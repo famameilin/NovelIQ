@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import (
@@ -29,6 +30,8 @@ from src.api.models.event_forest import (
     EventForestResponse,
     EventNodeResponse,
     EventSecondaryGroupResponse,
+    EventSourceChapterResponse,
+    EventSourceParagraphResponse,
     EventTreeResponse,
     ForeshadowingEdgeResponse,
 )
@@ -81,6 +84,7 @@ from src.api.services.results_queries.topic_aggregations import (
     fetch_paragraph_topic_series,
 )
 from src.config import settings
+from src.storage.models import Chapter, Paragraph
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
@@ -721,6 +725,8 @@ async def get_event_forest(
                 causal_event_refs=node.causal_event_refs,
                 tree_id=node.tree_id,
                 cause_role=cast(Literal["root", "main", "secondary"], node.cause_role),
+                parent_event_id=node.parent_event_id,
+                evidence_scope=cast(Literal["chapter", "paragraph"], node.evidence_scope),
             )
             for node in snapshot.event_nodes
         ],
@@ -767,5 +773,44 @@ async def get_event_forest(
                 active=fe.active,
             )
             for fe in snapshot.foreshadowing_edges
+        ],
+    )
+
+
+@router.get(
+    "/{novel_id}/event-forest/chapters/{chapter_id}/source",
+    response_model=EventSourceChapterResponse,
+)
+async def get_event_source_chapter(
+    novel_id: str,
+    chapter_id: int,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> EventSourceChapterResponse:
+    """按需读取当前任务的一章原文，供事件树节点核对依据"""
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
+    chapter = session.get(Chapter, (chapter_id, run_id))
+    if chapter is None or chapter.text is None:
+        raise HTTPException(status_code=404, detail="当前任务没有该章节原文")
+    paragraphs = list(
+        session.execute(
+            select(Paragraph)
+            .where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id)
+            .order_by(Paragraph.paragraph_index)
+        ).scalars()
+    )
+    if not paragraphs:
+        raise HTTPException(status_code=404, detail="当前任务没有该章节原文段落")
+    return EventSourceChapterResponse(
+        chapter_id=chapter_id,
+        title=chapter.display_title or chapter.title,
+        paragraphs=[
+            EventSourceParagraphResponse(
+                paragraph_id=paragraph.paragraph_id,
+                paragraph_index=paragraph.paragraph_index,
+                text=paragraph.text,
+            )
+            for paragraph in paragraphs
         ],
     )

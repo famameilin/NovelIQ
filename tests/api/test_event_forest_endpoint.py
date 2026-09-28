@@ -136,6 +136,9 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
     assert nodes[gate_root]["anchor_paragraph_ids"] == [0, 1]
     assert nodes[gate_root]["tree_id"] == "gate"
     assert nodes[gate_root]["cause_role"] == "root"
+    assert nodes[gate_root]["parent_event_id"] is None
+    assert nodes[gate_main]["parent_event_id"] == gate_root
+    assert nodes[gate_root]["evidence_scope"] == "chapter"
 
     # 树视图：章 1 双事件一棵树（主链），章 2 单事件一棵树；contains 派生化不再返回
     assert "event_edges" not in payload
@@ -164,6 +167,60 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
     assert foreshadowing["active"] is True
 
     assert sorted(payload["derived_event_order"]) == sorted(nodes)
+
+
+def test_event_forest_exposes_precise_evidence_and_source_chapter(api_client: TestClient, db_session) -> None:
+    """段落证据与章节原文来自同一任务，精确锚点按段落 ID 对齐"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["顾霜进入山门。\n顾霜立誓。"],
+        chapter_ids=[1],
+        title="事件树原文",
+    )
+    event_id = f"evt-{run_id[:8]}-root"
+    persist_chapter_annotation(
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        events=[{
+            "description": "顾霜进入山门",
+            "node_id": event_id,
+            "tree_id": "gate",
+            "cause_role": "root",
+            "evidence_paragraph_id": 0,
+        }],
+    )
+    RunRepository(db_session).update_run_status(run_id, "completed")
+    db_session.commit()
+
+    forest = api_client.get(f"/api/novels/{novel_id}/event-forest", params={"task_id": run_id[:8]})
+    assert forest.status_code == 200
+    node = forest.json()["event_nodes"][0]
+    assert node["evidence_scope"] == "paragraph"
+    assert node["anchor_paragraph_ids"] == [0]
+
+    source = api_client.get(
+        f"/api/novels/{novel_id}/event-forest/chapters/1/source",
+        params={"task_id": run_id[:8]},
+    )
+    assert source.status_code == 200
+    body = source.json()
+    assert body["chapter_id"] == 1
+    assert [paragraph["text"] for paragraph in body["paragraphs"]] == ["顾霜进入山门。", "顾霜立誓。"]
+    assert [paragraph["paragraph_id"] for paragraph in body["paragraphs"]] == [0, 1]
+
+    assert api_client.get(
+        f"/api/novels/{novel_id}/event-forest/chapters/999/source",
+        params={"task_id": run_id[:8]},
+    ).status_code == 404
+    assert api_client.get(
+        "/api/novels/other-novel/event-forest/chapters/1/source",
+        params={"task_id": run_id[:8]},
+    ).status_code in {403, 404}
+    assert api_client.get(
+        f"/api/novels/{novel_id}/event-forest/chapters/1/source",
+        params={"task_id": "missing-task"},
+    ).status_code == 404
 
 
 def test_event_forest_filters_by_chapter_boundary(api_client: TestClient, db_session) -> None:
@@ -217,3 +274,9 @@ def test_event_forest_rejects_non_completed_run(api_client: TestClient, db_sessi
 
     assert response.status_code == 400
     assert response.json()["error_type"] == "AnalysisNotCompleteError"
+    source = api_client.get(
+        f"/api/novels/{novel_id}/event-forest/chapters/1/source",
+        params={"task_id": run_id[:8]},
+    )
+    assert source.status_code == 400
+    assert source.json()["error_type"] == "AnalysisNotCompleteError"

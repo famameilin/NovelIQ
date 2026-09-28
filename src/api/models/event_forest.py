@@ -26,6 +26,8 @@ class EventNodeResponse(BaseModel):
     causal_event_refs: list[str] = Field(default_factory=list)
     tree_id: str = Field(min_length=1)
     cause_role: Literal["root", "main", "secondary"]
+    parent_event_id: str | None = None
+    evidence_scope: Literal["chapter", "paragraph"]
 
 
 class EventEdgeResponse(BaseModel):
@@ -84,3 +86,19 @@ class EventForestResponse(BaseModel):
     event_trees: list[EventTreeResponse]
     causal_edges: list[EventEdgeResponse]
     foreshadowing_edges: list[ForeshadowingEdgeResponse]
+
+
+class EventSourceParagraphResponse(BaseModel):
+    """按章原文中的一个有序段落"""
+
+    paragraph_id: int = Field(ge=0)
+    paragraph_index: int = Field(ge=0)
+    text: str
+
+
+class EventSourceChapterResponse(BaseModel):
+    """事件树阅读区按需加载的章节原文"""
+
+    chapter_id: int = Field(gt=0)
+    title: str
+    paragraphs: list[EventSourceParagraphResponse]

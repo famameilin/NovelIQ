@@ -213,7 +213,9 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
     )
     eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
     eid2 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2"))
-    eid3 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:3"))
+    # 反字典序的 id 用来证明旁支顺序来自写入序号，而非节点 id 排序
+    eid3 = f"evt-{run_id[:8]}-z"
+    eid4 = f"evt-{run_id[:8]}-a"
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -245,15 +247,15 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
                 "tree_id": "duel",
                 "cause_role": "secondary",
             },
+            {
+                "description": "顾霜追问",
+                "node_id": eid4,
+                "parent_node_id": eid2,
+                "tree_id": "duel",
+                "cause_role": "secondary",
+            },
         ],
     )
-    # 2026-09-14 写面退役 causal_event_refs；EventNode 该列保留读旧数据，
-    # secondary 归组（target=因果前驱）按读侧现行为以遗留列数据构造
-    secondary_node = db_session.get(EventNode, eid3)
-    assert secondary_node is not None
-    secondary_node.causal_event_refs = [eid2]
-    db_session.commit()
-
     snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
     assert snapshot is not None
     assert len(snapshot.event_trees) == 1
@@ -263,7 +265,12 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
     # 次因分支（secondary 挂在主链事件 2 下）
     assert len(tree.secondary_groups) == 1
     assert tree.secondary_groups[0].target_event_id == eid2
-    assert tree.secondary_groups[0].branch == [eid3]
+    assert tree.secondary_groups[0].branch == [eid3, eid4]
+    nodes = {node.event_id: node for node in snapshot.event_nodes}
+    assert nodes[eid1].parent_event_id is None
+    assert nodes[eid2].parent_event_id == eid1
+    assert nodes[eid3].parent_event_id == eid2
+    assert nodes[eid3].evidence_scope == "chapter"
 
 
 def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:

@@ -35,6 +35,8 @@ class EventNodeRow:
     causal_event_refs: list[str]
     tree_id: str
     cause_role: str
+    parent_event_id: str | None
+    evidence_scope: str
     payload_path: str
 
 
@@ -194,12 +196,31 @@ class EventForestRepository:
         )
 
     def fetch_event_nodes(self, run_id: str, *, max_chapter_order: int) -> list[EventNodeRow]:
-        """2026-08-19 用于读取截止章节边界的事件节点"""
-        rows = self.session.execute(
+        """读取边界内节点，并从正式章标注恢复树内父节点与证据粒度"""
+        rows = list(self.session.execute(
             select(EventNode)
             .where(EventNode.run_id == run_id, EventNode.chapter_order <= max_chapter_order)
             .order_by(EventNode.chapter_order, EventNode.event_id)
+        ).scalars())
+        if not rows:
+            return []
+        annotation_ids = {node.annotation_id for node in rows}
+        annotations = self.session.execute(
+            select(ChapterAnnotationRecord).where(ChapterAnnotationRecord.annotation_id.in_(annotation_ids))
         ).scalars()
+        # parent_node_id 只在正式标注载荷里，批量读取避免每个节点再查一次
+        payload_events: dict[str, dict[str, Any]] = {}
+        for annotation in annotations:
+            for event in (annotation.payload or {}).get("events", []):
+                if isinstance(event, dict) and event.get("node_id"):
+                    payload_events[str(event["node_id"])] = event
+        node_by_id = {node.event_id: node for node in rows}
+
+        def parent_event_id(node: EventNode) -> str | None:
+            parent_id = payload_events.get(node.event_id, {}).get("parent_node_id")
+            parent = node_by_id.get(str(parent_id)) if parent_id else None
+            return str(parent_id) if parent is not None and parent.tree_id == node.tree_id else None
+
         return [
             EventNodeRow(
                 event_id=node.event_id,
@@ -214,6 +235,11 @@ class EventForestRepository:
                 causal_event_refs=list(node.causal_event_refs),
                 tree_id=node.tree_id,
                 cause_role=node.cause_role,
+                parent_event_id=parent_event_id(node),
+                evidence_scope=(
+                    "paragraph" if payload_events.get(node.event_id, {}).get("evidence_paragraph_id") is not None
+                    else "chapter"
+                ),
                 payload_path=node.payload_path,
             )
             for node in rows
@@ -370,7 +396,8 @@ class EventForestRepository:
             for node in ordered:
                 if node.cause_role != "secondary":
                     continue
-                target = node.causal_event_refs[0] if node.causal_event_refs else tree_id
+                # 缺失挂接点时保留旁支节点，以 tree_id 作为“未确定挂接”分组标记
+                target = node.parent_event_id or tree_id
                 secondary_by_target.setdefault(target, []).append(node.event_id)
             trees.append(
                 (
@@ -379,8 +406,8 @@ class EventForestRepository:
                         root_event_id=root_id,
                         main_chain=[node.event_id for node in ordered if node.cause_role in ("root", "main")],
                         secondary_groups=[
-                            EventSecondaryGroupRow(target_event_id=target, branch=sorted(branch))
-                            for target, branch in sorted(secondary_by_target.items())
+                            EventSecondaryGroupRow(target_event_id=target, branch=branch)
+                            for target, branch in secondary_by_target.items()
                         ],
                         chapter_ids=sorted({node.chapter_id for node in nodes}),
                         char_start=min(node.char_start for node in nodes),
