@@ -11,6 +11,7 @@ import { ScatterChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { PagedControls } from "@/components/common/PagedControls";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import { useInView } from "@/hooks/useInView";
@@ -29,16 +30,18 @@ interface TopicShiftsPanelProps {
 export function TopicShiftsPanel({ candidates, config, showConfig = true, className }: TopicShiftsPanelProps) {
   const themeSignature = useChartThemeSignature();
   const { ref: chartContainerRef, isVisible: isChartVisible } = useInView(0.05);
-  const [expandedCandidates, setExpandedCandidates] = useState<TopicShiftCandidate[] | null>(null);
-  const showAllCandidates = expandedCandidates === candidates;
+  const [detailPage, setDetailPage] = useState(1);
   const rankedCandidates = useMemo(
     () => [...candidates].sort((left, right) => right.score - left.score),
     [candidates],
   );
-  const visibleCandidates = showAllCandidates ? rankedCandidates : rankedCandidates.slice(0, 8);
+  const pageCount = Math.ceil(rankedCandidates.length / 8);
+  const currentPage = Math.min(detailPage, Math.max(pageCount, 1));
+  const visibleCandidates = rankedCandidates.slice((currentPage - 1) * 8, currentPage * 8);
 
   const option = useMemo(
     () => ({
+      animation: false,
       tooltip: {
         formatter: (params: { data: [number, number] }) =>
           `位置 ${params.data[0]}<br/>主题差异强度 ${params.data[1]}`,
@@ -81,8 +84,8 @@ export function TopicShiftsPanel({ candidates, config, showConfig = true, classN
           {candidates.length === 0 ? (
             <p className="flex h-full items-center justify-center text-sm text-text-muted">暂无候选点</p>
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-              <Table className="text-left text-sm">
+            <div className="min-h-0 flex-1 [&>div]:h-full">
+              <Table className="h-full text-left text-sm">
                 <TableHeader className="sticky top-0 z-10 bg-surface">
                   <TableRow className="text-xs text-text-muted hover:bg-transparent">
                     <TableHead className="h-auto px-0 pb-2">字符位置</TableHead>
@@ -106,15 +109,9 @@ export function TopicShiftsPanel({ candidates, config, showConfig = true, classN
               </Table>
             </div>
           )}
-          {candidates.length > 8 ? (
-            <button
-              type="button"
-              onClick={() => setExpandedCandidates((current) => current === candidates ? null : candidates)}
-              className="mt-3 rounded-md border border-border/60 px-3 py-1.5 text-xs text-text-muted hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
-            >
-              {showAllCandidates ? "收起完整明细" : `查看全部 ${candidates.length} 个变化位置`}
-            </button>
-          ) : null}
+          <div className="mt-2 shrink-0">
+            <PagedControls page={currentPage} pageCount={pageCount} onPageChange={setDetailPage} label={`变化明细 · 共 ${candidates.length} 个`} />
+          </div>
         </DashboardCardShell>
       </div>
 

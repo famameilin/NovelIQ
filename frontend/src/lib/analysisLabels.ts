@@ -32,6 +32,7 @@ const LABEL_MAPS = {
     character: "角色",
     group: "群体",
     organization: "组织",
+    org: "组织",
     location: "地点",
     item: "物品",
     object: "物品",

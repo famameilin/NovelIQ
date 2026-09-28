@@ -41,7 +41,7 @@ describe("TopicShiftsPanel", () => {
     expect(screen.getByText("0.4200")).toBeInTheDocument();
   });
 
-  it("默认展示差异最强的八项并允许展开完整明细", async () => {
+  it("按强度分页展示全部明细且不出现内部纵向滚动", async () => {
     const user = userEvent.setup();
     const candidates = Array.from({ length: 10 }, (_, index) => ({
       position: (index + 1) * 100,
@@ -55,8 +55,10 @@ describe("TopicShiftsPanel", () => {
 
     expect(screen.getAllByRole("row")).toHaveLength(9);
     expect(screen.queryByText("0.0100")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "查看全部 10 个变化位置" }));
-    expect(screen.getAllByRole("row")).toHaveLength(11);
+    expect(screen.getByRole("navigation", { name: "变化明细 · 共 10 个分页" })).toBeInTheDocument();
+    expect(screen.getByRole("table").parentElement?.parentElement).not.toHaveClass("overflow-y-auto");
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getAllByRole("row")).toHaveLength(3);
     expect(screen.getByText("0.0100")).toBeInTheDocument();
   });
 });

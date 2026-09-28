@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { PagedControls } from "@/components/common/PagedControls";
+import { useCompactAnalysisViewport } from "@/hooks/useCompactAnalysisViewport";
 import { cn } from "@/lib/cn";
 import { paginateText } from "@/lib/paginateText";
 import { Scale } from "lucide-react";
@@ -23,7 +24,8 @@ export function ValueLogicCard({
   className,
 }: ValueLogicCardProps) {
   const [page, setPage] = useState(1);
-  const passages = paginateText(valueLogicReason ?? "", 110);
+  const compact = useCompactAnalysisViewport();
+  const passages = paginateText(valueLogicReason ?? "", compact ? 80 : 110);
   const currentPage = Math.min(page, Math.max(passages.length, 1));
   return (
     <DashboardCardShell
@@ -33,16 +35,16 @@ export function ValueLogicCard({
       showOrb
       className={cn(className)}
       contentClassName="flex h-full flex-col"
-      bodyClassName="min-h-0 flex-1 gap-3"
+      bodyClassName={compact ? "min-h-0 flex-1 gap-2" : "min-h-0 flex-1 gap-3"}
     >
       {valueLogicType ? (
-        <div className="flex flex-col gap-3">
-          <div className="inline-flex w-fit items-center rounded-full bg-chart-2/12 px-3 py-1.5 text-sm font-medium text-chart-2">
+        <div className={compact ? "flex flex-col gap-2" : "flex flex-col gap-3"}>
+          <div className="inline-flex w-fit items-center rounded-full bg-chart-2/12 px-3 py-1 text-sm font-medium text-chart-2">
             {valueLogicType}
           </div>
           {valueLogicReason && (
-            <div className="rounded-2xl border border-border/60 bg-surface/70 px-4 py-3">
-              <p className="whitespace-pre-wrap text-xs leading-6 text-text-muted">{passages[currentPage - 1]}</p>
+            <div className={compact ? "rounded-2xl border border-border/60 bg-surface/70 px-3 py-2" : "rounded-2xl border border-border/60 bg-surface/70 px-4 py-3"}>
+              <p className={compact ? "whitespace-pre-wrap text-xs leading-5 text-text-muted" : "whitespace-pre-wrap text-xs leading-6 text-text-muted"}>{passages[currentPage - 1]}</p>
             </div>
           )}
           <PagedControls page={currentPage} pageCount={passages.length} onPageChange={setPage} label="价值逻辑理由" />

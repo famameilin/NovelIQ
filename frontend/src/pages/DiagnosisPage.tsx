@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getDiagnosis, getForeshadowingTrees } from "@/api/results";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
+import { useCompactAnalysisViewport } from "@/hooks/useCompactAnalysisViewport";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
 import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
@@ -328,6 +329,7 @@ function SkeletonGrid() {
 export function DiagnosisPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
+  const compact = useCompactAnalysisViewport();
 
   const urlTaskId = searchParams.get("task_id");
 
@@ -463,24 +465,30 @@ export function DiagnosisPage() {
                   <p className="text-sm text-text-muted">当前任务暂无综合诊断文本。</p>
                 </DashboardCardShell>
               )}
-              <div className="flex min-h-0 flex-col gap-4">
+              <div className={compact ? "flex min-h-0 flex-col gap-2" : "flex min-h-0 flex-col gap-4"}>
                 <ValueLogicCard
                   valueLogicType={diagnosis.value_logic_type}
                   valueLogicReason={diagnosis.value_logic_reason}
                   className="shrink-0"
                 />
                 <DashboardCardShell
-                  title="主题标签"
+                  title={`主题标签 · ${diagnosis.topic_labels ? Object.keys(diagnosis.topic_labels).length : 0} 个`}
                   icon={<Tags className="h-4 w-4" />}
                   accent="chart-4"
-                  contentClassName="gap-2 p-3"
+                  contentClassName={compact ? "gap-1 p-2" : "gap-2 p-3"}
                   bodyClassName="gap-2"
                   className="shrink-0"
                 >
-                  <div className="rounded-lg border border-border/60 bg-surface/70 p-3">
+                  <div className={compact ? "rounded-lg border border-border/60 bg-surface/70 p-2" : "rounded-lg border border-border/60 bg-surface/70 p-3"}>
                     <TopicLabels labels={diagnosis.topic_labels} />
                   </div>
                 </DashboardCardShell>
+                <div data-testid="diagnosis-emotion-note" className="rounded-lg border border-border/60 bg-surface/70 px-3 py-2 text-xs text-text-muted">
+                  词典情绪均值：{diagnosis.emotion_avg != null ? diagnosis.emotion_avg.toFixed(8) : "—"}；
+                  零信号字符占比：{diagnosis.lexicon_zero_hit_share != null
+                    ? `${(diagnosis.lexicon_zero_hit_share * 100).toFixed(2)}%`
+                    : "—"}。词典未命中不代表正文没有情绪。
+                </div>
               </div>
             </div>
           </AnalysisWorkspace.Tab>

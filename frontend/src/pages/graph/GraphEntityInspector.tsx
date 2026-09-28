@@ -27,6 +27,16 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   organization: "组织",
 };
 
+const NARRATIVE_ROLE_DESCRIPTIONS: Record<string, string> = {
+  主体: "发起动作",
+  客体: "承受动作",
+  发送者: "发出信息",
+  接收者: "接收信息",
+  帮助者: "提供协助",
+  反对者: "造成阻碍",
+  见证者: "在场见证",
+};
+
 /**
  * 2026-08-31，作用：将图谱实体类型转换为中文展示名称
  * 简要说明：未知类型使用通用实体名称，避免直接暴露内部枚举
@@ -45,7 +55,7 @@ function getDirectionLabel(directionality: GraphRelatedEntity["directionality"])
 
 /**
  * 2026-08-31，作用：在关系画布旁展示用户可读的实体信息
- * 简要说明：隐藏内部编号，仅保留名称、出现范围、职责、状态和主要关系
+ * 简要说明：隐藏内部编号，仅保留名称、出现范围、人物叙事作用、状态和主要关系
  */
 export function GraphEntityInspector({
   node,
@@ -64,14 +74,14 @@ export function GraphEntityInspector({
         <div className="max-w-xs">
           <CircleUserRound className="mx-auto h-8 w-8 text-text-muted/60" aria-hidden="true" />
           <h2 className="mt-3 text-sm font-medium text-text">选择一个实体</h2>
-          <p className="mt-1 text-sm leading-6 text-text-muted">点击关系图中的节点，这里会显示其出现范围、当前职责和主要关系</p>
+          <p className="mt-1 text-sm leading-6 text-text-muted">点击关系图中的节点，这里会显示其出现范围、主要关系和人物的叙事作用</p>
         </div>
       </aside>
     );
   }
 
-  const primaryRole =
-    typeof node.state.primary_role_function === "string" ? node.state.primary_role_function : null;
+  const narrativeRole = typeof node.state.role_function === "string" ? node.state.role_function.trim() : "";
+  const roleDescription = NARRATIVE_ROLE_DESCRIPTIONS[narrativeRole];
   const stateStatus = typeof node.state.status === "string" ? node.state.status : null;
   const hasChapterRange = node.first_seen_chapter != null || node.last_seen_chapter != null;
 
@@ -100,12 +110,16 @@ export function GraphEntityInspector({
               : "暂无章节范围"}
           </dd>
         </div>
-        <div className="rounded-lg bg-surface-hover/55 p-3">
-          <dt className="text-xs text-text-muted">当前职责</dt>
-          <dd className="mt-1 text-sm font-medium text-text">
-            {primaryRole ? formatAnalysisLabel(primaryRole, "role") : "暂无职责标注"}
-          </dd>
-        </div>
+        {node.entity_type === "character" ? (
+          <div className="rounded-lg bg-surface-hover/55 p-3">
+            <dt className="text-xs text-text-muted">最近记录的叙事作用</dt>
+            <dd className="mt-1 text-sm font-medium text-text">
+              {narrativeRole
+                ? `${narrativeRole}${roleDescription ? `（${roleDescription}）` : ""}`
+                : "暂无叙事作用记录"}
+            </dd>
+          </div>
+        ) : null}
       </dl>
 
       <section className="mt-5" aria-labelledby="graph-related-title">

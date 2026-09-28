@@ -124,6 +124,8 @@ describe("LinguisticPage", () => {
       surface_top: [{ surface_text: "林渡", entity_type: "person", count: 92 }],
       total_char_count: 186000,
       metric_hit_count: 0,
+      audit_hit_count: 6,
+      metric_status: "pending_review",
       fixed_phrase_density: 0,
       four_char_candidate_count: 12,
       total_hits: 59,
@@ -157,7 +159,8 @@ describe("LinguisticPage", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("tab", { name: "实体与短语" }));
-    expect(await screen.findByText("短语命中总数")).toBeInTheDocument();
+    expect(await screen.findByText("候选记录总数")).toBeInTheDocument();
+    expect(screen.getAllByText("待审定").length).toBeGreaterThan(0);
     expect(getLinguisticEntitiesTabMock).toHaveBeenCalledWith("novel-1", "task-1");
     expect(getLinguisticWord2vecMock).not.toHaveBeenCalled();
 
@@ -180,7 +183,7 @@ describe("LinguisticPage", () => {
 
     await user.click(screen.getByRole("button", { name: "高频实体名" }));
     expect(await screen.findByText("高频实体名（前 20 名）")).toBeInTheDocument();
-    expect(screen.getByText("短语命中总数")).toBeInTheDocument();
+    expect(screen.getByText("候选记录总数")).toBeInTheDocument();
     expect(screen.queryByText("实体命中总数")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "词汇与语义" }));
 

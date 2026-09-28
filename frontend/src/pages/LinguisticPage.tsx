@@ -164,12 +164,10 @@ function ExpressionStructureView({ query }: { query: UseQueryResultLike<Linguist
               {
                 label: "边界正向分和",
                 value: stats?.boundary_pos_score_sum != null ? stats.boundary_pos_score_sum.toFixed(2) : "—",
-                description: "段落级监督边界正向分按段求和",
               },
               {
                 label: "边界负向分和",
                 value: stats?.boundary_neg_score_sum != null ? stats.boundary_neg_score_sum.toFixed(2) : "—",
-                description: "段落级监督边界负向分按段求和",
               },
             ]}
             className="grid-cols-4 [&>div]:px-3 [&>div]:py-1.5 [&>div>dd]:text-base"
@@ -207,14 +205,18 @@ function EntityPhraseView({ entitiesQuery }: { entitiesQuery: UseQueryResultLike
         <div className="flex h-full min-h-0 flex-col gap-3">
             <AnalysisMetricStrip
               items={[
-                { label: "固定表达密度（‰）", value: data.fixed_phrase_density?.toFixed(4) ?? "—" },
-                { label: "正式命中次数", value: data.metric_hit_count },
+                { label: "固定表达密度（‰）", value: data.metric_status === "pending_review" ? "待审定" : data.fixed_phrase_density?.toFixed(4) ?? "—" },
+                { label: "正式命中次数", value: data.metric_status === "pending_review" ? "待审定" : data.metric_hit_count },
                 { label: "四字候选数", value: data.four_char_candidate_count },
-                { label: "全书字符数", value: data.total_char_count },
-                { label: "短语命中总数", value: data.total_hits },
+                { label: "待审词表命中", value: data.audit_hit_count },
+                { label: "候选记录总数", value: data.total_hits },
               ]}
               className="grid-cols-5 [&>div]:px-3 [&>div]:py-1.5 [&>div>dd]:text-base"
             />
+            <p className="text-xs text-text-muted">
+              {data.metric_status === "pending_review" && "固定表达词表尚在审定，暂不计算正式密度。"}
+              实体类型来自 LTP 候选识别，与知识图谱实体分类口径不同。
+            </p>
             <AnalysisViewSwitcher value={view} onValueChange={setView} label="实体指标" options={[
               { value: "type", label: "实体类型" },
               { value: "surface", label: "高频实体名" },

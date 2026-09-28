@@ -19,7 +19,6 @@ describe("DiagnosisText", () => {
   it("保留合法英文专名并按原有换行展示", () => {
     render(<DiagnosisText diagnosisText={"OpenAI 是作品中的机构名\n第二段保持中文"} />);
 
-    expect(screen.getByText("OpenAI 是作品中的机构名")).toBeInTheDocument();
-    expect(screen.getByText("第二段保持中文")).toBeInTheDocument();
+    expect(screen.getByTestId("diagnosis-passage").textContent).toBe("OpenAI 是作品中的机构名\n第二段保持中文");
   });
 });

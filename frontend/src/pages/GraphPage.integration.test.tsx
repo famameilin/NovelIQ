@@ -104,7 +104,7 @@ function createGraphData(): GraphData {
         first_seen_chapter: 1,
         last_seen_chapter: 8,
         state_chapter_id: 1,
-        state: { primary_role_function: "主角" },
+        state: { role_function: "主体" },
       },
       {
         entity_id: "2",
@@ -206,6 +206,9 @@ describe("GraphPage integration", () => {
 
     const inspector = await screen.findByRole("complementary", { name: "顾霜实体详情" });
     expect(inspector).toHaveTextContent("顾霜");
+    expect(inspector).toHaveTextContent("最近记录的叙事作用");
+    expect(inspector).toHaveTextContent("主体（发起动作）");
+    expect(inspector).not.toHaveTextContent("暂无叙事作用记录");
     expect(inspector).toHaveTextContent("苏映雪");
     expect(inspector).not.toHaveTextContent("entity_id");
   });

@@ -185,6 +185,7 @@ export interface GlobalStats {
   avg_mtld?: number | null;
   avg_ttr?: number | null;
   avg_sent_len?: number | null;
+  emotion_avg?: number | null;
   emotion_std?: number | null;
   emotion_max?: number | null;
   emotion_min?: number | null;
@@ -192,6 +193,7 @@ export interface GlobalStats {
   rhythm_std?: number | null;
   rhythm_max?: number | null;
   rhythm_min?: number | null;
+  lexicon_zero_hit_share?: number | null;
 }
 
 export interface ChapterCharacter {
@@ -281,7 +283,9 @@ export interface DiagnosisResult {
   cultural_depth_reason?: string | null;
   focus_structure?: "single" | "dual" | "ensemble" | null;
   focus_characters?: string[] | null;
-  topic_labels?: string[] | null;
+  topic_labels?: Record<string, string> | string[] | null;
+  emotion_avg?: number | null;
+  lexicon_zero_hit_share?: number | null;
   core_cast?: string[] | null;
   main_characters?: string[] | null;
   theme_color?: string | null;
@@ -475,6 +479,51 @@ export interface EventTimelineResponse {
   total_chapters: number;
 }
 
+// 事件树页直接使用森林快照，保留每个事件节点的描述与证据
+export interface EventForestNode {
+  event_id: string;
+  chapter_id: number;
+  chapter_order: number;
+  description: string;
+  participants: TimelineEventParticipant[];
+  anchor_paragraph_ids: number[];
+  char_start: number;
+  char_end: number;
+  evidence: Array<Record<string, unknown>>;
+  causal_event_refs: string[];
+  tree_id: string;
+  cause_role: "root" | "main" | "secondary";
+  parent_event_id: string | null;
+  evidence_scope: "chapter" | "paragraph";
+}
+
+export interface EventForestTree {
+  tree_id: string;
+  root_event_id: string;
+  main_chain: string[];
+  secondary_groups: TimelineEventSecondaryGroup[];
+  chapter_ids: number[];
+  char_start: number;
+  char_end: number;
+}
+
+export interface EventForestResponse {
+  chapter_id: number;
+  chapter_order: number;
+  visible_through_chapter_order: number;
+  derived_event_order: string[];
+  event_nodes: EventForestNode[];
+  event_trees: EventForestTree[];
+  causal_edges: TimelineEventCausalEdge[];
+  foreshadowing_edges: TimelineEventForeshadowingEdge[];
+}
+
+export interface EventSourceChapterResponse {
+  chapter_id: number;
+  title: string;
+  paragraphs: Array<{ paragraph_id: number; paragraph_index: number; text: string }>;
+}
+
 // 指标
 
 export interface NarrativeStructureMetrics {
@@ -567,8 +616,8 @@ export interface TopicsOverviewTabResponse {
   distribution: TopicDistributionEntry[] | null;
   chapters: ChapterTopicDistribution[];
   keywords: KeywordScoreItem[];
-  /** 诊断切片：LLM 主题命名，按 topic_id 顺序对齐 topics */
-  topic_labels: string[] | null;
+  /** 诊断切片：只包含按 topic_id 键控的标签 */
+  topic_labels: Record<string, string> | null;
   unavailable_reason: string | null;
   keyword_unavailable_reason: string | null;
 }
@@ -586,6 +635,8 @@ export interface LinguisticEntitiesTabResponse {
   surface_top: EntitySurfaceCount[];
   total_char_count: number;
   metric_hit_count: number;
+  audit_hit_count: number;
+  metric_status: "ready" | "pending_review";
   fixed_phrase_density: number | null;
   four_char_candidate_count: number;
   total_hits: number;

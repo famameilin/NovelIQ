@@ -20,29 +20,32 @@ echarts.use([GridComponent, TooltipComponent, BarChart, CanvasRenderer]);
 
 interface TopicEmotionPanelProps {
   emotion: TopicEmotionEntry[];
+  topicLabels?: Record<number, string>;
   className?: string;
 }
 
-export function TopicEmotionPanel({ emotion, className }: TopicEmotionPanelProps) {
+export function TopicEmotionPanel({ emotion, topicLabels = {}, className }: TopicEmotionPanelProps) {
   const themeSignature = useChartThemeSignature();
   const { ref: chartContainerRef, isVisible: isChartVisible } = useInView(0.05);
 
   const option = useMemo(() => {
     const valid = emotion.filter((entry) => entry.emotion != null);
+    const labelFor = (topicId: number) => topicLabels[topicId]?.trim() || `主题 ${topicId + 1}`;
     return {
+      animation: false,
       tooltip: {
         trigger: "axis",
         formatter: (params: Array<{ dataIndex: number }>) => {
           const entry = valid[params[0]?.dataIndex];
           if (!entry) return "";
-          return `主题 ${entry.topic_id + 1}<br/>净情绪 ${entry.emotion?.toFixed(4)}<br/>加权文本量 ${entry.weighted_token_total ?? "-"}`;
+          return `${labelFor(entry.topic_id)}<br/>净情绪 ${entry.emotion?.toFixed(4)}<br/>加权文本量 ${entry.weighted_token_total ?? "-"}`;
         },
       },
-      grid: { left: 56, right: 20, top: 24, bottom: 36 },
+      grid: { left: 56, right: 20, top: 24, bottom: 72 },
       xAxis: {
         type: "category",
-        data: valid.map((entry) => `主题 ${entry.topic_id + 1}`),
-        axisLabel: { fontSize: 10 },
+        data: valid.map((entry) => labelFor(entry.topic_id)),
+        axisLabel: { fontSize: 10, interval: 0, rotate: 35 },
       },
       yAxis: { type: "value", axisLabel: { fontSize: 10 } },
       series: [
@@ -53,7 +56,7 @@ export function TopicEmotionPanel({ emotion, className }: TopicEmotionPanelProps
         },
       ],
     };
-  }, [emotion]);
+  }, [emotion, topicLabels]);
 
   return (
     <div className={cn("h-full min-h-0", className)}>

@@ -160,7 +160,7 @@ describe("TopicsPage", () => {
       distribution: Array.from({ length: 25 }, (_, topic_id) => ({ topic_id, weight: (25 - topic_id) / 325 })),
       chapters: [],
       keywords: [{ word: "宗门", score: 0.08 }],
-      topic_labels: Array.from({ length: 25 }, (_, index) => `主题标签${index + 1}`),
+      topic_labels: Object.fromEntries(Array.from({ length: 25 }, (_, index) => [String(index), `主题标签${index + 1}`])),
       unavailable_reason: null,
       keyword_unavailable_reason: null,
     });

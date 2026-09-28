@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { PagedControls } from "@/components/common/PagedControls";
+import { useCompactAnalysisViewport } from "@/hooks/useCompactAnalysisViewport";
 import { cn } from "@/lib/cn";
 import { paginateText } from "@/lib/paginateText";
 import { FileText } from "lucide-react";
@@ -43,8 +44,9 @@ function formatDiagnosisText(text: string): string {
  */
 export function DiagnosisText({ diagnosisText, className }: DiagnosisTextProps) {
   const [page, setPage] = useState(1);
+  const compact = useCompactAnalysisViewport();
   const formattedDiagnosisText = diagnosisText ? formatDiagnosisText(diagnosisText) : null;
-  const passages = formattedDiagnosisText ? paginateText(formattedDiagnosisText, 300) : [];
+  const passages = formattedDiagnosisText ? paginateText(formattedDiagnosisText, compact ? 420 : 800) : [];
   const currentPage = Math.min(page, Math.max(passages.length, 1));
   const currentPassage = (passages[currentPage - 1] ?? "").trimStart();
 
@@ -59,12 +61,8 @@ export function DiagnosisText({ diagnosisText, className }: DiagnosisTextProps) 
       bodyClassName="min-h-0 flex-1 gap-3"
     >
       {formattedDiagnosisText ? (
-        <div className="min-h-0 flex-1 rounded-lg border border-border/60 bg-surface/70 p-4 prose prose-sm max-w-none prose-p:text-text-muted prose-p:leading-relaxed">
-          {currentPassage.split("\n").map((line, i) => (
-            <p key={i} className="mb-2 last:mb-0">
-              {line.trim() || <br />}
-            </p>
-          ))}
+        <div data-testid="diagnosis-passage" className="min-h-0 flex-1 whitespace-pre-wrap rounded-lg border border-border/60 bg-surface/70 p-4 text-sm leading-6 text-text-muted">
+          {currentPassage}
         </div>
       ) : (
         <p className="text-sm text-text-muted">暂无诊断文本</p>

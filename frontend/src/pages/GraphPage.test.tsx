@@ -134,7 +134,7 @@ function createGraphData(): GraphData {
         first_seen_chapter: 1,
         last_seen_chapter: 15,
         state_chapter_id: 3,
-        state: { primary_role_function: "主角", status: "active" },
+        state: { role_function: "主体", status: "active" },
       },
       {
         entity_id: "2",

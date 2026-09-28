@@ -60,7 +60,6 @@ export function CharacterLandscape({
   onSelectName,
 }: CharacterLandscapeProps) {
   const [rankingPage, setRankingPage] = useState(1);
-  const [rolePage, setRolePage] = useState(1);
   const [distributionPage, setDistributionPage] = useState(1);
   const [overviewRankMode, setOverviewRankMode] = useState<"appearance" | "focus">("appearance");
   const sortedCharacters = useMemo(
@@ -89,6 +88,7 @@ export function CharacterLandscape({
     });
     return [...counts.entries()].sort((left, right) => right[1] - left[1]);
   }, [characters]);
+  const maxRoleCount = roleComposition[0]?.[1] ?? 0;
   const selectedDistribution = Object.entries(selectedCharacter?.role_function_distribution ?? {}).sort(
     (left, right) => right[1] - left[1],
   );
@@ -96,8 +96,6 @@ export function CharacterLandscape({
   const selectedDistributionMax = Math.max(0, ...selectedDistribution.map(([, value]) => value));
   const rankingPageCount = Math.ceil(sortedCharacters.length / 6);
   const currentRankingPage = Math.min(rankingPage, Math.max(rankingPageCount, 1));
-  const rolePageCount = Math.ceil(roleComposition.length / 6);
-  const currentRolePage = Math.min(rolePage, Math.max(rolePageCount, 1));
   const distributionPageCount = Math.ceil(selectedDistribution.length / 8);
   const currentDistributionPage = Math.min(distributionPage, Math.max(distributionPageCount, 1));
 
@@ -124,7 +122,7 @@ export function CharacterLandscape({
       ]} />
 
       <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
-      <section aria-labelledby="character-role-composition" className="min-h-0 rounded-lg border border-border/70 bg-surface/70 p-4">
+      <section aria-labelledby="character-role-composition" className="flex min-h-0 flex-col rounded-lg border border-border/70 bg-surface/70 p-4">
         <div className="flex items-center justify-between gap-3">
           <h2 id="character-role-composition" className="text-sm font-medium text-text">角色功能构成</h2>
           <span className="text-xs text-text-muted">按主导职责统计</span>
@@ -136,16 +134,16 @@ export function CharacterLandscape({
                 <span key={role} className={ROLE_SEGMENT_CLASSES[index % ROLE_SEGMENT_CLASSES.length]} style={{ width: `${count / characters.length * 100}%` }} title={`${formatAnalysisLabel(role, "role")} ${(count / characters.length * 100).toFixed(1)}%`} />
               ))}
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
-              {roleComposition.slice((currentRolePage - 1) * 6, currentRolePage * 6).map(([role, count], index) => (
-                <span key={role} className="flex min-w-0 items-center gap-1.5 text-xs text-text-muted">
-                  <span className={`h-2 w-2 rounded-full ${ROLE_SEGMENT_CLASSES[((currentRolePage - 1) * 6 + index) % ROLE_SEGMENT_CLASSES.length]}`} />
-                  <span className="truncate">{formatAnalysisLabel(role, "role")}</span>
-                  <span className="ml-auto tabular-nums">{((count / characters.length) * 100).toFixed(1)}%</span>
-                </span>
+            <div className="mt-3 grid min-h-0 flex-1 auto-rows-fr gap-1.5" aria-label="角色功能构成明细">
+              {roleComposition.map(([role, count], index) => (
+                <div key={role} className="flex min-h-0 items-center gap-2 text-xs text-text-muted">
+                  <span className={`h-2 w-2 rounded-full ${ROLE_SEGMENT_CLASSES[index % ROLE_SEGMENT_CLASSES.length]}`} />
+                  <span className="w-16 shrink-0 truncate" title={formatAnalysisLabel(role, "role")}>{formatAnalysisLabel(role, "role")}</span>
+                  <span className="h-2 min-w-0 flex-1 rounded-full bg-surface-hover"><span className={`block h-full rounded-full ${ROLE_SEGMENT_CLASSES[index % ROLE_SEGMENT_CLASSES.length]}`} style={{ width: `${maxRoleCount > 0 ? count / maxRoleCount * 100 : 0}%` }} /></span>
+                  <span className="w-12 shrink-0 text-right tabular-nums">{((count / characters.length) * 100).toFixed(1)}%</span>
+                </div>
               ))}
             </div>
-            <div className="mt-4"><PagedControls page={currentRolePage} pageCount={rolePageCount} onPageChange={setRolePage} label="角色功能" /></div>
           </>
         ) : <p className="mt-3 text-sm text-text-muted">暂无角色功能构成</p>}
       </section>

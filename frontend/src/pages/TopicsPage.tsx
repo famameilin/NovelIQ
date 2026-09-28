@@ -75,7 +75,7 @@ function TopicDetailPanel({
   topChapter: ChapterTopicDistribution | undefined;
 }) {
   return (
-    <DashboardCardShell title={topic ? `主题详情 · ${topic.label || `主题 ${topic.topic_id + 1}`}` : "主题详情"} accent="chart-2" className="h-full min-h-0" bodyClassName="min-h-0 gap-3">
+    <DashboardCardShell title={topic ? `主题详情 · ${topic.label || `主题 ${topic.topic_id + 1}`}` : "主题详情"} accent="chart-2" className="min-h-0" bodyClassName="min-h-0 gap-3">
       {topic ? (
         <>
           <AnalysisMetricStrip
@@ -83,11 +83,11 @@ function TopicDetailPanel({
               { label: "主题占比", value: `${(topic.weight * 100).toFixed(1)}%` },
               { label: "净情绪", value: emotion?.emotion != null ? emotion.emotion.toFixed(4) : "—" },
               { label: "加权文本量", value: emotion?.weighted_token_total != null ? Math.round(emotion.weighted_token_total).toLocaleString() : "—" },
-              { label: "占比最高章节", value: topChapter ? `第 ${topChapter.chapter_sequence} 章` : "—", description: topChapter ? `${((topChapter.distribution?.find((entry) => entry.topic_id === topic.topic_id)?.weight ?? 0) * 100).toFixed(1)}%` : "暂无章节分布" },
+              { label: "占比最高章节", value: topChapter ? `第 ${topChapter.chapter_sequence} 章` : "—" },
             ]}
             className="grid-cols-4 [&>div]:px-2.5 [&>div]:py-1.5 [&>div>dd]:text-base"
           />
-          <div className="min-h-0 flex-1 rounded-xl border border-border/60 bg-surface/70 p-3">
+          <div className="rounded-xl border border-border/60 bg-surface/70 p-3">
             <p className="text-xs font-medium text-text-muted">代表词</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {topic.words.length > 0 ? topic.words.map((word) => <span key={word} className="rounded-md bg-primary/10 px-2 py-1 text-xs text-primary">{word}</span>) : <span className="text-sm text-text-muted">暂无代表词</span>}
@@ -204,7 +204,7 @@ export function TopicsPage() {
     staleTime: STALE_TIME,
   });
 
-  // 诊断主题标签（topic_labels，按 topic_id 顺序）并入主题词展示
+  // 诊断标签只能按 topic_id 绑定；历史无 ID 数组不得猜测对应关系。
   const topics = useMemo(() => {
     const overview = overviewQuery.data;
     if (!overview) return [];
@@ -212,8 +212,9 @@ export function TopicsPage() {
     overview.topics.forEach((topic) => {
       if (topic.label) labelMap.set(topic.topic_id, topic.label!);
     });
-    overview.topic_labels?.forEach((label, idx) => {
-      if (label && !labelMap.has(idx)) labelMap.set(idx, label);
+    Object.entries(overview.topic_labels ?? {}).forEach(([topicId, label]) => {
+      const id = Number(topicId);
+      if (Number.isInteger(id) && label && !labelMap.has(id)) labelMap.set(id, label);
     });
     return overview.topics
       .map((topic) => ({
@@ -222,6 +223,10 @@ export function TopicsPage() {
       }))
       .sort((left, right) => right.weight - left.weight);
   }, [overviewQuery.data]);
+  const topicLabels = useMemo(
+    () => Object.fromEntries(topics.filter((topic) => topic.label).map((topic) => [topic.topic_id, topic.label!])),
+    [topics],
+  );
 
   const overviewUnavailable =
     overviewQuery.data != null &&
@@ -279,7 +284,7 @@ export function TopicsPage() {
                       setSelectedTopicId(balancedPageItems(topics, page, OVERVIEW_PAGE_SIZE).items[0]?.topic_id ?? null);
                     }} label="主题列表" />
                   </DashboardCardShell>
-                  <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-4">
+                  <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
                     <TopicDetailPanel topic={selectedTopic} emotion={selectedEmotion} topChapter={topChapter} />
                     <TopicKeywordsCard keywords={overview.keywords} unavailableReason={overview.keyword_unavailable_reason} columns={2} className="h-full min-h-0" />
                   </div>
@@ -324,8 +329,8 @@ export function TopicsPage() {
             <div className="h-full min-h-0">
               {renderTabGate(seriesQuery, "主题演进", seriesQuery.data?.unavailable_reason ?? null, (series) => (
                 <DashboardCardShell title="主题演进" accent="chart-2" className="h-full" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1 gap-2">
-                  <p className="text-xs text-text-muted">段落级完整 {series.num_topics} 维主题权重堆积图，横轴为真实字符位置。</p>
-                  <TopicSeriesChart points={series.points} numTopics={series.num_topics ?? 0} className="min-h-[320px] flex-1" />
+                  <p className="text-xs text-text-muted">按等长字符区间汇总 {series.num_topics} 个主题的段落权重，入模词元加权；色阶在 95 分位封顶，悬停查看精确值。</p>
+                  <TopicSeriesChart points={series.points} numTopics={series.num_topics ?? 0} topicLabels={topicLabels} className="min-h-[320px] flex-1" />
                 </DashboardCardShell>
               ))}
             </div>
@@ -342,7 +347,7 @@ export function TopicsPage() {
           <AnalysisWorkspace.Tab value="emotion" label="主题情绪">
             <div className="h-full min-h-0">
               {renderTabGate(emotionQuery, "主题情绪", emotionQuery.data?.unavailable_reason ?? null, (topicEmotion) => (
-                <TopicEmotionPanel emotion={topicEmotion.emotion} />
+                <TopicEmotionPanel emotion={topicEmotion.emotion} topicLabels={topicLabels} />
               ))}
             </div>
           </AnalysisWorkspace.Tab>

@@ -114,11 +114,11 @@ export function DiagnosisSummaryCard({
             )}
           </div>
 
-          {diagnosis.topic_labels && diagnosis.topic_labels.length > 0 && (
+          {diagnosis.topic_labels && Object.values(diagnosis.topic_labels).length > 0 && (
             <div className="rounded-xl border border-border/70 bg-surface/70 p-2.5">
               <div className="mb-1.5 text-xs uppercase tracking-wide text-text-muted">主题标签</div>
               <div className="flex flex-wrap gap-1.5">
-                {diagnosis.topic_labels.slice(0, 6).map((label) => (
+                {Object.values(diagnosis.topic_labels).slice(0, 6).map((label) => (
                   <Badge
                     key={label}
                     variant="secondary"
