@@ -110,7 +110,7 @@ describe("timelineTrackLayout", () => {
     });
   });
 
-  it("中间线靠上时，下方先按第二层、第一层、第二层排布，并把下一张第一层放上方", () => {
+  it("中间线靠上时，仍让上下各占两条车道", () => {
     const nodes = Array.from({ length: 8 }, (_, index) =>
       createEventNode(`h${index + 1}`, index + 1, 0.8, `高线事件${index + 1}`),
     );
@@ -121,11 +121,11 @@ describe("timelineTrackLayout", () => {
       totalChapters: 20,
     });
 
-    expect(layoutNodes.map((layoutNode) => layoutNode.lane)).toEqual([2, 1, 2, -1, 2, 1, 2, -1]);
+    expect(layoutNodes.map((layoutNode) => layoutNode.lane)).toEqual([-2, -1, 2, 1, -2, -1, 2, 1]);
     expect(layoutNodes.map((layoutNode) => Math.abs(layoutNode.lane))).toEqual([2, 1, 2, 1, 2, 1, 2, 1]);
   });
 
-  it("中间线靠下时，上方先按第二层、第一层、第二层排布，并把下一张第一层放下方", () => {
+  it("中间线靠下时，仍让上下各占两条车道", () => {
     const nodes = Array.from({ length: 8 }, (_, index) =>
       createEventNode(`l${index + 1}`, index + 1, 0.2, `低线事件${index + 1}`),
     );
@@ -136,7 +136,7 @@ describe("timelineTrackLayout", () => {
       totalChapters: 20,
     });
 
-    expect(layoutNodes.map((layoutNode) => layoutNode.lane)).toEqual([-2, -1, -2, 1, -2, -1, -2, 1]);
+    expect(layoutNodes.map((layoutNode) => layoutNode.lane)).toEqual([-2, -1, 2, 1, -2, -1, 2, 1]);
     expect(layoutNodes.map((layoutNode) => Math.abs(layoutNode.lane))).toEqual([2, 1, 2, 1, 2, 1, 2, 1]);
   });
 
@@ -153,6 +153,23 @@ describe("timelineTrackLayout", () => {
 
     expect(layoutNodes.map((layoutNode) => layoutNode.lane)).toEqual([-2, -1, 2, 1]);
     expect(layoutNodes.map((layoutNode) => Math.abs(layoutNode.lane))).toEqual([2, 1, 2, 1]);
+  });
+
+  it("长时间轴后半段即使曲线偏低，四条车道也均衡使用", () => {
+    const nodes = Array.from({ length: 88 }, (_, index) =>
+      createEventNode(`long-${index + 1}`, index + 1, (index + 1) / 88, `后段事件${index + 1}`),
+    );
+    const layoutNodes = createTimelineLayoutNodes(
+      nodes,
+      nodes.map((node) => node.tree_id),
+      calculateCanvasMinWidth(nodes.length, 88),
+      { tensionCurve: Array.from({ length: 88 }, (_, index) => index < 44 ? 1 : 0), totalChapters: 88 },
+    );
+    const lateLanes = layoutNodes.slice(44).map((node) => node.lane);
+
+    expect(lateLanes).toEqual(Array.from({ length: 11 }, () => [-2, -1, 2, 1]).flat());
+    expect(lateLanes.filter((lane) => lane < 0)).toHaveLength(22);
+    expect(lateLanes.filter((lane) => lane > 0)).toHaveLength(22);
   });
 
   it("卡片位置跟随中间线并保持上下间距", () => {

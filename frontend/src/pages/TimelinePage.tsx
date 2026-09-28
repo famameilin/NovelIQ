@@ -1,6 +1,6 @@
 /**
  * 2026-08-20，作用：展示事件森林时间轴页面
- * 简要说明：一棵事件树对应一个可筛选节点，并在同屏详情中展示角色、因果和伏笔联系
+ * 简要说明：一棵事件树对应一个轨道节点，点击节点就地悬浮展示详情
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -14,8 +14,8 @@ import { useNovelStore } from "@/store/novelStore";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { Button } from "@/components/ui/button";
-import { PagedControls } from "@/components/common/PagedControls";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TimelineEventPopover } from "@/components/timeline/TimelineEventPopover";
 import {
   TimelineLegend,
   TimelineTrack,
@@ -69,8 +69,7 @@ export function TimelinePage() {
   }, [urlMaxLevel]);
 
   const [activePhase, setActivePhase] = useState<string | undefined>();
-  const [activePanel, setActivePanel] = useState<"timeline" | "details">("timeline");
-  const [trackPage, setTrackPage] = useState(1);
+  const [anchor, setAnchor] = useState<{ treeId: string; element: HTMLElement } | null>(null);
   const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
   const taskScopeId = urlTaskId ?? storeTaskId;
 
@@ -147,10 +146,6 @@ export function TimelinePage() {
     // 按 level 统一过滤（importance_score 已分位数映射到 level）
     return sorted.filter((n) => n.level <= maxLevel);
   }, [nodes, derivedOrder, maxLevel]);
-  const trackPageCount = Math.ceil(displayNodes.length / 5);
-  const currentTrackPage = Math.min(trackPage, Math.max(trackPageCount, 1));
-  const trackNodes = displayNodes.slice((currentTrackPage - 1) * 5, currentTrackPage * 5);
-
   const selectedDetailNode = useMemo<TimelineEventNode | null>(() => {
     if (nodes.length === 0) return null;
     if (urlTreeId) {
@@ -158,8 +153,9 @@ export function TimelinePage() {
       if (byTree) return byTree;
     }
     if (urlEventId) {
-      const byEvent = nodes.find(
-        (n) => n.root_event_id === urlEventId || n.main_chain.includes(urlEventId!) || n.tree_id === urlEventId
+      const byEvent = nodes.find((n) =>
+        n.root_event_id === urlEventId || n.main_chain.includes(urlEventId) || n.tree_id === urlEventId ||
+        n.secondary_groups.some((group) => group.target_event_id === urlEventId || group.branch.includes(urlEventId))
       );
       if (byEvent) return byEvent;
     }
@@ -173,14 +169,7 @@ export function TimelinePage() {
     return null;
   }, [selectedDetailNode, urlEventId, urlTreeId]);
 
-  const selectedTrackNodeId = selectedDetailNode?.tree_id;
-
-  useEffect(() => {
-    if (selectedDetailNode && (urlTreeId || urlEventId)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- URL 深链解析完成后需要同步打开事件详情页签
-      setActivePanel("details");
-    }
-  }, [selectedDetailNode, urlEventId, urlTreeId]);
+  const selectedTrackNodeId = selectedDetailNode?.root_event_id;
 
   const eventCount = nodes.length;
   const causalCount = causalEdges.length;
@@ -189,7 +178,7 @@ export function TimelinePage() {
   const handleMaxLevelChange = useCallback(
     (level: 1 | 2 | 3) => {
       if (!novelId || !taskScopeId) return;
-      setTrackPage(1);
+      setAnchor(null);
       navigate(
         buildTimelinePageUrl(novelId, taskScopeId, {
           maxLevel: level,
@@ -203,9 +192,10 @@ export function TimelinePage() {
   );
 
   const handleNodeClick = useCallback(
-    (node: TimelineEventNode) => {
+    (node: TimelineEventNode, card: HTMLElement) => {
       if (!novelId || !taskScopeId) return;
       const isSameNode = selectedDetailNode?.tree_id === node.tree_id;
+      setAnchor(isSameNode ? null : { treeId: node.tree_id, element: card });
       navigate(
         buildTimelinePageUrl(novelId, taskScopeId, {
           maxLevel,
@@ -232,6 +222,7 @@ export function TimelinePage() {
       // treeId 可能是 event_id，外层会按 event_id 回退查找
       const targetNode = nodes.find((n) => n.tree_id === treeId || n.root_event_id === treeId || n.main_chain.includes(treeId));
       const resolvedTreeId = targetNode?.tree_id ?? treeId;
+      setAnchor(null);
       navigate(
         buildTimelinePageUrl(novelId, taskScopeId, {
           maxLevel,
@@ -247,6 +238,12 @@ export function TimelinePage() {
   const handleRetry = useCallback(() => {
     timelineQuery.refetch();
   }, [timelineQuery]);
+
+  const handleCloseDetail = useCallback(() => {
+    if (!novelId || !taskScopeId) return;
+    setAnchor(null);
+    navigate(buildTimelinePageUrl(novelId, taskScopeId, { maxLevel, treeId: null, eventId: null }), { replace: true });
+  }, [maxLevel, navigate, novelId, taskScopeId]);
 
   const isLoading = timelineQuery.isLoading || novelQuery.isLoading;
   const isAnalysisNotComplete = isAnalysisNotCompleteError(timelineQuery.error);
@@ -315,92 +312,69 @@ export function TimelinePage() {
             暂无时间轴节点
           </div>
         ) : (
-          <AnalysisWorkspace.Tabs value={activePanel} onValueChange={(value) => setActivePanel(value as "timeline" | "details")}>
-            <AnalysisWorkspace.Tab value="timeline" label="事件轨道">
-              <div className="flex h-full min-h-0 flex-col gap-2">
-                <dl className="grid shrink-0 grid-cols-4 gap-2" aria-label="事件轨道摘要">
-                  {[
-                    ["事件总数", eventCount], ["当前可见", visibleCount],
-                    ["因果联系", causalCount],
-                  ].map(([label, value]) => (
-                    <div key={label} className="flex items-center justify-between rounded-lg border border-border/70 bg-surface/75 px-3 py-1 text-xs">
-                      <dt className="text-text-muted">{label}</dt>
-                      <dd className="font-semibold tabular-nums text-text">{value}</dd>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-end rounded-lg border border-border/70 bg-surface/75 px-2">
-                    <PagedControls page={currentTrackPage} pageCount={trackPageCount} onPageChange={setTrackPage} label="事件轨道" />
-                  </div>
-                </dl>
-                <div className="flex shrink-0 items-center gap-2" aria-label="时间轴筛选">
-                  <TimelineControls variant="inline" maxLevel={maxLevel} onMaxLevelChange={handleMaxLevelChange} className="min-w-0 flex-1" />
-                  <Select value={activePhase ?? "all"} onValueChange={(value) => setActivePhase(value === "all" ? undefined : value)}>
-                    <SelectTrigger className="w-48 shrink-0" aria-label="叙事阶段筛选"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部阶段</SelectItem>
-                      {phases.map((phase) => <SelectItem key={phase.name} value={phase.name}>{phase.name} · 第 {phase.start} 至 {phase.end} 章</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <details className="relative z-20 shrink-0">
-                    <summary className="cursor-pointer list-none rounded-lg border border-border/70 bg-surface px-3 py-2 text-xs text-text">图例</summary>
-                    <div className="absolute right-0 top-full mt-2 w-[580px] rounded-xl border border-border/70 bg-background p-3 shadow-lg">
-                      <TimelineLegend />
-                    </div>
-                  </details>
+          <div className="flex h-full min-h-0 flex-col gap-2">
+            <dl className="grid shrink-0 grid-cols-3 gap-2" aria-label="事件轨道摘要">
+              {[
+                ["事件总数", eventCount], ["当前可见", visibleCount], ["因果联系", causalCount],
+              ].map(([label, value]) => (
+                <div key={label} className="flex items-center justify-between rounded-lg border border-border/70 bg-surface/75 px-3 py-1 text-xs">
+                  <dt className="text-text-muted">{label}</dt>
+                  <dd className="font-semibold tabular-nums text-text">{value}</dd>
                 </div>
-                {selectionHint ? <p className="absolute z-10 mt-20 flex items-center gap-2 rounded-lg border border-chart-negative/20 bg-background p-2 text-xs text-text-muted"><AlertTriangle className="h-4 w-4 text-chart-negative" aria-hidden="true" />{selectionHint}</p> : null}
-                <section className="min-h-0 flex-1" aria-label="事件轨道">
-                  <TimelineTrack
-                    nodes={trackNodes}
-                    derivedOrder={timelineData?.derived_event_order ?? []}
-                    phases={phases}
-                    activePhase={activePhase}
-                    selectedNodeId={selectedTrackNodeId}
-                    onNodeClick={handleNodeClick}
-                    tensionCurve={tensionCurve ?? null}
-                    totalChapters={totalChapters}
-                    fitViewport
-                    className="h-full min-h-0"
-                  />
-                </section>
-              </div>
-            </AnalysisWorkspace.Tab>
-
-            <AnalysisWorkspace.Tab value="details" label="事件详情">
-              <div className="h-full min-h-0">
-                {selectedDetailNode ? (
-                  <TimelineEventInspector
-                    node={selectedDetailNode}
-                    nodes={nodes}
-                    novelId={novelId}
-                    taskId={taskScopeId}
-                    causalEdges={causalEdges}
-                    foreshadowingEdges={foreshadowingEdges}
-                    onClose={() => {
-                      setActivePanel("timeline");
-                      navigate(
-                        buildTimelinePageUrl(novelId, taskScopeId, {
-                          maxLevel,
-                          treeId: null,
-                          eventId: null,
-                        }),
-                        { replace: true },
-                      );
-                    }}
-                    onSelectChapter={handleSelectChapter}
-                    onSelectTree={handleSelectTree}
-                    className="h-full"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border/60 bg-surface/50 px-6 text-center text-sm leading-6 text-text-muted">
-                    选择时间轴中的事件后，这里会显示事件摘要、涉及角色与因果联系
-                  </div>
-                )}
-              </div>
-            </AnalysisWorkspace.Tab>
-          </AnalysisWorkspace.Tabs>
+              ))}
+            </dl>
+            <div className="flex shrink-0 items-center gap-2" aria-label="时间轴筛选">
+              <TimelineControls variant="inline" maxLevel={maxLevel} onMaxLevelChange={handleMaxLevelChange} className="min-w-0 flex-1" />
+              <Select value={activePhase ?? "all"} onValueChange={(value) => setActivePhase(value === "all" ? undefined : value)}>
+                <SelectTrigger className="w-48 shrink-0" aria-label="叙事阶段筛选"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部阶段</SelectItem>
+                  {phases.map((phase) => <SelectItem key={phase.name} value={phase.name}>{phase.name} · 第 {phase.start} 至 {phase.end} 章</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <details className="relative z-20 shrink-0">
+                <summary className="cursor-pointer list-none rounded-lg border border-border/70 bg-surface px-3 py-2 text-xs text-text">图例</summary>
+                <div className="absolute right-0 top-full mt-2 w-[580px] rounded-xl border border-border/70 bg-background p-3 shadow-lg">
+                  <TimelineLegend />
+                </div>
+              </details>
+            </div>
+            {selectionHint && <p className="flex items-center gap-2 text-xs text-text-muted">
+              <AlertTriangle className="h-4 w-4 text-chart-negative" aria-hidden="true" />{selectionHint}
+            </p>}
+            <section className="min-h-0 flex-1" aria-label="事件轨道">
+              <TimelineTrack
+                nodes={displayNodes}
+                derivedOrder={derivedOrder}
+                phases={phases}
+                activePhase={activePhase}
+                selectedNodeId={selectedTrackNodeId}
+                onNodeClick={handleNodeClick}
+                tensionCurve={tensionCurve ?? null}
+                totalChapters={totalChapters}
+                className="h-full min-h-0"
+              />
+            </section>
+          </div>
         )}
       </div>
+      {selectedDetailNode && <TimelineEventPopover
+        anchor={anchor?.treeId === selectedDetailNode.tree_id ? anchor.element : null}
+        onClose={handleCloseDetail}
+      >
+        <TimelineEventInspector
+          node={selectedDetailNode}
+          nodes={nodes}
+          novelId={novelId}
+          taskId={taskScopeId}
+          causalEdges={causalEdges}
+          foreshadowingEdges={foreshadowingEdges}
+          onClose={handleCloseDetail}
+          onSelectChapter={handleSelectChapter}
+          onSelectTree={handleSelectTree}
+          className="h-full"
+        />
+      </TimelineEventPopover>}
     </AnalysisWorkspace>
   );
 }

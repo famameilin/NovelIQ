@@ -26,9 +26,10 @@ vi.mock("framer-motion", () => ({
 }));
 
 function createEventNode(overrides: Partial<TimelineEventNode> = {}): TimelineEventNode {
+  const treeId = overrides.tree_id ?? "evt-3";
   return {
-    tree_id: "evt-3",
-    root_event_id: "evt-3",
+    tree_id: treeId,
+    root_event_id: treeId,
     title: "白芷初遇",
     summary: "白芷初遇",
     anchor_chapter_id: 3,
@@ -99,7 +100,7 @@ describe("TimelineTrack", () => {
 
     fireEvent.click(detailButton!);
 
-    expect(onNodeClick).toHaveBeenCalledWith(node);
+    expect(onNodeClick).toHaveBeenCalledWith(node, detailButton);
     // 新合同事件节点默认展示为 事件节点/根因等，需兼容旧文案 "剧情节点" 已改为事件
     expect(screen.getByText(/事件/)).toBeInTheDocument();
     expect(screen.getByText("第 3 章")).toBeInTheDocument();
@@ -121,8 +122,8 @@ describe("TimelineTrack", () => {
     const cards = screen.getAllByTestId("timeline-card");
     expect(cards).toHaveLength(4);
     expect(cards.map((card) => card.dataset.cardOrder)).toEqual(["1", "2", "3", "4"]);
-    // lane 仍按 orderIndex 奇偶交错
-    expect(cards.map((card) => Number(card.dataset.lane))).toEqual([2, 1, 2, -1]);
+    // 相邻四张卡片按顺序覆盖上下各两条车道
+    expect(cards.map((card) => Number(card.dataset.lane))).toEqual([-2, -1, 2, 1]);
     expect(screen.getAllByRole("button")).toHaveLength(4);
 
     cards.forEach((card, index) => {

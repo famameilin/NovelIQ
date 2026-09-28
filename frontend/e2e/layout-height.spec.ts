@@ -24,7 +24,7 @@ const DESKTOP_VIEWPORT = { width: 1920, height: 943 } as const;
 
 interface PageViewCase {
   label: string;
-  role: 'button' | 'tab';
+  role: 'button' | 'tab' | 'region';
   revealMore?: boolean;
 }
 
@@ -95,10 +95,7 @@ const PAGE_HEIGHT_CASES: readonly PageHeightCase[] = [
   {
     label: '叙事时间轴',
     pathSuffix: '/timeline',
-    views: [
-      { label: '事件轨道', role: 'tab' },
-      { label: '事件详情', role: 'tab' },
-    ],
+    views: [{ label: '事件轨道', role: 'region' }],
   },
   {
     label: '诊断报告',
@@ -545,6 +542,20 @@ function formatOverflowReport(measurements: readonly HeightMeasurement[]): strin
 test.describe('全局页面高度门禁', () => {
   test.use({ viewport: DESKTOP_VIEWPORT, screen: DESKTOP_SCREEN });
 
+  test('事件轨道在桌面视口中连续呈现全部事件', async ({ page }) => {
+    const unhandledRequests = await installAnalysisApiMocks(page);
+    await page.goto(`/novels/${NOVEL_ID}/timeline?task_id=${TASK_ID}`);
+    const track = page.getByRole('region', { name: '事件轨道' });
+    await expect(track).toBeVisible();
+    const visibleCount = Number(await page.locator('[aria-label="事件轨道摘要"] dd').nth(1).textContent());
+    await expect(track.getByTestId('timeline-card')).toHaveCount(visibleCount);
+    await expect(page.getByRole('navigation', { name: '事件轨道分页' })).toHaveCount(0);
+    const bounds = await track.boundingBox();
+    expect(bounds?.height).toBeGreaterThan(400);
+    expect(bounds?.width).toBeGreaterThan(500);
+    expect([...unhandledRequests]).toEqual([]);
+  });
+
   /**
    * 2026-08-31 作用：验证全部业务页面不会撑出页面级竖向滚动
    * 简要说明：覆盖侧栏路由及其页面主体切换状态
@@ -578,7 +589,7 @@ test.describe('全局页面高度门禁', () => {
       for (const view of pageCase.views) {
         const control = page.getByRole(view.role, { name: view.label, exact: true });
         await expect(control).toBeVisible();
-        if ((await control.getAttribute('aria-selected')) !== 'true') {
+        if (view.role !== 'region' && (await control.getAttribute('aria-selected')) !== 'true') {
           await control.click();
           await waitForStableLayout(page, `${pageCase.label} / ${view.label} ${path}`, runtimeErrors);
         }
@@ -662,7 +673,7 @@ test.describe('重点页签 1280×720 单屏门禁', () => {
   test.use({ viewport: SINGLE_SCREEN_VIEWPORT, screen: SINGLE_SCREEN_VIEWPORT });
 
   for (const pageCase of PAGE_HEIGHT_CASES.filter((item) => SINGLE_SCREEN_PATHS.has(item.pathSuffix))) {
-    test(`${pageCase.label}各视图及长内容末页没有滚动`, async ({ page }) => {
+    test(`${pageCase.label}各视图及长内容末页无纵向滚动`, async ({ page }) => {
       test.setTimeout(90_000);
       const unhandledRequests = await installAnalysisApiMocks(page);
       const runtimeErrors: string[] = [];
@@ -676,7 +687,8 @@ test.describe('重点页签 1280×720 单屏门禁', () => {
 
       for (const view of pageCase.views ?? []) {
         const tab = page.getByRole(view.role, { name: view.label, exact: true });
-        await tab.click();
+        if (view.role === 'region') await expect(tab).toBeVisible();
+        else await tab.click();
         await waitForStableLayout(page, `${pageCase.label} / ${view.label}`, runtimeErrors);
         await expectSingleScreen(page, pageCase, view.label);
 
@@ -684,7 +696,12 @@ test.describe('重点页签 1280×720 单屏门禁', () => {
           await showLastPage(page, '角色排行', true);
         }
         if (pageCase.pathSuffix === '/timeline' && view.label === '事件轨道') {
-          await showLastPage(page, '事件轨道', true);
+          const track = page.getByRole('region', { name: '事件轨道' });
+          const visibleCount = Number(await page.locator('[aria-label="事件轨道摘要"] dd').nth(1).textContent());
+          await expect(track.getByTestId('timeline-card')).toHaveCount(visibleCount);
+          await track.getByTestId('timeline-card').last().click();
+          await expect(page.getByRole('dialog', { name: '事件详情悬浮框' })).toBeVisible();
+          await expectSingleScreen(page, pageCase, '末尾事件详情');
         }
         if (pageCase.pathSuffix === '/topics' && view.label === '主题总览') {
           await showLastPage(page, '主题列表', true);
@@ -775,9 +792,11 @@ test.describe('重点页签 1280×720 单屏门禁', () => {
       if (pageCase.pathSuffix === '/timeline') {
         await page.goto(`${path}&tree_id=tree%3A1`);
         await waitForStableLayout(page, '事件详情深链', runtimeErrors);
+        const popup = page.getByRole('dialog', { name: '事件详情悬浮框' });
+        await expect(popup).toBeVisible();
         const detailViews = [/^事件概况$/, /^参与实体/, /^因果联系/, /^关联伏笔/, /^分析数据$/];
         for (const name of detailViews) {
-          await page.getByRole('group', { name: '事件详情内容' }).getByRole('button', { name }).click();
+          await popup.getByRole('group', { name: '事件详情内容' }).getByRole('button', { name }).click();
           await expectSingleScreen(page, pageCase, `事件详情 ${name.source}`);
         }
       }

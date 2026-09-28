@@ -6,6 +6,7 @@ import {
   Network,
   MessageSquare,
   Clock,
+  GitBranch,
   FileText,
   Languages,
   PanelLeftClose,
@@ -24,6 +25,7 @@ const navItems = [
   { to: "/topics", icon: MessageSquare, label: "主题分布" },
   { to: "/linguistic", icon: Languages, label: "语言特征" },
   { to: "/timeline", icon: Clock, label: "叙事时间轴" },
+  { to: "/event-trees", icon: GitBranch, label: "事件树" },
   { to: "/diagnosis", icon: FileText, label: "诊断报告" },
 ];
 

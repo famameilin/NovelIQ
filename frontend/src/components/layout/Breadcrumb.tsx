@@ -63,6 +63,7 @@ export const routeNameMap: Record<string, string> = {
   "/topics": "主题分布",
   "/linguistic": "语言特征",
   "/timeline": "叙事时间轴",
+  "/event-trees": "事件树",
   "/diagnosis": "诊断报告",
 };
 

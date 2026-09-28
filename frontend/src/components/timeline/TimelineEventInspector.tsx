@@ -9,11 +9,13 @@ import type {
 import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { PagedControls } from "@/components/common/PagedControls";
+import { useCompactAnalysisViewport } from "@/hooks/useCompactAnalysisViewport";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { paginateText } from "@/lib/paginateText";
 import { buildGraphUrl } from "@/pages/graph/graphPageNavigation";
+import { buildEventTreeUrl } from "@/pages/eventTrees/eventTreeNavigation";
 import { getTimelineNodePresentation } from "./timelineNodePresentation";
 
 export interface TimelineEventInspectorProps {
@@ -71,6 +73,7 @@ export function TimelineEventInspector({
   const [view, setView] = useState<DetailView>("overview");
   const [page, setPage] = useState(1);
   const [descriptionPage, setDescriptionPage] = useState(1);
+  const compact = useCompactAnalysisViewport();
   const eventLabels = useMemo(() => {
     const labels = new Map<string, string>();
     nodes.forEach((item) => {
@@ -100,7 +103,7 @@ export function TimelineEventInspector({
   const characters = grouped.filter((item) => item.type === "character");
   const locations = grouped.filter((item) => item.type === "location" || item.type === "place");
   const otherEntities = grouped.filter((item) => !characters.includes(item) && !locations.includes(item));
-  const summaryPassages = paginateText(node.summary, 220);
+  const summaryPassages = paginateText(node.summary, compact ? 120 : 220);
   const pageCount = view === "overview" ? summaryPassages.length
     : view === "participants" ? Math.ceil(characters.length / 6)
       : view === "causal" ? Math.ceil(causalLinks.length / 3)
@@ -134,9 +137,14 @@ export function TimelineEventInspector({
             </div>
             <h2 className="mt-1 text-lg font-semibold leading-6 text-text">{node.title || node.summary}</h2>
           </div>
-          <Button variant="outline" size="sm" className="shrink-0" onClick={handleSelectChapter}>
-            在图谱中定位第 {node.anchor_chapter_id} 章
-          </Button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate(buildEventTreeUrl(novelId, taskId, { treeId: node.tree_id, eventId: node.root_event_id }))}>
+              查看事件树
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleSelectChapter}>
+              在图谱中定位第 {node.anchor_chapter_id} 章
+            </Button>
+          </div>
         </div>
         <AnalysisViewSwitcher value={view} onValueChange={(next) => { setView(next); setPage(1); setDescriptionPage(1); }}
           label="事件详情内容" options={[
@@ -147,14 +155,39 @@ export function TimelineEventInspector({
             { value: "metrics", label: "分析数据" },
           ]} />
         <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border/70 bg-surface/70 p-4">
-          {view === "overview" && <div className="flex h-full flex-col justify-center gap-4">
-            <p className="whitespace-pre-wrap text-sm leading-7 text-text-muted">{summaryPassages[currentPage - 1] ?? "暂无事件摘要"}</p>
-            <dl className="grid grid-cols-3 gap-3 text-sm">
-              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="flex items-center gap-1.5 text-xs text-text-muted"><MapPin className="h-3.5 w-3.5" />发生位置</dt><dd className="mt-1 font-medium text-text">{node.start_chapter_id === node.end_chapter_id ? `第 ${node.anchor_chapter_id} 章` : `第 ${node.start_chapter_id} 至 ${node.end_chapter_id} 章`}</dd></div>
-              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">全书位置</dt><dd className="mt-1 font-medium text-text">约 {Math.round(node.progress * 100)}%</dd></div>
-              <div className="rounded-lg bg-surface-hover/55 p-3"><dt className="text-xs text-text-muted">关联概况</dt><dd className="mt-1 font-medium text-text">{characters.length} 位角色 · {causalLinks.length} 条因果</dd></div>
+          {view === "overview" && <div className="flex h-full min-h-0 flex-col gap-3">
+            <section className="shrink-0 rounded-lg border border-border/60 bg-surface-hover/45 px-3 py-2">
+              <h3 className="text-xs font-medium text-text-muted">事件摘要</h3>
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-text">{summaryPassages[currentPage - 1] ?? "暂无事件摘要"}</p>
+              <PagedControls page={currentPage} pageCount={pageCount} onPageChange={setPage} label="事件摘要" />
+            </section>
+            <dl className="grid shrink-0 grid-cols-3 gap-2 text-sm">
+              <div className="rounded-lg bg-surface-hover/55 px-3 py-2"><dt className="flex items-center gap-1.5 text-xs text-text-muted"><MapPin className="h-3.5 w-3.5" />发生位置</dt><dd className="mt-1 font-medium text-text">{node.start_chapter_id === node.end_chapter_id ? `第 ${node.anchor_chapter_id} 章` : `第 ${node.start_chapter_id} 至 ${node.end_chapter_id} 章`}</dd></div>
+              <div className="rounded-lg bg-surface-hover/55 px-3 py-2"><dt className="text-xs text-text-muted">全书位置</dt><dd className="mt-1 font-medium text-text">约 {Math.round(node.progress * 100)}%</dd></div>
+              <div className="rounded-lg bg-surface-hover/55 px-3 py-2"><dt className="text-xs text-text-muted">重要性</dt><dd className="mt-1 font-medium text-text">{node.importance_score.toFixed(2)}</dd></div>
             </dl>
-            <PagedControls page={currentPage} pageCount={pageCount} onPageChange={setPage} label="事件摘要" />
+            <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
+              <section className="flex min-h-0 flex-col rounded-lg border border-border/60 bg-surface-hover/35 p-3">
+                <h3 className="text-xs font-medium text-text-muted">参与角色 · {characters.length} 位</h3>
+                <div className="mt-2 grid min-h-0 flex-1 auto-rows-fr gap-1.5">
+                  {characters.length > 0 ? characters.slice(0, 3).map((item) => (
+                    <div key={`${item.type}-${item.name}`} className="flex min-h-0 items-center justify-between gap-2 rounded-md bg-surface/75 px-2 py-1 text-xs">
+                      <span className="truncate font-medium text-text" title={item.name}>{item.name}</span>
+                      <span className="shrink-0 text-text-muted">{item.roles[0]}</span>
+                    </div>
+                  )) : <p className="text-xs text-text-muted">暂无参与角色</p>}
+                  {characters.length > 3 && <p className="text-xs text-text-muted">其余 {characters.length - 3} 位可在“参与实体”查看</p>}
+                </div>
+              </section>
+              <section className="flex min-h-0 flex-col rounded-lg border border-border/60 bg-surface-hover/35 p-3">
+                <h3 className="text-xs font-medium text-text-muted">关联结构</h3>
+                <dl className="mt-2 grid min-h-0 flex-1 auto-rows-fr gap-1.5 text-xs">
+                  <div className="flex items-center justify-between rounded-md bg-surface/75 px-2 py-1"><dt className="text-text-muted">因果联系</dt><dd className="font-medium text-text">{causalLinks.length} 条</dd></div>
+                  <div className="flex items-center justify-between rounded-md bg-surface/75 px-2 py-1"><dt className="text-text-muted">关联伏笔</dt><dd className="font-medium text-text">{relatedForeshadowing.length} 条</dd></div>
+                  <div className="flex items-center justify-between rounded-md bg-surface/75 px-2 py-1"><dt className="text-text-muted">主线 / 旁支</dt><dd className="font-medium text-text">{node.main_chain.length} / {node.secondary_groups.length}</dd></div>
+                </dl>
+              </section>
+            </div>
           </div>}
           {view === "participants" && <div className="flex h-full flex-col gap-3">
             <h3 className="flex items-center gap-2 text-sm font-medium text-text"><Users className="h-4 w-4 text-chart-3" />涉及角色</h3>

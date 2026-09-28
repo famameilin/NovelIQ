@@ -99,6 +99,10 @@ describe("TimelineEventInspector", () => {
     expect(onSelectTree).toHaveBeenCalledWith("event:internal:next");
     await user.click(screen.getByRole("button", { name: "在图谱中定位第 8 章" }));
     expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-1&selected_chapter=8");
+    await user.click(screen.getByRole("button", { name: "查看事件树" }));
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/novels/novel-1/event-trees?task_id=task-1&tree_id=tree%3Ainternal%3A1&event_id=event%3Ainternal%3Aroot",
+    );
     await user.click(screen.getByRole("button", { name: "关闭事件详情" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });

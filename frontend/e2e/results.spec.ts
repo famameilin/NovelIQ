@@ -176,13 +176,18 @@ test.describe('分析结果页面', () => {
             { name: '高潮期', start: 71, end: 85, ratio: 0.14 },
             { name: '收束期', start: 86, end: 100, ratio: 0.16 },
           ],
-          composite_nodes: [],
-          atomic_nodes: [],
-          tension_curve: null,
+          nodes: [],
+          causal_edges: [],
+          foreshadowing_edges: [],
+          derived_event_order: [],
+          tension_curve: Array(100).fill(0.5),
+          phase_basis: 'fixed_percentage',
+          total_chapters: 100,
         }),
       });
     });
     await page.goto(`/novels/${NOVEL_ID}/timeline?task_id=${TASK_ID}`);
+    await expect(page.getByText('暂无时间轴节点')).toBeVisible();
   });
 
   test('诊断页应正常加载', async ({ page }) => {

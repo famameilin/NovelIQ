@@ -16,15 +16,15 @@ import {
   calculateCanvasMinWidth,
   createTimelineLayoutNodes,
   getEventSpanWidth,
-  getLabelTopPx,
   LABEL_HEIGHT_PX,
+  LABEL_VERTICAL_GAP_PX,
   PHASE_BAND_BOTTOM_PX,
   PHASE_BAND_TOP_PX,
   TRACK_NODE_END_PADDING_PX,
   TRACK_NODE_START_PADDING_PX,
 } from "./timelineTrackLayout";
 import { getTimelineNodePresentation } from "./timelineNodePresentation";
-import { buildTensionAreaPath, getTrackPositionPx, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
+import { getTrackPositionPx, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
 
 export type TimelineDisplayNode = TimelineEventNode;
 
@@ -36,7 +36,7 @@ export interface TimelineTrackProps {
   phases?: { name: string; start: number; end: number; ratio: number }[] | TimelinePhase[];
   activePhase?: string;
   selectedNodeId?: string;
-  onNodeClick?: (node: TimelineEventNode) => void;
+  onNodeClick?: (node: TimelineEventNode, card: HTMLElement) => void;
   className?: string;
   tensionCurve?: number[] | null;
   totalChapters?: number;
@@ -88,13 +88,19 @@ export function TimelineTrack({
 }: TimelineTrackProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewportWidth, setViewportWidth] = useState(900);
+  const [viewportHeight, setViewportHeight] = useState(TRACK_HEIGHT_PX);
   useEffect(() => {
-    if (!fitViewport || !containerRef.current || typeof ResizeObserver === "undefined") return;
+    if (!containerRef.current || typeof ResizeObserver === "undefined") return;
     const element = containerRef.current;
-    const observer = new ResizeObserver(() => setViewportWidth(Math.max(element.clientWidth - 18, 600)));
+    const observer = new ResizeObserver(() => {
+      setViewportHeight(Math.max(element.clientHeight, TRACK_HEIGHT_PX));
+      if (fitViewport) setViewportWidth(Math.max(element.clientWidth - 18, 600));
+    });
     observer.observe(element);
     return () => observer.disconnect();
   }, [fitViewport]);
+  // 曲线填满轨道，事件卡保持固定高度。
+  const verticalScale = viewportHeight / TRACK_HEIGHT_PX;
   const highlightedRange = useMemo(() => {
     if (!activePhase || !phases) return null;
     const phase = phases.find((item) => item.name === activePhase);
@@ -153,21 +159,39 @@ export function TimelineTrack({
     () => createTimelineLayoutNodes(sortedNodes, derivedOrder, canvasMinWidth, { tensionCurve, totalChapters }),
     [canvasMinWidth, sortedNodes, derivedOrder, tensionCurve, totalChapters],
   );
+  const rowGap = 2 + (LABEL_VERTICAL_GAP_PX - 2) * Math.min(1, (viewportHeight - TRACK_HEIGHT_PX) / 180);
+  const laneStep = LABEL_HEIGHT_PX + rowGap;
+  const minTopAnchor = Math.min(...layoutNodes.filter(({ lane }) => lane < 0).map(({ anchorY }) => anchorY * verticalScale));
+  const maxBottomAnchor = Math.max(...layoutNodes.filter(({ lane }) => lane > 0).map(({ anchorY }) => anchorY * verticalScale));
+  const topOuterRow = Math.max(0, Math.min(viewportHeight * 0.08, minTopAnchor - LABEL_HEIGHT_PX - laneStep - rowGap));
+  const bottomOuterRow = Math.min(
+    viewportHeight - LABEL_HEIGHT_PX,
+    Math.max(viewportHeight * 0.92 - LABEL_HEIGHT_PX, maxBottomAnchor + rowGap + laneStep),
+  );
 
   const tensionPath = useMemo(() => {
-    if (fitViewport && layoutNodes.length > 0) {
-      const points = layoutNodes.map(({ anchorX, anchorY }) => `${anchorX},${anchorY}`);
-      const linePath = `M ${points.join(" L ")}`;
-      return {
-        linePath,
-        areaPath: `${linePath} L ${layoutNodes[layoutNodes.length - 1].anchorX},${TRACK_HEIGHT_PX} L ${layoutNodes[0].anchorX},${TRACK_HEIGHT_PX} Z`,
-      };
+    if (layoutNodes.length === 0 || (!fitViewport && (!tensionCurve || tensionCurve.length === 0))) return null;
+    // 横坐标按事件顺序排布，曲线必须经过同一批事件锚点，引导线才能落在曲线上。
+    const first = layoutNodes[0];
+    const last = layoutNodes[layoutNodes.length - 1];
+    const points = [
+      { x: TRACK_NODE_START_PADDING_PX, y: first.anchorY },
+      ...layoutNodes.map(({ anchorX, anchorY }) => ({ x: anchorX, y: anchorY })),
+      { x: canvasMinWidth - TRACK_NODE_END_PADDING_PX, y: last.anchorY },
+    ];
+    const segments = [`M ${points[0].x},${points[0].y}`];
+    for (let index = 1; index < points.length; index += 1) {
+      const previous = points[index - 1];
+      const current = points[index];
+      const handle = (current.x - previous.x) / 3;
+      segments.push(`C ${previous.x + handle},${previous.y} ${current.x - handle},${current.y} ${current.x},${current.y}`);
     }
-    if (!tensionCurve || tensionCurve.length === 0) {
-      return null;
-    }
-    return buildTensionAreaPath(tensionCurve, totalChapters, canvasMinWidth);
-  }, [canvasMinWidth, fitViewport, layoutNodes, tensionCurve, totalChapters]);
+    const linePath = segments.join(" ");
+    return {
+      linePath,
+      areaPath: `${linePath} L ${canvasMinWidth - TRACK_NODE_END_PADDING_PX},${TRACK_HEIGHT_PX} L ${TRACK_NODE_START_PADDING_PX},${TRACK_HEIGHT_PX} Z`,
+    };
+  }, [canvasMinWidth, fitViewport, layoutNodes, tensionCurve]);
 
   const phaseLayouts = useMemo(() => {
     if (fitViewport && sortedNodes.length > 0) {
@@ -197,11 +221,11 @@ export function TimelineTrack({
   }, [canvasMinWidth, fitViewport, phases, sortedNodes]);
 
   return (
-    <div ref={containerRef} className={cn("relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-border/70 bg-background/80", className)}>
+    <div className={cn("relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-border/70 bg-background/80", className)}>
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.8),transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,240,236,0.76))]" />
 
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-2">
+        <div ref={containerRef} className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-2">
           <div className="h-full w-max min-w-full">
             <div
               className="relative h-full min-h-[430px] overflow-hidden rounded-[24px] border border-white/60 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.72),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.7),rgba(247,240,236,0.4))]"
@@ -229,7 +253,7 @@ export function TimelineTrack({
 
               {tensionPath && (
                 <svg
-                  className="pointer-events-none absolute inset-0"
+                  className="pointer-events-none absolute inset-0 h-full w-full"
                   viewBox={`0 0 ${canvasMinWidth} ${TRACK_HEIGHT_PX}`}
                   preserveAspectRatio="none"
                 >
@@ -270,7 +294,7 @@ export function TimelineTrack({
                       style={{
                         left: `${spanLeft}px`,
                         width: `${spanWidth}px`,
-                        top: `${anchorY - 6}px`,
+                        top: `${anchorY * verticalScale - 6}px`,
                         height: "12px",
                       }}
                     />
@@ -279,9 +303,11 @@ export function TimelineTrack({
 
                 {layoutNodes.map((layoutNode, index) => {
                   const { node, lane, labelWidth, anchorX, anchorY } = layoutNode;
-                  const labelTop = getLabelTopPx(anchorY, lane);
                   const labelLeft = anchorX - labelWidth / 2;
-                  const labelAnchorY = lane < 0 ? labelTop + LABEL_HEIGHT_PX : labelTop;
+                  const labelTopPx = lane < 0
+                    ? topOuterRow + (lane === -1 ? laneStep : 0)
+                    : bottomOuterRow - (lane === 1 ? laneStep : 0);
+                  const labelAnchorY = (labelTopPx + (lane < 0 ? LABEL_HEIGHT_PX : 0)) / verticalScale;
                   const subtype = getEventPresentationSubtype(node);
                   const presentation = getTimelineNodePresentation(node.node_type as "event", subtype);
                   const nodeKey = resolveNodeKey(node);
@@ -296,8 +322,9 @@ export function TimelineTrack({
                     <div key={nodeKey}>
                       <svg
                         aria-hidden="true"
-                        className="pointer-events-none absolute inset-0 overflow-visible"
+                        className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
                         viewBox={`0 0 ${canvasMinWidth} ${TRACK_HEIGHT_PX}`}
+                        preserveAspectRatio="none"
                       >
                         <line
                           data-testid="timeline-connector"
@@ -317,7 +344,7 @@ export function TimelineTrack({
                       <motion.button
                         type="button"
                         className={cn(
-                          "absolute z-[5] flex h-[68px] items-start gap-2 overflow-hidden rounded-xl border px-3 py-2 text-left shadow-sm backdrop-blur-sm transition-all",
+                          "absolute z-[5] flex h-[68px] items-start gap-2 overflow-hidden rounded-xl border px-3 py-2 text-left shadow-sm backdrop-blur-sm transition-[transform,box-shadow,border-color,background-color]",
                           "hover:-translate-y-0.5 hover:shadow-md",
                           isSelected
                             ? "border-primary/35 bg-primary/10 shadow-[0_12px_30px_rgba(161,90,43,0.16)]"
@@ -326,13 +353,14 @@ export function TimelineTrack({
                         )}
                         style={{
                           left: `${labelLeft}px`,
-                          top: `${labelTop}px`,
+                          top: `${labelTopPx}px`,
                           width: `${labelWidth}px`,
                         }}
                         data-testid="timeline-card"
+                        data-tree-id={node.tree_id}
                         data-card-order={index + 1}
                         data-lane={lane}
-                        onClick={() => onNodeClick?.(node)}
+                        onClick={(event) => onNodeClick?.(node, event.currentTarget)}
                       >
                         <div
                           className={cn(

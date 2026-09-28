@@ -12,6 +12,7 @@ const GraphPage = lazy(() => import("@/pages/GraphPage").then((m) => ({ default:
 const TopicsPage = lazy(() => import("@/pages/TopicsPage").then((m) => ({ default: m.TopicsPage })));
 const LinguisticPage = lazy(() => import("@/pages/LinguisticPage").then((m) => ({ default: m.LinguisticPage })));
 const TimelinePage = lazy(() => import("@/pages/TimelinePage").then((m) => ({ default: m.TimelinePage })));
+const EventTreesPage = lazy(() => import("@/pages/EventTreesPage").then((m) => ({ default: m.EventTreesPage })));
 const DiagnosisPage = lazy(() => import("@/pages/DiagnosisPage").then((m) => ({ default: m.DiagnosisPage })));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage").then((m) => ({ default: m.NotFoundPage })));
@@ -51,6 +52,7 @@ export const router = createBrowserRouter([
       { path: "/novels/:novelId/topics", element: withSuspense(TopicsPage) },
       { path: "/novels/:novelId/linguistic", element: withSuspense(LinguisticPage) },
       { path: "/novels/:novelId/timeline", element: withSuspense(TimelinePage) },
+      { path: "/novels/:novelId/event-trees", element: withSuspense(EventTreesPage) },
       { path: "/novels/:novelId/diagnosis", element: withSuspense(DiagnosisPage) },
     ],
   },

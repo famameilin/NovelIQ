@@ -5,6 +5,8 @@ import type {
   ForeshadowingTree,
   GraphChangesPageResponse,
   EventTimelineResponse,
+  EventForestResponse,
+  EventSourceChapterResponse,
   EmotionTrendWindow,
   TopicEmotionResponse,
   TopicSeriesResponse,
@@ -109,6 +111,27 @@ export async function getTimeline(
         include_curve: options?.includeCurve ?? true,
       },
     }
+  );
+  return data;
+}
+
+/** 事件树页按任务读取一份完整森林快照，章节筛选在前端进行 */
+export async function getEventForest(novelId: string, taskId: string): Promise<EventForestResponse> {
+  const { data } = await apiClient.get<EventForestResponse>(`/api/novels/${novelId}/event-forest`, {
+    params: { task_id: taskId },
+  });
+  return data;
+}
+
+/** 仅在读者打开原文时读取当前事件所在章节 */
+export async function getEventSourceChapter(
+  novelId: string,
+  taskId: string,
+  chapterId: number,
+): Promise<EventSourceChapterResponse> {
+  const { data } = await apiClient.get<EventSourceChapterResponse>(
+    `/api/novels/${novelId}/event-forest/chapters/${chapterId}/source`,
+    { params: { task_id: taskId } },
   );
   return data;
 }

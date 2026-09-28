@@ -2,8 +2,6 @@ import type { TimelineEventNode } from "@/api/types";
 
 import { getCurveNodeYPx, getNormalizedProgress, getTrackPositionPx, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
 
-type TimelineSide = "top" | "bottom";
-
 export type TimelineLayoutInputNode = TimelineEventNode;
 
 interface TimelineLayoutCandidate {
@@ -43,7 +41,8 @@ export const PHASE_BAND_TOP_PX = 16;
 export const PHASE_BAND_BOTTOM_PX = 0;
 export const TOP_LABEL_CLEARANCE_PX = 12;
 export const BOTTOM_LABEL_CLEARANCE_PX = 10;
-export const LANE_ORDER = [-2, -1, 1, 2] as const;
+// 相邻四张卡片依次使用上方外层、上方内层、下方外层、下方内层
+export const LANE_ORDER = [-2, -1, 2, 1] as const;
 
 /**
  * 2026-08-17，作用：按事件摘要估算时间轴卡片宽度
@@ -52,70 +51,6 @@ export const LANE_ORDER = [-2, -1, 1, 2] as const;
 export function estimateLabelWidth(summaryText: string): number {
   const estimated = summaryText.trim().length * 11 + 56;
   return Math.max(LABEL_WIDTH_MIN_PX, Math.min(LABEL_WIDTH_MAX_PX, estimated));
-}
-
-/**
- * 2026-08-17，作用：计算给定方向可容纳的事件卡层数
- * 说明：第一层贴近时间轴，第二层远离时间轴
- */
-function getLaneCapacity(room: number, lineGap: number): number {
-  return Math.max(
-    0,
-    Math.floor((room - lineGap + LABEL_VERTICAL_GAP_PX) / (LABEL_HEIGHT_PX + LABEL_VERTICAL_GAP_PX)),
-  );
-}
-
-/**
- * 2026-08-17，作用：根据时间轴曲线高度识别上下可用车道
- * 说明：曲线靠上时下方提供两层，曲线靠下时上方提供两层
- */
-function getAvailableLanes(anchorY: number): Record<TimelineSide, number[]> {
-  const topRoom = Math.max(0, anchorY - (PHASE_BAND_TOP_PX + TOP_LABEL_CLEARANCE_PX));
-  const bottomRoom = Math.max(
-    0,
-    TRACK_HEIGHT_PX - PHASE_BAND_BOTTOM_PX - BOTTOM_LABEL_CLEARANCE_PX - anchorY,
-  );
-  const top = Array.from(
-    { length: Math.min(getLaneCapacity(topRoom, TOP_LABEL_MARGIN_PX), 2) },
-    (_, laneIndex) => -(laneIndex + 1),
-  );
-  const bottom = Array.from(
-    { length: Math.min(getLaneCapacity(bottomRoom, BOTTOM_LABEL_MARGIN_PX), 2) },
-    (_, laneIndex) => laneIndex + 1,
-  );
-
-  return { top, bottom };
-}
-
-/**
- * 2026-08-17，作用：按奇偶序号给事件卡选择交错车道
- * 说明：奇数卡固定第二层，偶数卡固定第一层，曲线偏上或偏下时让空间较多的一侧先排出二、一、二
- */
-function getPreferredLaneOrder(anchorY: number, cardIndex: number): number[] {
-  const availableLanes = getAvailableLanes(anchorY);
-  const requestedLayer = cardIndex % 2 === 0 ? 2 : 1;
-  const pairSide: TimelineSide = Math.floor(cardIndex / 2) % 2 === 0 ? "top" : "bottom";
-  const topSupportsSecondLayer = availableLanes.top.some((lane) => Math.abs(lane) === 2);
-  const bottomSupportsSecondLayer = availableLanes.bottom.some((lane) => Math.abs(lane) === 2);
-  const roomierSide =
-    topSupportsSecondLayer === bottomSupportsSecondLayer ? null : topSupportsSecondLayer ? "top" : "bottom";
-  const constrainedSide: TimelineSide | null =
-    roomierSide === "top" ? "bottom" : roomierSide === "bottom" ? "top" : null;
-  const useConstrainedSide =
-    requestedLayer === 1 && constrainedSide != null && Math.floor(cardIndex / 2) % 2 === 1;
-  const preferredSide = useConstrainedSide ? constrainedSide : roomierSide ?? pairSide;
-  const oppositeSide: TimelineSide = preferredSide === "top" ? "bottom" : "top";
-  const preferredSides = [preferredSide, oppositeSide];
-  const requestedLanes = preferredSides
-    .map((side) => availableLanes[side].find((candidateLane) => Math.abs(candidateLane) === requestedLayer))
-    .filter((lane): lane is number => lane != null);
-
-  if (requestedLanes.length > 0) {
-    return requestedLanes;
-  }
-
-  // 异常曲线输入时仍保留请求层级，避免偶数卡错误降到第二层或奇数卡错误升到第一层
-  return [pairSide === "top" ? -requestedLayer : requestedLayer];
 }
 
 /**
@@ -246,7 +181,7 @@ export function createTimelineLayoutNodes(
   candidates.forEach((candidate) => {
     const yProgress = resolveNodeProgress(candidate.node);
     candidate.anchorY = getLayoutAnchorY(yProgress, options);
-    candidate.lane = getPreferredLaneOrder(candidate.anchorY, candidate.orderIndex)[0] ?? 1;
+    candidate.lane = LANE_ORDER[candidate.orderIndex % LANE_ORDER.length] ?? -2;
   });
 
   return candidates.map((candidate) => ({
