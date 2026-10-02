@@ -57,6 +57,15 @@ def build_alias_resolution(
             parent[node] = find(parent[node])
         return parent[node]
 
+    for identifier, candidate_entity in entity_by_id.items():
+        target = str(candidate_entity.attributes.get("canonical_entity_id", ""))
+        if target and target != identifier and target in entity_by_id and candidate_entity.attributes.get(
+            "identity_status",
+        ) != "contested":
+            parent.setdefault(identifier, identifier)
+            parent.setdefault(target, target)
+            parent[find(identifier)] = find(target)
+
     for relation in relations:
         if not relation.is_active:
             continue
@@ -64,6 +73,9 @@ def build_alias_resolution(
             continue
         from_id = str(relation.from_entity_id)
         to_id = str(relation.to_entity_id)
+        if any(entity_by_id[identifier].attributes.get("identity_cutoff") for identifier in (from_id, to_id)
+               if identifier in entity_by_id):
+            continue
         parent.setdefault(from_id, from_id)
         parent.setdefault(to_id, to_id)
         root_a, root_b = find(from_id), find(to_id)
@@ -72,6 +84,8 @@ def build_alias_resolution(
 
     # P11：LLM same_character 声明之外，叠加高精度名称启发式边（子串/姓氏片段）
     for from_id, to_id in find_heuristic_character_edges(entities):
+        if any(entity_by_id[identifier].attributes.get("identity_cutoff") for identifier in (from_id, to_id)):
+            continue
         parent.setdefault(from_id, from_id)
         parent.setdefault(to_id, to_id)
         root_a, root_b = find(from_id), find(to_id)

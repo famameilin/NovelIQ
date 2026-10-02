@@ -41,6 +41,7 @@ class KnowledgeGraphAuthorityService:
 
     def build_level1_snapshot(self, run_id: str) -> Level1AuthoritySnapshot:
         """2026-08-07 用于提供最新章节实体与有效关系的最小只读视图"""
+        self.assert_graph_ready(run_id)
         entities = self._graph_repo.fetch_latest_entities(run_id)
         relations = self._graph_repo.fetch_latest_relations(run_id, active_only=True)
         resolution = self._build_alias_resolution(relations, entities)
@@ -122,20 +123,6 @@ class KnowledgeGraphAuthorityService:
             graph_changes=self._build_graph_changes(changes),
         )
 
-    def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-        """2026-08-07 用于提供最新章节图与完整关系版本变化"""
-        self.assert_graph_ready(run_id)
-        entities = self._graph_repo.fetch_latest_entities(run_id)
-        relations = self._graph_repo.fetch_latest_relations(run_id, active_only=True)
-        changes, _total = self._graph_repo.fetch_changes(run_id, limit=None)
-        resolution = self._build_alias_resolution(relations, entities)
-        return GraphAuthorityView(
-            canonical_entities=self._build_canonical_entities(entities, resolution=resolution),
-            confirmed_relations=self._build_confirmed_relations(relations, resolution=resolution),
-            graph_changes=self._build_graph_changes(changes),
-            participant_states=self._build_participant_states(entities, resolution=resolution),
-        )
-
     def build_representative_graph_view(self, run_id: str) -> GraphAuthorityView:
         """2026-08-07 用于向聚合与诊断提供排除 same_character 边的最新图"""
         self.assert_graph_ready(run_id)
@@ -166,6 +153,12 @@ class KnowledgeGraphAuthorityService:
 
     def assert_graph_ready(self, run_id: str) -> None:
         """2026-08-07 用于确认当前 run 至少存在一个成功章节图版本"""
+        from src.storage.repositories.pipeline_visibility import require_released_cutoff
+
+        try:
+            require_released_cutoff(self._graph_repo.session, run_id)
+        except ValueError as exc:
+            raise GraphReadinessError(str(exc)) from exc
         if self._graph_repo.resolve_chapter_boundary(run_id) is None:
             raise GraphReadinessError(f"run 尚无已完成章节图数据: {run_id}")
 
