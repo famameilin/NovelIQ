@@ -4,48 +4,17 @@ from __future__ import annotations
 
 from uuid import NAMESPACE_URL, uuid5
 
-from src.storage.models import EventEdge, EventNode
+import pytest
+
+from src.storage.models import EventEdge
 from src.storage.repositories.graph import EventForestRepository
 from tests.support.chapter_annotation_helpers import (
+    commit_test_event_link,
     create_run_with_chunks,
     persist_chapter_annotation,
 )
 
-
-def _insert_legacy_causal_edge(
-    session,
-    *,
-    run_id: str,
-    annotation_id: str,
-    source_event_id: str,
-    target_event_id: str,
-    source_chapter_id: int,
-    target_chapter_id: int,
-    is_active: bool = True,
-) -> str:
-    """2026-09-14 跨章因果链退役：write_event 不再产生 causal 边，
-    但 EventEdge 列/边类型保留读旧数据。测试按读侧现行为以遗留数据
-    直接构造一条 causal 边（edge_id 派生公式与生产写入面一致）。
-    """
-    edge_id = str(uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{source_event_id}:{target_event_id}"))
-    source_node = session.get(EventNode, source_event_id)
-    assert source_node is not None
-    session.add(
-        EventEdge(
-            edge_id=edge_id,
-            run_id=run_id,
-            edge_type="causal",
-            source_event_id=source_event_id,
-            target_event_id=target_event_id,
-            source_chapter_id=source_chapter_id,
-            target_chapter_id=target_chapter_id,
-            is_active=is_active,
-            evidence=list(source_node.evidence),
-            annotation_id=annotation_id,
-            payload_path=f"legacy/causal/{target_event_id}",
-        )
-    )
-    return edge_id
+pytestmark = pytest.mark.usefixtures("pipeline_run_cleanup")
 
 
 def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None:
@@ -58,7 +27,7 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
     )
     eid1 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
     eid2 = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2"))
-    annotation_id = persist_chapter_annotation(
+    persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=1,
@@ -66,7 +35,7 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
             {
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 0,
                 "node_id": eid1,
                 "tree_id": "gate-entry",
                 "cause_role": "root",
@@ -74,22 +43,15 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
             {
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [1],
+                "evidence_paragraph_id": 1,
                 "node_id": eid2,
                 "tree_id": "draw-entry",
                 "cause_role": "root",
             },
         ],
     )
-    # 读侧现行为：causal 边不再由写面产生，遗留数据仍应被 fetch_snapshot 读出
-    _insert_legacy_causal_edge(
-        db_session,
-        run_id=run_id,
-        annotation_id=annotation_id,
-        source_event_id=eid1,
-        target_event_id=eid2,
-        source_chapter_id=1,
-        target_chapter_id=1,
+    commit_test_event_link(
+        db_session, run_id=run_id, chapter_id=1, source_event_id=eid1, target_event_id=eid2,
     )
     db_session.commit()
 
@@ -125,14 +87,7 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
 
 
 def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_session) -> None:
-    """2026-09-14 回归：写面持续产生的 foreshadowing 边不得混进 causal_edges
-
-    伏笔即事件树（09-13）后 resolve_foreshadowing_case 挂树写
-    edge_type="foreshadowing" 边、causal 边无新来源；因果边查询不过滤 edge_type
-    会让伏笔边混入 snapshot.causal_edges——event-forest 端点按
-    EventEdgeResponse(edge_type=Literal["causal"]) 构造直接 500，
-    timeline 把伏笔边误标因果边。
-    """
+    """连续性提交的伏笔关联不混入因果边列表"""
     text = "顾霜立誓。\n顾霜离去。"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -141,7 +96,7 @@ def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_sessio
     )
     root_id = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:1"))
     bind_id = str(uuid5(NAMESPACE_URL, f"noveliq:event:{run_id}:1:2"))
-    annotation_id = persist_chapter_annotation(
+    persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=1,
@@ -149,7 +104,7 @@ def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_sessio
             {
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 0,
                 "node_id": root_id,
                 "tree_id": "oath-tree",
                 "cause_role": "root",
@@ -159,27 +114,16 @@ def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_sessio
             {
                 "description": "顾霜离去",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [1],
+                "evidence_paragraph_id": 1,
                 "node_id": bind_id,
                 "tree_id": "leave-tree",
                 "cause_role": "root",
             },
         ],
     )
-    db_session.add(
-        EventEdge(
-            edge_id=str(uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:foreshadowing:{root_id}:{bind_id}")),
-            run_id=run_id,
-            edge_type="foreshadowing",
-            source_event_id=root_id,
-            target_event_id=bind_id,
-            source_chapter_id=1,
-            target_chapter_id=1,
-            is_active=True,
-            evidence=list(db_session.get(EventNode, root_id).evidence),
-            annotation_id=annotation_id,
-            payload_path=f"foreshadowing/{bind_id}",
-        )
+    commit_test_event_link(
+        db_session, run_id=run_id, chapter_id=1, source_event_id=root_id, target_event_id=bind_id,
+        edge_type="foreshadowing",
     )
     db_session.commit()
 
@@ -224,7 +168,7 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
             {
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 0,
                 "node_id": eid1,
                 "tree_id": "duel",
                 "cause_role": "root",
@@ -232,7 +176,7 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
             {
                 "description": "顾霜喝止",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [1],
+                "evidence_paragraph_id": 1,
                 "node_id": eid2,
                 "parent_node_id": eid1,
                 "tree_id": "duel",
@@ -241,7 +185,7 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
             {
                 "description": "顾霜降敌",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [2],
+                "evidence_paragraph_id": 2,
                 "node_id": eid3,
                 "parent_node_id": eid2,
                 "tree_id": "duel",
@@ -249,6 +193,7 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
             },
             {
                 "description": "顾霜追问",
+                "evidence_paragraph_id": 2,
                 "node_id": eid4,
                 "parent_node_id": eid2,
                 "tree_id": "duel",
@@ -270,7 +215,7 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
     assert nodes[eid1].parent_event_id is None
     assert nodes[eid2].parent_event_id == eid1
     assert nodes[eid3].parent_event_id == eid2
-    assert nodes[eid3].evidence_scope == "chapter"
+    assert nodes[eid3].evidence_scope == "paragraph"
 
 
 def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
@@ -288,9 +233,8 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
             {
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 0,
                 "isforeshadowing": True,
-                "expected_payoff_family": "守护",
                 "payoff_likelihood": "high",
             },
         ],
@@ -307,6 +251,32 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     assert edge.payoff_event_id is None
     assert edge.status == "open"
     assert edge.active is True
+
+
+def test_same_paragraph_links_follow_formal_event_order_and_reject_reverse(db_session) -> None:
+    """同段偏序沿用正式写入序号，连续性不能反向关联"""
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜入门，随后立誓。"])
+    first_id = f"evt-{run_id[:8]}-z"
+    second_id = f"evt-{run_id[:8]}-a"
+    persist_chapter_annotation(
+        db_session, run_id=run_id, chapter_id=1,
+        events=[
+            {"description": "顾霜入门", "node_id": first_id, "tree_id": "entry", "evidence_paragraph_id": 0},
+            {"description": "顾霜立誓", "node_id": second_id, "tree_id": "oath", "evidence_paragraph_id": 0},
+        ],
+    )
+    commit_test_event_link(
+        db_session, run_id=run_id, chapter_id=1, source_event_id=first_id, target_event_id=second_id,
+    )
+    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    assert snapshot is not None
+    assert snapshot.derived_event_order == [first_id, second_id]
+    assert len(snapshot.causal_edges) == 1
+    assert snapshot.event_nodes[0].char_start == snapshot.event_nodes[1].char_start == 0
+    with pytest.raises(ValueError, match="文档严格偏序"):
+        commit_test_event_link(
+            db_session, run_id=run_id, chapter_id=1, source_event_id=second_id, target_event_id=first_id,
+        )
 
 
 def test_fetch_snapshot_returns_none_for_missing_run(db_session) -> None:
@@ -332,7 +302,7 @@ def test_fetch_snapshot_filters_by_chapter_id(db_session) -> None:
             {
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 0,
             },
         ],
     )
@@ -344,7 +314,7 @@ def test_fetch_snapshot_filters_by_chapter_id(db_session) -> None:
             {
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 1,
             },
         ],
     )

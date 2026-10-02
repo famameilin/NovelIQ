@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.schema import Confidence, ResolvedCase
+from src.agents.annotation.schema import BoundEvent, Confidence
 from src.storage.models import EventNode
 from src.storage.repositories.annotation.repository import AnnotationRepository
 from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation
@@ -75,21 +75,13 @@ def test_calculate_expectation_low_scores_below_medium(db_session) -> None:
     assert results[Confidence.MEDIUM.value] < results[Confidence.HIGH.value]
 
 
-def test_resolved_case_rejects_invalid_foreshadowing_enums() -> None:
+def test_formal_event_rejects_invalid_foreshadowing_confidence() -> None:
     """P3：伏笔枚举非法值直接 raise，不再降级为 unknown。"""
     with pytest.raises(ValidationError):
-        ResolvedCase(
-            case_id="case-1",
-            action="foreshadowing",
-            type="foreshadowing_suspect",
-            reason="任意字符串不应静默入库",
-            target_key="target-1",
-            target_ref={"chunk_id": 1},
-            foreshadowing_action="reinforce",
-            foreshadowing_root_event_id="evt-root",
-            foreshadowing_event_id="evt-bind",
+        BoundEvent(
+            node_id="evt-root", tree_id="tree-root", cause_role="root",
+            description="埋设悬念", is_foreshadow_setup=True,
             payoff_likelihood="certain",
-            strength="mega",
         )
 
 

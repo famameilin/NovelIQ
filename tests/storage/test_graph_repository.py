@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
 
-from src.agents.annotation.schema import ResolvedCase
 from src.storage.models import GraphRelation
 from src.storage.repositories import GraphRepository
 from tests.support.chapter_annotation_helpers import (
@@ -50,19 +50,14 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
         db_session,
         run_id=run_id,
         chapter_id=2,
-        resolved_cases=[
-            ResolvedCase(
-                case_id="case-break",
-                action="fact",
-                type="relation_change",
-                reason="分道扬镳",
-                target_key="target-break",
-                target_ref={"kind": "relation_change", "chapter_id": 2},
-                from_entity="林渡",
-                to_entity="顾霜",
-                relation_type="盟友",
-                change_kind="break",
-            )
+        continuity_resolutions=[
+            {
+                "reason": "分道扬镳",
+                "from_entity": "林渡",
+                "to_entity": "顾霜",
+                "relation_type": "盟友",
+                "change_kind": "break",
+            }
         ],
     )
     db_session.commit()
@@ -161,19 +156,14 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
         run_id=run_id,
         chapter_id=2,
         characters=[character_fact(chapter_id=2, name="林渡", action="离开")],
-        resolved_cases=[
-            ResolvedCase(
-                case_id="case-break",
-                action="fact",
-                type="relation_change",
-                reason="分道扬镳",
-                target_key="target-break",
-                target_ref={"kind": "relation_change", "chapter_id": 2},
-                from_entity="林渡",
-                to_entity="顾霜",
-                relation_type="盟友",
-                change_kind="break",
-            )
+        continuity_resolutions=[
+            {
+                "reason": "分道扬镳",
+                "from_entity": "林渡",
+                "to_entity": "顾霜",
+                "relation_type": "盟友",
+                "change_kind": "break",
+            }
         ],
     )
     db_session.commit()
@@ -181,10 +171,57 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
     repository = GraphRepository(db_session)
     changes, total = repository.fetch_changes(run_id, chapter_id=2)
 
-    # 一个角色观察包含 role/action/emotion 三个独立状态变化，加上关系断裂
-    assert total == len(changes) == 4
+    state_changes = [row for row in changes if row.change_kind == "state"]
+    relation_changes = [row for row in changes if row.change_kind == "relation"]
+    assert {row.changes[0]["field"]: row.changes[0]["after"] for row in state_changes} == {
+        "entity_type": "character", "role_function": "主体", "action": "离开", "emotion": 0,
+    }
+    assert len(state_changes) == 4
+    assert len(relation_changes) == 1
+    assert relation_changes[0].changes[0]["change_kind"] == "break"
+    assert total == len(changes) == len(state_changes) + len(relation_changes)
     assert {row.change_kind for row in changes} == {"state", "relation"}
     assert all(row.chapter_id == 2 for row in changes)
+
+
+@pytest.mark.parametrize("reverse_endpoints", [False, True])
+def test_graph_repository_break_targets_relation_created_after_first_chapter(
+    db_session, reverse_endpoints: bool,
+) -> None:
+    """同名的第一章提及不能替代第二章实际建立关系的端点"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session, texts=["林渡与顾霜初遇", "林渡与顾霜结盟", "两人分道扬镳"],
+        chapter_ids=[1, 2, 3], title="关系端点来源",
+    )
+    persist_chapter_annotation(
+        db_session, run_id=run_id, chapter_id=1,
+        characters=[character_fact(chapter_id=1, name="林渡", action="初遇"),
+                    character_fact(chapter_id=1, name="顾霜", action="初遇")],
+    )
+    persist_chapter_annotation(
+        db_session, run_id=run_id, chapter_id=2,
+        relations=[relation_fact(chapter_id=2, from_name="林渡", to_name="顾霜", relation_type="盟友")],
+    )
+    relation_id = db_session.execute(
+        select(GraphRelation.relation_id).where(GraphRelation.run_id == run_id)
+    ).scalar_one()
+    from_name, to_name = ("顾霜", "林渡") if reverse_endpoints else ("林渡", "顾霜")
+    persist_chapter_annotation(
+        db_session, run_id=run_id, chapter_id=3,
+        continuity_resolutions=[{
+            "reason": "分道扬镳", "from_entity": from_name, "to_entity": to_name,
+            "relation_type": "盟友", "change_kind": "break",
+        }],
+    )
+
+    repository = GraphRepository(db_session)
+    snapshot = repository.fetch_snapshot(run_id, chapter_id=3)
+    assert snapshot is not None
+    assert snapshot.relations == []
+    changes, total = repository.fetch_changes(run_id, chapter_id=3)
+    assert total == len(changes) == 1
+    assert changes[0].relation_id == relation_id
+    assert changes[0].changes[0]["change_kind"] == "break"
 
 
 def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) -> None:
@@ -218,19 +255,14 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
             character_fact(chapter_id=2, name="顾霜", action="同行"),
             character_fact(chapter_id=2, name="白鹤", action="旁观"),
         ],
-        resolved_cases=[
-            ResolvedCase(
-                case_id="case-2",
-                action="fact",
-                type="relation_change",
-                reason="关系加深",
-                target_key="target-2",
-                target_ref={"kind": "relation_change", "chapter_id": 2},
-                from_entity="林渡",
-                to_entity="顾霜",
-                relation_type="盟友",
-                change_kind="reinforce",
-            )
+        continuity_resolutions=[
+            {
+                "reason": "关系加深",
+                "from_entity": "林渡",
+                "to_entity": "顾霜",
+                "relation_type": "盟友",
+                "change_kind": "reinforce",
+            }
         ],
     )
     db_session.commit()
@@ -243,19 +275,14 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
             character_fact(chapter_id=3, name="林渡", action="离去"),
             character_fact(chapter_id=3, name="顾霜", action="离去"),
         ],
-        resolved_cases=[
-            ResolvedCase(
-                case_id="case-3",
-                action="fact",
-                type="relation_change",
-                reason="分道扬镳",
-                target_key="target-3",
-                target_ref={"kind": "relation_change", "chapter_id": 3},
-                from_entity="林渡",
-                to_entity="顾霜",
-                relation_type="盟友",
-                change_kind="break",
-            )
+        continuity_resolutions=[
+            {
+                "reason": "分道扬镳",
+                "from_entity": "林渡",
+                "to_entity": "顾霜",
+                "relation_type": "盟友",
+                "change_kind": "break",
+            }
         ],
     )
     db_session.commit()
