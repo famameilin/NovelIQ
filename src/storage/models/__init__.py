@@ -11,8 +11,6 @@ from src.storage.models.analysis import (
 from src.storage.models.base import Base
 from src.storage.models.chapter import Chapter
 from src.storage.models.continuity import (
-    CasePoolCase,
-    CaseResolutionMapping,
     ChapterAnnotationRecord,
 )
 from src.storage.models.core import AnalysisRun
@@ -37,12 +35,46 @@ from src.storage.models.paragraph_phrase_hits import ParagraphPhraseHit
 from src.storage.models.paragraph_pos_embeddings import ParagraphPosEmbedding
 from src.storage.models.paragraph_topic_inference import ParagraphTopicInference
 from src.storage.models.paragraph_topics import ParagraphTopic
+from src.storage.models.pipeline import (
+    AgentWorkItem,
+    AnalysisCutoff,
+    CaseClaim,
+    CaseHead,
+    CommandOutcome,
+    ContinuityCase,
+    CutoffPartition,
+    EventOutbox,
+    FormalArtifact,
+    PartitionHead,
+    ProjectionWorkItem,
+    ProviderBudget,
+    ProviderPermitLease,
+    SemanticCommand,
+    SourceManifest,
+    TextEvidenceRecord,
+)
 from src.storage.models.rag import TokenUsage
 from src.storage.models.topic_model_runs import TopicModelRun
 from src.storage.models.word2vec_model_runs import Word2VecModelRun
 
 __all__ = [
     "Base",
+    "AgentWorkItem",
+    "AnalysisCutoff",
+    "CaseClaim",
+    "CaseHead",
+    "CommandOutcome",
+    "ContinuityCase",
+    "CutoffPartition",
+    "EventOutbox",
+    "FormalArtifact",
+    "PartitionHead",
+    "ProjectionWorkItem",
+    "ProviderBudget",
+    "ProviderPermitLease",
+    "SemanticCommand",
+    "SourceManifest",
+    "TextEvidenceRecord",
     "AnalysisRun",
     "AgentInvocation",
     "AgentTurn",
@@ -58,8 +90,6 @@ __all__ = [
     "TopicModelRun",
     "ParagraphCurve",
     "ChapterAnnotationRecord",
-    "CasePoolCase",
-    "CaseResolutionMapping",
     "DialogueRecord",
     "ChapterBoundary",
     "GraphEntity",

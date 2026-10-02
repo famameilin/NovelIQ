@@ -59,6 +59,8 @@ class AnalysisRun(Base):
     task_kind: Mapped[str] = mapped_column(String(50), nullable=False, default="analysis")
     request_payload: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cancellation_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    annotation_cutoff_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)

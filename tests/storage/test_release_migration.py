@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 
-from scripts.db.migrate_0_1_0_to_0_1_1 import migrate
+from scripts.migrations.migrate_0_1_0_to_0_1_1 import migrate
 
 
 def test_release_migration_preserves_legacy_data_and_is_idempotent(test_database_url: str) -> None:
