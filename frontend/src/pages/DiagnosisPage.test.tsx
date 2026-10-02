@@ -82,10 +82,6 @@ vi.mock("@/components/common/DashboardCardShell", () => ({
   ),
 }));
 
-vi.mock("@/components/common/ScoreCard", () => ({
-  ScoreCard: (props: { title: string }) => <div>{props.title}</div>,
-}));
-
 vi.mock("@/components/diagnosis/DiagnosisHeader", () => ({
   DiagnosisHeader: passthroughComponent("diagnosis-header"),
 }));

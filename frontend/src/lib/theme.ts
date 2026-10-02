@@ -192,26 +192,3 @@ export function getCSSColorVar(name: string): string {
   return `hsl(${value})`;
 }
 
-/**
- * 从当前 CSS 变量中读取 ECharts 调色板
- */
-export function getEChartsColors(): string[] {
-  return [
-    getCSSColorVar("--chart-1"),
-    getCSSColorVar("--chart-2"),
-    getCSSColorVar("--chart-3"),
-    getCSSColorVar("--chart-4"),
-    getCSSColorVar("--chart-5"),
-  ];
-}
-
-/**
- * 获取情绪维度专用颜色（固定语义色）
- */
-export function getEmotionColors() {
-  return {
-    positive: getCSSColorVar("--chart-positive"),
-    negative: getCSSColorVar("--chart-negative"),
-    neutral: getCSSColorVar("--chart-neutral"),
-  };
-}

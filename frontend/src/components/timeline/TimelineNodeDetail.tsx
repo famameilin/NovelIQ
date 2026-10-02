@@ -34,10 +34,6 @@ export interface TimelineNodeDetailProps {
   onSelectChapter?: (chapterId: number) => void;
   onSelectTree?: (treeId: string) => void;
   className?: string;
-  // ── 过渡期兼容：旧页面仍传这些，忽略 ──
-  atomicNodes?: unknown;
-  selectedGraphChangeId?: string | null;
-  onSelectAtomicNode?: unknown;
 }
 
 function resolveCauseRole(level: 1 | 2 | 3): "root" | "main" | "secondary" {
@@ -72,20 +68,15 @@ export function TimelineNodeDetail({
 
   const chapterRangeLabel = useMemo(() => {
     if (!node) return "";
-    const rec = node as unknown as Record<string, unknown>;
-    const start = (rec["start_chapter_id"] as number) ?? (rec["anchor_chapter_id"] as number) ?? 0;
-    const end = (rec["end_chapter_id"] as number) ?? (rec["anchor_chapter_id"] as number) ?? 0;
-    const anchor = (rec["anchor_chapter_id"] as number) ?? start ?? 0;
-    if (start !== end) {
-      return `${start} – ${end} 章`;
+    if (node.start_chapter_id !== node.end_chapter_id) {
+      return `${node.start_chapter_id} – ${node.end_chapter_id} 章`;
     }
-    return `第 ${anchor} 章`;
+    return `第 ${node.anchor_chapter_id} 章`;
   }, [node]);
 
   const chapterIdsLabel = useMemo(() => {
     if (!node) return "—";
-    const rec = node as unknown as Record<string, unknown>;
-    const ids = (rec["chapter_ids"] as number[] | undefined) ?? [];
+    const ids = node.chapter_ids;
     if (ids.length === 0) return "—";
     if (ids.length <= 8) return ids.join(", ");
     return `${ids.slice(0, 8).join(", ")} … 等 ${ids.length} 章`;
@@ -94,9 +85,7 @@ export function TimelineNodeDetail({
   // main_chain 按 derivedOrder 排序，若无 derivedOrder 则保持原序；尝试从 nodes 解析 description
   const orderedMainChain = useMemo(() => {
     if (!node) return [];
-    const rec = node as unknown as Record<string, unknown>;
-    const rawChain = (rec["main_chain"] as string[] | undefined) ?? [];
-    const chain = [...rawChain];
+    const chain = [...node.main_chain];
     if (derivedOrder.length > 0) {
       const orderIndex = new Map(derivedOrder.map((id, idx) => [id, idx] as const));
       chain.sort((a, b) => {
@@ -130,18 +119,13 @@ export function TimelineNodeDetail({
   // causal 前因后果：过滤 source/target 为本树事件（tree_id, root_event_id, main_chain, secondary branch）
   const { causalInEdges, causalOutEdges } = useMemo(() => {
     if (!node) return { causalInEdges: [] as TimelineEventCausalEdge[], causalOutEdges: [] as TimelineEventCausalEdge[] };
-    const rec = node as unknown as Record<string, unknown>;
-    const rootId = (rec["root_event_id"] as string) ?? (rec["tree_id"] as string) ?? "";
-    const mainChain = (rec["main_chain"] as string[] | undefined) ?? [];
-    const secondaryGroups = (rec["secondary_groups"] as Array<{ target_event_id: string; branch: string[] }> | undefined) ?? [];
-    const treeId = (rec["tree_id"] as string) ?? rootId;
-    const treeEventIds = new Set<string>([rootId, ...mainChain]);
-    secondaryGroups.forEach((g) => {
+    const treeEventIds = new Set<string>([node.root_event_id, ...node.main_chain]);
+    node.secondary_groups.forEach((g) => {
       g.branch.forEach((eid) => treeEventIds.add(eid));
       treeEventIds.add(g.target_event_id);
     });
-    // 也包含 tree_id 本身若边直接指向 tree_id（兼容）
-    treeEventIds.add(treeId);
+    // 边也可能直接以 tree_id 为端点
+    treeEventIds.add(node.tree_id);
     const inEdges = causalEdges.filter((e) => treeEventIds.has(e.target_event_id));
     const outEdges = causalEdges.filter((e) => treeEventIds.has(e.source_event_id));
     return { causalInEdges: inEdges, causalOutEdges: outEdges };
@@ -149,12 +133,8 @@ export function TimelineNodeDetail({
 
   const relatedForeshadowing = useMemo(() => {
     if (!node) return [] as TimelineEventForeshadowingEdge[];
-    const rec = node as unknown as Record<string, unknown>;
-    const rootId = (rec["root_event_id"] as string) ?? "";
-    const mainChain = (rec["main_chain"] as string[] | undefined) ?? [];
-    const secondaryGroups = (rec["secondary_groups"] as Array<{ branch: string[] }> | undefined) ?? [];
-    const treeEventIds = new Set<string>([rootId, ...mainChain]);
-    secondaryGroups.forEach((g) => g.branch.forEach((eid) => treeEventIds.add(eid)));
+    const treeEventIds = new Set<string>([node.root_event_id, ...node.main_chain]);
+    node.secondary_groups.forEach((g) => g.branch.forEach((eid) => treeEventIds.add(eid)));
     return foreshadowingEdges.filter(
       (f) => treeEventIds.has(f.root_event_id) || (f.payoff_event_id && treeEventIds.has(f.payoff_event_id))
     );
@@ -163,24 +143,19 @@ export function TimelineNodeDetail({
   const handleGoToEvidence = useCallback(() => {
     if (!node) return;
     // 优先跳转到本树锚点：timeline?tree_id= & event_id=，保留 task_id
-    const rec = node as unknown as Record<string, unknown>;
-    const treeId = (rec["tree_id"] as string) ?? (rec["node_id"] as string) ?? "";
-    const rootId = (rec["root_event_id"] as string) ?? "";
-    const params = new URLSearchParams({ task_id: taskId, tree_id: treeId });
-    if (rootId) params.set("event_id", rootId);
+    const params = new URLSearchParams({ task_id: taskId, tree_id: node.tree_id });
+    if (node.root_event_id) params.set("event_id", node.root_event_id);
     navigate(`/novels/${novelId}/timeline?${params.toString()}`);
   }, [navigate, node, novelId, taskId]);
 
   const handleSelectAnchorChapter = useCallback(() => {
     if (!node) return;
-    const rec = node as unknown as Record<string, unknown>;
-    const anchor = (rec["anchor_chapter_id"] as number) ?? 0;
     if (onSelectChapter) {
-      onSelectChapter(anchor);
+      onSelectChapter(node.anchor_chapter_id);
       return;
     }
     // 默认回退：跳转到章节视图（若无专门章节页则留在 timeline 锚点）
-    navigate(`/novels/${novelId}/chapters?task_id=${taskId}&chapter=${anchor}`);
+    navigate(`/novels/${novelId}/chapters?task_id=${taskId}&chapter=${node.anchor_chapter_id}`);
   }, [navigate, node, novelId, onSelectChapter, taskId]);
 
   if (!node || !presentation || !Icon) {
@@ -196,29 +171,27 @@ export function TimelineNodeDetail({
     );
   }
 
-  // 兼容旧节点字段缺失：统一兜底，避免旧单测崩溃
-  const recNode = node as unknown as Record<string, unknown>;
-  const safeTreeId = (recNode["tree_id"] as string) ?? (recNode["node_id"] as string) ?? "unknown";
-  const safeSummary = (recNode["summary"] as string) ?? "";
-  const safeTitle = (recNode["title"] as string | undefined) ?? undefined;
-  const safeProgress = (recNode["progress"] as number) ?? 0;
-  const safeImportance = (recNode["importance_score"] as number) ?? 0;
-  const safeLevel = (recNode["level"] as number) ?? 3;
-  const safePhase = (recNode["phase_name"] as string) ?? "";
-  const safeParticipants = (recNode["participants"] as Array<Record<string, unknown>> | undefined) ?? [];
-  const safeCharacterNames = (recNode["character_names"] as string[] | undefined) ?? (recNode["characters"] as string[] | undefined) ?? [];
-  const safeChapterIds = (recNode["chapter_ids"] as number[] | undefined) ?? [];
-  const safeAnchorChapterId = (recNode["anchor_chapter_id"] as number) ?? 0;
-  const safeAnchorOrder = (recNode["anchor_chapter_order"] as number) ?? safeAnchorChapterId;
-  const safeStartChapter = (recNode["start_chapter_id"] as number) ?? safeAnchorChapterId;
-  const safeEndChapter = (recNode["end_chapter_id"] as number) ?? safeAnchorChapterId;
-  const safeCharStart = (recNode["char_start"] as number) ?? 0;
-  const safeCharEnd = (recNode["char_end"] as number) ?? safeCharStart;
-  const safeStartProgress = (recNode["start_progress"] as number) ?? safeProgress;
-  const safeEndProgress = (recNode["end_progress"] as number) ?? safeProgress;
-  const safeCausalOut = (recNode["causal_out"] as number) ?? 0;
-  const safeCausalIn = (recNode["causal_in"] as number) ?? 0;
-  const safeSecondaryGroups = (recNode["secondary_groups"] as Array<{ target_event_id: string; branch: string[] }> | undefined) ?? [];
+  const safeTreeId = node.tree_id;
+  const safeSummary = node.summary;
+  const safeTitle = node.title ?? undefined;
+  const safeProgress = node.progress;
+  const safeImportance = node.importance_score;
+  const safeLevel = node.level;
+  const safePhase = node.phase_name;
+  const safeParticipants = node.participants;
+  const safeCharacterNames = node.character_names;
+  const safeChapterIds = node.chapter_ids;
+  const safeAnchorChapterId = node.anchor_chapter_id;
+  const safeAnchorOrder = node.anchor_chapter_order;
+  const safeStartChapter = node.start_chapter_id;
+  const safeEndChapter = node.end_chapter_id;
+  const safeCharStart = node.char_start;
+  const safeCharEnd = node.char_end;
+  const safeStartProgress = node.start_progress;
+  const safeEndProgress = node.end_progress;
+  const safeCausalOut = node.causal_out;
+  const safeCausalIn = node.causal_in;
+  const safeSecondaryGroups = node.secondary_groups;
 
   return (
     <AnimatePresence mode="wait">
@@ -284,9 +257,9 @@ export function TimelineNodeDetail({
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {safeParticipants.map((p, idx) => {
-                  const name = String((p as Record<string, unknown>)["name"] ?? `参与者${idx + 1}`);
-                  const role = String((p as Record<string, unknown>)["role"] ?? "");
-                  const entityId = (p as Record<string, unknown>)["entity_id"] != null ? String((p as Record<string, unknown>)["entity_id"]) : null;
+                  const name = String(p.name ?? `参与者${idx + 1}`);
+                  const role = p.role;
+                  const entityId = p.entity_id != null ? String(p.entity_id) : null;
                   return (
                     <Badge
                       key={`${name}-${idx}`}
