@@ -11,8 +11,6 @@ from src.metrics.narrative_metrics import (
     compute_climax_spacing,
     compute_event_density,
     compute_middle_collapse_index,
-    compute_three_act_ratio,
-    compute_three_act_ratio_v2,
     find_global_peak,
     find_local_peaks,
     find_valley_before_peak,
@@ -23,12 +21,6 @@ def _linspace(n: int) -> list[float]:
     if n <= 1:
         return [0.0] * n
     return [i / (n - 1) for i in range(n)]
-
-
-class TestThreeActRatio(unittest.TestCase):
-    def test_empty_event_types(self) -> None:
-        result = compute_three_act_ratio([])
-        self.assertEqual(result["act1_ratio"], 0.0)
 
 
 class TestFindLocalPeaks(unittest.TestCase):
@@ -115,8 +107,6 @@ class TestThreeActStructure(unittest.TestCase):
         diagnostics = analyze_three_act_structure(positions, event_types, cliffhangers, pivot_moments, tension_scores)
         ratios = diagnostics.ratio_dict()
         self.assertAlmostEqual(sum(ratios.values()), 1.0, places=3)
-        ratios_v2 = compute_three_act_ratio_v2(positions, event_types, cliffhangers, pivot_moments, tension_scores)
-        self.assertEqual(ratios_v2, ratios)
 
     def test_len_mismatch_raises(self) -> None:
         with self.assertRaises(ValueError):

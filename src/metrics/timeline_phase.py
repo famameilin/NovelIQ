@@ -7,7 +7,7 @@ from typing import Literal, cast
 
 from loguru import logger
 
-from src.metrics.narrative_metrics import find_global_peak, find_local_peaks
+from src.metrics.narrative_primitives import find_global_peak, find_local_peaks
 
 TimelinePhaseName = Literal["引入期", "发展期", "高潮期", "收束期"]
 

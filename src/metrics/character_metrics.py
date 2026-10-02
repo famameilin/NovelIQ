@@ -217,7 +217,8 @@ def compute_antagonist_strength_gap(
 
 # 2026-08-13 修复：数据源 fetch_relation_data 的 change_kind 是英文枚举
 # （assert/reinforce/weaken/break/retract/refine/supersede，见 RelationChangeKind），
-# 此前用中文键（"强化"等）计数导致四个 *_rate 恒为 0。此处同时兼容英文枚举与旧中文键。
+# 此前用中文键（"强化"等）计数导致四个 *_rate 恒为 0。2026-10-02 移除旧中文键兼容：
+# 仅接受英文枚举，旧数据中的中文值不计入四类变化率。
 _RATE_KEYS = ("新建_rate", "强化_rate", "弱化_rate", "断裂_rate")
 _CHANGE_KIND_TO_RATE_KEY = {
     "assert": "新建_rate",
@@ -225,11 +226,6 @@ _CHANGE_KIND_TO_RATE_KEY = {
     "weaken": "弱化_rate",
     "break": "断裂_rate",
     "retract": "断裂_rate",
-    # 旧数据/旧调用方兼容
-    "新建": "新建_rate",
-    "强化": "强化_rate",
-    "弱化": "弱化_rate",
-    "断裂": "断裂_rate",
 }
 # refine/supersede（类型修正/替换）不归入四类变化率，仅计入 total_changes
 
