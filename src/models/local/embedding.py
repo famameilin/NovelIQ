@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 
-import numpy as np
 from loguru import logger
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, BadRequestError
 
@@ -70,6 +69,7 @@ class EmbeddingClient:
             base_url=self._base_url,
             api_key=self._api_key,
             timeout=self._timeout_s,
+            max_retries=0,
         )
 
         if self._is_cloud:
@@ -133,11 +133,18 @@ class EmbeddingClient:
         model_name = self._require_model_name()
         for attempt in range(1, EMBEDDING_MAX_RETRIES + 2):
             try:
-                return await self._client.embeddings.create(
-                    model=model_name,
-                    input=text_input,
-                    encoding_format="float",
-                )
+                from types import SimpleNamespace
+
+                from src.agents.provider_runtime import provider_permit_for_model
+
+                identity = SimpleNamespace(base_url=self._base_url, model_name=model_name, max_tokens=0)
+                async with provider_permit_for_model(identity, [text_input], endpoint="embeddings") as ticket:
+                    response = await self._client.embeddings.create(
+                        model=model_name, input=text_input, encoding_format="float",
+                    )
+                    if response.usage is not None:
+                        ticket.actual_tokens = response.usage.total_tokens
+                    return response
             except BadRequestError as e:
                 self._log(
                     "error",
@@ -371,25 +378,3 @@ class EmbeddingClient:
             logger.warning("empty text provided for embedding")
 
         return embeddings
-
-    @staticmethod
-    def compute_similarity(vec1: list[float], vec2: list[float]) -> float:
-        if not vec1 or not vec2:
-            logger.warning("empty vector provided for similarity computation")
-            return 0.0
-        if len(vec1) != len(vec2):
-            logger.warning(
-                "vector dimension mismatch: len1={} len2={}",
-                len(vec1),
-                len(vec2),
-            )
-            return 0.0
-        arr1 = np.array(vec1)
-        arr2 = np.array(vec2)
-        dot_product = np.dot(arr1, arr2)
-        norm1 = np.linalg.norm(arr1)
-        norm2 = np.linalg.norm(arr2)
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        similarity = dot_product / (norm1 * norm2)
-        return float(similarity)

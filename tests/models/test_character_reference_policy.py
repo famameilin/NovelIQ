@@ -1,5 +1,4 @@
 from src.models.local.character_reference_policy import (
-    collect_reference_slots_from_names,
     decide_character_reference,
     filter_global_character_names,
     is_global_character_surface_name,
@@ -74,17 +73,3 @@ def test_reference_policy_recognizes_explicit_reference_slot_as_non_global_name(
     assert decision.reference_kind == "pov_slot"
     assert decision.reference_slot == slot_name
     assert decision.resolved_global_name is None
-
-
-def test_collect_reference_slots_from_names_dedupes_surfaces_and_existing_slots() -> None:
-    """
-    创建时间: 2026-04-29
-    任务: Phase4 / RAG reference_slots 合同
-    新建原因: Phase4 request 组装需要稳定 dedupe 现有 slot 与 raw pronoun surface，避免重复 slot 污染 prompt。
-    """
-    slots = collect_reference_slots_from_names(
-        ["我", "POV_SLOT_C3_我", "她", "LOCAL_REF_C3_她", "汪淼"],
-        chapter_id=3,
-    )
-
-    assert slots == ["POV_SLOT_C3_我", "LOCAL_REF_C3_她"]

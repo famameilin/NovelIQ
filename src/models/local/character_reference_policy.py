@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -98,20 +97,6 @@ def build_reference_slot(surface_name: str | None, *, chapter_id: int | None = N
     prefix = "POV_SLOT" if kind == "pov_slot" else "LOCAL_REF"
     chunk_part = f"_C{chapter_id}" if chapter_id is not None else ""
     return f"{prefix}{chunk_part}_{normalized}"
-
-
-def collect_reference_slots_from_names(
-    names: Iterable[str | None],
-    *,
-    chapter_id: int | None = None,
-) -> list[str]:
-    """创建时间: 2026-04-29 作用: 从名称列表提取并去重局部引用位"""
-    reference_slots: list[str] = []
-    for name in names:
-        slot = build_reference_slot(name, chapter_id=chapter_id)
-        if slot and slot not in reference_slots:
-            reference_slots.append(slot)
-    return reference_slots
 
 
 def resolve_global_character_name(
