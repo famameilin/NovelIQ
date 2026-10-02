@@ -17,14 +17,23 @@
 唯一依据——引用一个没写成功的键，构造器当场结构化拒绝。
 """
 
+# ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入（大文件拆分聚合面）。
+
+# 创建时间：2026-10-02　创建者：Trae
+# 任务：subagent_ir.py 大文件拆分——校验 helpers 段（namespace_* / truncate_case_description /
+# _reject / _require_*）迁出至 ir_validation.py；本模块保留闭集常量与 IR 数据类并对迁出
+# 符号 re-export（既有导入方零改动）。
+# 说明：纯结构搬移，不改任何运行逻辑与签名。
+
 from __future__ import annotations
 
-import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
-from .errors import AnnotationStageRejection
 from .schema import (
+    EL_PATH_SEP,
+    RELATION_DEFINITIONS,
+    RESERVED_ROOT_KEY,
     Confidence,
     DialogueVerdict,
     EntityType,
@@ -34,7 +43,6 @@ from .schema import (
     RoleFunction,
     Tone,
 )
-from .tools import RELATION_DEFINITIONS
 
 # 章内 subagent 的角色名：多块章开三条职责 subagent 并发（单块章走 runner 的
 # agent 路径，不再有 solo 形态；职责范围文案在 prompts.SUBAGENT_ROLE_SCOPES）
@@ -59,10 +67,8 @@ EVENT_CHILD_TYPES: tuple[str, ...] = tuple(member.value for member in EventChild
 CONFIDENCE_VALUES: tuple[str, ...] = tuple(member.value for member in Confidence)
 RELATION_TYPES: tuple[str, ...] = tuple(RELATION_DEFINITIONS)
 
-# el 层级路径的分隔符（与正式写入的事件账本同源：根=树键、子=树键/节点键）
-EL_PATH_SEP = "/"
-# 根事件保留的节点键（与 tools 的 _ROOT_NODE_KEY 同义，本模块只用于核验落库形态）
-RESERVED_ROOT_KEY = "root"
+# el 层级路径分隔符与根事件保留节点键：权威定义在 schema（与正式写入的事件账本同源：
+# 根=树键、子=树键/节点键；本模块只用于核验落库形态）
 # 角色命名空间分隔符：subagent 的引用键是各自局部的（三个 subagent 都可能用 a1/t1），
 # 落库 el 一律按 `角色:局部键` 命名空间化，避免同名键互相占用（见 namespace_el）
 ROLE_NAMESPACE_SEP = ":"
@@ -78,138 +84,6 @@ PENDING_CASE_TYPES: dict[str, str] = {
 
 # 案例 description 上限（案例池列约束：人类可读说明 ≤100 字）
 CASE_DESCRIPTION_MAX_CHARS = 100
-
-
-def namespace_el(role: str, local_key: str) -> str:
-    """用于把 subagent 局部引用键翻成落库 el 键（`角色:局部键`）
-
-    三个 subagent 的引用键互不知情（都会用 a1/t1），而正式写入的 el 索引是全章一张表，
-    所以命名空间化必须发生在写入口（构造器）而不是落库相位：写入即绑定的键在整个
-    章内唯一，后面的关系/参与者/说话人引用直接用它。
-    """
-    return f"{role}{ROLE_NAMESPACE_SEP}{local_key}"
-
-
-def namespace_event_el(role: str, el: str) -> str:
-    """用于把事件 el（树键/节点键）按角色命名空间化（只前缀树键，节点键原样）"""
-    tree_key, _, node_key = el.partition(EL_PATH_SEP)
-    namespaced = namespace_el(role, tree_key)
-    return f"{namespaced}{EL_PATH_SEP}{node_key}" if node_key else namespaced
-
-
-def truncate_case_description(text: str) -> str:
-    """用于把案例说明压进案例池的长度约束（超限即截断并留痕）"""
-    cleaned = " ".join(text.split())
-    if len(cleaned) <= CASE_DESCRIPTION_MAX_CHARS:
-        return cleaned
-    return cleaned[: CASE_DESCRIPTION_MAX_CHARS - 1] + "…"
-
-
-def _reject(message: str, *, record: str, field: str, code: str, expected: str) -> AnnotationStageRejection:
-    """用于构造 subagent 局部对象的记录级结构化拒绝（模型按 record/field/code 自纠）"""
-    return AnnotationStageRejection(
-        message,
-        record=record,
-        field=field,
-        code=code,
-        expected=expected,
-    )
-
-
-def _require_text(value: Any, *, record: str, field_name: str) -> str:
-    """用于校验非空人类可读文本（NFC 归一 + strip）"""
-    if not isinstance(value, str) or not value.strip():
-        raise _reject(
-            f"{field_name} 必须是非空字符串",
-            record=record,
-            field=field_name,
-            code="invalid_value",
-            expected="非空文本",
-        )
-    return unicodedata.normalize("NFC", value).strip()
-
-
-def _require_enum(value: Any, allowed: dict[str, str] | tuple[str, ...], *, record: str, field_name: str) -> str:
-    """用于把取值限制在单源闭集内（越界值报出全部合法取值，一次自纠）"""
-    catalog = list(allowed) if isinstance(allowed, dict) else list(allowed)
-    text = value if isinstance(value, str) else str(value)
-    if text not in catalog:
-        raise _reject(
-            f"{field_name} 取值越界：{value!r}",
-            record=record,
-            field=field_name,
-            code="invalid_value",
-            expected="合法取值：" + "、".join(catalog),
-        )
-    return text
-
-
-def _require_score(value: Any, *, record: str, field_name: str) -> int:
-    """用于校验情绪分值（-2..2 整数，排除 bool）"""
-    if isinstance(value, bool) or not isinstance(value, int) or not -2 <= value <= 2:
-        raise _reject(
-            f"{field_name} 必须是 -2..2 的整数",
-            record=record,
-            field=field_name,
-            code="invalid_value",
-            expected="-2 强烈负面 / -1 轻微负面 / 0 中性 / 1 轻微正面 / 2 强烈正面",
-        )
-    return value
-
-
-def _require_name(value: Any, *, record: str, field_name: str) -> str:
-    """用于校验实体展示名（照抄正文写法，只作展示字段）
-
-    名字不再是引用键：引用一律用模型自定的本 subagent id（见 _require_local_key），
-    name 只用于落库时的实体登记与人类可读展示。
-    """
-    text = _require_text(value, record=record, field_name=field_name)
-    if EL_PATH_SEP in text:
-        raise _reject(
-            f"{field_name} 不能包含斜杠（那是事件树层级键的分隔符）：{text}",
-            record=record,
-            field=field_name,
-            code="invalid_value",
-            expected="照抄正文里的人物/地点/物品/组织名（如 沈遥、沈师姐）",
-        )
-    return text
-
-
-def _require_local_key(value: Any, *, record: str, field_name: str) -> str:
-    """用于校验模型自定的引用键（本 subagent 局部 id：实体 a1/a2…、事件树键 t1）"""
-    text = _require_text(value, record=record, field_name=field_name)
-    if EL_PATH_SEP in text or not all(char.isalnum() or char == "_" for char in text):
-        raise _reject(
-            f"{field_name} 只能是字母/数字/下划线组成的引用键：{text}",
-            record=record,
-            field=field_name,
-            code="invalid_value",
-            expected="你自定的短键（如 a1、a2、t1）；不要用空格、斜杠或汉字",
-        )
-    return text
-
-
-def _require_paragraph_id(
-    value: Any,
-    *,
-    record: str,
-    field_name: str,
-    paragraph_text_by_id: dict[int, str],
-) -> int:
-    """用于校验段首可见号属于本章（交给 label 构造器与待决项复用）
-
-    越界号结构化拒绝并列出合法号范围（1..N）。
-    """
-    if isinstance(value, bool) or not isinstance(value, int) or value not in paragraph_text_by_id:
-        size = len(paragraph_text_by_id)
-        raise _reject(
-            f"{field_name} 不属于本章：{value!r}",
-            record=record,
-            field=field_name,
-            code="out_of_range",
-            expected=f"本章段首可见号范围：1..{size}" if size else "本章没有可引用的段落号",
-        )
-    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,15 +173,14 @@ class SubagentEntity:
 class SubagentRelation:
     """结构 subagent 写的一条闭合关系边（两端写本 subagent 已登记的实体 id）
 
-    change_kind 省略=建边；填其余取值=对这条既有边提交一次变化（写入路径下同一条边可以
-    有多条记录：建边一条、每次变化各一条，故变化类型进记录的自然键）。
+    2026-10-02 对齐 0.2.0 写面：本章只确认局部关系（建边），不再携带 change_kind
+    关系变化——跨章关系变化由 write_link 关联工具承担。
     """
 
     from_id: str
     to_id: str
     relation_type: str
     evidence: tuple[SubagentEvidence, ...] = ()
-    change_kind: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """用于渲染记录明细"""
@@ -315,7 +188,6 @@ class SubagentRelation:
             "from_id": self.from_id,
             "to_id": self.to_id,
             "relation_type": self.relation_type,
-            "change_kind": self.change_kind,
             "evidence": _evidence_view(self.evidence),
         }
 
@@ -430,13 +302,16 @@ class SubagentMetric:
 
 @dataclass(slots=True)
 class SubagentPending:
-    """一条判不了的疑点（keys 写本 subagent 已登记的实体 id，构造器当场解析成登记名入池）"""
+    """一条判不了的疑点（keys 写本 subagent 已登记的实体 id，构造器当场解析成登记名入池）
+
+    2026-10-02 对齐 0.2.0 案例面：search_pool 检索已随案例裁决机器退役，
+    case_id 授权随之移除，疑点只登记不指向既有案例。
+    """
 
     kind: str
     detail: str
     keys: list[str] = field(default_factory=list)
     evidence: tuple[SubagentEvidence, ...] = ()
-    case_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """用于渲染记录明细"""
@@ -445,7 +320,6 @@ class SubagentPending:
             "detail": self.detail,
             "keys": list(self.keys),
             "evidence": _evidence_view(self.evidence),
-            "case_id": self.case_id,
         }
 
 
@@ -504,6 +378,39 @@ class SubagentAnnotation:
             "pending": [item.to_dict() for item in self.pending],
         }
 
+
+# 校验 helpers 迁至 ir_validation（闭集常量与数据类保留在本模块，供其引用）：
+# 置于文件末尾 re-export，两个方向的首次导入都安全（双方定义先于引用）。
+from .ir_validation import (  # noqa: E402
+    _reject as _reject,
+)
+from .ir_validation import (
+    _require_enum as _require_enum,
+)
+from .ir_validation import (
+    _require_local_key as _require_local_key,
+)
+from .ir_validation import (
+    _require_name as _require_name,
+)
+from .ir_validation import (
+    _require_paragraph_id as _require_paragraph_id,
+)
+from .ir_validation import (
+    _require_score as _require_score,
+)
+from .ir_validation import (
+    _require_text as _require_text,
+)
+from .ir_validation import (
+    namespace_el as namespace_el,
+)
+from .ir_validation import (
+    namespace_event_el as namespace_event_el,
+)
+from .ir_validation import (
+    truncate_case_description as truncate_case_description,
+)
 
 __all__ = [
     "CASE_DESCRIPTION_MAX_CHARS",
