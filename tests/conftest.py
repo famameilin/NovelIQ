@@ -274,6 +274,45 @@ def db_session(setup_test_database: None) -> Generator[Session, None, None]:
 
 
 @pytest.fixture
+def configured_model_pool(monkeypatch) -> None:
+    """队列测试使用明确的假模型配置，不依赖开发者的真实 Key"""
+    from src.config import settings
+    from src.config.schemas.model import WeightedModelSettings
+
+    monkeypatch.setattr(settings.models, "model_pool", [
+        WeightedModelSettings("test-model", "https://test.example/v1", "test-key", max_in_flight=2),
+    ])
+    monkeypatch.setattr(settings.models, "diagnosis_model_id", "test-model")
+
+
+@pytest.fixture
+def pipeline_run_cleanup(configured_model_pool: None) -> Generator[None, None, None]:
+    """隔离真实队列的测试租约，不能让前一测试占用后续测试的全局槽位"""
+    from sqlalchemy import select
+
+    from src.storage.db import get_session_factory
+    from src.storage.models import AnalysisRun
+    from src.storage.repositories.pipeline_work import PipelineWorkRepository
+
+    factory = get_session_factory()
+    with factory() as session:
+        existing = set(session.execute(select(AnalysisRun.run_id)).scalars())
+    try:
+        yield
+    finally:
+        with factory() as session:
+            created = set(session.execute(select(AnalysisRun.run_id)).scalars()) - existing
+        queue = PipelineWorkRepository(factory)
+        for run_id in created:
+            queue.cancel_run(run_id)
+        with factory() as session, session.begin():
+            for run_id in created:
+                run = session.get(AnalysisRun, run_id)
+                if run is not None and run.status in {"pending", "running", "cancelling"}:
+                    run.status = "cancelled"
+
+
+@pytest.fixture
 def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
     """
     API 测试客户端 fixture
