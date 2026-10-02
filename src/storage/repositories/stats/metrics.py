@@ -43,13 +43,6 @@ def insert_global_stats(session: Session, run_id: str, stats: Iterable[tuple[str
     session.commit()
 
 
-def fetch_global_stats(session: Session, run_id: str) -> list[tuple[str, float | None]]:
-    """获取全局统计数据。"""
-    stmt = select(GlobalStats.stat_name, GlobalStats.stat_value).where(GlobalStats.run_id == run_id)
-    result = session.execute(stmt)
-    return [(row.stat_name, row.stat_value) for row in result.fetchall()]
-
-
 def fetch_global_stats_dict(session: Session, run_id: str) -> dict[str, float | None]:
     """获取全局统计数据字典。"""
     stmt = select(GlobalStats.stat_name, GlobalStats.stat_value).where(GlobalStats.run_id == run_id)
@@ -396,11 +389,10 @@ def insert_global_context(
     session.commit()
 
 
-def fetch_global_context(session: Session, run_id: str, novel_id: str) -> tuple[str, str, str, str] | None:
+def fetch_global_context(session: Session, novel_id: str) -> tuple[str, str, str, str] | None:
     """获取全局上下文。"""
     # 2026-08-14 D15：insert 按 novel_id upsert 并覆写 run_id（全局上下文只保留
-    # 最新 run），读侧若再按 run_id 过滤，旧 run 会读不到上下文而视图不一致；
-    # 统一只按 novel_id 读取（run_id 参数保留仅为调用方兼容）
+    # 最新 run），故读侧只按 novel_id 定位；2026-10-02 移除仅为兼容保留的 run_id 参数
     stmt = select(
         GlobalContext.novel_title,
         GlobalContext.core_characters,
@@ -415,7 +407,7 @@ def fetch_global_context(session: Session, run_id: str, novel_id: str) -> tuple[
     return (result.novel_title, result.core_characters, result.world_setting, result.updated_at)
 
 
-def update_global_context(session: Session, run_id: str, novel_id: str, **kwargs: Any) -> None:
+def update_global_context(session: Session, novel_id: str, **kwargs: Any) -> None:
     """更新全局上下文（仅允许 core_characters / world_setting）。"""
     allowed_fields = {"core_characters", "world_setting"}
     update_data = {}
@@ -436,7 +428,7 @@ def update_global_context(session: Session, run_id: str, novel_id: str, **kwargs
     session.commit()
 
 
-def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> str | None:
+def fetch_novel_title(session: Session, novel_id: str) -> str | None:
     """获取小说标题。"""
     stmt = (
         select(GlobalContext.novel_title)
@@ -451,11 +443,11 @@ def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> str | Non
     return result.novel_title if result else None
 
 
-def has_global_context(session: Session, run_id: str, novel_id: str) -> bool:
+def has_global_context(session: Session, novel_id: str) -> bool:
     """检查某小说是否已存在 global_context 记录
 
-    2026-08-14 D15：表内每 novel 至多一行（upsert 覆写 run_id），
-    旧 run 的 run_id 已被最新 run 覆盖，故按 novel_id 判断（run_id 仅兼容保留）
+    2026-08-14 D15：表内每 novel 至多一行（upsert 覆写 run_id），故按 novel_id 判断；
+    2026-10-02 移除仅为兼容保留的 run_id 参数
     """
     stmt = select(GlobalContext).where(GlobalContext.novel_id == novel_id).limit(1)
     result = session.execute(stmt).scalar_one_or_none()

@@ -1,10 +1,13 @@
 """
 章节标注最新读侧仓储门面
+
+2026-10-02 拆分（Trae）：行/视图 dataclass 移至 annotation/rows.py，
+本模块从 rows 导入并 re-export（ChapterAnnotationRow/CharacterFactRow/
+DialogueFactRow/ForeshadowingTreeView），导入方零改动。
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from sqlalchemy import func, select
@@ -20,6 +23,12 @@ from src.storage.models import (
     GraphEntity,
     GraphFact,
 )
+from src.storage.repositories.annotation.rows import (
+    ChapterAnnotationRow,
+    CharacterFactRow,
+    DialogueFactRow,
+    ForeshadowingTreeView,
+)
 from src.storage.repositories.base import BaseRepository
 
 # 2026-09-14 伏笔 confidence 并轨三档（high/medium/low 等差基分），PayoffLikelihood 二值枚举退役
@@ -28,71 +37,6 @@ _EXPECTATION_STATUS_BONUS = {"open": -0.07, "reinforced": 0.03, "likely_paid_off
 _EXPECTATION_STRENGTH_BONUS = {"high": 0.03, "medium": 0.0, "low": -0.05}
 _EXPECTATION_STATUS_WEIGHT = {"open": 0.75, "reinforced": 1.0, "likely_paid_off": 1.2}
 _EXPECTATION_STRENGTH_WEIGHT = {"high": 0.05, "medium": 0.0, "low": -0.05}
-
-
-@dataclass(frozen=True)
-class ChapterAnnotationRow:
-    """2026-08-05 用于向 章节消费者暴露章节 segment 的具名读模型"""
-
-    chapter_id: int
-    emotional_valence: int
-    event_type: str
-    pivot_moment: bool
-    cliffhanger: bool
-    has_foreshadowing: bool | None = None
-    is_strong_setup: bool | None = None
-    foreshadowing_desc: str | None = None
-    why_unresolved_now: str | None = None
-    payoff_likelihood: str | None = None
-    # 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
-    foreshadowing_root_event_id: str | None = None
-    # 2026-09-05 A1：冻结时系统覆盖告警（旧 payload 无此字段时为空）
-    coverage_warnings: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class CharacterFactRow:
-    """2026-08-05 用于向人物与聚合消费者暴露数据库图人物事实"""
-
-    chapter_id: int
-    name: str
-    surface_name: str
-    reference_kind: str
-    reference_slot: str | None
-    resolved_global_name: str
-    global_skip_reason: str | None
-    role_function: str
-    action: str
-    emotion_score: object
-
-
-@dataclass(frozen=True)
-class DialogueFactRow:
-    """2026-08-05 用于向对话与情绪融合消费者暴露数据库图对话事实"""
-
-    chapter_id: int
-    speaker: list[str]
-    speaker_references: list[dict[str, Any]]
-    length: int
-    tone: str | None
-
-
-@dataclass(frozen=True)
-class ForeshadowingTreeView:
-    """2026-09-13 用于向 API 与诊断暴露伏笔树汇总视图（伏笔即事件树）"""
-
-    root_event_id: str
-    tree_id: str
-    first_chapter_id: int
-    last_chapter_id: int
-    anchor_chapter_ids: list[int]
-    description: str
-    payoff_likelihood: str | None
-    strength: str | None
-    status: str
-    active: bool
-    latest_reason: str | None
-    latest_why_unresolved_now: str | None
 
 
 class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
@@ -105,6 +49,12 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
 
     def _chapter_annotations(self, run_id: str) -> list[ChapterAnnotationRecord]:
         """2026-08-05 用于按真实章节顺序读取全部正式章节标注"""
+        from src.storage.repositories.pipeline_visibility import released_cutoff
+
+        cutoff = released_cutoff(self.session, run_id)
+        if cutoff is None:
+            return []
+        visible_ids = [item[0] for item in cutoff.manifest["formal"]]
         stmt = (
             select(ChapterAnnotationRecord)
             .join(
@@ -112,7 +62,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                 (Chapter.run_id == ChapterAnnotationRecord.run_id)
                 & (Chapter.chapter_id == ChapterAnnotationRecord.chapter_id),
             )
-            .where(ChapterAnnotationRecord.run_id == run_id)
+            .where(ChapterAnnotationRecord.run_id == run_id, ChapterAnnotationRecord.annotation_id.in_(visible_ids))
             .order_by(Chapter.sequence, ChapterAnnotationRecord.chapter_id)
         )
         return list(self.session.execute(stmt).scalars().all())
@@ -188,10 +138,6 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             by_chapter[edge.target_chapter_id] = _entry(root_node, linked=root_node.event_id)
         return by_chapter
 
-    def fetch_chapter_annotations(self, run_id: str) -> list[ChapterAnnotationRow]:
-        """2026-08-05 用于读取聚合张力所需的章节 segment 标注"""
-        return self.fetch_chapter_annotations_full(run_id)
-
     def fetch_chapter_annotations_full(self, run_id: str) -> list[ChapterAnnotationRow]:
         """2026-08-07 用于从最新系统绑定 payload 展开完整章节标注"""
         foreshadowing_by_chapter = self._foreshadowing_by_chapter(run_id)
@@ -262,7 +208,10 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         并保留两道过滤——实体必须是 character、名字必须是可作全局角色名的形态
         （代词/泛指/引用位名不算说话人）。
         """
+        from src.storage.repositories.pipeline_visibility import dialogue_continuity
+
         rows: list[DialogueFactRow] = []
+        overlays = dialogue_continuity(self.session, run_id)
         statement = (
             select(DialogueRecord)
             .join(
@@ -277,7 +226,14 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             for entity in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
         }
         for record in self.session.execute(statement).scalars().all():
-            speaker_entity = entities_by_id.get(str(record.speaker)) if record.speaker is not None else None
+            overlay = overlays.get(record.candidate_key, {})
+            continuity_value = overlay.get("value", {})
+            speaker_id = continuity_value.get("speaker_entity_id", record.speaker)
+            speaker_entity = entities_by_id.get(str(speaker_id)) if speaker_id is not None else None
+            if speaker_entity is not None and speaker_entity.attributes.get("identity_status") != "contested":
+                canonical_id = speaker_entity.attributes.get("canonical_entity_id")
+                if canonical_id:
+                    speaker_entity = entities_by_id.get(str(canonical_id), speaker_entity)
             valid_speaker: str | None = None
             if speaker_entity is not None:
                 speaker_name = str(speaker_entity.canonical_name).strip()
@@ -308,7 +264,10 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                     speaker=speaker_names,
                     speaker_references=speaker_references,
                     length=len(record.content),
-                    tone=record.tone,
+                    tone=continuity_value.get("tone", record.tone),
+                    formal_value={"speaker_entity_id": record.speaker, "tone": record.tone},
+                    continuity_value=continuity_value,
+                    continuity_state=overlay.get("state"), cutoff_hash=overlay.get("cutoff_hash"),
                 )
             )
         return rows
@@ -459,13 +418,15 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             return None
         return round(weighted_total / total_weight, 4)
 
-    def has_annotations(self, run_id: str) -> bool:
-        """2026-08-05 用于判断当前 run 是否存在章节正式标注"""
-        stmt = select(func.count()).select_from(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id)
-        return int(self.session.execute(stmt).scalar_one() or 0) > 0
-
     def is_annotate_complete(self, run_id: str) -> bool:
         """2026-08-05 用于按真实章节集合严格判断标注阶段完成状态"""
+        from src.storage.models import AnalysisRun
+        from src.storage.repositories.pipeline_visibility import released_cutoff
+
+        run = self.session.get(AnalysisRun, run_id)
+        cutoff = released_cutoff(self.session, run_id)
+        if run is None or cutoff is None or run.annotation_cutoff_hash != cutoff.cutoff_hash:
+            return False
         expected = {
             int(chapter_id)
             for chapter_id in self.session.execute(
@@ -481,10 +442,3 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             ).scalars()
         }
         return actual == expected
-
-    def get_annotation_by_chapter(self, run_id: str, chapter_id: int) -> dict[str, Any] | None:
-        """2026-08-05 用于按 chapter_id 回读由章节 segment 展开的标注字典"""
-        for row in self.fetch_chapter_annotations_full(run_id):
-            if row.chapter_id == chapter_id:
-                return asdict(row)
-        return None

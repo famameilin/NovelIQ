@@ -27,10 +27,6 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """插入全局统计数据"""
         return metrics.insert_global_stats(self.session, run_id, stats)
 
-    def fetch_global_stats(self, run_id: str) -> list[tuple[str, float | None]]:
-        """获取全局统计数据"""
-        return metrics.fetch_global_stats(self.session, run_id)
-
     def fetch_global_stats_dict(self, run_id: str) -> dict[str, float | None]:
         """获取全局统计数据字典"""
         return metrics.fetch_global_stats_dict(self.session, run_id)
@@ -77,10 +73,6 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
 
     # ==================== runs 模块方法 ====================
 
-    def has_aggregated_data(self, run_id: str) -> bool:
-        """检查指定运行是否有聚合数据"""
-        return runs.has_aggregated_data(self.session, run_id)
-
     def has_topic_data(self, run_id: str) -> bool:
         """检查指定运行是否有主题数据"""
         return runs.has_topic_data(self.session, run_id)
@@ -120,24 +112,24 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
             self.session, run_id, novel_id, core_characters, world_setting, novel_title
         )
 
-    def fetch_global_context(self, run_id: str, novel_id: str) -> tuple[str, str, str, str] | None:
+    def fetch_global_context(self, novel_id: str) -> tuple[str, str, str, str] | None:
         """获取全局上下文"""
-        return metrics.fetch_global_context(self.session, run_id, novel_id)
+        return metrics.fetch_global_context(self.session, novel_id)
 
-    def update_global_context(self, run_id: str, novel_id: str, **kwargs: Any) -> None:
+    def update_global_context(self, novel_id: str, **kwargs: Any) -> None:
         """更新全局上下文"""
-        return metrics.update_global_context(self.session, run_id, novel_id, **kwargs)
+        return metrics.update_global_context(self.session, novel_id, **kwargs)
 
-    def fetch_novel_title(self, novel_id: str, run_id: str) -> str | None:
+    def fetch_novel_title(self, novel_id: str) -> str | None:
         """获取小说标题"""
-        return metrics.fetch_novel_title(self.session, novel_id, run_id)
+        return metrics.fetch_novel_title(self.session, novel_id)
 
-    def has_global_context(self, run_id: str, novel_id: str) -> bool:
+    def has_global_context(self, novel_id: str) -> bool:
         """
         检查是否已存在 global_context 记录
 
         """
-        return metrics.has_global_context(self.session, run_id, novel_id)
+        return metrics.has_global_context(self.session, novel_id)
 
     # ==================== summaries 模块方法 ====================
 

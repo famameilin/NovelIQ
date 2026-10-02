@@ -75,28 +75,11 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             return None
         return json.dumps(request_payload, ensure_ascii=False, sort_keys=True)
 
-    def _deserialize_request_payload(self, request_payload: str | None) -> dict[str, Any] | None:
-        """
-        反序列化任务请求载荷
-
-        读取 analysis_runs.request_payload 时恢复为语义化字典，避免上层直接处理 JSON 字符串
-
-        增加 JSON 解析异常保护，脏数据时返回 None 并记录警告日志
-        """
-        if not request_payload:
-            return None
-        try:
-            return json.loads(request_payload)
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to deserialize request_payload: {e}")
-            return None
-
     def _to_dict_with_deserialization(self, run: AnalysisRun) -> dict[str, Any]:
         """
         将 ORM 对象转换为字典并反序列化 request_payload
 
-        2026-08-20 优化：合并 _to_dict 和 _deserialize_request_payload，
-        内联反序列化逻辑以减少多个端点各1层的函数调用开销
+        2026-08-20 优化：反序列化逻辑内联于此，减少多个端点各1层的函数调用开销
         """
         # 内联反序列化逻辑，避免额外的函数调用
         request_payload_dict = None
@@ -123,6 +106,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "task_kind": run.task_kind,
             "request_payload": request_payload_dict,
             "cancel_requested": run.cancel_requested,
+            "annotation_cutoff_hash": run.annotation_cutoff_hash,
             "worker_id": run.worker_id,
             "heartbeat_at": _utc_isoformat(run.heartbeat_at),
             "started_at": _utc_isoformat(run.started_at),
@@ -196,42 +180,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run.updated_at = now
             self.session.commit()
 
-    def update_run_progress(self, run_id: str, progress: float) -> None:
-        """
-        更新运行进度
-
-        同步 progress 字段到数据库
-
-        Args:
-            run_id: 运行ID
-            progress: 进度值 (0-100)
-        """
-        now = _naive_utcnow()
-        stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
-        run = self.session.execute(stmt).scalar_one_or_none()
-        if run:
-            run.progress = progress
-            run.updated_at = now
-            self.session.commit()
-
-    def update_run_stage(self, run_id: str, stage: str) -> None:
-        """
-        更新运行阶段
-
-        同步 stage 字段到数据库
-
-        Args:
-            run_id: 运行ID
-            stage: 阶段名称
-        """
-        now = _naive_utcnow()
-        stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
-        run = self.session.execute(stmt).scalar_one_or_none()
-        if run:
-            run.stage = stage
-            run.updated_at = now
-            self.session.commit()
-
     def get_runs_by_novel(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取指定小说的所有运行记录
@@ -254,7 +202,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
             .where(AnalysisRun.cancel_requested.is_(False))
-            .values(cancel_requested=True, updated_at=_naive_utcnow())
+            .values(cancel_requested=True, cancellation_epoch=AnalysisRun.cancellation_epoch + 1,
+                    updated_at=_naive_utcnow())
         )
         result = self.session.execute(stmt)
         self.session.commit()
@@ -279,6 +228,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             .values(
                 status="cancelling",
                 cancel_requested=True,
+                cancellation_epoch=AnalysisRun.cancellation_epoch + 1,
                 updated_at=now,
             )
         )
@@ -296,17 +246,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         stmt = select(AnalysisRun).where(AnalysisRun.status == status).order_by(AnalysisRun.created_at.desc())
         runs = self.session.execute(stmt).scalars().all()
         return [self._to_dict_with_deserialization(run) for run in runs]
-
-    def get_running_tasks(self) -> list[dict[str, Any]]:
-        """
-        获取所有运行中的任务
-
-        用于启动时清理孤儿任务和运行时状态检查
-
-        Returns:
-            所有 status=running 的任务记录列表
-        """
-        return self.get_by_status("running")
 
     def get_pending_tasks(self) -> list[dict[str, Any]]:
         """
@@ -446,24 +385,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             return None
         return self._to_dict_with_deserialization(run)
 
-    def get_latest_run(self, novel_id: str) -> dict[str, Any] | None:
-        """
-        获取指定小说的最新运行记录
-
-        Args:
-            novel_id: 小说ID
-
-        Returns:
-            最新运行记录字典，不存在则返回 None
-        """
-        stmt = (
-            select(AnalysisRun).where(AnalysisRun.novel_id == novel_id).order_by(AnalysisRun.created_at.desc()).limit(1)
-        )
-        run = self.session.execute(stmt).scalar_one_or_none()
-        if run is None:
-            return None
-        return self._to_dict_with_deserialization(run)
-
     def delete_run(self, run_id: str) -> bool:
         """2026-08-05 用于按当前 ORM 外键逆序删除运行数据并由调用方统一提交"""
         exists_stmt = select(AnalysisRun.run_id).where(AnalysisRun.run_id == run_id)
@@ -480,18 +401,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             self.session.execute(delete(table).where(run_id_column == run_id))
         self.session.flush()
         return True
-
-    def count_distinct_novels(self) -> int:
-        """
-        统计不同小说的数量
-
-        返回 analysis_runs 表中 distinct novel_id 的数量
-        """
-        from sqlalchemy import func, select
-
-        stmt = select(func.count(func.distinct(AnalysisRun.novel_id))).select_from(AnalysisRun)
-        result = self.session.execute(stmt)
-        return result.scalar() or 0
 
     def mark_running_as_failed(self, *, stale_before: datetime) -> int:
         """
@@ -560,33 +469,3 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         if count > 0:
             logger.info(f"Marked {count} orphaned cancelling task(s) as cancelled on startup")
         return count
-
-    def list_novels_with_latest_run(self) -> list[dict[str, Any]]:
-        """
-        获取所有有分析记录的小说列表
-
-        返回每个 novel_id 的最新运行记录，用于小说列表展示
-
-        Returns:
-            小说列表，每个元素包含 novel_id、title、author、status、created_at 等
-        """
-        from sqlalchemy import func, select
-
-        subquery = (
-            select(
-                AnalysisRun.novel_id,
-                func.max(AnalysisRun.created_at).label("latest_created_at"),
-            )
-            .group_by(AnalysisRun.novel_id)
-            .subquery()
-        )
-
-        stmt = (
-            select(AnalysisRun)
-            .join(subquery, AnalysisRun.novel_id == subquery.c.novel_id)
-            .where(AnalysisRun.created_at == subquery.c.latest_created_at)
-            .order_by(AnalysisRun.created_at.desc())
-        )
-
-        runs = self.session.execute(stmt).scalars().all()
-        return [self._to_dict_with_deserialization(run) for run in runs]

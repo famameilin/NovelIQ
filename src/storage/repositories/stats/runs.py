@@ -113,16 +113,6 @@ def _row_has_valid_diagnosis_contract(row: CloudAnalysis) -> bool:
     return True
 
 
-def has_aggregated_data(session: Session, run_id: str) -> bool:
-    """检查指定运行是否有聚合数据（查 global_stats）。Args: session/run_id；Returns: 是否存在。"""
-    # 2026-08-14 M8b：聚合唯一落库产物为 global_stats（chunk_curves 已下线）
-    stats_count = (
-        session.execute(select(func.count()).select_from(GlobalStats).where(GlobalStats.run_id == run_id)).scalar() or 0
-    )
-
-    return stats_count > 0
-
-
 def has_topic_data(session: Session, run_id: str) -> bool:
     """检查指定运行是否有主题数据。
 
