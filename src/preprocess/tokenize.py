@@ -126,10 +126,6 @@ class Tokenizer:
     def stopwords(self) -> set[str]:
         return self._stopwords.copy()
 
-    @property
-    def has_jieba(self) -> bool:
-        return self._jieba is not None
-
 
 _tokenizer: Tokenizer | None = None
 
