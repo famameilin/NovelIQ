@@ -13,10 +13,13 @@
 - 子事件先于树根写入被生产写入当场拒（"先根后子"由 write_event 在写入当场保证）；
 - 收尾失败整章失败并回滚章节改动；
 - 章级结果与审计（授权足迹/写记录/案例）全部取自共享账本；
-- `build_chapter_paragraph_info` 与段落行一致、空段落行显式拒绝。
+- `build_chapter_paragraph_info`（annotation.paragraphs 单一实现）与段落行一致、空段落行显式拒绝。
 
 2026-09-19 双路径定案：solo 形态与 codeact_enabled 开关随单块章归 agent 路径一起退役，
 本文件只剩 subagent 路径（roles 参数保留供单角色编排用例使用）。
+2026-10-02 对齐 0.2.0：paragraph_info 由派发方构建直传；FactGraph 每章新建（无
+begin_chapter）；账本与 schema 无 known_case_ids/authorized_chapter_ids/authorized_event_ids
+（案例面只剩 push_case）。
 """
 
 from __future__ import annotations
@@ -31,7 +34,8 @@ from src.agents.annotation import graph as annotation_graph
 from src.agents.annotation import subagent_connect as subagent_connect_module
 from src.agents.annotation.errors import AnnotationRetryableError
 from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.schema import ChapterParagraphInfo, PendingCase, SearchResult
+from src.agents.annotation.paragraphs import build_chapter_paragraph_info
+from src.agents.annotation.schema import ChapterParagraphInfo, PendingCase
 from src.agents.annotation.subagent_ir import (
     SubagentAnnotation,
     SubagentEntity,
@@ -40,10 +44,7 @@ from src.agents.annotation.subagent_ir import (
 )
 from src.agents.annotation.subagent_program import SUBAGENT_ROLES, SubagentRunOutcome
 from src.workflows.annotate_helpers import block_codeact
-from src.workflows.annotate_helpers.block_codeact import (
-    build_chapter_paragraph_info,
-    run_chapter_subagents,
-)
+from src.workflows.annotate_helpers.block_codeact import run_chapter_subagents
 
 TEXT = "“站住！”沈遥喝道。她收起长刀，转身走进雨里。"
 P1 = "“站住！”沈遥喝道。"
@@ -52,26 +53,17 @@ PARAGRAPH_ROWS = [
     SimpleNamespace(paragraph_id=1, local_start_char=0, local_end_char=len(P1), text=P1),
     SimpleNamespace(paragraph_id=2, local_start_char=len(P1), local_end_char=len(TEXT), text=P2),
 ]
+PARAGRAPH_INFO = build_chapter_paragraph_info(PARAGRAPH_ROWS)
 
 
 class _QueryService:
-    """用于提供无数据库依赖的查询桩"""
+    """用于提供无数据库依赖的查询桩（0.2.0 标注面只检索原文）"""
 
     current_chapter_order = None
-
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-        """用于返回空案例检索结果"""
-        del query, hidden_case_ids, case_type, limit, pending_cases
-        return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
         """用于返回空正文命中"""
         del query, range_name, limit
-        return []
-
-    def search_event_history(self, query, *, limit=50):
-        """用于返回空历史事件树"""
-        del query, limit
         return []
 
 
@@ -86,7 +78,7 @@ def _kwargs(*, graph_state: FactGraph | None = None) -> dict:
         "run_id": "run-1",
         "chapter_id": 1,
         "chapter_text": TEXT,
-        "chapter_paragraph_rows": list(PARAGRAPH_ROWS),
+        "paragraph_info": PARAGRAPH_INFO,
         "llm": MagicMock(),
         "sql_session_factory": MagicMock(),
         "query_service_factory": lambda session_factory: _QueryService(),
@@ -187,7 +179,6 @@ async def test_subagent_failure_cancels_siblings_and_resets_chapter_changes(monk
         await asyncio.wait_for(run_chapter_subagents(**_kwargs(graph_state=graph_state)), timeout=10)
 
     assert sorted(cancelled) == ["evidence", "structure"]
-    graph_state.begin_chapter.assert_called_once()
     graph_state.reset_chapter_changes.assert_called_once()
 
 
@@ -348,7 +339,6 @@ async def test_finish_phase_failure_resets_chapter_changes(monkeypatch: pytest.M
     with pytest.raises(AnnotationRetryableError):
         await run_chapter_subagents(**_kwargs(graph_state=graph_state))
 
-    graph_state.begin_chapter.assert_called_once()
     graph_state.reset_chapter_changes.assert_called_once()
 
 
@@ -358,7 +348,7 @@ async def test_finish_phase_failure_resets_chapter_changes(monkeypatch: pytest.M
 
 @pytest.mark.asyncio
 async def test_chapter_result_and_audit_read_from_shared_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
-    """授权足迹/案例 id/写记录都落在共享账本上，章级结果与审计直接读它的终态"""
+    """授权足迹/案例/写记录都落在共享账本上，章级结果与审计直接读它的终态"""
     captured: dict = {}
     pushed = PendingCase(
         type="其他疑点",
@@ -376,17 +366,9 @@ async def test_chapter_result_and_audit_read_from_shared_ledger(monkeypatch: pyt
         captured["ledger"] = ledger
         if role == "structure":
             ledger.authorized_text_paragraph_ids.update({1, 2})
-            ledger.authorized_chapter_ids.add(10)
-            ledger.authorized_event_ids.add("tree-1")
-            # 2026-09-19 案例 id 纪律：无运行期编号，案例 id 直接登记到授权面 known_case_ids
-            ledger.known_case_ids.update({"case-a", "case-b"})
             subagent.metric = SubagentMetric(summary="共享账本", emotional_valence=1, narrative_function="转折")
         elif role == "event":
             ledger.authorized_text_paragraph_ids.add(3)
-            ledger.authorized_event_ids.add("tree-2")
-            # 案例 id 全章去重：另一条 subagent 登记同一 case_id 不产生重复条目
-            ledger.known_case_ids.add("case-b")
-            assert ledger.known_case_ids == {"case-a", "case-b"}
         elif role == "evidence":
             ledger.pushed_cases.append(pushed)
         subagent.finished = True
@@ -401,14 +383,12 @@ async def test_chapter_result_and_audit_read_from_shared_ledger(monkeypatch: pyt
     assert result.annotation.metrics.summary == "共享账本"
     # 审计字段就是共享账本的终态，不做任何外部补并
     assert result.audit.authorized_text_paragraph_ids == [1, 2, 3]
-    assert result.audit.authorized_chapter_ids == [10]
-    assert result.audit.authorized_event_ids == ["tree-1", "tree-2"]
     assert result.audit.write_records == list(ledger.write_records)
     assert result.audit.write_records
-    assert result.resolved_cases == []
+    assert result.audit.source_anchors == ledger.source_anchors
     assert result.pushed_cases == [pushed]
-    # 案例 id 按全章去重登记（另一条 subagent 登记同一 id 不产生重复条目）
-    assert ledger.known_case_ids == {"case-a", "case-b"}
+    # 2026-10-02 对齐 0.2.0：resolved_cases/authorized_chapter_ids/authorized_event_ids
+    # 已随案例裁决机器与跨章检索退役，账本与结果里都不再有这些面
 
 
 # ----------------------------------------------------------------------
@@ -416,8 +396,8 @@ async def test_chapter_result_and_audit_read_from_shared_ledger(monkeypatch: pyt
 
 
 def test_build_chapter_paragraph_info_matches_paragraph_rows() -> None:
-    """段落坐标映射与段落行逐项一致，段号即全局 paragraph_id"""
-    info = build_chapter_paragraph_info(list(PARAGRAPH_ROWS), chapter_text=TEXT)
+    """段落坐标映射与段落行逐项一致，段号即全局 paragraph_id（annotation.paragraphs 单一实现）"""
+    info = build_chapter_paragraph_info(PARAGRAPH_ROWS)
 
     assert isinstance(info, ChapterParagraphInfo)
     assert info.paragraph_ids == [1, 2]
@@ -427,6 +407,8 @@ def test_build_chapter_paragraph_info_matches_paragraph_rows() -> None:
 
 
 def test_build_chapter_paragraph_info_rejects_empty_rows() -> None:
-    """空段落行：没有事实源可锚，显式抛可重试错误"""
-    with pytest.raises(AnnotationRetryableError):
-        build_chapter_paragraph_info([], chapter_text=TEXT)
+    """空段落行：没有事实源可锚，显式拒绝"""
+    from src.agents.annotation.errors import AnnotationInputError
+
+    with pytest.raises(AnnotationInputError):
+        build_chapter_paragraph_info([])

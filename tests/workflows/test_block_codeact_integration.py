@@ -12,8 +12,8 @@
    同一个实体上，且不因此多出实体；
 4. **写法分歧的可见降级**：引用处出现结构 subagent 未登记的人名时，写入口按引用处自报大类
    照常登记新实体，接续层再挂一条 `type=entity_alias` 的案例（实体数 +1，两条实体都如实保留）；
-5. 对话候选缺判定时按 `not_dialogue` 默认（`finish` 回执的 `dialogue_defaulted`
-   含缺的编号），整章照常完成；
+5. 对话候选缺判定时由章收尾链按 `not_dialogue` 显式降级落库（2026-10-02 对齐 0.2.0：
+   finish 拒绝未判候选，降级动作改为编排层经生产写入面补判定），整章照常完成；
 6. 任一 subagent 失败 → 整章失败，且 `FactGraph` 未被写入脏数据。
 
 章收尾相位（`_finish_chapter`）在 subagent 相位之后补齐接续层、指标/标签落库与
@@ -37,10 +37,10 @@ from langchain_core.messages import AIMessage
 
 from src.agents.annotation.errors import AnnotationRetryableError
 from src.agents.annotation.fact_graph import FactGraph
+from src.agents.annotation.paragraphs import build_chapter_paragraph_info
 from src.agents.annotation.program import PROGRAM_TOOL_NAME
-from src.agents.annotation.schema import SearchResult
-from src.workflows.annotate_helpers import block_codeact
 from src.workflows.annotate_helpers.block_codeact import run_chapter_subagents
+from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 # 三段以上正文：¶1/¶3/¶4 各含一个成对引号对话候选（住手！/退下！/晚了。）
 _PARAGRAPHS = [
@@ -55,10 +55,10 @@ _CHAPTER_TEXT = "".join(_PARAGRAPHS)
 # 脚本化伪 LLM 的程序：每个 subagent 一个程序（单轮写完），之后一轮空回复收束会话
 
 
-# 结构 subagent：两名角色一条关系；带一次 search_graph 证明检索面也在真实路径上
+# 结构 subagent：两名角色一条关系（2026-10-02 对齐 0.2.0：检索面只剩 search_text，
+# 原 search_graph 证明检索面的行移除，检索路径由 search_text 的单元测试覆盖）
 # 2026-09-18 引用一律用本 subagent 自定 id（a1/a2…），name 只作展示与落库登记名
 _STRUCTURE_PROGRAM = (
-    'search_graph(entities=["沈遥"])\n'
     'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
     'entity(id="a2", name="伯安", entity_type="character", evidence=4)\n'
     'relation(from_id="a1", to_id="a2", relation_type="敌对", evidence=3)\n'
@@ -139,25 +139,10 @@ class _QueryService:
 
     current_chapter_order = None
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-        """用于返回空案例检索结果"""
-        del query, hidden_case_ids, case_type, limit, pending_cases
-        return SearchResult()
-
     async def search_text(self, query, *, range_name, limit=50):
         """用于返回空正文命中"""
         del query, range_name, limit
         return []
-
-    def search_event_history(self, query, *, limit=50):
-        """用于返回空历史事件树"""
-        del query, limit
-        return []
-
-    def fetch_active_case_details(self, case_id):
-        """用于表示没有 active 案例"""
-        del case_id
-        return None
 
 
 class _AuditSession:
@@ -181,8 +166,8 @@ class _AuditSession:
         if type(row).__name__ == "AgentToolCall":
             self._store.tool_calls.append(row)
 
-    def get(self, model: Any, identity: int) -> Any:
-        """用于按主键取回已写入的审计行"""
+    def get(self, model: Any, identity: int, **_: Any) -> Any:
+        """用于按主键取回已写入的审计行（兼容 with_for_update 等会话参数）"""
         return self._store.rows.get((model.__name__, int(identity)))
 
     def flush(self) -> None:
@@ -221,8 +206,8 @@ class _SubagentBoom(Exception):
     """用于让脚本化 LLM 在某个 subagent 上抛错（非瞬态，不触发调用层重试）"""
 
 
-class _ScriptedLLM:
-    """用于按 subagent 职责返回脚本化 execute_code 程序"""
+class _ScriptedLLM(StreamedFakeModelMixin):
+    """用于按 subagent 职责返回脚本化 execute_code 程序（astream 由混入包装）"""
 
     def __init__(self, programs: dict[str, list[str]], *, fail_roles: tuple[str, ...] = ()) -> None:
         """用于初始化脚本游标、绑定面记录与失败 subagent 集合"""
@@ -294,7 +279,7 @@ async def _run_subagents(*, llm: _ScriptedLLM, store: _AuditStore, graph_state: 
         run_id="run-1",
         chapter_id=1,
         chapter_text=_CHAPTER_TEXT,
-        chapter_paragraph_rows=_paragraph_rows(),
+        paragraph_info=build_chapter_paragraph_info(_paragraph_rows()),
         llm=llm,
         sql_session_factory=store.session_factory,
         query_service_factory=lambda session: _QueryService(),
@@ -384,25 +369,17 @@ async def test_unregistered_reference_registers_entity_and_pushes_alias_case() -
 
 
 # ----------------------------------------------------------------------
-# 不变式 5：缺判定的对话候选按 not_dialogue 默认，整章照常完成
+# 不变式 5：缺判定的对话候选由章收尾链按 not_dialogue 显式降级落库，整章照常完成
 
 
 @pytest.mark.asyncio
-async def test_unjudged_dialogue_candidate_defaults_to_not_dialogue(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """候选 2 未判定：finish 回执 dialogue_defaulted 含 2，整章照常完成"""
-    captured: dict[str, Any] = {}
-    original_settle = block_codeact._settle_chapter
+async def test_unjudged_dialogue_candidate_defaults_to_not_dialogue() -> None:
+    """候选 2 未判定：章收尾链经生产写入面补 not_dialogue，整章照常完成
 
-    async def spy_settle(tool_map, ledger, *, stream):
-        """用于在真实收尾实现之上捕获 finish 回执"""
-        receipt = await original_settle(tool_map, ledger, stream=stream)
-        captured["receipt"] = receipt
-        return receipt
-
-    monkeypatch.setattr(block_codeact, "_settle_chapter", spy_settle)
-
+    2026-10-02 对齐 0.2.0：finish_chapter 拒绝未判候选（不补造未判内容），降级动作
+    移到编排层 _default_undecided_dialogues——缺的候选被真实写一条 not_dialogue，
+    与降级指标同一份可见降级纪律。
+    """
     llm = _ScriptedLLM(
         {
             "structure": [_STRUCTURE_PROGRAM],
@@ -415,15 +392,17 @@ async def test_unjudged_dialogue_candidate_defaults_to_not_dialogue(
 
     result = await _run_subagents(llm=llm, store=store, graph_state=graph)
 
-    # 收尾回执点名缺判定的编号
-    assert captured["receipt"]["status"] == "completed"
-    assert captured["receipt"]["dialogue_defaulted"] == [2]
-
-    # 默认 not_dialogue 不落成对话，但覆盖缺口随章留痕；整章照常完成
+    # 缺判定的候选 2 被降级补成 not_dialogue；annotation.dialogues 只收真对话/独白
+    # （0.2.0 口径），降级记录经审计的 dialogues 域观察
     annotation = result.annotation
     assert [dialogue.candidate_index for dialogue in annotation.dialogues] == [1, 3]
+    dialogue_records = next(
+        record["payload"] for record in result.audit.write_records if record["domain"] == "dialogues"
+    )
+    assert [item["candidate_index"] for item in dialogue_records] == [1, 2, 3]
+    assert dialogue_records[1]["verdict"] == "not_dialogue"
+    # 覆盖率告警只剩段落标签密度一条（判定已补齐，不再有对话覆盖缺口）
     assert annotation.coverage_warnings == [
-        "对话覆盖: 1 条候选未提交判定（序号 [2]），按 not_dialogue 默认处理",
         "情绪标签覆盖: 仅标注 1 段（每章应自选 2-3 段）",
     ]
     assert result.annotation.metrics.summary == "沈遥喝止众人"
