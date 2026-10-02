@@ -76,6 +76,11 @@ async def lifespan(app: FastAPI):
     from src.storage.db import init_db
 
     init_db()
+    from src.api.services.event_manager import event_manager
+    from src.storage.db import get_session_factory
+    from src.storage.repositories.event_outbox import EventOutboxRepository
+
+    event_manager.configure_outbox(EventOutboxRepository(lambda: get_session_factory()()))
 
     # 真正允许降级的只有孤儿任务恢复链路；
     # 即便这里失败，也不应掩盖数据库初始化阶段的结构性错误
@@ -112,7 +117,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="小说量化分析 API",
-    version="0.1.1",
+    version="0.2.0",
     description="小说文本量化分析服务的 RESTful API",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -150,7 +155,7 @@ async def health_check():
         return {
             "status": "healthy",
             "service": "novel-qa-api",
-            "version": "0.1.1",
+            "version": "0.2.0",
             "pool": pool_status,
         }
     except Exception as e:
@@ -162,7 +167,7 @@ async def health_check():
             content={
                 "status": "unhealthy",
                 "service": "novel-qa-api",
-                "version": "0.1.1",
+                "version": "0.2.0",
                 "error": "服务暂不可用，请稍后重试",
             },
         )

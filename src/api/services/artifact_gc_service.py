@@ -39,21 +39,20 @@ class ArtifactGcService:
             logger.info(f"Novel source file deleted: {file_path}")
 
     def delete_task_artifacts(self, task_id: str, run_id: str) -> None:
-        """2026-08-30 用于删除任务日志导出文件与 run 私有模型目录"""
+        """2026-08-30 用于删除任务日志导出文件与 run 私有模型目录
+
+        2026-10-02 移除历史短 run_id 目录兼容：日志目录只按 run_id 删除。
+        """
         word2vec_model_dir = resolve_run_model_dir(run_id, "word2vec")
         output_file = self.outputs_dir / f"{task_id}.json"
         if output_file.exists():
             output_file.unlink()
             logger.info(f"Deleted task output file: {output_file}")
 
-        candidate_log_dirs = [self.logs_dir / run_id]
-        if run_id != task_id:
-            candidate_log_dirs.append(self.logs_dir / task_id)
-
-        for log_dir in candidate_log_dirs:
-            if log_dir.exists():
-                shutil.rmtree(log_dir)
-                logger.info(f"Deleted task log directory: {log_dir}")
+        log_dir = self.logs_dir / run_id
+        if log_dir.exists():
+            shutil.rmtree(log_dir)
+            logger.info(f"Deleted task log directory: {log_dir}")
 
         if word2vec_model_dir.exists():
             shutil.rmtree(word2vec_model_dir)

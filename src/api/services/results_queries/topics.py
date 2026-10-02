@@ -97,8 +97,9 @@ def _fetch_topics(run_id: str, paragraph_repo: ParagraphRepository) -> list:
 
     if result:
         book_total = paragraph_repo.fetch_topic_inference_total(run_id)
+        # §5.11 新口径：分母为全书所有段落推断 token 和（每段一行，不因 K 行放大）；
+        # 2026-10-02 移除旧 Top-5 运行兼容：无 inference 表行时不做归一，保留原始加权和
         if book_total:
-            # §5.11 新口径：分母为全书所有段落推断 token 和（每段一行，不因 K 行放大）
             result = [
                 TopicInfo(
                     topic_id=item.topic_id,
@@ -108,18 +109,5 @@ def _fetch_topics(run_id: str, paragraph_repo: ParagraphRepository) -> list:
                 )
                 for item in result
             ]
-        else:
-            # 兼容旧 Top-5 运行（无 inference 表行）：按主题加权和归一
-            total_weight = sum(item.weight for item in result)
-            if total_weight > 0:
-                result = [
-                    TopicInfo(
-                        topic_id=item.topic_id,
-                        words=item.words,
-                        weight=round(item.weight / total_weight, 6),
-                        label=item.label,
-                    )
-                    for item in result
-                ]
 
     return result

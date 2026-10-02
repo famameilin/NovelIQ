@@ -52,11 +52,31 @@ async def sse_endpoint(novel_id: str, task_id: str, request: Request) -> EventSo
     queue = await event_manager.connect(task_id, last_seq=last_seq)
 
     async def event_generator() -> Any:
+        cursor = last_seq or 0
         try:
             while True:
                 if await request.is_disconnected():
                     break
+                if event_manager.is_durable is True:
+                    messages = await event_manager.replay(task_id, cursor)
+                    for message in messages:
+                        cursor = int(message["seq"])
+                        yield {"event": message["type"], "id": str(cursor),
+                               "data": json.dumps(message["data"], ensure_ascii=False)}
+                    if messages:
+                        continue
+                    try:
+                        message = await asyncio.wait_for(queue.get(), timeout=0.5)
+                    except TimeoutError:
+                        continue
+                    if message.get("type") == "reconnect_required":
+                        yield {"event": "reconnect_required", "data": json.dumps(message["data"])}
+                        break
+                    continue
                 message = await queue.get()
+                if message.get("type") == "reconnect_required":
+                    yield {"event": "reconnect_required", "data": json.dumps(message["data"])}
+                    break
                 event_type = message.get("type", "message")
                 data = message.get("data", {})
                 seq = message.get("seq", 0)

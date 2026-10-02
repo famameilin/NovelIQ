@@ -153,8 +153,12 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """2026-08-13 统一错误 body 契约：请求参数校验失败（422）也走三字段格式，
     detail 转可读字符串（FastAPI 默认 detail 是 [{loc, msg, type}] 列表）。"""
+    errors = exc.errors()
+    if request.url.path.startswith("/api/settings"):
+        # 设置请求包含模型 Key，校验失败也不能回显原始输入
+        errors = [{key: value for key, value in error.items() if key not in {"input", "ctx"}} for error in errors]
     error_response = create_error_response(
-        detail=str(exc.errors()),
+        detail=str(errors),
         error_type="ValidationError",
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     )

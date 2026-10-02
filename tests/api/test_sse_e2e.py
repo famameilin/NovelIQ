@@ -27,6 +27,7 @@ def _allow_existing_task(monkeypatch):
     """2026-08-14 P2-11：任务存在性校验默认放行（e2e 使用虚构 task_id）"""
 
     monkeypatch.setattr("src.api.routes.sse._task_run_belongs_to_novel", lambda task_id, novel_id: True)
+    monkeypatch.setattr(event_manager, "_outbox", None)
 
 
 def _make_request(disconnect_after: int) -> MagicMock:
