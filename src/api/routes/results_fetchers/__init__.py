@@ -15,7 +15,6 @@ from src.api.services.results_queries import (
     _fetch_graph_changes_page,
     _fetch_graph_snapshot,
     _fetch_hierarchical_relations,
-    _fetch_known_characters,
     _fetch_novel_name,
     _fetch_token_usage_stats,
     _fetch_topics,
@@ -43,5 +42,4 @@ __all__ = [
     "_fetch_global_stats",
     "_fetch_novel_name",
     "_fetch_token_usage_stats",
-    "_fetch_known_characters",
 ]

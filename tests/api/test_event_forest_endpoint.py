@@ -9,26 +9,18 @@
 
 from __future__ import annotations
 
-from uuid import NAMESPACE_URL, uuid5
-
 from fastapi.testclient import TestClient
 
-from src.storage.models import EventEdge, EventNode
 from src.storage.repositories import RunRepository
 from tests.support.chapter_annotation_helpers import (
+    commit_test_event_link,
     create_run_with_chunks,
     persist_chapter_annotation,
 )
 
 
 def _insert_event_forest_run(db_session) -> tuple[str, str]:
-    """两章三事件：章 1 双事件（遗留因果边连向章 2）+ 伏笔绑定章 1 事件 1；章 2 单事件。
-
-    节点 id 按 run 前缀派生：event_id 为全局主键，避免跨测试数据残留冲突。
-    2026-09-14 跨章因果链退役：write 面不再产生 causal 边（expected_payoff_family
-    同步退役），但 EventEdge 表与快照读侧字段保留读旧数据，端点断言按读侧现行为
-    以遗留边数据构造跨章因果边。
-    """
+    """两章正式事件和连续性跨章因果关联，节点 ID 使用本 run 前缀"""
     novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜进入山门。\n顾霜立誓。", "顾霜拔剑。"],
@@ -47,7 +39,7 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
             {
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 0,
                 "node_id": gate_root,
                 "tree_id": "gate",
                 "cause_role": "root",
@@ -59,7 +51,7 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
             {
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [1],
+                "evidence_paragraph_id": 1,
                 "node_id": gate_main,
                 "parent_node_id": gate_root,
                 "tree_id": "gate",
@@ -67,7 +59,7 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
             },
         ],
     )
-    sword_annotation_id = persist_chapter_annotation(
+    persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
@@ -75,31 +67,15 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
             {
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 2,
                 "node_id": sword_root,
                 "tree_id": "sword",
                 "cause_role": "root",
             },
         ],
     )
-    # 读侧现行为：跨章因果唯一出口是 causal EventEdge 行（遗留数据仍可读出，
-    # edge_id 派生公式与生产写面退役前一致；evidence 取因果源节点的章级盖章）
-    gate_root_node = db_session.get(EventNode, gate_root)
-    assert gate_root_node is not None
-    db_session.add(
-        EventEdge(
-            edge_id=str(uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{gate_root}:{sword_root}")),
-            run_id=run_id,
-            edge_type="causal",
-            source_event_id=gate_root,
-            target_event_id=sword_root,
-            source_chapter_id=1,
-            target_chapter_id=2,
-            is_active=True,
-            evidence=list(gate_root_node.evidence),
-            annotation_id=sword_annotation_id,
-            payload_path=f"legacy/causal/{sword_root}",
-        )
+    commit_test_event_link(
+        db_session, run_id=run_id, chapter_id=2, source_event_id=gate_root, target_event_id=sword_root,
     )
     RunRepository(db_session).update_run_status(run_id, "completed")
     db_session.commit()
@@ -133,12 +109,12 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
     assert nodes[gate_root]["description"] == "顾霜进入山门"
     assert nodes[gate_main]["description"] == "顾霜立誓"
     assert nodes[sword_root]["description"] == "顾霜拔剑"
-    assert nodes[gate_root]["anchor_paragraph_ids"] == [0, 1]
+    assert nodes[gate_root]["anchor_paragraph_ids"] == [0]
     assert nodes[gate_root]["tree_id"] == "gate"
     assert nodes[gate_root]["cause_role"] == "root"
     assert nodes[gate_root]["parent_event_id"] is None
     assert nodes[gate_main]["parent_event_id"] == gate_root
-    assert nodes[gate_root]["evidence_scope"] == "chapter"
+    assert nodes[gate_root]["evidence_scope"] == "paragraph"
 
     # 树视图：章 1 双事件一棵树（主链），章 2 单事件一棵树；contains 派生化不再返回
     assert "event_edges" not in payload
@@ -151,13 +127,15 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
     assert gate["chapter_ids"] == [1]
 
     causal_edges = payload["causal_edges"]
-    assert len(causal_edges) == 1
+    assert len(causal_edges) == 2
     assert all(edge["edge_type"] == "causal" for edge in causal_edges)
-    assert causal_edges[0]["source_event_id"] == gate_root
-    assert causal_edges[0]["target_event_id"] == sword_root
-    assert causal_edges[0]["source_chapter_id"] == 1
-    assert causal_edges[0]["target_chapter_id"] == 2
-    assert causal_edges[0]["is_active"] is True
+    assert {(edge["source_event_id"], edge["target_event_id"]) for edge in causal_edges} == {
+        (gate_root, gate_main), (gate_root, sword_root),
+    }
+    cross_chapter = next(edge for edge in causal_edges if edge["target_event_id"] == sword_root)
+    assert cross_chapter["source_chapter_id"] == 1
+    assert cross_chapter["target_chapter_id"] == 2
+    assert cross_chapter["is_active"] is True
 
     assert len(payload["foreshadowing_edges"]) == 1
     foreshadowing = payload["foreshadowing_edges"][0]
@@ -250,6 +228,9 @@ def test_event_forest_returns_404_without_matching_chapter_data(api_client: Test
         title="无事件森林",
     )
     RunRepository(db_session).update_run_status(run_id, "completed")
+    from tests.support.chapter_annotation_helpers import publish_test_cutoff
+
+    publish_test_cutoff(db_session, run_id)
     db_session.commit()
 
     response = api_client.get(

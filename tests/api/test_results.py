@@ -18,11 +18,23 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from src.storage.repositories import RunRepository
+from tests.support.chapter_annotation_helpers import publish_test_cutoff
 from tests.support.graph_snapshot_helpers import insert_graph_test_novel
 
 
 class TestResults:
     """测试结果端点"""
+
+    @pytest.mark.parametrize("endpoint", ["pipeline", "results", "graph"])
+    def test_unpublished_results_are_not_visible(self, api_client, db_session, endpoint) -> None:
+        novel_id = uuid.uuid4().hex[:8]
+        insert_graph_test_novel(db_session, novel_id)
+        repository = RunRepository(db_session)
+        run_id = repository.create_run(novel_id=novel_id)
+        repository.update_run_status(run_id, "completed")
+        response = api_client.get(f"/api/novels/{novel_id}/{endpoint}", params={"task_id": run_id[:8]})
+        assert response.status_code == 400
+        assert "尚未完成发布" in response.json()["detail"]
 
     def test_get_results_not_found(self, api_client: TestClient):
         """
@@ -79,6 +91,7 @@ class TestResults:
             title="Diagnosis Incomplete Contract",
         )
         run_repo.update_run_status(run_id, "completed")
+        publish_test_cutoff(db_session, run_id)
         db_session.execute(
             text(
                 "INSERT INTO cloud_analysis "
@@ -125,6 +138,7 @@ class TestResults:
             title="Graph Incomplete Contract",
         )
         run_repo.update_run_status(run_id, "completed")
+        publish_test_cutoff(db_session, run_id)
         db_session.execute(
             text(
                 "INSERT INTO cloud_analysis "

@@ -82,10 +82,10 @@ def test_fetch_topics_with_model_fills_words_labels_and_normalizes() -> None:
     assert second.weight == round(50.0 / 150.0, 6)
 
 
-def test_fetch_topics_falls_back_to_topic_weight_sum_without_inference_rows() -> None:
+def test_fetch_topics_keeps_raw_weight_without_inference_rows() -> None:
     """
-    2026-08-28 兼容旧 Top-5 运行：无 paragraph_topic_inference 行
-    （fetch_topic_inference_total 返回 None）时按主题加权和归一
+    2026-10-02 移除旧 Top-5 运行兼容：无 paragraph_topic_inference 行
+    （fetch_topic_inference_total 返回 None）时不做归一，保留原始加权和
     """
     repo = _make_repo([_make_row(0, 100.0), _make_row(1, 50.0)], book_total=None)
     trainer = _make_trainer_with_model()
@@ -97,8 +97,8 @@ def test_fetch_topics_falls_back_to_topic_weight_sum_without_inference_rows() ->
         result = _fetch_topics("run-legacy", repo)
 
     assert len(result) == 2
-    assert result[0].weight == round(100.0 / 150.0, 6)
-    assert result[1].weight == round(50.0 / 150.0, 6)
+    assert result[0].weight == 100.0
+    assert result[1].weight == 50.0
 
 
 def test_fetch_topics_model_load_failure_degrades() -> None:

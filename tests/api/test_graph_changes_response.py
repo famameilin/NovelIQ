@@ -25,7 +25,7 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
         chapter_order=3,
         fact_id="fact-12",
         effective_chapter_id=12,
-        changes=[{"change_kind": "新建", "field": "relation_type"}],
+        changes=[{"change_kind": "assert", "field": "relation_type"}],
         entity_id=None,
         entity_name=None,
         relation_id="relation-7",
@@ -52,7 +52,7 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
     assert change.to_entity_id == "00000000-0000-0000-0000-000000000002"
     assert change.from_name == "顾霜"
     assert change.to_name == "司夜"
-    assert change.relation_change_kind == "新建"
+    assert change.relation_change_kind == "assert"
     assert change.directionality == "bidirectional"
 
 
@@ -82,7 +82,7 @@ def test_graph_changes_page_clamps_limit_and_passes_offset() -> None:
         chapter_order=3,
         fact_id="fact-12",
         effective_chapter_id=12,
-        changes=[{"change_kind": "新建", "field": "relation_type"}],
+        changes=[{"change_kind": "assert", "field": "relation_type"}],
         entity_id=None,
         entity_name=None,
         relation_id="relation-7",
@@ -128,7 +128,7 @@ def test_graph_changes_page_rejects_out_of_range_cursor() -> None:
         chapter_order=1,
         fact_id="f",
         effective_chapter_id=1,
-        changes=[{"change_kind": "新建", "field": "relation_type"}],
+        changes=[{"change_kind": "assert", "field": "relation_type"}],
         entity_id=None,
         entity_name=None,
         relation_id="r",
