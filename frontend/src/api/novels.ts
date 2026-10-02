@@ -3,8 +3,6 @@ import { apiClient } from "./client";
 import type {
   Novel,
   NovelUploadResponse,
-  BatchDeleteRequest,
-  BatchDeleteResponse,
   PaginatedResponse,
 } from "./types";
 
@@ -54,14 +52,4 @@ export async function uploadNovel(
 
 export async function deleteNovel(novelId: string): Promise<void> {
   await apiClient.delete(`/api/novels/${novelId}`);
-}
-
-export async function batchDeleteNovels(
-  novelIds: string[]
-): Promise<BatchDeleteResponse> {
-  const { data } = await apiClient.post<BatchDeleteResponse>(
-    "/api/novels/batch-delete",
-    { novel_ids: novelIds } satisfies BatchDeleteRequest
-  );
-  return data;
 }

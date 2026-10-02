@@ -12,6 +12,8 @@ export type SSEEventType =
   | "task_complete"
   | "task_error"
   | "task_cancelled"
+  | "pipeline_progress"
+  | "reconnect_required"
   | "message";
 
 interface SSEEventListenerOptions {
@@ -105,6 +107,8 @@ export function useSSEListener(
       "task_complete",
       "task_error",
       "task_cancelled",
+      "pipeline_progress",
+      "reconnect_required",
       "message",
     ];
 

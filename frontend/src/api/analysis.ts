@@ -47,13 +47,6 @@ export async function getAnalysisTasks(
   return data.tasks;
 }
 
-export async function deleteAnalysisTask(
-  novelId: string,
-  taskId: string
-): Promise<void> {
-  await apiClient.delete(`/api/novels/${novelId}/tasks/${taskId}`);
-}
-
 export async function cancelAnalysisTask(
   novelId: string,
   taskId: string

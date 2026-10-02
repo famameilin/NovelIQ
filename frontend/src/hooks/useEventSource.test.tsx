@@ -73,6 +73,8 @@ describe("useSSEListener", () => {
       "task_complete",
       "task_error",
       "task_cancelled",
+      "pipeline_progress",
+      "reconnect_required",
       "message",
     ]) {
       expect(registered).toContain(eventType);

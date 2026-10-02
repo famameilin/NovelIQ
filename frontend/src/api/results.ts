@@ -1,6 +1,5 @@
 import { apiClient } from "./client";
 import type {
-  Character,
   DiagnosisResult,
   ForeshadowingTree,
   GraphChangesPageResponse,
@@ -12,25 +11,6 @@ import type {
   TopicSeriesResponse,
   TopicShiftResponse,
 } from "./types";
-
-// 角色：角色排行/角色表 tab 的数据源（单源端点直接作为 tab API）
-export async function getCharacters(
-  novelId: string,
-  taskId: string,
-  options?: { page?: number; page_size?: number }
-): Promise<Character[]> {
-  const { data } = await apiClient.get<Character[]>(
-    `/api/novels/${novelId}/characters`,
-    {
-      params: {
-        task_id: taskId,
-        ...(options?.page != null && { page: options.page }),
-        ...(options?.page_size != null && { page_size: options.page_size }),
-      },
-    }
-  );
-  return data;
-}
 
 // 情绪趋势窗口聚合：window_paragraphs 作用于 range 区间内（缺省=全书）；
 // 情绪趋势 tab 的数据源（单源端点直接作为 tab API）
