@@ -137,28 +137,6 @@ _SEMANTIC_STEMS: tuple[str, ...] = (
     "邪恶",
 )
 
-_TITLE_SUFFIXES: tuple[str, ...] = ("仙子", "魔女", "老祖", "真君", "尊者", "仙尊", "魔尊", "太子")
-_PLACE_SUFFIXES: tuple[str, ...] = ("宗", "门", "派", "城", "山", "峰", "谷", "域", "宫", "殿", "阁", "楼", "塔")
-_ARTIFACT_SUFFIXES: tuple[str, ...] = ("剑", "刀", "枪", "斧", "弓", "鞭", "戟", "印", "令", "珠", "鼎", "舟")
-_TITLE_ONLY: frozenset[str] = frozenset(
-    {
-        "仙尊",
-        "魔尊",
-        "老祖",
-        "仙子",
-        "尊者",
-        "真君",
-        "城主",
-        "宗主",
-        "长老",
-        "族长",
-        "太子",
-        "夫人",
-        "先生",
-        "大师",
-        "圣子",
-    }
-)
 _SENSORY_STOP: frozenset[str] = frozenset(
     {
         "明白",
