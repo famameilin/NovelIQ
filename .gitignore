@@ -114,6 +114,7 @@ opencode.json
 .omo/
 # ZCode 会话内部计划
 .zcode/
+.zcodeignore
 .playwright-mcp/
 # Playwright CLI 会话快照
 .playwright-cli/
@@ -175,8 +176,6 @@ docs/*
 # ============================================================================
 scripts/db/*
 scripts/tools/*
-# 有意跟踪的可复用脚本
-!scripts/tools/convert_word2vec_pretrained.py
 scripts/experiments/
 
 # ============================================================================
@@ -220,5 +219,3 @@ deprecated/
 /tests/*.py
 !/tests/conftest.py
 !/tests/__init__.py
-# 正式黑盒 API 测试
-!/tests/test_blackbox.py
