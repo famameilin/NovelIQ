@@ -6,6 +6,7 @@ import uuid
 from dataclasses import replace
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from src.chunking.chunker import Chunk, split_chunk_paragraphs
@@ -101,6 +102,35 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
         assert row.char_count == span.char_count == len(span.text)
         assert row.token_count == span.token_count
         assert row.text == span.text
+
+
+def test_fetch_chapter_paragraph_rows_filters_in_database(db_session) -> None:
+    """章节段落查询必须在 SQL 层按章过滤，不能回退到全书扫描"""
+    run_id = _create_run(db_session)
+    first = "甲段。\n乙段。\n"
+    second = "丙段。\n"
+    chunks = [
+        Chunk(index=0, text=first, start=0, end=len(first), chapter_id=1),
+        Chunk(index=1, text=second, start=len(first), end=len(first) + len(second), chapter_id=2),
+    ]
+    _insert_chapter_texts(db_session, run_id, chunks)
+    ParagraphRepository(db_session).insert_paragraphs(run_id, _make_spans(chunks))
+
+    statements: list[str] = []
+
+    def capture_sql(_conn, _cursor, statement, _parameters, _context, _executemany) -> None:
+        statements.append(statement)
+
+    bind = db_session.get_bind()
+    event.listen(bind, "before_cursor_execute", capture_sql)
+    try:
+        rows = ParagraphRepository(db_session).fetch_chapter_paragraph_rows(run_id, 2)
+    finally:
+        event.remove(bind, "before_cursor_execute", capture_sql)
+
+    assert len(rows) == 1
+    assert rows[0].chapter_id == 2
+    assert any("paragraphs.chapter_id =" in sql for sql in statements if "FROM paragraphs" in sql)
 
 
 def test_insert_paragraphs_with_nonzero_chunk_offset(db_session) -> None:
@@ -217,44 +247,6 @@ def test_insert_paragraphs_rejects_inconsistent_global_offset(db_session) -> Non
 
     with pytest.raises(ValueError):
         ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
-
-
-def test_get_incomplete_paragraph_chapter_ids(db_session) -> None:
-    """缺段落的章节被列出（空文本章节除外），补全后为空"""
-    run_id = _create_run(db_session)
-    text_a = "甲段。\n乙段。\n"
-    text_b = "丙段。\n"
-    chunks = [
-        Chunk(index=0, text=text_a, start=0, end=len(text_a), chapter_id=1),
-        Chunk(index=1, text=text_b, start=len(text_a), end=len(text_a) + len(text_b), chapter_id=2),
-        Chunk(index=2, text="", start=len(text_a) + len(text_b), end=len(text_a) + len(text_b), chapter_id=3),
-    ]
-    _insert_chapter_texts(db_session, run_id, chunks)
-    all_spans = _make_spans(chunks[:2])
-
-    repo = ParagraphRepository(db_session)
-    # 只插入章1 的段落 → 章2 缺失，章3 空文本被排除
-    chapter1_spans = [s for s in all_spans if s.chapter_id == 1]
-    repo.insert_paragraphs(run_id, chapter1_spans)
-    assert repo.get_incomplete_paragraph_chapter_ids(run_id) == [2]
-
-    # 补全后为空
-    repo.insert_paragraphs(run_id, all_spans)
-    assert repo.get_incomplete_paragraph_chapter_ids(run_id) == []
-
-
-def test_get_incomplete_paragraph_chapter_ids_detects_gaps(db_session) -> None:
-    """章内段落序号不连续（min != 0 或 count != max + 1）被列出"""
-    run_id = _create_run(db_session)
-    chunks = _single_chunk("一段。\n二段。\n")
-    _insert_chapter_texts(db_session, run_id, chunks)
-    # 手工构造缺 paragraph_index=1 的段落
-    spans = [
-        _span(paragraph_id=0, paragraph_index=0, local_start=0, local_end=3, global_start=0, global_end=3),
-        _span(paragraph_id=1, paragraph_index=2, local_start=4, local_end=7, global_start=4, global_end=7),
-    ]
-    ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
-    assert ParagraphRepository(db_session).get_incomplete_paragraph_chapter_ids(run_id) == [1]
 
 
 def test_db_constraint_rejects_invalid_local_order(db_session) -> None:

@@ -17,13 +17,13 @@ from src.agents.annotation.schema import (
 from src.chunking.chunker import Chunk
 from src.chunking.spans import ParagraphSpan
 from src.storage.repositories import (
-    ChapterAnnotationRepository,
     ChapterRepository,
     ParagraphRepository,
     RunRepository,
 )
 from src.storage.repositories.paragraph_repository import ParagraphCurveRow, ParagraphMetricRow
 from tests.support.analysis_factories import insert_test_novel
+from tests.support.chapter_annotation_helpers import commit_test_annotation, publish_test_cutoff
 
 
 def create_completed_run(
@@ -55,6 +55,7 @@ def create_completed_run(
         offset += len(text)
     ChapterRepository(db_session).insert_chapter_texts(run_id, chunks)
     RunRepository(db_session).update_run_status(run_id, "completed")
+    publish_test_cutoff(db_session, run_id)
     return novel_id, run_id
 
 
@@ -74,6 +75,8 @@ def create_run_with_status(
     )
     if status != "pending":
         RunRepository(db_session).update_run_status(run_id, status)
+    if status == "completed":
+        publish_test_cutoff(db_session, run_id)
     return novel_id, run_id
 
 
@@ -203,9 +206,9 @@ def insert_chapter_annotation(
         dialogues=[],
         events=[],
     )
-    ChapterAnnotationRepository(db_session).add_annotation(
+    commit_test_annotation(
+        db_session,
         run_id=run_id,
         chapter_id=chapter_id,
         annotation=annotation,
     )
-    db_session.commit()
