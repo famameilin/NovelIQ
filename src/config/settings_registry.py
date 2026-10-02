@@ -285,7 +285,7 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 path=("linguistic", "word2vec", "model_dir"),
                 field_type="string",
                 label="预训练共享模型目录",
-                description="目录内应恰有一个 .kv 文件（由 scripts/tools/convert_word2vec_pretrained.py 生成）",
+                description="目录内应恰有一个 .kv 文件（由 scripts/convert_word2vec_pretrained.py 生成）",
             ),
             SettingFieldSpec(
                 path=("linguistic", "word2vec", "window"), field_type="integer", label="窗口大小", min_value=1

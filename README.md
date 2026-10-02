@@ -44,7 +44,7 @@ LTP 与 Word2Vec 从本地加载，**不会自动联网下载**，均可经设�
 - **Word2Vec**（`linguistic.word2vec.enabled`，默认关闭）：关闭时无需模型；开启后需 `models/word2vec/shared/` 下的转换 `.kv` 主文件（依赖 LTP 词元），缺失同样在「语言结构」阶段报错。已有 `.vec`/`.bin`/`.txt` 预训练向量时执行：
 
   ```powershell
-  uv run python -m scripts.tools.convert_word2vec_pretrained
+  uv run python -m scripts.convert_word2vec_pretrained
   ```
 
   默认从 `models/word2vec/pretrained/` 读取，写入 `models/word2vec/shared/`。

@@ -5,7 +5,7 @@
 书内新词（人名等）随机初始化后由本书语料训练；模型产物保存为
 models/word2vec/{run_id}/word2vec.model（run 私有 artifact）。
 
-预训练共享向量由 scripts/tools/convert_word2vec_pretrained.py 一次性
+预训练共享向量由 scripts/convert_word2vec_pretrained.py 一次性
 转成 .kv 落盘，运行时直接加载共享 KeyedVectors（进程级只加载一次），
 不再重复解析 4.3GB 文本文件。
 
@@ -44,13 +44,13 @@ def resolve_shared_pretrained_path(model_dir: Path) -> Path:
     if not model_dir.is_dir():
         raise FileNotFoundError(
             f"预训练共享模型目录不存在: {model_dir}（请先执行 "
-            f"python -m scripts.tools.convert_word2vec_pretrained）"
+            f"python -m scripts.convert_word2vec_pretrained）"
         )
     kv_files = sorted(path.resolve() for path in model_dir.glob(f"*{_KV_SUFFIX}") if path.is_file())
     if not kv_files:
         raise FileNotFoundError(
             f"预训练共享模型目录中没有 .kv 文件: {model_dir}（请先执行 "
-            f"python -m scripts.tools.convert_word2vec_pretrained）"
+            f"python -m scripts.convert_word2vec_pretrained）"
         )
     if len(kv_files) != 1:
         raise ValueError(f"预训练共享模型目录必须恰好包含一个 .kv 文件: {model_dir}（当前 {len(kv_files)} 个）")

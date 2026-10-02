@@ -44,7 +44,7 @@ LTP and Word2Vec load from local files and **never download over the network**; 
 - **Word2Vec** (`linguistic.word2vec.enabled`, off by default): no model needed while off; once enabled it requires the converted `.kv` main file under `models/word2vec/shared/` (depends on LTP tokens), and a missing file errors at the same stage. For existing `.vec`/`.bin`/`.txt` pretrained vectors, run:
 
   ```powershell
-  uv run python -m scripts.tools.convert_word2vec_pretrained
+  uv run python -m scripts.convert_word2vec_pretrained
   ```
 
   Reads from `models/word2vec/pretrained/` by default and writes to `models/word2vec/shared/`.
