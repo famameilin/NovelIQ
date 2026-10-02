@@ -1,4 +1,4 @@
-# NovelIQ
+﻿# NovelIQ
 
 > [中文文档](README.md)
 
@@ -30,7 +30,7 @@ Once analysis completes, the frontend provides:
 | --- | --- |
 | ![Event forest](assets/screenshots/event-growth-forest-1440x900.png) | ![Causal structure within a tree](assets/screenshots/event-growth-tree-1440x900.png) |
 
-For an existing 0.1.0 database, follow the [one-time 0.1.1 upgrade guide](UPGRADE-0.1.1.md) before deploying this release.
+For an existing 0.1.0 database, follow the [one-time 0.1.1 upgrade guide](docs/upgrades/UPGRADE-0.1.1.md) before deploying this release.
 
 Stack: Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17 (pgvector); React 19 / Vite / ECharts / Tailwind CSS. LLMs go through an OpenAI-compatible interface (local vLLM or a cloud service both work); lexical analysis and word vectors are local offline models.
 

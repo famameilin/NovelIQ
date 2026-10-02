@@ -8,14 +8,14 @@
 2. 使用 0.1.1 代码及其依赖，从仓库根目录运行只读检查：
 
    ```powershell
-   .venv\Scripts\python.exe -X utf8 -m scripts.db.migrate_0_1_0_to_0_1_1
+   .venv\Scripts\python.exe -X utf8 -m scripts.migrations.migrate_0_1_0_to_0_1_1
    ```
 
 3. 核对报告的 `database`、`schema`、`schema_errors`、`blocking_issues`、`active_run_ids`。前两项必须指向预期目标，后三项必须为空。
 4. 登记升级；将示例库名替换为报告中的实际 `database`：
 
    ```powershell
-   .venv\Scripts\python.exe -X utf8 -m scripts.db.migrate_0_1_0_to_0_1_1 --apply --expect-database novel_analysis
+   .venv\Scripts\python.exe -X utf8 -m scripts.migrations.migrate_0_1_0_to_0_1_1 --apply --expect-database novel_analysis
    ```
 
 5. 再次运行只读检查，确认 `already_applied: true`。随后启动 0.1.1 API 和前端，检查 `/health`、已完成任务的事件树、主题与诊断页面。
