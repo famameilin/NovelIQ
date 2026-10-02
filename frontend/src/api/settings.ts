@@ -4,6 +4,8 @@
 import { apiClient } from "./client";
 import type {
   ModelEnvUpdate,
+  ModelProviderTask,
+  ModelProviderTestRequest,
   ModelProviderTestResponse,
   SettingsSchemaResponse,
   SettingsViewResponse,
@@ -35,8 +37,8 @@ export async function updateModelEnv(payload: ModelEnvUpdate): Promise<SettingsV
 
 /** 测试模型服务连通性（字段缺省用当前生效配置） */
 export async function testModelProvider(
-  task: "annotation" | "embedding",
-  payload?: { base_url?: string; api_key?: string }
+  task: ModelProviderTask,
+  payload?: ModelProviderTestRequest
 ): Promise<ModelProviderTestResponse> {
   const { data } = await apiClient.post<ModelProviderTestResponse>(
     `/api/settings/model-providers/${task}/test`,

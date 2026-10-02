@@ -10,7 +10,7 @@ import { http } from "msw";
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
 
 const sections = [
-  { id: "models", title: "模型参数", description: "标注/诊断任务与段落嵌入的运行参数", order: 1 },
+  { id: "models", title: "模型参数", description: "标注、诊断与段落嵌入", order: 1 },
   { id: "topic_model", title: "主题模型", description: "LDA 训练与主题变化候选参数", order: 2 },
   { id: "metrics", title: "指标计算", description: "各量化指标的阈值与采样参数", order: 3 },
   { id: "linguistic", title: "语言特征", description: "LTP 与 Word2Vec 能力开关及参数", order: 4 },
@@ -27,18 +27,6 @@ const fields = [
     step: null,
     enum_values: [],
     nullable: true,
-    editable: true,
-  },
-  {
-    path: ["models", "annotation", "temperature"],
-    field_type: "number",
-    label: "标注温度",
-    description: "",
-    min_value: 0,
-    max_value: 2,
-    step: 0.1,
-    enum_values: [],
-    nullable: false,
     editable: true,
   },
   {
@@ -105,16 +93,19 @@ const fields = [
 
 const values: Record<string, unknown> = {
   models: {
+    model_pool: [
+      { model_id: "text-model", base_url: "https://api.example.com/v1", api_key: "••••3456", weight: 1, max_in_flight: 8,
+        temperature: 0.7, top_p: 0.8, max_tokens: 131072 },
+      { model_id: "second-model", base_url: "https://second.example.com/v1", api_key: "••••7890", weight: 2, max_in_flight: 4,
+        temperature: 0.3, top_p: 0.9, max_tokens: 4096 },
+    ],
+    diagnosis_model_id: "second-model",
     annotation: {
-      base_url: "https://api.example.com/v1",
-      model: "text-model",
-      api_key: "••••3456",
       timeout_s: 180,
-      temperature: 0.7,
       max_iterations: 15,
       allow_future_context: true,
     },
-    diagnosis: { api_key: "••••3456" },
+    diagnosis: {},
     paragraph_embedding: {
       base_url: "http://localhost:8080/v1",
       model: "embedding-model",
@@ -130,16 +121,14 @@ const values: Record<string, unknown> = {
 
 const defaults: Record<string, unknown> = {
   models: {
+    model_pool: [],
+    diagnosis_model_id: null,
     annotation: {
-      base_url: null,
-      model: null,
-      api_key: null,
       timeout_s: null,
-      temperature: 0.7,
       max_iterations: 10,
-      allow_future_context: false,
+      allow_future_context: true,
     },
-    diagnosis: { api_key: null },
+    diagnosis: {},
     paragraph_embedding: { base_url: null, model: null, api_key: null },
   },
   topic_model: { num_topics: 25 },
@@ -151,7 +140,6 @@ const defaults: Record<string, unknown> = {
 
 const sources: Record<string, "default" | "file"> = {
   "models/annotation/timeout_s": "file",
-  "models/annotation/temperature": "default",
   "models/annotation/max_iterations": "file",
   "models/annotation/allow_future_context": "file",
   "topic_model/num_topics": "default",
