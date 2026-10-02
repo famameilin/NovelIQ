@@ -232,6 +232,10 @@ scripts/db/
 scripts/tools/
 scripts/experiments/
 
+!scripts/db/
+scripts/db/*
+scripts/tools/*
+
 # ZCode 会话内部计划
 .zcode/
 
@@ -261,3 +265,7 @@ config/settings.json
 
 # 数据库备份 dump（pg_dump 本地产物，体量大不入库）
 *.dump
+
+.zcodeignore
+
+deprecated/
