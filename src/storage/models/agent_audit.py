@@ -35,6 +35,11 @@ class AgentInvocation(Base):
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
     model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     model_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)  # local / cloud
+    work_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    attempt_epoch: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cutoff_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    business_outcome: Mapped[str | None] = mapped_column(String(30), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)  # success / error
     final_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
