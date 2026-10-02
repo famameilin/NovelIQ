@@ -188,16 +188,8 @@ def test_dialogue_speaker_rejection_points_at_the_single_record() -> None:
     assert ledger.written_dialogues[1].speaker == "甲"
 
 
-def test_dialogue_coverage_missing_candidates_defaults_to_not_dialogue() -> None:
-    """原测试保留：未提交候选在收尾时默认按 not_dialogue 处理并留痕
-
-    2026-09-13 变化：旧合同对话域由完整域提交（含空列表）收尾，未提交候选在域结算时
-    补默认；新合同取消逐域 finish，补默认判定推迟到唯一收尾里，2026-09-14 收尾更名
-    finish（ledger.chunk_finished→chapter_finished），因此本测试直接走
-    ledger.finish_chapter()。语义不变的部分：未提交候选默认 not_dialogue +
-    dialogue_missing_indexes 留痕 + bound_payloads 对话落账视图为空；
-    回执形状按新合同断言（dialogue_defaulted 列出默认序号，records 计入默认后的条数）。
-    """
+def test_dialogue_missing_candidates_reject_finish() -> None:
+    """未提交候选判定时拒绝收尾，不生成默认非对话记录"""
     ledger = AnnotationToolLedger(
         run_scope="r",
         current_chapter_id=1,
@@ -209,13 +201,9 @@ def test_dialogue_coverage_missing_candidates_defaults_to_not_dialogue() -> None
     ledger.apply_metrics(
         ChapterMetricsInput(summary="短块", emotional_valence=0, narrative_function="铺垫")
     )
-    result = ledger.finish_chapter()
-
-    assert result["status"] == "completed"
-    assert result["chapter_id"] == 1
-    assert result["records"]["dialogues"] == 1
-    assert result["dialogue_defaulted"] == [1]
-    assert ledger.dialogue_missing_indexes == [1]
-    assert ledger.written_dialogues[1].verdict == DialogueVerdict.NOT_DIALOGUE
-    assert ledger.bound_payloads["dialogues"] == []
-    assert ledger.chapter_finished is True
+    with pytest.raises(AnnotationStageRejection) as excinfo:
+        ledger.finish_chapter()
+    assert (excinfo.value.field, excinfo.value.code) == ("dialogues", "missing_record")
+    assert ledger.written_dialogues == {}
+    assert ledger.ready_chapter is None
+    assert ledger.chapter_finished is False

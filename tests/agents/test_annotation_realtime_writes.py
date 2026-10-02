@@ -1,8 +1,8 @@
 """2026-09-13 实时写入改造 / 2026-09-14 写入面重构后的合同测试（小调用写入即生效、唯一 finish 收尾）
 
 覆盖用户裁定的必要行为边界：同轮多调用只计一轮、失败不丢失已写入记录、
-逐条失败不阻塞收尾、重试按记录更新不重复、关系写入即入图、对话收尾时
-一次性默认否定、事件实时按调用顺序生长。
+逐条失败不阻塞已齐全产物的收尾、重试按记录更新不重复、关系写入即入图、
+对话必须实际判定、事件实时按调用顺序生长。
 
 2026-09-14 合同变化点（相对 09-13 九工具面，见 docs/write-surface-2026-0914-test-contract.md）：
 - 写入面为五个领域工具（write_entity/write_metrics/write_event/write_relation/write_dialogue）
@@ -36,36 +36,22 @@ from src.agents.annotation.graph import (
 from src.agents.annotation.schema import (
     ChapterMetricsInput,
     ChapterParagraphInfo,
-    SearchResult,
 )
 from src.agents.annotation.tools import (
     AnnotationToolLedger,
     build_annotation_tools,
 )
+from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 class _QueryService:
     """2026-09-13 用于提供无数据库依赖的查询桩"""
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-        """2026-09-13 用于返回空案例检索结果"""
-        del query, hidden_case_ids, case_type, limit
-        return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
         """2026-09-13 用于返回空正文命中"""
         del query, range_name, limit
         return []
-
-    def search_event_history(self, query, *, limit=50):
-        """2026-09-13 用于返回空历史事件树"""
-        del query, limit
-        return []
-
-    def fetch_active_case_details(self, case_id):
-        """2026-09-13 用于表示没有 active 案例"""
-        del case_id
-        return None
 
 
 def _chapter_text() -> str:
@@ -136,9 +122,16 @@ async def _seed_metrics(tools: dict) -> None:
     )
 
 
+async def _judge_dialogues(tools: dict) -> None:
+    """事件及关系测试明确提交样本文本中两条真实对话的判定"""
+    for candidate_index in (1, 2):
+        await _call(tools, "write_dialogue", {"candidate_index": candidate_index, "verdict": "dialogue"})
+
+
 async def _finish(ledger: AnnotationToolLedger, tools: dict) -> dict:
     """2026-09-14 用于按生产路径收尾（写指标后调用唯一 finish 的结算汇点）"""
     await _seed_metrics(tools)
+    await _judge_dialogues(tools)
     return ledger.finish_chapter()
 
 
@@ -636,8 +629,8 @@ async def test_second_root_with_same_tree_key_updates_description_in_place() -> 
 
 
 @pytest.mark.asyncio
-async def test_dialogue_default_is_applied_once_at_chapter_finish() -> None:
-    """2026-09-12/14 未提交候选只在 finish 收尾时一次性默认 not_dialogue"""
+async def test_dialogue_finish_requires_actual_judgment() -> None:
+    """候选缺判禁止收尾，补交判定后冻结且不默认否定"""
     ledger = _ledger()
     tools = _tools(ledger)
     await _register_entities(tools)
@@ -649,13 +642,18 @@ async def test_dialogue_default_is_applied_once_at_chapter_finish() -> None:
         {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": "愤怒"},
     )
     # 提交第一条不得把其余候选提前判否
-    assert ledger.dialogue_missing_indexes == []
     assert 2 not in ledger.written_dialogues
 
-    receipt = await _finish(ledger, tools)
-    assert receipt["dialogue_defaulted"] == [2]
+    await _seed_metrics(tools)
+    with pytest.raises(AnnotationStageRejection) as excinfo:
+        ledger.finish_chapter()
+    assert (excinfo.value.field, excinfo.value.code) == ("dialogues", "missing_record")
+    assert 2 not in ledger.written_dialogues and not ledger.chapter_finished
+    await _call(tools, "write_dialogue", {"candidate_index": 2, "verdict": "dialogue"})
+    receipt = ledger.finish_chapter()
+    assert receipt["status"] == "completed"
     assert sorted(ledger.written_dialogues) == [1, 2]
-    assert ledger.written_dialogues[2].verdict == "not_dialogue"
+    assert ledger.written_dialogues[2].verdict == "dialogue"
 
     # 收尾后 chunk 由系统冻结：再写同一序号被阶段协议拒绝，收尾结果不变
     ledger.complete_active_chapter()
@@ -827,7 +825,7 @@ async def test_relation_write_after_chunk_completed_is_rejected() -> None:
         )
     assert len(ledger.written_relations) == 1
     assert len(ledger.ready_chapter.events) == 0
-    assert ledger.ready_chapter.dialogues == []
+    assert len(ledger.ready_chapter.dialogues) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -888,6 +886,7 @@ async def test_finish_ignores_failed_records_from_same_round() -> None:
     tools = _tools(ledger)
     await _register_entities(tools)
     await _seed_metrics(tools)
+    await _judge_dialogues(tools)
 
     receipt = ledger.finish_chapter()
 
@@ -911,6 +910,7 @@ async def test_chapter_finish_requires_one_metrics_submission() -> None:
     assert (excinfo.value.record, excinfo.value.field) == ("finish", "metrics")
 
     await _seed_metrics(tools)
+    await _judge_dialogues(tools)
     assert ledger.finish_chapter()["status"] == "completed"
     assert isinstance(ledger.metrics_payload, ChapterMetricsInput)
 
@@ -945,7 +945,7 @@ async def test_write_entity_no_longer_requires_search_graph_gate() -> None:
     旧行为：图中已有登记实体时首笔登记必须先检索。闸门删净后省去 search_graph
     直接写入即生效，同轮多条登记照常各自独立。
     """
-    ledger = _ledger(graph=FactGraph(history_entity_types={"旧人": "character"}))
+    ledger = _ledger(graph=FactGraph())
     tools = _tools(ledger)
     await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     await _call(tools, "write_entity", {"name": "众人", "entity_type": "organization", "el": "众人"})
@@ -1056,7 +1056,7 @@ async def test_failed_call_keeps_previously_written_records_in_same_round() -> N
 # ---------------------------------------------------------------------------
 
 
-class _SingleReplyLLM:
+class _SingleReplyLLM(StreamedFakeModelMixin):
     """2026-09-13 用于返回单个回合的多工具回复并记录累计轮次"""
 
     def __init__(self, response) -> None:
@@ -1108,6 +1108,10 @@ async def test_same_round_small_calls_counts_as_single_iteration() -> None:
             "id": "c3",
             "type": "tool_call",
         },
+        {"name": "write_dialogue", "args": {"candidate_index": 1, "verdict": "dialogue"},
+         "id": "d1", "type": "tool_call"},
+        {"name": "write_dialogue", "args": {"candidate_index": 2, "verdict": "dialogue"},
+         "id": "d2", "type": "tool_call"},
         {"name": "finish", "args": {}, "id": "c4", "type": "tool_call"},
     ]
     llm = _SingleReplyLLM(AIMessage(content="", tool_calls=parallel_calls))
@@ -1222,6 +1226,7 @@ async def test_chapter_finish_is_atomic(monkeypatch) -> None:
             },
         )
     await _seed_metrics(tools)
+    await _judge_dialogues(tools)
 
     original = AnnotationToolLedger._build_ready_chapter
     failing = {"on": True}
@@ -1264,121 +1269,6 @@ async def test_chapter_finish_is_atomic(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 # 2026-09-13 根因修复：可见约束 / 登记即进池
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_push_case_hands_out_id_usable_in_same_chapter() -> None:
-    """2026-09-19 案例 id 化：push_case 当场给出案例 id，本案例当章即可在解决面用上
-
-    run 1b388eb3 第 2 章实锤：模型写错一条关系后推案例想撤边，回执寻址不到自己推的
-    案例 ⇒ 5 轮 33% 预算烧在零命中检索上。登记即进池后，同章拿到案例 id 即刻可用。
-
-    2026-09-18 误建的关系直接用写入路径撤：write_relation(change_kind="解除") 是关系
-    变化的唯一入口（案例裁决工具已删净），案例本身由 close_case 收口。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    numbers = await _register_entities(tools)
-    await _call(
-        tools,
-        "write_relation",
-        {"from_entity": numbers["顾霜"], "to_entity": numbers["众人"], "relation_type": "敌对"},
-    )
-    assert ledger.graph.relation_exists("顾霜", "众人", "敌对")
-
-    pushed = await _call(
-        tools,
-        "push_case",
-        {
-            "description": "误建关系：顾霜与众人并非敌对，需解除该边",
-            "keys": ["顾霜", "众人", "敌对"],
-            "type": "关系修正",
-        },
-    )
-    assert pushed["accepted"] is True
-    case_id = pushed["case_id"]
-
-    # 撤销走写入路径：端点写登记名/run 级 id，变化进图变更日志
-    resolved = await _call(
-        tools,
-        "write_relation",
-        {
-            "from_entity": numbers["顾霜"],
-            "to_entity": numbers["众人"],
-            "relation_type": "敌对",
-            "change_kind": "解除",
-        },
-    )
-    assert resolved["status"] == "written"
-    assert resolved["outcome"] == "break"
-    assert not ledger.graph.relation_exists("顾霜", "众人", "敌对")
-
-    closed = await _call(
-        tools,
-        "close_case",
-        {"case_id": case_id, "reason": "误建关系已由写入路径解除"},
-    )
-    assert closed["accepted"] is True
-    assert closed["case_id"] == case_id
-    assert pushed["case_id"] in ledger.resolved_case_ids
-
-
-@pytest.mark.asyncio
-async def test_promise_case_points_at_a_record_written_this_chapter() -> None:
-    """2026-09-18 案例只兑现到本章真写出来的记录（记录键由生产单条事务边界登记）
-
-    走原生工具批次节点（`_build_tool_batch_node` → `_execute_call`）而不是直接调工具
-    函数：登记发生在事务边界上，所以"直接 invoke 工具"不产生可用记录键——这条用例
-    同时钉住登记点在批量执行那条路径上。
-    """
-    from langchain_core.messages import AIMessage
-
-    from src.agents.annotation.graph import _build_tool_batch_node
-
-    ledger = _ledger()
-    tools = _tools(ledger)
-    batch = _build_tool_batch_node(list(tools.values()), ledger=ledger)
-    state = await batch(
-        {
-            "messages": [
-                AIMessage(
-                    content="",
-                    tool_calls=[
-                        {
-                            "name": "write_entity",
-                            "args": {"name": "顾霜", "entity_type": "character", "el": "a1"},
-                            "id": "c1",
-                            "type": "tool_call",
-                        }
-                    ],
-                )
-            ],
-            "phase": "chapter_open",
-        }
-    )
-    receipt = json.loads(str(state["messages"][0].content))
-    assert ledger.written_record_keys == {receipt["record"]}
-
-    pushed = await _call(
-        tools,
-        "push_case",
-        {"description": "顾霜的身份存疑", "keys": ["顾霜"], "type": "实体疑点"},
-    )
-    unknown = await _rejection(
-        tools,
-        "promise_case",
-        {"case_id": pushed["case_id"], "result_id": "structure/entity/a1"},
-    )
-    assert unknown.code == "unknown_record"
-
-    promised = await _call(
-        tools,
-        "promise_case",
-        {"case_id": pushed["case_id"], "result_id": receipt["record"]},
-    )
-    assert promised["accepted"] is True
-    assert promised["action"] == "promise"
-    assert ledger.resolved_cases[-1].result_id == receipt["record"]
 
 
 @pytest.mark.asyncio
@@ -1425,7 +1315,7 @@ async def test_unknown_entity_reference_lists_chapter_el_keys() -> None:
 
 
 @pytest.mark.asyncio
-async def test_relation_evidence_only_takes_a_paragraph_number() -> None:
+async def test_relation_rejects_undeclared_evidence_argument() -> None:
     """2026-09-20 evidence 只收段首号：引文这类自由文本在参数校验处就被拒
 
     run 54a72932：160 次 write_relation 把引文填进 evidence（159 次在新增分支，
@@ -1443,7 +1333,6 @@ async def test_relation_evidence_only_takes_a_paragraph_number() -> None:
             "from_entity": ids["顾霜"],
             "to_entity": ids["众人"],
             "relation_type": "敌对",
-            "change_kind": "强化",
             "evidence": "顾霜喝道",
         },
     )
@@ -1463,37 +1352,3 @@ async def test_entity_ledger_rows_carry_entity_type() -> None:
     await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "a1"})
 
     assert [row["entity_type"] for row in ledger.entity_ledger()] == ["character"]
-
-
-@pytest.mark.asyncio
-async def test_search_pool_renders_pending_case_from_same_chapter() -> None:
-    """2026-09-13 检索面接线：本章登记的待建案例随 search_pool 结果返回并带 pending 标记
-
-    仓储层的匹配语义（关键词/枚举/池规模）由 DB 用例覆盖，此处只验工具层把待建案例
-    透传给查询服务并把结果渲染进回执、取回同一个案例编号。
-    """
-
-    class _PendingEchoQueryService(_QueryService):
-        """2026-09-13 用于把传入的待建案例原样作为检索结果返回"""
-
-        def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-            del query, case_type, limit
-            return SearchResult(results=[case for case in pending_cases if case.id not in hidden_case_ids])
-
-    ledger = _ledger()
-    tools = {tool.name: tool for tool in build_annotation_tools(_PendingEchoQueryService(), ledger)}
-    pushed = await _call(
-        tools,
-        "push_case",
-        {
-            "description": "玉戒尺在第 5 章异常发光",
-            "keys": ["玉戒尺"],
-            "type": "伏笔疑点",
-        },
-    )
-
-    found = await _call(tools, "search_pool", {"query": "玉戒尺"})
-
-    assert [item["id"] for item in found["results"]] == [pushed["case_id"]]
-    assert found["results"][0]["pending"] is True
-    assert found["results"][0]["keys"] == ["玉戒尺"]

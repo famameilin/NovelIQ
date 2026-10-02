@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import build_annotation_graph
 from src.agents.annotation.prompts import build_chapter_message
-from src.agents.annotation.schema import ChapterParagraphInfo, SearchResult
+from src.agents.annotation.schema import ChapterParagraphInfo
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 from src.agents.audit.observer import AgentTurnObserver
 from src.agents.audit.recorder import AgentAuditRecorder
@@ -18,6 +18,7 @@ from src.agents.stream import ModelCallTiming
 from src.storage.models import TokenUsage
 from src.storage.models.agent_audit import AgentInvocation, AgentToolCall, AgentTurn
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
+from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 def _chunk_paragraph_info(text: str) -> ChapterParagraphInfo:
@@ -54,23 +55,14 @@ def _count(db_session, model, run_id: str) -> int:
 class _QueryService:
     """2026-08-07 用于提供无数据库依赖的新合同查询桩"""
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-        """2026-08-07 用于返回空案例与伏笔检索结果"""
-        del query, hidden_case_ids, case_type, limit
-        return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
         """2026-08-07 用于返回空原文候选"""
         del query, range_name, limit
         return []
 
-    def fetch_active_case_details(self, case_id):
-        """2026-08-07 用于表示测试中没有 active 案例"""
-        del case_id
-        return None
 
-
-class _SequenceLLM:
+class _SequenceLLM(StreamedFakeModelMixin):
     """2026-08-07 用于按顺序返回 Agent 消息的测试模型（仅 ainvoke，无流式）"""
 
     def __init__(self, responses: list[AIMessage]) -> None:
@@ -609,7 +601,7 @@ async def test_annotation_turns_and_tool_calls_are_audited(db_session) -> None:
         "character_observations": 2,
         "paragraph_labels": 2,
     }
-    assert finish_rows[0].receipt["dialogue_defaulted"] == []
+    assert "dialogue_defaulted" not in finish_rows[0].receipt
 
     token_rows = list(db_session.execute(select(TokenUsage).where(TokenUsage.run_id == run_id)).scalars())
     assert len(token_rows) == 3
