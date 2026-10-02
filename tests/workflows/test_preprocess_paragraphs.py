@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from src.chapters.preprocess import preprocess_text
 from src.config import settings
-from src.preprocess.cleaning import normalize_text
+from src.preprocess import normalize_text
 from src.storage.models import ParagraphCurve, ParagraphEmbedding, ParagraphMetric
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository

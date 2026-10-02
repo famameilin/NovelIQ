@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from src.agents.annotation.schema import ResolvedCase
 from src.storage.repositories import GraphRepository, RunRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
@@ -36,7 +35,8 @@ def persist_timeline_chapter(
     cliffhanger_chapters: set[int] | None = None,
     characters: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
-    resolved_cases: list[Any] | None = None,
+    continuity_resolutions: list[Any] | None = None,
+    events: list[dict[str, Any]] | None = None,
 ) -> str:
     """2026-08-07 用于写入当前章节标注与唯一章节图版本"""
     return persist_chapter_annotation(
@@ -49,11 +49,14 @@ def persist_timeline_chapter(
         cliffhanger_chapters=cliffhanger_chapters,
         characters=characters,
         relations=relations,
-        resolved_cases=resolved_cases,
+        continuity_resolutions=continuity_resolutions,
+        events=events,
     )
 
 
-def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenario:
+def create_timeline_contract_scenario(
+    db_session: Any, *, events_by_chapter: dict[int, list[dict[str, Any]]] | None = None,
+) -> TimelineContractScenario:
     """2026-08-06 用于通过章节标注与数据库图持久化构造时间轴共享场景"""
     hero_name = "顾承渊"
     rival_name = "苏映雪"
@@ -152,6 +155,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         run_id=run_id,
         chapter_id=1,
         characters=[character_fact(chapter_id=1, name=hero_name, action="初入江湖")],
+        events=(events_by_chapter or {}).get(1),
     )
     persist_timeline_chapter(
         db_session,
@@ -165,6 +169,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
                 role_function="帮助者",
             )
         ],
+        events=(events_by_chapter or {}).get(2),
     )
     persist_timeline_chapter(
         db_session,
@@ -231,19 +236,14 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
         run_id=run_id,
         chapter_id=5,
         characters=[character_fact(chapter_id=5, name=hero_name, action="独行")],
-        resolved_cases=[
-            ResolvedCase(
-                case_id="case-break",
-                action="fact",
-                type="relation_change",
-                reason="决裂",
-                target_key="target-break",
-                target_ref={"kind": "relation_change", "chapter_id": 5},
-                from_entity=hero_name,
-                to_entity=rival_name,
-                relation_type="盟友",
-                change_kind="break",
-            )
+        continuity_resolutions=[
+            {
+                "reason": "决裂",
+                "from_entity": hero_name,
+                "to_entity": rival_name,
+                "relation_type": "盟友",
+                "change_kind": "break",
+            }
         ],
     )
 

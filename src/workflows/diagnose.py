@@ -116,6 +116,9 @@ async def run_diagnose(
         CloudAnalysis: 诊断分析结果
     """
     from src.agents import run_diagnosis_agent
+    from src.storage.repositories.pipeline_visibility import require_released_cutoff
+
+    require_released_cutoff(session, run_id)
 
     run_repo = RunRepository(session)
     run = run_repo.get_run(run_id)

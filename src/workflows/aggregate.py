@@ -159,6 +159,9 @@ async def run_aggregate(
     Args: run_id / session / emitter(async StreamEvent->None)  Returns: (总章数, 全局统计条数, 保留位0)
     """
     start_time = time.time()
+    from src.storage.repositories.pipeline_visibility import require_released_cutoff
+
+    require_released_cutoff(session, run_id)
 
     chapter_repo = ChapterRepository(session)
     stats_repo = StatsRepository(session)

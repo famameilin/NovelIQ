@@ -348,25 +348,6 @@ class TestMnegCorrection:
         assert float(curve_row.net_density) == -0.25
 
 
-class _EmbeddingFakeLtpSession(FakeLtpSession):
-    """2026-09-07 用于句级监督测试：按情绪关键词返回可分句向量"""
-
-    def sentence_embeddings(self, sentences):
-        import numpy as np
-
-        vectors = []
-        for sentence in sentences:
-            vector = np.zeros(4, dtype=np.float32)
-            if "江湖" in sentence:
-                vector[0] = 1.0
-            elif "汤姆" in sentence:
-                vector[0] = -1.0
-            else:
-                vector[1] = 0.5
-            vectors.append(vector)
-        return np.array(vectors, dtype=np.float32)
-
-
 class TestParagraphBoundary:
     """2026-09-14 段落级监督（按书边界）：自选段标签→段落向量边界→逐段打分回写"""
 
@@ -401,36 +382,47 @@ class TestParagraphBoundary:
 
         monkeypatch.setattr(_settings.linguistic.word2vec, "enabled", False)
         yield
+        db_session.rollback()
         db_session.execute(sa_text(f"DROP TABLE IF EXISTS {runtime_schema}.paragraph_embeddings CASCADE"))
+        db_session.commit()
 
     def _feature_rows(self) -> list:
         return LinguisticRepository(self.db_session).fetch_linguistic_features(self.run_id)
 
-    def _insert_annotation_with_labels(self, chapter_id: int, labels: list[dict]) -> None:
+    def _insert_annotation_with_labels(self, labels: list[dict]) -> None:
+        from collections import defaultdict
+
+        from sqlalchemy import select
+
         from src.agents.annotation.schema import (
             BoundChapterAnnotation,
             BoundParagraphLabel,
             ChapterMetricsInput,
             NarrativeFunction,
         )
-        from src.storage.repositories import ChapterAnnotationRepository
+        from src.storage.models import Paragraph
+        from tests.support.chapter_annotation_helpers import commit_test_annotation
 
-        annotation = BoundChapterAnnotation(
-            metrics=ChapterMetricsInput(
-                summary="测试",
-                emotional_valence=0,
-                narrative_function=NarrativeFunction.SETUP,
-            ),
-            character_observations=[],
-            dialogues=[],
-            events=[],
-            paragraph_labels=[BoundParagraphLabel(**label) for label in labels],
-        )
-        ChapterAnnotationRepository(self.db_session).add_annotation(
-            run_id=self.run_id,
-            chapter_id=chapter_id,
-            annotation=annotation,
-        )
+        paragraphs = self.db_session.execute(select(Paragraph).where(Paragraph.run_id == self.run_id)).scalars()
+        chapters_by_paragraph = {paragraph.paragraph_id: paragraph.chapter_id for paragraph in paragraphs}
+        labels_by_chapter: dict[int, list[BoundParagraphLabel]] = defaultdict(list)
+        for label in labels:
+            labels_by_chapter[chapters_by_paragraph[label["paragraph_id"]]].append(BoundParagraphLabel(**label))
+        for chapter_id, chapter_labels in labels_by_chapter.items():
+            annotation = BoundChapterAnnotation(
+                metrics=ChapterMetricsInput(
+                    summary="测试",
+                    emotional_valence=0,
+                    narrative_function=NarrativeFunction.SETUP,
+                ),
+                character_observations=[],
+                dialogues=[],
+                events=[],
+                paragraph_labels=chapter_labels,
+            )
+            commit_test_annotation(
+                self.db_session, run_id=self.run_id, chapter_id=chapter_id, annotation=annotation,
+            )
 
     def _insert_paragraph_embeddings(self, vectors_by_id: dict[int, list[float]]) -> None:
         from src.storage.models import ParagraphEmbedding
@@ -468,7 +460,6 @@ class TestParagraphBoundary:
             }
         )
         self._insert_annotation_with_labels(
-            1,
             [
                 {"paragraph_id": positive_id, "emotion": 2},
                 {"paragraph_id": negative_id, "emotion": -2},
@@ -490,7 +481,6 @@ class TestParagraphBoundary:
         negative_id = next(i for i, text in enumerate(_TEST_TEXTS) if "汤姆" in text)
         self._insert_paragraph_embeddings({positive_id: [1.0, 0.0, 0.0, 0.0]})
         self._insert_annotation_with_labels(
-            1,
             [
                 {"paragraph_id": positive_id, "emotion": 2},
                 # 第二标签指向无向量的段落：fit 只用能对上向量的样本
@@ -514,7 +504,6 @@ class TestParagraphBoundary:
             }
         )
         self._insert_annotation_with_labels(
-            1,
             [
                 {"paragraph_id": positive_id, "emotion": 0},
                 {"paragraph_id": negative_id, "emotion": 0},
