@@ -48,7 +48,7 @@ def test_provider_request_metadata_keeps_thinking_and_excludes_credentials() -> 
     )
     bound_model = SimpleNamespace(bound=chat_model, kwargs={"tools": [{"name": "write_metrics"}]})
 
-    metadata = _provider_request_metadata(bound_model, transport="stream", attempt=1)
+    metadata = _provider_request_metadata(bound_model, attempt=1)
 
     assert metadata["parameters"]["extra_body"] == {"think": True}
     assert metadata["parameters"]["base_url"] == "https://provider.example/v1"
@@ -68,7 +68,7 @@ def test_provider_request_metadata_rejects_unparseable_url() -> None:
         model_kwargs={"extra_body": {"think": True}},
     )
 
-    metadata = _provider_request_metadata(SimpleNamespace(bound=chat_model, kwargs={}), transport="stream", attempt=1)
+    metadata = _provider_request_metadata(SimpleNamespace(bound=chat_model, kwargs={}), attempt=1)
 
     assert metadata["parameters"]["base_url"] == "invalid-url"
     assert "hidden" not in str(metadata)
@@ -102,11 +102,9 @@ def test_provider_request_metadata_redacts_sensitive_tool_key_variants() -> None
         }
     ]
 
-    clean = _provider_request_metadata(
-        SimpleNamespace(bound=chat_model, kwargs={"tools": clean_tools}), transport="stream", attempt=1
-    )
+    clean = _provider_request_metadata(SimpleNamespace(bound=chat_model, kwargs={"tools": clean_tools}), attempt=1)
     sensitive = _provider_request_metadata(
-        SimpleNamespace(bound=chat_model, kwargs={"tools": sensitive_tools}), transport="stream", attempt=1
+        SimpleNamespace(bound=chat_model, kwargs={"tools": sensitive_tools}), attempt=1
     )
 
     assert sensitive["parameters"]["tool_contract_fingerprint"] == clean["parameters"]["tool_contract_fingerprint"]
@@ -136,21 +134,6 @@ class _StreamingLLM:
         self.captured_messages.append(list(messages))
         for chunk in self.chunks:
             yield chunk
-
-
-class _NonStreamingLLM:
-    """仅支持 ainvoke 的测试模型（降级路径）"""
-
-    def __init__(self, response: AIMessage) -> None:
-        self.response = response
-
-    def bind_tools(self, tools):
-        del tools
-        return self
-
-    async def ainvoke(self, messages):
-        del messages
-        return self.response
 
 
 class _FlakyStreamingLLM:
@@ -198,57 +181,6 @@ class _RetryWithUsageLLM:
             raise ConnectionError("stream interrupted mid-way")
         for chunk in self.success_chunks:
             yield chunk
-
-
-class _ConfigDisabledStreamingLLM:
-    """2026-08-12 用于模拟 stream_enabled=False 的模型（有 astream 但 streaming 配置关闭）"""
-
-    def __init__(self, response: AIMessage) -> None:
-        self.response = response
-        self.streaming = False
-        self.ainvoke_calls = 0
-        self.astream_calls = 0
-
-    def bind_tools(self, tools):
-        del tools
-        return self
-
-    async def ainvoke(self, messages):
-        del messages
-        self.ainvoke_calls += 1
-        return self.response
-
-    async def astream(self, messages):
-        del messages
-        self.astream_calls += 1
-        yield AIMessageChunk(content="不应流出")
-
-
-class _FlakyNonStreamingLLM:
-    """2026-08-13 用于模拟非流式路径前 fail_count 次调用抛异常的测试模型"""
-
-    def __init__(
-        self,
-        response: AIMessage,
-        fail_count: int,
-        error: Exception | None = None,
-    ) -> None:
-        self.response = response
-        self.fail_count = fail_count
-        self.error = error or ConnectionError("network down")
-        self.ainvoke_calls = 0
-
-    def bind_tools(self, tools):
-        del tools
-        return self
-
-    async def ainvoke(self, messages):
-        del messages
-        self.ainvoke_calls += 1
-        if self.fail_count > 0:
-            self.fail_count -= 1
-            raise self.error
-        return self.response
 
 
 @pytest.mark.asyncio
@@ -510,25 +442,6 @@ async def test_run_model_call_skips_only_overlapping_prefix_on_retry() -> None:
     assert output_text == "你好好好世界"
 
 
-@pytest.mark.asyncio
-async def test_run_model_call_uses_ainvoke_when_streaming_disabled() -> None:
-    """2026-08-12 用于验证 stream_enabled=False（模型 streaming 配置关闭）时走 ainvoke 非流式路径"""
-    events, emitter = _collect_events()
-    stream = AgentStream(emitter)
-    model = _ConfigDisabledStreamingLLM(_tool_call_message())
-
-    response = await run_model_call(model, [AIMessage(content="问")], stream)
-
-    assert response.content == "完整回复"
-    assert model.ainvoke_calls == 1
-    assert model.astream_calls == 0
-    assert events == [
-        ("thinking", "模型未启用流式输出，等待完整回复...", ""),
-        ("output", "完整回复", ""),
-        ("tool_call", "finish", "started"),
-    ]
-
-
 def _noop_sleep(monkeypatch) -> list[float]:
     """2026-08-13 用于把 asyncio.sleep 替换为 no-op 并记录退避时长"""
     sleeps: list[float] = []
@@ -538,53 +451,6 @@ def _noop_sleep(monkeypatch) -> list[float]:
 
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", fake_sleep)
     return sleeps
-
-
-@pytest.mark.asyncio
-async def test_run_model_call_non_streaming_retries_transient_error(monkeypatch) -> None:
-    """2026-08-13 P2-6 非流式路径对网络/限流瞬态错误按 total_attempts 重试"""
-    events, emitter = _collect_events()
-    stream = AgentStream(emitter)
-    model = _FlakyNonStreamingLLM(_tool_call_message(), fail_count=1)
-    sleeps = _noop_sleep(monkeypatch)
-
-    response = await run_model_call(model, [AIMessage(content="问")], stream)
-
-    assert response.content == "完整回复"
-    assert model.ainvoke_calls == 2
-    assert len(sleeps) == 1
-    retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
-    assert len(retry_events) == 1
-
-
-@pytest.mark.asyncio
-async def test_run_model_call_non_streaming_does_not_retry_non_transient(monkeypatch) -> None:
-    """2026-08-13 P2-6 非流式路径对确定性错误（非网络/限流）不重试"""
-    model = _FlakyNonStreamingLLM(
-        AIMessage(content=""),
-        fail_count=99,
-        error=RuntimeError("bad request"),
-    )
-    sleeps = _noop_sleep(monkeypatch)
-
-    with pytest.raises(RuntimeError, match="bad request"):
-        await run_model_call(model, [AIMessage(content="问")], None)
-
-    assert model.ainvoke_calls == 1
-    assert sleeps == []
-
-
-@pytest.mark.asyncio
-async def test_run_model_call_non_streaming_exhausts_transient_retries(monkeypatch) -> None:
-    """2026-08-13 P2-6 非流式路径重试耗尽后抛出最后一次异常（次数 = total_attempts - 1）"""
-    model = _FlakyNonStreamingLLM(AIMessage(content=""), fail_count=99)
-    sleeps = _noop_sleep(monkeypatch)
-
-    with pytest.raises(ConnectionError, match="network down"):
-        await run_model_call(model, [AIMessage(content="问")], None, total_attempts=2)
-
-    assert model.ainvoke_calls == 2
-    assert len(sleeps) == 1
 
 
 @pytest.mark.asyncio
@@ -787,30 +653,6 @@ async def test_run_model_call_streams_usage_metadata_into_response() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_model_call_falls_back_to_ainvoke() -> None:
-    events, emitter = _collect_events()
-    stream = AgentStream(emitter)
-    tool_call = {"name": "finish", "args": {}, "id": "c1", "type": "tool_call"}
-    model = _NonStreamingLLM(AIMessage(content="完整回复", tool_calls=[tool_call]))
-
-    response = await run_model_call(model, [], stream)
-
-    assert response.content == "完整回复"
-    assert events == [
-        ("thinking", "模型不支持流式输出，等待完整回复...", ""),
-        ("output", "完整回复", ""),
-        ("tool_call", "finish", "started"),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_run_model_call_without_stream_uses_plain_ainvoke() -> None:
-    model = _NonStreamingLLM(_tool_call_message(content="回复"))
-    response = await run_model_call(model, [], None)
-    assert response.content == "回复"
-
-
-@pytest.mark.asyncio
 async def test_run_model_call_streams_without_agent_stream() -> None:
     """2026-08-10 用于验证不开启 SSE 时仍优先走 Provider 流式接口"""
     model = _StreamingLLM([AIMessageChunk(content="你好"), _tool_call_chunk()])
@@ -862,28 +704,6 @@ async def test_run_model_call_records_ttft_first_visible_and_reasoning_timings(m
 
 
 @pytest.mark.asyncio
-async def test_run_model_call_non_streaming_records_null_ttft(monkeypatch) -> None:
-    """2026-08-10 用于验证非流式 Provider 的 TTFT 与推理时间记录为 NULL"""
-    ticks = iter([0, 250_000_000])
-    monkeypatch.setattr("src.agents.stream.perf_counter_ns", lambda: next(ticks))
-    model = _NonStreamingLLM(_tool_call_message(content="回复"))
-    captured: dict[str, object] = {}
-
-    def on_turn_complete(message, timing) -> None:
-        del message
-        captured["timing"] = timing
-
-    response = await run_model_call(model, [], None, on_turn_complete=on_turn_complete)
-
-    assert response.content == "回复"
-    timing = captured["timing"]
-    assert timing.ttft_ms is None
-    assert timing.first_visible_ms is None
-    assert timing.reasoning_ms is None
-    assert timing.model_ms == 250
-
-
-@pytest.mark.asyncio
 async def test_aggregator_notes_reasoning_not_streamed(monkeypatch) -> None:
     """
     2026-08-11 用于验证流式响应未探测到思考内容时回合审计记录未流出原因
@@ -931,29 +751,6 @@ async def test_aggregator_omits_note_when_reasoning_streamed() -> None:
     timing = aggregator.timing()
     assert timing.reasoning_ms is not None
     assert timing.timing_notes == ()
-
-
-@pytest.mark.asyncio
-async def test_run_model_call_non_streaming_notes_provider_fallback(monkeypatch) -> None:
-    """
-    2026-08-11 用于验证非流式 Provider 降级路径记录 TTFT 与推理时间缺失原因
-    """
-    ticks = iter([0, 250_000_000])
-    monkeypatch.setattr("src.agents.stream.perf_counter_ns", lambda: next(ticks))
-    model = _NonStreamingLLM(_tool_call_message(content="回复"))
-    captured: dict[str, object] = {}
-
-    def on_turn_complete(message, timing) -> None:
-        del message
-        captured["timing"] = timing
-
-    await run_model_call(model, [], None, on_turn_complete=on_turn_complete)
-
-    timing = captured["timing"]
-    assert timing.ttft_ms is None
-    assert timing.reasoning_ms is None
-    assert timing.model_ms == 250
-    assert timing.timing_notes == ("provider_non_streaming",)
 
 
 @pytest.mark.asyncio
@@ -1156,37 +953,6 @@ async def test_run_model_call_retries_plain_text_reply_by_default(monkeypatch) -
     )
     model = _ScriptedStreamingLLM([[text_only], [complete]])
 
-    response = await run_model_call(model, [], None)
-
-    assert [call["name"] for call in response.tool_calls] == ["write_metrics"]
-    assert len(model.captured_messages) == 2
-
-
-@pytest.mark.asyncio
-async def test_run_model_call_non_streaming_retries_missing_tool_call(monkeypatch) -> None:
-    """2026-08-22 用于验证非流式路径对无工具回复同样按调用层故障重发"""
-    monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
-
-    class _NoStreamLLM:
-        """2026-08-22 用于模拟 streaming=False 且首次响应缺失工具调用的模型"""
-
-        streaming = False
-
-        def __init__(self):
-            self.responses = [
-                AIMessage(content="", additional_kwargs={"reasoning_content": "截断"}),
-                AIMessage(
-                    content="",
-                    tool_calls=[{"name": "write_metrics", "args": {}, "id": "call-1", "type": "tool_call"}],
-                ),
-            ]
-            self.captured_messages: list[list[Any]] = []
-
-        async def ainvoke(self, messages):
-            self.captured_messages.append(list(messages))
-            return self.responses.pop(0)
-
-    model = _NoStreamLLM()
     response = await run_model_call(model, [], None)
 
     assert [call["name"] for call in response.tool_calls] == ["write_metrics"]

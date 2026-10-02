@@ -69,8 +69,8 @@ def build_chat_model(
     if cfg.thinking_enabled:
         extra_body = {"think": True}
 
-    streaming = cfg.stream_enabled
-
+    # 2026-10-02 删除"流式输出"设置与非流式兜底路径：LLM 调用固定开启流式，
+    # 断流重试与计时统一由 stream.py 按 total_attempts 处理
     return ChatOpenAI(
         model=cfg.model or "",
         base_url=cfg.base_url,
@@ -82,7 +82,7 @@ def build_chat_model(
         # langchain-openai 新版参数名为 max_completion_tokens（OpenAI 新参数，旧 max_tokens 已弃用）
         max_completion_tokens=cfg.max_tokens,
         timeout=cfg.timeout_s if cfg.timeout_s is not None else 120,
-        streaming=streaming,
+        streaming=True,
         # 2026-08-12 断流重试由 stream.py 按 total_attempts 统一负责；
         # SDK 层再叠加 max_retries 会让最坏请求次数成倍膨胀（流式中断时叠加后最多 8 次）。
         # 关闭 SDK 层重试，重试次数只由 total_attempts 一处配置决定。

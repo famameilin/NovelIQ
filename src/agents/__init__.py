@@ -10,7 +10,6 @@ from typing import Any
 _ANNOTATION_EXPORTS = {
     "AgentRunResult",
     "BoundChapterAnnotation",
-    "CompletionResult",
     "run_annotation_agent",
 }
 _DIAGNOSIS_EXPORTS = {
@@ -21,7 +20,6 @@ _DIAGNOSIS_EXPORTS = {
 __all__ = [
     "AgentRunResult",
     "BoundChapterAnnotation",
-    "CompletionResult",
     "DiagnosisAgentRunError",
     "run_annotation_agent",
     "run_diagnosis_agent",
