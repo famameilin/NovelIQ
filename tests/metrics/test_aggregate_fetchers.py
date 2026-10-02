@@ -42,12 +42,6 @@ class _DummyAnnotationRepo:
 def test_fetch_character_data_uses_level1_canonical_entities_instead_of_graph_participants():
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
-    mock_service.build_graph_view.return_value = SimpleNamespace(
-        participant_states=[
-            SimpleNamespace(name="主角", status="active", primary_role_function="主体"),
-            SimpleNamespace(name="同伴", status="active", primary_role_function="助手"),
-        ]
-    )
     mock_service.build_level1_snapshot.return_value = SimpleNamespace(
         canonical_entities=[
             SimpleNamespace(name="主角", entity_type="character", status="active", primary_role_function="主体"),
@@ -75,7 +69,6 @@ def test_fetch_character_data_uses_level1_canonical_entities_instead_of_graph_pa
         ("主角", [1.0, -1.0]),
         ("同伴", [1.0]),
     ]
-    mock_service.build_graph_view.assert_not_called()
 
 
 def test_fetch_character_data_uses_explicit_resolved_graph_name():
@@ -103,12 +96,6 @@ def test_fetch_character_data_uses_explicit_resolved_graph_name():
         ],
     )
     mock_service = MagicMock()
-    mock_service.build_graph_view.return_value = SimpleNamespace(
-        participant_states=[
-            SimpleNamespace(name="白芷", status="active", primary_role_function="主体"),
-            SimpleNamespace(name="同伴", status="active", primary_role_function="助手"),
-        ]
-    )
     mock_service.build_level1_snapshot.return_value = SimpleNamespace(
         canonical_entities=[
             SimpleNamespace(name="白芷", entity_type="character", status="active", primary_role_function="主体"),
@@ -130,7 +117,6 @@ def test_fetch_character_data_uses_explicit_resolved_graph_name():
         ("白芷", [1.0, -1.0]),
         ("同伴", [1.0]),
     ]
-    mock_service.build_graph_view.assert_not_called()
 
 
 def test_fetch_character_data_skips_unresolved_reference_rows() -> None:

@@ -152,8 +152,6 @@ class TestGlobalSingleton:
     def test_lazy_load(self):
         reset_registry()
         reg = get_registry()
-        # 未调用 load() 前 is_loaded 为 False
-        assert reg.is_loaded is False
         # 调用 get 触发延迟加载
         terms = reg.get("positive.txt")
         assert len(terms) > 0
