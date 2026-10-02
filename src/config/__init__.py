@@ -1,10 +1,7 @@
 from . import bootstrap
 from .constants import (
-    CLASSICAL_PATTERNS,
-    EVENT_TYPE_SCORES,
     PROPP_FUNCTIONS,
     SEMANTIC_CATEGORY_MAPPING,
-    THREE_ACT_MAPPING,
 )
 from .input_config import (
     TaskModelConfig,
@@ -27,9 +24,7 @@ from .schemas import (
 from .settings import Settings, settings
 
 __all__ = [
-    "CLASSICAL_PATTERNS",
     "EmbeddingModelSettings",
-    "EVENT_TYPE_SCORES",
     "LdaSettings",
     "LoggingModuleSettings",
     "LoggingSettings",
@@ -43,7 +38,6 @@ __all__ = [
     "TaskModelConfig",
     "TaskModelSettings",
     "TaskType",
-    "THREE_ACT_MAPPING",
     "TopicModelSettings",
     "bootstrap",
     "load_task_config",

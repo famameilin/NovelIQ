@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from src.config.env_file import EnvFileError, apply_env_updates_to_process, update_env_file
+from src.config.env_file import EnvFileError, apply_env_updates_to_process, read_env_file, update_env_file
 from src.config.settings import (
     Settings,
     apply_settings_onto,
@@ -48,13 +48,13 @@ class TestApplySettingsOnto:
     def test_mutates_in_place(self) -> None:
         target = Settings()
         source = Settings()
-        source.models.annotation.temperature = 1.5
+        source.models.annotation.timeout_s = 65
         source.topic_model.num_topics = 7
 
         apply_settings_onto(target, source)
 
         assert target is not source
-        assert target.models.annotation.temperature == 1.5
+        assert target.models.annotation.timeout_s == 65
         assert target.topic_model.num_topics == 7
 
     def test_singleton_reference_sees_update(self) -> None:
@@ -72,31 +72,58 @@ class TestApplySettingsOnto:
 
 
 class TestEnvFile:
+    def test_named_credentials_roundtrip_and_duplicate_removal(self, tmp_path: Path) -> None:
+        path = tmp_path / ".env"
+        path.write_text(
+            "EMBEDDING_MODEL_KEY=old\nEMBEDDING_MODEL_KEY=duplicate\n# end", encoding="utf-8",
+        )
+        secret = "quoted 'key' # ${MODEL_KEY} \\ literal"
+        update_env_file(path, {"EMBEDDING_MODEL_KEY": secret, "EMBEDDING_MODEL_ID": "model"})
+        assert read_env_file(path)["EMBEDDING_MODEL_KEY"] == secret
+        assert path.read_text(encoding="utf-8").count("EMBEDDING_MODEL_KEY=") == 1
+        assert read_env_file(path)["EMBEDDING_MODEL_ID"] == "model"
+        update_env_file(path, {"EMBEDDING_MODEL_KEY": None})
+        assert "EMBEDDING_MODEL_KEY" not in read_env_file(path)
+
+    @pytest.mark.parametrize("key", [
+        "MODEL_PROVIDER_DEFAULT_KEY", "MODEL_PROVIDER_X_PASSWORD", "MODEL_PROVIDER_1X_KEY",
+    ])
+    def test_rejects_invalid_provider_env_key(self, tmp_path: Path, key: str) -> None:
+        with pytest.raises(EnvFileError):
+            update_env_file(tmp_path / ".env", {key: "value"})
+
+    def test_rejects_newline_before_writing(self, tmp_path: Path) -> None:
+        path = tmp_path / ".env"
+        with pytest.raises(EnvFileError):
+            update_env_file(path, {"MODEL_POOL": "key\nDATABASE_PASSWORD=evil"})
+        assert not path.exists()
+
     def test_update_preserves_comments_and_order(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
         env_path.write_text(
-            "# 数据库\nDATABASE_URL=postgresql://x\n\n# 模型\nMODEL_BASE_URL=http://old/v1\nMODEL_ID=old-model\n",
+            "# 数据库\nDATABASE_URL=postgresql://x\n\n# 模型\nEMBEDDING_MODEL_BASE_URL=http://old/v1\n"
+            "EMBEDDING_MODEL_ID=old-model\n",
             encoding="utf-8",
         )
 
-        update_env_file(env_path, {"MODEL_BASE_URL": "http://new/v1"})
+        update_env_file(env_path, {"EMBEDDING_MODEL_BASE_URL": "http://new/v1"})
 
         lines = env_path.read_text(encoding="utf-8").splitlines()
         assert lines[0] == "# 数据库"
         assert lines[3] == "# 模型"
-        assert "MODEL_BASE_URL=http://new/v1" in lines
-        assert "MODEL_ID=old-model" in lines
+        assert "EMBEDDING_MODEL_BASE_URL=http://new/v1" in lines
+        assert "EMBEDDING_MODEL_ID=old-model" in lines
         assert "DATABASE_URL=postgresql://x" in lines
 
     def test_delete_key_with_none(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
-        env_path.write_text("MODEL_KEY=secret\nMODEL_ID=m\n", encoding="utf-8")
+        env_path.write_text("MODEL_POOL=[]\nDIAGNOSIS_MODEL_ID=m\n", encoding="utf-8")
 
-        update_env_file(env_path, {"MODEL_KEY": None})
+        update_env_file(env_path, {"MODEL_POOL": None})
 
         content = env_path.read_text(encoding="utf-8")
-        assert "MODEL_KEY" not in content
-        assert "MODEL_ID=m" in content
+        assert "MODEL_POOL" not in content
+        assert "DIAGNOSIS_MODEL_ID=m" in content
 
     def test_appends_missing_keys(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
@@ -115,9 +142,8 @@ class TestEnvFile:
             apply_env_updates_to_process({"DATABASE_URL": "x"})
 
     def test_apply_updates_process_environ(self, monkeypatch) -> None:
-        monkeypatch.delenv("MODEL_KEY", raising=False)
-        apply_env_updates_to_process({"MODEL_KEY": " new-key "})
-        assert os.environ["MODEL_KEY"] == " new-key "
-        monkeypatch.delenv("MODEL_KEY", raising=False)
-        apply_env_updates_to_process({"MODEL_KEY": None})
-        assert "MODEL_KEY" not in os.environ
+        monkeypatch.delenv("MODEL_POOL", raising=False)
+        apply_env_updates_to_process({"MODEL_POOL": "[]"})
+        assert os.environ["MODEL_POOL"] == "[]"
+        apply_env_updates_to_process({"MODEL_POOL": None})
+        assert "MODEL_POOL" not in os.environ

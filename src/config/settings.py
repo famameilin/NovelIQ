@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
-from src.runtime_env import load_ltp_environment, load_model_environment
+from src.runtime_env import load_ltp_environment, load_model_environment, load_model_pool_environment
 
 from .schemas import (
     LinguisticSettings,
@@ -87,10 +87,10 @@ class Settings:
 
     @classmethod
     def _apply_runtime_environment(cls, instance: Settings) -> None:
-        """把环境变量凭据叠加到实例上（MODEL/EMBEDDING_MODEL/LTP 单一解析边界在 runtime_env）"""
+        """模型池、嵌入和 LTP 环境配置共用 runtime_env 解析边界"""
         apply_model_environment(
             instance.models,
-            load_model_environment("MODEL"),
+            load_model_pool_environment(),
             load_model_environment("EMBEDDING_MODEL"),
         )
         apply_linguistic_environment(instance.linguistic, load_ltp_environment())
