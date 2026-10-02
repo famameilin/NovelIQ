@@ -1,17 +1,4 @@
-"""
-章节 Agent 常驻事实图状态
-
-说明: run 级事实图在首个章节 Agent 启动时从库加载一次，之后所有章节 Agent 共享，
-每个图域写工具（write_entity / write_relation，含 change_kind 的关系变化）即时更新本图，
-章节完成时由持久化层从本图的操作日志派生新图版本落库。中途恢复任务时重新加载。
-运行时所有图查询（search_graph、关系/实体校验）只访问本内存图，数据库仅参与持久化。
-
-2026-09-04 单一写面收敛：图域（实体+关系）的运行时真相源是本 FactGraph，
-不再是 BoundChapterAnnotation 的 entities/relations 副本。本图在终态
-（active_relations / entity_* 映射）之外维护一份按章累积的有序操作日志
-（entity_ops/relation_assert_ops/relation_change_ops），承载持久化派生逐条 graph_facts 所需的 reason/case_id/
-change_kind/ordinal 与 before/after 审计信息——终态装不下这些，故必须显式记录。
-"""
+"""正式章节独立的实体与关系状态，操作日志随不可变章节结果提交"""
 
 from __future__ import annotations
 
@@ -33,12 +20,17 @@ def _entity_uuid(run_scope: str, key: str) -> str:
     return str(uuid5(NAMESPACE_DNS, f"novel-annotation-entity:{run_scope}:{key}"))
 
 
+def mention_uuid(run_id: str, chapter_id: int, name: str) -> str:
+    """章内提及身份不跨章合并，实体归属必须由标注 Agent 提交"""
+    return _entity_uuid(run_id, f"{chapter_id}:{_norm(name)}")
+
+
 def _stable_relation_key(
     from_name: str,
     to_name: str,
     relation_type: str,
 ) -> tuple[str, str, str]:
-    """2026-08-11 用于生成双向归一化的关系稳定键（历史加载与运行时共用）"""
+    """2026-08-11 用于生成双向归一化的关系稳定键"""
     key_a = _norm(from_name)
     key_b = _norm(to_name)
     definition = RELATION_DEFINITIONS.get(relation_type)
@@ -50,22 +42,10 @@ def _stable_relation_key(
 
 @dataclass(slots=True)
 class FactGraph:
-    """2026-08-09 用于保存实体与关系的实时事实图状态（历史+当章变更）
-
-    2026-09-19 实体 id：模型面引用一律用 run 级 uuid（uuid5 按 run_scope+归一化名
-    确定性铸造），名称只出现在系统面。id 在整章运行内恒定（同一实体无论从哪个章、
-    哪个面看都是同一个 id，含失败重试与进程重启重放）；id 跨 run 不复用
-    （run_scope 进哈希），落库主键即本 id，持久化按规范名匹配兜底重放。
-    """
+    """本章局部图，稳定身份跨尝试一致，图状态不跨章节共享"""
 
     run_scope: str = ""
-    history_entity_types: dict[str, EntityType] = field(default_factory=dict)
-    history_entity_names: dict[str, str] = field(default_factory=dict)
-    history_entity_tags: dict[str, list[str]] = field(default_factory=dict)
-    history_entity_attributes: dict[str, dict[str, Any]] = field(default_factory=dict)
-    history_entity_state: dict[str, dict[str, Any]] = field(default_factory=dict)
-    history_relations: set[tuple[str, str, str]] = field(default_factory=set)
-    history_relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict)
+    chapter_id: int = 0
     entity_types: dict[str, EntityType] = field(default_factory=dict, init=False)
     entity_names: dict[str, str] = field(default_factory=dict, init=False)
     entity_tags: dict[str, list[str]] = field(default_factory=dict, init=False)
@@ -75,40 +55,10 @@ class FactGraph:
     relation_attributes: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict, init=False)
     chapter_registered_entities: dict[str, EntityType] = field(default_factory=dict, init=False)
     chapter_added_relations: set[tuple[str, str, str]] = field(default_factory=set, init=False)
-    # 2026-09-19 实体 id 注册表：归一化名称 → run 级 uuid。id 纪律（2026-09-19）：
-    # 所有 id 都是 uuid（uuid5 按 run_scope+归一化名确定性铸造——同一实体在本 run 内
-    # 无论从哪个章、哪个面看都是同一个 id，进程重启重放也得到同值）；别名只能是 el；
-    # 一个实体只有一个 id；落库主键 graph_entities.entity_id 即本 id。
+    # 章内名称定位生成稳定提及 ID，跨章归属由标注 Agent 的身份结论确定
     entity_ids: dict[str, str] = field(default_factory=dict, init=False)
-    # 2026-09-04 单一写面：图域操作日志，按章累积（begin_chapter 清空、drain_ops 取出），
-    # 持久化层从这三份日志派生实体行、关系 assert 事实与案例关系变更事实；
-    # BoundChapterAnnotation 不再持有 entities/relations 副本，resolved_cases 不再承载 fact 动作。
-    # entity_ops 追加语义，relation_assert_ops 完整替换语义（每次 write_relation 按本章关系集合重放重填），
-    # relation_change_ops 记录 write_relation(change_kind=…) 的关系生命周期变化（无案例的变更
-    # 只有章与序号可做锚点，带案例的仍带案例生命周期元数据，
-    # 供完成事务锁行/校验/写映射）。三者纳入 snapshot/restore，重放顺序=先 assert 后 change。
     entity_ops: list[dict[str, Any]] = field(default_factory=list, init=False)
     relation_assert_ops: list[dict[str, Any]] = field(default_factory=list, init=False)
-    relation_change_ops: list[dict[str, Any]] = field(default_factory=list, init=False)
-
-    def __post_init__(self) -> None:
-        """2026-08-09 用于以历史快照初始化实时事实图状态"""
-        self.entity_types = dict(self.history_entity_types)
-        self.entity_names = dict(self.history_entity_names)
-        self.entity_tags = {key: list(tags) for key, tags in self.history_entity_tags.items()}
-        self.entity_attributes = {key: dict(attributes) for key, attributes in self.history_entity_attributes.items()}
-        self.entity_state = {key: dict(state) for key, state in self.history_entity_state.items()}
-        # 2026-08-12 历史关系按稳定键归一化加载，避免双向边端点顺序不一致导致匹配失败
-        self.active_relations = {
-            _stable_relation_key(from_name, to_name, relation_type)
-            for (from_name, to_name, relation_type) in self.history_relations
-        }
-        self.relation_attributes = {
-            key: dict(attributes) for key, attributes in self.history_relation_attributes.items()
-        }
-        # 2026-09-19 历史实体预填 id 注册表：uuid5 确定性铸造，任何时刻查询同值
-        for key in self.entity_names:
-            self._id_for(key)
 
     @staticmethod
     def _relation_key(
@@ -120,21 +70,13 @@ class FactGraph:
         return _stable_relation_key(from_name, to_name, relation_type)
 
     def register_entities(self, entities: list) -> list[tuple[str, str]]:
-        """2026-08-11 创建；2026-08-23 改为追加与更新语义（新名注册、同名更新，历史类型冲突仍拒绝）
+        """2026-08-11 创建；2026-08-23 改为追加与更新语义（新名注册、同名更新）
 
-        2026-09-19 返回本批每个实体的 (run 级 uuid id, 显示名)，供工具回执把 id 交给模型。
+        返回本批每个实体的 (章内提及 ID, 显示名)，供工具回执把 ID 交给模型。
         """
         assigned: list[tuple[str, str]] = []
         for entity in entities:
             key = _norm(entity.name)
-            if key in self.history_entity_types:
-                if self.history_entity_types[key] != entity.entity_type:
-                    raise ValueError(
-                        f"已登记实体不允许变更大类: {entity.name} "
-                        f"registered={self.history_entity_types[key]} "
-                        f"actual={entity.entity_type}（同一词条的不同身份请使用区分性名称，"
-                        '如"圣城"是 location、"圣城朝堂"是 organization）'
-                    )
             self.entity_types[key] = entity.entity_type
             self.entity_names[key] = entity.name
             assigned.append((self._id_for(key), entity.name))
@@ -164,7 +106,7 @@ class FactGraph:
         existing = self.entity_ids.get(key)
         if existing is not None:
             return existing
-        entity_id = _entity_uuid(self.run_scope, key)
+        entity_id = mention_uuid(self.run_scope, self.chapter_id, key)
         self.entity_ids[key] = entity_id
         return entity_id
 
@@ -185,23 +127,15 @@ class FactGraph:
         key = next((k for k, v in self.entity_ids.items() if v == entity_id), None)
         if key is None or key not in self.entity_names:
             raise ValueError(
-                f"{label} 实体 id 未登记：id 取自 write_entity / search_graph 回执的 id"
+                f"{label} 实体 id 未登记：id 取自本章 write_entity 回执"
             )
         return self.entity_names[key]
-
-    def entity_view(self, key: str) -> dict[str, Any]:
-        """2026-09-19 用于生成单个实体的模型可见视图（uuid id+名称+类型）"""
-        return {
-            "id": self._id_for(key),
-            "name": self.entity_names.get(key, key),
-            "entity_type": self.entity_types.get(key),
-        }
 
     def apply_relation(self, item: RelationInput) -> bool:
         """2026-08-12 用于登记本章确认存在的边（新边 assert，已存在 no-op 不累计支持度）
 
         返回 True 表示新边（assert），False 表示已存在（skipped_existing）。
-        强化/削弱/解除一律走 write_relation 的 change_kind 路径，不通过本条边提交。
+        跨章关系订正由 continuity 工作处理，本章只确认局部关系
         """
         from_name = str(item.from_entity)
         to_name = str(item.to_entity)
@@ -255,81 +189,14 @@ class FactGraph:
             for item in relations
         ]
 
-    def apply_relation_change(
-        self,
-        *,
-        from_entity: str,
-        to_entity: str,
-        relation_type: str,
-        change_kind: str,
-        reason: str,
-        case_id: str,
-        case_type: str,
-        target_key: str,
-        target_ref: dict[str, Any],
-        chapter_id: int,
-        evidence: int | None = None,
-    ) -> None:
-        """2026-09-04 关系生命周期变化：即时更新终态 + 记录变更操作
-
-        端点键按传入名原样构造、不过 resolve_name：search_graph 回显的 from/to 已是
-        入库规范名，与存储键一致；若在此再解析，同一人物分量内的两端会塌成代表节点
-        自环，要解除的边键自指导致永远删不掉（第 4 章空转的根因之一）。
-        break/retract 要求边当前活动，否则报错——静默 accepted 而终态不变正是上一轮
-        Agent 反复"撤销→复查→没变"空转的直接原因。
-
-        2026-09-18 变化从案例裁决下沉到写入路径：case_* 四件在无案例驱动时留空，
-        此时完成事务不锁案例行、不写解决映射，只按变更日志落库。
-        """
-        if _norm(from_entity) == _norm(to_entity):
-            # 两端归一后同名：持久化会插入 from_entity_id=to_entity_id 的自环行，
-            # 违反 graph_relations 端点互异约束炸掉完成事务（run a83fae3d 第9章实锤）。
-            # 同一人物归并只经 write_relation 的"同一人物"边表达，案例变更按原样端点
-            # 构造键、不过 resolve_name，此处裸同名即退化输入，直接报错回滚本回合
-            raise ValueError(
-                f"关系两端解析为同一实体，不允许自环: {from_entity}—{to_entity}（{relation_type}）；"
-                "同一人物归并请用 write_relation 提交「同一人物」边，关系变更请先 search_graph "
-                "取边的规范端点名"
-            )
-        key = self._relation_key(from_entity, to_entity, relation_type)
-        if change_kind in {"assert", "reinforce", "refine", "supersede"}:
-            self.active_relations.add(key)
-            self._bump_support_count(key)
-        elif change_kind in {"break", "retract"}:
-            if key not in self.active_relations:
-                raise ValueError(
-                    f"关系变更目标不存在或已解除: {from_entity}—{to_entity}（{relation_type}）；"
-                    "请用 search_graph 确认边的规范端点名后再解除"
-                )
-            self.active_relations.discard(key)
-        elif change_kind != "weaken":
-            raise ValueError(f"不支持的关系变化类型: {change_kind}")
-        self.relation_change_ops.append(
-            {
-                "from_entity": str(from_entity),
-                "to_entity": str(to_entity),
-                "relation_type": str(relation_type),
-                "change_kind": str(change_kind),
-                "reason": reason,
-                "case_id": case_id,
-                "case_type": str(case_type),
-                "target_key": target_key,
-                "target_ref": dict(target_ref),
-                "chapter_id": chapter_id,
-                "evidence": evidence,
-            }
-        )
-
     def drain_ops(self) -> dict[str, list[dict[str, Any]]]:
-        """2026-09-04 在子块结束时取出并清空累积的图域操作日志，供合并进完成事务输入"""
+        """取出本章局部命令，交给正式提交事务"""
         drained = {
             "entity_ops": self.entity_ops,
             "relation_assert_ops": self.relation_assert_ops,
-            "relation_change_ops": self.relation_change_ops,
         }
         self.entity_ops = []
         self.relation_assert_ops = []
-        self.relation_change_ops = []
         return drained
 
     def reset_chapter_relations(self) -> None:
@@ -353,45 +220,24 @@ class FactGraph:
         self.active_relations -= self.chapter_added_relations
         self.chapter_added_relations.clear()
 
-    def begin_chapter(self) -> None:
-        """2026-08-11 用于在章节边界把本章增量并入历史并清空章内追踪状态
-
-        2026-08-13 P1-1 防御：把本章实时状态并入 history_* 快照，使章节失败
-        回滚（reset_chapter_changes）恢复到上一章结束状态而非 run 启动状态，
-        避免重试时丢失已成功章节的内存增量（正常路径 resume 从库重载兜底）。
-        """
-        self.history_entity_types = dict(self.entity_types)
-        self.history_entity_names = dict(self.entity_names)
-        self.history_entity_tags = {key: list(tags) for key, tags in self.entity_tags.items()}
-        self.history_entity_attributes = {key: dict(attributes) for key, attributes in self.entity_attributes.items()}
-        self.history_entity_state = {key: dict(state) for key, state in self.entity_state.items()}
-        self.history_relations = set(self.active_relations)
-        self.history_relation_attributes = {
-            key: dict(attributes) for key, attributes in self.relation_attributes.items()
-        }
-        self.chapter_added_relations.clear()
-        self.chapter_registered_entities.clear()
-        self.entity_ops = []
-        self.relation_assert_ops = []
-        self.relation_change_ops = []
-
     def reset_chapter_changes(self) -> None:
-        """2026-08-09 用于在章节重试回滚时恢复历史快照
+        """2026-10-02 用于在多代理路径整章失败时撤销本章全部图域变更
 
-        2026-09-04：图域操作日志随本章增量一并清空（失败章不提交，日志无消费方）。
+        语义 = reset_chapter_relations（含 support_count 回退）＋ 清空本章实体域全部
+        状态（名称/类型/标签/属性/状态/ops）——容量位拉起下先完成的子代理也可能已
+        写入实体，失败路径必须整图复原。图按章新建、整图即本章，清空即复原；
+        实体 id 注册表（entity_ids）刻意不清：id 由 uuid5(run+名) 确定性铸造，
+        回收与保留同值。
         """
-        self.entity_types = dict(self.history_entity_types)
-        self.entity_names = dict(self.history_entity_names)
-        self.entity_tags = dict(self.history_entity_tags)
-        self.entity_attributes = dict(self.history_entity_attributes)
-        self.entity_state = dict(self.history_entity_state)
-        self.active_relations = set(self.history_relations)
-        self.relation_attributes = dict(self.history_relation_attributes)
-        self.chapter_registered_entities = {}
-        self.chapter_added_relations = set()
-        self.entity_ops = []
-        self.relation_assert_ops = []
-        self.relation_change_ops = []
+        self.reset_chapter_relations()
+        self.chapter_registered_entities.clear()
+        self.entity_names.clear()
+        self.entity_types.clear()
+        self.entity_tags.clear()
+        self.entity_attributes.clear()
+        self.entity_state.clear()
+        self.entity_ops.clear()
+        self.relation_assert_ops.clear()
 
     def snapshot(self) -> dict:
         """2026-08-09 用于保存章节尝试前的完整事实图快照
@@ -412,7 +258,6 @@ class FactGraph:
             "chapter_added_relations": set(self.chapter_added_relations),
             "entity_ops": [dict(op) for op in self.entity_ops],
             "relation_assert_ops": [dict(op) for op in self.relation_assert_ops],
-            "relation_change_ops": [dict(op) for op in self.relation_change_ops],
         }
 
     def restore(self, snap: dict) -> None:
@@ -423,10 +268,6 @@ class FactGraph:
     def entity_type(self, name: str) -> EntityType | None:
         """2026-08-09 用于查询实时事实图实体大类"""
         return self.entity_types.get(_norm(name))
-
-    def relation_exists(self, from_name: str, to_name: str, relation_type: str) -> bool:
-        """2026-08-09 用于判断活动关系是否已存在"""
-        return self._relation_key(from_name, to_name, relation_type) in self.active_relations
 
     def resolve_name(self, name: str) -> str:
         """2026-08-11 用于沿"同一人物"连通分量把别名解析为规范名（标记优先）"""
@@ -473,9 +314,6 @@ class FactGraph:
         flagged = [node for node in members if bool((self.entity_attributes.get(node) or {}).get("is_representative"))]
         if flagged:
             return flagged[0]
-        history_members = [node for node in members if node in self.history_entity_types]
-        if history_members:
-            return history_members[0]
         return members[0]
 
 
