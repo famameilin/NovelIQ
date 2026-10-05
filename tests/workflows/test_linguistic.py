@@ -123,6 +123,34 @@ class TestRunLinguistic:
         assert all(row.paragraph_id in (0, 1) for row in rows)
 
     @pytest.mark.asyncio()
+    async def test_ltp_inference_runs_off_event_loop(self, monkeypatch) -> None:
+        """2026-10-03 回归（run 08f9ba42）：LTP 批推理必须运行在工作线程
+
+        LTP 批推理是重 CPU 同步调用，直接在事件循环上跑会冻结整个 API
+        （状态端点/SSE 全部无响应，实证单次 30s 尖峰）。to_thread 后调用
+        线程必须是工作线程而非事件循环主线程。
+        """
+        import threading
+
+        import src.linguistic as linguistic_module
+        from src.linguistic import analyze_paragraph_batch as original_impl
+
+        observed_threads: list[int] = []
+
+        def _spy(texts):
+            observed_threads.append(threading.get_ident())
+            return original_impl(texts)
+
+        monkeypatch.setattr(linguistic_module, "analyze_paragraph_batch", _spy)
+
+        event_loop_thread = threading.get_ident()
+        paragraphs, features = await run_linguistic(self.run_id, self.db_session)
+
+        assert paragraphs == 2
+        assert observed_threads, "LTP 批推理未被执行"
+        assert all(t != event_loop_thread for t in observed_threads), "LTP 推理仍阻塞事件循环"
+
+    @pytest.mark.asyncio()
     async def test_word2vec_enabled_trains_and_writes_contract(self, monkeypatch, tmp_path) -> None:
         """2026-08-30 用于验证共享 kv 初始化后写入实际来源与 run 私有模型契约"""
 

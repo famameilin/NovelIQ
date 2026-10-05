@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -91,17 +92,17 @@ async def run_linguistic(
         last_id: int | None = None
         first_batch = True
         while True:
-            batch = paragraph_repo.fetch_paragraph_rows_batch(
-                run_id, after_id=last_id, limit=batch_size
-            )
+            batch = paragraph_repo.fetch_paragraph_rows_batch(run_id, after_id=last_id, limit=batch_size)
             if not batch:
                 break
             last_id = batch[-1].paragraph_id
 
-            logger.info(
-                f"LTP 分析 {len(batch)} 个段落（游标 after={last_id}）..."
-            )
-            results = analyze_paragraph_batch([row.text for row in batch])
+            logger.info(f"LTP 分析 {len(batch)} 个段落（游标 after={last_id}）...")
+            # 2026-10-03 LTP 批推理移出事件循环（run 08f9ba42 实证 30s API 尖峰）：
+            # 128 段/批的 cws/pos/ner/dep/sdp 是重 CPU 同步调用，直接在事件循环上
+            # 跑会冻结整个 API（状态端点/SSE 全部无响应）。批间 await 串行化模型
+            # 访问，无并发推理风险。
+            results = await asyncio.to_thread(analyze_paragraph_batch, [row.text for row in batch])
 
             feature_rows: list[dict] = []
             entity_rows: list[dict] = []
@@ -161,9 +162,7 @@ async def run_linguistic(
             ling_repo.insert_linguistic_features(run_id, feature_rows, clear_first=first_batch)
             ling_repo.insert_entities(run_id, entity_rows, clear_first=first_batch)
             total_feature_paragraphs += len(feature_rows)
-            logger.info(
-                f"LTP 特征落库：段落={len(feature_rows)} 实体候选={len(entity_rows)}"
-            )
+            logger.info(f"LTP 特征落库：段落={len(feature_rows)} 实体候选={len(entity_rows)}")
 
             # 固定短语匹配：词表命中 + 四字候选（依赖 LTP 词法特征行）
             # 2026-09-05 C 批：draft 词表（body_reaction/colloquial 扩表候选）
@@ -227,9 +226,7 @@ async def run_linguistic(
     # 标签不足或类别单一时无边界（两列 NULL），段落曲线维持 mNEG 口径，不伪造。
     boundary_rows = _apply_paragraph_boundary_scores(run_id, paragraph_repo)
     if boundary_rows:
-        logger.info(
-            f"段落级边界打分回写：{boundary_rows} 段获得分值（样本来自标注 agent 自选段标签）"
-        )
+        logger.info(f"段落级边界打分回写：{boundary_rows} 段获得分值（样本来自标注 agent 自选段标签）")
 
     # ------------------------------------------------------------------
     # Word2Vec：预训练初始化 + 按书微调（依赖 LTP 词元）
@@ -246,7 +243,10 @@ async def run_linguistic(
         pretrained_path = resolve_shared_pretrained_path(model_dir)
         pretrained_vectors = load_shared_pretrained_vectors(model_dir)
 
-        train_result, pos_rows_count = _train_and_build(
+        # 2026-10-03 Word2Vec 训练（gensim CPU 重活，分钟级）同样移出事件循环；
+        # 编排器 session 只被本协程使用，跨线程顺序访问安全（事件循环 await 期间不触碰）
+        train_result, pos_rows_count = await asyncio.to_thread(
+            _train_and_build,
             run_id,
             ling_repo,
             token_sequences,

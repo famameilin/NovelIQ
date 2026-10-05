@@ -116,9 +116,13 @@ async def run_diagnose(
         CloudAnalysis: 诊断分析结果
     """
     from src.agents import run_diagnosis_agent
-    from src.storage.repositories.pipeline_visibility import require_released_cutoff
 
-    require_released_cutoff(session, run_id)
+    # 2026-10-03 改短事务版边界检查：编排器 session 是长活事务，在其上取 FOR SHARE
+    # 会把 analysis_runs 行锁持有整个诊断阶段（实测 12+ 分钟），饿死任务心跳的
+    # UPDATE（详见 require_released_cutoff_short docstring）
+    from src.storage.repositories.pipeline_visibility import require_released_cutoff_short
+
+    require_released_cutoff_short(run_id)
 
     run_repo = RunRepository(session)
     run = run_repo.get_run(run_id)

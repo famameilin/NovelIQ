@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -159,9 +160,12 @@ async def run_aggregate(
     Args: run_id / session / emitter(async StreamEvent->None)  Returns: (总章数, 全局统计条数, 保留位0)
     """
     start_time = time.time()
-    from src.storage.repositories.pipeline_visibility import require_released_cutoff
+    # 2026-10-03 改短事务版边界检查：编排器 session 是长活事务，在其上取 FOR SHARE
+    # 会把 analysis_runs 行锁持有整个阶段，饿死任务心跳的 UPDATE（详见
+    # require_released_cutoff_short docstring）
+    from src.storage.repositories.pipeline_visibility import require_released_cutoff_short
 
-    require_released_cutoff(session, run_id)
+    require_released_cutoff_short(run_id)
 
     chapter_repo = ChapterRepository(session)
     stats_repo = StatsRepository(session)
@@ -182,7 +186,9 @@ async def run_aggregate(
 
     logger.info("Computing aggregate metrics...")
     try:
-        agg_result = aggregate_all_metrics(run_id, ann_repo, chapter_repo, stats_repo)
+        # 2026-10-03 指标聚合移出事件循环（run 08f9ba42 实证单次 7s API 冻结）：
+        # 全书章节/图事实的 CPU 聚合同为重活，与 linguistic 同待遇
+        agg_result = await asyncio.to_thread(aggregate_all_metrics, run_id, ann_repo, chapter_repo, stats_repo)
         _log_aggregate_results(agg_result)
         quality_report = _build_quality_gate_report(run_id, agg_result, session)
         _log_quality_gate_report(run_id, quality_report)
