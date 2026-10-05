@@ -11,6 +11,8 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
+
 from src.storage.models.agent_audit import AgentInvocation, AgentToolCall, AgentTurn
 from src.storage.models.rag import TokenUsage
 
@@ -45,9 +47,6 @@ class AgentAuditRecorder:
     ) -> int:
         """2026-08-10 用于开启一次 Annotation/Diagnosis 尝试审计并返回 invocation_id"""
         session = self._session_factory()
-        from src.agents.work_context import current_agent_work
-
-        work = current_agent_work.get()
         row = AgentInvocation(
             run_id=run_id,
             task_type=task_type,
@@ -55,11 +54,6 @@ class AgentAuditRecorder:
             attempt_number=attempt_number,
             model_name=model_name,
             model_provider=model_provider,
-            work_id=work.work_id if work is not None else None,
-            attempt_epoch=work.attempt_epoch if work is not None else None,
-            cutoff_hash=work.cutoff_hash if work is not None else None,
-            provider_id=work.provider_id if work is not None else None,
-            business_outcome="running" if work is not None else None,
             status="running",
             final_error=None,
             started_at=self._utcnow(),
@@ -87,9 +81,36 @@ class AgentAuditRecorder:
         row.status = status
         row.final_error = final_error
         row.finished_at = self._utcnow()
-        if row.work_id is not None and row.business_outcome in {"running", "model_succeeded", "model_failed"}:
-            row.business_outcome = "model_succeeded" if status == "success" else "model_failed"
         self._commit(session)
+
+    def close_orphaned_invocations(self, run_id: str) -> int:
+        """2026-10-03 用于分析环境初始化时收口本 run 遗留的 running 审计行
+
+        进程被杀/重启时正在执行的 invocation 没机会走 finish_invocation，永远停在
+        status='running' 且 finished_at 为空（run 08f9ba42 实证 12 条僵尸行污染
+        错误率统计）。每次创建/恢复分析任务时统一收口为 interrupted——审计是事实
+        记录，只补状态不删除。
+        """
+        session = self._session_factory()
+        try:
+            rows = list(
+                session.execute(
+                    select(AgentInvocation).where(
+                        AgentInvocation.run_id == run_id,
+                        AgentInvocation.status == "running",
+                        AgentInvocation.finished_at.is_(None),
+                    )
+                ).scalars()
+            )
+            now = self._utcnow()
+            for row in rows:
+                row.status = "interrupted"
+                row.final_error = "进程重启遗留：调用未正常收口"
+                row.finished_at = now
+            session.commit()
+            return len(rows)
+        finally:
+            session.close()
 
     def start_turn(
         self,
