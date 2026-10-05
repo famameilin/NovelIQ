@@ -406,25 +406,43 @@ class GraphRepository(BaseRepository[GraphFact]):
         return [] if boundary is None else self.fetch_relation_snapshots(boundary, active_only=active_only)
 
     def fetch_relation_history(self, run_id: str) -> list[RelationSnapshotRow]:
-        """2026-08-19 用于按章节顺序读取关系状态历史"""
-        rows: list[RelationSnapshotRow] = []
+        """按章节顺序读取关系历史，共享实体与关系索引，避免逐状态重建全图"""
         order_map = self._chapter_order_map(run_id)
+        entity_names = {
+            str(row.entity_id): str(row.canonical_name)
+            for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
+        }
+        relations = {
+            str(row.relation_id): row
+            for row in self.session.execute(select(GraphRelation).where(GraphRelation.run_id == run_id)).scalars()
+        }
         states = list(self.session.execute(select(RelationState).where(RelationState.run_id == run_id)).scalars())
+        first_seen: dict[str, int] = {}
+        for state in states:
+            key = str(state.relation_id)
+            first_seen[key] = min(first_seen.get(key, int(state.chapter_id)), int(state.chapter_id))
+        rows: list[RelationSnapshotRow] = []
         for state in sorted(states, key=lambda row: order_map.get(int(row.chapter_id), 0)):
-            boundary = ChapterBoundary(
-                run_id=run_id,
+            relation_id = str(state.relation_id)
+            relation = relations.get(relation_id)
+            if relation is None:
+                continue
+            rows.append(RelationSnapshotRow(
                 chapter_id=int(state.chapter_id),
-                chapter_order=order_map.get(int(state.chapter_id), 0),
-                first_chapter_id=int(state.chapter_id),
-                last_chapter_id=int(state.chapter_id),
-                annotation_id="",
-            )
-            snapshots = self.fetch_relation_snapshots(boundary, active_only=False)
-            rows.extend(
-                row
-                for row in snapshots
-                if row.relation_id == str(state.relation_id) and row.chapter_id == state.chapter_id
-            )
+                relation_id=relation_id,
+                from_entity_id=str(relation.from_entity_id),
+                to_entity_id=str(relation.to_entity_id),
+                from_name=entity_names[str(relation.from_entity_id)],
+                to_name=entity_names[str(relation.to_entity_id)],
+                relation_type=str(state.relation_type),
+                directionality=str(relation.directionality),
+                relation_semantics=str(relation.relation_semantics),
+                attributes=dict(state.attributes),
+                is_active=bool(state.is_active),
+                changes=list(state.changes),
+                first_seen_chapter=first_seen[relation_id],
+                last_seen_chapter=int(state.chapter_id),
+            ))
         return rows
 
     def fetch_relation_changes(self, run_id: str, *, limit: int | None = None) -> list[GraphChangeRow]:
