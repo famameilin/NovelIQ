@@ -1,6 +1,6 @@
 import type { TimelineEventNode } from "@/api/types";
 
-import { getCurveNodeYPx, getNormalizedProgress, getTrackPositionPx, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
+import { getCurveNodeYPx, getNormalizedProgress, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
 
 export type TimelineLayoutInputNode = TimelineEventNode;
 
@@ -257,15 +257,7 @@ export function getClampedLabelLeftPx(anchorX: number, labelWidth: number, canva
 
 /**
  * 2026-08-17，作用：计算节点的默认时间轴横坐标
- * 说明：用于布局前保留事件原始时间进度；2026-08-20 起布局内部不再依赖此函数，保留供外部兼容
- */
-export function calculateNodeAnchorX(progress: number, canvasWidth: number): number {
-  return getTrackPositionPx(progress, canvasWidth, TRACK_NODE_START_PADDING_PX, TRACK_NODE_END_PADDING_PX);
-}
-
-/**
- * 2026-08-17，作用：计算节点原始时间进度对应的曲线纵坐标
- * 说明：对外保留该计算入口，布局内部使用重排后的横坐标计算连接线落点
+ * 说明：布局内部使用重排后的横坐标计算连接线落点
  */
 export function calculateNodeAnchorY(
   progress: number,

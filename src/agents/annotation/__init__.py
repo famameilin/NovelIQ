@@ -14,7 +14,6 @@ from .runner import run_annotation_agent, validate_bound_annotation
 from .schema import (
     AgentRunResult,
     BoundChapterAnnotation,
-    CompletionResult,
 )
 from .tools import (
     AnnotationQueryService,
@@ -32,7 +31,6 @@ __all__ = [
     "AnnotationRetryableError",
     "AnnotationToolLedger",
     "BoundChapterAnnotation",
-    "CompletionResult",
     "build_annotation_graph",
     "build_annotation_tools",
     "run_annotation_agent",

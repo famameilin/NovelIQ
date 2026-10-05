@@ -31,47 +31,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-import numpy as np
-
 from src.config import settings
 from src.models.local.embedding import EmbeddingClient
 
 
 class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
-    def test_compute_similarity_identical_vectors(self) -> None:
-        vec = [1.0, 2.0, 3.0]
-        similarity = EmbeddingClient.compute_similarity(vec, vec)
-        self.assertAlmostEqual(similarity, 1.0, places=5)
-
-    def test_compute_similarity_orthogonal_vectors(self) -> None:
-        vec1 = [1.0, 0.0, 0.0]
-        vec2 = [0.0, 1.0, 0.0]
-        similarity = EmbeddingClient.compute_similarity(vec1, vec2)
-        self.assertAlmostEqual(similarity, 0.0, places=5)
-
-    def test_compute_similarity_opposite_vectors(self) -> None:
-        vec1 = [1.0, 0.0, 0.0]
-        vec2 = [-1.0, 0.0, 0.0]
-        similarity = EmbeddingClient.compute_similarity(vec1, vec2)
-        self.assertAlmostEqual(similarity, -1.0, places=5)
-
-    def test_compute_similarity_empty_vectors(self) -> None:
-        similarity = EmbeddingClient.compute_similarity([], [])
-        self.assertEqual(similarity, 0.0)
-
-    def test_compute_similarity_different_dimensions(self) -> None:
-        vec1 = [1.0, 2.0]
-        vec2 = [1.0, 2.0, 3.0]
-        similarity = EmbeddingClient.compute_similarity(vec1, vec2)
-        self.assertEqual(similarity, 0.0)
-
-    def test_compute_similarity_partial_similarity(self) -> None:
-        vec1 = [1.0, 0.0, 0.0]
-        vec2 = [1.0, 1.0, 0.0]
-        similarity = EmbeddingClient.compute_similarity(vec1, vec2)
-        expected = 1.0 / np.sqrt(2)
-        self.assertAlmostEqual(similarity, expected, places=5)
-
     @patch("src.models.local.embedding.AsyncOpenAI")
     async def test_get_embedding_success(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()

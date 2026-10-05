@@ -10,13 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.storage.models import (
-    CaseResolutionMapping,
     Chapter,
     ChapterAnnotationRecord,
     EventEdge,
     EventNode,
 )
 from src.storage.models.graph import ChapterBoundary
+from src.storage.repositories.event_order import formal_event_ordinals
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,7 @@ class EventNodeRow:
     parent_event_id: str | None
     evidence_scope: str
     payload_path: str
+    event_ordinal: int
 
 
 @dataclass(frozen=True)
@@ -205,19 +206,19 @@ class EventForestRepository:
         if not rows:
             return []
         annotation_ids = {node.annotation_id for node in rows}
-        annotations = self.session.execute(
+        annotations = list(self.session.execute(
             select(ChapterAnnotationRecord).where(ChapterAnnotationRecord.annotation_id.in_(annotation_ids))
-        ).scalars()
+        ).scalars())
         # parent_node_id 只在正式标注载荷里，批量读取避免每个节点再查一次
         payload_events: dict[str, dict[str, Any]] = {}
         for annotation in annotations:
-            for event in (annotation.payload or {}).get("events", []):
-                if isinstance(event, dict) and event.get("node_id"):
-                    payload_events[str(event["node_id"])] = event
+            for event in annotation.payload["events"]:
+                payload_events[event["node_id"]] = event
+        ordinals = formal_event_ordinals(annotations)
         node_by_id = {node.event_id: node for node in rows}
 
         def parent_event_id(node: EventNode) -> str | None:
-            parent_id = payload_events.get(node.event_id, {}).get("parent_node_id")
+            parent_id = payload_events[node.event_id]["parent_node_id"]
             parent = node_by_id.get(str(parent_id)) if parent_id else None
             return str(parent_id) if parent is not None and parent.tree_id == node.tree_id else None
 
@@ -236,11 +237,9 @@ class EventForestRepository:
                 tree_id=node.tree_id,
                 cause_role=node.cause_role,
                 parent_event_id=parent_event_id(node),
-                evidence_scope=(
-                    "paragraph" if payload_events.get(node.event_id, {}).get("evidence_paragraph_id") is not None
-                    else "chapter"
-                ),
+                evidence_scope="paragraph",
                 payload_path=node.payload_path,
+                event_ordinal=ordinals[node.event_id],
             )
             for node in rows
         ]
@@ -262,13 +261,7 @@ class EventForestRepository:
     def _fetch_event_edges_by_chapter_ids(
         self, run_id: str, chapter_ids: set[int], *, include_inactive: bool = False
     ) -> list[EventEdgeRow]:
-        """内部：按已解析 chapter_ids 查询因果边，避免重复计算章节集合
-
-        2026-09-14：必须按 edge_type="causal" 过滤——09-13 起 write_event 挂树边用
-        edge_type="foreshadowing" 落库（persistence 唯一仍产生的边类），不过滤会让
-        伏笔边混进 causal_edges，下游 EventEdgeResponse(edge_type=Literal["causal"])
-        校验直接 500，且 timeline 把伏笔边误标为因果边。
-        """
+        """按可见章节读取因果边，伏笔关联由独立通道返回"""
         if not chapter_ids:
             return []
         filters: list[Any] = [
@@ -294,27 +287,6 @@ class EventForestRepository:
             )
             for edge in rows
         ]
-
-    def fetch_timeline_causal_edges(
-        self, run_id: str, *, max_chapter_order: int, chapters: list[Chapter] | None = None
-    ) -> list[EventEdgeRow]:
-        """2026-08-20 用于时间轴返回全量因果边（含 inactive，前端灰显）"""
-        return self.fetch_event_edges(
-            run_id, max_chapter_order=max_chapter_order, include_inactive=True, chapters=chapters
-        )
-
-    def fetch_foreshadowing_edges(
-        self,
-        run_id: str,
-        *,
-        max_chapter_order: int,
-        chapters: list[Chapter] | None = None,
-    ) -> list[ForeshadowingEdgeRow]:
-        """2026-08-19 用于读取截止章节边界的伏笔边（支持复用已缓存 chapters）"""
-        chapter_ids = self._chapter_ids_for_order(run_id, max_chapter_order, chapters=chapters)
-        if not chapter_ids:
-            return []
-        return self._fetch_foreshadowing_edges_by_chapter_ids(run_id, chapter_ids)
 
     def _fetch_foreshadowing_edges_by_chapter_ids(
         self, run_id: str, chapter_ids: set[int]
@@ -346,22 +318,12 @@ class EventForestRepository:
             )
         ).scalars().all():
             edges_by_root.setdefault(edge.source_event_id, []).append(edge)
-        root_ids = {root.event_id for root in roots}
-        payoff_by_root: dict[str, str] = {}
-        for mapping in self.session.execute(
-            select(CaseResolutionMapping).where(
-                CaseResolutionMapping.run_id == run_id,
-                CaseResolutionMapping.target_root_event_id.in_(root_ids),
-            )
-        ).scalars().all():
-            if mapping.resolution.get("foreshadowing_action") == "payoff" and mapping.target_event_id:
-                payoff_by_root[str(mapping.target_root_event_id)] = str(mapping.target_event_id)
         return [
             ForeshadowingEdgeRow(
                 root_event_id=root.event_id,
                 run_id=run_id,
                 tree_id=root.tree_id,
-                payoff_event_id=payoff_by_root.get(root.event_id),
+                payoff_event_id=None,
                 first_chapter_id=root.chapter_id,
                 last_chapter_id=max(
                     [root.chapter_id, *(edge.target_chapter_id for edge in edges_by_root.get(root.event_id, []))]
@@ -380,12 +342,7 @@ class EventForestRepository:
             nodes_by_tree.setdefault(node.tree_id, []).append(node)
 
         def sort_key(node: EventNodeRow) -> tuple[int, int, int, str]:
-            # 章级证据盖章后同章节点 char_start/char_end 相同，不能再靠字符区间排主链。
-            # payload_path 末段是写入序号（chapters/{id}/events/{index}），配合 cause_role 恢复树序。
-            tail = node.payload_path.rsplit("/", 1)[-1]
-            ordinal = int(tail) if tail.isdigit() else 0
-            role_rank = {"root": 0, "main": 1, "secondary": 2}.get(node.cause_role, 9)
-            return (node.chapter_order, role_rank, ordinal, node.event_id)
+            return node.chapter_order, node.char_start, node.event_ordinal, node.event_id
 
         trees: list[tuple[EventTreeRow, tuple[int, int, int, str]]] = []
         for tree_id, nodes in nodes_by_tree.items():
@@ -454,7 +411,7 @@ class EventForestRepository:
             for edge in foreshadowing_edges
         ]
         ordered_nodes = sorted(
-            event_nodes, key=lambda node: (node.chapter_order, node.char_start, node.char_end, node.event_id)
+            event_nodes, key=lambda node: (node.chapter_order, node.char_start, node.event_ordinal, node.event_id)
         )
         return EventForestSnapshot(
             chapter_id=boundary.chapter_id,

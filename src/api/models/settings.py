@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
 SettingFieldType = Literal["number", "integer", "boolean", "enum", "string"]
 
@@ -72,10 +72,31 @@ class TaskEnvPatchRequest(BaseModel):
     api_key: str | None = Field(default=None, description='凭据；None=不修改，""=整组清空')
 
 
+class ModelPoolEntryRequest(BaseModel):
+    """池内模型的完整配置；已有模型 Key 缺省时保留，不接收打码值
+
+    2026-10-02 设置迁移：temperature/top_p/max_tokens 随模型保存，
+    不再经参数设置接口按任务配置。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    model_id: str
+    base_url: str
+    api_key: str | None = Field(default=None, repr=False)
+    weight: StrictInt | StrictFloat = 1.0
+    max_in_flight: StrictInt = 8
+    temperature: StrictInt | StrictFloat = Field(default=0.7, description="采样温度，[0, 2]")
+    top_p: StrictInt | StrictFloat = Field(default=0.8, description="核采样上限，[0, 1]")
+    max_tokens: StrictInt = Field(default=131072, description="输出 Token 上限")
+    original_model_id: str | None = None
+
+
 class ModelEnvUpdateRequest(BaseModel):
     """模型凭据更新（.env 白名单键写入 + os.environ 同步 + 单例原地生效）"""
 
-    model: TaskEnvPatchRequest | None = Field(default=None, description="文本模型（annotation/diagnosis 共用）")
+    model_config = ConfigDict(extra="forbid")
+    model_pool: list[ModelPoolEntryRequest] | None = Field(default=None, description="模型池完整配置")
+    diagnosis_model_id: str | None = Field(default=None, description="从模型池指定诊断模型")
     embedding_model: TaskEnvPatchRequest | None = Field(default=None, description="嵌入模型（llama-server）")
     ltp_model_dir: str | None = Field(default=None, description="LTP 模型目录；None=不修改，非空需为存在的目录")
 
@@ -85,6 +106,8 @@ class ModelProviderTestRequest(BaseModel):
 
     base_url: str | None = Field(default=None, description="覆盖当前 base_url")
     api_key: str | None = Field(default=None, description="覆盖当前 api_key（明文，不落盘）")
+    model_id: str | None = Field(default=None, description="池内模型 ID，用于读取已保存 Key")
+    model_config = ConfigDict(extra="forbid")
 
 
 class ModelProviderTestResponse(BaseModel):

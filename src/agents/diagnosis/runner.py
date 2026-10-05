@@ -124,8 +124,10 @@ async def run_diagnosis_agent(
 
     if llm is None:
         from src.agents.llm import build_chat_model
+        from src.config.input_config import load_task_config
 
-        llm = build_chat_model("diagnosis")
+        model_config = load_task_config("diagnosis")
+        llm = build_chat_model("diagnosis", config=model_config)
 
     if stream is not None:
         await stream.thinking("诊断 Agent 开始取证...")

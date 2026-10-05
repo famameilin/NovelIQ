@@ -18,6 +18,7 @@ from src.api.services.metrics_service import MetricsService
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
+from src.storage.models import AnalysisRun
 from src.storage.repositories import RunRepository
 
 # 结果查询端点统一的可读状态白名单（results / linguistic / tabs 共用）
@@ -27,6 +28,7 @@ READABLE_RUN_STATUSES = ("completed",)
 def require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict[str, Any]:
     """校验 run_id 存在且属于当前小说"""
     run_repo = RunRepository(session)
+    session.get(AnalysisRun, run_id, with_for_update={"read": True})
     run = run_repo.get_run(run_id)
     if not run:
         raise NovelNotFoundError(novel_id=novel_id, message=f"运行记录不存在: {run_id}")
@@ -46,6 +48,10 @@ def require_readable_run_status(run: dict[str, Any]) -> None:
         raise AnalysisNotCompleteError(
             f"分析未完成，当前状态: {run['status']}",
             run_status=run["status"],
+        )
+    if not run.get("annotation_cutoff_hash"):
+        raise AnalysisNotCompleteError(
+            message="分析结果尚未完成发布", run_status=run["status"],
         )
 
 # 模块级别的单例

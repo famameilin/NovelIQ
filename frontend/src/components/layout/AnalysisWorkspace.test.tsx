@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 
+vi.mock("@/components/common/PipelineBoundary", () => ({ PipelineBoundary: () => null }));
+
 vi.mock("@/components/common/NovelHeader", () => ({
   NovelHeader: ({ title, className }: { title: string; className?: string }) => (
     <div className={className}>{title}</div>

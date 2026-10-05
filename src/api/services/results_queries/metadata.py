@@ -1,7 +1,7 @@
 """
 结果元数据查询组装器
 
-说明: 承载 global_stats、token_usage、novel_name、已知角色等辅助查询逻辑
+说明: 承载 global_stats、token_usage、novel_name 等辅助查询逻辑
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from src.api.models.responses import (
     TokenUsageStats,
     TokenUsageSummary,
 )
-from src.storage.repositories import AnnotationRepository, ChapterRepository, DiagnosisRepository, StatsRepository
+from src.storage.repositories import ChapterRepository, StatsRepository
 
 
 def _fetch_global_stats(
@@ -45,9 +45,9 @@ def _fetch_global_stats(
     )
 
 
-def _fetch_novel_name(run_id: str, novel_id: str, stats_repo: StatsRepository) -> str | None:
+def _fetch_novel_name(novel_id: str, stats_repo: StatsRepository) -> str | None:
     """获取小说名称"""
-    return stats_repo.fetch_novel_title(novel_id, run_id)
+    return stats_repo.fetch_novel_title(novel_id)
 
 
 def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsRepository) -> TokenUsageStats:
@@ -96,9 +96,3 @@ def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsReposi
             summary=TokenUsageSummary(coverage_status="partial"),
             coverage_gaps=["token_usage_stats_unavailable"],
         )
-
-
-def _fetch_known_characters(run_id: str, annotation_repo: AnnotationRepository) -> list[str]:
-    """获取已知角色列表（规范名）"""
-    repo = DiagnosisRepository(annotation_repo.session)
-    return repo.fetch_known_characters(run_id)

@@ -19,8 +19,10 @@ from src.storage.models import (
     Chapter,
     CloudAnalysis,
     GlobalStats,
+    Paragraph,
     ParagraphLinguisticFeature,
     ParagraphTopic,
+    ParagraphTopicInference,
     TopicModelRun,
 )
 
@@ -113,16 +115,6 @@ def _row_has_valid_diagnosis_contract(row: CloudAnalysis) -> bool:
     return True
 
 
-def has_aggregated_data(session: Session, run_id: str) -> bool:
-    """检查指定运行是否有聚合数据（查 global_stats）。Args: session/run_id；Returns: 是否存在。"""
-    # 2026-08-14 M8b：聚合唯一落库产物为 global_stats（chunk_curves 已下线）
-    stats_count = (
-        session.execute(select(func.count()).select_from(GlobalStats).where(GlobalStats.run_id == run_id)).scalar() or 0
-    )
-
-    return stats_count > 0
-
-
 def has_topic_data(session: Session, run_id: str) -> bool:
     """检查指定运行是否有主题数据。
 
@@ -157,6 +149,54 @@ def has_linguistic_data(session: Session, run_id: str) -> bool:
         or 0
     )
     return count > 0
+
+
+def is_linguistic_complete(session: Session, run_id: str) -> bool:
+    """恢复任务只复用覆盖全部段落的语言特征，不能把首批数据当作阶段完成"""
+    row = session.execute(
+        select(
+            func.count(Paragraph.paragraph_id).label("total"),
+            func.count(ParagraphLinguisticFeature.paragraph_id).label("completed"),
+        ).select_from(Paragraph).outerjoin(
+            ParagraphLinguisticFeature,
+            (ParagraphLinguisticFeature.run_id == Paragraph.run_id)
+            & (ParagraphLinguisticFeature.paragraph_id == Paragraph.paragraph_id),
+        ).where(Paragraph.run_id == run_id)
+    ).mappings().one()
+    return row["total"] > 0 and row["completed"] == row["total"]
+
+
+def is_topic_model_complete(session: Session, run_id: str) -> bool:
+    """模型契约、每段终态与完整 K 维分布齐备后，才能在恢复时跳过主题阶段"""
+    model = session.get(TopicModelRun, run_id)
+    if model is None:
+        return False
+    topic_counts = select(
+        ParagraphTopic.paragraph_id, func.count().label("topic_count"),
+    ).where(ParagraphTopic.run_id == run_id).group_by(ParagraphTopic.paragraph_id).subquery()
+    row = session.execute(
+        select(
+            func.count(Paragraph.paragraph_id).label("total"),
+            func.count(ParagraphTopicInference.paragraph_id).filter(
+                ParagraphTopicInference.inference_status.in_(("complete", "empty_after_preprocess", "empty_bow")),
+            ).label("settled"),
+            func.count(ParagraphTopicInference.paragraph_id).filter(
+                ParagraphTopicInference.inference_status == "complete",
+            ).label("complete"),
+            func.count(ParagraphTopicInference.paragraph_id).filter(
+                ParagraphTopicInference.inference_status == "complete", topic_counts.c.topic_count == model.num_topics,
+            ).label("full_distributions"),
+        ).select_from(Paragraph).outerjoin(
+            ParagraphTopicInference,
+            (ParagraphTopicInference.run_id == Paragraph.run_id)
+            & (ParagraphTopicInference.paragraph_id == Paragraph.paragraph_id),
+        ).outerjoin(topic_counts, topic_counts.c.paragraph_id == Paragraph.paragraph_id)
+        .where(Paragraph.run_id == run_id)
+    ).mappings().one()
+    return (
+        row["total"] > 0 and row["settled"] == row["total"]
+        and row["complete"] == row["full_distributions"] == model.inference_paragraph_count
+    )
 
 
 def has_diagnosis_data(session: Session, run_id: str) -> bool:

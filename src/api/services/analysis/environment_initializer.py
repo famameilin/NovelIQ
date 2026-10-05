@@ -48,6 +48,14 @@ class EnvironmentInitializer:
 
         run_id = self._get_or_create_run_id(task_id, novel_id, source_path, novel_title, conn)
 
+        # 2026-10-03 收口进程重启遗留的 running 审计行，避免僵尸行永久污染错误率统计
+        # （run 08f9ba42 实证 12 条 running 僵尸行）；每次创建/恢复任务都会经过这里
+        from src.agents.audit.recorder import AgentAuditRecorder
+
+        orphaned = AgentAuditRecorder(lambda: self.session_factory.get_session()).close_orphaned_invocations(run_id)
+        if orphaned:
+            logger.info(f"Closed {orphaned} orphaned running invocations for run {run_id}")
+
         analysis_logger = self._create_analysis_logger(run_id)
         self._log_initialization_info(task_id, run_id, analysis_logger)
 
@@ -107,7 +115,7 @@ class EnvironmentInitializer:
     ) -> None:
         """确保全局上下文存在"""
         stats_repo = StatsRepository(conn)
-        if not stats_repo.has_global_context(run_id, novel_id):
+        if not stats_repo.has_global_context(novel_id):
             stats_repo.insert_global_context(
                 run_id=run_id,
                 novel_id=novel_id,
@@ -141,13 +149,13 @@ class EnvironmentInitializer:
         if skip_annotate and not settings.linguistic.ltp.enabled:
             logger.info("Linguistic disabled, treating stage as complete")
             skip_linguistic = True
-        elif skip_annotate and stats_repo.has_linguistic_data(run_id):
+        elif skip_annotate and stats_repo.is_linguistic_complete(run_id):
             logger.info("Linguistic complete, skipping")
             skip_linguistic = True
         if skip_linguistic and stats_repo.is_aggregate_complete(run_id):
             logger.info("Aggregate complete, skipping")
             skip_aggregate = True
-        if skip_aggregate and stats_repo.has_topic_data(run_id):
+        if skip_aggregate and stats_repo.is_topic_model_complete(run_id):
             logger.info("Topic model complete, skipping")
             skip_topic_model = True
         if skip_topic_model and stats_repo.has_diagnosis_data(run_id):

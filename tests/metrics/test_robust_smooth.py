@@ -12,13 +12,12 @@ import math
 
 import pytest
 
-from src.metrics.robust_smooth import robust_local_regression, smooth_series
+from src.metrics.robust_smooth import robust_local_regression
 
 
 class TestRobustLocalRegression:
     def test_empty_input_returns_empty(self) -> None:
         assert robust_local_regression([], []) == []
-        assert smooth_series([]) == []
 
     def test_length_mismatch_raises_value_error(self) -> None:
         with pytest.raises(ValueError):
@@ -31,7 +30,6 @@ class TestRobustLocalRegression:
         x = [0.0, 0.5, 1.0]
         y = [3.0, -1.0, 7.0]
         assert robust_local_regression(x, y) == y
-        assert smooth_series(y) == y
 
     def test_constant_input_outputs_constant_without_nan(self) -> None:
         x = [float(i) / 20 for i in range(21)]
@@ -112,16 +110,6 @@ class TestRobustLocalRegression:
         # 整体未被离群点拉弯：两端仍贴近趋势线
         assert robust_result[0] == pytest.approx(1.0, abs=1.0)
         assert robust_result[-1] == pytest.approx(3.0, abs=1.0)
-
-    def test_smooth_series_matches_uniform_regression(self) -> None:
-        """smooth_series 与 linspace 坐标的 robust_local_regression 等价"""
-        values = [1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0, 2.0]
-        expected = robust_local_regression(
-            [float(i) / 9 for i in range(10)],
-            values,
-            bandwidth=0.2,
-        )
-        assert smooth_series(values, bandwidth=0.2) == pytest.approx(expected)
 
     def test_zero_bandwidth_raises_instead_of_hanging(self) -> None:
         """2026-08-15 M3 回归：带宽 ≤ 0 时入口快速失败（此前扩窗 ×2 恒不变会死循环）"""

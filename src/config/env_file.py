@@ -17,7 +17,9 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
-from src.config.settings_registry import MODEL_ENV_KEYS
+from dotenv import dotenv_values
+
+from src.config.settings_registry import is_model_env_key
 
 _ENV_LINE_PATTERN = re.compile(r"^\s*(?:(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
@@ -27,9 +29,18 @@ class EnvFileError(ValueError):
 
 
 def _validate_whitelist(updates: Mapping[str, str | None]) -> None:
-    illegal = sorted(set(updates) - MODEL_ENV_KEYS)
+    illegal = sorted(key for key in updates if not is_model_env_key(key))
     if illegal:
         raise EnvFileError(f"以下键不在 .env 可编辑白名单内: {', '.join(illegal)}")
+    if any(value is not None and any(char in value for char in "\r\n\0") for value in updates.values()):
+        raise EnvFileError("环境变量值不能包含换行或空字符")
+
+
+def _encode_env_value(value: str) -> str:
+    if re.fullmatch(r"[^\s'\"#$\\]+", value):
+        return value
+    escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+    return f"'{escaped}'"
 
 
 def update_env_file(path: Path, updates: Mapping[str, str | None]) -> None:
@@ -41,24 +52,29 @@ def update_env_file(path: Path, updates: Mapping[str, str | None]) -> None:
     _validate_whitelist(updates)
 
     lines: list[str] = path.read_text(encoding="utf-8").splitlines(keepends=True) if path.exists() else []
-    pending = dict(updates)
+    pending = set(updates)
     output: list[str] = []
 
     for line in lines:
         match = _ENV_LINE_PATTERN.match(line)
-        if match is None or match.group(1) not in pending:
+        if match is None or match.group(1) not in updates:
             output.append(line)
             continue
         key = match.group(1)
-        new_value = pending.pop(key)
+        if key not in pending:
+            continue
+        pending.remove(key)
+        new_value = updates[key]
         if new_value is None:
             continue
         eol = "\n" if line.endswith("\n") else ""
-        output.append(f"{key}={new_value}{eol}")
+        output.append(f"{key}={_encode_env_value(new_value)}{eol}")
 
     for key, value in updates.items():
         if key in pending and value is not None:
-            output.append(f"{key}={value}\n")
+            if output and not output[-1].endswith("\n"):
+                output[-1] += "\n"
+            output.append(f"{key}={_encode_env_value(value)}\n")
 
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text("".join(output), encoding="utf-8")
@@ -69,12 +85,7 @@ def read_env_file(path: Path) -> dict[str, str]:
     """读取 .env 中的 KEY=VALUE（忽略注释与空行），供设置页回显打码值"""
     if not path.exists():
         return {}
-    result: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        match = _ENV_LINE_PATTERN.match(line)
-        if match is not None:
-            result[match.group(1)] = match.group(2).strip().strip('"').strip("'")
-    return result
+    return {key: value for key, value in dotenv_values(path, interpolate=False).items() if value is not None}
 
 
 def apply_env_updates_to_process(updates: Mapping[str, str | None]) -> None:

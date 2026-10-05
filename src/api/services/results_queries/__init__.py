@@ -24,7 +24,6 @@ from .graph import (
 )
 from .metadata import (
     _fetch_global_stats,
-    _fetch_known_characters,
     _fetch_novel_name,
     _fetch_token_usage_stats,
 )
@@ -50,7 +49,6 @@ __all__ = [
     "_fetch_global_stats",
     "_fetch_novel_name",
     "_fetch_token_usage_stats",
-    "_fetch_known_characters",
     "_fetch_paragraph_curves",
     "_fetch_chapter_metrics",
 ]

@@ -35,6 +35,8 @@ class AgentInvocation(Base):
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
     model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     model_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)  # local / cloud
+    # 2026-10-05 队列删除：work_id/attempt_epoch/cutoff_hash/provider_id/business_outcome
+    # 等 work 注入字段全部移除，审计身份只由 agent 自有的 run/chapter/attempt 承担
     status: Mapped[str] = mapped_column(String(20), nullable=False)  # success / error
     final_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

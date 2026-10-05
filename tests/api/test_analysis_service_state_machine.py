@@ -116,7 +116,7 @@ def test_disabled_ltp_is_complete_in_resume_chain(monkeypatch) -> None:
     annotation_repo.is_annotate_complete.return_value = True
     stats_repo = MagicMock()
     stats_repo.is_aggregate_complete.return_value = True
-    stats_repo.has_topic_data.return_value = True
+    stats_repo.is_topic_model_complete.return_value = True
     stats_repo.has_diagnosis_data.return_value = True
     monkeypatch.setattr(settings.linguistic.ltp, "enabled", False)
 
@@ -504,6 +504,8 @@ async def test_run_analysis_core_cancel_after_stages_persists_cancelled(db_sessi
     """
     2026-08-14 P2-13：所有阶段完成但成功收口前收到取消时，必须落 cancelled 终态
     （此前直接 return，run 卡在 running 直到重启孤儿回收）
+
+    2026-10-02 修改: _call_execute_analysis_stages 纯转发包装已内联删除，patch 目标改为 _execute_analysis_stages
     """
     from src.api.services.analysis.error_handler import AnalysisErrorHandler
 
@@ -528,7 +530,7 @@ async def test_run_analysis_core_cancel_after_stages_persists_cancelled(db_sessi
     async def _noop(*args, **kwargs) -> None:
         return None
 
-    monkeypatch.setattr(service, "_call_execute_analysis_stages", _noop)
+    monkeypatch.setattr(service, "_execute_analysis_stages", _noop)
 
     await service._run_analysis_core(
         task_id=run_id[:8],

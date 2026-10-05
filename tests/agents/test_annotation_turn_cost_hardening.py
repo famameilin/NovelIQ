@@ -28,9 +28,7 @@ from src.agents.annotation.errors import AnnotationStageRejection
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import _invoke_tool
 from src.agents.annotation.schema import (
-    CaseSearchResult,
     ChapterParagraphInfo,
-    SearchResult,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 
@@ -38,30 +36,10 @@ from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_t
 class _QueryServiceStub:
     """2026-09-12 用于无数据库依赖的空查询桩"""
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-        del query, hidden_case_ids, case_type, limit
-        return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
         del query, range_name, limit
         return []
-
-    def fetch_active_case_details(self, case_id):
-        del case_id
-        return None
-
-
-class _AliasCaseQueryService(_QueryServiceStub):
-    """2026-09-12 用于返回固定 entity_alias 案例的查询桩"""
-
-    def __init__(self, cases: list[CaseSearchResult]) -> None:
-        self.cases = cases
-
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-        del query, limit
-        if case_type == "entity_alias":
-            return SearchResult(results=[case for case in self.cases if case.id not in hidden_case_ids])
-        return SearchResult()
 
 
 def _writer_ledger(
@@ -120,46 +98,39 @@ def _entity_id(name: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_participation_role_rejects_narrative_role_word() -> None:
-    """role 与 narrative_role 是两套词表：人物功能词不得写进参与角色
+async def test_participation_role_unknown_word_defaults_to_subject() -> None:
+    """2026-10-04 合同放开：role 写了词表外的词不再拒绝，按登记大类给默认
 
-    2026-09-14：参与条目并入 write_event 的 characters 数组；非法枚举值由 schema 层
-    收紧成结构化拒绝，给出定位（record=t1/root, field=role, code=invalid_value）与
-    合法取值清单；被拒的整条不落账（根已写入，参与者仍为空）。
+    role 与 narrative_role 是两套词表，但把人物功能词写进参与角色只造成一次
+    缺省归一（character→主体），不再产生整条拒绝与解码返工。
     """
     ledger = _writer_ledger()
     tools = _writer_tools(ledger)
     tools["write_entity"].invoke({"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     tools["write_event"].invoke({"el": "t1", "isroot": True, "description": "根事件"})
 
-    receipt = await _write_rejection(
-        tools,
-        "write_event",
-        {
-            "el": "t1",
-            "isroot": True,
-            "description": "根事件",
-            "characters": [
-                {
-                    "entityid": "顾霜",
-                    "role": "发送者",
-                    "narrative_role": "主体",
-                    "action": "喝止",
-                    "emotion": -1,
-                }
-            ],
-        },
+    receipt = json.loads(
+        tools["write_event"].invoke(
+            {
+                "el": "t1",
+                "isroot": True,
+                "description": "根事件",
+                "characters": [
+                    {
+                        "entityid": "顾霜",
+                        "role": "发送者",
+                        "narrative_role": "主体",
+                        "action": "喝止",
+                        "emotion": -1,
+                    }
+                ],
+            }
+        )
     )
 
-    assert receipt["record"] == "t1/root"
-    assert receipt["field"] == "role"
-    assert receipt["code"] == "invalid_value"
-    assert "https://" not in receipt["message"]
-    # 被拒的整条不落账：根节点保留、参与者未被写入
-    tree = _tree(ledger, "t1")
-    assert set(tree["nodes"]) == {"root"}
-    root_event = next(event for event in ledger.bound_payloads["events"] if event.node_id == tree["root_node_id"])
-    assert root_event.participants == []
+    assert receipt["status"] == "written"
+    (participant,) = ledger.bound_payloads["events"][0].participants
+    assert participant.role == "主体"
 
 
 @pytest.mark.asyncio
@@ -243,57 +214,3 @@ async def test_failed_record_keeps_prior_written_records_repairable() -> None:
 
 # ---------------------------------------------------------------------------
 # 修复三：search_graph 回执标注未决别名案例的关联节点
-
-
-@pytest.mark.asyncio
-async def test_search_graph_annotates_alias_linked_nodes() -> None:
-    case = CaseSearchResult(
-        id="case-alias-1",
-        type="entity_alias",
-        chapter_id=5,
-        created_chapter=3,
-        keys=["蓟州驿道", "第三铺"],
-        description="蓟州驿道与第三铺疑为同一地点",
-    )
-    ledger = _writer_ledger()
-    tools = _writer_tools(ledger, _AliasCaseQueryService([case]))
-    # 先查图（写者习惯路径），再逐个登记两个别名实体（2026-09-14：el 键当场绑定）
-    await tools["search_graph"].ainvoke({"entities": ["蓟州驿道"]})
-    await tools["write_entity"].ainvoke({"name": "蓟州驿道", "entity_type": "location", "el": "蓟州驿道"})
-    await tools["write_entity"].ainvoke({"name": "第三铺", "entity_type": "location", "el": "第三铺"})
-
-    response = json.loads(await tools["search_graph"].ainvoke({"entities": ["蓟州驿道"]}))
-    match = response["matches"][0]
-    # 2026-09-19 id 纪律：图视图与关联标注全部带 run 级 uuid id（编号 n/case_number 已删）
-    assert match["id"] == _entity_id("蓟州驿道")
-    assert match["alias_linked"] == [
-        {"case_id": "case-alias-1", "linked": [{"id": _entity_id("第三铺"), "name": "第三铺"}]}
-    ]
-    assert "alias_note" in response
-    # 2026-09-13 文案纠偏：末句必须给两条具体动作（案例 id 见 case_id / close_case 关掉该 id），
-    # 且不得再承诺"系统会自动合并"（旧文案让模型以为什么都不用做 → 案例永挂、每章被反复点名）
-    assert "write_relation" in response["alias_note"]
-    # 展示即授权：案例 id 已登记进授权面、源章已授权
-    assert "case-alias-1" in ledger.known_case_ids
-    assert 5 in ledger.authorized_chapter_ids
-
-
-@pytest.mark.asyncio
-async def test_search_graph_without_alias_hits_has_no_annotation() -> None:
-    case = CaseSearchResult(
-        id="case-alias-2",
-        type="entity_alias",
-        chapter_id=5,
-        created_chapter=3,
-        keys=["蓟州驿道", "第三铺"],
-        description="蓟州驿道与第三铺疑为同一地点",
-    )
-    ledger = _writer_ledger()
-    tools = _writer_tools(ledger, _AliasCaseQueryService([case]))
-    await tools["search_graph"].ainvoke({"entities": ["蓟州驿道"]})
-    await tools["write_entity"].ainvoke({"name": "蓟州驿道", "entity_type": "location", "el": "蓟州驿道"})
-    await tools["write_entity"].ainvoke({"name": "第三铺", "entity_type": "location", "el": "第三铺"})
-
-    response = json.loads(await tools["search_graph"].ainvoke({"entities": ["侯飞白"]}))
-    assert response["matches"] == []
-    assert "alias_note" not in response

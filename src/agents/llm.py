@@ -68,9 +68,14 @@ def build_chat_model(
     extra_body: dict[str, object] | None = None
     if cfg.thinking_enabled:
         extra_body = {"think": True}
+    # 2026-10-03 流式必须显式开 include_usage：否则网关不下发 usage 块，token 记账
+    # 退化成本地估算（思考 token 完全漏记——此前 completion 只记到可见文本 41K，
+    # 真实思考输出数百万 token 全部隐身）。聚合器（stream_aggregator）会把末 chunk
+    # 的 usage_metadata 装回响应，extract_agent_token_usage 据此拿到如实上报。
+    extra_body = {**(extra_body or {}), "stream_options": {"include_usage": True}}
 
-    streaming = cfg.stream_enabled
-
+    # 2026-10-02 删除"流式输出"设置与非流式兜底路径：LLM 调用固定开启流式，
+    # 断流重试与计时统一由 stream.py 按 total_attempts 处理
     return ChatOpenAI(
         model=cfg.model or "",
         base_url=cfg.base_url,
@@ -82,7 +87,11 @@ def build_chat_model(
         # langchain-openai 新版参数名为 max_completion_tokens（OpenAI 新参数，旧 max_tokens 已弃用）
         max_completion_tokens=cfg.max_tokens,
         timeout=cfg.timeout_s if cfg.timeout_s is not None else 120,
-        streaming=streaming,
+        streaming=True,
+        # 2026-10-03 流块间隙看门狗放宽到 600s：run 4a6c268c 诊断阶段长报告生成中途
+        # 停流 120s 被默认看门狗掐死（已收 1400 chunk）。Ark 网关限流队列/思考停顿
+        # 超 2 分钟是常态；真死连接仍由 httpx 读超时兜底，10 分钟间隙容忍不引入悬挂。
+        stream_chunk_timeout=600,
         # 2026-08-12 断流重试由 stream.py 按 total_attempts 统一负责；
         # SDK 层再叠加 max_retries 会让最坏请求次数成倍膨胀（流式中断时叠加后最多 8 次）。
         # 关闭 SDK 层重试，重试次数只由 total_attempts 一处配置决定。

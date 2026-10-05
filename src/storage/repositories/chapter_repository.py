@@ -11,14 +11,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from sqlalchemy import delete, func, select, update
-from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
 from src.chapters.models import ChapterData
 from src.chunking.chunker import Chunk
 from src.config import settings
 from src.storage.models import Chapter as ChapterModel
-from src.storage.models import ChapterSummary
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.paragraph import (
     get_incomplete_paragraph_embedding_paragraph_ids,
@@ -219,21 +217,3 @@ class ChapterRepository(BaseRepository["ChapterModel"]):
         if get_incomplete_paragraph_embedding_paragraph_ids(self.session, run_id):
             return False
         return True
-
-    def fetch_chapter_summaries(self, run_id: str) -> Sequence[Row]:
-        """获取指定运行的所有章节摘要
-
-        Returns:
-            Row 对象序列，支持字段名访问：row.chapter_id, row.summary
-        """
-        stmt = (
-            select(ChapterSummary.chapter_id, ChapterSummary.summary)
-            .join(
-                ChapterModel,
-                (ChapterModel.run_id == ChapterSummary.run_id) & (ChapterModel.chapter_id == ChapterSummary.chapter_id),
-            )
-            .where(ChapterSummary.run_id == run_id)
-            .order_by(ChapterModel.sequence, ChapterSummary.chapter_id)
-        )
-        result = self.session.execute(stmt)
-        return result.fetchall()

@@ -24,19 +24,10 @@ from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_t
 class _QueryService:
     """无数据库依赖的新合同查询桩"""
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-        del query, hidden_case_ids, case_type, limit, pending_cases
-        from src.agents.annotation.schema import SearchResult
-
-        return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
         del query, range_name, limit
         return []
-
-    def fetch_active_case_details(self, case_id):
-        del case_id
-        return None
 
 
 def _ledger(*, paragraph_ids: list[int] | None = None) -> AnnotationToolLedger:

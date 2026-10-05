@@ -5,7 +5,7 @@
  *
  * 集成细粒度进度展示组件和 LLM 输出组件
  *
- * 合并 TaskSelector 和 TaskPanel 为统一的任务管理下拉面板
+ * 合并原 TaskSelector 与 TaskPanel 的职责为统一的任务管理下拉面板
  *
  * 移除未使用的 onCancelTask 属性，简化组件接口
  *

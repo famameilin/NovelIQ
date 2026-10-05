@@ -8,6 +8,7 @@ import socket
 import sys
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -76,6 +77,11 @@ async def lifespan(app: FastAPI):
     from src.storage.db import init_db
 
     init_db()
+    from src.api.services.event_manager import event_manager
+    from src.storage.db import get_session_factory
+    from src.storage.repositories.event_outbox import EventOutboxRepository
+
+    event_manager.configure_outbox(EventOutboxRepository(lambda: get_session_factory()()))
 
     # 真正允许降级的只有孤儿任务恢复链路；
     # 即便这里失败，也不应掩盖数据库初始化阶段的结构性错误
@@ -112,7 +118,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="小说量化分析 API",
-    version="0.1.1",
+    version="0.2.0",
     description="小说文本量化分析服务的 RESTful API",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -150,7 +156,7 @@ async def health_check():
         return {
             "status": "healthy",
             "service": "novel-qa-api",
-            "version": "0.1.1",
+            "version": "0.2.0",
             "pool": pool_status,
         }
     except Exception as e:
@@ -162,7 +168,7 @@ async def health_check():
             content={
                 "status": "unhealthy",
                 "service": "novel-qa-api",
-                "version": "0.1.1",
+                "version": "0.2.0",
                 "error": "服务暂不可用，请稍后重试",
             },
         )
@@ -176,6 +182,49 @@ app.include_router(tabs_router, prefix="/api")
 app.include_router(timeline_router, prefix="/api")
 app.include_router(settings_router, prefix="/api", tags=["settings"])
 app.include_router(sse_router, prefix="/api", tags=["SSE"])
+
+
+@app.get("/api/debug/asyncio-tasks", include_in_schema=False)
+async def _debug_asyncio_tasks() -> dict[str, list[str]]:
+    """2026-10-03 临时诊断端点：沿 await 链渲染每个任务的真实挂起点（排查调度卡死用）"""
+    import asyncio
+
+    def walk_await_chain(coro: Any, depth: int = 0) -> list[str]:
+        lines: list[str] = []
+        seen: set[int] = set()
+        current: Any = coro
+        while current is not None and depth < 40:
+            marker = id(current)
+            if marker in seen:
+                lines.append("  <cycle>")
+                break
+            seen.add(marker)
+            frame = getattr(current, "cr_frame", None)
+            if frame is None:
+                frame = getattr(current, "gi_frame", None)
+            if frame is None:
+                frame = getattr(current, "ag_frame", None)
+            if frame is not None:
+                lines.append(f"  {frame.f_code.co_filename}:{frame.f_lineno} {frame.f_code.co_name}")
+            else:
+                lines.append(f"  <no frame: {type(current).__name__}>")
+                break
+            current = getattr(current, "cr_await", None)
+            if current is None:
+                current = getattr(current, "gi_yieldfrom", None) if False else None
+            depth += 1
+        return lines
+
+    dumps: list[str] = []
+    for task in asyncio.all_tasks():
+        coro = getattr(task, "_coro", None) or getattr(task, "get_coro", lambda: None)()
+        entry = coro.cr_frame if coro is not None else None
+        head = "unknown"
+        if entry is not None:
+            head = f"{entry.f_code.co_filename}:{entry.f_lineno} {entry.f_code.co_name}"
+        dumps.append(f"{task.get_name()}: {head}\n" + "\n".join(walk_await_chain(coro)))
+    return {"tasks": dumps}
+
 
 register_exception_handlers(app)
 

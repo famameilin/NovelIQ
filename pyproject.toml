@@ -1,6 +1,6 @@
 [project]
 name = "novel-qa"
-version = "0.1.1"
+version = "0.2.0"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 dependencies = [
@@ -11,10 +11,8 @@ dependencies = [
     "python-multipart>=0.0.6",
     "aiofiles>=23.2.1",
     "sqlalchemy>=2.0.0",
-    "alembic>=1.13.0",
     "psycopg[binary]>=3.1.0",
     "openai>=1.0.0",
-    "litellm>=1.63.0",
     "pydantic>=2.0.0",
     "pgvector>=0.4.2",
     "jieba>=0.42.1",
@@ -22,13 +20,11 @@ dependencies = [
     "gensim>=4.3.2",
     "numpy>=1.24.0",
     "sse-starlette>=2.0.0",
-    "jinja2>=3.0",
     # 2026-08-13 加上界：langgraph/langchain-openai 无上界时 uv lock --upgrade
     # 可能拉到不兼容版本（此前 openai 一次跨 23 个 minor）；1.x 内锁定
     "langgraph>=1.2.10,<2",
     "langchain-core>=0.3,<2",
     "langchain-openai>=1.4.1,<2",
-    "tokenizers>=0.20,<0.21",
     "ltp>=4.2,<5",
 ]
 

@@ -292,8 +292,7 @@ class NovelService:
         """
         删除任务对应的日志与导出文件
 
-        说明: 输出文件按 task_id 命名，日志目录按 run_id 命名；
-              为兼容历史短 run_id 目录，run_id != task_id 时会额外检查短目录
+        说明: 输出文件按 task_id 命名，日志目录按 run_id 命名
         """
         self._artifact_gc_service.delete_task_artifacts(task_id, run_id)
 
@@ -332,7 +331,7 @@ class NovelService:
         删除单个 run 的数据库数据与文件产物
 
         说明: DB 删除仍复用 RunRepository.delete_run；文件侧统一删除 outputs/task_id.json
-              与 logs/run_id 目录，兼容历史 full run_id 日志目录
+              与 logs/run_id 目录
         """
         task_id = run_id_to_task_id(run_id)
 

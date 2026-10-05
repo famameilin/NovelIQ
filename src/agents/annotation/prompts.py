@@ -1,6 +1,4 @@
-"""
-章节标注 Agent 语义写入提示词
-"""
+"""正式章节标注提示词与原文注入"""
 
 from __future__ import annotations
 
@@ -10,46 +8,41 @@ from typing import Any
 
 from .schema import ChapterParagraphInfo, DialogueCandidate, paragraph_has_visible_prefix
 
-# 2026-09-18 系统提示词从 data/prompts 的两个 txt 读：agent.txt＝写者面、sub_agent.txt＝subagent 面
-# （提示词是数据不是代码，改提示词只改 txt；读不到文件直接抛错，不做静默兜底）。
-# 路径从本文件算起（src/agents/annotation/prompts.py → 仓库根/data/prompts），不依赖 CWD；
-# Dockerfile.backend 有 `COPY data ./data`，容器里同一路径成立。
 _PROMPTS_DIR = Path(__file__).resolve().parents[3] / "data" / "prompts"
 
 
 def _read_prompt_text(filename: str) -> str:
-    """用于读取 data/prompts 下的提示词文本（首尾空白剔除，正文逐字保留）"""
+    """提示词缺失直接失败，不替换为另一套工作合同"""
     return (_PROMPTS_DIR / filename).read_text(encoding="utf-8").strip()
 
-# 2026-09-14 处理规则上提系统层（原在【进度账本】注入块
-# 逐回合下发；规则是静态行为合同，属系统提示词，注入块只留动态状态）。实测依据
-# run a8c29ec8：规则上线后 ch1-3 墙钟 -44%，回合构成变为"判完即写、一批收章"。
-# 原"只能一行职责声明"的单行裁决就此废止。
-# 同日删除"首写前必须先 search_graph"硬闸（tools.write_entity），
-# 提示词里对应的从属条款一并删净——写入不再被检索回执推后一个回合。
-# 2026-09-16 删去"你的思考对后续回合不可见，跨回合预演计划等于下回合从零重推"一句。
-# 2026-09-17 回合压缩纪律回填：main 时代系统提示词要求"全部领域于同一回复批量提交，
-# 通常 1-2 个回复完成全部写入"，实测 main run fda9e7a7（同书同日）每章只花 1 个写入
-# 回合（write_metrics + write_entities + write_relations + write_dialogues + create_event
-# 同轮发出）；本分支 09-14 重写的短提示词与 09-15 的程序面规则都丢了这条纪律，
-# 实测 run 73d51472 每章 3-4 个写入回合、逐领域一个回合，同书墙钟 2h→8h 主要来自这里。
-SYSTEM_PROMPT = _read_prompt_text("agent.txt")
+
+ANNOTATION_SCOPE_POLICY = (
+    "\n统一判据：\n"
+    "- 人物：有姓名、代号、独立行动或实际发言的都登记；匿名行动者或说话人按正文称谓登记，"
+    "不编造姓名。无独立行动的路人、士兵等背景群体不登记；代词和泛泛称呼不单独建实体。\n"
+    "- 有稳定专指的别名与称号按正文写法分别登记，不自行推断身份；已确认同一人物的关系另行表达。\n"
+    "- 机构名称兼指所在场所时统一登记 organization；只有纯地理场所才登记 location。"
+    "同章同名只登记一种类型，不因进入、离开等地点用法重复建实体。\n"
+    "- 对话：信件、便条、书籍引文及假设性台词判 not_dialogue，其内容保留在事件或证据中；"
+    "实际说出口、口头转述或回忆中确实说过的话判 dialogue；真实内心想法判 inner_monologue。"
+    "每个候选均需判断，不能因说话人未知而改判 not_dialogue。\n"
+)
+
+SYSTEM_PROMPT = _read_prompt_text("agent.txt") + ANNOTATION_SCOPE_POLICY
 
 # 2026-09-18 三代理并发：subagent 面系统提示词同样从 txt 读（sub_agent.txt）。
-SUBAGENT_SYSTEM_PROMPT = _read_prompt_text("sub_agent.txt")
+# 2026-10-02 恢复：随章内三子代理路径一并加回（0.2.0 重构曾摘除）。
+SUBAGENT_SYSTEM_PROMPT = _read_prompt_text("sub_agent.txt") + ANNOTATION_SCOPE_POLICY
 
-# subagent 各自的职责范围（只写在文案里，**不通过拿掉工具或构造器实现**，§3）：
-# 多块章按三条职责并发（角色名单源在 subagent_ir）
-# 2026-09-18 职责文案只留**分域**：这个角色负责哪些域、不负责哪些域。参数取值、引用与证据
-# 口径、批量与收尾纪律全部在 execute_code 的说明里（那份说明是模型读得到的唯一合同），
-# 原来这里把 id 口径、evidence 段首号、别名不归并、pending 别硬套又各抄一遍——同一件事
-# 三处各写一遍，改一处漏两处，且属不属于这个角色的域混在一起反而看不清。
-# 2026-09-19 双路径定案：solo 形态随单块章归 agent 路径一起退役，职责表只剩三条。
+# subagent 各自的职责范围（只写在文案里，**不通过拿掉工具或构造器实现**）：
+# 多块章按三条职责并发（角色名单源在 subagent_ir）。职责文案只留**分域**：这个角色负责
+# 哪些域、不负责哪些域；参数取值、引用与证据口径、批量与收尾纪律全部在 execute_code 的
+# 说明里（那份说明是模型读得到的唯一合同）。solo 形态随单块章归 agent 路径，职责表只有三条。
 SUBAGENT_ROLE_SCOPES: dict[str, str] = {
     "structure": (
         "<RoleScope role=\"实体与关系\">\n"
         "你负责这一章的两个域：\n"
-        "- entity：正文里出现的实体（人物/地点/物品/组织）都登记；\n"
+        "- entity：按统一判据登记正文里的人物、地点、物品与组织；\n"
         "- relation：实体之间成立的闭合关系边都写。\n"
         "事件与参与者、对话判定、段落标签与章级指标都不属于你（由本章其他 subagent 负责）。\n"
         "</RoleScope>"
@@ -57,8 +50,8 @@ SUBAGENT_ROLE_SCOPES: dict[str, str] = {
     "event": (
         "<RoleScope role=\"事件与参与者\">\n"
         "你负责这一章的两个域：\n"
-        "- event：有正文依据的事件都建节点；\n"
-        "- participants：把每个事件节点的参与者挂上去。\n"
+        "- event 与 participants：有正文依据的事件都建节点并填写参与者；优先直接调用 submit_events 工具，"
+        "提交数据数组，引用与原文锚点由引擎完成。\n"
         "实体间的关系边、对话判定、段落标签与章级指标都不属于你。\n"
         "</RoleScope>"
     ),
@@ -92,16 +85,23 @@ def _candidate_views(candidates: list[DialogueCandidate]) -> list[dict]:
 
 
 def build_system_prompt() -> str:
-    """2026-08-30 用于构建 agent 路径（单块章）的系统提示词
-
-    2026-09-04 曾追加"案例编号"检索管道规则，2026-09-05 裁决删除：
-    该规则把非案例疑点（如对话说话人）误导进 search_pool 空转至上限
-    （第3章 15 轮 40 次检索 0 写入）。id 授权=检索展示即授权
-    + 工具层 case_id 校验（未授权 id 直接报错自纠）。
-    2026-09-19 双路径定案：本提示词服务 agent 路径（单块章，程序面）；
-    程序面合同在 execute_code 的说明里，subagent 路径用 sub_agent.txt。
-    """
-    return SYSTEM_PROMPT
+    """章级 Agent 同时负责局部事实和有原文依据的跨章关联"""
+    return (
+        SYSTEM_PROMPT
+        + "\n本轮工作为 formal_current。只写本章正式项、跨章关联和未确定案例；"
+        "不得查询图、案例池或历史事件，不得修改已有正式记录。"
+        "跨章依据直接读取原文，不等待其他章 Agent 的分析结论。"
+        "事件与参与者优先直接调用 submit_events 工具提交数据；已自动绑定的原文锚点无需重复读取或绑定。"
+        "本章原文用 read_chapter_text(paragraph_id=段首可见号)，跨章读取用 read_text 的全局段落号。"
+        "search_text 支持 offset 翻页；命中段落用 read_text 读取完整内容与上下文。"
+        "read_text(paragraph_id, quote=原文片段) 返回 source_ref，引用不能猜造。"
+        "本章实体、事件、对话、关系写出后，可用 anchor_record(record_id, source_ref) 绑定精确原文；"
+        "write_link 会自动绑定本次 read_text 已授权的本章 source_ref。"
+        "确认跨章同一/不同人物、因果、伏笔照应或关系变化时，在本次任务调用 write_link；"
+        "目标使用 read_text 的 source_ref，不要求目标章已有对象 ID。"
+        "不能确定的关联用 push_case 并提供双方 evidence_refs，不强行合并或覆写。"
+        "对话候选必须实际判定；不能确定说话人时保留未知并登记案例，不能将未判候选当作非对话。"
+    )
 
 
 def _render_paragraph_numbered_text(chapter_text: str, paragraph_info: ChapterParagraphInfo | None) -> str:
@@ -149,9 +149,15 @@ def build_chapter_message(
         f"{_render_paragraph_numbered_text(chapter_text, paragraph_info)}\n"
         "</CurrentChapter>",
         "<DialogueCandidates>\n"
+        f"total: {len(candidates)}\n"
         f"{json.dumps(candidate_views, ensure_ascii=False, indent=2)}\n"
         "</DialogueCandidates>",
     ]
+    if paragraph_info is not None:
+        sections.append("<ParagraphSources>\n" + json.dumps([
+            {"visible_id": visible, "paragraph_id": paragraph_id}
+            for visible, paragraph_id in zip(paragraph_info.visible_ids(), paragraph_info.paragraph_ids, strict=True)
+        ], ensure_ascii=False) + "\n</ParagraphSources>")
     return "\n\n".join(sections)
 
 
@@ -167,13 +173,14 @@ def build_subagent_message(
     三个 subagent 拿到的是同一份整章正文（不切分正文）：正文以段落清单注入，每段一行、
     以段首可见号 `N：` 开头（见 _render_paragraph_numbered_text），该号即 evidence 锚点
     与标签段号。本条消息只余事实与动态数据：整章正文、对话候选表，以及 role_scope
-    （三个 subagent 唯一的区分，2026-09-18 唯一保留的规则文案）；能力合同在 execute_code
-    的 description 里，两份文案同轮下发。
+    （三个 subagent 唯一的区分）；能力合同在 execute_code 的 description 里，两份文案同轮下发。
+    2026-10-02 恢复：随章内三子代理路径一并加回（0.2.0 重构曾摘除）。
     """
     paragraph_views = _render_paragraph_numbered_text("", paragraph_info)
     sections = [
         f"<CurrentChapter role=\"{role}\">\n{paragraph_views}\n</CurrentChapter>",
         "<DialogueCandidates>\n"
+        f"total: {len(candidates)}\n"
         f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"
         "</DialogueCandidates>",
         role_scope,
@@ -184,9 +191,9 @@ def build_subagent_message(
 def build_subagent_gap_message(gap: dict[str, Any]) -> str:
     """2026-09-17 用于 subagent 关键产出缺失时把缺口交回同一个会话续跑（有界一次）
 
-    2026-09-18 提示词面清理：只留缺口事实（缺收尾/缺候选判定/缺指标），
-    去掉"请补齐后再次调用 finish""逐条 dialogue() 判定""metric() 是硬前提"
-    等处理方式规训句——补写方式在 finish/execute_code 的 description 里。
+    提示词面只留缺口事实（缺收尾/缺候选判定/缺指标）——补写方式在
+    finish/execute_code 的 description 里。
+    2026-10-02 恢复：随章内三子代理路径一并加回（0.2.0 重构曾摘除）。
     """
     lines = ["<SubagentGap>"]
     if not gap.get("finished"):

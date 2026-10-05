@@ -56,7 +56,7 @@ class SettingFieldSpec:
 
 
 SETTING_SECTIONS: tuple[SettingSectionSpec, ...] = (
-    SettingSectionSpec(id="models", title="模型参数", description="标注/诊断任务与段落嵌入的运行参数", order=1),
+    SettingSectionSpec(id="models", title="模型参数", description="标注、诊断与段落嵌入", order=1),
     SettingSectionSpec(id="topic_model", title="主题模型", description="LDA 训练与主题变化候选参数", order=2),
     SettingSectionSpec(id="metrics", title="指标计算", description="各量化指标的阈值与采样参数", order=3),
     SettingSectionSpec(id="linguistic", title="语言特征", description="LTP 与 Word2Vec 能力开关及参数", order=4),
@@ -69,9 +69,8 @@ def _fields(specs: list[SettingFieldSpec]) -> list[SettingFieldSpec]:
 
 MODEL_ENV_KEYS: frozenset[str] = frozenset(
     {
-        "MODEL_BASE_URL",
-        "MODEL_ID",
-        "MODEL_KEY",
+        "MODEL_POOL",
+        "DIAGNOSIS_MODEL_ID",
         "EMBEDDING_MODEL_BASE_URL",
         "EMBEDDING_MODEL_ID",
         "EMBEDDING_MODEL_KEY",
@@ -79,10 +78,18 @@ MODEL_ENV_KEYS: frozenset[str] = frozenset(
     }
 )
 
+
+def is_model_env_key(key: str) -> bool:
+    """连接凭据白名单不开放命名供应方"""
+    return key in MODEL_ENV_KEYS
+
+
 SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
     _fields(
         [
             # ---- models.annotation（标注任务）----
+            # 2026-10-02 设置迁移：temperature/top_p/max_tokens 移入模型池
+            # （WeightedModelSettings，随模型在设置页"模型池"编辑），不再作为任务级参数
             SettingFieldSpec(
                 path=("models", "annotation", "timeout_s"),
                 field_type="number",
@@ -90,30 +97,8 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 min_value=1,
                 nullable=True,
             ),
-            SettingFieldSpec(
-                path=("models", "annotation", "temperature"),
-                field_type="number",
-                label="标注温度",
-                min_value=0,
-                max_value=2,
-                step=0.1,
-            ),
-            SettingFieldSpec(
-                path=("models", "annotation", "top_p"),
-                field_type="number",
-                label="标注 top_p",
-                min_value=0,
-                max_value=1,
-                step=0.05,
-            ),
             SettingFieldSpec(path=("models", "annotation", "thinking"), field_type="boolean", label="标注思考模式"),
-            SettingFieldSpec(path=("models", "annotation", "streaming"), field_type="boolean", label="标注流式输出"),
-            SettingFieldSpec(
-                path=("models", "annotation", "structured_output"),
-                field_type="enum",
-                label="结构化输出模式",
-                enum_values=("json_schema", "json_object"),
-            ),
+            # 2026-10-02 删除"标注流式输出"设置：LLM 调用固定开启流式（src/agents/llm.py）
             SettingFieldSpec(
                 path=("models", "annotation", "max_iterations"),
                 field_type="integer",
@@ -131,11 +116,11 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 field_type="boolean",
                 label="允许读取未来文本",
             ),
+            # 2026-10-02 恢复（随章内三子代理路径加回）：超过该字数的章派发三条职责 subagent 并发
             SettingFieldSpec(
                 path=("models", "annotation", "sub_chunk_max_chars"),
                 field_type="integer",
-                label="子代理门槛（字）",
-                description="章正文超过该字数走 subagent 路径（三条职责并发），不超过走单 agent；只作派发门槛",
+                label="章内三子代理字数门槛",
                 min_value=1,
             ),
             # ---- models.diagnosis（诊断任务）----
@@ -146,30 +131,7 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 min_value=1,
                 nullable=True,
             ),
-            SettingFieldSpec(
-                path=("models", "diagnosis", "temperature"),
-                field_type="number",
-                label="诊断温度",
-                min_value=0,
-                max_value=2,
-                step=0.1,
-            ),
-            SettingFieldSpec(
-                path=("models", "diagnosis", "top_p"),
-                field_type="number",
-                label="诊断 top_p",
-                min_value=0,
-                max_value=1,
-                step=0.05,
-            ),
             SettingFieldSpec(path=("models", "diagnosis", "thinking"), field_type="boolean", label="诊断思考模式"),
-            SettingFieldSpec(path=("models", "diagnosis", "streaming"), field_type="boolean", label="诊断流式输出"),
-            SettingFieldSpec(
-                path=("models", "diagnosis", "structured_output"),
-                field_type="enum",
-                label="诊断结构化输出模式",
-                enum_values=("json_schema", "json_object"),
-            ),
             SettingFieldSpec(
                 path=("models", "diagnosis", "max_iterations"),
                 field_type="integer",
@@ -323,7 +285,7 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 path=("linguistic", "word2vec", "model_dir"),
                 field_type="string",
                 label="预训练共享模型目录",
-                description="目录内应恰有一个 .kv 文件（由 convert_word2vec_pretrained.py 生成）",
+                description="目录内应恰有一个 .kv 文件（由 scripts/convert_word2vec_pretrained.py 生成）",
             ),
             SettingFieldSpec(
                 path=("linguistic", "word2vec", "window"), field_type="integer", label="窗口大小", min_value=1

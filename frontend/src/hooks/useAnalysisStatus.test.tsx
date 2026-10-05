@@ -6,6 +6,7 @@ import type { SSEEventType } from "@/api/streamTypes";
 
 const getTaskStatusMock = vi.fn();
 const disconnectMock = vi.fn();
+const invalidateQueriesMock = vi.fn();
 let mockedIsConnected = false;
 let latestSSEUrl: string | null | undefined;
 let latestSSEHandlers:
@@ -27,6 +28,10 @@ const streamStoreState = {
 
 vi.mock("@/api/analysis", () => ({
   getTaskStatus: (...args: unknown[]) => getTaskStatusMock(...args),
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ invalidateQueries: invalidateQueriesMock }),
 }));
 
 vi.mock("@/hooks/useEventSource", () => ({
@@ -106,6 +111,7 @@ describe("useAnalysisStatus", () => {
     latestSSEHandlers = null;
     getTaskStatusMock.mockReset();
     disconnectMock.mockReset();
+    invalidateQueriesMock.mockReset();
     streamStoreState.setConnected.mockReset();
     streamStoreState.setTaskId.mockReset();
     streamStoreState.updateProgress.mockReset();
@@ -117,6 +123,20 @@ describe("useAnalysisStatus", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("仅在 cutoff 释放及任务完成后刷新可见边界", async () => {
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-boundary"));
+    render(<HookHarness novelId="novel-1" taskId="task-boundary" />);
+    await waitFor(() => expect(getTaskStatusMock).toHaveBeenCalled());
+    invalidateQueriesMock.mockClear();
+    emitSSEEvent("pipeline_progress", { event_type: "work_submitted" });
+    expect(invalidateQueriesMock).not.toHaveBeenCalled();
+    emitSSEEvent("pipeline_progress", { event_type: "cutoff_released" });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ["pipeline", "novel-1", "task-boundary"] });
+    invalidateQueriesMock.mockClear();
+    emitSSEEvent("task_complete", { action: "complete", stage: "completed", percent: 100 });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ["pipeline", "novel-1", "task-boundary"] });
   });
 
   it("检测到已激活的 mock service worker 时跳过 SSE 连接", async () => {

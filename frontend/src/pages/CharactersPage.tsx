@@ -22,7 +22,7 @@ function SkeletonGrid() {
       animate={{ opacity: 1 }}
       className="space-y-6"
     >
-      {/* 排行条骨架屏 */}
+      {/* 人物景观骨架屏 */}
       <Card variant="elevated" className="rounded-xl h-[460px] overflow-hidden">
         <CardContent className="p-5">
           <div className="space-y-3">
@@ -32,7 +32,7 @@ function SkeletonGrid() {
         </CardContent>
       </Card>
 
-      {/* 饼图与主角卡片骨架屏 */}
+      {/* 人物卡片骨架屏 */}
       <div className="grid grid-cols-2 gap-6">
         <Card variant="elevated" className="rounded-xl h-[340px] overflow-hidden">
           <CardContent className="p-5">

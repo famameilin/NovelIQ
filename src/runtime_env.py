@@ -4,17 +4,18 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from loguru import logger
 
 DatabaseEnvironmentName = Literal["DATABASE", "TEST_DATABASE"]
-ModelEnvironmentName = Literal["MODEL", "EMBEDDING_MODEL"]
+ModelEnvironmentName = Literal["EMBEDDING_MODEL"]
 
 _DATABASE_ENVIRONMENT_NAMES = {"DATABASE", "TEST_DATABASE"}
-_MODEL_ENVIRONMENT_NAMES = {"MODEL", "EMBEDDING_MODEL"}
+_MODEL_ENVIRONMENT_NAMES = {"EMBEDDING_MODEL"}
 
 _DATABASE_FIELD_NAMES: dict[str, tuple[tuple[str, str], ...]] = {
     "DATABASE": (
@@ -30,11 +31,6 @@ _DATABASE_FIELD_NAMES: dict[str, tuple[tuple[str, str], ...]] = {
 }
 
 _MODEL_FIELD_NAMES: dict[str, tuple[tuple[str, str], ...]] = {
-    "MODEL": (
-        ("base_url", "MODEL_BASE_URL"),
-        ("model", "MODEL_ID"),
-        ("api_key", "MODEL_KEY"),
-    ),
     "EMBEDDING_MODEL": (
         ("base_url", "EMBEDDING_MODEL_BASE_URL"),
         ("model", "EMBEDDING_MODEL_ID"),
@@ -128,11 +124,10 @@ def load_database_environment(
 
 def load_model_environment(env_var_name: ModelEnvironmentName) -> ModelEnvironment | None:
     """
-    加载模型平铺环境变量。
+    加载嵌入模型的平铺环境变量
 
-    2026-08-12 模型变量整组缺失或部分缺失时不再抛 RuntimeError：
-    返回 None 并记录 warning，由装配层（Settings.from_env）降级使用 settings.json 的值；
-    字段存在但为空白时仍视为格式错误抛 ValueError。
+    配置缺失时保持未配置状态，不从 settings.json 读取连接或凭据
+    字段存在但为空白时视为格式错误
     """
 
     if env_var_name not in _MODEL_ENVIRONMENT_NAMES:
@@ -156,7 +151,7 @@ def load_model_environment(env_var_name: ModelEnvironmentName) -> ModelEnvironme
             missing_variables.append(environment_name)
     if missing_variables:
         logger.warning(
-            f"{env_var_name} 环境变量缺失（{', '.join(missing_variables)}），模型配置降级使用 settings.json 值"
+            f"{env_var_name} 环境变量缺失（{', '.join(missing_variables)}），嵌入模型未配置"
         )
         return None
 
@@ -166,6 +161,20 @@ def load_model_environment(env_var_name: ModelEnvironmentName) -> ModelEnvironme
         model=_get_value(validated_values, "model"),
         api_key=_get_value(validated_values, "api_key", preserve_whitespace=True),
     )
+
+
+def load_model_pool_environment() -> list[dict[str, Any]]:
+    """模型池只从 MODEL_POOL 读取，不拼装旧的共享连接配置"""
+    raw = os.environ.get("MODEL_POOL")
+    if raw is None:
+        return []
+    try:
+        entries = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("MODEL_POOL 必须是合法 JSON 数组") from exc
+    if not isinstance(entries, list):
+        raise ValueError("MODEL_POOL 必须是 JSON 数组")
+    return entries
 
 
 def load_ltp_environment() -> LtpEnvironment | None:

@@ -41,31 +41,22 @@ from src.agents.annotation.schema import (
     BoundParagraphLabel,
     ChapterMetricsInput,
     ChapterParagraphInfo,
-    SearchResult,
 )
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 class _QueryService:
     """2026-08-07 用于提供无数据库依赖的新合同查询桩"""
 
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-        """2026-08-07 用于返回空案例与伏笔检索结果"""
-        del query, hidden_case_ids, case_type, limit
-        return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
         """2026-08-07 用于返回空原文候选"""
         del query, range_name, limit
         return []
 
-    def fetch_active_case_details(self, case_id):
-        """2026-08-07 用于表示测试中没有 active 案例"""
-        del case_id
-        return None
 
-
-class _SequenceLLM:
+class _SequenceLLM(StreamedFakeModelMixin):
     """2026-08-07 用于按顺序返回 Agent 消息的测试模型（仅 ainvoke，无流式）"""
 
     def __init__(self, responses: list[AIMessage]) -> None:
@@ -263,12 +254,10 @@ def _agent_result() -> AgentRunResult:
         run_id="run-1",
         chapter_id=1,
         annotation=_bound_annotation(),
-        resolved_cases=[],
         pushed_cases=[],
         audit=AgentRunAudit(
             allow_future_context=False,
             write_records=[],
-            authorized_chapter_ids=[1],
             authorized_text_paragraph_ids=[],
         ),
     )
@@ -300,7 +289,6 @@ async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
     )
     tools = build_annotation_tools(_QueryService(), ledger)
     by_name = {tool.name: tool for tool in tools}
-    await by_name["search_graph"].ainvoke({"entities": ["侯飞白", "褚大山", "猴子"]})
     await by_name["write_entity"].ainvoke(
         {"name": "侯飞白", "entity_type": "character", "el": "侯飞白", "description": "贺军情报头子之子"}
     )
@@ -499,8 +487,8 @@ async def test_failed_event_statement_does_not_block_relation_in_same_program() 
     """2026-09-19 程序面：事件语句失败时同程序关系语句照常生效，下一轮修正后收尾"""
     invalid_participation = (
         'write_event(el="t1/e2", isroot=False, type="main", description="顾霜拦截去路", '
-        'characters=[{"entityid": "顾霜", "role": "主体", "narrative_role": "主体", '
-        '"action": "拦截", "emotion": 9}])'
+        'characters=[{"entityid": "路人甲", "role": "主体", "narrative_role": "主体", '
+        '"action": "拦截", "emotion": -1}])'
     )
     fixed_participation = (
         'write_event(el="t1/e2", isroot=False, type="main", description="顾霜拦截去路", '
@@ -525,7 +513,7 @@ async def test_failed_event_statement_does_not_block_relation_in_same_program() 
     assert llm.calls == 3
     event_round_receipts = _tool_receipts(llm.captured_messages[2])
     assert len(event_round_receipts) == 2
-    assert '"field": "emotion"' in event_round_receipts[1]
+    assert '"field": "entityid"' in event_round_receipts[1]
     assert '"applied": 3' in event_round_receipts[1]
 
 
@@ -538,14 +526,14 @@ async def test_failed_statement_in_same_program_does_not_block_finish() -> None:
     """
     invalid_root = (
         'write_event(el="t1", isroot=True, description="顾霜喝止众人", '
-        'characters=[{"entityid": "顾霜", "role": "主体", "narrative_role": "主体", '
-        '"action": "怒斥", "emotion": 9}])'
+        'characters=[{"entityid": "路人甲", "role": "主体", "narrative_role": "主体", '
+        '"action": "怒斥", "emotion": -1}])'
     )
     llm = _SequenceLLM(
         [
             _program_message("\n".join([_entity_stmt(), _metrics_stmt(labels=False)])),
             _program_message(
-                "\n".join([_event_root_stmt(), _event_child_stmt(), invalid_root, _finish_stmt()])
+                "\n".join([_event_root_stmt(), _event_child_stmt(), invalid_root, _dialogue_stmt(), _finish_stmt()])
             ),
         ]
     )
@@ -554,9 +542,9 @@ async def test_failed_statement_in_same_program_does_not_block_finish() -> None:
     # 末轮回执只在最终 state（captured_messages 是各次请求的历史，不含该轮自己的 ToolMessage）；
     # 程序面的失败清单在程序回执的 failed 里，finish 的结算在运行时内部完成
     receipts = _tool_receipts(result["messages"])
-    rejected = [receipt for receipt in receipts if '"code": "out_of_range"' in receipt]
-    assert len(rejected) == 1, "越界 emotion 的那一条必须被单独拒绝并回执"
-    assert '"record": "t1/root"' in rejected[0]
+    rejected = [receipt for receipt in receipts if '"code": "unknown_entity_id"' in receipt]
+    assert len(rejected) == 1, "未登记实体参与的那一条必须被单独拒绝并回执"
+    assert '"record": "t1/root/participant/' in rejected[0]
     assert '"status": "partial"' in rejected[0]
     # 失败不阻塞收尾：同程序的 finish 正常结算，坏记录本来就没进载荷
     assert result["phase"] == "completed"
@@ -801,65 +789,10 @@ async def test_runner_rejects_empty_chapter_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalid_change_kind_returns_failed_receipt() -> None:
-    """
-    2026-08-12 用于验证非法 change_kind 以失败回执回到模型继续对话，
-    而不是抛出让整章失败（下游持久化只认闭合枚举）。
-
-    2026-09-14 解决类工具并入 schema 层失败翻译：回执从 tool/error 通用形态
-    收窄为 record/field/code/expected 结构化拒绝（field=change_kind、可自纠）。
-    2026-09-19 程序面：拒绝进入本程序回执的 failed 清单，字段口径不变。
-    """
-    ledger = AnnotationToolLedger(
-        run_scope="run-1",
-        current_chapter_id=1,
-        current_chapter_text="\u201c住手\u201d回荡",
-        allow_future_context=False,
-        graph=FactGraph(
-            history_entity_types={"顾霜": "character", "顾老": "character"},
-            history_entity_names={"顾霜": "顾霜", "顾老": "顾老"},
-        ),
-        paragraph_info=ChapterParagraphInfo(
-            paragraph_ids=[0],
-            char_spans=[(0, len("\u201c住手\u201d回荡"))],
-            texts=["\u201c住手\u201d回荡"],
-        ),
-    )
-    llm = _SequenceLLM(
-        [
-            _program_message(
-                'write_relation(from_entity="顾霜", to_entity="顾老", '
-                'relation_type="同一人物", change_kind="强化关系")'
-            ),
-            *_serial_program_messages(),
-        ]
-    )
-    result = await _invoke_graph(llm, allow_future_context=False, ledger=ledger)
-
-    assert result["phase"] == "completed"
-    assert result.get("error") is None
-    assert llm.calls == 4
-    receipts = _tool_receipts(llm.captured_messages[1])
-    assert len(receipts) == 1
-    assert '"field": "change_kind"' in receipts[0]
-    assert '"code": "invalid_value"' in receipts[0]
-    assert '"tool": "write_relation"' in receipts[0]
-    assert ledger.resolved_cases == []
-
-
-@pytest.mark.asyncio
 async def test_runner_resets_fact_graph_chapter_state_on_failure() -> None:
-    """2026-08-12 用于验证章节失败路径恢复 FactGraph 历史快照，不残留当章脏状态
-
-    2026-08-13 P1-1：begin_chapter 把章前状态并入 history_*，失败回滚恢复到
-    「本章开始前」快照（上一章提交结果），而非 run 启动空状态。
-    """
-    graph_state = FactGraph(
-        history_entity_types={"顾霜": "character"},
-        history_entity_names={"顾霜": "顾霜"},
-        history_relations={("顾霜", "顾老", "同一人物")},
-    )
-    assert graph_state.active_relations
+    """本章失败后还原尝试前的局部图"""
+    graph_state = FactGraph(run_scope="run-1")
+    initial = graph_state.snapshot()
     session = MagicMock()
     recorder = MagicMock()
     with patch(
@@ -877,11 +810,7 @@ async def test_runner_resets_fact_graph_chapter_state_on_failure() -> None:
                 audit_recorder=recorder,
                 graph_state=graph_state,
             )
-    # 失败后恢复到本章开始前快照：上一章提交的边与实体保留，章内追踪清空
-    # （active_relations 按稳定键归一化，端点按字典序）
-    assert graph_state.active_relations == {("顾老", "顾霜", "同一人物")}
-    assert graph_state.chapter_added_relations == set()
-    assert graph_state.entity_types == {"顾霜": "character"}
+    assert graph_state.snapshot() == initial
 
 
 def test_validate_bound_annotation_verifies_paragraph_label_membership() -> None:

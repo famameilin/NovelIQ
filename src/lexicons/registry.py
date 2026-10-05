@@ -54,10 +54,6 @@ class LexiconRegistry:
     def base_dir(self) -> Path:
         return self._base_dir
 
-    @property
-    def is_loaded(self) -> bool:
-        return self._loaded
-
     def load(self) -> None:
         """加载注册文件集合；注册词表文件缺失 -> 报错（fail-fast，防静默空跑）"""
         if self._injected_registry_files is not None:

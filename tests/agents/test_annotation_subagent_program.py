@@ -3,7 +3,7 @@
 覆盖 subagent_program 的模型可见面与 2026-09-18"写入生效"口径：
 
 - 三个 subagent 的模型可见面逐字相同（绑定面只有 execute_code + finish），程序目录 =
-  四个检索 + 五个案例 + finish + 八类构造器，五个 write_* 既不在可见面也不在命名空间；
+  search_text + push_case + finish + 八类构造器，五个 write_* 既不在可见面也不在命名空间；
 - 八类构造器写入生效：构造器是纯校验器，运行时把那一笔经生产单条事务边界
   （graph._execute_call）当场落库，**写入成功才**回 `{status:"written", record, ref}`
   并把记录放进 subagent；共享章级账本（written_entities / entity_el_index /
@@ -16,6 +16,9 @@
 - 同键重写=更新语义（实体=本 subagent id、事件=el、对话=候选号、标签=段号）；
 - subagent 的 finish 是面上一等工具（不是构造器），subagent_gap 的口径与之一致；
 - 构造器目录与实际命名空间同源：目录里的每个名字都直接调得动，签名与参数说明同轮下发。
+
+2026-10-02 对齐 0.2.0：检索面收成 search_text、案例面只剩 push_case（去 search_pool/
+promise_case/close_case 与 case_id 授权）；relation 去 change_kind、dialogue 去订正路径。
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from typing import Any
 import pytest
 
 from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.schema import ChapterParagraphInfo, SearchResult
+from src.agents.annotation.schema import ChapterParagraphInfo
 from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.agents.annotation.subagent_program import (
     SubagentProgramRuntime,
@@ -66,28 +69,18 @@ participants(el="t1", items=[{"entity_id": "a1", "role": "主体", "narrative_ro
 dialogue(candidate_index=1, verdict="dialogue", speaker_id="a1", tone="愤怒", evidence=1)
 label(paragraph_id=1, emotion=-1)
 metric(summary="冲突", emotional_valence=-1, narrative_function="冲突")
-pending(kind="case_clue", detail="长刀来路不明", evidence=2, keys=["a2"], case_id="case-abc")
+pending(kind="case_clue", detail="长刀来路不明", evidence=2, keys=["a2"])
 """
 
 
 class _QueryService:
-    """用于提供无数据库依赖的查询桩"""
+    """用于提供无数据库依赖的查询桩（0.2.0 标注面只检索原文）"""
 
     current_chapter_order = None
-
-    def search_pool(self, query, *, hidden_case_ids, case_type=None, limit=50, pending_cases=()):
-        """用于返回空案例检索结果"""
-        del query, hidden_case_ids, case_type, limit, pending_cases
-        return SearchResult()
 
     async def search_text(self, query, *, range_name, limit=50):
         """用于返回空正文命中"""
         del query, range_name, limit
-        return []
-
-    def search_event_history(self, query, *, limit=50):
-        """用于返回空历史事件树"""
-        del query, limit
         return []
 
 
@@ -105,9 +98,9 @@ def _paragraph_info() -> ChapterParagraphInfo:
     return ChapterParagraphInfo(paragraph_ids=ids, char_spans=spans, texts=texts)
 
 
-def _ledger(*, known_case_ids: set[str] | None = None) -> AnnotationToolLedger:
-    """用于构造一个 subagent 的共享章级账本（整章正文、三段坐标、可选案例 id 授权）"""
-    ledger = AnnotationToolLedger(
+def _ledger() -> AnnotationToolLedger:
+    """用于构造一个 subagent 的共享章级账本（整章正文、三段坐标）"""
+    return AnnotationToolLedger(
         run_scope="run-subagent-test",
         current_chapter_id=1,
         current_chapter_text=CHAPTER_TEXT,
@@ -115,9 +108,6 @@ def _ledger(*, known_case_ids: set[str] | None = None) -> AnnotationToolLedger:
         graph=FactGraph(),
         paragraph_info=_paragraph_info(),
     )
-    if known_case_ids:
-        ledger.known_case_ids.update(known_case_ids)
-    return ledger
 
 
 def _tools(ledger: AnnotationToolLedger) -> dict[str, Any]:
@@ -172,7 +162,7 @@ def _finish_tool(subagent: SubagentAnnotation, *, candidate_total: int = 3):
 @pytest.mark.asyncio
 async def test_eight_constructors_write_records_into_the_subagent_and_shared_ledger() -> None:
     """八类构造器逐一成功：记录当场进 subagent 与共享章级账本，回执/进度逐域可见"""
-    ledger = _ledger(known_case_ids={"case-abc"})
+    ledger = _ledger()
     subagent = SubagentAnnotation(role="structure")
     runtime = _runtime(ledger, subagent)
 
@@ -216,7 +206,6 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     assert [item.paragraph_id for item in subagent.labels] == [1]
     assert subagent.metric is not None and subagent.metric.summary == "冲突"
     assert subagent.pending[0].keys == ["a2"]
-    assert subagent.pending[0].case_id == "case-abc"
 
     # 共享章级账本：实体 el 索引、事件树键索引、关系、对话、指标都当场可见
     assert set(ledger.written_entities) == {"沈遥", "长刀", "剑宗"}
@@ -244,7 +233,6 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
         "type": "敌对",
         "from_id": "a1",
         "to_id": "a3",
-        "change_kind": None,
     }
     assert relation_plan.args == {
         "from_entity": "structure:a1",
@@ -268,9 +256,9 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     metric_plan = runtime.tools["metric"](summary="冲突", emotional_valence=-1, narrative_function="冲突")
     assert metric_plan.ref == {"kind": "metric", "summary": "冲突"}
     pending_plan = runtime.tools["pending"](
-        kind="case_clue", detail="长刀来路不明", evidence=E_KNIFE, keys=["a2"], case_id="case-abc"
+        kind="case_clue", detail="长刀来路不明", evidence=E_KNIFE, keys=["a2"]
     )
-    assert pending_plan.ref == {"kind": "pending", "pending_kind": "case_clue", "case_id": "case-abc"}
+    assert pending_plan.ref == {"kind": "pending", "pending_kind": "case_clue"}
     # 直接调用没有落账：计数与计划调用前一致
     assert subagent.counts() == receipt["progress"]
 
@@ -451,8 +439,12 @@ async def test_event_rejects_foreshadowing_property_on_child() -> None:
 
 
 @pytest.mark.asyncio
-async def test_participants_rejects_unknown_event_and_partial_three_state() -> None:
-    """participants 引用不存在的事件 el、三态只给一半都拒绝，事件上头不留参与者"""
+async def test_participants_rejects_unknown_event_and_lands_partial_three_state() -> None:
+    """participants 引用不存在的事件 el 仍拒绝；2026-10-04 起三态只给一半照常落账
+
+    未登记实体引用依旧拒绝（引用面不放开）；叙事功能近义词归一、emotion 钳制
+    在构造层完成，生产面按实体登记大类给 role 缺省。
+    """
     ledger = _ledger()
     subagent = SubagentAnnotation(role="event")
     runtime = _runtime(ledger, subagent)
@@ -466,19 +458,20 @@ async def test_participants_rejects_unknown_event_and_partial_three_state() -> N
         'event(el="t1", isroot=True, description="喝止", evidence=1)\n'
         'entity(id="a1", name="沈遥", entity_type="character", evidence=1)',
     )
-    partial = await _runtime_rejection(
+    await _run(
         runtime,
-        'participants(el="t1", items=[{"entity_id": "a1", "role": "主体", "narrative_role": "主体"}])',
+        'participants(el="t1", items=[{"entity_id": "a1", "role": "主体", "narrative_role": "主角", "emotion": 9}])',
     )
-    assert partial["code"] == "missing_field"
-    assert partial["field"] == "participants[0].narrative_role"
+    (participant,) = subagent.event_keys()["t1"].participants
+    assert participant.role == "主体"
+    assert participant.narrative_role == "主体"
+    assert participant.emotion == 2
+    assert participant.action is None
     unregistered = await _runtime_rejection(
         runtime, 'participants(el="t1", items=[{"entity_id": "a9", "role": "主体"}])'
     )
     assert unregistered["code"] == "unknown_reference"
     assert unregistered["field"] == "participants[0].entity_id"
-    assert subagent.event_keys()["t1"].participants == []
-    assert ledger.observation_by_record == {}
 
 
 @pytest.mark.asyncio
@@ -487,11 +480,15 @@ async def test_dialogue_rejections_do_not_write() -> None:
     ledger = _ledger()
     subagent = SubagentAnnotation(role="evidence")
     runtime = _runtime(ledger, subagent)
-    out_of_range = await _runtime_rejection(
+    out_of_range = await _run(
         runtime, 'dialogue(candidate_index=9, verdict="dialogue", evidence=1)'
     )
-    assert out_of_range["code"] == "out_of_range"
-    assert out_of_range["field"] == "candidate_index"
+    assert out_of_range["status"] == "rejected"
+    assert out_of_range["applied"] == 0
+    assert out_of_range["error"]["type"] == "candidate_index_out_of_range"
+    assert "total=3" in out_of_range["error"]["message"]
+    assert "dialogue/9(candidate_index=9)" in out_of_range["error"]["message"]
+    assert runtime.ops == []
     not_dialogue = await _runtime_rejection(
         runtime, 'dialogue(candidate_index=1, verdict="not_dialogue", speaker_id="a1")'
     )
@@ -541,11 +538,11 @@ async def test_metric_rejects_out_of_range_narrative_function() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pending_rejects_case_clue_without_evidence_and_unauthorized_case_id() -> None:
-    """case_clue 缺引文、case_id 未由 search_pool 授权都拒绝，subagent 里不留待决项
+async def test_pending_rejects_case_clue_without_evidence() -> None:
+    """case_clue 缺引文即拒绝，subagent 里不留待决项
 
-    2026-09-19 案例 id 纪律：pending 的 case_id 必须是 search_pool 回执里的案例 id
-    字符串（运行期编号已删），未授权拒绝 code=unauthorized_case、field=case_id。
+    2026-10-02 对齐 0.2.0 案例面：case_id 授权随 search_pool 退役，
+    原未授权 case_id 的拒绝路径一并删除。
     """
     ledger = _ledger()
     subagent = SubagentAnnotation(role="evidence")
@@ -553,12 +550,6 @@ async def test_pending_rejects_case_clue_without_evidence_and_unauthorized_case_
     missing_evidence = await _runtime_rejection(runtime, 'pending(kind="case_clue", detail="长刀来路不明")')
     assert missing_evidence["code"] == "missing_evidence"
     assert missing_evidence["field"] == "evidence"
-    unauthorized = await _runtime_rejection(
-        runtime, 'pending(kind="case_clue", detail="长刀来路不明", evidence=2, case_id="case-abc")'
-    )
-    assert unauthorized["code"] == "unauthorized_case"
-    assert unauthorized["field"] == "case_id"
-    assert "search_pool" in unauthorized["expected"]
     assert subagent.pending == []
     assert ledger.pushed_cases == []
 
@@ -568,23 +559,25 @@ async def test_pending_rejects_case_clue_without_evidence_and_unauthorized_case_
 
 
 @pytest.mark.asyncio
-async def test_event_orphan_is_rejected_by_production_without_trace() -> None:
-    """子事件先于树根构造：write_event 被生产面以 unknown_tree 拒绝，不建树不留记录
+async def test_event_orphan_defers_until_root_arrives() -> None:
+    """子事件先于树根构造：2026-10-04 树键校验下沉，生产面挂起而非拒绝
 
-    2026-09-18 删除 _tree_ordered 后孤儿不再靠落库相位重排：那笔写入当场被拒，
-    构造器返回的拒绝回执就是模型可见的失败。
+    子事件写入即时生效（回执 written、构造器记入 plan），等根建好后按到达顺序
+    冲账进正式事件树；根始终不建时由 finish 拒绝收尾，不静默丢数据。
     """
     ledger = _ledger()
     subagent = SubagentAnnotation(role="event")
     runtime = _runtime(ledger, subagent)
-    entry = await _runtime_rejection(
-        runtime, 'event(el="t1/e2", isroot=False, description="转身", type="main", evidence=2)'
-    )
-    assert entry["code"] == "unknown_tree"
-    assert entry["field"] == "el"
-    assert entry["record"] == "event:t1/e2"  # 落库记录键 = 角色命名空间化的 el
-    assert subagent.events == []
-    assert ledger.tree_key_index == {} and ledger.event_trees == {}
+    await _run(runtime, 'event(el="t1/e2", isroot=False, description="转身", type="main", evidence=2)')
+
+    assert "t1/e2" in subagent.event_keys()
+    # 构造器 el 经角色命名空间化后才进生产面：挂起键是 event:t1
+    assert list(ledger.pending_child_events) == ["event:t1"]
+
+    await _run(runtime, 'event(el="t1", isroot=True, description="喝止", evidence=1)')
+    tree = ledger.event_trees[ledger.tree_key_index["event:t1"]]
+    assert sorted(tree["nodes"]) == ["e2", "root"]
+    assert ledger.pending_child_events == {}
 
 
 @pytest.mark.asyncio
@@ -680,13 +673,13 @@ async def test_same_name_across_subagents_merges_into_one_entity() -> None:
 @pytest.mark.asyncio
 async def test_pending_pool_keys_are_registered_names() -> None:
     """pending 的案例池 keys 取本 subagent 的登记名，且这条当场进共享账本的案例池"""
-    ledger = _ledger(known_case_ids={"case-abc"})
+    ledger = _ledger()
     subagent = SubagentAnnotation(role="evidence")
     runtime = _runtime(ledger, subagent)
     receipt = await _run(
         runtime,
         'entity(id="a2", name="长刀", entity_type="item", evidence=2)\n'
-        'pending(kind="case_clue", detail="长刀来路不明", evidence=2, keys=["a2"], case_id="case-abc")',
+        'pending(kind="case_clue", detail="长刀来路不明", evidence=2, keys=["a2"])',
     )
     assert receipt["status"] == "applied"
     # subagent 里记的是局部引用键；案例池里记的是登记名

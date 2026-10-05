@@ -90,7 +90,7 @@ class Word2VecSettings:
 
     单流水线：预训练共享向量初始化 + 本书语料微调（warm-start）。
     默认关闭；开启时 model_dir 必须指向转换后的预训练共享模型目录
-    （.kv，由 scripts/tools/convert_word2vec_pretrained.py 生成），
+    （.kv，由 scripts/convert_word2vec_pretrained.py 生成），
     维度以预训练共享向量为准。
     """
 

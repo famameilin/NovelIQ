@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.models import (
     Chapter,
     ChapterAnnotationRecord,
+    CutoffPartition,
     EntityState,
     GraphEntity,
     GraphFact,
@@ -20,6 +21,7 @@ from src.storage.models import (
 )
 from src.storage.models.graph import ChapterBoundary
 from src.storage.repositories.base import BaseRepository
+from src.storage.repositories.pipeline_visibility import require_released_cutoff
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,10 +97,29 @@ class GraphSnapshotRow:
 
 
 class GraphRepository(BaseRepository[GraphFact]):
-    """2026-08-19 用于按章节身份查询事实、实体状态和关系状态"""
+    def __init__(self, session: Session, *, internal: bool = False) -> None:
+        super().__init__(session)
+        self.internal = internal
+
+    def _require_visible(self, run_id: str) -> None:
+        """只有释放事务内部可绕过最终边界，普通查询不能读未发布的物化状态"""
+        if not self.internal:
+            require_released_cutoff(self.session, run_id)
+
+    def _filter_current_facts(self, run_id: str, facts: list[GraphFact]) -> list[GraphFact]:
+        if self.internal:
+            return facts
+        cutoff = require_released_cutoff(self.session, run_id)
+        partitions = self.session.execute(select(CutoffPartition).where(
+            CutoffPartition.cutoff_hash == cutoff.cutoff_hash,
+        )).scalars()
+        accepted = {f"commands/{command_id}" for row in partitions for assertion in row.projection["assertions"]
+                    if assertion["outcome"] == "accepted" for command_id in assertion["command_ids"]}
+        return [row for row in facts if row.payload_path in accepted]
 
     def _chapter_rows(self, run_id: str) -> list[Chapter]:
         """2026-08-19 用于读取当前运行的有正文章节并确定顺序"""
+        self._require_visible(run_id)
         return list(
             self.session.execute(
                 select(Chapter)
@@ -152,23 +173,6 @@ class GraphRepository(BaseRepository[GraphFact]):
             last_chapter_id=int(chapters[-1].chapter_id),
             annotation_id="",
         )
-
-    def previous_chapter_boundary(self, run_id: str, *, chapter_order: int) -> ChapterBoundary | None:
-        """2026-08-19 用于按章节顺序读取最近的前一章节边界"""
-        chapters = self._chapter_rows(run_id)
-        if chapter_order <= 1 or chapter_order > len(chapters) + 1:
-            return None
-        return self.resolve_chapter_boundary(run_id, chapter_id=int(chapters[chapter_order - 2].chapter_id))
-
-    def fetch_fact(self, run_id: str, fact_id: str, *, chapter_id: int | None = None) -> GraphFact | None:
-        """2026-08-19 用于按稳定事实 ID 与章节身份读取事实"""
-        statement = select(GraphFact).where(GraphFact.run_id == run_id, GraphFact.fact_id == fact_id)
-        if chapter_id is not None:
-            statement = statement.where(GraphFact.chapter_id == chapter_id)
-            return self.session.execute(statement).scalar_one_or_none()
-        facts = list(self.session.execute(statement).scalars())
-        order_map = self._chapter_order_map(run_id)
-        return max(facts, key=lambda row: order_map.get(int(row.chapter_id), 0), default=None)
 
     def _latest_state_rows(self, boundary: ChapterBoundary) -> dict[str, EntityState]:
         """2026-08-19 用于读取目标章节及以前每个实体最近的状态"""
@@ -282,29 +286,6 @@ class GraphRepository(BaseRepository[GraphFact]):
             relations=self.fetch_relation_snapshots(boundary, active_only=True),
         )
 
-    def fetch_visible_facts(
-        self, boundary: ChapterBoundary, *, query: str | None = None, limit: int = 50
-    ) -> list[GraphFact]:
-        """2026-08-19 用于读取目标章节边界可见事实"""
-        order_map = self._chapter_order_map(boundary.run_id)
-        rows = self.session.execute(select(GraphFact).where(GraphFact.run_id == boundary.run_id)).scalars()
-        normalized_query = (query or "").strip()
-        tokens = [token for token in re.split(r"[\s,，、；;]+", normalized_query) if token]
-        visible = [
-            row
-            for row in rows
-            if order_map.get(int(row.chapter_id), 0) <= boundary.chapter_order
-            and (
-                not tokens
-                or any(
-                    token.casefold() in str(row.predicate).casefold() or token.casefold() in str(row.content).casefold()
-                    for token in tokens
-                )
-            )
-        ]
-        visible.sort(key=lambda row: (order_map.get(int(row.chapter_id), 0), int(row.graph_fact_id)), reverse=True)
-        return visible[: max(1, limit)]
-
     def fetch_changes(
         self,
         run_id: str,
@@ -322,7 +303,9 @@ class GraphRepository(BaseRepository[GraphFact]):
         order_map = self._chapter_order_map(run_id)
         facts = {
             (int(row.chapter_id), str(row.fact_id)): row
-            for row in self.session.execute(select(GraphFact).where(GraphFact.run_id == run_id)).scalars()
+            for row in self._filter_current_facts(run_id, list(self.session.execute(
+                select(GraphFact).where(GraphFact.run_id == run_id)
+            ).scalars()))
         }
         entity_map = {
             str(row.entity_id): row
@@ -423,25 +406,43 @@ class GraphRepository(BaseRepository[GraphFact]):
         return [] if boundary is None else self.fetch_relation_snapshots(boundary, active_only=active_only)
 
     def fetch_relation_history(self, run_id: str) -> list[RelationSnapshotRow]:
-        """2026-08-19 用于按章节顺序读取关系状态历史"""
-        rows: list[RelationSnapshotRow] = []
+        """按章节顺序读取关系历史，共享实体与关系索引，避免逐状态重建全图"""
         order_map = self._chapter_order_map(run_id)
+        entity_names = {
+            str(row.entity_id): str(row.canonical_name)
+            for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
+        }
+        relations = {
+            str(row.relation_id): row
+            for row in self.session.execute(select(GraphRelation).where(GraphRelation.run_id == run_id)).scalars()
+        }
         states = list(self.session.execute(select(RelationState).where(RelationState.run_id == run_id)).scalars())
+        first_seen: dict[str, int] = {}
+        for state in states:
+            key = str(state.relation_id)
+            first_seen[key] = min(first_seen.get(key, int(state.chapter_id)), int(state.chapter_id))
+        rows: list[RelationSnapshotRow] = []
         for state in sorted(states, key=lambda row: order_map.get(int(row.chapter_id), 0)):
-            boundary = ChapterBoundary(
-                run_id=run_id,
+            relation_id = str(state.relation_id)
+            relation = relations.get(relation_id)
+            if relation is None:
+                continue
+            rows.append(RelationSnapshotRow(
                 chapter_id=int(state.chapter_id),
-                chapter_order=order_map.get(int(state.chapter_id), 0),
-                first_chapter_id=int(state.chapter_id),
-                last_chapter_id=int(state.chapter_id),
-                annotation_id="",
-            )
-            snapshots = self.fetch_relation_snapshots(boundary, active_only=False)
-            rows.extend(
-                row
-                for row in snapshots
-                if row.relation_id == str(state.relation_id) and row.chapter_id == state.chapter_id
-            )
+                relation_id=relation_id,
+                from_entity_id=str(relation.from_entity_id),
+                to_entity_id=str(relation.to_entity_id),
+                from_name=entity_names[str(relation.from_entity_id)],
+                to_name=entity_names[str(relation.to_entity_id)],
+                relation_type=str(state.relation_type),
+                directionality=str(relation.directionality),
+                relation_semantics=str(relation.relation_semantics),
+                attributes=dict(state.attributes),
+                is_active=bool(state.is_active),
+                changes=list(state.changes),
+                first_seen_chapter=first_seen[relation_id],
+                last_seen_chapter=int(state.chapter_id),
+            ))
         return rows
 
     def fetch_relation_changes(self, run_id: str, *, limit: int | None = None) -> list[GraphChangeRow]:

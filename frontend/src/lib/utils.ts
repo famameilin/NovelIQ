@@ -1,32 +1,11 @@
 import type { TaskStatus } from "@/api/types";
 
 /**
- * 按固定小数位格式化数字
- */
-export function formatNumber(value: number, decimals = 2): string {
-  return value.toFixed(decimals);
-}
-
-/**
- * 把百分比数值（0-1）格式化为展示字符串
- */
-export function formatPercent(value: number, decimals = 1): string {
-  return `${(value * 100).toFixed(decimals)}%`;
-}
-
-/**
  * 按最大长度截断字符串，并补省略号
  */
 export function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
   return str.slice(0, maxLength) + "...";
-}
-
-/**
- * 校验十六进制颜色格式
- */
-export function isValidHexColor(hex: string): boolean {
-  return /^#[0-9A-Fa-f]{6}$/.test(hex);
 }
 
 /**

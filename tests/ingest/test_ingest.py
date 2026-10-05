@@ -7,8 +7,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.ingest.reader import ingest_path, load_metadata, read_text_file
-from src.preprocess.cleaning import normalize_text, strip_empty_lines
-from src.preprocess.segment import split_paragraphs, split_sentences
+from src.preprocess import normalize_text, split_paragraphs, split_sentences, strip_empty_lines
 
 
 class TestIngest(unittest.TestCase):

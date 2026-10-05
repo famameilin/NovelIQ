@@ -1,13 +1,4 @@
-"""
-章节标注 Agent 运行入口（agent 路径：单块章整章一个 agent）
-
-2026-09-19 双路径定案：单块章走本入口（程序面，模型可见面=[execute_code, finish]），
-多块章走 block_codeact.run_chapter_subagents 三条职责 subagent 并发；原生工具面
-（模型直接 bind 写入工具）删除，程序面是两条路径唯一的模型可见面。
-审计: 每次运行开启 agent_invocations 行（task_type="annotation"），模型回合与工具
-调用通过 AgentTurnObserver 写入独立短事务；失败路径同样保留完整审计记录。
-断流重试已下沉到 stream.py 当前模型请求层，章节不再整章重试。
-"""
+"""正式章节 Agent 执行入口，断流重试位于模型请求层"""
 
 from __future__ import annotations
 
@@ -22,6 +13,7 @@ from .errors import (
     AnnotationInputError,
     AnnotationRetryableError,
 )
+from .event_submission import build_event_submission_tool
 from .fact_graph import FactGraph
 from .graph import build_annotation_graph
 from .program import ProgramRuntime, build_program_tool
@@ -67,7 +59,7 @@ def validate_bound_annotation(
     paragraph_info 校验；此处给段落坐标映射时做同一不变量的二次校验，
     替代旧"句文本逐字区间"复核——段号没有逐字复核的对象）。
     2026-09-19 章即块拍平：绑定标注就是章本身，chapter_id 即章身份；
-    block_codeact 的章收尾用同一签名。
+    正式信封使用同一验证边界。
     """
     if chapter_id <= 0:
         raise AnnotationInputError("chapter_id 必须为正整数")
@@ -85,7 +77,6 @@ def validate_bound_annotation(
                     f"系统自选段标签超出本章段落范围: chapter_id={chapter_id}"
                     f" paragraph_id={label.paragraph_id}"
                 )
-    # 2026-08-22 重构：事件不再携带锚点/字符区间/哈希，章级证据由持久化层盖章
 
 
 def _model_provider(llm: Any) -> str:
@@ -117,18 +108,12 @@ async def _run_single_attempt(
     observer: AgentTurnObserver | None = None,
     paragraph_info: ChapterParagraphInfo | None = None,
 ) -> AgentRunResult:
-    """2026-08-10 用于以全新账本执行一次章节 Agent 尝试（程序面）
-
-    2026-09-19 恢复写者程序面并去开关：绑定面=[execute_code, finish]（与 subagent 面
-    同形；finish 既是绑定工具也可写在程序末尾，两条通道同一条收尾判定），分发面仍是
-    完整工具表（含程序工具自身），模型直发原生调用时由批次转入同一个内层
-    dispatcher（见 graph 批次节点）；章正文整章注入（章即块，不再有子块协议）。
-    2026-09-16 连接粒度：这里不再自己开只读会话，只把 session_factory 转交查询服务，
-    由它在单次工具调用内取还连接（模型生成期间连接占用为零）。
-    """
+    """以独立本章图执行正式工具，查询连接仅在实际读取期间持有"""
     from src.config import settings
 
     query_service = query_service_factory(session_factory)
+    if graph_state is not None:
+        graph_state.chapter_id = chapter_id
     allow_future_context = settings.models.annotation.allow_future_context
     ledger = AnnotationToolLedger(
         run_scope=run_id,
@@ -142,17 +127,19 @@ async def _run_single_attempt(
     )
     tools = build_annotation_tools(query_service, ledger)
     finish_tool = {str(tool.name): tool for tool in tools}[FINISH_TOOL_NAME]
-    program_tool = build_program_tool(ProgramRuntime(tools, ledger, observer=observer, stream=stream))
+    runtime = ProgramRuntime(tools, ledger, observer=observer, stream=stream)
+    program_tool = build_program_tool(runtime)
+    event_submission_tool = build_event_submission_tool(runtime)
     total_iteration_limit = max(1, settings.models.annotation.max_iterations)
     graph = build_annotation_graph(
         llm,
-        [*tools, program_tool],
+        [*tools, program_tool, event_submission_tool],
         ledger=ledger,
         max_iterations=total_iteration_limit,
         stream=stream,
         observer=observer,
         retries=settings.models.annotation.total_attempts,
-        bind_tools=[program_tool, finish_tool],
+        bind_tools=[program_tool, event_submission_tool, finish_tool],
         program_tool_name=str(program_tool.name),
     )
     initial_messages = [
@@ -189,14 +176,13 @@ async def _run_single_attempt(
         run_id=run_id,
         chapter_id=chapter_id,
         annotation=ledger.annotation,
-        resolved_cases=list(ledger.resolved_cases),
         pushed_cases=list(ledger.pushed_cases),
+        cross_chapter_links=list(ledger.cross_chapter_links),
         audit=AgentRunAudit(
             allow_future_context=allow_future_context,
             write_records=list(ledger.write_records),
-            authorized_chapter_ids=sorted(ledger.authorized_chapter_ids),
             authorized_text_paragraph_ids=sorted(ledger.authorized_text_paragraph_ids),
-            authorized_event_ids=sorted(ledger.authorized_event_ids),
+            source_anchors=ledger.source_anchors,
         ),
     )
 
@@ -217,12 +203,7 @@ async def run_annotation_agent(
     chapter_label: str | None = None,
     paragraph_info: ChapterParagraphInfo | None = None,
 ) -> AgentRunResult:
-    """2026-08-11 用于单次运行章节 Agent（agent 路径）：断流重试已下沉到 stream.py，章节失败直接抛出
-
-    2026-09-19 双路径定案：本入口服务单块章（整章正文一次注入），多块章由派发方
-    走 run_chapter_subagents；签名从 current_chunks 列表改为章正文。
-    2026-09-16 连接粒度：不再自开只读会话，查询服务按单次工具调用取还连接。
-    """
+    """正式章节的唯一模型入口，工作成功后返回不可变提交载荷"""
     from src.agents.audit.observer import AgentTurnObserver
     from src.agents.audit.recorder import AgentAuditRecorder
 
@@ -238,8 +219,7 @@ async def run_annotation_agent(
     recorder = audit_recorder or AgentAuditRecorder(session_factory)
     model_name = _model_name(llm)
     model_provider = _model_provider(llm)
-    if graph_state is not None:
-        graph_state.begin_chapter()
+    graph_snapshot = graph_state.snapshot() if graph_state is not None else None
     invocation_id = recorder.start_invocation(
         run_id=run_id,
         task_type="annotation",
@@ -276,13 +256,11 @@ async def run_annotation_agent(
             paragraph_info=paragraph_info,
         )
     except Exception as exc:
-        if graph_state is not None:
-            # 章节失败时恢复事实图历史快照，避免当章脏状态残留到后续章节
-            graph_state.reset_chapter_changes()
+        if graph_state is not None and graph_snapshot is not None:
+            graph_state.restore(graph_snapshot)
         recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
         raise
-    # 2026-09-04 单一写面：取出本章累积的图域操作日志随结果返回，
-    # 由 workflow 合并进完成事务输入（失败路径已在上方 reset 清空）
+    # 本章局部命令与标注一同进入正式不可变提交
     if graph_state is not None:
         result = result.model_copy(update=graph_state.drain_ops())
     recorder.finish_invocation(invocation_id, status="success")

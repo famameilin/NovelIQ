@@ -49,7 +49,8 @@ def test_delete_task_artifacts_removes_output_logs_and_run_model(monkeypatch, tm
 
     assert not (outputs_dir / f"{task_id}.json").exists()
     assert not (logs_dir / run_id).exists()
-    assert not (logs_dir / task_id).exists()
+    # 2026-10-02 移除短 run_id 目录兼容：日志目录只按 run_id 删除
+    assert (logs_dir / task_id).exists()
     assert not run_model_dir.exists()
     assert (shared_dir / "fixture.kv").exists()
 

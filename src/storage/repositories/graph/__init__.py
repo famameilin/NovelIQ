@@ -7,11 +7,6 @@ from .event_forest import (
     EventTreeRow,
     ForeshadowingEdgeRow,
 )
-from .persistence import (
-    PersistedGraphResult,
-    persist_completion_graph,
-    stable_annotation_fact_id,
-)
 from .repository import (
     EntitySnapshotRow,
     GraphChangeRow,
@@ -26,9 +21,6 @@ __all__ = [
     "GraphRepository",
     "GraphSnapshotRow",
     "RelationSnapshotRow",
-    "PersistedGraphResult",
-    "persist_completion_graph",
-    "stable_annotation_fact_id",
     "EventForestRepository",
     "EventForestSnapshot",
     "EventNodeRow",

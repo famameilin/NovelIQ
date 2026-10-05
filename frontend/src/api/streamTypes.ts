@@ -15,6 +15,8 @@ export type SSEEventType =
   | "task_complete"
   | "task_error"
   | "task_cancelled"
+  | "pipeline_progress"
+  | "reconnect_required"
   | "message";
 
 export type ToolCallStatus = "started" | "success" | "failed";
@@ -34,25 +36,7 @@ export interface StreamEventData {
   status?: ToolCallStatus | null; // 工具调用状态（tool_call 事件专用）
 }
 
-export interface TaskCompleteData {
-  stage: string;
-  percent: number;
-  message: string;
-}
-
 export interface ErrorData {
   error: string;
   stage?: string;
-}
-
-export interface TaskCancelledData {
-  stage: string;
-  message: string;
-}
-
-export interface StreamMessage {
-  type: SSEEventType;
-  task_id: string;
-  data: StreamEventData | TaskCompleteData | ErrorData | TaskCancelledData | Record<string, unknown>;
-  timestamp: string;
 }

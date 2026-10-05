@@ -16,6 +16,11 @@
 任务: fix-test-db-isolation
 修改内容: 将后端测试默认数据库强制切换到 TEST_DATABASE，
     并在每个测试前后重置 SQLAlchemy 单例，防止直接调用 get_session_factory() 时污染开发库
+
+修改时间: 2026-10-03
+任务: feat-event-driven-scheduling
+修改内容: 新增 autouse 夹具在每个测试后重置模型池容量账本与事件总线单例，
+    防止预留位/订阅队列跨测试泄漏导致全量套件下调度类测试偶发失败
 """
 
 from __future__ import annotations
@@ -246,6 +251,28 @@ def reset_backend_db_singletons_per_test(force_test_database_url: None) -> Gener
         _reset_backend_db_singletons()
 
 
+@pytest.fixture(autouse=True)
+def reset_capacity_and_event_bus() -> Generator[None, None, None]:
+    """每个测试后重置模型池容量账本与事件总线单例。
+
+    创建时间: 2026-10-03
+    任务: feat-event-driven-scheduling
+    说明: MODEL_CAPACITY 的预留位（选举即 used+1）与 EVENT_BUS 的订阅队列都是
+        进程内单例状态；不复位会让后续测试的派发选举被残留值扭曲，
+        全量套件下表现为调度类测试偶发超时或断言计数偏差。
+    """
+    from src.agents.event_bus import EVENT_BUS
+    from src.agents.model_capacity import MODEL_CAPACITY
+
+    MODEL_CAPACITY.reset()
+    EVENT_BUS.reset()
+    try:
+        yield
+    finally:
+        MODEL_CAPACITY.reset()
+        EVENT_BUS.reset()
+
+
 @pytest.fixture
 def db_session(setup_test_database: None) -> Generator[Session, None, None]:
     """
@@ -271,6 +298,42 @@ def db_session(setup_test_database: None) -> Generator[Session, None, None]:
     finally:
         session.rollback()
         session.close()
+
+
+@pytest.fixture
+def configured_model_pool(monkeypatch) -> None:
+    """队列测试使用明确的假模型配置，不依赖开发者的真实 Key"""
+    from src.config import settings
+    from src.config.schemas.model import WeightedModelSettings
+
+    monkeypatch.setattr(settings.models, "model_pool", [
+        WeightedModelSettings("test-model", "https://test.example/v1", "test-key", max_in_flight=2),
+    ])
+    monkeypatch.setattr(settings.models, "diagnosis_model_id", "test-model")
+
+
+@pytest.fixture
+def pipeline_run_cleanup(configured_model_pool: None) -> Generator[None, None, None]:
+    """隔离测试 run 与进程内容量位账本，不能让前一测试占用后续测试的全局槽位"""
+    from sqlalchemy import select
+
+    from src.agents.model_capacity import MODEL_CAPACITY
+    from src.storage.db import get_session_factory
+    from src.storage.models import AnalysisRun
+
+    factory = get_session_factory()
+    with factory() as session:
+        existing = set(session.execute(select(AnalysisRun.run_id)).scalars())
+    try:
+        yield
+    finally:
+        MODEL_CAPACITY.reset()
+        with factory() as session, session.begin():
+            created = set(session.execute(select(AnalysisRun.run_id)).scalars()) - existing
+            for run_id in created:
+                run = session.get(AnalysisRun, run_id)
+                if run is not None and run.status in {"pending", "running", "cancelling"}:
+                    run.status = "cancelled"
 
 
 @pytest.fixture

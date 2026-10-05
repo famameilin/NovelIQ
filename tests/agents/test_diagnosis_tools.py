@@ -122,10 +122,10 @@ def test_get_pivot_materials_empty() -> None:
 
 def test_get_relation_changes_formats_rows() -> None:
     repo = MagicMock()
-    repo.fetch_relation_changes.return_value = [(3, "甲", "乙", "盟友", "新建")]
+    repo.fetch_relation_changes.return_value = [(3, "甲", "乙", "盟友", "assert")]
     with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
         tools = _build_tools()
-        assert _invoke(tools[2]) == "[chunk 3] 甲 -> 乙 (盟友, 新建)"
+        assert _invoke(tools[2]) == "[chunk 3] 甲 -> 乙 (盟友, assert)"
 
 
 def test_get_relation_changes_empty() -> None:

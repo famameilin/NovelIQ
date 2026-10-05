@@ -7,10 +7,11 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 from src.agents.diagnosis.runner import (
     DiagnosisAgentRunError,
@@ -20,6 +21,7 @@ from src.agents.diagnosis.runner import (
 )
 from src.agents.graph import build_agent_graph
 from src.models.cloud.schema import CloudAnalysis
+from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 def _analysis_payload() -> dict:
@@ -46,7 +48,7 @@ def _analysis_payload() -> dict:
     }
 
 
-class _FinishOnlyLLM:
+class _FinishOnlyLLM(StreamedFakeModelMixin):
     def __init__(self, payload: dict, *, first_bad: bool = False, wrapped: bool = True) -> None:
         self.payload = payload
         self.first_bad = first_bad
@@ -235,34 +237,35 @@ async def test_truncated_tool_call_skips_invoke_and_returns_error_tool_message()
             super().__init__(payload)
             self.captured_messages: list[list] = []
 
-        async def ainvoke(self, messages):
+        async def astream(self, messages):
+            # 2026-10-02 统一流式后截断由聚合器 JSON 解析失败产生：
+            # 首回合发出 args 被截断的工具调用 chunk，绕过 mixin 的完整 AIMessage 包装
             self.calls += 1
             self.captured_messages.append(list(messages))
             if self.calls == 1:
-                # 聚合器在运行时以属性赋值挂载截断标记（绕过 create_tool_call 重建）
-                message = AIMessage(content="")
-                message.tool_calls = [
-                    {
-                        "name": "get_aggregate_signals",
-                        "args": {},
-                        "id": "get-signals",
-                        "type": "tool_call",
-                        "truncated": True,
-                        "truncated_args": '{"metric": "sig',
-                    }
-                ]
-                return message
-            return AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "finish",
-                        "args": {"analysis": self.payload},
-                        "id": "finish",
-                        "type": "tool_call",
-                    }
-                ],
-            )
+                yield AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "name": "get_aggregate_signals",
+                            "args": '{"metric": "sig',
+                            "id": "get-signals",
+                            "index": 0,
+                        }
+                    ],
+                )
+            else:
+                yield AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "name": "finish",
+                            "args": json.dumps({"analysis": self.payload}, ensure_ascii=False),
+                            "id": "finish",
+                            "index": 0,
+                        }
+                    ],
+                )
 
     llm = _TruncatedThenFinishLLM(_analysis_payload())
     graph = build_agent_graph(

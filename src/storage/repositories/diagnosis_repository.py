@@ -16,7 +16,6 @@ from src.storage.models import (
     ParagraphCurve,
     ParagraphTopic,
     ParagraphTopicInference,
-    StageSummary,
 )
 from src.storage.path_resolver import resolve_model_dir
 from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingTreeView
@@ -98,6 +97,8 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
     def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str, str]]:
         """2026-08-07 用于从章节关系版本逐次变化读取诊断素材"""
         row_limit = limit if limit is not None else 50
+        if row_limit == 0:
+            return []
         rows: list[tuple[int, str, str, str, str]] = []
         for relation in GraphRepository(self.session).fetch_relation_history(run_id):
             if relation.relation_semantics == "same_character":
@@ -114,6 +115,8 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                         str(change.get("change_kind") or "refine"),
                     )
                 )
+                if row_limit > 0 and len(rows) >= row_limit:
+                    return rows
         return rows[:row_limit]
 
     def fetch_foreshadowing_trees(self, run_id: str) -> list[ForeshadowingTreeView]:
@@ -187,28 +190,3 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 continue
             rows.append(f"{entity.name}（别名：{'、'.join(entity.aliases)}）")
         return rows
-
-    def fetch_stage_summaries(self, run_id: str) -> list[dict[str, Any]]:
-        """2026-08-05 用于读取仍由诊断消费的阶段摘要记录"""
-        stmt = (
-            select(
-                StageSummary.start_chapter_id,
-                StageSummary.end_chapter_id,
-                StageSummary.summary,
-            )
-            .join(
-                Chapter,
-                (Chapter.run_id == StageSummary.run_id) & (Chapter.chapter_id == StageSummary.start_chapter_id),
-            )
-            .where(StageSummary.run_id == run_id)
-            .order_by(Chapter.sequence, StageSummary.start_chapter_id)
-        )
-        return [
-            {
-                "start_chapter_id": row.start_chapter_id,
-                "end_chapter_id": row.end_chapter_id,
-                "summary": row.summary,
-            }
-            for row in self.session.execute(stmt)
-            if row.summary
-        ]

@@ -18,6 +18,7 @@ from src.models.cloud.schema import CloudAnalysis
 from src.storage.repositories import RunRepository
 from src.workflows.diagnose import run_diagnose
 from tests.support.analysis_factories import insert_test_novel
+from tests.support.chapter_annotation_helpers import publish_test_cutoff
 
 
 def _fake_analysis(novel_id: str) -> CloudAnalysis:
@@ -50,6 +51,7 @@ class TestCli:
 
     @pytest.mark.asyncio()
     async def test_agent_diagnose_writes_db(self) -> None:
+        publish_test_cutoff(self.db_session, self.run_id)
         fake = AsyncMock(return_value=_fake_analysis(self.novel_id))
         with patch("src.agents.run_diagnosis_agent", new=fake):
             analysis = await run_diagnose(

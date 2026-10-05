@@ -1,6 +1,7 @@
 /** 通过 SSE 和 HTTP backfill 同步分析任务状态 */
 
 import { useEffect, useRef, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSSEListener } from "./useEventSource";
 import { useStreamStore } from "@/store/streamStore";
 import { appConfig } from "@/config";
@@ -90,6 +91,7 @@ export function useAnalysisStatus(
   taskId: string | null,
   options?: UseAnalysisStatusOptions,
 ) {
+  const queryClient = useQueryClient();
   const {
     setConnected,
     setTaskId,
@@ -291,6 +293,13 @@ export function useAnalysisStatus(
       const eventData = data as StreamEventData;
 
       switch (type) {
+        case "pipeline_progress": {
+          const payload = data as { event_type?: string };
+          if (payload.event_type === "cutoff_released") {
+            void queryClient.invalidateQueries({ queryKey: ["pipeline", novelId, taskId] });
+          }
+          break;
+        }
         case "stage_start":
           _handleStageChange(eventData);
           // 记录阶段开始时间
@@ -356,6 +365,7 @@ export function useAnalysisStatus(
           break;
 
         case "task_complete":
+          void queryClient.invalidateQueries({ queryKey: ["pipeline", novelId, taskId] });
           flushBufferedLLMOutputs();
           updateProgress({
             action: "complete",
@@ -373,7 +383,8 @@ export function useAnalysisStatus(
           break;
       }
     },
-    [bufferLLMOutput, flushBufferedLLMOutputs, _handleStageChange, setError, setStageDuration, updateProgress],
+    [bufferLLMOutput, flushBufferedLLMOutputs, _handleStageChange, setError, setStageDuration, updateProgress,
+      queryClient, novelId, taskId],
   );
 
   const sseUrl =

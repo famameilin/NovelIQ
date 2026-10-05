@@ -196,25 +196,6 @@ export interface GlobalStats {
   lexicon_zero_hit_share?: number | null;
 }
 
-export interface ChapterCharacter {
-  name: string;
-  role_function?: string | null;
-  action?: string | null;
-  emotion_score?: string | null;
-}
-
-export interface ChapterRelation {
-  from_char: string;
-  to_char: string;
-  type: string;
-  change: string;
-}
-
-export interface ChapterDialogue {
-  speaker: string[];
-  length?: number | null;
-}
-
 export type ForeshadowingPayoffLikelihood = "high" | "medium" | "low";
 export type DiagnosisGenreLabel = "科幻" | "悬疑" | "历史" | "仙侠" | "玄幻" | "都市" | "通用";
 export type DiagnosisStyleLabel =
@@ -232,24 +213,6 @@ export type DiagnosisStyleLabel =
   | "冷峻"
   | "权谋"
   | "爽文";
-
-export interface ChapterAnnotation {
-  chapter_id: number;
-  emotional_valence?: number | null;
-  event_type?: string | null;
-  pivot_moment?: boolean | null;
-  cliffhanger?: boolean | null;
-  has_foreshadowing?: boolean | null;
-  is_strong_setup?: boolean | null;
-  foreshadowing_desc?: string | null;
-  why_unresolved_now?: string | null;
-  payoff_likelihood?: ForeshadowingPayoffLikelihood | string | null;
-  // 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
-  foreshadowing_root_event_id?: string | null;
-  characters: ChapterCharacter[];
-  relations: ChapterRelation[];
-  dialogues: ChapterDialogue[];
-}
 
 // 主题
 
@@ -573,12 +536,6 @@ export interface StyleStatsMetrics {
   function_word_vector?: Record<string, number> | null;
 }
 
-// 通用
-
-export interface ApiError {
-  detail: string;
-}
-
 // Tab 级聚合（前端每 tab 一个 API；响应只含复合数据与展示主体，
 // 与后端 src/api/models/tabs.py 严格对齐）
 
@@ -820,15 +777,6 @@ export interface PaginatedResponse<T> {
   total_pages: number;
 }
 
-export interface BatchDeleteRequest {
-  novel_ids: string[];
-}
-
-export interface BatchDeleteResponse {
-  deleted: string[];
-  failed: string[];
-}
-
 // 设置模块（/api/settings）
 
 export type SettingFieldType = "number" | "integer" | "boolean" | "enum" | "string";
@@ -841,7 +789,7 @@ export interface SettingSectionSpec {
 }
 
 export interface SettingFieldSpec {
-  /** settings.json 中的结构化路径，如 ["models", "annotation", "temperature"] */
+  /** settings.json 中的结构化路径，如 ["models", "annotation", "timeout_s"] */
   path: string[];
   field_type: SettingFieldType;
   label: string;
@@ -869,6 +817,37 @@ export interface SettingsViewResponse {
   sources: Record<string, SettingSource>;
 }
 
+export interface ModelProviderView {
+  base_url: string | null;
+  model: string | null;
+  api_key: string | null;
+  configured: boolean;
+}
+
+export interface ModelPoolEntry {
+  model_id: string;
+  base_url: string;
+  api_key: string;
+  weight: number;
+  max_in_flight: number;
+  temperature: number;
+  top_p: number;
+  max_tokens: number;
+}
+
+export interface ModelPoolEntryUpdate {
+  model_id: string;
+  base_url: string;
+  /** 留空时不提交，已有模型保留已保存的 Key */
+  api_key?: string;
+  weight: number;
+  max_in_flight: number;
+  temperature: number;
+  top_p: number;
+  max_tokens: number;
+  original_model_id?: string;
+}
+
 export interface TaskEnvPatch {
   base_url?: string | null;
   model?: string | null;
@@ -877,9 +856,18 @@ export interface TaskEnvPatch {
 }
 
 export interface ModelEnvUpdate {
-  model?: TaskEnvPatch | null;
+  model_pool?: ModelPoolEntryUpdate[];
+  diagnosis_model_id?: string | null;
   embedding_model?: TaskEnvPatch | null;
   ltp_model_dir?: string | null;
+}
+
+export type ModelProviderTask = "pool" | "embedding";
+
+export interface ModelProviderTestRequest {
+  base_url?: string;
+  api_key?: string;
+  model_id?: string;
 }
 
 export interface ModelProviderTestResponse {

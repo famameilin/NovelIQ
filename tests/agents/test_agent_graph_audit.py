@@ -21,11 +21,12 @@ from src.models.cloud.schema import CloudAnalysis
 from src.storage.models.agent_audit import AgentToolCall, AgentTurn
 from tests.agents.test_diagnosis_agent import _analysis_payload
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
+from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 pytestmark = pytest.mark.asyncio
 
 
-class _SequencedLLM:
+class _SequencedLLM(StreamedFakeModelMixin):
     """按顺序返回预定义 AIMessage 的测试模型（非流式降级路径）"""
 
     def __init__(self, responses: list[AIMessage]) -> None:
@@ -43,7 +44,7 @@ class _SequencedLLM:
         return response
 
 
-class _FailingLLM:
+class _FailingLLM(StreamedFakeModelMixin):
     """模型调用直接抛异常的测试模型"""
 
     def bind_tools(self, tools):
@@ -55,7 +56,7 @@ class _FailingLLM:
         raise RuntimeError("provider timeout")
 
 
-class _RetryingLLM:
+class _RetryingLLM(StreamedFakeModelMixin):
     """2026-08-30 用于模拟一次瞬态失败后成功的非流式 Provider"""
 
     def __init__(self) -> None:
@@ -374,7 +375,8 @@ async def test_graph_model_exception_records_error_turn(db_session) -> None:
     assert turn.request_messages is not None
     assert {"system", "human"} == {m["role"] for m in turn.request_messages}
     assert turn.request_messages[-1]["content"] == "诊断"
-    assert turn.timing_notes == ["provider_call_failed", "provider_request_failed"]
+    # 2026-10-02 统一流式后异常中断的计时备注由聚合器给出：无 payload 记 provider_stream_no_payload
+    assert turn.timing_notes == ["provider_stream_no_payload", "provider_request_failed"]
 
 
 async def test_graph_retries_are_audited_as_separate_provider_requests(db_session) -> None:

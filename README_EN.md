@@ -1,4 +1,4 @@
-# NovelIQ
+﻿# NovelIQ
 
 > [中文文档](README.md)
 
@@ -30,7 +30,7 @@ Once analysis completes, the frontend provides:
 | --- | --- |
 | ![Event forest](assets/screenshots/event-growth-forest-1440x900.png) | ![Causal structure within a tree](assets/screenshots/event-growth-tree-1440x900.png) |
 
-For an existing 0.1.0 database, follow the [one-time 0.1.1 upgrade guide](UPGRADE-0.1.1.md) before deploying this release.
+For an existing 0.1.0 database, follow the [one-time 0.1.1 upgrade guide](docs/upgrades/UPGRADE-0.1.1.md) before deploying this release.
 
 Stack: Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17 (pgvector); React 19 / Vite / ECharts / Tailwind CSS. LLMs go through an OpenAI-compatible interface (local vLLM or a cloud service both work); lexical analysis and word vectors are local offline models.
 
@@ -44,7 +44,7 @@ LTP and Word2Vec load from local files and **never download over the network**; 
 - **Word2Vec** (`linguistic.word2vec.enabled`, off by default): no model needed while off; once enabled it requires the converted `.kv` main file under `models/word2vec/shared/` (depends on LTP tokens), and a missing file errors at the same stage. For existing `.vec`/`.bin`/`.txt` pretrained vectors, run:
 
   ```powershell
-  uv run python -m scripts.tools.convert_word2vec_pretrained
+  uv run python -m scripts.convert_word2vec_pretrained
   ```
 
   Reads from `models/word2vec/pretrained/` by default and writes to `models/word2vec/shared/`.

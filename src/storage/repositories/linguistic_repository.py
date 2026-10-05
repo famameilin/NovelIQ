@@ -172,20 +172,6 @@ class LinguisticRepository(BaseRepository[ParagraphLinguisticFeature]):
         self.session.bulk_insert_mappings(cast(Mapper[Any], ParagraphPosEmbedding), rows)
         return len(rows)
 
-    def fetch_pos_embeddings(self, run_id: str) -> Sequence[Row]:
-        statement = (
-            select(
-                ParagraphPosEmbedding.paragraph_id,
-                ParagraphPosEmbedding.pos_group,
-                ParagraphPosEmbedding.embedding_vector,
-                ParagraphPosEmbedding.source_token_count,
-                ParagraphPosEmbedding.in_vocabulary_token_count,
-            )
-            .where(ParagraphPosEmbedding.run_id == run_id)
-            .order_by(ParagraphPosEmbedding.paragraph_id, ParagraphPosEmbedding.pos_group)
-        )
-        return self.session.execute(statement).all()
-
     def fetch_pos_embedding_coverage(self, run_id: str) -> Sequence[Row]:
         """按词性分组返回覆盖率分子分母（§5.11 词性向量覆盖率）"""
         statement = (

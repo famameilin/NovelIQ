@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import unittest
@@ -16,17 +17,18 @@ class TestTaskModelConfigFromEnv(unittest.TestCase):
         """
 
         env_vars = {
-            "MODEL_BASE_URL": "https://api.example.com/v1",
-            "MODEL_ID": "shared-text-model",
-            "MODEL_KEY": "text-key",
+            "MODEL_POOL": json.dumps([{"base_url": "https://api.example.com/v1", "model_id": "text-model",
+                                       "api_key": "text-key", "weight": 1, "max_in_flight": 3}]),
+            "DIAGNOSIS_MODEL_ID": "text-model",
             "EMBEDDING_MODEL_BASE_URL": "http://localhost:8080/v1",
             "EMBEDDING_MODEL_ID": "embedding-model",
             "EMBEDDING_MODEL_KEY": "sk-no-key-required",
         }
         with patch.dict(os.environ, env_vars, clear=False):
             new_settings = Settings.from_env()
-            self.assertEqual(new_settings.models.annotation.model, "shared-text-model")
-            self.assertEqual(new_settings.models.diagnosis.model, "shared-text-model")
+            self.assertEqual(new_settings.models.model_pool[0].model_id, "text-model")
+            self.assertEqual(new_settings.models.model_pool[0].max_in_flight, 3)
+            self.assertEqual(new_settings.models.diagnosis_model_id, "text-model")
             self.assertEqual(new_settings.models.paragraph_embedding.model, "embedding-model")
 
 

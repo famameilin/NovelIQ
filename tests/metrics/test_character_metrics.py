@@ -197,23 +197,23 @@ class TestRelationChangeFrequency(unittest.TestCase):
 
     def test_change_rate_per_10k_chars(self) -> None:
         relations = [
-            ("A", "B", "盟友", "强化"),
-            ("A", "C", "敌对", "新建"),
-            ("A", "D", "敌对", "新建"),
+            ("A", "B", "盟友", "reinforce"),
+            ("A", "C", "敌对", "assert"),
+            ("A", "D", "敌对", "assert"),
         ]
         result = compute_relation_change_frequency(relations, 10000)
         self.assertEqual(result["total_changes"], 3.0)
         self.assertEqual(result["relation_change_per_10k_chars"], 3.0)
 
     def test_change_rate_zero_chars_returns_none(self) -> None:
-        result = compute_relation_change_frequency([("A", "B", "盟友", "强化")], 0)
+        result = compute_relation_change_frequency([("A", "B", "盟友", "reinforce")], 0)
         self.assertEqual(result["total_changes"], 0.0)
         self.assertIsNone(result["relation_change_per_10k_chars"])
 
     def test_change_frequency(self) -> None:
         relations = [
-            ("A", "B", "盟友", "强化"),
-            ("A", "C", "敌对", "新建"),
+            ("A", "B", "盟友", "reinforce"),
+            ("A", "C", "敌对", "assert"),
         ]
         result = compute_relation_change_frequency(relations, 10000)
         self.assertEqual(result["total_changes"], 2.0)

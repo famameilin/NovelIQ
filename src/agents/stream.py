@@ -4,28 +4,47 @@ Agent 流式事件封装
 将 Agent 循环中的模型推理/工具调用过程翻译为统一 StreamEvent 并发送到 SSE，
 Agent 层只需持有 AgentStream 即可获得完整过程可见性。
 
-计时说明: 流式与否由模型实例的 streaming 配置（stream_enabled）决定；
-流式 Provider 得到真实 TTFT，非流式 Provider 的 TTFT 与推理时间记录为 NULL，
-不会用总耗时冒充。
+计时说明: 2026-10-02 删除"流式输出"设置后所有 LLM 调用固定走流式
+（llm.py 以 streaming=True 构建模型实例），本模块统一经 astream 聚合，
+流式 Provider 得到真实 TTFT。
+
+拆分说明: 2026-10-02 审计脱敏与请求元数据迁至 stream_audit.py，chunk 纯
+函数与聚合器迁至 stream_aggregator.py；本模块保留 re-export 面（含
+ModelCallTiming/StreamChunkAggregator/extract_reasoning_content 等），
+导入方零改动，`__all__` 面不变。
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
+import contextlib
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
-from typing import Any, cast
-from urllib.parse import urlsplit, urlunsplit
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolCall, UsageMetadata
+from langchain_core.messages import AIMessage, HumanMessage
 
+from src.agents.stream_aggregator import (
+    StreamChunkAggregator,
+)
+from src.agents.stream_aggregator import (
+    _merge_tool_call_chunks as _merge_tool_call_chunks,
+)
+from src.agents.stream_aggregator import (
+    extract_reasoning_content as extract_reasoning_content,
+)
+from src.agents.stream_audit import ModelCallTiming, _provider_request_metadata
 from src.api.models.events import StreamEvent, StreamEventAction
 
 _MAX_TOOL_SUMMARY_CHARS = 200
+
+# 2026-10-04 内容进度看门狗阈值（秒）：流块到达而内容零增长超过该值即判死重发。
+# 依据：run 4cb054dc 末章僵流 31 分钟零内容（保活帧喂活了全部"有块"信号）；
+# 本 run 132 个计量回合 TTFT p99=9.4s/max=9.9s，重放健康流 ~57 内容帧/秒；
+# llm.py 注释声称的"网关限流队列/思考停顿超 2 分钟"远低于该阈值。
+# 误判代价=一次重发（total_attempts 兜底），漏判代价=lane 挂死需人工重启。
+CONTENT_STALL_TIMEOUT_S = 300.0
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +65,92 @@ class StreamEmitError(RuntimeError):
     """2026-08-12 用于区分 SSE 推送失败与模型输出流中断：推送失败不触发模型请求重试"""
 
 
+class ContentStallTimeoutError(TimeoutError):
+    """2026-10-04 用于标注"连接活着但内容零增长"的僵流形态
+
+    run 4cb054dc 末章实测：Provider 对单个请求卡死生成后仍持续下发可解析
+    保活帧（31 分钟零内容），httpx 读超时(120s)与 langchain 解析块看门狗
+    (600s)都以"有块到达"为信号被喂活，不会触发。本看门狗的判活信号改为
+    内容增量本身（reasoning/content/tool_calls）；继承 TimeoutError 以落进
+    _is_transient_model_error 的既有重发通道。健康流内容密度实测 ~57 帧/秒
+    （重放 turn 886：24775 内容帧/433s，唯一空 delta 是 finish 帧），阈值
+    300s 有数十倍边际；真实误判代价=一次重发，漏判代价=lane 挂死需人工重启。
+    """
+
+    def __init__(self, timeout_s: float, chunks_seen: int, content_chunks: int, elapsed_s: float) -> None:
+        self.timeout_s = timeout_s
+        self.chunks_seen = chunks_seen
+        self.content_chunks = content_chunks
+        self.elapsed_s = elapsed_s
+        super().__init__(
+            f"内容进度停摆 {timeout_s:.0f}s（收到 {chunks_seen} 个流块，其中内容块 {content_chunks} 个，"
+            f"历时 {elapsed_s:.0f}s）：连接可能活着但生成端无产出"
+        )
+
+
+def _chunk_has_content(chunk: Any) -> bool:
+    """2026-10-04 用于判定流块是否携带实际内容（内容进度看门狗的判活信号）"""
+    content = getattr(chunk, "content", None)
+    if isinstance(content, str) and content:
+        return True
+    if isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("text") for part in content
+    ):
+        return True
+    kwargs = getattr(chunk, "additional_kwargs", None) or {}
+    return bool(
+        kwargs.get("reasoning_content")
+        or kwargs.get("function_call")
+        or getattr(chunk, "tool_call_chunks", None)
+        or getattr(chunk, "tool_calls", None)
+    )
+
+
+async def _guard_content_progress(source: Any, timeout_s: float) -> Any:
+    """2026-10-04 内容进度看门狗：流块持续到达而内容零增长超过 timeout_s 即判死
+
+    与 langchain 的 stream_chunk_timeout（解析块间隔）互补：后者会被可解析
+    保活帧喂活而失效（mock 复现变体 B 坐实）。从流开始即武装——事故形态正是
+    首个内容帧永不到来；每个内容帧重置计时。提前退出（判死/取消）时显式
+    aclose 底层流，及时释放 HTTP 连接。
+    """
+    if timeout_s <= 0:
+        async for chunk in source:
+            yield chunk
+        return
+    started = time.monotonic()
+    last_content = started
+    chunks_seen = 0
+    content_chunks = 0
+    iterator = source.__aiter__()
+    try:
+        while True:
+            remaining = timeout_s - (time.monotonic() - last_content)
+            if remaining <= 0:
+                raise ContentStallTimeoutError(
+                    timeout_s, chunks_seen, content_chunks, time.monotonic() - started
+                )
+            try:
+                chunk = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
+            except StopAsyncIteration:
+                return
+            except TimeoutError as exc:
+                # wait_for 在预算耗尽处判死（保活帧形态下这是主要触发点，而非预检查）
+                raise ContentStallTimeoutError(
+                    timeout_s, chunks_seen, content_chunks, time.monotonic() - started
+                ) from exc
+            chunks_seen += 1
+            if _chunk_has_content(chunk):
+                content_chunks += 1
+                last_content = time.monotonic()
+            yield chunk
+    finally:
+        aclose = getattr(source, "aclose", None)
+        if aclose is not None:
+            with contextlib.suppress(Exception):
+                await aclose()
+
+
 CompletionHintProvider = Callable[[], str | None]
 """2026-09-08 无工具回复重发前向本次请求注入的提示工厂
 
@@ -61,19 +166,56 @@ def _is_transient_model_error(exc: BaseException) -> bool:
     覆盖内置 ConnectionError/TimeoutError 以及 openai/httpx 异常类型
     （APIConnectionError/APITimeoutError/RateLimitError/ConnectError/ReadTimeout 等）。
     """
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(status, int):
+        return status == 429 or status >= 500
     if isinstance(exc, (ConnectionError, TimeoutError)):
         return True
     name = type(exc).__name__.lower()
     return any(marker in name for marker in _TRANSIENT_ERROR_MARKERS)
 
 
-def _retry_backoff_seconds(attempt: int) -> float:
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """读取服务端 429 响应的 Retry-After 头（秒数或 HTTP 日期），无法解析返回 None"""
+    from datetime import UTC, datetime
+    from email.utils import parsedate_to_datetime
+
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    raw = headers.get("Retry-After") if headers is not None else None
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        try:
+            date = parsedate_to_datetime(str(raw))
+        except (TypeError, ValueError):
+            return None
+        if date.tzinfo is None:
+            date = date.replace(tzinfo=UTC)
+        return max(0.0, (date - datetime.now(UTC)).total_seconds())
+
+
+def _retry_backoff_seconds(attempt: int, exc: BaseException | None = None) -> float:
     """2026-08-13 P2-12 用于计算重试前退避时长：0.5s × 2^attempt 指数退避，上限 3s
 
     attempt 从 1 起计（第一次重试前等待 1s，第二次 2s，第三次 3s 封顶）。
     仅对 429/连接类瞬态错误生效，其余错误不额外等待。
+    2026-10-03 429 退避归本模块管（permit 层已删）：服务端给了 Retry-After 时取
+    max(指数退避, Retry-After)，上限放宽到 30s，避免压垮限流网关。
     """
-    return min(0.5 * (2 ** max(attempt, 1)), 3.0)
+    backoff = min(0.5 * (2 ** max(attempt, 1)), 3.0)
+    if exc is not None:
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 429:
+            retry_after = _retry_after_seconds(exc)
+            if retry_after is not None:
+                return min(max(backoff, retry_after), 30.0)
+    return backoff
 
 
 def _is_call_complete(message: Any) -> bool:
@@ -91,117 +233,6 @@ def _truncate(text: str, limit: int = _MAX_TOOL_SUMMARY_CHARS) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + "…"
-
-
-@dataclass(frozen=True, slots=True)
-class ModelCallTiming:
-    """2026-08-10 用于保存单次模型调用的逐项计时（毫秒）与计时口径备注"""
-
-    ttft_ms: int | None = None
-    first_visible_ms: int | None = None
-    reasoning_ms: int | None = None
-    model_ms: int | None = None
-    timing_notes: tuple[str, ...] = ()
-
-
-def _safe_base_url(value: Any) -> str | None:
-    """2026-08-30 用于清除模型地址中可能出现的认证信息后再写入审计"""
-    if not value:
-        return None
-    try:
-        parsed = urlsplit(str(value))
-    except ValueError:
-        return "invalid-url"
-    if not parsed.scheme or not parsed.netloc:
-        return "invalid-url"
-    return urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, "", ""))
-
-
-def _sanitize_audit_value(value: Any) -> Any:
-    """2026-08-30 用于递归移除工具合同中可能出现的认证字段后再计算指纹"""
-    if isinstance(value, Mapping):
-        return {
-            str(key): _sanitize_audit_value(item)
-            for key, item in value.items()
-            if not _is_sensitive_audit_key(str(key))
-        }
-    if isinstance(value, list | tuple):
-        return [_sanitize_audit_value(item) for item in value]
-    return value
-
-
-def _is_sensitive_audit_key(key: str) -> bool:
-    """2026-08-30 用于识别下划线连字符前缀等变体的认证字段名称"""
-    normalized = "".join(character for character in key.lower() if character.isalnum())
-    return any(
-        marker in normalized
-        for marker in ("apikey", "authorization", "accesstoken", "clientsecret", "password", "secret", "token")
-    )
-
-
-def _safe_tool_contract(tools: Any) -> tuple[list[str], str]:
-    """2026-08-30 用于生成脱敏的绑定工具合同摘要和稳定指纹"""
-    if not isinstance(tools, list):
-        return [], hashlib.sha256(b"[]").hexdigest()
-    normalized: list[Any] = []
-    names: list[str] = []
-    for tool in tools:
-        if isinstance(tool, Mapping):
-            function = tool.get("function")
-            name = function.get("name") if isinstance(function, Mapping) else tool.get("name")
-            if name:
-                names.append(str(name))
-            normalized.append(_sanitize_audit_value(tool))
-            continue
-        name = getattr(tool, "name", None)
-        if name:
-            names.append(str(name))
-        args_schema = getattr(tool, "args_schema", None)
-        model_json_schema = getattr(args_schema, "model_json_schema", None)
-        schema = model_json_schema() if callable(model_json_schema) else None
-        normalized.append(_sanitize_audit_value({"name": str(name or "unknown"), "parameters": schema}))
-    canonical = json.dumps(normalized, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
-    return sorted(set(names)), hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _provider_request_metadata(model: Any, *, transport: str, attempt: int) -> dict[str, Any]:
-    """2026-08-30 用于生成不含密钥的物理 Provider 请求参数与配置指纹"""
-    bound_model = getattr(model, "bound", model)
-    model_kwargs = getattr(bound_model, "model_kwargs", None) or {}
-    extra_body = model_kwargs.get("extra_body") if isinstance(model_kwargs, Mapping) else None
-    if not isinstance(extra_body, Mapping):
-        extra_body = getattr(bound_model, "extra_body", None) or {}
-    binding_kwargs = getattr(model, "kwargs", None) or {}
-    tools = binding_kwargs.get("tools") if isinstance(binding_kwargs, Mapping) else None
-    tool_names, tool_contract_fingerprint = _safe_tool_contract(tools)
-    thinking = bool(extra_body.get("think")) if isinstance(extra_body, Mapping) else False
-    parameters: dict[str, Any] = {
-        "model": str(
-            getattr(bound_model, "model_name", None) or getattr(bound_model, "model", "") or "unknown"
-        ),
-        "base_url": _safe_base_url(
-            getattr(bound_model, "base_url", None) or getattr(bound_model, "openai_api_base", None)
-        ),
-        "temperature": getattr(bound_model, "temperature", None),
-        "top_p": getattr(bound_model, "top_p", None),
-        "timeout_s": getattr(bound_model, "request_timeout", None) or getattr(bound_model, "timeout", None),
-        "streaming": bool(getattr(bound_model, "streaming", transport == "stream")),
-        "extra_body": {"think": thinking},
-        "tool_names": tool_names,
-        "tool_contract_fingerprint": tool_contract_fingerprint,
-    }
-    canonical = json.dumps(parameters, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
-    return {
-        "request_index": attempt,
-        "attempt": attempt,
-        "transport": transport,
-        "parameters": parameters,
-        "config_fingerprint": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
-        "timing_contract": {
-            "ttft_ms": "本物理请求从发送到首个 reasoning正文或工具 payload 的毫秒数",
-            "model_ms": "本物理请求从发送到流结束或错误的墙钟毫秒数",
-        },
-    }
 
 
 class AgentStream:
@@ -282,296 +313,6 @@ class AgentStream:
         )
 
 
-def _extract_reasoning_token(chunk: Any) -> str:
-    """
-    从流式 chunk 探测推理 token（Qwen 系 reasoning_content 字段）
-
-    不同 langchain-openai 版本对额外字段的暴露位置不同，依次探测
-    additional_kwargs / response_metadata / 直接属性
-    """
-    additional = getattr(chunk, "additional_kwargs", None) or {}
-    reasoning = additional.get("reasoning_content") or additional.get("reasoning") or ""
-    if reasoning:
-        return str(reasoning)
-
-    metadata = getattr(chunk, "response_metadata", None) or {}
-    reasoning = metadata.get("reasoning_content") or metadata.get("reasoning") or ""
-    if reasoning:
-        return str(reasoning)
-
-    direct = getattr(chunk, "reasoning_content", None)
-    if direct:
-        return str(direct)
-    return ""
-
-
-def _accumulate_usage_metadata(target: dict[str, Any], source: Mapping[str, Any]) -> None:
-    """
-    2026-08-10 用于累加流式 chunk 的用量数值字段，嵌套字典递归合并
-
-    OpenAI 兼容网关通常在末个 chunk 返回完整 usage；部分网关按 chunk 增量上报，
-    数值字段直接相加可兼容两种情况
-    """
-    for key, value in source.items():
-        if isinstance(value, Mapping):
-            nested = target.setdefault(key, {})
-            _accumulate_usage_metadata(nested, value)
-        elif isinstance(value, int | float) and not isinstance(value, bool):
-            target[key] = target.get(key, 0) + value
-        else:
-            target[key] = value
-
-
-def _merge_tool_call_chunks(tool_call_chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    按 index 合并 langchain 流式工具调用增量，还原完整 tool_calls
-
-    OpenAI 兼容流式接口把工具调用拆成多个分片：name 首片完整、args 为 JSON 片段增量，
-    需要按 index 拼接后再解析。JSON 解析失败说明流被截断（Provider 丢尾包/模型截断），
-    不再静默包装 {"_raw": ...} 执行，而是打 truncated 标记并保留原文供诊断与拒绝执行。
-    2026-08-22 修复：部分网关（muse-spark via zen）并发工具返回 index 均为 0，
-    需按 name/id 冲突自动分配新 index，避免名串接成单条（如 get_a+get_b）。
-    """
-    merged: dict[int, dict[str, str]] = {}
-    for raw in tool_call_chunks:
-        index = int(raw.get("index", len(merged)))
-        # 若 index 已被不同 name 占用，分配新 index
-        raw_name = raw.get("name") or ""
-        if index in merged and raw_name and merged[index]["name"] and merged[index]["name"] != raw_name:
-            index = max(merged.keys()) + 1
-            # 同时检查新 index 是否仍冲突（极端情况）
-            while index in merged and merged[index]["name"] and merged[index]["name"] != raw_name:
-                index += 1
-        entry = merged.setdefault(index, {"name": "", "args": "", "id": ""})
-        name = raw_name
-        if name:
-            entry["name"] += name
-        args = raw.get("args") or ""
-        if args:
-            entry["args"] += args
-        call_id = raw.get("id") or ""
-        if call_id:
-            entry["id"] += call_id
-
-    calls: list[dict[str, Any]] = []
-    for index in sorted(merged):
-        entry = merged[index]
-        if not entry["name"]:
-            continue
-        raw_args = entry["args"]
-        try:
-            parsed_args = json.loads(raw_args) if raw_args else {}
-        except json.JSONDecodeError:
-            logger.warning(
-                "工具调用参数 JSON 截断（流未完整收尾）: name=%s args=%r",
-                entry["name"],
-                entry["args"],
-            )
-            calls.append(
-                {
-                    "name": entry["name"],
-                    "args": {},
-                    "raw_args": raw_args,
-                    "id": entry["id"] or f"call_{index}",
-                    "type": "tool_call",
-                    "truncated": True,
-                    "truncated_args": raw_args,
-                }
-            )
-            continue
-        calls.append(
-            {
-                "name": entry["name"],
-                "args": parsed_args,
-                "raw_args": raw_args,
-                "id": entry["id"] or f"call_{index}",
-                "type": "tool_call",
-            }
-        )
-    return calls
-
-
-class StreamChunkAggregator:
-    """
-    聚合 astream 的 AIMessageChunk，边聚合边推送事件并采集逐项计时
-
-    文本 token → llm_output（output 块）
-    工具名完整出现 → "正在调用工具 X"（tool_call 事件）
-    推理 token 只聚合不推送（思考块内容由工具调用体现）
-    """
-
-    def __init__(
-        self,
-        stream: AgentStream | None,
-        *,
-        started_ns: int | None = None,
-        skip_output_prefix: str = "",
-        announced_tools: set[str] | None = None,
-    ) -> None:
-        self._stream = stream
-        self._started_ns = started_ns if started_ns is not None else perf_counter_ns()
-        self._content_parts: list[str] = []
-        self._reasoning_parts: list[str] = []
-        self._tool_call_chunks: list[dict[str, Any]] = []
-        # 2026-08-13 P2-8 按工具名记录已推送 started 事件（原按 index 记录会导致
-        # 断流重试后 index 相同但工具名不同时客户端看不到 started 事件）
-        self._announced_tools: set[str] = set(announced_tools or ())
-        self._skip_output_prefix = skip_output_prefix
-        self._usage_metadata: dict[str, Any] = {}
-        self._finish_reason: str | None = None
-        self._ttft_ns: int | None = None
-        self._first_visible_ns: int | None = None
-        self._first_reasoning_ns: int | None = None
-        self._last_reasoning_ns: int | None = None
-
-    @staticmethod
-    def _split_overlap(content: str, skip_prefix: str) -> tuple[str, str, str]:
-        """2026-08-13 拆分与上次已推送内容的重叠部分，返回（重叠部分, 非重叠部分, 剩余跳过前缀）
-
-        断流重试时客户端已看到失败尝试推送的全文。重叠部分进入消息链（重试
-        输出的完整内容必须保留，否则后续回合上下文缺失）但不推 SSE；非重叠
-        部分正常推送。重试输出整体是失败输出的前缀（非确定性 LLM 输出更短）
-        时，全部落入重叠区，消息链仍保留全文，仅 SSE 不重复推送。
-        """
-        if not skip_prefix:
-            return "", content, ""
-        common = 0
-        max_common = min(len(content), len(skip_prefix))
-        while common < max_common and content[common] == skip_prefix[common]:
-            common += 1
-        if common == len(content):
-            # 整个 chunk 是已推送内容的前缀：保留跳过前缀供后续 chunk 继续比对
-            return content, "", skip_prefix
-        return content[:common], content[common:], ""
-
-    async def add_chunk(self, chunk: Any) -> None:
-        """处理单个流式 chunk：提取并推送文本/工具调用增量，累积用量与计时"""
-        now_ns = perf_counter_ns()
-        content = getattr(chunk, "content", "")
-        if isinstance(content, str) and content:
-            # 断流重试后跳过与上次已推送部分重叠的前缀，避免客户端看到重复输出。
-            # 重叠部分进消息链（保留重试输出全文）但不推 SSE，非重叠部分正常推送。
-            overlap, content, self._skip_output_prefix = self._split_overlap(content, self._skip_output_prefix)
-            if overlap:
-                self._content_parts.append(overlap)
-            if content:
-                self._content_parts.append(content)
-                if self._stream is not None:
-                    try:
-                        await self._stream.output(content)
-                    except Exception as exc:
-                        raise StreamEmitError(f"SSE 推送输出失败: {exc}") from exc
-
-        reasoning = _extract_reasoning_token(chunk)
-        if reasoning:
-            self._reasoning_parts.append(reasoning)
-
-        raw_tool_chunks = getattr(chunk, "tool_call_chunks", None) or []
-        announced_name: str | None = None
-        for raw in raw_tool_chunks:
-            name = raw.get("name") or ""
-            if name and name not in self._announced_tools:
-                self._announced_tools.add(name)
-                announced_name = name
-                if self._stream is not None:
-                    try:
-                        await self._stream.tool_call_started(name)
-                    except Exception as exc:
-                        raise StreamEmitError(f"SSE 推送工具调用失败: {exc}") from exc
-        if raw_tool_chunks:
-            self._tool_call_chunks.extend(raw_tool_chunks)
-
-        has_payload = bool(content) or bool(reasoning) or bool(raw_tool_chunks)
-        if has_payload and self._ttft_ns is None:
-            self._ttft_ns = now_ns
-        if content and self._first_visible_ns is None:
-            self._first_visible_ns = now_ns
-        if announced_name and self._first_visible_ns is None:
-            self._first_visible_ns = now_ns
-        if reasoning:
-            if self._first_reasoning_ns is None:
-                self._first_reasoning_ns = now_ns
-            self._last_reasoning_ns = now_ns
-
-        usage_metadata = getattr(chunk, "usage_metadata", None)
-        if isinstance(usage_metadata, Mapping):
-            # 2026-08-13 P1-3 防御：同一 chunk 可能同时携带 LangChain 标准
-            # usage_metadata 与 provider 原始 usage（response_metadata/
-            # additional_kwargs），双源累加会把用量翻倍。以标准字段为准，
-            # 原始字段仅作为标准字段缺失时的回退（真实网关每 turn 恰好 1 条）。
-            has_usage_metadata = True
-            _accumulate_usage_metadata(self._usage_metadata, usage_metadata)
-        else:
-            has_usage_metadata = False
-        raw_usage = None
-        response_metadata = getattr(chunk, "response_metadata", None)
-        if isinstance(response_metadata, Mapping):
-            raw_usage = response_metadata.get("token_usage") or response_metadata.get("usage")
-            # 真实 Provider 实测 finish_reason 出现在倒数第二个 chunk，
-            # 必须扫描全部 chunk 并保留最后一次出现的值
-            finish_reason = response_metadata.get("finish_reason")
-            if finish_reason:
-                self._finish_reason = str(finish_reason)
-        additional_kwargs = getattr(chunk, "additional_kwargs", None)
-        if raw_usage is None and isinstance(additional_kwargs, Mapping):
-            raw_usage = additional_kwargs.get("usage") or additional_kwargs.get("token_usage")
-        if not has_usage_metadata and isinstance(raw_usage, Mapping):
-            _accumulate_usage_metadata(self._usage_metadata, raw_usage)
-
-    def finish(self) -> AIMessage:
-        """合并所有分片，构造与 ainvoke 等价的完整 AIMessage"""
-        content = "".join(self._content_parts)
-        reasoning = "".join(self._reasoning_parts)
-        tool_calls = _merge_tool_call_chunks(self._tool_call_chunks)
-        message = AIMessage(content=content)
-        if self._usage_metadata:
-            message.usage_metadata = cast(UsageMetadata, self._usage_metadata)
-        if tool_calls:
-            message.tool_calls = cast(list[ToolCall], tool_calls)
-        if reasoning:
-            message.additional_kwargs["reasoning_content"] = reasoning
-        if self._finish_reason is not None:
-            message.additional_kwargs["finish_reason"] = self._finish_reason
-        return message
-
-    def timing(self) -> ModelCallTiming:
-        """2026-08-10 用于按采集时间戳计算逐项耗时（毫秒）并记录计时口径备注"""
-        now_ns = perf_counter_ns()
-        reasoning_ms = None
-        if self._first_reasoning_ns is not None and self._last_reasoning_ns is not None:
-            reasoning_ms = round((self._last_reasoning_ns - self._first_reasoning_ns) / 1_000_000)
-        notes: list[str] = []
-        if self._ttft_ns is None:
-            notes.append("provider_stream_no_payload")
-        elif reasoning_ms is None:
-            notes.append("reasoning_not_streamed")
-        return ModelCallTiming(
-            ttft_ms=(round((self._ttft_ns - self._started_ns) / 1_000_000) if self._ttft_ns is not None else None),
-            first_visible_ms=(
-                round((self._first_visible_ns - self._started_ns) / 1_000_000)
-                if self._first_visible_ns is not None
-                else None
-            ),
-            reasoning_ms=reasoning_ms,
-            model_ms=round((now_ns - self._started_ns) / 1_000_000),
-            timing_notes=tuple(notes),
-        )
-
-
-async def emit_completed_model_call(stream: AgentStream, response: Any) -> None:
-    """
-    非流式调用完成后补发文本/工具调用状态事件
-
-    保证降级路径（模型不支持 astream）仍有过程可见性
-    """
-    content = getattr(response, "content", "") or ""
-    if isinstance(content, str) and content:
-        await stream.output(content)
-    tool_calls = getattr(response, "tool_calls", None) or []
-    for call in tool_calls:
-        await stream.tool_call_started(str(call.get("name") or "unknown"))
-
-
 async def run_model_call(
     model: Any,
     messages: list[Any],
@@ -583,13 +324,13 @@ async def run_model_call(
     total_attempts: int | None = None,
     completion_hint: CompletionHintProvider | None = None,
     require_tool_call: bool = True,
+    content_stall_timeout_s: float | None = None,
 ) -> AIMessage:
     """
     调用模型并返回完整 AIMessage
 
-    是否走流式由模型实例的 streaming 配置决定（ChatOpenAI(streaming=...)）：
-    开启时用 astream 聚合分片并推送事件；关闭或 Provider 不支持流式时
-    直接 ainvoke 单次调用，TTFT 与推理时间记录为 NULL。
+    2026-10-02 删除"流式输出"设置后统一走 astream 流式聚合并推送事件
+    （模型实例由 llm.py 以 streaming=True 构建，非流式兜底分支已删除）。
     流式输出中途断流（astream 抛异常）时用同一 messages 重发当前模型请求，
     total_attempts 表示总调用次数（重试次数 = total_attempts - 1），
     total_attempts=1 时关闭重试；缺省对齐 settings.models.annotation.total_attempts
@@ -597,11 +338,13 @@ async def run_model_call(
     重试期间推送 thinking 事件，并跳过与上次已推送内容重叠的前缀，避免重复输出；
     已失败尝试的用量与最终用量分别交给物理请求审计记账，避免跨请求混合。
     耗尽后抛出最后一次异常。SSE 推送失败（StreamEmitError）不触发重试。
-    非流式路径同样遵守 total_attempts 重试语义，但只对网络/限流等瞬态错误
-    （_is_transient_model_error）重发请求，其余错误直接失败。
-    2026-08-22 把"响应不含任何工具调用"视同调用未正常结束（涵盖网关思考阶段
-    静默截断产生的空回复），与瞬态错误共用 total_attempts 预算退避重发；
-    耗尽后上抛 RuntimeError。回合审计回调先于该判定执行，截断回合仍留痕。
+    网络/限流等瞬态错误（_is_transient_model_error）与"响应不含任何工具调用"
+    均按调用层故障共用 total_attempts 预算退避重发（2026-08-22），耗尽后上抛
+    RuntimeError；参数/鉴权等确定性错误直接失败。
+    2026-10-04 流消费经内容进度看门狗包装（_guard_content_progress）："流块
+    持续到达而内容零增长"超过 content_stall_timeout_s（缺省
+    CONTENT_STALL_TIMEOUT_S=300s，0/负值关闭）判死为 ContentStallTimeoutError，
+    按瞬态错误走同一重发预算；用于兜住保活帧喂活解析块看门狗的僵流形态。
     2026-09-08 无工具回复重发前调用 completion_hint 工厂取提示（整个 run_model_call
     周期内只取一次、只注入一次——重试间隔内无工具执行，账本状态不会变化），
     追加进重发请求让模型看到缺域清单；工厂缺省或返回 None 时维持原样重发。
@@ -625,84 +368,6 @@ async def run_model_call(
             messages.append(HumanMessage(content=hint))
             logger.warning("无工具回复重发前注入补齐提示: hint_chars=%s", len(hint))
 
-    if not hasattr(model, "astream") or not bool(getattr(model, "streaming", True)):
-        retries_remaining = max(0, total_attempts - 1)
-        attempt = 0
-        if stream is not None:
-            hint = (
-                "模型不支持流式输出，等待完整回复..."
-                if not hasattr(model, "astream")
-                else "模型未启用流式输出，等待完整回复..."
-            )
-            await stream.thinking(hint)
-        while True:
-            attempt += 1
-            started_ns = perf_counter_ns()
-            if on_turn_started is not None:
-                on_turn_started(_provider_request_metadata(model, transport="non_stream", attempt=attempt), started_ns)
-            try:
-                response = await model.ainvoke(messages)
-            except Exception as exc:
-                timing = ModelCallTiming(
-                    model_ms=round((perf_counter_ns() - started_ns) / 1_000_000),
-                    timing_notes=("provider_call_failed",),
-                )
-                if on_turn_failed is not None:
-                    on_turn_failed(str(exc), timing, None)
-                if isinstance(exc, StreamEmitError):
-                    raise
-                # 2026-08-13 P2-6 非流式路径只对网络/限流瞬态错误重试，
-                # 参数/鉴权等确定性错误重试无意义
-                if retries_remaining <= 0 or not _is_transient_model_error(exc):
-                    raise
-                failed_attempt = total_attempts - retries_remaining
-                retries_remaining -= 1
-                logger.warning(
-                    "模型调用失败，重发当前模型请求: error=%s retries_remaining=%s",
-                    exc,
-                    retries_remaining,
-                )
-                if stream is not None:
-                    await stream.thinking(f"模型调用失败，正在重试当前请求（剩余 {retries_remaining} 次）")
-                await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
-                continue
-            timing = ModelCallTiming(
-                model_ms=round((perf_counter_ns() - started_ns) / 1_000_000),
-                timing_notes=("provider_non_streaming",),
-            )
-            # 2026-08-22 调用未正常结束（响应不含工具调用）视同调用层故障：
-            # 与瞬态错误共用 total_attempts 预算退避重发，耗尽后上抛
-            # 2026-09-11 章内并行读者面 require_tool_call=False：读者没有写入工具，
-            # 无工具回复是"上报完毕"的正常完成信号而非调用故障（设计文档 §8.5）
-            if require_tool_call and not _is_call_complete(response):
-                error = "模型调用未正常结束：响应未包含任何工具调用"
-                if on_turn_failed is not None:
-                    on_turn_failed(error, timing, response)
-                if retries_remaining <= 0:
-                    logger.warning("模型调用未正常结束且重试已耗尽")
-                    raise RuntimeError(f"{error}，重发后仍未恢复")
-                failed_attempt = total_attempts - retries_remaining
-                retries_remaining -= 1
-                _apply_completion_hint()
-                logger.warning(
-                    "模型调用未正常结束（响应不含工具调用），重发当前模型请求: retries_remaining=%s",
-                    retries_remaining,
-                )
-                if stream is not None:
-                    await stream.thinking(f"模型调用未正常结束，正在重试当前请求（剩余 {retries_remaining} 次）")
-                await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
-                continue
-            try:
-                if stream is not None:
-                    await emit_completed_model_call(stream, response)
-            except Exception as exc:
-                if on_turn_failed is not None:
-                    on_turn_failed(str(exc), timing, response)
-                raise
-            if on_turn_complete is not None:
-                on_turn_complete(response, timing)
-            return response
-
     retries_remaining = max(0, total_attempts - 1)
     skip_output_prefix = ""
     announced_tools: set[str] = set()
@@ -711,7 +376,7 @@ async def run_model_call(
         attempt += 1
         started_ns = perf_counter_ns()
         if on_turn_started is not None:
-            on_turn_started(_provider_request_metadata(model, transport="stream", attempt=attempt), started_ns)
+            on_turn_started(_provider_request_metadata(model, attempt=attempt), started_ns)
         aggregator = StreamChunkAggregator(
             stream,
             started_ns=started_ns,
@@ -719,8 +384,10 @@ async def run_model_call(
             announced_tools=announced_tools,
         )
         try:
-            async for chunk in model.astream(messages):
+            stall_timeout = CONTENT_STALL_TIMEOUT_S if content_stall_timeout_s is None else content_stall_timeout_s
+            async for chunk in _guard_content_progress(model.astream(messages), stall_timeout):
                 await aggregator.add_chunk(chunk)
+            response = aggregator.finish()
         except StreamEmitError as exc:
             # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
             if on_turn_failed is not None:
@@ -729,7 +396,7 @@ async def run_model_call(
         except Exception as exc:
             if on_turn_failed is not None:
                 on_turn_failed(str(exc), aggregator.timing(), aggregator.finish())
-            if retries_remaining <= 0:
+            if retries_remaining <= 0 or not _is_transient_model_error(exc):
                 logger.warning("模型输出流中断且重试耗尽: error=%s", exc)
                 raise
             failed_attempt = total_attempts - retries_remaining
@@ -745,9 +412,8 @@ async def run_model_call(
             announced_tools = set(aggregator._announced_tools)
             # 2026-08-13 P2-12 仅 429/连接类瞬态错误在重试前退避，避免压垮网关
             if _is_transient_model_error(exc):
-                await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
+                await asyncio.sleep(_retry_backoff_seconds(failed_attempt, exc))
             continue
-        response = aggregator.finish()
         timing = aggregator.timing()
         # 2026-08-22 调用未正常结束（响应不含工具调用，含网关思考阶段静默截断产生的空回复）
         # 视同调用层故障：退避重发同一请求，耗尽后上抛交由上层失败审计收口
@@ -798,7 +464,6 @@ __all__ = [
     "AgentStream",
     "ModelCallTiming",
     "StreamChunkAggregator",
-    "emit_completed_model_call",
     "emit_tool_results",
     "run_model_call",
 ]

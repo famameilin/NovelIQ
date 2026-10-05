@@ -26,8 +26,6 @@ MAD_SCALE = 1.4826
 MAD_EPSILON = 1e-9
 Z_CLIP = 3.0
 
-COMPONENT_KEYS = ("fight", "exclaim", "question", "dialogue", "pause")
-
 
 def surface_tension_components(counts: ParagraphMetricCounts) -> dict[str, float]:
     """返回 5 个表层张力分量的原始值（未标准化，分母为零时按 1 保护）"""

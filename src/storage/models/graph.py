@@ -70,7 +70,7 @@ class GraphEntity(Base):
             "entity_type IN ('character', 'location', 'item', 'organization')",
             name="ck_graph_entities_type",
         ),
-        UniqueConstraint("run_id", "canonical_name", name="uq_graph_entities_run_canonical"),
+        Index("idx_graph_entities_run_canonical", "run_id", "canonical_name"),
         Index("idx_graph_entities_run_type", "run_id", "entity_type"),
         Index("idx_graph_entities_run_last_seen", "run_id", "last_seen_chapter"),
     )

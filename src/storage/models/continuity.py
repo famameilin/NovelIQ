@@ -1,18 +1,15 @@
-"""章节标注案例池与案例解决映射 ORM 模型"""
+"""章节不可变正式标注 ORM 模型"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
 from sqlalchemy import (
-    CheckConstraint,
     DateTime,
     ForeignKey,
-    ForeignKeyConstraint,
     Index,
     Integer,
     String,
-    Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -39,95 +36,13 @@ class ChapterAnnotationRecord(Base):
     )
     chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    # 2026-10-05 队列删除后 formal_work_id 只是铸造回执的溯源标识，不再是 work_items 外键
+    formal_work_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+    payload_hash: Mapped[str | None] = mapped_column(String(64))
+    source_manifest_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
         UniqueConstraint("run_id", "chapter_id", name="uq_chapter_annotations_run_chapter"),
         Index("idx_chapter_annotations_run_chapter", "run_id", "chapter_id"),
-    )
-
-
-class CasePoolCase(Base):
-    """2026-08-07 用于保存带稳定目标的活动或已解决案例"""
-
-    __tablename__ = "case_pool_cases"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    run_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    case_type: Mapped[str] = mapped_column("type", String(50), nullable=False)
-    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    keys: Mapped[list] = mapped_column(JSONB, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    target_key: Mapped[str] = mapped_column(String(64), nullable=False)
-    target_ref: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    state: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
-    created_by_annotation_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("chapter_annotations.annotation_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=_utcnow,
-        onupdate=_utcnow,
-    )
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["chapter_id", "run_id"],
-            ["chapters.chapter_id", "chapters.run_id"],
-            ondelete="CASCADE",
-            name="case_pool_cases_chapter_run_fkey",
-        ),
-        CheckConstraint(
-            "state IN ('active', 'resolved')",
-            name="ck_case_pool_cases_state",
-        ),
-        UniqueConstraint("run_id", "target_key", name="uq_case_pool_cases_run_target_key"),
-        Index("idx_case_pool_cases_run_state", "run_id", "state"),
-        Index("idx_case_pool_cases_run_type", "run_id", "type"),
-    )
-
-
-class CaseResolutionMapping(Base):
-    """2026-08-07 用于关联 pulled 案例解决结果与历史事实修订"""
-
-    __tablename__ = "case_resolution_mappings"
-
-    mapping_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    run_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    annotation_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("chapter_annotations.annotation_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    case_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("case_pool_cases.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    case_type: Mapped[str] = mapped_column("type", String(50), nullable=False)
-    target_ref: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    resolution: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    target_fact_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    target_dialogue_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # 2026-09-13 伏笔入森林：解决目标是伏笔树根（挂边动作 reinforce/payoff 记在 resolution JSON）
-    target_root_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    target_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-
-    __table_args__ = (
-        UniqueConstraint("run_id", "case_id", name="uq_case_resolution_mappings_run_case"),
-        Index("idx_case_resolution_mappings_annotation", "run_id", "annotation_id"),
-        Index("idx_case_resolution_mappings_case", "run_id", "case_id"),
     )

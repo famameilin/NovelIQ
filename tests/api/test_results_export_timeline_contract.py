@@ -34,8 +34,10 @@ from src.storage.repositories import (
     StatsRepository,
 )
 from tests.support.chapter_annotation_helpers import (
+    commit_test_event_link,
     create_run_with_chunks,
     persist_chapter_annotation,
+    publish_test_cutoff,
 )
 
 
@@ -59,7 +61,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
             {
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 0,
                 "node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "root",
@@ -69,7 +71,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
             {
                 "description": "顾霜拔剑",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [1],
+                "evidence_paragraph_id": 1,
                 "node_id": eid2,
                 "parent_node_id": eid1,
                 "tree_id": "gate",
@@ -77,7 +79,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
             },
         ],
     )
-    ch2_annotation_id = persist_chapter_annotation(
+    persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=2,
@@ -85,7 +87,7 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
             {
                 "description": "宫主现身",
                 "participants": ["宫主"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 2,
                 "node_id": palace_root,
                 "tree_id": "palace",
                 "cause_role": "root",
@@ -93,47 +95,30 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
             {
                 "description": "宫主出手",
                 "participants": ["宫主"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 2,
                 "node_id": strike_root,
                 "tree_id": "strike",
                 "cause_role": "root",
             },
         ],
     )
-    # 2026-09-14 跨章因果链退役：写面不再产生 causal 边（旧经 causal_event_refs 派生），
-    # EventEdge 表保留读旧数据。按读侧现行为以遗留数据构造两条跨/内章因果边：
-    # 一条置 inactive（含 expired_at），一条保持活性，用于验证 is_active/expired_at 透传
     from datetime import UTC, datetime
-    from uuid import NAMESPACE_URL, uuid5
 
-    from src.storage.models import EventEdge, EventNode
+    from sqlalchemy import select
 
-    def _legacy_edge(source_event_id: str, target_event_id: str, *, is_active: bool) -> EventEdge:
-        source_node = db_session.get(EventNode, source_event_id)
-        assert source_node is not None
-        return EventEdge(
-            edge_id=str(
-                uuid5(NAMESPACE_URL, f"noveliq:event-edge:{run_id}:causal:{source_event_id}:{target_event_id}")
-            ),
-            run_id=run_id,
-            edge_type="causal",
-            source_event_id=source_event_id,
-            target_event_id=target_event_id,
-            source_chapter_id=source_node.chapter_id,
-            target_chapter_id=db_session.get(EventNode, target_event_id).chapter_id,
-            is_active=is_active,
-            evidence=list(source_node.evidence),
-            annotation_id=ch2_annotation_id,
-            payload_path=f"legacy/causal/{target_event_id}",
-            expired_at=None if is_active else datetime.now(UTC),
-        )
+    from src.storage.models import EventEdge
 
-    db_session.add_all(
-        [
-            _legacy_edge(eid2, palace_root, is_active=False),
-            _legacy_edge(palace_root, strike_root, is_active=True),
-        ]
+    commit_test_event_link(
+        db_session, run_id=run_id, chapter_id=2, source_event_id=eid2, target_event_id=palace_root,
     )
+    commit_test_event_link(
+        db_session, run_id=run_id, chapter_id=2, source_event_id=palace_root, target_event_id=strike_root,
+    )
+    inactive_edge = db_session.execute(select(EventEdge).where(
+        EventEdge.run_id == run_id, EventEdge.source_event_id == eid2, EventEdge.target_event_id == palace_root,
+    )).scalar_one()
+    inactive_edge.is_active = False
+    inactive_edge.expired_at = datetime.now(UTC)
     db_session.commit()
 
     chapter_repo = ChapterRepository(db_session)
@@ -311,7 +296,9 @@ def test_load_character_bundle_accepts_partial_diagnosis(
     assert missing_fields == []
 
 
-def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(
+    monkeypatch: pytest.MonkeyPatch, db_session,
+) -> None:
     """
     创建时间: 2026-04-26
     任务: fix-diagnosis-followup-review-findings
@@ -377,11 +364,13 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
         ),
     )
 
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["导出测试。"])
+    publish_test_cutoff(db_session, run_id)
     results_data, missing_fields, novel_name = fetch_all_results_data(
-        novel_id="novel-1",
-        task_id="task-1",
-        run_id="run-1",
-        stats_repo=MagicMock(session=MagicMock()),
+        novel_id=novel_id,
+        task_id=run_id[:8],
+        run_id=run_id,
+        stats_repo=MagicMock(session=db_session),
         annotation_repo=MagicMock(),
         chapter_repo=MagicMock(),
     )
@@ -763,18 +752,17 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
             {
                 "description": "顾霜进入山门",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [0],
+                "evidence_paragraph_id": 0,
                 "node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "root",
                 "isforeshadowing": True,
-                "expected_payoff_family": "守护",
                 "payoff_likelihood": "high",
             },
             {
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
-                "anchor_paragraph_ids": [1],
+                "evidence_paragraph_id": 1,
                 "node_id": "evt-export-gate-main",
                 "parent_node_id": eid1,
                 "tree_id": "gate",
@@ -814,9 +802,10 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
         eid1,
         "evt-export-gate-main",
     ]
-    # 树内主链不再是因果边（contains 派生化 + 因果边仅跨树）
     causal_edges = forest["causal_edges"]
-    assert causal_edges == []
+    assert len(causal_edges) == 1
+    assert causal_edges[0]["source_event_id"] == eid1
+    assert causal_edges[0]["target_event_id"] == "evt-export-gate-main"
 
     assert len(forest["foreshadowing_edges"]) == 1
     assert forest["foreshadowing_edges"][0]["root_event_id"] == eid1
@@ -831,6 +820,7 @@ def test_fetch_all_results_data_emits_empty_event_forest_for_unannotated_run(db_
         title="空事件森林",
     )
     db_session.commit()
+    publish_test_cutoff(db_session, run_id)
 
     _stub_export_sibling_loaders(monkeypatch)
 

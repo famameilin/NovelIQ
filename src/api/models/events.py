@@ -262,7 +262,13 @@ class AnalysisEventBus:
             if resolved_event.percent is not None:
                 task_update_kwargs["progress"] = resolved_event.percent
 
-            self.task_manager.update_task(self.task_id, **task_update_kwargs)
+            # 2026-10-03 DB 写回移出事件循环：update_task 的同步 UPDATE 一旦撞上行锁
+            # （如 require_released_cutoff 曾把 FOR SHARE 持有整个 diagnose 阶段）会在
+            # 事件循环线程上等满语句超时——整个 API（SSE/health/所有端点）随之冻结。
+            # to_thread 只阻塞本事件处理，异常仍原样上抛给任务主链。
+            import asyncio
+
+            await asyncio.to_thread(self.task_manager.update_task, self.task_id, **task_update_kwargs)
         elif resolved_event.action == "output":
             try:
                 self.task_manager.append_llm_output(self.task_id, resolved_event.content)

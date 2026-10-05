@@ -9,7 +9,6 @@ from sqlalchemy.orm import sessionmaker
 from src.agents.audit.observer import AgentTurnObserver
 from src.agents.audit.recorder import AgentAuditRecorder
 from src.agents.stream import ModelCallTiming
-from src.storage.models import TokenUsage
 from src.storage.models.agent_audit import AgentInvocation, AgentToolCall, AgentTurn
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
@@ -83,75 +82,6 @@ def test_failed_invocation_keeps_final_error(db_session) -> None:
     assert row.final_error == "model failed"
 
 
-def test_record_turn_links_one_to_one_token_usage_row(db_session) -> None:
-    """2026-08-10 用于验证回合行与 token_usage 行一对一且携带逐项计时"""
-    novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
-    recorder = AgentAuditRecorder(_session_factory(db_session))
-    invocation_id = recorder.start_invocation(
-        run_id=run_id,
-        task_type="annotation",
-        chapter_id=1,
-        attempt_number=1,
-        model_name="test-model",
-        model_provider="local",
-    )
-
-    turn_id = recorder.record_turn(
-        invocation_id=invocation_id,
-        turn_index=1,
-        context_summary={"phase": "chapter_open", "missing_domains": ["metrics"]},
-        raw_response={"role": "ai", "content": "调用工具"},
-        timing={
-            "ttft_ms": 120,
-            "first_visible_ms": 180,
-            "reasoning_ms": 300,
-            "model_ms": 900,
-        },
-        token_usage={
-            "prompt_tokens": 100,
-            "completion_tokens": 20,
-            "total_tokens": 120,
-            "cache_read_tokens": 30,
-            "reasoning_tokens": 5,
-            "cost": 0.42,
-            "accounting_source": "reported",
-        },
-        run_id=run_id,
-        novel_id=novel_id,
-        task_type="annotation",
-        call_type="agent",
-        model="test-model",
-    )
-    recorder.update_turn_timings(turn_id, tool_wall_ms=250, turn_ms=1200)
-
-    db_session.rollback()
-    turn = db_session.get(AgentTurn, turn_id)
-    assert turn.turn_index == 1
-    assert turn.context_summary["phase"] == "chapter_open"
-    assert turn.raw_response["content"] == "调用工具"
-    assert turn.ttft_ms == 120
-    assert turn.first_visible_ms == 180
-    assert turn.reasoning_ms == 300
-    assert turn.model_ms == 900
-    assert turn.tool_wall_ms == 250
-    assert turn.turn_ms == 1200
-    token_row = db_session.execute(select(TokenUsage).where(TokenUsage.agent_turn_id == turn_id)).scalar_one()
-    assert token_row.novel_id == novel_id
-    assert token_row.run_id == run_id
-    assert token_row.task_type == "annotation"
-    assert token_row.call_type == "agent"
-    assert token_row.reasoning_tokens == 5
-    assert token_row.cache_read_tokens == 30
-    assert token_row.cost == 0.42
-    assert token_row.created_at.endswith("+00:00")
-    token_count = int(
-        db_session.execute(
-            select(func.count()).select_from(TokenUsage).where(TokenUsage.agent_turn_id == turn_id)
-        ).scalar_one()
-    )
-    assert token_count == 1
-
-
 def test_update_turn_timings_refreshes_finished_at(db_session, monkeypatch) -> None:
     """2026-08-13 P2-10 回合结束时刻随工具批处理结束更新，而非恒为插入时刻"""
     from datetime import datetime
@@ -168,14 +98,23 @@ def test_update_turn_timings_refreshes_finished_at(db_session, monkeypatch) -> N
     )
     inserted_at = datetime(2026, 8, 13, 1, 0, 0)
     updated_at = datetime(2026, 8, 13, 1, 0, 2)
-    times = iter([inserted_at, updated_at])
+    times = iter([inserted_at, inserted_at, updated_at])
     monkeypatch.setattr(recorder, "_utcnow", lambda: next(times))
 
-    turn_id = recorder.record_turn(
+    turn_id = recorder.start_turn(
         invocation_id=invocation_id,
         turn_index=1,
         context_summary={},
+        request_messages=[],
+    )
+    recorder.finish_turn(
+        turn_id,
         raw_response={"role": "ai", "content": "输出"},
+        status="success",
+        error=None,
+        timing={"model_ms": 100},
+        timing_notes=[],
+        token_usage=None,
         run_id=run_id,
         novel_id=novel_id,
         task_type="annotation",
@@ -204,16 +143,11 @@ def test_record_tool_call_persists_full_args_result_and_duration(db_session) -> 
         model_name="test-model",
         model_provider="local",
     )
-    turn_id = recorder.record_turn(
+    turn_id = recorder.start_turn(
         invocation_id=invocation_id,
         turn_index=1,
         context_summary={},
-        raw_response={"role": "ai", "content": ""},
-        run_id=run_id,
-        novel_id=novel_id,
-        task_type="annotation",
-        call_type="agent",
-        model="test-model",
+        request_messages=[],
     )
     recorder.record_tool_call(
         turn_id=turn_id,
@@ -250,16 +184,11 @@ def test_record_tool_call_persists_raw_args(db_session) -> None:
         model_name="test-model",
         model_provider="local",
     )
-    turn_id = recorder.record_turn(
+    turn_id = recorder.start_turn(
         invocation_id=invocation_id,
         turn_index=1,
         context_summary={},
-        raw_response={"role": "ai", "content": ""},
-        run_id=run_id,
-        novel_id=novel_id,
-        task_type="annotation",
-        call_type="agent",
-        model="test-model",
+        request_messages=[],
     )
     raw = '{"description": "神秘仪式", "keys": ["住手"]}'
     recorder.record_tool_call(
@@ -293,16 +222,11 @@ def test_failed_tool_call_recorded_with_error(db_session) -> None:
         model_name="test-model",
         model_provider="local",
     )
-    turn_id = recorder.record_turn(
+    turn_id = recorder.start_turn(
         invocation_id=invocation_id,
         turn_index=1,
         context_summary={},
-        raw_response={"role": "ai", "content": ""},
-        run_id=run_id,
-        novel_id=novel_id,
-        task_type="annotation",
-        call_type="agent",
-        model="test-model",
+        request_messages=[],
     )
     recorder.record_tool_call(
         turn_id=turn_id,
@@ -380,13 +304,13 @@ def test_observer_records_turn_and_tool_calls(db_session) -> None:
         content="",
         tool_calls=[{"name": "write_metrics", "args": {}, "id": "c1", "type": "tool_call"}],
     )
-    turn_id = observer.record_turn(
+    observer.begin_provider_turn(
         context_summary={"phase": "chapter_open"},
         request_messages=[AIMessage(content="问")],
-        response_message=response,
-        timing=ModelCallTiming(ttft_ms=10, model_ms=100),
+        provider_request={"transport": "stream"},
         started_ns=0,
     )
+    observer.complete_provider_turn(response_message=response, timing=ModelCallTiming(ttft_ms=10, model_ms=100))
     observer.record_tool_call(
         call_index=0,
         tool_name="write_metrics",
@@ -401,11 +325,11 @@ def test_observer_records_turn_and_tool_calls(db_session) -> None:
     observer.close_turn()
 
     db_session.rollback()
-    turn = db_session.get(AgentTurn, turn_id)
+    turn = db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalar_one()
     assert turn.turn_ms is not None and turn.turn_ms >= 0
     assert turn.tool_wall_ms == 5
     assert _count(db_session, AgentInvocation, run_id) == 1
-    tool_rows = list(db_session.execute(select(AgentToolCall).where(AgentToolCall.turn_id == turn_id)).scalars())
+    tool_rows = list(db_session.execute(select(AgentToolCall).where(AgentToolCall.turn_id == turn.id)).scalars())
     assert len(tool_rows) == 1
 
 
@@ -497,22 +421,22 @@ def test_observer_persists_reasoning_content_into_turn_row(db_session) -> None:
         additional_kwargs={"reasoning_content": "思考过程"},
     )
 
-    turn_id = observer.record_turn(
+    observer.begin_provider_turn(
         context_summary={"phase": "chapter_open"},
         request_messages=[AIMessage(content="问")],
-        response_message=response,
-        timing=ModelCallTiming(ttft_ms=5, model_ms=50),
+        provider_request={"transport": "stream"},
         started_ns=0,
     )
+    observer.complete_provider_turn(response_message=response, timing=ModelCallTiming(ttft_ms=5, model_ms=50))
 
     db_session.rollback()
-    turn = db_session.get(AgentTurn, turn_id)
+    turn = db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalar_one()
     assert turn.raw_response["content"] == "正文"
     assert turn.raw_response["reasoning_content"] == "思考过程"
 
 
-def test_record_turn_persists_request_messages_and_timing_notes(db_session) -> None:
-    """2026-08-11 用于验证回合行保存完整请求消息与计时口径备注"""
+def test_turn_row_persists_request_messages_and_timing_notes(db_session) -> None:
+    """2026-08-30 用于验证回合行保存完整请求消息与计时口径备注"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
     recorder = AgentAuditRecorder(_session_factory(db_session))
     invocation_id = recorder.start_invocation(
@@ -524,22 +448,23 @@ def test_record_turn_persists_request_messages_and_timing_notes(db_session) -> N
         model_provider="cloud",
     )
 
-    turn_id = recorder.record_turn(
+    turn_id = recorder.start_turn(
         invocation_id=invocation_id,
         turn_index=1,
         context_summary={"phase": "diagnosis"},
-        raw_response={"role": "ai", "content": ""},
-        timing={
-            "ttft_ms": None,
-            "first_visible_ms": None,
-            "reasoning_ms": None,
-            "model_ms": 900,
-        },
-        timing_notes=["provider_non_streaming"],
         request_messages=[
             {"role": "system", "content": "sys"},
             {"role": "human", "content": "问"},
         ],
+    )
+    recorder.finish_turn(
+        turn_id,
+        raw_response={"role": "ai", "content": ""},
+        status="success",
+        error=None,
+        timing={"model_ms": 900},
+        timing_notes=["provider_non_streaming"],
+        token_usage=None,
         run_id=run_id,
         novel_id=novel_id,
         task_type="diagnosis",
@@ -581,56 +506,28 @@ def test_observer_serializes_full_request_messages_into_turn(db_session) -> None
         model_provider="cloud",
     )
 
-    turn_id = observer.record_turn(
+    observer.begin_provider_turn(
         context_summary={"phase": "diagnosis"},
         request_messages=[SystemMessage(content="sys"), HumanMessage(content="问")],
+        provider_request={"transport": "stream"},
+        started_ns=0,
+    )
+    observer.complete_provider_turn(
         response_message=AIMessage(content="答"),
         timing=ModelCallTiming(
             model_ms=250,
             timing_notes=("provider_non_streaming",),
         ),
-        started_ns=0,
     )
 
     db_session.rollback()
-    turn = db_session.get(AgentTurn, turn_id)
+    turn = db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalar_one()
     assert turn.request_messages == [
         {"role": "system", "content": "sys"},
         {"role": "human", "content": "问"},
     ]
     assert turn.timing_notes == ["provider_non_streaming"]
     assert turn.raw_response["content"] == "答"
-
-
-def test_record_turn_defaults_empty_arrays_for_missing_columns(db_session) -> None:
-    """2026-08-11 用于验证未传请求消息与计时备注时列落空数组而非 NULL"""
-    novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
-    recorder = AgentAuditRecorder(_session_factory(db_session))
-    invocation_id = recorder.start_invocation(
-        run_id=run_id,
-        task_type="annotation",
-        chapter_id=1,
-        attempt_number=1,
-        model_name="test-model",
-        model_provider="local",
-    )
-
-    turn_id = recorder.record_turn(
-        invocation_id=invocation_id,
-        turn_index=1,
-        context_summary={},
-        raw_response={"role": "ai", "content": ""},
-        run_id=run_id,
-        novel_id=novel_id,
-        task_type="annotation",
-        call_type="agent",
-        model="test-model",
-    )
-
-    db_session.rollback()
-    turn = db_session.get(AgentTurn, turn_id)
-    assert turn.request_messages == []
-    assert turn.timing_notes == []
 
 
 def test_serialize_request_messages_returns_empty_list_without_messages() -> None:
@@ -640,8 +537,8 @@ def test_serialize_request_messages_returns_empty_list_without_messages() -> Non
     assert _serialize_request_messages([]) == []
 
 
-def test_observer_records_failed_turn_with_real_request_messages(db_session) -> None:
-    """2026-08-11 用于验证模型异常回合保存真实请求消息且计时备注非空"""
+def test_observer_fail_provider_turn_keeps_real_request_messages(db_session) -> None:
+    """2026-08-30 用于验证失败的物理请求保存真实请求消息且计时备注带失败标记"""
     from langchain_core.messages import HumanMessage, SystemMessage
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
@@ -665,22 +562,27 @@ def test_observer_records_failed_turn_with_real_request_messages(db_session) -> 
         model_provider="cloud",
     )
 
-    observer.record_failed_turn(
+    observer.begin_provider_turn(
         context_summary={"phase": "diagnosis"},
-        error="provider timeout",
-        started_ns=0,
         request_messages=[SystemMessage(content="sys"), HumanMessage(content="问")],
+        provider_request={"transport": "stream"},
+        started_ns=0,
+    )
+    observer.fail_provider_turn(
+        error="provider timeout",
+        timing=ModelCallTiming(model_ms=30),
+        response_message=None,
     )
 
     db_session.rollback()
     turn = db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalar_one()
     assert turn.status == "error"
-    assert turn.turn_ms is not None
+    assert turn.turn_ms == 30
     assert turn.request_messages == [
         {"role": "system", "content": "sys"},
         {"role": "human", "content": "问"},
     ]
-    assert turn.timing_notes == ["provider_call_failed"]
+    assert turn.timing_notes == ["provider_request_failed"]
 
 
 def test_observer_raises_when_tool_recorded_without_active_turn(db_session) -> None:

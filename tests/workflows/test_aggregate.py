@@ -41,7 +41,7 @@ from src.storage.repositories.paragraph_repository import (
 )
 from src.workflows.aggregate import run_aggregate
 from tests.support.analysis_factories import insert_test_novel
-from tests.support.chapter_annotation_helpers import persist_chapter_annotation
+from tests.support.chapter_annotation_helpers import persist_chapter_annotation, publish_test_cutoff
 
 
 def _build_paragraph_rows(
@@ -116,6 +116,7 @@ class TestAggregate:
         paragraph_repo.insert_paragraphs(self.run_id, spans)
         paragraph_repo.insert_paragraph_metrics(self.run_id, metric_rows)
         paragraph_repo.insert_paragraph_curves(self.run_id, curve_rows)
+        publish_test_cutoff(self.db_session, self.run_id)
 
     @pytest.mark.asyncio()
     async def test_aggregate_basic(self) -> None:
@@ -196,6 +197,7 @@ class TestAggregate:
 
     @pytest.mark.asyncio()
     async def test_aggregate_empty_db(self) -> None:
+        publish_test_cutoff(self.db_session, self.run_id)
         chunks, stats_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)
         assert chunks == 0
         assert stats_count == 0

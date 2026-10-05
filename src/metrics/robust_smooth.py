@@ -118,23 +118,3 @@ def robust_local_regression(
             robust_w = np.where(np.abs(u) < 1.0, (1.0 - u * u) ** 2, 0.0)
             fitted = _local_regression_fit(xa, ya, sample_w * robust_w, bandwidth, min_points)
     return [float(value) for value in fitted]
-
-
-def smooth_series(
-    values: Sequence[float],
-    bandwidth: float = 0.02,
-    min_points: int = 7,
-) -> list[float]:
-    """
-    等间距包装：x = linspace(0, 1, n) 的 robust_local_regression
-
-    用于 chunk 链路（无真实字符坐标）替代 fourier_smooth 的过渡调用点，
-    行为语义与 robust_local_regression 一致（空输入返回 []、n < min_points
-    返回原始序列、无 NaN）。
-    """
-    value_list = list(values)
-    n = len(value_list)
-    if n == 0:
-        return []
-    x = np.linspace(0.0, 1.0, n).tolist()
-    return robust_local_regression(x, value_list, bandwidth=bandwidth, min_points=min_points)

@@ -7,11 +7,8 @@
 from __future__ import annotations
 
 from .continuity import (
-    CasePoolRepository,
-    CaseResolutionMappingRepository,
     ChapterAnnotationRepository,
     DatabaseAnnotationQueryService,
-    DialogueRecordRepository,
 )
 from .repository import (
     AnnotationRepository,
@@ -27,9 +24,6 @@ __all__ = [
     "ChapterAnnotationRow",
     "DialogueFactRow",
     "ForeshadowingTreeView",
-    "CasePoolRepository",
-    "CaseResolutionMappingRepository",
     "ChapterAnnotationRepository",
     "DatabaseAnnotationQueryService",
-    "DialogueRecordRepository",
 ]

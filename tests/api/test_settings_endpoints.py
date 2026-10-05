@@ -1,18 +1,10 @@
-"""2026-09-10 设置端点测试（/api/settings）
-
-覆盖：
-- GET /schema、GET /（生效值打码 + 默认值 + 来源）
-- PUT /：部分保存（文件稀疏化 + 单例热生效）、校验失败 422、恢复默认剔除
-- PUT /env：凭据写入 .env + os.environ 同步 + 单例终态（含整组清空显式置 None）
-- POST /model-providers/{task}/test：连通性（mock OpenAI 客户端）
-
-单例与环境变量的现场在 fixture 中备份恢复，测试间零泄漏。
-"""
+"""统一模型池、设置保存与环境凭据的接口契约"""
 
 from __future__ import annotations
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -20,323 +12,315 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from src.config.settings import apply_settings_onto
+from src.config.env_file import read_env_file
+from src.config.settings import Settings, apply_settings_onto
 
-_ENV_KEYS = (
-    "MODEL_BASE_URL",
-    "MODEL_ID",
-    "MODEL_KEY",
-    "EMBEDDING_MODEL_BASE_URL",
-    "EMBEDDING_MODEL_ID",
-    "EMBEDDING_MODEL_KEY",
-    "LTP_MODEL_DIR",
-)
+_ENV_KEYS = ("MODEL_POOL", "DIAGNOSIS_MODEL_ID", "EMBEDDING_MODEL_BASE_URL", "EMBEDDING_MODEL_ID",
+             "EMBEDDING_MODEL_KEY", "LTP_MODEL_DIR")
 
 
 @pytest.fixture
 def isolated_settings(tmp_path: Path, monkeypatch) -> Path:
-    """settings.json 与 .env 重定向到临时目录，单例与 os.environ 现场备份恢复
-
-    2026-09-25 补隔离：conftest 的 load_dotenv 把真实 .env 装进 os.environ，单例构造时
-    env 组覆盖模型 base_url/api_key——不洗掉的话 /model-providers/*/test 拿真实通道发真
-    网络调用（"without_base_url" 实测探通了 commandcode，ok=True）。这里洗 env 并把单例
-    模型组置回未配置态，"未配置"分支才能被稳定测到。
-    """
-    import src.api.routes.settings as settings_routes
+    """配置文件、单例和环境变量均隔离，测试不使用真实连接"""
+    import src.api.routes.settings as routes
 
     settings_file = tmp_path / "settings.json"
-    env_file = tmp_path / ".env"
-    monkeypatch.setattr(settings_routes, "_settings_file_path", lambda: settings_file)
-    monkeypatch.setattr(settings_routes, "_env_file_path", lambda: env_file)
-
-    saved_settings = deepcopy(settings_routes.settings)
-    saved_env = {key: os.environ.get(key) for key in _ENV_KEYS}
+    monkeypatch.setattr(routes, "_settings_file_path", lambda: settings_file)
+    monkeypatch.setattr(routes, "_env_file_path", lambda: tmp_path / ".env")
+    saved = deepcopy(routes.settings)
+    # 设置接口会经 apply_env_updates_to_process 直写 os.environ（绕过 monkeypatch
+    # 追踪），必须整表快照还原，否则泄漏进后续测试的 Settings.from_env()
+    saved_environ = dict(os.environ)
     for key in _ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
-    for task_name in ("annotation", "diagnosis", "paragraph_embedding"):
-        task_settings = getattr(settings_routes.settings.models, task_name)
-        task_settings.base_url = None
-        task_settings.api_key = None
+    apply_settings_onto(routes.settings, Settings())
     try:
         yield settings_file
     finally:
-        apply_settings_onto(settings_routes.settings, saved_settings)
-        for key, value in saved_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+        os.environ.clear()
+        os.environ.update(saved_environ)
+        apply_settings_onto(routes.settings, saved)
 
 
-def test_get_settings_view_masks_api_key(isolated_settings: Path, api_client: TestClient) -> None:
-    # 单例在 import 期已加载真实 .env，先走被测链路写入测试凭据
-    setup = api_client.put(
-        "/api/settings/env",
-        json={
-            "model": {
-                "base_url": "https://api.example.com/v1",
-                "model": "text-model",
-                "api_key": "sk-test-abcdef123456",
-            }
-        },
-    )
-    assert setup.status_code == 200
-
-    response = api_client.get("/api/settings")
-    assert response.status_code == 200
-    data = response.json()
-
-    annotation = data["values"]["models"]["annotation"]
-    assert annotation["base_url"] == "https://api.example.com/v1"
-    assert annotation["api_key"] == "••••3456"
-    assert annotation["model"] == "text-model"
-    # defaults 来自 dataclass，不含 env 注入值
-    assert data["defaults"]["models"]["annotation"]["api_key"] is None
-    # 来源：注册表字段中文件里存在的标 file
-    assert data["sources"]["models/annotation/temperature"] == "default"
+def _entry(model_id: str = "model-a", **overrides: Any) -> dict[str, Any]:
+    return {"model_id": model_id, "base_url": f"https://{model_id}.example/v1", "api_key": f"sk-{model_id}-1234",
+            "weight": 1, "max_in_flight": 2, "temperature": 0.5, "top_p": 0.9, "max_tokens": 4096, **overrides}
 
 
-def test_update_settings_partial_save_and_hot_apply(
-    isolated_settings: Path, api_client: TestClient
+def _save_pool(client: TestClient) -> None:
+    client.put("/api/settings/env", json={
+        "model_pool": [_entry(), _entry("diagnostic", weight=0, max_in_flight=1)],
+        "diagnosis_model_id": "diagnostic",
+    }).raise_for_status()
+
+
+def test_pool_roundtrip_masks_keys_and_preserves_behavior_config(
+    isolated_settings: Path, api_client: TestClient,
 ) -> None:
-    isolated_settings.write_text(
-        json.dumps({"models": {"annotation": {"max_iterations": 15}}, "topic_model": {"num_topics": 25}}),
-        encoding="utf-8",
+    from src.config.input_config import load_task_config
+
+    env_file = isolated_settings.parent / ".env"
+    env_file.write_text("# 数据库\nDATABASE_PASSWORD=unrelated\n", encoding="utf-8")
+    _save_pool(api_client)
+    data = api_client.get("/api/settings").json()
+    pool = data["values"]["models"]["model_pool"]
+    assert pool[0] == {**_entry(), "api_key": "••••1234", "weight": 1.0}
+    assert "sk-model-a-1234" not in json.dumps(data)
+    assert "sk-diagnostic-1234" not in json.dumps(data)
+    assert "text_model" not in data and "model_providers" not in data
+    assert "api_key" not in data["values"]["models"]["annotation"]
+    assert "model_pool" not in data["values"]["models"]["annotation"]
+    assert data["defaults"]["models"]["model_pool"] == []
+    assert not isolated_settings.exists()
+    assert "DATABASE_PASSWORD=unrelated" in env_file.read_text(encoding="utf-8")
+    assert json.loads(read_env_file(env_file)["MODEL_POOL"])[1]["max_in_flight"] == 1
+    assert read_env_file(env_file)["DIAGNOSIS_MODEL_ID"] == "diagnostic"
+    annotation = load_task_config("annotation", selection_key="task")
+    diagnosis = load_task_config("diagnosis")
+    assert (annotation.model, annotation.api_key, annotation.max_in_flight) == ("model-a", "sk-model-a-1234", 2)
+    # 2026-10-02 设置迁移：采样参数来自池内模型配置
+    assert (annotation.temperature, annotation.top_p, annotation.max_tokens) == (0.5, 0.9, 4096)
+    assert (diagnosis.model, diagnosis.base_url, diagnosis.max_in_flight) == (
+        "diagnostic", "https://diagnostic.example/v1", 1,
     )
-
-    response = api_client.put("/api/settings", json={"values": {"models": {"annotation": {"temperature": 0.9}}}})
-    assert response.status_code == 200
-
-    saved = json.loads(isolated_settings.read_text(encoding="utf-8"))
-    # 未提及的键保留；等于默认的 num_topics 25 被稀疏化剔除
-    assert saved["models"]["annotation"] == {"max_iterations": 15, "temperature": 0.9}
-    assert "topic_model" not in saved
-
-    # 单例热生效
-    from src.config.settings import settings as singleton
-
-    assert singleton.models.annotation.temperature == 0.9
-    assert singleton.models.annotation.max_iterations == 15
-
-
-def test_update_settings_rejects_invalid(isolated_settings: Path, api_client: TestClient) -> None:
-    response = api_client.put(
-        "/api/settings",
-        json={"values": {"topic_model": {"topic_shift": {"window_size": 0}}}},
-    )
-    assert response.status_code == 422
-    body = response.json()
-    assert body["error_type"] == "SettingsValidationError"
-    # 失败不落盘
+    # 采样参数随模型保存（环境接口），不再经参数设置接口按任务配置
+    api_client.put("/api/settings/env", json={
+        "model_pool": [_entry(), _entry("diagnostic", weight=0, max_in_flight=1, max_tokens=2048)],
+        "diagnosis_model_id": "diagnostic",
+    }).raise_for_status()
+    assert load_task_config("diagnosis").model == "diagnostic"
+    assert load_task_config("diagnosis").max_tokens == 2048
+    # 采样参数改走环境接口后本用例不再触发参数保存，settings.json 应保持不生成
     assert not isolated_settings.exists()
 
 
-def test_update_settings_reset_to_default_removes_override(
-    isolated_settings: Path, api_client: TestClient
-) -> None:
-    isolated_settings.write_text(
-        json.dumps({"models": {"annotation": {"temperature": 0.9}}}), encoding="utf-8"
-    )
+def test_pool_reload_uses_only_the_new_environment_contract(isolated_settings: Path, api_client: TestClient) -> None:
+    _save_pool(api_client)
+    reloaded = Settings.from_config_dict({})
+    assert reloaded.models.model_pool[0].api_key == "sk-model-a-1234"
+    assert reloaded.models.diagnosis_model_id == "diagnostic"
 
-    response = api_client.put(
-        "/api/settings",
-        json={"values": {"models": {"annotation": {"temperature": 0.7}}}},
-    )
+
+def test_edit_model_keeps_key_and_updates_diagnosis_on_rename(isolated_settings: Path, api_client: TestClient) -> None:
+    _save_pool(api_client)
+    first = _entry(max_in_flight=5)
+    first.pop("api_key")
+    renamed = _entry("renamed", weight=0)
+    renamed.pop("api_key")
+    renamed["original_model_id"] = "diagnostic"
+    response = api_client.put("/api/settings/env", json={
+        "model_pool": [first, renamed], "diagnosis_model_id": "renamed",
+    })
+    assert response.status_code == 200
+    from src.config.input_config import load_task_config
+
+    assert load_task_config("diagnosis").api_key == "sk-diagnostic-1234"
+    assert load_task_config("annotation", model_id="model-a").max_in_flight == 5
+
+
+def test_delete_selected_model_requires_new_selection(isolated_settings: Path, api_client: TestClient) -> None:
+    _save_pool(api_client)
+    env_file = isolated_settings.parent / ".env"
+    before = env_file.read_text(encoding="utf-8")
+    response = api_client.put("/api/settings/env", json={"model_pool": [_entry()]})
+    assert response.status_code == 422 and env_file.read_text(encoding="utf-8") == before
+    response = api_client.put("/api/settings/env", json={"model_pool": [_entry()], "diagnosis_model_id": "model-a"})
+    assert response.status_code == 200
+    assert len(response.json()["values"]["models"]["model_pool"]) == 1
+
+
+@pytest.mark.parametrize("pool", [[], [_entry(weight=0)], [_entry(weight=-1)], [_entry(weight=True)],
+                                 [_entry(), _entry()], [_entry(max_in_flight=0)], [_entry(max_in_flight=1.5)],
+                                 [_entry(temperature=3)], [_entry(temperature=-0.1)], [_entry(top_p=1.5)],
+                                 [_entry(max_tokens=0)], [_entry(api_key="")], [_entry(api_key="••••1234")],
+                                 [_entry(api_key="key\nDATABASE_PASSWORD=evil")], [_entry(base_url="file:///tmp")]])
+def test_invalid_pool_does_not_write_config(
+    isolated_settings: Path, api_client: TestClient, pool: list[dict[str, Any]],
+) -> None:
+    response = api_client.put("/api/settings/env", json={"model_pool": pool})
+    assert response.status_code == 422
+    assert not (isolated_settings.parent / ".env").exists()
+    assert "MODEL_POOL" not in os.environ
+
+
+def test_unknown_diagnosis_and_missing_new_key_are_rejected(isolated_settings: Path, api_client: TestClient) -> None:
+    new = _entry()
+    new.pop("api_key")
+    assert api_client.put("/api/settings/env", json={"model_pool": [new]}).status_code == 422
+    assert api_client.put("/api/settings/env", json={
+        "model_pool": [_entry()], "diagnosis_model_id": "not-in-pool",
+    }).status_code == 422
+    assert not (isolated_settings.parent / ".env").exists()
+
+
+def test_short_key_is_fully_masked(isolated_settings: Path, api_client: TestClient) -> None:
+    response = api_client.put("/api/settings/env", json={"model_pool": [_entry(api_key="abc")]})
+    assert response.status_code == 200
+    assert response.json()["values"]["models"]["model_pool"][0]["api_key"] == "••••"
+
+
+def test_pool_and_embedding_validation_is_atomic(isolated_settings: Path, api_client: TestClient) -> None:
+    response = api_client.put("/api/settings/env", json={
+        "model_pool": [_entry()], "embedding_model": {"base_url": "https://embedding/v1"},
+    })
+    assert response.status_code == 422
+    assert not (isolated_settings.parent / ".env").exists() and "MODEL_POOL" not in os.environ
+
+
+def test_legacy_connection_and_named_provider_contracts_are_absent(
+    isolated_settings: Path, api_client: TestClient,
+) -> None:
+    for payload in ({"model": {"base_url": "https://old/v1", "model": "old", "api_key": "old"}},
+                    {"providers": {"secondary": {"api_key": "x"}}}):
+        assert api_client.put("/api/settings/env", json=payload).status_code == 422
+    assert not (isolated_settings.parent / ".env").exists()
+    assert api_client.post("/api/settings/model-providers/annotation/test").status_code == 404
+    assert api_client.post("/api/settings/model-providers/diagnosis/test").status_code == 404
+
+
+def test_pool_credentials_are_rejected_by_parameter_save(isolated_settings: Path, api_client: TestClient) -> None:
+    response = api_client.put("/api/settings", json={"values": {"models": {"model_pool": [_entry()]}}})
+    assert response.status_code == 422 and not isolated_settings.exists()
+
+
+def test_update_settings_partial_save_and_hot_apply(isolated_settings: Path, api_client: TestClient) -> None:
+    isolated_settings.write_text(json.dumps({"models": {"annotation": {"max_iterations": 15}},
+                                            "topic_model": {"num_topics": 25}}), encoding="utf-8")
+    response = api_client.put("/api/settings", json={"values": {"models": {"annotation": {"timeout_s": 60}}}})
     assert response.status_code == 200
     saved = json.loads(isolated_settings.read_text(encoding="utf-8"))
-    assert "models" not in saved
+    assert saved["models"]["annotation"] == {"max_iterations": 15, "timeout_s": 60}
+    assert "topic_model" not in saved
+    from src.config import settings
+
+    assert settings.models.annotation.timeout_s == 60
+    assert settings.models.annotation.max_iterations == 15
 
 
-def test_update_settings_rejects_corrupt_file(isolated_settings: Path, api_client: TestClient) -> None:
+def test_update_settings_invalid_and_corrupt_files_are_rejected(
+    isolated_settings: Path, api_client: TestClient,
+) -> None:
+    response = api_client.put("/api/settings", json={"values": {"topic_model": {"topic_shift": {"window_size": 0}}}})
+    assert response.status_code == 422 and not isolated_settings.exists()
     isolated_settings.write_text("{not-json", encoding="utf-8")
-    response = api_client.put("/api/settings", json={"values": {"models": {"annotation": {"temperature": 0.9}}}})
-    assert response.status_code == 422
+    assert api_client.put("/api/settings", json={"values": {"metrics": {"mtld_threshold": 0.8}}}).status_code == 422
 
 
-def test_update_env_sets_model_credentials(
-    isolated_settings: Path, api_client: TestClient, monkeypatch
+def test_reset_default_removes_override_and_preserves_singleton_identity(
+    isolated_settings: Path, api_client: TestClient,
 ) -> None:
-    for key in _ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
+    from src.config import settings
 
-    response = api_client.put(
-        "/api/settings/env",
-        json={"model": {"base_url": "https://api.example.com/v1", "model": "gpt-x", "api_key": "sk-live-key-9999"}},
-    )
-    assert response.status_code == 200
-    data = response.json()
-
-    env_content = (isolated_settings.parent / ".env").read_text(encoding="utf-8")
-    assert "MODEL_BASE_URL=https://api.example.com/v1" in env_content
-    assert "MODEL_ID=gpt-x" in env_content
-    assert "MODEL_KEY=sk-live-key-9999" in env_content
-
-    # os.environ 同步 + 单例热生效（annotation/diagnosis 共用文本模型组）
-    assert os.environ["MODEL_KEY"] == "sk-live-key-9999"
-    from src.config.settings import settings as singleton
-
-    assert singleton.models.annotation.api_key == "sk-live-key-9999"
-    assert singleton.models.diagnosis.model == "gpt-x"
-    # 回显打码
-    assert data["values"]["models"]["annotation"]["api_key"] == "••••9999"
+    singleton = settings
+    isolated_settings.write_text('{"models":{"annotation":{"timeout_s":90}}}', encoding="utf-8")
+    response = api_client.put("/api/settings", json={"values": {"models": {"annotation": {"timeout_s": None}}}})
+    assert response.status_code == 200 and settings is singleton
+    assert "models" not in json.loads(isolated_settings.read_text(encoding="utf-8"))
 
 
-def test_update_env_clear_group_requires_no_other_fields(
-    isolated_settings: Path, api_client: TestClient, monkeypatch
+def test_parallel_parameter_updates_preserve_independent_fields(isolated_settings: Path) -> None:
+    import src.api.routes.settings as routes
+    from src.api.models.settings import UpdateSettingsRequest
+
+    updates = [{"models": {"diagnosis": {"thinking": True}}}, {"models": {"annotation": {"timeout_s": 60}}},
+               {"metrics": {"mtld_threshold": 0.81}}]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        list(pool.map(lambda values: routes.update_settings(UpdateSettingsRequest(values=values)), updates))
+    view = routes.get_settings().values
+    assert view["models"]["diagnosis"]["thinking"] is True
+    assert view["models"]["annotation"]["timeout_s"] == 60
+    assert view["metrics"]["mtld_threshold"] == 0.81
+
+
+def test_embedding_credentials_can_be_saved_preserved_and_cleared(
+    isolated_settings: Path, api_client: TestClient,
 ) -> None:
-    monkeypatch.setenv("MODEL_BASE_URL", "https://old/v1")
-    monkeypatch.setenv("MODEL_ID", "old-model")
-    monkeypatch.setenv("MODEL_KEY", "old-key")
-
-    # 清空时同时设置其他字段 → 422
-    response = api_client.put(
-        "/api/settings/env",
-        json={"model": {"base_url": "https://new/v1", "api_key": ""}},
-    )
-    assert response.status_code == 422
-
-    # 整组清空：文件删键 + os.environ 删键 + 单例显式置 None（不走降级保留旧值）
-    response = api_client.put("/api/settings/env", json={"model": {"api_key": ""}})
+    patch = {"base_url": "http://localhost:8080/v1", "model": "embedding", "api_key": "sk-embedding-9999"}
+    response = api_client.put("/api/settings/env", json={"embedding_model": patch})
     assert response.status_code == 200
-
-    env_content = (isolated_settings.parent / ".env").read_text(encoding="utf-8")
-    assert "MODEL_KEY" not in env_content
-    assert "MODEL_ID" not in env_content
-    assert os.environ.get("MODEL_KEY") is None
-
-    from src.config.settings import settings as singleton
-
-    assert singleton.models.annotation.api_key is None
-    assert singleton.models.annotation.base_url is None
-    assert singleton.models.diagnosis.model is None
+    assert response.json()["values"]["models"]["paragraph_embedding"]["api_key"] == "••••9999"
+    api_client.put("/api/settings/env", json={"embedding_model": {"base_url": "http://localhost:9090/v1"}}).raise_for_status()
+    assert os.environ["EMBEDDING_MODEL_KEY"] == "sk-embedding-9999"
+    invalid = api_client.put("/api/settings/env", json={"embedding_model": {"api_key": "", "model": "new"}})
+    assert invalid.status_code == 422
+    response = api_client.put("/api/settings/env", json={"embedding_model": {"api_key": ""}})
+    assert response.status_code == 200 and "EMBEDDING_MODEL_KEY" not in os.environ
+    assert response.json()["values"]["models"]["paragraph_embedding"]["base_url"] is None
 
 
-def test_update_env_rejects_incomplete_group(
-    isolated_settings: Path, api_client: TestClient, monkeypatch
-) -> None:
-    # 未配置组只能整组设置（真实环境可能已配置部分键，先清干净再验证完整性校验）
-    for key in ("EMBEDDING_MODEL_BASE_URL", "EMBEDDING_MODEL_ID", "EMBEDDING_MODEL_KEY"):
-        monkeypatch.delenv(key, raising=False)
-
-    response = api_client.put(
-        "/api/settings/env",
-        json={"embedding_model": {"base_url": "http://localhost:8080/v1"}},
-    )
-    assert response.status_code == 422
-    assert "EMBEDDING_MODEL" in response.json()["detail"]
-
-
-def test_update_env_ltp_model_dir(isolated_settings: Path, api_client: TestClient, tmp_path: Path) -> None:
-    ltp_dir = tmp_path / "ltp-model"
-    ltp_dir.mkdir()
-
-    response = api_client.put("/api/settings/env", json={"ltp_model_dir": str(ltp_dir)})
-    assert response.status_code == 200
-    assert os.environ["LTP_MODEL_DIR"] == str(ltp_dir)
-
-    from src.config.settings import settings as singleton
-
-    assert singleton.linguistic.ltp.model_dir == str(ltp_dir)
-
-    # 不存在的目录 → 422
-    response = api_client.put("/api/settings/env", json={"ltp_model_dir": str(tmp_path / "missing")})
-    assert response.status_code == 422
-
-
-def test_update_env_ignores_non_whitelisted_keys(isolated_settings: Path, api_client: TestClient) -> None:
-    response = api_client.put(
-        "/api/settings/env",
-        json={"model": {"base_url": "https://x/v1", "model": "m", "api_key": "k"}},
-    )
-    assert response.status_code == 200
-    # .env 中只出现白名单键，DATABASE_* 等 UI 不可触碰
-    env_content = (isolated_settings.parent / ".env").read_text(encoding="utf-8")
-    assert "DATABASE" not in env_content
-
-
-class _FakeModel:
-    def __init__(self, model_id: str) -> None:
-        self.id = model_id
-
-
-class _FakeModelsPage:
-    def __init__(self, model_ids: list[str]) -> None:
-        self._model_ids = model_ids
-
-    def __iter__(self):
-        return iter(_FakeModel(model_id) for model_id in self._model_ids)
+def test_ltp_directory_requires_existing_path(isolated_settings: Path, api_client: TestClient, tmp_path: Path) -> None:
+    ltp = tmp_path / "ltp"
+    ltp.mkdir()
+    response = api_client.put("/api/settings/env", json={"ltp_model_dir": str(ltp)})
+    assert response.status_code == 200 and os.environ["LTP_MODEL_DIR"] == str(ltp)
+    assert api_client.put("/api/settings/env", json={"ltp_model_dir": str(tmp_path / "missing")}).status_code == 422
 
 
 class _FakeOpenAIClient:
     last_init: dict[str, Any] = {}
 
-    def __init__(self, base_url: str, api_key: str, timeout: float) -> None:
-        _FakeOpenAIClient.last_init = {"base_url": base_url, "api_key": api_key, "timeout": timeout}
+    def __init__(self, **kwargs: Any) -> None:
+        self.last_init.update(kwargs)
 
     @property
-    def models(self):
+    def models(self) -> _FakeOpenAIClient:
         return self
 
-    def list(self) -> _FakeModelsPage:
-        return _FakeModelsPage(["model-a", "model-b"])
+    def list(self) -> list[Any]:
+        from types import SimpleNamespace
+
+        return [SimpleNamespace(id="model-a"), SimpleNamespace(id="model-b")]
 
 
-def test_test_model_provider_success(isolated_settings: Path, api_client: TestClient, monkeypatch) -> None:
-    import src.api.routes.settings as settings_routes
-
-    monkeypatch.setattr(settings_routes, "OpenAI", _FakeOpenAIClient)
-    response = api_client.post(
-        "/api/settings/model-providers/annotation/test",
-        json={"base_url": "https://api.example.com/v1", "api_key": "sk-test"},
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["ok"] is True
-    assert data["model_ids"] == ["model-a", "model-b"]
-    assert data["latency_ms"] is not None
-    assert _FakeOpenAIClient.last_init["base_url"] == "https://api.example.com/v1"
-
-
-def test_test_model_provider_failure_returns_ok_false(
-    isolated_settings: Path, api_client: TestClient, monkeypatch
+def test_pool_connection_uses_saved_key_and_unsaved_override(
+    isolated_settings: Path, api_client: TestClient, monkeypatch,
 ) -> None:
-    import src.api.routes.settings as settings_routes
+    import src.api.routes.settings as routes
 
-    class _FailingClient(_FakeOpenAIClient):
-        def list(self) -> _FakeModelsPage:
-            raise ConnectionError("connection refused")
-
-    monkeypatch.setattr(settings_routes, "OpenAI", _FailingClient)
-    # base_url 走请求体显式给：fixture 已把单例模型组置空，不带体会在"base_url 未配置"提前返回
-    response = api_client.post(
-        "/api/settings/model-providers/embedding/test",
-        json={"base_url": "https://api.example.com/v1"},
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["ok"] is False
-    assert "connection refused" in data["error"]
-
-
-def test_test_model_provider_unknown_task(isolated_settings: Path, api_client: TestClient) -> None:
-    response = api_client.post("/api/settings/model-providers/unknown/test")
-    assert response.status_code == 404
+    monkeypatch.setattr(routes, "OpenAI", _FakeOpenAIClient)
+    _save_pool(api_client)
+    response = api_client.post("/api/settings/model-providers/pool/test", json={"model_id": "diagnostic"})
+    assert response.status_code == 200 and response.json()["ok"] is True
+    assert _FakeOpenAIClient.last_init["api_key"] == "sk-diagnostic-1234"
+    assert _FakeOpenAIClient.last_init["base_url"] == "https://diagnostic.example/v1"
+    assert _FakeOpenAIClient.last_init["max_retries"] == 0
+    before = os.environ["MODEL_POOL"]
+    response = api_client.post("/api/settings/model-providers/pool/test", json={
+        "model_id": "model-a", "base_url": "https://draft/v1", "api_key": "sk-draft",
+    })
+    assert response.json()["ok"] is True and os.environ["MODEL_POOL"] == before
+    assert _FakeOpenAIClient.last_init["api_key"] == "sk-draft"
 
 
-def test_test_model_provider_without_base_url(isolated_settings: Path, api_client: TestClient) -> None:
-    response = api_client.post("/api/settings/model-providers/annotation/test")
-    assert response.status_code == 200
-    assert response.json()["ok"] is False
+def test_connection_failure_redacts_draft_key(isolated_settings: Path, api_client: TestClient, monkeypatch) -> None:
+    import src.api.routes.settings as routes
+
+    class FailingClient(_FakeOpenAIClient):
+        def list(self) -> list[Any]:
+            raise ConnectionError("failed Authorization: Bearer sk-draft-secret")
+
+    monkeypatch.setattr(routes, "OpenAI", FailingClient)
+    response = api_client.post("/api/settings/model-providers/pool/test", json={
+        "base_url": "https://draft/v1", "api_key": "sk-draft-secret",
+    })
+    assert response.json()["ok"] is False and "sk-draft-secret" not in response.text
+    assert not (isolated_settings.parent / ".env").exists()
 
 
-def test_settings_roundtrip_preserves_singleton_identity(isolated_settings: Path, api_client: TestClient) -> None:
-    """PUT 前后单例对象身份不变——28 处 from src.config import settings 的前提"""
-    from src.config.settings import settings as singleton_before
+def test_connection_without_configuration_does_not_call_remote(isolated_settings: Path, api_client: TestClient) -> None:
+    assert api_client.post("/api/settings/model-providers/pool/test").json()["ok"] is False
+    assert api_client.post("/api/settings/model-providers/unknown/test").status_code == 404
 
-    response = api_client.put("/api/settings", json={"values": {"metrics": {"mtld_threshold": 0.8}}})
-    assert response.status_code == 200
 
-    from src.config.settings import settings as singleton_after
+def test_schema_has_no_extra_model_categories(isolated_settings: Path, api_client: TestClient) -> None:
+    paths = {tuple(entry["path"]) for entry in api_client.get("/api/settings/schema").json()["fields"]}
+    assert not any("continuity" in path or "provider_route" in path or "model_id" in path
+                   or "provider_max_in_flight" in path or "structured_output" in path for path in paths)
+    assert "continuity" not in api_client.get("/api/settings").json()["values"]["models"]
 
-    assert singleton_before is singleton_after
-    assert singleton_after.metrics.mtld_threshold == 0.8
+
+def test_validation_errors_do_not_echo_pool_keys(isolated_settings: Path, api_client: TestClient) -> None:
+    response = api_client.put("/api/settings/env", json={
+        "model_pool": [_entry(api_key="secret-pool-key", extra="bad")],
+    })
+    assert response.status_code == 422 and "secret-pool-key" not in response.text

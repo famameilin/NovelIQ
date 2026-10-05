@@ -11,6 +11,8 @@ import time
 from collections import deque
 from typing import Any
 
+from src.storage.repositories.event_outbox import EventOutboxRepository
+
 _MAX_BUFFER_SIZE = 256
 
 
@@ -21,7 +23,13 @@ class EventManager:
     管理 SSE 连接和消息推送，支持多客户端连接和消息缓冲
     """
 
-    def __init__(self, idle_timeout: float = 3600.0, buffer_size: int = _MAX_BUFFER_SIZE) -> None:
+    def __init__(
+        self, idle_timeout: float = 3600.0, buffer_size: int = _MAX_BUFFER_SIZE,
+        outbox: EventOutboxRepository | None = None,
+    ) -> None:
+        if buffer_size < 1:
+            raise ValueError("SSE 客户端队列必须有正的容量")
+        self._outbox = outbox
         self._connections: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_activity: dict[str, float] = {}
@@ -45,7 +53,7 @@ class EventManager:
         if task_id not in self._buffers:
             self._buffers[task_id] = deque(maxlen=self._buffer_size)
 
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=self._buffer_size)
         # 注册 queue 与快照缓冲必须在同一把锁内完成，与 send() 的"append + 收集推送目标"互斥：
         # 1) 避免并发 append 使迭代中的 deque 被修改（RuntimeError: deque mutated during iteration）
         # 2) 保证"先入缓冲后注册"或"先注册后实时推送"的严格时序，杜绝同一消息回放+实时双投
@@ -57,8 +65,9 @@ class EventManager:
             ]
 
         # 锁外回放：asyncio.Queue 无界 put 不会真正阻塞，但避免在锁内 await
-        for msg in buffered:
-            await queue.put(msg)
+        if self._outbox is None:
+            for msg in buffered:
+                queue.put_nowait(msg)
 
         return queue
 
@@ -123,14 +132,35 @@ class EventManager:
         # 锁内完成"编号 + 入缓冲 + 快照推送目标"，锁外 await put：
         # 与 connect 的"注册 + 快照"互斥（见 connect 注释），且不阻塞其它连接操作
         async with self._locks.setdefault(task_id, asyncio.Lock()):
-            seq = self._seq_counters.get(task_id, 0) + 1
+            if self._outbox is not None:
+                message = await asyncio.to_thread(self._outbox.emit, task_id, event_type, data)
+            seq = int(message.get("seq", self._seq_counters.get(task_id, 0) + 1))
             self._seq_counters[task_id] = seq
             message["seq"] = seq
             self._buffers[task_id].append(message)
             targets = list(self._connections.get(task_id, ()))
 
         for queue in targets:
-            await queue.put(message)
+            if queue.full():
+                await self.disconnect(task_id, queue)
+                while not queue.empty():
+                    queue.get_nowait()
+                queue.put_nowait({"type": "reconnect_required", "data": {"reason": "backpressure"}})
+            else:
+                queue.put_nowait(message)
+
+    @property
+    def is_durable(self) -> bool:
+        return self._outbox is not None
+
+    def configure_outbox(self, outbox: EventOutboxRepository) -> None:
+        """由应用启动注入持久后端，纯内存实例仅用于独立测试"""
+        self._outbox = outbox
+
+    async def replay(self, task_id: str, after_seq: int) -> list[dict[str, Any]]:
+        if self._outbox is None:
+            return []
+        return await asyncio.to_thread(self._outbox.replay, task_id, after_seq)
 
     async def shutdown(self) -> None:
         """

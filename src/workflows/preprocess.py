@@ -23,7 +23,7 @@ from src.chunking.chunker import chunk_documents_with_chapters, split_chunk_para
 from src.chunking.spans import ParagraphSpan
 from src.config import settings
 from src.ingest.reader import ingest_path
-from src.preprocess.cleaning import normalize_text
+from src.preprocess import normalize_text
 from src.preprocess.tokenize import tokenize
 from src.storage.repositories import (
     ChapterRepository,

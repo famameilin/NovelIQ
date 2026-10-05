@@ -6,7 +6,6 @@ from typing import Any
 
 from sqlalchemy import select
 
-from src.agents.annotation.schema import ResolvedCase
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.storage.models import GraphRelation
 from tests.support.chapter_annotation_helpers import (
@@ -25,7 +24,7 @@ def _persist_authority_chapter(
     chapter_id: int,
     characters: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
-    resolved_cases: list[Any] | None = None,
+    continuity_resolutions: list[Any] | None = None,
 ) -> None:
     """2026-08-19 用于为 authority 视图写入章节图数据"""
     persist_chapter_annotation(
@@ -34,7 +33,7 @@ def _persist_authority_chapter(
         chapter_id=chapter_id,
         characters=characters,
         relations=relations,
-        resolved_cases=resolved_cases,
+        continuity_resolutions=continuity_resolutions,
     )
 
 
@@ -67,7 +66,7 @@ def test_authority_views_project_chapter_history_and_graph_changes(db_session) -
     service = KnowledgeGraphAuthorityService.from_session(db_session)
     level1 = service.build_level1_snapshot(run_id)
     timeline = service.build_timeline_view(run_id)
-    graph_view = service.build_graph_view(run_id)
+    graph_view = service.build_representative_graph_view(run_id)
     export_view = service.build_export_view(run_id)
     report = service.build_graph_report(run_id)
 
@@ -118,24 +117,19 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
         db_session,
         run_id=run_id,
         chapter_id=2,
-        resolved_cases=[
-            ResolvedCase(
-                case_id="case-break",
-                action="fact",
-                type="relation_change",
-                reason="分道扬镳",
-                target_key="target-break",
-                target_ref={"kind": "relation_change", "chapter_id": 2},
-                from_entity="林渡",
-                to_entity="顾霜",
-                relation_type="盟友",
-                change_kind="break",
-            )
+        continuity_resolutions=[
+            {
+                "reason": "分道扬镳",
+                "from_entity": "林渡",
+                "to_entity": "顾霜",
+                "relation_type": "盟友",
+                "change_kind": "break",
+            }
         ],
     )
     db_session.commit()
 
-    graph_view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
+    graph_view = KnowledgeGraphAuthorityService.from_session(db_session).build_representative_graph_view(run_id)
     export_view = KnowledgeGraphAuthorityService.from_session(db_session).build_export_view(run_id)
 
     assert graph_view.confirmed_relations == []
@@ -180,7 +174,7 @@ def test_authority_merges_same_character_aliases_in_views(db_session) -> None:
 
     service = KnowledgeGraphAuthorityService.from_session(db_session)
     level1 = service.build_level1_snapshot(run_id)
-    graph_view = service.build_graph_view(run_id)
+    graph_view = service.build_representative_graph_view(run_id)
     representative = service.build_representative_graph_view(run_id)
 
     canonical_rows = level1.canonical_entities

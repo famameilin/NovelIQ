@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from gensim.models import KeyedVectors
 
-from scripts.tools.convert_word2vec_pretrained import (
+from scripts.convert_word2vec_pretrained import (
     convert_pretrained_to_kv,
     read_vector_size,
     resolve_pretrained_file,

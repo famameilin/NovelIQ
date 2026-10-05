@@ -30,7 +30,7 @@
 | --- | --- |
 | ![事件森林](assets/screenshots/event-growth-forest-1440x900.png) | ![树内因果结构](assets/screenshots/event-growth-tree-1440x900.png) |
 
-已有 0.1.0 数据库升级到 0.1.1 时，请先阅读 [一次性升级说明](UPGRADE-0.1.1.md)。
+已有 0.1.0 数据库升级到 0.1.1 时，请先阅读 [一次性升级说明](docs/upgrades/UPGRADE-0.1.1.md)。
 
 技术栈：Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17（pgvector）；React 19 / Vite / ECharts / Tailwind CSS。LLM 走 OpenAI 兼容接口（本地 vLLM 或云端服务均可），词法分析与词向量为本地离线模型。
 
@@ -44,7 +44,7 @@ LTP 与 Word2Vec 从本地加载，**不会自动联网下载**，均可经设�
 - **Word2Vec**（`linguistic.word2vec.enabled`，默认关闭）：关闭时无需模型；开启后需 `models/word2vec/shared/` 下的转换 `.kv` 主文件（依赖 LTP 词元），缺失同样在「语言结构」阶段报错。已有 `.vec`/`.bin`/`.txt` 预训练向量时执行：
 
   ```powershell
-  uv run python -m scripts.tools.convert_word2vec_pretrained
+  uv run python -m scripts.convert_word2vec_pretrained
   ```
 
   默认从 `models/word2vec/pretrained/` 读取，写入 `models/word2vec/shared/`。
