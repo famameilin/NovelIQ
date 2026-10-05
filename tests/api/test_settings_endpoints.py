@@ -28,12 +28,17 @@ def isolated_settings(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setattr(routes, "_settings_file_path", lambda: settings_file)
     monkeypatch.setattr(routes, "_env_file_path", lambda: tmp_path / ".env")
     saved = deepcopy(routes.settings)
+    # 设置接口会经 apply_env_updates_to_process 直写 os.environ（绕过 monkeypatch
+    # 追踪），必须整表快照还原，否则泄漏进后续测试的 Settings.from_env()
+    saved_environ = dict(os.environ)
     for key in _ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
     apply_settings_onto(routes.settings, Settings())
     try:
         yield settings_file
     finally:
+        os.environ.clear()
+        os.environ.update(saved_environ)
         apply_settings_onto(routes.settings, saved)
 
 
