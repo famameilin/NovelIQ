@@ -8,6 +8,7 @@ import socket
 import sys
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -181,6 +182,49 @@ app.include_router(tabs_router, prefix="/api")
 app.include_router(timeline_router, prefix="/api")
 app.include_router(settings_router, prefix="/api", tags=["settings"])
 app.include_router(sse_router, prefix="/api", tags=["SSE"])
+
+
+@app.get("/api/debug/asyncio-tasks", include_in_schema=False)
+async def _debug_asyncio_tasks() -> dict[str, list[str]]:
+    """2026-10-03 临时诊断端点：沿 await 链渲染每个任务的真实挂起点（排查调度卡死用）"""
+    import asyncio
+
+    def walk_await_chain(coro: Any, depth: int = 0) -> list[str]:
+        lines: list[str] = []
+        seen: set[int] = set()
+        current: Any = coro
+        while current is not None and depth < 40:
+            marker = id(current)
+            if marker in seen:
+                lines.append("  <cycle>")
+                break
+            seen.add(marker)
+            frame = getattr(current, "cr_frame", None)
+            if frame is None:
+                frame = getattr(current, "gi_frame", None)
+            if frame is None:
+                frame = getattr(current, "ag_frame", None)
+            if frame is not None:
+                lines.append(f"  {frame.f_code.co_filename}:{frame.f_lineno} {frame.f_code.co_name}")
+            else:
+                lines.append(f"  <no frame: {type(current).__name__}>")
+                break
+            current = getattr(current, "cr_await", None)
+            if current is None:
+                current = getattr(current, "gi_yieldfrom", None) if False else None
+            depth += 1
+        return lines
+
+    dumps: list[str] = []
+    for task in asyncio.all_tasks():
+        coro = getattr(task, "_coro", None) or getattr(task, "get_coro", lambda: None)()
+        entry = coro.cr_frame if coro is not None else None
+        head = "unknown"
+        if entry is not None:
+            head = f"{entry.f_code.co_filename}:{entry.f_lineno} {entry.f_code.co_name}"
+        dumps.append(f"{task.get_name()}: {head}\n" + "\n".join(walk_await_chain(coro)))
+    return {"tasks": dumps}
+
 
 register_exception_handlers(app)
 
