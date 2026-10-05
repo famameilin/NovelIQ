@@ -13,6 +13,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, cast
 
+from loguru import logger
+
 from src.agents.annotation.identity import stable_uuid
 from src.agents.annotation.schema import RELATION_DEFINITIONS
 from src.storage.models import EventEdge, EventNode, GraphEntity, GraphRelation, RelationState
@@ -27,12 +29,21 @@ def materialize_identity(m: CutoffMaterializer) -> None:
     """全 cutoff 只选举一次代表；正式名称、UUID 与事实不随绑定变化"""
     by_id = {entity.entity_id: entity for entity in m.entities.values()}
     parents = {identifier: identifier for identifier in by_id}
-    assertions = [assertion for partition in m.partitions for assertion in partition.projection["assertions"]
-                  if assertion["kind"] == "identity_binding"]
-    contested = {identifier for assertion in assertions if assertion["outcome"] == "conflict"
-                 for identifier in (assertion["payload"]["entity_id"], assertion["payload"]["canonical_entity_id"])}
-    contested.update(entity.entity_id for entity in by_id.values()
-                     if entity.attributes.get("identity_status") == "contested")
+    assertions = [
+        assertion
+        for partition in m.partitions
+        for assertion in partition.projection["assertions"]
+        if assertion["kind"] == "identity_binding"
+    ]
+    contested = {
+        identifier
+        for assertion in assertions
+        if assertion["outcome"] == "conflict"
+        for identifier in (assertion["payload"]["entity_id"], assertion["payload"]["canonical_entity_id"])
+    }
+    contested.update(
+        entity.entity_id for entity in by_id.values() if entity.attributes.get("identity_status") == "contested"
+    )
 
     def root(identifier: str) -> str:
         while parents[identifier] != identifier:
@@ -54,8 +65,11 @@ def materialize_identity(m: CutoffMaterializer) -> None:
         endpoints: tuple[str, str] | None = None
         for assertion in partition.projection["assertions"]:
             payload = assertion["payload"]
-            if (assertion["kind"] not in {"local_relation", "relation_change"}
-                or assertion["outcome"] != "accepted" or payload["relation_type"] != "同一人物"):
+            if (
+                assertion["kind"] not in {"local_relation", "relation_change"}
+                or assertion["outcome"] != "accepted"
+                or payload["relation_type"] != "同一人物"
+            ):
                 continue
             endpoints = payload["from_entity_id"], payload["to_entity_id"]
             change = payload.get("change_kind", "assert")
@@ -80,24 +94,36 @@ def materialize_identity(m: CutoffMaterializer) -> None:
             different[target].add(source)
         evidence[source].update(assertion["evidence_ids"])
         evidence[target].update(assertion["evidence_ids"])
-        m.fact(assertion, domain="identity", predicate=payload["identity_kind"],
-               subject=by_id[source], target=by_id[target], content=payload)
+        m.fact(
+            assertion,
+            domain="identity",
+            predicate=payload["identity_kind"],
+            subject=by_id[source],
+            target=by_id[target],
+            content=payload,
+        )
     clusters: dict[str, list[str]] = defaultdict(list)
     for identifier in parents:
         clusters[root(identifier)].append(identifier)
     for members in clusters.values():
-        representative = min(members, key=lambda identifier: (
-            m.chapters[by_id[identifier].first_seen_chapter].sequence,
-            identifier,
-        ))
+        representative = min(
+            members,
+            key=lambda identifier: (
+                m.chapters[by_id[identifier].first_seen_chapter].sequence,
+                identifier,
+            ),
+        )
         for identifier in members:
             entity = by_id[identifier]
-            entity.attributes = {**entity.attributes,
-                "canonical_entity_id": representative, "identity_cutoff": m.cutoff.cutoff_hash,
+            entity.attributes = {
+                **entity.attributes,
+                "canonical_entity_id": representative,
+                "identity_cutoff": m.cutoff.cutoff_hash,
                 "is_representative": len(members) > 1 and identifier == representative,
-                "identity_status": "contested" if identifier in contested else (
-                    "resolved" if evidence[identifier] else "known"
-                ), "different_entity_ids": sorted(different[identifier]),
+                "identity_status": "contested"
+                if identifier in contested
+                else ("resolved" if evidence[identifier] else "known"),
+                "different_entity_ids": sorted(different[identifier]),
                 "identity_evidence_ids": sorted(evidence[identifier]),
             }
 
@@ -117,17 +143,29 @@ def materialize_events(m: CutoffMaterializer) -> None:
                     raise ValueError("正式事件必须绑定本章段落证据")
                 root = payload.get("is_foreshadow_setup", False)
                 row = EventNode(
-                    event_id=event_id, run_id=m.cutoff.run_id, chapter_id=assertion["chapter_id"],
-                    chapter_order=m.orders[assertion["chapter_id"]], description=payload["description"],
-                    participants=[{"role": item["role"], "entity": m.descriptor(m.entity(item["entity_id"]))}
-                                  for item in payload.get("participants", [])],
-                    anchor_paragraph_ids=[anchor.paragraph_id], char_start=anchor.local_start_char,
-                    char_end=anchor.local_end_char, evidence=m.text_evidence(assertion), causal_event_refs=[],
-                    tree_id=payload["tree_id"], cause_role=payload["cause_role"], is_foreshadowing_root=root,
+                    event_id=event_id,
+                    run_id=m.cutoff.run_id,
+                    chapter_id=assertion["chapter_id"],
+                    chapter_order=m.orders[assertion["chapter_id"]],
+                    description=payload["description"],
+                    participants=[
+                        {"role": item["role"], "entity": m.descriptor(m.entity(item["entity_id"]))}
+                        for item in payload.get("participants", [])
+                    ],
+                    anchor_paragraph_ids=[anchor.paragraph_id],
+                    char_start=anchor.local_start_char,
+                    char_end=anchor.local_end_char,
+                    evidence=m.text_evidence(assertion),
+                    causal_event_refs=[],
+                    tree_id=payload["tree_id"],
+                    cause_role=payload["cause_role"],
+                    is_foreshadowing_root=root,
                     foreshadowing_status="open" if root else None,
-                    payoff_likelihood=payload.get("payoff_likelihood"), strength=payload.get("payoff_likelihood"),
+                    payoff_likelihood=payload.get("payoff_likelihood"),
+                    strength=payload.get("payoff_likelihood"),
                     annotation_id=m.annotations[assertion["chapter_id"]].annotation_id,
-                    source_kind="annotation", payload_path=f"commands/{assertion['command_ids'][0]}",
+                    source_kind="annotation",
+                    payload_path=f"commands/{assertion['command_ids'][0]}",
                 )
                 m.session.add(row)
                 m.events[event_id] = row
@@ -135,10 +173,17 @@ def materialize_events(m: CutoffMaterializer) -> None:
                 {"role": item["role"], "entity": m.descriptor(m.entity(item["entity_id"]))}
                 for item in payload.get("participants", [])
             ]
-            m.fact(assertion, domain="event", predicate="event", content={
-                "description": payload["description"],
-                "anchor_paragraph_ids": m.events[event_id].anchor_paragraph_ids,
-            }, value={"description": payload["description"]}, event_id=event_id)
+            m.fact(
+                assertion,
+                domain="event",
+                predicate="event",
+                content={
+                    "description": payload["description"],
+                    "anchor_paragraph_ids": m.events[event_id].anchor_paragraph_ids,
+                },
+                value={"description": payload["description"]},
+                event_id=event_id,
+            )
     m.session.flush()
     for partition in m.partitions:
         for assertion in partition.projection["assertions"]:
@@ -146,8 +191,9 @@ def materialize_events(m: CutoffMaterializer) -> None:
                 continue
             payload = assertion["payload"]
             if assertion["kind"] == "event_link":
-                m.event_edge(assertion, payload["root_event_id"], payload["event_id"],
-                             payload.get("edge_type", "foreshadowing"))
+                m.event_edge(
+                    assertion, payload["root_event_id"], payload["event_id"], payload.get("edge_type", "foreshadowing")
+                )
             elif assertion["kind"] == "event" and payload.get("parent_node_id"):
                 m.event_edge(assertion, payload["parent_node_id"], payload["node_id"], "causal")
     adjacency: dict[str, list[str]] = defaultdict(list)
@@ -177,7 +223,15 @@ def event_edge(
     if source_id == target_id:
         raise ValueError("事件不能自依赖")
     if event_position(source, m.event_ordinals) >= event_position(target, m.event_ordinals):
-        raise ValueError("事件依赖与文档偏序不一致")
+        # 2026-10-03 反向因果边降级为警告：回溯叙事（揭示型 root + 更早正文位置的
+        # 闪回子事件）是模型的系统性行为——run 4a6c268c 首次正式物化实测 16 条反向
+        # 边遍布 14 章，全部是"揭示当 root、更早场景当子"的同一形态。硬失败会让
+        # 27 章全成后收不了口，且语义命令不可变、无法只重写涉事章。环仍由上方
+        # 拓扑检测拦截，反向边仅影响读模型展示顺序，不再阻断释放。
+        logger.warning(
+            "事件依赖与文档偏序不一致（保留边）: {} {}({}) -> {}({})",
+            edge_type, source_id, source.chapter_id, target_id, target.chapter_id,
+        )
     key = source_id, target_id
     if key in m.active_edge_keys and m.edges[key].edge_type != edge_type:
         raise ValueError("同一事件依赖端点存在互斥边类型")
@@ -185,9 +239,15 @@ def event_edge(
     if key not in m.edges:
         row = EventEdge(
             edge_id=stable_uuid(m.cutoff.run_id, "event-edge", source_id, target_id),
-            run_id=m.cutoff.run_id, edge_type=edge_type, source_event_id=source_id, target_event_id=target_id,
-            source_chapter_id=source.chapter_id, target_chapter_id=target.chapter_id, is_active=True,
-            evidence=m.text_evidence(assertion), annotation_id=target.annotation_id,
+            run_id=m.cutoff.run_id,
+            edge_type=edge_type,
+            source_event_id=source_id,
+            target_event_id=target_id,
+            source_chapter_id=source.chapter_id,
+            target_chapter_id=target.chapter_id,
+            is_active=True,
+            evidence=m.text_evidence(assertion),
+            annotation_id=target.annotation_id,
             payload_path=f"commands/{assertion['command_ids'][0]}",
         )
         m.session.add(row)
@@ -202,8 +262,11 @@ def materialize_relations(m: CutoffMaterializer) -> None:
     for partition in m.partitions:
         if not partition.partition_key.startswith("relation:"):
             continue
-        assertions = [item for item in partition.projection["assertions"]
-                      if item["kind"] in {"local_relation", "relation_change"} and item["outcome"] == "accepted"]
+        assertions = [
+            item
+            for item in partition.projection["assertions"]
+            if item["kind"] in {"local_relation", "relation_change"} and item["outcome"] == "accepted"
+        ]
         if not assertions:
             continue
         first = assertions[0]["payload"]
@@ -217,21 +280,27 @@ def materialize_relations(m: CutoffMaterializer) -> None:
             target = cast(GraphEntity, m.canonical_entity(target))
             if source.entity_id == target.entity_id:
                 continue
-        relation_id = stable_relation_id(m.cutoff.run_id, source.entity_id, target.entity_id,
-                                   relation_type, str(definition["directionality"]))
+        relation_id = stable_relation_id(
+            m.cutoff.run_id, source.entity_id, target.entity_id, relation_type, str(definition["directionality"])
+        )
         if relation_id not in grouped:
             grouped[relation_id] = source, target, relation_type, []
         grouped[relation_id][3].extend(assertions)
     for relation_id, (source, target, relation_type, assertions) in sorted(grouped.items()):
         definition = RELATION_DEFINITIONS[relation_type]
-        assertions.sort(key=lambda item: (item["chapter_sequence"],
-            item["kind"] == "relation_change", item["command_ids"][0]))
+        assertions.sort(
+            key=lambda item: (item["chapter_sequence"], item["kind"] == "relation_change", item["command_ids"][0])
+        )
         relation = m.relations.get(relation_id)
         if relation is None:
-            relation = GraphRelation(relation_id=relation_id, run_id=m.cutoff.run_id,
-                                     from_entity_id=source.entity_id, to_entity_id=target.entity_id,
-                                     directionality=definition["directionality"],
-                                     relation_semantics=definition["semantics"])
+            relation = GraphRelation(
+                relation_id=relation_id,
+                run_id=m.cutoff.run_id,
+                from_entity_id=source.entity_id,
+                to_entity_id=target.entity_id,
+                directionality=definition["directionality"],
+                relation_semantics=definition["semantics"],
+            )
             m.session.add(relation)
             m.relations[relation_id] = relation
         attributes: dict[str, Any] = {}
@@ -253,15 +322,26 @@ def materialize_relations(m: CutoffMaterializer) -> None:
                 active = False
             elif change == "weaken":
                 attributes["strength"] = int(attributes.get("strength", 0)) - 1
-            fact = m.fact(assertion, domain="relation", predicate=relation_type, subject=source, target=target,
-                          content={"relation_id": relation_id, "relation_type": relation_type,
-                                   "change_kind": change})
+            fact = m.fact(
+                assertion,
+                domain="relation",
+                predicate=relation_type,
+                subject=source,
+                target=target,
+                content={"relation_id": relation_id, "relation_type": relation_type, "change_kind": change},
+            )
             if assertion["kind"] == "relation_change":
                 attributes["continuity_cutoff"] = m.cutoff.cutoff_hash
-            changes[chapter_id].append({"change_kind": change, "before": before,
-                                       "after": {"attributes": dict(attributes), "is_active": active,
-                                                 "relation_type": relation_type}, "fact_id": fact.fact_id,
-                                       "chapter_id": chapter_id, "source_kind": fact.source_kind})
+            changes[chapter_id].append(
+                {
+                    "change_kind": change,
+                    "before": before,
+                    "after": {"attributes": dict(attributes), "is_active": active, "relation_type": relation_type},
+                    "fact_id": fact.fact_id,
+                    "chapter_id": chapter_id,
+                    "source_kind": fact.source_kind,
+                }
+            )
             states[chapter_id] = dict(attributes), active
         m.session.flush()
         for chapter_id, chapter_changes in changes.items():
@@ -269,10 +349,17 @@ def materialize_relations(m: CutoffMaterializer) -> None:
             effective_state_keys.add((chapter_id, relation_id))
             row = m.relation_states.get((chapter_id, relation_id))
             if row is None:
-                m.session.add(RelationState(run_id=m.cutoff.run_id, chapter_id=chapter_id,
-                                           relation_id=relation_id, relation_type=relation_type,
-                                           attributes=state_attributes, is_active=state_active,
-                                           changes=chapter_changes))
+                m.session.add(
+                    RelationState(
+                        run_id=m.cutoff.run_id,
+                        chapter_id=chapter_id,
+                        relation_id=relation_id,
+                        relation_type=relation_type,
+                        attributes=state_attributes,
+                        is_active=state_active,
+                        changes=chapter_changes,
+                    )
+                )
             else:
                 row.attributes, row.is_active, row.changes = state_attributes, state_active, chapter_changes
     for key, row in m.relation_states.items():

@@ -21,7 +21,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.identity import stable_digest
-from src.storage.models import CaseHead, ContinuityCase, ProjectionWorkItem, SemanticCommand
+from src.storage.models import CaseHead, ContinuityCase, SemanticCommand
 from src.storage.repositories.pipeline_cases import register_case_identity
 from src.storage.repositories.pipeline_identity import identity_conflicts, identity_rejected_ids
 from src.storage.repositories.pipeline_links import resolve_cross_chapter_links
@@ -81,11 +81,6 @@ def append_domain_command(session: Session, parent: SemanticCommand,
         independence_keys=parent.independence_keys, parent_command_id=parent.command_id,
         author_work_id=parent.author_work_id,
     ).on_conflict_do_nothing(index_elements=[SemanticCommand.command_id]))
-    session.flush()
-    session.execute(insert(ProjectionWorkItem).values(
-        projection_id=stable_digest(command_id, partition), run_id=parent.run_id,
-        command_id=command_id, partition_key=partition,
-    ).on_conflict_do_nothing(index_elements=[ProjectionWorkItem.command_id, ProjectionWorkItem.partition_key]))
 
 
 def derive_domain_commands(session: Session, commands: list[SemanticCommand]) -> None:

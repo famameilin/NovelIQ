@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -10,7 +11,9 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from src.agents.stream import (
     AgentStream,
+    ContentStallTimeoutError,
     StreamChunkAggregator,
+    _is_transient_model_error,
     _provider_request_metadata,
     emit_tool_results,
     run_model_call,
@@ -155,6 +158,42 @@ class _FlakyStreamingLLM:
             raise ConnectionError("stream interrupted mid-way")
         for chunk in self.chunks:
             yield chunk
+
+
+class _TimedChunkLLM:
+    """2026-10-04 用于按间隔逐个吐块的测试模型（内容进度看门狗的时序型用例）"""
+
+    def __init__(self, chunks: list[AIMessageChunk], interval_s: float) -> None:
+        self.chunks = chunks
+        self.interval_s = interval_s
+        self.captured_messages: list[list] = []
+
+    def bind_tools(self, tools):
+        del tools
+        return self
+
+    async def astream(self, messages):
+        self.captured_messages.append(list(messages))
+        for chunk in self.chunks:
+            await asyncio.sleep(self.interval_s)
+            yield chunk
+
+
+class _EmptyChunkForeverLLM:
+    """2026-10-04 用于模拟保活帧喂活解析块看门狗的僵流：持续给空块、永不给内容"""
+
+    def __init__(self) -> None:
+        self.captured_messages: list[list] = []
+
+    def bind_tools(self, tools):
+        del tools
+        return self
+
+    async def astream(self, messages):
+        self.captured_messages.append(list(messages))
+        while True:
+            yield AIMessageChunk(content="")
+            await asyncio.sleep(0.02)
 
 
 class _RetryWithUsageLLM:
@@ -312,6 +351,77 @@ async def test_run_model_call_exhausts_stream_retries_and_raises() -> None:
     assert len(model.captured_messages) == 3
     retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
     assert len(retry_events) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_content_stall_kills_silent_chunks_and_exhausts_retries() -> None:
+    """2026-10-04 用于验证内容进度看门狗判死僵流：流块持续到达而内容零增长
+
+    run 4cb054dc 末章实证形态：Provider 卡死生成但保活帧持续喂活全部
+    "有块"信号。看门狗判死为 ContentStallTimeoutError（TimeoutError 子类），
+    按瞬态错误走既有重发预算；本例 total_attempts=2，两次判死后上抛。
+    """
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _EmptyChunkForeverLLM()
+
+    with pytest.raises(ContentStallTimeoutError, match="内容进度停摆"):
+        await run_model_call(
+            model, [AIMessage(content="问")], stream,
+            total_attempts=2, content_stall_timeout_s=0.2,
+        )
+
+    assert len(model.captured_messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_content_stall_watchdog_resets_on_each_content_chunk() -> None:
+    """2026-10-04 用于验证看门狗按内容帧重置计时而非按流起点一刀切
+
+    内容块每 0.06s 到达、共 6 块（总历时 >0.2s 阈值）：若计时不在内容帧
+    重置必然误杀；每帧重置则健康流完整跑完。
+    """
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _TimedChunkLLM(
+        [AIMessageChunk(content="你"), AIMessageChunk(content="好"), _tool_call_chunk()],
+        interval_s=0.06,
+    )
+
+    response = await run_model_call(
+        model, [AIMessage(content="问")], stream,
+        total_attempts=1, content_stall_timeout_s=0.2,
+    )
+
+    assert response.content == "你好"
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_content_stall_watchdog_counts_reasoning_as_content() -> None:
+    """2026-10-04 用于验证思考流（仅 reasoning_content 的块）保持看门狗判活
+
+    思考模式下大部分时间只有 reasoning 增量：若只认可见正文/工具调用，
+    正常思考回合会被误杀。
+    """
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    reasoning_chunks = [
+        AIMessageChunk(content="", additional_kwargs={"reasoning_content": f"第{i}步"})
+        for i in range(4)
+    ]
+    model = _TimedChunkLLM([*reasoning_chunks, _tool_call_chunk()], interval_s=0.06)
+
+    response = await run_model_call(
+        model, [AIMessage(content="问")], stream,
+        total_attempts=1, content_stall_timeout_s=0.2,
+    )
+
+    assert "第3步" in (response.additional_kwargs.get("reasoning_content") or "")
+
+
+def test_content_stall_error_is_transient_for_retry_channel() -> None:
+    """2026-10-04 用于验证僵流判死异常落进 _is_transient_model_error 的重发通道"""
+    assert _is_transient_model_error(ContentStallTimeoutError(300.0, 120, 0, 300.0)) is True
 
 
 @pytest.mark.asyncio

@@ -8,11 +8,10 @@ from sqlalchemy import select
 from src.agents.annotation.fact_graph import mention_uuid
 from src.agents.annotation.identity import text_digest
 from src.storage.db import get_session_factory
-from src.storage.models import AgentWorkItem, CaseClaim, ContinuityCase, Paragraph, SemanticCommand
+from src.storage.models import CaseClaim, ContinuityCase, Paragraph, SemanticCommand
 from src.storage.repositories.pipeline_cases import FollowUpCaseInput, follow_up_case_id
-from src.storage.repositories.pipeline_continuity import PipelineContinuityRepository
+from src.storage.repositories.pipeline_continuity import CaseClaimLost, PipelineContinuityRepository
 from src.storage.repositories.pipeline_projection import PipelineProjectionRepository
-from src.storage.repositories.pipeline_work import StaleWorkLeaseError
 from tests.storage.test_pipeline_continuity_projection import _continuity, _evidence, _project, _source
 
 pytestmark = pytest.mark.usefixtures("pipeline_run_cleanup")
@@ -47,7 +46,7 @@ def test_follow_up_is_hidden_until_next_cutoff_and_duplicate_evidence_is_appende
     first = next(case for case in repository.visible_cases(next_cutoff) if case["case_id"] == seed_id)
     initial_evidence = first["source_evidence"]
     assert first["state"] == "pending" and initial_evidence
-    receipt = _continuity(run_id, case_id, source_hash, logical_key="second-round")
+    receipt = _continuity(run_id, case_id, source_hash)
     claim = repository.claim(receipt, case_id)
     with factory() as session:
         paragraph = session.execute(select(Paragraph).where(
@@ -77,7 +76,6 @@ def test_invalid_follow_up_rolls_back_resolution_and_claim_consumption(db_sessio
     with pytest.raises(ValueError, match="固定 cutoff"):
         repository.commit(receipt, claim, follow_up_cases=[seed])
     with factory() as session:
-        assert session.get(AgentWorkItem, receipt.work_id).state == "running"
         assert session.get(CaseClaim, (case_id, claim.claim_epoch)).status == "active"
         assert not list(session.execute(select(SemanticCommand).where(
             SemanticCommand.author_work_id == receipt.work_id,
@@ -92,7 +90,7 @@ def test_stale_case_claim_cannot_create_follow_up(db_session) -> None:
     receipt = _continuity(run_id, case_id, source_hash)
     claim = repository.claim(receipt, case_id)
     repository.commit(receipt, claim)
-    with pytest.raises(StaleWorkLeaseError):
+    with pytest.raises(CaseClaimLost):
         repository.commit(receipt, claim, follow_up_cases=[_seed(run_id)])
     with factory() as session:
         assert session.get(ContinuityCase, follow_up_case_id(run_id, _seed(run_id))) is None

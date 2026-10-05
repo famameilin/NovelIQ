@@ -21,7 +21,6 @@ from src.storage.models import (
     ContinuityCase,
     CutoffPartition,
     Paragraph,
-    ProjectionWorkItem,
     SemanticCommand,
     SourceManifest,
     TextEvidenceRecord,
@@ -33,13 +32,22 @@ from src.storage.repositories.pipeline_cases import (
     register_case_identity,
 )
 from src.storage.repositories.pipeline_resolution import validate_resolution
-from src.storage.repositories.pipeline_work import (
-    PipelineWorkRepository,
-    StaleWorkLeaseError,
-    WorkReceipt,
-    append_outbox,
-    work_audit_outcome,
-)
+from src.storage.repositories.pipeline_work import WorkReceipt, append_outbox
+
+
+def continuity_receipt(
+    run_id: str, case_id: str, *, cutoff_hash: str, source_manifest_hash: str
+) -> WorkReceipt:
+    """构造案例工作回执；工作状态由案例 claim CAS 与提交事务表达，无队列行"""
+    payload: dict[str, Any] = {"case_id": case_id, "source_manifest_hash": source_manifest_hash}
+    return WorkReceipt(
+        work_id=stable_digest(run_id, "continuity", f"case:{case_id}", stable_digest(payload), cutoff_hash),
+        run_id=run_id,
+        work_kind="continuity",
+        payload=payload,
+        cutoff_hash=cutoff_hash,
+        attempt_epoch=1,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +59,7 @@ class CaseReceipt:
     state_hash: str
 
 
-class CaseClaimLost(StaleWorkLeaseError):
+class CaseClaimLost(RuntimeError):
     """案例 claim 冲突只拒绝本案例，不撤回任何正式章节"""
 
 
@@ -89,7 +97,6 @@ class PipelineContinuityRepository:
         if receipt.work_kind != "continuity" or case_id != receipt.payload.get("case_id"):
             raise ValueError("案例 claim 不属于本工作指定目标")
         with self.session_factory() as session, session.begin():
-            PipelineWorkRepository.lock_owned_work(session, receipt)
             cutoff = session.get(AnalysisCutoff, receipt.cutoff_hash)
             if cutoff is None or cutoff.state != "released" or cutoff.run_id != receipt.run_id:
                 raise CaseClaimLost("工作 cutoff 不可见")
@@ -120,8 +127,7 @@ class PipelineContinuityRepository:
                 case_id=case_id, claim_epoch=head.claim_epoch, lease_hash=head.active_lease_hash,
                 work_id=receipt.work_id, expires_at=head.active_lease_expires_at,
             ))
-            append_outbox(session, run_id=receipt.run_id, work_id=receipt.work_id,
-                          attempt_epoch=receipt.attempt_epoch, event_type="case_claimed",
+            append_outbox(session, run_id=receipt.run_id, event_type="case_claimed",
                           payload={"case_id": case_id, "claim_epoch": head.claim_epoch},
                           cutoff_hash=receipt.cutoff_hash)
             return CaseReceipt(case_id, head.claim_epoch, head.active_lease_hash, head.head_epoch, head.state_hash)
@@ -131,7 +137,6 @@ class PipelineContinuityRepository:
         if lease_seconds < 1 or claim.case_id != receipt.payload.get("case_id"):
             raise ValueError("案例续租参数与工作目标不匹配")
         with self.session_factory() as session, session.begin():
-            PipelineWorkRepository.lock_owned_work(session, receipt)
             head = session.get(CaseHead, claim.case_id, with_for_update=True)
             claim_row = session.get(CaseClaim, (claim.case_id, claim.claim_epoch), with_for_update=True)
             now = session.execute(select(func.clock_timestamp())).scalar_one()
@@ -158,12 +163,8 @@ class PipelineContinuityRepository:
         if receipt.work_kind != "continuity" or (claim is not None and claim.case_id != receipt.payload.get("case_id")):
             raise ValueError("连续性提交不属于本工作指定目标")
         with self.session_factory() as session, session.begin():
-            PipelineWorkRepository.lock_owned_work(session, receipt)
             if claim is None:
-                PipelineWorkRepository.mark_submitted(session, receipt)
-                work_audit_outcome(session, receipt, "claim_lost")
-                append_outbox(session, run_id=receipt.run_id, work_id=receipt.work_id,
-                              attempt_epoch=receipt.attempt_epoch, cutoff_hash=receipt.cutoff_hash,
+                append_outbox(session, run_id=receipt.run_id, cutoff_hash=receipt.cutoff_hash,
                               event_type="case_claim_lost", payload={"case_id": receipt.payload["case_id"]})
                 return None
             case = session.get(ContinuityCase, claim.case_id)
@@ -212,10 +213,6 @@ class PipelineContinuityRepository:
                 author_work_id=receipt.work_id,
             ).on_conflict_do_nothing(index_elements=[SemanticCommand.command_id]))
             session.flush()
-            session.execute(insert(ProjectionWorkItem).values(
-                projection_id=stable_digest(command_id, partition), run_id=receipt.run_id,
-                command_id=command_id, partition_key=partition,
-            ).on_conflict_do_nothing(index_elements=[ProjectionWorkItem.command_id, ProjectionWorkItem.partition_key]))
             for seed in follow_up_cases or []:
                 seed = FollowUpCaseInput.model_validate(seed)
                 target, origin = bind_follow_up_target(
@@ -243,12 +240,6 @@ class PipelineContinuityRepository:
                     author_work_id=receipt.work_id,
                 ).on_conflict_do_nothing(index_elements=[SemanticCommand.command_id]))
                 session.flush()
-                session.execute(insert(ProjectionWorkItem).values(
-                    projection_id=stable_digest(seed_command, seed_partition), run_id=receipt.run_id,
-                    command_id=seed_command, partition_key=seed_partition,
-                ).on_conflict_do_nothing(index_elements=[
-                    ProjectionWorkItem.command_id, ProjectionWorkItem.partition_key,
-                ]))
             prior_resolutions = session.execute(select(SemanticCommand.payload).where(
                 SemanticCommand.run_id == receipt.run_id, SemanticCommand.partition_key == partition,
                 SemanticCommand.command_kind == "case_resolution",
@@ -263,9 +254,7 @@ class PipelineContinuityRepository:
             head.updated_at = now
             claim_row.status = "consumed"
             claim_row.consumed_at = now
-            PipelineWorkRepository.mark_submitted(session, receipt)
-            append_outbox(session, run_id=receipt.run_id, work_id=receipt.work_id,
-                          attempt_epoch=receipt.attempt_epoch, event_type="case_resolution_submitted",
+            append_outbox(session, run_id=receipt.run_id, event_type="case_resolution_submitted",
                           payload={"case_id": case.case_id, "state": state, "command_id": command_id},
                           cutoff_hash=receipt.cutoff_hash)
             return command_id

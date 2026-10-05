@@ -36,7 +36,6 @@ from src.storage.models.paragraph_pos_embeddings import ParagraphPosEmbedding
 from src.storage.models.paragraph_topic_inference import ParagraphTopicInference
 from src.storage.models.paragraph_topics import ParagraphTopic
 from src.storage.models.pipeline import (
-    AgentWorkItem,
     AnalysisCutoff,
     CaseClaim,
     CaseHead,
@@ -46,12 +45,10 @@ from src.storage.models.pipeline import (
     EventOutbox,
     FormalArtifact,
     PartitionHead,
-    ProjectionWorkItem,
-    ProviderBudget,
-    ProviderPermitLease,
     SemanticCommand,
     SourceManifest,
     TextEvidenceRecord,
+    WorkItem,
 )
 from src.storage.models.rag import TokenUsage
 from src.storage.models.topic_model_runs import TopicModelRun
@@ -59,7 +56,7 @@ from src.storage.models.word2vec_model_runs import Word2VecModelRun
 
 __all__ = [
     "Base",
-    "AgentWorkItem",
+    "WorkItem",
     "AnalysisCutoff",
     "CaseClaim",
     "CaseHead",
@@ -69,9 +66,6 @@ __all__ = [
     "EventOutbox",
     "FormalArtifact",
     "PartitionHead",
-    "ProjectionWorkItem",
-    "ProviderBudget",
-    "ProviderPermitLease",
     "SemanticCommand",
     "SourceManifest",
     "TextEvidenceRecord",

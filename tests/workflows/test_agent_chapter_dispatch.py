@@ -20,10 +20,9 @@ from src.agents.annotation.schema import (
 )
 from src.agents.stream import AgentStream
 from src.storage.db import get_session_factory
-from src.storage.models import AgentWorkItem, AnalysisCutoff, Chapter, ChapterAnnotationRecord
-from src.storage.repositories.pipeline_work import PipelineWorkRepository
+from src.storage.models import AnalysisCutoff, Chapter, ChapterAnnotationRecord
 from src.workflows.annotate import run_annotate
-from src.workflows.durable_worker import PipelineWorkFailed
+from src.workflows.chapter_pool import PipelineWorkFailed
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 pytestmark = pytest.mark.usefixtures("pipeline_run_cleanup")
@@ -73,8 +72,10 @@ async def test_independent_chapter_graphs_keep_cases_without_full_book_rounds(db
     assert len(graphs) == 2 and graphs[0] is not graphs[1]
     assert chapter_agent.call_count == 2
     with get_session_factory()() as session:
-        work = session.execute(select(AgentWorkItem).where(AgentWorkItem.run_id == run_id)).scalars().all()
-        assert len(work) == 2 and all(row.work_kind == "formal_current" for row in work)
+        committed = list(session.execute(select(ChapterAnnotationRecord.chapter_id).where(
+            ChapterAnnotationRecord.run_id == run_id,
+        )).scalars())
+        assert sorted(committed) == [1, 2]
 
 
 @pytest.mark.asyncio
@@ -150,19 +151,71 @@ async def test_long_and_short_chapters_dispatch_by_length(db_session) -> None:
 
 
 @pytest.mark.asyncio
+async def test_chapters_dispatch_in_sequence_order(db_session, monkeypatch) -> None:
+    """2026-10-05 派发严格按章节序：容量 1 时 ch2 只能在 ch1 完成后启动"""
+    from src.config import settings
+    from src.config.schemas.model import WeightedModelSettings
+
+    monkeypatch.setattr(settings.models, "model_pool", [
+        WeightedModelSettings("seq-model", "https://seq.example/v1", "seq-key", max_in_flight=1),
+    ])
+    monkeypatch.setattr(settings.models.annotation, "total_attempts", 3)
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["第一章", "第二章"], chapter_ids=[1, 2])
+    started: list[int] = []
+
+    async def formal(**kwargs):
+        started.append(kwargs["chapter_id"])
+        await asyncio.sleep(0.01)
+        return _agent_result(run_id, kwargs["chapter_id"], kwargs["chapter_text"])
+
+    with patch("src.agents.annotation.run_annotation_agent", side_effect=formal), patch(
+        "src.agents.llm.build_chat_model", return_value=MagicMock()
+    ), patch("src.models.local.embedding.EmbeddingClient", return_value=MagicMock()):
+        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (2, 0, 2)
+    assert started == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_resume_reruns_only_uncommitted_chapters(db_session, monkeypatch) -> None:
+    """2026-10-05 重启恢复 = 重查无标注章节：已提交章不重跑，失败章按差集补跑"""
+    from src.config import settings
+
+    monkeypatch.setattr("src.workflows.chapter_pool.retry_delay", lambda epoch: 0)
+    monkeypatch.setattr(settings.models.annotation, "total_attempts", 1)
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["第一章", "第二章"], chapter_ids=[1, 2])
+
+    async def failing_first(**kwargs):
+        if kwargs["chapter_id"] == 1:
+            raise ValueError("注入终局失败")
+        return _agent_result(run_id, 2, kwargs["chapter_text"])
+
+    with patch("src.agents.annotation.run_annotation_agent", side_effect=failing_first), patch(
+        "src.agents.llm.build_chat_model", return_value=MagicMock()
+    ), patch("src.models.local.embedding.EmbeddingClient", return_value=MagicMock()), pytest.raises(PipelineWorkFailed):
+        await run_annotate(run_id, db_session, novel_id=novel_id)
+
+    monkeypatch.setattr(settings.models.annotation, "total_attempts", 3)
+    resumed: list[int] = []
+
+    async def formal(**kwargs):
+        resumed.append(kwargs["chapter_id"])
+        return _agent_result(run_id, kwargs["chapter_id"], kwargs["chapter_text"])
+
+    with patch("src.agents.annotation.run_annotation_agent", side_effect=formal), patch(
+        "src.agents.llm.build_chat_model", return_value=MagicMock()
+    ), patch("src.models.local.embedding.EmbeddingClient", return_value=MagicMock()):
+        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (2, 0, 2)
+    assert resumed == [1]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("all_fail", [False, True])
 async def test_failed_chapter_does_not_abort_other_work_or_release_partial_cutoff(
     db_session, all_fail, monkeypatch,
 ) -> None:
     novel_id, run_id = create_run_with_chunks(db_session, texts=["第一章", "第二章"], chapter_ids=[1, 2])
     calls: list[int] = []
-    original_fail = PipelineWorkRepository.fail
-
-    def fail_without_delay(self, receipt, **kwargs):
-        kwargs["retry_delay_seconds"] = 0
-        return original_fail(self, receipt, **kwargs)
-
-    monkeypatch.setattr(PipelineWorkRepository, "fail", fail_without_delay)
+    monkeypatch.setattr("src.workflows.chapter_pool.retry_delay", lambda epoch: 0)
 
     async def formal(**kwargs):
         calls.append(kwargs["chapter_id"])
@@ -176,10 +229,8 @@ async def test_failed_chapter_does_not_abort_other_work_or_release_partial_cutof
         await run_annotate(run_id, db_session, novel_id=novel_id)
     assert sorted(calls) == ([1] * 3 + [2] * 3 if all_fail else [1] * 3 + [2])
     with get_session_factory()() as session:
-        states = list(session.execute(select(AgentWorkItem.state).where(AgentWorkItem.run_id == run_id)).scalars())
-        assert states.count("dead_letter") == (2 if all_fail else 1)
-        assert states.count("submitted") == (0 if all_fail else 1)
-        assert len(list(session.execute(select(ChapterAnnotationRecord).where(
+        committed = list(session.execute(select(ChapterAnnotationRecord.chapter_id).where(
             ChapterAnnotationRecord.run_id == run_id,
-        )).scalars())) == (0 if all_fail else 1)
+        )).scalars())
+        assert committed == ([] if all_fail else [2])
         assert not list(session.execute(select(AnalysisCutoff).where(AnalysisCutoff.run_id == run_id)).scalars())

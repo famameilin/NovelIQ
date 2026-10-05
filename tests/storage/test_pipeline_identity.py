@@ -15,7 +15,6 @@ from src.storage.models import (
     ChapterAnnotationRecord,
     CutoffPartition,
     GraphEntity,
-    ProjectionWorkItem,
     SemanticCommand,
 )
 from src.storage.repositories.graph.repository import GraphRepository
@@ -99,7 +98,7 @@ def test_same_and_different_claims_remain_contested_with_both_evidence(db_sessio
     factory = get_session_factory()
     repository = PipelineContinuityRepository(factory)
     for case_id, kind in zip(cases, ("same", "different"), strict=True):
-        receipt = _continuity(run_id, case_id, source_hash, logical_key=case_id)
+        receipt = _continuity(run_id, case_id, source_hash)
         repository.commit(receipt, repository.claim(receipt, case_id), state="resolved", evidence=_evidence(run_id),
                           resolution={"entity_id": mention_uuid(run_id, 1, "顾霜"), "identity_kind": kind,
                                       "canonical_entity_id": mention_uuid(run_id, 1, "林渡")})
@@ -164,8 +163,6 @@ def test_type_conflict_is_explicitly_arbitrated_without_rewriting_formal_command
             author_work_id=original.author_work_id,
         ))
         session.flush()
-        session.add(ProjectionWorkItem(projection_id=command_id, run_id=run_id, command_id=command_id,
-                                       partition_key=original.partition_key))
     projections = PipelineProjectionRepository(factory)
     _project(projections, projections.seal(run_id, round_kind="continuity", round_number=1))
     repository = PipelineContinuityRepository(factory)

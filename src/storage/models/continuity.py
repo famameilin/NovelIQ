@@ -36,9 +36,8 @@ class ChapterAnnotationRecord(Base):
     )
     chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    formal_work_id: Mapped[str | None] = mapped_column(
-        String(64), ForeignKey("agent_work_items.work_id", ondelete="SET NULL"), unique=True
-    )
+    # 2026-10-05 队列删除后 formal_work_id 只是铸造回执的溯源标识，不再是 work_items 外键
+    formal_work_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     payload_hash: Mapped[str | None] = mapped_column(String(64))
     source_manifest_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

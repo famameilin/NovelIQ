@@ -27,10 +27,10 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-class AgentWorkItem(Base):
-    """数据库行是工作领取与迟到写回的唯一真相源"""
+class WorkItem(Base):
+    """统一任务队列：章节标注与连续性共用一套 4 态状态机，数据库行是工作领取与迟到写回的唯一真相源"""
 
-    __tablename__ = "agent_work_items"
+    __tablename__ = "work_items"
 
     work_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"))
@@ -39,7 +39,7 @@ class AgentWorkItem(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     cutoff_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    state: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="waiting")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -55,15 +55,15 @@ class AgentWorkItem(Base):
     __table_args__ = (
         UniqueConstraint(
             "run_id", "work_kind", "logical_key", "payload_hash", "cutoff_hash",
-            name="uq_agent_work_items_identity",
+            name="uq_work_identity",
         ),
-        CheckConstraint("work_kind IN ('formal_current', 'continuity')", name="ck_agent_work_kind"),
+        CheckConstraint("work_kind IN ('formal_current', 'continuity')", name="ck_work_kind"),
         CheckConstraint(
-            "state IN ('queued', 'running', 'submitted', 'cancelled', 'dead_letter')",
-            name="ck_agent_work_state",
+            "state IN ('waiting', 'running', 'succeeded', 'failed')",
+            name="ck_work_state",
         ),
-        Index("idx_agent_work_claim", "state", "available_at", "priority"),
-        Index("idx_agent_work_run_state", "run_id", "state"),
+        Index("idx_work_claim", "state", "available_at", "priority"),
+        Index("idx_work_run_state", "run_id", "state"),
     )
 
 
@@ -93,9 +93,8 @@ class SemanticCommand(Base):
     parent_command_id: Mapped[str | None] = mapped_column(String(64))
     precondition_epoch: Mapped[int | None] = mapped_column(Integer)
     precondition_hash: Mapped[str | None] = mapped_column(String(64))
-    author_work_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("agent_work_items.work_id", ondelete="CASCADE"), nullable=False
-    )
+    # 2026-10-05 队列删除后 author_work_id 只是铸造回执的溯源标识，不再是 work_items 外键
+    author_work_id: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
@@ -214,9 +213,8 @@ class CaseClaim(Base):
     )
     claim_epoch: Mapped[int] = mapped_column(Integer, primary_key=True)
     lease_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    work_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("agent_work_items.work_id", ondelete="CASCADE"), nullable=False
-    )
+    # 2026-10-05 队列删除后 work_id 只是工作回执的溯源标识，不再是 work_items 外键
+    work_id: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -306,37 +304,6 @@ class FormalArtifact(Base):
     materialized: Mapped[bool] = mapped_column(default=False, nullable=False)
 
 
-class ProjectionWorkItem(Base):
-    """命令入账与投影解耦，dead letter 阻止 cutoff 释放"""
-
-    __tablename__ = "projection_work_items"
-
-    projection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"))
-    command_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("semantic_commands.command_id", ondelete="CASCADE"), nullable=False
-    )
-    partition_key: Mapped[str] = mapped_column(String(128), nullable=False)
-    cutoff_hash: Mapped[str | None] = mapped_column(
-        String(64), ForeignKey("analysis_cutoffs.cutoff_hash", ondelete="CASCADE")
-    )
-    state: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
-    attempt_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    lease_owner: Mapped[str | None] = mapped_column(String(128))
-    lease_hash: Mapped[str | None] = mapped_column(String(64))
-    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-    last_error: Mapped[str | None] = mapped_column(Text)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    __table_args__ = (
-        UniqueConstraint("command_id", "partition_key", name="uq_projection_work_command_partition"),
-        CheckConstraint("state IN ('queued', 'running', 'ack', 'dead_letter')", name="ck_projection_work_state"),
-        Index("idx_projection_work_claim", "state", "available_at"),
-        Index("idx_projection_work_cutoff", "cutoff_hash", "state"),
-    )
-
-
 class EventOutbox(Base):
     """与业务状态同事务写入，Dispatcher 负责可重放发布"""
 
@@ -344,8 +311,6 @@ class EventOutbox(Base):
 
     event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"))
-    work_id: Mapped[str | None] = mapped_column(String(64))
-    attempt_epoch: Mapped[int | None] = mapped_column(Integer)
     chapter_id: Mapped[int | None] = mapped_column(Integer)
     cutoff_hash: Mapped[str | None] = mapped_column(String(64))
     stream_id: Mapped[int] = mapped_column(BigInteger, Identity(), nullable=False, unique=True)
@@ -357,50 +322,4 @@ class EventOutbox(Base):
     __table_args__ = (
         Index("idx_event_outbox_stream", "run_id", "stream_id"),
         Index("idx_event_outbox_pending", "published_at", "created_at"),
-    )
-
-
-class ProviderBudget(Base):
-    """LLM 与 Embedding 按 endpoint 分开的跨进程请求预算"""
-
-    __tablename__ = "provider_budgets"
-
-    provider_key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    base_url: Mapped[str] = mapped_column(Text, nullable=False)
-    model: Mapped[str] = mapped_column(String(255), nullable=False)
-    endpoint: Mapped[str] = mapped_column(String(40), nullable=False)
-    hard_max_in_flight: Mapped[int] = mapped_column(Integer, nullable=False)
-    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-    requests_window: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    tokens_window: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    pause_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    ewma_latency_ms: Mapped[float | None] = mapped_column()
-    ewma_error_rate: Mapped[float | None] = mapped_column()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-
-    __table_args__ = (
-        CheckConstraint("hard_max_in_flight > 0", name="ck_provider_hard_slots"),
-    )
-
-
-class ProviderPermitLease(Base):
-    """单次物理网络请求的租约与 Token 预留"""
-
-    __tablename__ = "provider_permit_leases"
-
-    permit_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    provider_key: Mapped[str] = mapped_column(
-        String(64), ForeignKey("provider_budgets.provider_key", ondelete="CASCADE"), nullable=False
-    )
-    owner: Mapped[str] = mapped_column(String(128), nullable=False)
-    work_id: Mapped[str | None] = mapped_column(String(64))
-    reserved_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
-    state: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
-    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-    lease_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    __table_args__ = (
-        CheckConstraint("state IN ('active', 'released', 'expired')", name="ck_provider_permit_state"),
-        Index("idx_provider_permit_active", "provider_key", "state", "lease_expires_at"),
     )

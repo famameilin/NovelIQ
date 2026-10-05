@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from src.storage.db import get_session_factory
-from src.storage.models import AnalysisCutoff, CutoffPartition, EventOutbox, PartitionHead, ProjectionWorkItem
+from src.storage.models import AnalysisCutoff, CutoffPartition, EventOutbox, PartitionHead
 from src.storage.repositories.pipeline_continuity import PipelineContinuityRepository
 from src.storage.repositories.pipeline_projection import PipelineProjectionRepository, ProjectionCASConflict
 from tests.storage.test_pipeline_continuity_projection import _continuity, _project, _source
@@ -56,9 +56,8 @@ def test_two_projectors_retry_cas_without_overwriting_winner(db_session, monkeyp
         )).scalars())
         assert len(retries) == 1 and retries[0].payload["partition_key"] == target
         assert session.get(AnalysisCutoff, cutoff_hash).state == "released"
-        assert {row.state for row in session.execute(select(ProjectionWorkItem).where(
-            ProjectionWorkItem.cutoff_hash == cutoff_hash,
-        )).scalars()} == {"ack"}
+        state, counts = projections.projection_progress(cutoff_hash)
+        assert state == "released" and counts["waiting"] == 0
 
 
 def test_failed_cas_leaves_no_partial_snapshot_ack_or_head(db_session, monkeypatch) -> None:
@@ -81,6 +80,5 @@ def test_failed_cas_leaves_no_partial_snapshot_ack_or_head(db_session, monkeypat
         assert session.get(PartitionHead, (run_id, target)).head_epoch == 0
         assert session.get(CutoffPartition, (cutoff_hash, target)) is None
         assert session.get(AnalysisCutoff, cutoff_hash).state == "projecting"
-        assert {row.state for row in session.execute(select(ProjectionWorkItem).where(
-            ProjectionWorkItem.cutoff_hash == cutoff_hash,
-        )).scalars()} == {"queued"}
+        state, counts = projections.projection_progress(cutoff_hash)
+        assert state == "projecting" and counts["waiting"] >= 1

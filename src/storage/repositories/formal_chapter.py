@@ -13,25 +13,18 @@ from src.agents.annotation.fact_graph import mention_uuid
 from src.agents.annotation.identity import exact_digest, stable_digest, stable_uuid, text_digest
 from src.agents.annotation.schema import AgentRunResult, SourceReference
 from src.storage.models import (
-    AgentWorkItem,
     CaseHead,
     Chapter,
     ChapterAnnotationRecord,
     ContinuityCase,
     FormalArtifact,
     Paragraph,
-    ProjectionWorkItem,
     SemanticCommand,
     SourceManifest,
     TextEvidenceRecord,
 )
 from src.storage.repositories.pipeline_resolution import bind_case_target, bind_record_target
-from src.storage.repositories.pipeline_work import (
-    ImmutableWorkConflict,
-    PipelineWorkRepository,
-    WorkReceipt,
-    append_outbox,
-)
+from src.storage.repositories.pipeline_work import ImmutableWorkConflict, WorkReceipt, append_outbox
 
 
 def _formal_commands(result: AgentRunResult) -> list[tuple[str, str, dict[str, Any], int | None]]:
@@ -69,8 +62,7 @@ def _formal_commands(result: AgentRunResult) -> list[tuple[str, str, dict[str, A
         payload = observation.model_dump(mode="json")
         payload["entity_id"] = mention_uuid(result.run_id, result.chapter_id, observation.character)
         key = stable_digest("character_observation", payload)
-        commands[key] = ("character_observation", f"entity:{payload['entity_id']}",
-                         payload, None)
+        commands[key] = ("character_observation", f"entity:{payload['entity_id']}", payload, None)
     payload = result.annotation.metrics.model_dump(mode="json")
     key = stable_digest("chapter_metrics", payload)
     commands[key] = ("chapter_metrics", f"chapter:{result.chapter_id}", payload, None)
@@ -80,6 +72,11 @@ def _formal_commands(result: AgentRunResult) -> list[tuple[str, str, dict[str, A
         commands[key] = ("paragraph_label", f"paragraph:{label.paragraph_id}", payload, label.paragraph_id)
     for record, references in result.audit.source_anchors.items():
         target = bind_record_target(record, result)
+        if not target:
+            # 2026-10-03 not_dialogue 候选在提交前合法消失（bind_record_target 返回 {} 哨兵）：
+            # 锚点已无对象可绑，跳过不落 object_anchor——空对象会让聚合期
+            # resolve_cross_chapter_links 取 payload["object"]["domain"] 时 KeyError('domain') 炸全 run
+            continue
         for reference in references:
             payload = {"object": target, "source": reference.model_dump(mode="json")}
             key = stable_digest("object_anchor", payload)
@@ -105,9 +102,11 @@ class FormalChapterRepository:
     def _paragraph_hashes(self, session: Session, source_hash: str, run_id: str) -> dict[str, str]:
         """不可变 manifest 每个 Worker 只装载一次，避免逐章传输全书哈希形成平方开销"""
         if source_hash not in self._source_paragraph_hashes:
-            row = session.execute(select(SourceManifest.run_id, SourceManifest.paragraph_hashes).where(
-                SourceManifest.source_manifest_hash == source_hash,
-            )).one_or_none()
+            row = session.execute(
+                select(SourceManifest.run_id, SourceManifest.paragraph_hashes).where(
+                    SourceManifest.source_manifest_hash == source_hash,
+                )
+            ).one_or_none()
             if row is None:
                 raise ValueError("正式工作没有匹配的原文快照")
             self._source_paragraph_hashes[source_hash] = row.run_id, dict(row.paragraph_hashes)
@@ -130,14 +129,22 @@ class FormalChapterRepository:
         annotation_id = stable_uuid(receipt.run_id, chapter_id, expected_source_hash)
 
         with self.session_factory() as session, session.begin():
-            submitted = session.get(AgentWorkItem, receipt.work_id)
-            if submitted is not None and submitted.state == "submitted":
-                existing = session.get(ChapterAnnotationRecord, annotation_id)
-                if (existing is None or existing.payload_hash != result_hash
-                        or existing.formal_work_id != receipt.work_id):
-                    raise ImmutableWorkConflict(f"正式章节重投递载荷冲突: chapter_id={chapter_id}")
+            existing = session.execute(
+                select(ChapterAnnotationRecord)
+                .where(
+                    ChapterAnnotationRecord.run_id == receipt.run_id,
+                    ChapterAnnotationRecord.chapter_id == chapter_id,
+                )
+                .with_for_update()
+            ).scalar_one_or_none()
+            if existing is not None:
+                if (
+                    existing.payload_hash != result_hash
+                    or existing.source_manifest_hash != expected_source_hash
+                    or existing.formal_work_id != receipt.work_id
+                ):
+                    raise ImmutableWorkConflict(f"正式章节不可变冲突: chapter_id={chapter_id}")
                 return existing.annotation_id
-            PipelineWorkRepository.lock_owned_work(session, receipt)
             chapter = session.get(Chapter, (chapter_id, receipt.run_id))
             if chapter is None or chapter.text is None:
                 raise ValueError(f"正式来源章节不存在: chapter_id={chapter_id}")
@@ -154,33 +161,17 @@ class FormalChapterRepository:
             if not current:
                 raise ValueError(f"正式章节没有原文段落: chapter_id={chapter_id}")
             paragraph_manifest = [
-                (row.paragraph_id, row.local_start_char, row.local_end_char, text_digest(row.text))
-                for row in current
+                (row.paragraph_id, row.local_start_char, row.local_end_char, text_digest(row.text)) for row in current
             ]
             if stable_digest(paragraph_manifest) != receipt.payload["paragraph_manifest_hash"]:
                 raise ImmutableWorkConflict(f"正式章节段落在工作期间发生变化: chapter_id={chapter_id}")
-
-            existing = session.execute(
-                select(ChapterAnnotationRecord).where(
-                    ChapterAnnotationRecord.run_id == receipt.run_id,
-                    ChapterAnnotationRecord.chapter_id == chapter_id,
-                ).with_for_update()
-            ).scalar_one_or_none()
-            if existing is not None:
-                if (
-                    existing.payload_hash != result_hash
-                    or existing.source_manifest_hash != expected_source_hash
-                    or existing.formal_work_id != receipt.work_id
-                ):
-                    raise ImmutableWorkConflict(f"正式章节不可变冲突: chapter_id={chapter_id}")
-                PipelineWorkRepository.mark_submitted(session, receipt)
-                return existing.annotation_id
 
             source_ids = {row.paragraph_id for row in current}
             source_ids.update(result.audit.authorized_text_paragraph_ids)
             paragraphs = list(
                 session.execute(
-                    select(Paragraph).where(
+                    select(Paragraph)
+                    .where(
                         Paragraph.run_id == receipt.run_id,
                         Paragraph.paragraph_id.in_(sorted(source_ids)),
                     )
@@ -198,12 +189,11 @@ class FormalChapterRepository:
             for row in paragraphs:
                 if not row.text:
                     raise ValueError(f"空原文不能登记 TextEvidence: paragraph_id={row.paragraph_id}")
-                evidence_id = stable_digest(
-                    receipt.run_id, row.paragraph_id, 0, len(row.text), expected_source_hash
-                )
+                evidence_id = stable_digest(receipt.run_id, row.paragraph_id, 0, len(row.text), expected_source_hash)
                 evidence_by_paragraph[row.paragraph_id] = evidence_id
                 session.execute(
-                    insert(TextEvidenceRecord).values(
+                    insert(TextEvidenceRecord)
+                    .values(
                         evidence_id=evidence_id,
                         run_id=receipt.run_id,
                         chapter_id=row.chapter_id,
@@ -212,7 +202,8 @@ class FormalChapterRepository:
                         char_end=len(row.text),
                         text_hash=text_digest(row.text),
                         source_manifest_hash=expected_source_hash,
-                    ).on_conflict_do_nothing(index_elements=[TextEvidenceRecord.evidence_id])
+                    )
+                    .on_conflict_do_nothing(index_elements=[TextEvidenceRecord.evidence_id])
                 )
             paragraph_by_id = {row.paragraph_id: row for row in paragraphs}
 
@@ -223,15 +214,29 @@ class FormalChapterRepository:
                     raise ValueError("精确原文引用不属于已授权段落")
                 if not 0 <= reference.char_start < reference.char_end <= len(row.text):
                     raise ValueError("精确原文引用超出段落")
-                if text_digest(row.text[reference.char_start:reference.char_end]) != reference.text_hash:
+                if text_digest(row.text[reference.char_start : reference.char_end]) != reference.text_hash:
                     raise ValueError("精确原文引用哈希不匹配")
-                identifier = stable_digest(receipt.run_id, reference.paragraph_id,
-                                           reference.char_start, reference.char_end, expected_source_hash)
-                session.execute(insert(TextEvidenceRecord).values(
-                    evidence_id=identifier, run_id=receipt.run_id, chapter_id=row.chapter_id,
-                    paragraph_id=row.paragraph_id, char_start=reference.char_start, char_end=reference.char_end,
-                    text_hash=reference.text_hash, source_manifest_hash=expected_source_hash,
-                ).on_conflict_do_nothing(index_elements=[TextEvidenceRecord.evidence_id]))
+                identifier = stable_digest(
+                    receipt.run_id,
+                    reference.paragraph_id,
+                    reference.char_start,
+                    reference.char_end,
+                    expected_source_hash,
+                )
+                session.execute(
+                    insert(TextEvidenceRecord)
+                    .values(
+                        evidence_id=identifier,
+                        run_id=receipt.run_id,
+                        chapter_id=row.chapter_id,
+                        paragraph_id=row.paragraph_id,
+                        char_start=reference.char_start,
+                        char_end=reference.char_end,
+                        text_hash=reference.text_hash,
+                        source_manifest_hash=expected_source_hash,
+                    )
+                    .on_conflict_do_nothing(index_elements=[TextEvidenceRecord.evidence_id])
+                )
                 return identifier
 
             for references in result.audit.source_anchors.values():
@@ -261,7 +266,6 @@ class FormalChapterRepository:
             session.flush()
             session.add(FormalArtifact(annotation_id=annotation_id, result=result.model_dump(mode="json")))
             sequence = int(receipt.payload["chapter_sequence"])
-            projections: list[ProjectionWorkItem] = []
             for kind, partition, payload, anchor_id in _formal_commands(result):
                 if anchor_id is not None and anchor_id not in {row.paragraph_id for row in current}:
                     raise ValueError("正式事件和段落标签必须锚定本章原文")
@@ -270,12 +274,12 @@ class FormalChapterRepository:
                 if kind == "object_anchor":
                     command_evidence = [exact_evidence(SourceReference.model_validate(payload["source"]))]
                 elif kind == "cross_chapter_link":
-                    command_evidence = [exact_evidence(SourceReference.model_validate(payload[field]))
-                                        for field in ("source", "target")]
+                    command_evidence = [
+                        exact_evidence(SourceReference.model_validate(payload[field])) for field in ("source", "target")
+                    ]
                 else:
                     command_evidence = (
-                        [evidence_by_paragraph[anchor_id], *other_evidence]
-                        if anchor_id is not None else all_evidence
+                        [evidence_by_paragraph[anchor_id], *other_evidence] if anchor_id is not None else all_evidence
                     )
                 payload_hash = stable_digest(payload)
                 command_path = stable_digest(kind, partition, payload_hash)
@@ -298,16 +302,7 @@ class FormalChapterRepository:
                         author_work_id=receipt.work_id,
                     )
                 )
-                projections.append(
-                    ProjectionWorkItem(
-                        projection_id=stable_digest(command_id, partition),
-                        run_id=receipt.run_id,
-                        command_id=command_id,
-                        partition_key=partition,
-                    )
-                )
             session.flush()
-            session.add_all(projections)
 
             for seed in result.pushed_cases:
                 if seed.chapter_id != chapter_id:
@@ -327,8 +322,13 @@ class FormalChapterRepository:
                         description=seed.description,
                         search_keys=list(seed.keys),
                         target_ref=target,
-                        source_evidence=sorted({exact_evidence(SourceReference.model_validate(value))
-                                                for value in seed.target_ref.get("source_refs", [])}) or all_evidence,
+                        source_evidence=sorted(
+                            {
+                                exact_evidence(SourceReference.model_validate(value))
+                                for value in seed.target_ref.get("source_refs", [])
+                            }
+                        )
+                        or all_evidence,
                         originating_annotation_id=annotation_id,
                         originating_chapter_id=chapter_id,
                     )
@@ -342,12 +342,9 @@ class FormalChapterRepository:
                     session.flush()
                     session.add(CaseHead(case_id=case_id, state_hash=stable_digest("pending", case_key)))
 
-            PipelineWorkRepository.mark_submitted(session, receipt)
             append_outbox(
                 session,
                 run_id=receipt.run_id,
-                work_id=receipt.work_id,
-                attempt_epoch=receipt.attempt_epoch,
                 chapter_id=chapter_id,
                 event_type="formal_chapter_committed",
                 payload={"annotation_id": annotation_id, "payload_hash": result_hash},

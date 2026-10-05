@@ -6,7 +6,6 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import patch
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -32,8 +31,7 @@ from src.storage.db import get_session_factory
 from src.storage.models import Chapter, Novel, Paragraph
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.formal_chapter import FormalChapterRepository
-from src.storage.repositories.pipeline_source import freeze_formal_source
-from src.storage.repositories.pipeline_work import PipelineWorkRepository
+from src.storage.repositories.pipeline_source import formal_receipt, freeze_formal_source
 
 
 def create_run_with_chunks(
@@ -426,17 +424,11 @@ def commit_test_annotation(
     entity_ops: list[dict[str, Any]] | None = None,
     relation_assert_ops: list[dict[str, Any]] | None = None,
 ) -> str:
-    """测试正式产出使用生产租约、不可变提交和投影发布"""
+    """测试正式产出使用确定性回执、不可变提交和投影发布"""
     session.commit()
     factory = get_session_factory()
     payload = next(item for item in freeze_formal_source(factory, run_id) if item["chapter_id"] == chapter_id)
-    queue = PipelineWorkRepository(factory)
-    queue.enqueue(run_id=run_id, work_kind="formal_current", logical_key=f"chapter:{chapter_id}",
-                  payload=payload, cutoff_hash=payload["source_manifest_hash"])
-    with patch("src.config.model_assignment.select_annotation_model", return_value="fixture-model"):
-        receipt = queue.claim(owner="test-formal", run_id=run_id, work_kind="formal_current")
-    if receipt is None or receipt.payload["chapter_id"] != chapter_id:
-        raise ValueError("测试章节未领取到对应正式工作")
+    receipt = formal_receipt(run_id, payload)
     result = AgentRunResult(
         run_id=run_id, chapter_id=chapter_id, annotation=annotation,
         entity_ops=entity_ops or [], relation_assert_ops=relation_assert_ops or [],
@@ -485,7 +477,10 @@ def commit_test_resolution(
     """连续性夹具使用当前案例 claim、证据校验、订正命令和投影发布"""
     from src.agents.annotation.identity import text_digest
     from src.storage.models import CaseHead, ChapterAnnotationRecord, ContinuityCase, Paragraph, TextEvidenceRecord
-    from src.storage.repositories.pipeline_continuity import PipelineContinuityRepository
+    from src.storage.repositories.pipeline_continuity import (
+        PipelineContinuityRepository,
+        continuity_receipt,
+    )
     from src.storage.repositories.pipeline_projection import PipelineProjectionRepository
 
     factory = get_session_factory()
@@ -514,13 +509,9 @@ def commit_test_resolution(
     publish_test_cutoff(session, run_id)
     cutoff = PipelineProjectionRepository(factory).latest_released(run_id)
     assert cutoff is not None
-    queue = PipelineWorkRepository(factory)
-    queue.enqueue(run_id=run_id, work_kind="continuity", logical_key=f"case:{case_id}",
-                  payload={"case_id": case_id, "source_manifest_hash": source_hash},
-                  cutoff_hash=cutoff["cutoff_hash"])
-    with patch("src.config.model_assignment.select_annotation_model", return_value="fixture-model"):
-        receipt = queue.claim(owner="test-continuity", run_id=run_id, work_kind="continuity")
-    assert receipt is not None
+    receipt = continuity_receipt(
+        run_id, case_id, cutoff_hash=cutoff["cutoff_hash"], source_manifest_hash=source_hash,
+    )
     repository = PipelineContinuityRepository(factory)
     claim = repository.claim(receipt, case_id)
     repository.commit(
@@ -548,13 +539,13 @@ def commit_test_event_link(
 
 def publish_test_cutoff(session: Any, run_id: str) -> None:
     """发布真实工作快照；纯读接口夹具显式构造无命令的当前发布边界"""
-    from src.storage.models import AgentWorkItem, AnalysisCutoff, AnalysisRun
+    from src.storage.models import AnalysisCutoff, AnalysisRun, ChapterAnnotationRecord
     from src.storage.repositories.pipeline_projection import PipelineProjectionRepository
     from src.workflows.pipeline_materialization import materialize_cutoff
 
     session.commit()
-    has_work = session.execute(select(AgentWorkItem.work_id).where(
-        AgentWorkItem.run_id == run_id,
+    has_work = session.execute(select(ChapterAnnotationRecord.annotation_id).where(
+        ChapterAnnotationRecord.run_id == run_id,
     ).limit(1)).scalar_one_or_none() is not None
     if has_work:
         count = session.execute(select(AnalysisCutoff.cutoff_hash).where(

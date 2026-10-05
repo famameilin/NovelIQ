@@ -17,14 +17,14 @@ ModelCallTiming/StreamChunkAggregator/extract_reasoning_content 等），
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from src.agents.provider_runtime import provider_permit_for_model
 from src.agents.stream_aggregator import (
     StreamChunkAggregator,
 )
@@ -38,6 +38,13 @@ from src.agents.stream_audit import ModelCallTiming, _provider_request_metadata
 from src.api.models.events import StreamEvent, StreamEventAction
 
 _MAX_TOOL_SUMMARY_CHARS = 200
+
+# 2026-10-04 内容进度看门狗阈值（秒）：流块到达而内容零增长超过该值即判死重发。
+# 依据：run 4cb054dc 末章僵流 31 分钟零内容（保活帧喂活了全部"有块"信号）；
+# 本 run 132 个计量回合 TTFT p99=9.4s/max=9.9s，重放健康流 ~57 内容帧/秒；
+# llm.py 注释声称的"网关限流队列/思考停顿超 2 分钟"远低于该阈值。
+# 误判代价=一次重发（total_attempts 兜底），漏判代价=lane 挂死需人工重启。
+CONTENT_STALL_TIMEOUT_S = 300.0
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +63,92 @@ _TRANSIENT_ERROR_MARKERS = (
 
 class StreamEmitError(RuntimeError):
     """2026-08-12 用于区分 SSE 推送失败与模型输出流中断：推送失败不触发模型请求重试"""
+
+
+class ContentStallTimeoutError(TimeoutError):
+    """2026-10-04 用于标注"连接活着但内容零增长"的僵流形态
+
+    run 4cb054dc 末章实测：Provider 对单个请求卡死生成后仍持续下发可解析
+    保活帧（31 分钟零内容），httpx 读超时(120s)与 langchain 解析块看门狗
+    (600s)都以"有块到达"为信号被喂活，不会触发。本看门狗的判活信号改为
+    内容增量本身（reasoning/content/tool_calls）；继承 TimeoutError 以落进
+    _is_transient_model_error 的既有重发通道。健康流内容密度实测 ~57 帧/秒
+    （重放 turn 886：24775 内容帧/433s，唯一空 delta 是 finish 帧），阈值
+    300s 有数十倍边际；真实误判代价=一次重发，漏判代价=lane 挂死需人工重启。
+    """
+
+    def __init__(self, timeout_s: float, chunks_seen: int, content_chunks: int, elapsed_s: float) -> None:
+        self.timeout_s = timeout_s
+        self.chunks_seen = chunks_seen
+        self.content_chunks = content_chunks
+        self.elapsed_s = elapsed_s
+        super().__init__(
+            f"内容进度停摆 {timeout_s:.0f}s（收到 {chunks_seen} 个流块，其中内容块 {content_chunks} 个，"
+            f"历时 {elapsed_s:.0f}s）：连接可能活着但生成端无产出"
+        )
+
+
+def _chunk_has_content(chunk: Any) -> bool:
+    """2026-10-04 用于判定流块是否携带实际内容（内容进度看门狗的判活信号）"""
+    content = getattr(chunk, "content", None)
+    if isinstance(content, str) and content:
+        return True
+    if isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("text") for part in content
+    ):
+        return True
+    kwargs = getattr(chunk, "additional_kwargs", None) or {}
+    return bool(
+        kwargs.get("reasoning_content")
+        or kwargs.get("function_call")
+        or getattr(chunk, "tool_call_chunks", None)
+        or getattr(chunk, "tool_calls", None)
+    )
+
+
+async def _guard_content_progress(source: Any, timeout_s: float) -> Any:
+    """2026-10-04 内容进度看门狗：流块持续到达而内容零增长超过 timeout_s 即判死
+
+    与 langchain 的 stream_chunk_timeout（解析块间隔）互补：后者会被可解析
+    保活帧喂活而失效（mock 复现变体 B 坐实）。从流开始即武装——事故形态正是
+    首个内容帧永不到来；每个内容帧重置计时。提前退出（判死/取消）时显式
+    aclose 底层流，及时释放 HTTP 连接。
+    """
+    if timeout_s <= 0:
+        async for chunk in source:
+            yield chunk
+        return
+    started = time.monotonic()
+    last_content = started
+    chunks_seen = 0
+    content_chunks = 0
+    iterator = source.__aiter__()
+    try:
+        while True:
+            remaining = timeout_s - (time.monotonic() - last_content)
+            if remaining <= 0:
+                raise ContentStallTimeoutError(
+                    timeout_s, chunks_seen, content_chunks, time.monotonic() - started
+                )
+            try:
+                chunk = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
+            except StopAsyncIteration:
+                return
+            except TimeoutError as exc:
+                # wait_for 在预算耗尽处判死（保活帧形态下这是主要触发点，而非预检查）
+                raise ContentStallTimeoutError(
+                    timeout_s, chunks_seen, content_chunks, time.monotonic() - started
+                ) from exc
+            chunks_seen += 1
+            if _chunk_has_content(chunk):
+                content_chunks += 1
+                last_content = time.monotonic()
+            yield chunk
+    finally:
+        aclose = getattr(source, "aclose", None)
+        if aclose is not None:
+            with contextlib.suppress(Exception):
+                await aclose()
 
 
 CompletionHintProvider = Callable[[], str | None]
@@ -84,27 +177,45 @@ def _is_transient_model_error(exc: BaseException) -> bool:
     return any(marker in name for marker in _TRANSIENT_ERROR_MARKERS)
 
 
-def _reported_tokens(message: Any) -> int | None:
-    usage = getattr(message, "usage_metadata", None)
-    if not isinstance(usage, Mapping):
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """读取服务端 429 响应的 Retry-After 头（秒数或 HTTP 日期），无法解析返回 None"""
+    from datetime import UTC, datetime
+    from email.utils import parsedate_to_datetime
+
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    raw = headers.get("Retry-After") if headers is not None else None
+    if raw is None:
         return None
-    total = usage.get("total_tokens")
-    if isinstance(total, int):
-        return total
-    prompt = usage.get("input_tokens")
-    completion = usage.get("output_tokens")
-    if isinstance(prompt, int) and isinstance(completion, int):
-        return prompt + completion
-    return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        try:
+            date = parsedate_to_datetime(str(raw))
+        except (TypeError, ValueError):
+            return None
+        if date.tzinfo is None:
+            date = date.replace(tzinfo=UTC)
+        return max(0.0, (date - datetime.now(UTC)).total_seconds())
 
 
-def _retry_backoff_seconds(attempt: int) -> float:
+def _retry_backoff_seconds(attempt: int, exc: BaseException | None = None) -> float:
     """2026-08-13 P2-12 用于计算重试前退避时长：0.5s × 2^attempt 指数退避，上限 3s
 
     attempt 从 1 起计（第一次重试前等待 1s，第二次 2s，第三次 3s 封顶）。
     仅对 429/连接类瞬态错误生效，其余错误不额外等待。
+    2026-10-03 429 退避归本模块管（permit 层已删）：服务端给了 Retry-After 时取
+    max(指数退避, Retry-After)，上限放宽到 30s，避免压垮限流网关。
     """
-    return min(0.5 * (2 ** max(attempt, 1)), 3.0)
+    backoff = min(0.5 * (2 ** max(attempt, 1)), 3.0)
+    if exc is not None:
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 429:
+            retry_after = _retry_after_seconds(exc)
+            if retry_after is not None:
+                return min(max(backoff, retry_after), 30.0)
+    return backoff
 
 
 def _is_call_complete(message: Any) -> bool:
@@ -213,6 +324,7 @@ async def run_model_call(
     total_attempts: int | None = None,
     completion_hint: CompletionHintProvider | None = None,
     require_tool_call: bool = True,
+    content_stall_timeout_s: float | None = None,
 ) -> AIMessage:
     """
     调用模型并返回完整 AIMessage
@@ -229,6 +341,10 @@ async def run_model_call(
     网络/限流等瞬态错误（_is_transient_model_error）与"响应不含任何工具调用"
     均按调用层故障共用 total_attempts 预算退避重发（2026-08-22），耗尽后上抛
     RuntimeError；参数/鉴权等确定性错误直接失败。
+    2026-10-04 流消费经内容进度看门狗包装（_guard_content_progress）："流块
+    持续到达而内容零增长"超过 content_stall_timeout_s（缺省
+    CONTENT_STALL_TIMEOUT_S=300s，0/负值关闭）判死为 ContentStallTimeoutError，
+    按瞬态错误走同一重发预算；用于兜住保活帧喂活解析块看门狗的僵流形态。
     2026-09-08 无工具回复重发前调用 completion_hint 工厂取提示（整个 run_model_call
     周期内只取一次、只注入一次——重试间隔内无工具执行，账本状态不会变化），
     追加进重发请求让模型看到缺域清单；工厂缺省或返回 None 时维持原样重发。
@@ -268,11 +384,10 @@ async def run_model_call(
             announced_tools=announced_tools,
         )
         try:
-            async with provider_permit_for_model(model, messages) as permit_ticket:
-                async for chunk in model.astream(messages):
-                    await aggregator.add_chunk(chunk)
-                response = aggregator.finish()
-                permit_ticket.actual_tokens = _reported_tokens(response)
+            stall_timeout = CONTENT_STALL_TIMEOUT_S if content_stall_timeout_s is None else content_stall_timeout_s
+            async for chunk in _guard_content_progress(model.astream(messages), stall_timeout):
+                await aggregator.add_chunk(chunk)
+            response = aggregator.finish()
         except StreamEmitError as exc:
             # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
             if on_turn_failed is not None:
@@ -297,7 +412,7 @@ async def run_model_call(
             announced_tools = set(aggregator._announced_tools)
             # 2026-08-13 P2-12 仅 429/连接类瞬态错误在重试前退避，避免压垮网关
             if _is_transient_model_error(exc):
-                await asyncio.sleep(_retry_backoff_seconds(failed_attempt))
+                await asyncio.sleep(_retry_backoff_seconds(failed_attempt, exc))
             continue
         timing = aggregator.timing()
         # 2026-08-22 调用未正常结束（响应不含工具调用，含网关思考阶段静默截断产生的空回复）

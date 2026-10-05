@@ -20,7 +20,6 @@ from src.agents.annotation.schema import (
 )
 from src.storage.db import get_session_factory
 from src.storage.models import (
-    AgentWorkItem,
     CaseHead,
     ChapterAnnotationRecord,
     CommandOutcome,
@@ -34,7 +33,6 @@ from src.storage.models import (
 from src.storage.repositories.formal_chapter import FormalChapterRepository
 from src.storage.repositories.pipeline_projection import PipelineProjectionRepository
 from src.storage.repositories.pipeline_source import prepare_formal_work
-from src.storage.repositories.pipeline_work import PipelineWorkRepository
 from src.workflows.annotate import project_and_release
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
@@ -78,10 +76,7 @@ def _result(run_id: str, chapter_id: int, references: list[SourceReference],
 async def test_chapter_links_connect_without_second_model_round(db_session, completion_order, mode) -> None:
     _, run_id = create_run_with_chunks(db_session, texts=["甲是阿青。", "甲带来了消息。"], chapter_ids=[1, 2])
     factory = get_session_factory()
-    prepare_formal_work(factory, run_id)
-    queue = PipelineWorkRepository(factory)
-    receipts = [queue.claim(owner="links", run_id=run_id) for _ in range(2)]
-    by_chapter = {receipt.payload["chapter_id"]: receipt for receipt in receipts}
+    by_chapter = {receipt.payload["chapter_id"]: receipt for receipt in prepare_formal_work(factory, run_id)}
     paragraphs = list(db_session.execute(select(Paragraph).where(Paragraph.run_id == run_id)
                       .order_by(Paragraph.chapter_id)).scalars())
     references = {row.chapter_id: _reference(row.chapter_id, row.paragraph_id, row.text, "甲") for row in paragraphs}
@@ -108,8 +103,6 @@ async def test_chapter_links_connect_without_second_model_round(db_session, comp
             ChapterAnnotationRecord.run_id == run_id)).scalars())
         assert len(annotations) == 2
         assert all(row.payload == results[row.chapter_id].annotation.model_dump(mode="json") for row in annotations)
-        assert all(row.attempt_epoch == 1 for row in session.execute(select(AgentWorkItem).where(
-            AgentWorkItem.run_id == run_id)).scalars())
         cases = list(session.execute(select(ContinuityCase).where(ContinuityCase.run_id == run_id)).scalars())
         if mode == "same_entity":
             assert not cases
@@ -139,8 +132,7 @@ async def test_chapter_links_connect_without_second_model_round(db_session, comp
 def test_invalid_cross_chapter_span_rolls_back_entire_chapter(db_session) -> None:
     _, run_id = create_run_with_chunks(db_session, texts=["甲出现。", "甲回应。"], chapter_ids=[1, 2])
     factory = get_session_factory()
-    prepare_formal_work(factory, run_id)
-    receipt = PipelineWorkRepository(factory).claim(owner="invalid-reference", run_id=run_id)
+    receipt = prepare_formal_work(factory, run_id)[0]
     paragraphs = list(db_session.execute(select(Paragraph).where(Paragraph.run_id == run_id)
                       .order_by(Paragraph.chapter_id)).scalars())
     references = {row.chapter_id: _reference(row.chapter_id, row.paragraph_id, row.text, "甲") for row in paragraphs}

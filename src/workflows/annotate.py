@@ -1,4 +1,4 @@
-"""持久化章节队列与固定 cutoff 的并行标注主流程"""
+"""按章节序的进程内并行标注主流程：任务即章节，状态即章节侧正式标注"""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ from src.config.analysis_logger import AnalysisLogger
 from src.storage.db import get_session_factory
 from src.storage.models import AnalysisRun
 from src.storage.repositories.pipeline_projection import CutoffNotReady, PipelineProjectionRepository
-from src.storage.repositories.pipeline_source import prepare_formal_work
-from src.storage.repositories.pipeline_work import PipelineWorkRepository, WorkReceipt
-from src.workflows.durable_worker import DurableWorkerPool
+from src.storage.repositories.pipeline_source import formal_committed_chapter_ids, prepare_formal_work
+from src.storage.repositories.pipeline_work import WorkReceipt
+from src.workflows.chapter_pool import AgentStatus, ChapterWorkerPool
 from src.workflows.pipeline_agent import PipelineAgentExecutor
 from src.workflows.pipeline_materialization import materialize_cutoff
 
@@ -34,7 +34,7 @@ async def project_and_release(repository: PipelineProjectionRepository, cutoff_h
             return
         if state == "failed" or time.monotonic() >= deadline:
             raise CutoffNotReady("投影分区失败或等待其他进程 ACK 超时")
-        if not counts.get("queued", 0):
+        if not counts.get("waiting", 0):
             break
         await asyncio.sleep(0.05)
     await asyncio.to_thread(repository.release, cutoff_hash, materialize=materialize_cutoff)
@@ -50,7 +50,7 @@ async def run_annotate(
     is_cancelled: Callable[[], bool] | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
-    """章节独立执行；数据库工作、正式提交和 cutoff 是恢复与可见性的真相源"""
+    """章节独立执行；正式标注提交与 cutoff 是恢复与可见性的真相源"""
     del analysis_logger, use_context_enhancement
     from src.config import settings
 
@@ -61,33 +61,33 @@ async def run_annotate(
     total = len(work)
     if not total:
         return 0, 0, 0
-    options = settings.models.annotation
-    queue = PipelineWorkRepository(factory)
-    await asyncio.to_thread(queue.resume_failed_work, run_id)
-    projections = PipelineProjectionRepository(factory)
-    pool = DurableWorkerPool(queue, max_attempts=options.total_attempts)
+    committed = await asyncio.to_thread(formal_committed_chapter_ids, factory, run_id)
+    pending = [receipt for receipt in work if int(receipt.payload["chapter_id"]) not in committed]
+    pool = ChapterWorkerPool(max_attempts=settings.models.annotation.total_attempts)
     executor = PipelineAgentExecutor(factory, owner=pool.owner, novel_id=novel_id, novel_title=novel_title,
-                                     is_cancelled=is_cancelled, emitter=emitter)
+                                     emitter=emitter)
 
     async def emit_progress(chapter_id: int | None = None, label: str = "") -> None:
         if emitter is None:
             return
-        counts = await asyncio.to_thread(queue.state_counts, run_id, work_kind="formal_current")
-        submitted = counts.get("submitted", 0)
+        submitted = await asyncio.to_thread(formal_committed_chapter_ids, factory, run_id)
+        current = len(submitted)
         await emitter(StreamEvent(
             action="progress", stage="annotate", sub_stage="chapter_agent", chapter_id=chapter_id,
-            current=submitted, total=total, percent=10 + submitted / total * 70,
-            sub_percent=submitted / total * 100,
-            message=f"章节 {label} 已提交" if label else f"共 {total} 个章节，按模型请求并发处理",
+            current=current, total=total, percent=10 + current / total * 70,
+            sub_percent=current / total * 100,
+            message=f"章节 {label} 已提交" if label else f"共 {total} 个章节，按章节序并发处理",
         ))
 
-    async def execute_formal(receipt: WorkReceipt) -> None:
-        await executor.execute(receipt)
-        await emit_progress(int(receipt.payload["chapter_id"]), receipt.payload["chapter_label"])
+    async def execute_formal(receipt: WorkReceipt) -> AgentStatus:
+        outcome = await executor.execute(receipt)
+        if outcome == "submitted":
+            await emit_progress(int(receipt.payload["chapter_id"]), receipt.payload["chapter_label"])
+        return outcome
 
     await emit_progress()
-    counts = await pool.run(run_id=run_id, work_kind="formal_current", execute=execute_formal,
-                            is_cancelled=is_cancelled)
+    await pool.run(pending, execute=execute_formal, is_cancelled=is_cancelled)
+    projections = PipelineProjectionRepository(factory)
     boundary = await asyncio.to_thread(projections.latest_released, run_id)
     if boundary is None:
         cutoff_hash = await asyncio.to_thread(projections.seal, run_id, round_kind="formal", round_number=0)
@@ -102,4 +102,5 @@ async def run_annotate(
         run.annotation_cutoff_hash = boundary["cutoff_hash"]
     logger.info("parallel annotate completed run_id={} chapters={} elapsed={:.2f}s",
                 run_id, total, time.perf_counter() - started_at)
-    return counts.get("submitted", 0), 0, total
+    final_committed = await asyncio.to_thread(formal_committed_chapter_ids, factory, run_id)
+    return len(final_committed), 0, total

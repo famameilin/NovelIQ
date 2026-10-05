@@ -36,6 +36,7 @@ from src.agents.annotation.subagent_connect import SubagentConnectionLayer
 from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.agents.annotation.subagent_program import SUBAGENT_ROLES, run_subagent_agent
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.model_capacity import MODEL_CAPACITY
 
 # 指标缺提交时收尾会被拒（finish 硬前提），所以章收尾链必须给出一条兜底指标；
 # 兜底值一律中性且把"缺失"写进正文，禁止把它伪装成模型产出的摘要
@@ -57,6 +58,8 @@ async def run_chapter_subagents(
     audit_recorder: Any | None = None,
     roles: tuple[str, ...] = SUBAGENT_ROLES,
     capacity: Any | None = None,
+    work_id: str | None = None,
+    model_id: str | None = None,
 ) -> AgentRunResult:
     """用于以"N 个 subagent 各持整章 + 构造器写入生效"执行一章标注并返回章级结果
 
@@ -115,6 +118,18 @@ async def run_chapter_subagents(
                 failure = exc
                 failure_event.set()
 
+    # claim 选举为整章预留了一个容量位：第一个子代理启动即兑现，后续子代理阻塞领取
+    pending_consume = work_id
+
+    async def _acquire_slot() -> None:
+        nonlocal pending_consume
+        if (pending_consume is not None and model_id is not None
+                and MODEL_CAPACITY.consume(pending_consume, model_id)):
+            pending_consume = None
+            return
+        assert capacity is not None
+        await capacity.acquire()
+
     async def _run_role(role: str, subagent: SubagentAnnotation) -> None:
         try:
             await run_subagent_agent(
@@ -148,7 +163,7 @@ async def run_chapter_subagents(
             ))
             tasks[-1].add_done_callback(_record_failure)
             continue
-        acquire_fut = asyncio.ensure_future(capacity.acquire())
+        acquire_fut = asyncio.ensure_future(_acquire_slot())
         failure_fut = asyncio.ensure_future(failure_event.wait())
         await asyncio.wait({acquire_fut, failure_fut}, return_when=asyncio.FIRST_COMPLETED)
         failure_fut.cancel()

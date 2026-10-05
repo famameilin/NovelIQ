@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from src.agents.annotation.identity import stable_digest, text_digest
 from src.storage.models import Chapter, ChapterAnnotationRecord, Paragraph, SourceManifest
-from src.storage.repositories.pipeline_work import ImmutableWorkConflict, PipelineWorkRepository
+from src.storage.repositories.pipeline_work import ImmutableWorkConflict, WorkReceipt
 
 
 def verify_source_manifest(session: Session, run_id: str) -> str:
@@ -81,13 +81,32 @@ def freeze_formal_source(session_factory: Callable[[], Session], run_id: str) ->
     return work
 
 
-def prepare_formal_work(session_factory: Callable[[], Session], run_id: str) -> list[dict[str, Any]]:
-    """按同一全书快照为所有章节创建可恢复工作"""
+def formal_receipt(run_id: str, payload: dict[str, Any]) -> WorkReceipt:
+    """按 enqueue 时代的同一公式铸造 work_id，保证与存量正式结果的 formal_work_id 兼容"""
+    return WorkReceipt(
+        work_id=stable_digest(
+            run_id, "formal_current", f"chapter:{payload['chapter_id']}",
+            stable_digest(payload), payload["source_manifest_hash"],
+        ),
+        run_id=run_id,
+        work_kind="formal_current",
+        payload=dict(payload),
+        cutoff_hash=payload["source_manifest_hash"],
+        attempt_epoch=0,
+    )
+
+
+def formal_committed_chapter_ids(session_factory: Callable[[], Session], run_id: str) -> set[int]:
+    """章节状态即工作状态：有正式标注的章节就是已完成工作"""
+    with session_factory() as session:
+        return set(session.execute(select(ChapterAnnotationRecord.chapter_id).where(
+            ChapterAnnotationRecord.run_id == run_id,
+        )).scalars())
+
+
+def prepare_formal_work(session_factory: Callable[[], Session], run_id: str) -> list[WorkReceipt]:
+    """按全书快照构造章节序的工作回执；重启恢复 = 重查后过滤已提交章节"""
     work = freeze_formal_source(session_factory, run_id)
-    queue = PipelineWorkRepository(session_factory)
-    for payload in work:
-        queue.enqueue(run_id=run_id, work_kind="formal_current", logical_key=f"chapter:{payload['chapter_id']}",
-                      payload=payload, cutoff_hash=payload["source_manifest_hash"])
-    return work
+    return [formal_receipt(run_id, payload) for payload in work]
 
 

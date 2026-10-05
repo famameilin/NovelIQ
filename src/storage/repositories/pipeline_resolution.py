@@ -90,7 +90,9 @@ def bind_record_target(record: str, result: AgentRunResult) -> dict[str, Any]:
         dialogue = next((item for item in result.annotation.dialogues
                          if candidate in {item.candidate_key, str(item.candidate_index)}), None)
         if dialogue is None:
-            raise ValueError("原文锚点的对话不是本章正式产出")
+            # 2026-10-03 候选被判 not_dialogue（含收尾兜底）时从正式产出合法消失：
+            # 案例保留原锚点但不做对话域绑定，不再整章炸沉
+            return {}
         return {"domain": "dialogue", "candidate_key": dialogue.candidate_key}
     tree_key, _, node_key = record.partition("/")
     event_id = stable_uuid(result.run_id, result.chapter_id, "event_node", tree_key, node_key or "root")

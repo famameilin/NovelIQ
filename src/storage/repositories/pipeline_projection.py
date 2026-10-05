@@ -12,14 +12,12 @@ from datetime import UTC, datetime
 from secrets import choice, token_hex
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.identity import stable_digest
 from src.storage.models import (
-    AgentInvocation,
-    AgentWorkItem,
     AnalysisCutoff,
     AnalysisRun,
     CaseHead,
@@ -28,7 +26,6 @@ from src.storage.models import (
     ContinuityCase,
     CutoffPartition,
     PartitionHead,
-    ProjectionWorkItem,
     SemanticCommand,
 )
 from src.storage.repositories.pipeline_projection_commands import (
@@ -74,9 +71,11 @@ class PipelineProjectionRepository:
             run = session.get(AnalysisRun, run_id, with_for_update=True)
             if run is None or run.cancel_requested:
                 raise CutoffNotReady("分析不存在或已取消")
-            work = list(session.execute(select(AgentWorkItem).where(AgentWorkItem.run_id == run_id)).scalars())
-            if not work or any(row.state != "submitted" for row in work):
-                raise CutoffNotReady("Agent 工作尚未全部提交")
+            annotated_count = session.execute(select(func.count()).select_from(ChapterAnnotationRecord).where(
+                ChapterAnnotationRecord.run_id == run_id,
+            )).scalar_one()
+            if annotated_count == 0:
+                raise CutoffNotReady("没有任何正式章节结果，不能封 cutoff")
             self._check_claims(session, run_id)
             source_hash = verify_source_manifest(session, run_id)
             formal = list(session.execute(select(ChapterAnnotationRecord).where(
@@ -133,13 +132,6 @@ class PipelineProjectionRepository:
                 } for partition in partitions]).on_conflict_do_nothing(index_elements=[
                     PartitionHead.run_id, PartitionHead.partition_key,
                 ]))
-            for item in session.execute(select(ProjectionWorkItem).where(
-                ProjectionWorkItem.run_id == run_id
-            )).scalars():
-                item.cutoff_hash = cutoff_hash
-                item.state = "queued"
-                item.completed_at = None
-                item.last_error = None
             append_outbox(session, run_id=run_id, event_type="cutoff_sealed",
                           payload={"round_kind": round_kind, "round_number": round_number}, cutoff_hash=cutoff_hash)
             return cutoff_hash
@@ -181,12 +173,6 @@ class PipelineProjectionRepository:
                 cutoff = self._lock_cutoff(session, cutoff_hash)
                 if cutoff is not None and cutoff.state == "projecting":
                     cutoff.state = "failed"
-                    for item in session.execute(select(ProjectionWorkItem).where(
-                        ProjectionWorkItem.cutoff_hash == cutoff_hash, ProjectionWorkItem.state == "queued",
-                        ProjectionWorkItem.partition_key == attempted[0],
-                    )).scalars():
-                        item.state = "dead_letter"
-                        item.last_error = str(exc)
                     append_outbox(session, run_id=cutoff.run_id, event_type="projection_dead_letter",
                                   payload={"error": str(exc), "partition_key": attempted[0]}, cutoff_hash=cutoff_hash)
             raise
@@ -203,11 +189,6 @@ class PipelineProjectionRepository:
             if run.cancellation_epoch != cutoff.cancellation_epoch:
                 cutoff.cancellation_epoch = run.cancellation_epoch
             cutoff.state = "projecting"
-            for item in session.execute(select(ProjectionWorkItem).where(
-                ProjectionWorkItem.cutoff_hash == cutoff_hash, ProjectionWorkItem.state == "dead_letter",
-            )).scalars():
-                item.state = "queued"
-                item.last_error = None
 
     def _project_next(self, cutoff_hash: str, attempted: list[str]) -> bool:
         """无分区锁读取固定命令，head_epoch 与双哈希 CAS 后同事务 ACK"""
@@ -220,20 +201,16 @@ class PipelineProjectionRepository:
             run = session.get(AnalysisRun, cutoff.run_id, with_for_update={"read": True})
             if run is None or run.cancel_requested or run.cancellation_epoch != cutoff.cancellation_epoch:
                 raise CutoffNotReady("投影已被取消栅栏拒绝")
-            candidates = session.execute(select(ProjectionWorkItem.partition_key).where(
-                ProjectionWorkItem.cutoff_hash == cutoff_hash,
-                ProjectionWorkItem.state == "queued",
-                ProjectionWorkItem.available_at <= func.clock_timestamp(),
-            ).distinct().order_by(ProjectionWorkItem.partition_key).limit(32)).scalars()
+            candidates = session.execute(select(SemanticCommand.partition_key).where(
+                SemanticCommand.run_id == cutoff.run_id,
+                ~exists(select(1).where(
+                    CutoffPartition.cutoff_hash == cutoff_hash,
+                    CutoffPartition.partition_key == SemanticCommand.partition_key,
+                ).correlate(SemanticCommand)),
+            ).distinct().order_by(SemanticCommand.partition_key).limit(32)).scalars()
             available = list(candidates)
             partition = choice(available) if available else None
             if partition is None:
-                return False
-            items = list(session.execute(select(ProjectionWorkItem).where(
-                ProjectionWorkItem.cutoff_hash == cutoff_hash, ProjectionWorkItem.partition_key == partition,
-                ProjectionWorkItem.state == "queued",
-            )).scalars())
-            if not items:
                 return False
             attempted.append(partition)
             if cutoff_hash not in self._projection_inputs:
@@ -247,12 +224,9 @@ class PipelineProjectionRepository:
             inputs = self._projection_inputs[cutoff_hash]
             head = session.get(PartitionHead, (cutoff.run_id, partition))
             assert head is not None
-            commands = list(session.execute(select(SemanticCommand).join(
-                ProjectionWorkItem, ProjectionWorkItem.command_id == SemanticCommand.command_id,
-            ).where(
+            commands = list(session.execute(select(SemanticCommand).where(
                 SemanticCommand.run_id == cutoff.run_id,
                 SemanticCommand.partition_key == partition,
-                ProjectionWorkItem.cutoff_hash == cutoff_hash,
             )).scalars())
             blocked = set(inputs["blocked_parent_ids"])
             active_commands = [row for row in commands if row.parent_command_id not in blocked]
@@ -284,10 +258,6 @@ class PipelineProjectionRepository:
                     "state": outcomes[command.command_id], "head_epoch": head_epoch,
                     "state_hash": state_hash, "resolved_at": datetime.now(UTC),
                 }))
-            for item in items:
-                item.state = "ack"
-                item.attempt_epoch += 1
-                item.completed_at = datetime.now(UTC)
             append_outbox(session, run_id=cutoff.run_id, event_type="partition_projected",
                           payload={"partition_key": partition, "projection_hash": projection_hash},
                           cutoff_hash=cutoff_hash)
@@ -325,17 +295,26 @@ class PipelineProjectionRepository:
             raise
 
     def projection_progress(self, cutoff_hash: str) -> tuple[str, dict[str, int]]:
-        """CAS 重试让出工作时仍可能有 queued 分区，协调器按持久状态等待"""
+        """待投影分区由 semantic_commands 对 cutoff_partitions 的差集派生"""
         with self.session_factory() as session:
             state = session.execute(select(AnalysisCutoff.state).where(
                 AnalysisCutoff.cutoff_hash == cutoff_hash,
             )).scalar_one_or_none()
             if state is None:
                 raise CutoffNotReady("cutoff 不存在")
-            counts = session.execute(select(ProjectionWorkItem.state, func.count().label("item_count")).where(
-                ProjectionWorkItem.cutoff_hash == cutoff_hash,
-            ).group_by(ProjectionWorkItem.state))
-            return state, {row.state: row.item_count for row in counts}
+            run_id = session.execute(select(AnalysisCutoff.run_id).where(
+                AnalysisCutoff.cutoff_hash == cutoff_hash,
+            )).scalar_one()
+            pending = session.execute(select(func.count()).select_from(select(
+                SemanticCommand.partition_key.label("partition_key"),
+            ).where(
+                SemanticCommand.run_id == run_id,
+                ~exists(select(1).where(
+                    CutoffPartition.cutoff_hash == cutoff_hash,
+                    CutoffPartition.partition_key == SemanticCommand.partition_key,
+                ).correlate(SemanticCommand)),
+            ).distinct().subquery())).scalar_one()
+            return state, {"waiting": int(pending)}
 
     def _release(
         self, cutoff_hash: str, *, materialize: Callable[[Session, AnalysisCutoff], None], attempted: list[bool],
@@ -355,11 +334,15 @@ class PipelineProjectionRepository:
             self._check_claims(session, cutoff.run_id)
             if verify_source_manifest(session, cutoff.run_id) != cutoff.manifest["source_manifest_hash"]:
                 raise CutoffNotReady("原文 manifest 发生变化")
-            states = list(session.execute(select(ProjectionWorkItem.state).where(
-                ProjectionWorkItem.cutoff_hash == cutoff_hash
-            )).scalars())
-            if any(state != "ack" for state in states):
-                raise CutoffNotReady("存在未 ACK 或 dead letter 的投影")
+            missing = session.execute(select(SemanticCommand.partition_key).where(
+                SemanticCommand.run_id == cutoff.run_id,
+                ~exists(select(1).where(
+                    CutoffPartition.cutoff_hash == cutoff_hash,
+                    CutoffPartition.partition_key == SemanticCommand.partition_key,
+                ).correlate(SemanticCommand)),
+            ).limit(1)).first()
+            if missing is not None:
+                raise CutoffNotReady("存在未投影的分区")
             commands = list(session.execute(select(SemanticCommand.command_id, SemanticCommand.payload_hash)
                                            .where(SemanticCommand.run_id == cutoff.run_id)
                                            .order_by(SemanticCommand.command_id)).all())
@@ -380,9 +363,6 @@ class PipelineProjectionRepository:
             materialize(session, cutoff)
             cutoff.state = "released"
             cutoff.released_at = datetime.now(UTC)
-            session.execute(update(AgentInvocation).where(
-                AgentInvocation.run_id == cutoff.run_id, AgentInvocation.business_outcome == "submitted",
-            ).values(business_outcome="projected"))
             append_outbox(session, run_id=cutoff.run_id, event_type="cutoff_released",
                           payload={"round_kind": cutoff.round_kind, "round_number": cutoff.round_number},
                           cutoff_hash=cutoff_hash)

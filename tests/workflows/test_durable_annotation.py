@@ -11,7 +11,7 @@ from sqlalchemy import select
 from src.agents.annotation.schema import AgentRunAudit, AgentRunResult, BoundChapterAnnotation, ChapterMetricsInput
 from src.config import settings
 from src.storage.db import get_session_factory
-from src.storage.models import AgentWorkItem, AnalysisCutoff, ChapterAnnotationRecord
+from src.storage.models import AnalysisCutoff, ChapterAnnotationRecord, WorkItem
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
@@ -59,8 +59,8 @@ async def test_chapters_run_concurrently_and_resume_does_not_call_model_again(db
         )).scalars().all()
         assert len(annotations) == 2
         assert all(row.payload_hash for row in annotations)
-        assert all(row.state == "submitted" for row in session.execute(select(AgentWorkItem).where(
-            AgentWorkItem.run_id == run_id
+        assert all(row.state == "succeeded" for row in session.execute(select(WorkItem).where(
+            WorkItem.run_id == run_id
         )).scalars())
 
 
