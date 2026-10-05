@@ -424,6 +424,96 @@ def test_content_stall_error_is_transient_for_retry_channel() -> None:
     assert _is_transient_model_error(ContentStallTimeoutError(300.0, 120, 0, 300.0)) is True
 
 
+class _RaceIterationStreamingLLM:
+    """2026-10-05 用于模拟并发共享面竞态抛出的迭代中变更错误（前 fail_count 次调用抛出）"""
+
+    def __init__(self, chunks: list[AIMessageChunk], fail_count: int, message: str) -> None:
+        self.chunks = chunks
+        self.fail_count = fail_count
+        self.message = message
+        self.captured_messages: list[list] = []
+
+    def bind_tools(self, tools):
+        del tools
+        return self
+
+    async def astream(self, messages):
+        self.captured_messages.append(list(messages))
+        if self.fail_count > 0:
+            self.fail_count -= 1
+            raise RuntimeError(self.message)
+        for chunk in self.chunks:
+            yield chunk
+
+
+class _SilentError(Exception):
+    """str(exc) 为空的异常（httpx.ReadTimeout('') 空消息形态的替身）"""
+
+
+class _EmptyMessageErrorLLM:
+    """2026-10-05 用于模拟 str(exc) 为空的流中断（空消息异常，审计空串来源）"""
+
+    def bind_tools(self, tools):
+        del tools
+        return self
+
+    async def astream(self, messages):
+        del messages
+        raise _SilentError()
+        yield  # 不可达：仅为使本函数成为异步生成器（异常在首个 __anext__ 抛出）
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "dictionary keys changed during iteration",
+        "dictionary changed size during iteration",
+        "deque mutated during iteration",
+    ],
+)
+def test_race_iteration_errors_are_transient_for_retry_channel(message: str) -> None:
+    """2026-10-05 用于验证并发竞态迭代错误按消息匹配落进 _is_transient_model_error 重发通道"""
+    assert _is_transient_model_error(RuntimeError(message)) is True
+    assert _is_transient_model_error(RuntimeError("普通运行时错误")) is False
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_retries_current_request_on_race_iteration_error() -> None:
+    """2026-10-05 用于验证字典迭代竞态错误按瞬态重发而非整章上抛（run 483cd5c5 ch15）"""
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _RaceIterationStreamingLLM(
+        [AIMessageChunk(content="已恢复"), _tool_call_chunk()],
+        fail_count=1,
+        message="dictionary keys changed during iteration",
+    )
+
+    response = await run_model_call(model, [AIMessage(content="问")], stream)
+
+    assert response.content == "已恢复"
+    assert len(model.captured_messages) == 2
+    retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
+    assert len(retry_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_reports_failed_turn_error_with_exception_type_prefix() -> None:
+    """2026-10-05 用于验证审计 error 恒带异常类型前缀：str(exc) 为空时审计不再只剩空串"""
+    failures: list[str] = []
+    model = _EmptyMessageErrorLLM()
+
+    with pytest.raises(_SilentError):
+        await run_model_call(
+            model,
+            [AIMessage(content="问")],
+            None,
+            total_attempts=1,
+            on_turn_failed=lambda error, timing, message: failures.append(error),
+        )
+
+    assert failures == ["_SilentError: "]
+
+
 @pytest.mark.asyncio
 async def test_run_model_call_total_attempts_one_disables_retries() -> None:
     """2026-08-12 用于验证 total_attempts=1 时关闭断流重试，只调用一次即失败"""

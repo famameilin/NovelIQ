@@ -86,7 +86,12 @@ def build_chat_model(
         # 截断实测 7.7K~61K 字符散布，思考撑满预算时载荷尾部被腰斩。
         # langchain-openai 新版参数名为 max_completion_tokens（OpenAI 新参数，旧 max_tokens 已弃用）
         max_completion_tokens=cfg.max_tokens,
-        timeout=cfg.timeout_s if cfg.timeout_s is not None else 120,
+        # 2026-10-05 读超时 180s 必须高于 stream.py 的内容进度看门狗（150s）：
+        # 层级倒挂（httpx 120 < 看门狗 300）时网关死气永远死在 httpx 层，
+        # httpx.ReadTimeout('') 空串进审计不可诊断（run 483cd5c5 ch9 12.2 分钟
+        # 巨回合全弃，四 run 共 5 次）；重排后死气由内容看门狗的类型化异常收口。
+        # 首字节排队超 120s 也属"慢但活着"（ch21/ch22 实测 120.1s 超时后重发成功）。
+        timeout=cfg.timeout_s if cfg.timeout_s is not None else 180,
         streaming=True,
         # 2026-10-03 流块间隙看门狗放宽到 600s：run 4a6c268c 诊断阶段长报告生成中途
         # 停流 120s 被默认看门狗掐死（已收 1400 chunk）。Ark 网关限流队列/思考停顿

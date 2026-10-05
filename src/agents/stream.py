@@ -44,7 +44,11 @@ _MAX_TOOL_SUMMARY_CHARS = 200
 # 本 run 132 个计量回合 TTFT p99=9.4s/max=9.9s，重放健康流 ~57 内容帧/秒；
 # llm.py 注释声称的"网关限流队列/思考停顿超 2 分钟"远低于该阈值。
 # 误判代价=一次重发（total_attempts 兜底），漏判代价=lane 挂死需人工重启。
-CONTENT_STALL_TIMEOUT_S = 300.0
+# 2026-10-05 300→150s 并确立层级不变量：本看门狗必须低于 llm.py 的 httpx 读超时
+# （180s）——倒挂（httpx 120 < 看门狗 300）时网关死气先死在 httpx 层，
+# httpx.ReadTimeout('') 空串进审计（run 483cd5c5 ch9，四 run 共 5 次）；
+# 150s 仍为 120s 首字节排队留足余量。
+CONTENT_STALL_TIMEOUT_S = 150.0
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +62,15 @@ _TRANSIENT_ERROR_MARKERS = (
     "ratelimit",
     "rate_limit",
     "429",
+)
+
+# 2026-10-05 迭代中被并发变更为竞态形态（消息匹配而非类名）：同请求重发大概率即愈；
+# 非瞬态时整章报废（run 483cd5c5 ch15，12-17 分钟巨回合全弃）。我们的聚合层已用
+# 共享字典对象对抗性压测 450 回合排除确定性，来源在并发共享面（连接池/事件循环）。
+_RACE_ITERATION_MESSAGES = (
+    "dictionary changed size during iteration",
+    "dictionary keys changed during iteration",
+    "deque mutated during iteration",
 )
 
 
@@ -172,6 +185,10 @@ def _is_transient_model_error(exc: BaseException) -> bool:
     if isinstance(status, int):
         return status == 429 or status >= 500
     if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    if isinstance(exc, RuntimeError) and any(
+        marker in str(exc) for marker in _RACE_ITERATION_MESSAGES
+    ):
         return True
     name = type(exc).__name__.lower()
     return any(marker in name for marker in _TRANSIENT_ERROR_MARKERS)
@@ -313,6 +330,12 @@ class AgentStream:
         )
 
 
+def _format_turn_error(exc: BaseException) -> str:
+    """2026-10-05 用于审计 error 列恒带异常类型前缀：str(exc) 为空时（如
+    httpx.ReadTimeout('')，run 483cd5c5 ch9 起四 run 共 5 次）审计只剩空串不可诊断"""
+    return f"{type(exc).__name__}: {exc}"
+
+
 async def run_model_call(
     model: Any,
     messages: list[Any],
@@ -391,20 +414,21 @@ async def run_model_call(
         except StreamEmitError as exc:
             # 客户端已断开，重试推送也发不出去，直接上抛不再重发模型请求
             if on_turn_failed is not None:
-                on_turn_failed(str(exc), aggregator.timing(), aggregator.finish())
+                on_turn_failed(_format_turn_error(exc), aggregator.timing(), aggregator.finish())
             raise
         except Exception as exc:
             if on_turn_failed is not None:
-                on_turn_failed(str(exc), aggregator.timing(), aggregator.finish())
+                on_turn_failed(_format_turn_error(exc), aggregator.timing(), aggregator.finish())
             if retries_remaining <= 0 or not _is_transient_model_error(exc):
-                logger.warning("模型输出流中断且重试耗尽: error=%s", exc)
+                logger.warning("模型输出流中断且重试耗尽: error=%r", exc, exc_info=True)
                 raise
             failed_attempt = total_attempts - retries_remaining
             retries_remaining -= 1
             logger.warning(
-                "模型输出流中断，重发当前模型请求: error=%s retries_remaining=%s",
+                "模型输出流中断，重发当前模型请求: error=%r retries_remaining=%s",
                 exc,
                 retries_remaining,
+                exc_info=True,
             )
             if stream is not None:
                 await stream.thinking(f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）")

@@ -369,7 +369,8 @@ async def test_graph_model_exception_records_error_turn(db_session) -> None:
     assert len(turns) == 1
     turn = turns[0]
     assert turn.status == "error"
-    assert turn.error == "provider timeout"
+    # 2026-10-05 合同变更：审计 error 恒带异常类型前缀（str(exc) 为空时不再只剩空串）
+    assert turn.error == "RuntimeError: provider timeout"
     assert turn.turn_ms is not None and turn.turn_ms >= 0
     assert turn.model_ms is not None
     assert turn.request_messages is not None
