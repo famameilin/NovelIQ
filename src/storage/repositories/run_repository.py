@@ -261,7 +261,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
         通过单条 UPDATE 将 pending->running，避免多个实例同时把同一任务拉起执行
         """
-        from sqlalchemy import update
+        from sqlalchemy import func, update
 
         # 2026-08-13 P2：heartbeat_at 列无时区，默认值统一落 naive UTC 挂钟
         # （避免 aware UTC 被 PG 按会话时区转换，导致 resume 窗口/孤儿回收误判）
@@ -275,7 +275,10 @@ class RunRepository(BaseRepository[dict[str, Any]]):
                 status="running",
                 worker_id=worker_id,
                 heartbeat_at=now,
-                started_at=now,
+                # 2026-10-04 重领（诊断重试触发的 re-claim）保留首次开始时间：
+                # started_at 曾被覆盖成最后一次 claim 时刻，两次 run 的表面耗时
+                # 因此缩水成 13m36s/7m26s（真实 16h46m/4h09m）
+                started_at=func.coalesce(AnalysisRun.started_at, now),
                 updated_at=now,
             )
         )

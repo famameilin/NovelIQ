@@ -48,7 +48,7 @@ class EventOutboxRepository:
             return [{
                 "type": row.payload["type"] if row.event_type == "stream_message" else "pipeline_progress",
                 "data": row.payload["data"] if row.event_type == "stream_message" else {
-                    "event_type": row.event_type, "work_id": row.work_id, "attempt_epoch": row.attempt_epoch,
-                    "cutoff_hash": row.cutoff_hash, "chapter_id": row.chapter_id, **row.payload,
+                    "event_type": row.event_type, "cutoff_hash": row.cutoff_hash,
+                    "chapter_id": row.chapter_id, **row.payload,
                 }, "seq": row.stream_id,
             } for row in rows]
