@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
-from contextlib import AbstractContextManager, nullcontext
 from typing import Any, cast
 
 from loguru import logger
@@ -123,21 +122,12 @@ async def run_diagnosis_agent(
 
     start_time = time.time()
 
-    scope: AbstractContextManager[Any]
     if llm is None:
         from src.agents.llm import build_chat_model
-        from src.agents.provider_runtime import ProviderRequestScope, provider_request_scope
         from src.config.input_config import load_task_config
-        from src.storage.repositories.provider_permits import ProviderPermitRepository
 
         model_config = load_task_config("diagnosis")
         llm = build_chat_model("diagnosis", config=model_config)
-        scope = provider_request_scope(ProviderRequestScope(
-            repository=ProviderPermitRepository(get_session_factory()), owner=f"diagnosis:{run_id}", work_id=None,
-            hard_max_in_flight=model_config.max_in_flight, model_pool_managed=True,
-        ))
-    else:
-        scope = nullcontext()
 
     if stream is not None:
         await stream.thinking("诊断 Agent 开始取证...")
@@ -209,8 +199,7 @@ async def run_diagnosis_agent(
     }
 
     try:
-        with scope:
-            result_state = cast(dict[str, Any], await graph.ainvoke(initial_state))
+        result_state = cast(dict[str, Any], await graph.ainvoke(initial_state))
     except Exception as exc:
         logger.error("diagnosis agent graph failed: run_id={} error={}", run_id, exc)
         recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))

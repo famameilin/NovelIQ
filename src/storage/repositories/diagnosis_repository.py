@@ -97,6 +97,8 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
     def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str, str]]:
         """2026-08-07 用于从章节关系版本逐次变化读取诊断素材"""
         row_limit = limit if limit is not None else 50
+        if row_limit == 0:
+            return []
         rows: list[tuple[int, str, str, str, str]] = []
         for relation in GraphRepository(self.session).fetch_relation_history(run_id):
             if relation.relation_semantics == "same_character":
@@ -113,6 +115,8 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                         str(change.get("change_kind") or "refine"),
                     )
                 )
+                if row_limit > 0 and len(rows) >= row_limit:
+                    return rows
         return rows[:row_limit]
 
     def fetch_foreshadowing_trees(self, run_id: str) -> list[ForeshadowingTreeView]:
