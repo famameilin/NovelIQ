@@ -92,6 +92,7 @@ EventLocalKey = Annotated[
     ),
 ]
 
+
 def tool_record_key(tool_name: str, args: dict[str, Any]) -> str | None:
     """2026-09-13 用于按工具名与原始参数生成稳定记录键（成功回执与拒绝回执共用）
 
@@ -114,6 +115,8 @@ def tool_record_key(tool_name: str, args: dict[str, Any]) -> str | None:
         if _EL_PATH_SEP in el:
             return el
         return f"{el}/{_ROOT_NODE_KEY}" if el else "event"
+    if tool_name in {"anchor_record", "write_link"}:
+        return str(args.get("record_id") or tool_name)
     return None
 
 
@@ -121,7 +124,11 @@ class AnnotationQueryService(Protocol):
     """章级标注使用的全书原文查询能力"""
 
     async def search_text(
-        self, query: str, *, range_name: str, limit: int = 50,
+        self,
+        query: str,
+        *,
+        range_name: str,
+        limit: int = 50,
     ) -> list[TextSearchResult]: ...
 
     async def read_paragraph(self, paragraph_id: int, *, allow_future_context: bool) -> dict[str, Any]: ...
@@ -158,7 +165,8 @@ def _forbid_undeclared_args(tool_candidate: Any) -> None:
 
 
 def build_search_tools(
-    query_service: AnnotationQueryService, ledger: AnnotationToolLedger,
+    query_service: AnnotationQueryService,
+    ledger: AnnotationToolLedger,
 ) -> list[Any]:
     """标注仅检索原文，不依赖其他章节的分析完成顺序"""
 
@@ -169,6 +177,8 @@ def build_search_tools(
         查询支持多关键词（空格/标点分隔，任一命中即返回）与通配符
         （% 匹配任意长度、_ 匹配单个字符），如「伯安 偷%」或「赤羽_尾鸡」；
         回执包含章节、段落和服务端绑定的来源能力，提交审计据此登记。
+        命中只给段落定位（paragraph_ids），不产生 source_ref；
+        要把原文作为案例证据或锚点，需再 read_text 该段取 source_ref。
         """
         normalized_query = _normalize_query(query, tool_name="search_text")
         if offset < 0:
@@ -182,7 +192,7 @@ def build_search_tools(
             limit=offset + 9,
         )
         views: list[dict[str, Any]] = []
-        for item in results[offset:offset + 8]:
+        for item in results[offset : offset + 8]:
             visible_content = item.content[:2000]
             ledger.authorized_text_paragraph_ids.update(item.paragraph_ids)
             view = {

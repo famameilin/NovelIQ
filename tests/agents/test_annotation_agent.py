@@ -487,8 +487,8 @@ async def test_failed_event_statement_does_not_block_relation_in_same_program() 
     """2026-09-19 程序面：事件语句失败时同程序关系语句照常生效，下一轮修正后收尾"""
     invalid_participation = (
         'write_event(el="t1/e2", isroot=False, type="main", description="顾霜拦截去路", '
-        'characters=[{"entityid": "顾霜", "role": "主体", "narrative_role": "主体", '
-        '"action": "拦截", "emotion": 9}])'
+        'characters=[{"entityid": "路人甲", "role": "主体", "narrative_role": "主体", '
+        '"action": "拦截", "emotion": -1}])'
     )
     fixed_participation = (
         'write_event(el="t1/e2", isroot=False, type="main", description="顾霜拦截去路", '
@@ -513,7 +513,7 @@ async def test_failed_event_statement_does_not_block_relation_in_same_program() 
     assert llm.calls == 3
     event_round_receipts = _tool_receipts(llm.captured_messages[2])
     assert len(event_round_receipts) == 2
-    assert '"field": "emotion"' in event_round_receipts[1]
+    assert '"field": "entityid"' in event_round_receipts[1]
     assert '"applied": 3' in event_round_receipts[1]
 
 
@@ -526,8 +526,8 @@ async def test_failed_statement_in_same_program_does_not_block_finish() -> None:
     """
     invalid_root = (
         'write_event(el="t1", isroot=True, description="顾霜喝止众人", '
-        'characters=[{"entityid": "顾霜", "role": "主体", "narrative_role": "主体", '
-        '"action": "怒斥", "emotion": 9}])'
+        'characters=[{"entityid": "路人甲", "role": "主体", "narrative_role": "主体", '
+        '"action": "怒斥", "emotion": -1}])'
     )
     llm = _SequenceLLM(
         [
@@ -542,9 +542,9 @@ async def test_failed_statement_in_same_program_does_not_block_finish() -> None:
     # 末轮回执只在最终 state（captured_messages 是各次请求的历史，不含该轮自己的 ToolMessage）；
     # 程序面的失败清单在程序回执的 failed 里，finish 的结算在运行时内部完成
     receipts = _tool_receipts(result["messages"])
-    rejected = [receipt for receipt in receipts if '"code": "out_of_range"' in receipt]
-    assert len(rejected) == 1, "越界 emotion 的那一条必须被单独拒绝并回执"
-    assert '"record": "t1/root"' in rejected[0]
+    rejected = [receipt for receipt in receipts if '"code": "unknown_entity_id"' in receipt]
+    assert len(rejected) == 1, "未登记实体参与的那一条必须被单独拒绝并回执"
+    assert '"record": "t1/root/participant/' in rejected[0]
     assert '"status": "partial"' in rejected[0]
     # 失败不阻塞收尾：同程序的 finish 正常结算，坏记录本来就没进载荷
     assert result["phase"] == "completed"

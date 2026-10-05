@@ -18,6 +18,7 @@ from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
 from .errors import AnnotationInvariantError
+from .event_submission import SUBMIT_EVENTS_TOOL_NAME
 from .graph import (
     AnnotationGraphState,
     _failed_receipt,
@@ -92,7 +93,8 @@ async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
     try:
         result = await candidate.ainvoke(args)
     except ValidationError as exc:
-        if name in _WRITE_TOOL_NAMES:
+        # 关联工具也报告记录键与失败值，沿用原有参数校验与取值规则
+        if name in _WRITE_TOOL_NAMES | {"anchor_record", "write_link"}:
             raise translate_write_validation_error(name, args, exc) from None
         raise
     return str(result)
@@ -360,7 +362,9 @@ def _build_tool_batch_node(
                     await _failed_entry(call, error_text, index=call_index, observer=observer, stream=stream)
                 )
                 continue
-            direct_fallback = program_tool_name is not None and name != program_tool_name
+            direct_fallback = program_tool_name is not None and name not in {
+                program_tool_name, SUBMIT_EVENTS_TOOL_NAME,
+            }
             rendered.append(
                 await _execute_call(
                     call,

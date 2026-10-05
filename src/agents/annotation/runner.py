@@ -13,6 +13,7 @@ from .errors import (
     AnnotationInputError,
     AnnotationRetryableError,
 )
+from .event_submission import build_event_submission_tool
 from .fact_graph import FactGraph
 from .graph import build_annotation_graph
 from .program import ProgramRuntime, build_program_tool
@@ -126,17 +127,19 @@ async def _run_single_attempt(
     )
     tools = build_annotation_tools(query_service, ledger)
     finish_tool = {str(tool.name): tool for tool in tools}[FINISH_TOOL_NAME]
-    program_tool = build_program_tool(ProgramRuntime(tools, ledger, observer=observer, stream=stream))
+    runtime = ProgramRuntime(tools, ledger, observer=observer, stream=stream)
+    program_tool = build_program_tool(runtime)
+    event_submission_tool = build_event_submission_tool(runtime)
     total_iteration_limit = max(1, settings.models.annotation.max_iterations)
     graph = build_annotation_graph(
         llm,
-        [*tools, program_tool],
+        [*tools, program_tool, event_submission_tool],
         ledger=ledger,
         max_iterations=total_iteration_limit,
         stream=stream,
         observer=observer,
         retries=settings.models.annotation.total_attempts,
-        bind_tools=[program_tool, finish_tool],
+        bind_tools=[program_tool, event_submission_tool, finish_tool],
         program_tool_name=str(program_tool.name),
     )
     initial_messages = [

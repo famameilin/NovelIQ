@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -54,6 +55,7 @@ from .schema import (
     RelationType,
     Tone,
 )
+from .subagent_ir import ROLE_NAMESPACE_SEP
 from .tools import _norm_entity_key, _norm_graph_name
 from .validation_errors import _translate_record_validation
 
@@ -63,6 +65,7 @@ _PARAGRAPH_LABEL_MIN_PER_CHAPTER = 2
 # 引用被拒时回执里列几个本章已登记实体（"el=名字"对照）；超出部分只报总数，
 # 拒绝回执要能一眼读完（全章几十个实体时不铺开）
 _ENTITY_REF_HINT_LIMIT = 12
+
 
 @dataclass(slots=True)
 class AnnotationToolLedger:
@@ -115,6 +118,9 @@ class AnnotationToolLedger:
     observation_by_record: dict[str, BoundCharacterObservation] = field(default_factory=dict)
     # tree_key → tree_id：章内局部键是模型侧寻址面，真实 uuid 不外露
     tree_key_index: dict[str, str] = field(default_factory=dict)
+    # 2026-10-04 树键校验下沉：tree_key → 暂挂子事件（先于根到达时缓存，建根按到达序
+    # 冲账；finish 时仍有暂挂即拒，防止静默丢数据）
+    pending_child_events: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     # 2026-09-14 实体局部键索引：el → 归一化登记名（模型自定、写入即绑定、同轮可用）
     entity_el_index: dict[str, str] = field(default_factory=dict)
     # 2026-09-18 本章已经写出来的记录键集合（程序面每次调用成功即登记）：
@@ -162,6 +168,8 @@ class AnnotationToolLedger:
                 "cross_chapter_links": self.cross_chapter_links,
                 "authorized_event_ids": self.authorized_event_ids,
                 "event_trees": self.event_trees,
+                # 重提与建根会核销挂起项，后续字段失败时必须随该调用一起恢复
+                "pending_child_events": self.pending_child_events,
                 "annotation": self.annotation,
                 "search_log": self.search_log,
                 "written_entities": self.written_entities,
@@ -252,7 +260,7 @@ class AnnotationToolLedger:
                 record=record,
                 field="el",
                 code="unknown_tree",
-                expected="先用 write_event(isroot=true, el=\"t1\") 建树，子事件再用 t1/节点键（同轮先根后子即可）",
+                expected='先用 write_event(isroot=true, el="t1") 建树，子事件再用 t1/节点键（同轮先根后子即可）',
             )
         return tree
 
@@ -338,9 +346,7 @@ class AnnotationToolLedger:
 
     def _rebuild_entity_payload(self) -> None:
         """用于按写入顺序重建当前章 的实体目录载荷"""
-        self.domain_payloads["entities"] = EntityDirectoryInput(
-            entities=list(self.written_entities.values())
-        )
+        self.domain_payloads["entities"] = EntityDirectoryInput(entities=list(self.written_entities.values()))
 
     # ------------------------------------------------------------------
     # 指标域：整域一次提交，重复提交按最后一次为准；段落级监督标签随本域提交
@@ -354,11 +360,7 @@ class AnnotationToolLedger:
         """
         self._require_writable("metrics")
         if payload.labels:
-            visible_to_global = (
-                dict(self._visible_global_pairs())
-                if self.paragraph_info is not None
-                else {}
-            )
+            visible_to_global = dict(self._visible_global_pairs()) if self.paragraph_info is not None else {}
             for label in payload.labels:
                 if label.paragraph_id not in visible_to_global:
                     preview = ", ".join(str(pid) for pid in sorted(visible_to_global)[:12]) or "（无）"
@@ -496,7 +498,7 @@ class AnnotationToolLedger:
                 )
             except ValueError as exc:
                 raise AnnotationStageRejection(
-                    str(exc),
+                    f"{record}({field_name}={name!r})：{exc}",
                     record=record,
                     field=field_name,
                     code="endpoint_invalid",
@@ -517,8 +519,7 @@ class AnnotationToolLedger:
             (
                 entry["outcome"]
                 for entry in outcomes
-                if (entry["from"], entry["to"]) == resolution
-                and entry["relation_type"] == str(item.relation_type)
+                if (entry["from"], entry["to"]) == resolution and entry["relation_type"] == str(item.relation_type)
             ),
             "assert",
         )
@@ -546,9 +547,7 @@ class AnnotationToolLedger:
                 # 插入 from_entity_id=to_entity_id 的自环行，违反
                 # graph_relations 端点互异约束炸掉完成事务（run a83fae3d
                 # 第9章实锤），一律跳过不入图不入操作日志
-                is_same_character = (
-                    RELATION_DEFINITIONS[str(item.relation_type)]["semantics"] == "same_character"
-                )
+                is_same_character = RELATION_DEFINITIONS[str(item.relation_type)]["semantics"] == "same_character"
                 outcomes.append(
                     {
                         "from": resolved_from,
@@ -635,6 +634,8 @@ class AnnotationToolLedger:
                 isforeshadowing=isforeshadowing,
                 confidence=confidence,
             )
+            # 2026-10-04 树键校验下沉：建根（或根重写）时把先到的暂挂子事件按到达序冲账
+            self._flush_pending_children(tree_key)
         else:
             if not tree_key or not node_key:
                 raise AnnotationStageRejection(
@@ -668,6 +669,20 @@ class AnnotationToolLedger:
                     code="missing",
                     expected='type="main"（顺延主因链）或 "secondary"（挂在当时主链尾）',
                 )
+            if self.tree_key_index.get(tree_key) is None:
+                # 2026-10-04 树键校验下沉：根未建时子事件不再即时拒绝，挂起等建根冲账
+                #（写面本来就是纯内存账本、整章成功才单事务落库，调用期因果校验只制造返工）
+                self.pending_child_events.setdefault(tree_key, []).append(
+                    {
+                        "record": record,
+                        "node_key": node_key,
+                        "node_type": node_type,
+                        "description": description,
+                        "evidence": evidence,
+                        "characters": characters,
+                    }
+                )
+                return record
             node_id = self._apply_event_child(
                 record=record,
                 tree_key=tree_key,
@@ -690,6 +705,92 @@ class AnnotationToolLedger:
         if isroot or EL_PATH_SEP not in cleaned:
             return f"{cleaned}/{RESERVED_ROOT_KEY}"
         return cleaned
+
+    _IR_RECORD_RE = re.compile(r"([a-z_]+)/(entity|dialogue|relation|event)/(.+)")
+
+    def production_record_key(self, key: str) -> str:
+        """用于把模型面 IR 记录键规范成生产记录键（已是生产键的原样返回）
+
+        2026-09-20 起 subagent 路径的 written_record_keys 混装两种键：构造器 plan 的
+        IR 键（structure/entity/a1、event/t1、evidence/dialogue/3）与生产写入面的
+        生产键（entity/{name}、event:t1/root、dialogue/3）。push_case/anchor_record 按
+        written 集合校验后原样存进 target_ref/source_anchors，而正式提交的
+        bind_record_target 只认生产键——IR 键落库必炸"原文锚点不是本章正式产出"。
+        这里在工具入口统一翻译成生产键，两类消费点共用这一份规范。
+        """
+        # 2026-10-04 裸树键补全：模型按自然形态拿树键当记录键（run 4cb054dc 18 次
+        # anchor 被拒），树键在索引里时唯一指到它的根记录，统一补 /root
+        if key in self.tree_key_index:
+            return f"{key}/{RESERVED_ROOT_KEY}"
+        match = self._IR_RECORD_RE.fullmatch(key)
+        if match is not None:
+            role, domain, body = match.groups()
+            if domain == "entity":
+                name = self.resolve_entity_ref(f"{role}:{body}", record=key, field="record_id")
+                return f"entity/{name}"
+            if domain == "dialogue":
+                return f"dialogue/{body}"
+            if domain == "event":
+                # 2026-10-03 非事件角色写树时的 IR 键（structure/event/t1）：树键按
+                # 角色命名空间化落库（namespace_event_el → structure:t1）
+                namespaced = f"{role}{ROLE_NAMESPACE_SEP}{body}"
+                return namespaced if EL_PATH_SEP in body else f"{namespaced}/{RESERVED_ROOT_KEY}"
+            if domain == "relation":
+                return self._production_relation_key(key, role, body)
+            return key
+        if key.startswith("event/"):
+            # 2026-10-03 修正事件键翻译：子代理事件树落库时树键按角色命名空间化
+            # （namespace_event_el：t1 → event:t1），节点 id 以命名空间树键参与
+            # stable_uuid——IR 前缀 "event/" 恰是事件角色自己的前缀（_record_of 去重），
+            # 翻译必须保留命名空间。此前翻成 t1/root、t1/e12，提交期 bind_record_target
+            # 按无命名空间树键算 node_id 永不匹配，案例指向事件的章必炸"原文锚点的
+            # 事件不是本章正式产出"（run 4a6c268c ch21 三连炸实证）。written 集合里的
+            # "event/..." 只来自子代理构造器日志（solo 面 write_event 回执本就是生产键
+            # event:t1/root 或 t1/root 原样登记），无条件翻译不影响 solo 路径。
+            el = key.removeprefix("event/")
+            namespaced = f"event{ROLE_NAMESPACE_SEP}{el}"
+            return namespaced if EL_PATH_SEP in el else f"{namespaced}/{RESERVED_ROOT_KEY}"
+        return key
+
+    def _production_relation_key(self, key: str, role: str, body: str) -> str:
+        """用于把 IR 关系键翻译成生产键；消解不了当场拒绝（毒键入库必炸提交期 bind）
+
+        2026-10-03 角色命名空间修复：IR 关系键的端点 el 是 subagent 局部键，落库时按
+        角色命名空间化（namespace_el → structure:qianjin），解析必须带角色前缀——此前用
+        裸 el 查索引永不命中，翻译原样返回 "structure/relation/a-b"，提交期
+        bind_record_target 前缀不匹配 entity/relation/dialogue，落进事件分支按
+        tree_key="structure" 算 node_id 永不匹配，整章炸"原文锚点的事件不是本章正式产出"
+        （run 4a6c268c ch21 attempt 14/15 实证）。原样返回等价于埋毒键，改为当场拒绝：
+        模型拿结构化回执换一条可消解的记录或省略 record_id，不再连烧 3 个 attempt。
+        """
+        from_el, sep, to_el = body.rpartition("-")
+        if not sep:
+            raise AnnotationStageRejection(
+                f"{key} 不是可消解的关系记录键（缺少 from-to 端点形态）",
+                record=key,
+                field="record_id",
+                code="unknown_record",
+                expected="关系 IR 键形如 structure/relation/from_el-to_el（端点 el 是你登记实体时的 id）",
+            )
+        if self.graph is None:
+            raise AnnotationInvariantError("关系键消解需要常驻事实图，graph 缺失")
+        names: list[str] = []
+        for el in (from_el, to_el):
+            names.append(self.resolve_entity_ref(f"{role}{ROLE_NAMESPACE_SEP}{el}", record=key, field="record_id"))
+        types = {
+            str(op["relation_type"])
+            for op in self.graph.relation_assert_ops
+            if op["from_entity"] == names[0] and op["to_entity"] == names[1]
+        }
+        if len(types) != 1:
+            raise AnnotationStageRejection(
+                f"{key} 无法唯一消解成一条已写出的关系边（两端间存在 {len(types)} 种关系类型）",
+                record=key,
+                field="record_id",
+                code="unknown_record",
+                expected="两端之间恰好写出过一条关系边时才能作为案例目标；请换可消解的记录或省略 record_id",
+            )
+        return f"relation/{names[0]}-{names[1]}/{types.pop()}"
 
     def _event_evidence_paragraph_id(
         self, evidence: int | None, *, record: str, existing: BoundEvent | None = None
@@ -802,10 +903,9 @@ class AnnotationToolLedger:
                     code="immutable",
                     expected="删除重写需换节点键（该节点 type=已定的 main/secondary）",
                 )
-            event.evidence_paragraph_id = self._event_evidence_paragraph_id(
-                evidence, record=record, existing=event
-            )
+            event.evidence_paragraph_id = self._event_evidence_paragraph_id(evidence, record=record, existing=event)
             event.description = description
+            self._discard_resubmitted_pending({(node_key, description)}, exclude_tree=tree_key)
             return str(existing_node_id)
         parent_node_id = str(tree["trunk_tail"])
         node_id = self._node_id(tree_key, node_key)
@@ -827,7 +927,60 @@ class AnnotationToolLedger:
         if str(node_type) == "main":
             tree["trunk_tail"] = node_id
         self.authorized_event_ids.add(node_id)
+        self._discard_resubmitted_pending({(node_key, description)}, exclude_tree=tree_key)
         return node_id
+
+    def _discard_resubmitted_pending(
+        self, written: set[tuple[str, str]], *, exclude_tree: str | None = None,
+    ) -> None:
+        """只核销节点键与描述完全一致的重提项，保留未写入项及其原有到达顺序"""
+        for tree_key, items in list(self.pending_child_events.items()):
+            if tree_key == exclude_tree:
+                continue
+            remaining = [item for item in items if (str(item["node_key"]), str(item["description"])) not in written]
+            if remaining:
+                self.pending_child_events[tree_key] = remaining
+            else:
+                del self.pending_child_events[tree_key]
+
+    def _reconcile_pending_children(self) -> None:
+        """收尾前核对实际已落账的子节点，清理早前错误桶中已被正确重提的挂起项"""
+        event_by_id = {str(event.node_id): event for event in self.bound_payloads.get("events") or []}
+        written = {
+            (str(node_key), event_by_id[str(node_id)].description)
+            for tree in self.event_trees.values()
+            for node_key, node_id in tree.get("nodes", {}).items()
+            if node_key != RESERVED_ROOT_KEY and str(node_id) in event_by_id
+        }
+        self._discard_resubmitted_pending(written)
+
+    def _flush_pending_children(self, tree_key: str) -> None:
+        """用于建根时按到达顺序冲账先于根提交的暂挂子事件（含各自参与者）"""
+        pending = self.pending_child_events.pop(tree_key, None)
+        if not pending:
+            return
+        for item in pending:
+            node_id = self._apply_event_child(
+                record=str(item["record"]),
+                tree_key=tree_key,
+                node_key=str(item["node_key"]),
+                node_type=cast("EventChildType", item["node_type"]),
+                description=str(item["description"]),
+                evidence=item.get("evidence"),
+            )
+            characters = item.get("characters")
+            if characters is not None:
+                self._apply_participants(
+                    node_record=str(item["record"]),
+                    node_id=node_id,
+                    characters=characters,
+                )
+
+    def is_pending_child(self, record: str) -> bool:
+        """用于判断该生产记录键是否仍在暂挂子事件缓冲里（树根未建，调用期未落账）"""
+        return any(
+            str(item.get("record")) == record for items in self.pending_child_events.values() for item in items
+        )
 
     def _apply_participants(
         self,
@@ -838,9 +991,10 @@ class AnnotationToolLedger:
     ) -> None:
         """用于把 characters 数组整体替换到指定节点的参与者列表
 
-        按登记类型分流：character 三态必填并派生人物动态状态（人物榜/Greimas/
-        实体状态注入的唯一数据源）；非 character 不接受三态；同一实体在数组内
-        只允许出现一次；旧记录键下的动态状态先清后建（替换语义）。
+        按登记类型分流：character 三态可空、给了就派生人物动态状态
+        （人物榜/Greimas/实体状态注入的唯一数据源），role 缺省按登记类型取默认；
+        非 character 不接受三态；同一实体在数组内只允许出现一次；
+        旧记录键下的动态状态先清后建（替换语义）。
         """
         if self.graph is None:
             raise AnnotationInvariantError("参与者解析需要常驻事实图，graph 缺失")
@@ -871,7 +1025,16 @@ class AnnotationToolLedger:
                     code="unregistered",
                     expected="先用 write_entity 登记本章实体",
                 )
-            if arg.role == EventParticipantRole.LOCATION and actual_type != EntityType.LOCATION.value:
+            # 2026-10-04 合同放开：role 可省略，按实体登记类型给缺省
+            # （character→主体、location→地点、其余→客体）；显式写错仍拒
+            effective_role = arg.role or (
+                EventParticipantRole.LOCATION
+                if actual_type == EntityType.LOCATION.value
+                else EventParticipantRole.SUBJECT
+                if actual_type == EntityType.CHARACTER.value
+                else EventParticipantRole.OBJECT
+            )
+            if effective_role == EventParticipantRole.LOCATION and actual_type != EntityType.LOCATION.value:
                 raise AnnotationStageRejection(
                     f"地点角色端点必须是 location: {entity_name}（登记类型 {actual_type}）",
                     record=participant_record,
@@ -879,34 +1042,21 @@ class AnnotationToolLedger:
                     code="role_type_mismatch",
                     expected="地点角色只用于 location 实体",
                 )
-            has_observation = any(
-                value is not None for value in (arg.narrative_role, arg.action, arg.emotion)
-            )
+            has_observation = any(value is not None for value in (arg.narrative_role, arg.action, arg.emotion))
             if actual_type == EntityType.CHARACTER.value:
-                if arg.narrative_role is None or arg.action is None or arg.emotion is None:
-                    missing = [
-                        name
-                        for name, value in (
-                            ("narrative_role", arg.narrative_role),
-                            ("action", arg.action),
-                            ("emotion", arg.emotion),
-                        )
-                        if value is None
-                    ]
-                    raise AnnotationStageRejection(
-                        f"character 参与者必须同时提供 narrative_role/action/emotion，缺失: {', '.join(missing)}",
-                        record=participant_record,
-                        field=missing[0],
-                        code="missing",
-                        expected="三字段必填、不自动填默认值",
+                # 2026-10-04 合同放开：三态字段可空落账（不再要求必填），缺省由消费方按空处理
+                if arg.action is not None:
+                    self._reject_duplicate_observation(participant_record, entity_name, arg.action)
+                # 2026-10-04 三态全空不产动态状态行：同一人物在多个事件上无动作参与是放开后的
+                # 正常形态，全空行既无信息量又会在收尾校验撞 (character, action=None) 重复语义；
+                # 参与者本身仍随事件落账，只是不进 character_observations
+                if has_observation:
+                    self.observation_by_record[participant_record] = BoundCharacterObservation(
+                        character=entity_name,
+                        role_function=arg.narrative_role,
+                        action=arg.action,
+                        emotion=arg.emotion,
                     )
-                self._reject_duplicate_observation(participant_record, entity_name, arg.action)
-                self.observation_by_record[participant_record] = BoundCharacterObservation(
-                    character=entity_name,
-                    role_function=arg.narrative_role,
-                    action=arg.action,
-                    emotion=arg.emotion,
-                )
             elif has_observation:
                 raise AnnotationStageRejection(
                     f"narrative_role/action/emotion 只属于 character 参与者: {entity_name}（登记类型 {actual_type}）",
@@ -919,7 +1069,7 @@ class AnnotationToolLedger:
                 participants.append(
                     EventParticipantInput(
                         entity=entity_name,
-                        role=arg.role,
+                        role=effective_role,
                         narrative_role=arg.narrative_role,
                         action=arg.action,
                         emotion=arg.emotion,
@@ -952,11 +1102,12 @@ class AnnotationToolLedger:
             if (observation.character, observation.action) != (entity_name, action):
                 continue
             raise AnnotationStageRejection(
-                f"人物动态状态重复：{entity_name} 的动作 {action} 已记在 {other_record}",
+                f"人物动态状态重复：{other_record}(character={observation.character}, action={observation.action})"
+                f" 与 {record}(character={entity_name}, action={action}) 相撞",
                 record=record,
                 field="action",
                 code="duplicate_observation",
-                expected="同一人物在本章 内的动作不得重复（改写动作或更新已记的那条）",
+                expected="本章非空的 (character, action) 组合唯一",
             )
 
     # ------------------------------------------------------------------
@@ -990,8 +1141,15 @@ class AnnotationToolLedger:
         """
         cleaned = unicodedata.normalize("NFC", el).strip()
         tree_key, _, node_key = cleaned.partition(EL_PATH_SEP)
-        tree = self.event_trees.get(self.tree_key_index.get(tree_key.strip(), ""))
+        tree_key_clean = tree_key.strip()
+        tree = self.event_trees.get(self.tree_key_index.get(tree_key_clean, ""))
         if tree is None:
+            if tree_key_clean in self.pending_child_events:
+                # 2026-10-04 树键校验下沉：暂挂子事件的回显即挂起状态本身
+                return {
+                    "deferred": True,
+                    "note": f"树 {tree_key_clean} 尚未建根：该子事件已挂起，根建好后自动生效",
+                }
             raise AnnotationInvariantError(f"write_event 回显需要账本内事件树: {tree_key}")
         if isroot or not node_key.strip():
             event = self._bound_event(str(tree["root_node_id"]))
@@ -1106,6 +1264,8 @@ class AnnotationToolLedger:
         """
         if self.phase != "chapter_open":
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish")
+        # 核销只依赖已接受事实，后续收尾拒绝也不把已过期的挂起项恢复回来
+        self._reconcile_pending_children()
         if self.metrics_payload is None:
             raise AnnotationStageRejection(
                 "本章指标尚未提交，不予收尾",
@@ -1116,11 +1276,28 @@ class AnnotationToolLedger:
             )
         snapshot = self.snapshot()
         try:
+            if self.pending_child_events:
+                # 2026-10-04 树键校验下沉的兜底：根始终没建时暂挂子事件不许静默丢弃；
+                # 点名各树挂起的节点键（只有 "t1×3" 数量时模型无从判断挂的是哪些子事件）
+                detail = "、".join(
+                    f"{tree_key}({', '.join(str(item['node_key']) for item in items)})"
+                    for tree_key, items in self.pending_child_events.items()
+                )
+                raise AnnotationStageRejection(
+                    f"子事件仍挂起等待建根: {detail}",
+                    record="finish",
+                    field="events",
+                    code="missing_record",
+                    expected="先 write_event(isroot=true, el=树键) 建根（挂起的子事件自动生效），或换树键重写",
+                )
             pending = self.dialogue_ledger()["pending"]
             if pending:
                 raise AnnotationStageRejection(
-                    f"对话候选尚未判定: {pending}", record="finish", field="dialogues",
-                    code="missing_record", expected="逐条判定候选后再 finish，未确定内容登记案例池",
+                    f"对话候选尚未判定: {pending}",
+                    record="finish",
+                    field="dialogues",
+                    code="missing_record",
+                    expected="逐条判定候选后再 finish，未确定内容登记案例池",
                 )
             self._ensure_domain_payloads()
             self.ready_chapter = self._build_ready_chapter()
@@ -1169,9 +1346,7 @@ class AnnotationToolLedger:
             {
                 "chapter_id": self.current_chapter_id,
                 "domain": "entities",
-                "payload": EntityDirectoryInput(
-                    entities=list(self.written_entities.values())
-                ).model_dump(mode="json"),
+                "payload": EntityDirectoryInput(entities=list(self.written_entities.values())).model_dump(mode="json"),
             }
         ]
         if self.metrics_payload is not None:
@@ -1198,19 +1373,14 @@ class AnnotationToolLedger:
             {
                 "chapter_id": self.current_chapter_id,
                 "domain": "relations",
-                "payload": [
-                    item.model_dump(mode="json") for item in self.written_relations.values()
-                ],
+                "payload": [item.model_dump(mode="json") for item in self.written_relations.values()],
             }
         )
         records.append(
             {
                 "chapter_id": self.current_chapter_id,
                 "domain": "dialogues",
-                "payload": [
-                    item.model_dump(mode="json")
-                    for item in (self.domain_payloads.get("dialogues") or [])
-                ],
+                "payload": [item.model_dump(mode="json") for item in (self.domain_payloads.get("dialogues") or [])],
             }
         )
         return records
@@ -1302,10 +1472,7 @@ class AnnotationToolLedger:
             resolved_key = _norm_graph_name(self.graph.resolve_name(name))
         actual_type = entity_types.get(resolved_key) or entity_types.get(key)
         if actual_type is None:
-            raise ValueError(
-                f"{label} 未在当前章 登记: {name}（"
-                "请先用 write_entity 登记该实体，或改用已登记实体名）"
-            )
+            raise ValueError(f"{label} 未在当前章 登记: {name}（请先用 write_entity 登记该实体，或改用已登记实体名）")
         if expected_types is not None and actual_type not in expected_types:
             raise ValueError(
                 f"{label} 端点类型必须属于 {[str(t) for t in expected_types]}，实际为 {actual_type}"
@@ -1321,29 +1488,60 @@ class AnnotationToolLedger:
     # 账本侧不再持有任何锚点/哈希派生逻辑
 
     def _validate_domain_duplicates(self, payloads: dict[str, Any]) -> None:
-        """2026-08-07 用于拒绝当前章 各领域的重复语义事实"""
-        keys_by_domain: dict[str, list[tuple[Any, ...]]] = {
-            "character_observations": [(item.character, item.action) for item in payloads["character_observations"]],
-            "events": [(item.node_id,) for item in payloads.get("events") or []],
+        """2026-08-07 用于拒绝当前章 各领域的重复语义事实
+
+        2026-10-04 回执点名违规记录：拒绝消息列出相撞各条的生产记录键与字段值，不再只报
+        下标+域名——run 4cb054dc ch12 自愈回合烧 60%+ 思考逆向解读拒绝合同，直接诱因就是
+        "[3, 7] character_observations 重复语义项"这种无法定位的形态。
+        """
+        # 2026-10-04 三态放开后判重只在写入点做（_reject_duplicate_observation，动作非空才查）：
+        # 同一人物在多个事件上无动作出场是合法形态，(人物, None) 相撞不是重复语义
+        errors: list[str] = []
+        for domain, entries in self._duplicate_entries(payloads).items():
+            seen: dict[tuple[Any, ...], list[str]] = {}
+            for key, label in entries:
+                seen.setdefault(key, []).append(label)
+            for labels in seen.values():
+                if len(labels) > 1:
+                    errors.append(f"{domain} 重复语义项: {' 与 '.join(labels)}")
+        if errors:
+            raise ValueError("；".join(errors))
+
+    def _duplicate_entries(self, payloads: dict[str, Any]) -> dict[str, list[tuple[tuple[Any, ...], str]]]:
+        """用于为判重载荷生成 (语义键, 记录点名标签) 对（标签与键同源同序）
+
+        character_observations 的载荷顺序与 observation_by_record 一致（同一 dict 的
+        values/keys），逐条能反查回生产记录键；events 用树内节点反查模型面局部键
+        （不露 uuid）。键/序失配时退回下标标签，点名失败不改变判重语义。
+        """
+        node_labels = {
+            str(node_id): f"{tree_key}/{node_key}"
+            for tree_key, tree_id in self.tree_key_index.items()
+            for node_key, node_id in (self.event_trees.get(tree_id) or {}).get("nodes", {}).items()
+        }
+        observation_keys = list(self.observation_by_record)
+        return {
+            "character_observations": [
+                (
+                    (item.character, item.action),
+                    f"{observation_keys[index] if index < len(observation_keys) else index}"
+                    f"(character={item.character}, action={item.action})",
+                )
+                for index, item in enumerate(payloads["character_observations"])
+                if item.action is not None
+            ],
+            "events": [
+                ((str(item.node_id),), node_labels.get(str(item.node_id), str(item.node_id)))
+                for item in payloads.get("events") or []
+            ],
             "relations": [
                 (
-                    item.from_entity,
-                    item.to_entity,
-                    str(item.relation_type),
+                    (item.from_entity, item.to_entity, str(item.relation_type)),
+                    f"relation/{item.from_entity}-{item.to_entity}/{item.relation_type}",
                 )
                 for item in payloads["relations"]
             ],
         }
-        errors: list[str] = []
-        for domain, keys in keys_by_domain.items():
-            seen: dict[tuple[Any, ...], list[int]] = {}
-            for index, key in enumerate(keys):
-                seen.setdefault(key, []).append(index)
-            for _key, indexes in seen.items():
-                if len(indexes) > 1:
-                    errors.append(f"[{', '.join(str(i) for i in indexes)}] {domain} 重复语义项")
-        if errors:
-            raise ValueError("；".join(errors))
 
     # ------------------------------------------------------------------
     # ready_chapter 构造与冻结
@@ -1359,9 +1557,15 @@ class AnnotationToolLedger:
         }
 
         # 2026-08-20 内联全量端点校验，合并 _validate_fact_endpoints 和 _validate_domain_endpoints
+        # 2026-10-04 错误点名生产记录键（原 "[下标] 域.字段" 模型无法映射回具体记录）
         errors: list[str] = []
 
-        def check_entity(name: str, expected_types: tuple[EntityType, ...] | None, label: str, index: int) -> None:
+        def check_entity(
+            name: str,
+            expected_types: tuple[EntityType, ...] | None,
+            label: str,
+            record_label: str,
+        ) -> None:
             key = unicodedata.normalize("NFC", name).strip().casefold()
             resolved_key = key
             if self.graph is not None:
@@ -1369,33 +1573,41 @@ class AnnotationToolLedger:
             actual_type = resolved_entity_types.get(resolved_key) or resolved_entity_types.get(key)
             if actual_type is None:
                 errors.append(
-                    f"[{index}] {label} 未在当前章 登记: {name}"
+                    f"{record_label} {label} 未在当前章 登记: {name}"
                     "（请先用 write_entity 登记该实体，或改用已登记实体名）"
                 )
                 return
             if expected_types is not None and actual_type not in expected_types:
                 errors.append(
-                    f"[{index}] {label} 端点类型必须属于 {[str(t) for t in expected_types]}，"
+                    f"{record_label} {label}={name!r} 端点类型必须属于 {[str(t) for t in expected_types]}，"
                     f"实际为 {actual_type}（该名称在图上的登记类型是 {actual_type}，"
                     "请按登记类型使用，或对同一词条的不同身份使用区分性名称）"
                 )
 
-        # character_observations 端点校验
+        # character_observations 端点校验（载荷顺序与 observation_by_record 一致，可反查记录键）
+        observation_keys = list(self.observation_by_record)
         for index, item in enumerate(payloads["character_observations"]):
-            check_entity(item.character, (EntityType.CHARACTER,), "character_observation.character", index)
+            record_label = str(observation_keys[index]) if index < len(observation_keys) else str(index)
+            check_entity(item.character, (EntityType.CHARACTER,), "character_observation.character", record_label)
 
         # dialogues 端点校验
-        for index, item in enumerate(payloads["dialogues"]):
+        for item in payloads["dialogues"]:
             if item.verdict != DialogueVerdict.NOT_DIALOGUE and item.speaker is not None:
-                check_entity(item.speaker, (EntityType.CHARACTER,), "dialogue.speaker", index)
+                check_entity(
+                    item.speaker,
+                    (EntityType.CHARACTER,),
+                    "dialogue.speaker",
+                    f"dialogue/{item.candidate_index}",
+                )
 
         # 2026-08-22 事件契约：write_event 已在写入时内联校验参与者端点，此处不再重查
 
         # relations 端点校验
-        for index, item in enumerate(payloads["relations"]):
+        for item in payloads["relations"]:
             definition = RELATION_DEFINITIONS[str(item.relation_type)]
-            check_entity(item.from_entity, definition["from_types"], "relation.from_entity", index)
-            check_entity(item.to_entity, definition["to_types"], "relation.to_entity", index)
+            record_label = f"relation/{item.from_entity}-{item.to_entity}/{item.relation_type}"
+            check_entity(item.from_entity, definition["from_types"], "relation.from_entity", record_label)
+            check_entity(item.to_entity, definition["to_types"], "relation.to_entity", record_label)
 
         if errors:
             raise ValueError("端点校验失败: " + "；".join(errors))
@@ -1502,11 +1714,7 @@ class AnnotationToolLedger:
                     "description": item.description,
                     "participants": [
                         {
-                            "id": (
-                                self.graph.entity_id(participant.entity)
-                                if self.graph is not None
-                                else None
-                            ),
+                            "id": (self.graph.entity_id(participant.entity) if self.graph is not None else None),
                             "entity": participant.entity,
                             "role": str(participant.role),
                         }
@@ -1538,11 +1746,7 @@ class AnnotationToolLedger:
             "entities": {
                 "declared": [
                     {
-                        "id": (
-                            self.graph.entity_id(entity.name)
-                            if self.graph is not None
-                            else None
-                        ),
+                        "id": (self.graph.entity_id(entity.name) if self.graph is not None else None),
                         "name": entity.name,
                         "entity_type": entity.entity_type,
                     }
@@ -1550,8 +1754,11 @@ class AnnotationToolLedger:
                 ],
                 "registered": (
                     [
-                        {"id": self.graph.entity_id(display_name), "name": display_name,
-                         "entity_type": self.graph.entity_types[key]}
+                        {
+                            "id": self.graph.entity_id(display_name),
+                            "name": display_name,
+                            "entity_type": self.graph.entity_types[key],
+                        }
                         for key, display_name in sorted(self.graph.entity_names.items())
                     ]
                     if self.graph is not None

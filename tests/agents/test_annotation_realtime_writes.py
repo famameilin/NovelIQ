@@ -187,36 +187,35 @@ async def test_event_children_grow_in_call_order_with_trunk_rules() -> None:
 
 
 @pytest.mark.asyncio
-async def test_character_participation_requires_all_three_state_fields() -> None:
-    """2026-09-14 人物三态必填、不自动填默认值；非 character 条目不接受三态字段
+async def test_character_participation_defaults_partial_state_fields() -> None:
+    """2026-10-04 合同放开：三态字段缺省/越界不再拒绝
 
-    参与写并入 write_event 的 characters 数组后，分流规则不变：
-    character 条目缺三态→账本级 code=missing；只给部分三态→schema 级整条拒绝
-    （invalid_combination）；emotion 越界→out_of_range；非 character 带三态→
-    observation_on_noncharacter（旧 not_character/is_character 双向拒绝的合并面）。
+    character 条目缺三态→不产动态状态行（同日补裁决：全空行会撞收尾重复语义，
+    参与者仍落账）、role 缺省按登记大类取（character→主体）；
+    只给部分三态→原样落账；emotion 越界→按边界钳制；
+    非 character 带三态→observation_on_noncharacter（字段误用仍拒）。
     """
     ledger = _ledger()
     tools = _tools(ledger)
     numbers = await _register_entities(tools)
     await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
 
-    missing = await _rejection(
+    missing = await _call(
         tools,
         "write_event",
         {
             "el": "t1",
             "isroot": True,
             "description": "顾霜喝止众人",
-            "characters": [{"entityid": numbers["顾霜"], "role": "主体"}],
+            "characters": [{"entityid": numbers["顾霜"]}],
         },
     )
-    assert (missing.record, missing.field, missing.code) == (
-        f"t1/root/participant/{numbers['顾霜']}",
-        "narrative_role",
-        "missing",
-    )
+    assert missing["status"] == "written"
+    assert f"t1/root/participant/{numbers['顾霜']}" not in ledger.observation_by_record
+    (participant,) = ledger.bound_payloads["events"][0].participants
+    assert participant.role == "主体"
 
-    partial = await _rejection(
+    partial = await _call(
         tools,
         "write_event",
         {
@@ -228,9 +227,9 @@ async def test_character_participation_requires_all_three_state_fields() -> None
             ],
         },
     )
-    assert (partial.record, partial.code) == ("t1/root", "invalid_combination")
+    assert partial["status"] == "written"
 
-    out_of_range = await _rejection(
+    clamped = await _call(
         tools,
         "write_event",
         {
@@ -248,12 +247,8 @@ async def test_character_participation_requires_all_three_state_fields() -> None
             ],
         },
     )
-    assert (out_of_range.record, out_of_range.field, out_of_range.code, out_of_range.expected) == (
-        "t1/root",
-        "emotion",
-        "out_of_range",
-        "-2..2 整数分值（-2 强烈负面 … 2 强烈正面）",
-    )
+    assert clamped["status"] == "written"
+    assert ledger.observation_by_record[f"t1/root/participant/{numbers['顾霜']}"].emotion == 2
 
     not_character = await _rejection(
         tools,
@@ -411,8 +406,8 @@ async def test_el_shape_reserved_key_and_unknown_tree_are_rejected_per_record() 
     """2026-09-14 el 层级键的形态约束：子必填 type、root 是保留节点键、树键必须先建，拒绝只指向该条记录
 
     order 参数退役（树内先后=调用顺序）后，事件写入点保留的形态校验是：
-    子缺 type→missing；t1/root 占用保留键→reserved；未建树→unknown_tree；
-    根带路径→bad_el。任一失败都不得动到同树已写入的根。
+    子缺 type→missing；t1/root 占用保留键→reserved；
+    根带路径→bad_el（2026-10-04 起未建树的子事件改为挂起，不再即时拒绝）。任一失败都不得动到同树已写入的根。
     """
     ledger = _ledger()
     tools = _tools(ledger)
@@ -437,13 +432,6 @@ async def test_el_shape_reserved_key_and_unknown_tree_are_rejected_per_record() 
         {"el": "t1/root", "isroot": False, "type": "main", "description": "众人散去"},
     )
     assert (reserved.record, reserved.field, reserved.code) == ("t1/root", "el", "reserved")
-
-    unknown_tree = await _rejection(
-        tools,
-        "write_event",
-        {"el": "t9/e1", "isroot": False, "type": "main", "description": "众人散去"},
-    )
-    assert (unknown_tree.record, unknown_tree.field, unknown_tree.code) == ("t9/e1", "el", "unknown_tree")
 
     bad_el = await _rejection(
         tools,

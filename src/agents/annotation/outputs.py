@@ -20,12 +20,16 @@ from .vocabulary import CaseType, Confidence, EventCauseRole, RoleFunction, Tone
 
 
 class BoundCharacterObservation(StrictModel):
-    """2026-08-30 用于保存从事件人物参与者派生的动态状态"""
+    """用于保存从事件人物参与者派生的动态状态
+
+    2026-10-04 随 participants 合同放开：三态字段可缺省（模型没写就是 None，
+    不再要求必填），消费方按可空处理。
+    """
 
     character: str = Field(min_length=1)
-    role_function: RoleFunction
-    action: str = Field(min_length=1)
-    emotion: int = Field(ge=-2, le=2)
+    role_function: RoleFunction | None = None
+    action: str | None = Field(default=None, min_length=1)
+    emotion: int | None = Field(default=None, ge=-2, le=2)
 
 
 class BoundDialogue(StrictModel):

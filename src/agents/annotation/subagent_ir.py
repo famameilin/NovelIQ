@@ -196,14 +196,12 @@ class SubagentRelation:
 class SubagentParticipant:
     """事件 subagent 挂到一个事件节点上的参与者（entity_id 写本 subagent 已登记的实体 id）
 
-    2026-09-17 §3.1：character 三态必填（narrative_role/action/emotion），
-    非 character（item/organization/location）只填 entity_id/role——判定依据是生产面
-    落库后的实体大类（write_event 自己查图），不是这里的自报，所以此处只做"三态齐否"
-    的形状校验。
+    2026-10-04 合同放开：role/narrative_role/action/emotion 均可缺省——role 未知词与
+    缺省由生产面按实体登记大类给默认，叙事功能近义词归一、情绪分值钳制在构造层完成。
     """
 
     entity_id: str
-    role: str
+    role: str | None = None
     narrative_role: str | None = None
     action: str | None = None
     emotion: int | None = None

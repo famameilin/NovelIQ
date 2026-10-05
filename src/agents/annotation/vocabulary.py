@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from enum import StrEnum
 from typing import Literal, TypedDict
 
@@ -68,7 +69,8 @@ class DialogueVerdict(StrEnum):
     """对话候选的三态判定
 
     dialogue=人物之间真的说出口的话；inner_monologue=人物心里的想法（含未被他人听见的自语）；
-    not_dialogue=被引号包住但不是人物说话（引文、书名、术语强调等）。
+    not_dialogue=信件、便条、书籍引文、书名、术语强调及假设性台词。
+    口头转述或回忆中确实说过的话仍判 dialogue；书面内容保留在事件或证据中。
     """
 
     DIALOGUE = "dialogue"
@@ -145,6 +147,83 @@ class EventParticipantRole(StrEnum):
     OPPONENT = "反对者"
     WITNESS = "见证者"
     LOCATION = "地点"
+
+
+# 2026-10-04 合同由"缺失/越界即拒"改"缺省归一"（run 08f9ba42 审计：participants 族
+# 拒绝 482 次=全部被拒 53%，且是子代理盲发死循环的唯一燃料）。两条生产路径共用。
+ROLE_FUNCTION_ALIASES: dict[str, str] = {
+    "主角": "主体",
+    "发起者": "主体",
+    "发起人": "主体",
+    "施动者": "主体",
+    "承受者": "客体",
+    "受动者": "客体",
+    "接受者": "接收者",
+    "协助者": "帮助者",
+    "支持者": "帮助者",
+    "阻碍者": "反对者",
+    "对抗者": "反对者",
+    "旁观者": "见证者",
+    "目击者": "见证者",
+    "在场者": "见证者",
+}
+
+
+def normalize_role_function(value: object) -> RoleFunction | None:
+    """用于把模型写的叙事功能词归一到 RoleFunction（缺省/未收录不拒绝）
+
+    同义词按 ROLE_FUNCTION_ALIASES 映射；未收录值收敛为主体并留给审计
+    （原始入参始终在 agent_tool_calls.request_args 可查）。地点等事件专属角色词
+    不在此处理——那是字段误用，仍由调用方按原口径拒绝。
+    """
+    if value is None:
+        return None
+    if isinstance(value, RoleFunction):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = unicodedata.normalize("NFC", value).strip()
+    if not text:
+        return None
+    text = ROLE_FUNCTION_ALIASES.get(text, text)
+    try:
+        return RoleFunction(text)
+    except ValueError:
+        return RoleFunction.SUBJECT
+
+
+def normalize_event_participant_role(value: object) -> EventParticipantRole | None:
+    """用于把模型写的参与角色词归一到 EventParticipantRole（缺省/未收录返回 None）
+
+    None 由生产面按实体登记类型给缺省（character→主体、location→地点、其余→客体）。
+    """
+    if value is None:
+        return None
+    if isinstance(value, EventParticipantRole):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = unicodedata.normalize("NFC", value).strip()
+    if not text:
+        return None
+    try:
+        return EventParticipantRole(text)
+    except ValueError:
+        return None
+
+
+def clamp_emotion_score(value: object) -> int | None:
+    """用于把模型写的情绪分值收敛到 -2..2（越界按边界钳制，非数值记空）"""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = int(value.strip())
+        except ValueError:
+            return None
+    if not isinstance(value, (int, float)):
+        return None
+    return max(-2, min(2, round(value)))
 
 
 class RelationChangeKind(StrEnum):

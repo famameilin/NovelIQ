@@ -13,8 +13,9 @@ from __future__ import annotations
 import inspect
 from enum import StrEnum
 from types import UnionType
-from typing import Annotated, Any, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
+from .links import LINK_KIND_CHANGE_PAIRING_TEXT
 from .program import _PROGRAM_MAX_CODE_CHARS, _PROGRAM_MAX_OPS, render_list_signature
 from .schema import (
     CLIFFHANGER_DESCRIPTION,
@@ -23,6 +24,7 @@ from .schema import (
     PERSON_ROLE_FIELD_HINT,
     PIVOT_MOMENT_DESCRIPTION,
     Confidence,
+    DialogueVerdict,
     EntityRefType,
     EventParticipantRole,
     RoleFunction,
@@ -88,6 +90,8 @@ def _type_label(annotation: Any, *, metadata: tuple[Any, ...] = ()) -> str:
     if origin in (Union, UnionType):
         branches = [item for item in get_args(annotation) if item is not type(None)]
         return _type_label(branches[0]) if len(branches) == 1 else ""
+    if origin is Literal:
+        return "取值 " + " / ".join(repr(value) for value in get_args(annotation))
     if origin is dict:
         return "对象"
     if origin in (list, tuple, set):
@@ -215,7 +219,10 @@ def constructor_call_entries(entries: list[tuple[str, Any, str]]) -> list[tuple[
 
     2026-10-02 恢复：随章内三子代理路径一并加回（0.2.0 重构曾摘除）。
     """
-    return [(name, _function_parameters(function), summary) for name, function, summary in entries]
+    return [
+        (name, _function_parameters(function), inspect.getdoc(function) or summary)
+        for name, function, summary in entries
+    ]
 
 
 def tool_call_entries(
@@ -263,18 +270,33 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
     "el": "本章局部键：实体用 a1，事件根用树键 t1，子事件用 t1/e2",
     "query": "检索原文的关键词，多词任一命中；% 匹配任意长度，_ 匹配单个字符",
     "evidence": "本章事件所在段落的段首号（整数），不是引文",
-    "write_event.type": '"main" 顺延主因链，"secondary" 挂在主链尾；根事件不填',
+    "read_chapter_text.paragraph_id": "本章正文段首可见号，由引擎换算为全局段落号",
+    "read_text.paragraph_id": "全局段落号，跨章检索命中时照抄 paragraph_ids 中的值",
+    "write_event.type": '"main" 顺延主因链，"secondary" 挂在主链尾；子事件必填，根事件不填',
+    "event.type": '"main" 顺延主因链，"secondary" 挂在主链尾；子事件必填，根事件不填',
     "isforeshadowing": "本章原文中的伏笔埋设；为 true 时 confidence 必填",
-    "verdict": "dialogue=真实对话 / inner_monologue=内心独白 / not_dialogue=误判候选",
+    "verdict": _enum_parameter_note(DialogueVerdict),
     "pivot_moment": PIVOT_MOMENT_DESCRIPTION,
     "cliffhanger": CLIFFHANGER_DESCRIPTION,
     "push_case.description": "待处理疑点的人类可读说明，不超过 100 字",
     "push_case.keys": "疑点的匹配关键词，可给多个",
     "push_case.type": "疑点类型，不在正式工作中领取或订正",
     "record_id": "本章写入回执中的 record 原值；没有明确记录可省略",
+    "candidate_index": "候选表的 1 基编号，范围 1..DialogueCandidates.total；total=0 时无候选",
+    "write_link.kind": LINK_KIND_CHANGE_PAIRING_TEXT,
+    "write_link.change_kind": "relation_change 必填，按原文选择变化方向；其它 kind 省略或 None（见 kind 配对表）",
+    "write_link.source_ref": "本次读取已授权的本章原文引用，关联成功时自动绑定到 record_id",
     "characters": '[{"entityid": 参与者实体引用, "role": 参与角色, "narrative_role": 叙事功能, '
     '"action": 做了什么, "emotion": -2..2 整数}, …]；'
-    "character 的三态（narrative_role/action/emotion）要么一起给、要么都不给，非 character 只给 entityid 与 role。"
+    "role/narrative_role/action/emotion 都可省略或写偏：role 缺省按实体登记类型取"
+    "（character→主体、location→地点、其余→客体），叙事功能近义词自动归一，"
+    "emotion 越界按边界收敛；非 character 条目只给 entityid 与 role。"
+    f"role 取：{'、'.join(member.value for member in EventParticipantRole)}（{EVENT_ROLE_FIELD_HINT}）；"
+    f"narrative_role 取：{'、'.join(member.value for member in RoleFunction)}（{PERSON_ROLE_FIELD_HINT}）",
+    "participants.items": '[{"entity_id": 本 subagent 已登记的实体 id, "role": 参与角色, '
+    '"narrative_role": 叙事功能, "action": 一句话动作, "emotion": -2..2 整数}, …]；'
+    "四个描述字段都可省略或写偏：role 缺省按实体登记类型取（character→主体、location→地点、"
+    "其余→客体），叙事功能近义词自动归一，emotion 越界按边界收敛。"
     f"role 取：{'、'.join(member.value for member in EventParticipantRole)}（{EVENT_ROLE_FIELD_HINT}）；"
     f"narrative_role 取：{'、'.join(member.value for member in RoleFunction)}（{PERSON_ROLE_FIELD_HINT}）",
 }
@@ -288,8 +310,10 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
 SUBAGENT_CONTRACT_TEXT: str = (
     "执行一段 Python 程序，程序里的每次调用立即生效：成功就写入正式记录，失败只作废那一条。\n"
     "运行规则：\n"
+    "- 对话序号：执行前预检可确定的 candidate_index 范围，越界时本程序不执行；动态返回值仍逐项校验。\n"
     "- 语法：变量赋值、列表/字典/元组、下标、for 列表循环、if 与 ==/!=/in；调用只写具名参数；"
-    "没有 import、属性访问、函数定义或其他 Python API。常量写 True/False/None（也接受 true/false/null）。\n"
+    "没有 import、属性访问、函数定义或其他 Python API。常量写 True/False/None（也接受 true/false/null）；\n"
+    "字典/列表一律写字面量（{…}/[…]）：dict()/list() 等构造器与列表推导不可用，循环一律用 for。\n"
     "- 变量：程序里赋的变量在本章后续程序里保留；构造器与检索的返回值都能用变量承接。\n"
     "- 失败：业务失败只作废该条调用、后面的语句继续执行；语法或运行错误停止本程序、已成功的调用保留。\n"
     f"- 上限：单个程序最多 {_PROGRAM_MAX_CODE_CHARS} 字符、{_PROGRAM_MAX_OPS} 条调用。\n"
@@ -297,12 +321,14 @@ SUBAGENT_CONTRACT_TEXT: str = (
     "- status：本次程序的整体结果。\n"
     "- applied：本程序成功的调用条数。\n"
     "- failed：失败清单，每条给 op（第几条调用）、line（源码行）、record、field、code、expected。\n"
-    "- reads：本程序内检索到的数据，原样回显。\n"
+    "- written：本程序成功的 record 键，直接照抄，不自行拼接。\n"
+    "- reads：本程序最近的读结果，正文可截短；references 保留全部 source_ref 与坐标，"
+    "variables 给出仍可使用的原文引用变量，reads_omitted 是省略正文回显的实际条数。\n"
     "- progress：本 subagent 各类已写入记录的条数。\n"
     "- error：程序在写完之前就失败时的错误详情（type 与 message）。\n"
     "- 单次调用：写类回 status=written 带 record 与 ref（ref 是该次的产出，如 push_case 的案例编号）；"
     "读类直接给数据；被拒一律 status=rejected 带 record/field/code/expected/message。\n"
-    "写类调用的成功明文不回显：已写入的进度看 progress、检索结果看 reads。\n"
+    "写类调用的成功正文不回显：记录键看 written，进度看 progress，原文句柄看 references。\n"
     "工作方式：\n"
     "- 一次程序把本章该判的内容写完：同一段程序里连续调用多个构造器、写多条记录都可以。\n"
     "- 判不了的用 pending 登记，不要硬套：正文只说见面、对峙这类没有闭合关系可表达的，宁缺勿滥。\n"
@@ -320,8 +346,10 @@ SUBAGENT_CONTRACT_TEXT: str = (
 PROGRAM_CONTRACT_TEXT: str = (
     "执行一段 Python 程序，程序里的每次调用立即生效：成功就写入正式记录，失败只作废那一条。\n"
     "运行规则：\n"
+    "- 对话序号：执行前预检可确定的 candidate_index 范围，越界时本程序不执行；动态返回值仍逐项校验。\n"
     "- 语法：变量赋值、列表/字典/元组、下标、for 列表循环、if 与 ==/!=/in；调用只写具名参数；"
-    "没有 import、属性访问、函数定义或其他 Python API。常量写 True/False/None（也接受 true/false/null）。\n"
+    "没有 import、属性访问、函数定义或其他 Python API。常量写 True/False/None（也接受 true/false/null）；\n"
+    "字典/列表一律写字面量（{…}/[…]）：dict()/list() 等构造器与列表推导不可用，循环一律用 for。\n"
     "- 变量：程序里赋的变量在本章后续程序里保留；调用的返回值都能用变量承接。\n"
     "- 失败：业务失败只作废该条调用、后面的语句继续执行；语法或运行错误停止本程序、已成功的调用保留。\n"
     f"- 上限：单个程序最多 {_PROGRAM_MAX_CODE_CHARS} 字符、{_PROGRAM_MAX_OPS} 条调用。\n"
@@ -329,12 +357,14 @@ PROGRAM_CONTRACT_TEXT: str = (
     "- status：本次程序的整体结果。\n"
     "- applied：本程序成功的调用条数。\n"
     "- failed：失败清单，每条给 op（第几条调用）、line（源码行）、record、field、code、expected。\n"
-    "- reads：本程序内检索到的数据，原样回显。\n"
+    "- written：本程序成功的 record 键，直接照抄，不自行拼接。\n"
+    "- reads：本程序最近的读结果，正文可截短；references 保留全部 source_ref 与坐标，"
+    "variables 给出仍可使用的原文引用变量，reads_omitted 是省略正文回显的实际条数。\n"
     "- progress：本章各类已写入记录的条数。\n"
     "- error：程序在写完之前就失败时的错误详情（type 与 message）。\n"
     "- 单次调用：写类回 status=written 带 record；读类直接给数据；"
     "被拒一律 status=rejected 带 record/field/code/expected/message。\n"
-    "写类调用的成功明文不回显：已写入的进度看 progress、检索结果看 reads。\n"
+    "写类调用的成功正文不回显：记录键看 written，进度看 progress，原文句柄看 references。\n"
     "工作方式：\n"
     "- 一次程序把本章该判的内容写完：同一段程序里连续写多条记录都可以。\n"
     "- 全部领域通常 1-2 个程序完成：判完即写、一批收章，不要逐领域各发一个程序。\n"

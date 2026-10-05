@@ -41,7 +41,6 @@ from .subagent_ir import (
     ENTITY_TYPES,
     EVENT_CHILD_TYPES,
     NARRATIVE_FUNCTIONS,
-    PARTICIPANT_ROLES,
     PENDING_CASE_TYPES,
     PENDING_KINDS,
     RELATION_TYPES,
@@ -70,6 +69,12 @@ from .subagent_ir import (
     truncate_case_description,
 )
 from .tools import FINISH_TOOL_NAME, _forbid_undeclared_args
+from .vocabulary import (
+    _EVENT_ONLY_ROLE_WORDS,
+    clamp_emotion_score,
+    normalize_event_participant_role,
+    normalize_role_function,
+)
 
 
 def _record_of(subagent: SubagentAnnotation, field: str) -> str:
@@ -167,11 +172,11 @@ def _normalize_el(value: Any, *, record: str) -> str:
 
 
 def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) -> list[SubagentParticipant]:
-    """用于校验参与者清单的形状（entity_id 是本 subagent 已登记 id、character 三态齐）
+    """用于校验参与者清单的形状（entity_id 是本 subagent 已登记 id），并归一角色取值
 
-    2026-09-17 §3.1：这里只判形状——"是不是 character"由生产面按**落库后的实体大类**
-    判定（write_event 自己查图），所以三态齐否按"给了三态就是 character 语义"处理：
-    三态要么一起给、要么一个都不给（与大类无关）。
+    2026-10-04 合同放开：role/narrative_role/emotion 缺省或写偏不再拒绝——role 未知词
+    交生产面按实体登记类型给默认，叙事功能近义词归一（未收录收敛为主体），
+    情绪分值越界按边界钳制；地点等事件专属角色词写进叙事功能仍当场拒（字段误用）。
     """
     if raw is None:
         raise _reject(
@@ -196,43 +201,27 @@ def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) ->
         entity_id = _require_known_entity_id(
             book, entry.get("entity_id"), record=record, field_name=f"participants[{index}].entity_id"
         )
-        role = _require_enum(
-            entry.get("role"), PARTICIPANT_ROLES, record=record, field_name=f"participants[{index}].role"
-        )
         narrative_role = entry.get("narrative_role")
-        action = entry.get("action")
-        emotion = entry.get("emotion")
-        given = [value is not None for value in (narrative_role, action, emotion)]
-        if any(given) and not all(given):
+        if isinstance(narrative_role, str) and narrative_role.strip() in _EVENT_ONLY_ROLE_WORDS:
             raise _reject(
-                f"participants[{index}]（{entity_id}）的 narrative_role/action/emotion 要么一起给、要么都不给",
+                f"participants[{index}].narrative_role 不接受 {narrative_role.strip()}: "
+                "地点、行动者等只用于 role 字段；人物功能使用 主体/客体/发送者/接收者/帮助者/反对者/见证者",
                 record=record,
                 field=f"participants[{index}].narrative_role",
-                code="missing_field",
-                expected="narrative_role（主体/客体/发送者/接收者/帮助者/反对者/见证者）"
-                "＋ action（一句话动作）＋ emotion（-2..2 整数）",
+                code="invalid_value",
+                expected="、".join(RUNTIME_ROLES),
             )
         normalized.append(
             SubagentParticipant(
                 entity_id=entity_id,
-                role=role,
-                narrative_role=(
-                    _require_enum(
-                        narrative_role, RUNTIME_ROLES, record=record, field_name=f"participants[{index}].narrative_role"
-                    )
-                    if narrative_role is not None
-                    else None
-                ),
+                role=normalize_event_participant_role(entry.get("role")),
+                narrative_role=normalize_role_function(narrative_role),
                 action=(
                     _require_text(action, record=record, field_name=f"participants[{index}].action")
-                    if action is not None
+                    if (action := entry.get("action")) is not None
                     else None
                 ),
-                emotion=(
-                    _require_score(emotion, record=record, field_name=f"participants[{index}].emotion")
-                    if emotion is not None
-                    else None
-                ),
+                emotion=clamp_emotion_score(entry.get("emotion")),
             )
         )
     return normalized
@@ -323,6 +312,9 @@ def build_subagent_constructors(
     语句）。三个 subagent 拿到的是同一份构造器清单（§3），引用键按角色命名空间化
     落库（namespace_el），所以三个 subagent 的同名局部键互不占用。
     """
+    # 聚合模块会反向导入构造器，运行时再读取目录顺序以避免首次导入环
+    from .subagent_program import _SUBAGENT_CONSTRUCTOR_ORDER
+
     book = _ConstructorBook(
         subagent=subagent,
         role=subagent.role,
@@ -589,7 +581,8 @@ def build_subagent_constructors(
 
         items 每项 {entity_id: 本 subagent 已登记的实体 id, role: 主体/客体/接收者/帮助者/
         反对者/见证者/地点, narrative_role: 叙事功能, action: 做了什么, emotion: -2..2 整数}。
-        character 的三态（narrative_role/action/emotion）要么一起给、要么都不给。
+        四个描述字段均可省略或写偏：role 缺省按实体登记类型取默认（character→主体、
+        location→地点、其余→客体），叙事功能近义词自动归一，emotion 越界按边界收敛。
         """
         record = _record_of(subagent, f"participants/{el}")
         normalized_el = _normalize_el(el, record=record)
@@ -859,8 +852,9 @@ def build_subagent_finish_tool(subagent: SubagentAnnotation, *, candidate_total:
         构造器的写入是即时生效的（收尾不减损已写入的记录），收尾后仍可继续写入。
         """
         subagent.finished = True
-        judged = {item.candidate_index for item in subagent.dialogues}
-        missing = sorted(set(range(1, candidate_total + 1)) - judged)
+        from .subagent_program import subagent_gap
+
+        gap = subagent_gap(subagent, candidate_total=candidate_total)
         return json.dumps(
             {
                 "status": "written",
@@ -869,8 +863,9 @@ def build_subagent_finish_tool(subagent: SubagentAnnotation, *, candidate_total:
                     "role": subagent.role,
                     "finished": True,
                     "counts": subagent.counts(),
-                    "unjudged_candidates": missing,
-                    "candidate_total": candidate_total,
+                    "unjudged_candidates": gap["missing_candidates"],
+                    "candidate_total": candidate_total if subagent.role == "evidence" else 0,
+                    "missing_metric": gap["missing_metric"],
                 },
             },
             ensure_ascii=False,
@@ -886,8 +881,3 @@ def build_subagent_finish_tool(subagent: SubagentAnnotation, *, candidate_total:
     )
     _forbid_undeclared_args(tool_candidate)
     return tool_candidate
-
-
-# 构造器目录顺序常量保留在 subagent_program（本模块仅在调用时读它）：
-# 置于文件末尾引用，两个方向的首次导入都安全（双方定义先于引用）。
-from .subagent_program import _SUBAGENT_CONSTRUCTOR_ORDER  # noqa: E402

@@ -123,6 +123,22 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         """用于回执 progress（本 subagent 已构造的记录计数）"""
         return self.subagent.counts()
 
+    def _receipt(
+        self, *, status: str, applied: int, failed: list[dict[str, Any]], error: dict[str, Any] | None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """只回报本次程序的显式收尾，避免上一轮 finish 触发提前结束"""
+        from .subagent_program import subagent_gap
+
+        body = super()._receipt(status=status, applied=applied, failed=failed, error=error, note=note)
+        if any(
+            op["program_id"] == self._program_id and op["tool_name"] == FINISH_TOOL_NAME
+            and op["status"] == "success"
+            for op in self.ops
+        ):
+            body["finish"] = subagent_gap(self.subagent, candidate_total=len(self.ledger.dialogue_candidates))
+        return body
+
     async def _dispatch(self, name: str, args: dict[str, Any], *, line: int | None) -> Any:
         """用于执行程序里的一次调用（构造器与工具同一条路径、同一套回执与审计）
 

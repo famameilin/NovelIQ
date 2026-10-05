@@ -162,11 +162,15 @@ def build_annotation_tools(
         not_dialogue 表示题字或描写等误判候选，只给编号与 verdict
         """
         record = ledger.apply_dialogue(
-            candidate_index=candidate_index, verdict=verdict, speaker_ref=speaker, tone=tone,
+            candidate_index=candidate_index,
+            verdict=verdict,
+            speaker_ref=speaker,
+            tone=tone,
         )
         return json.dumps(
             {
-                "status": "written", "record": record,
+                "status": "written",
+                "record": record,
                 "content": ledger.dialogue_content(candidate_index),
                 "progress": {"written": len(ledger.written_dialogues), "total": len(ledger.dialogue_candidates)},
             },
@@ -184,7 +188,9 @@ def build_annotation_tools(
     ) -> str:
         """登记本章局部关系，两端只能引用本章实体，不修改既有关系状态"""
         record, outcome, content = ledger.apply_relation(
-            from_ref=from_entity, to_ref=to_entity, relation_type=relation_type,
+            from_ref=from_entity,
+            to_ref=to_entity,
+            relation_type=relation_type,
         )
         return json.dumps(
             {"status": "written", "record": record, "outcome": outcome, "content": content},
@@ -206,7 +212,8 @@ def build_annotation_tools(
 
         description 是一句话描述（根事件不超过 30 字）。evidence 是该事件所在段的
         段首可见号；多段章节新建事件时必填，单段章节可省略。整棵树可以在一轮里按顺序写完：
-        先根后子逐个调用，el 由你指定、写入即生效，同轮后面的调用直接可用（不等回执）；
+        建议先根后子逐个调用，el 由你指定、写入即生效，同轮后面的调用直接可用（不等回执）；
+        子事件先于根提交也可以：会挂起，根建好后按提交顺序自动生效（回执 content 带 deferred 提示）。
         树内先后=调用顺序，没有序号参数。子事件 type="main" 顺延主因链（成为新的
         链尾）/"secondary" 挂在当时主链尾；伏笔属性（isforeshadowing/confidence）只属于根：
         isforeshadowing=true 时 confidence 必填（high/medium/low），整棵树成为伏笔树、
@@ -214,10 +221,12 @@ def build_annotation_tools(
         伏笔建模判据：埋设事件本身就是本章主链事件时，直接给主链根标 isforeshadowing=true，
         不再另立第二棵树重复同一时刻；仅当要埋的悬念不对应主链某个事件时才独立立伏笔树。
         同一悬念的建树选择一次定案，后续回合不再依同一证据复议。
-        characters 是该节点的参与者数组（可省）：根节点也直接挂参与者。character 实体
-        每条必须带 narrative_role/action/emotion 三态（action 不超过 15 字、emotion
-        为 -2..2 整数；同一人物在本章 内的动作不得重复），非 character（item/
-        organization/location）条目只填 entityid/role，"地点"角色只用于 location。
+        characters 是该节点的参与者数组（可省）：根节点也直接挂参与者。character 实体的
+        role/narrative_role/action/emotion 建议都给，也允许省略或写偏：role 缺省按实体登记
+        类型取（character→主体、location→地点、其余→客体），叙事功能近义词自动归一，
+        emotion 越界按边界收敛；action 不超过 15 字，同一人物在本章内的动作不得重复。
+        非 character（item/organization/location）条目只填 entityid/role，
+        "地点"角色只用于 location。
         entityid 填本章的 el 键或 write_entity 回执中的 run 级 id。
         同 el 重写按更新处理：根改描述/伏笔属性，子改描述（type 不可改写，要改换键）；
         characters 给出即整体替换该节点参与者列表，省略则保留。
@@ -283,15 +292,31 @@ def build_annotation_tools(
                 expected=expected,
             )
         if normalized not in ledger.written_record_keys:
-            known = "、".join(sorted(ledger.written_record_keys)[:8])
+            # 2026-10-03 known 清单按域全量分组回显：此前只随机列前 8 个，模型拿不到
+            # "什么能用"的全貌，思考审计实证它只能逐个试探（70% 犹豫句在猜键空间）。
+            # 分组按域关键字匹配——IR 键带角色前缀（structure/entity/a1），首段不是域
+            grouped: dict[str, list[str]] = {}
+            for key in sorted(ledger.written_record_keys):
+                if "/entity/" in key or key.startswith("entity/"):
+                    domain = "entity"
+                elif "/relation/" in key or key.startswith("relation/"):
+                    domain = "relation"
+                elif "/dialogue/" in key or key.startswith("dialogue/"):
+                    domain = "dialogue"
+                else:
+                    domain = "event"
+                grouped.setdefault(domain, []).append(key)
+            sections = "；".join(f"{name}: {'、'.join(keys)}" for name, keys in grouped.items())
             raise AnnotationStageRejection(
                 f"{field} 不是本章已经写出来的记录: {normalized}",
                 record=record,
                 field=field,
                 code="unknown_record",
-                expected=f"{expected}；本章已写出：{known or '（还没有任何记录）'}",
+                expected=(f"{expected}；本章已写出的全部合法记录键——{sections or '（还没有任何记录）'}"),
             )
-        return normalized
+        # 2026-10-03 校验通过后把 IR 键（structure/entity/a1、event/t1…）规范成生产键：
+        # 存进 target_ref 的键由正式提交的 bind_record_target 按生产键空间解析
+        return ledger.production_record_key(normalized)
 
     @tool
     def push_case(
@@ -309,7 +334,8 @@ def build_annotation_tools(
         record_id 填这条疑点涉及的产出记录键（写入回执里的 record，实体/关系/事件/对话都行），
         没有明确记录就省略。
         未确定项直接进入案例池，不要求另开全书标注或重新分析章节。
-        evidence_refs 可引用 read_text 返回的原文定位，保存双方证据。
+        evidence_refs 逐字照抄 read_text 回执里的 source_ref（原文证据句柄）；
+        search_text 命中只给段落定位、不是 source_ref，未读过的段落先 read_text。
         """
         if ledger.phase != "chapter_open":
             raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 push_case")
@@ -321,8 +347,7 @@ def build_annotation_tools(
             raise AnnotationInputError("push_case.description 不能为空")
         if len(normalized_description) > 100:
             raise AnnotationInputError(
-                "push_case.description 不能超过 100 字，请精简为人类可读要点"
-                "（案例检索载荷有长度上限）"
+                "push_case.description 不能超过 100 字，请精简为人类可读要点（案例检索载荷有长度上限）"
             )
         json_marker_fields = ('"keys"', '"type"', '"record_id"')
         if any(marker in normalized_description for marker in json_marker_fields):
@@ -341,8 +366,19 @@ def build_annotation_tools(
             "keys": normalized_keys,
         }
         if evidence_refs:
-            if any(reference not in ledger.text_references for reference in evidence_refs):
-                raise AnnotationInputError("案例证据必须来自本次 read_text 的回执")
+            unknown = [reference for reference in evidence_refs if reference not in ledger.text_references]
+            if unknown:
+                # 2026-10-03 拒绝信息教格式并列已授权 source_ref：run 4a6c268c ch21 实证
+                # 模型拿段落号（'57'、'21:1360'）猜 evidence_refs 格式 7 连拒——不知道
+                # source_ref 是 read_text 回执里的哈希句柄，也没有"哪些可用"的回显
+                authorized = sorted(ledger.text_references)
+                shown = "、".join(authorized[:5]) + ("…" if len(authorized) > 5 else "")
+                raise AnnotationInputError(
+                    "evidence_refs 必须逐字照抄 read_text 回执里的 source_ref 字段"
+                    f"（收到 {unknown[0]!r} 等 {len(unknown)} 个非法值；段落号不是 source_ref）"
+                    "——先 read_text(paragraph_id, quote=原文片段) 取回执再登记"
+                    + (f"；本次已授权的 source_ref：{shown}" if authorized else "；本次还没有任何 read_text 回执")
+                )
             target_ref["source_refs"] = [
                 ledger.text_references[reference].model_dump(mode="json") for reference in sorted(set(evidence_refs))
             ]
@@ -377,8 +413,17 @@ def build_annotation_tools(
 
     from .links import build_link_tools
 
-    tools = [write_entity, write_metrics, write_event, write_relation, write_dialogue, finish,
-             *build_search_tools(query_service, ledger), *build_link_tools(query_service, ledger), push_case]
+    tools = [
+        write_entity,
+        write_metrics,
+        write_event,
+        write_relation,
+        write_dialogue,
+        finish,
+        *build_search_tools(query_service, ledger),
+        *build_link_tools(query_service, ledger),
+        push_case,
+    ]
     for tool_candidate in tools:
         _forbid_undeclared_args(tool_candidate)
     return tools

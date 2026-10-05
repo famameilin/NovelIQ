@@ -2,8 +2,8 @@
 
 设计（《章内多代理重设计-三代理并发版》§3/§3.1/§4）：
 
-- **三个 subagent 的模型可见面完全相同（不按域裁剪）**：只有 `execute_code` 与 `finish`
-  两项（八类构造器、检索与案例登记全装在 execute_code 的 description 里）。
+- **三个 subagent 的模型可见面完全相同（不按域裁剪）**：`execute_code`、`submit_events` 与 `finish`
+  三项（八类构造器、检索与案例登记装在 execute_code 的 description 里，事件可直接提交数据）。
   域分工只写在职责文案里，不通过拿掉工具或构造器实现——依据是 run c80105cc 的实测
   （工具按域渐进解锁时，模型在多个回合反复确认能力缺口，67% 思考落在锁定轮，
   锁定轮只发 14% 调用）。
@@ -19,8 +19,8 @@
   案例面只剩 `push_case`（裁决机器与 search_pool/promise_case/close_case 已退役）；
   relation 构造器去 change_kind（关系变化归 write_link），event 构造器去伏笔挂树参数，
   dialogue 构造器去 candidate_key 订正路径（0.2.0 write_dialogue 无订正入口）。
-- 收束 = 模型不再提交程序；`finish` 只声明本 subagent 完毕并回显还缺什么，
-  撞轮次上限按同一收束处理。
+- 当前批次无失败且显式 `finish` 的职责缺口清零时直接结束，省去模型复述完成的回合
+  无工具回复或轮次上限只结束会话，runner 仍检查是否交付完整
 """
 
 # ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入（大文件拆分聚合面）。
@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .event_submission import SUBMIT_EVENTS_TOOL_NAME
 from .program import PROGRAM_TOOL_NAME
 from .subagent_ir import SUBAGENT_ROLES, SubagentAnnotation
 from .tools import FINISH_TOOL_NAME
@@ -56,11 +57,15 @@ SUBAGENT_ROLE_LABELS: dict[str, str] = {
 # 案例面只剩 push_case（search_pool/promise_case/close_case 随裁决机器退役）。
 SUBAGENT_TOOL_NAMES: tuple[str, ...] = (
     "search_text",
+    "read_text",
+    "read_chapter_text",
+    "anchor_record",
+    "write_link",
     "push_case",
 )
 
-# 2026-09-18 subagent 的模型可见面（绑定面）：只有程序入口与收尾两件，与写者面逐字同名。
-SUBAGENT_BOUND_TOOL_NAMES: tuple[str, ...] = (PROGRAM_TOOL_NAME, FINISH_TOOL_NAME)
+# 三个职责共享程序入口、结构化事件入口和收尾工具
+SUBAGENT_BOUND_TOOL_NAMES: tuple[str, ...] = (PROGRAM_TOOL_NAME, SUBMIT_EVENTS_TOOL_NAME, FINISH_TOOL_NAME)
 
 # 2026-09-18 本面的引用与证据口径（渲染在构造器目录之前，全局定义一次）。
 # 为什么必须有这一块：构造器的实体引用走 _require_known_entity_id，只认"本 subagent 登记过的
@@ -75,7 +80,11 @@ _SUBAGENT_REFERENCE_SCOPE_TEXT: str = (
     "服务端按号取段、不需要抄原文；号码越界会被拒并回报合法号范围。\n"
     "- push_case(record_id=...) 指向的是产出记录：写写入回执里的 record 原值（照抄，不要自己拼）："
     "实体形如 structure/entity/a1、事件形如 event/t1、对话形如 evidence/dialogue/…，"
-    "且必须是本章已经写出来的记录——疑点登记只记账，语义改动由那条记录自己承担。\n\n"
+    "且必须是本章已经写出来的记录——疑点登记只记账，语义改动由那条记录自己承担。\n"
+    "- 本章原文用 read_chapter_text(paragraph_id=段首可见号)；跨章 search_text 命中里的全局段落号"
+    "用 read_text(paragraph_id=全局段落号)。两者都返回 source_ref，不要自行换算或构造引用。\n"
+    "- push_case 的 evidence_refs 逐字照抄读取回执的 source_ref（不是段落号）；"
+    "search_text 命中不产生 source_ref，先读取那一段再登记证据。\n\n"
 )
 
 # 八类构造器（§3.1 的目录就是模型知道"能交什么、怎么交"的全部依据）。

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import json
 import unicodedata
 from typing import Any
 from uuid import NAMESPACE_DNS, uuid5
@@ -97,46 +98,39 @@ def _entity_id(name: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_participation_role_rejects_narrative_role_word() -> None:
-    """role 与 narrative_role 是两套词表：人物功能词不得写进参与角色
+async def test_participation_role_unknown_word_defaults_to_subject() -> None:
+    """2026-10-04 合同放开：role 写了词表外的词不再拒绝，按登记大类给默认
 
-    2026-09-14：参与条目并入 write_event 的 characters 数组；非法枚举值由 schema 层
-    收紧成结构化拒绝，给出定位（record=t1/root, field=role, code=invalid_value）与
-    合法取值清单；被拒的整条不落账（根已写入，参与者仍为空）。
+    role 与 narrative_role 是两套词表，但把人物功能词写进参与角色只造成一次
+    缺省归一（character→主体），不再产生整条拒绝与解码返工。
     """
     ledger = _writer_ledger()
     tools = _writer_tools(ledger)
     tools["write_entity"].invoke({"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     tools["write_event"].invoke({"el": "t1", "isroot": True, "description": "根事件"})
 
-    receipt = await _write_rejection(
-        tools,
-        "write_event",
-        {
-            "el": "t1",
-            "isroot": True,
-            "description": "根事件",
-            "characters": [
-                {
-                    "entityid": "顾霜",
-                    "role": "发送者",
-                    "narrative_role": "主体",
-                    "action": "喝止",
-                    "emotion": -1,
-                }
-            ],
-        },
+    receipt = json.loads(
+        tools["write_event"].invoke(
+            {
+                "el": "t1",
+                "isroot": True,
+                "description": "根事件",
+                "characters": [
+                    {
+                        "entityid": "顾霜",
+                        "role": "发送者",
+                        "narrative_role": "主体",
+                        "action": "喝止",
+                        "emotion": -1,
+                    }
+                ],
+            }
+        )
     )
 
-    assert receipt["record"] == "t1/root"
-    assert receipt["field"] == "role"
-    assert receipt["code"] == "invalid_value"
-    assert "https://" not in receipt["message"]
-    # 被拒的整条不落账：根节点保留、参与者未被写入
-    tree = _tree(ledger, "t1")
-    assert set(tree["nodes"]) == {"root"}
-    root_event = next(event for event in ledger.bound_payloads["events"] if event.node_id == tree["root_node_id"])
-    assert root_event.participants == []
+    assert receipt["status"] == "written"
+    (participant,) = ledger.bound_payloads["events"][0].participants
+    assert participant.role == "主体"
 
 
 @pytest.mark.asyncio

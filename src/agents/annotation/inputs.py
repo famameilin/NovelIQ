@@ -42,6 +42,9 @@ from .vocabulary import (
     RelationType,
     RoleFunction,
     Tone,
+    clamp_emotion_score,
+    normalize_event_participant_role,
+    normalize_role_function,
     relation_catalog_text,
 )
 
@@ -233,84 +236,83 @@ class EventParticipantInput(StrictModel):
 
     @model_validator(mode="after")
     def normalize_participant(self) -> EventParticipantInput:
-        """2026-08-30 用于规范化参与者并约束人物动态字段成组提交"""
+        """用于规范化参与者（2026-10-04 起三态字段允许任意缺省，不再成组约束）"""
         self.entity = normalize_semantic_text(self.entity, label="event.participant.entity")
         if self.action is not None:
             self.action = normalize_semantic_text(self.action, label="event.participant.action")
-        observation_fields = (self.narrative_role, self.action, self.emotion)
-        if any(value is not None for value in observation_fields) and not all(
-            value is not None for value in observation_fields
-        ):
-            raise ValueError("character 参与者的 narrative_role/action/emotion 必须同时提供或同时省略")
         return self
 
 
 class ParticipantArg(StrictModel):
     """事件的一个参与者（write_event.characters 数组元素）
 
-    按该实体的登记类型分两种形态：character 填 entityid/role 加人物三态
-    （narrative_role/action/emotion），其余实体只填 entityid/role。
+    2026-10-04 合同放开：role/narrative_role/action/emotion 均可省略或写偏——缺省值
+    与归一在解析层完成（role 按实体登记类型默认、叙事功能同义词归一、情绪分值钳制），
+    拒绝面只留字段误用（事件角色词写进叙事功能、语气词写进情绪分值）。
     """
 
     entityid: EntityRef = Field(description=entity_ref_field_description("参与者实体引用"))
-    role: EventParticipantRole = Field(
+    role: EventParticipantRole | None = Field(
+        default=None,
         description=(
             f"参与角色：{EVENT_ROLE_FIELD_HINT}；取 {_enum_values_text(EventParticipantRole)}"
-            "（地点角色只用于 location 实体）"
-        )
+            "（地点角色只用于 location 实体）；可省略，缺省按实体登记类型取"
+            "（character→主体、location→地点、其余→客体）"
+        ),
     )
     narrative_role: RoleFunction | None = Field(
         default=None,
         description=(
-            f"仅 character 参与者必填的人物叙事功能（{PERSON_ROLE_FIELD_HINT}）："
-            f"{_enum_values_text(RoleFunction)}"
+            f"character 参与者的人物叙事功能（{PERSON_ROLE_FIELD_HINT}）："
+            f"{_enum_values_text(RoleFunction)}；可省略，近义词自动归一"
         ),
     )
     action: str | None = Field(
         default=None,
         min_length=1,
-        description="仅 character 参与者必填：一句话概括人物在本事件中的动作（不超过 15 字）",
+        description="character 参与者的一句话动作概括（不超过 15 字）；可省略",
     )
     emotion: int | None = Field(
         default=None,
         ge=-2,
         le=2,
-        description=f"仅 character 参与者必填：动作伴随的情绪分值。{EMOTION_SCORE_DESCRIPTION}",
+        description=f"character 参与者动作伴随的情绪分值，可省略。{EMOTION_SCORE_DESCRIPTION}",
     )
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _normalize_role(cls, value: object) -> object:
+        """用于把参与角色词归一到闭集（缺省/未收录交生产面按实体类型给默认）"""
+        return normalize_event_participant_role(value)
 
     @field_validator("narrative_role", mode="before")
     @classmethod
     def _reject_event_role_words(cls, value: object) -> object:
-        """2026-08-30 用于阻止事件专属角色词进入人物功能字段"""
+        """用于阻止事件专属角色词进入人物功能字段，其余近义词归一（含未收录收敛为主体）"""
         if isinstance(value, str) and value.strip() in _EVENT_ONLY_ROLE_WORDS:
             raise ValueError(
                 "narrative_role 不接受 "
                 f"{value.strip()}：地点、行动者等只用于事件参与者的 role 字段；"
                 "人物功能使用 主体/客体/发送者/接收者/帮助者/反对者/见证者"
             )
-        return value
+        return normalize_role_function(value)
 
     @field_validator("emotion", mode="before")
     @classmethod
     def _reject_tone_words_in_emotion(cls, value: object) -> object:
-        """2026-08-30 用于阻止对话语气词进入人物情绪分值字段"""
+        """用于阻止对话语气词进入人物情绪分值字段（语气词指引保留，数值越界改钳制）"""
         if isinstance(value, str) and value.strip() in _TONE_CHINESE_WORDS:
             raise ValueError(
                 f"emotion 不接受 {value.strip()}：该字段是整数分值 -2..2"
                 "（-2 强烈负面 … 2 强烈正面），语气词是对话 tone 字段的取值"
             )
-        return value
+        return clamp_emotion_score(value)
 
     @model_validator(mode="after")
     def normalize_participant(self) -> ParticipantArg:
-        """2026-09-14 用于规范化动作并按组校验三态字段"""
+        """用于规范化动作文本（三态字段允许任意缺省，不再做齐套校验）"""
         if self.action is not None:
             self.action = normalize_semantic_text(self.action, label="characters[].action")
-        observation_fields = (self.narrative_role, self.action, self.emotion)
-        if any(value is not None for value in observation_fields) and not all(
-            value is not None for value in observation_fields
-        ):
-            raise ValueError("character 参与者的 narrative_role/action/emotion 必须同时提供；非 character 三者都不填")
         return self
 
 

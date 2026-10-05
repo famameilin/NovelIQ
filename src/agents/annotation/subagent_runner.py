@@ -90,15 +90,19 @@ async def run_subagent_agent(
             stream=stream,
         )
         program_tool = runtime.build_tool()
+        from .event_submission import build_event_submission_tool
+
         graph = build_subagent_graph(
             llm,
             program_tool,
             runtime.finish_tool,
             ledger=ledger,
+            subagent=subagent,
             max_iterations=max(1, settings.models.annotation.max_iterations),
             stream=stream,
             observer=observer,
             retries=settings.models.annotation.total_attempts,
+            event_submission_tool=build_event_submission_tool(runtime),
         )
         first_messages: list[BaseMessage] = [
             SystemMessage(content=SUBAGENT_SYSTEM_PROMPT),

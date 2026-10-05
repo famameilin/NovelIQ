@@ -16,11 +16,23 @@ def _read_prompt_text(filename: str) -> str:
     return (_PROMPTS_DIR / filename).read_text(encoding="utf-8").strip()
 
 
-SYSTEM_PROMPT = _read_prompt_text("agent.txt")
+ANNOTATION_SCOPE_POLICY = (
+    "\n统一判据：\n"
+    "- 人物：有姓名、代号、独立行动或实际发言的都登记；匿名行动者或说话人按正文称谓登记，"
+    "不编造姓名。无独立行动的路人、士兵等背景群体不登记；代词和泛泛称呼不单独建实体。\n"
+    "- 有稳定专指的别名与称号按正文写法分别登记，不自行推断身份；已确认同一人物的关系另行表达。\n"
+    "- 机构名称兼指所在场所时统一登记 organization；只有纯地理场所才登记 location。"
+    "同章同名只登记一种类型，不因进入、离开等地点用法重复建实体。\n"
+    "- 对话：信件、便条、书籍引文及假设性台词判 not_dialogue，其内容保留在事件或证据中；"
+    "实际说出口、口头转述或回忆中确实说过的话判 dialogue；真实内心想法判 inner_monologue。"
+    "每个候选均需判断，不能因说话人未知而改判 not_dialogue。\n"
+)
+
+SYSTEM_PROMPT = _read_prompt_text("agent.txt") + ANNOTATION_SCOPE_POLICY
 
 # 2026-09-18 三代理并发：subagent 面系统提示词同样从 txt 读（sub_agent.txt）。
 # 2026-10-02 恢复：随章内三子代理路径一并加回（0.2.0 重构曾摘除）。
-SUBAGENT_SYSTEM_PROMPT = _read_prompt_text("sub_agent.txt")
+SUBAGENT_SYSTEM_PROMPT = _read_prompt_text("sub_agent.txt") + ANNOTATION_SCOPE_POLICY
 
 # subagent 各自的职责范围（只写在文案里，**不通过拿掉工具或构造器实现**）：
 # 多块章按三条职责并发（角色名单源在 subagent_ir）。职责文案只留**分域**：这个角色负责
@@ -30,7 +42,7 @@ SUBAGENT_ROLE_SCOPES: dict[str, str] = {
     "structure": (
         "<RoleScope role=\"实体与关系\">\n"
         "你负责这一章的两个域：\n"
-        "- entity：正文里出现的实体（人物/地点/物品/组织）都登记；\n"
+        "- entity：按统一判据登记正文里的人物、地点、物品与组织；\n"
         "- relation：实体之间成立的闭合关系边都写。\n"
         "事件与参与者、对话判定、段落标签与章级指标都不属于你（由本章其他 subagent 负责）。\n"
         "</RoleScope>"
@@ -38,8 +50,8 @@ SUBAGENT_ROLE_SCOPES: dict[str, str] = {
     "event": (
         "<RoleScope role=\"事件与参与者\">\n"
         "你负责这一章的两个域：\n"
-        "- event：有正文依据的事件都建节点；\n"
-        "- participants：把每个事件节点的参与者挂上去。\n"
+        "- event 与 participants：有正文依据的事件都建节点并填写参与者；优先直接调用 submit_events 工具，"
+        "提交数据数组，引用与原文锚点由引擎完成。\n"
         "实体间的关系边、对话判定、段落标签与章级指标都不属于你。\n"
         "</RoleScope>"
     ),
@@ -79,9 +91,12 @@ def build_system_prompt() -> str:
         + "\n本轮工作为 formal_current。只写本章正式项、跨章关联和未确定案例；"
         "不得查询图、案例池或历史事件，不得修改已有正式记录。"
         "跨章依据直接读取原文，不等待其他章 Agent 的分析结论。"
+        "事件与参与者优先直接调用 submit_events 工具提交数据；已自动绑定的原文锚点无需重复读取或绑定。"
+        "本章原文用 read_chapter_text(paragraph_id=段首可见号)，跨章读取用 read_text 的全局段落号。"
         "search_text 支持 offset 翻页；命中段落用 read_text 读取完整内容与上下文。"
         "read_text(paragraph_id, quote=原文片段) 返回 source_ref，引用不能猜造。"
-        "本章实体、事件、对话、关系写出后，用 anchor_record(record_id, source_ref) 绑定精确原文。"
+        "本章实体、事件、对话、关系写出后，可用 anchor_record(record_id, source_ref) 绑定精确原文；"
+        "write_link 会自动绑定本次 read_text 已授权的本章 source_ref。"
         "确认跨章同一/不同人物、因果、伏笔照应或关系变化时，在本次任务调用 write_link；"
         "目标使用 read_text 的 source_ref，不要求目标章已有对象 ID。"
         "不能确定的关联用 push_case 并提供双方 evidence_refs，不强行合并或覆写。"
@@ -134,6 +149,7 @@ def build_chapter_message(
         f"{_render_paragraph_numbered_text(chapter_text, paragraph_info)}\n"
         "</CurrentChapter>",
         "<DialogueCandidates>\n"
+        f"total: {len(candidates)}\n"
         f"{json.dumps(candidate_views, ensure_ascii=False, indent=2)}\n"
         "</DialogueCandidates>",
     ]
@@ -164,6 +180,7 @@ def build_subagent_message(
     sections = [
         f"<CurrentChapter role=\"{role}\">\n{paragraph_views}\n</CurrentChapter>",
         "<DialogueCandidates>\n"
+        f"total: {len(candidates)}\n"
         f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"
         "</DialogueCandidates>",
         role_scope,

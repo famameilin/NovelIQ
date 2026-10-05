@@ -14,15 +14,27 @@ from __future__ import annotations
 import ast
 import json
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
+
+from pydantic import TypeAdapter, ValidationError
 
 # 限额常量经 program 模块属性读取（而非值拷贝）：tests 以 KEEP_*") 调整安全护栏，属性访问保持这一注入缝隙逐字生效。
 from . import program as _program
 from .catalog import PROGRAM_CONTRACT_TEXT, call_parameters
 from .program import _ProgramFault, render_list_signature
+from .receipt_projection import compact_read_result, read_references
 from .search_projection import _failed_view, build_program_tools
 from .tool_batch import _execute_call
-from .tools import FINISH_TOOL_NAME, tool_record_key
+from .tools import FINISH_TOOL_NAME, AnnotationToolLedger, tool_record_key
+
+# 2026-10-04 重复失败批守卫（两级）：失败条数达到 _REPEAT_FAILED_BATCH_MIN_OPS 且
+# 连续两次程序的失败清单逐条相同时注入聚合提示，第三次相同判本程序失败。
+# run 08f9ba42 审计实证：ch13/21/26 的 lane 连续 4~6 个回合原样重发同一批
+# participants 调用（每回合 26 发 26 拒、思考趋零的盲发），原样重发不会通过。
+_REPEAT_FAILED_BATCH_MIN_OPS = 5
+_REPEAT_FAILED_BATCH_FATAL_AT = 3
+_DIALOGUE_INDEX_ADAPTER = TypeAdapter(int)
 
 
 class RestrictedProgramRuntime:
@@ -36,6 +48,7 @@ class RestrictedProgramRuntime:
 
     # 工具目录从当前信封的实际工具表生成
     contract_text: str = ""
+    ledger: AnnotationToolLedger
 
     def __init__(
         self,
@@ -56,12 +69,17 @@ class RestrictedProgramRuntime:
         self.ops: list[dict[str, Any]] = []
         # 本程序内检索读结果的回显（每次 execute 重置；见 _program._READ_TOOL_NAMES）
         self.reads: list[dict[str, Any]] = []
+        self._read_references: list[dict[str, Any]] = []
+        self._reads_omitted = 0
         self._program_seq = 0
         self._call_index_seq = 0
         self._program_id = ""
         self._ops_in_program = 0
         self._steps = 0
         self._deadline = 0.0
+        # 2026-10-04 重复失败批守卫状态（跨程序、章内持续）
+        self._last_failed_sig: tuple[tuple[str, str, str, str], ...] | None = None
+        self._failed_repeat_count = 0
 
     # ------------------------------------------------------------------
     # 程序入口
@@ -72,32 +90,198 @@ class RestrictedProgramRuntime:
         程序内已经成功的调用不回滚（程序错误只中断后续语句），失败逐条进 failed；
         收尾类意图由子类在 _after_program 里结算（写者面即 finish）。
         """
+        async def run() -> None:
+            nodes = self._parse(code)
+            await self._preflight_dialogue_indices(nodes)
+            await self._statements(nodes)
+
+        return await self._execute_program(run)
+
+    async def _preflight_dialogue_indices(self, nodes: list[ast.stmt]) -> None:
+        """在任何写入前检查可确定的候选序号，读写工具返回值仍由真实执行逐项校验
+
+        用临时变量环境复用纯表达式求值，绝不执行工具；只检查可确定的分支与有界循环，
+        不确定分支赋出的变量失效，避免拿上一轮或另一分支的旧值误判当前程序
+        """
+        names = {"write_dialogue", "dialogue"} & self.tools.keys()
+        if not any(
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in names
+            for statement in nodes for node in ast.walk(statement)
+        ):
+            return
+        unknown = object()
+        original_env, original_steps = self.env, self._steps
+        self.env = dict(original_env)
+        invalid: dict[int, int | None] = {}
+        total = len(self.ledger.dialogue_candidates)
+
+        def invalidate(node: ast.AST) -> None:
+            for target in ast.walk(node):
+                if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store):
+                    self.env.pop(target.id, None)
+
+        def assign_known(target: ast.AST, value: Any) -> None:
+            try:
+                self._assign(target, value)
+            except _ProgramFault:
+                # 预检只拒绝候选号越界，其它赋值错误留在原执行点报出
+                invalidate(target)
+
+        async def pure_value(node: ast.AST) -> Any:
+            if any(isinstance(child, ast.Call) for child in ast.walk(node)):
+                return unknown
+            try:
+                return await self._value(node)
+            except _ProgramFault as fault:
+                if fault.code in {"too_many_steps", "deadline_exceeded"}:
+                    raise
+                return unknown
+
+        async def check_calls(expression: ast.AST) -> None:
+            for call in ast.walk(expression):
+                if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name) or call.func.id not in names:
+                    continue
+                for keyword in call.keywords:
+                    if keyword.arg != "candidate_index":
+                        continue
+                    value = await pure_value(keyword.value)
+                    if value is unknown or isinstance(value, bool):
+                        continue
+                    if call.func.id == "write_dialogue":
+                        try:
+                            value = _DIALOGUE_INDEX_ADAPTER.validate_python(value)
+                        except ValidationError:
+                            continue
+                    if isinstance(value, int) and not 1 <= value <= total:
+                        invalid.setdefault(value, call.lineno)
+
+        async def visit(statements: list[ast.stmt]) -> None:
+            for statement in statements:
+                self._guard()
+                if isinstance(statement, (ast.Assign, ast.Expr)):
+                    await check_calls(statement.value)
+                    if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                        value = await pure_value(statement.value)
+                        invalidate(statement)
+                        if value is not unknown:
+                            assign_known(statement.targets[0], value)
+                elif isinstance(statement, ast.If):
+                    await check_calls(statement.test)
+                    value = await pure_value(statement.test)
+                    if value is unknown:
+                        invalidate(statement)
+                    else:
+                        await visit(statement.body if value else statement.orelse)
+                elif isinstance(statement, ast.For):
+                    await check_calls(statement.iter)
+                    values = await pure_value(statement.iter)
+                    if not isinstance(values, (list, tuple)) or len(values) > _program._PROGRAM_MAX_LOOP_ITEMS:
+                        invalidate(statement)
+                        continue
+                    for value in values:
+                        self._guard()
+                        assign_known(statement.target, value)
+                        await visit(statement.body)
+                    await visit(statement.orelse)
+
+        try:
+            await visit(nodes)
+        finally:
+            self.env, self._steps = original_env, original_steps
+        if invalid:
+            records = "、".join(f"dialogue/{index}(candidate_index={index})" for index in invalid)
+            available = f"1..{total}" if total else "无可用候选"
+            raise _ProgramFault(
+                f"DialogueCandidates total={total}，candidate_index 范围={available}；越界记录：{records}",
+                code="candidate_index_out_of_range", line=next(iter(invalid.values())),
+            )
+
+    async def _execute_program(self, action: Callable[[], Awaitable[None]]) -> str:
+        """程序文本与结构化提交共用限额、回执和逐条写入边界"""
         self._program_seq += 1
         self._program_id = f"p{self._program_seq}"
         self._ops_in_program = 0
         self._steps = 0
         self.reads = []
+        self._read_references = []
+        self._reads_omitted = 0
         self._deadline = time.monotonic() + _program._PROGRAM_DEADLINE_S
         self._reset_program_state()
         error: dict[str, Any] | None = None
         status = "applied"
         try:
-            await self._statements(self._parse(code))
+            await action()
         except _ProgramFault as fault:
             error = fault.payload()
             status = "rejected" if fault.code in _program._PRE_RUN_FAULT_CODES else "runtime_error"
-        # 程序被中断时不结算收尾意图：收尾之后的语句没跑完，冻结即不可逆地丢内容；
-        # 模型按回执里的 error/failed 补完失败的尾部后重新提交 finish() 即可
+        # 2026-10-04 重复失败批守卫：判败时不结算收尾意图（与运行错误同口径——
+        # 收尾之后的语句没跑完，冻结即不可逆地丢内容），模型必须真正修改失败取值。
+        # 守卫用结算前的 ops 快照判定；回执计数在收尾结算后取全量（finish 结算也记 op）。
+        repeat = 0
         if error is None:
-            await self._after_program()
+            pre_failed = [
+                op for op in self.ops if op["program_id"] == self._program_id and op["status"] != "success"
+            ]
+            repeat = self._register_failed_batch(pre_failed)
+            if repeat >= _REPEAT_FAILED_BATCH_FATAL_AT:
+                error = {
+                    "type": "repeat_failed_batch",
+                    "message": (
+                        f"本程序与上一次完全相同的失败清单已连续出现 {repeat} 次；"
+                        "原样重发不会通过，必须先修改 failed 各条的取值再提交"
+                    ),
+                }
+                status = "runtime_error"
+            else:
+                await self._after_program()
+        else:
+            self._reset_failed_batch()
         program_ops = [op for op in self.ops if op["program_id"] == self._program_id]
         applied = sum(1 for op in program_ops if op["status"] == "success")
         failed = [op for op in program_ops if op["status"] != "success"]
         if failed and status == "applied":
             status = "partial"
-        return json.dumps(
-            self._receipt(status=status, applied=applied, failed=failed, error=error), ensure_ascii=False
+        note = (
+            "本程序失败清单与上一次完全相同：原样重发不会通过，先修第一条的原因再提交"
+            if repeat == _REPEAT_FAILED_BATCH_FATAL_AT - 1 and error is None
+            else None
         )
+        return json.dumps(
+            self._receipt(status=status, applied=applied, failed=failed, error=error, note=note),
+            ensure_ascii=False,
+        )
+
+    def _register_failed_batch(self, failed: list[dict[str, Any]]) -> int:
+        """用于给重复失败批守卫计数，返回"连续第几次提交同一失败批"（不足阈值重置为 0）
+
+        签名取逐条 (tool_name, error_code, field, message)——盲发批的逐条错误完全一致；
+        消息含实体名等动态部分，同一批原样重发即逐字相同。
+        """
+        if len(failed) < _REPEAT_FAILED_BATCH_MIN_OPS:
+            self._reset_failed_batch()
+            return 0
+        signature = tuple(
+            sorted(
+                (
+                    str(op.get("tool_name") or ""),
+                    str(op.get("error_code") or ""),
+                    str(op.get("field") or ""),
+                    str(op.get("message") or ""),
+                )
+                for op in failed
+            )
+        )
+        if signature == self._last_failed_sig:
+            self._failed_repeat_count += 1
+        else:
+            self._failed_repeat_count = 1
+            self._last_failed_sig = signature
+        return self._failed_repeat_count
+
+    def _reset_failed_batch(self) -> None:
+        """用于在连续性被打断（程序本身出错、失败批变小）时清空守卫计数"""
+        self._last_failed_sig = None
+        self._failed_repeat_count = 0
 
     def _reset_program_state(self) -> None:
         """子类钩子：一个程序开始时重置本面独有的状态（默认无状态）"""
@@ -142,23 +326,48 @@ class RestrictedProgramRuntime:
         applied: int,
         failed: list[dict[str, Any]],
         error: dict[str, Any] | None,
+        note: str | None = None,
     ) -> dict[str, Any]:
         """用于组装压缩回执（成功明文不回显，只给进度/读结果/失败清单）
 
         2026-09-17 键序：失败与读结果排在进度之前——失败清单排在后面时模型要先蹚过
         上万字符才看到被拒原因。
+        2026-10-03 回执补 written 生效键清单：多语句程序的成功写入此前只有进度计数，
+        模型看不到每条的生效 record 键（思考审计实证它只能靠猜/试探，run 4a6c268c
+        思考里 70% 的犹豫句在猜键空间）。written 按提交顺序去重回显，模型照抄即可。
         """
         body: dict[str, Any] = {
             "status": status,
             "applied": applied,
             "progress": self._progress(),
         }
+        written: list[str] = []
+        program_ops = [op for op in self.ops if op.get("program_id") == self._program_id]
+        for op in program_ops:
+            record = op.get("record")
+            if op.get("status") == "success" and record and record not in written:
+                written.append(str(record))
+        if written:
+            body["written"] = written
         if failed:
             body["failed"] = [_failed_view(op) for op in failed]
+        if note is not None:
+            body["note"] = note
         if error is not None:
             body["error"] = error
         if self.reads:
             body["reads"] = list(self.reads)
+        if self._reads_omitted:
+            body["reads_omitted"] = self._reads_omitted
+        if self._read_references:
+            body["references"] = list(self._read_references)
+        variables = {
+            name: read_references(value)[0]
+            for name, value in self.env.items()
+            if isinstance(value, dict) and value.get("source_ref")
+        }
+        if variables:
+            body["variables"] = variables
         return body
 
     # ------------------------------------------------------------------
@@ -410,23 +619,21 @@ class RestrictedProgramRuntime:
         整轮推理烧在"回查"上。这里把 payload 原样回显（投影已在 _ProgramSearchTool 做过），
         按条数与字符数双上限截断。
         """
-        try:
-            text = receipt if isinstance(receipt, str) else json.dumps(receipt, ensure_ascii=False)
-        except (TypeError, ValueError):
-            text = str(receipt)
+        text, omitted = compact_read_result(receipt, max_chars=_program._READ_ECHO_MAX_CHARS)
         item: dict[str, Any] = {"op": op_index, "tool": name}
         if line is not None:
             item["line"] = line
-        if len(text) > _program._READ_ECHO_MAX_CHARS:
-            item["result"] = text[:_program._READ_ECHO_MAX_CHARS]
-            item["truncated_chars"] = len(text)
-        else:
-            item["result"] = text
+        item["result"] = text
+        if omitted:
+            item["truncated_chars"] = omitted
+        for reference in read_references(receipt):
+            if not any(existing["source_ref"] == reference["source_ref"] for existing in self._read_references):
+                self._read_references.append({"op": op_index, **reference})
         self.reads.append(item)
         if len(self.reads) > _program._READ_ECHO_MAX_ITEMS:
             dropped = len(self.reads) - _program._READ_ECHO_MAX_ITEMS
-            self.reads = self.reads[-_program._READ_ECHO_MAX_ITEMS:]
-            self.reads.insert(0, {"note": f"更早的 {dropped} 条读结果已省略（要重看就再检索一次）"})
+            del self.reads[:dropped]
+            self._reads_omitted += dropped
 
     def _guard(self) -> None:
         """用于在每条语句/表达式前检查步数与墙钟硬限"""

@@ -30,7 +30,7 @@ def test_formal_envelope_exposes_only_local_writes_and_text_search() -> None:
     assert set(tools) == {
         "write_entity", "write_metrics", "write_event", "write_relation",
         "write_dialogue", "finish", "search_text", "push_case",
-        "read_text", "anchor_record", "write_link",
+        "read_text", "read_chapter_text", "anchor_record", "write_link",
     }
     with pytest.raises(ValidationError):
         tools["write_dialogue"].invoke({"candidate_key": "other-chapter", "speaker": "some-id"})

@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.graph import _build_tool_batch_node, build_annotation_graph
 from src.agents.annotation.program import PROGRAM_TOOL_NAME, ProgramRuntime, build_program_tool
+from src.agents.annotation.prompts import build_chapter_message, build_subagent_message
 from src.agents.annotation.schema import ChapterParagraphInfo, TextSearchResult
 from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
@@ -75,7 +76,7 @@ def test_catalog_is_current_formal_tool_surface() -> None:
     assert {tool.name for tool in tools} == {
         "search_text", "write_entity", "write_metrics", "write_event", "write_relation", "write_dialogue",
         "push_case", "finish",
-        "read_text", "anchor_record", "write_link",
+        "read_text", "read_chapter_text", "anchor_record", "write_link",
     }
     assert program_tool.name == PROGRAM_TOOL_NAME
     for tool in tools:
@@ -85,6 +86,38 @@ def test_catalog_is_current_formal_tool_surface() -> None:
     assert "search_pool(" not in program_tool.description
     assert "promise_case(" not in program_tool.description
     assert "fields" in program_tool.description and "limit" in program_tool.description
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_dialogue_candidate_prompts_report_actual_total(empty: bool) -> None:
+    ledger = _ledger()
+    candidates = [] if empty else ledger.dialogue_candidates
+    messages = [
+        build_chapter_message(chapter_text=ledger.current_chapter_text, candidates=candidates),
+        build_subagent_message(
+            role="dialogue", paragraph_info=ledger.paragraph_info, candidates=candidates, role_scope="",
+        ),
+    ]
+    for message in messages:
+        block = message.split("<DialogueCandidates>\n", 1)[1].split("\n</DialogueCandidates>", 1)[0]
+        total, payload = block.split("\n", 1)
+        assert total == f"total: {len(candidates)}"
+        assert len(json.loads(payload)) == len(candidates)
+
+
+def test_link_pairing_table_is_visible_in_schema_and_program_parameters() -> None:
+    _, program_tool, tools = _surface(_ledger())
+    link = next(tool for tool in tools if tool.name == "write_link")
+    schema = link.args_schema.model_json_schema()
+    for field in ("kind", "change_kind"):
+        description = schema["properties"][field]["description"]
+        assert "same_entity / different_entity / causal / foreshadowing | 省略或 None" in description
+        assert (
+            "relation_change | 必填 assert / reinforce / weaken / refine / break / supersede / retract" in description
+        )
+    assert "relation_change | 必填" in program_tool.description
+    assert "自动绑定" in program_tool.description
+    assert schema["properties"]["change_kind"]["default"] is None
 
 
 @pytest.mark.asyncio
@@ -207,5 +240,6 @@ async def test_read_echo_is_bounded() -> None:
     runtime, _, _ = _surface(_ledger())
     receipt = json.loads(await runtime.execute('search_text(query="顾霜")\n' * 9))
     assert receipt["applied"] == 9
-    assert len(receipt["reads"]) == 9
-    assert "更早的 1 条读结果已省略" in receipt["reads"][0]["note"]
+    assert len(receipt["reads"]) == 8
+    assert receipt["reads_omitted"] == 1
+    assert all("result" in read for read in receipt["reads"])

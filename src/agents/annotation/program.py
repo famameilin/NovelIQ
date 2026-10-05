@@ -41,14 +41,15 @@ _PROGRAM_NAME_CONSTANTS: dict[str, Any] = {"true": True, "false": False, "null":
 
 # 未进入执行就失败的错误码（程序一个字都没跑）：语义上是"拒绝本次提交"，与
 # 执行期中断（已成功的调用保留）分开表达
-_PRE_RUN_FAULT_CODES = frozenset({"empty_program", "program_too_large", "syntax_error"})
+_PRE_RUN_FAULT_CODES = frozenset({"empty_program", "program_too_large", "syntax_error", "candidate_index_out_of_range"})
 
 # 2026-09-17 程序面回执回显只读检索结果：程序里的检索调用此前只把 payload 交给程序
 # 变量，模型看不到值（实验实测同一句 search_pool 连发 7 次、块会话整轮 burn 在"回查"
 # 上）。reads 只装检索类工具，写入类仍只回句柄（成功明文不回显）。
 _READ_TOOL_NAMES = frozenset({
     "search_text",
-    "read_text", "read_graph", "read_event", "read_candidates", "read_evidence", "find_cases", "claim_case",
+    "read_text", "read_chapter_text", "read_graph", "read_event", "read_candidates", "read_evidence",
+    "find_cases", "claim_case",
 })
 _READ_ECHO_MAX_CHARS = 1600
 _READ_ECHO_MAX_ITEMS = 8

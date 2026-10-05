@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import re
+from enum import Enum
 from typing import Any
 
 from pydantic import ValidationError
@@ -87,14 +88,15 @@ def _translate_record_validation(
     exc: ValidationError,
     *,
     tool_name: str,
+    args: dict[str, Any] | None = None,
 ) -> AnnotationStageRejection:
     """2026-09-13 用于把单条记录的 pydantic 失败翻成结构化拒绝回执
 
     只报第一个失败字段：小调用的粒度就是一个字段一个语义单元，一次修一处。
     """
     errors = exc.errors()
-    first = dict(errors[0]) if errors else {}
-    raw_location = first.get("loc") or ()
+    first: dict[str, Any] = dict(errors[0]) if errors else {}
+    raw_location: tuple[int | str, ...] = first.get("loc") or ()
     location = (
         [str(part) for part in raw_location if str(part) != "__root__"]
         if isinstance(raw_location, (list, tuple))
@@ -119,6 +121,30 @@ def _translate_record_validation(
         fallback = _STAGE_ENUM_FALLBACKS.get(field or "")
         suffix = f"（{fallback}）" if fallback else ""
         message = f"{tool_name} 记录不符合合同: {field} 只能是 {expected}{suffix}，收到 {value}"
+    # 消息点名参与者，record 仍指向整条被拒的事件调用，保留原子写入的定位合同
+    record_label = record
+    if args is not None and len(raw_location) >= 2 and raw_location[0] == "characters":
+        participants = args.get("characters")
+        index = raw_location[1]
+        if isinstance(participants, list) and isinstance(index, int) and 0 <= index < len(participants):
+            participant = participants[index]
+            if isinstance(participant, dict) and participant.get("entityid") is not None:
+                record_label = f"{record}/participant/{participant['entityid']}"
+    # 缺失与显式 null 分开报告，字段错误只回显该字段的实际输入
+    if location:
+        submitted = "<未提供>" if kind == "missing" else repr(first.get("input"))
+        message = f"{record_label}({'.'.join(location)}={submitted})：{message}"
+    elif isinstance(first.get("input"), dict):
+        # 联合约束无字段路径时，优先回显报错明确提到的字段，不猜测纠正取值
+        named_fields = set(re.findall(r"\b[A-Za-z_]\w*\b", detail))
+        values = {name: value for name, value in first["input"].items() if name in named_fields}
+        values = values or first["input"]
+        submitted = ", ".join(
+            f"{name}={repr(value.value if isinstance(value, Enum) else value)}" for name, value in values.items()
+        )
+        message = f"{record_label}({submitted})：{message}"
+    else:
+        message = f"{record_label}：{message}"
     return AnnotationStageRejection(
         message,
         record=record,
@@ -138,4 +164,4 @@ def translate_write_validation_error(
     schema 层的失败发生在工具函数体之前，记录键只能从原始参数拼装。
     """
     record = tool_record_key(tool_name, args) or tool_name
-    return _translate_record_validation(record, exc, tool_name=tool_name)
+    return _translate_record_validation(record, exc, tool_name=tool_name, args=args)

@@ -31,7 +31,7 @@ from src.agents.annotation.schema import (
     RelationInput,
     TextSearchResult,
 )
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.annotation.tools import AnnotationToolLedger, _norm_entity_key, build_annotation_tools
 
 
 class _QueryService:
@@ -46,7 +46,6 @@ class _QueryService:
         self.text_queries: list[tuple[str, str, int]] = []
         self.text_result_count = text_result_count
         self.known_dialogue_ids = known_dialogue_ids if known_dialogue_ids is not None else {"dlg_prev_1"}
-
 
     async def search_text(self, query, *, range_name, limit=50):
         """2026-08-30 用于记录范围查询并返回完整原文命中"""
@@ -394,17 +393,17 @@ def test_schema_rejects_event_role_words_in_narrative_role_with_guidance() -> No
         )
 
 
-def test_event_participant_requires_complete_character_state_group() -> None:
-    """2026-08-30 用于拒绝只提交部分人物动态字段的事件参与者"""
-    with pytest.raises(ValidationError):
-        EventParticipantInput.model_validate(
-            {
-                "entity": "顾霜",
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": "喝止",
-            }
-        )
+def test_event_participant_allows_partial_character_state_group() -> None:
+    """2026-10-04 合同放开：人物动态字段允许部分缺省，缺省值原样保留为 None"""
+    participant = EventParticipantInput.model_validate(
+        {
+            "entity": "顾霜",
+            "role": "主体",
+            "narrative_role": "主体",
+            "action": "喝止",
+        }
+    )
+    assert participant.emotion is None
 
 
 def test_dialogue_verdict_contract_rules() -> None:
@@ -1310,8 +1309,66 @@ def test_push_case_blank_record_id_means_no_record() -> None:
         {"description": "仪式疑点", "keys": ["住手"], "type": "神秘仪式", "record_id": ""},
     )
     assert response["accepted"] is True
-    assert response["case_id"]
     assert "record_id" not in ledger.pushed_cases[0].target_ref
+
+
+def test_push_case_translates_ir_record_key_to_production_key() -> None:
+    """2026-10-03 subagent 路径的 IR 记录键在 push_case 入口规范成生产键
+
+    written_record_keys 混装构造器 plan 的 IR 键（structure/entity/a1、event/t1、
+    evidence/dialogue/3）与生产写入面的生产键（entity/{name}、event:t1/root、
+    dialogue/3）。正式提交的 bind_record_target 只认生产键——IR 键原样落库会炸
+    "原文锚点不是本章正式产出"。已是生产键的原样保留。
+    2026-10-03 事件键带角色命名空间：子代理事件树落库 el 命名空间化
+    （namespace_event_el → event:t1），节点 id 按命名空间树键参与 stable_uuid，
+    翻译必须保留 "event:" 前缀，否则提交期 bind 永不匹配（ch21 三连炸根因）；
+    非事件角色写树时 IR 键形如 structure/event/t9，同样翻译成命名空间键。
+    """
+    service = _QueryService()
+    ledger = _ledger()
+    ledger.graph = _graph_with_entities({"顾霜": "character", "沈砚": "character"})
+    ledger.entity_el_index["structure:a19"] = _norm_entity_key("顾霜")
+    ledger.entity_el_index["event:e1"] = _norm_entity_key("沈砚")
+    ledger.written_record_keys.update(
+        {
+            "structure/entity/a19",
+            "event/entity/e1",
+            "evidence/dialogue/3",
+            "event/t1",
+            "event/t1/e5",
+            "structure/event/t9",
+            "entity/顾霜",
+            "dialogue/3",
+            "t1/root",
+            "t1/e5",
+        }
+    )
+    tools = _tools(service, ledger)
+
+    cases = [
+        ("structure/entity/a19", "entity/顾霜"),
+        ("event/entity/e1", "entity/沈砚"),
+        ("evidence/dialogue/3", "dialogue/3"),
+        ("event/t1", "event:t1/root"),
+        ("event/t1/e5", "event:t1/e5"),
+        ("structure/event/t9", "structure:t9/root"),
+        ("entity/顾霜", "entity/顾霜"),
+        ("dialogue/3", "dialogue/3"),
+        ("t1/root", "t1/root"),
+    ]
+    for index, (record_id, expected) in enumerate(cases):
+        response = json.loads(
+            _find_tool(tools, "push_case").invoke(
+                {
+                    "description": f"疑点{index}",
+                    "keys": [f"键{index}"],
+                    "type": "锚点疑点",
+                    "record_id": record_id,
+                }
+            )
+        )
+        assert response["accepted"] is True
+        assert ledger.pushed_cases[index].target_ref["record_id"] == expected
 
 
 def test_push_case_rejects_json_fragment_in_description() -> None:
@@ -1344,6 +1401,36 @@ def test_push_case_rejects_overlong_description() -> None:
                 "type": "疑点",
             }
         )
+    assert ledger.pushed_cases == []
+
+
+def test_push_case_rejects_unknown_evidence_ref_with_guidance() -> None:
+    """2026-10-03 evidence_refs 含非法值时拒绝信息教格式并回显已授权 source_ref
+
+    run 4a6c268c ch21 实证：模型拿段落号（'57'、'21:1360'）猜 evidence_refs 格式
+    7 连拒——旧拒绝信息只说"必须来自 read_text 回执"，不教 source_ref 形态、
+    不回显哪些可用。现在点名非法值、给出合法口径与已授权清单；案例整体不落池。
+    """
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+    read = json.loads(asyncio.run(_find_tool(tools, "read_text").ainvoke({"paragraph_id": 0, "quote": "住手"})))
+    authorized = read["source_ref"]
+
+    with pytest.raises(AnnotationInputError) as excinfo:
+        _find_tool(tools, "push_case").invoke(
+            {
+                "description": "对话疑点",
+                "keys": ["住手"],
+                "type": "dialogue_speaker",
+                "evidence_refs": ["57", authorized],
+            }
+        )
+    message = str(excinfo.value)
+    assert "source_ref" in message
+    assert "'57'" in message
+    assert "read_text" in message
+    assert authorized in message
     assert ledger.pushed_cases == []
 
 
@@ -1460,9 +1547,7 @@ def test_relation_write_asserts_new_edge_immediately() -> None:
     }
     assert ("顾老", "顾霜", "友情") in ledger.graph.active_relations
     ops = ledger.graph.relation_assert_ops
-    assert [(op["from_entity"], op["to_entity"], op["relation_type"]) for op in ops] == [
-        ("顾霜", "顾老", "友情")
-    ]
+    assert [(op["from_entity"], op["to_entity"], op["relation_type"]) for op in ops] == [("顾霜", "顾老", "友情")]
     assert ledger.domain_payloads["relations"][0].relation_type == "友情"
 
 
@@ -1473,9 +1558,15 @@ def test_relation_repeated_write_keeps_single_local_edge() -> None:
     ledger.graph = _graph_with_entities({"顾霜": "character", "顾老": "character"})
     tools = _tools(service, ledger)
 
-    _call(tools, "write_relation", {
-        "from_entity": _entity_id("顾霜"), "to_entity": _entity_id("顾老"), "relation_type": "友情",
-    })
+    _call(
+        tools,
+        "write_relation",
+        {
+            "from_entity": _entity_id("顾霜"),
+            "to_entity": _entity_id("顾老"),
+            "relation_type": "友情",
+        },
+    )
 
     receipt = _call(
         tools,
@@ -1521,10 +1612,7 @@ def test_relation_type_replacement_rebuilds_local_aliases() -> None:
     assert ledger.written_relations[("猴子", "侯飞白")].relation_type == "友情"
 
     assert len(ledger.graph.relation_assert_ops) == 1
-    assert not any(
-        from_key == to_key
-        for from_key, to_key, _relation_type in ledger.graph.active_relations
-    )
+    assert not any(from_key == to_key for from_key, to_key, _relation_type in ledger.graph.active_relations)
     # 同一人物/友情均为双向关系：稳定键按端点名排序
     assert ("侯飞白", "猴子", "同一人物") not in ledger.graph.active_relations
     assert ("侯飞白", "猴子", "友情") in ledger.graph.active_relations

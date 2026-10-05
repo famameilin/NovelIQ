@@ -252,15 +252,15 @@ async def test_finish_phase_pushes_connections_then_metrics_then_finish(monkeypa
 
 
 # ----------------------------------------------------------------------
-# 四、子事件先于树根写入被生产写入当场拒
+# 四、子事件先于树根写入：挂起待根，建根后自动冲账
 
 
 @pytest.mark.asyncio
-async def test_subagent_phase_rejects_child_event_before_root_is_written(monkeypatch: pytest.MonkeyPatch) -> None:
-    """子事件先于树根写入：生产写入当场判拒（树键未建），建根后同键子事件才落账
+async def test_subagent_phase_child_event_before_root_is_deferred(monkeypatch: pytest.MonkeyPatch) -> None:
+    """子事件先于树根写入：2026-10-04 树键校验下沉，写入挂起、建根按到达顺序冲账
 
-    2026-09-18 写入生效后"先根后子"由生产 write_event 在写入当场保证，不再是落库相位的
-    重排职责；模型先写子事件会拿到结构化拒绝，自纠补根后同键子事件照常落账。
+    旧合同"先根后子"在生产写入当场拒绝（树键未建），盲发循环实证它只制造返工；
+    现契约子事件即时生效为暂挂记录，建根后自动落进事件树，不要求模型补根自纠。
     """
     statuses: list[str] = []
 
@@ -306,12 +306,14 @@ async def test_subagent_phase_rejects_child_event_before_root_is_written(monkeyp
 
     result = await run_chapter_subagents(**_kwargs(graph_state=FactGraph()), roles=("event",))
 
-    assert statuses == ["error", "success", "success"]
+    assert statuses == ["success", "success", "success"]
     annotation = result.annotation
-    assert [event.description for event in annotation.events] == ["根", "子二"]
-    assert [event.evidence_paragraph_id for event in annotation.events] == [1, 2]
-    assert [event.cause_role for event in annotation.events] == ["root", "main"]
+    assert [event.description for event in annotation.events] == ["根", "子一", "子二"]
+    assert [event.evidence_paragraph_id for event in annotation.events] == [1, 1, 2]
+    assert [event.cause_role for event in annotation.events] == ["root", "main", "main"]
+    # 挂起的"子一"在建根时按到达顺序冲账：父=根；后写的"子二"顺延成为新链尾
     assert annotation.events[1].parent_node_id == annotation.events[0].node_id
+    assert annotation.events[2].parent_node_id == annotation.events[1].node_id
 
 
 # ----------------------------------------------------------------------
