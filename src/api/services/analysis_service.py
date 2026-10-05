@@ -168,6 +168,8 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         novel: dict,
         task_kind: str,
         request: ReanalyzeRequest | None,
+        *,
+        resume: bool = False,
     ) -> None:
         """
         2026-08-20 统一调度入口，直接创建执行协程，消除冗余跳转层
@@ -195,7 +197,11 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
             logger.info(f"Reanalysis skip_stages: {skip_stages}")
 
             def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
-                return skip_stages
+                if not resume:
+                    return dict(skip_stages)
+                # force 决定新任务的重跑范围，继续同一任务时复用已完成的依赖链
+                completed = self.env_initializer.check_stage_completion_status(session, run_id)
+                return {name: skip or completed[name] for name, skip in skip_stages.items()}
 
             num_topics = request.num_topics if request else settings.topic_model.num_topics
             log_prefix = "Reanalysis"
@@ -275,7 +281,7 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         event_manager.clear_buffer(task_id)
 
         task_kind, execution_request = self._restore_execution_request(task)
-        self._schedule_task_execution(task_id, novel, task_kind, execution_request)
+        self._schedule_task_execution(task_id, novel, task_kind, execution_request, resume=True)
         return task_id
 
     async def start_reanalysis(self, novel_id: str, request: ReanalyzeRequest | None = None) -> str:

@@ -116,7 +116,7 @@ def test_disabled_ltp_is_complete_in_resume_chain(monkeypatch) -> None:
     annotation_repo.is_annotate_complete.return_value = True
     stats_repo = MagicMock()
     stats_repo.is_aggregate_complete.return_value = True
-    stats_repo.has_topic_data.return_value = True
+    stats_repo.is_topic_model_complete.return_value = True
     stats_repo.has_diagnosis_data.return_value = True
     monkeypatch.setattr(settings.linguistic.ltp, "enabled", False)
 

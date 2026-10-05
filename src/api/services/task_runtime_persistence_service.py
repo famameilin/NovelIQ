@@ -55,6 +55,11 @@ class TaskRuntimePersistenceService:
             return
 
         session = self._session_factory()
+        # 2026-10-03 运行态写回分级：纯进度/心跳字段是可观测性信号，DB 锁等待/抖动只
+        # 降级为警告跳过——run 4a6c268c 实证 aggregate 完成后的进度更新被下一阶段长
+        # 事务阻塞 2 分钟语句超时，把 27 章标注+聚合全部冤杀成 failed。状态迁移
+        # （status/completed_at/error/cancel_requested）仍是可靠写，失败照旧上抛。
+        state_transition = bool({"status", "completed_at", "error", "cancel_requested"} & set(update_params))
         try:
             run_repo = RunRepository(session)
             run_id = self._resolve_run_id_for_db_write(task_id, session)
@@ -63,8 +68,11 @@ class TaskRuntimePersistenceService:
             run_repo.update_run_task_fields(run_id, **update_params)
             logger.debug(f"Task DB updated: task_id={task_id}, run_id={run_id} - {update_params}")
         except Exception as exc:
-            logger.error(f"Failed to update task DB (task_id={task_id}): {exc}")
-            raise
+            if state_transition:
+                logger.error(f"Failed to update task DB (task_id={task_id}): {exc}")
+                raise
+            logger.warning(f"Skipped task runtime update after DB error (task_id={task_id}): {exc}")
+            return
         finally:
             session.close()
 

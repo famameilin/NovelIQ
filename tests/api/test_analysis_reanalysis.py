@@ -161,6 +161,8 @@ class TestReanalysis:
             novel: dict,
             task_kind: str,
             request: ReanalyzeRequest | None = None,
+            *,
+            resume: bool = False,
         ) -> None:
             scheduled["task_id"] = scheduled_task_id
             scheduled["novel_id"] = novel["novel_id"]

@@ -35,10 +35,24 @@ class StageOrchestratorMixin(TaskClaimMixin):
     stage_executor: StageExecutor
 
     @staticmethod
-    def _make_stage_emitter(bus: AnalysisEventBus, stage: str) -> Callable[[StreamEvent], Awaitable[None]]:
-        """创建阶段 emitter：自动补全 stage 上下文"""
+    def _make_stage_emitter(
+        bus: AnalysisEventBus,
+        stage: str,
+        session: Session,
+    ) -> Callable[[StreamEvent], Awaitable[None]]:
+        """创建阶段 emitter：自动补全 stage 上下文，并在发事件前提交编排器 session
+
+        2026-10-03 死锁修复（run 08f9ba42 实证）：编排器 session 的事务跨阶段存活，
+        阶段内写入（如 topic 表 INSERT 对 analysis_runs 行取的外键 FOR KEY SHARE、
+        以及任何显式行锁）与 emit 路径 to_thread 的 UPDATE analysis_runs 行锁互斥——
+        编排器协程 await 自己事务堵住的 UPDATE 即永久死锁（topic INSERT 后 emit
+        complete 挂死 14+ 分钟，后端 CPU 归零）。emitter 先 commit 再 emit：
+        本阶段已完成写入对其它连接可见，行锁随提交释放，emit 永不被自己事务阻塞。
+        expire_on_commit=False，已加载 ORM 对象不会失效。
+        """
 
         async def emitter(event: StreamEvent) -> None:
+            session.commit()
             if not event.stage:
                 # 用 dataclass replace 补全 stage，避免手动重建丢失字段
                 from dataclasses import replace
@@ -74,7 +88,7 @@ class StageOrchestratorMixin(TaskClaimMixin):
             await bus.emit_stage_start("preprocess", message="开始预处理", percent=settings.progress.preprocess.start)
 
             await self.stage_executor.run_preprocess(
-                source_path, run_id, session, emitter=self._make_stage_emitter(bus, "preprocess")
+                source_path, run_id, session, emitter=self._make_stage_emitter(bus, "preprocess", session)
             )
             await bus.emit_stage_complete("preprocess")
 
@@ -113,7 +127,7 @@ class StageOrchestratorMixin(TaskClaimMixin):
                 novel_id,
                 analysis_logger,
                 novel_title,
-                emitter=self._make_stage_emitter(bus, "annotate"),
+                emitter=self._make_stage_emitter(bus, "annotate", session),
                 is_cancelled=lambda: self._is_cancelled(task_id),
             )
             await bus.emit_stage_complete("annotate")
@@ -129,7 +143,7 @@ class StageOrchestratorMixin(TaskClaimMixin):
             )
 
             await self.stage_executor.run_linguistic(
-                run_id, session, self._make_stage_emitter(bus, "linguistic")
+                run_id, session, self._make_stage_emitter(bus, "linguistic", session)
             )
             await bus.emit_stage_complete("linguistic")
 
@@ -141,7 +155,9 @@ class StageOrchestratorMixin(TaskClaimMixin):
         if not skip_stages["skip_aggregate"]:
             await bus.emit_stage_start("aggregate", message="开始数据聚合", percent=settings.progress.aggregate.start)
 
-            await self.stage_executor.run_aggregate(run_id, session, self._make_stage_emitter(bus, "aggregate"))
+            await self.stage_executor.run_aggregate(
+                run_id, session, self._make_stage_emitter(bus, "aggregate", session)
+            )
             await bus.emit_stage_complete("aggregate")
 
         if self._is_cancelled(task_id):
@@ -155,7 +171,7 @@ class StageOrchestratorMixin(TaskClaimMixin):
             )
 
             await self.stage_executor.run_topic_model(
-                run_id, session, num_topics, self._make_stage_emitter(bus, "topic-model")
+                run_id, session, num_topics, self._make_stage_emitter(bus, "topic-model", session)
             )
             await bus.emit_stage_complete("topic-model")
 
@@ -167,6 +183,6 @@ class StageOrchestratorMixin(TaskClaimMixin):
         if not skip_stages["skip_diagnose"]:
             await bus.emit_stage_start("diagnose", message="开始诊断报告", percent=settings.progress.diagnose.start)
             await self.stage_executor.run_diagnose(
-                run_id, session, analysis_logger, self._make_stage_emitter(bus, "diagnose")
+                run_id, session, analysis_logger, self._make_stage_emitter(bus, "diagnose", session)
             )
             await bus.emit_stage_complete("diagnose")

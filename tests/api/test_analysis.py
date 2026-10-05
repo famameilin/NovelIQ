@@ -606,7 +606,9 @@ class TestAnalysis:
         task_id = service.create_task(novel_id)
         scheduled_calls: list[tuple[str, str]] = []
 
-        def _record_schedule(self, scheduled_task_id: str, novel: dict, task_kind: str, request=None) -> None:
+        def _record_schedule(
+            self, scheduled_task_id: str, novel: dict, task_kind: str, request=None, *, resume: bool = False,
+        ) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
         with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule):
@@ -645,7 +647,9 @@ class TestAnalysis:
             scheduled_calls.append((scheduled_task_id, resume_novel_id))
             return scheduled_task_id
 
-        def _record_schedule(self, scheduled_task_id: str, novel: dict, task_kind: str, request=None) -> None:
+        def _record_schedule(
+            self, scheduled_task_id: str, novel: dict, task_kind: str, request=None, *, resume: bool = False,
+        ) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
         with (
@@ -689,6 +693,8 @@ class TestAnalysis:
             novel: dict,
             task_kind: str,
             request: ReanalyzeRequest | None = None,
+            *,
+            resume: bool = False,
         ) -> None:
             reanalysis_calls.append((scheduled_task_id, novel["novel_id"], task_kind, request))
 
