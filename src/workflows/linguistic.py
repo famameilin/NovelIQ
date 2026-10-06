@@ -28,10 +28,10 @@ from gensim.models import KeyedVectors, Word2Vec
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.models.events import StreamEvent
 from src.config import settings
 from src.config.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES
 from src.linguistic import TrainResult
+from src.sse.events import StreamEvent
 from src.storage.repositories import ParagraphRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
 
@@ -42,11 +42,15 @@ async def run_linguistic(
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     *,
     batch_size: int = 128,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, int]:
     """2026-08-30 用于执行语言结构阶段并返回段落数与词法特征段落数
 
     batch_size 控制每批处理的段落数并限制阶段内存峰值
+    取消在每个段落批边界生效：LTP 批推理是线程内重活，不能安全硬中断
     """
+    from src.workflows.cancellation import check_cancelled
+
     start_time = time.time()
     paragraph_repo = ParagraphRepository(session)
     ling_repo = LinguisticRepository(session)
@@ -92,6 +96,7 @@ async def run_linguistic(
         last_id: int | None = None
         first_batch = True
         while True:
+            check_cancelled(is_cancelled)
             batch = paragraph_repo.fetch_paragraph_rows_batch(run_id, after_id=last_id, limit=batch_size)
             if not batch:
                 break
@@ -224,6 +229,7 @@ async def run_linguistic(
     # 逐段打分回写 paragraph_linguistic_features 两列。不依赖 LTP——向量源是
     # paragraph_embeddings（preprocess 落库），故挂在 ltp 闸门之外；
     # 标签不足或类别单一时无边界（两列 NULL），段落曲线维持 mNEG 口径，不伪造。
+    check_cancelled(is_cancelled)
     boundary_rows = _apply_paragraph_boundary_scores(run_id, paragraph_repo)
     if boundary_rows:
         logger.info(f"段落级边界打分回写：{boundary_rows} 段获得分值（样本来自标注 agent 自选段标签）")
@@ -235,6 +241,7 @@ async def run_linguistic(
         from src.linguistic import load_shared_pretrained_vectors, resolve_shared_pretrained_path
         from src.storage.path_resolver import resolve_project_root
 
+        check_cancelled(is_cancelled)
         if not w2v_settings.model_dir:
             raise ValueError("linguistic.word2vec.enabled=true 需要配置 model_dir（预训练共享模型目录）")
         model_dir = Path(w2v_settings.model_dir)

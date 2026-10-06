@@ -15,8 +15,8 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.models.events import StreamEvent
 from src.config import settings
+from src.sse.events import StreamEvent
 from src.storage.path_resolver import resolve_model_dir, resolve_project_root
 from src.storage.repositories import ParagraphRepository
 from src.topic import (
@@ -54,12 +54,16 @@ async def run_topic_model(
     top_n: int = 5,
     force: bool = False,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, int]:
     """执行主题建模（§5.8-5.10），训练用达标段落，推断覆盖所有有 token 段落。
 
     写库顺序：模型契约 topic_model_runs → 段落推断状态 paragraph_topic_inference
     → 完整分布 paragraph_topics；同 run 重跑先清本阶段旧行，不允许新旧结果混合。
+    取消在段落推断的批边界生效：LDA 训练与推断是库内调用，不能中途中断
     """
+    from src.workflows.cancellation import check_cancelled
+
     _num_topics = num_topics if num_topics is not None else settings.topic_model.num_topics
     _passes = passes if passes is not None else settings.topic_model.passes
     _iterations = iterations if iterations is not None else settings.topic_model.iterations
@@ -136,6 +140,7 @@ async def run_topic_model(
     trainer = LDATrainer(config)
 
     logger.info(f"Training LDA model with {_num_topics} topics...")
+    check_cancelled(is_cancelled)
     topic_model = trainer.train(valid_docs, filter_extremes=False)
     logger.info(f"LDA model trained with {topic_model.num_topics} topics")
     logger.info(f"Model trained. Inferring topics for {total_paragraphs} paragraphs...")
@@ -149,7 +154,10 @@ async def run_topic_model(
     inference_rows: list[tuple[int, int, int, str, str | None, float | None]] = []
     topic_rows: list[tuple[int, int, float]] = []
     complete_count = 0
-    for row, tokens in zip(paragraph_rows, tokenized_docs, strict=True):
+    for processed, (row, tokens) in enumerate(zip(paragraph_rows, tokenized_docs, strict=True), start=1):
+        # 推断按段落串行推进，每 64 段兑现一次取消，避免整卷推断拖住取消
+        if processed % 64 == 1:
+            check_cancelled(is_cancelled)
         if not tokens:
             inference_rows.append(
                 (

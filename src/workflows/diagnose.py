@@ -12,12 +12,11 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.agents.diagnosis.schema import CloudAnalysis
 from src.agents.stream import AgentStream
-from src.api.exceptions import GraphReadinessError
-from src.api.models.events import StreamEvent
 from src.config.analysis_logger import AnalysisLogger
-from src.models.cloud.schema import CloudAnalysis
-from src.storage.repositories import RunRepository, StatsRepository
+from src.sse.events import StreamEvent
+from src.storage.repositories import RunRepository
 
 
 def _log_diagnosis_results(result: CloudAnalysis) -> None:
@@ -46,63 +45,12 @@ def _log_diagnosis_results(result: CloudAnalysis) -> None:
         logger.info(f"\nDiagnosis:\n{result.diagnosis}")
 
 
-def _persist_main_character_attributes(
-    session: Session,
-    *,
-    run_id: str,
-    main_characters: list[str],
-) -> None:
-    """2026-08-09 用于把诊断主角名单固化为图节点属性"""
-    from sqlalchemy import select
-
-    from src.knowledge.authority import KnowledgeGraphAuthorityService
-    from src.storage.models import GraphEntity
-
-    if not main_characters:
-        return
-    try:
-        view = KnowledgeGraphAuthorityService.from_session(session).build_export_view(run_id)
-    except (ValueError, GraphReadinessError):
-        # 图未就绪或数据异常时静默跳过主角属性固化（后续图版本补写）
-        return
-    preferred = set(main_characters)
-    representative_ids: set[str] = set()
-    for item in view.canonical_entities:
-        if item.entity_id is None:
-            continue
-        aliases = set(item.aliases)
-        if item.name in preferred or (aliases & preferred):
-            representative_ids.add(str(item.entity_id))
-    if not representative_ids:
-        return
-    graph_entities = list(
-        session.execute(
-            select(GraphEntity).where(
-                GraphEntity.run_id == run_id,
-            )
-        ).scalars()
-    )
-    # 2026-08-13 P2-2 重跑诊断先清除该 run 全部实体的 is_main_character 标记，
-    # 避免旧名单残留（只置位不清理会让已下榜角色仍显示为主角）。
-    # attributes 是 JSON 列，这里读改写后整体写回，与下文置位共用同一批实体。
-    for graph_entity in graph_entities:
-        attributes = dict(graph_entity.attributes or {})
-        if attributes.pop("is_main_character", None) is not None:
-            graph_entity.attributes = attributes
-    for graph_entity in graph_entities:
-        if graph_entity.entity_id not in representative_ids:
-            continue
-        attributes = dict(graph_entity.attributes or {})
-        attributes["is_main_character"] = True
-        graph_entity.attributes = attributes
-    session.flush()
-
-
 async def run_diagnose(
     run_id: str,
     session: Session,
     analysis_logger: AnalysisLogger | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> CloudAnalysis:
     """
     执行诊断流程（诊断 Agent 工具化自主取证）
@@ -116,13 +64,15 @@ async def run_diagnose(
         CloudAnalysis: 诊断分析结果
     """
     from src.agents import run_diagnosis_agent
+    from src.workflows.cancellation import check_cancelled
 
-    # 2026-10-03 改短事务版边界检查：编排器 session 是长活事务，在其上取 FOR SHARE
-    # 会把 analysis_runs 行锁持有整个诊断阶段（实测 12+ 分钟），饿死任务心跳的
-    # UPDATE（详见 require_released_cutoff_short docstring）
-    from src.storage.repositories.pipeline_visibility import require_released_cutoff_short
+    check_cancelled(is_cancelled)
 
-    require_released_cutoff_short(run_id)
+    # 完成状态按成功角色贡献只读聚合，不持有整轮诊断的发布行锁
+    from src.storage.repositories.annotation import AnnotationRepository
+
+    if not AnnotationRepository(session).is_annotate_complete(run_id):
+        raise ValueError("必需角色 work 尚未全部成功保存，不能诊断")
 
     run_repo = RunRepository(session)
     run = run_repo.get_run(run_id)
@@ -136,21 +86,16 @@ async def run_diagnose(
 
     agent_stream = AgentStream(emitter, sub_stage="diagnosis") if emitter is not None else None
 
+    # 诊断 agent 自存产物（analysis_outputs），工作流不再代写
     result = await run_diagnosis_agent(
         session=session,
         run_id=run_id,
         novel_id=novel_id,
         novel_title=novel_title,
         stream=agent_stream,
+        is_cancelled=is_cancelled,
     )
 
-    stats_repo = StatsRepository(session)
-    stats_repo.insert_cloud_analysis(run_id, result)
-    _persist_main_character_attributes(
-        session,
-        run_id=run_id,
-        main_characters=list(result.main_characters),
-    )
     logger.debug(f"diagnosis persisted run_id={run_id}")
 
     _log_diagnosis_results(result)

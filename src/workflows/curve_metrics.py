@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.metrics.style_metrics import mtld, ttr
-from src.preprocess.tokenize import tokenize
+from src.utils.tokenize import tokenize
 
 
 def _last_extreme_index(values: list[float], *, want_max: bool) -> int:
