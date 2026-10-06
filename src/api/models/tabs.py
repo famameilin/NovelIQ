@@ -24,6 +24,7 @@ from src.api.models.responses import (
     DiagnosisResult,
     EmotionStats,
     EmotionTrendWindow,
+    LinguisticPhrasesResponse,
     NarrativeStructureStats,
     ParagraphCurvePoint,
     StyleStats,
@@ -60,24 +61,18 @@ class EntitySurfaceCount(BaseModel):
     count: int
 
 
-class LinguisticEntitiesTabResponse(BaseModel):
+class LinguisticEntitiesTabResponse(LinguisticPhrasesResponse):
     """实体与短语 tab：实体类型计数 + 高频实体名 + 固定短语统计
 
     不含实体候选 span 明细（paragraph_id/字符区间），仅回聚合统计；
     unavailable_reason 表示语言阶段不可用；已运行但没有实体候选时仍展示短语统计。
+    短语部分复用 /linguistic/phrases 的响应模型（同一批字段与语义）。
     """
 
-    run_id: str
     count_by_type: dict[str, int] = Field(default_factory=dict)
     surface_top: list[EntitySurfaceCount] = Field(default_factory=list)
-    total_char_count: int = 0
-    metric_hit_count: int = 0
     audit_hit_count: int = 0
     metric_status: Literal["ready", "pending_review"] = "ready"
-    fixed_phrase_density: float | None = None
-    four_char_candidate_count: int = 0
-    total_hits: int = 0
-    unavailable_reason: str | None = None
 
 
 class DashboardTabResponse(BaseModel):

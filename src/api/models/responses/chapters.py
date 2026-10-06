@@ -1,9 +1,6 @@
 """
 章节级响应模型
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（models/responses.py → responses/ 包）
 说明: 自 src/api/models/responses.py 拆出章节指标汇总、章节标注（人物/关系/对话）
 与伏笔树响应模型（设计文档《章节粒度分析指标重设计》§13.2 等），字段与语义保持不变。
 """
@@ -13,11 +10,9 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class ChapterMetricSummary(BaseModel):
-    """章节汇总（设计文档《章节粒度分析指标重设计》§13.2，由段落充分统计量聚合）"""
+class StyleMetricBlock(BaseModel):
+    """风格与密度指标块：章节汇总与全书聚合共用同一批字段"""
 
-    chapter_id: int
-    paragraph_count: int
     total_chars: int
     total_tokens: int
     pos_density: float | None = None
@@ -32,31 +27,24 @@ class ChapterMetricSummary(BaseModel):
     sent_len_std: float | None = None
     ttr: float | None = None
     mtld: float | None = None
+
+
+class ChapterMetricSummary(StyleMetricBlock):
+    """章节汇总（设计文档《章节粒度分析指标重设计》§13.2，由段落充分统计量聚合）"""
+
+    chapter_id: int
+    paragraph_count: int
     narrative_function: str | None = None
     pivot_moment: bool | None = None
     cliffhanger: bool | None = None
     emotional_valence: int | None = None
 
 
-class BookAggregateStats(BaseModel):
+class BookAggregateStats(StyleMetricBlock):
     """全书聚合（设计文档《章节粒度分析指标重设计》§13.2）"""
 
     total_chapters: int
     total_paragraphs: int
-    total_chars: int
-    total_tokens: int
-    pos_density: float | None = None
-    neg_density: float | None = None
-    net_density: float | None = None
-    fight_density: float | None = None
-    exclaim_per_100_chars: float | None = None
-    question_per_100_chars: float | None = None
-    pause_per_100_chars: float | None = None
-    dialogue_ratio: float | None = None
-    avg_sent_len: float | None = None
-    sent_len_std: float | None = None
-    ttr: float | None = None
-    mtld: float | None = None
     chapter_narrative_function_share: dict[str, float] = Field(default_factory=dict)
     chapter_pivot_rate: float | None = None
     chapter_cliffhanger_rate: float | None = None

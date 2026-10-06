@@ -1,10 +1,8 @@
 """
 API 响应模型包
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（models/responses.py → responses/ 包）
-说明: 原 src/api/models/responses.py 按资源域拆分为 tasks/curves/chapters/stats/
+说明: 读侧响应模型（任务与小说域 DTO 留在 src/api/models/tasks.py）
+原 src/api/models/responses.py 按资源域拆分为 tasks/curves/chapters/stats/
 topics/linguistic/entities 子模块；本包全量 re-export 原有公开名，
 `from src.api.models.responses import X` 与 `from src.api.models.responses.xxx import X`
 两种导入方式均可使用，现有导入方零改动。
@@ -54,20 +52,6 @@ from src.api.models.responses.stats import (
     TokenUsageStats,
     TokenUsageSummary,
 )
-from src.api.models.responses.tasks import (
-    BatchDeleteNovelsRequest,
-    BatchDeleteNovelsResponse,
-    BatchDeleteTasksRequest,
-    BatchDeleteTasksResponse,
-    CreateTaskResponse,
-    ReanalyzeResponse,
-    ResumeTaskResponse,
-    StatusResponse,
-    TaskInfoResponse,
-    TaskListResponse,
-    TaskStatus,
-    UploadResponse,
-)
 from src.api.models.responses.topics import (
     ChapterTopicAggregateResponse,
     ChapterTopicDistribution,
@@ -88,10 +72,6 @@ from src.api.models.responses.topics import (
 )
 
 __all__ = [
-    "BatchDeleteNovelsRequest",
-    "BatchDeleteNovelsResponse",
-    "BatchDeleteTasksRequest",
-    "BatchDeleteTasksResponse",
     "BookAggregateStats",
     "ChapterAnnotation",
     "ChapterCharacter",
@@ -105,7 +85,6 @@ __all__ = [
     "CharacterRelation",
     "CharacterStats",
     "CharacterStatsAggregate",
-    "CreateTaskResponse",
     "DiagnosisResult",
     "EmotionStats",
     "EmotionTrendWindow",
@@ -125,13 +104,7 @@ __all__ = [
     "PosCentroidEntry",
     "PosCoverageEntry",
     "ResultsWriteResponse",
-    "ReanalyzeResponse",
-    "ResumeTaskResponse",
-    "StatusResponse",
     "StyleStats",
-    "TaskInfoResponse",
-    "TaskListResponse",
-    "TaskStatus",
     "TokenUsageByModel",
     "TokenUsageByTask",
     "TokenUsageStats",
@@ -147,7 +120,6 @@ __all__ = [
     "TopicShiftCandidate",
     "TopicShiftConfig",
     "TopicShiftResponse",
-    "UploadResponse",
     "Word2VecModelInfo",
     "Word2VecStatsResponse",
 ]

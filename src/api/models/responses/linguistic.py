@@ -1,9 +1,6 @@
 """
 语言结构响应模型
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（models/responses.py → responses/ 包）
 说明: 自 src/api/models/responses.py 拆出语言结构聚合响应模型；
 LinguisticGroupStats → ChapterLinguisticStats → LinguisticFeaturesResponse 继承链
 与情绪事件计数模型（2026-09-05 B 批）必须同文件维护，字段与语义保持不变。

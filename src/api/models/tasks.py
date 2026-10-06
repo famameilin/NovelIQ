@@ -1,26 +1,18 @@
 """
 任务生命周期响应模型
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（models/responses.py → responses/ 包）
 说明: 自 src/api/models/responses.py 拆出任务状态枚举、任务创建/继续/状态查询、
 任务列表与批量删除等任务生命周期响应模型，字段与语义保持不变。
 """
 
 from datetime import datetime
-from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from src.storage.task_status import TaskStatus
 
-class TaskStatus(StrEnum):
-    PENDING = "pending"
-    RUNNING = "running"
-    CANCELLING = "cancelling"
-    CANCELLED = "cancelled"
-    COMPLETED = "completed"
-    FAILED = "failed"
+__all__ = ["TaskStatus"]
+
 
 
 class UploadResponse(BaseModel):
@@ -32,28 +24,19 @@ class UploadResponse(BaseModel):
 
 class CreateTaskResponse(BaseModel):
     """
-    创建并启动任务响应
+    任务已启动响应（创建/继续/重分析同一形状，message 由端点显式给出）
 
-    说明: 对应 POST /api/novels/{novel_id}/tasks
+    说明: 对应 POST /api/novels/{novel_id}/tasks、.../{task_id}/resume、/reanalyze
     """
 
     novel_id: str
     task_id: str
     status: TaskStatus = TaskStatus.PENDING
-    message: str = "分析任务已创建并启动"
+    message: str
 
 
-class ResumeTaskResponse(BaseModel):
-    """
-    继续任务响应
-
-    说明: 对应 POST /api/novels/{novel_id}/tasks/{task_id}/resume
-    """
-
-    novel_id: str
-    task_id: str
-    status: TaskStatus = TaskStatus.PENDING
-    message: str = "分析任务已继续执行"
+ResumeTaskResponse = CreateTaskResponse
+ReanalyzeResponse = CreateTaskResponse
 
 
 class StatusResponse(BaseModel):
@@ -75,13 +58,6 @@ class StatusResponse(BaseModel):
     error: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
-
-
-class ReanalyzeResponse(BaseModel):
-    novel_id: str
-    task_id: str
-    status: TaskStatus = TaskStatus.PENDING
-    message: str = "重新分析任务已启动"
 
 
 class TaskInfoResponse(BaseModel):
@@ -108,19 +84,6 @@ class BatchDeleteNovelsRequest(BaseModel):
     novel_ids: list[str] = Field(..., description="要删除的小说ID列表")
 
 
-class BatchDeleteNovelsResponse(BaseModel):
-    """
-    批量删除小说响应模型
-    """
-
-    success: bool
-    message: str
-    deleted_count: int
-    failed_count: int
-    deleted_ids: list[str]
-    failed_ids: list[dict[str, str]]  # [{"novel_id": "xxx", "reason": "错误原因"}]
-
-
 class BatchDeleteTasksRequest(BaseModel):
     """
     批量删除任务请求模型
@@ -131,7 +94,9 @@ class BatchDeleteTasksRequest(BaseModel):
 
 class BatchDeleteTasksResponse(BaseModel):
     """
-    批量删除任务响应模型
+    批量删除响应（小说与任务同一形状，failed_ids 元素键随资源不同）
+
+    failed_ids 元素形如 {"novel_id": "xxx", "reason": "错误原因"} 或 {"task_id": ...}
     """
 
     success: bool
@@ -140,3 +105,6 @@ class BatchDeleteTasksResponse(BaseModel):
     failed_count: int
     deleted_ids: list[str]
     failed_ids: list[dict[str, str]]  # [{"task_id": "xxx", "reason": "错误原因"}]
+
+
+BatchDeleteNovelsResponse = BatchDeleteTasksResponse
