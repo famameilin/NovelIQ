@@ -13,8 +13,6 @@ from collections.abc import Sequence
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from src.chapters.models import ChapterData
-from src.chunking.chunker import Chunk
 from src.config import settings
 from src.storage.models import Chapter as ChapterModel
 from src.storage.repositories.base import BaseRepository
@@ -23,7 +21,9 @@ from src.storage.repositories.paragraph import (
     has_paragraph_embeddings,
 )
 from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.storage.text_units import Chunk
 from src.storage.vector_schema import validate_paragraph_embeddings_schema
+from src.utils.chapters.models import ChapterData
 
 
 class ChapterRepository(BaseRepository["ChapterModel"]):

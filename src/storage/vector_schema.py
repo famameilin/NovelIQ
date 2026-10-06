@@ -39,8 +39,8 @@ def _get_table_columns(session: Session, table_name: str) -> set[str]:
     }
 
 
-def _get_embedding_vector_type(session: Session, table_name: str) -> str | None:
-    """2026-08-07 用于读取 pgvector 列的格式化数据库类型"""
+def _get_column_format_type(session: Session, table_name: str, column_name: str) -> str | None:
+    """2026-10-06 用于读取指定列的格式化数据库类型"""
     schema = _runtime_schema()
     return session.execute(
         text(
@@ -48,12 +48,17 @@ def _get_embedding_vector_type(session: Session, table_name: str) -> str | None:
             SELECT format_type(attribute.atttypid, attribute.atttypmod)
             FROM pg_attribute AS attribute
             WHERE attribute.attrelid = to_regclass(:table_name)
-              AND attribute.attname = 'embedding_vector'
+              AND attribute.attname = :column_name
               AND NOT attribute.attisdropped
             """
         ),
-        {"table_name": f"{schema}.{table_name}"},
+        {"table_name": f"{schema}.{table_name}", "column_name": column_name},
     ).scalar_one_or_none()
+
+
+def _get_embedding_vector_type(session: Session, table_name: str) -> str | None:
+    """2026-08-07 用于读取 pgvector 列的格式化数据库类型"""
+    return _get_column_format_type(session, table_name, "embedding_vector")
 
 
 # 二期段落化（§5.2）新结构：旧列（chunk_id/paragraph_index/paragraph_text/
@@ -97,7 +102,15 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
         {"table_name": table_regclass},
     ).scalar_one()
     existing_columns = _get_table_columns(session, "paragraph_embeddings") if table_exists is not None else set()
-    if table_exists is not None and existing_columns != _REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS:
+    # 2026-10-06 created_at 由 VARCHAR 字符串改为 naive UTC timestamp：旧类型视为
+    # 不兼容结构，与列集合不符同策略 DROP 重建，数据不回填
+    created_at_type = (
+        _get_column_format_type(session, "paragraph_embeddings", "created_at") if table_exists is not None else None
+    )
+    if table_exists is not None and (
+        existing_columns != _REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS
+        or created_at_type != "timestamp without time zone"
+    ):
         # 2026-08-14 二期段落化：旧结构（含一期段落 embedding 结构）直接 DROP 重建，
         # 不尝试 ALTER 兼容——旧列与新结构语义完全不同，且旧数据不回填
         session.execute(text(f"DROP TABLE {table_regclass}"))
@@ -112,7 +125,7 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
                     embedding_vector vector({embedding_dim}),
                     embedding_model_key VARCHAR,
                     embedding_dimension INTEGER,
-                    created_at VARCHAR(50),
+                    created_at TIMESTAMP,
                     PRIMARY KEY (run_id, paragraph_id),
                     FOREIGN KEY (run_id) REFERENCES {schema}.analysis_runs(run_id) ON DELETE CASCADE,
                     FOREIGN KEY (run_id, paragraph_id)
@@ -152,6 +165,30 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
                 f"ON {schema}.paragraph_embeddings USING hnsw (embedding_vector vector_cosine_ops)"
             )
         )
+    _apply_paragraph_embeddings_comments(session, schema)
+
+
+# 2026-10-06 动态建表不走 ORM comment 元数据（init_db 排除本表），表/列注释在此幂等补齐
+_EMBEDDINGS_COMMENTS: tuple[tuple[str, str], ...] = (
+    ("TABLE {schema}.paragraph_embeddings", "段落向量嵌入表：段落语义向量与溯源（列宽按嵌入模型实测维度固化）"),
+    ("COLUMN {schema}.paragraph_embeddings.run_id", "所属分析运行"),
+    ("COLUMN {schema}.paragraph_embeddings.paragraph_id", "所属段落编号"),
+    ("COLUMN {schema}.paragraph_embeddings.embedding_vector", "段落语义向量（列宽按嵌入模型维度固化）"),
+    ("COLUMN {schema}.paragraph_embeddings.embedding_model_key", "生成向量的嵌入模型 key"),
+    ("COLUMN {schema}.paragraph_embeddings.embedding_dimension", "嵌入维度（preprocess 探测值）"),
+    ("COLUMN {schema}.paragraph_embeddings.created_at", "创建时间"),
+)
+
+
+def _apply_paragraph_embeddings_comments(session: Session, schema: str) -> None:
+    """为 paragraph_embeddings 写入表/列注释（覆盖式，幂等）
+
+    COMMENT ON 的 IS 子句不支持绑定参数，只能拼接字面量；schema 已过
+    _runtime_schema 白名单校验，注释文本为代码内常量，单引号转义后内插。
+    """
+    for target_template, comment in _EMBEDDINGS_COMMENTS:
+        literal = comment.replace("'", "''")
+        session.execute(text(f"COMMENT ON {target_template.format(schema=schema)} IS '{literal}'"))
 
 
 def _hnsw_index_exists(session: Session, schema: str) -> bool:

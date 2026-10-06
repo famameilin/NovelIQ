@@ -23,7 +23,6 @@ from typing import Any
 
 from sqlalchemy.engine import Row
 
-from src.chunking.spans import ParagraphSpan
 from src.storage.models import Paragraph, TopicModelRun
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.paragraph.curve_ops import (
@@ -59,6 +58,7 @@ from src.storage.repositories.paragraph.topic_ops import (
     insert_topic_model_run,
 )
 from src.storage.repositories.paragraph.writer import insert_paragraphs, validate_spans
+from src.storage.text_units import ParagraphSpan
 
 
 class ParagraphRepository(BaseRepository[Paragraph]):

@@ -1,21 +1,23 @@
-"""全局统计、token 使用与 diagnosis 落库相关操作"""
+"""全局统计、模型回合计账与分析产物落库相关操作"""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
-from src.storage.models import CloudAnalysis, GlobalContext, GlobalStats, TokenUsage
-from src.storage.models.agent_audit import AgentInvocation, AgentTurn
+from src.agents.diagnosis.schema import CloudAnalysis as CloudAnalysisSchema
+from src.storage.models import AnalysisOutput, GlobalStats, ModelTurn, Novel
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+# 计账聚合只统计真实模型调用行；attempt_error 行是尝试结果登记，不是一次调用
+_USAGE_ROW_KINDS = ("agent_turn", "usage")
 
 
 def insert_global_stats(session: Session, run_id: str, stats: Iterable[tuple[str, float | None]]) -> None:
@@ -50,10 +52,10 @@ def fetch_global_stats_dict(session: Session, run_id: str) -> dict[str, float | 
     return {row.stat_name: row.stat_value for row in result}
 
 
-def insert_token_usage(
+def insert_model_turn(
     session: Session,
+    *,
     run_id: str,
-    novel_id: str,
     task_type: str,
     call_type: str,
     model: str,
@@ -65,18 +67,18 @@ def insert_token_usage(
     cost: float | None = None,
     accounting_source: str = "reported",
     reasoning_tokens: int | None = None,
-    agent_turn_id: int | None = None,
-) -> int | None:
-    """插入 token 使用记录（cache_read_tokens 缺失记 0）。"""
-    from datetime import datetime
-
-    now = datetime.now().isoformat()
-    token_usage = TokenUsage(
-        novel_id=novel_id,
-        chapter_id=chapter_id,
+    message_key: str | None = None,
+) -> int:
+    """插入非 Agent 模型调用的记账行（Agent 回合的计账由审计记录器内联在回合行上）。"""
+    now = datetime.now(UTC).replace(tzinfo=None)
+    turn = ModelTurn(
+        row_kind="usage",
+        run_id=run_id,
         task_type=task_type,
         call_type=call_type,
         model=model,
+        chapter_id=chapter_id,
+        status="success",
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
@@ -84,27 +86,35 @@ def insert_token_usage(
         reasoning_tokens=reasoning_tokens,
         cost=cost,
         accounting_source=accounting_source,
-        created_at=now,
-        run_id=run_id,
-        agent_turn_id=agent_turn_id,
+        started_at=now,
+        finished_at=now,
+        message_key=message_key,
     )
-    session.add(token_usage)
+    session.add(turn)
     session.flush()
-    return token_usage.id
+    return turn.id
 
 
-def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
-    """获取 token 使用统计。"""
-    summary = _fetch_usage_summary(session, run_id, novel_id)
-    by_task = _fetch_usage_by_task(session, run_id, novel_id)
-    by_call_type = _fetch_usage_by_call_type(session, run_id, novel_id)
-    by_model = _fetch_usage_by_model(session, run_id, novel_id)
-    coverage_gaps = _detect_token_coverage_gaps(session, run_id, by_call_type)
+def fetch_token_usage_stats(session: Session, run_id: str) -> dict[str, Any]:
+    """获取模型回合的 token 使用统计。"""
+    summary = _fetch_usage_summary(session, run_id)
+    by_task = _fetch_usage_by_task(session, run_id)
+    by_call_type = _fetch_usage_by_call_type(session, run_id)
+    by_model = _fetch_usage_by_model(session, run_id)
+    coverage_gaps = _detect_token_coverage_gaps(session, run_id)
     # 这里的 estimated 表示“整套 token 统计只能作为近似成本信号”，
     # 并不强制每一条记录都来自本地估算；像 embedding 这类 provider 能稳定返回 usage 的链路，
     # 仍然优先复用实报值，避免为了统一字面口径反而丢掉更好的原始信息
-    summary["accounting_method"] = "estimated"
-    summary["coverage_status"] = "partial" if coverage_gaps else "complete"
+    sources = set(
+        session.execute(
+            select(ModelTurn.accounting_source).where(
+                ModelTurn.run_id == run_id, ModelTurn.row_kind.in_(_USAGE_ROW_KINDS)
+            )
+        ).scalars()
+    )
+    summary["accounting_method"] = "unknown" if not sources else "reported" if sources == {"reported"} else "estimated"
+    summary["coverage_scope"] = "实际审计请求及已记录的非 Agent 调用；未记录链路不能推断完整"
+    summary["coverage_status"] = "partial" if coverage_gaps else "unknown" if not sources else "recorded_calls"
     return {
         "summary": summary,
         "by_task": by_task,
@@ -114,16 +124,16 @@ def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> dic
     }
 
 
-def _fetch_usage_summary(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
+def _fetch_usage_summary(session: Session, run_id: str) -> dict[str, Any]:
     """获取使用量摘要"""
     stmt = select(
         func.count().label("call_count"),
-        func.sum(TokenUsage.prompt_tokens).label("total_prompt_tokens"),
-        func.sum(func.coalesce(TokenUsage.completion_tokens, 0)).label("total_completion_tokens"),
-        func.sum(TokenUsage.total_tokens).label("total_tokens"),
+        func.sum(ModelTurn.prompt_tokens).label("total_prompt_tokens"),
+        func.sum(func.coalesce(ModelTurn.completion_tokens, 0)).label("total_completion_tokens"),
+        func.sum(ModelTurn.total_tokens).label("total_tokens"),
     ).where(
-        TokenUsage.novel_id == novel_id,
-        TokenUsage.run_id == run_id,
+        ModelTurn.run_id == run_id,
+        ModelTurn.row_kind.in_(_USAGE_ROW_KINDS),
     )
     result = session.execute(stmt).fetchone()
     if result is None:
@@ -141,26 +151,25 @@ def _fetch_usage_summary(session: Session, run_id: str, novel_id: str) -> dict[s
     }
 
 
-def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
+def _fetch_usage_by_task(session: Session, run_id: str) -> dict[str, Any]:
     """按任务类型获取使用量"""
     stmt = (
         select(
-            TokenUsage.task_type,
+            ModelTurn.task_type,
             func.count().label("call_count"),
-            func.sum(TokenUsage.total_tokens).label("total_tokens"),
+            func.sum(ModelTurn.total_tokens).label("total_tokens"),
         )
         .where(
-            TokenUsage.novel_id == novel_id,
-            TokenUsage.run_id == run_id,
+            ModelTurn.run_id == run_id,
+            ModelTurn.row_kind.in_(_USAGE_ROW_KINDS),
         )
-        .group_by(TokenUsage.task_type)
+        .group_by(ModelTurn.task_type)
     )
 
     result = session.execute(stmt).fetchall()
     aggregated: dict[str, dict[str, int]] = {}
     for row in result:
-        normalized_task_type = _normalize_token_usage_task_type(row.task_type)
-        bucket = aggregated.setdefault(normalized_task_type, {"call_count": 0, "total_tokens": 0})
+        bucket = aggregated.setdefault(row.task_type, {"call_count": 0, "total_tokens": 0})
         # 不要再用 `row.count` 这类名字，mypy 会把它当成序列方法而不是 SQL 列
         bucket["call_count"] += int(row.call_count or 0)
         bucket["total_tokens"] += int(row.total_tokens or 0)
@@ -172,60 +181,45 @@ def _build_call_type_key(task_type: str, call_type: str) -> str:
     return f"{task_type}.{call_type}"
 
 
-def _normalize_token_usage_task_type(task_type: str) -> str:
-    """2026-08-05 用于返回最新主链唯一的 Token 任务类型"""
-    return task_type
-
-
-def _agent_call_type(task_type: str) -> str:
-    """2026-08-10 用于把 Agent 审计任务类型映射到 token_usage 的调用桶 call_type"""
-    if task_type == "annotation":
-        return "agent"
-    if task_type == "diagnosis":
-        return "diagnosis"
-    return task_type
-
-
-def _fetch_usage_by_call_type(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
+def _fetch_usage_by_call_type(session: Session, run_id: str) -> dict[str, Any]:
     """按 task_type + call_type 获取使用量"""
     stmt = (
         select(
-            TokenUsage.task_type,
-            TokenUsage.call_type,
+            ModelTurn.task_type,
+            ModelTurn.call_type,
             func.count().label("call_count"),
-            func.sum(TokenUsage.total_tokens).label("total_tokens"),
+            func.sum(ModelTurn.total_tokens).label("total_tokens"),
         )
         .where(
-            TokenUsage.novel_id == novel_id,
-            TokenUsage.run_id == run_id,
+            ModelTurn.run_id == run_id,
+            ModelTurn.row_kind.in_(_USAGE_ROW_KINDS),
         )
-        .group_by(TokenUsage.task_type, TokenUsage.call_type)
+        .group_by(ModelTurn.task_type, ModelTurn.call_type)
     )
 
     result = session.execute(stmt).fetchall()
     aggregated: dict[str, dict[str, int]] = {}
     for row in result:
-        normalized_task_type = _normalize_token_usage_task_type(row.task_type)
-        key = _build_call_type_key(normalized_task_type, row.call_type)
+        key = _build_call_type_key(row.task_type, row.call_type)
         bucket = aggregated.setdefault(key, {"call_count": 0, "total_tokens": 0})
         bucket["call_count"] += int(row.call_count or 0)
         bucket["total_tokens"] += int(row.total_tokens or 0)
     return aggregated
 
 
-def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
+def _fetch_usage_by_model(session: Session, run_id: str) -> dict[str, Any]:
     """按模型获取使用量"""
     stmt = (
         select(
-            TokenUsage.model,
+            ModelTurn.model,
             func.count().label("call_count"),
-            func.sum(TokenUsage.total_tokens).label("total_tokens"),
+            func.sum(ModelTurn.total_tokens).label("total_tokens"),
         )
         .where(
-            TokenUsage.novel_id == novel_id,
-            TokenUsage.run_id == run_id,
+            ModelTurn.run_id == run_id,
+            ModelTurn.row_kind.in_(_USAGE_ROW_KINDS),
         )
-        .group_by(TokenUsage.model)
+        .group_by(ModelTurn.model)
     )
 
     result = session.execute(stmt).fetchall()
@@ -238,217 +232,54 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[
     }
 
 
-def _fetch_agent_turn_call_counts(session: Session, run_id: str) -> dict[str, int]:
-    """2026-08-10 用于统计新审计表中真实成功的 Agent 模型回合数"""
-    stmt = (
-        select(AgentInvocation.task_type, func.count().label("turn_count"))
-        .join(AgentTurn, AgentTurn.invocation_id == AgentInvocation.id)
-        .where(AgentInvocation.run_id == run_id, AgentTurn.status == "success")
-        .group_by(AgentInvocation.task_type)
-    )
-    aggregated: dict[str, int] = {}
-    for row in session.execute(stmt).fetchall():
-        key = _build_call_type_key(row.task_type, _agent_call_type(row.task_type))
-        aggregated[key] = aggregated.get(key, 0) + int(row.turn_count or 0)
-    return aggregated
-
-
 def _detect_token_coverage_gaps(
     session: Session,
     run_id: str,
-    by_call_type: dict[str, Any],
 ) -> list[str]:
-    """比较真实 Agent 回合与已记账调用，找出 token 覆盖缺口"""
-    agent_turn_counts = _fetch_agent_turn_call_counts(session, run_id)
-    gaps: list[str] = []
-    for call_key in sorted(agent_turn_counts.keys()):
-        agent_call_count = int(agent_turn_counts.get(call_key, 0) or 0)
-        token_call_count = int(by_call_type.get(call_key, {}).get("call_count", 0) or 0)
-        if token_call_count < agent_call_count:
-            gaps.append(call_key)
-    return gaps
+    """找出计账口径不完整的调用桶
+
+    Agent 回合与计账列同行内联，缺口只剩三类：尚未收口的 running 行、
+    没有 token 记账的行、以及只能本地估算的行。
+    """
+    gaps: set[str] = set()
+    statement = select(ModelTurn.task_type, ModelTurn.call_type).where(
+        ModelTurn.run_id == run_id,
+        ModelTurn.row_kind == "agent_turn",
+        (ModelTurn.status == "running")
+        | (ModelTurn.prompt_tokens.is_(None))
+        | (ModelTurn.accounting_source != "reported"),
+    )
+    for row in session.execute(statement):
+        gaps.add(_build_call_type_key(row.task_type, row.call_type))
+    return sorted(gaps)
 
 
-def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysisSchema) -> None:
-    """按当前焦点合同写入云端分析结果"""
-    arc_scores_json = json.dumps(dict(analysis.arc_scores), ensure_ascii=False)
-    genre_labels_json = json.dumps(list(analysis.genre_labels), ensure_ascii=False)
-    style_labels_json = json.dumps(list(analysis.style_labels), ensure_ascii=False)
-    topic_labels_json = json.dumps(analysis.topic_labels, ensure_ascii=False)
-    focus_characters_json = json.dumps(list(analysis.focus_characters), ensure_ascii=False)
-    main_characters_json = json.dumps(list(analysis.main_characters), ensure_ascii=False)
-    core_cast_json = json.dumps(list(analysis.core_cast), ensure_ascii=False)
-
-    cloud_analysis = CloudAnalysis(
-        novel_id=analysis.novel_id,
-        foreshadow_expectation=analysis.foreshadow_expectation,
-        arc_scores=arc_scores_json,
-        genre_labels=genre_labels_json,
-        style_labels=style_labels_json,
-        topic_labels=topic_labels_json,
-        diagnosis=analysis.diagnosis,
-        value_logic_type=analysis.value_logic_type,
-        value_logic_reason=analysis.value_logic_reason,
-        power_stance_score=analysis.power_stance_score,
-        power_stance_reason=analysis.power_stance_reason,
-        common_people_dignity=analysis.common_people_dignity,
-        dignity_reason=analysis.dignity_reason,
-        cultural_depth_score=analysis.cultural_depth_score,
-        cultural_depth_reason=analysis.cultural_depth_reason,
-        narrative_arc_type=analysis.narrative_arc_type,
-        focus_structure=analysis.focus_structure,
-        focus_characters=focus_characters_json,
-        main_characters=main_characters_json,
-        core_cast=core_cast_json,
-        theme_color=analysis.theme_color,
+def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysisSchema) -> str:
+    """诊断产物以 kind=cloud_analysis 追加进分析产物表，读侧取最新一行"""
+    row = AnalysisOutput(
+        output_id=str(uuid4()),
         run_id=run_id,
+        kind="cloud_analysis",
+        payload=analysis.model_dump(),
     )
-    session.add(cloud_analysis)
-    session.commit()
+    session.add(row)
+    session.flush()
+    return row.output_id
 
 
-def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[str, Any] | None:
-    """读取当前云端分析结构"""
-    stmt = (
-        select(CloudAnalysis)
-        .where(
-            CloudAnalysis.novel_id == novel_id,
-            CloudAnalysis.run_id == run_id,
-        )
-        .order_by(CloudAnalysis.id.desc())
+def fetch_cloud_analysis(session: Session, run_id: str) -> dict[str, Any] | None:
+    """读取当前诊断产物（最新一行），返回展平的合同字典"""
+    result = session.execute(
+        select(AnalysisOutput)
+        .where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "cloud_analysis")
+        .order_by(AnalysisOutput.created_at.desc(), AnalysisOutput.output_id.desc())
         .limit(1)
-    )
-
-    result = session.execute(stmt).scalar_one_or_none()
-
-    if result is None:
-        stmt = select(CloudAnalysis).where(CloudAnalysis.run_id == run_id).order_by(CloudAnalysis.id.desc()).limit(1)
-        result = session.execute(stmt).scalar_one_or_none()
-
+    ).scalar_one_or_none()
     if result is None:
         return None
-
-    return {
-        "novel_id": result.novel_id,
-        "foreshadow_expectation": result.foreshadow_expectation,
-        "arc_scores": result.arc_scores,
-        "genre_labels": result.genre_labels,
-        "style_labels": result.style_labels,
-        "topic_labels": result.topic_labels,
-        "diagnosis": result.diagnosis,
-        "value_logic_type": result.value_logic_type,
-        "value_logic_reason": result.value_logic_reason,
-        "power_stance_score": result.power_stance_score,
-        "power_stance_reason": result.power_stance_reason,
-        "common_people_dignity": result.common_people_dignity,
-        "dignity_reason": result.dignity_reason,
-        "cultural_depth_score": result.cultural_depth_score,
-        "cultural_depth_reason": result.cultural_depth_reason,
-        "narrative_arc_type": result.narrative_arc_type,
-        "focus_structure": result.focus_structure,
-        "focus_characters": result.focus_characters,
-        "main_characters": result.main_characters,
-        "core_cast": result.core_cast,
-        "theme_color": result.theme_color,
-        "run_id": result.run_id,
-    }
-
-
-def insert_global_context(
-    session: Session,
-    run_id: str,
-    novel_id: str,
-    core_characters: str,
-    world_setting: str,
-    novel_title: str | None = None,
-) -> None:
-    """插入全局上下文。"""
-    now = datetime.now().isoformat()
-    stmt = (
-        pg_insert(GlobalContext)
-        .values(
-            novel_id=novel_id,
-            novel_title=novel_title,
-            core_characters=core_characters,
-            world_setting=world_setting,
-            updated_at=now,
-            run_id=run_id,
-        )
-        .on_conflict_do_update(
-            index_elements=["novel_id"],
-            set_={
-                "novel_title": novel_title,
-                "core_characters": core_characters,
-                "world_setting": world_setting,
-                "updated_at": now,
-                "run_id": run_id,
-            },
-        )
-    )
-    session.execute(stmt)
-    session.commit()
-
-
-def fetch_global_context(session: Session, novel_id: str) -> tuple[str, str, str, str] | None:
-    """获取全局上下文。"""
-    # 2026-08-14 D15：insert 按 novel_id upsert 并覆写 run_id（全局上下文只保留
-    # 最新 run），故读侧只按 novel_id 定位；2026-10-02 移除仅为兼容保留的 run_id 参数
-    stmt = select(
-        GlobalContext.novel_title,
-        GlobalContext.core_characters,
-        GlobalContext.world_setting,
-        GlobalContext.updated_at,
-    ).where(
-        GlobalContext.novel_id == novel_id,
-    )
-    result = session.execute(stmt).fetchone()
-    if result is None:
-        return None
-    return (result.novel_title, result.core_characters, result.world_setting, result.updated_at)
-
-
-def update_global_context(session: Session, novel_id: str, **kwargs: Any) -> None:
-    """更新全局上下文（仅允许 core_characters / world_setting）。"""
-    allowed_fields = {"core_characters", "world_setting"}
-    update_data = {}
-    for key, value in kwargs.items():
-        if key in allowed_fields:
-            update_data[key] = value
-    if not update_data:
-        return
-    update_data["updated_at"] = datetime.now().isoformat()
-
-    stmt = (
-        update(GlobalContext)
-        # 2026-08-14 D15：与 fetch_global_context 同口径，只按 novel_id 定位最新行
-        .where(GlobalContext.novel_id == novel_id)
-        .values(**update_data)
-    )
-    session.execute(stmt)
-    session.commit()
+    return {**result.payload, "run_id": result.run_id}
 
 
 def fetch_novel_title(session: Session, novel_id: str) -> str | None:
     """获取小说标题。"""
-    stmt = (
-        select(GlobalContext.novel_title)
-        # 2026-08-14 D15：只按 novel_id 读取最新行
-        .where(
-            GlobalContext.novel_id == novel_id,
-        )
-        .limit(1)
-    )
-
-    result = session.execute(stmt).fetchone()
-    return result.novel_title if result else None
-
-
-def has_global_context(session: Session, novel_id: str) -> bool:
-    """检查某小说是否已存在 global_context 记录
-
-    2026-08-14 D15：表内每 novel 至多一行（upsert 覆写 run_id），故按 novel_id 判断；
-    2026-10-02 移除仅为兼容保留的 run_id 参数
-    """
-    stmt = select(GlobalContext).where(GlobalContext.novel_id == novel_id).limit(1)
-    result = session.execute(stmt).scalar_one_or_none()
-    return result is not None
+    return session.execute(select(Novel.title).where(Novel.novel_id == novel_id)).scalar_one_or_none()

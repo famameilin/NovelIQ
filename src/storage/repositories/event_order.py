@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
-from src.storage.models import ChapterAnnotationRecord, EventNode
+from src.storage.models import AnalysisOutput, EventNode
 
 
-def formal_event_ordinals(annotations: Iterable[ChapterAnnotationRecord]) -> dict[str, int]:
+def formal_event_ordinals(annotations: Iterable[AnalysisOutput]) -> dict[str, int]:
     """同段事件按不可变章标注的写入序号排序，不从命令哈希推断顺序"""
     return {
         event["node_id"]: ordinal

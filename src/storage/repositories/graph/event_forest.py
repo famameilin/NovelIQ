@@ -10,8 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.storage.models import (
+    AnalysisOutput,
     Chapter,
-    ChapterAnnotationRecord,
     EventEdge,
     EventNode,
 )
@@ -140,76 +140,59 @@ class EventForestRepository:
         chapters: list[Chapter] | None = None,
     ) -> ChapterBoundary | None:
         """2026-08-19 用于按章节身份解析当前运行的图谱边界（缓存 chapters，批量查 annotation 避免逆序 N+1）"""
-        if chapters is None:
-            chapters = self._chapter_rows(run_id)
-        if chapter_id is None:
-            if not chapters:
-                return None
-            # 批量查询 annotation 避免逆序 N+1
-            chapter_ids = [int(c.chapter_id) for c in chapters]
-            rows = list(
-                self.session.execute(
-                    select(ChapterAnnotationRecord).where(
-                        ChapterAnnotationRecord.run_id == run_id,
-                        ChapterAnnotationRecord.chapter_id.in_(chapter_ids),
-                    )
-                ).scalars()
-            )
-            annotation_by_chapter: dict[int, ChapterAnnotationRecord] = {int(row.chapter_id): row for row in rows}
-            target = None
-            annotation = None
-            for candidate in reversed(chapters):
-                cand_annotation = annotation_by_chapter.get(int(candidate.chapter_id))
-                if cand_annotation is not None:
-                    target = candidate
-                    annotation = cand_annotation
-                    break
-            if target is None or annotation is None:
-                return None
-            order = chapters.index(target) + 1
-            return ChapterBoundary(
-                run_id=run_id,
-                chapter_id=int(target.chapter_id),
-                chapter_order=order,
-                first_chapter_id=int(target.chapter_id),
-                last_chapter_id=int(target.chapter_id),
-                annotation_id=str(annotation.annotation_id),
-            )
-        target = next((chapter for chapter in chapters if int(chapter.chapter_id) == chapter_id), None)
-        if target is None:
+        from src.storage.models import AnnotationWork
+
+        chapters = self._chapter_rows(run_id)
+        records = {
+            row.chapter_id: row
+            for row in self.session.execute(
+                select(AnalysisOutput)
+                .join(AnnotationWork, AnnotationWork.work_id == AnalysisOutput.work_id)
+                .where(
+                    AnalysisOutput.run_id == run_id,
+                    AnalysisOutput.kind == "chapter_annotation",
+                    AnnotationWork.state == "saved",
+                    AnnotationWork.invocation_id == AnalysisOutput.invocation_id,
+                )
+            ).scalars()
+        }
+        target = (
+            next((chapter for chapter in reversed(chapters) if chapter.chapter_id in records), None)
+            if chapter_id is None
+            else next((chapter for chapter in chapters if chapter.chapter_id == chapter_id), None)
+        )
+        if target is None or target.chapter_id not in records:
             return None
-        annotation = self.session.execute(
-            select(ChapterAnnotationRecord).where(
-                ChapterAnnotationRecord.run_id == run_id,
-                ChapterAnnotationRecord.chapter_id == target.chapter_id,
-            )
-        ).scalar_one_or_none()
-        if annotation is None:
-            return None
-        order = chapters.index(target) + 1
         return ChapterBoundary(
             run_id=run_id,
-            chapter_id=int(target.chapter_id),
-            chapter_order=order,
-            first_chapter_id=int(target.chapter_id),
-            last_chapter_id=int(target.chapter_id),
-            annotation_id=str(annotation.annotation_id),
+            chapter_id=target.chapter_id,
+            chapter_order=chapters.index(target) + 1,
+            first_chapter_id=target.chapter_id,
+            last_chapter_id=target.chapter_id,
+            annotation_id=records[target.chapter_id].output_id,
         )
 
     def fetch_event_nodes(self, run_id: str, *, max_chapter_order: int) -> list[EventNodeRow]:
         """读取边界内节点，并从正式章标注恢复树内父节点与证据粒度"""
-        rows = list(self.session.execute(
-            select(EventNode)
-            .where(EventNode.run_id == run_id, EventNode.chapter_order <= max_chapter_order)
-            .order_by(EventNode.chapter_order, EventNode.event_id)
-        ).scalars())
+        rows = list(
+            self.session.execute(
+                select(EventNode)
+                .where(EventNode.run_id == run_id, EventNode.chapter_order <= max_chapter_order)
+                .order_by(EventNode.chapter_order, EventNode.event_id)
+            ).scalars()
+        )
         if not rows:
             return []
         annotation_ids = {node.annotation_id for node in rows}
-        annotations = list(self.session.execute(
-            select(ChapterAnnotationRecord).where(ChapterAnnotationRecord.annotation_id.in_(annotation_ids))
-        ).scalars())
-        # parent_node_id 只在正式标注载荷里，批量读取避免每个节点再查一次
+        annotations = list(
+            self.session.execute(
+                select(AnalysisOutput).where(
+                    AnalysisOutput.kind == "chapter_annotation",
+                    AnalysisOutput.output_id.in_(annotation_ids),
+                )
+            ).scalars()
+        )
+        # 不可变产出用于排序；父边和树归属读取当前有效连接的折叠结果
         payload_events: dict[str, dict[str, Any]] = {}
         for annotation in annotations:
             for event in annotation.payload["events"]:
@@ -218,7 +201,7 @@ class EventForestRepository:
         node_by_id = {node.event_id: node for node in rows}
 
         def parent_event_id(node: EventNode) -> str | None:
-            parent_id = payload_events[node.event_id]["parent_node_id"]
+            parent_id = node.parent_node_id
             parent = node_by_id.get(str(parent_id)) if parent_id else None
             return str(parent_id) if parent is not None and parent.tree_id == node.tree_id else None
 
@@ -311,12 +294,16 @@ class EventForestRepository:
         if not roots:
             return []
         edges_by_root: dict[str, list[EventEdge]] = {}
-        for edge in self.session.execute(
-            select(EventEdge).where(
-                EventEdge.run_id == run_id,
-                EventEdge.edge_type == "foreshadowing",
+        for edge in (
+            self.session.execute(
+                select(EventEdge).where(
+                    EventEdge.run_id == run_id,
+                    EventEdge.edge_type == "foreshadowing",
+                )
             )
-        ).scalars().all():
+            .scalars()
+            .all()
+        ):
             edges_by_root.setdefault(edge.source_event_id, []).append(edge)
         return [
             ForeshadowingEdgeRow(

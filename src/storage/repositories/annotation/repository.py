@@ -13,10 +13,9 @@ from typing import Any
 from sqlalchemy import func, select
 
 from src.agents.annotation.schema import BoundChapterAnnotation
-from src.models.local.character_reference_policy import is_global_character_surface_name
 from src.storage.models import (
+    AnalysisOutput,
     Chapter,
-    ChapterAnnotationRecord,
     DialogueRecord,
     EventEdge,
     EventNode,
@@ -30,6 +29,7 @@ from src.storage.repositories.annotation.rows import (
     ForeshadowingTreeView,
 )
 from src.storage.repositories.base import BaseRepository
+from src.utils.character_reference_policy import is_global_character_surface_name
 
 # 2026-09-14 伏笔 confidence 并轨三档（high/medium/low 等差基分），PayoffLikelihood 二值枚举退役
 _EXPECTATION_BASE_SCORE_BY_PAYOFF = {"high": 0.62, "medium": 0.38, "low": 0.14}
@@ -39,7 +39,7 @@ _EXPECTATION_STATUS_WEIGHT = {"open": 0.75, "reinforced": 1.0, "likely_paid_off"
 _EXPECTATION_STRENGTH_WEIGHT = {"high": 0.05, "medium": 0.0, "low": -0.05}
 
 
-class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
+class AnnotationRepository(BaseRepository[AnalysisOutput]):
     """2026-08-05 用于统一读取章节正式标注与数据库图事实"""
 
     def _chapter_sequence_map(self, run_id: str) -> dict[int, int]:
@@ -47,25 +47,11 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         rows = self.session.execute(select(Chapter.chapter_id, Chapter.sequence).where(Chapter.run_id == run_id)).all()
         return {int(row.chapter_id): int(row.sequence) for row in rows}
 
-    def _chapter_annotations(self, run_id: str) -> list[ChapterAnnotationRecord]:
+    def _chapter_annotations(self, run_id: str) -> list[AnalysisOutput]:
         """2026-08-05 用于按真实章节顺序读取全部正式章节标注"""
-        from src.storage.repositories.pipeline_visibility import released_cutoff
+        from .results import chapter_annotations
 
-        cutoff = released_cutoff(self.session, run_id)
-        if cutoff is None:
-            return []
-        visible_ids = [item[0] for item in cutoff.manifest["formal"]]
-        stmt = (
-            select(ChapterAnnotationRecord)
-            .join(
-                Chapter,
-                (Chapter.run_id == ChapterAnnotationRecord.run_id)
-                & (Chapter.chapter_id == ChapterAnnotationRecord.chapter_id),
-            )
-            .where(ChapterAnnotationRecord.run_id == run_id, ChapterAnnotationRecord.annotation_id.in_(visible_ids))
-            .order_by(Chapter.sequence, ChapterAnnotationRecord.chapter_id)
-        )
-        return list(self.session.execute(stmt).scalars().all())
+        return chapter_annotations(self.session, run_id)
 
     def _graph_facts(self, run_id: str, *, content_kind: str) -> list[GraphFact]:
         """2026-08-19 用于读取指定类型的章节事实"""
@@ -143,6 +129,8 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         foreshadowing_by_chapter = self._foreshadowing_by_chapter(run_id)
         rows: list[ChapterAnnotationRow] = []
         for record in self._chapter_annotations(run_id):
+            if record.chapter_id is None:
+                continue
             annotation = BoundChapterAnnotation.model_validate(record.payload)
             rows.append(
                 ChapterAnnotationRow(
@@ -208,10 +196,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         并保留两道过滤——实体必须是 character、名字必须是可作全局角色名的形态
         （代词/泛指/引用位名不算说话人）。
         """
-        from src.storage.repositories.pipeline_visibility import dialogue_continuity
-
         rows: list[DialogueFactRow] = []
-        overlays = dialogue_continuity(self.session, run_id)
         statement = (
             select(DialogueRecord)
             .join(
@@ -226,14 +211,8 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             for entity in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
         }
         for record in self.session.execute(statement).scalars().all():
-            overlay = overlays.get(record.candidate_key, {})
-            continuity_value = overlay.get("value", {})
-            speaker_id = continuity_value.get("speaker_entity_id", record.speaker)
+            speaker_id = record.speaker
             speaker_entity = entities_by_id.get(str(speaker_id)) if speaker_id is not None else None
-            if speaker_entity is not None and speaker_entity.attributes.get("identity_status") != "contested":
-                canonical_id = speaker_entity.attributes.get("canonical_entity_id")
-                if canonical_id:
-                    speaker_entity = entities_by_id.get(str(canonical_id), speaker_entity)
             valid_speaker: str | None = None
             if speaker_entity is not None:
                 speaker_name = str(speaker_entity.canonical_name).strip()
@@ -264,10 +243,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                     speaker=speaker_names,
                     speaker_references=speaker_references,
                     length=len(record.content),
-                    tone=continuity_value.get("tone", record.tone),
-                    formal_value={"speaker_entity_id": record.speaker, "tone": record.tone},
-                    continuity_value=continuity_value,
-                    continuity_state=overlay.get("state"), cutoff_hash=overlay.get("cutoff_hash"),
+                    tone=record.tone,
                 )
             )
         return rows
@@ -310,9 +286,13 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             edges_by_root.setdefault(edge.source_event_id, []).append(edge)
         target_ids = {edge.target_event_id for edge in all_edges}
         if target_ids:
-            for node in self.session.execute(
-                select(EventNode).where(EventNode.run_id == run_id, EventNode.event_id.in_(target_ids))
-            ).scalars().all():
+            for node in (
+                self.session.execute(
+                    select(EventNode).where(EventNode.run_id == run_id, EventNode.event_id.in_(target_ids))
+                )
+                .scalars()
+                .all()
+            ):
                 targets_by_id[node.event_id] = node
         views: list[ForeshadowingTreeView] = []
         for root in roots:
@@ -351,7 +331,9 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
                     EventNode.run_id == run_id,
                     EventNode.is_foreshadowing_root.is_(True),
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         if not roots:
             return None
@@ -377,9 +359,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
             hit_count = 1 + edge_counts.get(root.event_id, 0)
             # 2026-08-16 P3：字段为 None 时不冒充 LLM 判断；若全树都无
             # payoff_likelihood/strength 证据，说明上游输入退化，结果为 None。
-            has_evidence = has_evidence or any(
-                value is not None for value in (root.payoff_likelihood, root.strength)
-            )
+            has_evidence = has_evidence or any(value is not None for value in (root.payoff_likelihood, root.strength))
             status = root.foreshadowing_status or "open"
             base = _EXPECTATION_BASE_SCORE_BY_PAYOFF.get(
                 root.payoff_likelihood or "",
@@ -420,13 +400,6 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
 
     def is_annotate_complete(self, run_id: str) -> bool:
         """2026-08-05 用于按真实章节集合严格判断标注阶段完成状态"""
-        from src.storage.models import AnalysisRun
-        from src.storage.repositories.pipeline_visibility import released_cutoff
-
-        run = self.session.get(AnalysisRun, run_id)
-        cutoff = released_cutoff(self.session, run_id)
-        if run is None or cutoff is None or run.annotation_cutoff_hash != cutoff.cutoff_hash:
-            return False
         expected = {
             int(chapter_id)
             for chapter_id in self.session.execute(
@@ -435,10 +408,5 @@ class AnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         }
         if not expected:
             return False
-        actual = {
-            int(chapter_id)
-            for chapter_id in self.session.execute(
-                select(ChapterAnnotationRecord.chapter_id).where(ChapterAnnotationRecord.run_id == run_id).distinct()
-            ).scalars()
-        }
+        actual = {record.chapter_id for record in self._chapter_annotations(run_id)}
         return actual == expected

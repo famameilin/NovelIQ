@@ -10,11 +10,11 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.schema import BoundChapterAnnotation, BoundParagraphLabel, TextSearchResult
+from src.agents.text_search import TextSearchService
 from src.config import settings
-from src.models.local.embedding import EmbeddingClient
-from src.storage.models import Chapter, ChapterAnnotationRecord, Paragraph
+from src.embedding import EmbeddingClient
+from src.storage.models import AnalysisOutput, Chapter, Paragraph
 from src.storage.repositories.base import BaseRepository
-from src.text_search import TextSearchService
 
 
 class DatabaseAnnotationQueryService:
@@ -130,25 +130,32 @@ class DatabaseAnnotationQueryService:
 
     async def read_paragraph(self, paragraph_id: int, *, allow_future_context: bool) -> dict:
         """读取完整原文段落，不要求来源章节已完成标注"""
+
         def read() -> dict:
             with self._read_scope() as session:
-                row = session.execute(select(Paragraph, Chapter.sequence).join(Chapter, (
-                    (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id)
-                )).where(Paragraph.run_id == self.run_id, Paragraph.paragraph_id == paragraph_id)).one_or_none()
+                row = session.execute(
+                    select(Paragraph, Chapter.sequence)
+                    .join(
+                        Chapter, ((Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id))
+                    )
+                    .where(Paragraph.run_id == self.run_id, Paragraph.paragraph_id == paragraph_id)
+                ).one_or_none()
                 if row is None:
                     raise ValueError("原文段落不属于当前分析")
                 if not allow_future_context and row.sequence > self.current_chapter_sequence:
                     raise ValueError("当前原文读取范围不允许未来章节")
                 paragraph = row.Paragraph
-                return {"chapter_id": paragraph.chapter_id, "paragraph_id": paragraph.paragraph_id,
-                        "text": paragraph.text}
+                return {
+                    "chapter_id": paragraph.chapter_id,
+                    "paragraph_id": paragraph.paragraph_id,
+                    "text": paragraph.text,
+                }
 
         return await asyncio.to_thread(read)
 
 
-
-class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
-    """已提交正式标注的只读查询，不提供绕过工作租约的写入口"""
+class ChapterAnnotationRepository(BaseRepository[AnalysisOutput]):
+    """按成功保存的角色贡献读取章标注，不创建额外章级产物"""
 
     def fetch_paragraph_labels(self, run_id: str) -> list[BoundParagraphLabel]:
         """2026-09-14 用于读取全书自选段情绪标签（段落级监督按书边界）
@@ -156,9 +163,9 @@ class ChapterAnnotationRepository(BaseRepository[ChapterAnnotationRecord]):
         标签随章节标注 payload 落库；句级旧字段（sentence_labels，2026-09-07 口径）
         已从合同删除，重建库后无历史 payload 兼容问题。
         """
-        records = self.session.execute(
-            select(ChapterAnnotationRecord).where(ChapterAnnotationRecord.run_id == run_id)
-        ).scalars()
+        from .results import chapter_annotations
+
+        records = chapter_annotations(self.session, run_id)
         labels: list[BoundParagraphLabel] = []
         for record in records:
             annotation = BoundChapterAnnotation.model_validate(record.payload)
