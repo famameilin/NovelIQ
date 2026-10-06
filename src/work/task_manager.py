@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from src.api.services.task_runtime_persistence_service import TaskRuntimePersistenceService
+from src.work.task_persistence import TaskRuntimePersistenceService
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -43,15 +43,34 @@ class TaskManager:
         progress_callback: Callable[[str, str, float, str], None] | None = None,
         worker_id: str | None = None,
         heartbeat_interval_seconds: float = 30.0,
+        run_completed_callback: Callable[[str], None] | None = None,
     ):
         """
         初始化任务执行缓存管理器
+
+        Args:
+            run_completed_callback: run 成功收口时的上报回调（读侧注入，用于失效
+                自身缓存）；未注入时为空操作
         """
         self._tasks: dict[str, TaskInfo] = {}
         self._progress_callback = progress_callback
         self._worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}"
         self._heartbeat_interval_seconds = heartbeat_interval_seconds
+        self._run_completed_callback = run_completed_callback
         self._runtime_persistence = TaskRuntimePersistenceService(self._worker_id)
+
+    def notify_run_completed(self, run_id: str) -> None:
+        """
+        上报 run 成功收口，供读侧失效自身缓存
+
+        说明: 读侧缓存归读侧所有，执行层只上报事实，不感知其实现
+        """
+        if self._run_completed_callback is None:
+            return
+        try:
+            self._run_completed_callback(run_id)
+        except Exception as exc:
+            logger.warning(f"Run completed callback failed for {run_id}: {exc}")
 
     def set_db_session_factory(self, factory: Callable[[], Session]) -> None:
         """

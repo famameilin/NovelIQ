@@ -11,9 +11,9 @@ from typing import Any
 
 from loguru import logger
 
-from src.api.models.responses import TaskStatus
 from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
 from src.storage.repositories import RunRepository
+from src.storage.task_status import TaskStatus
 
 
 class TaskRuntimePersistenceService:
