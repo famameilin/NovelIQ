@@ -36,43 +36,45 @@ class AnalysisRun(Base):
     """
 
     __tablename__ = "analysis_runs"
+    __table_args__ = (
+        Index("idx_analysis_runs_novel", "novel_id"),
+        Index("idx_analysis_runs_status", "status"),
+        {"comment": "分析运行表：每次分析任务一行，run_id 是所有业务数据的隔离主键，运行态唯一真相源"},
+    )
 
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="运行主键（uuid）")
     novel_id: Mapped[str] = mapped_column(
         String(255),
         ForeignKey("novels.novel_id", ondelete="RESTRICT", name="analysis_runs_novel_id_fkey"),
         nullable=False,
+        comment="所属小说",
     )
-    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
-    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    author: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
-    progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    stage: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_path: Mapped[str | None] = mapped_column(Text, nullable=True, comment="原始文件路径快照")
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="书名快照")
+    author: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="作者快照")
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", comment="运行状态")
+    progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="总进度（0~1）")
+    stage: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="当前主阶段名")
 
     # 运行态字段
-    sub_stage: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
-    current: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
-    message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    task_kind: Mapped[str] = mapped_column(String(50), nullable=False, default="analysis")
-    request_payload: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    cancellation_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    annotation_cutoff_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
-    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
-
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-    __table_args__ = (
-        Index("idx_analysis_runs_novel", "novel_id"),
-        Index("idx_analysis_runs_status", "status"),
+    sub_stage: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None, comment="当前子阶段名")
+    current: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="子阶段已完成单位数")
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=100, comment="子阶段总单位数")
+    message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None, comment="进度消息")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True, default=None, comment="失败时的错误信息")
+    task_kind: Mapped[str] = mapped_column(String(50), nullable=False, default="analysis", comment="任务类型")
+    request_payload: Mapped[str | None] = mapped_column(Text, nullable=True, default=None, comment="请求参数快照")
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="取消请求标志")
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None, comment="执行者标识")
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="心跳时间")
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, default=None,
+        comment="实际开始执行时间",
     )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="完成时间")
+
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="创建时间")
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="更新时间")
 
     def __repr__(self) -> str:
         return (

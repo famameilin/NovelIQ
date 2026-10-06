@@ -14,7 +14,7 @@ paragraph_curves 保存段落级情绪密度与表层张力曲线（设计文档
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import (
     DateTime,
@@ -26,12 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
-
-
-def _utcnow() -> datetime:
-    """created_at 默认值：UTC 带时区当前时间（避免模块导入期求值）"""
-    return datetime.now(UTC)
+from .base import Base, naive_utcnow
 
 
 class ParagraphCurve(Base):
@@ -43,21 +38,6 @@ class ParagraphCurve(Base):
     """
 
     __tablename__ = "paragraph_curves"
-
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    pos_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    neg_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    net_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-    smoothed_net_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-
-    # 表层张力原始值取自 paragraph_metrics（run 内稳健标准化 + sigmoid），
-    # 此处只保存平滑后的展示值
-    surface_tension: Mapped[float | None] = mapped_column(Float, nullable=True)
-    smoothed_surface_tension: Mapped[float | None] = mapped_column(Float, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-
     __table_args__ = (
         ForeignKeyConstraint(
             ["run_id", "paragraph_id"],
@@ -70,6 +50,29 @@ class ParagraphCurve(Base):
             ondelete="CASCADE",
         ),
         Index("idx_paragraph_curves_run_paragraph", "run_id", "paragraph_id"),
+        {"comment": "段落曲线表：情绪密度与表层张力曲线（原始密度=分子/分母，平滑值=LOWESS，横轴为字符位置）"},
+    )
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
+    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="所属段落编号")
+    pos_density: Mapped[float | None] = mapped_column(Float, nullable=True, comment="正向情绪密度（分母 0 时为 NULL）")
+    neg_density: Mapped[float | None] = mapped_column(Float, nullable=True, comment="负向情绪密度（分母 0 时为 NULL）")
+    net_density: Mapped[float | None] = mapped_column(Float, nullable=True, comment="净情绪密度（分母 0 时为 NULL）")
+    smoothed_net_density: Mapped[float | None] = mapped_column(Float, nullable=True, comment="平滑净情绪密度（LOWESS）")
+
+    # 表层张力原始值取自 paragraph_metrics（run 内稳健标准化 + sigmoid），
+    # 此处只保存平滑后的展示值
+    surface_tension: Mapped[float | None] = mapped_column(
+        Float, nullable=True,
+        comment="表层张力（取自 paragraph_metrics）",
+    )
+    smoothed_surface_tension: Mapped[float | None] = mapped_column(
+        Float, nullable=True,
+        comment="平滑表层张力（LOWESS 展示值）",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
     )
 
     def __repr__(self) -> str:

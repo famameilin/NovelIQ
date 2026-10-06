@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ForeignKeyConstraint, Index, Integer, String
+from sqlalchemy import DateTime, ForeignKeyConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -25,16 +27,6 @@ class ParagraphEmbedding(Base):
     """
 
     __tablename__ = "paragraph_embeddings"
-
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    embedding_vector: Mapped[list[float] | None] = mapped_column(Vector(), nullable=True)
-    # 生成该向量的嵌入模型 key（settings.models.paragraph_embedding.model）
-    embedding_model_key: Mapped[str | None] = mapped_column(String, nullable=True)
-    # 生成该向量的嵌入维度（preprocess 探测值，写入期随行落库）
-    embedding_dimension: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
-
     __table_args__ = (
         ForeignKeyConstraint(
             ["run_id"],
@@ -47,7 +39,26 @@ class ParagraphEmbedding(Base):
             ondelete="CASCADE",
         ),
         Index("idx_paragraph_embeddings_run_id", "run_id"),
+        {
+            "comment": "段落向量嵌入表：段落语义向量与溯源（动态建表，列宽按嵌入模型实测维度固化）",
+        },
     )
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
+    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="所属段落编号")
+    embedding_vector: Mapped[list[float] | None] = mapped_column(
+        Vector(), nullable=True, comment="段落语义向量（列宽按嵌入模型维度固化）"
+    )
+    # 生成该向量的嵌入模型 key（settings.models.paragraph_embedding.model）
+    embedding_model_key: Mapped[str | None] = mapped_column(
+        String, nullable=True,
+        comment="生成向量的嵌入模型 key",
+    )
+    # 生成该向量的嵌入维度（preprocess 探测值，写入期随行落库）
+    embedding_dimension: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="嵌入维度（preprocess 探测值）"
+    )
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="创建时间")
 
     def __repr__(self) -> str:
         return f"<ParagraphEmbedding(run_id={self.run_id}, paragraph_id={self.paragraph_id})>"

@@ -8,7 +8,7 @@ paragraph_entities 保存 LTP NER 输出的实体候选（《分析能力扩展�
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
@@ -23,31 +23,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
-
-
-def _utcnow() -> datetime:
-    """created_at 默认值：UTC 带时区当前时间（避免模块导入期求值）"""
-    return datetime.now(UTC)
+from .base import Base, naive_utcnow
 
 
 class ParagraphEntity(Base):
     """LTP 实体候选表（一个候选一行）"""
 
     __tablename__ = "paragraph_entities"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    run_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    paragraph_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    surface_text: Mapped[str] = mapped_column(Text, nullable=False)
-    raw_entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    normalized_entity_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    local_start_char: Mapped[int] = mapped_column(Integer, nullable=False)
-    local_end_char: Mapped[int] = mapped_column(Integer, nullable=False)
-    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    source_kind: Mapped[str] = mapped_column(String(30), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-
     __table_args__ = (
         ForeignKeyConstraint(
             ["run_id", "paragraph_id"],
@@ -70,6 +52,21 @@ class ParagraphEntity(Base):
         ),
         Index("idx_entities_run_para_start", "run_id", "paragraph_id", "local_start_char"),
         Index("idx_entities_run_normalized", "run_id", "normalized_entity_type"),
+        {"comment": "LTP 实体候选表：NER 输出的实体候选（一个候选一行），不产生身份或关系事实"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="自增主键")
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False, comment="所属分析运行")
+    paragraph_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="所属段落编号")
+    surface_text: Mapped[str] = mapped_column(Text, nullable=False, comment="候选原文")
+    raw_entity_type: Mapped[str] = mapped_column(String(50), nullable=False, comment="LTP 原始实体类型")
+    normalized_entity_type: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="归一实体类型")
+    local_start_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="段内起始字符偏移")
+    local_end_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="段内结束字符偏移")
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True, comment="置信度")
+    source_kind: Mapped[str] = mapped_column(String(30), nullable=False, comment="来源种类")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
     )
 
     def __repr__(self) -> str:

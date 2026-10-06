@@ -21,23 +21,6 @@ class Chapter(Base):
     """章节表：章节结构解析的持久化结果"""
 
     __tablename__ = "chapters"
-
-    chapter_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
-    title: Mapped[str] = mapped_column(Text, nullable=False)
-    display_title: Mapped[str] = mapped_column(Text, nullable=False)
-    display_index_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    level: Mapped[str] = mapped_column(String(20), nullable=False)
-    start_pos: Mapped[int] = mapped_column(Integer, nullable=False)
-    end_pos: Mapped[int] = mapped_column(Integer, nullable=False)
-    # ---- 2026-08-14 M9a-2：正文切片列（原 chunks 表列，空正文章节为 NULL）----
-    text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    char_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    char_end_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, primary_key=True
-    )
-
     __table_args__ = (
         Index("idx_chapters_run_id", "run_id"),
         # 正文检索：keyword 检索与段落边界查询按 trimmed 正文切片定位
@@ -46,6 +29,32 @@ class Chapter(Base):
             sql_text("lower(text) gin_trgm_ops"),
             postgresql_using="gin",
         ),
+        {"comment": "章节表：章节结构解析结果，含部/卷/番外层级与空正文条目；正文切片列承接原 chunks 表"},
+    )
+
+    chapter_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="章节编号（run 内）")
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, comment="全书顺序号")
+    title: Mapped[str] = mapped_column(Text, nullable=False, comment="解析标题")
+    display_title: Mapped[str] = mapped_column(Text, nullable=False, comment="前端展示标题")
+    display_index_label: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="展示用层级编号标签")
+    level: Mapped[str] = mapped_column(String(20), nullable=False, comment="章节层级类型")
+    start_pos: Mapped[int] = mapped_column(Integer, nullable=False, comment="全文起始字符位置")
+    end_pos: Mapped[int] = mapped_column(Integer, nullable=False, comment="全文结束字符位置")
+    # ---- 2026-08-14 M9a-2：正文切片列（原 chunks 表列，空正文章节为 NULL）----
+    text: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="正文切片文本（trimmed 边界；空正文章节为 NULL）",
+    )
+    char_offset: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="正文切片起始全局字符偏移（段落 global 坐标基准）"
+    )
+    char_end_offset: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="正文切片结束全局字符偏移")
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+        comment="所属分析运行",
     )
 
     def __repr__(self) -> str:

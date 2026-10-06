@@ -10,17 +10,12 @@ token 数与分布守恒审计只在本表保存一次，供 paragraph_topics �
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKeyConstraint, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
-
-
-def _utcnow() -> datetime:
-    """created_at 默认值：UTC 带时区当前时间（避免模块导入期求值）"""
-    return datetime.now(UTC)
+from .base import Base, naive_utcnow
 
 
 class ParagraphTopicInference(Base):
@@ -34,16 +29,6 @@ class ParagraphTopicInference(Base):
     """
 
     __tablename__ = "paragraph_topic_inference"
-
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    source_token_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    inference_token_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    inference_status: Mapped[str] = mapped_column(String(30), nullable=False)
-    unavailable_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    distribution_sum: Mapped[float | None] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-
     __table_args__ = (
         ForeignKeyConstraint(
             ["run_id", "paragraph_id"],
@@ -52,6 +37,26 @@ class ParagraphTopicInference(Base):
         ),
         ForeignKeyConstraint(["run_id"], ["topic_model_runs.run_id"], ondelete="CASCADE"),
         Index("idx_topic_inference_status_paragraph", "run_id", "inference_status", "paragraph_id"),
+        {"comment": "段落主题推断状态表：token 数、推断状态与不可用原因（每段一行，聚合分母唯源）"},
+    )
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
+    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="所属段落编号")
+    source_token_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="原始 token 数")
+    inference_token_count: Mapped[int] = mapped_column(
+        Integer, nullable=False,
+        comment="进入 LDA BOW 的 token 数（聚合分母）",
+    )
+    inference_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, comment="推断状态（complete/empty_after_preprocess/empty_bow/failed）"
+    )
+    unavailable_reason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="不可用原因（非完成状态必有）")
+    distribution_sum: Mapped[float | None] = mapped_column(
+        Float, nullable=True,
+        comment="分布权重和（complete 时约为 1）",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
     )
 
     def __repr__(self) -> str:

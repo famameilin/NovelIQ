@@ -9,7 +9,7 @@ paragraphs 是全文唯一的段落事实源（设计文档《章节粒度分析
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import (
     CheckConstraint,
@@ -26,15 +26,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
+from .base import Base, naive_utcnow
 
 # 注：sql_text 为 sqlalchemy.text 的别名——本模块存在 Paragraph.text 列属性，
 # 类体内 __table_args__ 直接引用 text 会解析到列对象而非函数（与 章节.py 同口径）
-
-
-def _utcnow() -> datetime:
-    """created_at 默认值：UTC 带时区当前时间（避免模块导入期求值）"""
-    return datetime.now(UTC)
 
 
 class Paragraph(Base):
@@ -48,25 +43,6 @@ class Paragraph(Base):
     """
 
     __tablename__ = "paragraphs"
-
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    # 章内段落顺序号（0 起），同一章内唯一且连续
-    paragraph_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    # 来源自然段在 章节 内的序号（0 起）；超长自然段拆出的片段共享该值
-    source_paragraph_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    # 超长自然段被拆分后的片段序号（0 起）；未拆分的自然段恒为 0
-    fragment_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    local_start_char: Mapped[int] = mapped_column(Integer, nullable=False)
-    local_end_char: Mapped[int] = mapped_column(Integer, nullable=False)
-    global_start_char: Mapped[int] = mapped_column(Integer, nullable=False)
-    global_end_char: Mapped[int] = mapped_column(Integer, nullable=False)
-    char_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    token_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    text: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-
     __table_args__ = (
         UniqueConstraint("run_id", "chapter_id", "paragraph_index", name="uq_paragraphs_run_chapter_index"),
         ForeignKeyConstraint(
@@ -98,6 +74,38 @@ class Paragraph(Base):
             sql_text("lower(text) gin_trgm_ops"),
             postgresql_using="gin",
         ),
+        {"comment": "段落事实源表：全文唯一段落单元的身份、字符坐标与原文，派生数据不得重新切段"},
+    )
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
+    paragraph_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, comment="段落编号（run 内全文顺序稠密整数，0 起）"
+    )
+    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="所属章节编号")
+    # 章内段落顺序号（0 起），同一章内唯一且连续
+    paragraph_index: Mapped[int] = mapped_column(
+        Integer, nullable=False,
+        comment="章内段落顺序号（0 起，章内唯一连续）",
+    )
+    # 来源自然段在 章节 内的序号（0 起）；超长自然段拆出的片段共享该值
+    source_paragraph_index: Mapped[int] = mapped_column(
+        Integer, nullable=False,
+        comment="来源自然段章内序号（0 起，拆分片段共享）",
+    )
+    # 超长自然段被拆分后的片段序号（0 起）；未拆分的自然段恒为 0
+    fragment_index: Mapped[int] = mapped_column(
+        Integer, nullable=False,
+        comment="超长自然段拆分片段序号（0 起，未拆分恒为 0）",
+    )
+    local_start_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="章内切片局部起始字符偏移")
+    local_end_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="章内切片局部结束字符偏移")
+    global_start_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="run 规范化全文起始字符偏移")
+    global_end_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="run 规范化全文结束字符偏移")
+    char_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="字符数（=length(text)=global 差值）")
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="token 数")
+    text: Mapped[str] = mapped_column(Text, nullable=False, comment="段落原文")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
     )
 
     def __repr__(self) -> str:

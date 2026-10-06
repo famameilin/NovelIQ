@@ -9,18 +9,13 @@ topic_model_runs 每个启用主题建模的分析运行保存一行完整模型
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
-
-
-def _utcnow() -> datetime:
-    """created_at 默认值：UTC 带时区当前时间（避免模块导入期求值）"""
-    return datetime.now(UTC)
+from .base import Base, naive_utcnow
 
 
 class TopicModelRun(Base):
@@ -33,20 +28,29 @@ class TopicModelRun(Base):
     """
 
     __tablename__ = "topic_model_runs"
+    __table_args__ = {"comment": "主题模型运行表：每启用主题建模的 run 一行 LDA 模型契约（主题 id 不跨 run 对齐）"}
 
     run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), primary_key=True
+        String(36),
+        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="所属分析运行（主键）",
     )
-    model_key: Mapped[str] = mapped_column(String(255), nullable=False)
-    library_version: Mapped[str] = mapped_column(String(64), nullable=False)
-    pipeline_version: Mapped[str] = mapped_column(String(64), nullable=False)
-    num_topics: Mapped[int] = mapped_column(Integer, nullable=False)
-    parameters: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    dictionary_size: Mapped[int] = mapped_column(Integer, nullable=False)
-    training_document_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    inference_paragraph_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    artifact_key: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    model_key: Mapped[str] = mapped_column(String(255), nullable=False, comment="模型 key")
+    library_version: Mapped[str] = mapped_column(String(64), nullable=False, comment="建模库版本")
+    pipeline_version: Mapped[str] = mapped_column(String(64), nullable=False, comment="预处理管线版本")
+    num_topics: Mapped[int] = mapped_column(Integer, nullable=False, comment="实际主题数 K")
+    parameters: Mapped[dict] = mapped_column(
+        JSONB, nullable=False,
+        comment="参数快照（alpha/eta/passes/iterations/random_state 等）",
+    )
+    dictionary_size: Mapped[int] = mapped_column(Integer, nullable=False, comment="词典规模")
+    training_document_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="训练文档数")
+    inference_paragraph_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="推断段落数")
+    artifact_key: Mapped[str] = mapped_column(Text, nullable=False, comment="模型文件 artifact 键")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
+    )
 
     def __repr__(self) -> str:
         return (
