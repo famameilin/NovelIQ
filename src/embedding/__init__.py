@@ -1,3 +1,8 @@
+"""嵌入客户端
+
+说明: 文本向量化（本地 llama-server，OpenAI 兼容接口）与查询侧的 instruct 前缀包装。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +13,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpe
 
 from src.config import settings
 
-TokenUsageCallback = Callable[[str, str, str, str, int, int, int | None, int | None], None]
+TokenUsageCallback = Callable[[str, str, str, int, int, int | None, int | None], None]
 BatchProgressCallback = Callable[[int, int, int], Awaitable[None] | None]
 RETRYABLE_EMBEDDING_STATUS_CODES = {429, 500, 502, 503, 504}
 EMBEDDING_MAX_RETRIES = 2
@@ -194,7 +199,6 @@ class EmbeddingClient:
                 # 这里优先保留实报值；汇总层对外仍标 estimated，是因为整条分析链路整体只承诺近似统计，
                 # 而不是要求每一笔都必须退化成本地估算
                 self._token_usage_callback(
-                    self._novel_id or "unknown",
                     "embedding",
                     "local",
                     self._model or "unknown",
@@ -341,7 +345,6 @@ class EmbeddingClient:
                 # 批量 embedding 与单条 embedding 口径一致，
                 # provider 已返回 usage 时直接记实报，避免额外估算把更好的原始数据抹平
                 self._token_usage_callback(
-                    self._novel_id or "unknown",
                     "embedding",
                     "local",
                     self._model or "unknown",

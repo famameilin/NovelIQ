@@ -32,11 +32,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config import settings
-from src.models.local.embedding import EmbeddingClient
+from src.embedding import EmbeddingClient
 
 
 class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
-    @patch("src.models.local.embedding.AsyncOpenAI")
+    @patch("src.embedding.AsyncOpenAI")
     async def test_get_embedding_success(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -58,7 +58,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [0.1, 0.2, 0.3])
         mock_client.embeddings.create.assert_called_once()
 
-    @patch("src.models.local.embedding.AsyncOpenAI")
+    @patch("src.embedding.AsyncOpenAI")
     async def test_get_embedding_empty_text(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -69,7 +69,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [])
         mock_client.embeddings.create.assert_not_called()
 
-    @patch("src.models.local.embedding.AsyncOpenAI")
+    @patch("src.embedding.AsyncOpenAI")
     async def test_constructor_does_not_use_openai_api_key(self, mock_openai: MagicMock) -> None:
         """
         2026-08-03 用于确认 Embedding 客户端不再读取 OPENAI_API_KEY
@@ -83,7 +83,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
             EmbeddingClient(base_url="http://test", model="test-model")
         mock_openai.assert_not_called()
 
-    @patch("src.models.local.embedding.AsyncOpenAI")
+    @patch("src.embedding.AsyncOpenAI")
     async def test_get_embedding_raises_on_dimension_mismatch_after_probe_lock(self, mock_openai: MagicMock) -> None:
         """2026-09-10 维度不再是配置：探针锁定 2 维后，后续 3 维响应必须快速失败"""
         mock_client = MagicMock()
@@ -108,7 +108,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "embedding dimension mismatch"):
             await client.get_embedding("测试文本")
 
-    @patch("src.models.local.embedding.AsyncOpenAI")
+    @patch("src.embedding.AsyncOpenAI")
     async def test_embed_texts_batches_requests(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -149,7 +149,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
             [f"文本{i}" for i in range(batch_size, total_texts)],
         )
 
-    @patch("src.models.local.embedding.AsyncOpenAI")
+    @patch("src.embedding.AsyncOpenAI")
     async def test_embed_texts_preserves_empty_text_positions(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -173,7 +173,7 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_client.embeddings.create.await_count, 1)
         self.assertEqual(mock_client.embeddings.create.await_args.kwargs["input"], ["有效1", "有效2"])
 
-    @patch("src.models.local.embedding.AsyncOpenAI")
+    @patch("src.embedding.AsyncOpenAI")
     async def test_embed_texts_reports_batch_progress(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
