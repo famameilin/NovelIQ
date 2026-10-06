@@ -18,6 +18,8 @@ from typing import Any, cast
 
 from pydantic import ValidationError
 
+from src.fact_graph.graph import FactGraph
+
 from .candidates import extract_dialogue_candidates
 from .errors import (
     AnnotationInputError,
@@ -25,13 +27,11 @@ from .errors import (
     AnnotationProtocolError,
     AnnotationStageRejection,
 )
-from .fact_graph import FactGraph
 from .identity import stable_uuid
 from .schema import (
     EL_PATH_SEP,
     RELATION_DEFINITIONS,
     RESERVED_ROOT_KEY,
-    BoundChapterAnnotation,
     BoundCharacterObservation,
     BoundDialogue,
     BoundEvent,
@@ -50,7 +50,6 @@ from .schema import (
     EventParticipantInput,
     EventParticipantRole,
     ParticipantArg,
-    PendingCase,
     RelationInput,
     RelationType,
     Tone,
@@ -85,17 +84,13 @@ class AnnotationToolLedger:
     domain_payloads: dict[str, Any] = field(default_factory=dict)
     bound_payloads: dict[str, Any] = field(default_factory=dict)
     write_records: list[dict[str, Any]] = field(default_factory=list)
-    completed_chapters: list[BoundChapterAnnotation] = field(default_factory=list)
-    ready_chapter: BoundChapterAnnotation | None = None
-    pushed_cases: list[PendingCase] = field(default_factory=list)
     # 2026-08-30：search_text 返回正文时登记真实 SQL 命中段落
     authorized_text_paragraph_ids: set[int] = field(default_factory=set)
     text_references: dict[str, Any] = field(default_factory=dict)
     source_anchors: dict[str, list[Any]] = field(default_factory=dict)
-    cross_chapter_links: list[Any] = field(default_factory=list)
+    shared_entity_ids: set[str] = field(default_factory=set)
     # 2026-09-05 冻结时系统确定性覆盖告警（仅留痕不阻断），随章持久化
     coverage_warnings: list[str] = field(default_factory=list)
-    annotation: BoundChapterAnnotation | None = None
     errors: list[str] = field(default_factory=list)
     search_log: list[dict[str, Any]] = field(default_factory=list)
     graph: FactGraph | None = None
@@ -129,6 +124,12 @@ class AnnotationToolLedger:
     # 2026-09-13 收尾声明：唯一 finish 置位后由系统冻结当前章
     chapter_finished: bool = False
 
+    work_id: str = ""
+    invocation_id: str = ""
+    role: str = "solo"
+    invoke_tool: Any = None
+    finish_work: Any = None
+
     def __post_init__(self) -> None:
         """2026-08-07 用于初始化唯一章的对话候选"""
         if not self.current_chapter_text.strip():
@@ -138,9 +139,6 @@ class AnnotationToolLedger:
             self.current_chapter_text,
         )
 
-    def pending_case_by_id(self, case_id: str) -> PendingCase | None:
-        """按稳定目标合并本章已登记的未确定案例"""
-        return next((case for case in self.pushed_cases if case.target_key == case_id), None)
 
     def set_phase(self, phase: str) -> None:
         """2026-08-07 用于同步 LangGraph 和工具账本阶段"""
@@ -159,18 +157,13 @@ class AnnotationToolLedger:
                 "bound_payloads": self.bound_payloads,
                 "chapter_finished": self.chapter_finished,
                 "write_records": self.write_records,
-                "completed_chapters": self.completed_chapters,
-                "ready_chapter": self.ready_chapter,
-                "pushed_cases": self.pushed_cases,
                 "authorized_text_paragraph_ids": self.authorized_text_paragraph_ids,
                 "text_references": self.text_references,
                 "source_anchors": self.source_anchors,
-                "cross_chapter_links": self.cross_chapter_links,
                 "authorized_event_ids": self.authorized_event_ids,
                 "event_trees": self.event_trees,
                 # 重提与建根会核销挂起项，后续字段失败时必须随该调用一起恢复
                 "pending_child_events": self.pending_child_events,
-                "annotation": self.annotation,
                 "search_log": self.search_log,
                 "written_entities": self.written_entities,
                 "metrics_payload": self.metrics_payload,
@@ -236,11 +229,11 @@ class AnnotationToolLedger:
 
     def _tree_id(self, tree_key: str) -> str:
         """树身份绑定章与局部键，重试和乱序执行都得到同一 id"""
-        return stable_uuid(self.run_scope, self.current_chapter_id, "event_tree", tree_key)
+        return stable_uuid(self.run_scope, self.work_id or self.current_chapter_id, "event_tree", tree_key)
 
     def _node_id(self, tree_key: str, node_key: str) -> str:
         """节点身份绑定局部键，避免重投递产生另一组事件 id"""
-        return stable_uuid(self.run_scope, self.current_chapter_id, "event_node", tree_key, node_key)
+        return stable_uuid(self.run_scope, self.work_id or self.current_chapter_id, "event_node", tree_key, node_key)
 
     # ------------------------------------------------------------------
     # 实时写入：每个小调用即时落到目标结构，回执即当前真相（2026-09-13 取消暂存区）
@@ -671,7 +664,7 @@ class AnnotationToolLedger:
                 )
             if self.tree_key_index.get(tree_key) is None:
                 # 2026-10-04 树键校验下沉：根未建时子事件不再即时拒绝，挂起等建根冲账
-                #（写面本来就是纯内存账本、整章成功才单事务落库，调用期因果校验只制造返工）
+                # （写面本来就是纯内存账本、整章成功才单事务落库，调用期因果校验只制造返工）
                 self.pending_child_events.setdefault(tree_key, []).append(
                     {
                         "record": record,
@@ -931,7 +924,10 @@ class AnnotationToolLedger:
         return node_id
 
     def _discard_resubmitted_pending(
-        self, written: set[tuple[str, str]], *, exclude_tree: str | None = None,
+        self,
+        written: set[tuple[str, str]],
+        *,
+        exclude_tree: str | None = None,
     ) -> None:
         """只核销节点键与描述完全一致的重提项，保留未写入项及其原有到达顺序"""
         for tree_key, items in list(self.pending_child_events.items()):
@@ -978,9 +974,7 @@ class AnnotationToolLedger:
 
     def is_pending_child(self, record: str) -> bool:
         """用于判断该生产记录键是否仍在暂挂子事件缓冲里（树根未建，调用期未落账）"""
-        return any(
-            str(item.get("record")) == record for items in self.pending_child_events.values() for item in items
-        )
+        return any(str(item.get("record")) == record for items in self.pending_child_events.values() for item in items)
 
     def _apply_participants(
         self,
@@ -1257,67 +1251,6 @@ class AnnotationToolLedger:
     # ------------------------------------------------------------------
     # 收尾声明：唯一 finish，系统据此校验并冻结当前章（冻结单位=整章）
 
-    def finish_chapter(self) -> dict[str, Any]:
-        """校验本章必需产物及逐条对话判定后组装结果，不补造未判内容
-
-        构造失败整体回滚，已写入记录原样保留；结构校验不等于语义正确性证明
-        """
-        if self.phase != "chapter_open":
-            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish")
-        # 核销只依赖已接受事实，后续收尾拒绝也不把已过期的挂起项恢复回来
-        self._reconcile_pending_children()
-        if self.metrics_payload is None:
-            raise AnnotationStageRejection(
-                "本章指标尚未提交，不予收尾",
-                record="finish",
-                field="metrics",
-                code="missing_record",
-                expected="先 write_metrics 提交摘要与叙事指标",
-            )
-        snapshot = self.snapshot()
-        try:
-            if self.pending_child_events:
-                # 2026-10-04 树键校验下沉的兜底：根始终没建时暂挂子事件不许静默丢弃；
-                # 点名各树挂起的节点键（只有 "t1×3" 数量时模型无从判断挂的是哪些子事件）
-                detail = "、".join(
-                    f"{tree_key}({', '.join(str(item['node_key']) for item in items)})"
-                    for tree_key, items in self.pending_child_events.items()
-                )
-                raise AnnotationStageRejection(
-                    f"子事件仍挂起等待建根: {detail}",
-                    record="finish",
-                    field="events",
-                    code="missing_record",
-                    expected="先 write_event(isroot=true, el=树键) 建根（挂起的子事件自动生效），或换树键重写",
-                )
-            pending = self.dialogue_ledger()["pending"]
-            if pending:
-                raise AnnotationStageRejection(
-                    f"对话候选尚未判定: {pending}",
-                    record="finish",
-                    field="dialogues",
-                    code="missing_record",
-                    expected="逐条判定候选后再 finish，未确定内容登记案例池",
-                )
-            self._ensure_domain_payloads()
-            self.ready_chapter = self._build_ready_chapter()
-        except Exception as exc:
-            self.restore(snapshot)
-            if isinstance(exc, AnnotationStageRejection):
-                raise
-            raise AnnotationStageRejection(
-                f"章节收尾校验失败: {exc}",
-                record="finish",
-                code="assembly_failed",
-                expected="按报错核对已写入的记录后重新 finish",
-            ) from None
-        self.write_records.extend(self._chapter_write_records())
-        self.chapter_finished = True
-        return {
-            "status": "completed",
-            "chapter_id": self.current_chapter_id,
-            "records": self._written_counts(),
-        }
 
     def _ensure_domain_payloads(self) -> None:
         """用于收尾时补齐空域载荷（零实体/零关系/零事件都是合法终态）"""
@@ -1547,8 +1480,8 @@ class AnnotationToolLedger:
     # ready_chapter 构造与冻结
     # ------------------------------------------------------------------
 
-    def _build_ready_chapter(self) -> BoundChapterAnnotation:
-        """2026-08-20 用于从全部已接受领域校验并构造完整 BoundChapterAnnotation（优化：内联验证逻辑）"""
+    def validate_work_endpoints(self) -> None:
+        """各角色 finish 重查共享图端点，避免依赖其他失败 work 的临时实体"""
         payloads = self.domain_payloads
         entity_types, _entity_names = self._entity_catalog(payloads["entities"])
         resolved_entity_types = {
@@ -1600,7 +1533,9 @@ class AnnotationToolLedger:
                     f"dialogue/{item.candidate_index}",
                 )
 
-        # 2026-08-22 事件契约：write_event 已在写入时内联校验参与者端点，此处不再重查
+        for item in payloads.get("events", []):
+            for participant in item.participants:
+                check_entity(participant.entity, None, "event.participant.entity", f"event/{item.node_id}")
 
         # relations 端点校验
         for item in payloads["relations"]:
@@ -1612,17 +1547,6 @@ class AnnotationToolLedger:
         if errors:
             raise ValueError("端点校验失败: " + "；".join(errors))
 
-        self._validate_domain_duplicates(payloads)
-        bound_dialogues = list(self.bound_payloads["dialogues"])
-        # 2026-09-04 单一写面：entities/relations 不进 ready_chapter，
-        # 图域真相源是 FactGraph 操作日志，持久化从其派生
-        return BoundChapterAnnotation(
-            metrics=payloads["metrics"],
-            character_observations=list(self.bound_payloads["character_observations"]),
-            dialogues=bound_dialogues,
-            events=list(self.bound_payloads["events"]),
-            paragraph_labels=list(self.bound_payloads.get("paragraph_labels") or []),
-        )
 
     def _paragraph_label_coverage_warnings(self) -> list[str]:
         """2026-09-07 用于在冻结前确定性登记段落级监督覆盖缺口（仅告警不阻断冻结）
@@ -1635,39 +1559,7 @@ class AnnotationToolLedger:
             return []
         return [f"情绪标签覆盖: 仅标注 {len(labels)} 段（每章应自选 2-3 段）"]
 
-    def complete_active_chapter(self) -> BoundChapterAnnotation:
-        """用于在收尾声明后冻结当前章（覆盖率告警随章留痕）"""
-        if self.phase != "chapter_open":
-            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 complete_chapter")
-        if not self.chapter_finished:
-            raise ValueError("本章 尚未收尾：先调用 finish")
-        if self.ready_chapter is None:
-            raise AnnotationInvariantError("已收尾但 ready_chapter 缺失，系统不变量被破坏")
-        warnings = self._paragraph_label_coverage_warnings()
-        chapter = (
-            self.ready_chapter.model_copy(update={"coverage_warnings": warnings}) if warnings else self.ready_chapter
-        )
-        self.completed_chapters.append(chapter)
-        # 2026-08-14 M6：当前章隐式授权（_resolve_case_details 按 current_chapter_id
-        # 相等校验），不再登记文本授权集合
-        # 2026-08-14 D1：不再有 continuity_open 阶段，冻结章 后直接进入终态
-        self.phase = "completed"
-        return chapter
 
-    def finish(self) -> BoundChapterAnnotation:
-        """2026-08-11 用于在章冻结后由系统产出章节正式标注
-
-        2026-09-19 章即块拍平：章节标注就是冻结的那一份（原"各 chunk summary
-        拼章节摘要"随两级结构退役，摘要在 metrics.summary）。
-        """
-        if self.phase != "completed":
-            raise AnnotationProtocolError(f"阶段 {self.phase} 不允许 finish")
-        if not self.completed_chapters:
-            raise AnnotationInvariantError("已冻结但 completed_chapters 为空，系统不变量被破坏")
-        annotation = self.completed_chapters[-1]
-        self.annotation = annotation
-        self.phase = "completed"
-        return annotation
 
     # ------------------------------------------------------------------
     # 确定性上下文摘要与搜索压缩
@@ -1767,7 +1659,6 @@ class AnnotationToolLedger:
             },
             "facts": self._domain_fact_views(),
             "errors": list(self.errors),
-            "cases": {"seeds": len(self.pushed_cases)},
             "search_log": list(self.search_log[-8:]),
         }
 

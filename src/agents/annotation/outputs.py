@@ -10,13 +10,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
-
 from pydantic import Field, model_validator
 
 from .inputs import ChapterMetricsInput, EventParticipantInput
 from .schema import StrictModel
-from .vocabulary import CaseType, Confidence, EventCauseRole, RoleFunction, Tone
+from .vocabulary import Confidence, EventCauseRole, RoleFunction, Tone
 
 
 class BoundCharacterObservation(StrictModel):
@@ -101,15 +99,6 @@ class TextSearchResult(StrictModel):
         return self
 
 
-class PendingCase(StrictModel):
-    """保存本章标注发现的未确定案例及证据定位"""
-
-    type: CaseType
-    chapter_id: int = Field(gt=0)
-    keys: list[str] = Field(min_length=1)
-    description: str = Field(min_length=1, max_length=100)
-    target_key: str
-    target_ref: dict[str, Any]
 
 
 class SourceReference(StrictModel):
@@ -126,43 +115,3 @@ class SourceReference(StrictModel):
         if self.char_end <= self.char_start:
             raise ValueError("原文引用必须是非空区间")
         return self
-
-
-class AgentRunAudit(StrictModel):
-    """保存正式写入记录与实际读取原文的段落授权"""
-
-    allow_future_context: bool
-    write_records: list[dict[str, Any]]
-    authorized_text_paragraph_ids: list[int]
-    source_anchors: dict[str, list[SourceReference]] = Field(default_factory=dict)
-
-
-class CrossChapterLink(StrictModel):
-    """章级 Agent 本次确认的跨章关联，其他章只能被引用不能被覆盖"""
-
-    record_id: str
-    kind: Literal["same_entity", "different_entity", "causal", "foreshadowing", "relation_change"]
-    source: SourceReference
-    target: SourceReference
-    change_kind: Literal["assert", "reinforce", "weaken", "refine", "break", "supersede", "retract"] | None = None
-
-    @model_validator(mode="after")
-    def validate_link(self) -> CrossChapterLink:
-        if self.source.chapter_id == self.target.chapter_id:
-            raise ValueError("跨章关联的两端必须属于不同章节")
-        if (self.kind == "relation_change") != (self.change_kind is not None):
-            raise ValueError("仅关系变化必须提供 change_kind")
-        return self
-
-
-class AgentRunResult(StrictModel):
-    """本章标注、原文定位的跨章关联及未确定案例一并提交"""
-
-    run_id: str
-    chapter_id: int = Field(gt=0)
-    annotation: BoundChapterAnnotation
-    pushed_cases: list[PendingCase] = Field(default_factory=list)
-    entity_ops: list[dict[str, Any]] = Field(default_factory=list)
-    relation_assert_ops: list[dict[str, Any]] = Field(default_factory=list)
-    cross_chapter_links: list[CrossChapterLink] = Field(default_factory=list)
-    audit: AgentRunAudit

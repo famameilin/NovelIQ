@@ -3,31 +3,16 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args, get_origin
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import tool
-from pydantic import Field
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError, AnnotationStageRejection
 from .identity import stable_digest, text_digest
-from .schema import CrossChapterLink, SourceReference
+from .schema import SourceReference
 
 if TYPE_CHECKING:
     from .tools import AnnotationQueryService, AnnotationToolLedger
-
-_CHANGE_KIND_VALUES = next(
-    get_args(branch) for branch in get_args(CrossChapterLink.model_fields["change_kind"].annotation)
-    if get_origin(branch) is Literal
-)
-LINK_KIND_CHANGE_PAIRING_TEXT = (
-    "kind | change_kind\n"
-    + " / ".join(
-        kind for kind in get_args(CrossChapterLink.model_fields["kind"].annotation) if kind != "relation_change"
-    )
-    + " | 省略或 None\nrelation_change | 必填 " + " / ".join(_CHANGE_KIND_VALUES)
-    + "；按原文选择关系变化方向"
-)
-
 
 def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationToolLedger) -> list[Any]:
     """所有写工具只接受本次读回执和本章已写出的对象"""
@@ -126,68 +111,5 @@ def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationTo
             values.append(value)
         return json.dumps({"accepted": True, "record": record, "source_ref": source_ref}, ensure_ascii=False)
 
-    @tool
-    def write_link(
-        record_id: str, source_ref: str, target_ref: str,
-        kind: Annotated[
-            Literal["same_entity", "different_entity", "causal", "foreshadowing", "relation_change"],
-            Field(description=LINK_KIND_CHANGE_PAIRING_TEXT),
-        ],
-        change_kind: Annotated[
-            Literal["assert", "reinforce", "weaken", "refine", "break", "supersede", "retract"] | None,
-            Field(description=LINK_KIND_CHANGE_PAIRING_TEXT),
-        ] = None,
-    ) -> str:
-        """提交已确认跨章关联，自动绑定已授权的本章 source_ref；未确定内容使用 push_case"""
-        record = require_record(record_id)
-        source = reference(source_ref, record=record, field="source_ref")
-        target = reference(target_ref, record=record, field="target_ref")
-        expected_domain = "entity/" if kind in {"same_entity", "different_entity"} else (
-            "relation/" if kind == "relation_change" else None
-        )
-        if expected_domain is not None and not record.startswith(expected_domain):
-            raise AnnotationStageRejection(
-                f"{record}(kind={kind})：关联类型与本章记录领域不匹配",
-                record=record, field="kind", code="domain_mismatch", expected=f"record_id 以 {expected_domain} 开头",
-            )
-        if expected_domain is None and record.startswith(("entity/", "relation/", "dialogue/", "metrics")):
-            raise AnnotationStageRejection(
-                f"{record}(kind={kind})：因果与伏笔照应必须指向本章事件记录",
-                record=record, field="kind", code="domain_mismatch", expected="本章事件记录键",
-            )
-        if source.chapter_id != ledger.current_chapter_id:
-            raise AnnotationStageRejection(
-                f"{record}(source_ref={source_ref!r}, source.chapter_id={source.chapter_id})："
-                f"关联来源必须属于本章（本章 chapter_id={ledger.current_chapter_id}）",
-                record=record, field="source_ref", code="chapter_mismatch",
-                expected=f"source.chapter_id={ledger.current_chapter_id}",
-            )
-        # 联合约束在工具边界点名实际两端和字段值，模型不必从整条载荷反推错误字段
-        if source.chapter_id == target.chapter_id:
-            raise AnnotationStageRejection(
-                f"{record}(source.chapter_id={source.chapter_id}, target.chapter_id={target.chapter_id})："
-                "跨章关联的两端必须属于不同章节",
-                record=record, field="target_ref", code="invalid_combination",
-                expected="source.chapter_id != target.chapter_id",
-            )
-        if kind == "relation_change" and change_kind is None:
-            raise AnnotationStageRejection(
-                f"{record}(kind={kind}, change_kind=None)：关系变化缺少 change_kind",
-                record=record, field="change_kind", code="missing",
-                expected="assert / reinforce / weaken / refine / break / supersede / retract",
-            )
-        if kind != "relation_change" and change_kind is not None:
-            raise AnnotationStageRejection(
-                f"{record}(kind={kind}, change_kind={change_kind})：change_kind 只用于 relation_change",
-                record=record, field="change_kind", code="invalid_combination", expected="change_kind=None",
-            )
-        value = CrossChapterLink(record_id=record, kind=kind, source=source, target=target, change_kind=change_kind)
-        # 全部关联校验通过后才补锚点，拒绝调用不留下绑定副作用
-        anchors = ledger.source_anchors.setdefault(record, [])
-        if source not in anchors:
-            anchors.append(source)
-        if value not in ledger.cross_chapter_links:
-            ledger.cross_chapter_links.append(value)
-        return json.dumps({"accepted": True, "record": record, "kind": kind}, ensure_ascii=False)
 
-    return [read_text, read_chapter_text, anchor_record, write_link]
+    return [read_text, read_chapter_text, anchor_record]

@@ -16,8 +16,6 @@ from typing import Annotated, Any
 from langchain_core.tools import tool
 from pydantic import Field, JsonValue
 
-from .errors import AnnotationInputError, AnnotationProtocolError, AnnotationStageRejection
-from .identity import stable_digest
 from .ledger import AnnotationToolLedger
 from .schema import (
     CLIFFHANGER_DESCRIPTION,
@@ -35,7 +33,6 @@ from .schema import (
     NarrativeFunction,
     ParagraphLabelInput,
     ParticipantArg,
-    PendingCase,
     RelationType,
     Tone,
     relation_catalog_text,
@@ -248,168 +245,8 @@ def build_annotation_tools(
             ensure_ascii=False,
         )
 
-    @tool
-    def finish() -> str:
-        """声明本章的语义写入已写完：本回合全部调用处理完后系统校验并冻结
 
-        本章的全部内容（含整棵事件树）都可以在同一批调用里按顺序写完，末尾直接跟本工具，
-        不必为了"先看回执"再拆一轮：局部键（实体 el、事件树键）由你指定、写入即生效，
-        同批后面的调用直接可用。
-        本工具可以单独调用，也可以写在 execute_code 的程序末尾——写在程序末尾时在本程序
-        全部语句执行完后结算，与单独调用同一条判定。
-        写入是实时生效的，本工具只做收尾：唯一会拒绝收尾的是指标（write_metrics）
-        尚未提交——那时回执给出 missing_record，先补指标再收尾。
-        本回合其他调用有没有失败与收尾无关：失败的那条只回滚它自己（回执已单独说明原因），
-        没进图/没进载荷，收尾按已写入内容完成即可，不必为了收尾去重交失败记录。
-        没有内容的领域不必造假数据，直接收尾即可（收尾回执给出各域写入条数）。
-        收尾判定在本回合全部调用处理完后生效，通过后本章冻结、不再接受写入；
-        不调用本工具，本章不会冻结。
-        """
-        return json.dumps({"status": "pending"}, ensure_ascii=False)
 
-    def _require_chapter_record(
-        ledger: AnnotationToolLedger,
-        value: str,
-        *,
-        record: str,
-        field: str,
-    ) -> str:
-        """2026-09-18 用于校验记录键确实是本章已经写出来的记录（案例只指向真实产出）
-
-        记录键就是写入回执里的 record（实体 entity/…、事件 t1 或 t1/e2、关系、对话各自的
-        形态；两个面的键空间不同，所以这里给的是"回执里的 record"这条判据而不是样例）。
-        可用集合由写入口在每次调用成功时登记（ledger.written_record_keys），这里读同一份。
-        未命中按结构化拒绝回，并把本章已写出的键列在 expected 里（模型可当场自纠）。
-        """
-        normalized = unicodedata.normalize("NFC", str(value)).strip()
-        expected = "写入回执里的 record（本章写出来的记录键）"
-        if not normalized:
-            raise AnnotationStageRejection(
-                f"{field} 不能为空",
-                record=record,
-                field=field,
-                code="invalid_value",
-                expected=expected,
-            )
-        if normalized not in ledger.written_record_keys:
-            # 2026-10-03 known 清单按域全量分组回显：此前只随机列前 8 个，模型拿不到
-            # "什么能用"的全貌，思考审计实证它只能逐个试探（70% 犹豫句在猜键空间）。
-            # 分组按域关键字匹配——IR 键带角色前缀（structure/entity/a1），首段不是域
-            grouped: dict[str, list[str]] = {}
-            for key in sorted(ledger.written_record_keys):
-                if "/entity/" in key or key.startswith("entity/"):
-                    domain = "entity"
-                elif "/relation/" in key or key.startswith("relation/"):
-                    domain = "relation"
-                elif "/dialogue/" in key or key.startswith("dialogue/"):
-                    domain = "dialogue"
-                else:
-                    domain = "event"
-                grouped.setdefault(domain, []).append(key)
-            sections = "；".join(f"{name}: {'、'.join(keys)}" for name, keys in grouped.items())
-            raise AnnotationStageRejection(
-                f"{field} 不是本章已经写出来的记录: {normalized}",
-                record=record,
-                field=field,
-                code="unknown_record",
-                expected=(f"{expected}；本章已写出的全部合法记录键——{sections or '（还没有任何记录）'}"),
-            )
-        # 2026-10-03 校验通过后把 IR 键（structure/entity/a1、event/t1…）规范成生产键：
-        # 存进 target_ref 的键由正式提交的 bind_record_target 按生产键空间解析
-        return ledger.production_record_key(normalized)
-
-    @tool
-    def push_case(
-        description: str,
-        keys: list[str],
-        type: str,
-        record_id: str | None = None,
-        evidence_refs: list[str] | None = None,
-    ) -> str:
-        """把本章分析中发现的未确定内容登记进案例池（回执给出案例 id）
-
-        type 是任意描述字符串（如 "伏笔疑点"）；description 只写人类可读说明且不超过 100 字；
-        keys/type/record_id 必须作为独立参数提交，示例：
-        push_case(description="玉戒尺在第 5 章异常发光", keys=["玉戒尺"], type="伏笔疑点")。
-        record_id 填这条疑点涉及的产出记录键（写入回执里的 record，实体/关系/事件/对话都行），
-        没有明确记录就省略。
-        未确定项直接进入案例池，不要求另开全书标注或重新分析章节。
-        evidence_refs 逐字照抄 read_text 回执里的 source_ref（原文证据句柄）；
-        search_text 命中只给段落定位、不是 source_ref，未读过的段落先 read_text。
-        """
-        if ledger.phase != "chapter_open":
-            raise AnnotationProtocolError(f"阶段 {ledger.phase} 不允许 push_case")
-        normalized_type = unicodedata.normalize("NFC", type).strip()
-        if not normalized_type:
-            raise AnnotationInputError("push_case.type 不能为空")
-        normalized_description = unicodedata.normalize("NFC", description).strip()
-        if not normalized_description:
-            raise AnnotationInputError("push_case.description 不能为空")
-        if len(normalized_description) > 100:
-            raise AnnotationInputError(
-                "push_case.description 不能超过 100 字，请精简为人类可读要点（案例检索载荷有长度上限）"
-            )
-        json_marker_fields = ('"keys"', '"type"', '"record_id"')
-        if any(marker in normalized_description for marker in json_marker_fields):
-            raise AnnotationInputError(
-                "push_case.description 只接受人类可读说明；keys/type/record_id"
-                " 必须作为独立参数提交，不能写入 description 字符串"
-            )
-        normalized_keys = [unicodedata.normalize("NFC", key).strip() for key in keys]
-        if not normalized_keys or any(not key for key in normalized_keys):
-            raise AnnotationInputError("push_case.keys 不能为空")
-        if len(set(normalized_keys)) != len(normalized_keys):
-            raise AnnotationInputError("push_case.keys 不允许重复")
-        target_ref: dict[str, Any] = {
-            "kind": normalized_type,
-            "chapter_id": ledger.current_chapter_id,
-            "keys": normalized_keys,
-        }
-        if evidence_refs:
-            unknown = [reference for reference in evidence_refs if reference not in ledger.text_references]
-            if unknown:
-                # 2026-10-03 拒绝信息教格式并列已授权 source_ref：run 4a6c268c ch21 实证
-                # 模型拿段落号（'57'、'21:1360'）猜 evidence_refs 格式 7 连拒——不知道
-                # source_ref 是 read_text 回执里的哈希句柄，也没有"哪些可用"的回显
-                authorized = sorted(ledger.text_references)
-                shown = "、".join(authorized[:5]) + ("…" if len(authorized) > 5 else "")
-                raise AnnotationInputError(
-                    "evidence_refs 必须逐字照抄 read_text 回执里的 source_ref 字段"
-                    f"（收到 {unknown[0]!r} 等 {len(unknown)} 个非法值；段落号不是 source_ref）"
-                    "——先 read_text(paragraph_id, quote=原文片段) 取回执再登记"
-                    + (f"；本次已授权的 source_ref：{shown}" if authorized else "；本次还没有任何 read_text 回执")
-                )
-            target_ref["source_refs"] = [
-                ledger.text_references[reference].model_dump(mode="json") for reference in sorted(set(evidence_refs))
-            ]
-        # 2026-09-18 record_id 可为空：留空（省略或纯空白）即不指向记录，不写进 target_ref
-        normalized_record_id = None if record_id is None else unicodedata.normalize("NFC", record_id).strip()
-        if normalized_record_id:
-            target_ref["record_id"] = _require_chapter_record(
-                ledger,
-                normalized_record_id,
-                record=f"case/{normalized_type}",
-                field="record_id",
-            )
-        target_key = stable_digest(ledger.run_scope, normalized_type, target_ref, fold_text=True)
-        existing_case = ledger.pending_case_by_id(target_key)
-        if existing_case is not None:
-            return json.dumps({"accepted": True, "case_id": target_key, "duplicate": True}, ensure_ascii=False)
-        pushed = PendingCase(
-            type=normalized_type,
-            chapter_id=ledger.current_chapter_id,
-            keys=normalized_keys,
-            description=normalized_description,
-            target_key=target_key,
-            target_ref=target_ref,
-        )
-        ledger.pushed_cases.append(pushed)
-        response = {
-            "accepted": True,
-            "case_id": target_key,
-            "note": "未确定内容已登记案例池，不作为已确认事实",
-        }
-        return json.dumps(response, ensure_ascii=False)
 
     from .links import build_link_tools
 
@@ -419,10 +256,8 @@ def build_annotation_tools(
         write_event,
         write_relation,
         write_dialogue,
-        finish,
         *build_search_tools(query_service, ledger),
         *build_link_tools(query_service, ledger),
-        push_case,
     ]
     for tool_candidate in tools:
         _forbid_undeclared_args(tool_candidate)
