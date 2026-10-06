@@ -12,7 +12,7 @@ from typing import TypedDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models.local.embedding import EmbeddingClient, format_query_instruct
+from src.embedding import EmbeddingClient, format_query_instruct
 from src.storage.models import Chapter, Paragraph
 from src.storage.repositories.paragraph import search_paragraphs_by_keywords, search_similar_paragraphs
 

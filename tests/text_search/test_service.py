@@ -7,12 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
-from src.models.local.embedding import format_query_instruct
-from src.preprocess.tokenize import tokenize
+from src.agents.text_search import TextSearchService, extract_query_terms
+from src.embedding import format_query_instruct
 from src.storage.repositories.paragraph.embedding_ops import SimilarParagraphRow
 from src.storage.repositories.paragraph_repository import ParagraphRepository
-from src.text_search.service import TextSearchService, extract_query_terms
+from src.storage.text_units import Chunk
+from src.utils.tokenize import tokenize
+from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
@@ -132,7 +133,7 @@ async def test_search_merges_keyword_and_semantic_scores_per_paragraph(db_sessio
         )
     ]
     with patch(
-        "src.text_search.service.search_similar_paragraphs",
+        "src.agents.text_search.search_similar_paragraphs",
         return_value=semantic_rows,
     ):
         result = await service.search("林渡 顾霜")
@@ -161,7 +162,7 @@ async def test_search_wraps_query_with_instruct_prefix(db_session) -> None:
     service = TextSearchService(db_session, run_id=run_id, semantic_enabled=True)
     service._embedding_client = AsyncMock()
     with patch(
-        "src.text_search.service.search_similar_paragraphs",
+        "src.agents.text_search.search_similar_paragraphs",
         return_value=[],
     ):
         await service.search("林渡 顾霜")
@@ -205,7 +206,7 @@ async def test_search_with_missing_paragraph_meta_skips_candidate(db_session) ->
         global_end_char=5,
     )
     with patch(
-        "src.text_search.service.search_paragraphs_by_keywords",
+        "src.agents.text_search.search_paragraphs_by_keywords",
         return_value=[keyword_row],
     ):
         result = await service.search("顾霜")
