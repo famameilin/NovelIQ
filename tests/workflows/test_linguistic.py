@@ -6,6 +6,7 @@ analyze_paragraph 纯函数路径保持真实；短语匹配与 Word2Vec 全真�
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import uuid
 from dataclasses import replace
@@ -17,11 +18,12 @@ from sqlalchemy.engine import Row
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.linguistic.ltp_client import LtpPipelineOutput
 from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
+from src.storage.text_units import Chunk
 from src.workflows.linguistic import run_linguistic
+from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 
 _TEST_TEXTS = ["江湖快意恩仇，刀光剑影之间英雄辈出。", "他叫汤姆去拿外衣，但是天色已晚。"]
@@ -41,7 +43,7 @@ class FakeLtpSession:
             pos.append(["n" if w != "，" and w != "。" else "wp" for w in words])
             dep.append({"head": [0] * len(words), "label": ["HED"] * len(words)})
             ner.append([("Nh", "汤姆", 2, 2)] if "汤姆" in sentence else [])
-        return LtpPipelineOutput(cws=cws, pos=pos, ner=ner, dep=dep)
+        return LtpPipelineOutput(cws=cws, pos=pos, ner=ner, dep=dep, sdp=[])
 
 
 class TestRunLinguistic:
@@ -103,7 +105,6 @@ class TestRunLinguistic:
         paragraphs, features = await run_linguistic(self.run_id, self.db_session)
         assert paragraphs == 2
         assert features == 2
-
         assert self._count("paragraph_linguistic_features") == 2
         assert self._count("paragraph_entities") > 0  # 汤姆 Nh person
         assert self._count("paragraph_phrase_hits") > 0  # 快意恩仇/刀光剑影命中
@@ -121,6 +122,22 @@ class TestRunLinguistic:
         rows = self._feature_rows()
         assert len(rows) == 2
         assert all(row.paragraph_id in (0, 1) for row in rows)
+
+    @pytest.mark.asyncio()
+    async def test_cancel_takes_effect_at_paragraph_batch_boundary(self) -> None:
+        """取消在段落批边界生效：不会把整卷 LTP 跑完才响应，也不写完整结果"""
+        checks = {"count": 0}
+
+        def is_cancelled() -> bool:
+            checks["count"] += 1
+            return checks["count"] > 1
+
+        with pytest.raises(asyncio.CancelledError):
+            await run_linguistic(self.run_id, self.db_session, batch_size=1, is_cancelled=is_cancelled)
+
+        # 第一批已放行、第二批边界命中取消：没跑完整卷
+        assert checks["count"] >= 2
+        assert self._count("paragraph_linguistic_features") < 2
 
     @pytest.mark.asyncio()
     async def test_ltp_inference_runs_off_event_loop(self, monkeypatch) -> None:

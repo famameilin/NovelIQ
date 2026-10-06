@@ -25,12 +25,13 @@ def _create_run_with_paragraph_metrics(
     """构造带段落指标数据的 run（每章一段；token_counts 控制各章 token 数）。"""
     from dataclasses import replace
 
-    from src.chunking.chunker import Chunk, split_chunk_paragraphs
     from src.storage.repositories import ChapterRepository
     from src.storage.repositories.paragraph_repository import (
         ParagraphMetricRow,
         ParagraphRepository,
     )
+    from src.storage.text_units import Chunk
+    from src.workflows.paragraphs import split_chunk_paragraphs
 
     if imagery_hit_counts is None:
         imagery_hit_counts = [0] * len(token_counts)
@@ -142,12 +143,13 @@ def test_build_quality_gate_report_counts_chapters_without_metric_rows(db_sessio
     """2026-08-15 漏检修复：完全没有指标行的章必须进入分母并计为缺失"""
     from dataclasses import replace
 
-    from src.chunking.chunker import Chunk, split_chunk_paragraphs
     from src.storage.repositories import ChapterRepository
     from src.storage.repositories.paragraph_repository import (
         ParagraphMetricRow,
         ParagraphRepository,
     )
+    from src.storage.text_units import Chunk
+    from src.workflows.paragraphs import split_chunk_paragraphs
 
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)

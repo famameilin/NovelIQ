@@ -10,15 +10,13 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.models.cloud.schema import CloudAnalysis
+from src.agents.diagnosis.schema import CloudAnalysis
 from src.storage.repositories import RunRepository
 from src.workflows.diagnose import run_diagnose
 from tests.support.analysis_factories import insert_test_novel
-from tests.support.chapter_annotation_helpers import publish_test_cutoff
 
 
 def _fake_analysis(novel_id: str) -> CloudAnalysis:
@@ -28,7 +26,7 @@ def _fake_analysis(novel_id: str) -> CloudAnalysis:
         arc_scores={"角色0": 8.5, "角色1": 7.0},
         genre_labels=["通用"],
         style_labels=["严肃"],
-        topic_labels=["成长"],
+        topic_labels={'0': '成长'},
         diagnosis="ok",
         narrative_arc_type="白手起家",
         focus_structure="dual",
@@ -51,7 +49,9 @@ class TestCli:
 
     @pytest.mark.asyncio()
     async def test_agent_diagnose_writes_db(self) -> None:
-        publish_test_cutoff(self.db_session, self.run_id)
+        from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation
+        self.novel_id, self.run_id = create_run_with_chunks(self.db_session, texts=["测试小说正文。"])
+        persist_chapter_annotation(self.db_session, run_id=self.run_id, chapter_id=1)
         fake = AsyncMock(return_value=_fake_analysis(self.novel_id))
         with patch("src.agents.run_diagnosis_agent", new=fake):
             analysis = await run_diagnose(
@@ -62,11 +62,6 @@ class TestCli:
 
         assert analysis.genre_labels == ["通用"]
         assert analysis.style_labels == ["严肃"]
+        # 诊断 agent 完整通过注解完成度闸门并被派发；落库断言见
+        # tests/workflows/test_cloud_diagnose_routes.py 的真 agent 路径
         fake.assert_awaited_once()
-
-        row = self.db_session.execute(
-            text("SELECT genre_labels, style_labels FROM cloud_analysis WHERE run_id = :run_id"),
-            {"run_id": self.run_id},
-        ).fetchone()
-        assert row[0] == '["通用"]'
-        assert row[1] == '["严肃"]'

@@ -12,15 +12,14 @@ import sys
 import uuid
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
-from sqlalchemy import text
+from langchain_core.messages import AIMessage
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
-from src.models.cloud.schema import CloudAnalysis
+from src.agents.diagnosis.schema import CloudAnalysis
 from src.storage.repositories import (
     ChapterRepository,
     DiagnosisRepository,
@@ -29,9 +28,37 @@ from src.storage.repositories import (
     StatsRepository,
 )
 from src.storage.repositories.paragraph_repository import ParagraphCurveRow
+from src.storage.text_units import Chunk
 from src.workflows.diagnose import run_diagnose
+from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
+from tests.support.model_stream_adapter import StreamedFakeModelMixin
+
+
+class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
+    """先调用取证工具再提交 finish 的假诊断模型，覆盖真实落库路径"""
+
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        del tools
+        return self
+
+    async def ainvoke(self, messages):
+        del messages
+        self.calls += 1
+        if self.calls == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[{"name": "get_aggregate_signals", "args": {}, "id": "e1", "type": "tool_call"}],
+            )
+        return AIMessage(
+            content="提交",
+            tool_calls=[{"name": "finish", "args": {"analysis": self.payload}, "id": "f1", "type": "tool_call"}],
+        )
 
 
 def _fake_analysis(novel_id: str) -> CloudAnalysis:
@@ -41,7 +68,7 @@ def _fake_analysis(novel_id: str) -> CloudAnalysis:
         arc_scores={"角色0": 8.5, "角色1": 7.0},
         genre_labels=["通用"],
         style_labels=["严肃"],
-        topic_labels=["成长"],
+        topic_labels={'0': '成长'},
         diagnosis="ok",
         narrative_arc_type="白手起家",
         focus_structure="dual",
@@ -181,10 +208,11 @@ class TestDiagnosisRoutes:
 
     @pytest.mark.asyncio()
     async def test_run_diagnose_agent_writes_db(self) -> None:
+        """真 agent（假模型、真工具）跑完诊断后由 agent 自存产物"""
         self._create_full_data(5)
 
-        fake = AsyncMock(return_value=_fake_analysis(self.novel_id))
-        with patch("src.agents.run_diagnosis_agent", new=fake):
+        llm = _EvidenceThenFinishLLM(_fake_analysis(self.novel_id).model_dump())
+        with patch("src.model_pool.llm.build_chat_model", return_value=llm):
             analysis = await run_diagnose(
                 run_id=self.run_id,
                 session=self.db_session,
@@ -192,46 +220,43 @@ class TestDiagnosisRoutes:
         assert analysis is not None
         assert analysis.genre_labels == ["通用"]
         assert analysis.style_labels == ["严肃"]
-        assert analysis.foreshadow_expectation == 0.1
-        fake.assert_awaited_once()
 
-        rows = self.db_session.execute(
-            text("SELECT COUNT(*) FROM cloud_analysis WHERE run_id = :run_id"),
-            {"run_id": self.run_id},
-        ).scalar()
-        assert rows > 0
+        from sqlalchemy import select
+
+        from src.storage.models import AnalysisOutput
+
+        rows = list(
+            self.db_session.execute(
+                select(AnalysisOutput).where(
+                    AnalysisOutput.run_id == self.run_id, AnalysisOutput.kind == "cloud_analysis"
+                )
+            ).scalars()
+        )
+        assert len(rows) == 1
+        assert rows[0].payload["genre_labels"] == ["通用"]
 
     @pytest.mark.asyncio()
     async def test_run_diagnose_persists_result(self) -> None:
         self._create_full_data(3)
 
-        fake = AsyncMock(return_value=_fake_analysis(self.novel_id))
-        with patch("src.agents.run_diagnosis_agent", new=fake):
+        llm = _EvidenceThenFinishLLM(_fake_analysis(self.novel_id).model_dump())
+        with patch("src.model_pool.llm.build_chat_model", return_value=llm):
             await run_diagnose(
                 run_id=self.run_id,
                 session=self.db_session,
             )
-        rows = self.db_session.execute(
-            text(
-                "SELECT novel_id, genre_labels, style_labels, foreshadow_expectation, narrative_arc_type, "
-                "focus_structure, focus_characters, main_characters, core_cast "
-                "FROM cloud_analysis WHERE run_id = :run_id"
-            ),
-            {"run_id": self.run_id},
-        ).fetchall()
-        assert len(rows) > 0
-        assert rows[0][0] == self.novel_id
-        assert rows[0][1] == '["通用"]'
-        assert rows[0][2] == '["严肃"]'
-        assert rows[0][4] == "白手起家"
-        assert rows[0][5] == "dual"
-        assert "角色0" in rows[0][6]
-        assert "角色0" in rows[0][7]
-        assert "角色1" in rows[0][8]
 
         stats_repo = StatsRepository(self.db_session)
-        fetched = stats_repo.fetch_cloud_analysis(self.novel_id, self.run_id)
+        fetched = stats_repo.fetch_cloud_analysis(self.run_id)
         assert fetched is not None
+        assert fetched["novel_id"] == self.novel_id
+        assert fetched["genre_labels"] == ["通用"]
+        assert fetched["style_labels"] == ["严肃"]
+        assert fetched["narrative_arc_type"] == "白手起家"
+        assert fetched["focus_structure"] == "dual"
+        assert "角色0" in fetched["focus_characters"]
+        assert "角色0" in fetched["main_characters"]
+        assert "角色1" in fetched["core_cast"]
         assert fetched["focus_structure"] == "dual"
         assert fetched["focus_characters"] is not None
         assert fetched["main_characters"] is not None

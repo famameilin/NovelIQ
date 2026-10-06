@@ -32,16 +32,17 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import (
     ParagraphCurveRow,
     ParagraphMetricRow,
     ParagraphRepository,
 )
+from src.storage.text_units import Chunk
 from src.workflows.aggregate import run_aggregate
+from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
-from tests.support.chapter_annotation_helpers import persist_chapter_annotation, publish_test_cutoff
+from tests.support.chapter_annotation_helpers import confirm_test_work, persist_chapter_annotation
 
 
 def _build_paragraph_rows(
@@ -116,7 +117,7 @@ class TestAggregate:
         paragraph_repo.insert_paragraphs(self.run_id, spans)
         paragraph_repo.insert_paragraph_metrics(self.run_id, metric_rows)
         paragraph_repo.insert_paragraph_curves(self.run_id, curve_rows)
-        publish_test_cutoff(self.db_session, self.run_id)
+        confirm_test_work(self.db_session, self.run_id, create_missing=True)
 
     @pytest.mark.asyncio()
     async def test_aggregate_basic(self) -> None:
@@ -191,16 +192,16 @@ class TestAggregate:
             cliffhanger_chapters={2},
         )
 
+        confirm_test_work(self.db_session, self.run_id, create_missing=True)
         chunks, stats_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)
         assert chunks == 3
         assert stats_count > 0
 
     @pytest.mark.asyncio()
     async def test_aggregate_empty_db(self) -> None:
-        publish_test_cutoff(self.db_session, self.run_id)
-        chunks, stats_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)
-        assert chunks == 0
-        assert stats_count == 0
+        confirm_test_work(self.db_session, self.run_id, create_missing=True)
+        with pytest.raises(ValueError, match="必需角色 work"):
+            await run_aggregate(run_id=self.run_id, session=self.db_session)
 
     @pytest.mark.asyncio()
     async def test_aggregate_metrics_graph_not_ready_degrades_gracefully(self, monkeypatch) -> None:
