@@ -22,10 +22,10 @@ from src.storage.repositories import RunRepository
 from src.storage.session import SessionFactory
 
 if TYPE_CHECKING:
-    from src.api.models.events import AnalysisEventBus
-    from src.api.services.novel_service import NovelService
-    from src.api.services.task_manager import TaskManager
     from src.config.analysis_logger import AnalysisLogger
+    from src.work.events import AnalysisEventBus
+    from src.work.task_manager import TaskManager
+    from src.workflows.tasks import TaskService
 
 
 class AnalysisErrorHandler:
@@ -33,10 +33,10 @@ class AnalysisErrorHandler:
 
     def __init__(
         self,
-        novel_service: NovelService,
+        task_service: TaskService,
         task_manager: TaskManager,
     ):
-        self.novel_service = novel_service
+        self.task_service = task_service
         self.task_manager = task_manager
 
     def _run_still_owned_by_current_worker(self, session: Session, run_id: str) -> bool:
@@ -79,7 +79,6 @@ class AnalysisErrorHandler:
                     "status": "completed",
                 }
             )
-        self.novel_service.update_task_status(task_id, "completed")
         self.task_manager.complete_task(task_id, success=True)
 
         # 2026-08-14 P2-13：旧 worker 延迟写回守卫（run 已被 resume 新轮接管时跳过）
@@ -98,7 +97,7 @@ class AnalysisErrorHandler:
                 run_id,
                 status="completed",
                 progress=100.0,
-                completed_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC).replace(tzinfo=None),
             )
             session.commit()
         except Exception as exc:
@@ -106,16 +105,9 @@ class AnalysisErrorHandler:
             # DB 停留在旧状态，留给重启孤儿回收兜底；显式告警便于排查
             logger.error(f"Task {task_id} 终态 DB 写回失败（内存态已收口，DB 状态待重启回收兜底）: {exc}")
 
-        # 任务完成后失效聚合指标缓存，确保新分析结果立即生效
-        # 这里必须命中 api.dependencies 中维护的同一 MetricsService 单例，
-        # 否则只会失效一个临时新实例上的空缓存，路由真实读取的缓存仍然保留旧值
-        try:
-            from src.api.dependencies import get_metrics_service
-
-            metrics_service = get_metrics_service()
-            metrics_service.invalidate_cache(run_id)
-        except Exception as e:
-            logger.warning(f"Failed to invalidate metrics cache for {run_id}: {e}")
+        # 任务完成后上报读侧失效聚合指标缓存，确保新分析结果立即生效
+        # 该缓存归读侧（api 依赖注入层）所有并在此注入回调，执行层不直接依赖读侧实现
+        self.task_manager.notify_run_completed(run_id)
 
         if bus:
             await bus.emit_task_complete()
@@ -148,7 +140,6 @@ class AnalysisErrorHandler:
                     "error": str(error),
                 }
             )
-        self.novel_service.update_task_status(task_id, "failed")
         logger.error(f"{log_prefix} failed: {task_id} - {error}")
         self.task_manager.complete_task(task_id, success=False, error=str(error))
 
@@ -171,7 +162,7 @@ class AnalysisErrorHandler:
                 run_id,
                 status="failed",
                 error=str(error),
-                completed_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC).replace(tzinfo=None),
             )
             session.commit()
         except Exception as exc:
@@ -193,7 +184,6 @@ class AnalysisErrorHandler:
         处理分析取消
         """
         self.task_manager.cancel_completed_task(task_id, error="用户取消")
-        self.novel_service.update_task_status(task_id, "cancelled")
 
         # 取消路径与失败路径一样，共享同一个 session；
         # 若不先 rollback，commit cancel 状态时仍会把之前残留的脏写入一起提交
@@ -211,7 +201,7 @@ class AnalysisErrorHandler:
                 run_id,
                 status="cancelled",
                 cancel_requested=False,
-                completed_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC).replace(tzinfo=None),
             )
             session.commit()
         except Exception as exc:
@@ -238,10 +228,10 @@ class TerminalStateFallbackMixin:
     """
     终态兜底混入（2026-10-02 自 analysis_service.py 并入）
 
-    宿主需提供 novel_service/task_manager/session_factory；方法体与原实现保持一致
+    宿主需提供 task_service/task_manager/session_factory；方法体与原实现保持一致
     """
 
-    novel_service: NovelService
+    task_service: TaskService
     task_manager: TaskManager
     session_factory: SessionFactory
 
@@ -263,7 +253,6 @@ class TerminalStateFallbackMixin:
     ) -> None:
         """处理已完成的分析任务，确保 DB 状态一致"""
         logger.info(f"Task {task_id} already completed, no action needed")
-        self.novel_service.update_task_status(task_id, "completed")
         self.task_manager.complete_task(task_id, success=True)
 
         # DB 终态写入：由于 complete_task() 不再写 DB，需自行操作
@@ -281,7 +270,7 @@ class TerminalStateFallbackMixin:
                     run_id,
                     status="completed",
                     progress=100.0,
-                    completed_at=datetime.now(UTC),
+                    completed_at=datetime.now(UTC).replace(tzinfo=None),
                 )
 
         if analysis_logger:
@@ -318,7 +307,7 @@ class TerminalStateFallbackMixin:
                     run_id,
                     status="failed",
                     error=error_message,
-                    completed_at=datetime.now(UTC),
+                    completed_at=datetime.now(UTC).replace(tzinfo=None),
                 )
         except TaskIDNotFoundError:
             logger.warning(f"Task {task_id} not found in id_mapping during failure DB write, skipping")

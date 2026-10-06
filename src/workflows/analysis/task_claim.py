@@ -16,11 +16,11 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from src.api.exceptions import AnalysisError
+from src.workflows.exceptions import AnalysisError
 
 if TYPE_CHECKING:
-    from src.api.services.task_manager import TaskManager
     from src.storage.session import SessionFactory
+    from src.work.task_manager import TaskManager
 
 # 任务 claim 时判定"刚被 resume 重置"的竞态窗口：resume 重置后旧 worker 的延迟取消
 # 写回可能把状态覆盖回 cancelled，只有在该窗口内的重置才允许 claim 侧重新激活
@@ -139,7 +139,7 @@ class TaskClaimMixin:
                         run_id,
                         status="cancelled",
                         cancel_requested=False,
-                        completed_at=datetime.now(UTC),
+                        completed_at=datetime.now(UTC).replace(tzinfo=None),
                         message=run.get("message") or "任务在启动前已取消",
                         worker_id=None,
                         heartbeat_at=None,
@@ -190,7 +190,7 @@ class TaskClaimMixin:
                 run_id,
                 status="cancelled",
                 cancel_requested=False,
-                completed_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC).replace(tzinfo=None),
                 message=refreshed.get("message") or "任务在启动前已取消",
                 worker_id=None,
                 heartbeat_at=None,

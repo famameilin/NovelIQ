@@ -50,16 +50,14 @@ class EnvironmentInitializer:
 
         # 2026-10-03 收口进程重启遗留的 running 审计行，避免僵尸行永久污染错误率统计
         # （run 08f9ba42 实证 12 条 running 僵尸行）；每次创建/恢复任务都会经过这里
-        from src.agents.audit.recorder import AgentAuditRecorder
+        from src.agents.audit.module import AuditModule
 
-        orphaned = AgentAuditRecorder(lambda: self.session_factory.get_session()).close_orphaned_invocations(run_id)
+        orphaned = AuditModule.close_interrupted(lambda: self.session_factory.get_session(), run_id)
         if orphaned:
             logger.info(f"Closed {orphaned} orphaned running invocations for run {run_id}")
 
         analysis_logger = self._create_analysis_logger(run_id)
         self._log_initialization_info(task_id, run_id, analysis_logger)
-
-        self._ensure_global_context(run_id, novel_id, novel_title, conn)
 
         return novel_id, source_path, novel_title, conn, analysis_logger, run_id
 
@@ -105,25 +103,6 @@ class EnvironmentInitializer:
         logger.info(f"Task ID: {task_id}")
         logger.info(f"Run ID: {run_id}")
         logger.info(f"Log directory: {analysis_logger.log_dir}")
-
-    def _ensure_global_context(
-        self,
-        run_id: str,
-        novel_id: str,
-        novel_title: str | None,
-        conn: Session,
-    ) -> None:
-        """确保全局上下文存在"""
-        stats_repo = StatsRepository(conn)
-        if not stats_repo.has_global_context(novel_id):
-            stats_repo.insert_global_context(
-                run_id=run_id,
-                novel_id=novel_id,
-                novel_title=novel_title,
-                core_characters="[]",
-                world_setting="",
-            )
-            logger.info(f"Created database with novel_id={novel_id}")
 
     def check_stage_completion_status(self, session: Session, run_id: str) -> dict[str, bool]:
         """检查各阶段完成状态"""

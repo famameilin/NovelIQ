@@ -2,6 +2,9 @@
 分析阶段执行服务
 
 说明: 负责执行分析的各个阶段（预处理、标注、聚合、主题建模、诊断）
+
+各阶段都可选接收 is_cancelled：长阶段据此在处理单元边界响应取消，
+不必等整个阶段跑完（见 src/workflows/cancellation.py）
 """
 
 from __future__ import annotations
@@ -11,9 +14,11 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from src.api.models.events import StreamEvent
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
+from src.sse.events import StreamEvent
+
+CancellationCheck = Callable[[], bool]
 
 
 class StageExecutor:
@@ -25,6 +30,7 @@ class StageExecutor:
         run_id: str,
         session: Session,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+        is_cancelled: CancellationCheck | None = None,
     ) -> None:
         """执行预处理阶段"""
         from src.workflows import run_preprocess
@@ -34,6 +40,7 @@ class StageExecutor:
             run_id=run_id,
             session=session,
             emitter=emitter,
+            is_cancelled=is_cancelled,
         )
 
     async def run_annotate(
@@ -44,7 +51,7 @@ class StageExecutor:
         analysis_logger: AnalysisLogger | None,
         novel_title: str | None = None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
-        is_cancelled: Callable[[], bool] | None = None,
+        is_cancelled: CancellationCheck | None = None,
     ) -> None:
         """执行标注阶段（LangGraph 标注 Agent）"""
         from src.workflows import run_annotate
@@ -64,22 +71,24 @@ class StageExecutor:
         run_id: str,
         session: Session,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+        is_cancelled: CancellationCheck | None = None,
     ) -> None:
         """执行聚合阶段"""
         from src.workflows import run_aggregate
 
-        await run_aggregate(run_id=run_id, session=session, emitter=emitter)
+        await run_aggregate(run_id=run_id, session=session, emitter=emitter, is_cancelled=is_cancelled)
 
     async def run_linguistic(
         self,
         run_id: str,
         session: Session,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+        is_cancelled: CancellationCheck | None = None,
     ) -> None:
         """执行语言结构基础数据阶段（LTP 词法/句法/实体 + 固定短语 + Word2Vec）"""
         from src.workflows import run_linguistic
 
-        await run_linguistic(run_id=run_id, session=session, emitter=emitter)
+        await run_linguistic(run_id=run_id, session=session, emitter=emitter, is_cancelled=is_cancelled)
 
     async def run_topic_model(
         self,
@@ -87,13 +96,20 @@ class StageExecutor:
         session: Session,
         num_topics: int | None = None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+        is_cancelled: CancellationCheck | None = None,
     ) -> None:
         """执行主题建模阶段"""
         from src.workflows import run_topic_model
 
         if num_topics is None:
             num_topics = settings.topic_model.num_topics
-        await run_topic_model(run_id=run_id, session=session, num_topics=num_topics, emitter=emitter)
+        await run_topic_model(
+            run_id=run_id,
+            session=session,
+            num_topics=num_topics,
+            emitter=emitter,
+            is_cancelled=is_cancelled,
+        )
 
     async def run_diagnose(
         self,
@@ -101,6 +117,7 @@ class StageExecutor:
         session: Session,
         analysis_logger: AnalysisLogger | None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+        is_cancelled: CancellationCheck | None = None,
     ) -> None:
         """
         执行诊断阶段（LangGraph 诊断 Agent）
@@ -112,4 +129,5 @@ class StageExecutor:
             session=session,
             analysis_logger=analysis_logger,
             emitter=emitter,
+            is_cancelled=is_cancelled,
         )

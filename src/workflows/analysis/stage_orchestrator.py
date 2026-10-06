@@ -18,14 +18,15 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.models.events import AnalysisEventBus, StreamEvent
-from src.api.services.analysis.task_claim import TaskClaimMixin
 from src.config import settings
+from src.sse.events import StreamEvent
+from src.work.events import AnalysisEventBus
+from src.workflows.analysis.task_claim import TaskClaimMixin
 
 if TYPE_CHECKING:
-    from src.api.services.analysis.error_handler import AnalysisErrorHandler
-    from src.api.services.analysis.stage_executor import StageExecutor
     from src.config.analysis_logger import AnalysisLogger
+    from src.workflows.analysis.error_handler import AnalysisErrorHandler
+    from src.workflows.analysis.stage_executor import StageExecutor
 
 
 class StageOrchestratorMixin(TaskClaimMixin):
@@ -79,6 +80,9 @@ class StageOrchestratorMixin(TaskClaimMixin):
         """
         task_id = bus.task_id
 
+        def is_cancelled() -> bool:
+            return self._is_cancelled(task_id)
+
         if self._is_cancelled(task_id):
             await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
@@ -88,7 +92,11 @@ class StageOrchestratorMixin(TaskClaimMixin):
             await bus.emit_stage_start("preprocess", message="开始预处理", percent=settings.progress.preprocess.start)
 
             await self.stage_executor.run_preprocess(
-                source_path, run_id, session, emitter=self._make_stage_emitter(bus, "preprocess", session)
+                source_path,
+                run_id,
+                session,
+                emitter=self._make_stage_emitter(bus, "preprocess", session),
+                is_cancelled=is_cancelled,
             )
             await bus.emit_stage_complete("preprocess")
 
@@ -128,7 +136,7 @@ class StageOrchestratorMixin(TaskClaimMixin):
                 analysis_logger,
                 novel_title,
                 emitter=self._make_stage_emitter(bus, "annotate", session),
-                is_cancelled=lambda: self._is_cancelled(task_id),
+                is_cancelled=is_cancelled,
             )
             await bus.emit_stage_complete("annotate")
 
@@ -143,7 +151,7 @@ class StageOrchestratorMixin(TaskClaimMixin):
             )
 
             await self.stage_executor.run_linguistic(
-                run_id, session, self._make_stage_emitter(bus, "linguistic", session)
+                run_id, session, self._make_stage_emitter(bus, "linguistic", session), is_cancelled=is_cancelled
             )
             await bus.emit_stage_complete("linguistic")
 
@@ -156,7 +164,7 @@ class StageOrchestratorMixin(TaskClaimMixin):
             await bus.emit_stage_start("aggregate", message="开始数据聚合", percent=settings.progress.aggregate.start)
 
             await self.stage_executor.run_aggregate(
-                run_id, session, self._make_stage_emitter(bus, "aggregate", session)
+                run_id, session, self._make_stage_emitter(bus, "aggregate", session), is_cancelled=is_cancelled
             )
             await bus.emit_stage_complete("aggregate")
 
@@ -171,7 +179,8 @@ class StageOrchestratorMixin(TaskClaimMixin):
             )
 
             await self.stage_executor.run_topic_model(
-                run_id, session, num_topics, self._make_stage_emitter(bus, "topic-model", session)
+                run_id, session, num_topics, self._make_stage_emitter(bus, "topic-model", session),
+                is_cancelled=is_cancelled,
             )
             await bus.emit_stage_complete("topic-model")
 
@@ -183,6 +192,7 @@ class StageOrchestratorMixin(TaskClaimMixin):
         if not skip_stages["skip_diagnose"]:
             await bus.emit_stage_start("diagnose", message="开始诊断报告", percent=settings.progress.diagnose.start)
             await self.stage_executor.run_diagnose(
-                run_id, session, analysis_logger, self._make_stage_emitter(bus, "diagnose", session)
+                run_id, session, analysis_logger, self._make_stage_emitter(bus, "diagnose", session),
+                is_cancelled=is_cancelled,
             )
             await bus.emit_stage_complete("diagnose")
