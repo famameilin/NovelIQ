@@ -15,10 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
 from typing import Any
-
-from langchain_core.messages import BaseMessage
 
 from .errors import AnnotationInvariantError
 from .program import (
@@ -39,7 +36,6 @@ from .subagent_constructors import (
     _tool_receipt,
     _written_receipt,
     build_subagent_constructors,
-    build_subagent_finish_tool,
 )
 from .subagent_ir import SubagentAnnotation
 from .tool_batch import _execute_call
@@ -83,12 +79,20 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
             subagent,
             paragraph_text_by_id=paragraph_text_by_id,
             candidate_total=candidate_total,
+            shared_entity_ids=lambda: ledger.shared_entity_ids,
         )
-        self.finish_tool = build_subagent_finish_tool(subagent, candidate_total=candidate_total)
+        if ledger.finish_work is None:
+            raise AnnotationInvariantError("work 收尾校验未装配，不能启动程序面")
+        self.finish_tool = tool_map[FINISH_TOOL_NAME]
         program_tools = build_program_tools(list(tool_map.values()))
         by_name = {str(tool.name): tool for tool in program_tools}
         # 可见面按 SUBAGENT_TOOL_NAMES 的顺序取（那是模型目录的排列依据），不跟随工具表顺序
         visible_tools = [by_name[name] for name in SUBAGENT_TOOL_NAMES if name in by_name]
+        visible_tools.extend(
+            by_name[name]
+            for name in ("promise_case", "search_cases", "search_events", "search_graph")
+            if name in by_name
+        )
         namespace: dict[str, Any] = {str(tool.name): tool for tool in [*visible_tools, self.finish_tool]}
         namespace.update({name: function for name, function, _ in entries})
         super().__init__(
@@ -124,7 +128,12 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         return self.subagent.counts()
 
     def _receipt(
-        self, *, status: str, applied: int, failed: list[dict[str, Any]], error: dict[str, Any] | None,
+        self,
+        *,
+        status: str,
+        applied: int,
+        failed: list[dict[str, Any]],
+        error: dict[str, Any] | None,
         note: str | None = None,
     ) -> dict[str, Any]:
         """只回报本次程序的显式收尾，避免上一轮 finish 触发提前结束"""
@@ -132,8 +141,7 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
 
         body = super()._receipt(status=status, applied=applied, failed=failed, error=error, note=note)
         if any(
-            op["program_id"] == self._program_id and op["tool_name"] == FINISH_TOOL_NAME
-            and op["status"] == "success"
+            op["program_id"] == self._program_id and op["tool_name"] == FINISH_TOOL_NAME and op["status"] == "success"
             for op in self.ops
         ):
             body["finish"] = subagent_gap(self.subagent, candidate_total=len(self.ledger.dialogue_candidates))
@@ -150,6 +158,20 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         """
         op_index = self._next_op_index(line=line)
         started_ns = time.perf_counter_ns()
+        if self.ledger.chapter_finished:
+            from .errors import AnnotationProtocolError
+
+            error = AnnotationProtocolError(f"work_id={self.ledger.work_id} 已 finish，拒绝迟到调用={name}")
+            return self._finish_call(
+                name,
+                op_index=op_index,
+                line=line,
+                status="error",
+                receipt=_call_rejection(name, error, signature_hint=self._signature_hint(name)),
+                call_args=dict(args),
+                error=str(error),
+                started_ns=started_ns,
+            )
         # 模型写的那一次调用：op 记录与审计行都记它，执行用构造器编译出的生产入参
         call_args = dict(args)
         plan: _ConstructorCall | None = None
@@ -197,8 +219,7 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
                     observer=None,
                     stream=self.stream,
                     call_index=self._next_call_index(),
-                    # 2026-09-18 subagent 与写者面的收尾工具同名：本面的 finish 不是章级收尾
-                    chapter_finish_name=None,
+                    record_keys=self.ledger.written_record_keys,
                 )
         except AnnotationInvariantError:
             self._close_turn()
@@ -206,8 +227,7 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         ok = str(entry.get("status") or "error") == "success"
         if ok and plan is not None:
             plan.commit()
-            # 模型看到的记录键就是这次回执里的 record：登记进章级账本，push_case(record_id=...)
-            # 与 promise_case(result_id=...) 按它校验"指向的是本章真实写出来的记录"
+            # 构造器记录键与底层写入记录共同授权本次原文锚点
             self.ledger.written_record_keys.add(plan.record)
         receipt: Any
         if not ok:
@@ -216,6 +236,10 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
             receipt = _tool_receipt(name, entry.get("receipt"))
         else:
             _sync_entity_ref(plan.ref, entry.get("receipt"))
+            if plan.tool == "push_case" and isinstance(entry.get("receipt"), dict):
+                plan.ref.update(
+                    {key: entry["receipt"][key] for key in ("case_id", "description") if key in entry["receipt"]}
+                )
             receipt = _written_receipt(plan.record, plan.ref)
         return self._finish_call(
             name,
@@ -321,16 +345,6 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         )
 
 
-@dataclass(slots=True)
-class SubagentRunOutcome:
-    """一个 subagent 会话的产出（本 subagent 的产出记录 + 末条消息，供日志与离线对照）
-
-    2026-09-18 写入生效后这里不再搬运授权足迹与案例记录：它们落在三个 subagent 共享的
-    章级账本上，调用方拿到的账本本身就是终态（没有落库相位的状态搬运）。
-    """
-
-    subagent: SubagentAnnotation
-    final_messages: list[BaseMessage]
 
 
 # 工具面常量保留在 subagent_program（本模块仅在构造时读它们）：置于文件末尾引用，

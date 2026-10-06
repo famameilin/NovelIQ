@@ -85,10 +85,9 @@ def build_subagent_graph(
     retries: int | None = None,
     event_submission_tool: Any | None = None,
 ) -> Any:
-    """构建子代理会话，完整的显式收尾直接结束，省去模型复述完成的回合
+    """构建独立 work 会话，成功 finish 后直接结束
 
-    finish 只声明当前职责完成，不冻结整章。无工具回复或轮次上限仅结束会话，
-    交付是否完整仍由 runner 的职责缺口闸门判断
+    无工具回复或轮次上限仅停止会话，Agent 必须确认成功 finish 才能交付队列保存。
     """
     bind_tools = [program_tool, *([event_submission_tool] if event_submission_tool is not None else []), finish_tool]
     program_tool_name = str(program_tool.name)
@@ -103,14 +102,6 @@ def build_subagent_graph(
             stream=stream,
             observer=observer,
             retries=retries,
-            completion_hint=None,
-            require_tool_call=False,
-            # 2026-09-25 消融（ch20/lanes 三臂，tmp_ablation/）：lane 账本令 reasoning +36%、
-            # prompt 3.5x、三 lane 全撞满回合上限，交付相当——账本只在写者面注入
-            inject_progress=False,
-            bind_tools=bind_tools,
-            subagent_face=True,
-            stop_at_iteration_limit=True,
         ),
     )
     execute_batch = _build_tool_batch_node(
@@ -119,17 +110,18 @@ def build_subagent_graph(
         observer=observer,
         stream=stream,
         program_tool_name=program_tool_name,
-        chapter_finish_name=None,
+
     )
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
-        # 旧批次或同批失败后的 finish 不能让自然结束绕过职责缺口闸门
-        subagent.finished = False
         result = await execute_batch(state)
-        merged_state: AnnotationGraphState = {**state, "messages": [*state["messages"], *result["messages"]]}
-        if _route_after_subagent_batch(merged_state) != "end":
-            subagent.finished = False
         return result
+
+    def route_batch(state: AnnotationGraphState) -> str:
+        # 新 work 的成功 finish 已关闭写面，后续同批迟到写入不撤销关闭事实
+        if ledger.chapter_finished:
+            return "end"
+        return _route_after_subagent_batch(state)
 
     graph.add_node("tool_batch", tool_batch)
     graph.add_edge(START, "agent")
@@ -141,5 +133,5 @@ def build_subagent_graph(
             "end": END,
         },
     )
-    graph.add_conditional_edges("tool_batch", _route_after_subagent_batch, {"agent": "agent", "end": END})
+    graph.add_conditional_edges("tool_batch", route_batch, {"agent": "agent", "end": END})
     return graph.compile()

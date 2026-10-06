@@ -2,13 +2,6 @@
 程序面运行时：受限 AST 解释器基座与写者面程序运行时
 """
 
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：program.py 大文件拆分——两个 runtime（RestrictedProgramRuntime/ProgramRuntime）
-# 迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；限额常量与 _ProgramFault 保留在 program.py、
-# 目录渲染与合同文案在 catalog.py、检索投影在 search_projection.py，均由本模块引用；
-# program.py 对两个 runtime 保留 re-export，既有导入方零改动。
-
 from __future__ import annotations
 
 import ast
@@ -21,12 +14,11 @@ from pydantic import TypeAdapter, ValidationError
 
 # 限额常量经 program 模块属性读取（而非值拷贝）：tests 以 KEEP_*") 调整安全护栏，属性访问保持这一注入缝隙逐字生效。
 from . import program as _program
-from .catalog import PROGRAM_CONTRACT_TEXT, call_parameters
+from .catalog import call_parameters
 from .program import _ProgramFault, render_list_signature
 from .receipt_projection import compact_read_result, read_references
-from .search_projection import _failed_view, build_program_tools
-from .tool_batch import _execute_call
-from .tools import FINISH_TOOL_NAME, AnnotationToolLedger, tool_record_key
+from .search_projection import _failed_view
+from .tools import AnnotationToolLedger, tool_record_key
 
 # 2026-10-04 重复失败批守卫（两级）：失败条数达到 _REPEAT_FAILED_BATCH_MIN_OPS 且
 # 连续两次程序的失败清单逐条相同时注入聚合提示，第三次相同判本程序失败。
@@ -648,121 +640,3 @@ class RestrictedProgramRuntime:
                 f"单次程序执行超过 {int(_program._PROGRAM_DEADLINE_S)} 秒硬限",
                 code="deadline_exceeded",
             )
-
-
-class ProgramRuntime(RestrictedProgramRuntime):
-    """2026-09-15 写者面程序运行时：受限解释器里逐条复用生产单条事务边界
-
-    2026-09-19 随 agent 路径恢复：单块章的模型可见面=[execute_code, finish]，程序内直接
-    调用正式工具（检索+写入+finish）；每条内层调用都走 graph._execute_call，与
-    正式与连续性工具面共用同一份"快照 → 调用 → 按条回滚 → 审计"实现。
-    生命周期：每个章尝试建一次、跨回合复用（变量环境与逐 op 记录随之保留）。
-    """
-
-    contract_text = PROGRAM_CONTRACT_TEXT
-
-    def __init__(
-        self,
-        tools: list[Any],
-        ledger: Any,
-        *,
-        observer: Any = None,
-        stream: Any = None,
-    ) -> None:
-        """用于绑定程序面工具、账本与审计/事件出口"""
-        tool_list = build_program_tools(tools)
-        super().__init__(
-            tool_list,
-            {str(tool.name): tool for tool in tool_list},
-            observer=observer,
-            stream=stream,
-        )
-        self.ledger = ledger
-        self._finish_requested = False
-        self._finish_line: int | None = None
-
-    def _reset_program_state(self) -> None:
-        """用于在一个程序开始时清掉上一次的收尾意图"""
-        self._finish_requested = False
-        self._finish_line = None
-
-    def _progress(self) -> dict[str, int]:
-        """用于回执 progress（与 finish 回执同源的域计数）"""
-        return self.ledger._written_counts()
-
-    async def _after_program(self) -> None:
-        """用于在程序末尾结算 finish 收尾意图（与批次收尾同一条判定路径）"""
-        if self._finish_requested:
-            await self._settle_finish()
-
-    async def _dispatch(self, name: str, args: dict[str, Any], *, line: int | None) -> Any:
-        """用于把一次程序内调用交给生产单条事务边界（收尾声明只登记不结算）"""
-        if name == FINISH_TOOL_NAME:
-            if args:
-                raise _ProgramFault(f"{FINISH_TOOL_NAME} 无参数", code="bad_call", line=line)
-            self._finish_requested = True
-            self._finish_line = line
-            return {"status": "pending", "note": "收尾已登记：本程序全部语句执行完后结算"}
-        return await self._run_op(name=name, args=args, line=line)
-
-    async def _run_op(self, *, name: str, args: dict[str, Any], line: int | None) -> dict[str, Any]:
-        """用于把一次工具调用交给生产单条事务边界执行并登记逐 op 记录"""
-        op_index = self._next_op_index(line=line)
-        entry = await _execute_call(
-            {"name": name, "args": args, "id": f"{self._program_id}-op{op_index}"},
-            tool_map=self.tools,
-            ledger=self.ledger,
-            observer=self.observer,
-            stream=self.stream,
-            call_index=self._next_call_index(),
-            # 2026-09-20 写者面也要登记本章已写出的记录键：案例工具（push_case.record_id /
-            # promise_case.result_id）按 ledger.written_record_keys 校验，这条路此前没登记
-            # （原生批次与 正式与连续性工具面都登记了），于是写者面每次引用自己刚写的记录都被
-            # unknown_record 拒（run 54a72932：t2/t3 树根引用两次全废）。
-            record_keys=self.ledger.written_record_keys,
-            program_meta={
-                "program_id": self._program_id,
-                "op_index": op_index,
-                "source_line": line,
-                "record": tool_record_key(name, args),
-                "direct_fallback": False,
-            },
-        )
-        raw_call = entry.get("call")
-        call_args: dict[str, Any] = dict(raw_call.get("args") or {}) if isinstance(raw_call, dict) else {}
-        self._log_op(
-            name,
-            op_index=op_index,
-            line=line,
-            status=str(entry.get("status") or "error"),
-            receipt=entry.get("receipt"),
-            call_args=call_args,
-        )
-        return entry.get("receipt") or {}
-
-    async def _settle_finish(self) -> None:
-        """用于在程序末尾结算 finish 收尾意图（就地结算，不再只登记）"""
-        op_index = self._ops_in_program + 1
-        entry = await _execute_call(
-            {"name": FINISH_TOOL_NAME, "args": {}, "id": f"{self._program_id}-finish"},
-            tool_map=self.tools,
-            ledger=self.ledger,
-            observer=self.observer,
-            stream=self.stream,
-            call_index=self._next_call_index(),
-            settle_finish=True,
-            program_meta={
-                "program_id": self._program_id,
-                "op_index": op_index,
-                "source_line": self._finish_line,
-                "record": FINISH_TOOL_NAME,
-                "direct_fallback": False,
-            },
-        )
-        self._log_op(
-            FINISH_TOOL_NAME,
-            op_index=op_index,
-            line=self._finish_line,
-            status=str(entry.get("status") or "error"),
-            receipt=entry.get("receipt"),
-        )

@@ -300,25 +300,11 @@ class SubagentMetric:
 
 @dataclass(slots=True)
 class SubagentPending:
-    """一条判不了的疑点（keys 写本 subagent 已登记的实体 id，构造器当场解析成登记名入池）
-
-    2026-10-02 对齐 0.2.0 案例面：search_pool 检索已随案例裁决机器退役，
-    case_id 授权随之移除，疑点只登记不指向既有案例。
-    """
-
-    kind: str
-    detail: str
-    keys: list[str] = field(default_factory=list)
-    evidence: tuple[SubagentEvidence, ...] = ()
+    """局部待决记录只有普通文字说明"""
+    description: str
 
     def to_dict(self) -> dict[str, Any]:
-        """用于渲染记录明细"""
-        return {
-            "kind": self.kind,
-            "detail": self.detail,
-            "keys": list(self.keys),
-            "evidence": _evidence_view(self.evidence),
-        }
+        return {"description": self.description}
 
 
 @dataclass(slots=True)

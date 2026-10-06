@@ -46,11 +46,16 @@ _PRE_RUN_FAULT_CODES = frozenset({"empty_program", "program_too_large", "syntax_
 # 2026-09-17 程序面回执回显只读检索结果：程序里的检索调用此前只把 payload 交给程序
 # 变量，模型看不到值（实验实测同一句 search_pool 连发 7 次、块会话整轮 burn 在"回查"
 # 上）。reads 只装检索类工具，写入类仍只回句柄（成功明文不回显）。
-_READ_TOOL_NAMES = frozenset({
-    "search_text",
-    "read_text", "read_chapter_text", "read_graph", "read_event", "read_candidates", "read_evidence",
-    "find_cases", "claim_case",
-})
+_READ_TOOL_NAMES = frozenset(
+    {
+        "search_graph",
+        "search_events",
+        "search_cases",
+        "search_text",
+        "read_text",
+        "read_chapter_text",
+    }
+)
 _READ_ECHO_MAX_CHARS = 1600
 _READ_ECHO_MAX_ITEMS = 8
 
@@ -96,11 +101,15 @@ def build_program_tool(
     2026-09-18 call_entries：本面的构造器条目（constructor_call_entries 的产物）——构造器与
     工具在目录里同形，所以这里一次渲染成一份目录，没有"构造器块 + 工具块"的分别。
     """
-    description = runtime.contract_text + extra_api + call_api_text(
-        [
-            *(call_entries or []),
-            *tool_call_entries(runtime.tool_list, descriptions=tool_descriptions),
-        ]
+    description = (
+        runtime.contract_text
+        + extra_api
+        + call_api_text(
+            [
+                *(call_entries or []),
+                *tool_call_entries(runtime.tool_list, descriptions=tool_descriptions),
+            ]
+        )
     )
     return StructuredTool.from_function(
         coroutine=runtime.execute,
@@ -109,9 +118,6 @@ def build_program_tool(
     )
 
 
-from .catalog import (  # noqa: E402
-    PROGRAM_CONTRACT_TEXT as PROGRAM_CONTRACT_TEXT,
-)
 from .catalog import (
     SUBAGENT_CONTRACT_TEXT as SUBAGENT_CONTRACT_TEXT,
 )
@@ -130,9 +136,6 @@ from .catalog import (
 from .catalog import (
     tool_call_entries as tool_call_entries,
 )
-from .program_runtime import (  # noqa: E402
-    ProgramRuntime as ProgramRuntime,
-)
 from .program_runtime import (
     RestrictedProgramRuntime as RestrictedProgramRuntime,
 )
@@ -144,9 +147,7 @@ from .search_projection import (
 )
 
 __all__ = [
-    "PROGRAM_CONTRACT_TEXT",
     "PROGRAM_TOOL_NAME",
-    "ProgramRuntime",
     "RestrictedProgramRuntime",
     "build_program_tool",
     "build_program_tools",
