@@ -1,18 +1,8 @@
 """Tab 级聚合端点（前端每 tab 一个 API）
 
 统一守门：resolve_run_id + require_run_for_novel + require_readable_run_status；
-切片原则见 src/api/models/tabs.py 模块说明。
-
-既有单源端点直接作为所属 tab 的 API，不在此包一层：
-- 情绪趋势 tab → /emotion-trend
-- 时间轴/节点详情 tab → /timeline
-- 主题演进/迁移/情绪 tab → /topics/series|shifts|emotion
-- 词法句法/词向量 tab → /linguistic/features|word2vec
-- 角色排行/角色表 tab → /characters
-- 图谱变化 tab → /graph/changes
-- 诊断摘要/价值与主题 tab → /diagnosis；伏笔树 tab → /foreshadowing-trees
+切片原则见 src/api/models/tabs.py 模块说明。既有单源端点直接作为所属 tab 的 API。
 """
-
 from __future__ import annotations
 
 from typing import Annotated

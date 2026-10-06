@@ -3,10 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
-from src.api.dependencies import get_novel_service, get_task_manager
 from src.api.exceptions import NovelNotFoundError
-from src.api.models.requests import ReanalyzeRequest
-from src.api.models.responses import (
+from src.api.models.tasks import (
     BatchDeleteTasksRequest,
     BatchDeleteTasksResponse,
     CreateTaskResponse,
@@ -17,10 +15,11 @@ from src.api.models.responses import (
     TaskListResponse,
     TaskStatus,
 )
-from src.api.services.analysis_service import AnalysisService
-from src.api.services.novel_service import NovelService
-from src.api.services.task_application_service import TaskApplicationService
-from src.api.services.task_manager import TaskManager
+from src.workflows.application import TaskApplicationService
+from src.workflows.dependencies import get_analysis_service, get_task_application_service, get_task_service
+from src.workflows.schemas import ReanalyzeRequest
+from src.workflows.service import AnalysisService
+from src.workflows.tasks import TaskService
 
 _STATUS_MAP: dict[str, TaskStatus] = {
     "completed": TaskStatus.COMPLETED,
@@ -48,50 +47,44 @@ router = APIRouter(prefix="/novels", tags=["analysis"])
 @router.post("/{novel_id}/tasks", response_model=CreateTaskResponse)
 async def create_and_start_task(
     novel_id: str,
-    novel_service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),
+    analysis_service: AnalysisService = Depends(get_analysis_service),
 ) -> CreateTaskResponse:
     """
     创建并启动一个新的分析任务
     """
-    analysis_service = AnalysisService(novel_service, task_manager)
     task_id = await analysis_service.create_task_and_start(novel_id)
-    return CreateTaskResponse(novel_id=novel_id, task_id=task_id)
+    return CreateTaskResponse(novel_id=novel_id, task_id=task_id, message="分析任务已创建并启动")
 
 
 @router.post("/{novel_id}/tasks/{task_id}/resume", response_model=ResumeTaskResponse)
 async def resume_task(
     novel_id: str,
     task_id: str,
-    novel_service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),
+    task_application_service: TaskApplicationService = Depends(get_task_application_service),
 ) -> ResumeTaskResponse:
     """
     继续执行指定的 pending/failed 任务
     """
-    task_application_service = TaskApplicationService(novel_service, task_manager)
     resumed_task_id = await task_application_service.resume_task(novel_id, task_id)
-    return ResumeTaskResponse(novel_id=novel_id, task_id=resumed_task_id)
+    return ResumeTaskResponse(novel_id=novel_id, task_id=resumed_task_id, message="分析任务已继续执行")
 
 
 @router.post("/{novel_id}/reanalyze", response_model=ReanalyzeResponse)
 async def start_reanalysis(
     novel_id: str,
     request: ReanalyzeRequest | None = None,
-    novel_service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),
+    analysis_service: AnalysisService = Depends(get_analysis_service),
 ) -> ReanalyzeResponse:
-    analysis_service = AnalysisService(novel_service, task_manager)
     task_id = await analysis_service.start_reanalysis(novel_id, request)
-    return ReanalyzeResponse(novel_id=novel_id, task_id=task_id)
+    return ReanalyzeResponse(novel_id=novel_id, task_id=task_id, message="重新分析任务已启动")
 
 
 @router.get("/{novel_id}/tasks", response_model=TaskListResponse)
-async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_novel_service)) -> TaskListResponse:
+async def list_tasks(novel_id: str, task_service: TaskService = Depends(get_task_service)) -> TaskListResponse:
     """
     获取小说的所有任务列表
     """
-    tasks = novel_service.get_tasks_by_novel(novel_id)
+    tasks = task_service.get_tasks_by_novel(novel_id)
     return TaskListResponse(
         novel_id=novel_id,
         tasks=[
@@ -110,8 +103,7 @@ async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_no
 async def delete_task(
     novel_id: str,
     task_id: str,
-    novel_service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),
+    task_application_service: TaskApplicationService = Depends(get_task_application_service),
 ):
     """
     删除单个分析任务
@@ -122,7 +114,6 @@ async def delete_task(
         3. 删除 DB 记录
         4. 删除内存缓存
     """
-    task_application_service = TaskApplicationService(novel_service, task_manager)
     return await task_application_service.delete_task(novel_id, task_id)
 
 
@@ -130,17 +121,16 @@ async def delete_task(
 async def get_task_status(
     novel_id: str,
     task_id: str,
-    novel_service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),
+    task_service: TaskService = Depends(get_task_service),
 ) -> StatusResponse:
     """
     查询单个任务状态
 
-    2026-08-20 阶段 3.1：消除双查询，使用 novel_service.get_task 一次获取完整状态
-    数据库是唯一真相源，TaskManager 运行时持续写回状态到 DB
+    2026-08-20 阶段 3.1：消除双查询，使用 task_service.get_task 一次获取完整状态
+    数据库是唯一真相源，队列运行期持续写回状态到 DB
     """
     try:
-        task = novel_service.get_task(task_id)
+        task = task_service.get_task(task_id)
     except NovelNotFoundError:
         raise HTTPException(status_code=404, detail="任务不存在") from None
 
@@ -169,15 +159,13 @@ async def get_task_status(
 async def cancel_task(
     novel_id: str,
     task_id: str,
-    task_manager: TaskManager = Depends(get_task_manager),
-    novel_service: NovelService = Depends(get_novel_service),
+    task_application_service: TaskApplicationService = Depends(get_task_application_service),
 ):
     """
     取消正在运行的分析任务
 
-    说明: 设置取消信号，任务将在当前阶段完成后停止
+    说明: 立即停止——停止新派发并中断在飞执行；未完成的 work 不保存
     """
-    task_application_service = TaskApplicationService(novel_service, task_manager)
     return await task_application_service.cancel_task(novel_id, task_id)
 
 
@@ -185,8 +173,7 @@ async def cancel_task(
 async def batch_delete_tasks(
     novel_id: str,
     request: BatchDeleteTasksRequest,
-    novel_service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),
+    task_application_service: TaskApplicationService = Depends(get_task_application_service),
 ) -> BatchDeleteTasksResponse:
     """
     批量删除指定的分析任务
@@ -198,7 +185,6 @@ async def batch_delete_tasks(
 
     for task_id in request.task_ids:
         try:
-            task_application_service = TaskApplicationService(novel_service, task_manager)
             await task_application_service.delete_task(novel_id, task_id)
             deleted_ids.append(task_id)
             logger.info(f"Batch delete: task {task_id} deleted successfully")

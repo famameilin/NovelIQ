@@ -3,15 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from loguru import logger
 
-from src.api.dependencies import get_novel_service, get_task_manager
+from src.api.dependencies import get_novel_service
 from src.api.exceptions import NovelNotFoundError
-from src.api.models.responses import (
+from src.api.models.tasks import (
     BatchDeleteNovelsRequest,
     BatchDeleteNovelsResponse,
     UploadResponse,
 )
 from src.api.services.novel_service import NovelService
-from src.api.services.task_manager import TaskManager
 
 router = APIRouter(prefix="/novels", tags=["novels"])
 
@@ -74,10 +73,9 @@ async def get_novel(
 async def delete_novel(
     novel_id: str,
     service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),
 ):
     try:
-        service.delete_novel(novel_id, task_manager=task_manager)
+        service.delete_novel(novel_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"message": "删除成功", "novel_id": novel_id}
@@ -87,7 +85,6 @@ async def delete_novel(
 async def batch_delete_novels(
     request: BatchDeleteNovelsRequest,
     service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),
 ) -> BatchDeleteNovelsResponse:
     """
     批量删除小说
@@ -100,7 +97,7 @@ async def batch_delete_novels(
 
     for novel_id in request.novel_ids:
         try:
-            service.delete_novel(novel_id, task_manager=task_manager)
+            service.delete_novel(novel_id)
             deleted_ids.append(novel_id)
             logger.info(f"Batch delete: novel {novel_id} deleted successfully")
         except NovelNotFoundError as e:
