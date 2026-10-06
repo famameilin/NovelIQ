@@ -12,15 +12,10 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.metrics.emotion_metrics import (
-    lexical_sentiment_density,
-    pos_neg_ratio,
-)
 from src.metrics.lexicon_metrics import (
     count_mixed_hits,
     term_mixed_counts,
 )
-from src.metrics.rhythm_metrics import tension_composite, tension_proxy
 from src.metrics.style_metrics import (
     average_word_length,
     function_word_distribution,
@@ -80,46 +75,6 @@ class TestTextUtils(unittest.TestCase):
         text = "你好世界"
         tokens = tokenize_words(text)
         self.assertGreaterEqual(len(tokens), 2)
-
-
-class TestEmotionMetrics(unittest.TestCase):
-    def test_lexical_sentiment_density(self) -> None:
-        text = "good bad good"
-        result = lexical_sentiment_density(text, {"good": 1}, {"bad": 1})
-        self.assertGreater(result["pos_density"], 0)
-        self.assertGreater(result["neg_density"], 0)
-        self.assertGreater(pos_neg_ratio(text, {"good": 1}, {"bad": 1}), 0)
-
-
-class TestRhythmMetrics(unittest.TestCase):
-    def test_tension_proxy(self) -> None:
-        text = "「杀」！斩击。你好吗？"
-        result = tension_proxy(text, {"斩击": 1, "杀": 1})
-        self.assertGreater(result["avg_sent_len"], 0)
-        self.assertGreater(result["fight_density"], 0)
-        self.assertGreater(result["dialogue_ratio"], 0)
-        self.assertGreater(result["question_density"], 0)
-        self.assertGreaterEqual(result["exclaim_density"], 0)
-        composite = tension_composite(
-            result["fight_density"],
-            result["exclaim_density"],
-            result["question_density"],
-            result["dialogue_ratio"],
-            result["avg_sent_len"],
-        )
-        self.assertGreaterEqual(composite, 0)
-
-    def test_tension_proxy_no_overlap_count(self) -> None:
-        """
-        修改时间: 2026-03-26
-        任务: 修复 fight_density 重叠计数问题
-        修改内容: 新增测试用例，验证重叠词不被重复计数
-        """
-        text = "仙道杀招"
-        result = tension_proxy(text, {"杀招": 1, "道杀招": 1, "仙道杀招": 1})
-        tokens = tokenize_words(text)
-        self.assertEqual(len(tokens), 2)
-        self.assertAlmostEqual(result["fight_density"], 1.0 / len(tokens), places=6)
 
 
 class TestStyleMetrics(unittest.TestCase):

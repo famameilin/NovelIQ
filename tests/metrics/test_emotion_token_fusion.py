@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from src.metrics.lexicon_metrics import get_emotion_spans
 from src.metrics.negation import is_flipped, load_negation_spec
-from src.preprocess.tokenize import tokenize
+from src.utils.tokenize import tokenize
 
 
 def _spans(text: str, terms: set[str]) -> list[str]:

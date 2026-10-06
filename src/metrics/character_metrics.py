@@ -7,7 +7,7 @@ import networkx as nx
 
 from src.config import settings
 from src.config.constants import PROPP_FUNCTIONS
-from src.relation_network_metrics import summarize_relation_network
+from src.metrics.relation_network_metrics import summarize_relation_network
 
 GREIMAS_FUNCTIONS = {
     "主体",

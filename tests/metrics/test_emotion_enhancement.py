@@ -8,9 +8,10 @@
 2026-08-16 M4/M5：权重弃用（命中计数）、否定逻辑移入 src.metrics.negation 共享层
 （分类加载/翻转语义/审计回归专项见 tests/metrics/test_negation.py）；
 find_negation_context/count_negations_before/load_negation_words 已删除。
+2026-10-06：emotion_metrics 包装层（lexical_sentiment_density）删除后，
+翻转语义只在 test_negation.py 的共享层入口验证。
 
 测试覆盖:
-- 否定词翻转语义：单重、双重、无否定、负面词翻转、禁用
 - 加权计数函数（count_weighted_hits/term_weighted_counts/load_weighted_lexicon 保留）
 - jieba用户词典：分词效果验证
 """
@@ -24,102 +25,12 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.metrics.emotion_metrics import lexical_sentiment_density
 from src.metrics.lexicon_metrics import (
     count_weighted_hits,
     load_weighted_lexicon,
     term_weighted_counts,
 )
-from src.preprocess.tokenize import get_tokenizer
-
-
-class TestNegationFlip:
-    """
-    否定词翻转逻辑测试（M5 起走共享层默认 spec）
-
-    创建时间: 2026-04-06
-    任务: 情绪曲线算法增强单元测试
-    """
-
-    def test_single_negation_flip_polarity(self) -> None:
-        """
-        单重否定翻转极性
-
-        场景: "不快乐" 中 "快乐" 是正面词，但被否定词翻转
-        期望: 正面词计入负面密度
-        """
-        result = lexical_sentiment_density(
-            "不快乐",
-            {"快乐": 1},
-            {},
-            enable_negation=True,
-        )
-        assert result["neg_density"] > 0
-        assert result["pos_density"] == 0
-
-    def test_double_negation_restore_polarity(self) -> None:
-        """
-        双重否定还原极性
-
-        场景: "不是不快乐" 中 "快乐" 是正面词，双重否定后仍为正面
-        期望: 正面词计入正面密度
-        """
-        result = lexical_sentiment_density(
-            "不是不快乐",
-            {"快乐": 1},
-            {},
-            enable_negation=True,
-        )
-        assert result["pos_density"] > 0
-        assert result["neg_density"] == 0
-
-    def test_no_negation_keep_polarity(self) -> None:
-        """
-        无否定词保持原极性
-
-        场景: "快乐" 无否定词
-        期望: 正面词计入正面密度
-        """
-        result = lexical_sentiment_density(
-            "快乐",
-            {"快乐": 1},
-            {},
-            enable_negation=True,
-        )
-        assert result["pos_density"] > 0
-        assert result["neg_density"] == 0
-
-    def test_negation_flip_negative_to_positive(self) -> None:
-        """
-        否定词翻转负面词为正面
-
-        场景: "不悲伤" 中 "悲伤" 是负面词，被否定词翻转为正面
-        期望: 负面词计入正面密度
-        """
-        result = lexical_sentiment_density(
-            "不悲伤",
-            {},
-            {"悲伤": 1},
-            enable_negation=True,
-        )
-        assert result["pos_density"] > 0
-        assert result["neg_density"] == 0
-
-    def test_disable_negation(self) -> None:
-        """
-        禁用否定词翻转
-
-        场景: "不快乐" 但禁用否定词翻转
-        期望: 正面词仍计入正面密度
-        """
-        result = lexical_sentiment_density(
-            "不快乐",
-            {"快乐": 1},
-            {},
-            enable_negation=False,
-        )
-        assert result["pos_density"] > 0
-        assert result["neg_density"] == 0
+from src.utils.tokenize import get_tokenizer
 
 
 class TestWeightedDensity:
