@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Self
 from langchain_core.tools import StructuredTool
 from pydantic import Field, StrictInt, ValidationError, WithJsonSchema, field_validator, model_validator
 
-from .schema import (
+from src.agents.annotation.schema import (
     Confidence,
     EntityType,
     EventChildType,
@@ -20,7 +20,7 @@ from .schema import (
     StrictModel,
     normalize_semantic_text,
 )
-from .vocabulary import (
+from src.agents.annotation.vocabulary import (
     _EVENT_ONLY_ROLE_WORDS,
     _TONE_CHINESE_WORDS,
     clamp_emotion_score,
@@ -29,7 +29,7 @@ from .vocabulary import (
 )
 
 if TYPE_CHECKING:
-    from .program_runtime import RestrictedProgramRuntime
+    from src.agents.annotation.program_runtime import RestrictedProgramRuntime
 
 SUBMIT_EVENTS_TOOL_NAME = "submit_events"
 
@@ -335,7 +335,7 @@ class EventSubmissionEngine:
 
     async def execute(self, items: list[Any]) -> None:
         """先建立树根，再按提交顺序写子事件；每项保留自己的失败路径"""
-        from . import program as limits
+        from src.agents.annotation import program as limits
 
         encoded = json.dumps([
             item.model_dump(mode="json") if isinstance(item, EventSubmission) else item for item in items
