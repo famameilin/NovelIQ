@@ -3,9 +3,6 @@
 
 说明: 从 results.py 提取的结果导出逻辑，负责数据获取和组装
 
-修改时间: 2026-10-02
-修改者: Trae
-修改内容: 大文件拆分——bundle 装载函数迁至 src/api/services/results_export_bundles.py，
 本模块保留 build_export_payload/fetch_all_results_data，并 re-export 全部装载函数与
 结果获取依赖（tests 会对本模块命名空间中的 _fetch_* 与 get_metrics_service 打补丁，
 装载函数亦按调用期经本模块命名空间解析同名依赖，语义保持不变）。
@@ -13,10 +10,14 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
-from src.api.dependencies import get_metrics_service
+from loguru import logger
+
+from src.api.models.responses import ResultsWriteResponse
+from src.api.services.metrics_service import get_metrics_service
 from src.api.services.results_contracts import validate_aggregate_metrics_contract
 from src.api.services.results_export_bundles import (
     _fetch_timeline_data,
@@ -39,7 +40,8 @@ from src.api.services.results_queries import (
     _fetch_token_usage_stats,
 )
 from src.api.services.results_queries.diagnosis import _has_diagnosis_result
-from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.config import settings
+from src.fact_graph.authority import KnowledgeGraphAuthorityService
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
@@ -286,9 +288,38 @@ def fetch_all_results_data(
         timeline_data=timeline_data,
         event_forest=event_forest_data,
     )
-    from src.storage.repositories.pipeline_visibility import cutoff_view, require_released_cutoff
+    from src.storage.repositories.book_state import book_state_view
 
-    cutoff = require_released_cutoff(stats_repo.session, run_id)
-    results_data["pipeline"] = cutoff_view(stats_repo.session, cutoff)
+    results_data["pipeline"] = book_state_view(stats_repo.session, run_id)
 
     return results_data, missing_fields, novel_name
+
+
+def build_results_response(
+    file_path: str, novel_id: str, novel_name: str | None, missing_fields: list[str]
+) -> ResultsWriteResponse:
+    """
+    构建结果响应对象
+    """
+    return ResultsWriteResponse(
+        success=True,
+        message="分析结果已写入文件",
+        file_path=file_path,
+        novel_id=novel_id,
+        novel_name=novel_name,
+        missing_fields=missing_fields if missing_fields else None,
+    )
+
+
+def write_results_to_file(task_id: str, data: dict[str, Any]) -> str:
+    results_dir = settings.paths.results_dir
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{task_id}.json"
+    file_path = results_dir / filename
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    logger.info(f"Results written to {file_path}")
+    return str(file_path)

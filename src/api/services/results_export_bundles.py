@@ -1,9 +1,6 @@
 """
 结果导出 bundle 装载服务
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（results_export_service.py → results_export_bundles.py）
 说明: 自 src/api/services/results_export_service.py 拆出各 bundle 装载函数
 （load_core_results/load_character_bundle/load_chapter_bundle/load_graph_signal_bundle/
 load_aggregate_metrics_bundle/load_export_relation_bundle/_fetch_timeline_data），
@@ -27,7 +24,7 @@ from src.api.services.results_queries import (
     _fetch_topics,
 )
 from src.api.services.results_queries.diagnosis import _has_diagnosis_result
-from src.knowledge.authority import (
+from src.fact_graph.authority import (
     ExportGraphAuthorityView,
     GraphAuthorityReport,
     serialize_graph_report_signals,
@@ -150,7 +147,7 @@ def load_chapter_bundle(
     topics = _fetch_topics(run_id, paragraph_repo)
     # 2026-09-05 A6：artifact 缺失导致聚合被静默清空时，给出显式原因进 missing_fields
     if not topics:
-        from src.api.services.results_queries.topics import describe_topics_unavailability
+        from src.metrics.aggregate.normalization import describe_topics_unavailability
 
         reason = describe_topics_unavailability(run_id)
         missing_fields.append(f"topics（{reason}）" if reason else "topics")
@@ -199,7 +196,7 @@ def load_aggregate_metrics_bundle(
     )
 
     global_stats = _fetch_global_stats(run_id, stats_repo, chapter_repo)
-    token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
+    token_usage_stats = _fetch_token_usage_stats(run_id, stats_repo)
 
     aggregate_metrics = get_metrics_service().get_aggregate_metrics_contract(run_id, stats_repo.session)
 

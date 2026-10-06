@@ -127,3 +127,15 @@ class MetricsService:
             character_stats,
             style_stats,
         )
+
+
+# 聚合指标服务单例：API 依赖与报告导出工具共用同一实例
+_metrics_service_instance: MetricsService | None = None
+
+
+def get_metrics_service() -> MetricsService:
+    """获取聚合指标服务单例（缓存 300s）"""
+    global _metrics_service_instance
+    if _metrics_service_instance is None:
+        _metrics_service_instance = MetricsService(cache_ttl=300)
+    return _metrics_service_instance
