@@ -184,7 +184,7 @@ export function useGraphDeepLinkSelection({
   }, [initialSelectedChapter, navigate, selectedChange, timelineUrl]);
 
   const handleOpenTimelineChapter = useCallback(
-    // 2026-08-13 P2-5: chapterId 放宽为 number | null，兼容生命周期字段缺失的节点
+    // 未选中章节时没有可打开的时间线定位
     (chapterId?: number | null, changeId?: string | null, selectedNodeId?: string | null) => {
       if (!timelineUrl || chapterId == null) return;
       navigate(

@@ -190,7 +190,7 @@ describe("DiagnosisPage", () => {
       genre_labels: ["科幻"],
       style_labels: ["硬核"],
       foreshadow_expectation: 0.42,
-      topic_labels: ["成长"],
+      topic_labels: { "0": "成长" },
       power_stance_reason: "权力立场依据完整展示",
       dignity_reason: "平民尊严依据完整展示",
       cultural_depth_reason: "文化深度依据完整展示",
