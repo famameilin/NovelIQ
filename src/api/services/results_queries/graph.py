@@ -8,10 +8,16 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Any
 
 from loguru import logger
+from sqlalchemy.orm import Session
 
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
-from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
-from src.knowledge.authority.alias import build_alias_resolution
+from src.fact_graph.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
+from src.fact_graph.authority.alias import build_alias_resolution
+from src.metrics.aggregate.algorithms import (
+    GRAPH_METRICS_VERSION,
+    InsufficientGraphNodesError,
+    compute_graph_structure_metrics,
+)
 from src.storage.repositories import AnnotationRepository, GraphRepository
 
 GRAPH_CHANGE_LIMIT = 200
@@ -200,6 +206,27 @@ def _fetch_graph_snapshot(
         "last_chapter_id": boundary.last_chapter_id,
         "nodes": nodes,
         "edges": edges,
+    }
+
+
+def compute_graph_metrics(run_id: str, session: Session) -> dict[str, Any]:
+    """图结构指标读取入口：取 /graph 同一快照，算法在 src.metrics.aggregate.algorithms"""
+    try:
+        snapshot = _fetch_graph_snapshot(run_id, AnnotationRepository(session))
+    except LookupError as exc:
+        return _graph_metrics_unavailable(run_id, f"graph_snapshot_unavailable: {exc}")
+    try:
+        metrics = compute_graph_structure_metrics(snapshot)
+    except InsufficientGraphNodesError as exc:
+        return _graph_metrics_unavailable(run_id, f"insufficient_nodes: {exc}")
+    return {"run_id": run_id, "unavailable_reason": None, **metrics}
+
+
+def _graph_metrics_unavailable(run_id: str, reason: str) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "unavailable_reason": reason,
+        "algorithm": {"version": GRAPH_METRICS_VERSION},
     }
 
 

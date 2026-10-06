@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from src.api.services.results_queries.linguistic import (
+from src.metrics.aggregate.linguistic_aggregations import (
     aggregate_phrase_stats,
     fetch_entity_candidates,
 )
