@@ -4,29 +4,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.models.local.character_reference_policy import is_global_character_surface_name
+from src.config.constants.diagnosis import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
+from src.utils.character_reference_policy import is_global_character_surface_name
 
 ValueLogicType = Literal["善义有价值", "强者为王", "混合型"]
 FocusStructureType = Literal["single", "dual", "ensemble"]
-GENRE_LABEL_VALUES = ("科幻", "悬疑", "历史", "仙侠", "玄幻", "都市", "通用")
-STYLE_LABEL_VALUES = (
-    "硬核",
-    "史诗",
-    "哲思",
-    "严肃",
-    "黑暗",
-    "慢热",
-    "高概念",
-    "实验性",
-    "热血",
-    "轻松",
-    "寓言性",
-    "冷峻",
-    "权谋",
-    "爽文",
-)
-
-
 class CloudAnalysis(BaseModel):
     """
     云端分析数据结构
@@ -49,8 +31,8 @@ class CloudAnalysis(BaseModel):
     arc_scores: dict[str, float] = Field(default_factory=dict)
     genre_labels: list[str] = Field(default_factory=list)
     style_labels: list[str] = Field(default_factory=list)
-    # 新诊断以 topic_id 为键；旧数组仅用于读取历史诊断，不能按下标绑定主题。
-    topic_labels: dict[str, str] | list[str] = Field(default_factory=dict)
+    # 标签必须与本轮模型的实际 topic_id 一一对应
+    topic_labels: dict[str, str] = Field(default_factory=dict)
     diagnosis: str | None = None
     value_logic_type: ValueLogicType | str | None = None
     value_logic_reason: str | None = None
@@ -133,9 +115,7 @@ class CloudAnalysis(BaseModel):
 
     @field_validator("topic_labels")
     @classmethod
-    def validate_topic_labels(cls, values: dict[str, str] | list[str]) -> dict[str, str] | list[str]:
-        if isinstance(values, list):
-            return [label.strip() for label in values if label.strip()]
+    def validate_topic_labels(cls, values: dict[str, str]) -> dict[str, str]:
         normalized: dict[str, str] = {}
         for raw_id, raw_label in values.items():
             topic_id = str(raw_id)

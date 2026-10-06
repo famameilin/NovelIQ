@@ -13,11 +13,37 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from src.agents.audit.recorder import AgentAuditRecorder
 from src.agents.stream import ModelCallTiming, extract_reasoning_content
-from src.agents.usage import estimate_agent_token_usage, extract_agent_token_usage
+from src.model_pool.usage import estimate_agent_token_usage, extract_agent_token_usage
 
 _FALLBACK_AI_MESSAGE = AIMessage(content="")
+
+
+def build_invocation_context(
+    *,
+    run_id: str,
+    task_type: str,
+    execution_id: str,
+    attempt_number: int,
+    model: str,
+    model_provider: str | None,
+    chapter_id: int | None = None,
+    work_id: str | None = None,
+    role: str | None = None,
+) -> dict[str, Any]:
+    """构造一次尝试的 invocation 上下文，随每条审计调用流动并落到回合行"""
+    return {
+        "run_id": run_id,
+        "task_type": task_type,
+        "call_type": "agent" if task_type == "annotation" else task_type,
+        "model": model or "unknown",
+        "model_provider": model_provider,
+        "execution_id": execution_id,
+        "attempt_number": attempt_number,
+        "chapter_id": chapter_id,
+        "work_id": work_id,
+        "role": role,
+    }
 
 
 def _extract_finish_reason(message: Any) -> str:
@@ -102,29 +128,18 @@ def _usage_for_turn(request_messages: list[Any], response_message: Any) -> dict[
 
 
 class AgentTurnObserver:
-    """2026-08-10 用于在 Agent 图节点间传递当前回合审计上下文并逐笔落库"""
+    """2026-08-10 用于在 Agent 图节点间传递当前回合审计上下文并逐笔落库
 
-    def __init__(
-        self,
-        recorder: AgentAuditRecorder,
-        *,
-        invocation_id: int,
-        run_id: str,
-        novel_id: str,
-        task_type: str,
-        call_type: str,
-        model_name: str,
-        model_provider: str,
-    ) -> None:
+    context 是本次尝试的 invocation 上下文（run_id/task_type/call_type/model/
+    model_provider/execution_id/attempt_number/chapter_id/work_id/role），随每条
+    审计调用流动，落库端不需要额外状态。
+    """
+
+    def __init__(self, recorder: Any, *, invocation_id: int, context: dict[str, Any]) -> None:
         """2026-08-10 用于绑定审计库与本次尝试的运行元数据"""
         self._recorder = recorder
         self._invocation_id = invocation_id
-        self._run_id = run_id
-        self._novel_id = novel_id
-        self._task_type = task_type
-        self._call_type = call_type
-        self._model_name = model_name or "unknown"
-        self._model_provider = model_provider
+        self._context = dict(context)
         self._turn_counter = 0
         self._active_turn_id: int | None = None
         self._active_started_ns: int | None = None
@@ -151,6 +166,7 @@ class AgentTurnObserver:
         summary = dict(context_summary)
         summary["provider_request"] = request
         self._pending_turn_id = self._recorder.start_turn(
+            **self._context,
             invocation_id=self._invocation_id,
             turn_index=self._turn_counter,
             context_summary=summary,
@@ -178,11 +194,6 @@ class AgentTurnObserver:
             },
             timing_notes=list(timing.timing_notes),
             token_usage=_usage_for_turn(self._pending_request_messages, response_message),
-            run_id=self._run_id,
-            novel_id=self._novel_id,
-            task_type=self._task_type,
-            call_type=self._call_type,
-            model=self._model_name,
         )
         self._pending_turn_id = None
         self._pending_started_ns = None
@@ -217,11 +228,6 @@ class AgentTurnObserver:
             },
             timing_notes=list(timing.timing_notes) + ["provider_request_failed"],
             token_usage=_usage_for_turn(self._pending_request_messages, response),
-            run_id=self._run_id,
-            novel_id=self._novel_id,
-            task_type=self._task_type,
-            call_type=self._call_type,
-            model=self._model_name,
         )
         self._pending_turn_id = None
         self._pending_started_ns = None
@@ -283,4 +289,4 @@ class AgentTurnObserver:
         self._active_tool_last_ns = None
 
 
-__all__ = ["AgentTurnObserver"]
+__all__ = ["AgentTurnObserver", "build_invocation_context"]

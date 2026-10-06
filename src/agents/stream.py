@@ -35,7 +35,7 @@ from src.agents.stream_aggregator import (
     extract_reasoning_content as extract_reasoning_content,
 )
 from src.agents.stream_audit import ModelCallTiming, _provider_request_metadata
-from src.api.models.events import StreamEvent, StreamEventAction
+from src.sse.events import StreamEvent, StreamEventAction
 
 _MAX_TOOL_SUMMARY_CHARS = 200
 

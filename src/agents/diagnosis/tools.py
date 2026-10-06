@@ -13,9 +13,9 @@ from typing import Any
 from langchain_core.tools import tool
 from sqlalchemy.orm import Session
 
-from src.models.cloud.schema import CloudAnalysis
+from src.agents.diagnosis.schema import CloudAnalysis
+from src.storage.diagnosis_payload import CloudAnalysisPatch
 
-from .contract import CloudAnalysisPatch
 from .evidence import DiagnosisEvidenceLedger
 
 
@@ -170,7 +170,7 @@ def build_diagnosis_tools(
         查询人物图谱质量信号（节点数、关系数、活跃度等）。
         用于判断角色网络规模与图谱完整性。
         """
-        from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
+        from src.fact_graph.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
 
         ledger.record_tool_call("get_graph_signals")
 
