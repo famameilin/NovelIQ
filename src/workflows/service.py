@@ -1,12 +1,8 @@
 """
 分析服务类
 
-修改时间: 2026-10-02
-修改者: Trae
-修改内容: 大文件拆分——取消检查与 DB 领取状态机迁至 src/api/services/analysis/task_claim.py，
-阶段编排迁至 src/api/services/analysis/stage_orchestrator.py，终态兜底迁至
-src/api/services/analysis/error_handler.py（TerminalStateFallbackMixin）。
-本模块保留构造与公开入口，并 re-export 拆出符号以维持既有导入路径。
+说明: 编排的公开入口——建任务、跑阶段、恢复、重分析。阶段编排、取消检查、终态兜底
+分别在 src/workflows/analysis/ 下，队列运行时由 src/work 提供（本层向下调用）。
 """
 
 from __future__ import annotations
@@ -18,24 +14,24 @@ from collections.abc import Callable
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.exceptions import NovelNotFoundError
-from src.api.models.events import AnalysisEventBus, StreamMessageType
-from src.api.models.requests import ReanalyzeRequest
-from src.api.models.responses import TaskStatus
-from src.api.services.analysis.environment_initializer import EnvironmentInitializer
-from src.api.services.analysis.error_handler import AnalysisErrorHandler, TerminalStateFallbackMixin
-from src.api.services.analysis.stage_executor import StageExecutor
-from src.api.services.analysis.stage_orchestrator import StageOrchestratorMixin
-from src.api.services.analysis.task_claim import (
+from src.config import settings
+from src.config.analysis_logger import AnalysisLogger
+from src.sse.manager import event_manager
+from src.storage.session import SessionFactory
+from src.storage.task_status import TaskStatus
+from src.work.events import AnalysisEventBus, StreamMessageType
+from src.work.task_manager import TaskManager
+from src.workflows.analysis.environment_initializer import EnvironmentInitializer
+from src.workflows.analysis.error_handler import AnalysisErrorHandler, TerminalStateFallbackMixin
+from src.workflows.analysis.stage_executor import StageExecutor
+from src.workflows.analysis.stage_orchestrator import StageOrchestratorMixin
+from src.workflows.analysis.task_claim import (
     _RESUME_RESET_WINDOW_SECONDS,
     CancellationStateCheckError,
 )
-from src.api.services.event_manager import event_manager
-from src.api.services.novel_service import NovelService
-from src.api.services.task_manager import TaskManager
-from src.config import settings
-from src.config.analysis_logger import AnalysisLogger
-from src.storage.session import SessionFactory
+from src.workflows.exceptions import NovelNotFoundError
+from src.workflows.schemas import ReanalyzeRequest
+from src.workflows.tasks import TaskService
 
 __all__ = [
     "TASK_KIND_ANALYSIS",
@@ -53,17 +49,17 @@ TASK_KIND_REANALYSIS = "reanalysis"
 class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
     def __init__(
         self,
-        novel_service: NovelService,
+        task_service: TaskService,
         task_manager: TaskManager,
         session_factory: SessionFactory | None = None,
     ):
-        self.novel_service = novel_service
+        self.task_service = task_service
         self.task_manager = task_manager
         self.session_factory = session_factory or SessionFactory()
         self.env_initializer = EnvironmentInitializer(self.session_factory)
         self.stage_executor = StageExecutor()
         self.error_handler = AnalysisErrorHandler(
-            novel_service=novel_service,
+            task_service=task_service,
             task_manager=task_manager,
         )
 
@@ -229,8 +225,8 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
 
         说明: 只负责“创建+启动”，不做复用/猜测行为
         """
-        novel = self.novel_service.get_novel(novel_id)
-        task_id = self.novel_service.create_task(novel_id, task_kind=TASK_KIND_ANALYSIS)
+        novel = self.task_service.get_novel(novel_id)
+        task_id = self.task_service.create_task(novel_id, task_kind=TASK_KIND_ANALYSIS)
         self.task_manager.create_task(task_id, novel_id)
         self._schedule_task_execution(task_id, novel, TASK_KIND_ANALYSIS, None)
         return task_id
@@ -241,8 +237,8 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
 
         说明: 只负责“继续已有任务”，不创建新任务
         """
-        novel = self.novel_service.get_novel(novel_id)
-        task = self.novel_service.get_task(task_id)
+        novel = self.task_service.get_novel(novel_id)
+        task = self.task_service.get_task(task_id)
 
         if task.get("novel_id") != novel_id:
             raise ValueError(f"任务 {task_id} 不属于小说 {novel_id}")
@@ -276,18 +272,17 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
             completed_at=None,
         )
 
-        # 清空上一轮 SSE 终态事件缓冲，避免重连客户端先回放 task_cancelled/task_error/
-        # task_complete 再收新一轮 stage_start（resume 启动的是全新一轮，旧终态不应再出现）
-        event_manager.clear_buffer(task_id)
+        # SSE 独立保存本次恢复事实，持久重放同样屏蔽旧终态，保留已完成 work 的展示
+        await event_manager.restart_display(task_id)
 
         task_kind, execution_request = self._restore_execution_request(task)
         self._schedule_task_execution(task_id, novel, task_kind, execution_request, resume=True)
         return task_id
 
     async def start_reanalysis(self, novel_id: str, request: ReanalyzeRequest | None = None) -> str:
-        novel = self.novel_service.get_novel(novel_id)
+        novel = self.task_service.get_novel(novel_id)
 
-        task_id = self.novel_service.create_task(
+        task_id = self.task_service.create_task(
             novel_id,
             task_kind=TASK_KIND_REANALYSIS,
             request_payload=self._build_reanalysis_request_payload(request),
@@ -410,7 +405,6 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
                         log_prefix=log_prefix,
                     )
                 else:
-                    self.novel_service.update_task_status(task_id, "failed")
                     self.task_manager.complete_task(task_id, success=False, error=str(e))
                     self._write_failure_to_db(task_id, str(e))
                 return
@@ -440,7 +434,6 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
                 )
             else:
                 # 环境初始化失败时也要写入 DB 失败终态
-                self.novel_service.update_task_status(task_id, "failed")
                 self.task_manager.complete_task(task_id, success=False, error=str(e))
                 self._write_failure_to_db(task_id, str(e))
         finally:

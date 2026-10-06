@@ -13,17 +13,17 @@ from typing import Any
 from fastapi import HTTPException
 from loguru import logger
 
-from src.api.exceptions import NovelNotFoundError
-from src.api.services.analysis_service import AnalysisService
-from src.api.services.novel_service import NovelService
-from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
-from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
+from src.storage.id_mapping import TaskIDNotFoundError, run_id_to_task_id, task_id_to_run_id
 from src.storage.repositories import RunRepository
+from src.work.task_manager import TaskManager
+from src.workflows.exceptions import NovelNotFoundError
+from src.workflows.service import AnalysisService
+from src.workflows.tasks import TaskService
 
 
 def resolve_task_for_novel(
-    novel_service: NovelService,
+    task_service: TaskService,
     novel_id: str,
     task_id: str,
 ) -> dict[str, Any]:
@@ -31,7 +31,7 @@ def resolve_task_for_novel(
     获取并校验任务是否属于指定小说
     """
     try:
-        task = novel_service.get_task(task_id)
+        task = task_service.get_task(task_id)
     except NovelNotFoundError:
         raise HTTPException(status_code=404, detail="任务不存在") from None
 
@@ -141,13 +141,13 @@ class TaskApplicationService:
     说明: 面向 API 编排任务恢复、取消、删除等跨 DB/运行态的流程
     """
 
-    def __init__(self, novel_service: NovelService, task_manager: TaskManager):
+    def __init__(self, task_service: TaskService, task_manager: TaskManager):
         """
         初始化任务应用服务
         """
-        self.novel_service = novel_service
+        self.task_service = task_service
         self.task_manager = task_manager
-        self.analysis_service = AnalysisService(novel_service, task_manager)
+        self.analysis_service = AnalysisService(task_service, task_manager)
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
         """
@@ -162,20 +162,34 @@ class TaskApplicationService:
         """
         删除单个分析任务
         """
-        task = resolve_task_for_novel(self.novel_service, novel_id, task_id)
+        task = resolve_task_for_novel(self.task_service, novel_id, task_id)
         task_status = task.get("status", "")
         if task_status in ("pending", "running", "cancelling"):
             raise HTTPException(status_code=400, detail=f"任务正在{task_status}中，请先取消任务后再删除")
 
         await cleanup_task_runtime_before_delete(task_id, self.task_manager)
-        self.novel_service.delete_task(task_id, task_manager=self.task_manager)
+        self.task_service.delete_task(task_id, task_manager=self.task_manager)
         return {"message": "任务删除成功", "novel_id": novel_id, "task_id": task_id}
+
+    def delete_tasks_for_novel(self, novel_id: str) -> int:
+        """
+        删除小说下全部任务（含运行态清理）
+
+        说明: 小说级删除的前置条件是任务不在飞——ensure_tasks_deletable 会拒绝运行态任务；
+        因此这里无需（也无法）做异步中断。返回删除的任务数。
+        """
+        runs = self.task_service.collect_runs(novel_id)
+        self.task_service.ensure_tasks_deletable(novel_id, runs)
+        for run in runs:
+            task_id = run_id_to_task_id(str(run["run_id"]))
+            self.task_service.delete_task(task_id, task_manager=self.task_manager)
+        return len(runs)
 
     async def cancel_task(self, novel_id: str, task_id: str) -> dict[str, str]:
         """
         取消指定分析任务
         """
-        task = resolve_task_for_novel(self.novel_service, novel_id, task_id)
+        task = resolve_task_for_novel(self.task_service, novel_id, task_id)
         task_status = task.get("status", "")
         raise_cancel_not_allowed(task_status)
 
@@ -188,7 +202,7 @@ class TaskApplicationService:
 
             # 如果原子 pending 取消没赢，说明别的执行方已经推进了 DB 真相；
             # 这里必须重新读库，以赢家状态继续判断，不能沿用旧快照
-            task = resolve_task_for_novel(self.novel_service, novel_id, task_id)
+            task = resolve_task_for_novel(self.task_service, novel_id, task_id)
             task_status = task.get("status", "")
             raise_cancel_not_allowed(task_status)
 
@@ -205,13 +219,21 @@ class TaskApplicationService:
 
         cancelled = self.task_manager.cancel_task(task_id)
         if cancelled:
-            return {"task_id": task_id, "status": "cancelling", "message": "任务将在当前处理单元完成后停止"}
+            return {
+                "task_id": task_id,
+                "status": "cancelling",
+                "message": "已停止派发并立即中断在飞执行，未完成的 work 不保存",
+            }
 
         if task_status in ("pending", "running"):
             logger.info(
                 "Task {} cancellation requested (not in memory), DB cancel_requested=true and status=cancelling",
                 task_id,
             )
-            return {"task_id": task_id, "status": "cancelling", "message": "任务已标记为取消中，等待执行方收尾"}
+            return {
+                "task_id": task_id,
+                "status": "cancelling",
+                "message": "取消已落库，执行方将立即中断在飞执行",
+            }
 
         raise HTTPException(status_code=400, detail=f"任务状态为 {task_status}，无法取消")
