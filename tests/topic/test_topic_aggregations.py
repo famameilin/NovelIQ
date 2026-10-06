@@ -17,16 +17,19 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.api.services.results_queries.topic_aggregations import (
+from src.metrics.aggregate.algorithms import (
+    compute_topic_shift_candidates,
+    jensen_shannon_divergence,
+)
+from src.metrics.aggregate.topic_aggregations import (
     aggregate_book_topics,
     aggregate_chapter_topics,
     compute_topic_emotion,
-    compute_topic_shift_candidates,
     fetch_paragraph_topic_series,
-    jensen_shannon_divergence,
 )
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.storage.repositories import ParagraphRepository, RunRepository
+from src.storage.text_units import Chunk
+from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 
 _CHUNK_TEXTS = ["甲。\n乙。\n丙。", "丁。\n戊。\n己。"]

@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 
-from src.agents.annotation.schema import coerce_emotion_score
-from src.knowledge.authority import KnowledgeGraphAuthorityService
-from src.models.local.character_reference_policy import decide_character_reference
+from src.fact_graph.authority import KnowledgeGraphAuthorityService
+from src.metrics.aggregate.normalization import read_emotion_score
 from src.storage.models import Chapter
+from src.utils.character_reference_policy import decide_character_reference
 
 from .types import (
     AnnotationData,
@@ -115,7 +115,7 @@ def fetch_annotation_data(
         event_types=[row.event_type or "铺垫" for row in rows],
         cliffhangers=[row.cliffhanger or 0 for row in rows],
         pivot_moments=[row.pivot_moment or 0 for row in rows],
-        emotional_valences=[coerce_emotion_score(row.emotional_valence) for row in rows],
+        emotional_valences=[read_emotion_score(row.emotional_valence) for row in rows],
     )
 
 
@@ -184,12 +184,12 @@ def fetch_character_data(
     emotion_map: dict[str, int] = {}
     for row in rows:
         canonical_name = _resolve_aggregate_character_name(
-            surface_name=getattr(row, "surface_name", None) or getattr(row, "name", None),
-            resolved_global_name=getattr(row, "resolved_global_name", None),
+            surface_name=row.surface_name,
+            resolved_global_name=row.resolved_global_name,
         )
         if canonical_name is None:
             continue
-        emotion_map[canonical_name] = coerce_emotion_score(getattr(row, "emotion_score", None))
+        emotion_map[canonical_name] = read_emotion_score(row.emotion_score)
 
     # 3. 构建角色列表（使用共享 canonical entity 作为完整角色种子）
     characters = []
@@ -202,14 +202,14 @@ def fetch_character_data(
     char_emotion_map: dict[str, list[float]] = {}
     for row in char_emotion_rows:
         canonical_name = _resolve_aggregate_character_name(
-            surface_name=getattr(row, "surface_name", None) or getattr(row, "name", None),
-            resolved_global_name=getattr(row, "resolved_global_name", None),
+            surface_name=row.surface_name,
+            resolved_global_name=row.resolved_global_name,
         )
         if canonical_name is None:
             continue
         if canonical_name not in char_emotion_map:
             char_emotion_map[canonical_name] = []
-        score = float(coerce_emotion_score(getattr(row, "emotion_score", None)))
+        score = float(read_emotion_score(row.emotion_score))
         char_emotion_map[canonical_name].append(score)
     char_emotion_scores = list(char_emotion_map.items())
 
