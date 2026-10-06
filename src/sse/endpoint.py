@@ -17,7 +17,7 @@ try:
 except ImportError:
     from starlette.responses import EventSourceResponse  # type: ignore[no-redef,attr-defined]
 
-from src.api.services.event_manager import event_manager
+from src.sse.manager import event_manager
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
 
@@ -57,26 +57,29 @@ async def sse_endpoint(novel_id: str, task_id: str, request: Request) -> EventSo
             while True:
                 if await request.is_disconnected():
                     break
-                if event_manager.is_durable is True:
-                    messages = await event_manager.replay(task_id, cursor)
-                    for message in messages:
-                        cursor = int(message["seq"])
-                        yield {"event": message["type"], "id": str(cursor),
-                               "data": json.dumps(message["data"], ensure_ascii=False)}
-                    if messages:
+                messages = await event_manager.replay(task_id, cursor)
+                for message in messages:
+                    sequence = int(message["seq"])
+                    if sequence <= cursor:
                         continue
-                    try:
-                        message = await asyncio.wait_for(queue.get(), timeout=0.5)
-                    except TimeoutError:
-                        continue
-                    if message.get("type") == "reconnect_required":
-                        yield {"event": "reconnect_required", "data": json.dumps(message["data"])}
-                        break
+                    cursor = sequence
+                    yield {
+                        "event": message["type"],
+                        "id": str(cursor),
+                        "data": json.dumps(message["data"], ensure_ascii=False),
+                    }
+                if messages:
                     continue
-                message = await queue.get()
+                try:
+                    message = await asyncio.wait_for(queue.get(), timeout=0.5)
+                except TimeoutError:
+                    continue
                 if message.get("type") == "reconnect_required":
                     yield {"event": "reconnect_required", "data": json.dumps(message["data"])}
                     break
+                if 0 < int(message.get("seq", 0)) <= cursor:
+                    continue
+                cursor = max(cursor, int(message.get("seq", 0)))
                 event_type = message.get("type", "message")
                 data = message.get("data", {})
                 seq = message.get("seq", 0)
