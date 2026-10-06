@@ -1,14 +1,4 @@
-"""
-说明: 提供分析结果导出和查询接口
-
-修改时间: 2026-10-02
-修改者: Trae
-修改内容: 大文件拆分——按资源域拆分至同目录子模块（results_common/results_export/
-results_paragraphs/results_topics/results_graph/results_metrics），本模块仅保留
-router 聚合入口；include 顺序与原路由注册顺序完全一致（event-forest 域在 metrics 之后），
-路径、响应模型与 OpenAPI 标签均保持不变。
-"""
-
+"""分析结果查询路由的注册入口（各资源域子模块见同目录 results_*.py）"""
 from __future__ import annotations
 
 from fastapi import APIRouter

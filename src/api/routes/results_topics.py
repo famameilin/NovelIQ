@@ -1,9 +1,6 @@
 """
 主题与诊断结果查询路由
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（routes/results.py → 同目录资源域子模块）
 说明: 从 src/api/routes/results.py 拆出主题族路由（topics/aggregate/series/shifts/emotion）
 与诊断、伏笔树路由（diagnosis/foreshadowing-trees），行为保持不变。
 """
@@ -31,16 +28,16 @@ from src.api.routes.results_common import (
     get_db_session,
     resolve_run_id,
 )
-from src.api.routes.results_fetchers import (
+from src.api.services.results_queries import (
     _fetch_diagnosis,
     _fetch_foreshadowing_trees,
     _fetch_topics,
 )
-from src.api.services.results_queries.topic_aggregations import (
+from src.metrics.aggregate.algorithms import compute_topic_shift_candidates
+from src.metrics.aggregate.topic_aggregations import (
     aggregate_book_topics,
     aggregate_chapter_topics,
     compute_topic_emotion,
-    compute_topic_shift_candidates,
     fetch_paragraph_topic_series,
 )
 from src.storage.repositories import AnnotationRepository, ParagraphRepository, StatsRepository

@@ -1,9 +1,6 @@
 """
 段落级结果查询路由
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（routes/results.py → 同目录资源域子模块）
 说明: 从 src/api/routes/results.py 拆出段落曲线/情绪趋势/章节指标/章节标注/角色域路由，
 行为保持不变。
 """
@@ -31,7 +28,7 @@ from src.api.routes.results_common import (
     get_db_session,
     resolve_run_id,
 )
-from src.api.routes.results_fetchers import (
+from src.api.services.results_queries import (
     _fetch_chapter_annotations,
     _fetch_characters,
     _fetch_diagnosis,

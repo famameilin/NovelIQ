@@ -1,15 +1,4 @@
-"""
-结果查询共享依赖与公共工具
-
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（routes/results.py → 同目录资源域子模块）
-说明: 从 src/api/routes/results.py 拆出共享 Depends（resolve_run_id/get_db_session/
-require_run_for_novel/require_readable_run_status）、pipeline 快照路由与公共工具，
-供 results_export/results_paragraphs/results_topics/results_graph/results_metrics 复用；
-路由注册顺序由主模块 src/api/routes/results.py 统一编排。
-"""
-
+"""结果查询共享依赖、pipeline 快照路由与查询参数解析"""
 from __future__ import annotations
 
 import json
@@ -49,15 +38,10 @@ async def get_pipeline_snapshot(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict[str, Any]:
-    from src.api.exceptions import AnalysisNotCompleteError
-    from src.storage.repositories.pipeline_visibility import cutoff_view, require_released_cutoff
+    from src.storage.repositories.book_state import book_state_view
 
     _require_run_for_novel(session, novel_id, run_id)
-    try:
-        cutoff = require_released_cutoff(session, run_id)
-    except ValueError as exc:
-        raise AnalysisNotCompleteError(message=str(exc), run_status="running") from exc
-    return cutoff_view(session, cutoff)
+    return book_state_view(session, run_id)
 
 
 def _parse_emotion_trend_range(
