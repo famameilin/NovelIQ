@@ -6,12 +6,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
 from src.utils.token_counter import count_tokens
 
 if TYPE_CHECKING:
-    from src.models.local.embedding import TokenUsageCallback
+    from src.embedding import TokenUsageCallback
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,16 +146,16 @@ def estimate_agent_token_usage(messages: list[Any]) -> list[AgentTokenUsage]:
     return estimated
 
 
-def build_token_usage_callback(*, session: Any, run_id: str) -> TokenUsageCallback:
-    """
-    2026-08-10 用于构造 EmbeddingClient 可用的 token 用量回调，逐笔落入 token_usage
-    """
-    from src.storage.repositories import StatsRepository
+def build_token_usage_callback(*, bus: Any, run_id: str) -> TokenUsageCallback:
+    """非 Agent 调用只发送实际 usage，由统计审计模块独立保存"""
+    from uuid import uuid4
 
-    stats_repo = StatsRepository(session)
+    from src.event_bus import Message
+
+    execution_id = uuid4().hex
+    sequence = 0
 
     def callback(
-        novel_id: str,
         task_type: str,
         call_type: str,
         model: str,
@@ -166,19 +164,32 @@ def build_token_usage_callback(*, session: Any, run_id: str) -> TokenUsageCallba
         completion_tokens: int | None,
         chunk_id: int | None,
     ) -> None:
-        try:
-            stats_repo.insert_token_usage(
+        nonlocal sequence
+        sequence += 1
+        bus.publish(
+            Message(
+                topic=f"audit:{run_id}",
+                source="preprocess",
+                target=f"audit:{run_id}",
                 run_id=run_id,
-                novel_id=novel_id,
-                task_type=task_type,
-                call_type=call_type,
-                model=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                chapter_id=chunk_id,
+                invocation_id=execution_id,
+                message_id=f"{execution_id}:usage:{sequence}",
+                payload={
+                    "method": "nonagent_usage",
+                    "local_id": sequence,
+                    "kwargs": {
+                        "run_id": run_id,
+                        "task_type": task_type,
+                        "call_type": call_type,
+                        "model": model,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                        "chapter_id": chunk_id,
+                        "accounting_source": "reported",
+                    },
+                },
             )
-        except Exception as exc:
-            logger.warning("failed to record embedding token usage: {}", exc)
+        )
 
     return callback
