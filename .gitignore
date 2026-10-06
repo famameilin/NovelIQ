@@ -175,6 +175,7 @@ docs/*
 # scripts 本地脚本目录（内容不入库，目录壳保留；迁移脚本在 scripts/migrations）
 # ============================================================================
 scripts/db/*
+!scripts/db/migrate_queue_agents.py
 scripts/tools/*
 scripts/experiments/
 
