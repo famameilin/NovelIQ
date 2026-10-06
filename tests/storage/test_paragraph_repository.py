@@ -9,11 +9,11 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
-from src.chunking.spans import ParagraphSpan
 from src.storage.models import Paragraph
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.storage.text_units import Chunk, ParagraphSpan
+from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
 
 CHUNK_TEXT = "第一段。\n第二段。\n第三段。\n"

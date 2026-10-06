@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import uuid
 
-from src.chapters.models import ChapterData, ChapterLevel
 from src.storage.repositories import ChapterRepository, RunRepository
+from src.utils.chapters.models import ChapterData, ChapterLevel
 from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
 
 
@@ -81,7 +81,7 @@ def test_count_chapters(db_session) -> None:
     repo = ChapterRepository(db_session)
     repo.insert_chapters(run_id, _make_chapters())
     # M9a-2：count_chapters 只统计有正文的章节（结构行不算）
-    from src.chunking.chunker import Chunk
+    from src.storage.text_units import Chunk
 
     repo.insert_chapter_texts(
         run_id,

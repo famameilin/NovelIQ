@@ -8,9 +8,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.config import settings
-from src.preprocess.tokenize import tokenize
 from src.storage.models import (
     Chapter,
 )
@@ -18,6 +16,9 @@ from src.storage.repositories.annotation.continuity import (
     DatabaseAnnotationQueryService,
 )
 from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.storage.text_units import Chunk
+from src.utils.tokenize import tokenize
+from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
 )
@@ -221,8 +222,11 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     """
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-    from src.agents.annotation.graph import build_annotation_graph
-    from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+    from src.agents.annotation.schema import ChapterParagraphInfo
+    from src.agents.annotation.subagent_graph import build_subagent_graph
+    from src.agents.annotation.tools import AnnotationToolLedger
+    from src.fact_graph.graph import FactGraph
+    from tests.support.annotation_work_tools import build_annotation_tools, build_program_test_runtime
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="模型回话不占连接")
     tracker = _SessionTracker(db_session)
@@ -238,6 +242,8 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
         current_chapter_id=1,
         current_chapter_text="顾霜身份成谜",
         allow_future_context=False,
+        graph=FactGraph(run_scope=run_id),
+        paragraph_info=ChapterParagraphInfo(paragraph_ids=[0], char_spans=[(0, 6)], texts=["顾霜身份成谜"]),
     )
     tools = build_annotation_tools(service, ledger)
     live_at_model_reply: list[int] = []
@@ -255,18 +261,22 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
             return AIMessage(
                 content="",
                 tool_calls=[
-                    {"name": "search_text", "args": {"query": "顾霜"}, "id": "c1", "type": "tool_call"},
                     {
-                        "name": "write_metrics",
-                        "args": {"summary": "顾霜身份成谜", "emotional_valence": 0, "narrative_function": "铺垫"},
+                        "name": "execute_code",
+                        "args": {"code": 'search_text(query="顾霜")\n'
+                                 'metric(summary="顾霜身份成谜", emotional_valence=0, narrative_function="铺垫")\n'
+                                 'finish()'},
                         "id": "c2",
                         "type": "tool_call",
                     },
-                    {"name": "finish", "args": {}, "id": "c3", "type": "tool_call"},
                 ],
             )
 
-    graph = build_annotation_graph(_SearchThenFinishLLM(), tools, ledger=ledger, max_iterations=1)
+    runtime = build_program_test_runtime(tools, ledger)
+    graph = build_subagent_graph(
+        _SearchThenFinishLLM(), runtime.build_tool(), runtime.finish_tool,
+        ledger=ledger, subagent=runtime.subagent, max_iterations=1,
+    )
     state = await graph.ainvoke(
         {
             "messages": [SystemMessage(content="test"), HumanMessage(content="chunk")],

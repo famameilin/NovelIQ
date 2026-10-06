@@ -32,14 +32,14 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import chunk_text, split_chunk_paragraphs
-from src.models.cloud.schema import CloudAnalysis
+from src.agents.diagnosis.schema import CloudAnalysis
 from src.storage.repositories import (
     ChapterRepository,
     ParagraphRepository,
     RunRepository,
     StatsRepository,
 )
+from src.workflows.paragraphs import chunk_text, split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 
@@ -134,7 +134,7 @@ def test_insert_cloud_analysis(db_session) -> None:
         arc_scores={"角色0": 8.2, "角色1": 7.4},
         genre_labels=["通用"],
         style_labels=["严肃"],
-        topic_labels=["成长"],
+        topic_labels={'0': '成长'},
         diagnosis="ok",
         narrative_arc_type="白手起家",
         focus_structure="dual",
@@ -148,13 +148,11 @@ def test_insert_cloud_analysis(db_session) -> None:
 
     stats_repo = StatsRepository(db_session)
     stats_repo.insert_cloud_analysis(run_id, analysis)
-    row = db_session.execute(
-        text("SELECT novel_id, foreshadow_expectation, narrative_arc_type FROM cloud_analysis WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    ).fetchone()
-    assert row[0] == novel_id
-    assert row[1] == 0.5
-    assert row[2] == "白手起家"
+    fetched = stats_repo.fetch_cloud_analysis(run_id)
+    assert fetched is not None
+    assert fetched["novel_id"] == novel_id
+    assert fetched["foreshadow_expectation"] == 0.5
+    assert fetched["narrative_arc_type"] == "白手起家"
 
 
 def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> None:
@@ -173,7 +171,7 @@ def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> Non
             arc_scores={"角色0": 7.0},
             genre_labels=["通用"],
             style_labels=["严肃"],
-            topic_labels=["旧主题"],
+            topic_labels={'0': '旧主题'},
             diagnosis="old",
             narrative_arc_type="白手起家",
             focus_structure="single",
@@ -190,7 +188,7 @@ def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> Non
             arc_scores={"角色1": 9.0},
             genre_labels=["科幻"],
             style_labels=["硬核"],
-            topic_labels=["新主题"],
+            topic_labels={'0': '新主题'},
             diagnosis="new",
             narrative_arc_type="白手起家",
             focus_structure="single",
@@ -200,9 +198,9 @@ def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> Non
         ),
     )
 
-    fetched = stats_repo.fetch_cloud_analysis(novel_id, run_id)
+    fetched = stats_repo.fetch_cloud_analysis(run_id)
 
     assert fetched is not None
-    assert fetched["genre_labels"] == '["科幻"]'
-    assert fetched["style_labels"] == '["硬核"]'
+    assert fetched["genre_labels"] == ["科幻"]
+    assert fetched["style_labels"] == ["硬核"]
     assert fetched["foreshadow_expectation"] == 0.8

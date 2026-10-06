@@ -19,8 +19,7 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
-from src.models.cloud.schema import CloudAnalysis
+from src.agents.diagnosis.schema import CloudAnalysis
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
@@ -32,7 +31,9 @@ from src.storage.repositories.paragraph import (
     ParagraphEmbeddingRow,
     insert_paragraph_embeddings,
 )
+from src.storage.text_units import Chunk
 from src.storage.vector_schema import ensure_paragraph_embeddings_schema
+from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import persist_chapter_annotation
 
@@ -435,7 +436,7 @@ class TestStageCompleteChecks:
             arc_scores={"角色0": 8.2, "角色1": 7.4},
             genre_labels=["通用"],
             style_labels=["严肃"],
-            topic_labels=["成长"],
+            topic_labels={'0': '成长'},
             diagnosis="ok",
             focus_structure="dual",
             focus_characters=["角色0", "角色1"],
@@ -444,6 +445,16 @@ class TestStageCompleteChecks:
         )
         stats_repo.insert_cloud_analysis(run_id, analysis)
         assert stats_repo.has_diagnosis_data(run_id)
+        # 主题标签被破坏成列表（应为 id→label 的 dict）时，合同校验不再放行
+        db_session.execute(
+            text(
+                "UPDATE analysis_outputs SET payload = jsonb_set(payload, '{topic_labels}', '[\"成长\"]') "
+                "WHERE run_id = :run_id AND kind = 'cloud_analysis'"
+            ),
+            {"run_id": run_id},
+        )
+        db_session.commit()
+        assert not stats_repo.has_diagnosis_data(run_id)
 
     def test_is_diagnose_complete_rejects_incomplete_focus_contract_row(self, db_session):
         """旧/半成品 cloud_analysis 行不应再把 diagnose 阶段标成完成"""
@@ -458,16 +469,17 @@ class TestStageCompleteChecks:
 
         db_session.execute(
             text(
-                "INSERT INTO cloud_analysis "
-                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
-                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
+                "INSERT INTO analysis_outputs "
+                "(output_id, run_id, kind, payload, created_at) "
+                "VALUES (:output_id, :run_id, 'cloud_analysis', :payload, now())"
             ),
             {
-                "novel_id": novel_id,
-                "foreshadow_expectation": 0.5,
-                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
-                "diagnosis": "旧 row 缺少 focus contract",
+                "output_id": uuid.uuid4().hex,
                 "run_id": run_id,
+                "payload": (
+                    f'{{"novel_id": "{novel_id}", "foreshadow_expectation": 0.5, '
+                    f'"arc_scores": {{"角色0": 8.2}}, "diagnosis": "旧 row 缺少 focus contract"}}'
+                ),
             },
         )
         db_session.commit()

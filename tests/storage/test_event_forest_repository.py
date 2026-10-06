@@ -273,7 +273,7 @@ def test_same_paragraph_links_follow_formal_event_order_and_reject_reverse(db_se
     assert snapshot.derived_event_order == [first_id, second_id]
     assert len(snapshot.causal_edges) == 1
     assert snapshot.event_nodes[0].char_start == snapshot.event_nodes[1].char_start == 0
-    with pytest.raises(ValueError, match="文档严格偏序"):
+    with pytest.raises(ValueError, match="形成环"):
         commit_test_event_link(
             db_session, run_id=run_id, chapter_id=1, source_event_id=second_id, target_event_id=first_id,
         )
