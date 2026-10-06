@@ -98,6 +98,10 @@ class ChapterConfig:
     # 编号连续性
     max_expected_number_delta: int = 100
 
+    # 重复版本守卫（同号同题相邻章节，短章正文被基准章吸收比例达到阈值即判为重复发布）
+    revision_containment_threshold: float = 0.5
+    revision_min_body_chars: int = 200
+
     # 评分乘数（逐维度乘法叠加）
     score_short_title: float = 0.8
     score_long_title: float = 0.9

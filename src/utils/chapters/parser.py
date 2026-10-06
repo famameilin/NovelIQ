@@ -1,6 +1,6 @@
 """章节结构解析入口
 
-流程：预处理 → TOC 检测 → 候选收集 → 置信度评分 → 结构决策 → 自动分章兜底。
+流程：预处理 → TOC 检测 → 候选收集 → 置信度评分 → 结构决策 → 自动分章兜底 → 重复版本守卫。
 
 产出的章节字符偏移相对 preprocess_text 的输出；调用方如需按偏移切片，
 必须使用同一份预处理后的文本。
@@ -8,13 +8,14 @@
 
 from __future__ import annotations
 
-from src.chapters.candidates import collect_candidates
-from src.chapters.constants import ChapterConfig
-from src.chapters.models import ChapterData
-from src.chapters.preprocess import preprocess_text
-from src.chapters.scoring import score_candidates
-from src.chapters.structure import auto_split, decide_structure, finalize
-from src.chapters.toc import detect_toc_range
+from src.utils.chapters.candidates import collect_candidates
+from src.utils.chapters.constants import ChapterConfig
+from src.utils.chapters.models import ChapterData
+from src.utils.chapters.preprocess import preprocess_text
+from src.utils.chapters.revisions import drop_duplicate_revisions
+from src.utils.chapters.scoring import score_candidates
+from src.utils.chapters.structure import auto_split, decide_structure, finalize
+from src.utils.chapters.toc import detect_toc_range
 
 
 def parse_chapters(text: str, config: ChapterConfig | None = None) -> list[ChapterData]:
@@ -32,4 +33,5 @@ def parse_chapters(text: str, config: ChapterConfig | None = None) -> list[Chapt
     if not chapters:
         chapters = auto_split(normalized, config)
 
+    chapters = drop_duplicate_revisions(normalized, chapters, config)
     return finalize(normalized, chapters)

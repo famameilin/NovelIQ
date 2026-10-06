@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.chapters.candidates import collect_candidates
-from src.chapters.models import ChapterLevel
+from src.utils.chapters.candidates import collect_candidates
+from src.utils.chapters.models import ChapterLevel
 
 
 def _single(text: str, level: ChapterLevel) -> object:

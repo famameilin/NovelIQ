@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from src.chapters.constants import ChapterConfig
-from src.chapters.models import ChapterCandidate, ChapterLevel
-from src.chapters.scoring import score_candidates
+from src.utils.chapters.constants import ChapterConfig
+from src.utils.chapters.models import ChapterCandidate, ChapterLevel
+from src.utils.chapters.scoring import score_candidates
 
 
 def _candidate(

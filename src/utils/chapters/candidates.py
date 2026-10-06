@@ -10,8 +10,8 @@ import re
 
 from loguru import logger
 
-from src.chapters.cn2int import extract_number
-from src.chapters.constants import (
+from src.utils.chapters.cn2int import extract_number
+from src.utils.chapters.constants import (
     CHAPTER_RE,
     ESSAY_RE,
     EXTRA_RE,
@@ -28,7 +28,7 @@ from src.chapters.constants import (
     VOLUME_RE,
     ChapterConfig,
 )
-from src.chapters.models import ChapterCandidate, ChapterLevel
+from src.utils.chapters.models import ChapterCandidate, ChapterLevel
 
 # 按优先级排列的层级正则：(层级, 正则, 标签组号, 编号组号, 内容组号)
 _LEVEL_PATTERNS: list[tuple[ChapterLevel, re.Pattern[str], int, int | None, int]] = [
