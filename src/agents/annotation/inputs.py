@@ -416,8 +416,7 @@ class DialogueCandidate(StrictModel):
     """2026-08-07 用于系统保存对话候选真实原文和位置"""
 
     candidate_key: str = Field(min_length=1)
-    # 2026-08-14 M7：允许负 chapter_id（子块运行时 ID，§20），候选不落库
-    chapter_id: int
+    chapter_id: int = Field(gt=0)
     start: int = Field(ge=0)
     end: int = Field(gt=0)
     content: str = Field(min_length=1)

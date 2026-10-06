@@ -55,13 +55,6 @@ EL_PATH_SEP = "/"
 RESERVED_ROOT_KEY = "root"
 
 
-def coerce_emotion_score(value: object) -> int:
-    """emotion 分值容错读取：合同值本就是 -2..2 整数，历史遗留/异常取值按中性 0 计"""
-    if isinstance(value, int) and not isinstance(value, bool) and -2 <= value <= 2:
-        return value
-    return 0
-
-
 # 2026-09-19 id 纪律：实体引用 = run 级 uuid id 或本 章内 write_entity 自定的 el 键。
 # el 由模型指定、登记即绑定（同回合后面的调用直接可用，不等回执）；id 由服务端确定性铸造、
 # 回执与检索视图同值；名称仍是非法引用，在账本解析点按 unknown_el / unknown_entity_id 拒绝。
@@ -154,12 +147,6 @@ from .inputs import (
 from .inputs import (
     paragraph_has_visible_prefix as paragraph_has_visible_prefix,
 )
-from .outputs import (  # noqa: E402
-    AgentRunAudit as AgentRunAudit,
-)
-from .outputs import (
-    AgentRunResult as AgentRunResult,
-)
 from .outputs import (
     BoundChapterAnnotation as BoundChapterAnnotation,
 )
@@ -176,12 +163,6 @@ from .outputs import (
     BoundParagraphLabel as BoundParagraphLabel,
 )
 from .outputs import (
-    CrossChapterLink as CrossChapterLink,
-)
-from .outputs import (
-    PendingCase as PendingCase,
-)
-from .outputs import (
     SourceReference as SourceReference,
 )
 from .outputs import (
@@ -189,9 +170,6 @@ from .outputs import (
 )
 from .vocabulary import (  # noqa: E402
     RELATION_DEFINITIONS as RELATION_DEFINITIONS,
-)
-from .vocabulary import (
-    CaseType as CaseType,
 )
 from .vocabulary import (
     Confidence as Confidence,
