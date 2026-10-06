@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import replace
-from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -13,8 +12,6 @@ from sqlalchemy import select
 from src.agents.annotation.candidates import extract_dialogue_candidates
 from src.agents.annotation.identity import stable_digest
 from src.agents.annotation.schema import (
-    AgentRunAudit,
-    AgentRunResult,
     BoundChapterAnnotation,
     BoundCharacterObservation,
     BoundDialogue,
@@ -25,13 +22,11 @@ from src.agents.annotation.schema import (
     EventParticipantInput,
     RelationInput,
 )
-from src.chunking.chunker import Chunk as ChunkerChunk
-from src.chunking.chunker import split_chunk_paragraphs
 from src.storage.db import get_session_factory
 from src.storage.models import Chapter, Novel, Paragraph
 from src.storage.repositories import ChapterRepository, RunRepository
-from src.storage.repositories.formal_chapter import FormalChapterRepository
-from src.storage.repositories.pipeline_source import formal_receipt, freeze_formal_source
+from src.storage.text_units import Chunk as ChunkerChunk
+from src.workflows.paragraphs import split_chunk_paragraphs
 
 
 def create_run_with_chunks(
@@ -238,16 +233,25 @@ def persist_chapter_annotation(
     events: list[dict[str, Any]] | None = None,
     foreshadowings: list[dict[str, Any]] | None = None,
 ) -> str:
-    """章标注经冻结原文、工作租约、不可变提交和 cutoff 发布生成读模型"""
+    """通过 Agent 与三个域保存一份真实 solo work，供消费端回归读取"""
     chapter_row = session.execute(
         select(Chapter).where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id)
     ).scalar_one_or_none()
     if chapter_row is None or chapter_row.text is None:
         raise ValueError(f"章节没有原文: run_id={run_id} chapter_id={chapter_id}")
     chapter_text_by_id = {chapter_id: str(chapter_row.text)}
-    paragraph_id = session.execute(select(Paragraph.paragraph_id).where(
-        Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id,
-    ).order_by(Paragraph.paragraph_id)).scalars().first()
+    paragraph_id = (
+        session.execute(
+            select(Paragraph.paragraph_id)
+            .where(
+                Paragraph.run_id == run_id,
+                Paragraph.chapter_id == chapter_id,
+            )
+            .order_by(Paragraph.paragraph_id)
+        )
+        .scalars()
+        .first()
+    )
     candidate_by_content: dict[tuple[int, str], tuple[int, Any]] = {}
     for chapter_id, chapter_text in chapter_text_by_id.items():
         for candidate_index, candidate in enumerate(extract_dialogue_candidates(chapter_id, chapter_text), start=1):
@@ -411,8 +415,12 @@ def persist_chapter_annotation(
                 }
             )
     annotation_id = commit_test_annotation(
-        session, run_id=run_id, chapter_id=chapter_id, annotation=chapter_annotations[0],
-        entity_ops=entity_ops, relation_assert_ops=relation_assert_ops,
+        session,
+        run_id=run_id,
+        chapter_id=chapter_id,
+        annotation=chapter_annotations[0],
+        entity_ops=entity_ops,
+        relation_assert_ops=relation_assert_ops,
     )
     for resolution in continuity_resolutions or []:
         commit_test_relation_resolution(session, run_id=run_id, chapter_id=chapter_id, **resolution)
@@ -420,28 +428,112 @@ def persist_chapter_annotation(
 
 
 def commit_test_annotation(
-    session: Any, *, run_id: str, chapter_id: int, annotation: BoundChapterAnnotation,
+    session: Any,
+    *,
+    run_id: str,
+    chapter_id: int,
+    annotation: BoundChapterAnnotation,
     entity_ops: list[dict[str, Any]] | None = None,
     relation_assert_ops: list[dict[str, Any]] | None = None,
 ) -> str:
-    """测试正式产出使用确定性回执、不可变提交和投影发布"""
-    session.commit()
-    factory = get_session_factory()
-    payload = next(item for item in freeze_formal_source(factory, run_id) if item["chapter_id"] == chapter_id)
-    receipt = formal_receipt(run_id, payload)
-    result = AgentRunResult(
-        run_id=run_id, chapter_id=chapter_id, annotation=annotation,
-        entity_ops=entity_ops or [], relation_assert_ops=relation_assert_ops or [],
-        audit=AgentRunAudit(allow_future_context=True, write_records=[], authorized_text_paragraph_ids=[]),
+    """夹具直接使用 work 和域保存接口，不构造旧冻结、命令或章收尾"""
+    from src.agents.annotation.agent import AnnotationAgent, WorkExecution
+    from src.agents.annotation.ledger import AnnotationToolLedger
+    from src.agents.annotation.paragraphs import build_chapter_paragraph_info
+    from src.agents.annotation.subagent_ir import SubagentAnnotation
+    from src.agents.annotation.work import WorkReceipt, annotation_work_id
+    from src.case_pool import CasePool
+    from src.event_bus import EventBus
+    from src.event_trees.trees import EventTrees
+    from src.fact_graph.graph import FactGraph
+    from src.storage.models import AnalysisOutput, AnnotationWork
+
+    chapter = session.get(Chapter, (chapter_id, run_id))
+    paragraphs = list(
+        session.execute(
+            select(Paragraph)
+            .where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id)
+            .order_by(Paragraph.paragraph_index)
+        ).scalars()
     )
-    annotation_id = FormalChapterRepository(factory).commit(receipt, result)
-    publish_test_cutoff(session, run_id)
-    return annotation_id
+    work_id = annotation_work_id(run_id, chapter_id, "solo")
+    invocation = uuid4().hex
+    payload = {
+        "chapter_id": chapter_id,
+        "chapter_sequence": chapter.sequence,
+        "chapter_label": str(chapter.sequence),
+        "chapter_text": chapter.text,
+        "chapter_chars": len(chapter.text),
+        "role": "solo",
+        "paragraphs": paragraphs,
+    }
+    graph, trees, cases = FactGraph(run_scope=run_id), EventTrees(run_id), CasePool(run_id)
+    agent = AnnotationAgent(
+        EventBus(),
+        run_id,
+        get_session_factory(),
+        novel_id="fixture",
+        fact_graph=graph,
+        event_trees=trees,
+        case_pool=cases,
+    )
+    records = list(
+        session.execute(select(AnalysisOutput).where(AnalysisOutput.run_id == run_id)).scalars()
+    )
+    graph.restore_storage(session, records)
+    trees.restore_storage(session, records)
+    graph.begin(work_id, invocation, chapter.sequence, "solo")
+    graph.contributions[(work_id, invocation)]["entity_ops"] = entity_ops or []
+    graph.contributions[(work_id, invocation)]["relation_assert_ops"] = relation_assert_ops or []
+    graph._fold()
+    trees.begin(work_id, invocation)
+    trees.sync((work_id, invocation), chapter_id, annotation.events)
+    cases.begin(work_id, invocation)
+    ledger = AnnotationToolLedger(
+        run_scope=run_id,
+        current_chapter_id=chapter_id,
+        current_chapter_text=chapter.text,
+        allow_future_context=False,
+        graph=graph,
+        paragraph_info=build_chapter_paragraph_info(paragraphs),
+        work_id=work_id,
+        invocation_id=invocation,
+        role="solo",
+    )
+    ledger.metrics_payload = annotation.metrics
+    ledger.bound_payloads = {
+        key: getattr(annotation, key) for key in ("events", "dialogues", "character_observations", "paragraph_labels")
+    }
+    execution = WorkExecution(
+        WorkReceipt(work_id, run_id, "annotation_agent", payload),
+        invocation,
+        ledger,
+        SubagentAnnotation(role="solo"),
+        finished=True,
+    )
+    agent.freeze(execution)
+    session.add(
+        AnnotationWork(
+            work_id=work_id, run_id=run_id, chapter_id=chapter_id, role="solo", invocation_id=invocation, state="saved"
+        )
+    )
+    session.flush()
+    result = agent._save(execution, session)
+    session.commit()
+    agent.close()
+    return result
 
 
 def commit_test_relation_resolution(
-    session: Any, *, run_id: str, chapter_id: int, from_entity: str, to_entity: str,
-    relation_type: str, change_kind: str, reason: str,
+    session: Any,
+    *,
+    run_id: str,
+    chapter_id: int,
+    from_entity: str,
+    to_entity: str,
+    relation_type: str,
+    change_kind: str,
+    reason: str,
 ) -> None:
     """关系历史夹具使用真实关系端点，不假定实体出现在第一章"""
     from src.storage.repositories import GraphRepository
@@ -460,119 +552,202 @@ def commit_test_relation_resolution(
     relation = matches[0]
 
     target = {
-        "domain": "relation", "from_entity_id": relation.from_entity_id,
-        "to_entity_id": relation.to_entity_id, "relation_type": relation_type,
+        "domain": "relation",
+        "from_entity_id": relation.from_entity_id,
+        "to_entity_id": relation.to_entity_id,
+        "relation_type": relation_type,
     }
     resolution = {key: value for key, value in {**target, "change_kind": change_kind}.items() if key != "domain"}
     commit_test_resolution(
-        session, run_id=run_id, chapter_id=chapter_id, target=target, resolution=resolution,
-        issue_kind="关系变化", search_keys=[from_entity, to_entity], reason=reason,
+        session,
+        run_id=run_id,
+        chapter_id=chapter_id,
+        target=target,
+        resolution=resolution,
+        issue_kind="关系变化",
+        search_keys=[from_entity, to_entity],
+        reason=reason,
     )
 
 
 def commit_test_resolution(
-    session: Any, *, run_id: str, chapter_id: int, target: dict[str, Any], resolution: dict[str, Any],
-    issue_kind: str, search_keys: list[str], reason: str,
+    session: Any,
+    *,
+    run_id: str,
+    chapter_id: int,
+    target: dict[str, Any],
+    resolution: dict[str, Any],
+    issue_kind: str,
+    search_keys: list[str],
+    reason: str,
 ) -> None:
-    """连续性夹具使用当前案例 claim、证据校验、订正命令和投影发布"""
-    from src.agents.annotation.identity import text_digest
-    from src.storage.models import CaseHead, ChapterAnnotationRecord, ContinuityCase, Paragraph, TextEvidenceRecord
-    from src.storage.repositories.pipeline_continuity import (
-        PipelineContinuityRepository,
-        continuity_receipt,
+    """关系变化/明确事件连接夹具直接保存领域事实，案例不夹带结构化裁决"""
+    from src.agents.annotation.identity import stable_uuid, text_digest
+    from src.agents.annotation.schema import RELATION_DEFINITIONS
+    from src.fact_graph.graph import FactGraph
+    from src.storage.models import (
+        AnalysisOutput,
+        AnnotationWork,
+        EventEdge,
+        EventNode,
+        GraphFact,
     )
-    from src.storage.repositories.pipeline_projection import PipelineProjectionRepository
+    from src.storage.repositories.graph.identity import relation_id
 
-    factory = get_session_factory()
-    paragraph = session.execute(select(Paragraph).where(
-        Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id,
-    ).order_by(Paragraph.paragraph_id)).scalars().first()
-    if paragraph is None:
-        raise ValueError("连续性夹具缺少本章原文")
-    annotation = session.execute(select(ChapterAnnotationRecord).where(
-        ChapterAnnotationRecord.run_id == run_id, ChapterAnnotationRecord.chapter_id == chapter_id,
-    )).scalar_one()
-    source_hash = annotation.source_manifest_hash
-    evidence_id = session.execute(select(TextEvidenceRecord.evidence_id).where(
-        TextEvidenceRecord.run_id == run_id, TextEvidenceRecord.paragraph_id == paragraph.paragraph_id,
-    )).scalar_one()
-    case_id = stable_digest(run_id, chapter_id, target, resolution)
-    session.add(ContinuityCase(
-        case_id=case_id, run_id=run_id, case_key=case_id, issue_kind=issue_kind,
-        description=reason, search_keys=search_keys, target_ref=target,
-        source_evidence=[evidence_id], originating_annotation_id=annotation.annotation_id,
-        originating_chapter_id=chapter_id,
-    ))
-    session.flush()
-    session.add(CaseHead(case_id=case_id, state_hash=stable_digest("pending", case_id)))
-    session.commit()
-    publish_test_cutoff(session, run_id)
-    cutoff = PipelineProjectionRepository(factory).latest_released(run_id)
-    assert cutoff is not None
-    receipt = continuity_receipt(
-        run_id, case_id, cutoff_hash=cutoff["cutoff_hash"], source_manifest_hash=source_hash,
+    work = session.execute(
+        select(AnnotationWork).where(AnnotationWork.run_id == run_id, AnnotationWork.chapter_id == chapter_id)
+    ).scalar_one()
+    record = session.execute(
+        select(AnalysisOutput).where(AnalysisOutput.work_id == work.work_id)
+    ).scalar_one()
+    paragraph = (
+        session.execute(select(Paragraph).where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id))
+        .scalars()
+        .first()
     )
-    repository = PipelineContinuityRepository(factory)
-    claim = repository.claim(receipt, case_id)
-    repository.commit(
-        receipt, claim, state="resolved", resolution=resolution,
-        reason=reason, evidence=[{
-            "paragraph_id": paragraph.paragraph_id, "char_start": 0, "char_end": len(paragraph.text),
+    evidence = [
+        {
+            "chapter_id": chapter_id,
+            "paragraph_id": paragraph.paragraph_id,
+            "char_start": 0,
+            "char_end": len(paragraph.text),
             "text_hash": text_digest(paragraph.text),
-        }],
-    )
-    publish_test_cutoff(session, run_id)
+        }
+    ]
+    if target["domain"] == "event":
+        parent, child = (
+            session.get(EventNode, resolution["root_event_id"]),
+            session.get(EventNode, resolution["event_id"]),
+        )
+        edge_type = resolution["edge_type"]
+        session.add(
+            EventEdge(
+                edge_id=stable_uuid(run_id, work.work_id, parent.event_id, child.event_id, edge_type),
+                run_id=run_id,
+                source_event_id=parent.event_id,
+                target_event_id=child.event_id,
+                source_chapter_id=parent.chapter_id,
+                target_chapter_id=child.chapter_id,
+                edge_type=edge_type,
+                evidence=evidence,
+                is_active=True,
+                annotation_id=record.output_id,
+                payload_path=f"fixture/{parent.event_id}/{child.event_id}",
+                author_work_id=work.work_id,
+                cause_role=None,
+            )
+        )
+        session.flush()
+        from src.event_trees.trees import EventTrees
+
+        EventTrees(run_id).rebuild_storage(session)
+    elif target["domain"] == "relation":
+        from src.storage.models import GraphEntity
+
+        left, right = (
+            session.get(GraphEntity, target["from_entity_id"]),
+            session.get(GraphEntity, target["to_entity_id"]),
+        )
+        identifier = relation_id(
+            run_id,
+            left.entity_id,
+            right.entity_id,
+            target["relation_type"],
+            RELATION_DEFINITIONS[target["relation_type"]]["directionality"],
+        )
+        op = {
+            "from_entity": left.canonical_name,
+            "to_entity": right.canonical_name,
+            "relation_type": target["relation_type"],
+            "chapter_id": chapter_id,
+            "change_kind": resolution["change_kind"],
+            "reason": reason,
+        }
+        fact_id = stable_digest(run_id, chapter_id, op)
+        session.add(
+            GraphFact(
+                run_id=run_id,
+                chapter_id=chapter_id,
+                fact_id=fact_id,
+                fact_type="relation",
+                subject_entity_id=left.entity_id,
+                predicate="relation",
+                object=None,
+                value=op,
+                participants=[],
+                scope="book",
+                assertion="asserted",
+                confidence="high",
+                content={"kind": "relation", "operation": op, "operation_order": 1000, "relation_id": identifier},
+                effective_chapter_id=chapter_id,
+                source_kind="annotation",
+                annotation_id=record.output_id,
+                payload_path=f"fixture/{fact_id}",
+                author_work_id=work.work_id,
+                evidence=evidence,
+            )
+        )
+        session.flush()
+        FactGraph(run_scope=run_id).rebuild_storage(session)
+    else:
+        raise ValueError("夹具必须指定当前领域有效端点")
+    session.commit()
 
 
 def commit_test_event_link(
-    session: Any, *, run_id: str, chapter_id: int, source_event_id: str, target_event_id: str,
+    session: Any,
+    *,
+    run_id: str,
+    chapter_id: int,
+    source_event_id: str,
+    target_event_id: str,
     edge_type: str = "causal",
 ) -> None:
     """跨树事件关联经当前连续性事务生成，不插入历史格式的因果边"""
     commit_test_resolution(
-        session, run_id=run_id, chapter_id=chapter_id,
+        session,
+        run_id=run_id,
+        chapter_id=chapter_id,
         target={"domain": "event", "event_id": target_event_id},
         resolution={"root_event_id": source_event_id, "event_id": target_event_id, "edge_type": edge_type},
-        issue_kind="因果疑点", search_keys=[source_event_id, target_event_id], reason="原文确认事件关联",
+        issue_kind="因果疑点",
+        search_keys=[source_event_id, target_event_id],
+        reason="原文确认事件关联",
     )
 
 
-def publish_test_cutoff(session: Any, run_id: str) -> None:
-    """发布真实工作快照；纯读接口夹具显式构造无命令的当前发布边界"""
-    from src.storage.models import AnalysisCutoff, AnalysisRun, ChapterAnnotationRecord
-    from src.storage.repositories.pipeline_projection import PipelineProjectionRepository
-    from src.workflows.pipeline_materialization import materialize_cutoff
+def confirm_test_work(session: Any, run_id: str, *, create_missing: bool = False) -> None:
+    """只读查询夹具显式构造实际保存 work，不再设置发布 hash"""
+    from src.storage.models import AnnotationWork
 
-    session.commit()
-    has_work = session.execute(select(ChapterAnnotationRecord.annotation_id).where(
-        ChapterAnnotationRecord.run_id == run_id,
-    ).limit(1)).scalar_one_or_none() is not None
-    if has_work:
-        count = session.execute(select(AnalysisCutoff.cutoff_hash).where(
-            AnalysisCutoff.run_id == run_id,
-        )).scalars().all()
-        projections = PipelineProjectionRepository(get_session_factory())
-        boundary = projections.seal(run_id, round_kind="test", round_number=len(count))
-        while projections.project_next(boundary):
-            pass
-        projections.release(boundary, materialize=materialize_cutoff)
-        session.expire_all()
-        run = session.get(AnalysisRun, run_id)
-        assert run is not None
-        run.annotation_cutoff_hash = boundary
-        session.commit()
-        return
-    manifest = {"formal": [], "commands": [], "cases": [], "dependencies": {}}
-    cutoff_hash = stable_digest("empty-test-visibility", run_id, manifest)
-    if session.get(AnalysisCutoff, cutoff_hash) is None:
-        session.add(AnalysisCutoff(
-            cutoff_hash=cutoff_hash, run_id=run_id, round_kind="test", round_number=0,
-            formal_manifest_hash=stable_digest([]), command_manifest_hash=stable_digest([]),
-            case_manifest_hash=stable_digest([]), manifest=manifest,
-            state="released", released_at=datetime.now(UTC),
-        ))
-    run = session.get(AnalysisRun, run_id)
-    if run is None:
-        raise ValueError("测试分析不存在")
-    run.annotation_cutoff_hash = cutoff_hash
+    saved = set(session.execute(select(AnnotationWork.chapter_id).where(AnnotationWork.run_id == run_id)).scalars())
+    for chapter in session.execute(select(Chapter).where(Chapter.run_id == run_id)).scalars().all():
+        paragraphs_exist = (
+            session.execute(
+                select(Paragraph.paragraph_id).where(
+                    Paragraph.run_id == run_id, Paragraph.chapter_id == chapter.chapter_id
+                )
+            ).first()
+            is not None
+        )
+        from src.storage.models import EventNode, GraphEntity
+
+        graph_exists = (
+            session.execute(select(GraphEntity.entity_id).where(GraphEntity.run_id == run_id)).first() is not None
+        )
+        event_exists = session.execute(select(EventNode.event_id).where(EventNode.run_id == run_id)).first() is not None
+        if chapter.chapter_id not in saved and paragraphs_exist and (create_missing or graph_exists or event_exists):
+            commit_test_annotation(
+                session,
+                run_id=run_id,
+                chapter_id=chapter.chapter_id,
+                annotation=BoundChapterAnnotation(
+                    metrics=ChapterMetricsInput(
+                        summary=chapter.text or "夹具", emotional_valence=0, narrative_function="铺垫"
+                    ),
+                    character_observations=[],
+                    dialogues=[],
+                    events=[],
+                ),
+            )
     session.commit()

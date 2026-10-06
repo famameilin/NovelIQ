@@ -261,8 +261,8 @@ def reset_capacity_and_event_bus() -> Generator[None, None, None]:
         进程内单例状态；不复位会让后续测试的派发选举被残留值扭曲，
         全量套件下表现为调度类测试偶发超时或断言计数偏差。
     """
-    from src.agents.event_bus import EVENT_BUS
-    from src.agents.model_capacity import MODEL_CAPACITY
+    from src.event_bus import EVENT_BUS
+    from src.model_pool.capacity import MODEL_CAPACITY
 
     MODEL_CAPACITY.reset()
     EVENT_BUS.reset()
@@ -317,7 +317,7 @@ def pipeline_run_cleanup(configured_model_pool: None) -> Generator[None, None, N
     """隔离测试 run 与进程内容量位账本，不能让前一测试占用后续测试的全局槽位"""
     from sqlalchemy import select
 
-    from src.agents.model_capacity import MODEL_CAPACITY
+    from src.model_pool.capacity import MODEL_CAPACITY
     from src.storage.db import get_session_factory
     from src.storage.models import AnalysisRun
 
@@ -358,7 +358,7 @@ def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
 
     from src.api.dependencies import get_task_manager
     from src.api.main import app
-    from src.api.services.event_manager import event_manager
+    from src.sse.manager import event_manager
 
     get_task_manager().reset_for_testing()
     event_manager.reset_for_testing()

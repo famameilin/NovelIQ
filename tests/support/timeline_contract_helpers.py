@@ -76,20 +76,6 @@ def create_timeline_contract_scenario(
     run_repo = RunRepository(db_session)
     run_repo.update_run_status(run_id, "completed")
 
-    from src.storage.repositories.stats.summaries import insert_chapter_summary
-
-    for chapter_id, summary in enumerate(
-        [
-            "顾承渊登场",
-            "苏映雪现身",
-            "顾承渊与苏映雪结盟",
-            "苏映雪离场",
-            "顾承渊独自前行",
-        ],
-        start=1,
-    ):
-        insert_chapter_summary(db_session, run_id, chapter_id, summary)
-
     # 2026-08-14 段落化：导出核心结果走段落曲线，场景同步插入段落曲线行
     # （每段一行，与 5 个 chunk 一一对应；章张力 = 段内 surface_tension 均值，
     # 时间轴测试据此断言 tension_curve）
@@ -254,7 +240,7 @@ def create_timeline_contract_scenario(
         focus_characters=[hero_name],
         main_characters=[hero_name, rival_name],
         core_cast=[hero_name, rival_name, organization_name],
-        topic_labels=["结盟与决裂"],
+        topic_labels={'0': '结盟与决裂'},
     )
 
     return TimelineContractScenario(
