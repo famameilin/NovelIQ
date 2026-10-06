@@ -12,6 +12,9 @@ export type SSEEventType =
   | "task_complete"
   | "task_error"
   | "task_cancelled"
+  | "work_reset"
+  | "task_reset"
+  | "chapter_reset"
   | "pipeline_progress"
   | "reconnect_required"
   | "message";
@@ -107,6 +110,9 @@ export function useSSEListener(
       "task_complete",
       "task_error",
       "task_cancelled",
+      "work_reset",
+      "task_reset",
+      "chapter_reset",
       "pipeline_progress",
       "reconnect_required",
       "message",
@@ -118,6 +124,8 @@ export function useSSEListener(
       eventSource.addEventListener(eventType, (event: MessageEvent) => {
         // 只记录非空的 lastEventId（后端按序发送 id: 字段）
         if (event.lastEventId && taskId) {
+          const previous = Number(lastSeqByTask.get(taskId) ?? 0);
+          if (Number(event.lastEventId) <= previous) return;
           lastSeqByTask.set(taskId, event.lastEventId);
         }
         let data: unknown;

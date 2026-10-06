@@ -11,6 +11,7 @@ import type {
   StreamEventData,
   ErrorData,
 } from "@/api/streamTypes";
+import { buildStreamExecutionScope } from "@/api/streamTypes";
 import type { TaskStatusResponse } from "@/api/types";
 
 const SSE_URL = appConfig.apiBaseUrl;
@@ -61,7 +62,7 @@ function isMockEnabled(): boolean {
 }
 
 /** 将同一流的连续输出合并进批量缓冲，减少后台恢复后的逐 token 刷新 */
-function buildLLMOutputBufferKey(data: Pick<StreamEventData, "action" | "stage" | "sub_stage" | "chapter_id" | "stream_id">): string {
+function buildLLMOutputBufferKey(data: Pick<StreamEventData, "action" | "stage" | "sub_stage" | "chapter_id" | "stream_id" | "invocation_id">): string {
   if (!data.stream_id) {
     throw new Error("LLM 流事件缺少 stream_id");
   }
@@ -71,6 +72,7 @@ function buildLLMOutputBufferKey(data: Pick<StreamEventData, "action" | "stage" 
     data.sub_stage || "default",
     String(data.chapter_id ?? 0),
     data.stream_id,
+    data.invocation_id || "",
   ].join("|");
 }
 
@@ -97,6 +99,8 @@ export function useAnalysisStatus(
     setTaskId,
     updateProgress,
     appendLLMOutput,
+    resetWorkOutput,
+    resetChapterOutput,
     setError,
     setStageDuration,
     reset,
@@ -107,6 +111,10 @@ export function useAnalysisStatus(
   const prevStatusRef = useRef<string | null>(null);
   const stageStartTimeRef = useRef<number | null>(null);
   const llmOutputBufferRef = useRef<Map<string, StreamEventData>>(new Map());
+  const executionRef = useRef(new Map<string, string>());
+  const retiredExecutionsRef = useRef(new Map<string, Set<string>>());
+  const executionChaptersRef = useRef(new Map<string, number>());
+  const executionTaskRef = useRef<string | null>(taskId);
   const flushTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const hasConnectedOnceRef = useRef(false);
   const hasHydratedTaskStatusRef = useRef(false);
@@ -266,6 +274,7 @@ export function useAnalysisStatus(
         sub_stage: eventData.sub_stage,
         chapter_id: eventData.chapter_id,
         stream_id: eventData.stream_id,
+        invocation_id: eventData.invocation_id,
       });
       const existing = llmOutputBufferRef.current.get(bufferKey);
       if (existing) {
@@ -293,9 +302,50 @@ export function useAnalysisStatus(
       const eventData = data as StreamEventData;
 
       switch (type) {
+        case "task_reset":
+          flushBufferedLLMOutputs();
+          setError(null);
+          prevStatusRef.current = null;
+          void syncTaskStatus();
+          break;
+        case "chapter_reset":
+          for (const [scope, invocation] of executionRef.current) {
+            if (executionChaptersRef.current.get(scope) === eventData.chapter_id) {
+              const retired = new Set(retiredExecutionsRef.current.get(scope));
+              retired.add(invocation);
+              retiredExecutionsRef.current.set(scope, retired);
+              executionRef.current.delete(scope);
+            }
+          }
+          for (const [key, value] of llmOutputBufferRef.current) {
+            if (value.stage === eventData.stage && value.chapter_id === eventData.chapter_id) llmOutputBufferRef.current.delete(key);
+          }
+          resetChapterOutput(eventData);
+          break;
+        case "work_reset": {
+          const scope = buildStreamExecutionScope(eventData);
+          const invocation = eventData.invocation_id;
+          if (!invocation || executionRef.current.get(scope) === invocation) break;
+          if (invocation && retiredExecutionsRef.current.get(scope)?.has(invocation)) break;
+          const previous = executionRef.current.get(scope);
+          if (invocation) {
+            if (previous && previous !== invocation) {
+              const retired = new Set(retiredExecutionsRef.current.get(scope));
+              retired.add(previous);
+              retiredExecutionsRef.current.set(scope, retired);
+            }
+            executionRef.current.set(scope, invocation);
+            executionChaptersRef.current.set(scope, eventData.chapter_id ?? 0);
+          }
+          for (const [key, value] of llmOutputBufferRef.current) {
+            if (buildStreamExecutionScope(value) === scope) llmOutputBufferRef.current.delete(key);
+          }
+          resetWorkOutput(eventData);
+          break;
+        }
         case "pipeline_progress": {
           const payload = data as { event_type?: string };
-          if (payload.event_type === "cutoff_released") {
+          if (payload.event_type === "work_saved") {
             void queryClient.invalidateQueries({ queryKey: ["pipeline", novelId, taskId] });
           }
           break;
@@ -307,6 +357,7 @@ export function useAnalysisStatus(
           break;
 
         case "stage_progress":
+          if (eventData.stage === "annotate") void queryClient.invalidateQueries({queryKey: ["pipeline", novelId, taskId]});
           _handleStageChange(eventData);
           break;
 
@@ -322,13 +373,20 @@ export function useAnalysisStatus(
 
         case "llm_output":
         case "llm_thinking":
-        case "tool_call":
+        case "tool_call": {
+          const current = executionRef.current.get(buildStreamExecutionScope(eventData));
+          if (eventData.work_id && !current) break;
+          if (current && current !== eventData.invocation_id) break;
+          const retired = retiredExecutionsRef.current.get(buildStreamExecutionScope(eventData));
+          if (retired?.has(eventData.invocation_id ?? "") || retired?.size && !current) break;
           bufferLLMOutput({
             action: eventData.action,
             stage: eventData.stage,
             sub_stage: eventData.sub_stage,
             chapter_id: eventData.chapter_id,
             stream_id: eventData.stream_id,
+            work_id: eventData.work_id,
+            invocation_id: eventData.invocation_id,
             current: eventData.current,
             total: eventData.total,
             percent: eventData.percent,
@@ -338,6 +396,7 @@ export function useAnalysisStatus(
             status: eventData.status ?? null,
           });
           break;
+        }
 
         case "task_error":
           flushBufferedLLMOutputs();
@@ -383,8 +442,8 @@ export function useAnalysisStatus(
           break;
       }
     },
-    [bufferLLMOutput, flushBufferedLLMOutputs, _handleStageChange, setError, setStageDuration, updateProgress,
-      queryClient, novelId, taskId],
+    [bufferLLMOutput, flushBufferedLLMOutputs, _handleStageChange, setError, setStageDuration, updateProgress, resetWorkOutput,
+      queryClient, novelId, taskId, syncTaskStatus, resetChapterOutput],
   );
 
   const sseUrl =
@@ -420,6 +479,12 @@ export function useAnalysisStatus(
   }, [enabled, flushBufferedLLMOutputs, isConnected, setConnected, syncTaskStatus]);
 
   useEffect(() => {
+    if (executionTaskRef.current !== taskId) {
+      executionTaskRef.current = taskId;
+      executionRef.current.clear();
+      retiredExecutionsRef.current.clear();
+      executionChaptersRef.current.clear();
+    }
     if (taskId && novelId) {
       setTaskId(taskId);
       prevStatusRef.current = null;

@@ -1,6 +1,7 @@
 /** 管理任务进度与多流 LLM 输出状态 */
 import { create } from "zustand";
 import type { StreamEventData, ToolCallStatus } from "@/api/streamTypes";
+import { buildStreamExecutionScope } from "@/api/streamTypes";
 import { appConfig } from "@/config";
 
 /** 工具调用条目：工具名 + 状态 + 描述 */
@@ -27,6 +28,8 @@ export interface LLMStreamGroup {
   subStage: string;
   chapterId: number;
   streamId: string;
+  workId?: string | null;
+  invocationId?: string | null;
   outputText: string;
   thinkingText: string;
   outputTotalChars: number;
@@ -50,12 +53,17 @@ interface StreamState {
   error: string | null;
   /** 2026-08-14 D5：resume 轮次信号，每次 resetStreamForTask 自增，消费方据此重置内部缓冲 */
   resumeEpoch: number;
+  currentInvocations: Map<string, string>;
+  retiredInvocations: Map<string, Set<string>>;
+  executionChapters: Map<string, number>;
 
   setConnected: (connected: boolean) => void;
   setTaskId: (taskId: string | null) => void;
   /** 2026-08-14 D5：无条件重置数据并设置任务（resume 同 task_id 开新轮时使用） */
   resetStreamForTask: (taskId: string | null) => void;
   updateProgress: (progress: StreamEventData) => void;
+  resetWorkOutput: (data: StreamEventData) => void;
+  resetChapterOutput: (data: StreamEventData) => void;
   appendLLMOutput: (data: StreamEventData) => void;
   setActiveStreamSelection: (scopeKey: string, groupKey: string) => void;
   setStageDuration: (stage: string, duration: number) => void;
@@ -78,11 +86,12 @@ export function buildLLMOutputGroupKey(data: {
   chapter_id: number;
   sub_stage: string;
   stream_id: string;
+  invocation_id?: string | null;
 }): string {
   if (!data.stream_id) {
     throw new Error("LLM 流事件缺少 stream_id");
   }
-  return `${buildLLMOutputScopeKey(data)}-${data.stream_id}`;
+  return `${buildLLMOutputScopeKey(data)}-${data.stream_id}${data.invocation_id ? `-${data.invocation_id}` : ""}`;
 }
 
 /** 将单条流输出裁剪到固定字符数和行数上限内 */
@@ -296,6 +305,9 @@ const initialState = {
   stageDurations: new Map<string, number>(),
   error: null,
   resumeEpoch: 0,
+  currentInvocations: new Map<string, string>(),
+  retiredInvocations: new Map<string, Set<string>>(),
+  executionChapters: new Map<string, number>(),
 };
 
 export const useStreamStore = create<StreamState>()((set) => ({
@@ -316,19 +328,24 @@ export const useStreamStore = create<StreamState>()((set) => ({
         activeStreamSelections: new Map<string, string>(),
         streamSelectionModes: new Map<string, "auto" | "manual">(),
         stageDurations: new Map<string, number>(),
+        currentInvocations: new Map<string, string>(),
+        retiredInvocations: new Map<string, Set<string>>(),
+        executionChapters: new Map<string, number>(),
         error: null,
       };
     }),
 
-  // 2026-08-14 D5：resume 是"同 task_id 开新轮"，setTaskId 对同 id 幂等不重置；
-  // 这里无条件清空旧轮数据并推进 resumeEpoch，供 useAnalysisStatus 重置内部缓冲
+  // 同任务恢复保留有效 work 展示，真正重跑的 work 由实际 work_reset 精确替换
   resetStreamForTask: (taskId) =>
     set((state) => ({
       currentTaskId: taskId,
       progress: null,
-      llmOutputs: new Map<string, LLMStreamGroup>(),
-      activeStreamSelections: new Map<string, string>(),
-      streamSelectionModes: new Map<string, "auto" | "manual">(),
+      llmOutputs: state.currentTaskId === taskId ? state.llmOutputs : new Map<string, LLMStreamGroup>(),
+      activeStreamSelections: state.currentTaskId === taskId ? state.activeStreamSelections : new Map<string, string>(),
+      streamSelectionModes: state.currentTaskId === taskId ? state.streamSelectionModes : new Map<string, "auto" | "manual">(),
+      currentInvocations: state.currentTaskId === taskId ? state.currentInvocations : new Map<string, string>(),
+      retiredInvocations: state.currentTaskId === taskId ? state.retiredInvocations : new Map<string, Set<string>>(),
+      executionChapters: state.currentTaskId === taskId ? state.executionChapters : new Map<string, number>(),
       stageDurations: new Map<string, number>(),
       error: null,
       resumeEpoch: state.resumeEpoch + 1,
@@ -354,8 +371,68 @@ export const useStreamStore = create<StreamState>()((set) => ({
       };
     }),
 
+  resetWorkOutput: (data) => set((state) => {
+    if (!data.invocation_id) return state;
+    const executionScope = buildStreamExecutionScope(data);
+    if (data.invocation_id && state.retiredInvocations.get(executionScope)?.has(data.invocation_id)) return state;
+    if (state.currentInvocations.get(executionScope) === data.invocation_id) return state;
+    const currentInvocations = new Map(state.currentInvocations);
+    const executionChapters = new Map(state.executionChapters);
+    const retiredInvocations = new Map(state.retiredInvocations);
+    if (data.invocation_id) {
+      const previous = currentInvocations.get(executionScope);
+      if (previous && previous !== data.invocation_id) {
+        retiredInvocations.set(executionScope, new Set([...(retiredInvocations.get(executionScope) ?? []), previous]));
+      }
+      currentInvocations.set(executionScope, data.invocation_id);
+      executionChapters.set(executionScope, data.chapter_id ?? 0);
+    }
+    const scope = buildLLMOutputScopeKey({stage: data.stage, chapter_id: data.chapter_id ?? 0, sub_stage: data.sub_stage});
+    const outputs = new Map(state.llmOutputs);
+    for (const [key, group] of outputs) {
+      if (data.work_id ? group.workId === data.work_id
+        : group.stage === data.stage && group.chapterId === (data.chapter_id ?? 0) && group.subStage === data.sub_stage) {
+        outputs.delete(key);
+      }
+    }
+    const selections = new Map(state.activeStreamSelections);
+    const modes = new Map(state.streamSelectionModes);
+    selections.delete(scope);
+    modes.delete(scope);
+    return {llmOutputs: outputs, activeStreamSelections: selections, streamSelectionModes: modes,
+      currentInvocations, retiredInvocations, executionChapters};
+  }),
+  resetChapterOutput: (data) => set((state) => {
+    const currentInvocations = new Map(state.currentInvocations);
+    const retiredInvocations = new Map(state.retiredInvocations);
+    for (const [scope, invocation] of currentInvocations) {
+      if (state.executionChapters.get(scope) === data.chapter_id) {
+        retiredInvocations.set(scope, new Set([...(retiredInvocations.get(scope) ?? []), invocation]));
+        currentInvocations.delete(scope);
+      }
+    }
+    const outputs = new Map(state.llmOutputs);
+    const selections = new Map(state.activeStreamSelections);
+    const modes = new Map(state.streamSelectionModes);
+    for (const [key, group] of outputs) {
+      if (group.stage === data.stage && group.chapterId === data.chapter_id) {
+        outputs.delete(key);
+        const scope = buildLLMOutputScopeKey({stage: group.stage, chapter_id: group.chapterId, sub_stage: group.subStage});
+        selections.delete(scope);
+        modes.delete(scope);
+      }
+    }
+    return {llmOutputs: outputs, activeStreamSelections: selections, streamSelectionModes: modes,
+      currentInvocations, retiredInvocations};
+  }),
   appendLLMOutput: (data) =>
     set((state) => {
+      const executionScope = buildStreamExecutionScope(data);
+      const current = state.currentInvocations.get(executionScope);
+      if (data.work_id && !current) return state;
+      if (current && current !== data.invocation_id) return state;
+      const retired = state.retiredInvocations.get(executionScope);
+      if (retired?.has(data.invocation_id ?? "") || retired?.size && !current) return state;
       if (!data.stream_id) {
         throw new Error("LLM 流事件缺少 stream_id");
       }
@@ -369,6 +446,7 @@ export const useStreamStore = create<StreamState>()((set) => ({
         chapter_id: data.chapter_id ?? 0,
         sub_stage: data.sub_stage,
         stream_id: data.stream_id,
+        invocation_id: data.invocation_id,
       });
       const now = Date.now();
       const newOutputs = new Map(state.llmOutputs);
@@ -379,6 +457,8 @@ export const useStreamStore = create<StreamState>()((set) => ({
         subStage: data.sub_stage,
         chapterId: data.chapter_id ?? 0,
         streamId: data.stream_id,
+        workId: data.work_id,
+        invocationId: data.invocation_id,
         outputText: existing?.outputText ?? "",
         thinkingText: existing?.thinkingText ?? "",
         outputTotalChars: existing?.outputTotalChars ?? 0,

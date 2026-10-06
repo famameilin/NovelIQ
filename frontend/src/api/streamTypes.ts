@@ -15,6 +15,9 @@ export type SSEEventType =
   | "task_complete"
   | "task_error"
   | "task_cancelled"
+  | "work_reset"
+  | "task_reset"
+  | "chapter_reset"
   | "pipeline_progress"
   | "reconnect_required"
   | "message";
@@ -26,6 +29,9 @@ export interface StreamEventData {
   stage: string;         // 预处理 / 标注 / 聚合 / 主题建模 / 诊断
   sub_stage: string;     // 第一阶段 / 第二阶段 / 第三阶段 / 第四阶段
   chapter_id?: number | null;  // 当前章节 ID（annotate 阶段有效）；HTTP 回填/终态事件不携带真实章节
+  work_id?: string | null;
+  invocation_id?: string | null;
+  message_id?: string | null;
   stream_id?: string | null; // llm_output/llm_thinking/tool_call 事件的显式流标识
   current: number;       // 当前章节编号
   total: number;        // 总章节数
@@ -39,4 +45,9 @@ export interface StreamEventData {
 export interface ErrorData {
   error: string;
   stage?: string;
+}
+
+/** 无 work 的诊断消息按实际阶段归属；work 身份不随模型请求改变 */
+export function buildStreamExecutionScope(data: Pick<StreamEventData, "work_id" | "stage" | "chapter_id" | "sub_stage">): string {
+  return data.work_id || `${data.stage}:${data.chapter_id || 0}:${data.sub_stage || ""}`;
 }
