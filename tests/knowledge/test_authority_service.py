@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.fact_graph.authority import KnowledgeGraphAuthorityService
 from src.storage.models import GraphRelation
 from tests.support.chapter_annotation_helpers import (
     character_fact,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.relation_network_metrics import summarize_relation_network
+from src.metrics.relation_network_metrics import summarize_relation_network
 
 from .types import (
     ConfirmedRelation,

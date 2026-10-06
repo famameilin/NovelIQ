@@ -4,7 +4,7 @@
 说明: 依据"同一人物"关系（relation_semantics=same_character）与实体节点属性
 is_representative 标记，把别名实体归一到代表实体。所有读侧消费者（图谱快照、
 角色榜、时间轴、聚合、诊断、导出）统一复用本模块，避免各自重复实现合并语义。
-代表标记由章节完成事务全量重选（见 storage/repositories/graph/election.py）。
+代表按当前实体标记或分量内稳定身份确定
 """
 
 from __future__ import annotations
@@ -46,8 +46,7 @@ def build_alias_resolution(
     """
     2026-08-11 用于从 active 的同一人物关系构建别名归并映射
 
-    代表 = 实体 attributes.is_representative=true 的节点；无标记（旧数据/防御）时
-    取分量内最小 entity_id，与完成事务选举语义对齐。
+    代表优先使用实体 is_representative 标记，否则按分量内最小 entity_id 确定
     """
     entity_by_id = {str(entity.entity_id): entity for entity in entities}
     parent: dict[str, str] = {}
@@ -57,15 +56,6 @@ def build_alias_resolution(
             parent[node] = find(parent[node])
         return parent[node]
 
-    for identifier, candidate_entity in entity_by_id.items():
-        target = str(candidate_entity.attributes.get("canonical_entity_id", ""))
-        if target and target != identifier and target in entity_by_id and candidate_entity.attributes.get(
-            "identity_status",
-        ) != "contested":
-            parent.setdefault(identifier, identifier)
-            parent.setdefault(target, target)
-            parent[find(identifier)] = find(target)
-
     for relation in relations:
         if not relation.is_active:
             continue
@@ -73,9 +63,6 @@ def build_alias_resolution(
             continue
         from_id = str(relation.from_entity_id)
         to_id = str(relation.to_entity_id)
-        if any(entity_by_id[identifier].attributes.get("identity_cutoff") for identifier in (from_id, to_id)
-               if identifier in entity_by_id):
-            continue
         parent.setdefault(from_id, from_id)
         parent.setdefault(to_id, to_id)
         root_a, root_b = find(from_id), find(to_id)
@@ -84,8 +71,6 @@ def build_alias_resolution(
 
     # P11：LLM same_character 声明之外，叠加高精度名称启发式边（子串/姓氏片段）
     for from_id, to_id in find_heuristic_character_edges(entities):
-        if any(entity_by_id[identifier].attributes.get("identity_cutoff") for identifier in (from_id, to_id)):
-            continue
         parent.setdefault(from_id, from_id)
         parent.setdefault(to_id, to_id)
         root_a, root_b = find(from_id), find(to_id)

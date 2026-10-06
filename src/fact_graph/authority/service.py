@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from src.api.exceptions import GraphReadinessError
-from src.models.local.character_reference_policy import is_global_character_surface_name
+from src.fact_graph.exceptions import GraphReadinessError
 from src.storage.repositories import AnnotationRepository, GraphRepository
 from src.storage.repositories.graph import EntitySnapshotRow, GraphChangeRow, RelationSnapshotRow
+from src.utils.character_reference_policy import is_global_character_surface_name
 
 from .alias import AliasResolution, build_alias_resolution
 from .graph_outputs import build_graph_quality_report, build_graph_shared_summary
@@ -153,12 +153,6 @@ class KnowledgeGraphAuthorityService:
 
     def assert_graph_ready(self, run_id: str) -> None:
         """2026-08-07 用于确认当前 run 至少存在一个成功章节图版本"""
-        from src.storage.repositories.pipeline_visibility import require_released_cutoff
-
-        try:
-            require_released_cutoff(self._graph_repo.session, run_id)
-        except ValueError as exc:
-            raise GraphReadinessError(str(exc)) from exc
         if self._graph_repo.resolve_chapter_boundary(run_id) is None:
             raise GraphReadinessError(f"run 尚无已完成章节图数据: {run_id}")
 

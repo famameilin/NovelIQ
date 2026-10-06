@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.knowledge.authority.alias import build_alias_resolution
-from src.knowledge.authority.alias_heuristics import (
+from src.fact_graph.authority.alias import build_alias_resolution
+from src.fact_graph.authority.alias_heuristics import (
     find_heuristic_character_edges,
     looks_like_alias_name,
 )
