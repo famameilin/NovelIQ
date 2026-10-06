@@ -23,10 +23,11 @@ _ENV_KEYS = ("MODEL_POOL", "DIAGNOSIS_MODEL_ID", "EMBEDDING_MODEL_BASE_URL", "EM
 def isolated_settings(tmp_path: Path, monkeypatch) -> Path:
     """配置文件、单例和环境变量均隔离，测试不使用真实连接"""
     import src.api.routes.settings as routes
+    import src.config.settings_service as settings_service
 
     settings_file = tmp_path / "settings.json"
-    monkeypatch.setattr(routes, "_settings_file_path", lambda: settings_file)
-    monkeypatch.setattr(routes, "_env_file_path", lambda: tmp_path / ".env")
+    monkeypatch.setattr(settings_service, "settings_file_path", lambda: settings_file)
+    monkeypatch.setattr(settings_service, "env_file_path", lambda: tmp_path / ".env")
     saved = deepcopy(routes.settings)
     # 设置接口会经 apply_env_updates_to_process 直写 os.environ（绕过 monkeypatch
     # 追踪），必须整表快照还原，否则泄漏进后续测试的 Settings.from_env()

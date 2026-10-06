@@ -228,9 +228,9 @@ def test_event_forest_returns_404_without_matching_chapter_data(api_client: Test
         title="无事件森林",
     )
     RunRepository(db_session).update_run_status(run_id, "completed")
-    from tests.support.chapter_annotation_helpers import publish_test_cutoff
+    from tests.support.chapter_annotation_helpers import confirm_test_work
 
-    publish_test_cutoff(db_session, run_id)
+    confirm_test_work(db_session, run_id)
     db_session.commit()
 
     response = api_client.get(

@@ -14,13 +14,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import text
 
-from src.api.services.analysis.environment_initializer import EnvironmentInitializer
-from src.api.services.analysis_service import AnalysisService
-from src.api.services.task_manager import TaskManager
 from src.config import settings
 from src.storage.models import Novel
 from src.storage.repositories import RunRepository
 from src.storage.session import DatabaseSession
+from src.work.task_manager import TaskManager
+from src.workflows.analysis.environment_initializer import EnvironmentInitializer
+from src.workflows.service import AnalysisService
 
 
 class _StaticSessionFactory:
@@ -55,7 +55,7 @@ def _insert_novel(db_session, novel_id: str) -> None:
 def _make_service(db_session, *, worker_id: str = "worker-state-machine") -> AnalysisService:
     """构造绑定测试库的 AnalysisService。"""
     return AnalysisService(
-        novel_service=MagicMock(),
+        task_service=MagicMock(),
         task_manager=TaskManager(worker_id=worker_id),
         session_factory=_StaticSessionFactory(db_session),
     )
@@ -124,7 +124,7 @@ def test_disabled_ltp_is_complete_in_resume_chain(monkeypatch) -> None:
         patch("src.storage.repositories.ChapterRepository", return_value=chapter_repo),
         patch("src.storage.repositories.AnnotationRepository", return_value=annotation_repo),
         patch(
-            "src.api.services.analysis.environment_initializer.StatsRepository",
+            "src.workflows.analysis.environment_initializer.StatsRepository",
             return_value=stats_repo,
         ),
     ):
@@ -431,7 +431,7 @@ def test_is_recent_resume_reset_compares_heartbeat_in_utc(db_session) -> None:
     """
     from datetime import UTC, datetime, timedelta
 
-    from src.api.services.analysis_service import _RESUME_RESET_WINDOW_SECONDS
+    from src.workflows.service import _RESUME_RESET_WINDOW_SECONDS
 
     _insert_novel(db_session, "svchb01")
     run_repo = RunRepository(db_session)
@@ -484,7 +484,7 @@ async def test_run_analysis_core_emits_cancelled_event_when_claim_cancelled(db_s
     async def fake_send(task_id: str, event_type: str, data: dict) -> None:
         sent.append((task_id, event_type, data))
 
-    monkeypatch.setattr("src.api.services.analysis_service.event_manager.send", fake_send)
+    monkeypatch.setattr("src.workflows.service.event_manager.send", fake_send)
 
     await service._run_analysis_core(
         task_id=run_id[:8],
@@ -507,7 +507,7 @@ async def test_run_analysis_core_cancel_after_stages_persists_cancelled(db_sessi
 
     2026-10-02 修改: _call_execute_analysis_stages 纯转发包装已内联删除，patch 目标改为 _execute_analysis_stages
     """
-    from src.api.services.analysis.error_handler import AnalysisErrorHandler
+    from src.workflows.analysis.error_handler import AnalysisErrorHandler
 
     _insert_novel(db_session, "svcevt2")
     run_repo = RunRepository(db_session)
@@ -515,7 +515,7 @@ async def test_run_analysis_core_cancel_after_stages_persists_cancelled(db_sessi
     service = _make_service(db_session, worker_id="worker-evt2")
     service.task_manager.create_task(run_id[:8], "svcevt2")
     service.error_handler = AnalysisErrorHandler(
-        novel_service=service.novel_service,
+        task_service=service.task_service,
         task_manager=service.task_manager,
     )
 
@@ -554,7 +554,7 @@ async def test_error_handler_skips_terminal_write_when_run_reclaimed(db_session)
     """
     from datetime import UTC, datetime
 
-    from src.api.services.analysis.error_handler import AnalysisErrorHandler
+    from src.workflows.analysis.error_handler import AnalysisErrorHandler
 
     _insert_novel(db_session, "svcgrd1")
     run_repo = RunRepository(db_session)
@@ -567,7 +567,7 @@ async def test_error_handler_skips_terminal_write_when_run_reclaimed(db_session)
         heartbeat_at=datetime.now(UTC),
     )
     handler = AnalysisErrorHandler(
-        novel_service=MagicMock(),
+        task_service=MagicMock(),
         task_manager=TaskManager(worker_id="worker-old"),
     )
 

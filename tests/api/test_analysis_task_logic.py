@@ -1,10 +1,10 @@
 """
-测试 NovelService 任务判断逻辑
+测试任务读写服务的多任务判断逻辑
 
 创建时间: 2026-03-11
 修改时间: 2026-04-08
-任务: 重写测试以匹配当前 NovelService API
-修改内容: 基于当前 NovelService 实现重写测试，使用依赖注入的 session
+任务: 重写测试以匹配任务读写服务 API
+修改内容: 基于任务读写服务实现重写测试，使用依赖注入的 session
 说明: 只有 1 个 task 时返回，多个 task 时报错
 """
 
@@ -12,13 +12,13 @@ import uuid
 
 import pytest
 
-from src.api.services.novel_service import NovelService
 from src.storage.models import AnalysisRun, Novel
 from src.storage.repositories import RunRepository
+from src.workflows.tasks import TaskService
 
 
-class TestNovelServiceTaskLogic:
-    """测试 NovelService 中多任务判断逻辑"""
+class TestTaskServiceTaskLogic:
+    """测试任务读写服务中多任务判断逻辑"""
 
     @pytest.fixture(autouse=True)
     def setup(self, db_session, tmp_path):
@@ -37,7 +37,7 @@ class TestNovelServiceTaskLogic:
         db_session.add(novel)
         db_session.commit()
 
-        self.service = NovelService(tmp_path)
+        self.service = TaskService()
 
         yield
 
@@ -121,7 +121,7 @@ class TestAnalysisServiceTaskId:
         """设置测试环境"""
         self.db_session = db_session
         self.temp_dir = tmp_path
-        self.service = NovelService(tmp_path)
+        self.service = TaskService()
 
     def test_start_analysis_with_task_id(self) -> None:
         """指定 task_id 启动分析"""

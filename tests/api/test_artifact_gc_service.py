@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.api.services.artifact_gc_service import ArtifactGcService
+from src.work.artifacts import ArtifactGcService
 
 
 def test_delete_task_artifacts_removes_output_logs_and_run_model(monkeypatch, tmp_path: Path) -> None:
@@ -40,7 +40,7 @@ def test_delete_task_artifacts_removes_output_logs_and_run_model(monkeypatch, tm
         return run_model_dir
 
     monkeypatch.setattr(
-        "src.api.services.artifact_gc_service.resolve_run_model_dir",
+        "src.work.artifacts.resolve_run_model_dir",
         resolve_test_run_model_dir,
     )
 

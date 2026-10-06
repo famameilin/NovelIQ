@@ -16,17 +16,18 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.api.models.events import AnalysisEventBus, StreamEvent
-from src.api.routes.sse import sse_endpoint
-from src.api.services.event_manager import event_manager
-from src.api.services.task_manager import TaskManager
+from src.sse.endpoint import sse_endpoint
+from src.sse.events import StreamEvent
+from src.sse.manager import event_manager
+from src.work.events import AnalysisEventBus
+from src.work.task_manager import TaskManager
 
 
 @pytest.fixture(autouse=True)
 def _allow_existing_task(monkeypatch):
     """2026-08-14 P2-11：任务存在性校验默认放行（e2e 使用虚构 task_id）"""
 
-    monkeypatch.setattr("src.api.routes.sse._task_run_belongs_to_novel", lambda task_id, novel_id: True)
+    monkeypatch.setattr("src.sse.endpoint._task_run_belongs_to_novel", lambda task_id, novel_id: True)
     monkeypatch.setattr(event_manager, "_outbox", None)
 
 

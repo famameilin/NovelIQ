@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.api.models.requests import ReanalyzeRequest
-from src.api.services.analysis_service import TASK_KIND_REANALYSIS, AnalysisService
 from src.config import settings
+from src.workflows.schemas import ReanalyzeRequest
+from src.workflows.service import TASK_KIND_REANALYSIS, AnalysisService
 
 
 @pytest.mark.asyncio
@@ -56,7 +56,7 @@ def test_partial_upstream_stage_prevents_reusing_downstream_results(monkeypatch)
     with (
         patch("src.storage.repositories.ChapterRepository", return_value=chapters),
         patch("src.storage.repositories.AnnotationRepository", return_value=annotations),
-        patch("src.api.services.analysis.environment_initializer.StatsRepository", return_value=stats),
+        patch("src.workflows.analysis.environment_initializer.StatsRepository", return_value=stats),
     ):
         result = service.env_initializer.check_stage_completion_status(MagicMock(), "run")
     assert result["skip_preprocess"] and result["skip_annotate"]
