@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
-from src.runtime_env import ModelEnvironment
+from src.config.runtime_env import ModelEnvironment
 
 
 @dataclass

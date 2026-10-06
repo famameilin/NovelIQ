@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
-from src.runtime_env import load_ltp_environment, load_model_environment, load_model_pool_environment
+from src.config.runtime_env import load_ltp_environment, load_model_environment, load_model_pool_environment
 
 from .schemas import (
     LinguisticSettings,

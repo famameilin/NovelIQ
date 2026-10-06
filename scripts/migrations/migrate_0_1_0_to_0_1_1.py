@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from sqlalchemy import Connection, create_engine, inspect, text
 from sqlalchemy.engine import make_url
 
-from src.runtime_env import DatabaseEnvironmentName
+from src.config.runtime_env import DatabaseEnvironmentName
 from src.storage.database_url import resolve_database_url_from_env
 
 VERSION = "0.1.1"

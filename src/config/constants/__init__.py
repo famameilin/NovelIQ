@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from src.config.constants.diagnosis import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
 from src.config.constants.lexicons import LEXICON_DRAFT_KEYS, LEXICON_FILES
 from src.config.constants.progress import STAGE_PROGRESS_MILESTONES
 from src.config.constants.text_normalization import (
@@ -42,4 +43,6 @@ __all__ = [
     "STAGE_PROGRESS_MILESTONES",
     "LEXICON_FILES",
     "LEXICON_DRAFT_KEYS",
+    "GENRE_LABEL_VALUES",
+    "STYLE_LABEL_VALUES",
 ]

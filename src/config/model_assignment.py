@@ -10,8 +10,12 @@ from src.config.schemas.model import WeightedModelSettings
 
 
 def select_annotation_model(
-    key: str, pool: list[WeightedModelSettings], *, previous_model_id: str | None = None,
+    key: str,
+    pool: list[WeightedModelSettings],
+    *,
+    previous_model_id: str | None = None,
     in_flight: Mapping[str, int] | None = None,
+    failures: Mapping[str, int] | None = None,
 ) -> str | None:
     """尝试键决定加权选择；有其他可用模型时不重复失败的模型
 
@@ -26,10 +30,14 @@ def select_annotation_model(
         candidates = [item for item in candidates if in_flight.get(item.model_id, 0) < item.max_in_flight]
         if not candidates:
             return None
-    if previous_model_id is not None and any(item.model_id != previous_model_id for item in candidates):
+    if failures is not None:
+        lowest = min(failures.get(item.model_id, 0) for item in candidates)
+        candidates = [item for item in candidates if failures.get(item.model_id, 0) == lowest]
+    elif previous_model_id is not None and any(item.model_id != previous_model_id for item in candidates):
         candidates = [item for item in candidates if item.model_id != previous_model_id]
-    scale = max(item.weight for item in candidates)
-    weights = [item.weight / scale for item in candidates]
+    effective = [item.weight / (1 + (failures or {}).get(item.model_id, 0)) for item in candidates]
+    scale = max(effective)
+    weights = [weight / scale for weight in effective]
     total = math.fsum(weights)
     fraction = int.from_bytes(hashlib.sha256(key.encode("utf-8")).digest()[:8], "big") / 2**64
     threshold = fraction * total
