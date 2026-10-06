@@ -7,8 +7,6 @@ from __future__ import annotations
 import socket
 import sys
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,44 +26,7 @@ from src.api.app_bootstrap import (
     tabs_router,
     timeline_router,
 )
-
-ORPHAN_TASK_HEARTBEAT_TIMEOUT = timedelta(minutes=5)
-
-
-def _recover_orphaned_tasks() -> tuple[int, int]:
-    """
-    启动时收口上次进程遗留的孤儿任务
-
-    Returns:
-        tuple[int, int]: (failed_count, cancelled_count)
-    """
-    from src.storage.db import get_session
-    from src.storage.repositories import RunRepository
-
-    # 2026-08-13 P2：heartbeat_at 列为无时区 DateTime，落库值统一为 naive UTC 挂钟
-    # （见 task_runtime_persistence_service 写入端），比较参数必须同为 naive UTC，
-    # 避免 aware 参数被 PG 按会话时区转换造成孤儿判定偏移
-    stale_before = (datetime.now(UTC) - ORPHAN_TASK_HEARTBEAT_TIMEOUT).replace(tzinfo=None)
-    with get_session() as session:
-        repo = RunRepository(session)
-        failed_count = repo.mark_running_as_failed(stale_before=stale_before)
-        cancelled_count = repo.mark_cancelling_as_cancelled(stale_before=stale_before)
-        return failed_count, cancelled_count
-
-
-async def _resume_pending_tasks() -> tuple[int, int]:
-    """
-    启动时把 DB 中可恢复的 pending 任务重新接回执行器
-
-    Returns:
-        tuple[int, int]: (scheduled_count, cancelled_count)
-    """
-    from src.api.dependencies import get_novel_service
-    from src.api.routes.analysis import get_task_manager
-    from src.api.services.analysis_service import AnalysisService
-
-    analysis_service = AnalysisService(get_novel_service(), get_task_manager())
-    return await analysis_service.recover_pending_tasks()
+from src.workflows.startup_recovery import recover_orphaned_runs, resume_pending_tasks
 
 
 @asynccontextmanager
@@ -77,36 +38,40 @@ async def lifespan(app: FastAPI):
     from src.storage.db import init_db
 
     init_db()
-    from src.api.services.event_manager import event_manager
+    from src.sse.manager import event_manager
     from src.storage.db import get_session_factory
     from src.storage.repositories.event_outbox import EventOutboxRepository
 
     event_manager.configure_outbox(EventOutboxRepository(lambda: get_session_factory()()))
 
-    # 真正允许降级的只有孤儿任务恢复链路；
+    # 真正允许降级的只有重启遗留任务收口链路；
     # 即便这里失败，也不应掩盖数据库初始化阶段的结构性错误
     try:
-        failed_count, cancelled_count = _recover_orphaned_tasks()
-        scheduled_pending_count, cancelled_pending_count = await _resume_pending_tasks()
+        from src.api.dependencies import get_task_manager, get_task_service
+
+        failed_count, cancelled_count = recover_orphaned_runs()
+        scheduled_pending_count, cancelled_pending_count = await resume_pending_tasks(
+            get_task_service(), get_task_manager()
+        )
         if failed_count > 0:
-            logger.info(f"Successfully cleaned {failed_count} orphaned running task(s)")
+            logger.info(f"Successfully failed {failed_count} running task(s) left by the previous process")
         if cancelled_count > 0:
-            logger.info(f"Successfully finalized {cancelled_count} orphaned cancelling task(s)")
+            logger.info(f"Successfully finalized {cancelled_count} cancelling task(s) left by the previous process")
         if scheduled_pending_count > 0:
             logger.info(f"Successfully rescheduled {scheduled_pending_count} pending task(s) on startup")
         if cancelled_pending_count > 0:
             logger.info(f"Successfully finalized {cancelled_pending_count} pending cancellation(s) on startup")
         if failed_count == 0 and cancelled_count == 0 and scheduled_pending_count == 0 and cancelled_pending_count == 0:
-            logger.debug("No orphaned running/cancelling or pending tasks found on startup")
+            logger.debug("No running/cancelling or pending tasks found on startup")
     except Exception as e:
-        logger.warning(f"Failed to clean up zombie tasks on startup: {e}")
+        logger.warning(f"Failed to clean up tasks left by the previous process on startup: {e}")
 
     try:
         yield
     finally:
         logger.info("FastAPI application shutting down...")
         try:
-            from src.api.services.event_manager import event_manager
+            from src.sse.manager import event_manager
 
             # 正常应用 shutdown 不能把仍在运行的分析任务收口成“用户取消”
             # TaskManager 的运行态缓存仅供当前进程使用，生产停服时由进程退出自然结束；
@@ -118,7 +83,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="小说量化分析 API",
-    version="0.2.0",
+    version="0.2.1",
     description="小说文本量化分析服务的 RESTful API",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -156,7 +121,7 @@ async def health_check():
         return {
             "status": "healthy",
             "service": "novel-qa-api",
-            "version": "0.2.0",
+            "version": "0.2.1",
             "pool": pool_status,
         }
     except Exception as e:
@@ -168,7 +133,7 @@ async def health_check():
             content={
                 "status": "unhealthy",
                 "service": "novel-qa-api",
-                "version": "0.2.0",
+                "version": "0.2.1",
                 "error": "服务暂不可用，请稍后重试",
             },
         )
@@ -182,49 +147,6 @@ app.include_router(tabs_router, prefix="/api")
 app.include_router(timeline_router, prefix="/api")
 app.include_router(settings_router, prefix="/api", tags=["settings"])
 app.include_router(sse_router, prefix="/api", tags=["SSE"])
-
-
-@app.get("/api/debug/asyncio-tasks", include_in_schema=False)
-async def _debug_asyncio_tasks() -> dict[str, list[str]]:
-    """2026-10-03 临时诊断端点：沿 await 链渲染每个任务的真实挂起点（排查调度卡死用）"""
-    import asyncio
-
-    def walk_await_chain(coro: Any, depth: int = 0) -> list[str]:
-        lines: list[str] = []
-        seen: set[int] = set()
-        current: Any = coro
-        while current is not None and depth < 40:
-            marker = id(current)
-            if marker in seen:
-                lines.append("  <cycle>")
-                break
-            seen.add(marker)
-            frame = getattr(current, "cr_frame", None)
-            if frame is None:
-                frame = getattr(current, "gi_frame", None)
-            if frame is None:
-                frame = getattr(current, "ag_frame", None)
-            if frame is not None:
-                lines.append(f"  {frame.f_code.co_filename}:{frame.f_lineno} {frame.f_code.co_name}")
-            else:
-                lines.append(f"  <no frame: {type(current).__name__}>")
-                break
-            current = getattr(current, "cr_await", None)
-            if current is None:
-                current = getattr(current, "gi_yieldfrom", None) if False else None
-            depth += 1
-        return lines
-
-    dumps: list[str] = []
-    for task in asyncio.all_tasks():
-        coro = getattr(task, "_coro", None) or getattr(task, "get_coro", lambda: None)()
-        entry = coro.cr_frame if coro is not None else None
-        head = "unknown"
-        if entry is not None:
-            head = f"{entry.f_code.co_filename}:{entry.f_lineno} {entry.f_code.co_name}"
-        dumps.append(f"{task.get_name()}: {head}\n" + "\n".join(walk_await_chain(coro)))
-    return {"tasks": dumps}
-
 
 register_exception_handlers(app)
 
