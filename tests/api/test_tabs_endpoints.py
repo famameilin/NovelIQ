@@ -523,9 +523,9 @@ def test_graph_network_tab_bundles_snapshot_metrics_and_change_total(api_client:
 def test_graph_network_tab_requires_graph_data(api_client: TestClient, db_session) -> None:
     """无章节图数据时与 /graph 族端点一致返回 409（GraphReadinessError 透传）"""
     novel_id, run_id = _create_graph_fixture_run(db_session, seed_graph=False)
-    from tests.support.chapter_annotation_helpers import publish_test_cutoff
+    from tests.support.chapter_annotation_helpers import confirm_test_work
 
-    publish_test_cutoff(db_session, run_id)
+    confirm_test_work(db_session, run_id)
 
     response = api_client.get(f"/api/novels/{novel_id}/tabs/graph-network", params={"task_id": run_id[:8]})
     assert response.status_code == 409

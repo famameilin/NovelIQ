@@ -15,7 +15,7 @@ from src.api.services.results_export_service import (
     load_export_relation_bundle,
     load_graph_signal_bundle,
 )
-from src.knowledge.authority import (
+from src.fact_graph.authority import (
     CanonicalEntity,
     ExportGraphAuthorityView,
     ExportRelationSnapshot,
@@ -35,9 +35,9 @@ from src.storage.repositories import (
 )
 from tests.support.chapter_annotation_helpers import (
     commit_test_event_link,
+    confirm_test_work,
     create_run_with_chunks,
     persist_chapter_annotation,
-    publish_test_cutoff,
 )
 
 
@@ -206,7 +206,7 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
         style_labels=["严肃"],
         focus_structure="single",
         focus_characters=["沈砚"],
-        topic_labels=["成长"],
+        topic_labels={'0': '成长'},
         main_characters=["沈砚"],
         core_cast=["沈砚"],
     )
@@ -365,7 +365,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(
     )
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["导出测试。"])
-    publish_test_cutoff(db_session, run_id)
+    confirm_test_work(db_session, run_id)
     results_data, missing_fields, novel_name = fetch_all_results_data(
         novel_id=novel_id,
         task_id=run_id[:8],
@@ -395,7 +395,7 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
         style_labels=["严肃"],
         focus_structure="single",
         focus_characters=["沈砚"],
-        topic_labels=["成长"],
+        topic_labels={'0': '成长'},
         main_characters=["沈砚"],
         core_cast=["沈砚"],
     )
@@ -820,7 +820,7 @@ def test_fetch_all_results_data_emits_empty_event_forest_for_unannotated_run(db_
         title="空事件森林",
     )
     db_session.commit()
-    publish_test_cutoff(db_session, run_id)
+    confirm_test_work(db_session, run_id)
 
     _stub_export_sibling_loaders(monkeypatch)
 

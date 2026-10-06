@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from src.api.services.results_queries.graph_metrics import compute_graph_metrics
+from src.api.services.results_queries.graph import compute_graph_metrics
 from src.storage.repositories import GraphRepository, RunRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
@@ -46,9 +46,9 @@ def _seed_graph(db_session, run_id: str) -> None:
 def _mark_completed(db_session, run_id: str) -> None:
     """create_run_with_chunks 生成的 run 状态回到 completed 以通过读门禁"""
     RunRepository(db_session).update_run_status(run_id, "completed")
-    from tests.support.chapter_annotation_helpers import publish_test_cutoff
+    from tests.support.chapter_annotation_helpers import confirm_test_work
 
-    publish_test_cutoff(db_session, run_id)
+    confirm_test_work(db_session, run_id)
 
 def test_graph_metrics_returns_pagerank_hits_communities(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_chunks(
@@ -99,10 +99,10 @@ def test_graph_metrics_accumulates_reverse_relations(monkeypatch) -> None:
         return dict.fromkeys(graph.nodes, 1 / 3)
 
     monkeypatch.setattr(
-        "src.api.services.results_queries.graph_metrics._require_snapshot",
+        "src.api.services.results_queries.graph._fetch_graph_snapshot",
         MagicMock(return_value=snapshot),
     )
-    monkeypatch.setattr("src.api.services.results_queries.graph_metrics.nx.pagerank", capture_pagerank)
+    monkeypatch.setattr("src.metrics.aggregate.algorithms.nx.pagerank", capture_pagerank)
 
     compute_graph_metrics("run-1", MagicMock())
 
