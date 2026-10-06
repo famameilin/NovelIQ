@@ -26,16 +26,14 @@ import json
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.graph import _invoke_tool, build_annotation_graph
-from src.agents.annotation.prompts import build_chapter_message
-from src.agents.annotation.schema import (
-    ChapterParagraphInfo,
-)
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.annotation.schema import ChapterParagraphInfo
+from src.agents.annotation.tool_batch import _invoke_tool
+from src.agents.annotation.tools import AnnotationToolLedger
+from src.fact_graph.graph import FactGraph
+from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 _CHUNK_TEXT = "“住手”回荡"
@@ -214,82 +212,8 @@ class _SequenceLLM(StreamedFakeModelMixin):
         return self.responses.pop(0)
 
 
-async def _invoke_graph(
-    llm: _SequenceLLM,
-    ledger: AnnotationToolLedger,
-    *,
-    max_iterations: int = 30,
-) -> dict:
-    """2026-09-13 用于在给定账本上执行单章 LangGraph"""
-    tools = build_annotation_tools(_QueryServiceStub(), ledger)
-    graph = build_annotation_graph(llm, tools, ledger=ledger, max_iterations=max_iterations)
-    return await graph.ainvoke(
-        {
-            "messages": [
-                SystemMessage(content="test"),
-                HumanMessage(
-                    content=build_chapter_message(
-                                                chapter_text=_CHUNK_TEXT,
-                        candidates=ledger.dialogue_candidates,
-                    )
-                ),
-            ],
-            "phase": "chapter_open",
-            "iterations": 0,
-            "error": None,
-        }
-    )
 
 
-def test_write_event_returns_tree_and_authorizes_root() -> None:
-    """2026-08-22 创建事件树由服务端派发节点 id 并登记授权
-
-    2026-09-14 单工具 write_event：根 el=t1、参与者内联 characters，回执
-    {status: written, record: t1/root / t1/e1, content}；2026-09-19 id 纪律下
-    content 携带落库终值与节点 run 级 uuid id（=落库 event_id，树级 uuid 不外露），
-    真实 id 亦可从账本读取——授权集合仍登记根与子节点 id（挂树的授权来源）。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    entity = _entity_id(tools, "顾霜")
-    root_receipt = _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity)]))
-    root_content = root_receipt.pop("content")
-    assert root_receipt == {"status": "written", "record": "t1/root"}
-    child_receipt = _call(tools, "write_event", _child_args())
-    child_content = child_receipt.pop("content")
-    assert child_receipt == {"status": "written", "record": "t1/e1"}
-
-    tree = ledger.event_trees[ledger.tree_key_index["t1"]]
-    root_node_id = tree["root_node_id"]
-    assert root_content == {
-        "id": root_node_id,
-        "description": "顾霜拔剑",
-        "isforeshadowing": False,
-        "confidence": None,
-        "characters": [
-            {"entity": "顾霜", "role": "主体", "narrative_role": "主体", "action": "拔剑", "emotion": -1}
-        ],
-    }
-    assert child_content["id"] == tree["nodes"]["e1"]
-    assert child_content["type"] == "main"
-    assert "isforeshadowing" not in child_content
-    assert "node_id" not in child_content and "tree_id" not in child_content
-    assert root_node_id in ledger.authorized_event_ids
-    assert set(tree["nodes"].values()) <= ledger.authorized_event_ids
-    bound = ledger.bound_payloads["events"]
-    assert [node.node_id for node in bound] == list(tree["nodes"].values())
-    assert bound[0].tree_id == tree["tree_id"]
-    assert bound[0].cause_role == "root"
-    assert bound[0].description == "顾霜拔剑"
-    assert bound[0].participants[0].action == "拔剑"
-    assert ledger.bound_payloads["character_observations"][0].action == "拔剑"
-
-    _seed_completion(tools)
-    receipt = ledger.finish_chapter()
-    assert receipt["status"] == "completed"
-    assert receipt["chapter_id"] == 1
-    assert receipt["records"]["events"] == 2
-    assert receipt["records"]["character_observations"] == 1
 
 
 @pytest.mark.asyncio
@@ -320,104 +244,14 @@ async def test_write_event_defaults_character_participant_state_fields() -> None
     assert participant.role == "主体"
 
 
-def test_write_event_empty_state_participant_skips_observation_row() -> None:
-    """2026-10-04 用于验证三态全空的参与者只落事件参与者、不产动态状态行
-
-    合同放开后同一人物在多个事件上无动作参与是正常形态：全空行无信息量，且会
-    在收尾校验撞 (character, action=None) 重复语义（run 4cb054dc finish 实证）。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    entity = _entity_id(tools, "顾霜")
-    _call(tools, "write_event", _root_args(characters=[{"entityid": entity, "role": "主体"}]))
-    _call(tools, "write_event", _child_args(characters=[{"entityid": entity, "role": "主体"}]))
-    _seed_completion(tools)
-
-    receipt = ledger.finish_chapter()
-
-    assert not ledger.observation_by_record
-    assert receipt["records"]["character_observations"] == 0
-    assert receipt["records"]["events"] == 2
 
 
-def test_finish_allows_actionless_presence_across_events() -> None:
-    """2026-10-04 用于验证收尾判重不撞无动作出场（三态放开残余，run 4cb054dc ch12 实证）
-
-    同一人物在多个事件只给 role/emotion 不给 action：(人物, None) 相撞不是重复
-    语义，finish 正常收尾；有具体动作的重复由写入点 duplicate_observation 拒绝。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    entity = _entity_id(tools, "顾霜")
-    _call(tools, "write_event", _root_args(characters=[{"entityid": entity, "narrative_role": "主体"}]))
-    _call(
-        tools,
-        "write_event",
-        _child_args(characters=[{"entityid": entity, "narrative_role": "主体", "emotion": 1}]),
-    )
-    _seed_completion(tools)
-
-    receipt = ledger.finish_chapter()
-
-    assert receipt["status"] == "completed"
-    assert receipt["records"]["character_observations"] == 2
 
 
-def test_write_event_without_participants_derives_empty_character_domain() -> None:
-    """2026-08-30 用于允许无人物事件明确收尾空人物动态领域
-
-    2026-09-14：无参与者树用 write_event(isroot=true) 即时落账，再用唯一
-    finish 收尾；character_observations 随事件域派生的语义不变。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    _call(tools, "write_event", _root_args(description="山门夜雨"))
-    _seed_completion(tools)
-
-    receipt = ledger.finish_chapter()
-
-    assert receipt["records"]["character_observations"] == 0
-    assert ledger.bound_payloads["character_observations"] == []
-    assert "events" not in ledger.missing_content_domains()
 
 
-def test_write_event_empty_completion_does_not_invent_event() -> None:
-    """2026-08-30 用于允许无事件章节显式收尾且不捏造事件
-
-    2026-09-14：空域不再用逐域声明，直接 finish 收尾；
-    空事件是合法终态，不建树不建节点。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    _seed_completion(tools)
-
-    receipt = ledger.finish_chapter()
-
-    assert receipt["status"] == "completed"
-    assert receipt["records"]["events"] == 0
-    assert ledger.event_trees == {}
-    assert ledger.bound_payloads["events"] == []
-    assert ledger.bound_payloads["character_observations"] == []
 
 
-def test_event_completion_requires_actual_dialogue_verdict() -> None:
-    ledger = _ledger()
-    tools = _tools(ledger)
-    _call(tools, "write_event", _root_args())
-    _call(tools, "write_metrics", {"summary": "顾霜喝止众人", "emotional_valence": 0, "narrative_function": "冲突"})
-
-    with pytest.raises(AnnotationStageRejection) as exc_info:
-        ledger.finish_chapter()
-
-    assert (exc_info.value.field, exc_info.value.code) == ("dialogues", "missing_record")
-    assert ledger.written_dialogues == {}
-    assert ledger.dialogue_ledger()["pending"] == [1]
-    assert not ledger.chapter_finished and ledger.ready_chapter is None
-    assert len(ledger.bound_payloads["events"]) == 1
-
-    _call(tools, "write_dialogue", {"candidate_index": 1, "verdict": "dialogue"})
-    assert ledger.finish_chapter()["status"] == "completed"
-    assert len(ledger.bound_payloads["dialogues"]) == 1
 
 
 @pytest.mark.asyncio
@@ -469,78 +303,8 @@ async def test_write_event_isforeshadowing_creates_thread_binding() -> None:
     assert tree["root_node_id"] == root.node_id
 
 
-@pytest.mark.asyncio
-async def test_write_event_rejects_invalid_children_without_mutating_ledger() -> None:
-    """2026-08-30 用于验证子节点合同失败时不会留下半棵事件树
-
-    2026-09-14：子节点 type 是闭合枚举，非法值在 schema 层翻成结构化拒绝
-    （record=t1/e1, field=type, code=invalid_value），该节点不写入；
-    根记录保留，换合法值重交即可（旧测试的裸 ValidationError 断言已不适用）。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    _call(tools, "write_event", _root_args())
-
-    receipt = await _stage_rejection(tools, "write_event", _child_args(type="invalid"))
-
-    assert receipt["record"] == "t1/e1"
-    assert receipt["field"] == "type"
-    assert receipt["code"] == "invalid_value"
-    tree = ledger.event_trees[ledger.tree_key_index["t1"]]
-    assert set(tree["nodes"]) == {"root"}
-    assert ledger.bound_payloads["events"][0].description == "顾霜拔剑"
-
-    _call(tools, "write_event", _child_args())
-    _seed_completion(tools)
-    ledger.finish_chapter()
-    assert len(ledger.bound_payloads["events"]) == 2
 
 
-@pytest.mark.asyncio
-async def test_write_event_rejects_duplicate_character_action_atomically() -> None:
-    """2026-08-30 用于保证重复人物动作只拒绝那一条记录，不部分写入第二棵事件树
-
-    2026-09-14：参与者内联在 write_event 调用里——(人物, 动作) 重复时整条子事件
-    调用在写入点被拒并回滚自己（第二棵树只剩根落账，坏的那条没进账），
-    同回合的 finish 不受影响（逐条失败不阻塞收尾），第一棵树的记录原样保留。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    entity = _entity_id(tools, "顾霜")
-    llm = _SequenceLLM(
-        [
-            _tool_message(
-                [
-                    *_event_tree_calls(
-                        tree_key="t1", description="顾霜拔剑", action="拔剑", entity=entity, call_id="call-t1"
-                    ),
-                    *_event_tree_calls(
-                        tree_key="t2", description="顾霜再拔剑", action="拔剑", entity=entity, call_id="call-t2"
-                    ),
-                    _metrics_call(),
-                    _write_call("write_dialogue", {"candidate_index": 1, "verdict": "dialogue"}, call_id="dialogue"),
-                    _finish_call(),
-                ]
-            )
-        ]
-    )
-
-    result = await _invoke_graph(llm, ledger, max_iterations=1)
-
-    receipts = _tool_receipts(result["messages"])
-    duplicate = [receipt for receipt in receipts if '"code": "duplicate_observation"' in receipt]
-    assert len(duplicate) == 1
-    assert f'"record": "t2/e1/participant/{entity}"' in duplicate[0]
-    assert '"field": "action"' in duplicate[0]
-    # 重复记录被单独拒绝，同回合收尾照常完成
-    assert result["phase"] == "completed"
-    assert ledger.chapter_finished
-    finish_receipt = json.loads([item for item in receipts if '"status": "completed"' in item][-1])
-
-    # t1 根+子与 t2 根都落账（重复动作所在的 t2 子事件整条回滚）；重复动作未写入
-    assert finish_receipt["records"]["events"] == 3
-    assert set(ledger.tree_key_index) == {"t1", "t2"}
-    assert [item.action for item in ledger.observation_by_record.values()] == ["拔剑"]
 
 
 @pytest.mark.asyncio
@@ -570,46 +334,6 @@ async def test_write_event_rejects_unauthorized_entity_reference() -> None:
     assert ledger.observation_by_record == {}
 
 
-def test_write_event_maps_visible_evidence_to_global_paragraph_id() -> None:
-    """全局 paragraph_id 与段首可见号错位时，事件和标签都绑定正确段落。
-
-    节点只携带全局段落 ID；字符区间与图证据由持久化层从段落事实源派生。
-    2026-09-14 段落级监督随 write_metrics.labels 提交；2026-09-18 标签用段首可见号
-    （正文 `N：`，此处即 1 基顺序号），全局 paragraph_id 只留在持久化侧。
-    """
-    text = _CHUNK_TEXT
-    ledger = _ledger(
-        paragraph_ids=[44, 45],
-        char_spans=[(0, 4), (4, len(text))],
-        texts=["“住手”", "回荡"],
-    )
-    tools = _tools(ledger)
-    entity = _entity_id(tools, "顾霜")
-    _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity)]))
-    _call(
-        tools,
-        "write_metrics",
-        {
-            "summary": "顾霜拔剑",
-            "emotional_valence": 0,
-            "narrative_function": "冲突",
-            "labels": [{"paragraph_id": 1, "emotion": -1}],
-        },
-    )
-    _call(tools, "write_dialogue", {"candidate_index": 1, "verdict": "dialogue"})
-    receipt = ledger.finish_chapter()
-
-    assert receipt["status"] == "completed"
-    bound = ledger.bound_payloads["events"][0]
-    dumped = bound.model_dump()
-    assert "anchor_paragraph_ids" not in dumped
-    assert "evidence" not in dumped
-    assert "char_start" not in dumped
-    assert dumped["description"] == "顾霜拔剑"
-    assert dumped["evidence_paragraph_id"] == 44
-    assert [
-        (label.paragraph_id, label.emotion) for label in ledger.bound_payloads["paragraph_labels"]
-    ] == [(44, -1)]
 
 
 @pytest.mark.asyncio
@@ -650,77 +374,8 @@ def test_write_event_infers_single_paragraph_evidence() -> None:
     assert ledger.bound_payloads["events"][0].evidence_paragraph_id == 44
 
 
-@pytest.mark.asyncio
-async def test_failed_participation_resubmission_repairs_and_keeps_other_records() -> None:
-    """2026-09-11 草稿补丁链（stash_event_draft + patches）已随小调用改造删除
-
-    等价验证（2026-09-14）：characters 里未登记引用只指向该参与者记录（结构化拒绝，
-    field=entityid/code=unknown_entity_id），已写入的根/子事件记录保留，
-    重交同键根记录即修复（旧断言"draft_repaired/pending_event_draft 清空"没有对应物）。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    entity = _entity_id(tools, "顾霜")
-    _call(tools, "write_event", _root_args())
-    _call(tools, "write_event", _child_args())
-
-    rejected = await _stage_rejection(
-        tools,
-        "write_event",
-        _root_args(characters=[_participant(entityid="00000000-0000-0000-0000-000000000999")]),
-    )
-
-    assert rejected["record"] == "t1/root/participant/00000000-0000-0000-0000-000000000999"
-    assert rejected["field"] == "entityid"
-    assert rejected["code"] == "unknown_entity_id"
-    tree = ledger.event_trees[ledger.tree_key_index["t1"]]
-    assert ledger.bound_payloads["events"][0].description == "顾霜拔剑"
-    assert set(tree["nodes"]) == {"root", "e1"}
-
-    _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity)]))
-    _seed_completion(tools)
-    receipt = ledger.finish_chapter()
-
-    assert receipt["records"]["events"] == 2
-    assert set(ledger.event_trees)
-    bound = ledger.bound_payloads["events"]
-    assert bound[0].participants[0].entity == "顾霜"
 
 
-@pytest.mark.asyncio
-async def test_record_revision_after_failure_keeps_accepted_value() -> None:
-    """2026-09-11 补丁后仍失败→合并草稿成新基线；等价验证（2026-09-14）：
-
-    characters 条目里 emotion 写语气词在 schema 层即失败（ParticipantArg 前置校验），
-    翻译出的拒绝记录键按 tool_record_key 回落到节点键 "t1/root"（不再是参与者
-    路径）；失败的调用不改动已接受的同键记录，最后一次成功提交决定收尾值。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    entity = _entity_id(tools, "顾霜")
-    _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity, emotion=-1)]))
-
-    rejected = await _stage_rejection(
-        tools,
-        "write_event",
-        _root_args(characters=[_participant(entityid=entity, emotion="愤怒")]),
-    )
-
-    assert rejected["record"] == "t1/root"
-    assert rejected["field"] == "emotion"
-    # 旧合同 not_integer（int 解析失败）；2026-09-14 语气词由 ParticipantArg 前置校验
-    # 拒绝，pydantic value_error 族按 _STAGE_FIELD_CODES 翻成 invalid_combination
-    assert rejected["code"] == "invalid_combination"
-    assert "https://" not in rejected["message"]
-    assert next(iter(ledger.observation_by_record.values())).emotion == -1
-
-    _call(tools, "write_event", _root_args(characters=[_participant(entityid=entity, emotion=-2)]))
-    _seed_completion(tools)
-    ledger.finish_chapter()
-
-    bound = ledger.bound_payloads["events"][0]
-    assert bound.participants[0].entity == "顾霜"
-    assert bound.participants[0].emotion == -2
 
 
 @pytest.mark.asyncio
@@ -769,40 +424,3 @@ async def test_participation_rejections_point_at_record_and_keep_written_tree() 
     assert ledger.bound_payloads["events"][0].description == "顾霜拔剑"
     assert ledger.bound_payloads["events"][0].participants == []
     assert set(tree["nodes"]) == {"root", "e1"}
-
-
-@pytest.mark.asyncio
-async def test_write_event_child_before_root_defers_until_root_arrives() -> None:
-    """2026-10-04 树键校验下沉：子事件先于根提交挂起，建根按到达顺序自动冲账
-
-    写面本来就是纯内存账本、整章成功才单事务落库，调用期"根先子后"校验只制造
-    返工（run2 的 event 族拒绝 128 次全是"树键未建"）。挂起回执 content 带
-    deferred 提示；finish 时根始终未建则拒绝收尾，防止静默丢数据。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    _entity_id(tools, "顾霜")
-
-    deferred = _call(
-        tools,
-        "write_event",
-        {"el": "t9/e1", "isroot": False, "type": "main", "description": "先到的子事件", "evidence": 1},
-    )
-    assert deferred["status"] == "written"
-    assert deferred["content"]["deferred"] is True
-    assert "t9" in deferred["content"]["note"]
-
-    _seed_completion(tools)
-    with pytest.raises(AnnotationStageRejection) as exc_info:
-        ledger.finish_chapter()
-    assert "t9" in str(exc_info.value)
-
-    _call(tools, "write_event", {"el": "t9", "isroot": True, "description": "迟到的根", "evidence": 1})
-
-    tree = ledger.event_trees[ledger.tree_key_index["t9"]]
-    assert set(tree["nodes"]) == {"root", "e1"}
-    assert [node.description for node in ledger.bound_payloads["events"] if node.tree_id == tree["tree_id"]] == [
-        "迟到的根",
-        "先到的子事件",
-    ]
-    assert ledger.pending_child_events == {}

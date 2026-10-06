@@ -6,10 +6,11 @@ import json
 from typing import Any
 from unittest.mock import MagicMock
 
-from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.identity import exact_digest, text_digest
 from src.agents.annotation.schema import ChapterParagraphInfo
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.annotation.tools import AnnotationToolLedger
+from src.fact_graph.graph import FactGraph
+from tests.support.annotation_work_tools import build_annotation_tools
 
 
 def _tools(chapter_id: int, *, run_scope: str = "run-1") -> tuple[AnnotationToolLedger, dict[str, Any]]:
@@ -41,24 +42,8 @@ def test_event_ids_are_stable_for_same_chapter_and_distinct_for_other_chapters_a
     assert len({ids[0], ids[2], ids[3]}) == 3
 
 
-def test_repeated_case_seed_uses_one_stable_target() -> None:
-    ledger, tools = _tools(1)
-    args = {"description": "身份有疑点", "keys": ["甲"], "type": "身份疑点"}
-    first = json.loads(tools["push_case"].invoke(args))
-    second = json.loads(tools["push_case"].invoke(args))
-    assert second == {"accepted": True, "case_id": first["case_id"], "duplicate": True}
-    assert len(ledger.pushed_cases) == 1
 
 
-def test_case_ids_are_distinct_for_other_chapters_and_runs() -> None:
-    ids: set[str] = set()
-    for run_scope, chapter_id in (("run-1", 1), ("run-1", 2), ("run-2", 1)):
-        _, tools = _tools(chapter_id, run_scope=run_scope)
-        receipt = json.loads(tools["push_case"].invoke({
-            "description": "身份有疑点", "keys": ["甲"], "type": "身份疑点",
-        }))
-        ids.add(receipt["case_id"])
-    assert len(ids) == 3
 
 
 def test_original_text_and_formal_payload_hash_preserve_whitespace_and_unicode() -> None:

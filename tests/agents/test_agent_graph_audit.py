@@ -14,11 +14,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from src.agents.audit.observer import AgentTurnObserver
+from src.agents.audit.observer import AgentTurnObserver, build_invocation_context
 from src.agents.audit.recorder import AgentAuditRecorder
+from src.agents.diagnosis.schema import CloudAnalysis
 from src.agents.graph import build_agent_graph
-from src.models.cloud.schema import CloudAnalysis
-from src.storage.models.agent_audit import AgentToolCall, AgentTurn
+from src.storage.models.agent_audit import AgentToolCall, ModelTurn
 from tests.agents.test_diagnosis_agent import _analysis_payload
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
@@ -77,30 +77,22 @@ class _RetryingLLM(StreamedFakeModelMixin):
         return AIMessage(content="提交", tool_calls=[_finish_call(_analysis_payload())])
 
 
-def _new_audit_context(db_session) -> tuple[AgentAuditRecorder, AgentTurnObserver, int, str]:
+def _new_audit_context(db_session) -> tuple[AgentAuditRecorder, AgentTurnObserver, dict, str]:
     """构造与测试库绑定的审计 recorder/observer 并开启 invocation"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     recorder = AgentAuditRecorder(factory)
-    invocation_id = recorder.start_invocation(
+    context = build_invocation_context(
         run_id=run_id,
         task_type="diagnosis",
-        chapter_id=None,
+        execution_id="diag-exec",
         attempt_number=1,
-        model_name="test-model",
+        model="test-model",
         model_provider="local",
     )
-    observer = AgentTurnObserver(
-        recorder,
-        invocation_id=invocation_id,
-        run_id=run_id,
-        novel_id=novel_id,
-        task_type="diagnosis",
-        call_type="diagnosis",
-        model_name="test-model",
-        model_provider="local",
-    )
-    return recorder, observer, invocation_id, run_id
+    invocation_id = recorder.start_invocation(**context)
+    observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=context)
+    return recorder, observer, context, run_id
 
 
 def _initial_state() -> dict:
@@ -125,7 +117,7 @@ def _finish_call(payload: dict, call_id: str = "f1") -> dict:
 
 async def test_graph_finish_round_closes_turn_and_audits_finish_tool(db_session) -> None:
     """2026-08-11 用于验证 finish 提交回合闭合 turn_ms 且 finish 进入工具审计"""
-    recorder, observer, invocation_id, _ = _new_audit_context(db_session)
+    recorder, observer, context, run_id = _new_audit_context(db_session)
     evidence_tool = MagicMock()
     evidence_tool.name = "get_aggregate_signals"
     evidence_tool.ainvoke = AsyncMock(return_value='{"ok": true}')
@@ -156,12 +148,14 @@ async def test_graph_finish_round_closes_turn_and_audits_finish_tool(db_session)
 
     result = await graph.ainvoke(_initial_state())
 
-    recorder.finish_invocation(invocation_id, status="success")
+    recorder.finish_invocation(**context, status="success")
     assert result.get("error") is None
     db_session.rollback()
     turns = list(
         db_session.execute(
-            select(AgentTurn).where(AgentTurn.invocation_id == invocation_id).order_by(AgentTurn.turn_index)
+            select(ModelTurn)
+            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
+            .order_by(ModelTurn.turn_index)
         ).scalars()
     )
     assert len(turns) == 2
@@ -180,7 +174,7 @@ async def test_graph_finish_round_closes_turn_and_audits_finish_tool(db_session)
 
 async def test_graph_finish_validation_failure_records_error_tool_call(db_session) -> None:
     """2026-08-11 用于验证校验失败的 finish 调用以 error 状态进入工具审计且回合闭合"""
-    recorder, observer, invocation_id, _ = _new_audit_context(db_session)
+    recorder, observer, context, run_id = _new_audit_context(db_session)
     bad_payload = dict(_analysis_payload())
     bad_payload["power_stance_score"] = 99
     llm = _SequencedLLM(
@@ -200,13 +194,15 @@ async def test_graph_finish_validation_failure_records_error_tool_call(db_sessio
 
     result = await graph.ainvoke(_initial_state())
 
-    recorder.finish_invocation(invocation_id, status="success")
+    recorder.finish_invocation(**context, status="success")
     assert result.get("error") is None
     assert llm.calls == 2
     db_session.rollback()
     turns = list(
         db_session.execute(
-            select(AgentTurn).where(AgentTurn.invocation_id == invocation_id).order_by(AgentTurn.turn_index)
+            select(ModelTurn)
+            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
+            .order_by(ModelTurn.turn_index)
         ).scalars()
     )
     assert len(turns) == 2
@@ -214,9 +210,10 @@ async def test_graph_finish_validation_failure_records_error_tool_call(db_sessio
     finish_rows = list(
         db_session.execute(
             select(AgentToolCall)
-            .join(AgentTurn, AgentTurn.id == AgentToolCall.turn_id)
+            .join(ModelTurn, ModelTurn.id == AgentToolCall.turn_id)
             .where(
-                AgentTurn.invocation_id == invocation_id,
+                ModelTurn.run_id == run_id,
+                ModelTurn.row_kind == "agent_turn",
                 AgentToolCall.tool_name == "finish",
             )
             .order_by(AgentToolCall.id)
@@ -228,7 +225,7 @@ async def test_graph_finish_validation_failure_records_error_tool_call(db_sessio
 
 async def test_graph_mixed_finish_round_records_error_submission_audit(db_session) -> None:
     """2026-08-11 用于验证 finish 与其他工具同轮的不合规提交也进入工具审计"""
-    recorder, observer, invocation_id, _ = _new_audit_context(db_session)
+    recorder, observer, context, run_id = _new_audit_context(db_session)
     evidence_tool = MagicMock()
     evidence_tool.name = "get_aggregate_signals"
     evidence_tool.ainvoke = AsyncMock(return_value='{"ok": true}')
@@ -260,13 +257,15 @@ async def test_graph_mixed_finish_round_records_error_submission_audit(db_sessio
 
     result = await graph.ainvoke(_initial_state())
 
-    recorder.finish_invocation(invocation_id, status="success")
+    recorder.finish_invocation(**context, status="success")
     assert result.get("error") is None
     assert llm.calls == 2
     db_session.rollback()
     turns = list(
         db_session.execute(
-            select(AgentTurn).where(AgentTurn.invocation_id == invocation_id).order_by(AgentTurn.turn_index)
+            select(ModelTurn)
+            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
+            .order_by(ModelTurn.turn_index)
         ).scalars()
     )
     assert len(turns) == 2
@@ -275,9 +274,10 @@ async def test_graph_mixed_finish_round_records_error_submission_audit(db_sessio
     finish_rows = list(
         db_session.execute(
             select(AgentToolCall)
-            .join(AgentTurn, AgentTurn.id == AgentToolCall.turn_id)
+            .join(ModelTurn, ModelTurn.id == AgentToolCall.turn_id)
             .where(
-                AgentTurn.invocation_id == invocation_id,
+                ModelTurn.run_id == run_id,
+                ModelTurn.row_kind == "agent_turn",
                 AgentToolCall.tool_name == "finish",
             )
             .order_by(AgentToolCall.id)
@@ -289,7 +289,7 @@ async def test_graph_mixed_finish_round_records_error_submission_audit(db_sessio
 
 async def test_graph_tool_limit_round_closes_turn(db_session) -> None:
     """2026-08-11 用于验证工具迭代超限回合同样闭合 turn_ms"""
-    recorder, observer, invocation_id, _ = _new_audit_context(db_session)
+    recorder, observer, context, run_id = _new_audit_context(db_session)
     evidence_tool = MagicMock()
     evidence_tool.name = "get_aggregate_signals"
     evidence_tool.ainvoke = AsyncMock(return_value='{"ok": true}')
@@ -337,11 +337,13 @@ async def test_graph_tool_limit_round_closes_turn(db_session) -> None:
 
     result = await graph.ainvoke(_initial_state())
 
-    recorder.finish_invocation(invocation_id, status="error", final_error=str(result.get("error")))
+    recorder.finish_invocation(**context, status="error", final_error=str(result.get("error")))
     db_session.rollback()
     turns = list(
         db_session.execute(
-            select(AgentTurn).where(AgentTurn.invocation_id == invocation_id).order_by(AgentTurn.turn_index)
+            select(ModelTurn)
+            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
+            .order_by(ModelTurn.turn_index)
         ).scalars()
     )
     assert len(turns) == 2
@@ -350,7 +352,7 @@ async def test_graph_tool_limit_round_closes_turn(db_session) -> None:
 
 async def test_graph_model_exception_records_error_turn(db_session) -> None:
     """2026-08-11 用于验证模型调用异常时保留 error 状态回合且计时闭合"""
-    recorder, observer, invocation_id, _ = _new_audit_context(db_session)
+    recorder, observer, context, run_id = _new_audit_context(db_session)
     graph = build_agent_graph(
         _FailingLLM(),
         [],
@@ -363,9 +365,13 @@ async def test_graph_model_exception_records_error_turn(db_session) -> None:
     with pytest.raises(RuntimeError, match="provider timeout"):
         await graph.ainvoke(_initial_state())
 
-    recorder.finish_invocation(invocation_id, status="error", final_error="provider timeout")
+    recorder.finish_invocation(**context, status="error", final_error="provider timeout")
     db_session.rollback()
-    turns = list(db_session.execute(select(AgentTurn).where(AgentTurn.invocation_id == invocation_id)).scalars())
+    turns = list(
+        db_session.execute(
+            select(ModelTurn).where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
+        ).scalars()
+    )
     assert len(turns) == 1
     turn = turns[0]
     assert turn.status == "error"
@@ -382,7 +388,7 @@ async def test_graph_model_exception_records_error_turn(db_session) -> None:
 
 async def test_graph_retries_are_audited_as_separate_provider_requests(db_session) -> None:
     """2026-08-30 用于验证通用 Agent 的失败重试分别形成独立物理请求审计行"""
-    recorder, observer, invocation_id, _ = _new_audit_context(db_session)
+    recorder, observer, context, run_id = _new_audit_context(db_session)
     llm = _RetryingLLM()
     graph = build_agent_graph(
         llm,
@@ -396,13 +402,15 @@ async def test_graph_retries_are_audited_as_separate_provider_requests(db_sessio
 
     result = await graph.ainvoke(_initial_state())
 
-    recorder.finish_invocation(invocation_id, status="success")
+    recorder.finish_invocation(**context, status="success")
     assert result.get("error") is None
     assert llm.calls == 2
     db_session.rollback()
     turns = list(
         db_session.execute(
-            select(AgentTurn).where(AgentTurn.invocation_id == invocation_id).order_by(AgentTurn.turn_index)
+            select(ModelTurn)
+            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
+            .order_by(ModelTurn.turn_index)
         ).scalars()
     )
     assert [turn.status for turn in turns] == ["error", "success"]

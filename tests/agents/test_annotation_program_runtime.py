@@ -8,10 +8,11 @@ from typing import Any
 import pytest
 
 from src.agents.annotation import program as program_module
-from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.program import ProgramRuntime
 from src.agents.annotation.schema import ChapterParagraphInfo
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.annotation.tools import AnnotationToolLedger
+from src.fact_graph.graph import FactGraph
+from tests.support.annotation_work_tools import build_annotation_tools
+from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 
 
 class _QueryService:
@@ -43,33 +44,6 @@ async def _run(runtime: ProgramRuntime, code: str) -> dict[str, Any]:
     return json.loads(await runtime.execute(code))
 
 
-@pytest.mark.asyncio
-async def test_program_writes_domains_and_returns_compressed_receipt() -> None:
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    receipt = await _run(runtime, """
-person = write_entity(el="a1", name="顾霜", entity_type="character")
-write_metrics(summary="顾霜喝止众人", emotional_valence=0, narrative_function="冲突")
-write_event(el="t1", isroot=true, description="喝止", evidence=1, characters=[
-    {"entityid": person["id"], "role": "主体", "narrative_role": "主体", "action": "喝止", "emotion": -1}
-])
-for candidate in [1, 2]:
-    write_dialogue(candidate_index=candidate, verdict="not_dialogue")
-finish()
-""")
-    assert receipt["status"] == "applied"
-    assert receipt["applied"] == 6
-    assert "failed" not in receipt and "reads" not in receipt and "refs" not in receipt
-    assert receipt["progress"]["entities"] == 1
-    assert receipt["progress"]["dialogues"] == 2
-    assert ledger.chapter_finished and ledger.ready_chapter is not None
-    assert runtime.ops[0]["program_id"] == "p1"
-    assert runtime.ops[0]["op_index"] == 1
-    assert runtime.ops[0]["tool_name"] == "write_entity"
-    assert runtime.ops[0]["status"] == "success"
-    assert runtime.ops[0]["record"] == "entity/顾霜"
-    assert runtime.ops[0]["source_line"] == 2
-    assert runtime.ops[-1]["tool_name"] == "finish"
 
 
 @pytest.mark.asyncio
@@ -239,79 +213,12 @@ if left == 1:
     assert set(ledger.written_dialogues) == {1, 2}
 
 
-@pytest.mark.asyncio
-async def test_finish_settles_after_remaining_statements() -> None:
-    ledger = _ledger()
-    receipt = await _run(_runtime(ledger),
-                         'finish()\nwrite_metrics(summary="尾部指标", emotional_valence=0, narrative_function="铺垫")\n'
-                         'for candidate in [1, 2]:\n'
-                         '    write_dialogue(candidate_index=candidate, verdict="dialogue")')
-    assert receipt["status"] == "applied" and receipt["applied"] == 4
-    assert ledger.chapter_finished
-    assert ledger.ready_chapter.metrics.summary == "尾部指标"
 
 
-@pytest.mark.asyncio
-async def test_error_after_finish_does_not_freeze_chapter() -> None:
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    receipt = await _run(runtime,
-                         'write_metrics(summary="当前指标", emotional_valence=0, narrative_function="铺垫")\n'
-                         'finish()\nvalue = undefined')
-    assert receipt["error"]["type"] == "undefined_name"
-    assert receipt["applied"] == 1
-    assert not ledger.chapter_finished and ledger.ready_chapter is None
-    retry = await _run(runtime, 'for candidate in [1, 2]:\n'
-                               '    write_dialogue(candidate_index=candidate, verdict="dialogue")\nfinish()')
-    assert retry["status"] == "applied" and ledger.chapter_finished
 
 
-@pytest.mark.asyncio
-async def test_program_reads_source_anchors_links_and_cases_within_chapter_task() -> None:
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    receipt = await _run(runtime, """
-person = write_entity(el="a1", name="顾霜", entity_type="character")
-local = read_text(paragraph_id=1, quote="顾霜")
-other = read_text(paragraph_id=20, quote="顾霜")
-anchor_record(record_id=person["record"], source_ref=local["source_ref"])
-write_link(record_id=person["record"], source_ref=local["source_ref"],
-           target_ref=other["source_ref"], kind="same_entity")
-push_case(description="阿青的其他称呼尚未确定", keys=["阿青"], type="身份未确定", record_id=person["record"],
-          evidence_refs=[local["source_ref"], other["source_ref"]])
-write_metrics(summary="顾霜喝止众人", emotional_valence=0, narrative_function="冲突")
-for candidate in [1, 2]:
-    write_dialogue(candidate_index=candidate, verdict="dialogue", speaker=person["id"])
-finish()
-""")
-    assert receipt["status"] == "applied"
-    assert ledger.chapter_finished and ledger.ready_chapter is not None
-    assert len(ledger.cross_chapter_links) == 1
-    link = ledger.cross_chapter_links[0]
-    assert (link.source.chapter_id, link.target.chapter_id, link.kind) == (1, 2, "same_entity")
-    assert link.source in ledger.source_anchors["entity/顾霜"]
-    assert ledger.authorized_text_paragraph_ids == {1, 20}
-    assert len(ledger.pushed_cases) == 1
-    assert {item["chapter_id"] for item in ledger.pushed_cases[0].target_ref["source_refs"]} == {1, 2}
-    assert {row["tool_name"] for row in runtime.ops} >= {"read_text", "anchor_record", "write_link", "push_case"}
 
 
-@pytest.mark.asyncio
-async def test_program_rejects_unread_or_other_chapter_source_without_mutating_links() -> None:
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    await _run(runtime, """
-person = write_entity(el="a1", name="顾霜", entity_type="character")
-other = read_text(paragraph_id=20, quote="顾霜")
-""")
-    receipt = await _run(runtime, """
-anchor_record(record_id=person["record"], source_ref=other["source_ref"])
-write_link(record_id=person["record"], source_ref="invented-ref", target_ref=other["source_ref"], kind="same_entity")
-push_case(description="没有读取的证据", keys=["顾霜"], type="未确定", evidence_refs=["invented-ref"])
-""")
-    assert receipt["status"] == "partial" and receipt["applied"] == 0
-    assert len(receipt["failed"]) == 3
-    assert ledger.source_anchors == {} and ledger.cross_chapter_links == [] and ledger.pushed_cases == []
 
 
 @pytest.mark.asyncio

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.schema import EntityInput, RelationInput
+from src.fact_graph.graph import FactGraph
 
 
 def _entity(name: str, **attributes: object) -> EntityInput:

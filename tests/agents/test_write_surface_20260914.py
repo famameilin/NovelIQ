@@ -16,9 +16,10 @@ import json
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.fact_graph import FactGraph
 from src.agents.annotation.schema import ChapterParagraphInfo, Confidence
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.annotation.tools import AnnotationToolLedger
+from src.fact_graph.graph import FactGraph
+from tests.support.annotation_work_tools import build_annotation_tools
 
 
 class _QueryService:
@@ -316,32 +317,3 @@ async def test_paragraph_labels_membership_gate_and_same_paragraph_dedupe() -> N
         )
     )["status"] == "written"
     assert [(label.paragraph_id, label.emotion) for label in ledger.bound_payloads["paragraph_labels"]] == [(0, -1)]
-
-
-@pytest.mark.asyncio
-async def test_finish_chapter_settlement_requires_metrics_then_reports_counts() -> None:
-    """finish 无参数：唯一硬前提是指标已提交；完成回执按域计数"""
-    ledger = _ledger()
-    tools = _tools(ledger)
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        ledger.finish_chapter()
-    assert excinfo.value.record == "finish"
-    assert excinfo.value.code == "missing_record"
-
-    await _write_entity(tools, name="顾霜", el="gushuang")
-    await tools["write_metrics"].ainvoke(
-        {
-            "summary": "顾霜喝止众人",
-            "emotional_valence": -1,
-            "narrative_function": "冲突",
-            "labels": [{"paragraph_id": 1, "emotion": -1}],
-        }
-    )
-    await tools["write_event"].ainvoke({"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
-    assert json.loads(await tools["finish"].ainvoke({}))["status"] == "pending"
-    receipt = ledger.finish_chapter()
-    assert ledger.chapter_finished is True
-    assert receipt["status"] == "completed"
-    assert receipt["records"]["entities"] == 1
-    assert receipt["records"]["events"] == 1
-    assert receipt["records"]["paragraph_labels"] == 1

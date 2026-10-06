@@ -19,8 +19,8 @@ from src.agents.diagnosis.runner import (
     _validate_topic_label_ids,
     run_diagnosis_agent,
 )
+from src.agents.diagnosis.schema import CloudAnalysis
 from src.agents.graph import build_agent_graph
-from src.models.cloud.schema import CloudAnalysis
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
@@ -357,8 +357,8 @@ def test_validate_topic_label_ids_rejects_mismatch() -> None:
     with pytest.raises(ValueError, match="IDs must match"):
         _validate_topic_label_ids(analysis, expected_ids={0, 1, 8})
 
-    with pytest.raises(ValueError, match="keyed by topic_id"):
-        _validate_topic_label_ids(CloudAnalysis(topic_labels=["成长", "复仇"]), expected_ids={0, 1})
+    with pytest.raises(ValueError, match="valid dictionary"):
+        CloudAnalysis.model_validate({"topic_labels": ["成长", "复仇"]})
 
 
 def test_finalize_diagnosis_result_overrides_model_owned_runtime_fields() -> None:

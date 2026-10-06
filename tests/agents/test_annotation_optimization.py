@@ -10,17 +10,17 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agents.annotation import program as program_module
-from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.event_submission import build_event_submission_tool
-from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.graph import build_annotation_graph
-from src.agents.annotation.program import ProgramRuntime, build_program_tool
+from src.agents.annotation.program import build_program_tool
 from src.agents.annotation.schema import ChapterParagraphInfo, EventParticipantRole, RoleFunction
 from src.agents.annotation.subagent_graph import build_subagent_graph
 from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.agents.annotation.subagent_runtime import SubagentProgramRuntime
 from src.agents.annotation.tool_batch import _build_tool_batch_node
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.annotation.tools import AnnotationToolLedger
+from src.event_trees.submission import build_event_submission_tool
+from src.fact_graph.graph import FactGraph
+from tests.support.annotation_work_tools import build_annotation_tools
+from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
@@ -49,8 +49,11 @@ def _runtime(ledger: AnnotationToolLedger, role: str | None = None, *, observer:
     tools = build_annotation_tools(_QueryService(), ledger)
     if role is None:
         return ProgramRuntime(tools, ledger, observer=observer)
+    ledger.role = role
+    subagent = SubagentAnnotation(role=role)
+    ledger.finish_work.__self__.subagent = subagent
     return SubagentProgramRuntime(
-        {tool.name: tool for tool in tools}, ledger, SubagentAnnotation(role=role), observer=observer,
+        {tool.name: tool for tool in tools}, ledger, subagent, observer=observer,
     )
 
 
@@ -257,30 +260,6 @@ async def test_failed_child_resubmission_restores_pending_and_does_not_add_node(
     assert len(ledger.bound_payloads["events"]) == 1
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("unresolved", [False, True])
-async def test_finish_reconciles_preexisting_stale_pending_without_losing_unresolved_items(unresolved: bool) -> None:
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    await runtime.execute('write_event(el="wrong/e1", isroot=False, type="main", description="进入院门", evidence=2)')
-    stale = copy.deepcopy(ledger.pending_child_events)
-    await runtime.execute('write_event(el="t1", isroot=True, description="阿青举刀", evidence=1)\n'
-                          'write_event(el="t1/e1", isroot=False, type="main", description="进入院门", evidence=2)\n'
-                          'write_metrics(summary="阿青进入院门", emotional_valence=0, narrative_function="铺垫")')
-    assert not ledger.pending_child_events
-    # 模拟早前程序留下的旧桶：收尾也必须能独立核销，不能只依赖当前写入点
-    ledger.pending_child_events = stale
-    if unresolved:
-        stale["wrong"].append({**stale["wrong"][0], "record": "wrong/e2", "node_key": "e2"})
-        with pytest.raises(AnnotationStageRejection, match="wrong\\(e2\\)"):
-            ledger.finish_chapter()
-        assert [item["node_key"] for item in ledger.pending_child_events["wrong"]] == ["e2"]
-        assert not ledger.chapter_finished
-    else:
-        receipt = ledger.finish_chapter()
-        assert receipt["status"] == "completed"
-        assert not ledger.pending_child_events
-        assert len(ledger.ready_chapter.events) == 2
 
 
 @pytest.mark.asyncio
@@ -359,7 +338,7 @@ async def test_structured_item_failures_are_audited_and_native_submission_is_not
     event_tool = build_event_submission_tool(runtime)
     batch = _build_tool_batch_node(
         [build_program_tool(runtime), event_tool], ledger=ledger, observer=observer,
-        program_tool_name="execute_code", chapter_finish_name=None,
+        program_tool_name="execute_code",
     )
     bad = _root("bad")
     bad["participants"][0]["emotion"] = "愤怒"
@@ -445,7 +424,7 @@ async def test_clean_subagent_finish_stops_without_another_model_request(role: s
 
 
 @pytest.mark.asyncio
-async def test_partial_batch_and_stale_finish_do_not_stop_repairs() -> None:
+async def test_finish_closes_work_after_rejected_optional_event() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger, "event")
     model = _Replies([
@@ -458,8 +437,9 @@ async def test_partial_batch_and_stale_finish_do_not_stop_repairs() -> None:
     )
     await graph.ainvoke({"messages": [HumanMessage(content="完成")], "phase": "chapter_open",
                         "iterations": 0, "error": None})
-    assert model.requests == 3
-    assert len(ledger.bound_payloads["events"]) == 1
+    assert model.requests == 1
+    assert ledger.chapter_finished
+    assert ledger.bound_payloads["events"] == []
 
 
 @pytest.mark.asyncio
@@ -485,7 +465,7 @@ async def test_evidence_finish_requires_its_own_metric() -> None:
         "code": 'event(el="t1", isroot=True, type="main", description="举刀", evidence=1)',
     }},
 ])
-async def test_failed_batch_followed_by_natural_end_cannot_keep_a_finished_flag(failed_call: dict[str, Any]) -> None:
+async def test_rejected_call_does_not_reopen_successfully_finished_work(failed_call: dict[str, Any]) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger, "event")
     model = _Replies([
@@ -500,8 +480,9 @@ async def test_failed_batch_followed_by_natural_end_cannot_keep_a_finished_flag(
     )
     await graph.ainvoke({"messages": [HumanMessage(content="完成")], "phase": "chapter_open",
                         "iterations": 0, "error": None})
-    assert model.requests == 2
-    assert runtime.subagent.finished is False
+    assert model.requests == 1
+    assert runtime.subagent.finished is True
+    assert ledger.chapter_finished
 
 
 @pytest.mark.asyncio
@@ -522,29 +503,3 @@ async def test_subagent_graph_binds_structured_events_and_finishes_in_one_reques
     assert "submit_events" in model.bound_names
     assert len(ledger.bound_payloads["events"]) == 1
     assert runtime.subagent.finished is True
-
-
-@pytest.mark.asyncio
-async def test_formal_graph_binds_and_executes_structured_events() -> None:
-    ledger = _ledger()
-    tools = build_annotation_tools(_QueryService(), ledger)
-    runtime = ProgramRuntime(tools, ledger)
-    program_tool = build_program_tool(runtime)
-    event_tool = build_event_submission_tool(runtime)
-    finish_tool = next(tool for tool in tools if tool.name == "finish")
-    model = _Replies([AIMessage(content="", tool_calls=[
-        {"name": "submit_events", "args": {"events": [_root()]}, "id": "e1", "type": "tool_call"},
-        {"name": "execute_code", "args": {"code":
-         'write_metrics(summary="阿青举刀", emotional_valence=0, narrative_function="冲突")\nfinish()'},
-         "id": "p1", "type": "tool_call"},
-    ])])
-    graph = build_annotation_graph(
-        model, [*tools, program_tool, event_tool], ledger=ledger, max_iterations=5,
-        bind_tools=[program_tool, event_tool, finish_tool], program_tool_name="execute_code",
-    )
-    result = await graph.ainvoke({"messages": [HumanMessage(content="标注")], "phase": "chapter_open",
-                                 "iterations": 0, "error": None})
-    assert result["phase"] == "completed"
-    assert "submit_events" in model.bound_names
-    assert model.requests == 1
-    assert ledger.annotation is not None

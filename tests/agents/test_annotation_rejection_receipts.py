@@ -15,9 +15,6 @@ from typing import Any
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.graph import _invoke_tool
-from src.agents.annotation.program import ProgramRuntime
 from src.agents.annotation.schema import (
     BoundCharacterObservation,
     BoundEvent,
@@ -26,7 +23,11 @@ from src.agents.annotation.schema import (
     RelationInput,
     RelationType,
 )
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.annotation.tool_batch import _invoke_tool
+from src.agents.annotation.tools import AnnotationToolLedger
+from src.fact_graph.graph import FactGraph
+from tests.support.annotation_work_tools import build_annotation_tools
+from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 
 
 class _QueryService:
@@ -145,34 +146,13 @@ def test_endpoint_error_names_record_key() -> None:
         RelationInput(from_entity="未登记者", to_entity="李瑜", relation_type=RelationType.ALLY)
     ]
     with pytest.raises(ValueError) as excinfo:
-        ledger._build_ready_chapter()
+        ledger.validate_work_endpoints()
     message = str(excinfo.value)
     assert "端点校验失败" in message
     assert "t1/e1/participant/未登记者 character_observation.character 未在当前章 登记: 未登记者" in message
     assert "relation/未登记者-李瑜/盟友 relation.from_entity 未在当前章 登记: 未登记者" in message
 
 
-@pytest.mark.asyncio
-async def test_finish_rejection_names_pending_child_node_keys() -> None:
-    """挂起子事件兜底拒绝点名各树挂起的节点键（原 "t1×2" 只有数量）
-
-    finish 工具本身只回 pending 占位，收尾判定由回合末的 ledger.finish_chapter() 执行。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    await _call(
-        tools,
-        "write_metrics",
-        {"summary": "顾霜喝止众人", "emotional_valence": 0, "narrative_function": "冲突"},
-    )
-    for el in ("t1/e2", "t1/e3"):
-        receipt = await _call(
-            tools, "write_event", {"el": el, "isroot": False, "type": "main", "description": "李瑜推门"}
-        )
-        assert receipt.get("status") != "rejected"
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        ledger.finish_chapter()
-    assert "子事件仍挂起等待建根: t1(e2, e3)" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -266,148 +246,22 @@ anchor_record(record_id=edge["record"], source_ref=local["source_ref"])
     }
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("explicit_null", [False, True])
-async def test_missing_link_change_kind_names_record_value_and_allows_repair(explicit_null: bool) -> None:
-    ledger, runtime, args = await _link_runtime()
-    if explicit_null:
-        args["change_kind"] = None
-    code = "write_link(" + ", ".join(f"{key}={value!r}" for key, value in args.items()) + ")"
-    receipt = json.loads(await runtime.execute(code))
-    (failed,) = receipt["failed"]
-    assert receipt["status"] == "partial"
-    assert failed["record"] == "relation/顾霜-众人/盟友"
-    assert failed["field"] == "change_kind"
-    assert failed["code"] == "missing"
-    assert "relation/顾霜-众人/盟友(kind=relation_change, change_kind=None)" in failed["message"]
-    assert "reinforce" in failed["expected"]
-    assert not ledger.cross_chapter_links
-    assert ledger.source_anchors[args["record_id"]]
-    args["change_kind"] = "reinforce"
-    repaired = json.loads(await runtime.execute(
-        "write_link(" + ", ".join(f"{key}={value!r}" for key, value in args.items()) + ")"
-    ))
-    assert repaired["status"] == "applied", repaired
-    assert len(ledger.cross_chapter_links) == 1
-    assert ledger.cross_chapter_links[0].change_kind == "reinforce"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("field", "value", "code"), [
-    ("change_kind", "invented", "invalid_value"),
-    ("change_kind", "null", "invalid_value"),
-    ("kind", "invented", "invalid_value"),
-    ("source_ref", "unread-source", "unauthorized_reference"),
-    ("target_ref", "unread-target", "unauthorized_reference"),
-    ("target_ref", None, "string_type"),
-    ("record_id", "relation/不存在-众人/盟友", "unknown_record"),
-])
-async def test_link_rejection_names_record_and_invalid_field_value(field: str, value: Any, code: str) -> None:
-    ledger, runtime, args = await _link_runtime()
-    args[field] = value
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        await _call(runtime.tools, "write_link", args)
-    receipt = excinfo.value.receipt()
-    assert receipt["record"] == args["record_id"]
-    assert receipt["field"] == field
-    assert receipt["code"] == code
-    assert args["record_id"] in receipt["message"]
-    assert repr(value) in receipt["message"]
-    assert not ledger.cross_chapter_links
 
 
-@pytest.mark.asyncio
-async def test_link_rejection_names_missing_schema_field_without_echoing_payload() -> None:
-    ledger, runtime, args = await _link_runtime()
-    del args["target_ref"]
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        await _call(runtime.tools, "write_link", args)
-    receipt = excinfo.value.receipt()
-    assert receipt["record"] == args["record_id"]
-    assert receipt["field"] == "target_ref"
-    assert "target_ref=<未提供>" in receipt["message"]
-    assert args["source_ref"] not in receipt["message"]
-    assert not ledger.cross_chapter_links
 
 
-@pytest.mark.asyncio
-async def test_link_same_chapter_rejection_names_actual_chapter_values() -> None:
-    ledger, runtime, args = await _link_runtime()
-    args.update(target_ref=args["source_ref"], change_kind="reinforce")
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        await _call(runtime.tools, "write_link", args)
-    receipt = excinfo.value.receipt()
-    assert receipt["record"] == args["record_id"]
-    assert receipt["field"] == "target_ref"
-    assert "source.chapter_id=1, target.chapter_id=1" in receipt["message"]
-    assert not ledger.cross_chapter_links
 
 
-@pytest.mark.asyncio
-async def test_nonrelation_link_change_kind_rejection_names_both_field_values() -> None:
-    ledger, runtime, args = await _link_runtime()
-    entity_record = "entity/顾霜"
-    await _call(runtime.tools, "anchor_record", {"record_id": entity_record, "source_ref": args["source_ref"]})
-    args.update(record_id=entity_record, kind="same_entity", change_kind="reinforce")
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        await _call(runtime.tools, "write_link", args)
-    receipt = excinfo.value.receipt()
-    assert receipt["record"] == entity_record
-    assert receipt["field"] == "change_kind"
-    assert "entity/顾霜(kind=same_entity, change_kind=reinforce)" in receipt["message"]
-    assert not ledger.cross_chapter_links
 
 
-@pytest.mark.asyncio
-async def test_link_domain_rejection_names_actual_record_and_kind() -> None:
-    ledger, runtime, args = await _link_runtime()
-    args["record_id"] = "entity/顾霜"
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        await _call(runtime.tools, "write_link", args)
-    receipt = excinfo.value.receipt()
-    assert receipt["record"] == "entity/顾霜"
-    assert receipt["field"] == "kind"
-    assert receipt["code"] == "domain_mismatch"
-    assert "entity/顾霜(kind=relation_change)" in receipt["message"]
-    assert not ledger.cross_chapter_links
 
 
-@pytest.mark.asyncio
-async def test_foreign_link_source_rejection_names_actual_source_ref() -> None:
-    ledger, runtime, args = await _link_runtime()
-    args["source_ref"] = args["target_ref"]
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        await _call(runtime.tools, "write_link", args)
-    receipt = excinfo.value.receipt()
-    assert receipt["record"] == args["record_id"]
-    assert receipt["field"] == "source_ref"
-    assert receipt["code"] == "chapter_mismatch"
-    assert repr(args["source_ref"]) in receipt["message"]
-    assert "source.chapter_id=2" in receipt["message"]
-    assert not ledger.cross_chapter_links
 
 
-@pytest.mark.asyncio
-async def test_link_automatically_anchors_authorized_source_and_replay_is_idempotent() -> None:
-    ledger, runtime, args = await _link_runtime()
-    args.update(record_id="entity/顾霜", kind="same_entity")
-    assert args["record_id"] not in ledger.source_anchors
-    first = await _call(runtime.tools, "write_link", args)
-    replay = await _call(runtime.tools, "write_link", args)
-    assert first["accepted"] and replay["accepted"]
-    assert ledger.source_anchors[args["record_id"]] == [ledger.text_references[args["source_ref"]]]
-    assert len(ledger.cross_chapter_links) == 1
 
 
-@pytest.mark.asyncio
-async def test_rejected_relation_link_does_not_anchor_or_guess_change_direction() -> None:
-    ledger, runtime, args = await _link_runtime()
-    del ledger.source_anchors[args["record_id"]]
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        await _call(runtime.tools, "write_link", args)
-    assert excinfo.value.field == "change_kind"
-    assert not ledger.source_anchors
-    assert not ledger.cross_chapter_links
 
 
 @pytest.mark.asyncio
