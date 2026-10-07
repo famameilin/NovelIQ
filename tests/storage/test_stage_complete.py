@@ -443,12 +443,12 @@ class TestStageCompleteChecks:
             main_characters=["角色0", "角色1"],
             core_cast=["角色0", "角色1"],
         )
-        stats_repo.insert_agent_analysis(run_id, analysis)
+        stats_repo.insert_agent_analysis(run_id, analysis.model_dump())
         assert stats_repo.has_diagnosis_data(run_id)
-        # 主题标签被破坏成列表（应为 id→label 的 dict）时，合同校验不再放行
+        # 焦点结构被破坏成契约外取值时，阶段完成判定不再放行
         db_session.execute(
             text(
-                "UPDATE analysis_outputs SET payload = jsonb_set(payload, '{topic_labels}', '[\"成长\"]') "
+                "UPDATE analysis_outputs SET payload = jsonb_set(payload, '{focus_structure}', '\"solo\"') "
                 "WHERE run_id = :run_id AND kind = 'agent_analysis'"
             ),
             {"run_id": run_id},

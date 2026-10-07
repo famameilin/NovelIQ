@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.fact_graph.schema import TextSearchResult
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
+from src.storage.text_search import TextSearchCandidate
 from tests.support.annotation_work_tools import build_annotation_tools
 
 
@@ -32,9 +32,9 @@ async def test_future_text_search_has_auditable_source_capability() -> None:
     _ledger, query_service, tools = _formal_tools()
     query_service.search_text = AsyncMock(
         return_value=[
-            TextSearchResult(
-                chapter_id=8, paragraph_ids=[80], content="第八章证实身份",
-                keyword_score=1.0,
+            TextSearchCandidate(
+                chapter_id=8, paragraph_id=80, excerpt="第八章证实身份",
+                keyword_score=1.0, semantic_score=None,
             )
         ]
     )

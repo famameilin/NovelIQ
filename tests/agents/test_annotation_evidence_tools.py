@@ -17,11 +17,18 @@ import pytest
 from pydantic import ValidationError
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.fact_graph.schema import ChapterParagraphInfo, DialogueInput, EntityInput, RelationInput, TextSearchResult
-from src.event_trees.models import EventParticipantInput
 from src.agents.annotation.tool_batch import _invoke_tool
 from src.agents.annotation.tools import AnnotationToolLedger
+from src.event_trees.models import EventParticipantInput
 from src.fact_graph.graph import FactGraph, mention_uuid
+from src.fact_graph.schema import (
+    ChapterParagraphInfo,
+    DialogueInput,
+    EntityInput,
+    RelationInput,
+    TextSearchResult,
+)
+from src.storage.text_search import TextSearchCandidate
 from tests.support.annotation_work_tools import build_annotation_tools
 
 
@@ -42,11 +49,12 @@ class _QueryService:
         """2026-08-30 用于记录范围查询并返回完整原文命中"""
         self.text_queries.append((query, range_name, limit))
         return [
-            TextSearchResult(
+            TextSearchCandidate(
                 chapter_id=2,
-                paragraph_ids=[20 + index],
-                content="顾霜喝道" + "甲" * 2000,
+                paragraph_id=20 + index,
+                excerpt="顾霜喝道" + "甲" * 2000,
                 keyword_score=1.0,
+                semantic_score=None,
             )
             for index in range(self.text_result_count)
         ]

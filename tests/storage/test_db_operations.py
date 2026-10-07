@@ -147,7 +147,7 @@ def test_insert_agent_analysis(db_session) -> None:
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 
     stats_repo = StatsRepository(db_session)
-    stats_repo.insert_agent_analysis(run_id, analysis)
+    stats_repo.insert_agent_analysis(run_id, analysis.model_dump())
     fetched = stats_repo.fetch_agent_analysis(run_id)
     assert fetched is not None
     assert fetched["novel_id"] == novel_id
@@ -178,7 +178,7 @@ def test_fetch_agent_analysis_prefers_latest_row_for_same_run(db_session) -> Non
             focus_characters=["角色0"],
             main_characters=["角色0"],
             core_cast=["角色0"],
-        ),
+        ).model_dump(),
     )
     stats_repo.insert_agent_analysis(
         run_id,
@@ -195,7 +195,7 @@ def test_fetch_agent_analysis_prefers_latest_row_for_same_run(db_session) -> Non
             focus_characters=["角色1"],
             main_characters=["角色1"],
             core_cast=["角色1"],
-        ),
+        ).model_dump(),
     )
 
     fetched = stats_repo.fetch_agent_analysis(run_id)

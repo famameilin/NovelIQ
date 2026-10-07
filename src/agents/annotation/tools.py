@@ -33,13 +33,15 @@ from __future__ import annotations
 
 import json
 import unicodedata
+from collections.abc import Sequence
 from typing import Annotated, Any, Protocol
 
 from langchain_core.tools import tool
 from pydantic import ConfigDict, Field, create_model
 
-from .errors import AnnotationAuthorizationError, AnnotationInputError
 from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY, TextSearchResult
+
+from .errors import AnnotationAuthorizationError, AnnotationInputError
 
 # 2026-09-13 领域写入工具表：正式写入工具集合与失败归因共用同一份声明
 _DOMAIN_WRITE_TOOLS: dict[str, tuple[str, ...]] = {
@@ -129,7 +131,9 @@ class AnnotationQueryService(Protocol):
         *,
         range_name: str,
         limit: int = 50,
-    ) -> list[TextSearchResult]: ...
+    ) -> Sequence[Any]:
+        """返回段落级候选行（storage 的 TextSearchCandidate），域模型由本层构造"""
+        ...
 
     async def read_paragraph(self, paragraph_id: int, *, allow_future_context: bool) -> dict[str, Any]: ...
 
@@ -186,11 +190,20 @@ def build_search_tools(
         if ledger.phase != "chapter_open":
             raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 search_text")
         expected_range = "all" if ledger.allow_future_context else "previous"
-        results = await query_service.search_text(
-            normalized_query,
-            range_name=expected_range,
-            limit=offset + 9,
-        )
+        results = [
+            TextSearchResult(
+                chapter_id=row.chapter_id,
+                paragraph_ids=[row.paragraph_id],
+                content=row.excerpt,
+                keyword_score=row.keyword_score,
+                semantic_score=row.semantic_score,
+            )
+            for row in await query_service.search_text(
+                normalized_query,
+                range_name=expected_range,
+                limit=offset + 9,
+            )
+        ]
         views: list[dict[str, Any]] = []
         for item in results[offset : offset + 8]:
             visible_content = item.content[:2000]

@@ -8,10 +8,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
-from src.agents.diagnosis.schema import AgentAnalysis as AgentAnalysisSchema
 from src.storage.repositories.base import BaseRepository
 
 # 导入各模块函数
@@ -98,9 +97,9 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
 
     # ==================== metrics 模块补充方法 ====================
 
-    def insert_agent_analysis(self, run_id: str, analysis: AgentAnalysisSchema) -> str:
+    def insert_agent_analysis(self, run_id: str, payload: Mapping[str, Any]) -> str:
         """诊断产物追加进分析产物表，返回产物 id"""
-        return metrics.insert_agent_analysis(self.session, run_id, analysis)
+        return metrics.insert_agent_analysis(self.session, run_id, payload)
 
     def fetch_agent_analysis(self, run_id: str) -> dict[str, Any] | None:
         """获取最新诊断产物"""

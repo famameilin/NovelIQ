@@ -12,7 +12,6 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from src.event_trees.models import BoundChapterAnnotation
 from src.storage.models import (
     AnalysisOutput,
     Chapter,
@@ -125,21 +124,24 @@ class AnnotationRepository(BaseRepository[AnalysisOutput]):
         return by_chapter
 
     def fetch_chapter_annotations_full(self, run_id: str) -> list[ChapterAnnotationRow]:
-        """2026-08-07 用于从最新系统绑定 payload 展开完整章节标注"""
+        """2026-08-07 用于从最新系统绑定 payload 展开完整章节标注
+
+        写入前的领域校验归标注 agent，这里按 payload 取指标字段，不重跑整章合同。
+        """
         foreshadowing_by_chapter = self._foreshadowing_by_chapter(run_id)
         rows: list[ChapterAnnotationRow] = []
         for record in self._chapter_annotations(run_id):
             if record.chapter_id is None:
                 continue
-            annotation = BoundChapterAnnotation.model_validate(record.payload)
+            metrics = record.payload["metrics"]
             rows.append(
                 ChapterAnnotationRow(
                     chapter_id=record.chapter_id,
-                    emotional_valence=annotation.metrics.emotional_valence,
-                    event_type=annotation.metrics.narrative_function,
-                    pivot_moment=annotation.metrics.pivot_moment,
-                    cliffhanger=annotation.metrics.cliffhanger,
-                    coverage_warnings=list(annotation.coverage_warnings),
+                    emotional_valence=metrics["emotional_valence"],
+                    event_type=metrics["narrative_function"],
+                    pivot_moment=metrics["pivot_moment"],
+                    cliffhanger=metrics["cliffhanger"],
+                    coverage_warnings=list(record.payload.get("coverage_warnings") or []),
                     **foreshadowing_by_chapter.get(record.chapter_id, {}),
                 )
             )

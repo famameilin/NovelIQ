@@ -10,21 +10,22 @@ from langchain_core.messages import AIMessage
 
 from src.agents.annotation.program import PROGRAM_TOOL_NAME
 from src.agents.annotation.prompts import build_subagent_message
-from src.fact_graph.schema import ChapterParagraphInfo, TextSearchResult
 from src.agents.annotation.tool_batch import _build_tool_batch_node
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
+from src.fact_graph.schema import ChapterParagraphInfo
+from src.storage.text_search import TextSearchCandidate
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 class _QueryService:
-    async def search_text(self, query: str, *, range_name: str, limit: int = 50) -> list[TextSearchResult]:
+    async def search_text(self, query: str, *, range_name: str, limit: int = 50) -> list[TextSearchCandidate]:
         assert range_name == "all"
         return [
-            TextSearchResult(chapter_id=2, paragraph_ids=[index + 10], content=f"顾霜喝止众人-{index}",
-                             keyword_score=1.0, semantic_score=0.8)
+            TextSearchCandidate(chapter_id=2, paragraph_id=index + 10, excerpt=f"顾霜喝止众人-{index}",
+                                keyword_score=1.0, semantic_score=0.8)
             for index in range(5)
         ]
 

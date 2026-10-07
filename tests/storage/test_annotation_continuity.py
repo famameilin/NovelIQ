@@ -133,14 +133,14 @@ async def test_text_search_ranges_use_chapter_sequence_when_ids_are_out_of_order
     future = await service.search_text("顾霜", range_name="future")
     all_results = await service.search_text("顾霜", range_name="all")
 
-    assert [(item.chapter_id, item.paragraph_ids) for item in previous] == [(100, [1])]
-    assert previous[0].content == "前文顾霜初次现身"
-    assert [(item.chapter_id, item.paragraph_ids) for item in future] == [(900, [0])]
-    assert future[0].content == "后文顾霜身份揭晓"
-    assert {(item.chapter_id, tuple(item.paragraph_ids), item.content) for item in all_results} == {
-        (100, (1,), "前文顾霜初次现身"),
-        (500, (2,), "当前章顾霜入城"),
-        (900, (0,), "后文顾霜身份揭晓"),
+    assert [(item.chapter_id, item.paragraph_id) for item in previous] == [(100, 1)]
+    assert previous[0].excerpt == "前文顾霜初次现身"
+    assert [(item.chapter_id, item.paragraph_id) for item in future] == [(900, 0)]
+    assert future[0].excerpt == "后文顾霜身份揭晓"
+    assert {(item.chapter_id, item.paragraph_id, item.excerpt) for item in all_results} == {
+        (100, 1, "前文顾霜初次现身"),
+        (500, 2, "当前章顾霜入城"),
+        (900, 0, "后文顾霜身份揭晓"),
     }
 
 
@@ -169,7 +169,7 @@ async def test_search_text_keyword_channel_supports_wildcards_and_multi_terms(
     multi = await service.search_text("伯安 风雪", range_name="all", limit=8)
     miss = await service.search_text("不存在词", range_name="previous", limit=8)
 
-    assert any("赤羽炽尾鸡" in item.content for item in wildcard)
+    assert any("赤羽炽尾鸡" in item.excerpt for item in wildcard)
     assert {item.chapter_id for item in multi} == {1, 2}
     assert miss == []
 
@@ -222,10 +222,10 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     """
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-    from src.fact_graph.schema import ChapterParagraphInfo
     from src.agents.annotation.subagent_graph import build_subagent_graph
     from src.agents.annotation.tools import AnnotationToolLedger
     from src.fact_graph.graph import FactGraph
+    from src.fact_graph.schema import ChapterParagraphInfo
     from tests.support.annotation_work_tools import build_annotation_tools, build_program_test_runtime
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="模型回话不占连接")

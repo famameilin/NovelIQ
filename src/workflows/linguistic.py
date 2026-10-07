@@ -319,13 +319,13 @@ def _apply_paragraph_boundary_scores(run_id: str, paragraph_repo: ParagraphRepos
     if not vectors_by_id:
         logger.info("段落边界跳过：本 run 无段落向量（paragraph_embeddings 未就绪），两列保持 NULL")
         return 0
-    fit_labels = [label for label in labels if label.paragraph_id in vectors_by_id]
+    fit_labels = [label for label in labels if label["paragraph_id"] in vectors_by_id]
     if len(fit_labels) < 2:
         logger.info("段落边界跳过：自选段标签能对上段落向量的不足 2 条，两列保持 NULL")
         return 0
     boundary = fit_emotion_boundary(
-        np.stack([vectors_by_id[label.paragraph_id] for label in fit_labels]),
-        [int(label.emotion) for label in fit_labels],
+        np.stack([vectors_by_id[label["paragraph_id"]] for label in fit_labels]),
+        [int(label["emotion"]) for label in fit_labels],
     )
     if boundary is None:
         logger.info("段落边界跳过：标签分值无变化（全同情绪），无边界可学，两列保持 NULL")

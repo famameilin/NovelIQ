@@ -5,17 +5,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from src.fact_graph.schema import TextSearchResult
-from src.event_trees.models import BoundChapterAnnotation, BoundParagraphLabel
-from src.storage.text_search import TextSearchService
 from src.config import settings
 from src.embedding import EmbeddingClient
 from src.storage.models import AnalysisOutput, Chapter, Paragraph
 from src.storage.repositories.base import BaseRepository
+from src.storage.text_search import TextSearchCandidate, TextSearchService
 
 
 class DatabaseAnnotationQueryService:
@@ -91,11 +90,12 @@ class DatabaseAnnotationQueryService:
         *,
         range_name: str,
         limit: int = 50,
-    ) -> list[TextSearchResult]:
+    ) -> list[TextSearchCandidate]:
         """2026-08-30 用于按 Chapter.sequence 在 SQL 层执行配置授权的正文范围检索
 
         2026-09-16 检索服务改为只读作用域内按次构造（构造函数纯赋值，零成本），
         语义检索的 HTTP 往返仍落在这一次调用里。
+        返回段落级候选行；域模型（TextSearchResult）由调用方标注 agent 自行构造。
         """
         before_chapter_sequence: int | None = None
         after_chapter_sequence: int | None = None
@@ -118,16 +118,7 @@ class DatabaseAnnotationQueryService:
                 after_chapter_sequence=after_chapter_sequence,
                 limit=limit,
             )
-        return [
-            TextSearchResult(
-                chapter_id=row.chapter_id,
-                paragraph_ids=[row.paragraph_id],
-                content=row.excerpt,
-                keyword_score=row.keyword_score,
-                semantic_score=row.semantic_score,
-            )
-            for row in candidates
-        ]
+        return list(candidates)
 
     async def read_paragraph(self, paragraph_id: int, *, allow_future_context: bool) -> dict:
         """读取完整原文段落，不要求来源章节已完成标注"""
@@ -158,17 +149,17 @@ class DatabaseAnnotationQueryService:
 class ChapterAnnotationRepository(BaseRepository[AnalysisOutput]):
     """按成功保存的角色贡献读取章标注，不创建额外章级产物"""
 
-    def fetch_paragraph_labels(self, run_id: str) -> list[BoundParagraphLabel]:
+    def fetch_paragraph_labels(self, run_id: str) -> list[dict[str, Any]]:
         """2026-09-14 用于读取全书自选段情绪标签（段落级监督按书边界）
 
         标签随章节标注 payload 落库；句级旧字段（sentence_labels，2026-09-07 口径）
-        已从合同删除，重建库后无历史 payload 兼容问题。
+        已从合同删除，重建库后无历史 payload 兼容问题。写入前的领域校验归标注 agent，
+        这里只按行形态收段落标签，不重跑整章合同、也不构造上层模型。
         """
         from .results import chapter_annotations
 
         records = chapter_annotations(self.session, run_id)
-        labels: list[BoundParagraphLabel] = []
+        labels: list[dict[str, Any]] = []
         for record in records:
-            annotation = BoundChapterAnnotation.model_validate(record.payload)
-            labels.extend(annotation.paragraph_labels)
+            labels.extend(record.payload.get("paragraph_labels") or [])
         return labels

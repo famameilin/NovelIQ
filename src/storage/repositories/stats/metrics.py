@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -10,7 +10,6 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.agents.diagnosis.schema import AgentAnalysis as AgentAnalysisSchema
 from src.storage.models import AnalysisOutput, GlobalStats, ModelTurn, Novel
 
 if TYPE_CHECKING:
@@ -254,13 +253,16 @@ def _detect_token_coverage_gaps(
     return sorted(gaps)
 
 
-def insert_agent_analysis(session: Session, run_id: str, analysis: AgentAnalysisSchema) -> str:
-    """诊断产物以 kind=agent_analysis 追加进分析产物表，读侧取最新一行"""
+def insert_agent_analysis(session: Session, run_id: str, payload: Mapping[str, Any]) -> str:
+    """诊断产物以 kind=agent_analysis 追加进分析产物表，读侧取最新一行
+
+    这里只落已由诊断 agent 校验过的字段面，不重复做领域校验。
+    """
     row = AnalysisOutput(
         output_id=str(uuid4()),
         run_id=run_id,
         kind="agent_analysis",
-        payload=analysis.model_dump(),
+        payload=dict(payload),
     )
     session.add(row)
     session.flush()

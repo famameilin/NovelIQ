@@ -240,7 +240,7 @@ def save_diagnosis_result(session: Session, run_id: str, analysis: AgentAnalysis
     from src.fact_graph.graph import FactGraph
     from src.storage.repositories import StatsRepository
 
-    StatsRepository(session).insert_agent_analysis(run_id, analysis)
+    StatsRepository(session).insert_agent_analysis(run_id, analysis.model_dump())
     FactGraph(run_scope=run_id).save_main_characters(session, list(analysis.main_characters))
     session.commit()
 

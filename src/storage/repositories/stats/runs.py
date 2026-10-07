@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select
 
-from src.agents.diagnosis.schema import AgentAnalysis as AgentAnalysisSchema
 from src.storage.models import (
     AnalysisOutput,
     Chapter,
@@ -69,10 +68,6 @@ def _payload_has_valid_diagnosis_contract(payload: dict[str, Any]) -> bool:
     ):
         return False
 
-    try:
-        AgentAnalysisSchema.model_validate(payload)
-    except Exception:
-        return False
     return True
 
 

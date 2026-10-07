@@ -439,8 +439,12 @@ class TestParagraphBoundary:
 
         from sqlalchemy import select
 
-        from src.fact_graph.schema import BoundParagraphLabel, ChapterMetricsInput, NarrativeFunction
         from src.event_trees.models import BoundChapterAnnotation
+        from src.fact_graph.schema import (
+            BoundParagraphLabel,
+            ChapterMetricsInput,
+            NarrativeFunction,
+        )
         from src.storage.models import Paragraph
         from tests.support.chapter_annotation_helpers import commit_test_annotation
 
