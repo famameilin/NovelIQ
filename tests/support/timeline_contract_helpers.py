@@ -10,7 +10,7 @@ from tests.support.chapter_annotation_helpers import (
     persist_chapter_annotation,
     relation_fact,
 )
-from tests.support.graph_snapshot_helpers import insert_focus_contract_cloud_analysis
+from tests.support.graph_snapshot_helpers import insert_focus_contract_agent_analysis
 
 
 @dataclass(frozen=True)
@@ -233,7 +233,7 @@ def create_timeline_contract_scenario(
         ],
     )
 
-    insert_focus_contract_cloud_analysis(
+    insert_focus_contract_agent_analysis(
         db_session,
         novel_id=novel_id,
         run_id=run_id,

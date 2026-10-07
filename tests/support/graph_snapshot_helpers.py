@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from src.agents.diagnosis.schema import CloudAnalysis
+from src.agents.diagnosis.schema import AgentAnalysis
 from src.storage.models import Novel
 from src.storage.repositories import StatsRepository
 
@@ -44,7 +44,7 @@ def insert_graph_test_chunks(db_session, run_id: str, chunk_ids: range) -> None:
     db_session.commit()
 
 
-def insert_focus_contract_cloud_analysis(
+def insert_focus_contract_agent_analysis(
     db_session,
     *,
     novel_id: str,
@@ -55,7 +55,7 @@ def insert_focus_contract_cloud_analysis(
     topic_labels: Mapping[str, str] | None = None,
 ) -> None:
     """
-    插入一条最小合法的 cloud_analysis 记录，满足 graph/timeline 相关测试的焦点合同 gate
+    插入一条最小合法的诊断产物记录，满足 graph/timeline 相关测试的焦点合同 gate
     """
     focus_names = list(focus_characters)
     main_names = list(main_characters or focus_names)
@@ -63,7 +63,7 @@ def insert_focus_contract_cloud_analysis(
     arc_names = list(dict.fromkeys([*focus_names, *main_names, *core_names]))
     arc_scores = {name: float(9 - index * 0.5) for index, name in enumerate(arc_names)}
 
-    analysis = CloudAnalysis(
+    analysis = AgentAnalysis(
         novel_id=novel_id,
         foreshadow_expectation=0.42,
         arc_scores=arc_scores,
@@ -76,4 +76,4 @@ def insert_focus_contract_cloud_analysis(
         main_characters=main_names,
         core_cast=core_names,
     )
-    StatsRepository(db_session).insert_cloud_analysis(run_id, analysis)
+    StatsRepository(db_session).insert_agent_analysis(run_id, analysis)
