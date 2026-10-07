@@ -171,7 +171,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_known_characters(self, run_id: str) -> list[str]:
         """2026-08-09 用于从消歧后的规范人物视图读取诊断人物名单"""
-        from src.fact_graph.authority import KnowledgeGraphAuthorityService
+        from src.storage.repositories.graph.authority import KnowledgeGraphAuthorityService
 
         authority = KnowledgeGraphAuthorityService.from_session(self.session)
         try:

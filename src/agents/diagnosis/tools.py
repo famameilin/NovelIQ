@@ -170,7 +170,10 @@ def build_diagnosis_tools(
         查询人物图谱质量信号（节点数、关系数、活跃度等）。
         用于判断角色网络规模与图谱完整性。
         """
-        from src.fact_graph.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
+        from src.storage.repositories.graph.authority import (
+            KnowledgeGraphAuthorityService,
+            serialize_graph_report_signals,
+        )
 
         ledger.record_tool_call("get_graph_signals")
 

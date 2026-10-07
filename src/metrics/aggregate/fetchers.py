@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 
-from src.fact_graph.authority import KnowledgeGraphAuthorityService
 from src.metrics.aggregate.normalization import read_emotion_score
 from src.storage.models import Chapter
+from src.storage.repositories.graph.authority import KnowledgeGraphAuthorityService
 from src.utils.character_reference_policy import decide_character_reference
 
 from .types import (

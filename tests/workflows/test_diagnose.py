@@ -18,7 +18,7 @@ def test_persist_main_character_attributes_clears_previous_run_flags(db_session,
     避免只置位不清理导致已下榜角色残留主角标记"""
     from uuid import NAMESPACE_DNS, uuid5
 
-    from src.fact_graph.authority import KnowledgeGraphAuthorityService
+    from src.storage.repositories.graph.authority import KnowledgeGraphAuthorityService
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
 

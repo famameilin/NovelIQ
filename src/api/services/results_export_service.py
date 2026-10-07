@@ -41,12 +41,12 @@ from src.api.services.results_queries import (
 )
 from src.api.services.results_queries.diagnosis import _has_diagnosis_result
 from src.config import settings
-from src.fact_graph.authority import KnowledgeGraphAuthorityService
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
     StatsRepository,
 )
+from src.storage.repositories.graph.authority import KnowledgeGraphAuthorityService
 
 __all__ = [
     "_fetch_character_relations",

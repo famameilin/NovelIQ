@@ -16,7 +16,6 @@ from src.api.models.responses import (
     ChapterDialogue,
     ChapterRelation,
 )
-from src.fact_graph.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
 from src.metrics.aggregate.normalization import (
     partition_chapter_characters,
     partition_chapter_dialogues,
@@ -24,6 +23,7 @@ from src.metrics.aggregate.normalization import (
     read_emotion_score,
 )
 from src.storage.repositories import AnnotationRepository
+from src.storage.repositories.graph.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
 
 
 def _fetch_chapter_annotations(

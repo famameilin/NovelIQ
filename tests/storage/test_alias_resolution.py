@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from src.fact_graph.authority.alias import build_alias_resolution
+from src.storage.repositories.graph.authority.alias import build_alias_resolution
 
 
 def _sid(entity_id: int) -> str:

@@ -24,11 +24,6 @@ from src.api.services.results_queries import (
     _fetch_topics,
 )
 from src.api.services.results_queries.diagnosis import _has_diagnosis_result
-from src.fact_graph.authority import (
-    ExportGraphAuthorityView,
-    GraphAuthorityReport,
-    serialize_graph_report_signals,
-)
 from src.metrics.event_timeline_metrics import (
     build_event_timeline_plan,
     serialize_event_timeline_node,
@@ -39,6 +34,11 @@ from src.storage.repositories import (
     ChapterRepository,
     ParagraphRepository,
     StatsRepository,
+)
+from src.storage.repositories.graph.authority import (
+    ExportGraphAuthorityView,
+    GraphAuthorityReport,
+    serialize_graph_report_signals,
 )
 
 __all__ = [

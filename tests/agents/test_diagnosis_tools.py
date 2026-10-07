@@ -177,8 +177,8 @@ def test_get_topic_data_empty() -> None:
 
 def test_get_graph_signals_merges_summary_and_quality() -> None:
     with (
-        patch("src.fact_graph.authority.KnowledgeGraphAuthorityService") as svc_cls,
-        patch("src.fact_graph.authority.serialize_graph_report_signals") as serialize,
+        patch("src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService") as svc_cls,
+        patch("src.storage.repositories.graph.authority.serialize_graph_report_signals") as serialize,
     ):
         svc_cls.from_session.return_value.build_graph_report.return_value = object()
         serialize.return_value = ({"nodes": 10}, {"quality": "high"})
@@ -191,8 +191,8 @@ def test_get_graph_signals_merges_summary_and_quality() -> None:
 
 def test_get_graph_signals_empty_signals() -> None:
     with (
-        patch("src.fact_graph.authority.KnowledgeGraphAuthorityService"),
-        patch("src.fact_graph.authority.serialize_graph_report_signals", return_value=({}, {})),
+        patch("src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService"),
+        patch("src.storage.repositories.graph.authority.serialize_graph_report_signals", return_value=({}, {})),
     ):
         tools = _build_tools()
         assert _invoke(tools[5]) == "（无图谱信号数据）"

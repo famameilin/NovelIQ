@@ -12,9 +12,9 @@ from src.api.services.results_queries import (
     _fetch_foreshadowing_trees,
     _fetch_hierarchical_relations,
 )
-from src.fact_graph.authority import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
 from src.metrics.aggregate.normalization import normalize_arc_scores, normalize_name_list
 from src.storage.repositories.annotation import ForeshadowingTreeView
+from src.storage.repositories.graph.authority import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
 
 
 class _DummyRow:
@@ -643,7 +643,7 @@ def test_fetch_character_relations_deduplicates_across_chunks():
     )
 
     with patch(
-        "src.fact_graph.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -686,7 +686,7 @@ def test_fetch_character_relations_skips_inactive_current_relations():
     )
 
     with patch(
-        "src.fact_graph.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -707,7 +707,7 @@ def test_fetch_character_relations_uses_last_seen_chapter_id():
     )
 
     with patch(
-        "src.fact_graph.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -724,7 +724,7 @@ def test_fetch_character_relations_uses_last_seen_chapter_id():
 def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
     annotation_repo = _DummyAnnotationRepo2()
     with patch(
-        "src.fact_graph.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(
             assert_graph_ready=lambda _run_id: (_ for _ in ()).throw(
                 GraphReadinessError(
@@ -744,7 +744,7 @@ def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
 def test_fetch_character_relations_allows_empty_graph_when_no_pending():
     annotation_repo = _DummyAnnotationRepo2()
     with patch(
-        "src.fact_graph.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(

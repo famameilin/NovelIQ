@@ -15,7 +15,12 @@ from src.api.services.results_export_service import (
     load_export_relation_bundle,
     load_graph_signal_bundle,
 )
-from src.fact_graph.authority import (
+from src.storage.repositories import (
+    AnnotationRepository,
+    ChapterRepository,
+    StatsRepository,
+)
+from src.storage.repositories.graph.authority import (
     CanonicalEntity,
     ExportGraphAuthorityView,
     ExportRelationSnapshot,
@@ -27,11 +32,6 @@ from src.fact_graph.authority import (
     GraphQualitySignals,
     GraphSharedSummary,
     serialize_graph_report_signals,
-)
-from src.storage.repositories import (
-    AnnotationRepository,
-    ChapterRepository,
-    StatsRepository,
 )
 from tests.support.chapter_annotation_helpers import (
     commit_test_event_link,
