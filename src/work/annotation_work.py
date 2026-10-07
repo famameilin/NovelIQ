@@ -1,7 +1,7 @@
 """角色 work 的稳定身份与必需角色
 
 说明: 作业单元（work）契约由派发侧构造、由标注 agent 消费，因此与队列机制同包；
-角色值域与章节完成判定（storage）留在持久化侧，本模块只取用。
+角色值域与章节完成判定由本包的无副作用 policy 维护。
 """
 
 from __future__ import annotations
@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from src.storage.repositories.annotation.work_state import LANES, Role
 from src.utils.identity import stable_digest
+from src.work.policy import LANES, Role
 
 
 def required_roles(chapter_text: str, threshold: int) -> tuple[Role, ...]:

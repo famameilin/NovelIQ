@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.fact_graph.schema import ChapterParagraphInfo, DialogueCandidate, paragraph_has_visible_prefix
+from src.fact_graph.inputs import ChapterParagraphInfo, DialogueCandidate, paragraph_has_visible_prefix
 
 _PROMPTS_DIR = Path(__file__).resolve().parents[3] / "data" / "prompts"
 

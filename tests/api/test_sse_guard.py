@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from src.sse.endpoint import _task_run_belongs_to_novel
+from src.api.routes.sse import _task_run_belongs_to_novel
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
 from tests.support.analysis_factories import insert_test_novel

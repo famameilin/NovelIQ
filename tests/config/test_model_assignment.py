@@ -4,15 +4,21 @@ from typing import Any
 
 import pytest
 
-from src.config.input_config import load_task_config
-from src.config.model_assignment import select_annotation_model
 from src.config.schemas.model import WeightedModelSettings, _parse_model_pool
 from src.config.settings import settings
+from src.model_pool.configuration import load_task_config
+from src.model_pool.selection import select_annotation_model
 
 
 def _entry(model_id: str = "a", **overrides: Any) -> dict[str, Any]:
-    return {"model_id": model_id, "base_url": f"https://{model_id}.example/v1", "api_key": f"key-{model_id}",
-            "weight": 1, "max_in_flight": 2, **overrides}
+    return {
+        "model_id": model_id,
+        "base_url": f"https://{model_id}.example/v1",
+        "api_key": f"key-{model_id}",
+        "weight": 1,
+        "max_in_flight": 2,
+        **overrides,
+    }
 
 
 def test_weighted_assignment_is_stable_and_zero_weight_is_excluded() -> None:
@@ -23,36 +29,67 @@ def test_weighted_assignment_is_stable_and_zero_weight_is_excluded() -> None:
     assert select_annotation_model("task", pool) == select_annotation_model("task", pool)
 
 
-@pytest.mark.parametrize("pool", [[], [_entry(weight=-1)], [_entry(weight=0)], [_entry(weight=True)],
-                                 [_entry(weight=float("inf"))], [_entry(), _entry()], [_entry(max_in_flight=0)],
-                                 [_entry(max_in_flight=True)], [_entry(max_in_flight=1.5)], [_entry(api_key="")],
-                                 [_entry(api_key="key\nother=value")], [_entry(base_url="file:///tmp")],
-                                 [_entry(base_url="https://user:secret@host/v1")], [_entry(base_url="https://host:bad/v1")]])
+@pytest.mark.parametrize(
+    "pool",
+    [
+        [],
+        [_entry(weight=-1)],
+        [_entry(weight=0)],
+        [_entry(weight=True)],
+        [_entry(weight=float("inf"))],
+        [_entry(), _entry()],
+        [_entry(max_in_flight=0)],
+        [_entry(max_in_flight=True)],
+        [_entry(max_in_flight=1.5)],
+        [_entry(api_key="")],
+        [_entry(api_key="key\nother=value")],
+        [_entry(base_url="file:///tmp")],
+        [_entry(base_url="https://user:secret@host/v1")],
+        [_entry(base_url="https://host:bad/v1")],
+    ],
+)
 def test_invalid_pool_is_rejected(pool: list[dict[str, Any]]) -> None:
     with pytest.raises(ValueError):
         _parse_model_pool(pool)
 
 
 def test_selected_models_use_their_own_credentials_and_concurrency(monkeypatch) -> None:
-    monkeypatch.setattr(settings.models, "model_pool", _parse_model_pool([
-        _entry("a"), _entry("b", max_in_flight=5, temperature=0.3, top_p=0.9, max_tokens=2048),
-        _entry("diagnostic", weight=0, max_in_flight=1, temperature=0.1),
-    ]))
+    monkeypatch.setattr(
+        settings.models,
+        "model_pool",
+        _parse_model_pool(
+            [
+                _entry("a"),
+                _entry("b", max_in_flight=5, temperature=0.3, top_p=0.9, max_tokens=2048),
+                _entry("diagnostic", weight=0, max_in_flight=1, temperature=0.1),
+            ]
+        ),
+    )
     monkeypatch.setattr(settings.models, "diagnosis_model_id", "diagnostic")
     selected = load_task_config("annotation", model_id="b")
     assert (selected.model, selected.base_url, selected.api_key, selected.max_in_flight) == (
-        "b", "https://b.example/v1", "key-b", 5,
+        "b",
+        "https://b.example/v1",
+        "key-b",
+        5,
     )
     # 2026-10-02 设置迁移：采样参数跟随选中的池内模型
     assert (selected.temperature, selected.top_p, selected.max_tokens) == (0.3, 0.9, 2048)
     diagnosis = load_task_config("diagnosis")
     assert (diagnosis.model, diagnosis.base_url, diagnosis.api_key, diagnosis.max_in_flight) == (
-        "diagnostic", "https://diagnostic.example/v1", "key-diagnostic", 1,
+        "diagnostic",
+        "https://diagnostic.example/v1",
+        "key-diagnostic",
+        1,
     )
     assert (diagnosis.temperature, diagnosis.max_tokens) == (0.1, 131072)
-    assert load_task_config("annotation", selection_key="fixed").model == load_task_config(
-        "annotation", selection_key="fixed",
-    ).model
+    assert (
+        load_task_config("annotation", selection_key="fixed").model
+        == load_task_config(
+            "annotation",
+            selection_key="fixed",
+        ).model
+    )
 
 
 def test_missing_diagnosis_selection_does_not_use_annotation_model(monkeypatch) -> None:

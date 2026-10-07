@@ -14,10 +14,10 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from src.agents.audit.observer import AgentTurnObserver, build_invocation_context
-from src.agents.audit.recorder import AgentAuditRecorder
-from src.agents.diagnosis.schema import AgentAnalysis
 from src.agents.graph import build_agent_graph
+from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
+from src.audit.recorder import AgentAuditRecorder
+from src.diagnosis.schema import AgentAnalysis
 from src.storage.models.agent_audit import AgentToolCall, ModelTurn
 from tests.agents.test_diagnosis_agent import _analysis_payload
 from tests.support.chapter_annotation_helpers import create_run_with_chunks

@@ -19,9 +19,9 @@ import pytest
 from src.sse.events import StreamEvent
 from src.storage.db import get_session, get_session_factory
 from src.storage.models import AnalysisRun, Novel
-from src.work.events import AnalysisEventBus
 from src.work.task_manager import TaskManager
 from src.workflows.analysis.stage_orchestrator import StageOrchestratorMixin
+from src.workflows.progress import AnalysisEventBus
 
 pytestmark = pytest.mark.asyncio
 

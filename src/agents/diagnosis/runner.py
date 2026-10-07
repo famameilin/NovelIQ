@@ -14,10 +14,10 @@ from typing import Any, cast
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.agents.diagnosis.schema import AgentAnalysis
 from src.agents.stream import AgentStream
-from src.storage.diagnosis_payload import AgentAnalysisPatch
-from src.storage.repositories.diagnosis_repository import DiagnosisRepository
+from src.diagnosis.patch import AgentAnalysisPatch
+from src.diagnosis.queries import DiagnosisQueries
+from src.diagnosis.schema import AgentAnalysis
 
 from .evidence import DiagnosisEvidenceLedger
 from .prompts import build_diagnosis_system_prompt
@@ -105,14 +105,14 @@ async def _run_diagnosis_agent(
     从数据库按需查询证据（聚合指标/转折素材/人物/主题/图谱信号），
     自主决定查看哪些证据，最终产出诊断结果
     """
-    from src.agents.audit.observer import AgentTurnObserver, build_invocation_context
     from src.agents.graph import build_agent_graph
+    from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
     from src.config import settings
 
     start_time = time.time()
 
     if llm is None:
-        from src.config.input_config import load_task_config
+        from src.model_pool.configuration import load_task_config
         from src.model_pool.llm import build_chat_model
 
         model_config = load_task_config("diagnosis")
@@ -120,7 +120,7 @@ async def _run_diagnosis_agent(
 
     if stream is not None:
         await stream.thinking("诊断 Agent 开始取证...")
-    diagnosis_repo = DiagnosisRepository(session)
+    diagnosis_repo = DiagnosisQueries(session)
     topic_rows = diagnosis_repo.fetch_topic_words(run_id)
     expected_topic_ids = {int(row["topic_id"]) for row in topic_rows}
     foreshadow_expectation = diagnosis_repo.calculate_foreshadow_expectation(run_id)
@@ -182,9 +182,7 @@ async def _run_diagnosis_agent(
         # 故与标注 agent 同语义直接中断这次的图调用（取消由上层 handle_cancel 收口）
         from src.utils.cancellation import run_cancellable
 
-        result_state = cast(
-            dict[str, Any], await run_cancellable(graph.ainvoke(initial_state), is_cancelled)
-        )
+        result_state = cast(dict[str, Any], await run_cancellable(graph.ainvoke(initial_state), is_cancelled))
     except BaseException as exc:
         logger.error("diagnosis agent graph failed: run_id={} error={}", run_id, exc)
         recorder.finish_invocation(**audit_context, status="error", final_error=str(exc))
@@ -259,7 +257,7 @@ async def run_diagnosis_agent(
     """默认执行只发送实际展示和审计消息，审计保存有独立生命周期"""
     from uuid import uuid4
 
-    from src.agents.audit.module import AuditMessages, AuditModule
+    from src.audit.module import AuditMessages, AuditModule
     from src.event_bus import EventBus, Message
     from src.sse.consumer import SSEModule
     from src.storage.db import get_session_factory

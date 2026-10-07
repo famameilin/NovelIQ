@@ -10,7 +10,7 @@ from src.api.models.tasks import (
     BatchDeleteNovelsResponse,
     UploadResponse,
 )
-from src.api.services.novel_service import NovelService
+from src.workflows.novels import NovelService
 
 router = APIRouter(prefix="/novels", tags=["novels"])
 

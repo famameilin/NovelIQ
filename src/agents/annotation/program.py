@@ -1,64 +1,16 @@
-"""
-程序面（CodeAct）execute_code 工具：受限解释器、目录渲染与投影层
-"""
-
-# ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入（大文件拆分聚合面）。
-
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：program.py 大文件拆分——检索投影层迁出至 search_projection.py，API 目录渲染 +
-# 合同文案迁出至 catalog.py，两个 runtime 迁出至 program_runtime.py；本模块保留
-# build_program_tool/render_list_signature 并对迁出符号 re-export（既有导入方零改动）。
-# 2026-10-07 体积/步数上限与 ProgramFault 再下沉至 src/event_trees/program_contract.py：
-# 事件树与标注 agent 共用同一份护栏，agent 不必被写入目标反向 import。
-# 说明：纯结构搬移，不改任何运行逻辑与签名；program_runtime 仍经 tool_batch._execute_call
-# 复用生产单条事务边界。
+"""把当前程序运行时的实际工具目录装配成 execute_code"""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import StructuredTool
 
-# 程序面工具名（唯一对外的绑定面）：写者只见这一条工具
-PROGRAM_TOOL_NAME = "execute_code"
+from src.agents.annotation.catalog import call_api_text, tool_call_entries
+from src.agents.annotation.program_contract import PROGRAM_TOOL_NAME
 
-# 内层 op 的审计 call_index 命名空间：模型面的调用号从 0 起，内层从 1000 起递增，
-# 两套编号在同一回合内不重叠（agent_tool_calls 无 (turn_id, call_index) 唯一约束，
-# 此约定只为让既有按 call_index 排序的排查口径保持可读）
-_INNER_CALL_INDEX_BASE = 1000
-
-# 2026-09-15 常量别名：模型把 JSON 的 true/false/null 写进 Python 程序是常态
-# （实验 run codeact-20260914 ch5 第五轮 KeyError: 'true' 白烧一轮），别名表在
-# 变量查找之前命中，True/False/None 本身是 Python 常量节点、天然可用
-_PROGRAM_NAME_CONSTANTS: dict[str, Any] = {"true": True, "false": False, "null": None, "none": None}
-
-# 2026-09-17 程序面回执回显只读检索结果：程序里的检索调用此前只把 payload 交给程序
-# 变量，模型看不到值（实验实测同一句 search_pool 连发 7 次、块会话整轮 burn 在"回查"
-# 上）。reads 只装检索类工具，写入类仍只回句柄（成功明文不回显）。
-_READ_TOOL_NAMES = frozenset(
-    {
-        "search_graph",
-        "search_events",
-        "search_cases",
-        "read_event",
-        "read_entity",
-        "search_text",
-        "read_text",
-        "read_chapter_text",
-    }
-)
-_READ_ECHO_MAX_CHARS = 1600
-_READ_ECHO_MAX_ITEMS = 8
-
-
-def render_list_signature(name: str, parameters: list[tuple[str, str]]) -> str:
-    """2026-09-16 用于渲染调用签名（参数清单从函数签名或 args_schema 读出，不手抄）
-
-    2026-09-18 参数清单先在调用方算好（构造器读函数、工具读 schema），本函数只做排版：
-    构造器与工具在目录里是同一种签名的写法。
-    2026-09-20 参数那一截自带类型标签（见 _type_label），本函数只负责拼。
-    """
-    return f"{name}(" + ", ".join(text for _, text in parameters) + ")"
+if TYPE_CHECKING:
+    from src.agents.annotation.program_runtime import RestrictedProgramRuntime
 
 
 def build_program_tool(
@@ -91,43 +43,3 @@ def build_program_tool(
         name=PROGRAM_TOOL_NAME,
         description=description,
     )
-
-
-from .catalog import (
-    SUBAGENT_CONTRACT_TEXT as SUBAGENT_CONTRACT_TEXT,
-)
-from .catalog import (
-    _dedent_catalog_text as _dedent_catalog_text,
-)
-from .catalog import (
-    call_api_text as call_api_text,
-)
-from .catalog import (
-    call_parameters as call_parameters,
-)
-from .catalog import (
-    constructor_call_entries as constructor_call_entries,
-)
-from .catalog import (
-    tool_call_entries as tool_call_entries,
-)
-from .program_runtime import (
-    RestrictedProgramRuntime as RestrictedProgramRuntime,
-)
-from .search_projection import (  # noqa: E402
-    _call_rejection as _call_rejection,
-)
-from .search_projection import (
-    build_program_tools as build_program_tools,
-)
-
-__all__ = [
-    "PROGRAM_TOOL_NAME",
-    "RestrictedProgramRuntime",
-    "build_program_tool",
-    "build_program_tools",
-    "call_api_text",
-    "call_parameters",
-    "render_list_signature",
-    "tool_call_entries",
-]

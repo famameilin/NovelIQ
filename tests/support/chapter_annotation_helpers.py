@@ -10,19 +10,11 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from src.agents.annotation.candidates import extract_dialogue_candidates
-from src.event_trees.models import (
-    BoundChapterAnnotation,
-    BoundEvent,
-    EventParticipantInput,
-)
-from src.fact_graph.schema import (
-    BoundCharacterObservation,
-    BoundDialogue,
-    ChapterMetricsInput,
-    EntityInput,
-    EntityType,
-    RelationInput,
-)
+from src.agents.annotation.output_models import BoundChapterAnnotation
+from src.event_trees.models import BoundEvent, EventParticipantInput
+from src.fact_graph.inputs import ChapterMetricsInput, EntityInput, RelationInput
+from src.fact_graph.outputs import BoundCharacterObservation, BoundDialogue
+from src.fact_graph.vocabulary import EntityType
 from src.storage.db import get_session_factory
 from src.storage.models import Chapter, Novel, Paragraph
 from src.storage.repositories import ChapterRepository, RunRepository
@@ -479,9 +471,7 @@ def commit_test_annotation(
         event_trees=trees,
         case_pool=cases,
     )
-    records = list(
-        session.execute(select(AnalysisOutput).where(AnalysisOutput.run_id == run_id)).scalars()
-    )
+    records = list(session.execute(select(AnalysisOutput).where(AnalysisOutput.run_id == run_id)).scalars())
     graph.restore_storage(session, records)
     trees.restore_storage(session, records)
     graph.begin(work_id, invocation, chapter.sequence, "solo")
@@ -503,9 +493,10 @@ def commit_test_annotation(
         role="solo",
     )
     ledger.metrics_payload = annotation.metrics
-    ledger.bound_payloads = {
-        key: getattr(annotation, key) for key in ("events", "dialogues", "character_observations", "paragraph_labels")
-    }
+    ledger.events.bound_payloads["events"] = annotation.events
+    ledger.events.bound_payloads["character_observations"] = annotation.character_observations
+    ledger.dialogue.bound_payloads["dialogues"] = annotation.dialogues
+    ledger.metrics.bound_payloads["paragraph_labels"] = annotation.paragraph_labels
     execution = WorkExecution(
         WorkReceipt(work_id, run_id, "annotation_agent", payload),
         invocation,
@@ -585,7 +576,7 @@ def commit_test_resolution(
 ) -> None:
     """关系变化/明确事件连接夹具直接保存领域事实，案例不夹带结构化裁决"""
     from src.fact_graph.graph import FactGraph
-    from src.fact_graph.schema import RELATION_DEFINITIONS
+    from src.fact_graph.vocabulary import RELATION_DEFINITIONS
     from src.storage.models import (
         AnalysisOutput,
         AnnotationWork,
@@ -599,9 +590,7 @@ def commit_test_resolution(
     work = session.execute(
         select(AnnotationWork).where(AnnotationWork.run_id == run_id, AnnotationWork.chapter_id == chapter_id)
     ).scalar_one()
-    record = session.execute(
-        select(AnalysisOutput).where(AnalysisOutput.work_id == work.work_id)
-    ).scalar_one()
+    record = session.execute(select(AnalysisOutput).where(AnalysisOutput.work_id == work.work_id)).scalar_one()
     paragraph = (
         session.execute(select(Paragraph).where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id))
         .scalars()

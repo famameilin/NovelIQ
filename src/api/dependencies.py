@@ -17,11 +17,11 @@ from sqlalchemy.orm import Session
 
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.services.metrics_service import MetricsService, get_metrics_service
-from src.api.services.novel_service import NovelService
 from src.storage.db import get_session_factory
 from src.storage.models import AnalysisRun
 from src.storage.repositories import RunRepository
 from src.workflows import dependencies as workflows_deps
+from src.workflows.novels import NovelService
 from src.workflows.tasks import TaskService
 
 # 结果查询端点统一的可读状态白名单（results / linguistic / tabs 共用）

@@ -1,14 +1,14 @@
 """共享案例的保存顺序及独立审计回执验证"""
 
 from copy import deepcopy
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 
-from src.agents.audit.module import AuditModule
+from src.audit.module import AuditModule
 from src.case_pool import CasePool
 from src.event_bus import EventBus, Message
+from src.fact_graph.read.annotations import fetch_chapter_characters_full
 from src.storage.db import get_session_factory
 from src.storage.models import BookCase, ModelTurn
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -19,12 +19,10 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
     """引用自身已保存且有效，丢弃源章不补造实体写入，也不丢引用端点"""
     from uuid import uuid4
 
-    from src.event_trees.models import BoundChapterAnnotation
+    from src.agents.annotation.output_models import BoundChapterAnnotation
     from src.fact_graph.graph import FactGraph, mention_uuid
-    from src.fact_graph.schema import (
-        BoundDialogue,
-        ChapterMetricsInput,
-    )
+    from src.fact_graph.inputs import ChapterMetricsInput
+    from src.fact_graph.outputs import BoundDialogue
     from src.storage.models import AnalysisOutput, AnnotationWork, GraphEntity, GraphFact, Paragraph
     from src.storage.repositories.annotation import AnnotationRepository
     from tests.support.chapter_annotation_helpers import (
@@ -37,29 +35,49 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
     text = 'Alice says: "Go."'
     _, run_id = create_run_with_chunks(db_session, texts=["Alice knows Bob.", text], chapter_ids=[1, 2])
     source_id = persist_chapter_annotation(
-        db_session, run_id=run_id, chapter_id=1,
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
         relations=[relation_fact(chapter_id=1, from_name="Alice", to_name="Bob", relation_type="敌对")],
         entity_attributes={(1, "Alice"): {"discarded_attribute": True}},
     )
     output = BoundChapterAnnotation(
         metrics=ChapterMetricsInput(summary="Actual input", emotional_valence=0, narrative_function="铺垫"),
-        events=[], dialogues=[], character_observations=[],
+        events=[],
+        dialogues=[],
+        character_observations=[],
     )
     relations = []
     if reference_kind == "relation":
         relations = [{"from_entity": "Alice", "to_entity": "Bob", "relation_type": "敌对", "chapter_id": 2}]
     elif reference_kind == "event":
-        output.events = [make_bound_event(
-            description="Alice speaks", participants=[{"entity": "Alice", "role": "主体"}],
-            node_id=str(uuid4()), tree_id=str(uuid4()),
-        )]
+        output.events = [
+            make_bound_event(
+                description="Alice speaks",
+                participants=[{"entity": "Alice", "role": "主体"}],
+                node_id=str(uuid4()),
+                tree_id=str(uuid4()),
+            )
+        ]
         paragraph = db_session.query(Paragraph).filter_by(run_id=run_id, chapter_id=2).one()
         output.events[0].evidence_paragraph_id = paragraph.paragraph_id
     else:
-        output.dialogues = [BoundDialogue(candidate_index=1, candidate_key="actual-go", content="Go.",
-                                          start=text.index("Go."), end=text.index("Go.") + 3, speaker="Alice")]
+        output.dialogues = [
+            BoundDialogue(
+                candidate_index=1,
+                candidate_key="actual-go",
+                content="Go.",
+                start=text.index("Go."),
+                end=text.index("Go.") + 3,
+                speaker="Alice",
+            )
+        ]
     kept_id = commit_test_annotation(
-        db_session, run_id=run_id, chapter_id=2, annotation=output, relation_assert_ops=relations,
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        annotation=output,
+        relation_assert_ops=relations,
     )
     source = db_session.get(AnalysisOutput, source_id)
     source_work = source.work_id
@@ -76,7 +94,7 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
     assert db_session.get(GraphEntity, mention_uuid(run_id, 2, "Alice")).attributes == {}
     assert db_session.query(GraphFact).filter_by(run_id=run_id, fact_type="entity").count() == 0
     assert db_session.query(GraphFact).filter_by(run_id=run_id, fact_type="entity_reference").count() >= 1
-    assert AnnotationRepository(db_session).fetch_chapter_characters_full(run_id) == []
+    assert fetch_chapter_characters_full(AnnotationRepository(db_session).session, run_id) == []
 
 
 def test_case_delivery_order_does_not_follow_database_save_order(db_session):
@@ -104,16 +122,15 @@ def test_case_delivery_order_does_not_follow_database_save_order(db_session):
     )
 
     def execution(author):
-        return SimpleNamespace(
-            work_id=author[0],
-            invocation_id=author[1],
-            contributions={
-                "cases": {
-                    "registrations": {key: deepcopy(pool.cases[key]) for key in pool.registrations[author]},
-                    "deliveries": deepcopy(pool.deliveries[author]),
-                }
-            },
-        )
+        import json
+
+        from src.case_pool.contributions import CaseContribution
+
+        snapshot = {
+            "registrations": {key: deepcopy(pool.cases[key]) for key in pool.registrations[author]},
+            "deliveries": deepcopy(pool.deliveries[author]),
+        }
+        return CaseContribution(run_id, author[0], author[1], json.dumps(snapshot, ensure_ascii=False))
 
     pool.save_work(db_session, execution(b))
     db_session.commit()
@@ -157,7 +174,9 @@ async def test_actual_usage_duplicate_is_durable_and_does_not_double_charge(db_s
     bus.publish(message)
     await audit.close()
     db_session.expire_all()
-    usage = db_session.execute(
-        select(ModelTurn).where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "usage")
-    ).scalars().all()
+    usage = (
+        db_session.execute(select(ModelTurn).where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "usage"))
+        .scalars()
+        .all()
+    )
     assert len(usage) == 1 and usage[0].total_tokens == 10

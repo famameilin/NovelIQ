@@ -6,10 +6,6 @@
 
 from __future__ import annotations
 
-from .continuity import (
-    ChapterAnnotationRepository,
-    DatabaseAnnotationQueryService,
-)
 from .repository import (
     AnnotationRepository,
     ChapterAnnotationRow,
@@ -24,6 +20,4 @@ __all__ = [
     "ChapterAnnotationRow",
     "DialogueFactRow",
     "ForeshadowingTreeView",
-    "ChapterAnnotationRepository",
-    "DatabaseAnnotationQueryService",
 ]

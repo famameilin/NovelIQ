@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from src.agents.diagnosis.schema import AgentAnalysis
+from src.diagnosis.schema import AgentAnalysis
 from src.storage.models import Novel
 from src.storage.repositories import StatsRepository
 

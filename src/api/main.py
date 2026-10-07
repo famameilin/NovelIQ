@@ -39,10 +39,10 @@ async def lifespan(app: FastAPI):
 
     init_db()
     from src.sse.manager import event_manager
+    from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
-    from src.storage.repositories.event_outbox import EventOutboxRepository
 
-    event_manager.configure_outbox(EventOutboxRepository(lambda: get_session_factory()()))
+    event_manager.configure_outbox(SseMessageRepository(lambda: get_session_factory()()))
 
     # 真正允许降级的只有重启遗留任务收口链路；
     # 即便这里失败，也不应掩盖数据库初始化阶段的结构性错误

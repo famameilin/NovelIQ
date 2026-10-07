@@ -21,11 +21,12 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.metrics.aggregate import aggregate_all_metrics
+from src.fact_graph.errors import GraphReadinessError
+from src.metrics.queries.aggregate import query_aggregate_metrics
 from src.sse.events import StreamEvent
 from src.storage.repositories import ChapterRepository, StatsRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
-from src.utils.exceptions import GraphReadinessError
+from src.work.queries import is_annotate_complete
 
 QUALITY_TARGETS = {
     "tone_distribution_non_empty_rate": 1.0,
@@ -167,7 +168,7 @@ async def run_aggregate(
     # require_released_cutoff_short docstring）
     from src.storage.repositories.annotation import AnnotationRepository
 
-    if not AnnotationRepository(session).is_annotate_complete(run_id):
+    if not is_annotate_complete(AnnotationRepository(session).session, run_id):
         raise ValueError("必需角色 work 尚未全部成功保存，不能聚合")
 
     chapter_repo = ChapterRepository(session)
@@ -183,16 +184,17 @@ async def run_aggregate(
     total_chapters = len(chunk_texts)
     logger.info(f"loaded {total_chapters} chunks from db")
 
-    from src.agents.audit.module import AuditModule
+    from src.metrics.queries.global_stats import save_global_stats
+
     check_cancelled(is_cancelled)
-    global_stats = AuditModule.save_global_stats(session, run_id)
+    global_stats = save_global_stats(session, run_id)
     logger.info(f"inserted {len(global_stats)} global stats")
 
     logger.info("Computing aggregate metrics...")
     try:
         # 2026-10-03 指标聚合移出事件循环（run 08f9ba42 实证单次 7s API 冻结）：
         # 全书章节/图事实的 CPU 聚合同为重活，与 linguistic 同待遇
-        agg_result = await asyncio.to_thread(aggregate_all_metrics, run_id, ann_repo, chapter_repo, stats_repo)
+        agg_result = await asyncio.to_thread(query_aggregate_metrics, run_id, ann_repo, chapter_repo, stats_repo)
         # 聚合是单次线程内调用，无法中途中断：返回后立刻兑现取消
         check_cancelled(is_cancelled)
         _log_aggregate_results(agg_result)

@@ -20,8 +20,8 @@ from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.sse.events import StreamEvent
-from src.work.events import AnalysisEventBus
 from src.workflows.analysis.task_claim import TaskClaimMixin
+from src.workflows.progress import AnalysisEventBus
 
 if TYPE_CHECKING:
     from src.config.analysis_logger import AnalysisLogger
@@ -179,7 +179,10 @@ class StageOrchestratorMixin(TaskClaimMixin):
             )
 
             await self.stage_executor.run_topic_model(
-                run_id, session, num_topics, self._make_stage_emitter(bus, "topic-model", session),
+                run_id,
+                session,
+                num_topics,
+                self._make_stage_emitter(bus, "topic-model", session),
                 is_cancelled=is_cancelled,
             )
             await bus.emit_stage_complete("topic-model")
@@ -192,7 +195,10 @@ class StageOrchestratorMixin(TaskClaimMixin):
         if not skip_stages["skip_diagnose"]:
             await bus.emit_stage_start("diagnose", message="开始诊断报告", percent=settings.progress.diagnose.start)
             await self.stage_executor.run_diagnose(
-                run_id, session, analysis_logger, self._make_stage_emitter(bus, "diagnose", session),
+                run_id,
+                session,
+                analysis_logger,
+                self._make_stage_emitter(bus, "diagnose", session),
                 is_cancelled=is_cancelled,
             )
             await bus.emit_stage_complete("diagnose")

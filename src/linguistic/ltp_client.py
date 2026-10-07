@@ -379,9 +379,7 @@ def analyze_paragraph_batch(texts: Sequence[str]) -> list[ParagraphLinguisticRes
     for text in texts:
         sentences = split_sentences(text)
         if not sentences:
-            results.append(
-                analyze_paragraph(text, LtpPipelineOutput(cws=[], pos=[], ner=[], dep=[], sdp=[]))
-            )
+            results.append(analyze_paragraph(text, LtpPipelineOutput(cws=[], pos=[], ner=[], dep=[], sdp=[])))
             continue
         output = session.pipeline(sentences, tasks=("cws", "pos", "ner", "dep", "sdp"))
         results.append(analyze_paragraph(text, output))

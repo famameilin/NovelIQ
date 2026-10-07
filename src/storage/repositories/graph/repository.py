@@ -19,7 +19,6 @@ from src.storage.models import (
 )
 from src.storage.models.graph import ChapterBoundary
 from src.storage.repositories.base import BaseRepository
-from src.utils.character_reference_policy import is_global_character_surface_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -393,7 +392,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         end = None if limit is None else offset + max(1, min(limit, 200))
         return changes[offset:end], total
 
-    def fetch_latest_entities(self, run_id: str, *, entity_type: str | None = None) -> list[EntitySnapshotRow]:
+    def fetch_latest_entity_rows(self, run_id: str, *, entity_type: str | None = None) -> list[EntitySnapshotRow]:
         """2026-08-19 用于读取当前章节边界的实体状态"""
         boundary = self.resolve_persisted_boundary(run_id)
         if boundary is None:
@@ -402,7 +401,6 @@ class GraphRepository(BaseRepository[GraphFact]):
             row
             for row in self.fetch_entity_snapshots(boundary)
             if (entity_type is None or row.entity_type == entity_type)
-            and (row.entity_type != "character" or is_global_character_surface_name(row.name))
         ]
 
     def fetch_latest_relations(self, run_id: str, *, active_only: bool = True) -> list[RelationSnapshotRow]:

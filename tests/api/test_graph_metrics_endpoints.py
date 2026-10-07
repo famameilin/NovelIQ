@@ -15,6 +15,7 @@ from tests.support.chapter_annotation_helpers import (
     relation_fact,
 )
 from tests.support.paragraph_fixtures import create_run_with_status
+from tests.support.run_records import set_run_status
 
 
 def _seed_graph(db_session, run_id: str) -> None:
@@ -41,14 +42,13 @@ def _seed_graph(db_session, run_id: str) -> None:
     db_session.commit()
 
 
-
-
 def _mark_completed(db_session, run_id: str) -> None:
     """create_run_with_chunks 生成的 run 状态回到 completed 以通过读门禁"""
-    RunRepository(db_session).update_run_status(run_id, "completed")
+    set_run_status(RunRepository(db_session).session, run_id, "completed")
     from tests.support.chapter_annotation_helpers import confirm_test_work
 
     confirm_test_work(db_session, run_id)
+
 
 def test_graph_metrics_returns_pagerank_hits_communities(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_chunks(

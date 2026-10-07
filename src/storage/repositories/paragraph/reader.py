@@ -6,7 +6,7 @@
 任务: 大文件拆分——从 paragraph_repository.py 提取段落行读取逻辑
 说明: 纯结构搬移，不改查询行为。提供 run 存在性判断、段落行计数与
 按 paragraph_id keyset 游标的分批读取（limit=None 返回全部行）。
-fetch_paragraph_rows / fetch_chapter_paragraph_rows 为不同默认参数的
+fetch_paragraph_rows 为读取全部段落的
 便捷入口，保留在 ParagraphRepository 门面上直接委托 fetch_paragraph_rows_batch。
 """
 

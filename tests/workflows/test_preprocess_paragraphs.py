@@ -23,6 +23,7 @@ from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.text_processing.chapters.preprocess import preprocess_text
 from src.text_processing.preprocess import normalize_text
 from src.workflows.preprocess import run_preprocess
+from src.workflows.preprocess_readiness import is_preprocess_complete
 from tests.support.analysis_factories import insert_test_novel
 
 
@@ -215,7 +216,7 @@ class TestPreprocessParagraphs:
         )
         assert chunks1 > 0
         assert ParagraphRepository(db_session).count_paragraphs(run_id) > 0
-        assert ChapterRepository(db_session).is_preprocess_complete(run_id)
+        assert is_preprocess_complete(ChapterRepository(db_session).session, run_id)
 
         chunks2, chars2, elapsed2 = await run_preprocess(
             source_path=source_path,

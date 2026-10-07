@@ -71,7 +71,7 @@ def _build_paragraph_rows(
                 sensory_hit_count=0,
                 imagery_hit_count=1,
                 metaphor_sentence_count=0,
-                    body_reaction_hit_count=0,
+                body_reaction_hit_count=0,
                 function_word_counts={},
                 semantic_category_counts={},
                 surface_tension_z=0.0,
@@ -219,7 +219,7 @@ class TestAggregate:
 
         monkeypatch.setattr("src.workflows.aggregate.logger.error", _capture)
         with patch(
-            "src.workflows.aggregate.aggregate_all_metrics",
+            "src.workflows.aggregate.query_aggregate_metrics",
             side_effect=GraphReadinessError("graph not ready yet"),
         ):
             chunks, stats_count, _ = await run_aggregate(
@@ -270,7 +270,7 @@ class TestGlobalStatsRunIsolation:
         paragraph_repo.insert_paragraph_curves(run_id, curve_rows)
 
     def test_global_stats_only_aggregates_own_run(self) -> None:
-        from src.metrics.curve_metrics import compute_global_stats
+        from src.metrics.queries.global_stats import query_global_stats as compute_global_stats
 
         self._insert_metrics_for_run(self.run_a, sentence_sum=20.0, sentence_count=1)
         self._insert_metrics_for_run(self.run_b, sentence_sum=100.0, sentence_count=2)

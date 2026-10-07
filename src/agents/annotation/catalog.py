@@ -15,7 +15,8 @@ from enum import StrEnum
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
-from src.event_trees.program_contract import PROGRAM_MAX_CODE_CHARS, PROGRAM_MAX_OPS
+from src.agents.annotation.program_contract import PROGRAM_MAX_CODE_CHARS, PROGRAM_MAX_OPS
+from src.agents.annotation.validation_errors import _STAGE_FIELD_EXPECTATIONS
 from src.event_trees.vocabulary import EventParticipantRole
 from src.fact_graph.schema import (
     CLIFFHANGER_DESCRIPTION,
@@ -23,21 +24,15 @@ from src.fact_graph.schema import (
     EVENT_ROLE_FIELD_HINT,
     PERSON_ROLE_FIELD_HINT,
     PIVOT_MOMENT_DESCRIPTION,
-    Confidence,
-    DialogueVerdict,
     EntityRefType,
-    RoleFunction,
-    Tone,
-    relation_catalog_text,
 )
+from src.fact_graph.vocabulary import Confidence, DialogueVerdict, RoleFunction, Tone, relation_catalog_text
 
-from .program import render_list_signature
 from .search_projection import (
     _PROJECTION_PARAMETER_LABELS,
     _PROJECTION_PARAMETERS,
     _SEARCH_PROJECTIONS,
 )
-from .tools import _STAGE_FIELD_EXPECTATIONS
 
 
 def _dedent_catalog_text(text: str) -> str:
@@ -151,8 +146,7 @@ def _schema_parameters(tool: Any, *, extra: tuple[str, ...] = ()) -> list[tuple[
             default = "None" if field.default is None else repr(field.default)
             optional.append((str(name), f"{head} = {default}"))
     optional.extend(
-        (name, _parameter_head(name, _PROJECTION_PARAMETER_LABELS.get(name, "")) + " = None")
-        for name in extra
+        (name, _parameter_head(name, _PROJECTION_PARAMETER_LABELS.get(name, "")) + " = None") for name in extra
     )
     return [*required, *optional]
 
@@ -344,3 +338,13 @@ SUBAGENT_CONTRACT_TEXT: str = (
     "failed 里那一条按 expected 当场改。\n"
     "- 产出写完时调用 finish 收尾：收尾不减损已写入的记录，回执点名还缺什么，缺的当场补。\n\n"
 )
+
+
+def render_list_signature(name: str, parameters: list[tuple[str, str]]) -> str:
+    """2026-09-16 用于渲染调用签名（参数清单从函数签名或 args_schema 读出，不手抄）
+
+    2026-09-18 参数清单先在调用方算好（构造器读函数、工具读 schema），本函数只做排版：
+    构造器与工具在目录里是同一种签名的写法。
+    2026-09-20 参数那一截自带类型标签（见 _type_label），本函数只负责拼。
+    """
+    return f"{name}(" + ", ".join(text for _, text in parameters) + ")"

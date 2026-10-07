@@ -385,9 +385,7 @@ class TestMnegCorrection:
 
         # 曲线按修正分子重算：net_density = (0 - 1) / 4
         curve_row = self.db_session.execute(
-            text(
-                "SELECT net_density FROM paragraph_curves WHERE run_id = :run_id AND paragraph_id = 0"
-            ),
+            text("SELECT net_density FROM paragraph_curves WHERE run_id = :run_id AND paragraph_id = 0"),
             {"run_id": self.run_id},
         ).one()
         assert float(curve_row.net_density) == -0.25
@@ -439,12 +437,10 @@ class TestParagraphBoundary:
 
         from sqlalchemy import select
 
-        from src.event_trees.models import BoundChapterAnnotation
-        from src.fact_graph.schema import (
-            BoundParagraphLabel,
-            ChapterMetricsInput,
-            NarrativeFunction,
-        )
+        from src.agents.annotation.output_models import BoundChapterAnnotation
+        from src.fact_graph.inputs import ChapterMetricsInput
+        from src.fact_graph.outputs import BoundParagraphLabel
+        from src.fact_graph.vocabulary import NarrativeFunction
         from src.storage.models import Paragraph
         from tests.support.chapter_annotation_helpers import commit_test_annotation
 
@@ -466,7 +462,10 @@ class TestParagraphBoundary:
                 paragraph_labels=chapter_labels,
             )
             commit_test_annotation(
-                self.db_session, run_id=self.run_id, chapter_id=chapter_id, annotation=annotation,
+                self.db_session,
+                run_id=self.run_id,
+                chapter_id=chapter_id,
+                annotation=annotation,
             )
 
     def _insert_paragraph_embeddings(self, vectors_by_id: dict[int, list[float]]) -> None:

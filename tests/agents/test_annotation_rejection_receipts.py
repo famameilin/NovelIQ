@@ -15,17 +15,13 @@ from typing import Any
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
+from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.tool_batch import _invoke_tool
-from src.agents.annotation.tools import AnnotationToolLedger
 from src.event_trees.models import BoundEvent
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.schema import (
-    BoundCharacterObservation,
-    ChapterParagraphInfo,
-    EntityDirectoryInput,
-    RelationInput,
-    RelationType,
-)
+from src.fact_graph.inputs import ChapterParagraphInfo, EntityDirectoryInput, RelationInput
+from src.fact_graph.outputs import BoundCharacterObservation
+from src.fact_graph.vocabulary import RelationType
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 
@@ -89,15 +85,9 @@ def _duplicate_payloads(ledger: AnnotationToolLedger) -> dict:
 def test_duplicate_observation_rejection_names_records_and_values() -> None:
     """判重拒绝点名相撞双方的生产记录键与 (character, action) 值，未相撞条目不出现"""
     ledger = _ledger()
-    ledger.observation_by_record["t1/e1/participant/lyr"] = BoundCharacterObservation(
-        character="李瑜", action="推门"
-    )
-    ledger.observation_by_record["t2/e1/participant/李瑜"] = BoundCharacterObservation(
-        character="李瑜", action="推门"
-    )
-    ledger.observation_by_record["t3/e1/participant/顾霜"] = BoundCharacterObservation(
-        character="顾霜", action="守门"
-    )
+    ledger.observation_by_record["t1/e1/participant/lyr"] = BoundCharacterObservation(character="李瑜", action="推门")
+    ledger.observation_by_record["t2/e1/participant/李瑜"] = BoundCharacterObservation(character="李瑜", action="推门")
+    ledger.observation_by_record["t3/e1/participant/顾霜"] = BoundCharacterObservation(character="顾霜", action="守门")
     with pytest.raises(ValueError) as excinfo:
         ledger._validate_domain_duplicates(_duplicate_payloads(ledger))
     message = str(excinfo.value)
@@ -112,7 +102,7 @@ def test_duplicate_event_rejection_names_local_node_key() -> None:
     ledger = _ledger()
     ledger.tree_key_index["t1"] = "tree-1"
     ledger.event_trees["tree-1"] = {"nodes": {"root": "node-root", "e2": "node-2"}}
-    ledger.bound_payloads["events"] = [
+    ledger.events.bound_payloads["events"] = [
         BoundEvent(node_id="node-2", tree_id="tree-1", cause_role="main", description="李瑜推门"),
         BoundEvent(node_id="node-2", tree_id="tree-1", cause_role="main", description="李瑜推门"),
     ]
@@ -139,10 +129,10 @@ def test_endpoint_error_names_record_key() -> None:
     ledger.observation_by_record["t1/e1/participant/未登记者"] = BoundCharacterObservation(
         character="未登记者", action="推门"
     )
-    ledger.domain_payloads["entities"] = EntityDirectoryInput(entities=[])
-    ledger.domain_payloads["character_observations"] = list(ledger.observation_by_record.values())
-    ledger.domain_payloads["dialogues"] = []
-    ledger.domain_payloads["relations"] = [
+    ledger.entities.domain_payloads["entities"] = EntityDirectoryInput(entities=[])
+    ledger.events.domain_payloads["character_observations"] = list(ledger.observation_by_record.values())
+    ledger.dialogue.domain_payloads["dialogues"] = []
+    ledger.entities.domain_payloads["relations"] = [
         RelationInput(from_entity="未登记者", to_entity="李瑜", relation_type=RelationType.ALLY)
     ]
     with pytest.raises(ValueError) as excinfo:
@@ -153,17 +143,17 @@ def test_endpoint_error_names_record_key() -> None:
     assert "relation/未登记者-李瑜/盟友 relation.from_entity 未在当前章 登记: 未登记者" in message
 
 
-
-
 @pytest.mark.asyncio
 async def test_write_duplicate_rejection_names_both_records_in_program_receipt() -> None:
     ledger = _ledger()
     runtime = ProgramRuntime(build_annotation_tools(_QueryService(), ledger), ledger)
-    receipt = json.loads(await runtime.execute('''
+    receipt = json.loads(
+        await runtime.execute("""
 write_entity(el="a1", name="顾霜", entity_type="character")
 write_event(el="t1", isroot=True, description="顾霜喝止", characters=[{"entityid": "a1", "action": "喝止"}])
 write_event(el="t2", isroot=True, description="众人退下", characters=[{"entityid": "a1", "action": "喝止"}])
-'''))
+""")
+    )
     assert receipt["status"] == "partial"
     (failed,) = receipt["failed"]
     assert failed["record"] == "t2/root/participant/a1"
@@ -181,10 +171,16 @@ async def test_schema_rejection_names_participant_key_and_submitted_value() -> N
     ledger = _ledger()
     tools = _tools(ledger)
     with pytest.raises(AnnotationStageRejection) as excinfo:
-        await _call(tools, "write_event", {
-            "el": "t1", "isroot": True, "description": "顾霜喝止",
-            "characters": [{"entityid": "a1", "emotion": "愤怒"}],
-        })
+        await _call(
+            tools,
+            "write_event",
+            {
+                "el": "t1",
+                "isroot": True,
+                "description": "顾霜喝止",
+                "characters": [{"entityid": "a1", "emotion": "愤怒"}],
+            },
+        )
     receipt = excinfo.value.receipt()
     assert receipt["record"] == "t1/root"
     assert receipt["field"] == "emotion"
@@ -229,39 +225,27 @@ async def test_record_combination_rejection_names_actual_field_values() -> None:
 async def _link_runtime() -> tuple[AnnotationToolLedger, ProgramRuntime, dict[str, Any]]:
     ledger = _ledger(allow_future_context=True)
     runtime = ProgramRuntime(build_annotation_tools(_QueryService(), ledger), ledger)
-    prepared = json.loads(await runtime.execute('''
+    prepared = json.loads(
+        await runtime.execute("""
 write_entity(el="a1", name="顾霜", entity_type="character")
 write_entity(el="a2", name="众人", entity_type="character")
 edge = write_relation(from_entity="a1", to_entity="a2", relation_type="盟友")
 local = read_text(paragraph_id=1)
 other = read_text(paragraph_id=20)
 anchor_record(record_id=edge["record"], source_ref=local["source_ref"])
-'''))
+""")
+    )
     assert prepared["status"] == "applied", prepared
-    return ledger, runtime, {
-        "record_id": runtime.env["edge"]["record"],
-        "source_ref": runtime.env["local"]["source_ref"],
-        "target_ref": runtime.env["other"]["source_ref"],
-        "kind": "relation_change",
-    }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    return (
+        ledger,
+        runtime,
+        {
+            "record_id": runtime.env["edge"]["record"],
+            "source_ref": runtime.env["local"]["source_ref"],
+            "target_ref": runtime.env["other"]["source_ref"],
+            "kind": "relation_change",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -279,7 +263,7 @@ async def test_anchor_rejection_names_record_and_invalid_reference(reference_nam
     assert receipt["field"] == "source_ref"
     assert receipt["code"] == code
     assert source_ref in receipt["message"]
-    assert ledger.source_anchors == before["source_anchors"]
+    assert ledger.source_anchors == before["dialogue"].source_anchors
 
 
 @pytest.mark.asyncio

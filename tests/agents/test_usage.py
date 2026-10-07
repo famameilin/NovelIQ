@@ -213,7 +213,7 @@ def test_turn_usage_records_estimates_missing_usage() -> None:
     """
     2026-08-10 用于验证回合观察器在 Provider 无用量时记录本地估算
     """
-    from src.agents.audit.observer import _usage_for_turn
+    from src.agents.turn_observer import _usage_for_turn
 
     request = [AIMessage(content="问")]
     response = AIMessage(content="分析结果")
@@ -232,7 +232,7 @@ def test_turn_usage_records_keeps_reported_usage() -> None:
     """
     2026-08-10 用于验证回合观察器实报路径保留缓存/费用/推理明细
     """
-    from src.agents.audit.observer import _usage_for_turn
+    from src.agents.turn_observer import _usage_for_turn
 
     request = [AIMessage(content="问")]
     response = AIMessage(

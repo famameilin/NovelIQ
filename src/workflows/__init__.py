@@ -2,7 +2,6 @@
 workflows 模块入口，包含核心业务逻辑，供 API 和 CLI 共同调用
 """
 
-from src.metrics.curve_metrics import compute_global_stats
 from src.workflows.aggregate import run_aggregate
 from src.workflows.annotate import run_annotate
 from src.workflows.diagnose import (
@@ -13,7 +12,6 @@ from src.workflows.preprocess import run_preprocess
 from src.workflows.topic import run_topic_model
 
 __all__ = [
-    "compute_global_stats",
     "run_aggregate",
     "run_annotate",
     "run_diagnose",

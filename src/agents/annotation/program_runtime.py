@@ -12,16 +12,16 @@ from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
-from src.event_trees import program_contract
-from src.event_trees.program_contract import ProgramFault
+from src.agents.annotation import program_contract
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.program_contract import ProgramFault
+from src.agents.annotation.tools import tool_record_key
 
 # 限额常量经 program 模块属性读取（而非值拷贝）：tests 以 KEEP_*") 调整安全护栏，属性访问保持这一注入缝隙逐字生效。
-from . import program as _program
-from .catalog import call_parameters
-from .program import render_list_signature
+from . import program_contract as _program
+from .catalog import call_parameters, render_list_signature
 from .receipt_projection import compact_read_result, read_references
 from .search_projection import SHARED_SEARCH_MAX_CHARS, _failed_view
-from .tools import AnnotationToolLedger, tool_record_key
 
 # 2026-10-04 重复失败批守卫（两级）：失败条数达到 _REPEAT_FAILED_BATCH_MIN_OPS 且
 # 连续两次程序的失败清单逐条相同时注入聚合提示，第三次相同判本程序失败。
@@ -85,6 +85,7 @@ class RestrictedProgramRuntime:
         程序内已经成功的调用不回滚（程序错误只中断后续语句），失败逐条进 failed；
         收尾类意图由子类在 _after_program 里结算（写者面即 finish）。
         """
+
         async def run() -> None:
             nodes = self._parse(code)
             await self._preflight_dialogue_indices(nodes)
@@ -101,7 +102,8 @@ class RestrictedProgramRuntime:
         names = {"write_dialogue", "dialogue"} & self.tools.keys()
         if not any(
             isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in names
-            for statement in nodes for node in ast.walk(statement)
+            for statement in nodes
+            for node in ast.walk(statement)
         ):
             return
         unknown = object()
@@ -188,7 +190,8 @@ class RestrictedProgramRuntime:
             available = f"1..{total}" if total else "无可用候选"
             raise ProgramFault(
                 f"DialogueCandidates total={total}，candidate_index 范围={available}；越界记录：{records}",
-                code="candidate_index_out_of_range", line=next(iter(invalid.values())),
+                code="candidate_index_out_of_range",
+                line=next(iter(invalid.values())),
             )
 
     async def _execute_program(self, action: Callable[[], Awaitable[None]]) -> str:
@@ -214,9 +217,7 @@ class RestrictedProgramRuntime:
         # 守卫用结算前的 ops 快照判定；回执计数在收尾结算后取全量（finish 结算也记 op）。
         repeat = 0
         if error is None:
-            pre_failed = [
-                op for op in self.ops if op["program_id"] == self._program_id and op["status"] != "success"
-            ]
+            pre_failed = [op for op in self.ops if op["program_id"] == self._program_id and op["status"] != "success"]
             repeat = self._register_failed_batch(pre_failed)
             if repeat >= _REPEAT_FAILED_BATCH_FATAL_AT:
                 error = {
@@ -545,16 +546,20 @@ class RestrictedProgramRuntime:
         name = function.id
         if name not in self.tools:
             raise ProgramFault(
-                f"未开放函数：{name}" + (
+                f"未开放函数：{name}"
+                + (
                     "；检索结果自动回显在 reads，请删除 print，直接用变量 = search_events(query=...) "
-                    "或 search_graph(query=...) 读取" if name == "print" else ""
+                    "或 search_graph(query=...) 读取"
+                    if name == "print"
+                    else ""
                 ),
                 code="unknown_tool",
                 line=line,
             )
         if node.args or any(keyword.arg is None for keyword in node.keywords):
             hint = (
-                f'{name}(query="关键词", limit=5)' if name in {"search_events", "search_graph"}
+                f'{name}(query="关键词", limit=5)'
+                if name in {"search_events", "search_graph"}
                 else self._call_hint(name)
             )
             raise ProgramFault(

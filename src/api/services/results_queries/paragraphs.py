@@ -27,8 +27,9 @@ from src.metrics.aggregate.algorithms import (
     must_keep_curve_indices,
     smooth_emotion_series,
 )
+from src.metrics.queries.annotations import fetch_chapter_annotations_full
+from src.metrics.sampling import sample_paragraph_curve_points
 from src.storage.repositories import AnnotationRepository, ParagraphRepository
-from src.utils.lttb import sample_paragraph_curve_points
 
 
 def _apply_emotion_smoothing(windows: list[EmotionTrendWindow]) -> list[EmotionTrendWindow]:
@@ -155,7 +156,7 @@ def _fetch_chapter_metrics(
     """
     del run
     annotations_by_chapter_id = {
-        int(row.chapter_id): row for row in annotation_repo.fetch_chapter_annotations_full(run_id)
+        int(row.chapter_id): row for row in fetch_chapter_annotations_full(annotation_repo.session, run_id)
     }
     payload = aggregate_chapter_metrics(
         paragraph_repo.fetch_paragraph_rows(run_id),

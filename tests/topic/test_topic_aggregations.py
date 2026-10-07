@@ -21,15 +21,15 @@ from src.metrics.aggregate.algorithms import (
     compute_topic_shift_candidates,
     jensen_shannon_divergence,
 )
-from src.metrics.aggregate.topic_aggregations import (
+from src.storage.repositories import ParagraphRepository, RunRepository
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
+from src.topic.queries import (
     aggregate_book_topics,
     aggregate_chapter_topics,
     compute_topic_emotion,
     fetch_paragraph_topic_series,
 )
-from src.storage.repositories import ParagraphRepository, RunRepository
-from src.text_processing.models import Chunk
-from src.text_processing.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 
 _CHUNK_TEXTS = ["甲。\n乙。\n丙。", "丁。\n戊。\n己。"]
@@ -48,9 +48,7 @@ class TestJensenShannonDivergence:
     def test_symmetric(self) -> None:
         p = [0.8, 0.1, 0.1]
         q = [0.1, 0.3, 0.6]
-        assert jensen_shannon_divergence(p, q) == pytest.approx(
-            jensen_shannon_divergence(q, p), abs=1e-12
-        )
+        assert jensen_shannon_divergence(p, q) == pytest.approx(jensen_shannon_divergence(q, p), abs=1e-12)
 
     def test_within_unit_range(self) -> None:
         p = [0.9, 0.05, 0.05]
@@ -113,11 +111,9 @@ class TestComputeTopicShiftCandidates:
     def test_detects_abrupt_distribution_change(self) -> None:
         # 前 4 段全部主题 0、后 4 段全部主题 1；窗口=4 时两窗口 JS=1
         points = [
-            {"paragraph_id": i, "start_position": i * 10, "token_count": 5, "weights": [1.0, 0.0]}
-            for i in range(4)
+            {"paragraph_id": i, "start_position": i * 10, "token_count": 5, "weights": [1.0, 0.0]} for i in range(4)
         ] + [
-            {"paragraph_id": i, "start_position": i * 10, "token_count": 5, "weights": [0.0, 1.0]}
-            for i in range(4, 8)
+            {"paragraph_id": i, "start_position": i * 10, "token_count": 5, "weights": [0.0, 1.0]} for i in range(4, 8)
         ]
         result = compute_topic_shift_candidates(
             _series(points),
@@ -137,8 +133,7 @@ class TestComputeTopicShiftCandidates:
 
     def test_threshold_filters_low_scores(self) -> None:
         points = [
-            {"paragraph_id": i, "start_position": i * 10, "token_count": 5, "weights": [0.9, 0.1]}
-            for i in range(8)
+            {"paragraph_id": i, "start_position": i * 10, "token_count": 5, "weights": [0.9, 0.1]} for i in range(8)
         ]
         result = compute_topic_shift_candidates(
             _series(points),
@@ -152,11 +147,9 @@ class TestComputeTopicShiftCandidates:
 
     def test_window_token_minimum_skips_sparse_windows(self) -> None:
         points = [
-            {"paragraph_id": i, "start_position": i * 10, "token_count": 1, "weights": [1.0, 0.0]}
-            for i in range(4)
+            {"paragraph_id": i, "start_position": i * 10, "token_count": 1, "weights": [1.0, 0.0]} for i in range(4)
         ] + [
-            {"paragraph_id": i, "start_position": i * 10, "token_count": 1, "weights": [0.0, 1.0]}
-            for i in range(4, 8)
+            {"paragraph_id": i, "start_position": i * 10, "token_count": 1, "weights": [0.0, 1.0]} for i in range(4, 8)
         ]
         result = compute_topic_shift_candidates(
             _series(points),
@@ -227,10 +220,7 @@ class TestTopicAggregations:
         # 章1 全主题0、章2 全主题1；inference_token_count 用于加权验证
         tokens = [10, 10, 20, 10, 10, 20]
         distributions = [[1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0], [0.0, 1.0]]
-        inference_rows = [
-            (paragraph_id, 2, tokens[paragraph_id], "complete", None, 1.0)
-            for paragraph_id in range(6)
-        ]
+        inference_rows = [(paragraph_id, 2, tokens[paragraph_id], "complete", None, 1.0) for paragraph_id in range(6)]
         repo.insert_paragraph_topic_inferences(self.run_id, inference_rows)
         topic_rows = [
             (paragraph_id, topic_id, distributions[paragraph_id][topic_id])

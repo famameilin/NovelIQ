@@ -10,7 +10,11 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import NAMESPACE_DNS, uuid5
 
-from src.fact_graph.schema import RELATION_DEFINITIONS, EntityType, RelationInput
+from sqlalchemy.orm import Session
+
+from src.fact_graph.contributions import FactContribution
+from src.fact_graph.inputs import RelationInput
+from src.fact_graph.vocabulary import RELATION_DEFINITIONS, EntityType
 
 _CONTRIBUTION_FACT_TYPES = {"entity", "relation", "character_observation", "entity_reference"}
 
@@ -111,7 +115,7 @@ class FactGraph:
         self.contributions[author]["entity_references"] = deepcopy(references)
         self._fold()
 
-    def save_work(self, session: Any, execution: Any, annotation_id: str) -> None:
+    def save_work(self, session: Session, frozen: FactContribution, annotation_id: str) -> None:
         """保存自己的不可变操作，再按实际章序和角色序重折数据库状态"""
         from sqlalchemy import select, text
 
@@ -124,8 +128,8 @@ class FactGraph:
         session.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": f"fact_graph:{self.run_scope}"}
         )
-        contribution = execution.contributions["facts"]
-        chapter_id = execution.receipt.payload["chapter_id"]
+        contribution = frozen.snapshot()
+        chapter_id = frozen.chapter_id
         entities = contribution["entities"]
         for identifier, value in entities.items():
             if session.get(GraphEntity, identifier) is None:
@@ -144,11 +148,11 @@ class FactGraph:
         session.flush()
         operations = [("entity", op) for op in contribution["entity_ops"]]
         operations += [("relation", op) for op in contribution["relation_assert_ops"]]
-        operations += [("character_observation", op) for op in execution.output()["character_observations"]]
+        operations += [("character_observation", op) for op in frozen.observations()]
         # 引用是当前 work 的实际有效支持，不把读取到的实体伪造成一次实体写入
         operations += [("entity_reference", value) for _, value in sorted(entities.items())]
         for index, (kind, op) in enumerate(operations):
-            path = f"work/{execution.work_id}/{kind}/{index}"
+            path = f"work/{frozen.work_id}/{kind}/{index}"
             entity_name = op.get("name") or op.get("character") or op.get("from_entity")
             entity_id = mention_uuid(self.run_scope, chapter_id, entity_name)
             content = {"kind": kind, "operation": op, "operation_order": index}
@@ -196,12 +200,12 @@ class FactGraph:
                         source_kind="annotation",
                         annotation_id=annotation_id,
                         payload_path=path,
-                        author_work_id=execution.work_id,
-                        evidence=evidence_for(execution),
+                        author_work_id=frozen.work_id,
+                        evidence=evidence_for(frozen.paragraphs),
                     )
                 )
         session.flush()
-        self.rebuild_storage(session, preserve=set(execution.contributions["facts"]["entities"]))
+        self.rebuild_storage(session, preserve=set(contribution["entities"]))
 
     def rebuild_storage(self, session: Any, *, preserve: set[str] | None = None) -> None:
         """恢复和乱序保存共用重折，所有状态只来自实际保存的贡献"""
@@ -384,9 +388,9 @@ class FactGraph:
 
         run_id = self.run_scope
 
+        from src.fact_graph.errors import GraphReadinessError
+        from src.fact_graph.read import KnowledgeGraphAuthorityService
         from src.storage.models import GraphEntity
-        from src.storage.repositories.graph.authority import KnowledgeGraphAuthorityService
-        from src.utils.exceptions import GraphReadinessError
 
         if not main_characters:
             return
@@ -461,9 +465,7 @@ class FactGraph:
             )
         self._fold()
 
-    def load_saved_work(
-        self, session: Any, work_id: str, invocation_id: str, annotation_id: str
-    ) -> dict[str, Any]:
+    def load_saved_work(self, session: Any, work_id: str, invocation_id: str, annotation_id: str) -> dict[str, Any]:
         """锁外读取当前 work 的真实保存贡献，不读取或撤销其他执行"""
         from sqlalchemy import select
 
@@ -491,9 +493,13 @@ class FactGraph:
     def recover_work(self, snapshot: dict[str, Any]) -> None:
         """同 run 锁内替换一个已保存作者，保护其他在飞贡献"""
         self.restore_work(
-            snapshot["author"][0], snapshot["author"][1], snapshot["sequence"], snapshot["role"],
+            snapshot["author"][0],
+            snapshot["author"][1],
+            snapshot["sequence"],
+            snapshot["role"],
             snapshot["entity_ops"],
-            snapshot["relation_assert_ops"], snapshot["entity_references"],
+            snapshot["relation_assert_ops"],
+            snapshot["entity_references"],
         )
 
     def restore_work(
@@ -755,33 +761,6 @@ class FactGraph:
                 self.relation_attributes.pop(key, None)
         self.active_relations -= self.chapter_added_relations
         self.chapter_added_relations.clear()
-
-    def reset_chapter_changes(self) -> None:
-        """2026-10-02 用于在多代理路径整章失败时撤销本章全部图域变更
-
-        语义 = reset_chapter_relations（含 support_count 回退）＋ 清空本章实体域全部
-        状态（名称/类型/标签/属性/状态/ops）——容量位拉起下先完成的子代理也可能已
-        写入实体，失败路径必须整图复原。图按章新建、整图即本章，清空即复原；
-        实体 id 注册表（entity_ids）刻意不清：id 由 uuid5(run+名) 确定性铸造，
-        回收与保留同值。
-        """
-        if self.contributions:
-            author = self._author.get()
-            if author is None:
-                raise ValueError("共享事实图撤销必须指定执行作者")
-            self.contributions[author]["entity_ops"] = []
-            self.contributions[author]["relation_assert_ops"] = []
-            self._fold()
-            return
-        self.reset_chapter_relations()
-        self.chapter_registered_entities.clear()
-        self.entity_names.clear()
-        self.entity_types.clear()
-        self.entity_tags.clear()
-        self.entity_attributes.clear()
-        self.entity_state.clear()
-        self.entity_ops.clear()
-        self.relation_assert_ops.clear()
 
     def snapshot(self) -> dict:
         """2026-08-09 用于保存章节尝试前的完整事实图快照

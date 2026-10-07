@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.sse.events import StreamEvent
-from src.work.events import AnalysisEventBus
+from src.workflows.progress import AnalysisEventBus
 
 
 @pytest.mark.asyncio

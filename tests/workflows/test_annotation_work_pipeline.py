@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from src.config import settings
 from src.storage.models import AnalysisOutput, AnnotationWork, ModelTurn
 from src.storage.repositories.annotation import AnnotationRepository
+from src.work.queries import is_annotate_complete
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
@@ -51,7 +52,7 @@ async def test_solo_runs_real_program_and_saves_one_work(db_session) -> None:
         assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
     assert model.calls == 1
     db_session.expire_all()
-    assert AnnotationRepository(db_session).is_annotate_complete(run_id)
+    assert is_annotate_complete(AnnotationRepository(db_session).session, run_id)
     records = db_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id)).scalars().all()
     assert [(item.role, item.state) for item in records] == [("solo", "saved")]
     displayed = [event for event in events if event.action == "work_saved"]
@@ -59,9 +60,9 @@ async def test_solo_runs_real_program_and_saves_one_work(db_session) -> None:
     assert displayed[0].work_id == records[0].work_id
     assert displayed[0].invocation_id == records[0].invocation_id
     outputs = (
-        db_session.execute(select(AnalysisOutput).where(
-            AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation"
-        ))
+        db_session.execute(
+            select(AnalysisOutput).where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation")
+        )
         .scalars()
         .all()
     )
@@ -82,11 +83,13 @@ async def test_current_work_validates_serialized_participant_fields_before_save(
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
-    output = db_session.execute(
-        select(AnalysisOutput).where(
-            AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation"
+    output = (
+        db_session.execute(
+            select(AnalysisOutput).where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation")
         )
-    ).scalar_one().payload
+        .scalar_one()
+        .payload
+    )
     assert output["events"][0]["participants"][0]["entity"] == "张三"
     assert output["character_observations"][0]["emotion"] == 1
 
@@ -102,14 +105,14 @@ async def test_long_chapter_saves_three_work_without_chapter_finalize(db_session
     work = db_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id)).scalars().all()
     assert {item.role for item in work} == {"structure", "event", "evidence"}
     outputs = (
-        db_session.execute(select(AnalysisOutput).where(
-            AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation"
-        ))
+        db_session.execute(
+            select(AnalysisOutput).where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation")
+        )
         .scalars()
         .all()
     )
     assert len(outputs) == 3
-    assert AnnotationRepository(db_session).is_annotate_complete(run_id)
+    assert is_annotate_complete(AnnotationRepository(db_session).session, run_id)
 
 
 class RoleModel(ProgramModel):
@@ -207,9 +210,9 @@ async def test_recovery_discards_partial_roles_and_keeps_completed_chapter(db_se
         == 7
     )
     records = (
-        db_session.execute(select(AnalysisOutput).where(
-            AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation"
-        ))
+        db_session.execute(
+            select(AnalysisOutput).where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation")
+        )
         .scalars()
         .all()
     )
@@ -306,7 +309,7 @@ async def test_no_eligible_model_ends_without_starting_or_saving_work(db_session
         raise AssertionError("不应启动 work")
 
     monkeypatch.setattr(AnnotationAgent, "execute", unexpected)
-    monkeypatch.setattr("src.config.model_assignment.select_annotation_model", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.model_pool.selection.select_annotation_model", lambda *args, **kwargs: None)
     with pytest.raises(ModelElectionExhausted):
         await run_annotate(run_id, db_session, novel_id=novel_id)
     assert not started
@@ -315,8 +318,8 @@ async def test_no_eligible_model_ends_without_starting_or_saving_work(db_session
 
 @pytest.mark.asyncio
 async def test_program_can_read_shared_nodes_claim_case_and_save_cross_chapter_link(db_session, configured_model_pool):
+    from src.api.services.pipeline_view import book_state_view
     from src.storage.models import BookCase, EventEdge
-    from src.storage.repositories.book_state import book_state_view
 
     settings.models.model_pool[0].max_in_flight = 1
     novel_id, run_id = create_run_with_chunks(

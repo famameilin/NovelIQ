@@ -84,8 +84,9 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
                 )
             ],
         )
-        session.execute(text("UPDATE novels SET title=:title WHERE novel_id=:novel"),
-            {"novel": novel_id, "title": "测试小说"})
+        session.execute(
+            text("UPDATE novels SET title=:title WHERE novel_id=:novel"), {"novel": novel_id, "title": "测试小说"}
+        )
         session.commit()
 
     log_dir = Path("logs") / run_id

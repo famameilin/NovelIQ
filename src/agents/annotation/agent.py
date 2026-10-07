@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -13,13 +14,17 @@ from uuid import uuid4
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.orm import Session
 
-from src.agents.audit.module import AuditMessages
-from src.agents.audit.observer import AgentTurnObserver, build_invocation_context
+from src.agents.annotation.event_submission import build_event_submission_tool
 from src.agents.stream import AgentStream
+from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
+from src.audit.module import AuditMessages
 from src.case_pool import CasePool
+from src.case_pool.contributions import CaseContribution
 from src.event_bus import EventBus, Message
-from src.event_trees.submission import build_event_submission_tool
+from src.event_trees.contributions import EventContribution
 from src.event_trees.trees import EventTrees
+from src.fact_graph.contributions import FactContribution
+from src.fact_graph.evidence import EvidenceParagraph
 from src.fact_graph.graph import FactGraph
 from src.storage.models import AnalysisOutput
 from src.utils.identity import stable_uuid
@@ -42,7 +47,9 @@ class WorkExecution:
     task: asyncio.Task[Any] | None = None
     finished: bool = False
     saved: bool = False
-    contributions: dict[str, Any] = field(default_factory=dict)
+    fact_contribution: FactContribution | None = None
+    event_contribution: EventContribution | None = None
+    case_contribution: CaseContribution | None = None
     call_id: str = ""
     event_reads: dict[str, dict[str, Any]] = field(default_factory=dict)
     case_connections: list[str] = field(default_factory=list)
@@ -51,6 +58,17 @@ class WorkExecution:
     @property
     def work_id(self) -> str:
         return self.receipt.work_id
+
+    @property
+    def contributions(self) -> dict[str, Any]:
+        """保存确认只读取三个冻结快照，不保留第二份可变贡献真相"""
+        if self.fact_contribution is None or self.event_contribution is None or self.case_contribution is None:
+            raise ValueError("本 work 尚未冻结贡献")
+        return {
+            "facts": self.fact_contribution.snapshot(),
+            "events": self.event_contribution.snapshot(),
+            "cases": self.case_contribution.snapshot(),
+        }
 
     def validate(self) -> None:
         """只检查自身角色，候选必须真实逐条判定，绝不填中性指标"""
@@ -119,11 +137,11 @@ class AnnotationAgent:
             bus.handle(topic, self.address, handler)
 
     async def execute(self, message: Message) -> dict[str, Any]:
+        from src.agents.annotation.queries import DatabaseAnnotationQueryService
         from src.config import settings
-        from src.config.input_config import load_task_config
         from src.embedding import EmbeddingClient
+        from src.model_pool.configuration import load_task_config
         from src.model_pool.llm import build_chat_model
-        from src.storage.repositories import DatabaseAnnotationQueryService
 
         receipt = message.payload
         invocation_id = uuid4().hex
@@ -411,10 +429,13 @@ class AnnotationAgent:
             )
         )
         session.flush()
-        self.event_trees.save_work(session, execution, annotation_id)
-        self.fact_graph.save_work(session, execution, annotation_id)
+        assert execution.event_contribution is not None
+        assert execution.fact_contribution is not None
+        assert execution.case_contribution is not None
+        self.event_trees.save_work(session, execution.event_contribution, annotation_id)
+        self.fact_graph.save_work(session, execution.fact_contribution, annotation_id)
         self._save_dialogues(session, execution)
-        self.case_pool.save_work(session, execution)
+        self.case_pool.save_work(session, execution.case_contribution)
         return annotation_id
 
     async def confirm(self, message: Message) -> None:
@@ -494,7 +515,7 @@ class AnnotationAgent:
             for name in names
         }
         self.fact_graph.reference_entities(author, list(facts["entities"].values()))
-        execution.contributions = {
+        contributions = {
             "facts": facts,
             "events": {
                 "nodes": deepcopy(
@@ -514,6 +535,36 @@ class AnnotationAgent:
                 "deliveries": deepcopy(self.case_pool.deliveries.get(author, [])),
             },
         }
+
+        payload = execution.receipt.payload
+        paragraphs = tuple(
+            EvidenceParagraph(row.chapter_id, row.paragraph_id, row.text, row.local_start_char, row.local_end_char)
+            for row in payload["paragraphs"]
+        )
+        execution.fact_contribution = FactContribution(
+            self.run_id,
+            execution.work_id,
+            execution.invocation_id,
+            payload["chapter_id"],
+            paragraphs,
+            json.dumps(facts, ensure_ascii=False),
+            json.dumps(output["character_observations"], ensure_ascii=False),
+        )
+        execution.event_contribution = EventContribution(
+            self.run_id,
+            execution.work_id,
+            execution.invocation_id,
+            payload["chapter_sequence"],
+            paragraphs,
+            json.dumps(contributions["events"], ensure_ascii=False),
+            json.dumps(facts["entities"], ensure_ascii=False),
+        )
+        execution.case_contribution = CaseContribution(
+            self.run_id,
+            execution.work_id,
+            execution.invocation_id,
+            json.dumps(contributions["cases"], ensure_ascii=False),
+        )
 
     def _save_dialogues(self, session: Session, execution: WorkExecution) -> None:
         from src.fact_graph.graph import mention_uuid

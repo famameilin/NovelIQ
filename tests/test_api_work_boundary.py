@@ -1,126 +1,288 @@
-"""分层调用方向锁定
-
-约定：
-- api 是传输层，机制与领域包（agents/workflows/work/storage 等）不得反向依赖 src.api；
-- api 只操作 workflows：任务/运行的读写与编排由 workflows 出面，api 不直接 import
-  work 队列（api → workflows → work 队列/embedding/ltp/topic）；领域契约（诊断 payload、
-  受控标签词表、情绪分值解析）落在 storage/config/metrics，api 与 agent 各自取用，
-  api 不 import agents；
-- agents 只被 workflows 调用：标注域契约（身份、实体/关系/对话/指标值域、提交与绑定
-  模型、证据格式、作业身份）在 fact_graph，事件值域与事件绑定模型 + 程序面护栏在
-  event_trees，被调用的三者不得反向依赖 src.agents；agents 也不得反向依赖 workflows；
-- 事件侧单向：event_trees 取用事实图的共享件，事实图不反向依赖 event_trees；
-- 编排层只派发：workflows 不 import fact_graph / event_trees / case_pool——三者的引擎由
-  agent 自建，作业单元契约在 work，图谱就绪失败类型在 utils；
-- 共用模块只有四个（config / utils / lexicons / event_bus）：它们位于依赖最底层，谁都可以依赖，
-  但它们自己只允许在这四个之内互相引用，不得 import 任何领域或机制模块；
-- work 是队列机制层，由 workflows 驱动，队列不得反向依赖 src.workflows。
-"""
+"""用 AST 锁定 21 个模块的职责方向及包内运行时依赖"""
 
 from __future__ import annotations
 
-import re
+import ast
+import subprocess
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
-_API_ROOT = _SRC / "api"
-_WORK_ROOT = _SRC / "work"
-_AGENTS_ROOT = _SRC / "agents"
-_WORKFLOWS_ROOT = _SRC / "workflows"
-_FACT_GRAPH_ROOT = _SRC / "fact_graph"
-_SHARED_MODULES = ("config", "utils", "lexicons", "event_bus")
-_EVENT_TREES_IMPORT_LINE = re.compile(r"^\s*(?:from|import)\s+src\.event_trees(?:\.|$|\s)")
-_GRAPH_DOMAIN_IMPORT_LINE = re.compile(r"^\s*(?:from|import)\s+src\.(?:fact_graph|event_trees|case_pool)(?:\.|$|\s)")
-_IMPORT_LINE = re.compile(r"^\s*(?:from|import)\s+src\.api(?:\.|$|\s)")
-_WORKFLOW_IMPORT_LINE = re.compile(r"^\s*(?:from|import)\s+src\.workflows(?:\.|$|\s)")
-_QUEUE_IMPORT_LINE = re.compile(r"^\s*(?:from|import)\s+src\.work(?:\.|$|\s)")
-_AGENTS_IMPORT_LINE = re.compile(r"^\s*(?:from|import)\s+src\.agents(?:\.|$|\s)")
-_SRC_IMPORT_LINE = re.compile(r"^\s*(?:from|import)\s+src\.([A-Za-z_][A-Za-z0-9_]*)(?:\.|$|\s)")
+from tests.support.module_dependencies import cycles, dependencies, reexport_dependencies
+
+_ROOT = Path(__file__).resolve().parents[1]
+_ALLOWED = {
+    "api": {
+        "config",
+        "workflows",
+        "work",
+        "metrics",
+        "linguistic",
+        "topic",
+        "diagnosis",
+        "fact_graph",
+        "event_trees",
+        "case_pool",
+        "audit",
+        "sse",
+        "storage",
+        "utils",
+    },
+    "workflows": {
+        "agents",
+        "audit",
+        "config",
+        "diagnosis",
+        "embedding",
+        "event_bus",
+        "fact_graph",
+        "lexicons",
+        "linguistic",
+        "metrics",
+        "model_pool",
+        "sse",
+        "storage",
+        "text_processing",
+        "topic",
+        "utils",
+        "work",
+    },
+    "agents": {
+        "audit",
+        "case_pool",
+        "config",
+        "diagnosis",
+        "embedding",
+        "event_bus",
+        "event_trees",
+        "fact_graph",
+        "model_pool",
+        "sse",
+        "storage",
+        "utils",
+        "work",
+    },
+    "work": {"config", "event_bus", "model_pool", "storage", "utils"},
+    "model_pool": {"config", "embedding", "event_bus", "utils"},
+    "embedding": {"config"},
+    "audit": {"event_bus", "storage"},
+    "diagnosis": {"config", "event_trees", "fact_graph", "metrics", "storage", "topic", "utils"},
+    "text_processing": {"config", "lexicons"},
+    "fact_graph": {"storage", "utils"},
+    "event_trees": {"fact_graph", "storage", "utils"},
+    "case_pool": {"storage", "utils"},
+    "metrics": {"config", "event_trees", "fact_graph", "lexicons", "storage", "text_processing", "utils", "work"},
+    "linguistic": {"config", "metrics", "storage", "text_processing", "utils", "work"},
+    "topic": {"config", "lexicons", "storage", "utils"},
+    "storage": {"config", "utils"},
+    "sse": {"event_bus", "storage"},
+    "lexicons": {"config", "utils"},
+    "config": set(),
+    "utils": {"config"},
+    "event_bus": set(),
+}
 
 
-def _offenders(root: Path, pattern: re.Pattern[str]) -> list[str]:
-    found: list[str] = []
-    for path in sorted(root.rglob("*.py")):
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if pattern.match(line):
-                found.append(f"{path.relative_to(_SRC)}:{line_number}: {line.strip()}")
-    return found
+def _project_dependencies():
+    return [d for d in dependencies(_ROOT) if d.target.startswith("src.")]
 
 
-def test_only_api_depends_on_api() -> None:
-    offenders: list[str] = []
-    for path in sorted(_SRC.rglob("*.py")):
-        if path.is_relative_to(_API_ROOT):
+def test_modules_and_dependency_whitelist() -> None:
+    modules = {p.name for p in (_ROOT / "src").iterdir() if p.is_dir() and (p / "__init__.py").exists()}
+    assert modules == set(_ALLOWED)
+    violations = []
+    for d in _project_dependencies():
+        source, target = d.source.split(".")[1], d.target.split(".")[1]
+        if source != target and target not in _ALLOWED[source]:
+            violations.append(f"{d.source}:{d.line} -> {d.target}")
+    assert not violations, "\n".join(violations)
+
+
+def test_runtime_dependencies_have_no_cycles() -> None:
+    imports = [d for d in _project_dependencies() + reexport_dependencies(_ROOT) if not d.type_only]
+    assert cycles((d.source.split(".")[1], d.target.split(".")[1]) for d in imports) == []
+    assert cycles((d.source, d.target) for d in imports) == []
+
+
+def test_http_framework_belongs_to_api() -> None:
+    bad = [
+        f"{d.source}:{d.line} -> {d.target}"
+        for d in dependencies(_ROOT)
+        if d.target.split(".")[0] in {"fastapi", "starlette", "sse_starlette"} and not d.source.startswith("src.api.")
+    ]
+    assert bad == []
+
+
+def test_api_uses_read_interfaces_not_write_engines() -> None:
+    prefixes = {
+        "fact_graph": ("src.fact_graph.read", "src.fact_graph.errors"),
+        "event_trees": ("src.event_trees.read",),
+        "case_pool": ("src.case_pool.read",),
+        "work": ("src.work.queries", "src.work.policy", "src.work.annotation_work"),
+    }
+    bad = []
+    for d in _project_dependencies():
+        top = d.target.split(".")[1]
+        if d.source.startswith("src.api.") and top in prefixes and not d.target.startswith(prefixes[top]):
+            bad.append(f"{d.source}:{d.line} -> {d.target}")
+    assert bad == []
+
+
+def test_metrics_calculation_does_not_read_database_or_network() -> None:
+    bad = []
+    for d in dependencies(_ROOT):
+        if not d.source.startswith("src.metrics.") or d.source.startswith("src.metrics.queries") or d.type_only:
             continue
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if _IMPORT_LINE.match(line):
-                offenders.append(f"{path.relative_to(_SRC)}:{line_number}: {line.strip()}")
-    assert offenders == []
+        if d.target.startswith(("src.storage", "sqlalchemy", "httpx", "requests", "openai", "src.embedding")):
+            bad.append(f"{d.source}:{d.line} -> {d.target}")
+    assert bad == []
 
 
-def test_api_does_not_depend_on_queue() -> None:
-    assert _offenders(_API_ROOT, _QUEUE_IMPORT_LINE) == []
+def test_model_pool_does_not_consume_business_envelopes() -> None:
+    for path in (_ROOT / "src/model_pool").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        assert not any(isinstance(n, ast.Name) and n.id == "WorkReceipt" for n in ast.walk(tree)), str(path)
 
 
-def test_api_does_not_depend_on_agents() -> None:
-    assert _offenders(_API_ROOT, _AGENTS_IMPORT_LINE) == []
+def test_deprecated_is_local_and_unreferenced() -> None:
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "deprecated"], cwd=_ROOT, capture_output=True, text=True, check=True
+    )
+    assert tracked.stdout.strip() == ""
+    ignored = subprocess.run(
+        ["git", "check-ignore", "deprecated/architecture/probe.py"], cwd=_ROOT, capture_output=True, text=True
+    )
+    assert ignored.returncode == 0
+    assert not any(d.target == "deprecated" or d.target.startswith("deprecated.") for d in dependencies(_ROOT))
 
 
-def test_queue_does_not_depend_on_workflows() -> None:
-    assert _offenders(_WORK_ROOT, _WORKFLOW_IMPORT_LINE) == []
+def test_parser_covers_relative_nested_and_dynamic_imports(tmp_path: Path) -> None:
+    package = tmp_path / "src/sample"
+    package.mkdir(parents=True)
+    (tmp_path / "src/__init__.py").write_text("")
+    (package / "__init__.py").write_text("")
+    (package / "leaf.py").write_text("")
+    (package / "consumer.py").write_text(
+        "from typing import TYPE_CHECKING\n"
+        "from importlib import import_module as load\n"
+        "from . import leaf\n"
+        "if TYPE_CHECKING:\n    from src.sample.leaf import Kind\n"
+        "def run():\n    from .leaf import value\n"
+        '    load("src.sample.leaf")\n    load(f"{__package__}.leaf")\n'
+    )
+    imports = [d for d in dependencies(tmp_path) if d.source == "src.sample.consumer" and d.target == "src.sample.leaf"]
+    assert len(imports) == 5
+    assert sum(d.type_only for d in imports) == 1
+    assert sum(d.dynamic for d in imports) == 2
 
 
-def test_only_workflows_depends_on_agents() -> None:
-    """agents 是编排层独占的调用面；契约与护栏必须落在被调用侧"""
-    offenders: list[str] = []
-    for path in sorted(_SRC.rglob("*.py")):
-        if path.is_relative_to(_AGENTS_ROOT) or path.is_relative_to(_WORKFLOWS_ROOT):
-            continue
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if _AGENTS_IMPORT_LINE.match(line):
-                offenders.append(f"{path.relative_to(_SRC)}:{line_number}: {line.strip()}")
-    assert offenders == []
+def test_contracts_do_not_reexport_their_consumers() -> None:
+    bad = [
+        d
+        for d in _project_dependencies()
+        if d.source == "src.fact_graph.schema"
+        and d.target.startswith(("src.fact_graph.inputs", "src.fact_graph.outputs"))
+    ]
+    assert not bad
+    assert not any(
+        d.source.startswith("src.storage.") and d.target.split(".")[1] not in {"storage", "config", "utils"}
+        for d in reexport_dependencies(_ROOT)
+    )
 
 
-def test_agents_does_not_depend_on_workflows() -> None:
-    assert _offenders(_AGENTS_ROOT, _WORKFLOW_IMPORT_LINE) == []
+def test_reexport_parser_resolves_actual_definition(tmp_path: Path) -> None:
+    package = tmp_path / "src/example"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("from .facade import Contract\n")
+    (package / "leaf.py").write_text("class Contract: pass\n")
+    (package / "facade.py").write_text("from .leaf import Contract\n")
+    (package / "caller.py").write_text("def call():\n    from .facade import Contract\n")
+    result = reexport_dependencies(tmp_path)
+    assert any(d.source == "src.example.caller" and d.target == "src.example.leaf" for d in result)
+    assert any(d.source == "src.example" and d.target == "src.example.leaf" for d in result)
 
 
-def test_fact_graph_does_not_depend_on_event_trees() -> None:
-    """事件侧单向：event_trees 取用事实图共享件，事实图不反向依赖事件树"""
-    assert _offenders(_FACT_GRAPH_ROOT, _EVENT_TREES_IMPORT_LINE) == []
+def test_annotation_state_ownership_is_explicit() -> None:
+    owner_fields = {
+        "state_entities": {"written_entities", "written_relations", "entity_el_index"},
+        "state_events": {"event_trees", "pending_child_events", "observation_by_record"},
+        "state_dialogue": {"source_anchors", "written_dialogues", "authorized_text_paragraph_ids"},
+        "state_metrics": {"metrics_payload", "bound_payloads"},
+    }
+    for module, expected in owner_fields.items():
+        tree = ast.parse((_ROOT / f"src/agents/annotation/{module}.py").read_text(encoding="utf-8"))
+        classes = [
+            n
+            for n in tree.body
+            if isinstance(n, ast.ClassDef)
+            and any(isinstance(d, ast.Call) and ast.unparse(d.func) == "dataclass" for d in n.decorator_list)
+        ]
+        fields = {
+            n.target.id
+            for cls in classes
+            for n in cls.body
+            if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+        }
+        assert expected <= fields
+        assert not any(isinstance(n, ast.FunctionDef) and n.name == "__getattr__" for n in ast.walk(tree))
+    ledger = ast.parse((_ROOT / "src/agents/annotation/ledger.py").read_text(encoding="utf-8"))
+    ledger_class = next(n for n in ledger.body if isinstance(n, ast.ClassDef) and n.name == "AnnotationToolLedger")
+    fields = {n.target.id for n in ledger_class.body if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)}
+    assert {"entities", "events", "dialogue", "metrics"} <= fields
+    assert not fields & set().union(*owner_fields.values())
 
 
-def test_shared_modules_depend_on_nothing_but_each_other() -> None:
-    """共用模块只有 config / utils / lexicons / event_bus：位于最底层，不得依赖任何领域模块"""
-    offenders: list[str] = []
-    for name in _SHARED_MODULES:
-        for path in sorted((_SRC / name).rglob("*.py")):
-            for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-                match = _SRC_IMPORT_LINE.match(line)
-                if match and match.group(1) not in _SHARED_MODULES:
-                    offenders.append(f"{path.relative_to(_SRC)}:{line_number}: {line.strip()}")
-    assert offenders == []
+def test_domain_save_consumes_frozen_contributions() -> None:
+    for module, leaf, contribution in (
+        ("fact_graph", "graph", "FactContribution"),
+        ("event_trees", "trees", "EventContribution"),
+        ("case_pool", "__init__", "CaseContribution"),
+    ):
+        tree = ast.parse((_ROOT / f"src/{module}/{leaf}.py").read_text(encoding="utf-8"))
+        save = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "save_work")
+        assert any(a.annotation is not None and ast.unparse(a.annotation) == contribution for a in save.args.args)
+        assert not any(isinstance(n, ast.Name) and n.id == "execution" for n in ast.walk(save))
+        tree = ast.parse((_ROOT / f"src/{module}/contributions.py").read_text(encoding="utf-8"))
+        cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == contribution)
+        assert any(
+            isinstance(d, ast.Call)
+            and any(
+                k.arg == "frozen" and isinstance(k.value, ast.Constant) and k.value.value is True for k in d.keywords
+            )
+            for d in cls.decorator_list
+        )
 
 
-def test_storage_does_not_depend_on_event_trees() -> None:
-    """章标注 payload 由标注 agent 校验，storage 只按行形态取值，不依赖事件树模型"""
-    assert _offenders(_SRC / "storage", _EVENT_TREES_IMPORT_LINE) == []
+def test_stage_completion_rules_do_not_belong_to_storage() -> None:
+    retired = {
+        "is_preprocess_complete",
+        "is_linguistic_complete",
+        "is_topic_model_complete",
+        "is_aggregate_complete",
+        "has_diagnosis_data",
+        "_payload_has_valid_diagnosis_contract",
+    }
+    for path in (_ROOT / "src/storage").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        assert not any(isinstance(n, ast.FunctionDef) and n.name in retired for n in ast.walk(tree)), str(path)
 
 
-def test_workflows_reaches_graph_domains_only_through_agents() -> None:
-    """编排层只派发 work：事实图、事件树、案例池由 agent 自建并使用，workflows 不直接取用"""
-    assert _offenders(_WORKFLOWS_ROOT, _GRAPH_DOMAIN_IMPORT_LINE) == []
+def test_sse_display_rules_belong_to_sse() -> None:
+    tree = ast.parse((_ROOT / "src/storage/repositories/event_outbox.py").read_text(encoding="utf-8"))
+    assert not any(
+        getattr(n, "name", None) in {"DisplayState", "display_scope", "replay", "_display_state", "display_state"}
+        for n in ast.walk(tree)
+    )
 
 
-def test_graph_domains_are_agent_only() -> None:
-    """事实图、事件树、案例池是标注 agent 的私有域：除 agents 与这三者自身，谁都不 import"""
-    domain_roots = tuple(_SRC / name for name in ("fact_graph", "event_trees", "case_pool"))
-    offenders: list[str] = []
-    for path in sorted(_SRC.rglob("*.py")):
-        if path.is_relative_to(_AGENTS_ROOT) or any(path.is_relative_to(root) for root in domain_roots):
-            continue
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if _GRAPH_DOMAIN_IMPORT_LINE.match(line):
-                offenders.append(f"{path.relative_to(_SRC)}:{line_number}: {line.strip()}")
-    assert offenders == []
+def test_config_does_not_export_domain_rules() -> None:
+    prohibited = {
+        "PROPP_FUNCTIONS",
+        "SEMANTIC_CATEGORY_MAPPING",
+        "LEXICON_FILES",
+        "LEXICON_DRAFT_KEYS",
+        "TITLE_ALIAS_SUFFIXES",
+        "ALLOWED_PREV_CJK_CHARS",
+        "LIKELY_NAME_PREFIX_CHARS",
+    }
+    for path in (_ROOT / "src/config").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        assert not any(isinstance(n, ast.Name) and n.id in prohibited for n in ast.walk(tree)), str(path)

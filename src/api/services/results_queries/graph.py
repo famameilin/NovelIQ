@@ -11,14 +11,14 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
+from src.fact_graph.read import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
+from src.fact_graph.read.alias import build_alias_resolution
 from src.metrics.aggregate.algorithms import (
     GRAPH_METRICS_VERSION,
     InsufficientGraphNodesError,
     compute_graph_structure_metrics,
 )
 from src.storage.repositories import AnnotationRepository, GraphRepository
-from src.storage.repositories.graph.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
-from src.storage.repositories.graph.authority.alias import build_alias_resolution
 
 GRAPH_CHANGE_LIMIT = 200
 

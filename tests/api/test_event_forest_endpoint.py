@@ -17,6 +17,7 @@ from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
     persist_chapter_annotation,
 )
+from tests.support.run_records import set_run_status
 
 
 def _insert_event_forest_run(db_session) -> tuple[str, str]:
@@ -75,9 +76,13 @@ def _insert_event_forest_run(db_session) -> tuple[str, str]:
         ],
     )
     commit_test_event_link(
-        db_session, run_id=run_id, chapter_id=2, source_event_id=gate_root, target_event_id=sword_root,
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        source_event_id=gate_root,
+        target_event_id=sword_root,
     )
-    RunRepository(db_session).update_run_status(run_id, "completed")
+    set_run_status(RunRepository(db_session).session, run_id, "completed")
     db_session.commit()
     return novel_id, run_id
 
@@ -130,7 +135,8 @@ def test_event_forest_returns_full_snapshot(api_client: TestClient, db_session) 
     assert len(causal_edges) == 2
     assert all(edge["edge_type"] == "causal" for edge in causal_edges)
     assert {(edge["source_event_id"], edge["target_event_id"]) for edge in causal_edges} == {
-        (gate_root, gate_main), (gate_root, sword_root),
+        (gate_root, gate_main),
+        (gate_root, sword_root),
     }
     cross_chapter = next(edge for edge in causal_edges if edge["target_event_id"] == sword_root)
     assert cross_chapter["source_chapter_id"] == 1
@@ -160,15 +166,17 @@ def test_event_forest_exposes_precise_evidence_and_source_chapter(api_client: Te
         db_session,
         run_id=run_id,
         chapter_id=1,
-        events=[{
-            "description": "顾霜进入山门",
-            "node_id": event_id,
-            "tree_id": "gate",
-            "cause_role": "root",
-            "evidence_paragraph_id": 0,
-        }],
+        events=[
+            {
+                "description": "顾霜进入山门",
+                "node_id": event_id,
+                "tree_id": "gate",
+                "cause_role": "root",
+                "evidence_paragraph_id": 0,
+            }
+        ],
     )
-    RunRepository(db_session).update_run_status(run_id, "completed")
+    set_run_status(RunRepository(db_session).session, run_id, "completed")
     db_session.commit()
 
     forest = api_client.get(f"/api/novels/{novel_id}/event-forest", params={"task_id": run_id[:8]})
@@ -187,18 +195,24 @@ def test_event_forest_exposes_precise_evidence_and_source_chapter(api_client: Te
     assert [paragraph["text"] for paragraph in body["paragraphs"]] == ["顾霜进入山门。", "顾霜立誓。"]
     assert [paragraph["paragraph_id"] for paragraph in body["paragraphs"]] == [0, 1]
 
-    assert api_client.get(
-        f"/api/novels/{novel_id}/event-forest/chapters/999/source",
-        params={"task_id": run_id[:8]},
-    ).status_code == 404
+    assert (
+        api_client.get(
+            f"/api/novels/{novel_id}/event-forest/chapters/999/source",
+            params={"task_id": run_id[:8]},
+        ).status_code
+        == 404
+    )
     assert api_client.get(
         "/api/novels/other-novel/event-forest/chapters/1/source",
         params={"task_id": run_id[:8]},
     ).status_code in {403, 404}
-    assert api_client.get(
-        f"/api/novels/{novel_id}/event-forest/chapters/1/source",
-        params={"task_id": "missing-task"},
-    ).status_code == 404
+    assert (
+        api_client.get(
+            f"/api/novels/{novel_id}/event-forest/chapters/1/source",
+            params={"task_id": "missing-task"},
+        ).status_code
+        == 404
+    )
 
 
 def test_event_forest_filters_by_chapter_boundary(api_client: TestClient, db_session) -> None:
@@ -227,7 +241,7 @@ def test_event_forest_returns_404_without_matching_chapter_data(api_client: Test
         texts=["未标注原文。"],
         title="无事件森林",
     )
-    RunRepository(db_session).update_run_status(run_id, "completed")
+    set_run_status(RunRepository(db_session).session, run_id, "completed")
     from tests.support.chapter_annotation_helpers import confirm_test_work
 
     confirm_test_work(db_session, run_id)
@@ -245,7 +259,7 @@ def test_event_forest_returns_404_without_matching_chapter_data(api_client: Test
 def test_event_forest_rejects_non_completed_run(api_client: TestClient, db_session) -> None:
     """2026-08-18 用于验证未完成 run 被 400 拒绝"""
     novel_id, run_id = _insert_event_forest_run(db_session)
-    RunRepository(db_session).update_run_status(run_id, "pending")
+    set_run_status(RunRepository(db_session).session, run_id, "pending")
     db_session.commit()
 
     response = api_client.get(

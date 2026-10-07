@@ -214,24 +214,11 @@ def build_aggregate_metrics_contract_from_models(
     return aggregate_metrics
 
 
-def build_aggregate_metrics_contract(result: AggregateResult) -> dict[str, Any]:
-    """构建供导出层使用的稳定非图谱聚合指标包"""
-
-    narrative_structure, emotion_stats, character_stats, style_stats = _convert_aggregate_result(result)
-    return build_aggregate_metrics_contract_from_models(
-        narrative_structure,
-        emotion_stats,
-        character_stats,
-        style_stats,
-    )
-
-
 __all__ = [
     "AGGREGATE_METRIC_CONTRACT_FIELDS",
     "AGGREGATE_GRAPH_FORBIDDEN_FIELDS",
     "_convert_aggregate_result",
     "_convert_style_stats",
-    "build_aggregate_metrics_contract",
     "build_aggregate_metrics_contract_from_models",
     "validate_aggregate_metrics_contract",
 ]

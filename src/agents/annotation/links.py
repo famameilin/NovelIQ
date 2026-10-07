@@ -7,13 +7,15 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import tool
 
-from src.fact_graph.schema import SourceReference
+from src.fact_graph.outputs import SourceReference
 from src.utils.identity import stable_digest, text_digest
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError, AnnotationStageRejection
 
 if TYPE_CHECKING:
-    from .tools import AnnotationQueryService, AnnotationToolLedger
+    from src.agents.annotation.ledger import AnnotationToolLedger
+    from src.agents.annotation.tools import AnnotationQueryService
+
 
 def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationToolLedger) -> list[Any]:
     """所有写工具只接受本次读回执和本章已写出的对象"""
@@ -30,7 +32,9 @@ def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationTo
         if record_id not in ledger.written_record_keys and resolved not in ledger.written_record_keys:
             raise AnnotationStageRejection(
                 f"{record_id}(record_id={record_id!r})：record_id 必须是本章实际写出的记录键",
-                record=record_id, field="record_id", code="unknown_record",
+                record=record_id,
+                field="record_id",
+                code="unknown_record",
                 expected="本章已写出的记录键",
             )
         return resolved
@@ -39,7 +43,9 @@ def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationTo
         if source_ref not in ledger.text_references:
             raise AnnotationStageRejection(
                 f"{record}({field}={source_ref!r})：引用未由本次 read_text 授权",
-                record=record, field=field, code="unauthorized_reference",
+                record=record,
+                field=field,
+                code="unauthorized_reference",
                 expected="本次 read_text 已授权的 source_ref",
             )
         return ledger.text_references[source_ref]
@@ -53,14 +59,17 @@ def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationTo
         paragraph: dict[str, Any] | None = None
         if ledger.paragraph_info is not None:
             for identifier, content in zip(
-                ledger.paragraph_info.paragraph_ids, ledger.paragraph_info.texts, strict=True,
+                ledger.paragraph_info.paragraph_ids,
+                ledger.paragraph_info.texts,
+                strict=True,
             ):
                 if identifier == paragraph_id:
                     paragraph = {"chapter_id": ledger.current_chapter_id, "paragraph_id": identifier, "text": content}
                     break
         if paragraph is None:
             paragraph = await query_service.read_paragraph(
-                paragraph_id, allow_future_context=ledger.allow_future_context,
+                paragraph_id,
+                allow_future_context=ledger.allow_future_context,
             )
         content = str(paragraph["text"])
         start, end = 0, len(content)
@@ -73,13 +82,20 @@ def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationTo
                 if start < 0:
                     raise AnnotationInputError("quote 或 occurrence 不匹配原文")
             end = start + len(quote)
-        value = SourceReference(chapter_id=paragraph["chapter_id"], paragraph_id=paragraph_id,
-                                char_start=start, char_end=end, text_hash=text_digest(content[start:end]))
+        value = SourceReference(
+            chapter_id=paragraph["chapter_id"],
+            paragraph_id=paragraph_id,
+            char_start=start,
+            char_end=end,
+            text_hash=text_digest(content[start:end]),
+        )
         source_ref = stable_digest(ledger.run_scope, value.model_dump(mode="json"))
         ledger.text_references[source_ref] = value
         ledger.authorized_text_paragraph_ids.add(paragraph_id)
-        return json.dumps({**value.model_dump(mode="json"), "content": content[start:end],
-                           "source_ref": source_ref}, ensure_ascii=False)
+        return json.dumps(
+            {**value.model_dump(mode="json"), "content": content[start:end], "source_ref": source_ref},
+            ensure_ascii=False,
+        )
 
     @tool
     async def read_chapter_text(paragraph_id: int, quote: str | None = None, occurrence: int = 1) -> str:
@@ -91,9 +107,13 @@ def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationTo
         identifiers = dict(zip(info.visible_ids(), info.paragraph_ids, strict=True))
         if paragraph_id not in identifiers:
             raise AnnotationInputError(f"段首可见号越界，可用号：{list(identifiers)}")
-        return await read_text.ainvoke({
-            "paragraph_id": identifiers[paragraph_id], "quote": quote, "occurrence": occurrence,
-        })
+        return await read_text.ainvoke(
+            {
+                "paragraph_id": identifiers[paragraph_id],
+                "quote": quote,
+                "occurrence": occurrence,
+            }
+        )
 
     @tool
     def anchor_record(record_id: str, source_ref: str) -> str:
@@ -104,13 +124,14 @@ def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationTo
             raise AnnotationStageRejection(
                 f"{record}(source_ref={source_ref!r}, source.chapter_id={value.chapter_id})："
                 f"只能给本章对象绑定本章原文锚点（本章 chapter_id={ledger.current_chapter_id}）",
-                record=record, field="source_ref", code="chapter_mismatch",
+                record=record,
+                field="source_ref",
+                code="chapter_mismatch",
                 expected=f"source.chapter_id={ledger.current_chapter_id}",
             )
         values = ledger.source_anchors.setdefault(record, [])
         if value not in values:
             values.append(value)
         return json.dumps({"accepted": True, "record": record, "source_ref": source_ref}, ensure_ascii=False)
-
 
     return [read_text, read_chapter_text, anchor_record]

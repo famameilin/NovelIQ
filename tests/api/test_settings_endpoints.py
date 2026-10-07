@@ -15,8 +15,14 @@ from fastapi.testclient import TestClient
 from src.config.env_file import read_env_file
 from src.config.settings import Settings, apply_settings_onto
 
-_ENV_KEYS = ("MODEL_POOL", "DIAGNOSIS_MODEL_ID", "EMBEDDING_MODEL_BASE_URL", "EMBEDDING_MODEL_ID",
-             "EMBEDDING_MODEL_KEY", "LTP_MODEL_DIR")
+_ENV_KEYS = (
+    "MODEL_POOL",
+    "DIAGNOSIS_MODEL_ID",
+    "EMBEDDING_MODEL_BASE_URL",
+    "EMBEDDING_MODEL_ID",
+    "EMBEDDING_MODEL_KEY",
+    "LTP_MODEL_DIR",
+)
 
 
 @pytest.fixture
@@ -44,21 +50,34 @@ def isolated_settings(tmp_path: Path, monkeypatch) -> Path:
 
 
 def _entry(model_id: str = "model-a", **overrides: Any) -> dict[str, Any]:
-    return {"model_id": model_id, "base_url": f"https://{model_id}.example/v1", "api_key": f"sk-{model_id}-1234",
-            "weight": 1, "max_in_flight": 2, "temperature": 0.5, "top_p": 0.9, "max_tokens": 4096, **overrides}
+    return {
+        "model_id": model_id,
+        "base_url": f"https://{model_id}.example/v1",
+        "api_key": f"sk-{model_id}-1234",
+        "weight": 1,
+        "max_in_flight": 2,
+        "temperature": 0.5,
+        "top_p": 0.9,
+        "max_tokens": 4096,
+        **overrides,
+    }
 
 
 def _save_pool(client: TestClient) -> None:
-    client.put("/api/settings/env", json={
-        "model_pool": [_entry(), _entry("diagnostic", weight=0, max_in_flight=1)],
-        "diagnosis_model_id": "diagnostic",
-    }).raise_for_status()
+    client.put(
+        "/api/settings/env",
+        json={
+            "model_pool": [_entry(), _entry("diagnostic", weight=0, max_in_flight=1)],
+            "diagnosis_model_id": "diagnostic",
+        },
+    ).raise_for_status()
 
 
 def test_pool_roundtrip_masks_keys_and_preserves_behavior_config(
-    isolated_settings: Path, api_client: TestClient,
+    isolated_settings: Path,
+    api_client: TestClient,
 ) -> None:
-    from src.config.input_config import load_task_config
+    from src.model_pool.configuration import load_task_config
 
     env_file = isolated_settings.parent / ".env"
     env_file.write_text("# 数据库\nDATABASE_PASSWORD=unrelated\n", encoding="utf-8")
@@ -82,13 +101,18 @@ def test_pool_roundtrip_masks_keys_and_preserves_behavior_config(
     # 2026-10-02 设置迁移：采样参数来自池内模型配置
     assert (annotation.temperature, annotation.top_p, annotation.max_tokens) == (0.5, 0.9, 4096)
     assert (diagnosis.model, diagnosis.base_url, diagnosis.max_in_flight) == (
-        "diagnostic", "https://diagnostic.example/v1", 1,
+        "diagnostic",
+        "https://diagnostic.example/v1",
+        1,
     )
     # 采样参数随模型保存（环境接口），不再经参数设置接口按任务配置
-    api_client.put("/api/settings/env", json={
-        "model_pool": [_entry(), _entry("diagnostic", weight=0, max_in_flight=1, max_tokens=2048)],
-        "diagnosis_model_id": "diagnostic",
-    }).raise_for_status()
+    api_client.put(
+        "/api/settings/env",
+        json={
+            "model_pool": [_entry(), _entry("diagnostic", weight=0, max_in_flight=1, max_tokens=2048)],
+            "diagnosis_model_id": "diagnostic",
+        },
+    ).raise_for_status()
     assert load_task_config("diagnosis").model == "diagnostic"
     assert load_task_config("diagnosis").max_tokens == 2048
     # 采样参数改走环境接口后本用例不再触发参数保存，settings.json 应保持不生成
@@ -109,11 +133,15 @@ def test_edit_model_keeps_key_and_updates_diagnosis_on_rename(isolated_settings:
     renamed = _entry("renamed", weight=0)
     renamed.pop("api_key")
     renamed["original_model_id"] = "diagnostic"
-    response = api_client.put("/api/settings/env", json={
-        "model_pool": [first, renamed], "diagnosis_model_id": "renamed",
-    })
+    response = api_client.put(
+        "/api/settings/env",
+        json={
+            "model_pool": [first, renamed],
+            "diagnosis_model_id": "renamed",
+        },
+    )
     assert response.status_code == 200
-    from src.config.input_config import load_task_config
+    from src.model_pool.configuration import load_task_config
 
     assert load_task_config("diagnosis").api_key == "sk-diagnostic-1234"
     assert load_task_config("annotation", model_id="model-a").max_in_flight == 5
@@ -130,13 +158,30 @@ def test_delete_selected_model_requires_new_selection(isolated_settings: Path, a
     assert len(response.json()["values"]["models"]["model_pool"]) == 1
 
 
-@pytest.mark.parametrize("pool", [[], [_entry(weight=0)], [_entry(weight=-1)], [_entry(weight=True)],
-                                 [_entry(), _entry()], [_entry(max_in_flight=0)], [_entry(max_in_flight=1.5)],
-                                 [_entry(temperature=3)], [_entry(temperature=-0.1)], [_entry(top_p=1.5)],
-                                 [_entry(max_tokens=0)], [_entry(api_key="")], [_entry(api_key="••••1234")],
-                                 [_entry(api_key="key\nDATABASE_PASSWORD=evil")], [_entry(base_url="file:///tmp")]])
+@pytest.mark.parametrize(
+    "pool",
+    [
+        [],
+        [_entry(weight=0)],
+        [_entry(weight=-1)],
+        [_entry(weight=True)],
+        [_entry(), _entry()],
+        [_entry(max_in_flight=0)],
+        [_entry(max_in_flight=1.5)],
+        [_entry(temperature=3)],
+        [_entry(temperature=-0.1)],
+        [_entry(top_p=1.5)],
+        [_entry(max_tokens=0)],
+        [_entry(api_key="")],
+        [_entry(api_key="••••1234")],
+        [_entry(api_key="key\nDATABASE_PASSWORD=evil")],
+        [_entry(base_url="file:///tmp")],
+    ],
+)
 def test_invalid_pool_does_not_write_config(
-    isolated_settings: Path, api_client: TestClient, pool: list[dict[str, Any]],
+    isolated_settings: Path,
+    api_client: TestClient,
+    pool: list[dict[str, Any]],
 ) -> None:
     response = api_client.put("/api/settings/env", json={"model_pool": pool})
     assert response.status_code == 422
@@ -148,9 +193,16 @@ def test_unknown_diagnosis_and_missing_new_key_are_rejected(isolated_settings: P
     new = _entry()
     new.pop("api_key")
     assert api_client.put("/api/settings/env", json={"model_pool": [new]}).status_code == 422
-    assert api_client.put("/api/settings/env", json={
-        "model_pool": [_entry()], "diagnosis_model_id": "not-in-pool",
-    }).status_code == 422
+    assert (
+        api_client.put(
+            "/api/settings/env",
+            json={
+                "model_pool": [_entry()],
+                "diagnosis_model_id": "not-in-pool",
+            },
+        ).status_code
+        == 422
+    )
     assert not (isolated_settings.parent / ".env").exists()
 
 
@@ -161,18 +213,25 @@ def test_short_key_is_fully_masked(isolated_settings: Path, api_client: TestClie
 
 
 def test_pool_and_embedding_validation_is_atomic(isolated_settings: Path, api_client: TestClient) -> None:
-    response = api_client.put("/api/settings/env", json={
-        "model_pool": [_entry()], "embedding_model": {"base_url": "https://embedding/v1"},
-    })
+    response = api_client.put(
+        "/api/settings/env",
+        json={
+            "model_pool": [_entry()],
+            "embedding_model": {"base_url": "https://embedding/v1"},
+        },
+    )
     assert response.status_code == 422
     assert not (isolated_settings.parent / ".env").exists() and "MODEL_POOL" not in os.environ
 
 
 def test_legacy_connection_and_named_provider_contracts_are_absent(
-    isolated_settings: Path, api_client: TestClient,
+    isolated_settings: Path,
+    api_client: TestClient,
 ) -> None:
-    for payload in ({"model": {"base_url": "https://old/v1", "model": "old", "api_key": "old"}},
-                    {"providers": {"secondary": {"api_key": "x"}}}):
+    for payload in (
+        {"model": {"base_url": "https://old/v1", "model": "old", "api_key": "old"}},
+        {"providers": {"secondary": {"api_key": "x"}}},
+    ):
         assert api_client.put("/api/settings/env", json=payload).status_code == 422
     assert not (isolated_settings.parent / ".env").exists()
     assert api_client.post("/api/settings/agents/annotation/test").status_code == 404
@@ -185,8 +244,10 @@ def test_pool_credentials_are_rejected_by_parameter_save(isolated_settings: Path
 
 
 def test_update_settings_partial_save_and_hot_apply(isolated_settings: Path, api_client: TestClient) -> None:
-    isolated_settings.write_text(json.dumps({"models": {"annotation": {"max_iterations": 15}},
-                                            "topic_model": {"num_topics": 25}}), encoding="utf-8")
+    isolated_settings.write_text(
+        json.dumps({"models": {"annotation": {"max_iterations": 15}}, "topic_model": {"num_topics": 25}}),
+        encoding="utf-8",
+    )
     response = api_client.put("/api/settings", json={"values": {"models": {"annotation": {"timeout_s": 60}}}})
     assert response.status_code == 200
     saved = json.loads(isolated_settings.read_text(encoding="utf-8"))
@@ -199,7 +260,8 @@ def test_update_settings_partial_save_and_hot_apply(isolated_settings: Path, api
 
 
 def test_update_settings_invalid_and_corrupt_files_are_rejected(
-    isolated_settings: Path, api_client: TestClient,
+    isolated_settings: Path,
+    api_client: TestClient,
 ) -> None:
     response = api_client.put("/api/settings", json={"values": {"topic_model": {"topic_shift": {"window_size": 0}}}})
     assert response.status_code == 422 and not isolated_settings.exists()
@@ -208,7 +270,8 @@ def test_update_settings_invalid_and_corrupt_files_are_rejected(
 
 
 def test_reset_default_removes_override_and_preserves_singleton_identity(
-    isolated_settings: Path, api_client: TestClient,
+    isolated_settings: Path,
+    api_client: TestClient,
 ) -> None:
     from src.config import settings
 
@@ -223,8 +286,11 @@ def test_parallel_parameter_updates_preserve_independent_fields(isolated_setting
     import src.api.routes.settings as routes
     from src.api.models.settings import UpdateSettingsRequest
 
-    updates = [{"models": {"diagnosis": {"thinking": True}}}, {"models": {"annotation": {"timeout_s": 60}}},
-               {"metrics": {"mtld_threshold": 0.81}}]
+    updates = [
+        {"models": {"diagnosis": {"thinking": True}}},
+        {"models": {"annotation": {"timeout_s": 60}}},
+        {"metrics": {"mtld_threshold": 0.81}},
+    ]
     with ThreadPoolExecutor(max_workers=3) as pool:
         list(pool.map(lambda values: routes.update_settings(UpdateSettingsRequest(values=values)), updates))
     view = routes.get_settings().values
@@ -234,13 +300,16 @@ def test_parallel_parameter_updates_preserve_independent_fields(isolated_setting
 
 
 def test_embedding_credentials_can_be_saved_preserved_and_cleared(
-    isolated_settings: Path, api_client: TestClient,
+    isolated_settings: Path,
+    api_client: TestClient,
 ) -> None:
     patch = {"base_url": "http://localhost:8080/v1", "model": "embedding", "api_key": "sk-embedding-9999"}
     response = api_client.put("/api/settings/env", json={"embedding_model": patch})
     assert response.status_code == 200
     assert response.json()["values"]["models"]["paragraph_embedding"]["api_key"] == "••••9999"
-    api_client.put("/api/settings/env", json={"embedding_model": {"base_url": "http://localhost:9090/v1"}}).raise_for_status()
+    api_client.put(
+        "/api/settings/env", json={"embedding_model": {"base_url": "http://localhost:9090/v1"}}
+    ).raise_for_status()
     assert os.environ["EMBEDDING_MODEL_KEY"] == "sk-embedding-9999"
     invalid = api_client.put("/api/settings/env", json={"embedding_model": {"api_key": "", "model": "new"}})
     assert invalid.status_code == 422
@@ -274,7 +343,9 @@ class _FakeOpenAIClient:
 
 
 def test_pool_connection_uses_saved_key_and_unsaved_override(
-    isolated_settings: Path, api_client: TestClient, monkeypatch,
+    isolated_settings: Path,
+    api_client: TestClient,
+    monkeypatch,
 ) -> None:
     import src.api.routes.settings as routes
 
@@ -286,9 +357,14 @@ def test_pool_connection_uses_saved_key_and_unsaved_override(
     assert _FakeOpenAIClient.last_init["base_url"] == "https://diagnostic.example/v1"
     assert _FakeOpenAIClient.last_init["max_retries"] == 0
     before = os.environ["MODEL_POOL"]
-    response = api_client.post("/api/settings/agents/pool/test", json={
-        "model_id": "model-a", "base_url": "https://draft/v1", "api_key": "sk-draft",
-    })
+    response = api_client.post(
+        "/api/settings/agents/pool/test",
+        json={
+            "model_id": "model-a",
+            "base_url": "https://draft/v1",
+            "api_key": "sk-draft",
+        },
+    )
     assert response.json()["ok"] is True and os.environ["MODEL_POOL"] == before
     assert _FakeOpenAIClient.last_init["api_key"] == "sk-draft"
 
@@ -301,9 +377,13 @@ def test_connection_failure_redacts_draft_key(isolated_settings: Path, api_clien
             raise ConnectionError("failed Authorization: Bearer sk-draft-secret")
 
     monkeypatch.setattr(routes, "OpenAI", FailingClient)
-    response = api_client.post("/api/settings/agents/pool/test", json={
-        "base_url": "https://draft/v1", "api_key": "sk-draft-secret",
-    })
+    response = api_client.post(
+        "/api/settings/agents/pool/test",
+        json={
+            "base_url": "https://draft/v1",
+            "api_key": "sk-draft-secret",
+        },
+    )
     assert response.json()["ok"] is False and "sk-draft-secret" not in response.text
     assert not (isolated_settings.parent / ".env").exists()
 
@@ -315,13 +395,22 @@ def test_connection_without_configuration_does_not_call_remote(isolated_settings
 
 def test_schema_has_no_extra_model_categories(isolated_settings: Path, api_client: TestClient) -> None:
     paths = {tuple(entry["path"]) for entry in api_client.get("/api/settings/schema").json()["fields"]}
-    assert not any("continuity" in path or "provider_route" in path or "model_id" in path
-                   or "provider_max_in_flight" in path or "structured_output" in path for path in paths)
+    assert not any(
+        "continuity" in path
+        or "provider_route" in path
+        or "model_id" in path
+        or "provider_max_in_flight" in path
+        or "structured_output" in path
+        for path in paths
+    )
     assert "continuity" not in api_client.get("/api/settings").json()["values"]["models"]
 
 
 def test_validation_errors_do_not_echo_pool_keys(isolated_settings: Path, api_client: TestClient) -> None:
-    response = api_client.put("/api/settings/env", json={
-        "model_pool": [_entry(api_key="secret-pool-key", extra="bad")],
-    })
+    response = api_client.put(
+        "/api/settings/env",
+        json={
+            "model_pool": [_entry(api_key="secret-pool-key", extra="bad")],
+        },
+    )
     assert response.status_code == 422 and "secret-pool-key" not in response.text

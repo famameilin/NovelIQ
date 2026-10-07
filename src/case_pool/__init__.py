@@ -6,6 +6,9 @@ import unicodedata
 from copy import deepcopy
 from typing import Any
 
+from sqlalchemy.orm import Session
+
+from src.case_pool.contributions import CaseContribution
 from src.utils.identity import stable_digest
 
 
@@ -163,12 +166,12 @@ class CasePool:
             for key, case in sorted(self.cases.items())
         ]
 
-    def save_work(self, session: Any, execution: Any) -> None:
+    def save_work(self, session: Session, contribution: CaseContribution) -> None:
         from sqlalchemy.dialects.postgresql import insert
 
         from src.storage.models import BookCase, EventEdge
 
-        frozen = execution.contributions["cases"]
+        frozen = contribution.snapshot()
         for case_id, case in sorted(frozen["registrations"].items()):
             session.execute(insert(BookCase).values(run_id=self.run_id, **case).on_conflict_do_nothing())
             session.flush()
@@ -182,7 +185,9 @@ class CasePool:
                 ):
                     raise ValueError(f"case_id={case_id} resolved 的连接尚未成功保存")
             contributions = dict(state.contributions)
-            contributions.setdefault(execution.work_id, {"invocation_id": execution.invocation_id, "deliveries": facts})
+            contributions.setdefault(
+                contribution.work_id, {"invocation_id": contribution.invocation_id, "deliveries": facts}
+            )
             state.contributions = contributions
             all_facts = [item for source in contributions.values() for item in source["deliveries"]]
             latest = max(all_facts, key=lambda item: item["accepted_order"], default=None)
@@ -227,9 +232,7 @@ class CasePool:
             self._sequence = max(self._sequence, max((item["accepted_order"] for item in facts), default=0))
         session.flush()
 
-    def load_saved_work(
-        self, session: Any, work_id: str, invocation_id: str, annotation_id: str
-    ) -> dict[str, Any]:
+    def load_saved_work(self, session: Any, work_id: str, invocation_id: str, annotation_id: str) -> dict[str, Any]:
         """锁外读取当前作者实际保存的登记和交付，不恢复数据库认领"""
         from sqlalchemy import select
 
@@ -240,9 +243,7 @@ class CasePool:
             raise ValueError(f"案例保存身份不一致: {work_id}/{invocation_id}")
         cases: dict[str, dict[str, str]] = {}
         deliveries: list[dict[str, Any]] = []
-        for case in session.execute(
-            select(BookCase).where(BookCase.run_id == self.run_id)
-        ).scalars():
+        for case in session.execute(select(BookCase).where(BookCase.run_id == self.run_id)).scalars():
             contribution = case.contributions.get(work_id)
             if contribution is None:
                 continue
@@ -273,7 +274,9 @@ class CasePool:
                 self.case_runtime.pop(case_id, None)
                 continue
             facts = [
-                (source, item) for source, items in self.deliveries.items() for item in items
+                (source, item)
+                for source, items in self.deliveries.items()
+                for item in items
                 if item["case_id"] == case_id
             ]
             latest = max(facts, key=lambda pair: pair[1]["accepted_order"], default=None)

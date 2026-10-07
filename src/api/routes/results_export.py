@@ -21,13 +21,13 @@ from src.api.routes.results_common import (
     get_db_session,
     resolve_run_id,
 )
-from src.api.services.novel_service import NovelService
 from src.api.services.results_export_service import (
     build_results_response,
     fetch_all_results_data,
     write_results_to_file,
 )
 from src.storage.repositories import AnnotationRepository, ChapterRepository, StatsRepository
+from src.workflows.novels import NovelService
 
 # 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
@@ -64,5 +64,3 @@ async def get_results(
         logger.warning(f"Task {task_id} has missing fields: {missing_fields}")
 
     return build_results_response(file_path, novel_id, novel_name, missing_fields)
-
-

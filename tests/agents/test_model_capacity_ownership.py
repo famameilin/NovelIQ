@@ -11,8 +11,9 @@ import pytest
 from src.config import settings
 from src.event_bus import EventBus, Message
 from src.model_pool.capacity import MODEL_CAPACITY, ModelElectionExhausted, ModelElectionPool
+from src.model_pool.contracts import SelectionRequest, SelectionResult
 from src.work.annotation_work import WorkReceipt
-from src.workflows.chapter_pool import ChapterWorkerPool
+from src.work.chapter_pool import ChapterWorkerPool
 
 
 def _receipt() -> WorkReceipt:
@@ -35,9 +36,7 @@ def _receipt() -> WorkReceipt:
 
 
 def _single_slot_pool(monkeypatch: Any) -> None:
-    monkeypatch.setattr(
-        settings.models, "model_pool", [SimpleNamespace(model_id="test", max_in_flight=1, weight=1.0)]
-    )
+    monkeypatch.setattr(settings.models, "model_pool", [SimpleNamespace(model_id="test", max_in_flight=1, weight=1.0)])
 
 
 async def _enqueue(bus: EventBus, pool: ModelElectionPool) -> None:
@@ -48,7 +47,7 @@ async def _enqueue(bus: EventBus, pool: ModelElectionPool) -> None:
             target=pool.address,
             run_id="run",
             work_id="work",
-            payload=_receipt(),
+            payload=SelectionRequest("run", "work"),
         )
     )
 
@@ -99,7 +98,9 @@ async def test_live_pool_occupancy_keeps_election_waiting(monkeypatch: Any) -> N
     MODEL_CAPACITY.release(other.address, "busy")
     message = await asyncio.wait_for(assignments.get(), 2)
     assert message.work_id == "work"
-    assert message.payload.payload["model_id"] == "test"
+    assert isinstance(message.payload, SelectionResult)
+    assert message.payload.model_id == "test"
+    assert not hasattr(message.payload, "payload")
 
     election.cancel()
     await asyncio.gather(election, return_exceptions=True)
@@ -112,7 +113,7 @@ async def test_empty_slot_and_unavailable_model_stops_analysis(monkeypatch: Any)
     """并发为空且选举不出来时立即报错停止，不空转"""
     _single_slot_pool(monkeypatch)
     bus = EventBus()
-    monkeypatch.setattr("src.config.model_assignment.select_annotation_model", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.model_pool.selection.select_annotation_model", lambda *args, **kwargs: None)
     pool = ModelElectionPool(bus, "run", max_attempts=1, poll_seconds=0.001)
     await _enqueue(bus, pool)
 
@@ -163,3 +164,36 @@ async def test_queue_appends_no_stop_message_when_pool_ends_analysis(monkeypatch
         )
 
     assert stop_messages == []
+
+
+@pytest.mark.asyncio
+async def test_pool_rejects_business_envelope_and_mismatched_identity() -> None:
+    bus = EventBus()
+    pool = ModelElectionPool(bus, "run", max_attempts=1)
+    try:
+        with pytest.raises(TypeError, match="SelectionRequest"):
+            await pool.enqueue(
+                Message(
+                    topic="pool.enqueue",
+                    source="queue:run",
+                    target=pool.address,
+                    run_id="run",
+                    work_id="work",
+                    payload=_receipt(),
+                )
+            )
+        with pytest.raises(ValueError, match="身份"):
+            await pool.enqueue(
+                Message(
+                    topic="pool.enqueue",
+                    source="queue:run",
+                    target=pool.address,
+                    run_id="run",
+                    work_id="other",
+                    payload=SelectionRequest("run", "work"),
+                )
+            )
+        assert not pool.pending
+        assert not MODEL_CAPACITY.snapshot()
+    finally:
+        pool.close()

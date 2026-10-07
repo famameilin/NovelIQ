@@ -70,7 +70,8 @@ class TestAnalyzeParagraph(unittest.TestCase):
             pos=[["v", "n", "n"]],
             ner=[[]],
             dep=[{"head": [0, 1, 2], "label": ["HED", "ATT", "ATT"]}],
-        sdp=[])
+            sdp=[],
+        )
         result = analyze_paragraph("abc", output)
         self.assertEqual(result.dependency_node_count, 3)
         self.assertEqual(result.dependency_root_count, 1)
@@ -82,11 +83,8 @@ class TestAnalyzeParagraph(unittest.TestCase):
     def test_dependency_cycle_defensive_depth(self) -> None:
         # 环：1→2→1，防御按深度 1 处理
         output = LtpPipelineOutput(
-            cws=[["a", "b"]],
-            pos=[["v", "n"]],
-            ner=[[]],
-            dep=[{"head": [2, 1], "label": ["ATT", "ATT"]}],
-        sdp=[])
+            cws=[["a", "b"]], pos=[["v", "n"]], ner=[[]], dep=[{"head": [2, 1], "label": ["ATT", "ATT"]}], sdp=[]
+        )
         result = analyze_paragraph("ab", output)
         self.assertEqual(result.dependency_node_count, 2)
         self.assertEqual(result.dependency_depth_max, 1)
@@ -98,7 +96,8 @@ class TestAnalyzeParagraph(unittest.TestCase):
             pos=[["r", "v", "nh", "v", "v", "n", "wp"]],
             ner=[[("Nh", "汤姆", 2, 2)]],
             dep=[{"head": [2, 0, 2, 5, 2, 5, 2], "label": ["SBV", "HED", "DBL", "ADV", "VOB", "VOB", "WP"]}],
-        sdp=[])
+            sdp=[],
+        )
         result = analyze_paragraph(text, output)
         self.assertEqual(len(result.entities), 1)
         entity = result.entities[0]
@@ -119,7 +118,8 @@ class TestAnalyzeParagraph(unittest.TestCase):
                 # 第二句：head=3 原本是句内索引（指向"跑了"），换算后应为全局索引
                 {"head": [2, 0, 2, 2], "label": ["SBV", "HED", "RAD", "WP"]},
             ],
-        sdp=[])
+            sdp=[],
+        )
         result = analyze_paragraph(text, output)
         # 第一句：token_index 1-4，head 换算后不变（第一句 sent_token_start=1）
         # 第二句：token_index 5-8，sent_token_start=5，head 换算后 +4
@@ -132,7 +132,8 @@ class TestAnalyzeParagraph(unittest.TestCase):
             if arc.head_index == 0:
                 continue  # ROOT 永远正确
             self.assertGreaterEqual(
-                arc.head_index, 5,
+                arc.head_index,
+                5,
                 f"dependent_index={arc.dependent_index} 的 head_index={arc.head_index} 应在第二句区间",
             )
         # 全句统计：节点数=8，根数=2（每句一个 ROOT）
@@ -165,6 +166,7 @@ def test_ltp_session_requires_local_model_dir(monkeypatch) -> None:
 
 if __name__ == "__main__":
     unittest.main()
+
 
 class TestSdpArcParsing:
     """2026-09-05 B 批：sdp 语义弧解析（句内坐标 → 段内全局 token_index）"""

@@ -13,7 +13,7 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.agents.diagnosis.schema import AgentAnalysis
+from src.diagnosis.schema import AgentAnalysis
 from src.storage.repositories import RunRepository
 from src.workflows.diagnose import run_diagnose
 from tests.support.analysis_factories import insert_test_novel
@@ -26,7 +26,7 @@ def _fake_analysis(novel_id: str) -> AgentAnalysis:
         arc_scores={"角色0": 8.5, "角色1": 7.0},
         genre_labels=["通用"],
         style_labels=["严肃"],
-        topic_labels={'0': '成长'},
+        topic_labels={"0": "成长"},
         diagnosis="ok",
         narrative_arc_type="白手起家",
         focus_structure="dual",
@@ -50,10 +50,11 @@ class TestCli:
     @pytest.mark.asyncio()
     async def test_agent_diagnose_writes_db(self) -> None:
         from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation
+
         self.novel_id, self.run_id = create_run_with_chunks(self.db_session, texts=["测试小说正文。"])
         persist_chapter_annotation(self.db_session, run_id=self.run_id, chapter_id=1)
         fake = AsyncMock(return_value=_fake_analysis(self.novel_id))
-        with patch("src.agents.run_diagnosis_agent", new=fake):
+        with patch("src.agents.diagnosis.runner.run_diagnosis_agent", new=fake):
             analysis = await run_diagnose(
                 run_id=self.run_id,
                 session=self.db_session,

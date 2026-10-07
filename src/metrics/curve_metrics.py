@@ -13,12 +13,26 @@ compute_rhythm_curve / compute_emotion_curve_weighted）已删除——曲线事
 from __future__ import annotations
 
 import math
-
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from collections.abc import Sequence
+from typing import Protocol, cast
 
 from src.metrics.style_metrics import mtld, ttr
 from src.text_processing.tokenize import tokenize
+
+
+class GlobalStatRecord(Protocol):
+    """全书计算所需的具名充分统计量，不暴露连接或 ORM 操作"""
+
+    chapter_id: int
+    text: str | None
+    char_count: int | None
+    token_count: int | None
+    sentence_count: int | None
+    sentence_char_sum: int | None
+    positive_weight_sum: float | None
+    negative_weight_sum: float | None
+    net_density: float | None
+    surface_tension: float | None
 
 
 def _last_extreme_index(values: list[float], *, want_max: bool) -> int:
@@ -27,7 +41,7 @@ def _last_extreme_index(values: list[float], *, want_max: bool) -> int:
     return len(values) - 1 - values[::-1].index(extreme)
 
 
-def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float | None]]:
+def compute_global_stats(rows: Sequence[GlobalStatRecord]) -> list[tuple[str, float | None]]:
     """
     计算全局统计（§9.1 聚合守恒，2026-08-14 M8b 段落化重写）
 
@@ -38,34 +52,6 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float | 
     - emotion/rhythm 的 std/max/min 与峰值定位基于段落密度序列，
       并列极值取最后出现的段落（rindex 语义）
     """
-    from src.storage.models import Paragraph, ParagraphCurve, ParagraphMetric
-
-    rows = conn.execute(
-        select(
-            Paragraph.chapter_id,
-            Paragraph.text,
-            Paragraph.char_count,
-            ParagraphMetric.token_count,
-            ParagraphMetric.sentence_count,
-            ParagraphMetric.sentence_char_sum,
-            ParagraphMetric.positive_weight_sum,
-            ParagraphMetric.negative_weight_sum,
-            ParagraphCurve.net_density,
-            ParagraphCurve.surface_tension,
-        )
-        .join(
-            ParagraphMetric,
-            (ParagraphMetric.run_id == Paragraph.run_id) & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
-            isouter=True,
-        )
-        .join(
-            ParagraphCurve,
-            (ParagraphCurve.run_id == Paragraph.run_id) & (ParagraphCurve.paragraph_id == Paragraph.paragraph_id),
-            isouter=True,
-        )
-        .where(Paragraph.run_id == run_id)
-        .order_by(Paragraph.global_start_char, Paragraph.paragraph_id)
-    ).fetchall()
 
     global_stats: list[tuple[str, float | None]] = []
 
@@ -102,7 +88,7 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float | 
         global_stats.append(("lexicon_zero_hit_share", zero_hit_chars / scored_chars))
 
     emotion_indices = [i for i, row in enumerate(rows) if row.net_density is not None]
-    emotion_values = [float(rows[i].net_density) for i in emotion_indices]
+    emotion_values = [float(cast(float, rows[i].net_density)) for i in emotion_indices]
     if emotion_values:
         mean = sum(emotion_values) / len(emotion_values)
         variance = sum((d - mean) ** 2 for d in emotion_values) / len(emotion_values)
@@ -117,7 +103,7 @@ def compute_global_stats(conn: Session, run_id: str) -> list[tuple[str, float | 
         global_stats.append(("emotion_min_chapter_id", float(rows[emotion_indices[min_idx]].chapter_id)))
 
     tension_indices = [i for i, row in enumerate(rows) if row.surface_tension is not None]
-    tension_values = [float(rows[i].surface_tension) for i in tension_indices]
+    tension_values = [float(cast(float, rows[i].surface_tension)) for i in tension_indices]
     if tension_values:
         mean = sum(tension_values) / len(tension_values)
         variance = sum((v - mean) ** 2 for v in tension_values) / len(tension_values)

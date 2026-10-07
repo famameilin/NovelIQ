@@ -8,11 +8,12 @@
 from __future__ import annotations
 
 from src.api.models.responses import CharacterStats
+from src.fact_graph.read.annotations import fetch_chapter_characters_full
+from src.fact_graph.read.normalization import build_name_resolution
 from src.metrics.aggregate.aggregations import (
     merge_character_appearances,
     rank_character_appearances,
 )
-from src.metrics.aggregate.normalization import build_name_resolution
 from src.storage.repositories import AnnotationRepository
 
 
@@ -25,7 +26,7 @@ def _fetch_characters(
     limit: int | None = 50,
 ) -> list:
     """组装角色榜，过滤局部引用、归并别名并对齐诊断名单"""
-    rows = annotation_repo.fetch_characters_with_scores(run_id)
+    rows = fetch_chapter_characters_full(annotation_repo.session, run_id)
     name_resolution = build_name_resolution(
         annotation_repo,
         run_id,

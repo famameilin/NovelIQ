@@ -71,18 +71,6 @@ class TestRunTimestampContract:
         delta = abs((datetime.now(UTC).replace(tzinfo=None) - persisted).total_seconds())
         assert delta < 5, f"completed_at 与当前时刻偏差过大（可能仍被时区污染）: {delta}s"
 
-    def test_update_run_status_completed_at_is_consistent_with_started_at(self, api_client: TestClient):
-        """验证 update_run_status 终态时间与 started_at 同口径，无 8 小时跨度假象"""
-        _insert_test_novel("tz_run2")
-        with get_session_factory()() as session:
-            run_repo = RunRepository(session)
-            run_id = run_repo.create_run(novel_id="tz_run2", title="tz-regression-2")
-            run_repo.update_run_status(run_id, "completed")
-            run = run_repo.get_run(run_id)
-        assert run["started_at"] is None
-        assert run["completed_at"] is not None and run["completed_at"].endswith("Z")
-        assert run["updated_at"] is not None and run["updated_at"].endswith("Z")
-
 
 class TestAnalysis:
     """测试分析端点"""
@@ -593,7 +581,13 @@ class TestAnalysis:
         scheduled_calls: list[tuple[str, str]] = []
 
         def _record_schedule(
-            self, scheduled_task_id: str, novel: dict, task_kind: str, request=None, *, resume: bool = False,
+            self,
+            scheduled_task_id: str,
+            novel: dict,
+            task_kind: str,
+            request=None,
+            *,
+            resume: bool = False,
         ) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
@@ -635,7 +629,13 @@ class TestAnalysis:
             return scheduled_task_id
 
         def _record_schedule(
-            self, scheduled_task_id: str, novel: dict, task_kind: str, request=None, *, resume: bool = False,
+            self,
+            scheduled_task_id: str,
+            novel: dict,
+            task_kind: str,
+            request=None,
+            *,
+            resume: bool = False,
         ) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
@@ -714,7 +714,6 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
 
         service = get_task_service()
         task_id = service.create_task(novel_id)

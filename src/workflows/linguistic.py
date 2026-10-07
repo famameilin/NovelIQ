@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from src.config import settings
 from src.lexicons.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES
 from src.linguistic import TrainResult
+from src.linguistic.queries import fetch_paragraph_labels
 from src.sse.events import StreamEvent
 from src.storage.repositories import ParagraphRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
@@ -299,10 +300,9 @@ def _apply_paragraph_boundary_scores(run_id: str, paragraph_repo: ParagraphRepos
 
     from src.linguistic import fit_emotion_boundary
     from src.storage.models import ParagraphEmbedding, ParagraphLinguisticFeature
-    from src.storage.repositories import ChapterAnnotationRepository
 
     session = paragraph_repo.session
-    labels = ChapterAnnotationRepository(session).fetch_paragraph_labels(run_id)
+    labels = fetch_paragraph_labels(session, run_id)
     if len(labels) < 2:
         logger.info("段落边界跳过：自选段标签不足 2 条（无法拟合边界），两列保持 NULL")
         return 0

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from src.agents.audit.observer import build_invocation_context
-from src.storage.repositories.stats import metrics
+from src.agents.turn_observer import build_invocation_context
+from src.audit import queries as metrics
 
 
 def test_fetch_token_usage_stats_reports_unknown_without_rows() -> None:

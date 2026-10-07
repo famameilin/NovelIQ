@@ -19,8 +19,8 @@ from src.agents.diagnosis.runner import (
     _validate_topic_label_ids,
     run_diagnosis_agent,
 )
-from src.agents.diagnosis.schema import AgentAnalysis
 from src.agents.graph import build_agent_graph
+from src.diagnosis.schema import AgentAnalysis
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
@@ -310,7 +310,7 @@ async def test_run_diagnosis_agent_requires_run_scoped_tools() -> None:
     diagnosis_repo.calculate_foreshadow_expectation.return_value = 0.62
 
     with patch(
-        "src.agents.diagnosis.runner.DiagnosisRepository",
+        "src.agents.diagnosis.runner.DiagnosisQueries",
         return_value=diagnosis_repo,
     ):
         analysis = await run_diagnosis_agent(
@@ -337,7 +337,7 @@ async def test_run_diagnosis_agent_rejects_finish_without_evidence_tool() -> Non
     diagnosis_repo.fetch_topic_words.return_value = [{"topic_id": 0}, {"topic_id": 1}]
     diagnosis_repo.calculate_foreshadow_expectation.return_value = 0.62
 
-    with patch("src.agents.diagnosis.runner.DiagnosisRepository", return_value=diagnosis_repo):
+    with patch("src.agents.diagnosis.runner.DiagnosisQueries", return_value=diagnosis_repo):
         with pytest.raises(DiagnosisAgentRunError):
             await run_diagnosis_agent(
                 session=mock_session,
@@ -393,5 +393,3 @@ def test_diagnosis_context_summary_carries_evidence_keys() -> None:
     assert summary["attempts"] == 2
     assert summary["tool_iterations"] == 3
     assert summary["evidence"] == {"tool_calls": ["get_aggregate_signals"]}
-
-

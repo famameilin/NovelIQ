@@ -29,10 +29,10 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from src.agents.annotation.errors import AnnotationStageRejection
+from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.tool_batch import _invoke_tool
-from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.schema import ChapterParagraphInfo
+from src.fact_graph.inputs import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
@@ -41,7 +41,6 @@ _CHUNK_TEXT = "“住手”回荡"
 
 class _QueryServiceStub:
     """2026-08-19 用于为事件写入提供最小查询服务（无需检索历史）"""
-
 
     async def search_text(self, query, *, range_name, limit=50):
         del query, range_name, limit
@@ -212,10 +211,6 @@ class _SequenceLLM(StreamedFakeModelMixin):
         return self.responses.pop(0)
 
 
-
-
-
-
 @pytest.mark.asyncio
 async def test_write_event_defaults_character_participant_state_fields() -> None:
     """2026-10-04 用于验证参与者三态缺省归一（合同由必填即拒改为缺省落账）
@@ -242,16 +237,6 @@ async def test_write_event_defaults_character_participant_state_fields() -> None
     assert observation.action is None
     (participant,) = ledger.bound_payloads["events"][0].participants
     assert participant.role == "主体"
-
-
-
-
-
-
-
-
-
-
 
 
 @pytest.mark.asyncio
@@ -303,10 +288,6 @@ async def test_write_event_isforeshadowing_creates_thread_binding() -> None:
     assert tree["root_node_id"] == root.node_id
 
 
-
-
-
-
 @pytest.mark.asyncio
 async def test_write_event_rejects_unauthorized_entity_reference() -> None:
     """2026-08-22 未经登记/检索授权的引用被结构化拒绝（cause_tree_id 的今日等价面）
@@ -332,8 +313,6 @@ async def test_write_event_rejects_unauthorized_entity_reference() -> None:
     assert receipt["code"] == "unknown_entity_id"
     assert ledger.bound_payloads["events"][0].participants == []
     assert ledger.observation_by_record == {}
-
-
 
 
 @pytest.mark.asyncio
@@ -372,10 +351,6 @@ def test_write_event_infers_single_paragraph_evidence() -> None:
     ledger = _ledger(paragraph_ids=[44])
     _call(_tools(ledger), "write_event", _root_args(evidence=None))
     assert ledger.bound_payloads["events"][0].evidence_paragraph_id == 44
-
-
-
-
 
 
 @pytest.mark.asyncio

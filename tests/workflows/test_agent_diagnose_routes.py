@@ -19,14 +19,9 @@ from langchain_core.messages import AIMessage
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.agents.diagnosis.schema import AgentAnalysis
-from src.storage.repositories import (
-    ChapterRepository,
-    DiagnosisRepository,
-    ParagraphRepository,
-    RunRepository,
-    StatsRepository,
-)
+from src.diagnosis.queries import DiagnosisQueries
+from src.diagnosis.schema import AgentAnalysis
+from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository, StatsRepository
 from src.storage.repositories.paragraph_repository import ParagraphCurveRow
 from src.text_processing.models import Chunk
 from src.text_processing.paragraphs import split_chunk_paragraphs
@@ -68,7 +63,7 @@ def _fake_analysis(novel_id: str) -> AgentAnalysis:
         arc_scores={"角色0": 8.5, "角色1": 7.0},
         genre_labels=["通用"],
         style_labels=["严肃"],
-        topic_labels={'0': '成长'},
+        topic_labels={"0": "成长"},
         diagnosis="ok",
         narrative_arc_type="白手起家",
         focus_structure="dual",
@@ -184,7 +179,7 @@ class TestDiagnosisRoutes:
     def test_fetch_pivot_blocks(self) -> None:
         self._create_full_data(5)
 
-        diag_repo = DiagnosisRepository(self.db_session)
+        diag_repo = DiagnosisQueries(self.db_session)
         blocks = diag_repo.fetch_pivot_blocks(self.run_id)
         assert len(blocks) > 0
         for block in blocks:
@@ -193,7 +188,7 @@ class TestDiagnosisRoutes:
     def test_fetch_high_tension_chunks(self) -> None:
         self._create_full_data(5)
 
-        diag_repo = DiagnosisRepository(self.db_session)
+        diag_repo = DiagnosisQueries(self.db_session)
         chunks = diag_repo.fetch_high_tension_chunks(self.run_id, limit=3)
         assert len(chunks) > 0
         for chunk in chunks:
@@ -202,7 +197,7 @@ class TestDiagnosisRoutes:
     def test_fetch_pivot_moments(self) -> None:
         self._create_full_data(5)
 
-        diag_repo = DiagnosisRepository(self.db_session)
+        diag_repo = DiagnosisQueries(self.db_session)
         moments = diag_repo.fetch_pivot_moments(self.run_id)
         assert len(moments) > 0
 

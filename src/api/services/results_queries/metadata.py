@@ -15,6 +15,7 @@ from src.api.models.responses import (
     TokenUsageStats,
     TokenUsageSummary,
 )
+from src.audit.queries import fetch_token_usage_stats
 from src.storage.repositories import ChapterRepository, StatsRepository
 
 
@@ -53,7 +54,7 @@ def _fetch_novel_name(novel_id: str, stats_repo: StatsRepository) -> str | None:
 def _fetch_token_usage_stats(run_id: str, stats_repo: StatsRepository) -> TokenUsageStats:
     """获取 token 使用统计"""
     try:
-        stats = stats_repo.fetch_token_usage_stats(run_id)
+        stats = fetch_token_usage_stats(stats_repo.session, run_id)
         summary = TokenUsageSummary(
             call_count=stats["summary"]["call_count"],
             total_prompt_tokens=stats["summary"]["total_prompt_tokens"],

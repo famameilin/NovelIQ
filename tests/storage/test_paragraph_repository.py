@@ -104,7 +104,7 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
         assert row.text == span.text
 
 
-def test_fetch_chapter_paragraph_rows_filters_in_database(db_session) -> None:
+def test_chapter_paragraph_batch_filters_in_database(db_session) -> None:
     """章节段落查询必须在 SQL 层按章过滤，不能回退到全书扫描"""
     run_id = _create_run(db_session)
     first = "甲段。\n乙段。\n"
@@ -124,7 +124,7 @@ def test_fetch_chapter_paragraph_rows_filters_in_database(db_session) -> None:
     bind = db_session.get_bind()
     event.listen(bind, "before_cursor_execute", capture_sql)
     try:
-        rows = ParagraphRepository(db_session).fetch_chapter_paragraph_rows(run_id, 2)
+        rows = ParagraphRepository(db_session).fetch_paragraph_rows_batch(run_id, chapter_id=2, limit=None)
     finally:
         event.remove(bind, "before_cursor_execute", capture_sql)
 

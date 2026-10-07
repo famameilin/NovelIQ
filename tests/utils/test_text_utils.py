@@ -1,6 +1,6 @@
 """2026-09-04 用于验证通配符词项匹配谓词与 SQL LIKE 口径一致"""
 
-from src.text_processing.text_utils import like_pattern, term_matches
+from src.storage.query_terms import like_pattern, term_matches
 
 
 def test_term_matches_plain_substring_case_insensitive() -> None:

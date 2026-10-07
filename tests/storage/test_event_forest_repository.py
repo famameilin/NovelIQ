@@ -6,8 +6,8 @@ from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 
+from src.event_trees.read.forest import EventForestQuery
 from src.storage.models import EventEdge
-from src.storage.repositories.graph import EventForestRepository
 from tests.support.chapter_annotation_helpers import (
     commit_test_event_link,
     create_run_with_chunks,
@@ -51,11 +51,15 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
         ],
     )
     commit_test_event_link(
-        db_session, run_id=run_id, chapter_id=1, source_event_id=eid1, target_event_id=eid2,
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        source_event_id=eid1,
+        target_event_id=eid2,
     )
     db_session.commit()
 
-    repo = EventForestRepository(db_session)
+    repo = EventForestQuery(db_session)
     snapshot = repo.fetch_snapshot(run_id)
     assert snapshot is not None
     assert snapshot.chapter_order == 1
@@ -122,12 +126,16 @@ def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_sessio
         ],
     )
     commit_test_event_link(
-        db_session, run_id=run_id, chapter_id=1, source_event_id=root_id, target_event_id=bind_id,
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        source_event_id=root_id,
+        target_event_id=bind_id,
         edge_type="foreshadowing",
     )
     db_session.commit()
 
-    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
     assert snapshot is not None
     assert snapshot.causal_edges == []
     assert repo_foreshadow_edges(db_session, run_id) == 1
@@ -139,7 +147,9 @@ def repo_foreshadow_edges(session, run_id: str) -> int:
 
     return int(
         session.execute(
-            select(func.count()).select_from(EventEdge).where(
+            select(func.count())
+            .select_from(EventEdge)
+            .where(
                 EventEdge.run_id == run_id,
                 EventEdge.edge_type == "foreshadowing",
             )
@@ -201,7 +211,7 @@ def test_fetch_snapshot_builds_secondary_branch_groups(db_session) -> None:
             },
         ],
     )
-    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
     assert snapshot is not None
     assert len(snapshot.event_trees) == 1
     tree = snapshot.event_trees[0]
@@ -241,7 +251,7 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     )
     db_session.commit()
 
-    repo = EventForestRepository(db_session)
+    repo = EventForestQuery(db_session)
     snapshot = repo.fetch_snapshot(run_id)
     assert snapshot is not None
     assert len(snapshot.foreshadowing_edges) == 1
@@ -259,29 +269,39 @@ def test_same_paragraph_links_follow_formal_event_order_and_reject_reverse(db_se
     first_id = f"evt-{run_id[:8]}-z"
     second_id = f"evt-{run_id[:8]}-a"
     persist_chapter_annotation(
-        db_session, run_id=run_id, chapter_id=1,
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
         events=[
             {"description": "顾霜入门", "node_id": first_id, "tree_id": "entry", "evidence_paragraph_id": 0},
             {"description": "顾霜立誓", "node_id": second_id, "tree_id": "oath", "evidence_paragraph_id": 0},
         ],
     )
     commit_test_event_link(
-        db_session, run_id=run_id, chapter_id=1, source_event_id=first_id, target_event_id=second_id,
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        source_event_id=first_id,
+        target_event_id=second_id,
     )
-    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
     assert snapshot is not None
     assert snapshot.derived_event_order == [first_id, second_id]
     assert len(snapshot.causal_edges) == 1
     assert snapshot.event_nodes[0].char_start == snapshot.event_nodes[1].char_start == 0
     with pytest.raises(ValueError, match="形成环"):
         commit_test_event_link(
-            db_session, run_id=run_id, chapter_id=1, source_event_id=second_id, target_event_id=first_id,
+            db_session,
+            run_id=run_id,
+            chapter_id=1,
+            source_event_id=second_id,
+            target_event_id=first_id,
         )
 
 
 def test_fetch_snapshot_returns_none_for_missing_run(db_session) -> None:
     """2026-08-18 用于验证不存在的 run 查询返回 None"""
-    repo = EventForestRepository(db_session)
+    repo = EventForestQuery(db_session)
     snapshot = repo.fetch_snapshot("nonexistent-run-id")
     assert snapshot is None
 
@@ -320,7 +340,7 @@ def test_fetch_snapshot_filters_by_chapter_id(db_session) -> None:
     )
     db_session.commit()
 
-    repo = EventForestRepository(db_session)
+    repo = EventForestQuery(db_session)
     # 只取第 1 章：只有 1 个事件节点
     snapshot_ch1 = repo.fetch_snapshot(run_id, chapter_id=1)
     assert snapshot_ch1 is not None

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -17,13 +17,22 @@ async def test_force_is_applied_once_per_task_and_completion_chain_is_reused_on_
     service = AnalysisService(MagicMock(), MagicMock(), session_factory=MagicMock())
     service._run_analysis_core = AsyncMock()
     complete = {
-        "skip_preprocess": True, "skip_annotate": True, "skip_linguistic": True,
-        "skip_aggregate": True, "skip_topic_model": True, "skip_diagnose": False,
+        "skip_preprocess": True,
+        "skip_annotate": True,
+        "skip_linguistic": True,
+        "skip_aggregate": True,
+        "skip_topic_model": True,
+        "skip_diagnose": False,
     }
     service.env_initializer.check_stage_completion_status = MagicMock(return_value=complete)
     request = ReanalyzeRequest(
-        force_preprocess=True, force_annotate=True, force_linguistic=True,
-        force_aggregate=True, force_topic_model=True, force_diagnose=True, num_topics=7,
+        force_preprocess=True,
+        force_annotate=True,
+        force_linguistic=True,
+        force_aggregate=True,
+        force_topic_model=True,
+        force_diagnose=True,
+        num_topics=7,
     )
     original = request.model_dump()
     service._schedule_task_execution("task", {"novel_id": "novel"}, TASK_KIND_REANALYSIS, request, resume=resume)
@@ -44,21 +53,26 @@ async def test_force_is_applied_once_per_task_and_completion_chain_is_reused_on_
 
 
 def test_partial_upstream_stage_prevents_reusing_downstream_results(monkeypatch) -> None:
+    from src.workflows.analysis import environment_initializer as module
+
     service = AnalysisService(MagicMock(), MagicMock(), session_factory=MagicMock())
     monkeypatch.setattr(settings.linguistic.ltp, "enabled", True)
-    chapters = MagicMock()
-    chapters.is_preprocess_complete.return_value = True
-    annotations = MagicMock()
-    annotations.is_annotate_complete.return_value = True
-    stats = MagicMock()
-    stats.has_linguistic_data.return_value = True
-    stats.is_linguistic_complete.return_value = False
-    with (
-        patch("src.storage.repositories.ChapterRepository", return_value=chapters),
-        patch("src.storage.repositories.AnnotationRepository", return_value=annotations),
-        patch("src.workflows.analysis.environment_initializer.StatsRepository", return_value=stats),
-    ):
-        result = service.env_initializer.check_stage_completion_status(MagicMock(), "run")
+    queries = {
+        name: MagicMock(return_value=value)
+        for name, value in {
+            "is_preprocess_complete": True,
+            "is_annotate_complete": True,
+            "is_linguistic_complete": False,
+            "is_aggregate_complete": True,
+            "is_topic_model_complete": True,
+            "has_diagnosis_data": True,
+        }.items()
+    }
+    for name, query in queries.items():
+        monkeypatch.setattr(module, name, query)
+    result = service.env_initializer.check_stage_completion_status(MagicMock(), "run")
     assert result["skip_preprocess"] and result["skip_annotate"]
     assert not any(result[key] for key in ("skip_linguistic", "skip_aggregate", "skip_topic_model", "skip_diagnose"))
-    stats.has_linguistic_data.assert_not_called()
+    queries["is_linguistic_complete"].assert_called_once()
+    for name in ("is_aggregate_complete", "is_topic_model_complete", "has_diagnosis_data"):
+        queries[name].assert_not_called()

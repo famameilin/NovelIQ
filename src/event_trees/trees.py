@@ -5,6 +5,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from sqlalchemy.orm import Session
+
+from src.event_trees.contributions import EventContribution
 from src.utils.identity import stable_uuid
 
 
@@ -96,7 +99,11 @@ class EventTrees:
         }
 
     def search_ids(
-        self, query: str = "", *, chapter_id: int | None = None, tree_id: str | None = None,
+        self,
+        query: str = "",
+        *,
+        chapter_id: int | None = None,
+        tree_id: str | None = None,
     ) -> list[str]:
         """先筛选稳定节点 ID，分页读取详情时不复制整本书的节点正文"""
         parents = self._parents() if tree_id is not None else {}
@@ -230,7 +237,7 @@ class EventTrees:
             if query.casefold() in node["content"]["description"].casefold()
         ]
 
-    def save_work(self, session: Any, execution: Any, annotation_id: str) -> None:
+    def save_work(self, session: Session, frozen: EventContribution, annotation_id: str) -> None:
         from sqlalchemy import text
 
         from src.fact_graph.evidence import evidence_for
@@ -239,33 +246,30 @@ class EventTrees:
         session.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": f"event_trees:{self.run_id}"}
         )
-        nodes = execution.contributions["events"]["nodes"]
+        contribution = frozen.snapshot()
+        nodes = contribution["nodes"]
         for node_id, node in nodes.items():
             content = node["content"]
-            paragraph = next(
-                row
-                for row in execution.receipt.payload["paragraphs"]
-                if row.paragraph_id == content["evidence_paragraph_id"]
-            )
+            paragraph = next(row for row in frozen.paragraphs if row.paragraph_id == content["evidence_paragraph_id"])
             participants = []
             for participant in content["participants"]:
                 name = participant["entity"]
                 from src.fact_graph.graph import mention_uuid
 
                 identifier = mention_uuid(self.run_id, node["chapter_id"], name)
-                participants.append({**participant, "entity": execution.contributions["facts"]["entities"][identifier]})
+                participants.append({**participant, "entity": frozen.entities()[identifier]})
             session.add(
                 EventNode(
                     event_id=node_id,
                     run_id=self.run_id,
                     chapter_id=node["chapter_id"],
-                    chapter_order=execution.receipt.payload["chapter_sequence"],
+                    chapter_order=frozen.chapter_order,
                     description=content["description"],
                     participants=participants,
                     anchor_paragraph_ids=[paragraph.paragraph_id],
                     char_start=paragraph.local_start_char,
                     char_end=paragraph.local_end_char,
-                    evidence=evidence_for(execution, paragraph.paragraph_id),
+                    evidence=evidence_for(frozen.paragraphs, paragraph.paragraph_id),
                     causal_event_refs=[],
                     tree_id=content["tree_id"],
                     cause_role=content["cause_role"],
@@ -275,32 +279,32 @@ class EventTrees:
                     strength=content["payoff_likelihood"],
                     annotation_id=annotation_id,
                     source_kind="annotation",
-                    payload_path=f"work/{execution.work_id}/{node_id}",
-                    author_work_id=execution.work_id,
-                    producer_invocation_id=execution.invocation_id,
+                    payload_path=f"work/{frozen.work_id}/{node_id}",
+                    author_work_id=frozen.work_id,
+                    producer_invocation_id=frozen.invocation_id,
                     parent_node_id=content["parent_node_id"],
                 )
             )
         session.flush()
-        connections = dict(execution.contributions["events"]["connections"])
+        connections = dict(contribution["connections"])
         for node_id, node in nodes.items():
             content = node["content"]
             if content["parent_node_id"]:
                 identifier = stable_uuid(
-                    self.run_id, execution.work_id, content["parent_node_id"], node_id, content["cause_role"]
+                    self.run_id, frozen.work_id, content["parent_node_id"], node_id, content["cause_role"]
                 )
                 connections[identifier] = {
                     "parent": content["parent_node_id"],
                     "child": node_id,
                     "type": content["cause_role"],
-                    "author": (execution.work_id, execution.invocation_id),
+                    "author": (frozen.work_id, frozen.invocation_id),
                 }
         for identifier, connection in connections.items():
             parent, child = (session.get(EventNode, connection[name]) for name in ("parent", "child"))
             if parent is None or child is None:
                 raise ValueError(f"连接端点没有有效保存: {connection}")
             for endpoint in (parent, child):
-                if endpoint.author_work_id != execution.work_id:
+                if endpoint.author_work_id != frozen.work_id:
                     work = session.get(AnnotationWork, endpoint.author_work_id)
                     if work is None or work.state != "saved" or work.invocation_id != endpoint.producer_invocation_id:
                         raise ValueError(f"node_id={endpoint.event_id} 所属 work 未有效保存")
@@ -314,11 +318,11 @@ class EventTrees:
                         source_chapter_id=parent.chapter_id,
                         target_chapter_id=child.chapter_id,
                         edge_type="foreshadowing" if connection["type"] == "foreshadowing" else "causal",
-                        evidence=evidence_for(execution),
+                        evidence=evidence_for(frozen.paragraphs),
                         is_active=True,
                         annotation_id=annotation_id,
-                        payload_path=f"work/{execution.work_id}/{identifier}",
-                        author_work_id=execution.work_id,
+                        payload_path=f"work/{frozen.work_id}/{identifier}",
+                        author_work_id=frozen.work_id,
                         cause_role=None if connection["type"] in {"causal", "foreshadowing"} else connection["type"],
                     )
                 )
@@ -448,9 +452,7 @@ class EventTrees:
             }
         self._parents()
 
-    def load_saved_work(
-        self, session: Any, work_id: str, invocation_id: str, annotation_id: str
-    ) -> dict[str, Any]:
+    def load_saved_work(self, session: Any, work_id: str, invocation_id: str, annotation_id: str) -> dict[str, Any]:
         """锁外取得已保存作者的原始节点和实际有效连接"""
         from sqlalchemy import select
 

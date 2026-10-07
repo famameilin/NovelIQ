@@ -22,7 +22,7 @@ from src.fact_graph.graph import FactGraph
 from src.model_pool.capacity import MODEL_CAPACITY, ModelElectionExhausted, ModelElectionPool
 from src.storage.models import AnnotationWork
 from src.work.annotation_work import WorkReceipt
-from src.workflows.chapter_pool import ChapterWorkerPool, PipelineWorkFailed, WorkSaveUnconfirmed
+from src.work.chapter_pool import ChapterWorkerPool, PipelineWorkFailed, WorkSaveUnconfirmed
 
 
 class _MemorySessions:
@@ -114,7 +114,7 @@ def _receipt(role: str = "structure") -> WorkReceipt:
 
 def _model_pool(monkeypatch: Any) -> None:
     monkeypatch.setattr(settings.models, "model_pool", [SimpleNamespace(model_id="test", max_in_flight=1, weight=1)])
-    monkeypatch.setattr("src.config.model_assignment.select_annotation_model", lambda *args, **kwargs: "test")
+    monkeypatch.setattr("src.model_pool.selection.select_annotation_model", lambda *args, **kwargs: "test")
 
 
 class _NoDatabaseAudit:
@@ -141,9 +141,11 @@ def _agent(bus: EventBus, sessions: Any, monkeypatch: Any) -> AnnotationAgent:
         "src.model_pool.llm.build_chat_model",
         lambda *args, **kwargs: SimpleNamespace(model_name="fake"),
     )
-    monkeypatch.setattr("src.config.input_config.load_task_config", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.model_pool.configuration.load_task_config", lambda *args, **kwargs: None)
     monkeypatch.setattr("src.embedding.EmbeddingClient", lambda **kwargs: object())
-    monkeypatch.setattr("src.storage.repositories.DatabaseAnnotationQueryService", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        "src.agents.annotation.queries.DatabaseAnnotationQueryService", lambda *args, **kwargs: object()
+    )
     monkeypatch.setattr(
         "src.agents.annotation.agent.build_subagent_graph",
         lambda model, program, *args, **kwargs: _FinishGraph(program),
@@ -297,7 +299,7 @@ async def test_retry_feedback_preserves_pool_failure_weight_before_reselection(m
         async def _save(self, *args: Any) -> None:
             assert any(MODEL_CAPACITY.snapshot().values())
 
-    monkeypatch.setattr("src.config.model_assignment.select_annotation_model", select)
+    monkeypatch.setattr("src.model_pool.selection.select_annotation_model", select)
     monkeypatch.setattr(ModelElectionPool, "feedback", feedback)
     bus.handle("agent.execute", "agent:run", execute)
     bus.handle("agent.cancel", "agent:run", _ignore)
@@ -567,7 +569,7 @@ async def test_pool_configuration_fault_waits_for_reserved_work_save_before_exit
             assert any(MODEL_CAPACITY.snapshot().values())
             actions.append("save")
 
-    monkeypatch.setattr("src.config.model_assignment.select_annotation_model", select)
+    monkeypatch.setattr("src.model_pool.selection.select_annotation_model", select)
     bus.handle("agent.execute", "agent:run", execute)
     bus.handle("agent.cancel", "agent:run", cancel)
     task = asyncio.create_task(

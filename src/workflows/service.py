@@ -19,7 +19,6 @@ from src.config.analysis_logger import AnalysisLogger
 from src.sse.manager import event_manager
 from src.storage.session import SessionFactory
 from src.storage.task_status import TaskStatus
-from src.work.events import AnalysisEventBus, StreamMessageType
 from src.work.task_manager import TaskManager
 from src.workflows.analysis.environment_initializer import EnvironmentInitializer
 from src.workflows.analysis.error_handler import AnalysisErrorHandler, TerminalStateFallbackMixin
@@ -30,6 +29,7 @@ from src.workflows.analysis.task_claim import (
     CancellationStateCheckError,
 )
 from src.workflows.exceptions import NovelNotFoundError
+from src.workflows.progress import AnalysisEventBus, StreamMessageType
 from src.workflows.schemas import ReanalyzeRequest
 from src.workflows.tasks import TaskService
 

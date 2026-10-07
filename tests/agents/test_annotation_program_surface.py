@@ -8,13 +8,13 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from src.agents.annotation.program import PROGRAM_TOOL_NAME
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.program_contract import PROGRAM_TOOL_NAME
 from src.agents.annotation.prompts import build_subagent_message
+from src.agents.annotation.text_search import TextSearchCandidate
 from src.agents.annotation.tool_batch import _build_tool_batch_node
-from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.schema import ChapterParagraphInfo
-from src.storage.text_search import TextSearchCandidate
+from src.fact_graph.inputs import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
@@ -24,8 +24,13 @@ class _QueryService:
     async def search_text(self, query: str, *, range_name: str, limit: int = 50) -> list[TextSearchCandidate]:
         assert range_name == "all"
         return [
-            TextSearchCandidate(chapter_id=2, paragraph_id=index + 10, excerpt=f"顾霜喝止众人-{index}",
-                                keyword_score=1.0, semantic_score=0.8)
+            TextSearchCandidate(
+                chapter_id=2,
+                paragraph_id=index + 10,
+                excerpt=f"顾霜喝止众人-{index}",
+                keyword_score=1.0,
+                semantic_score=0.8,
+            )
             for index in range(5)
         ]
 
@@ -58,7 +63,10 @@ class _ProgramLLM(StreamedFakeModelMixin):
 def _ledger() -> AnnotationToolLedger:
     text = "“住手！”顾霜喝道。“退下。”众人散去。"
     return AnnotationToolLedger(
-        run_scope="run-1", current_chapter_id=1, current_chapter_text=text, allow_future_context=True,
+        run_scope="run-1",
+        current_chapter_id=1,
+        current_chapter_text=text,
+        allow_future_context=True,
         graph=FactGraph(run_scope="run-1"),
         paragraph_info=ChapterParagraphInfo(paragraph_ids=[1], char_spans=[(0, len(text))], texts=[text]),
     )
@@ -77,9 +85,24 @@ def _call(name: str, args: dict[str, Any], call_id: str) -> dict[str, Any]:
 def test_catalog_is_current_formal_tool_surface() -> None:
     _, program_tool, tools = _surface(_ledger())
     assert {tool.name for tool in tools} == {
-        "search_text", "write_entity", "write_metrics", "write_event", "write_relation", "write_dialogue",
-        "push_case", "promise_case", "search_cases", "search_events", "search_graph", "finish",
-        "read_text", "read_chapter_text", "anchor_record", "write_link", "read_event", "read_entity",
+        "search_text",
+        "write_entity",
+        "write_metrics",
+        "write_event",
+        "write_relation",
+        "write_dialogue",
+        "push_case",
+        "promise_case",
+        "search_cases",
+        "search_events",
+        "search_graph",
+        "finish",
+        "read_text",
+        "read_chapter_text",
+        "anchor_record",
+        "write_link",
+        "read_event",
+        "read_entity",
     }
     assert program_tool.name == PROGRAM_TOOL_NAME
     for name in ("entity", "relation", "event", "participants", "dialogue", "label", "metric", "pending"):
@@ -95,7 +118,10 @@ def test_dialogue_candidate_prompts_report_actual_total(empty: bool) -> None:
     candidates = [] if empty else ledger.dialogue_candidates
     messages = [
         build_subagent_message(
-            role="dialogue", paragraph_info=ledger.paragraph_info, candidates=candidates, role_scope="",
+            role="dialogue",
+            paragraph_info=ledger.paragraph_info,
+            candidates=candidates,
+            role_scope="",
         ),
     ]
     for message in messages:
@@ -113,11 +139,13 @@ def test_link_schema_uses_actual_entity_or_event_ids() -> None:
     assert "source_ref" not in schema["properties"]
     assert "record_id" not in schema["properties"]
     assert schema["properties"]["kind"]["enum"] == [
-        "causal", "foreshadowing", "same_entity", "different_entity", "relation_change",
+        "causal",
+        "foreshadowing",
+        "same_entity",
+        "different_entity",
+        "relation_change",
     ]
     assert schema["properties"]["change_kind"]["default"] is None
-
-
 
 
 @pytest.mark.asyncio
@@ -125,16 +153,33 @@ async def test_direct_current_tools_use_same_dispatcher_and_unknown_call_is_isol
     ledger = _ledger()
     observer = _RecordingObserver()
     _, program_tool, tools = _surface(ledger, observer)
-    batch = _build_tool_batch_node([program_tool, *tools], ledger=ledger, observer=observer,
-                                   program_tool_name=PROGRAM_TOOL_NAME)
-    result = await batch({"messages": [AIMessage(content="", tool_calls=[
-        _call("unknown_tool", {}, "bad"),
-        _call("write_entity", {"el": "a1", "name": "顾霜", "entity_type": "character"}, "entity"),
-        _call("write_metrics", {"summary": "当前章", "emotional_valence": 0, "narrative_function": "铺垫"}, "m"),
-        _call("write_dialogue", {"candidate_index": 1, "verdict": "dialogue", "speaker": "a1"}, "d1"),
-        _call("write_dialogue", {"candidate_index": 2, "verdict": "dialogue"}, "d2"),
-        _call("finish", {}, "f"),
-    ])], "phase": "chapter_open", "iterations": 1, "error": None})
+    batch = _build_tool_batch_node(
+        [program_tool, *tools], ledger=ledger, observer=observer, program_tool_name=PROGRAM_TOOL_NAME
+    )
+    result = await batch(
+        {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        _call("unknown_tool", {}, "bad"),
+                        _call("write_entity", {"el": "a1", "name": "顾霜", "entity_type": "character"}, "entity"),
+                        _call(
+                            "write_metrics",
+                            {"summary": "当前章", "emotional_valence": 0, "narrative_function": "铺垫"},
+                            "m",
+                        ),
+                        _call("write_dialogue", {"candidate_index": 1, "verdict": "dialogue", "speaker": "a1"}, "d1"),
+                        _call("write_dialogue", {"candidate_index": 2, "verdict": "dialogue"}, "d2"),
+                        _call("finish", {}, "f"),
+                    ],
+                )
+            ],
+            "phase": "chapter_open",
+            "iterations": 1,
+            "error": None,
+        }
+    )
     receipts = [json.loads(message.content) for message in result["messages"]]
     assert receipts[0]["accepted"] is False
     assert receipts[1]["status"] == "written"
@@ -150,12 +195,22 @@ async def test_direct_current_tools_use_same_dispatcher_and_unknown_call_is_isol
 async def test_native_batch_protocol_error_rejects_whole_batch() -> None:
     ledger = _ledger()
     tools = build_annotation_tools(_QueryService(), ledger)
-    result = await _build_tool_batch_node(tools, ledger=ledger)({
-        "messages": [AIMessage(content="", tool_calls=[
-            _call("unknown_tool", {}, "bad"),
-            _call("write_entity", {"el": "a1", "name": "顾霜", "entity_type": "character"}, "entity"),
-        ])], "phase": "chapter_open", "iterations": 1, "error": None,
-    })
+    result = await _build_tool_batch_node(tools, ledger=ledger)(
+        {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        _call("unknown_tool", {}, "bad"),
+                        _call("write_entity", {"el": "a1", "name": "顾霜", "entity_type": "character"}, "entity"),
+                    ],
+                )
+            ],
+            "phase": "chapter_open",
+            "iterations": 1,
+            "error": None,
+        }
+    )
     assert ledger.written_entities == {}
     assert all(json.loads(message.content)["accepted"] is False for message in result["messages"])
 
@@ -164,17 +219,22 @@ async def test_native_batch_protocol_error_rejects_whole_batch() -> None:
 async def test_audit_rows_carry_program_meta_and_inner_call_index() -> None:
     observer = _RecordingObserver()
     runtime, _, _ = _surface(_ledger(), observer)
-    result = json.loads(await runtime.execute(
-        'write_entity(el="a1", name="顾霜", entity_type="character")\n'
-        'search_text(query="顾霜", fields=["nope"])'
-    ))
+    result = json.loads(
+        await runtime.execute(
+            'write_entity(el="a1", name="顾霜", entity_type="character")\nsearch_text(query="顾霜", fields=["nope"])'
+        )
+    )
     assert result["applied"] == 1
     assert result["failed"][0]["code"] == "unknown_field"
     entity_row, search_row = observer.rows
     assert entity_row["call_index"] >= 1000
     assert search_row["call_index"] > entity_row["call_index"]
     assert entity_row["request_args"]["_program"] == {
-        "program_id": "p1", "op_index": 1, "source_line": 1, "record": "entity/顾霜", "direct_fallback": False,
+        "program_id": "p1",
+        "op_index": 1,
+        "source_line": 1,
+        "record": "entity/顾霜",
+        "direct_fallback": False,
     }
     assert search_row["request_args"]["_program"]["error_code"] == "unknown_field"
     assert search_row["status"] == "error"
@@ -199,12 +259,15 @@ async def test_search_projection_keeps_source_capabilities_and_records_reads() -
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("options", "field", "error_code"), [
-    ('fields="content"', "fields", "invalid_value"),
-    ('fields=["nope"]', "fields", "unknown_field"),
-    ("limit=true", "limit", "invalid_value"),
-    ("limit=99", "limit", "out_of_range"),
-])
+@pytest.mark.parametrize(
+    ("options", "field", "error_code"),
+    [
+        ('fields="content"', "fields", "invalid_value"),
+        ('fields=["nope"]', "fields", "unknown_field"),
+        ("limit=true", "limit", "invalid_value"),
+        ("limit=99", "limit", "out_of_range"),
+    ],
+)
 async def test_search_projection_errors_are_structured(options: str, field: str, error_code: str) -> None:
     runtime, _, _ = _surface(_ledger())
     receipt = json.loads(await runtime.execute(f'search_text(query="顾霜", {options})'))

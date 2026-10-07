@@ -46,51 +46,6 @@ def load_lexicon_terms(path: Path) -> list[str]:
     return items
 
 
-def load_weighted_lexicon(filepath: str | Path, default_weight: int = 1) -> dict[str, int]:
-    """
-    加载带权重的词典
-
-    说明: 将 weighted lexicon parser 从 metrics 下沉到公共层，切断 lexicons -> metrics 的反向依赖
-
-    参数:
-        filepath: 词典文件路径
-        default_weight: 词条没有权重列或权重非法时使用的默认权重
-
-    返回:
-        {词条: 权重} 字典
-    """
-    result: dict[str, int] = {}
-    path = Path(filepath)
-
-    if not path.exists():
-        return result
-
-    for line in path.read_text(encoding="utf-8").splitlines():
-        cleaned = line.strip()
-        if not cleaned or cleaned.startswith("#"):
-            continue
-        cleaned = _strip_inline_comment(cleaned)
-
-        parts = cleaned.split("\t")
-        term = parts[0].strip()
-        if not term:
-            continue
-
-        if len(parts) < 2:
-            result[term] = default_weight
-            continue
-
-        try:
-            weight = int(parts[1].strip())
-        except ValueError:
-            result[term] = default_weight
-            continue
-
-        result[term] = weight
-
-    return result
-
-
 def parse_semantic_category_lexicon(file_path: str) -> dict[str, list[str]]:
     """解析语义类别词表：分节标题给类别、标题后每行一个词条
 

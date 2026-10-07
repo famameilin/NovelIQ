@@ -16,18 +16,7 @@ from src.metrics.lexicon_metrics import (
     count_mixed_hits,
     term_mixed_counts,
 )
-from src.metrics.style_metrics import (
-    average_word_length,
-    function_word_distribution,
-    imagery_density,
-    metaphor_density,
-    mtld,
-    pause_density,
-    semantic_category_density,
-    sentence_length_stats,
-    ttr,
-    word_frequency_breadth,
-)
+from src.metrics.style_metrics import mtld, ttr
 from src.text_processing.text_utils import dialogue_length, split_sentences, tokenize_words
 
 
@@ -78,47 +67,10 @@ class TestTextUtils(unittest.TestCase):
 
 
 class TestStyleMetrics(unittest.TestCase):
-    def test_sentence_length_stats(self) -> None:
-        stats = sentence_length_stats("你好。再见。")
-        self.assertGreater(stats["avg_sent_len"], 0)
-        # §19.5: d_value 与 sent_len_std 完全重复，已移除
-        self.assertNotIn("d_value", stats)
-        self.assertIn("sent_len_std", stats)
-        self.assertEqual(
-            stats["sent_len_std"],
-            sentence_length_stats("你好。再见。")["sent_len_std"],
-        )
-
-    def test_sentence_length_stats_empty(self) -> None:
-        stats = sentence_length_stats("")
-        self.assertEqual(stats["avg_sent_len"], 0.0)
-        self.assertEqual(stats["sent_len_std"], 0.0)
-        self.assertNotIn("d_value", stats)
-
-    def test_pause_density(self) -> None:
-        text = "你好，世界；再见。"
-        self.assertGreater(pause_density(text), 0)
-
-    def test_pause_density_per_hundred_chars(self) -> None:
-        # §19.4: 每百字停顿频率，随长度线性增长而非二次增长
-        text_short = "你，你。"
-        text_long = text_short * 10
-        self.assertAlmostEqual(pause_density(text_short), pause_density(text_long), places=6)
-        text_empty = ""
-        self.assertEqual(pause_density(text_empty), 0.0)
-        text_no_pause = "你好世界"
-        self.assertEqual(pause_density(text_no_pause), 0.0)
-
-    def test_metaphor_density(self) -> None:
-        text = "她像风一样。"
-        self.assertGreater(metaphor_density(text), 0)
-
     def test_mtld_ttr(self) -> None:
         tokens = ["我", "爱", "你", "我", "爱", "他"]
         self.assertGreater(ttr(tokens), 0)
         self.assertGreater(mtld(tokens), 0)
-        self.assertGreater(average_word_length(tokens), 0)
-        self.assertGreaterEqual(word_frequency_breadth(tokens, 0.8), 0)
 
     def test_mtld_factors_zero_returns_none(self) -> None:
         # §19.12: 全唯一词（TTR 未跌破阈值）时 MTLD 数学上无定义，返回 None
@@ -127,54 +79,6 @@ class TestStyleMetrics(unittest.TestCase):
 
     def test_mtld_empty_tokens(self) -> None:
         self.assertEqual(mtld([]), 0.0)
-
-    def test_function_word_distribution(self) -> None:
-        tokens = ["的", "是", "我", "的"]
-        dist = function_word_distribution(tokens, ["的", "是"])
-        self.assertGreater(dist.get("的", 0), 0)
-
-    def test_function_word_distribution_basic(self) -> None:
-        tokens = ["我", "的", "书", "在", "桌", "子", "上"]
-        function_words = ["的", "在", "上"]
-        dist = function_word_distribution(tokens, function_words)
-        self.assertEqual(dist["的"], 1 / 7)
-        self.assertEqual(dist["在"], 1 / 7)
-        self.assertEqual(dist["上"], 1 / 7)
-        self.assertNotIn("我", dist)
-
-    def test_function_word_distribution_empty_tokens(self) -> None:
-        dist = function_word_distribution([], ["的", "是"])
-        self.assertEqual(dist, {})
-
-    def test_function_word_distribution_empty_function_words(self) -> None:
-        tokens = ["我", "的", "书"]
-        dist = function_word_distribution(tokens, [])
-        self.assertEqual(dist, {})
-
-    def test_function_word_distribution_no_matches(self) -> None:
-        tokens = ["我", "爱", "你"]
-        dist = function_word_distribution(tokens, ["的", "是"])
-        self.assertEqual(dist, {})
-
-    def test_function_word_distribution_relative_frequency(self) -> None:
-        tokens = ["的", "的", "的", "我", "爱", "你"]
-        dist = function_word_distribution(tokens, ["的"])
-        self.assertAlmostEqual(dist["的"], 3 / 6, places=6)
-
-    def test_semantic_category_density(self) -> None:
-        text = "刀剑宗门"
-        self.assertGreater(semantic_category_density(text, ["刀剑"]), 0)
-
-    def test_imagery_density(self) -> None:
-        text = "明月几时有，把酒问青天"
-        terms = ["明月", "酒", "青天", "山", "水"]
-        result = imagery_density(text, terms)
-        self.assertGreater(result, 0)
-        text2 = "今天天气真好"
-        result2 = imagery_density(text2, terms)
-        self.assertEqual(result2, 0.0)
-        result3 = imagery_density("", terms)
-        self.assertEqual(result3, 0.0)
 
 
 if __name__ == "__main__":

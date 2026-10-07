@@ -23,8 +23,8 @@ from src.storage.session import SessionFactory
 
 if TYPE_CHECKING:
     from src.config.analysis_logger import AnalysisLogger
-    from src.work.events import AnalysisEventBus
     from src.work.task_manager import TaskManager
+    from src.workflows.progress import AnalysisEventBus
     from src.workflows.tasks import TaskService
 
 

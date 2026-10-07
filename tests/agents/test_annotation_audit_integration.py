@@ -7,10 +7,10 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
-from src.agents.audit.observer import AgentTurnObserver, build_invocation_context
-from src.agents.audit.recorder import AgentAuditRecorder
-from src.agents.stream import ModelCallTiming
-from src.fact_graph.schema import ChapterParagraphInfo
+from src.agents.stream_audit import ModelCallTiming
+from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
+from src.audit.recorder import AgentAuditRecorder
+from src.fact_graph.inputs import ChapterParagraphInfo
 from src.storage.models.agent_audit import ModelTurn
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
@@ -47,9 +47,9 @@ def _count(db_session, model, run_id: str) -> int:
 # import）；命名与写法同 tests/agents/test_annotation_agent.py 的 helper 部分。
 # ---------------------------------------------------------------------------
 
+
 class _QueryService:
     """2026-08-07 用于提供无数据库依赖的新合同查询桩"""
-
 
     async def search_text(self, query, *, range_name, limit=50):
         """2026-08-07 用于返回空原文候选"""
@@ -290,9 +290,5 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
     assert turns[0].raw_response["content"] == "部分输出"
     assert turns[0].raw_response["reasoning_observed"] is False
     assert turns[1].raw_response["reasoning_observed"] is True
-    token_rows = [
-        turn
-        for turn in turns
-        if turn.total_tokens is not None
-    ]
+    token_rows = [turn for turn in turns if turn.total_tokens is not None]
     assert sorted(row.total_tokens for row in token_rows) == [12, 20]

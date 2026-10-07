@@ -4,17 +4,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.api.exceptions import GraphReadinessError
-from src.api.services.results_queries import (
-    _fetch_chapter_annotations,
-    _fetch_character_relations,
-    _fetch_characters,
-    _fetch_diagnosis,
-    _fetch_foreshadowing_trees,
-    _fetch_hierarchical_relations,
-)
-from src.metrics.aggregate.normalization import normalize_arc_scores, normalize_name_list
+from src.api.services.results_queries import _fetch_character_relations, _fetch_diagnosis, _fetch_hierarchical_relations
+from src.diagnosis.normalization import normalize_arc_scores, normalize_name_list
+from src.fact_graph.read import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
 from src.storage.repositories.annotation import ForeshadowingTreeView
-from src.storage.repositories.graph.authority import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
+from tests.support.results_query_stubs import _fetch_chapter_annotations, _fetch_characters, _fetch_foreshadowing_trees
 
 
 class _DummyRow:
@@ -84,7 +78,7 @@ class _DummyAnnotationRepo:
         self.session = MagicMock()
         self.foreshadow_expectation = None
 
-    def fetch_characters_with_scores(self, run_id):
+    def fetch_chapter_characters_full(self, run_id):
         assert run_id == "run-1"
         return self._rows
 
@@ -550,12 +544,14 @@ def test_fetch_diagnosis_preserves_distinct_graph_entity_names():
 
 def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
     rows = []
-    rows.extend([
-        _DummyRow(surface_name="\u7532", resolved_global_name="\u7532", role_function="\u5ba2\u4f53", emotion_score=0)
-    ] * 20)
-    rows.extend([
-        _DummyRow(surface_name="\u4e59", resolved_global_name="\u4e59", role_function="\u4e3b\u4f53", emotion_score=0)
-    ] * 10)
+    rows.extend(
+        [_DummyRow(surface_name="\u7532", resolved_global_name="\u7532", role_function="\u5ba2\u4f53", emotion_score=0)]
+        * 20
+    )
+    rows.extend(
+        [_DummyRow(surface_name="\u4e59", resolved_global_name="\u4e59", role_function="\u4e3b\u4f53", emotion_score=0)]
+        * 10
+    )
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
@@ -643,7 +639,7 @@ def test_fetch_character_relations_deduplicates_across_chunks():
     )
 
     with patch(
-        "src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.fact_graph.read.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -686,7 +682,7 @@ def test_fetch_character_relations_skips_inactive_current_relations():
     )
 
     with patch(
-        "src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.fact_graph.read.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -707,7 +703,7 @@ def test_fetch_character_relations_uses_last_seen_chapter_id():
     )
 
     with patch(
-        "src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.fact_graph.read.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -724,7 +720,7 @@ def test_fetch_character_relations_uses_last_seen_chapter_id():
 def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
     annotation_repo = _DummyAnnotationRepo2()
     with patch(
-        "src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.fact_graph.read.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(
             assert_graph_ready=lambda _run_id: (_ for _ in ()).throw(
                 GraphReadinessError(
@@ -744,7 +740,7 @@ def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
 def test_fetch_character_relations_allows_empty_graph_when_no_pending():
     annotation_repo = _DummyAnnotationRepo2()
     with patch(
-        "src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.fact_graph.read.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(

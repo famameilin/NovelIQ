@@ -108,28 +108,25 @@ async def test_execute_stages_runs_linguistic_before_aggregate(db_session, monke
 
 
 def test_disabled_ltp_is_complete_in_resume_chain(monkeypatch) -> None:
-    """2026-08-31 用于验证关闭 LTP 时恢复链仍能识别后续已完成阶段"""
+    """关闭 LTP 时恢复链仍能复用后续已完成阶段"""
+    from src.workflows.analysis import environment_initializer as module
+
     initializer = EnvironmentInitializer(MagicMock())
-    chapter_repo = MagicMock()
-    chapter_repo.is_preprocess_complete.return_value = True
-    annotation_repo = MagicMock()
-    annotation_repo.is_annotate_complete.return_value = True
-    stats_repo = MagicMock()
-    stats_repo.is_aggregate_complete.return_value = True
-    stats_repo.is_topic_model_complete.return_value = True
-    stats_repo.has_diagnosis_data.return_value = True
+    queries = {
+        name: MagicMock(return_value=True)
+        for name in (
+            "is_preprocess_complete",
+            "is_annotate_complete",
+            "is_linguistic_complete",
+            "is_aggregate_complete",
+            "is_topic_model_complete",
+            "has_diagnosis_data",
+        )
+    }
+    for name, query in queries.items():
+        monkeypatch.setattr(module, name, query)
     monkeypatch.setattr(settings.linguistic.ltp, "enabled", False)
-
-    with (
-        patch("src.storage.repositories.ChapterRepository", return_value=chapter_repo),
-        patch("src.storage.repositories.AnnotationRepository", return_value=annotation_repo),
-        patch(
-            "src.workflows.analysis.environment_initializer.StatsRepository",
-            return_value=stats_repo,
-        ),
-    ):
-        result = initializer.check_stage_completion_status(MagicMock(), "run-1")
-
+    result = initializer.check_stage_completion_status(MagicMock(), "run-1")
     assert result == {
         "skip_preprocess": True,
         "skip_annotate": True,
@@ -138,7 +135,7 @@ def test_disabled_ltp_is_complete_in_resume_chain(monkeypatch) -> None:
         "skip_topic_model": True,
         "skip_diagnose": True,
     }
-    stats_repo.has_linguistic_data.assert_not_called()
+    queries["is_linguistic_complete"].assert_not_called()
 
 
 def test_prepare_task_execution_claim_claims_pending_run(db_session) -> None:
@@ -157,34 +154,6 @@ def test_prepare_task_execution_claim_claims_pending_run(db_session) -> None:
     assert refreshed["worker_id"] == "worker-a"
     assert refreshed["heartbeat_at"] is not None
     assert refreshed["started_at"] is not None
-
-
-def test_update_run_status_completed_persists_completed_at(db_session) -> None:
-    """成功收口写入 completed 终态时，应同时记录 completed_at。"""
-    _insert_novel(db_session, "svcdone")
-    run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcdone")
-
-    run_repo.update_run_status(run_id, "completed")
-    refreshed = run_repo.get_run(run_id)
-
-    assert refreshed is not None
-    assert refreshed["status"] == "completed"
-    assert refreshed["completed_at"] is not None
-
-
-def test_update_run_status_failed_persists_completed_at(db_session) -> None:
-    """失败收口写入 failed 终态时，应同时记录 completed_at。"""
-    _insert_novel(db_session, "svcfail2")
-    run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcfail2")
-
-    run_repo.update_run_status(run_id, "failed")
-    refreshed = run_repo.get_run(run_id)
-
-    assert refreshed is not None
-    assert refreshed["status"] == "failed"
-    assert refreshed["completed_at"] is not None
 
 
 def test_get_run_exposes_started_at_after_claim(db_session) -> None:

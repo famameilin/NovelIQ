@@ -14,6 +14,7 @@ from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
     persist_chapter_annotation,
 )
+from tests.support.run_records import set_run_status
 
 
 def _insert_two_chapter_forest(db_session):
@@ -100,7 +101,7 @@ def _insert_two_chapter_forest(db_session):
             ),
         ],
     )
-    RunRepository(db_session).update_run_status(run_id, "completed")
+    set_run_status(RunRepository(db_session).session, run_id, "completed")
     db_session.commit()
     return novel_id, run_id
 
@@ -112,7 +113,7 @@ def test_snapshot_none_returns_200_empty(api_client: TestClient, db_session) -> 
         texts=["未标注原文。"],
         title="空快照",
     )
-    RunRepository(db_session).update_run_status(run_id, "completed")
+    set_run_status(RunRepository(db_session).session, run_id, "completed")
     db_session.commit()
     task_id = run_id[:8]
     response = api_client.get(
@@ -193,14 +194,26 @@ def test_causal_edges_include_inactive_and_expired_at(api_client: TestClient, db
     gate_main = f"evt-{t}-gate-main"
     sword_root = f"evt-{t}-sword-root"
     commit_test_event_link(
-        db_session, run_id=run_id, chapter_id=2, source_event_id=gate_main, target_event_id=sword_root,
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        source_event_id=gate_main,
+        target_event_id=sword_root,
     )
     commit_test_event_link(
-        db_session, run_id=run_id, chapter_id=2, source_event_id=gate_root, target_event_id=sword_root,
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        source_event_id=gate_root,
+        target_event_id=sword_root,
     )
-    inactive = db_session.execute(select(EventEdge).where(
-        EventEdge.run_id == run_id, EventEdge.source_event_id == gate_root, EventEdge.target_event_id == sword_root,
-    )).scalar_one()
+    inactive = db_session.execute(
+        select(EventEdge).where(
+            EventEdge.run_id == run_id,
+            EventEdge.source_event_id == gate_root,
+            EventEdge.target_event_id == sword_root,
+        )
+    ).scalar_one()
     inactive.is_active = False
     inactive.expired_at = datetime.now(UTC)
     db_session.commit()
@@ -233,7 +246,7 @@ def test_analysis_not_complete_returns_400(api_client: TestClient, db_session) -
     """AnalysisNotComplete 仍返回 400"""
     novel_id, run_id = _insert_two_chapter_forest(db_session)
     # revert to pending
-    RunRepository(db_session).update_run_status(run_id, "pending")
+    set_run_status(RunRepository(db_session).session, run_id, "pending")
     db_session.commit()
     task_id = run_id[:8]
     response = api_client.get(

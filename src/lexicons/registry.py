@@ -1,7 +1,7 @@
 """
 词表注册中心 (Lexicon Registry v3)
 
-注册关系唯一事实源：src/config/constants/lexicons.py 的 LEXICON_FILES
+注册关系唯一事实源：src/lexicons/constants.py 的 LEXICON_FILES
 （语义 key -> 文件名），注册文件集合即其全部文件名。
 
 设计（2026-08-15 按用户要求）：
@@ -10,16 +10,13 @@
   - 加载报错保留（fail-fast）：注册词表文件缺失 -> 加载即报错，防止分析链
     静默拿到空词表降级；词表是否参与正式指标由调用方决定（用/不用）。
   - 词表内容可自由迭代：词条增删不触发任何声明校验。
-  - version_hash 为与加载状态无关的确定性 hash：
-    覆盖注册文件名集合 canonical JSON + 全部注册文件原文
 
 使用方式::
 
-    from src.config.constants import LEXICON_FILES
+    from src.lexicons.constants import LEXICON_FILES
 
     reg = LexiconRegistry()
     pos_terms = reg.get(LEXICON_FILES["positive"])               # 词条列表
-    pos_weighted = reg.get_weighted(LEXICON_FILES["positive"])    # 加权 dict（M4 弃用权重前过渡用）
     sem_files = reg.get_file_paths(LEXICON_FILES["semantic_category"])
 """
 
@@ -30,7 +27,7 @@ from pathlib import Path
 from loguru import logger
 
 from src.lexicons.constants import LEXICON_FILES
-from src.lexicons.parser import load_lexicon_terms, load_weighted_lexicon
+from src.lexicons.parser import load_lexicon_terms
 
 _DEFAULT_LEXICON_DIR = Path("data/lexicons")
 
@@ -47,12 +44,7 @@ class LexiconRegistry:
         self._injected_registry_files = registry_files
         self._registry_files: list[str] = []
         self._cache: dict[str, list[str]] = {}
-        self._weighted_cache: dict[str, dict[str, int]] = {}
         self._loaded = False
-
-    @property
-    def base_dir(self) -> Path:
-        return self._base_dir
 
     def load(self) -> None:
         """加载注册文件集合；注册词表文件缺失 -> 报错（fail-fast，防静默空跑）"""
@@ -97,24 +89,6 @@ class LexiconRegistry:
         self._cache[key] = deduped
         return deduped
 
-    def get_weighted(self, key: str) -> dict[str, int]:
-        """
-        获取加权词表（"词条\\t权重" 格式；纯词条按默认权重 1）
-
-        key 均为代码内写死的注册表目（无未知 key 场景，不做专门处理）；
-        词表文件缺失：报错（fail-fast）。
-        """
-        self.ensure_loaded()
-        if key in self._weighted_cache:
-            return self._weighted_cache[key]
-
-        path = self._base_dir / key
-        if not path.exists():
-            raise FileNotFoundError(f"词表 '{key}' 的文件缺失: {path}")
-        merged = load_weighted_lexicon(path)
-        self._weighted_cache[key] = merged
-        return merged
-
     def get_file_paths(self, key: str) -> list[Path]:
         """返回词表文件路径（如 semantic_category 的类别解析需要原文）；文件缺失报错"""
         self.ensure_loaded()
@@ -122,18 +96,6 @@ class LexiconRegistry:
         if not path.exists():
             raise FileNotFoundError(f"词表 '{key}' 的文件缺失: {path}")
         return [path]
-
-    def version_hash(self) -> str:
-        """
-        当前词表版本的摘要（哈希已删除，返回空串）
-        """
-        self.ensure_loaded()
-        return ""
-
-    def list_all_keys(self) -> list[str]:
-        """列出所有已注册的词表 key（文件名）"""
-        self.ensure_loaded()
-        return list(self._registry_files)
 
 
 _global_registry: LexiconRegistry | None = None

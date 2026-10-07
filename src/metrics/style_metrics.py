@@ -1,16 +1,9 @@
 from __future__ import annotations
 
-import math
-import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 
 from src.config import settings
-from src.text_processing.text_utils import dialogue_length, split_sentences, tokenize_words
-
-from .lexicon_metrics import count_mixed_hits
-
-SHORT_CHUNK_TOKEN_THRESHOLD = 12
-SHORT_CHUNK_MIN_POSITIVE_DENSITY = 1e-4
+from src.text_processing.text_utils import dialogue_length
 
 
 def ttr(tokens: Sequence[str]) -> float:
@@ -50,124 +43,7 @@ def mtld(tokens: Sequence[str], threshold: float | None = None) -> float | None:
     return len(tokens) / factors
 
 
-def average_word_length(tokens: Sequence[str]) -> float:
-    if not tokens:
-        return 0.0
-    return sum(len(token) for token in tokens) / len(tokens)
-
-
-def word_frequency_breadth(tokens: Sequence[str], coverage: float = 0.9) -> float:
-    if not tokens:
-        return 0.0
-    if coverage <= 0 or coverage >= 1:
-        raise ValueError("coverage must be between 0 and 1")
-
-    counts: dict[str, int] = {}
-    for token in tokens:
-        counts[token] = counts.get(token, 0) + 1
-
-    total = len(tokens)
-    cumulative = 0
-    for _, count in sorted(counts.items(), key=lambda item: item[1], reverse=True):
-        cumulative += count
-        if cumulative / total >= coverage:
-            break
-    return (total - cumulative) / total
-
-
-def function_word_distribution(tokens: Sequence[str], function_words: Iterable[str]) -> dict[str, float]:
-    total = len(tokens)
-    if total == 0:
-        return {}
-
-    function_set = {word for word in function_words if word}
-    counts: dict[str, int] = {}
-    for token in tokens:
-        if token in function_set:
-            counts[token] = counts.get(token, 0) + 1
-
-    return {token: count / total for token, count in counts.items()}
-
-
-def sentence_length_stats(text: str) -> dict[str, float]:
-    sentences = split_sentences(text)
-    if not sentences:
-        return {"avg_sent_len": 0.0, "sent_len_std": 0.0}
-
-    lengths = [len(sentence) for sentence in sentences]
-    avg = sum(lengths) / len(lengths)
-    variance = sum((length - avg) ** 2 for length in lengths) / len(lengths)
-    std = math.sqrt(variance)
-    return {"avg_sent_len": avg, "sent_len_std": std}
-
-
-def pause_density(text: str) -> float:
-    if not text:
-        return 0.0
-    pauses = len(re.findall(r"[，、；,;]", text))
-    # §19.4 修复：改为每百字停顿频率，消除随长度非线性增长
-    return pauses / len(text) * 100
-
-
 def dialogue_ratio(text: str) -> float:
     if not text:
         return 0.0
     return dialogue_length(text) / len(text)
-
-
-def metaphor_density(text: str) -> float:
-    sentences = split_sentences(text)
-    if not sentences:
-        return 0.0
-
-    markers = ("像", "如", "仿佛", "宛若", "犹如", "好似")
-    hit = sum(1 for sentence in sentences if any(marker in sentence for marker in markers))
-    return hit / len(sentences)
-
-
-def lexicon_density(tokens: Sequence[str], terms: Iterable[str], text: str) -> float:
-    """词表密度（phrase模式）。"""
-    total_tokens = len(tokens)
-    hit_count = count_mixed_hits(text, tokens, terms)
-    density = hit_count / max(total_tokens, 1)
-
-    if hit_count > 0 and total_tokens <= SHORT_CHUNK_TOKEN_THRESHOLD:
-        density = max(density, SHORT_CHUNK_MIN_POSITIVE_DENSITY)
-
-    return min(density, 1.0)
-
-
-def sensory_density(text: str, terms: Iterable[str]) -> float:
-    tokens = tokenize_words(text)
-    return lexicon_density(tokens, terms, text=text)
-
-
-def semantic_category_density(text: str, terms: Iterable[str]) -> float:
-    tokens = tokenize_words(text)
-    return lexicon_density(tokens, terms, text=text)
-
-
-def semantic_category_densities(text: str, category_terms: dict[str, list[str]]) -> dict[str, float]:
-    tokens = tokenize_words(text)
-    total_tokens = len(tokens)
-    if total_tokens == 0:
-        return dict.fromkeys(category_terms.keys(), 0.0)
-
-    densities: dict[str, float] = {}
-    for category, terms in category_terms.items():
-        if not terms:
-            densities[category] = 0.0
-            continue
-
-        hit_count = count_mixed_hits(text, tokens, terms)
-        density = hit_count / total_tokens
-        if hit_count > 0 and total_tokens <= SHORT_CHUNK_TOKEN_THRESHOLD:
-            density = max(density, SHORT_CHUNK_MIN_POSITIVE_DENSITY)
-        densities[category] = min(density, 1.0)
-
-    return densities
-
-
-def imagery_density(text: str, terms: Iterable[str]) -> float:
-    tokens = tokenize_words(text)
-    return lexicon_density(tokens, terms, text=text)

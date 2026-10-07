@@ -1,10 +1,7 @@
 """导出仓库实现与协议接口"""
 
-from .annotation import (
-    AnnotationRepository,
-    ChapterAnnotationRepository,
-    DatabaseAnnotationQueryService,
-)
+from src.storage.repositories.annotation import AnnotationRepository
+
 from .base import BaseRepository, T
 from .chapter_repository import ChapterRepository
 from .diagnosis_repository import DiagnosisRepository
@@ -19,8 +16,6 @@ __all__ = [
     "ChapterRepository",
     "RunRepository",
     "AnnotationRepository",
-    "ChapterAnnotationRepository",
-    "DatabaseAnnotationQueryService",
     "GraphRepository",
     "EntitySnapshotRow",
     "RelationSnapshotRow",

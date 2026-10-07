@@ -16,8 +16,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from src.agents.diagnosis.schema import AgentAnalysis
 from src.agents.diagnosis.tools import build_diagnosis_tools
+from src.diagnosis.schema import AgentAnalysis
 
 
 def _build_tools(session=None, ledger=None) -> list:
@@ -35,7 +35,7 @@ def _make_analysis() -> AgentAnalysis:
         arc_scores={"沈砚": 8.0},
         genre_labels=["通用"],
         style_labels=["严肃"],
-        topic_labels={'0': '成长'},
+        topic_labels={"0": "成长"},
         diagnosis="ok",
         value_logic_type="善义有价值",
         narrative_arc_type="白手起家",
@@ -101,7 +101,7 @@ def test_get_pivot_materials_with_all_sections() -> None:
         ],
         expectation=0.35,
     )
-    with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
+    with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
         out = _invoke(tools[1])
 
@@ -110,7 +110,7 @@ def test_get_pivot_materials_with_all_sections() -> None:
 
 def test_get_pivot_materials_empty() -> None:
     repo = _mock_pivot_repo()
-    with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
+    with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
         assert _invoke(tools[1]) == "（无转折素材数据）"
 
@@ -123,7 +123,7 @@ def test_get_pivot_materials_empty() -> None:
 def test_get_relation_changes_formats_rows() -> None:
     repo = MagicMock()
     repo.fetch_relation_changes.return_value = [(3, "甲", "乙", "盟友", "assert")]
-    with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
+    with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
         assert _invoke(tools[2]) == "[chunk 3] 甲 -> 乙 (盟友, assert)"
 
@@ -131,7 +131,7 @@ def test_get_relation_changes_formats_rows() -> None:
 def test_get_relation_changes_empty() -> None:
     repo = MagicMock()
     repo.fetch_relation_changes.return_value = []
-    with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
+    with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
         assert _invoke(tools[2]) == "（无关系变化数据）"
 
@@ -144,7 +144,7 @@ def test_get_relation_changes_empty() -> None:
 def test_get_character_data_with_known_characters() -> None:
     repo = MagicMock()
     repo.fetch_known_characters.return_value = ["沈砚", "顾霜"]
-    with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
+    with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
         assert _invoke(tools[3]) == "已知人物: ['沈砚', '顾霜']"
 
@@ -152,7 +152,7 @@ def test_get_character_data_with_known_characters() -> None:
 def test_get_character_data_empty() -> None:
     repo = MagicMock()
     repo.fetch_known_characters.return_value = []
-    with patch("src.storage.repositories.diagnosis_repository.DiagnosisRepository", return_value=repo):
+    with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
         assert _invoke(tools[3]) == "（无人物数据）"
 
@@ -165,7 +165,7 @@ def test_get_character_data_empty() -> None:
 def test_get_topic_data_empty() -> None:
     repo = MagicMock()
     repo.fetch_topic_words.return_value = []
-    with patch("src.storage.repositories.DiagnosisRepository", return_value=repo):
+    with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
         assert _invoke(tools[4]) == "（无主题数据）"
 
@@ -177,8 +177,8 @@ def test_get_topic_data_empty() -> None:
 
 def test_get_graph_signals_merges_summary_and_quality() -> None:
     with (
-        patch("src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService") as svc_cls,
-        patch("src.storage.repositories.graph.authority.serialize_graph_report_signals") as serialize,
+        patch("src.fact_graph.read.KnowledgeGraphAuthorityService") as svc_cls,
+        patch("src.fact_graph.read.serialize_graph_report_signals") as serialize,
     ):
         svc_cls.from_session.return_value.build_graph_report.return_value = object()
         serialize.return_value = ({"nodes": 10}, {"quality": "high"})
@@ -191,8 +191,8 @@ def test_get_graph_signals_merges_summary_and_quality() -> None:
 
 def test_get_graph_signals_empty_signals() -> None:
     with (
-        patch("src.storage.repositories.graph.authority.KnowledgeGraphAuthorityService"),
-        patch("src.storage.repositories.graph.authority.serialize_graph_report_signals", return_value=({}, {})),
+        patch("src.fact_graph.read.KnowledgeGraphAuthorityService"),
+        patch("src.fact_graph.read.serialize_graph_report_signals", return_value=({}, {})),
     ):
         tools = _build_tools()
         assert _invoke(tools[5]) == "（无图谱信号数据）"
@@ -204,10 +204,8 @@ def test_get_graph_signals_empty_signals() -> None:
 
 
 def test_finish_and_revise_finish_ok() -> None:
-    from src.storage.diagnosis_payload import AgentAnalysisPatch
+    from src.diagnosis.patch import AgentAnalysisPatch
 
     tools = _build_tools()
     assert _invoke(tools[6], {"analysis": _make_analysis()}) == "OK"
     assert _invoke(tools[7], {"patch": AgentAnalysisPatch(diagnosis="ok")}) == "OK"
-
-

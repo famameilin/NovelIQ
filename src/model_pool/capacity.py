@@ -15,13 +15,12 @@ import asyncio
 import random
 import time
 from collections import deque
-from dataclasses import replace
 from uuid import uuid4
 
 from loguru import logger
 
 from src.event_bus import EventBus, Message
-from src.work.annotation_work import WorkReceipt
+from src.model_pool.contracts import SelectionRequest, SelectionResult
 
 
 class ModelCapacity:
@@ -79,7 +78,7 @@ class ModelElectionPool:
         self.assignment_topic = f"assignment:{run_id}"
         self.max_attempts = max_attempts
         self.poll_seconds = poll_seconds
-        self.pending: deque[WorkReceipt] = deque()
+        self.pending: deque[SelectionRequest] = deque()
         self.attempts: dict[str, int] = {}
         self.failures: dict[str, dict[str, int]] = {}
         self.available_at: dict[str, float] = {}
@@ -91,6 +90,10 @@ class ModelElectionPool:
 
     async def enqueue(self, message: Message) -> None:
         receipt = message.payload
+        if not isinstance(receipt, SelectionRequest):
+            raise TypeError("模型池只接收 SelectionRequest")
+        if (receipt.run_id, receipt.work_id) != (message.run_id, message.work_id) or receipt.run_id != self.run_id:
+            raise ValueError("选举请求与消息身份不一致")
         if any(item.work_id == receipt.work_id for item in self.pending):
             return
         if self.attempts.get(receipt.work_id, 0):
@@ -116,7 +119,7 @@ class ModelElectionPool:
 
     async def run(self) -> None:
         from src.config import settings
-        from src.config.model_assignment import select_annotation_model
+        from src.model_pool.selection import select_annotation_model
         from src.utils.identity import stable_digest
 
         selection_error: Exception | None = None
@@ -150,12 +153,18 @@ class ModelElectionPool:
                     self.pending.popleft()
                     self.bus.publish(
                         Message(
-                            topic=self.assignment_topic, source=self.address, target=f"queue:{self.run_id}",
-                            run_id=self.run_id, work_id=receipt.work_id,
-                            payload=replace(receipt, payload={
-                                **receipt.payload, "model_id": model_id,
-                                "attempt_number": attempts + 1, "reservation_id": reservation_id,
-                            }),
+                            topic=self.assignment_topic,
+                            source=self.address,
+                            target=f"queue:{self.run_id}",
+                            run_id=self.run_id,
+                            work_id=receipt.work_id,
+                            payload=SelectionResult(
+                                run_id=receipt.run_id,
+                                work_id=receipt.work_id,
+                                model_id=model_id,
+                                attempt_number=attempts + 1,
+                                reservation_id=reservation_id,
+                            ),
                         )
                     )
                     continue

@@ -5,11 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.storage.repositories.graph.authority.alias import build_alias_resolution
-from src.storage.repositories.graph.authority.alias_heuristics import (
-    find_heuristic_character_edges,
-    looks_like_alias_name,
-)
+from src.fact_graph.read.alias import build_alias_resolution
+from src.fact_graph.read.alias_heuristics import find_heuristic_character_edges, looks_like_alias_name
 from src.storage.repositories.graph.repository import EntitySnapshotRow
 
 _GOLD_DIR = Path(__file__).resolve().parents[2] / "data" / "gold_standards" / "disambiguation"

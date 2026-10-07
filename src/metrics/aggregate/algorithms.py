@@ -8,18 +8,17 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from typing import Any
 
 import networkx as nx
 import networkx.algorithms.community as nx_comm
 import numpy as np
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.lexicons.tables import STOPWORDS_TERMS
 from src.metrics.robust_smooth import robust_local_regression
-from src.storage.repositories import ParagraphRepository
 from src.text_processing.text_utils import split_sentences, tokenize_words
 
 GRAPH_METRICS_VERSION = "graph-metrics-v1"
@@ -116,17 +115,15 @@ def compute_graph_structure_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
     return metrics
 
 
-def compute_keywords(run_id: str, session: Session, top_n: int = 10) -> dict[str, Any]:
+def compute_keywords(run_id: str, texts: Sequence[str], top_n: int = 10) -> dict[str, Any]:
     """段落全文的 TextRank 关键词（Top-N 词 + 权重，赛道 A3）
 
     在独立词共现图上计算（窗口 5 共现 + PageRank），不与人物关系图混用；
     停用词来自 Registry v3 的 stopwords.txt。关键词只表示词共现结构信号，
     与 LDA 主题词可对照但口径独立。
     """
-    paragraph_repo = ParagraphRepository(session)
-    rows = paragraph_repo.fetch_paragraph_rows(run_id)
     algorithm = {"version": KEYWORD_ALGORITHM_VERSION, "window": WINDOW_SIZE, "top_n": top_n}
-    if not rows:
+    if not texts:
         return {
             "run_id": run_id,
             "keywords": [],
@@ -136,8 +133,8 @@ def compute_keywords(run_id: str, session: Session, top_n: int = 10) -> dict[str
 
     stopwords = set(STOPWORDS_TERMS)
     tokens: list[str] = []
-    for row in rows:
-        for sentence in split_sentences(row.text):
+    for text in texts:
+        for sentence in split_sentences(text):
             tokens.extend(
                 word for word in tokenize_words(sentence) if len(word) >= MIN_WORD_LENGTH and word not in stopwords
             )

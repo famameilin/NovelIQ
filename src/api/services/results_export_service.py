@@ -41,12 +41,12 @@ from src.api.services.results_queries import (
 )
 from src.api.services.results_queries.diagnosis import _has_diagnosis_result
 from src.config import settings
+from src.fact_graph.read import KnowledgeGraphAuthorityService
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
     StatsRepository,
 )
-from src.storage.repositories.graph.authority import KnowledgeGraphAuthorityService
 
 __all__ = [
     "_fetch_character_relations",
@@ -181,9 +181,9 @@ def fetch_all_results_data(
     novel_name = _fetch_novel_name(novel_id, stats_repo)
 
     # 2026-08-19 事件森林/DAG：导出 event_forest 段（ 树视图 + 树间边）
-    from src.storage.repositories.graph import EventForestRepository
+    from src.event_trees.read.forest import EventForestQuery
 
-    event_forest_repo = EventForestRepository(stats_repo.session)
+    event_forest_repo = EventForestQuery(stats_repo.session)
     event_forest_snapshot = event_forest_repo.fetch_snapshot(run_id)
     event_forest_data: dict[str, Any] | None = None
     if event_forest_snapshot is not None:
@@ -288,7 +288,7 @@ def fetch_all_results_data(
         timeline_data=timeline_data,
         event_forest=event_forest_data,
     )
-    from src.storage.repositories.book_state import book_state_view
+    from src.api.services.pipeline_view import book_state_view
 
     results_data["pipeline"] = book_state_view(stats_repo.session, run_id)
 

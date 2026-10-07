@@ -28,13 +28,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from src.agents.stream_aggregator import (
     StreamChunkAggregator,
 )
-from src.agents.stream_aggregator import (
-    _merge_tool_call_chunks as _merge_tool_call_chunks,
-)
-from src.agents.stream_aggregator import (
-    extract_reasoning_content as extract_reasoning_content,
-)
 from src.agents.stream_audit import ModelCallTiming, _provider_request_metadata
+from src.agents.stream_errors import StreamEmitError
 from src.sse.events import StreamEvent, StreamEventAction
 
 _MAX_TOOL_SUMMARY_CHARS = 200
@@ -52,7 +47,6 @@ CONTENT_STALL_TIMEOUT_S = 150.0
 
 logger = logging.getLogger(__name__)
 
-perf_counter_ns = time.perf_counter_ns
 
 # 2026-08-13 P2-6 瞬态错误类型名标记：openai/httpx 网络与限流异常按类名匹配
 _TRANSIENT_ERROR_MARKERS = (
@@ -72,10 +66,6 @@ _RACE_ITERATION_MESSAGES = (
     "dictionary keys changed during iteration",
     "deque mutated during iteration",
 )
-
-
-class StreamEmitError(RuntimeError):
-    """2026-08-12 用于区分 SSE 推送失败与模型输出流中断：推送失败不触发模型请求重试"""
 
 
 class ContentStallTimeoutError(TimeoutError):
@@ -106,9 +96,7 @@ def _chunk_has_content(chunk: Any) -> bool:
     content = getattr(chunk, "content", None)
     if isinstance(content, str) and content:
         return True
-    if isinstance(content, list) and any(
-        isinstance(part, dict) and part.get("text") for part in content
-    ):
+    if isinstance(content, list) and any(isinstance(part, dict) and part.get("text") for part in content):
         return True
     kwargs = getattr(chunk, "additional_kwargs", None) or {}
     return bool(
@@ -140,9 +128,7 @@ async def _guard_content_progress(source: Any, timeout_s: float) -> Any:
         while True:
             remaining = timeout_s - (time.monotonic() - last_content)
             if remaining <= 0:
-                raise ContentStallTimeoutError(
-                    timeout_s, chunks_seen, content_chunks, time.monotonic() - started
-                )
+                raise ContentStallTimeoutError(timeout_s, chunks_seen, content_chunks, time.monotonic() - started)
             try:
                 chunk = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
             except StopAsyncIteration:
@@ -186,9 +172,7 @@ def _is_transient_model_error(exc: BaseException) -> bool:
         return status == 429 or status >= 500
     if isinstance(exc, (ConnectionError, TimeoutError)):
         return True
-    if isinstance(exc, RuntimeError) and any(
-        marker in str(exc) for marker in _RACE_ITERATION_MESSAGES
-    ):
+    if isinstance(exc, RuntimeError) and any(marker in str(exc) for marker in _RACE_ITERATION_MESSAGES):
         return True
     name = type(exc).__name__.lower()
     return any(marker in name for marker in _TRANSIENT_ERROR_MARKERS)
@@ -348,6 +332,7 @@ async def run_model_call(
     completion_hint: CompletionHintProvider | None = None,
     require_tool_call: bool = True,
     content_stall_timeout_s: float | None = None,
+    clock_ns: Callable[[], int] = time.perf_counter_ns,
 ) -> AIMessage:
     """
     调用模型并返回完整 AIMessage
@@ -397,12 +382,13 @@ async def run_model_call(
     attempt = 0
     while True:
         attempt += 1
-        started_ns = perf_counter_ns()
+        started_ns = clock_ns()
         if on_turn_started is not None:
             on_turn_started(_provider_request_metadata(model, attempt=attempt), started_ns)
         aggregator = StreamChunkAggregator(
             stream,
             started_ns=started_ns,
+            clock_ns=clock_ns,
             skip_output_prefix=skip_output_prefix,
             announced_tools=announced_tools,
         )
@@ -486,8 +472,6 @@ async def emit_tool_results(stream: AgentStream, tool_messages: list[Any]) -> No
 
 __all__ = [
     "AgentStream",
-    "ModelCallTiming",
-    "StreamChunkAggregator",
     "emit_tool_results",
     "run_model_call",
 ]

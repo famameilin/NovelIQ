@@ -14,8 +14,14 @@ from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
+from src.diagnosis.completion import has_diagnosis_data
+from src.linguistic.completion import is_linguistic_complete
+from src.metrics.queries.completion import is_aggregate_complete
 from src.storage.repositories import RunRepository, StatsRepository
 from src.storage.session import SessionFactory
+from src.topic.completion import is_topic_model_complete
+from src.work.queries import is_annotate_complete
+from src.workflows.preprocess_readiness import is_preprocess_complete
 
 
 class EnvironmentInitializer:
@@ -50,7 +56,7 @@ class EnvironmentInitializer:
 
         # 2026-10-03 收口进程重启遗留的 running 审计行，避免僵尸行永久污染错误率统计
         # （run 08f9ba42 实证 12 条 running 僵尸行）；每次创建/恢复任务都会经过这里
-        from src.agents.audit.module import AuditModule
+        from src.audit.module import AuditModule
 
         orphaned = AuditModule.close_interrupted(lambda: self.session_factory.get_session(), run_id)
         if orphaned:
@@ -119,25 +125,25 @@ class EnvironmentInitializer:
         skip_topic_model = False
         skip_diagnose = False
 
-        if chapter_repo.is_preprocess_complete(run_id):
+        if is_preprocess_complete(chapter_repo.session, run_id):
             logger.info("Preprocess complete, skipping")
             skip_preprocess = True
-        if skip_preprocess and ann_repo.is_annotate_complete(run_id):
+        if skip_preprocess and is_annotate_complete(ann_repo.session, run_id):
             logger.info("Annotate complete, skipping")
             skip_annotate = True
         if skip_annotate and not settings.linguistic.ltp.enabled:
             logger.info("Linguistic disabled, treating stage as complete")
             skip_linguistic = True
-        elif skip_annotate and stats_repo.is_linguistic_complete(run_id):
+        elif skip_annotate and is_linguistic_complete(stats_repo.session, run_id):
             logger.info("Linguistic complete, skipping")
             skip_linguistic = True
-        if skip_linguistic and stats_repo.is_aggregate_complete(run_id):
+        if skip_linguistic and is_aggregate_complete(stats_repo.session, run_id):
             logger.info("Aggregate complete, skipping")
             skip_aggregate = True
-        if skip_aggregate and stats_repo.is_topic_model_complete(run_id):
+        if skip_aggregate and is_topic_model_complete(stats_repo.session, run_id):
             logger.info("Topic model complete, skipping")
             skip_topic_model = True
-        if skip_topic_model and stats_repo.has_diagnosis_data(run_id):
+        if skip_topic_model and has_diagnosis_data(stats_repo.session, run_id):
             logger.info("Diagnose complete, skipping")
             skip_diagnose = True
 

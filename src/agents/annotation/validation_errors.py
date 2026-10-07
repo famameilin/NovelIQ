@@ -16,7 +16,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.fact_graph.schema import ENTITY_TAGS_RULE_TEXT, tone_catalog_text
+from src.fact_graph.schema import ENTITY_TAGS_RULE_TEXT
+from src.fact_graph.vocabulary import tone_catalog_text
 
 from .errors import AnnotationStageRejection
 from .tools import tool_record_key

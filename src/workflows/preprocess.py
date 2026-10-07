@@ -35,6 +35,7 @@ from src.text_processing.paragraphs import chunk_documents_with_chapters, split_
 from src.text_processing.preprocess import normalize_text
 from src.text_processing.text_reader import ingest_path
 from src.text_processing.tokenize import tokenize
+from src.workflows.preprocess_readiness import is_preprocess_complete
 
 
 async def run_preprocess(
@@ -55,7 +56,7 @@ async def run_preprocess(
         await emitter(StreamEvent(action="start", stage="preprocess", message="开始预处理", sub_percent=0.0))
 
     chapter_repo = ChapterRepository(session)
-    if chapter_repo.is_preprocess_complete(run_id):
+    if is_preprocess_complete(chapter_repo.session, run_id):
         logger.info(f"preprocess already complete for run_id={run_id}, skipping")
         return 0, 0, 0.0
 
@@ -76,7 +77,6 @@ async def run_preprocess(
 
     all_chunks, all_chapters = await chunk_documents_with_chapters(
         normalized_texts,
-        emitter=emitter,
     )
 
     total_chapters = len(all_chunks)
@@ -268,7 +268,7 @@ async def _generate_paragraph_embeddings(
         logger.info("no paragraphs found for run_id={}, skip paragraph embeddings", run_id)
         return 0
 
-    from src.agents.audit.module import AuditModule
+    from src.audit.module import AuditModule
     from src.event_bus import EventBus
     from src.storage.db import get_session_factory
 

@@ -32,12 +32,6 @@ def text_digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def exact_digest(*parts: Any) -> str:
-    """正式载荷只排序对象键，不归一化可能影响证据区间的文本"""
-    canonical = json.dumps(parts, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
 def stable_uuid(*parts: Any) -> str:
     """需要 UUID 外键的本地节点用稳定命名空间生成身份"""
     return str(uuid5(NAMESPACE_URL, stable_digest(*parts, fold_text=True)))

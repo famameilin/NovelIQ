@@ -12,7 +12,8 @@ from collections import deque
 from typing import Any
 from uuid import uuid4
 
-from src.storage.repositories.event_outbox import DisplayState, EventOutboxRepository
+from src.sse.persistence import SseMessageRepository
+from src.sse.state import DisplayState
 
 _MAX_BUFFER_SIZE = 256
 
@@ -28,7 +29,7 @@ class EventManager:
         self,
         idle_timeout: float = 3600.0,
         buffer_size: int = _MAX_BUFFER_SIZE,
-        outbox: EventOutboxRepository | None = None,
+        outbox: SseMessageRepository | None = None,
     ) -> None:
         if buffer_size < 1:
             raise ValueError("SSE 客户端队列必须有正的容量")
@@ -67,7 +68,8 @@ class EventManager:
             self._connections[task_id].append(queue)
             self._last_activity[task_id] = time.monotonic()
             buffered = [
-                msg for msg in self._buffers.get(task_id, ())
+                msg
+                for msg in self._buffers.get(task_id, ())
                 if (last_seq is None or msg.get("seq", 0) > last_seq)
                 and state.accepts(msg["type"], msg["data"], msg["seq"])
             ]
@@ -184,7 +186,7 @@ class EventManager:
     def is_durable(self) -> bool:
         return self._outbox is not None
 
-    def configure_outbox(self, outbox: EventOutboxRepository) -> None:
+    def configure_outbox(self, outbox: SseMessageRepository) -> None:
         """由应用启动注入持久后端，纯内存实例仅用于独立测试"""
         self._outbox = outbox
 
@@ -195,13 +197,15 @@ class EventManager:
             state = await self._display_state(task_id)
             stored = await asyncio.to_thread(self._outbox.replay, task_id, after_seq) if self._outbox else []
             cached = [
-                message for message in self._buffers.get(task_id, ())
+                message
+                for message in self._buffers.get(task_id, ())
                 if message["seq"] > after_seq and state.accepts(message["type"], message["data"], message["seq"])
             ]
             # 单页持久重放还有后续页时，不能越过它直接推送更高缓存游标
             ceiling = stored[-1]["seq"] if len(stored) >= 128 else float("inf")
             merged = {
-                message["seq"]: message for message in [*stored, *cached]
+                message["seq"]: message
+                for message in [*stored, *cached]
                 if message["seq"] <= ceiling and state.accepts(message["type"], message["data"], message["seq"])
             }
             return [merged[seq] for seq in sorted(merged)]

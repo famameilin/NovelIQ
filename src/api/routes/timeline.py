@@ -17,18 +17,14 @@ from src.api.models.events import (
     EventTimelineResponse,
 )
 from src.api.models.responses import ErrorResponse
-from src.api.services.novel_service import NovelService
 from src.api.services.results_queries.event_projection import serialize_snapshot_edges
-from src.metrics.event_timeline_metrics import (
-    build_event_timeline_plan,
-    serialize_event_timeline_node,
-    serialize_event_timeline_phases,
-)
+from src.event_trees.read.forest import EventForestQuery
+from src.metrics.event_timeline_metrics import serialize_event_timeline_node, serialize_event_timeline_phases
+from src.metrics.queries.timeline import build_event_timeline_plan
 from src.storage.repositories import ChapterRepository, RunRepository, StatsRepository
-from src.storage.repositories.graph import EventForestRepository
+from src.workflows.novels import NovelService
 
 router = APIRouter(prefix="/novels", tags=["timeline"])
-
 
 
 @router.get(
@@ -83,7 +79,7 @@ async def get_timeline(
     chapter_repo = ChapterRepository(session)
     stats_repo = StatsRepository(session)
 
-    snapshot = EventForestRepository(session).fetch_snapshot(run_id, chapter_id=None)
+    snapshot = EventForestQuery(session).fetch_snapshot(run_id, chapter_id=None)
     if snapshot is None:
         logger.warning("No event forest snapshot for run {}", run_id)
         response.headers["X-Timeline-Empty-Reason"] = "no_event_forest"

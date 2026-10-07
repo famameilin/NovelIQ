@@ -22,10 +22,10 @@ from src.api.routes import analysis as analysis_mod
 from src.sse.events import StreamEvent
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
-from src.work.events import AnalysisEventBus
 from src.work.task_manager import TaskManager
 from src.workflows.analysis.error_handler import AnalysisErrorHandler
 from src.workflows.application import cleanup_task_runtime_before_delete
+from src.workflows.progress import AnalysisEventBus
 from src.workflows.service import AnalysisService, CancellationStateCheckError
 from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
 
@@ -184,8 +184,10 @@ class TestDeleteAnalysis:
                 ),
                 {"chapter_id": 1, "text": "待删除分块", "len": 5, "run_id": run_id},
             )
-            session.execute(text("UPDATE novels SET title = :title WHERE novel_id = :novel_id"),
-                {"novel_id": novel_id, "title": "待删除小说"})
+            session.execute(
+                text("UPDATE novels SET title = :title WHERE novel_id = :novel_id"),
+                {"novel_id": novel_id, "title": "待删除小说"},
+            )
             session.commit()
 
         log_dir = Path("logs") / run_id
@@ -488,7 +490,7 @@ class TestAnalysisErrorHandler:
         )
 
         metrics_service = get_metrics_service()
-        metrics_service._cache[metrics_service._get_cache_key(run_id)] = (("cached",), 9999999999.0)
+        metrics_service.query._cache[run_id] = (("cached",), 9999999999.0)
 
         await handler.handle_success(
             task_id=run_id[:8],
@@ -500,7 +502,7 @@ class TestAnalysisErrorHandler:
             bus=None,
         )
 
-        assert metrics_service._get_from_cache(run_id) is None
+        assert run_id not in metrics_service.query._cache
 
     @pytest.mark.asyncio
     async def test_handle_success_persists_progress_100_and_completed_at(self, db_session):

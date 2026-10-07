@@ -8,9 +8,9 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
-from src.agents.audit.observer import AgentTurnObserver
-from src.agents.audit.recorder import AgentAuditRecorder
-from src.agents.stream import ModelCallTiming
+from src.agents.stream_audit import ModelCallTiming
+from src.agents.turn_observer import AgentTurnObserver
+from src.audit.recorder import AgentAuditRecorder
 from src.storage.models.agent_audit import AgentToolCall, ModelTurn
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
@@ -393,7 +393,7 @@ def test_serialize_ai_message_preserves_reasoning_content() -> None:
     """2026-08-10 用于验证回合原始响应序列化保留模型思考内容"""
     from langchain_core.messages import AIMessage
 
-    from src.agents.audit.observer import _serialize_ai_message
+    from src.agents.turn_observer import _serialize_ai_message
 
     message = AIMessage(
         content="正文输出",
@@ -410,7 +410,7 @@ def test_serialize_ai_message_reads_reasoning_from_metadata() -> None:
     """2026-08-10 用于验证 Provider 把思考放在 response_metadata 时同样保留"""
     from langchain_core.messages import AIMessage
 
-    from src.agents.audit.observer import _serialize_ai_message
+    from src.agents.turn_observer import _serialize_ai_message
 
     message = AIMessage(
         content="正文输出",
@@ -426,7 +426,7 @@ def test_serialize_ai_message_preserves_finish_reason_from_kwargs() -> None:
     """2026-08-11 用于验证聚合器挂载的 finish_reason 随回合审计序列化保留"""
     from langchain_core.messages import AIMessage
 
-    from src.agents.audit.observer import _serialize_ai_message
+    from src.agents.turn_observer import _serialize_ai_message
 
     message = AIMessage(content="", additional_kwargs={"finish_reason": "length"})
 
@@ -439,7 +439,7 @@ def test_serialize_ai_message_reads_finish_reason_from_metadata() -> None:
     """2026-08-11 用于验证非流式响应的 finish_reason 从 response_metadata 读取"""
     from langchain_core.messages import AIMessage
 
-    from src.agents.audit.observer import _serialize_ai_message
+    from src.agents.turn_observer import _serialize_ai_message
 
     message = AIMessage(content="", response_metadata={"finish_reason": "stop"})
 
@@ -549,7 +549,7 @@ def test_observer_serializes_full_request_messages_into_turn(db_session) -> None
 
 def test_serialize_request_messages_returns_empty_list_without_messages() -> None:
     """2026-08-11 用于验证无请求消息时序列化为空数组而非 NULL"""
-    from src.agents.audit.observer import _serialize_request_messages
+    from src.agents.turn_observer import _serialize_request_messages
 
     assert _serialize_request_messages([]) == []
 

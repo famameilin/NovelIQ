@@ -17,13 +17,14 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages import ToolMessage
 from langgraph.graph import END, START, StateGraph
 
+from src.agents.annotation.ledger import AnnotationToolLedger
+
 from .graph import AnnotationGraphState, _build_agent_node, _tool_calls
 from .tool_batch import _build_tool_batch_node
-from .tools import AnnotationToolLedger
 
 if TYPE_CHECKING:
-    from src.agents.audit.observer import AgentTurnObserver
     from src.agents.stream import AgentStream
+    from src.agents.turn_observer import AgentTurnObserver
 
     from .subagent_ir import SubagentAnnotation
 
@@ -61,13 +62,13 @@ def _route_after_subagent_batch(state: AnnotationGraphState) -> str:
         if message.name == "finish" and body.get("status") == "written":
             ref = body.get("ref") or {}
             gap = {
-                "finished": ref.get("finished"), "missing_candidates": ref.get("unjudged_candidates"),
+                "finished": ref.get("finished"),
+                "missing_candidates": ref.get("unjudged_candidates"),
                 "missing_metric": ref.get("missing_metric", True),
             }
         if isinstance(gap, dict):
             finished = finished or (
-                gap.get("finished") is True and not gap.get("missing_candidates")
-                and gap.get("missing_metric") is False
+                gap.get("finished") is True and not gap.get("missing_candidates") and gap.get("missing_metric") is False
             )
     return "end" if finished else "agent"
 
@@ -110,7 +111,6 @@ def build_subagent_graph(
         observer=observer,
         stream=stream,
         program_tool_name=program_tool_name,
-
     )
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:

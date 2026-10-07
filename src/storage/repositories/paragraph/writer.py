@@ -17,8 +17,8 @@ from collections.abc import Sequence
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
+from src.storage.input_records import ParagraphRecord as ParagraphSpan
 from src.storage.models import Chapter, Paragraph
-from src.text_processing.models import ParagraphSpan
 
 
 def insert_paragraphs(session: Session, run_id: str, spans: Sequence[ParagraphSpan]) -> int:

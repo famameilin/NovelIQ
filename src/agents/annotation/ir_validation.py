@@ -14,8 +14,10 @@ from __future__ import annotations
 import unicodedata
 from typing import Any
 
+from src.fact_graph.schema import EL_PATH_SEP
+
 from .errors import AnnotationStageRejection
-from .subagent_ir import CASE_DESCRIPTION_MAX_CHARS, EL_PATH_SEP, ROLE_NAMESPACE_SEP
+from .ir_contract import CASE_DESCRIPTION_MAX_CHARS, ROLE_NAMESPACE_SEP
 
 
 def namespace_el(role: str, local_key: str) -> str:

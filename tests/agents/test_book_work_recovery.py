@@ -7,7 +7,7 @@ from src.case_pool import CasePool
 from src.event_trees.models import BoundEvent
 from src.event_trees.trees import EventTrees
 from src.fact_graph.graph import FactGraph, mention_uuid
-from src.fact_graph.schema import EntityInput
+from src.fact_graph.inputs import EntityInput
 
 
 def test_saved_reference_restores_endpoints_without_fabricating_entity_writes():

@@ -6,10 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from src.metrics.aggregate.linguistic_aggregations import (
-    aggregate_phrase_stats,
-    fetch_entity_candidates,
-)
+from src.linguistic.queries import aggregate_phrase_stats, fetch_entity_candidates
 
 _SURFACE_TOP_LIMIT = 20
 
@@ -31,7 +28,7 @@ def build_linguistic_entities_tab(run_id: str, session: Session) -> dict[str, An
     surface_top = [
         {"surface_text": surface, "entity_type": entity_type, "count": count}
         for (surface, entity_type), count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
-    ][: _SURFACE_TOP_LIMIT]
+    ][:_SURFACE_TOP_LIMIT]
 
     return {
         "run_id": run_id,

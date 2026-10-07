@@ -11,6 +11,7 @@ from tests.support.chapter_annotation_helpers import (
     relation_fact,
 )
 from tests.support.graph_snapshot_helpers import insert_focus_contract_agent_analysis
+from tests.support.run_records import set_run_status
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,9 @@ def persist_timeline_chapter(
 
 
 def create_timeline_contract_scenario(
-    db_session: Any, *, events_by_chapter: dict[int, list[dict[str, Any]]] | None = None,
+    db_session: Any,
+    *,
+    events_by_chapter: dict[int, list[dict[str, Any]]] | None = None,
 ) -> TimelineContractScenario:
     """2026-08-06 用于通过章节标注与数据库图持久化构造时间轴共享场景"""
     hero_name = "顾承渊"
@@ -74,7 +77,7 @@ def create_timeline_contract_scenario(
         title="Timeline Contract",
     )
     run_repo = RunRepository(db_session)
-    run_repo.update_run_status(run_id, "completed")
+    set_run_status(run_repo.session, run_id, "completed")
 
     # 2026-08-14 段落化：导出核心结果走段落曲线，场景同步插入段落曲线行
     # （每段一行，与 5 个 chunk 一一对应；章张力 = 段内 surface_tension 均值，
@@ -240,7 +243,7 @@ def create_timeline_contract_scenario(
         focus_characters=[hero_name],
         main_characters=[hero_name, rival_name],
         core_cast=[hero_name, rival_name, organization_name],
-        topic_labels={'0': '结盟与决裂'},
+        topic_labels={"0": "结盟与决裂"},
     )
 
     return TimelineContractScenario(

@@ -17,14 +17,6 @@
 唯一依据——引用一个没写成功的键，构造器当场结构化拒绝。
 """
 
-# ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入（大文件拆分聚合面）。
-
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：subagent_ir.py 大文件拆分——校验 helpers 段（namespace_* / truncate_case_description /
-# _reject / _require_*）迁出至 ir_validation.py；本模块保留闭集常量与 IR 数据类并对迁出
-# 符号 re-export（既有导入方零改动）。
-# 说明：纯结构搬移，不改任何运行逻辑与签名。
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -34,10 +26,8 @@ from src.event_trees.vocabulary import (
     EventChildType,
     EventParticipantRole,
 )
-from src.fact_graph.schema import (
-    EL_PATH_SEP,
+from src.fact_graph.vocabulary import (
     RELATION_DEFINITIONS,
-    RESERVED_ROOT_KEY,
     Confidence,
     DialogueVerdict,
     EntityType,
@@ -45,6 +35,8 @@ from src.fact_graph.schema import (
     RoleFunction,
     Tone,
 )
+
+from .ir_validation import _reject, _require_paragraph_id
 
 # 章内 subagent 的角色名：多块章开三条职责 subagent 并发（单块章走 runner 的
 # agent 路径，不再有 solo 形态；职责范围文案在 prompts.SUBAGENT_ROLE_SCOPES）
@@ -73,7 +65,6 @@ RELATION_TYPES: tuple[str, ...] = tuple(RELATION_DEFINITIONS)
 # 根=树键、子=树键/节点键；本模块只用于核验落库形态）
 # 角色命名空间分隔符：subagent 的引用键是各自局部的（三个 subagent 都可能用 a1/t1），
 # 落库 el 一律按 `角色:局部键` 命名空间化，避免同名键互相占用（见 namespace_el）
-ROLE_NAMESPACE_SEP = ":"
 
 # 待决项种类 → 案例池 type（案例池的 type 是自由文本，这里是唯一的机械映射处；
 # 构造器与连接层共用同一份，疑点入池与写法分歧入池口径只有一处）
@@ -85,7 +76,6 @@ PENDING_CASE_TYPES: dict[str, str] = {
 }
 
 # 案例 description 上限（案例池列约束：人类可读说明 ≤100 字）
-CASE_DESCRIPTION_MAX_CHARS = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +293,7 @@ class SubagentMetric:
 @dataclass(slots=True)
 class SubagentPending:
     """局部待决记录只有普通文字说明"""
+
     description: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -363,76 +354,3 @@ class SubagentAnnotation:
             "metric": self.metric.to_dict() if self.metric is not None else None,
             "pending": [item.to_dict() for item in self.pending],
         }
-
-
-# 校验 helpers 迁至 ir_validation（闭集常量与数据类保留在本模块，供其引用）：
-# 置于文件末尾 re-export，两个方向的首次导入都安全（双方定义先于引用）。
-from .ir_validation import (  # noqa: E402
-    _reject as _reject,
-)
-from .ir_validation import (
-    _require_enum as _require_enum,
-)
-from .ir_validation import (
-    _require_local_key as _require_local_key,
-)
-from .ir_validation import (
-    _require_name as _require_name,
-)
-from .ir_validation import (
-    _require_paragraph_id as _require_paragraph_id,
-)
-from .ir_validation import (
-    _require_score as _require_score,
-)
-from .ir_validation import (
-    _require_text as _require_text,
-)
-from .ir_validation import (
-    namespace_el as namespace_el,
-)
-from .ir_validation import (
-    namespace_event_el as namespace_event_el,
-)
-from .ir_validation import (
-    truncate_case_description as truncate_case_description,
-)
-
-__all__ = [
-    "CASE_DESCRIPTION_MAX_CHARS",
-    "CONFIDENCE_VALUES",
-    "DIALOGUE_VERDICTS",
-    "EL_PATH_SEP",
-    "ENTITY_TYPES",
-    "EVENT_CHILD_TYPES",
-    "PENDING_CASE_TYPES",
-    "RESERVED_ROOT_KEY",
-    "ROLE_NAMESPACE_SEP",
-    "SubagentAnnotation",
-    "SubagentDialogue",
-    "SubagentEntity",
-    "SubagentEvent",
-    "SubagentEvidence",
-    "SubagentLabel",
-    "SubagentMetric",
-    "SubagentParticipant",
-    "SubagentPending",
-    "SubagentRelation",
-    "NARRATIVE_FUNCTIONS",
-    "PARTICIPANT_ROLES",
-    "PENDING_KINDS",
-    "RELATION_TYPES",
-    "RESERVED_ROOT_KEY",
-    "RUNTIME_ROLES",
-    "SUBAGENT_ROLES",
-    "TONE_VALUES",
-    "_evidence_view",
-    "_reject",
-    "_require_enum",
-    "_require_local_key",
-    "_require_name",
-    "_require_paragraph_id",
-    "_require_score",
-    "_require_text",
-    "normalize_evidence",
-]

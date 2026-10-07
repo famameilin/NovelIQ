@@ -2,16 +2,7 @@
 章节标注 Agent 语义写入合同与系统绑定模型
 """
 
-# ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入（大文件拆分聚合面）。
-
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：schema.py 大文件拆分——枚举/Literal/关系目录段迁出至 vocabulary.py，输入模型段
-# 迁出至 inputs.py，输出与结果模型段迁出至 outputs.py；本模块保留共享件并对全部符号
-# re-export（导入方零改动）。
-# 说明：纯结构搬移，不改任何运行逻辑与签名。依赖方向：vocabulary ← inputs ← outputs，
-# 本模块只被它们引用（StrictModel、字段描述常量、EntityRef、normalize_semantic_text），
-# 末尾反向 re-export 形成包内聚合面；事件值域与事件绑定模型在 src/event_trees，
-# 不从本模块转发，事实图不反向依赖事件树。
+# 输入与输出模型只依赖本文件的基础约束，消费者直接导入实际定义模块
 
 # 2026-09-17 模型可见文案约定：本模块的类 docstring 会被 pydantic 渲染成字段的
 # JSON schema 说明、直接进模型可见面（工具参数 schema、程序面 API 目录都是这份），
@@ -21,7 +12,7 @@
 from __future__ import annotations
 
 import unicodedata
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict
 
@@ -111,135 +102,3 @@ ENTITY_TAGS_RULE_TEXT = f"最多 {ENTITY_TAG_MAX_COUNT} 个，每个最多 {ENTI
 # 称号写进 role（如"大少爷"）与把 role 的词写进 narrative_role。
 EVENT_ROLE_FIELD_HINT = "这个实体在这件事里起的作用，不是身份、称号"
 PERSON_ROLE_FIELD_HINT = "与 role 同一判断的叙事面"
-
-if TYPE_CHECKING:  # noqa: E402
-    from .inputs import (
-        ChapterMetricsInput as ChapterMetricsInput,
-    )
-    from .inputs import (
-        ChapterParagraphInfo as ChapterParagraphInfo,
-    )
-    from .inputs import (
-        DialogueCandidate as DialogueCandidate,
-    )
-    from .inputs import (
-        DialogueInput as DialogueInput,
-    )
-    from .inputs import (
-        EntityDirectoryInput as EntityDirectoryInput,
-    )
-    from .inputs import (
-        EntityInput as EntityInput,
-    )
-    from .inputs import (
-        ParagraphLabelInput as ParagraphLabelInput,
-    )
-    from .inputs import (
-        RelationInput as RelationInput,
-    )
-    from .inputs import (
-        TextEvidence as TextEvidence,
-    )
-    from .inputs import (
-        paragraph_has_visible_prefix as paragraph_has_visible_prefix,
-    )
-    from .outputs import (
-        BoundCharacterObservation as BoundCharacterObservation,
-    )
-    from .outputs import (
-        BoundDialogue as BoundDialogue,
-    )
-    from .outputs import (
-        BoundParagraphLabel as BoundParagraphLabel,
-    )
-    from .outputs import (
-        SourceReference as SourceReference,
-    )
-    from .outputs import (
-        TextSearchResult as TextSearchResult,
-    )
-
-from .vocabulary import (  # noqa: E402
-    RELATION_DEFINITIONS as RELATION_DEFINITIONS,
-)
-from .vocabulary import (
-    Confidence as Confidence,
-)
-from .vocabulary import (
-    DialogueParseStatus as DialogueParseStatus,
-)
-from .vocabulary import (
-    DialogueVerdict as DialogueVerdict,
-)
-from .vocabulary import (
-    Directionality as Directionality,
-)
-from .vocabulary import (
-    EntityType as EntityType,
-)
-from .vocabulary import (
-    NarrativeFunction as NarrativeFunction,
-)
-from .vocabulary import (
-    RelationChangeKind as RelationChangeKind,
-)
-from .vocabulary import (
-    RelationDefinition as RelationDefinition,
-)
-from .vocabulary import (
-    RelationSemantics as RelationSemantics,
-)
-from .vocabulary import (
-    RelationType as RelationType,
-)
-from .vocabulary import (
-    RoleFunction as RoleFunction,
-)
-from .vocabulary import (
-    Tone as Tone,
-)
-from .vocabulary import (
-    relation_catalog_text as relation_catalog_text,
-)
-from .vocabulary import (
-    tone_catalog_text as tone_catalog_text,
-)
-
-# 2026-10-07 输入/输出模型与共享件互相引用（inputs 取本模块的 StrictModel，本模块再导出
-# 它们的类），模块级互相导入会让"谁先被导入"决定成败；这里改为按需转发。
-_LAZY_REEXPORTS = {
-    **dict.fromkeys(
-        (
-            "ChapterMetricsInput",
-            "ChapterParagraphInfo",
-            "DialogueCandidate",
-            "DialogueInput",
-            "EntityDirectoryInput",
-            "EntityInput",
-            "ParagraphLabelInput",
-            "RelationInput",
-            "TextEvidence",
-            "paragraph_has_visible_prefix",
-        ),
-        "inputs",
-    ),
-    **dict.fromkeys(
-        (
-            "BoundCharacterObservation",
-            "BoundDialogue",
-            "BoundParagraphLabel",
-            "SourceReference",
-            "TextSearchResult",
-        ),
-        "outputs",
-    ),
-}
-
-
-def __getattr__(name: str) -> Any:
-    module_name = _LAZY_REEXPORTS.get(name)
-    if module_name is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    from importlib import import_module
-
-    return getattr(import_module(f"{__package__}.{module_name}"), name)

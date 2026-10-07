@@ -8,37 +8,24 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.event_trees.vocabulary import (
-    _EVENT_ONLY_ROLE_WORDS,
-    EventChildType,
-    normalize_event_participant_role,
+from src.agents.annotation.ir_validation import (
+    _reject,
+    _require_enum,
+    _require_local_key,
+    _require_name,
+    _require_paragraph_id,
+    _require_score,
+    _require_text,
+    namespace_el,
+    namespace_event_el,
 )
-from src.fact_graph.schema import (
-    ENTITY_TAG_MAX_CHARS,
-    ENTITY_TAG_MAX_COUNT,
-    Confidence,
-    DialogueVerdict,
-    EntityRef,
-    EntityType,
-    NarrativeFunction,
-    RelationType,
-    Tone,
-)
-from src.fact_graph.vocabulary import (
-    clamp_emotion_score,
-    normalize_role_function,
-)
-
-from .program import _READ_TOOL_NAMES
-from .subagent_ir import (
+from src.agents.annotation.subagent_ir import (
     CONFIDENCE_VALUES,
     DIALOGUE_VERDICTS,
-    EL_PATH_SEP,
     ENTITY_TYPES,
     EVENT_CHILD_TYPES,
     NARRATIVE_FUNCTIONS,
     RELATION_TYPES,
-    RESERVED_ROOT_KEY,
     RUNTIME_ROLES,
     TONE_VALUES,
     SubagentAnnotation,
@@ -50,17 +37,26 @@ from .subagent_ir import (
     SubagentParticipant,
     SubagentPending,
     SubagentRelation,
-    _reject,
-    _require_enum,
-    _require_local_key,
-    _require_name,
-    _require_paragraph_id,
-    _require_score,
-    _require_text,
-    namespace_el,
-    namespace_event_el,
     normalize_evidence,
 )
+from src.event_trees.vocabulary import (
+    _EVENT_ONLY_ROLE_WORDS,
+    EventChildType,
+    normalize_event_participant_role,
+)
+from src.fact_graph.schema import EL_PATH_SEP, ENTITY_TAG_MAX_CHARS, ENTITY_TAG_MAX_COUNT, RESERVED_ROOT_KEY, EntityRef
+from src.fact_graph.vocabulary import (
+    Confidence,
+    DialogueVerdict,
+    EntityType,
+    NarrativeFunction,
+    RelationType,
+    Tone,
+    clamp_emotion_score,
+    normalize_role_function,
+)
+
+from .program_contract import _READ_TOOL_NAMES
 
 
 def _record_of(subagent: SubagentAnnotation, field: str) -> str:
@@ -775,10 +771,20 @@ def build_subagent_constructors(
         record = _record_of(subagent, "pending")
         item = SubagentPending(description=_require_text(description, record=record, field_name="description"))
         if len(item.description) > 100:
-            raise _reject(f"description={item.description!r} 超过 100 字", record=record,
-                field="description", code="too_long", expected="1..100 字普通文字")
-        return _ConstructorCall(record=record, tool="push_case", args={"description": item.description},
-            ref={"kind": "pending"}, commit=lambda: subagent.pending.append(item))
+            raise _reject(
+                f"description={item.description!r} 超过 100 字",
+                record=record,
+                field="description",
+                code="too_long",
+                expected="1..100 字普通文字",
+            )
+        return _ConstructorCall(
+            record=record,
+            tool="push_case",
+            args={"description": item.description},
+            ref={"kind": "pending"},
+            commit=lambda: subagent.pending.append(item),
+        )
 
     functions = {
         "entity": (entity, "登记本章的一个实体（id=本 subagent 引用键，name 照抄正文写法仅展示）"),

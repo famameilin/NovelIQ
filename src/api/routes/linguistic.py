@@ -1,4 +1,5 @@
 """语言结构基础数据查询端点（《分析能力扩展路线图》§3.3 B/C 赛道）"""
+
 from __future__ import annotations
 
 from typing import Annotated, Literal
@@ -22,7 +23,7 @@ from src.api.models.responses import (
     LinguisticPhrasesResponse,
     Word2VecStatsResponse,
 )
-from src.metrics.aggregate.linguistic_aggregations import (
+from src.linguistic.queries import (
     aggregate_linguistic_features,
     aggregate_phrase_stats,
     fetch_entity_candidates,

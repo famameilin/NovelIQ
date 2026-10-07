@@ -20,26 +20,20 @@ run+规范名确定性铸造（uuid5，回执与落库主键同值），事件�
 没有逐域 finish，失败只指向一个语义单元，模型只重调那一条记录。
 """
 
-# ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入（大文件拆分聚合面）。
-
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：tools.py 大文件拆分——AnnotationToolLedger 迁出至 ledger.py，校验错误翻译层
-# 迁出至 validation_errors.py，build_annotation_tools 工厂段迁出至 tool_factories.py；
-# 本模块保留常量/键规范化/AnnotationQueryService/build_search_tools 并对迁出符号
-# re-export（既有导入方零改动）。
-# 说明：纯结构搬移，不改任何运行逻辑与签名。
+# 账本与工具工厂按实际定义导入；本文件只维护查询工具和键规范化
 
 from __future__ import annotations
 
 import json
 import unicodedata
 from collections.abc import Sequence
-from typing import Annotated, Any, Protocol
+from typing import TYPE_CHECKING, Annotated, Any, Protocol
 
 from langchain_core.tools import tool
 from pydantic import ConfigDict, Field, create_model
 
-from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY, TextSearchResult
+from src.fact_graph.outputs import TextSearchResult
+from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError
 
@@ -237,17 +231,5 @@ def build_search_tools(
     return [search_text]
 
 
-from .ledger import AnnotationToolLedger as AnnotationToolLedger  # noqa: E402
-from .tool_factories import build_annotation_tools as build_annotation_tools  # noqa: E402
-from .validation_errors import (  # noqa: E402
-    _STAGE_FIELD_EXPECTATIONS as _STAGE_FIELD_EXPECTATIONS,
-)
-from .validation_errors import (
-    translate_write_validation_error as translate_write_validation_error,
-)
-
-__all__ = [
-    "AnnotationQueryService",
-    "AnnotationToolLedger",
-    "build_annotation_tools",
-]
+if TYPE_CHECKING:
+    from .ledger import AnnotationToolLedger

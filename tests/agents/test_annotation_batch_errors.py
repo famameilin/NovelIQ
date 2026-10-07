@@ -13,14 +13,11 @@
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.tools import AnnotationToolLedger
+from src.agents.annotation.ledger import AnnotationToolLedger
 from src.event_trees.models import ParticipantArg
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.schema import (
-    DialogueVerdict,
-    EntityInput,
-    Tone,
-)
+from src.fact_graph.inputs import EntityInput
+from src.fact_graph.vocabulary import DialogueVerdict, Tone
 
 
 def _ledger() -> AnnotationToolLedger:

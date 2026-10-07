@@ -8,12 +8,9 @@ from sqlalchemy.orm import Session
 
 from src.api.services.results_queries.diagnosis import _fetch_diagnosis
 from src.api.services.results_queries.topics import _fetch_topics
-from src.metrics.aggregate.algorithms import compute_keywords
-from src.metrics.aggregate.topic_aggregations import (
-    aggregate_book_topics,
-    aggregate_chapter_topics,
-)
+from src.metrics.queries.keywords import query_keywords as compute_keywords
 from src.storage.repositories import ParagraphRepository, StatsRepository
+from src.topic.queries import aggregate_book_topics, aggregate_chapter_topics
 
 
 def build_topics_overview(run_id: str, session: Session, novel_id: str) -> dict[str, Any]:

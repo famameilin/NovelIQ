@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.event_trees.models import BoundChapterAnnotation
-from src.fact_graph.schema import ChapterParagraphInfo
+from src.agents.annotation.output_models import BoundChapterAnnotation
+from src.fact_graph.inputs import ChapterParagraphInfo
 
 from .errors import AnnotationInputError
 
@@ -28,6 +28,5 @@ def validate_bound_annotation(
         for label in annotation.paragraph_labels:
             if label.paragraph_id not in known_paragraph_ids:
                 raise ValueError(
-                    f"系统自选段标签超出本章段落范围: chapter_id={chapter_id}"
-                    f" paragraph_id={label.paragraph_id}"
+                    f"系统自选段标签超出本章段落范围: chapter_id={chapter_id} paragraph_id={label.paragraph_id}"
                 )

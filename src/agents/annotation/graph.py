@@ -13,19 +13,21 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDic
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph.message import add_messages
 
+from src.agents.annotation.ledger import AnnotationToolLedger
+
 from .errors import AnnotationStageRejection
 from .graph_texts import _turn_budget_reminder
-from .tools import AnnotationToolLedger
 
 if TYPE_CHECKING:
-    from src.agents.audit.observer import AgentTurnObserver
     from src.agents.stream import AgentStream
+    from src.agents.turn_observer import AgentTurnObserver
 
 # 2026-08-14 D1：无 continuity_open 阶段，chapter_open -> completed 两态
 AnnotationPhase = Literal["chapter_open", "completed"]
 
 # 2026-09-05 剩余轮次（含本轮）进入该窗口即向本次请求追加收尾提醒
 TURN_BUDGET_REMINDER_WINDOW = 3
+
 
 class AnnotationGraphState(TypedDict):
     """2026-08-10 用于保存逐章 工具循环的累积消息链"""
@@ -131,8 +133,6 @@ def _tool_calls(state: AnnotationGraphState) -> list[dict[str, Any]]:
     return [dict(call) for call in last_message.tool_calls]
 
 
-
-
 def _failed_receipt(name: str, error: str | BaseException) -> str:
     """2026-08-10 用于构造单个调用失败时模型可见的独立回执
 
@@ -145,5 +145,6 @@ def _failed_receipt(name: str, error: str | BaseException) -> str:
         {"accepted": False, "tool": name, "error": str(error)},
         ensure_ascii=False,
     )
+
 
 __all__ = ["AnnotationGraphState"]

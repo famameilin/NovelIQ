@@ -23,6 +23,7 @@ from typing import Any
 
 from sqlalchemy.engine import Row
 
+from src.storage.input_records import ParagraphRecord as ParagraphSpan
 from src.storage.models import Paragraph, TopicModelRun
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.paragraph.curve_ops import (
@@ -58,7 +59,6 @@ from src.storage.repositories.paragraph.topic_ops import (
     insert_topic_model_run,
 )
 from src.storage.repositories.paragraph.writer import insert_paragraphs, validate_spans
-from src.text_processing.models import ParagraphSpan
 
 
 class ParagraphRepository(BaseRepository[Paragraph]):
@@ -91,10 +91,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         """读取 run 的全部段落行，按 paragraph_id 升序"""
         return self.fetch_paragraph_rows_batch(run_id, limit=None)
 
-    def fetch_chapter_paragraph_rows(self, run_id: str, chapter_id: int) -> Sequence[Row]:
-        """按章节直接读取段落清单，避免章节 Agent 反复扫描全书"""
-        return self.fetch_paragraph_rows_batch(run_id, chapter_id=chapter_id, limit=None)
-
     def fetch_paragraph_rows_batch(
         self,
         run_id: str,
@@ -104,9 +100,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         limit: int | None = 128,
     ) -> Sequence[Row]:
         """按 paragraph_id keyset 游标分批读取段落行"""
-        return fetch_paragraph_rows_batch(
-            self.session, run_id, chapter_id=chapter_id, after_id=after_id, limit=limit
-        )
+        return fetch_paragraph_rows_batch(self.session, run_id, chapter_id=chapter_id, after_id=after_id, limit=limit)
 
     # ------------------------------------------------------------------
     # paragraph_metrics（§5.3 原始计数与充分统计量）

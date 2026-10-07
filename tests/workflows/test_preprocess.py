@@ -20,6 +20,8 @@ from unittest.mock import patch
 
 import pytest
 
+from src.workflows.preprocess_readiness import is_preprocess_complete
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.storage.repositories import ChapterRepository, RunRepository
@@ -122,7 +124,7 @@ class TestPreprocess:
         assert total_chars > 0
 
         chapter_repo = ChapterRepository(db_session)
-        assert chapter_repo.is_preprocess_complete(run_id)
+        assert is_preprocess_complete(chapter_repo.session, run_id)
 
         rows = chapter_repo.fetch_chapter_texts(run_id)
         assert len(rows) == chunks_inserted

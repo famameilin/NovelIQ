@@ -1,4 +1,5 @@
 """结果查询共享依赖、pipeline 快照路由与查询参数解析"""
+
 from __future__ import annotations
 
 import json
@@ -38,7 +39,7 @@ async def get_pipeline_snapshot(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict[str, Any]:
-    from src.storage.repositories.book_state import book_state_view
+    from src.api.services.pipeline_view import book_state_view
 
     _require_run_for_novel(session, novel_id, run_id)
     return book_state_view(session, run_id)

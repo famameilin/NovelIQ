@@ -1,6 +1,18 @@
 from __future__ import annotations
 
-from src.api.services.results_queries import _fetch_token_usage_stats
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from src.api.services.results_queries.metadata import _fetch_token_usage_stats as serialize_token_usage
+
+
+def _fetch_token_usage_stats(run_id, source):
+    """在实际领域查询点注入用量，继续验证 HTTP 载荷的完整字段"""
+    with patch(
+        "src.api.services.results_queries.metadata.fetch_token_usage_stats",
+        side_effect=lambda session, identifier: source.fetch_token_usage_stats(identifier),
+    ):
+        return serialize_token_usage(run_id, SimpleNamespace(session=object()))
 
 
 class _StatsRepoStub:
@@ -92,10 +104,18 @@ def test_missing_usage_stays_unknown_instead_of_claiming_complete() -> None:
 
     source = {
         "summary": {
-            "call_count": 0, "total_prompt_tokens": 0, "total_completion_tokens": 0, "total_tokens": 0,
-            "accounting_method": "unknown", "coverage_status": "unknown", "coverage_scope": "未记录链路不能推断完整",
+            "call_count": 0,
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
+            "total_tokens": 0,
+            "accounting_method": "unknown",
+            "coverage_status": "unknown",
+            "coverage_scope": "未记录链路不能推断完整",
         },
-        "by_task": {}, "by_model": {}, "by_call_type": {}, "coverage_gaps": [],
+        "by_task": {},
+        "by_model": {},
+        "by_call_type": {},
+        "coverage_gaps": [],
     }
     result = _fetch_token_usage_stats("run-1", SimpleNamespace(fetch_token_usage_stats=lambda *_: source))
     assert result.summary.accounting_method == "unknown"

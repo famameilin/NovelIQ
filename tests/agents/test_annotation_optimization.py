@@ -10,27 +10,23 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from src.agents.annotation import program as program_module
+from src.agents.annotation import program_contract
 from src.agents.annotation.agent import WorkExecution
+from src.agents.annotation.event_submission import build_event_submission_tool
+from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.program import build_program_tool
 from src.agents.annotation.subagent_graph import build_subagent_graph
 from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.agents.annotation.subagent_runtime import SubagentProgramRuntime
 from src.agents.annotation.tool_batch import _build_tool_batch_node
-from src.agents.annotation.tools import AnnotationToolLedger
 from src.agents.annotation.work_tools import SHARED_SEARCH_MAX_CHARS, build_work_tools
 from src.case_pool import CasePool
-from src.event_trees import program_contract
 from src.event_trees.models import BoundEvent
-from src.event_trees.submission import build_event_submission_tool
 from src.event_trees.trees import EventTrees
 from src.event_trees.vocabulary import EventParticipantRole
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.schema import (
-    ChapterParagraphInfo,
-    EntityInput,
-    RoleFunction,
-)
+from src.fact_graph.inputs import ChapterParagraphInfo, EntityInput
+from src.fact_graph.vocabulary import RoleFunction
 from src.work.annotation_work import WorkReceipt
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
@@ -50,10 +46,15 @@ def _ledger(texts: list[str] | None = None) -> AnnotationToolLedger:
         spans.append((offset, offset + len(text)))
         offset += len(text)
     return AnnotationToolLedger(
-        run_scope="optimized-run", current_chapter_id=24, current_chapter_text="".join(texts),
-        allow_future_context=True, graph=FactGraph(run_scope="optimized-run"),
+        run_scope="optimized-run",
+        current_chapter_id=24,
+        current_chapter_text="".join(texts),
+        allow_future_context=True,
+        graph=FactGraph(run_scope="optimized-run"),
         paragraph_info=ChapterParagraphInfo(
-            paragraph_ids=list(range(201, 201 + len(texts))), char_spans=spans, texts=texts,
+            paragraph_ids=list(range(201, 201 + len(texts))),
+            char_spans=spans,
+            texts=texts,
         ),
     )
 
@@ -66,17 +67,28 @@ def _runtime(ledger: AnnotationToolLedger, role: str | None = None, *, observer:
     subagent = SubagentAnnotation(role=role)
     ledger.finish_work.__self__.subagent = subagent
     return SubagentProgramRuntime(
-        {tool.name: tool for tool in tools}, ledger, subagent, observer=observer,
+        {tool.name: tool for tool in tools},
+        ledger,
+        subagent,
+        observer=observer,
     )
 
 
 def _root(identifier: str = "opening", *, paragraph_id: int = 1) -> dict[str, Any]:
     return {
-        "id": identifier, "description": "阿青举起长刀", "evidence": {"paragraph_id": paragraph_id},
-        "participants": [{
-            "name": "阿青", "entity_type": "character", "role": "主体",
-            "narrative_role": "主体", "action": "举起长刀", "emotion": 0,
-        }],
+        "id": identifier,
+        "description": "阿青举起长刀",
+        "evidence": {"paragraph_id": paragraph_id},
+        "participants": [
+            {
+                "name": "阿青",
+                "entity_type": "character",
+                "role": "主体",
+                "narrative_role": "主体",
+                "action": "举起长刀",
+                "emotion": 0,
+            }
+        ],
     }
 
 
@@ -102,8 +114,13 @@ def _real_work_runtime(*, role: str = "event", observer: Any = None) -> tuple[An
 async def test_production_work_defers_child_without_id_then_publishes_after_root(role: str) -> None:
     runtime, agent, execution = _real_work_runtime(role=role)
     tool = build_event_submission_tool(runtime)
-    child = {"id": "enter", "root_id": "opening", "type": "main", "description": "阿青走进院门",
-             "evidence": {"paragraph_id": 2}}
+    child = {
+        "id": "enter",
+        "root_id": "opening",
+        "type": "main",
+        "description": "阿青走进院门",
+        "evidence": {"paragraph_id": 2},
+    }
     deferred = json.loads(await tool.ainvoke({"events": [child]}))
     assert deferred["status"] == "applied", deferred
     assert deferred["items"][0]["status"] == "waiting"
@@ -126,8 +143,14 @@ async def test_production_work_defers_child_without_id_then_publishes_after_root
 async def test_failed_root_read_blocks_child_before_any_production_write() -> None:
     runtime, agent, execution = _real_work_runtime()
     root = _root(paragraph_id=999)
-    child = {"id": "enter", "root_id": "opening", "type": "main", "description": "进入院门",
-             "evidence": {"paragraph_id": 2}, "participants": _root()["participants"]}
+    child = {
+        "id": "enter",
+        "root_id": "opening",
+        "type": "main",
+        "description": "进入院门",
+        "evidence": {"paragraph_id": 2},
+        "participants": _root()["participants"],
+    }
     body = json.loads(await build_event_submission_tool(runtime).ainvoke({"events": [child, root]}))
     assert [item["status"] for item in body["items"]] == ["failed", "failed"], body
     assert body["items"][0]["failed"][0]["code"] == "dependency_failed"
@@ -141,10 +164,17 @@ async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(mo
     runtime, agent, execution = _real_work_runtime()
     trees = agent.event_trees
     trees.begin("foreign", "saved")
-    nodes = [BoundEvent(
-        node_id=f"node-{index:04d}", tree_id=f"tree-{index % 3}", parent_node_id=None, cause_role="root",
-        description=f"院门事件{index}" + "正文" * 1500, evidence_paragraph_id=201,
-    ) for index in range(247)]
+    nodes = [
+        BoundEvent(
+            node_id=f"node-{index:04d}",
+            tree_id=f"tree-{index % 3}",
+            parent_node_id=None,
+            cause_role="root",
+            description=f"院门事件{index}" + "正文" * 1500,
+            evidence_paragraph_id=201,
+        )
+        for index in range(247)
+    ]
     trees.sync(("foreign", "saved"), 12, nodes)
     trees.confirm("foreign", "saved")
     calls = []
@@ -199,9 +229,15 @@ async def test_graph_search_filters_relations_pages_and_reads_attributes_on_dema
     assert 0 < len(first["entities"]) <= 20
     assert 0 < len(first["relations"]) <= 20
     assert first["next_offset"] is not None and first["next_relation_offset"] is not None
-    second = json.loads(await tool.ainvoke({
-        "limit": 20, "offset": first["next_offset"], "relation_offset": first["next_relation_offset"],
-    }))
+    second = json.loads(
+        await tool.ainvoke(
+            {
+                "limit": 20,
+                "offset": first["next_offset"],
+                "relation_offset": first["next_relation_offset"],
+            }
+        )
+    )
     assert first["entities"][-1]["id"] not in {item["id"] for item in second["entities"]}
     assert first["relations"][-1] not in second["relations"]
     locations = json.loads(await tool.ainvoke({"entity_type": "location"}))
@@ -216,7 +252,10 @@ async def test_program_business_failure_is_audited_without_rolling_back_applied_
     observer = _RecordingObserver()
     runtime, _, execution = _real_work_runtime(observer=observer)
     batch = _build_tool_batch_node(
-        [runtime.build_tool()], ledger=execution.ledger, observer=observer, program_tool_name="execute_code",
+        [runtime.build_tool()],
+        ledger=execution.ledger,
+        observer=observer,
+        program_tool_name="execute_code",
     )
     reply = _program_reply('entity(id="a", name="阿青", entity_type="character", evidence=1)\nprint("done")', "p")
     await batch({"messages": [reply], "phase": "chapter_open", "iterations": 0, "error": None})
@@ -229,7 +268,7 @@ async def test_program_business_failure_is_audited_without_rolling_back_applied_
     assert "reads" in row["receipt"]["error"]["message"]
     positional = json.loads(await runtime.execute('search_graph("阿青")'))
     assert positional["error"]["type"] == "bad_call"
-    assert 'query=' in positional["error"]["message"]
+    assert "query=" in positional["error"]["message"]
     reserved = json.loads(await runtime.execute('entity = read_entity(entity_id="unknown")'))
     assert reserved["error"]["type"] == "name_reserved"
     assert "entity_result" in reserved["error"]["message"]
@@ -257,10 +296,21 @@ async def test_structured_events_resolve_dependencies_and_anchor_real_paragraphs
         assert ledger.source_anchors[record][0].paragraph_id in {201, 202}
         assert ledger.source_anchors[record][0].chapter_id == 24
     # 同一项重提不新增树或节点；未提供参与者时保留已提交集合
-    retry = json.loads(await tool.ainvoke({"events": [{
-        "id": "enter", "root_id": "opening", "type": "main", "description": "阿青进入院门",
-        "evidence": {"paragraph_id": 2},
-    }]}))
+    retry = json.loads(
+        await tool.ainvoke(
+            {
+                "events": [
+                    {
+                        "id": "enter",
+                        "root_id": "opening",
+                        "type": "main",
+                        "description": "阿青进入院门",
+                        "evidence": {"paragraph_id": 2},
+                    }
+                ]
+            }
+        )
+    )
     assert retry["items"][0]["status"] == "written"
     assert len(ledger.bound_payloads["events"]) == 2
 
@@ -272,8 +322,7 @@ async def test_bad_item_does_not_reject_batch_and_only_failed_items_need_resubmi
     tool = build_event_submission_tool(_runtime(ledger, role))
     bad = _root("bad")
     bad["participants"][0]["emotion"] = "愤怒"
-    child = {"id": "child", "root_id": "bad", "type": "main", "description": "入门",
-             "evidence": {"paragraph_id": 2}}
+    child = {"id": "child", "root_id": "bad", "type": "main", "description": "入门", "evidence": {"paragraph_id": 2}}
     healthy = {"id": "healthy", "description": "院门敞开", "evidence": {"paragraph_id": 2}}
     body = json.loads(await tool.ainvoke({"events": [bad, child, healthy]}))
 
@@ -306,7 +355,10 @@ async def test_participant_state_defaults_and_normalization_lands_partial_trio(r
     tool = build_event_submission_tool(_runtime(ledger, role))
     sparse = _root("sparse")
     sparse["participants"][0] = {
-        "name": "阿青", "entity_type": "character", "narrative_role": "主角", "emotion": 9,
+        "name": "阿青",
+        "entity_type": "character",
+        "narrative_role": "主角",
+        "emotion": 9,
     }
     body = json.loads(await tool.ainvoke({"events": [sparse]}))
 
@@ -349,8 +401,13 @@ async def test_child_before_root_waits_in_ledger_until_root_arrives(role: str | 
     """
     ledger = _ledger()
     tool = build_event_submission_tool(_runtime(ledger, role))
-    child = {"id": "enter", "root_id": "opening", "type": "main", "description": "阿青进入院门",
-             "evidence": {"paragraph_id": 2}}
+    child = {
+        "id": "enter",
+        "root_id": "opening",
+        "type": "main",
+        "description": "阿青进入院门",
+        "evidence": {"paragraph_id": 2},
+    }
     body = json.loads(await tool.ainvoke({"events": [child]}))
 
     assert body["status"] == "applied", body
@@ -372,15 +429,26 @@ async def test_child_before_root_waits_in_ledger_until_root_arrives(role: str | 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("role", [None, "event"])
-@pytest.mark.parametrize("production_key", [
-    "batch_deadbeef", "batch_deadbeef/root", "event:batch_deadbeef/root", "event/event/batch_deadbeef/root",
-])
+@pytest.mark.parametrize(
+    "production_key",
+    [
+        "batch_deadbeef",
+        "batch_deadbeef/root",
+        "event:batch_deadbeef/root",
+        "event/event/batch_deadbeef/root",
+    ],
+)
 async def test_submission_rejects_production_root_keys_per_item(role: str | None, production_key: str) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger, role)
     tool = build_event_submission_tool(runtime)
-    bad = {"id": "enter", "root_id": production_key, "type": "main", "description": "阿青进入院门",
-           "evidence": {"paragraph_id": 2}}
+    bad = {
+        "id": "enter",
+        "root_id": production_key,
+        "type": "main",
+        "description": "阿青进入院门",
+        "evidence": {"paragraph_id": 2},
+    }
     body = json.loads(await tool.ainvoke({"events": [bad, _root()]}))
     assert [item["status"] for item in body["items"]] == ["failed", "written"], body
     (failure,) = body["items"][0]["failed"]
@@ -396,8 +464,13 @@ async def test_submission_rejects_production_root_keys_per_item(role: str | None
 async def test_correct_child_resubmission_clears_only_exact_stale_pending_matches(role: str | None) -> None:
     ledger = _ledger()
     tool = build_event_submission_tool(_runtime(ledger, role))
-    child = {"id": "enter", "root_id": "wrong_root", "type": "main", "description": "阿青进入院门",
-             "evidence": {"paragraph_id": 2}}
+    child = {
+        "id": "enter",
+        "root_id": "wrong_root",
+        "type": "main",
+        "description": "阿青进入院门",
+        "evidence": {"paragraph_id": 2},
+    }
     initial = json.loads(await tool.ainvoke({"events": [child, {**child, "id": "other_node"}]}))
     assert all(item["status"] == "waiting" for item in initial["items"])
     await tool.ainvoke({"events": [{**child, "root_id": "other_wrong", "description": "阿青守住院门"}]})
@@ -423,26 +496,29 @@ async def test_correct_child_resubmission_clears_only_exact_stale_pending_matche
 async def test_failed_child_resubmission_restores_pending_and_does_not_add_node() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
-    await runtime.execute('write_event(el="wrong/e1", isroot=False, type="main", description="进入院门", evidence=2)\n'
-                          'write_event(el="t1", isroot=True, description="阿青举刀", evidence=1)')
+    await runtime.execute(
+        'write_event(el="wrong/e1", isroot=False, type="main", description="进入院门", evidence=2)\n'
+        'write_event(el="t1", isroot=True, description="阿青举刀", evidence=1)'
+    )
     before = copy.deepcopy(ledger.pending_child_events)
-    receipt = json.loads(await runtime.execute(
-        'write_event(el="t1/e1", isroot=False, type="main", description="进入院门", evidence=2, '
-        'characters=[{"entityid": "unregistered"}])'
-    ))
+    receipt = json.loads(
+        await runtime.execute(
+            'write_event(el="t1/e1", isroot=False, type="main", description="进入院门", evidence=2, '
+            'characters=[{"entityid": "unregistered"}])'
+        )
+    )
     assert receipt["status"] == "partial", receipt
     assert ledger.pending_child_events == before
     assert len(ledger.bound_payloads["events"]) == 1
-
-
 
 
 @pytest.mark.asyncio
 async def test_subagent_dialogue_preflight_rejects_entire_out_of_range_batch() -> None:
     ledger = _ledger(["“住手！”顾霜喝道。", "“退下。”众人散去。"])
     runtime = _runtime(ledger, "dialogue")
-    body = json.loads(await runtime.execute('for index in [1, 99]:\n'
-                                           '    dialogue(candidate_index=index, verdict="not_dialogue")'))
+    body = json.loads(
+        await runtime.execute('for index in [1, 99]:\n    dialogue(candidate_index=index, verdict="not_dialogue")')
+    )
     assert body["status"] == "rejected", body
     assert body["error"]["type"] == "candidate_index_out_of_range"
     assert "total=2" in body["error"]["message"]
@@ -500,9 +576,15 @@ async def test_organization_receipts_name_actual_fields_and_repair_keeps_entity_
     tool = build_event_submission_tool(_runtime(ledger, role))
     group = _root("group")
     group["description"] = "青云宗弟子来到院门"
-    group["participants"] = [{
-        "name": "青云宗", "entity_type": "organization", "role": "主体", "action": "来到院门", "emotion": 0,
-    }]
+    group["participants"] = [
+        {
+            "name": "青云宗",
+            "entity_type": "organization",
+            "role": "主体",
+            "action": "来到院门",
+            "emotion": 0,
+        }
+    ]
     misuse = json.loads(await tool.ainvoke({"events": [group]}))
     failure = misuse["items"][0]["failed"][0]
     assert failure["record"] == "submission/group"
@@ -543,14 +625,24 @@ async def test_structured_item_failures_are_audited_and_native_submission_is_not
     runtime = _runtime(ledger, observer=observer)
     event_tool = build_event_submission_tool(runtime)
     batch = _build_tool_batch_node(
-        [build_program_tool(runtime), event_tool], ledger=ledger, observer=observer,
+        [build_program_tool(runtime), event_tool],
+        ledger=ledger,
+        observer=observer,
         program_tool_name="execute_code",
     )
     bad = _root("bad")
     bad["participants"][0]["emotion"] = "愤怒"
-    reply = AIMessage(content="", tool_calls=[{
-        "name": "submit_events", "args": {"events": [bad, _root()]}, "id": "e1", "type": "tool_call",
-    }])
+    reply = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "submit_events",
+                "args": {"events": [bad, _root()]},
+                "id": "e1",
+                "type": "tool_call",
+            }
+        ],
+    )
     await batch({"messages": [reply], "phase": "chapter_open", "iterations": 0, "error": None})
 
     failure = next(row for row in observer.rows if row["status"] == "error")
@@ -572,13 +664,15 @@ async def test_structured_item_failures_are_audited_and_native_submission_is_not
 async def test_compressed_reads_keep_every_reference_and_persistent_variable(monkeypatch) -> None:
     ledger = _ledger(["阿青" + "原文" * 1000 for _ in range(11)])
     runtime = _runtime(ledger)
-    monkeypatch.setattr(program_module, "_READ_ECHO_MAX_ITEMS", 2)
-    monkeypatch.setattr(program_module, "_READ_ECHO_MAX_CHARS", 80)
-    body = json.loads(await runtime.execute(
-        'person = write_entity(el="a1", name="阿青", entity_type="character")\n'
-        'first = read_chapter_text(paragraph_id=1)\n'
-        + "\n".join(f"read_chapter_text(paragraph_id={identifier})" for identifier in range(2, 12))
-    ))
+    monkeypatch.setattr(program_contract, "_READ_ECHO_MAX_ITEMS", 2)
+    monkeypatch.setattr(program_contract, "_READ_ECHO_MAX_CHARS", 80)
+    body = json.loads(
+        await runtime.execute(
+            'person = write_entity(el="a1", name="阿青", entity_type="character")\n'
+            "first = read_chapter_text(paragraph_id=1)\n"
+            + "\n".join(f"read_chapter_text(paragraph_id={identifier})" for identifier in range(2, 12))
+        )
+    )
     assert body["status"] == "applied", body
     assert body["reads_omitted"] == 9
     assert len(body["reads"]) == 2
@@ -589,9 +683,9 @@ async def test_compressed_reads_keep_every_reference_and_persistent_variable(mon
         assert len(result["source_ref"]) == 64
         assert result["paragraph_id"] in {210, 211}
         assert read["truncated_chars"] > 0
-    repaired = json.loads(await runtime.execute(
-        'anchor_record(record_id=person["record"], source_ref=first["source_ref"])'
-    ))
+    repaired = json.loads(
+        await runtime.execute('anchor_record(record_id=person["record"], source_ref=first["source_ref"])')
+    )
     assert repaired["status"] == "applied"
     assert ledger.source_anchors["entity/阿青"][0].paragraph_id == 201
 
@@ -613,9 +707,17 @@ class _Replies(StreamedFakeModelMixin):
 
 
 def _program_reply(code: str, identifier: str) -> AIMessage:
-    return AIMessage(content="", tool_calls=[{
-        "name": "execute_code", "args": {"code": code}, "id": identifier, "type": "tool_call",
-    }])
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "execute_code",
+                "args": {"code": code},
+                "id": identifier,
+                "type": "tool_call",
+            }
+        ],
+    )
 
 
 @pytest.mark.asyncio
@@ -625,10 +727,16 @@ async def test_clean_subagent_finish_stops_without_another_model_request(role: s
     runtime = _runtime(ledger, role)
     model = _Replies([_program_reply("finish()", "p1")])
     graph = build_subagent_graph(
-        model, runtime.build_tool(), runtime.finish_tool, ledger=ledger, subagent=runtime.subagent, max_iterations=5,
+        model,
+        runtime.build_tool(),
+        runtime.finish_tool,
+        ledger=ledger,
+        subagent=runtime.subagent,
+        max_iterations=5,
     )
-    await graph.ainvoke({"messages": [HumanMessage(content="完成")], "phase": "chapter_open",
-                        "iterations": 0, "error": None})
+    await graph.ainvoke(
+        {"messages": [HumanMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
+    )
     assert model.requests == 1
 
 
@@ -636,16 +744,24 @@ async def test_clean_subagent_finish_stops_without_another_model_request(role: s
 async def test_finish_closes_work_after_rejected_optional_event() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger, "event")
-    model = _Replies([
-        _program_reply('event(el="t1", isroot=True, type="main", description="举刀", evidence=1)\nfinish()', "p1"),
-        _program_reply('event(el="t1", isroot=True, description="举刀", evidence=1)', "p2"),
-        _program_reply("finish()", "p3"),
-    ])
-    graph = build_subagent_graph(
-        model, runtime.build_tool(), runtime.finish_tool, ledger=ledger, subagent=runtime.subagent, max_iterations=5,
+    model = _Replies(
+        [
+            _program_reply('event(el="t1", isroot=True, type="main", description="举刀", evidence=1)\nfinish()', "p1"),
+            _program_reply('event(el="t1", isroot=True, description="举刀", evidence=1)', "p2"),
+            _program_reply("finish()", "p3"),
+        ]
     )
-    await graph.ainvoke({"messages": [HumanMessage(content="完成")], "phase": "chapter_open",
-                        "iterations": 0, "error": None})
+    graph = build_subagent_graph(
+        model,
+        runtime.build_tool(),
+        runtime.finish_tool,
+        ledger=ledger,
+        subagent=runtime.subagent,
+        max_iterations=5,
+    )
+    await graph.ainvoke(
+        {"messages": [HumanMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
+    )
     assert model.requests == 1
     assert ledger.chapter_finished
     assert ledger.bound_payloads["events"] == []
@@ -655,40 +771,67 @@ async def test_finish_closes_work_after_rejected_optional_event() -> None:
 async def test_evidence_finish_requires_its_own_metric() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger, "evidence")
-    model = _Replies([
-        _program_reply("finish()", "p1"),
-        _program_reply('metric(summary="阿青入门", emotional_valence=0, narrative_function="铺垫")\nfinish()', "p2"),
-    ])
-    graph = build_subagent_graph(
-        model, runtime.build_tool(), runtime.finish_tool, ledger=ledger, subagent=runtime.subagent, max_iterations=5,
+    model = _Replies(
+        [
+            _program_reply("finish()", "p1"),
+            _program_reply(
+                'metric(summary="阿青入门", emotional_valence=0, narrative_function="铺垫")\nfinish()', "p2"
+            ),
+        ]
     )
-    await graph.ainvoke({"messages": [HumanMessage(content="完成")], "phase": "chapter_open",
-                        "iterations": 0, "error": None})
+    graph = build_subagent_graph(
+        model,
+        runtime.build_tool(),
+        runtime.finish_tool,
+        ledger=ledger,
+        subagent=runtime.subagent,
+        max_iterations=5,
+    )
+    await graph.ainvoke(
+        {"messages": [HumanMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
+    )
     assert model.requests == 2
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failed_call", [
-    {"name": "unknown_tool", "args": {}},
-    {"name": "execute_code", "args": {
-        "code": 'event(el="t1", isroot=True, type="main", description="举刀", evidence=1)',
-    }},
-])
+@pytest.mark.parametrize(
+    "failed_call",
+    [
+        {"name": "unknown_tool", "args": {}},
+        {
+            "name": "execute_code",
+            "args": {
+                "code": 'event(el="t1", isroot=True, type="main", description="举刀", evidence=1)',
+            },
+        },
+    ],
+)
 async def test_rejected_call_does_not_reopen_successfully_finished_work(failed_call: dict[str, Any]) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger, "event")
-    model = _Replies([
-        AIMessage(content="", tool_calls=[
-            {**failed_call, "id": "bad", "type": "tool_call"},
-            {"name": "finish", "args": {}, "id": "f1", "type": "tool_call"},
-        ]),
-        AIMessage(content="完成"),
-    ])
-    graph = build_subagent_graph(
-        model, runtime.build_tool(), runtime.finish_tool, ledger=ledger, subagent=runtime.subagent, max_iterations=5,
+    model = _Replies(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {**failed_call, "id": "bad", "type": "tool_call"},
+                    {"name": "finish", "args": {}, "id": "f1", "type": "tool_call"},
+                ],
+            ),
+            AIMessage(content="完成"),
+        ]
     )
-    await graph.ainvoke({"messages": [HumanMessage(content="完成")], "phase": "chapter_open",
-                        "iterations": 0, "error": None})
+    graph = build_subagent_graph(
+        model,
+        runtime.build_tool(),
+        runtime.finish_tool,
+        ledger=ledger,
+        subagent=runtime.subagent,
+        max_iterations=5,
+    )
+    await graph.ainvoke(
+        {"messages": [HumanMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
+    )
     assert model.requests == 1
     assert runtime.subagent.finished is True
     assert ledger.chapter_finished
@@ -698,16 +841,29 @@ async def test_rejected_call_does_not_reopen_successfully_finished_work(failed_c
 async def test_subagent_graph_binds_structured_events_and_finishes_in_one_request() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger, "event")
-    model = _Replies([AIMessage(content="", tool_calls=[
-        {"name": "submit_events", "args": {"events": [_root()]}, "id": "e1", "type": "tool_call"},
-        {"name": "finish", "args": {}, "id": "f1", "type": "tool_call"},
-    ])])
-    graph = build_subagent_graph(
-        model, runtime.build_tool(), runtime.finish_tool, ledger=ledger, subagent=runtime.subagent,
-        max_iterations=5, event_submission_tool=build_event_submission_tool(runtime),
+    model = _Replies(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "submit_events", "args": {"events": [_root()]}, "id": "e1", "type": "tool_call"},
+                    {"name": "finish", "args": {}, "id": "f1", "type": "tool_call"},
+                ],
+            )
+        ]
     )
-    await graph.ainvoke({"messages": [HumanMessage(content="完成")], "phase": "chapter_open",
-                        "iterations": 0, "error": None})
+    graph = build_subagent_graph(
+        model,
+        runtime.build_tool(),
+        runtime.finish_tool,
+        ledger=ledger,
+        subagent=runtime.subagent,
+        max_iterations=5,
+        event_submission_tool=build_event_submission_tool(runtime),
+    )
+    await graph.ainvoke(
+        {"messages": [HumanMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
+    )
     assert model.requests == 1
     assert "submit_events" in model.bound_names
     assert len(ledger.bound_payloads["events"]) == 1

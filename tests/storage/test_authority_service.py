@@ -6,8 +6,8 @@ from typing import Any
 
 from sqlalchemy import select
 
+from src.fact_graph.read import KnowledgeGraphAuthorityService
 from src.storage.models import GraphRelation
-from src.storage.repositories.graph.authority import KnowledgeGraphAuthorityService
 from tests.support.chapter_annotation_helpers import (
     character_fact,
     create_run_with_chunks,

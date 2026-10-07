@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 
-from src.metrics.curve_metrics import compute_global_stats
+from src.metrics.queries.global_stats import query_global_stats as compute_global_stats
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import (
     ParagraphCurveRow,
@@ -72,7 +72,7 @@ def _insert_paragraph_curves(
             sensory_hit_count=0,
             imagery_hit_count=0,
             metaphor_sentence_count=0,
-                    body_reaction_hit_count=0,
+            body_reaction_hit_count=0,
             function_word_counts={},
             semantic_category_counts={},
         )

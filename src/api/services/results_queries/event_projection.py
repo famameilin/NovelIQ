@@ -19,7 +19,7 @@ from src.api.models.events import (
 )
 
 if TYPE_CHECKING:
-    from src.storage.repositories.graph.event_forest import EventForestSnapshot
+    from src.event_trees.read.models import EventForestSnapshot
 
 
 def build_event_forest_response(snapshot: EventForestSnapshot) -> EventForestResponse:

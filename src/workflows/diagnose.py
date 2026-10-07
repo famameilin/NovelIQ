@@ -12,11 +12,12 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.agents.diagnosis.schema import AgentAnalysis
 from src.agents.stream import AgentStream
 from src.config.analysis_logger import AnalysisLogger
+from src.diagnosis.schema import AgentAnalysis
 from src.sse.events import StreamEvent
 from src.storage.repositories import RunRepository
+from src.work.queries import is_annotate_complete
 
 
 def _log_diagnosis_results(result: AgentAnalysis) -> None:
@@ -63,7 +64,7 @@ async def run_diagnose(
     Returns:
         AgentAnalysis: 诊断分析结果
     """
-    from src.agents import run_diagnosis_agent
+    from src.agents.diagnosis.runner import run_diagnosis_agent
     from src.utils.cancellation import check_cancelled
 
     check_cancelled(is_cancelled)
@@ -71,7 +72,7 @@ async def run_diagnose(
     # 完成状态按成功角色贡献只读聚合，不持有整轮诊断的发布行锁
     from src.storage.repositories.annotation import AnnotationRepository
 
-    if not AnnotationRepository(session).is_annotate_complete(run_id):
+    if not is_annotate_complete(AnnotationRepository(session).session, run_id):
         raise ValueError("必需角色 work 尚未全部成功保存，不能诊断")
 
     run_repo = RunRepository(session)

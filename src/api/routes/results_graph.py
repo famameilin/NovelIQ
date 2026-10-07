@@ -36,7 +36,7 @@ from src.api.services.results_queries import (
 )
 from src.api.services.results_queries.event_projection import build_event_forest_response
 from src.api.services.results_queries.graph import GRAPH_CHANGE_LIMIT, compute_graph_metrics
-from src.metrics.aggregate.algorithms import compute_keywords
+from src.metrics.queries.keywords import query_keywords as compute_keywords
 from src.storage.models import Chapter, Paragraph
 from src.storage.repositories import AnnotationRepository
 
@@ -131,7 +131,6 @@ async def get_keywords(
     return KeywordsResponse(**compute_keywords(run_id, session, top_n=top_n))
 
 
-
 # 说明: event-forest 路由在原注册顺序中位于 metrics/* 之后，独立成 router 以保持主模块注册顺序一致
 event_forest_router = APIRouter()
 
@@ -146,9 +145,9 @@ async def get_event_forest(
     """查询事件树、树间边、锚点、证据、可见边界和派生顺序"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    from src.storage.repositories.graph import EventForestRepository
+    from src.event_trees.read.forest import EventForestQuery
 
-    repo = EventForestRepository(session)
+    repo = EventForestQuery(session)
     try:
         snapshot = repo.fetch_snapshot(
             run_id,

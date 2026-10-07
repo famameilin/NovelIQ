@@ -15,17 +15,13 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING
 
 from src.text_processing.chapters.models import ChapterData
 from src.text_processing.chapters.parser import parse_chapters
 from src.text_processing.chapters.preprocess import preprocess_text
 from src.text_processing.models import Chunk, ParagraphSpan
-
-if TYPE_CHECKING:
-    from src.sse.events import StreamEvent
 
 # =============================================================================
 # 数据类型
@@ -65,16 +61,14 @@ def _resolve_trimmed_span(text: str, start: int, end: int) -> tuple[int, int, st
 
 async def chunk_text(
     text: str,
-    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Chunk]:
     """将文本分割成块（async 版本），保留章节信息；无章节结构时自动分章兜底"""
-    chunks, _ = await chunk_text_with_chapters(text, emitter=emitter)
+    chunks, _ = await chunk_text_with_chapters(text)
     return chunks
 
 
 async def chunk_text_with_chapters(
     text: str,
-    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[list[Chunk], list[ChapterData]]:
     """
     将文本分割成块并返回章节目录（async 版本）
@@ -120,69 +114,6 @@ def _chunk_by_chapters(
 # =============================================================================
 # 便捷函数
 # =============================================================================
-
-
-async def chunk_documents(
-    texts: Iterable[str],
-    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
-) -> list[Chunk]:
-    """分块多个文档（async 版本），仅返回 chunks"""
-    chunks, _ = await chunk_documents_with_chapters(texts, emitter=emitter)
-    return chunks
-
-
-async def chunk_documents_with_chapters(
-    texts: Iterable[str],
-    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
-) -> tuple[list[Chunk], list[ChapterData]]:
-    """
-    分块多个文档并聚合章节目录（async 版本）
-
-    多文档场景下将每个文档的 chunk/chapter offset 折算为 run 级连续全文坐标；
-    run-global offset 口径定义为“按输入顺序直接拼接的 preprocess_text 输出”。
-    """
-    all_chunks: list[Chunk] = []
-    all_chapters: list[ChapterData] = []
-    chunk_index_offset = 0
-    chapter_index_offset = 0
-    document_char_offset = 0
-
-    for text in texts:
-        # chunk/chapter 偏移均相对 preprocess_text 输出，offset 累加必须用预处理后长度，
-        # 否则多文档 run 中第 2 个文档起的坐标会系统性漂移
-        normalized_len = len(preprocess_text(text))
-        chunks, chapters = await chunk_text_with_chapters(text, emitter=emitter)
-        for chunk in chunks:
-            all_chunks.append(
-                Chunk(
-                    index=chunk.index + chunk_index_offset,
-                    text=chunk.text,
-                    start=chunk.start + document_char_offset,
-                    end=chunk.end + document_char_offset,
-                    chapter_id=chunk.chapter_id + chapter_index_offset,
-                )
-            )
-        for chapter in chapters:
-            all_chapters.append(
-                ChapterData(
-                    chapter_id=chapter.chapter_id + chapter_index_offset,
-                    sequence=chapter.sequence + chapter_index_offset,
-                    level=chapter.level,
-                    title=chapter.title,
-                    display_title=chapter.display_title,
-                    display_index_label=chapter.display_index_label,
-                    number=chapter.number,
-                    title_start_char=chapter.title_start_char + document_char_offset,
-                    start_char=chapter.start_char + document_char_offset,
-                    end_char=chapter.end_char + document_char_offset,
-                )
-            )
-        chunk_index_offset += len(chunks)
-        if chapters:
-            chapter_index_offset += len(chapters)
-        document_char_offset += normalized_len
-
-    return _reindex(all_chunks), all_chapters
 
 
 # =============================================================================
@@ -321,3 +252,56 @@ def split_chunk_paragraphs(
             )
             paragraph_id += 1
     return spans
+
+
+async def chunk_documents_with_chapters(
+    texts: Iterable[str],
+) -> tuple[list[Chunk], list[ChapterData]]:
+    """
+    分块多个文档并聚合章节目录（async 版本）
+
+    多文档场景下将每个文档的 chunk/chapter offset 折算为 run 级连续全文坐标；
+    run-global offset 口径定义为“按输入顺序直接拼接的 preprocess_text 输出”。
+    """
+    all_chunks: list[Chunk] = []
+    all_chapters: list[ChapterData] = []
+    chunk_index_offset = 0
+    chapter_index_offset = 0
+    document_char_offset = 0
+
+    for text in texts:
+        # chunk/chapter 偏移均相对 preprocess_text 输出，offset 累加必须用预处理后长度，
+        # 否则多文档 run 中第 2 个文档起的坐标会系统性漂移
+        normalized_len = len(preprocess_text(text))
+        chunks, chapters = await chunk_text_with_chapters(text)
+        for chunk in chunks:
+            all_chunks.append(
+                Chunk(
+                    index=chunk.index + chunk_index_offset,
+                    text=chunk.text,
+                    start=chunk.start + document_char_offset,
+                    end=chunk.end + document_char_offset,
+                    chapter_id=chunk.chapter_id + chapter_index_offset,
+                )
+            )
+        for chapter in chapters:
+            all_chapters.append(
+                ChapterData(
+                    chapter_id=chapter.chapter_id + chapter_index_offset,
+                    sequence=chapter.sequence + chapter_index_offset,
+                    level=chapter.level,
+                    title=chapter.title,
+                    display_title=chapter.display_title,
+                    display_index_label=chapter.display_index_label,
+                    number=chapter.number,
+                    title_start_char=chapter.title_start_char + document_char_offset,
+                    start_char=chapter.start_char + document_char_offset,
+                    end_char=chapter.end_char + document_char_offset,
+                )
+            )
+        chunk_index_offset += len(chunks)
+        if chapters:
+            chapter_index_offset += len(chapters)
+        document_char_offset += normalized_len
+
+    return _reindex(all_chunks), all_chapters

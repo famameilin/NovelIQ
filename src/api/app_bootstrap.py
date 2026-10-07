@@ -10,7 +10,7 @@ setup_logging()
 
 _middleware_module = import_module("src.api.middleware")
 _routes_module = import_module("src.api.routes")
-_sse_module = import_module("src.sse.endpoint")
+_sse_module = import_module("src.api.routes.sse")
 
 register_exception_handlers = _middleware_module.register_exception_handlers
 register_middlewares = _middleware_module.register_middlewares

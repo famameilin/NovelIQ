@@ -14,13 +14,6 @@ def normalize_text(text: str) -> str:
     return normalized.strip()
 
 
-def strip_empty_lines(text: str) -> str:
-    if not text:
-        return ""
-    lines = [line.strip() for line in text.splitlines()]
-    return "\n".join([line for line in lines if line])
-
-
 def split_paragraphs(text: str) -> list[str]:
     if not text:
         return []
@@ -39,7 +32,6 @@ __all__ = [
     "normalize_text",
     "split_paragraphs",
     "split_sentences",
-    "strip_empty_lines",
     "Tokenizer",
     "get_tokenizer",
     "tokenize",

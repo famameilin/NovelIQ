@@ -17,17 +17,19 @@ import asyncio
 import time
 from typing import Any
 
-from .errors import AnnotationInvariantError
-from .program import (
+from src.agents.annotation.catalog import (
     SUBAGENT_CONTRACT_TEXT,
-    RestrictedProgramRuntime,
-    _call_rejection,
-    build_program_tool,
-    build_program_tools,
     call_parameters,
     constructor_call_entries,
     render_list_signature,
 )
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.program import build_program_tool
+from src.agents.annotation.program_runtime import RestrictedProgramRuntime
+from src.agents.annotation.search_projection import _call_rejection, build_program_tools
+from src.agents.annotation.tools import FINISH_TOOL_NAME
+
+from .errors import AnnotationInvariantError
 from .subagent_constructors import (
     _ConstructorCall,
     _receipt_message,
@@ -39,7 +41,6 @@ from .subagent_constructors import (
 )
 from .subagent_ir import SubagentAnnotation
 from .tool_batch import _execute_call
-from .tools import FINISH_TOOL_NAME, AnnotationToolLedger
 
 
 class SubagentProgramRuntime(RestrictedProgramRuntime):
@@ -343,8 +344,6 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
             tool_duration_ms=max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000)),
             started_ns=started_ns,
         )
-
-
 
 
 # 工具面常量保留在 subagent_program（本模块仅在构造时读它们）：置于文件末尾引用，

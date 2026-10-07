@@ -16,15 +16,15 @@ import json
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.tools import AnnotationToolLedger
+from src.agents.annotation.ledger import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.schema import ChapterParagraphInfo, Confidence
+from src.fact_graph.inputs import ChapterParagraphInfo
+from src.fact_graph.vocabulary import Confidence
 from tests.support.annotation_work_tools import build_annotation_tools
 
 
 class _QueryService:
     """无数据库依赖的新合同查询桩"""
-
 
     async def search_text(self, query, *, range_name, limit=50):
         del query, range_name, limit
@@ -53,9 +53,7 @@ def _tools(ledger: AnnotationToolLedger) -> dict:
 
 
 async def _write_entity(tools: dict, *, name: str, el: str, entity_type: str = "character") -> dict:
-    receipt = json.loads(
-        await tools["write_entity"].ainvoke({"name": name, "entity_type": entity_type, "el": el})
-    )
+    receipt = json.loads(await tools["write_entity"].ainvoke({"name": name, "entity_type": entity_type, "el": el}))
     assert receipt["status"] == "written"
     return receipt
 
@@ -246,9 +244,7 @@ async def test_characters_full_replacement_clears_stale_observations() -> None:
     # 参与者记录键按模型提交的引用原样构造（2026-09-19：uuid id 引用即进键）
     uuid_record = f"t1/root/participant/{gushuang['id']}"
     assert list(ledger.observation_by_record) == [uuid_record]
-    assert ledger.domain_payloads["character_observations"] == [
-        ledger.observation_by_record[uuid_record]
-    ]
+    assert ledger.domain_payloads["character_observations"] == [ledger.observation_by_record[uuid_record]]
 
 
 @pytest.mark.asyncio
@@ -257,17 +253,20 @@ async def test_foreshadow_root_low_confidence_written_as_payoff_likelihood() -> 
     ledger = _ledger()
     tools = _tools(ledger)
     await _write_entity(tools, name="顾霜", el="gushuang")
-    assert json.loads(
-        await tools["write_event"].ainvoke(
-            {
-                "el": "t1",
-                "isroot": True,
-                "description": "顾霜立誓复仇",
-                "isforeshadowing": True,
-                "confidence": "low",
-            }
-        )
-    )["status"] == "written"
+    assert (
+        json.loads(
+            await tools["write_event"].ainvoke(
+                {
+                    "el": "t1",
+                    "isroot": True,
+                    "description": "顾霜立誓复仇",
+                    "isforeshadowing": True,
+                    "confidence": "low",
+                }
+            )
+        )["status"]
+        == "written"
+    )
     root_event = next(event for event in ledger.bound_payloads["events"] if event.cause_role == "root")
     assert root_event.is_foreshadow_setup is True
     # StrictModel use_enum_values：载荷里按值存（Confidence 是 StrEnum，按值相等）
@@ -311,9 +310,12 @@ async def test_paragraph_labels_membership_gate_and_same_paragraph_dedupe() -> N
     assert excinfo.value.code == "out_of_range"
     assert "1, 2, 3" in str(excinfo.value.expected)
 
-    assert json.loads(
-        await tools["write_metrics"].ainvoke(
-            {**base, "labels": [{"paragraph_id": 1, "emotion": 2}, {"paragraph_id": 1, "emotion": -1}]}
-        )
-    )["status"] == "written"
+    assert (
+        json.loads(
+            await tools["write_metrics"].ainvoke(
+                {**base, "labels": [{"paragraph_id": 1, "emotion": 2}, {"paragraph_id": 1, "emotion": -1}]}
+            )
+        )["status"]
+        == "written"
+    )
     assert [(label.paragraph_id, label.emotion) for label in ledger.bound_payloads["paragraph_labels"]] == [(0, -1)]

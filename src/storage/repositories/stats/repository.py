@@ -65,10 +65,6 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
             message_key=message_key,
         )
 
-    def fetch_token_usage_stats(self, run_id: str) -> dict[str, Any]:
-        """获取 token 使用统计"""
-        return metrics.fetch_token_usage_stats(self.session, run_id)
-
     # ==================== runs 模块方法 ====================
 
     def has_topic_data(self, run_id: str) -> bool:
@@ -78,22 +74,6 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
     def has_linguistic_data(self, run_id: str) -> bool:
         """检查指定运行是否有语言结构基础数据"""
         return runs.has_linguistic_data(self.session, run_id)
-
-    def is_linguistic_complete(self, run_id: str) -> bool:
-        """检查全部段落的语言结构基础数据是否齐备"""
-        return runs.is_linguistic_complete(self.session, run_id)
-
-    def is_topic_model_complete(self, run_id: str) -> bool:
-        """检查主题模型契约、段落终态和分布覆盖是否完整"""
-        return runs.is_topic_model_complete(self.session, run_id)
-
-    def has_diagnosis_data(self, run_id: str) -> bool:
-        """检查指定运行是否有诊断数据"""
-        return runs.has_diagnosis_data(self.session, run_id)
-
-    def is_aggregate_complete(self, run_id: str) -> bool:
-        """检查聚合阶段是否完成"""
-        return runs.is_aggregate_complete(self.session, run_id)
 
     # ==================== metrics 模块补充方法 ====================
 

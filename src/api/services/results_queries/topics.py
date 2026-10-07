@@ -2,7 +2,7 @@
 主题查询组装器
 
 说明: 承载 topics 相关取数与响应装配；权重归一在
-`src.metrics.aggregate.topic_aggregations.normalize_topic_weights`。
+`src.topic.queries.normalize_topic_weights`。
 
 Paragraph 粒度主题结果使用 paragraph_topics 的原始 token 加权聚合
 （fetch_paragraph_topics_agg），归一化使用 weighted_total
@@ -11,9 +11,9 @@ Paragraph 粒度主题结果使用 paragraph_topics 的原始 token 加权聚合
 from __future__ import annotations
 
 from src.api.models.responses import TopicInfo
-from src.metrics.aggregate.normalization import load_topic_words
-from src.metrics.aggregate.topic_aggregations import normalize_topic_weights
 from src.storage.repositories import ParagraphRepository
+from src.topic.artifacts import load_topic_words
+from src.topic.queries import normalize_topic_weights
 
 
 def _fetch_topics(run_id: str, paragraph_repo: ParagraphRepository) -> list:

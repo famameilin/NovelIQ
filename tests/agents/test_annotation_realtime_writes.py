@@ -27,17 +27,16 @@ import json
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
+from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.tool_batch import _invoke_tool
-from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.schema import ChapterParagraphInfo
+from src.fact_graph.inputs import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 class _QueryService:
     """2026-09-13 用于提供无数据库依赖的查询桩"""
-
 
     async def search_text(self, query, *, range_name, limit=50):
         """2026-09-13 用于返回空正文命中"""
@@ -119,13 +118,9 @@ async def _judge_dialogues(tools: dict) -> None:
         await _call(tools, "write_dialogue", {"candidate_index": candidate_index, "verdict": "dialogue"})
 
 
-
-
 # ---------------------------------------------------------------------------
 # 事件：实时生长、三态与重复动态
 # ---------------------------------------------------------------------------
-
-
 
 
 @pytest.mark.asyncio
@@ -164,9 +159,7 @@ async def test_character_participation_defaults_partial_state_fields() -> None:
             "el": "t1",
             "isroot": True,
             "description": "顾霜喝止众人",
-            "characters": [
-                {"entityid": numbers["顾霜"], "role": "主体", "narrative_role": "主体", "emotion": 1}
-            ],
+            "characters": [{"entityid": numbers["顾霜"], "role": "主体", "narrative_role": "主体", "emotion": 1}],
         },
     )
     assert partial["status"] == "written"
@@ -558,8 +551,6 @@ async def test_second_root_with_same_tree_key_updates_description_in_place() -> 
 # ---------------------------------------------------------------------------
 
 
-
-
 @pytest.mark.asyncio
 async def test_dialogue_replay_updates_verdict_in_place() -> None:
     """2026-09-13 同序号重交按更新语义（旧契约的"candidate_index 重复"报错已退役）"""
@@ -700,8 +691,6 @@ async def test_relations_are_flushed_on_write_and_replayed_by_endpoint_pair() ->
     assert str(next(iter(ledger.written_relations.values())).relation_type) == "敌对"
 
 
-
-
 # ---------------------------------------------------------------------------
 # 实体：部分更新合并语义（docstring"只提交本次变化的字段"的服务端兑现）
 # ---------------------------------------------------------------------------
@@ -717,14 +706,29 @@ async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> Non
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    first = await _call(tools, "write_entity", {
-        "name": "顾霜", "entity_type": "character", "el": "a",
-        "tags": ["冷面"], "description": "佩刀女子", "attributes": {"兵器": "刀", "旧痕": "疤"},
-    })
-    update = await _call(tools, "write_entity", {
-        "name": "顾霜", "entity_type": "character", "el": "a",
-        "description": "护院教头", "attributes": {"旧痕": None, "佩饰": "玉"},
-    })
+    first = await _call(
+        tools,
+        "write_entity",
+        {
+            "name": "顾霜",
+            "entity_type": "character",
+            "el": "a",
+            "tags": ["冷面"],
+            "description": "佩刀女子",
+            "attributes": {"兵器": "刀", "旧痕": "疤"},
+        },
+    )
+    update = await _call(
+        tools,
+        "write_entity",
+        {
+            "name": "顾霜",
+            "entity_type": "character",
+            "el": "a",
+            "description": "护院教头",
+            "attributes": {"旧痕": None, "佩饰": "玉"},
+        },
+    )
     assert update["content"] == {
         "name": "顾霜",
         "entity_type": "character",
@@ -735,9 +739,16 @@ async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> Non
     }
     assert ledger.written_entities["顾霜"].tags == ["冷面"]
 
-    cleared = await _call(tools, "write_entity", {
-        "name": "顾霜", "entity_type": "character", "el": "a", "tags": [],
-    })
+    cleared = await _call(
+        tools,
+        "write_entity",
+        {
+            "name": "顾霜",
+            "entity_type": "character",
+            "el": "a",
+            "tags": [],
+        },
+    )
     assert cleared["content"]["tags"] == []
     assert cleared["content"]["description"] == "护院教头"
     assert cleared["content"]["attributes"] == {"兵器": "刀", "佩饰": "玉"}
@@ -746,12 +757,6 @@ async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> Non
 # ---------------------------------------------------------------------------
 # 收尾：唯一 finish 的判定边界
 # ---------------------------------------------------------------------------
-
-
-
-
-
-
 
 
 @pytest.mark.asyncio
@@ -894,8 +899,6 @@ class _SingleReplyLLM(StreamedFakeModelMixin):
         return self.response
 
 
-
-
 # ---------------------------------------------------------------------------
 # 参数面与收尾事务边界
 # ---------------------------------------------------------------------------
@@ -953,8 +956,6 @@ async def test_undeclared_argument_is_rejected_per_call_not_dropped() -> None:
     assert ledger.event_trees[ledger.tree_key_index["t1"]]["nodes"] == {
         "root": ledger.event_trees[ledger.tree_key_index["t1"]]["root_node_id"]
     }
-
-
 
 
 # ---------------------------------------------------------------------------

@@ -17,18 +17,13 @@ import pytest
 from pydantic import ValidationError
 
 from src.agents.annotation.errors import AnnotationStageRejection
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.text_search import TextSearchCandidate
 from src.agents.annotation.tool_batch import _invoke_tool
-from src.agents.annotation.tools import AnnotationToolLedger
 from src.event_trees.models import EventParticipantInput
 from src.fact_graph.graph import FactGraph, mention_uuid
-from src.fact_graph.schema import (
-    ChapterParagraphInfo,
-    DialogueInput,
-    EntityInput,
-    RelationInput,
-    TextSearchResult,
-)
-from src.storage.text_search import TextSearchCandidate
+from src.fact_graph.inputs import ChapterParagraphInfo, DialogueInput, EntityInput, RelationInput
+from src.fact_graph.outputs import TextSearchResult
 from tests.support.annotation_work_tools import build_annotation_tools
 
 
@@ -186,8 +181,6 @@ def _reject(tools: list, ledger: AnnotationToolLedger, name: str, args: dict) ->
     return excinfo.value.receipt()
 
 
-
-
 def _entity_calls(
     *,
     name: str = "顾霜",
@@ -302,8 +295,6 @@ def _event_calls(
             },
         ),
     ]
-
-
 
 
 def test_schema_rejects_tone_words_in_emotion_with_guidance() -> None:
@@ -457,20 +448,6 @@ def test_entity_tags_normalized_deduplicated_and_type_enforced() -> None:
                 "entity_type": "object",
             }
         )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_dialogue_verdict_binds_inner_monologue() -> None:
@@ -684,8 +661,6 @@ def test_write_tools_reject_invalid_enum_at_call_time() -> None:
     assert ledger.written_dialogues == {}
 
 
-
-
 def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
     """2026-09-13 伏笔即事件树：isforeshadowing=true 根事件携带置信度并拒绝未知参数
 
@@ -839,20 +814,6 @@ def test_write_relation_rejects_unregistered_entity_reference() -> None:
     assert "00000000-0000-0000-0000-000000000987" in receipt["message"]
     assert ledger.written_relations == {}
     assert ledger.graph.relation_assert_ops == []
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_dialogue_small_calls_bind_speaker_tone_and_null_fields() -> None:
@@ -1071,10 +1032,6 @@ def test_relation_state_field_rejected_from_contract() -> None:
     assert ledger.written_relations == {}
 
 
-
-
-
-
 def test_text_search_result_accepts_paragraph_id_zero() -> None:
     """2026-08-30 用于验证首段可作为精确命中段落授权"""
     result = TextSearchResult(
@@ -1132,18 +1089,6 @@ def _paragraph_labels_for_ledger(ledger: AnnotationToolLedger) -> list[dict]:
     return _paragraph_labels(list(zip(known[:2], [-2, -1], strict=True)))
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def test_paragraph_labels_reject_foreign_paragraph_and_dedup_on_replay() -> None:
     """2026-09-07 用于验证越界段号直接报错自纠（拒绝不落任何写入）
 
@@ -1179,8 +1124,6 @@ def test_paragraph_labels_reject_foreign_paragraph_and_dedup_on_replay() -> None
     assert labels[0].emotion == -1
     # 旧"句标签不触碰指标域"随域合并退役：标签并入指标整域，提交即落账
     assert ledger.metrics_payload is not None
-
-
 
 
 def test_tone_rejection_receipt_is_self_correcting_through_production_path() -> None:

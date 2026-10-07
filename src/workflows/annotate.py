@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.agent import AnnotationAgent
-from src.agents.audit.module import AuditModule
+from src.audit.module import AuditModule
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
 from src.event_bus import EventBus, Message
@@ -20,9 +20,9 @@ from src.sse.consumer import SSEModule
 from src.sse.events import StreamEvent
 from src.storage.db import get_session_factory
 from src.storage.models import AnalysisOutput, AnnotationWork, Chapter, Paragraph
-from src.storage.repositories.annotation.work_state import completed_chapters
 from src.work.annotation_work import WorkReceipt, annotation_work_id, required_roles
-from src.workflows.chapter_pool import ChapterWorkerPool
+from src.work.chapter_pool import ChapterWorkerPool
+from src.work.policy import completed_chapters
 
 
 def _load_work(session_factory: Callable[[], Session], run_id: str) -> tuple[list[WorkReceipt], set[int]]:

@@ -19,23 +19,18 @@ from uuid import NAMESPACE_DNS, uuid5
 import pytest
 from langchain_core.messages import AIMessage
 
-from src.agents.annotation.tools import AnnotationToolLedger
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.output_models import BoundChapterAnnotation
 from src.agents.annotation.validation import validate_bound_annotation
-from src.event_trees.models import BoundChapterAnnotation
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.schema import (
-    BoundDialogue,
-    BoundParagraphLabel,
-    ChapterMetricsInput,
-    ChapterParagraphInfo,
-)
+from src.fact_graph.inputs import ChapterMetricsInput, ChapterParagraphInfo
+from src.fact_graph.outputs import BoundDialogue, BoundParagraphLabel
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 class _QueryService:
     """2026-08-07 用于提供无数据库依赖的新合同查询桩"""
-
 
     async def search_text(self, query, *, range_name, limit=50):
         """2026-08-07 用于返回空原文候选"""
@@ -168,8 +163,6 @@ def _serial_program_messages() -> list[AIMessage]:
     ]
 
 
-
-
 def _bound_annotation(*, summary: str = "顾霜进入山门") -> BoundChapterAnnotation:
     """2026-08-07 用于构造 Runner 重试测试的最小章节标注（2026-09-19 章即块拍平）"""
     return BoundChapterAnnotation(
@@ -182,8 +175,6 @@ def _bound_annotation(*, summary: str = "顾霜进入山门") -> BoundChapterAnn
         dialogues=[],
         events=[],
     )
-
-
 
 
 def _tool_receipts(captured_round: list) -> list[str]:
@@ -246,24 +237,6 @@ async def test_entity_reregistration_same_content_is_idempotent() -> None:
     assert len(ledger.graph.entity_ops) == 1
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def test_validate_bound_annotation_verifies_dialogue_original_text() -> None:
     """2026-08-07 用于验证对话原文位置与内容由系统绑定且可回查"""
     annotation = _bound_annotation()
@@ -282,18 +255,6 @@ def test_validate_bound_annotation_verifies_dialogue_original_text() -> None:
             chapter_id=1,
             chapter_text="顾霜进入山门",
         )
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_validate_bound_annotation_verifies_paragraph_label_membership() -> None:

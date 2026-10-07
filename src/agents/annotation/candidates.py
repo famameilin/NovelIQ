@@ -8,7 +8,8 @@ import re
 from dataclasses import dataclass
 from uuid import NAMESPACE_DNS, uuid5
 
-from src.fact_graph.schema import DialogueCandidate, DialogueParseStatus
+from src.fact_graph.inputs import DialogueCandidate
+from src.fact_graph.vocabulary import DialogueParseStatus
 
 _QUOTE_PAIRS = {
     "“": "”",

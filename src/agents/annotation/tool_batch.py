@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING, Any, get_args
 from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
-from src.event_trees.submission import SUBMIT_EVENTS_TOOL_NAME
+from src.agents.annotation.event_submission import SUBMIT_EVENTS_TOOL_NAME
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.tools import _WRITE_TOOL_NAMES
+from src.agents.annotation.validation_errors import translate_write_validation_error
 
 from .errors import AnnotationInvariantError
 from .graph import (
@@ -19,15 +22,10 @@ from .graph import (
     _failed_receipt,
     _tool_calls,
 )
-from .tools import (
-    _WRITE_TOOL_NAMES,
-    AnnotationToolLedger,
-    translate_write_validation_error,
-)
 
 if TYPE_CHECKING:
-    from src.agents.audit.observer import AgentTurnObserver
     from src.agents.stream import AgentStream
+    from src.agents.turn_observer import AgentTurnObserver
 
 
 def _tool_batch_protocol_error(
@@ -276,7 +274,9 @@ async def _execute_call(
             started_ns=started_ns,
         )
     await _tool_status_emitter(stream, observer)(
-        name, audit_status, result if audit_status == "success" else (audit_error or ""),
+        name,
+        audit_status,
+        result if audit_status == "success" else (audit_error or ""),
     )
     return _call_entry(
         call,
@@ -347,7 +347,6 @@ def _build_tool_batch_node(
                     observer=observer,
                     stream=stream,
                     call_index=call_index,
-
                     # 写入成功即登记当前 work 的记录键，供原文锚点使用
                     record_keys=ledger.written_record_keys,
                     program_meta=(

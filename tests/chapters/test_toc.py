@@ -112,17 +112,7 @@ def test_toc_with_named_volume_page_number_entries() -> None:
     2026-09-09 重明传形态回归：纯名称卷/篇 + 尾页码（"少年篇\t2"）的目录条目。
     修复前该形态不匹配 _TOC_ENTRY_RE，首行即判非条目导致整体识别失败。
     """
-    text = (
-        "目录\n"
-        "少年篇\t2\n"
-        "第一章 起点\t3\n"
-        "第二章 入城\t5\n"
-        "青年篇\t122\n"
-        "\n"
-        "少年篇\n"
-        "第一章 起点\n"
-        "内容。"
-    )
+    text = "目录\n少年篇\t2\n第一章 起点\t3\n第二章 入城\t5\n青年篇\t122\n\n少年篇\n第一章 起点\n内容。"
     toc = detect_toc_range(text)
     assert toc is not None
     start, end = toc

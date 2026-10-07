@@ -237,4 +237,3 @@ def test_split_paragraphs_oversized_without_sentence_boundaries_falls_back_hard_
     assert len(paragraphs) > 1
     assert all(len(p.text) <= 1500 for p in paragraphs)
     assert "".join(p.text for p in paragraphs) == text
-

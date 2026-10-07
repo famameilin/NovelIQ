@@ -20,13 +20,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from src.api.exceptions import (
     AnalysisError,
     AnalysisNotCompleteError,
-    FileStorageError,
     GraphReadinessError,
-    InvalidFileError,
     NovelNotFoundError,
     SettingsValidationError,
 )
 from src.storage.id_mapping import IDMappingError, TaskIDNotFoundError
+from src.workflows.exceptions import FileStorageError, InvalidFileError, TaskApplicationError
 
 
 class ErrorResponse:
@@ -125,6 +124,12 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     return error_response.to_json_response()
 
 
+async def task_application_error_handler(request: Request, exc: TaskApplicationError) -> JSONResponse:
+    """业务原因在 HTTP 边界映射，保留原有错误载荷字段与标签"""
+    codes = {"missing_task": 404, "invalid_state": 400, "persistence_failed": 500}
+    return create_error_response(str(exc), "HTTPException", codes[exc.reason]).to_json_response()
+
+
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """2026-08-13 统一错误 body 契约：请求参数校验失败（422）也走三字段格式，
     detail 转可读字符串（FastAPI 默认 detail 是 [{loc, msg, type}] 列表）。"""
@@ -147,6 +152,7 @@ def register_exception_handlers(app) -> None:
 
     # 2026-08-13 统一错误 body 契约：路由内 HTTPException 与请求校验失败
     # 不再返回 FastAPI 默认 {detail}，与自定义异常处理器同为三字段结构
+    app.add_exception_handler(TaskApplicationError, task_application_error_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
 

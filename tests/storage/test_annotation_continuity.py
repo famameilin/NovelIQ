@@ -8,12 +8,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.agents.annotation.queries import DatabaseAnnotationQueryService
 from src.config import settings
 from src.storage.models import (
     Chapter,
-)
-from src.storage.repositories.annotation.continuity import (
-    DatabaseAnnotationQueryService,
 )
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.text_processing.models import Chunk
@@ -222,10 +220,10 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     """
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+    from src.agents.annotation.ledger import AnnotationToolLedger
     from src.agents.annotation.subagent_graph import build_subagent_graph
-    from src.agents.annotation.tools import AnnotationToolLedger
     from src.fact_graph.graph import FactGraph
-    from src.fact_graph.schema import ChapterParagraphInfo
+    from src.fact_graph.inputs import ChapterParagraphInfo
     from tests.support.annotation_work_tools import build_annotation_tools, build_program_test_runtime
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="模型回话不占连接")
@@ -263,9 +261,11 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
                 tool_calls=[
                     {
                         "name": "execute_code",
-                        "args": {"code": 'search_text(query="顾霜")\n'
-                                 'metric(summary="顾霜身份成谜", emotional_valence=0, narrative_function="铺垫")\n'
-                                 'finish()'},
+                        "args": {
+                            "code": 'search_text(query="顾霜")\n'
+                            'metric(summary="顾霜身份成谜", emotional_valence=0, narrative_function="铺垫")\n'
+                            "finish()"
+                        },
                         "id": "c2",
                         "type": "tool_call",
                     },
@@ -274,8 +274,12 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
 
     runtime = build_program_test_runtime(tools, ledger)
     graph = build_subagent_graph(
-        _SearchThenFinishLLM(), runtime.build_tool(), runtime.finish_tool,
-        ledger=ledger, subagent=runtime.subagent, max_iterations=1,
+        _SearchThenFinishLLM(),
+        runtime.build_tool(),
+        runtime.finish_tool,
+        ledger=ledger,
+        subagent=runtime.subagent,
+        max_iterations=1,
     )
     state = await graph.ainvoke(
         {

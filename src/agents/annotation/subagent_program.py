@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.event_trees.submission import SUBMIT_EVENTS_TOOL_NAME
+from src.agents.annotation.event_submission import SUBMIT_EVENTS_TOOL_NAME
+from src.agents.annotation.program_contract import PROGRAM_TOOL_NAME
 
-from .program import PROGRAM_TOOL_NAME
-from .subagent_ir import SUBAGENT_ROLES, SubagentAnnotation
+from .subagent_ir import SubagentAnnotation
 from .tools import FINISH_TOOL_NAME
 
 # 长章三个角色独立执行，短章使用 solo；展示名供职责文案和日志共用
@@ -65,6 +65,7 @@ _SUBAGENT_CONSTRUCTOR_ORDER: tuple[str, ...] = (
     "pending",
 )
 
+
 def subagent_gap(subagent: SubagentAnnotation, *, candidate_total: int) -> dict[str, Any]:
     """回报当前职责的实际缺口，不补造指标或对话判定"""
     if subagent.role not in {"solo", "evidence"}:
@@ -76,27 +77,3 @@ def subagent_gap(subagent: SubagentAnnotation, *, candidate_total: int) -> dict[
         "missing_candidates": sorted(set(range(1, candidate_total + 1)) - judged),
         "missing_metric": subagent.metric is None,
     }
-
-
-def subagent_gap_is_clean(gap: dict[str, Any]) -> bool:
-    """成功收尾且全部必需产出齐全才算完成"""
-    return bool(gap.get("finished")) and not gap.get("missing_candidates") and not gap.get("missing_metric")
-
-
-from .subagent_constructors import (  # noqa: E402
-    build_subagent_constructors as build_subagent_constructors,
-)
-from .subagent_runtime import (  # noqa: E402
-    SubagentProgramRuntime as SubagentProgramRuntime,
-)
-
-__all__ = [
-    "SUBAGENT_BOUND_TOOL_NAMES",
-    "SUBAGENT_ROLES",
-    "SUBAGENT_ROLE_LABELS",
-    "SUBAGENT_TOOL_NAMES",
-    "SubagentProgramRuntime",
-    "build_subagent_constructors",
-    "subagent_gap",
-    "subagent_gap_is_clean",
-]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.schema import EntityInput, RelationInput
+from src.fact_graph.inputs import EntityInput, RelationInput
 
 
 def _entity(name: str, **attributes: object) -> EntityInput:

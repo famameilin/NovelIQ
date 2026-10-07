@@ -44,6 +44,7 @@ def _as_naive_utc(value: datetime | None) -> datetime | None:
         return value
     return value.astimezone(UTC).replace(tzinfo=None)
 
+
 _UNSET = object()
 T = TypeVar("T")
 
@@ -161,24 +162,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             return None
         return self._to_dict_with_deserialization(run)
 
-    def update_run_status(self, run_id: str, status: str) -> None:
-        """
-        更新运行状态
-
-        Args:
-            run_id: 运行ID
-            status: 新状态
-        """
-        now = _naive_utcnow()
-        stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
-        run = self.session.execute(stmt).scalar_one_or_none()
-        if run:
-            run.status = status
-            if status in ("completed", "failed", "cancelled"):
-                run.completed_at = now
-            run.updated_at = now
-            self.session.commit()
-
     def get_runs_by_novel(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取指定小说的所有运行记录
@@ -192,21 +175,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         stmt = select(AnalysisRun).where(AnalysisRun.novel_id == novel_id).order_by(AnalysisRun.created_at.desc())
         runs = self.session.execute(stmt).scalars().all()
         return [self._to_dict_with_deserialization(run) for run in runs]
-
-    def cancel_run(self, run_id: str) -> bool:
-        """原子性设置取消标记（DB 驱动 cancel_requested）。Args: run_id；Returns: 是否成功。"""
-        from sqlalchemy import update
-
-        stmt = (
-            update(AnalysisRun)
-            .where(AnalysisRun.run_id == run_id)
-            .where(AnalysisRun.cancel_requested.is_(False))
-            .values(cancel_requested=True,
-                    updated_at=_naive_utcnow())
-        )
-        result = self.session.execute(stmt)
-        self.session.commit()
-        return result.rowcount > 0  # type: ignore[attr-defined]
 
     def request_task_cancellation(self, run_id: str) -> str | None:
         """
@@ -227,7 +195,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             .values(
                 status="cancelling",
                 cancel_requested=True,
-
                 updated_at=now,
             )
         )

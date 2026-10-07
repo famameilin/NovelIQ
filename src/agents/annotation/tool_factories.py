@@ -18,20 +18,20 @@ from pydantic import Field, JsonValue
 
 from src.event_trees.models import ParticipantArg
 from src.event_trees.vocabulary import EventChildType
+from src.fact_graph.inputs import ChapterMetricsInput, EntityInput, ParagraphLabelInput
 from src.fact_graph.schema import (
     CLIFFHANGER_DESCRIPTION,
     ENTITY_TAG_MAX_CHARS,
     ENTITY_TAG_MAX_COUNT,
     ENTITY_TAGS_RULE_TEXT,
     PIVOT_MOMENT_DESCRIPTION,
-    ChapterMetricsInput,
+    EntityRef,
+)
+from src.fact_graph.vocabulary import (
     Confidence,
     DialogueVerdict,
-    EntityInput,
-    EntityRef,
     EntityType,
     NarrativeFunction,
-    ParagraphLabelInput,
     RelationType,
     Tone,
     relation_catalog_text,

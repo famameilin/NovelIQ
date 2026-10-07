@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 
-from src.utils.lttb import lttb_indices, sample_paragraph_curve_points
+from src.metrics.sampling import lttb_indices, sample_paragraph_curve_points
 
 
 def test_lttb_returns_all_when_within_budget() -> None:

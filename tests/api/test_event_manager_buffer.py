@@ -239,7 +239,7 @@ async def test_failed_persistence_replays_actual_cache_with_same_cursor_and_iden
             return 41
 
         def display_state(self, task_id):
-            from src.storage.repositories.event_outbox import DisplayState
+            from src.sse.state import DisplayState
 
             return DisplayState()
 
@@ -275,7 +275,7 @@ async def test_replay_short_page_and_concurrent_send_keep_all_persisted_sequence
     """短页查询期间发送超过缓存容量，客户端仍能逐页收到全部持久消息"""
     from copy import deepcopy
 
-    from src.storage.repositories.event_outbox import DisplayState
+    from src.sse.state import DisplayState
 
     class ConcurrentOutbox:
         def __init__(self):
@@ -343,13 +343,13 @@ async def test_replay_short_page_and_concurrent_send_keep_all_persisted_sequence
 
 @pytest.mark.asyncio
 async def test_postgres_outbox_keeps_generated_sequence_across_reversed_save_and_restart(db_session):
+    from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
     from src.storage.models import EventOutbox
-    from src.storage.repositories.event_outbox import EventOutboxRepository
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
     _novel, run_id = create_run_with_chunks(db_session, texts=["原文。"])
-    outbox = EventOutboxRepository(get_session_factory())
+    outbox = SseMessageRepository(get_session_factory())
     first = {"message_id": "first:" + run_id, "invocation_id": "actual-inv", "content": "先产生"}
     second = {"message_id": "second:" + run_id, "invocation_id": "actual-inv", "content": "后产生"}
     a = outbox.reserve_sequence(run_id, first["message_id"])
@@ -370,19 +370,32 @@ async def test_postgres_outbox_keeps_generated_sequence_across_reversed_save_and
 
 @pytest.mark.asyncio
 async def test_resume_preserves_saved_work_display_but_filters_persisted_old_terminal(db_session):
+    from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
-    from src.storage.repositories.event_outbox import EventOutboxRepository
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
     _novel, run_id = create_run_with_chunks(db_session, texts=["第一章原文。", "第二章原文。"], chapter_ids=[1, 2])
-    outbox = EventOutboxRepository(get_session_factory())
+    outbox = SseMessageRepository(get_session_factory())
     manager = EventManager(outbox=outbox)
-    completed = {"work_id": "complete-work", "invocation_id": "complete-inv", "stage": "annotate",
-                 "chapter_id": 1, "sub_stage": "solo"}
+    completed = {
+        "work_id": "complete-work",
+        "invocation_id": "complete-inv",
+        "stage": "annotate",
+        "chapter_id": 1,
+        "sub_stage": "solo",
+    }
     try:
         await manager.send(run_id, "work_reset", {**completed, "message_id": "reset-complete:" + run_id})
-        await manager.send(run_id, "llm_output", {**completed, "message_id": "shown-complete:" + run_id,
-                                                 "stream_id": "complete-inv", "content": "保留完成章"})
+        await manager.send(
+            run_id,
+            "llm_output",
+            {
+                **completed,
+                "message_id": "shown-complete:" + run_id,
+                "stream_id": "complete-inv",
+                "content": "保留完成章",
+            },
+        )
         await manager.send(run_id, "task_cancelled", {"message_id": "old-stop:" + run_id})
         await manager.restart_display(run_id)
         await manager.send(run_id, "stage_start", {"message_id": "new-stage:" + run_id, "stage": "annotate"})
@@ -401,26 +414,35 @@ async def test_resume_preserves_saved_work_display_but_filters_persisted_old_ter
 
 @pytest.mark.asyncio
 async def test_reset_filters_old_invocation_after_restart_without_deleting_message_history(db_session):
+    from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
     from src.storage.models import EventOutbox
-    from src.storage.repositories.event_outbox import EventOutboxRepository
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
     _novel, run_id = create_run_with_chunks(db_session, texts=["原文。"])
-    outbox = EventOutboxRepository(get_session_factory())
+    outbox = SseMessageRepository(get_session_factory())
     manager = EventManager(outbox=outbox)
     base = {"work_id": "same-work", "stage": "annotate", "sub_stage": "event", "chapter_id": 1}
     try:
         await manager.send(run_id, "work_reset", {**base, "invocation_id": "old", "message_id": "old-reset:" + run_id})
-        await manager.send(run_id, "llm_output", {**base, "invocation_id": "old", "message_id": "old-output:" + run_id,
-                                                 "content": "旧执行"})
+        await manager.send(
+            run_id,
+            "llm_output",
+            {**base, "invocation_id": "old", "message_id": "old-output:" + run_id, "content": "旧执行"},
+        )
         await manager.send(run_id, "work_reset", {**base, "invocation_id": "new", "message_id": "new-reset:" + run_id})
-        await manager.send(run_id, "llm_output", {**base, "invocation_id": "new", "message_id": "new-output:" + run_id,
-                                                 "content": "新执行"})
+        await manager.send(
+            run_id,
+            "llm_output",
+            {**base, "invocation_id": "new", "message_id": "new-output:" + run_id, "content": "新执行"},
+        )
         restarted = EventManager(outbox=outbox)
         try:
-            await restarted.send(run_id, "llm_output", {**base, "invocation_id": "old", "message_id": "late:" + run_id,
-                                                       "content": "迟到旧执行"})
+            await restarted.send(
+                run_id,
+                "llm_output",
+                {**base, "invocation_id": "old", "message_id": "late:" + run_id, "content": "迟到旧执行"},
+            )
             await restarted.send(
                 run_id, "work_reset", {**base, "invocation_id": "old", "message_id": "late-reset:" + run_id}
             )
@@ -446,10 +468,22 @@ async def test_sse_module_ignores_old_execution_and_retired_reset():
         shown.append(event)
 
     module = SSEModule(bus, "run", emit)
+
     async def send(action, invocation, content=""):
-        await module.show(Message("sse.show", "agent", module.address, "run", "work", invocation,
-                                  payload=StreamEvent(action=action, sub_stage="event", chapter_id=1,
-                                                      stream_id=invocation, content=content)))
+        await module.show(
+            Message(
+                "sse.show",
+                "agent",
+                module.address,
+                "run",
+                "work",
+                invocation,
+                payload=StreamEvent(
+                    action=action, sub_stage="event", chapter_id=1, stream_id=invocation, content=content
+                ),
+            )
+        )
+
     try:
         await send("work_reset", "old")
         await send("work_reset", "new")
@@ -457,7 +491,9 @@ async def test_sse_module_ignores_old_execution_and_retired_reset():
         await send("work_reset", "old")
         await send("output", "new", "当前")
         assert [(event.action, event.invocation_id) for event in shown] == [
-            ("work_reset", "old"), ("work_reset", "new"), ("output", "new"),
+            ("work_reset", "old"),
+            ("work_reset", "new"),
+            ("output", "new"),
         ]
     finally:
         module.close()
@@ -465,33 +501,53 @@ async def test_sse_module_ignores_old_execution_and_retired_reset():
 
 @pytest.mark.asyncio
 async def test_chapter_reset_retires_old_lanes_but_keeps_other_chapters_after_restart(db_session):
+    from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
-    from src.storage.repositories.event_outbox import EventOutboxRepository
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
     _novel, run_id = create_run_with_chunks(db_session, texts=["完成章。", "未完成章。"], chapter_ids=[1, 2])
-    outbox = EventOutboxRepository(get_session_factory())
+    outbox = SseMessageRepository(get_session_factory())
     manager = EventManager(outbox=outbox)
     try:
         for chapter, work, invocation, role in [(1, "complete", "saved", "solo"), (2, "old-event", "old", "event")]:
-            data = {"work_id": work, "invocation_id": invocation, "chapter_id": chapter,
-                    "stage": "annotate", "sub_stage": role}
+            data = {
+                "work_id": work,
+                "invocation_id": invocation,
+                "chapter_id": chapter,
+                "stage": "annotate",
+                "sub_stage": role,
+            }
             await manager.send(run_id, "work_reset", {**data, "message_id": f"{run_id}:reset:{work}"})
             await manager.send(run_id, "llm_output", {**data, "content": work, "message_id": f"{run_id}:output:{work}"})
         await manager.send(run_id, "chapter_reset", {"stage": "annotate", "chapter_id": 2})
-        data = {"work_id": "new-solo", "invocation_id": "new", "chapter_id": 2,
-                "stage": "annotate", "sub_stage": "solo"}
+        data = {
+            "work_id": "new-solo",
+            "invocation_id": "new",
+            "chapter_id": 2,
+            "stage": "annotate",
+            "sub_stage": "solo",
+        }
         await manager.send(run_id, "work_reset", {**data, "message_id": f"{run_id}:reset:solo"})
         await manager.send(run_id, "llm_output", {**data, "content": "new-solo", "message_id": f"{run_id}:output:solo"})
         restarted = EventManager(outbox=outbox)
         try:
-            await restarted.send(run_id, "llm_output", {
-                "stage": "annotate", "chapter_id": 2, "sub_stage": "event", "work_id": "old-event",
-                "invocation_id": "old", "content": "迟到旧角色", "message_id": f"{run_id}:late",
-            })
+            await restarted.send(
+                run_id,
+                "llm_output",
+                {
+                    "stage": "annotate",
+                    "chapter_id": 2,
+                    "sub_stage": "event",
+                    "work_id": "old-event",
+                    "invocation_id": "old",
+                    "content": "迟到旧角色",
+                    "message_id": f"{run_id}:late",
+                },
+            )
             replay = await restarted.replay(run_id, 0)
             assert [message["data"]["content"] for message in replay if message["type"] == "llm_output"] == [
-                "complete", "new-solo",
+                "complete",
+                "new-solo",
             ]
         finally:
             restarted.reset_for_testing()

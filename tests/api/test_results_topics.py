@@ -21,10 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.api.services.results_queries.topics import _fetch_topics
-from src.metrics.aggregate.normalization import (
-    describe_topics_unavailability,
-    validate_topic_aggregation_row,
-)
+from src.topic.artifacts import describe_topics_unavailability, validate_topic_aggregation_row
 
 
 def _make_row(topic_id: int, weighted_total: float) -> SimpleNamespace:

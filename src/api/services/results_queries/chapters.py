@@ -16,14 +16,16 @@ from src.api.models.responses import (
     ChapterDialogue,
     ChapterRelation,
 )
-from src.metrics.aggregate.normalization import (
+from src.fact_graph.read import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
+from src.fact_graph.read.annotations import fetch_chapter_characters_full, fetch_chapter_dialogues_full
+from src.fact_graph.read.normalization import (
     partition_chapter_characters,
     partition_chapter_dialogues,
     partition_chapter_relations,
-    read_emotion_score,
 )
+from src.metrics.queries.annotations import fetch_chapter_annotations_full
+from src.metrics.values import read_emotion_score
 from src.storage.repositories import AnnotationRepository
-from src.storage.repositories.graph.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
 
 
 def _fetch_chapter_annotations(
@@ -33,9 +35,9 @@ def _fetch_chapter_annotations(
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
     """组装章节标注并过滤未解析的局部角色引用"""
-    annotations_raw = annotation_repo.fetch_chapter_annotations_full(run_id)
-    characters_raw = annotation_repo.fetch_chapter_characters_full(run_id)
-    dialogues_raw = annotation_repo.fetch_chapter_dialogues_full(run_id)
+    annotations_raw = fetch_chapter_annotations_full(annotation_repo.session, run_id)
+    characters_raw = fetch_chapter_characters_full(annotation_repo.session, run_id)
+    dialogues_raw = fetch_chapter_dialogues_full(annotation_repo.session, run_id)
 
     if export_graph_view is None:
         authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
@@ -95,9 +97,7 @@ def _fetch_chapter_annotations(
                     else None
                 ),
                 coverage_warnings=list(getattr(annotation_row, "coverage_warnings", None) or []),
-                characters=[
-                    ChapterCharacter(**payload) for payload in characters_by_chunk.get(chapter_id, [])
-                ],
+                characters=[ChapterCharacter(**payload) for payload in characters_by_chunk.get(chapter_id, [])],
                 relations=[ChapterRelation(**payload) for payload in relations_by_chunk.get(chapter_id, [])],
                 dialogues=[ChapterDialogue(**payload) for payload in dialogues_by_chunk.get(chapter_id, [])],
             )

@@ -9,7 +9,7 @@ from langchain_core.tools import tool
 from pydantic import Field, TypeAdapter
 
 from src.event_trees.models import ParticipantArg
-from src.fact_graph.schema import EntityType
+from src.fact_graph.vocabulary import EntityType
 
 from .search_projection import SHARED_SEARCH_MAX_CHARS
 from .tool_factories import build_annotation_tools
@@ -238,7 +238,7 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             if agent.case_pool.active(author) is not None:
                 execution.case_connections.append(identifier)
         else:
-            from src.fact_graph.schema import RELATION_DEFINITIONS
+            from src.fact_graph.vocabulary import RELATION_DEFINITIONS
 
             for identifier in (source_id, target_id):
                 if identifier not in ledger.shared_entity_ids:

@@ -12,7 +12,7 @@
 注：count/file_hash 声明校验已按用户要求删除（词表内容可自由迭代）；
 kind/tier/polarity/weight_policy/consumers/status 元数据已于 2026-08-28
 塌缩删除（生产无消费点，词表用/不用由调用方决定）。
-注册关系唯一事实源为 src/config/constants/lexicons.py 的 LEXICON_FILES；
+注册关系唯一事实源为 src/lexicons/constants.py 的 LEXICON_FILES；
 测试侧经构造注入 registry_files 或 monkeypatch registry 模块的 LEXICON_FILES。
 """
 
@@ -86,22 +86,10 @@ class TestLexiconLoading:
         reg.load()
         assert reg.get_file_paths("a.txt") == [tmp_lexicon_dir / "a.txt"]
 
-    def test_get_weighted(self, tmp_lexicon_dir: Path) -> None:
-        reg = _make_registry(tmp_lexicon_dir)
-        reg.load()
-        assert reg.get_weighted("a.txt") == {"快乐": 1, "开心": 1}
-
 
 # ====================================================================
 # 3. version_hash：确定性
 # ====================================================================
-
-
-class TestVersionHashV3:
-    def test_deterministic(self, tmp_lexicon_dir: Path) -> None:
-        h1 = _make_registry(tmp_lexicon_dir).version_hash()
-        h2 = _make_registry(tmp_lexicon_dir).version_hash()
-        assert h1 == h2
 
 
 # ====================================================================
@@ -116,7 +104,7 @@ class TestRegistryIsSingleSourceOfTruth:
         reg = LexiconRegistry()
         reg.load()
         draft_files = {LEXICON_FILES[k] for k in LEXICON_DRAFT_KEYS}
-        for key in reg.list_all_keys():
+        for key in sorted(set(LEXICON_FILES.values())):
             if key in draft_files:
                 continue
             assert len(reg.get(key)) > 0, f"注册表目 {key} 加载为空"

@@ -16,11 +16,11 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.fact_graph.character_reference_policy import decide_character_reference
 from src.metrics.aggregate.algorithms import safe_ratio
-from src.metrics.aggregate.normalization import read_emotion_score
 from src.metrics.style_metrics import mtld, ttr
+from src.metrics.values import read_emotion_score
 from src.text_processing.tokenize import tokenize
-from src.utils.character_reference_policy import decide_character_reference
 
 
 @dataclass

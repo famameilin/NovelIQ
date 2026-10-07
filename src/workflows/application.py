@@ -10,14 +10,13 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import HTTPException
 from loguru import logger
 
 from src.storage.db import get_session_factory
 from src.storage.id_mapping import TaskIDNotFoundError, run_id_to_task_id, task_id_to_run_id
 from src.storage.repositories import RunRepository
 from src.work.task_manager import TaskManager
-from src.workflows.exceptions import NovelNotFoundError
+from src.workflows.exceptions import NovelNotFoundError, TaskApplicationError
 from src.workflows.service import AnalysisService
 from src.workflows.tasks import TaskService
 
@@ -33,10 +32,10 @@ def resolve_task_for_novel(
     try:
         task = task_service.get_task(task_id)
     except NovelNotFoundError:
-        raise HTTPException(status_code=404, detail="任务不存在") from None
+        raise TaskApplicationError(reason="missing_task", message="任务不存在") from None
 
     if task.get("novel_id") != novel_id:
-        raise HTTPException(status_code=400, detail="任务不属于该小说")
+        raise TaskApplicationError(reason="invalid_state", message="任务不属于该小说")
     return task
 
 
@@ -45,9 +44,9 @@ def raise_cancel_not_allowed(task_status: str) -> None:
     统一校验任务是否允许进入取消流程
     """
     if task_status in ("completed", "cancelled", "cancelling"):
-        raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
+        raise TaskApplicationError(reason="invalid_state", message=f"任务已{task_status}，无需取消")
     if task_status == "failed":
-        raise HTTPException(status_code=400, detail="任务已失败，无法取消")
+        raise TaskApplicationError(reason="invalid_state", message="任务已失败，无法取消")
 
 
 def persist_task_cancellation_request(task_id: str) -> str:
@@ -61,14 +60,14 @@ def persist_task_cancellation_request(task_id: str) -> str:
             run_repo = RunRepository(session)
             latest_status = run_repo.request_task_cancellation(run_id)
             if latest_status is None:
-                raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试")
+                raise TaskApplicationError(reason="persistence_failed", message="任务取消持久化失败，请稍后重试")
             return latest_status
     except (TaskIDNotFoundError, ValueError) as exc:
         logger.error(f"Task {task_id} run_id not found when persisting cancellation request: {exc}")
-        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
+        raise TaskApplicationError(reason="persistence_failed", message="任务取消持久化失败，请稍后重试") from exc
     except Exception as exc:
         logger.error(f"Failed to persist cancellation request for task {task_id}: {exc}")
-        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
+        raise TaskApplicationError(reason="persistence_failed", message="任务取消持久化失败，请稍后重试") from exc
 
 
 def cancel_unclaimed_pending_task(task_id: str) -> bool:
@@ -85,10 +84,10 @@ def cancel_unclaimed_pending_task(task_id: str) -> bool:
             return cancelled
     except (TaskIDNotFoundError, ValueError) as exc:
         logger.error(f"Task {task_id} run_id not found when cancelling unclaimed pending task: {exc}")
-        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
+        raise TaskApplicationError(reason="persistence_failed", message="任务取消持久化失败，请稍后重试") from exc
     except Exception as exc:
         logger.error(f"Failed to cancel unclaimed pending task {task_id}: {exc}")
-        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
+        raise TaskApplicationError(reason="persistence_failed", message="任务取消持久化失败，请稍后重试") from exc
 
 
 async def cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskManager) -> None:
@@ -156,7 +155,7 @@ class TaskApplicationService:
         try:
             return await self.analysis_service.resume_task(novel_id, task_id)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise TaskApplicationError(reason="invalid_state", message=str(exc)) from exc
 
     async def delete_task(self, novel_id: str, task_id: str) -> dict[str, str]:
         """
@@ -165,7 +164,7 @@ class TaskApplicationService:
         task = resolve_task_for_novel(self.task_service, novel_id, task_id)
         task_status = task.get("status", "")
         if task_status in ("pending", "running", "cancelling"):
-            raise HTTPException(status_code=400, detail=f"任务正在{task_status}中，请先取消任务后再删除")
+            raise TaskApplicationError(reason="invalid_state", message=f"任务正在{task_status}中，请先取消任务后再删除")
 
         await cleanup_task_runtime_before_delete(task_id, self.task_manager)
         self.task_service.delete_task(task_id, task_manager=self.task_manager)
@@ -212,9 +211,9 @@ class TaskApplicationService:
             # 走到这里说明 latest_status 仍为 pending/running：
             # 原子取消请求未命中（并发竞态），任务本身仍然可取消，
             # 文案必须说“未生效”而不是“无法取消”
-            raise HTTPException(
-                status_code=400,
-                detail=f"任务状态为 {latest_status}，取消请求未生效，请重试",
+            raise TaskApplicationError(
+                reason="invalid_state",
+                message=f"任务状态为 {latest_status}，取消请求未生效，请重试",
             )
 
         cancelled = self.task_manager.cancel_task(task_id)
@@ -236,4 +235,4 @@ class TaskApplicationService:
                 "message": "取消已落库，执行方将立即中断在飞执行",
             }
 
-        raise HTTPException(status_code=400, detail=f"任务状态为 {task_status}，无法取消")
+        raise TaskApplicationError(reason="invalid_state", message=f"任务状态为 {task_status}，无法取消")

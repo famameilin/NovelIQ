@@ -13,7 +13,8 @@ from langchain_core.messages import AIMessageChunk, BaseMessageChunk
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from src.config import TaskModelConfig, TaskType, load_task_config
+from src.config import TaskModelConfig, TaskType
+from src.model_pool.configuration import load_task_config
 
 _reasoning_content_patch_installed = False
 
