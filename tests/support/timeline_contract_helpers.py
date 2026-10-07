@@ -59,6 +59,7 @@ def create_timeline_contract_scenario(
     db_session: Any,
     *,
     events_by_chapter: dict[int, list[dict[str, Any]]] | None = None,
+    final_relations: list[dict[str, Any]] | None = None,
 ) -> TimelineContractScenario:
     """2026-08-06 用于通过章节标注与数据库图持久化构造时间轴共享场景"""
     hero_name = "顾承渊"
@@ -225,6 +226,7 @@ def create_timeline_contract_scenario(
         run_id=run_id,
         chapter_id=5,
         characters=[character_fact(chapter_id=5, name=hero_name, action="独行")],
+        relations=final_relations,
         continuity_resolutions=[
             {
                 "reason": "决裂",
