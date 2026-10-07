@@ -14,9 +14,9 @@ from fastapi import APIRouter, HTTPException
 from openai import OpenAI
 
 from src.api.models.settings import (
+    AgentModelTestRequest,
+    AgentModelTestResponse,
     ModelEnvUpdateRequest,
-    ModelProviderTestRequest,
-    ModelProviderTestResponse,
     SettingFieldSpecResponse,
     SettingSectionSpecResponse,
     SettingsSchemaResponse,
@@ -149,8 +149,8 @@ def update_model_env(request: ModelEnvUpdateRequest) -> SettingsViewResponse:
         return _update_model_env(request)
 
 
-@router.post("/model-providers/{task}/test", response_model=ModelProviderTestResponse)
-def test_model_provider(task: str, request: ModelProviderTestRequest | None = None) -> ModelProviderTestResponse:
+@router.post("/agents/{task}/test", response_model=AgentModelTestResponse)
+def test_agent_model(task: str, request: AgentModelTestRequest | None = None) -> AgentModelTestResponse:
     """测试模型服务连通性（GET /v1/models，字段缺省用当前生效配置；明文凭据仅本次请求内存使用）"""
     if task not in {"pool", "embedding"}:
         raise HTTPException(status_code=404, detail=f"未知任务组: {task}")
@@ -165,23 +165,23 @@ def test_model_provider(task: str, request: ModelProviderTestRequest | None = No
     api_key = (request.api_key if request and request.api_key else credentials["api_key"]) or ""
 
     if not base_url:
-        return ModelProviderTestResponse(ok=False, error="base_url 未配置")
+        return AgentModelTestResponse(ok=False, error="base_url 未配置")
     if not api_key:
-        return ModelProviderTestResponse(ok=False, error="Key 未配置")
+        return AgentModelTestResponse(ok=False, error="Key 未配置")
 
     try:
         client = OpenAI(base_url=base_url, api_key=api_key, timeout=_TEST_CONNECT_TIMEOUT_S, max_retries=0)
         started = time.monotonic()
         models = list(client.models.list())
         latency_ms = (time.monotonic() - started) * 1000
-        return ModelProviderTestResponse(
+        return AgentModelTestResponse(
             ok=True,
             latency_ms=round(latency_ms, 1),
             model_ids=[model.id for model in models][:_TEST_CONNECT_MAX_MODELS],
         )
     except Exception as exc:  # 连接失败原因直接回显给设置页
         error = str(exc).replace(api_key, "[redacted]") if api_key else str(exc)
-        return ModelProviderTestResponse(ok=False, error=error[:300])
+        return AgentModelTestResponse(ok=False, error=error[:300])
 
 
 __all__ = ["router"]

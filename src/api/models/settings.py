@@ -101,7 +101,7 @@ class ModelEnvUpdateRequest(BaseModel):
     ltp_model_dir: str | None = Field(default=None, description="LTP 模型目录；None=不修改，非空需为存在的目录")
 
 
-class ModelProviderTestRequest(BaseModel):
+class AgentModelTestRequest(BaseModel):
     """测试连接请求：字段缺省时使用当前生效配置"""
 
     base_url: str | None = Field(default=None, description="覆盖当前 base_url")
@@ -110,7 +110,7 @@ class ModelProviderTestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ModelProviderTestResponse(BaseModel):
+class AgentModelTestResponse(BaseModel):
     """测试连接结果：ok=false 时 error 携带可读原因"""
 
     ok: bool
