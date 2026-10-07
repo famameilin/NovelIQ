@@ -7,10 +7,10 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
-from src.fact_graph.schema import ChapterParagraphInfo
 from src.agents.audit.observer import AgentTurnObserver, build_invocation_context
 from src.agents.audit.recorder import AgentAuditRecorder
 from src.agents.stream import ModelCallTiming
+from src.fact_graph.schema import ChapterParagraphInfo
 from src.storage.models.agent_audit import ModelTurn
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.model_stream_adapter import StreamedFakeModelMixin

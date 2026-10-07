@@ -14,7 +14,6 @@ import pytest
 from src.agents.annotation.agent import AnnotationAgent, WorkExecution
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.subagent_ir import SubagentAnnotation
-from src.work.annotation_work import WorkReceipt
 from src.case_pool import CasePool
 from src.config import settings
 from src.event_bus import EventBus, Message
@@ -22,6 +21,7 @@ from src.event_trees.trees import EventTrees
 from src.fact_graph.graph import FactGraph
 from src.model_pool.capacity import MODEL_CAPACITY, ModelElectionExhausted, ModelElectionPool
 from src.storage.models import AnnotationWork
+from src.work.annotation_work import WorkReceipt
 from src.workflows.chapter_pool import ChapterWorkerPool, PipelineWorkFailed, WorkSaveUnconfirmed
 
 

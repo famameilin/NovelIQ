@@ -21,11 +21,11 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.utils.exceptions import GraphReadinessError
 from src.metrics.aggregate import aggregate_all_metrics
 from src.sse.events import StreamEvent
 from src.storage.repositories import ChapterRepository, StatsRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.utils.exceptions import GraphReadinessError
 
 QUALITY_TARGETS = {
     "tone_distribution_non_empty_rate": 1.0,

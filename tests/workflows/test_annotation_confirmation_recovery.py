@@ -11,11 +11,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.agent import AnnotationAgent
-from src.work.annotation_work import annotation_work_id
 from src.case_pool import CasePool
 from src.config import settings
 from src.event_bus import Message
 from src.storage.models import AnalysisOutput, AnnotationWork, BookCase
+from src.work.annotation_work import annotation_work_id
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.workflows.test_annotation_work_pipeline import ProgramModel

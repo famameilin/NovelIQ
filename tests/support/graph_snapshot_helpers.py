@@ -76,4 +76,4 @@ def insert_focus_contract_agent_analysis(
         main_characters=main_names,
         core_cast=core_names,
     )
-    StatsRepository(db_session).insert_agent_analysis(run_id, analysis)
+    StatsRepository(db_session).insert_agent_analysis(run_id, analysis.model_dump())

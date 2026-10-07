@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import tool
 
-from .errors import AnnotationAuthorizationError, AnnotationInputError, AnnotationStageRejection
-from src.utils.identity import stable_digest, text_digest
 from src.fact_graph.schema import SourceReference
+from src.utils.identity import stable_digest, text_digest
+
+from .errors import AnnotationAuthorizationError, AnnotationInputError, AnnotationStageRejection
 
 if TYPE_CHECKING:
     from .tools import AnnotationQueryService, AnnotationToolLedger

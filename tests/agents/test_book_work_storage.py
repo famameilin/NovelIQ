@@ -19,9 +19,12 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
     """引用自身已保存且有效，丢弃源章不补造实体写入，也不丢引用端点"""
     from uuid import uuid4
 
-    from src.fact_graph.schema import BoundDialogue, ChapterMetricsInput
     from src.event_trees.models import BoundChapterAnnotation
     from src.fact_graph.graph import FactGraph, mention_uuid
+    from src.fact_graph.schema import (
+        BoundDialogue,
+        ChapterMetricsInput,
+    )
     from src.storage.models import AnalysisOutput, AnnotationWork, GraphEntity, GraphFact, Paragraph
     from src.storage.repositories.annotation import AnnotationRepository
     from tests.support.chapter_annotation_helpers import (

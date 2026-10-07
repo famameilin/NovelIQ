@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from .errors import AnnotationInputError
 from src.fact_graph.schema import ChapterParagraphInfo
+
+from .errors import AnnotationInputError
 
 
 class ChapterParagraphRow(Protocol):

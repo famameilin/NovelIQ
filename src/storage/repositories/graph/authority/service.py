@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from src.utils.exceptions import GraphReadinessError
 from src.storage.repositories import AnnotationRepository, GraphRepository
 from src.storage.repositories.graph import EntitySnapshotRow, GraphChangeRow, RelationSnapshotRow
 from src.utils.character_reference_policy import is_global_character_surface_name
+from src.utils.exceptions import GraphReadinessError
 
 from .alias import AliasResolution, build_alias_resolution
 from .graph_outputs import build_graph_quality_report, build_graph_shared_summary

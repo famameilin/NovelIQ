@@ -12,8 +12,8 @@ from sqlalchemy import and_, func, not_, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from src.utils.identity import stable_digest
 from src.storage.models import AnalysisRun, EventOutbox
+from src.utils.identity import stable_digest
 
 _TASK_STATE_EVENTS = {
     "stage_start", "stage_progress", "stage_complete", "task_complete", "task_error", "task_cancelled", "task_reset",

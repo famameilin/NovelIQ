@@ -10,13 +10,24 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from src.agents.annotation.candidates import extract_dialogue_candidates
-from src.utils.identity import stable_digest
-from src.fact_graph.schema import EntityInput, EntityType, RelationInput
-from src.event_trees.models import BoundChapterAnnotation, BoundCharacterObservation, BoundDialogue, BoundEvent, ChapterMetricsInput, EventParticipantInput
+from src.event_trees.models import (
+    BoundChapterAnnotation,
+    BoundEvent,
+    EventParticipantInput,
+)
+from src.fact_graph.schema import (
+    BoundCharacterObservation,
+    BoundDialogue,
+    ChapterMetricsInput,
+    EntityInput,
+    EntityType,
+    RelationInput,
+)
 from src.storage.db import get_session_factory
 from src.storage.models import Chapter, Novel, Paragraph
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.text_units import Chunk as ChunkerChunk
+from src.utils.identity import stable_digest
 from src.workflows.paragraphs import split_chunk_paragraphs
 
 
@@ -432,12 +443,12 @@ def commit_test_annotation(
     from src.agents.annotation.ledger import AnnotationToolLedger
     from src.agents.annotation.paragraphs import build_chapter_paragraph_info
     from src.agents.annotation.subagent_ir import SubagentAnnotation
-    from src.work.annotation_work import WorkReceipt, annotation_work_id
     from src.case_pool import CasePool
     from src.event_bus import EventBus
     from src.event_trees.trees import EventTrees
     from src.fact_graph.graph import FactGraph
     from src.storage.models import AnalysisOutput, AnnotationWork
+    from src.work.annotation_work import WorkReceipt, annotation_work_id
 
     chapter = session.get(Chapter, (chapter_id, run_id))
     paragraphs = list(
@@ -573,9 +584,8 @@ def commit_test_resolution(
     reason: str,
 ) -> None:
     """关系变化/明确事件连接夹具直接保存领域事实，案例不夹带结构化裁决"""
-    from src.utils.identity import stable_uuid, text_digest
-    from src.fact_graph.schema import RELATION_DEFINITIONS
     from src.fact_graph.graph import FactGraph
+    from src.fact_graph.schema import RELATION_DEFINITIONS
     from src.storage.models import (
         AnalysisOutput,
         AnnotationWork,
@@ -584,6 +594,7 @@ def commit_test_resolution(
         GraphFact,
     )
     from src.storage.repositories.graph.identity import relation_id
+    from src.utils.identity import stable_uuid, text_digest
 
     work = session.execute(
         select(AnnotationWork).where(AnnotationWork.run_id == run_id, AnnotationWork.chapter_id == chapter_id)

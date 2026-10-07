@@ -16,9 +16,9 @@ import json
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.fact_graph.schema import ChapterParagraphInfo, Confidence
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
+from src.fact_graph.schema import ChapterParagraphInfo, Confidence
 from tests.support.annotation_work_tools import build_annotation_tools
 
 
