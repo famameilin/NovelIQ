@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from src.fact_graph.exceptions import GraphReadinessError
+from src.utils.exceptions import GraphReadinessError
 from src.storage.repositories import AnnotationRepository, GraphRepository
 from src.storage.repositories.graph import EntitySnapshotRow, GraphChangeRow, RelationSnapshotRow
 from src.utils.character_reference_policy import is_global_character_surface_name

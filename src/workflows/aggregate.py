@@ -21,7 +21,7 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.fact_graph.exceptions import GraphReadinessError
+from src.utils.exceptions import GraphReadinessError
 from src.metrics.aggregate import aggregate_all_metrics
 from src.sse.events import StreamEvent
 from src.storage.repositories import ChapterRepository, StatsRepository

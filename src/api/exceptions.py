@@ -8,7 +8,7 @@ API 异常与错误映射
 from __future__ import annotations
 
 from src.config.exceptions import SettingsValidationError
-from src.fact_graph.exceptions import GraphReadinessError
+from src.utils.exceptions import GraphReadinessError
 from src.workflows.exceptions import (
     AnalysisError,
     AnalysisNotCompleteError,

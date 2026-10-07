@@ -385,7 +385,7 @@ class FactGraph:
         run_id = self.run_scope
 
         from src.fact_graph.authority import KnowledgeGraphAuthorityService
-        from src.fact_graph.exceptions import GraphReadinessError
+        from src.utils.exceptions import GraphReadinessError
         from src.storage.models import GraphEntity
 
         if not main_characters:
