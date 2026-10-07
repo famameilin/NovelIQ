@@ -120,8 +120,8 @@ class FactGraph:
         from sqlalchemy import select, text
 
         from src.fact_graph.evidence import evidence_for
+        from src.fact_graph.identity import relation_id
         from src.storage.models import GraphEntity, GraphFact, GraphRelation
-        from src.storage.repositories.graph.identity import relation_id
         from src.utils.identity import stable_digest
 
         # 数据库锁只串行化图的折叠写入，不占 run 内存锁、不等待角色 finish

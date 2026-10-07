@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from src.config import settings
-from src.text_processing.text_utils import dialogue_length
 
 
 def ttr(tokens: Sequence[str]) -> float:
@@ -41,9 +40,3 @@ def mtld(tokens: Sequence[str], threshold: float | None = None) -> float | None:
         # （§19.12 修复：不再退化为 len(tokens)）
         return None
     return len(tokens) / factors
-
-
-def dialogue_ratio(text: str) -> float:
-    if not text:
-        return 0.0
-    return dialogue_length(text) / len(text)

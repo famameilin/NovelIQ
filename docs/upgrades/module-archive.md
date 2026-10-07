@@ -2,7 +2,7 @@
 
 基线 B0 为 `0ff05bdea28d2324461c4cfe3bfbd7d3e532f968`，表中提交 `0ff05bdea28d` 均指此完整提交。实现和本地归档清单仅留在原有忽略的 `deprecated/`，不进入 Git；本文只记录原路径、符号、判据、替代入口与恢复依据。
 
-42 个生产符号与 36 份测试片段共 78 条记录。后者包含 4 份混合测试原始副本，并不表示把这 4 个测试的活动能力删除。`chunk_documents_with_chapters` 保留在 `src/text_processing/paragraphs.py`，不在退役列表。
+44 个生产符号与 36 份测试片段共 80 条记录。后者包含 4 份混合测试原始副本，并不表示把这 4 个测试的活动能力删除。`chunk_documents_with_chapters` 保留在 `src/text_processing/paragraphs.py`，不在退役列表。
 
 恢复 R1：用 `git show 0ff05bdea28d2324461c4cfe3bfbd7d3e532f968:<原路径>` 只读查看原文件，提取所列符号及确有必要的依赖，按当前责任模块重新接入，不整文件覆盖，也不自动恢复旧导出。恢复 R2：同样从 B0 提取专属测试，只有重新决定启用对应能力时才配套恢复实现与测试。恢复 R3：混合测试只提取原退役断言；现有活动断言继续保留。恢复后均运行相关回归与 AST 边界检查。
 
@@ -95,3 +95,15 @@
 | `tests/metrics/test_metrics.py` | `test_function_word_distribution_relative_frequency` | 所测退役接口的专属测试；无产品契约消费者 | 无同名旧能力；现行文本/指标/词表/状态机测试保留 | `0ff05bdea28d` | R2 |
 | `tests/metrics/test_metrics.py` | `test_semantic_category_density` | 所测退役接口的专属测试；无产品契约消费者 | 无同名旧能力；现行文本/指标/词表/状态机测试保留 | `0ff05bdea28d` | R2 |
 | `tests/metrics/test_metrics.py` | `test_imagery_density` | 所测退役接口的专属测试；无产品契约消费者 | 无同名旧能力；现行文本/指标/词表/状态机测试保留 | `0ff05bdea28d` | R2 |
+
+
+## 独立审核后的补充归档
+
+本批依据源码、测试、既有脚本的可解析调用检索，只归档以下两个零调用函数。`relation_id` 仍活跃，已迁入 `fact_graph.identity`，保持 UUID 算法不变，不计入退役清单。`dialogue_length` 仍用于段落指标，仅移除旧封装中的专用导入。
+
+| 原路径 | 符号 | 依据 | 替代入口或处理 | 原提交 | 恢复 |
+|---|---|---|---|---|---|
+| `src/metrics/style_metrics.py` | `dialogue_ratio` | 产品、测试和既有脚本无调用；同名 DTO 字段不属于函数调用 | `metrics.aggregate.aggregations` 按充分统计量计算，合法无分母仍返回 None | `3fd6b74e5fb3df069d76e91931cf40c58215d10e` | R4 |
+| `src/storage/repositories/graph/identity.py` | `normalized_name` | 无调用；活动事实图使用自身名称规范化规则 | `fact_graph.graph._norm`；不重建仓储旧入口 | `3fd6b74e5fb3df069d76e91931cf40c58215d10e` | R4 |
+
+恢复 R4：使用表中完整提交执行 `git show <提交>:<原路径>`，只提取相应符号及必要依赖；如决定重新启用，先确认现行职责和业务口径，再补消费者和回归。两份实现片段及清单只留在本地 `deprecated/architecture/2026-10-08/`，原有 deprecated 忽略规则保持不变。

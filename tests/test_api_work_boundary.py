@@ -6,7 +6,13 @@ import ast
 import subprocess
 from pathlib import Path
 
-from tests.support.module_dependencies import cycles, dependencies, reexport_dependencies
+from tests.support.module_dependencies import (
+    api_write_violations,
+    cycles,
+    dependencies,
+    metrics_calculation_violations,
+    reexport_dependencies,
+)
 
 _ROOT = Path(__file__).resolve().parents[1]
 _ALLOWED = {
@@ -112,28 +118,45 @@ def test_http_framework_belongs_to_api() -> None:
 
 
 def test_api_uses_read_interfaces_not_write_engines() -> None:
-    prefixes = {
-        "fact_graph": ("src.fact_graph.read", "src.fact_graph.errors"),
-        "event_trees": ("src.event_trees.read",),
-        "case_pool": ("src.case_pool.read",),
-        "work": ("src.work.queries", "src.work.policy", "src.work.annotation_work"),
-    }
-    bad = []
-    for d in _project_dependencies():
-        top = d.target.split(".")[1]
-        if d.source.startswith("src.api.") and top in prefixes and not d.target.startswith(prefixes[top]):
-            bad.append(f"{d.source}:{d.line} -> {d.target}")
-    assert bad == []
+    assert api_write_violations(_ROOT) == []
 
 
 def test_metrics_calculation_does_not_read_database_or_network() -> None:
-    bad = []
-    for d in dependencies(_ROOT):
-        if not d.source.startswith("src.metrics.") or d.source.startswith("src.metrics.queries") or d.type_only:
-            continue
-        if d.target.startswith(("src.storage", "sqlalchemy", "httpx", "requests", "openai", "src.embedding")):
-            bad.append(f"{d.source}:{d.line} -> {d.target}")
-    assert bad == []
+    assert metrics_calculation_violations(_ROOT) == []
+
+
+def test_api_guard_rejects_write_reexport(tmp_path: Path) -> None:
+    for module, code in {
+        "api/query": "from src.fact_graph.read.facade import save_work\n",
+        "fact_graph/read/facade": "from ..graph import save_work\n",
+        "fact_graph/graph": "def save_work(): pass\n",
+    }.items():
+        path = tmp_path / "src" / (module + ".py")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(code)
+    assert api_write_violations(tmp_path) == ["src.api.query:1 -> src.fact_graph.graph"]
+
+
+def test_calculation_guard_rejects_query_and_transitive_database(tmp_path: Path) -> None:
+    for module, code in {
+        "metrics/calculate": "from .queries.helper import load\nfrom src.utils.helper import value\n",
+        "metrics/queries/helper": "import sqlalchemy\n",
+        "utils/helper": "def load():\n    import sqlalchemy\n",
+    }.items():
+        path = tmp_path / "src" / (module + ".py")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(code)
+    assert metrics_calculation_violations(tmp_path) == [
+        "src.metrics.calculate -> src.metrics.queries.helper",
+        "src.metrics.calculate -> src.utils.helper -> sqlalchemy",
+    ]
+
+
+def test_calculation_guard_allows_type_only_database_reference(tmp_path: Path) -> None:
+    path = tmp_path / "src/metrics/calculate.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import sqlalchemy\n")
+    assert metrics_calculation_violations(tmp_path) == []
 
 
 def test_model_pool_does_not_consume_business_envelopes() -> None:

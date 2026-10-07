@@ -576,6 +576,7 @@ def commit_test_resolution(
 ) -> None:
     """关系变化/明确事件连接夹具直接保存领域事实，案例不夹带结构化裁决"""
     from src.fact_graph.graph import FactGraph
+    from src.fact_graph.identity import relation_id
     from src.fact_graph.vocabulary import RELATION_DEFINITIONS
     from src.storage.models import (
         AnalysisOutput,
@@ -584,7 +585,6 @@ def commit_test_resolution(
         EventNode,
         GraphFact,
     )
-    from src.storage.repositories.graph.identity import relation_id
     from src.utils.identity import stable_uuid, text_digest
 
     work = session.execute(

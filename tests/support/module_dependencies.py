@@ -200,3 +200,52 @@ def reexport_dependencies(root: Path) -> list[Dependency]:
         Dependency(source, origin(target, symbol), line, type_only)
         for source, target, symbol, line, type_only in imports
     ]
+
+
+def _within(module: str, prefix: str) -> bool:
+    return module == prefix or module.startswith(prefix + ".")
+
+
+def api_write_violations(root: Path) -> list[str]:
+    """查询入口同时检查直接导入与导出符号的实际归属，防止门面泄露写接口"""
+    prefixes = {
+        "fact_graph": ("src.fact_graph.read", "src.fact_graph.errors"),
+        "event_trees": ("src.event_trees.read",),
+        "case_pool": ("src.case_pool.read",),
+        "work": ("src.work.queries", "src.work.policy", "src.work.annotation_work"),
+    }
+    bad = set()
+    for dep in dependencies(root) + reexport_dependencies(root):
+        if not dep.source.startswith("src.api.") or not dep.target.startswith("src."):
+            continue
+        top = dep.target.split(".")[1]
+        if top in prefixes and not any(_within(dep.target, prefix) for prefix in prefixes[top]):
+            bad.add(f"{dep.source}:{dep.line} -> {dep.target}")
+    return sorted(bad)
+
+
+def metrics_calculation_violations(root: Path) -> list[str]:
+    """计算层禁止经查询模块、辅助模块或导出链触达数据库及网络"""
+    imports = [dep for dep in dependencies(root) + reexport_dependencies(root) if not dep.type_only]
+    graph: dict[str, set[str]] = {}
+    for dep in imports:
+        graph.setdefault(dep.source, set()).add(dep.target)
+    prohibited = ("src.metrics.queries", "src.storage", "sqlalchemy", "httpx", "requests", "openai", "src.embedding")
+    bad = []
+    for source in sorted(graph):
+        if not _within(source, "src.metrics") or _within(source, "src.metrics.queries"):
+            continue
+        pending = [(source, (source,))]
+        seen = {source}
+        while pending:
+            module, path = pending.pop()
+            for target in sorted(graph.get(module, set())):
+                if target in seen:
+                    continue
+                seen.add(target)
+                chain = (*path, target)
+                if any(_within(target, prefix) for prefix in prohibited):
+                    bad.append(" -> ".join(chain))
+                else:
+                    pending.append((target, chain))
+    return sorted(bad)
