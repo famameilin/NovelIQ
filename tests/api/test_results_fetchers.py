@@ -55,7 +55,7 @@ class _DummyStatsRepo:
         self.payload = payload
         self.global_stats = global_stats or {}
 
-    def fetch_cloud_analysis(self, run_id):
+    def fetch_agent_analysis(self, run_id):
         assert run_id == "run-1"
         return self.payload
 
@@ -188,7 +188,7 @@ def test_fetch_foreshadowing_trees_preserves_status_field():
     assert rows[0].status == "reinforced"
 
 
-def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
+def test_fetch_diagnosis_returns_none_when_agent_result_missing():
     stats_repo = _DummyStatsRepo(None)
 
     result = _fetch_diagnosis(
@@ -200,7 +200,7 @@ def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
     assert result is None
 
 
-def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
+def test_fetch_diagnosis_uses_agent_analysis_expectation_as_single_contract():
     """
     创建时间: 2026-04-29
     任务: split-genre-style-labels-review-fixes
@@ -470,7 +470,7 @@ def test_fetch_diagnosis_drops_non_mapping_arc_scores():
     assert result.main_characters == []
 
 
-def test_fetch_diagnosis_returns_partial_cloud_row():
+def test_fetch_diagnosis_returns_partial_agent_row():
     stats_repo = _DummyStatsRepo(
         {
             "foreshadow_expectation": 0.42,

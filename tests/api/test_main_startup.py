@@ -23,7 +23,7 @@ async def test_lifespan_propagates_init_db_schema_guard_failure() -> None:
 
     创建时间: 2026-04-28
     任务: fix-startup-schema-guard-boundary
-    说明: 旧 cloud_analysis protagonist 列属于结构性 schema 错误；
+    说明: 旧诊断表的 protagonist 列属于结构性 schema 错误；
           这里要求 lifespan 原样抛出异常，保持 fail-closed 语义。
     """
 

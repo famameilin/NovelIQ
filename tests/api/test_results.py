@@ -95,7 +95,7 @@ class TestResults:
             text(
                 "INSERT INTO analysis_outputs "
                 "(output_id, run_id, kind, payload, created_at) "
-                "VALUES (:output_id, :run_id, 'cloud_analysis', :payload, now())"
+                "VALUES (:output_id, :run_id, 'agent_analysis', :payload, now())"
             ),
             {
                 "output_id": uuid.uuid4().hex,
@@ -144,7 +144,7 @@ class TestResults:
             text(
                 "INSERT INTO analysis_outputs "
                 "(output_id, run_id, kind, payload, created_at) "
-                "VALUES (:output_id, :run_id, 'cloud_analysis', :payload, now())"
+                "VALUES (:output_id, :run_id, 'agent_analysis', :payload, now())"
             ),
             {
                 "output_id": uuid.uuid4().hex,

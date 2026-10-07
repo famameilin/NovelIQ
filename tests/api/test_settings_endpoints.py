@@ -175,8 +175,8 @@ def test_legacy_connection_and_named_provider_contracts_are_absent(
                     {"providers": {"secondary": {"api_key": "x"}}}):
         assert api_client.put("/api/settings/env", json=payload).status_code == 422
     assert not (isolated_settings.parent / ".env").exists()
-    assert api_client.post("/api/settings/model-providers/annotation/test").status_code == 404
-    assert api_client.post("/api/settings/model-providers/diagnosis/test").status_code == 404
+    assert api_client.post("/api/settings/agents/annotation/test").status_code == 404
+    assert api_client.post("/api/settings/agents/diagnosis/test").status_code == 404
 
 
 def test_pool_credentials_are_rejected_by_parameter_save(isolated_settings: Path, api_client: TestClient) -> None:
@@ -280,13 +280,13 @@ def test_pool_connection_uses_saved_key_and_unsaved_override(
 
     monkeypatch.setattr(routes, "OpenAI", _FakeOpenAIClient)
     _save_pool(api_client)
-    response = api_client.post("/api/settings/model-providers/pool/test", json={"model_id": "diagnostic"})
+    response = api_client.post("/api/settings/agents/pool/test", json={"model_id": "diagnostic"})
     assert response.status_code == 200 and response.json()["ok"] is True
     assert _FakeOpenAIClient.last_init["api_key"] == "sk-diagnostic-1234"
     assert _FakeOpenAIClient.last_init["base_url"] == "https://diagnostic.example/v1"
     assert _FakeOpenAIClient.last_init["max_retries"] == 0
     before = os.environ["MODEL_POOL"]
-    response = api_client.post("/api/settings/model-providers/pool/test", json={
+    response = api_client.post("/api/settings/agents/pool/test", json={
         "model_id": "model-a", "base_url": "https://draft/v1", "api_key": "sk-draft",
     })
     assert response.json()["ok"] is True and os.environ["MODEL_POOL"] == before
@@ -301,7 +301,7 @@ def test_connection_failure_redacts_draft_key(isolated_settings: Path, api_clien
             raise ConnectionError("failed Authorization: Bearer sk-draft-secret")
 
     monkeypatch.setattr(routes, "OpenAI", FailingClient)
-    response = api_client.post("/api/settings/model-providers/pool/test", json={
+    response = api_client.post("/api/settings/agents/pool/test", json={
         "base_url": "https://draft/v1", "api_key": "sk-draft-secret",
     })
     assert response.json()["ok"] is False and "sk-draft-secret" not in response.text
@@ -309,8 +309,8 @@ def test_connection_failure_redacts_draft_key(isolated_settings: Path, api_clien
 
 
 def test_connection_without_configuration_does_not_call_remote(isolated_settings: Path, api_client: TestClient) -> None:
-    assert api_client.post("/api/settings/model-providers/pool/test").json()["ok"] is False
-    assert api_client.post("/api/settings/model-providers/unknown/test").status_code == 404
+    assert api_client.post("/api/settings/agents/pool/test").json()["ok"] is False
+    assert api_client.post("/api/settings/agents/unknown/test").status_code == 404
 
 
 def test_schema_has_no_extra_model_categories(isolated_settings: Path, api_client: TestClient) -> None:
