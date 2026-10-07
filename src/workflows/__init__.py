@@ -2,9 +2,9 @@
 workflows 模块入口，包含核心业务逻辑，供 API 和 CLI 共同调用
 """
 
+from src.metrics.curve_metrics import compute_global_stats
 from src.workflows.aggregate import run_aggregate
 from src.workflows.annotate import run_annotate
-from src.workflows.curve_metrics import compute_global_stats
 from src.workflows.diagnose import (
     run_diagnose,
 )

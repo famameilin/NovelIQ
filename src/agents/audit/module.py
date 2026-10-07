@@ -41,8 +41,8 @@ class AuditModule:
     @staticmethod
     def save_global_stats(session: Session, run_id: str) -> list[tuple[str, float | None]]:
         """统计模块计算并保存自己负责的全书充分统计量"""
+        from src.metrics.curve_metrics import compute_global_stats
         from src.storage.repositories import StatsRepository
-        from src.workflows.curve_metrics import compute_global_stats
 
         values = compute_global_stats(session, run_id)
         StatsRepository(session).insert_global_stats(run_id, values)

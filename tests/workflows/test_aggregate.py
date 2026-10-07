@@ -270,7 +270,7 @@ class TestGlobalStatsRunIsolation:
         paragraph_repo.insert_paragraph_curves(run_id, curve_rows)
 
     def test_global_stats_only_aggregates_own_run(self) -> None:
-        from src.workflows.curve_metrics import compute_global_stats
+        from src.metrics.curve_metrics import compute_global_stats
 
         self._insert_metrics_for_run(self.run_a, sentence_sum=20.0, sentence_count=1)
         self._insert_metrics_for_run(self.run_b, sentence_sum=100.0, sentence_count=2)

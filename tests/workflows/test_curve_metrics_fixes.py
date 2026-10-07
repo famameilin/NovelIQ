@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import uuid
 
+from src.metrics.curve_metrics import compute_global_stats
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import (
     ParagraphCurveRow,
     ParagraphMetricRow,
     ParagraphRepository,
 )
-from src.workflows.curve_metrics import compute_global_stats
 from tests.support.analysis_factories import insert_test_novel
 
 
