@@ -6,7 +6,7 @@ import json
 from typing import Any
 from unittest.mock import MagicMock
 
-from src.agents.annotation.identity import exact_digest, text_digest
+from src.utils.identity import exact_digest, text_digest
 from src.agents.annotation.schema import ChapterParagraphInfo
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph

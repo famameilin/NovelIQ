@@ -24,7 +24,7 @@ from src.event_trees.trees import EventTrees
 from src.fact_graph.graph import FactGraph
 from src.storage.models import AnalysisOutput
 
-from .identity import stable_uuid
+from src.utils.identity import stable_uuid
 from .ledger import AnnotationToolLedger
 from .paragraphs import build_chapter_paragraph_info
 from .subagent_graph import build_subagent_graph

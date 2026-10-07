@@ -27,7 +27,7 @@ from .errors import (
     AnnotationProtocolError,
     AnnotationStageRejection,
 )
-from .identity import stable_uuid
+from src.utils.identity import stable_uuid
 from .schema import (
     EL_PATH_SEP,
     RELATION_DEFINITIONS,

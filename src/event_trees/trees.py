@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from src.agents.annotation.identity import stable_uuid
+from src.utils.identity import stable_uuid
 
 
 class EventTrees:

@@ -12,7 +12,7 @@ from sqlalchemy import and_, func, not_, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.identity import stable_digest
+from src.utils.identity import stable_digest
 from src.storage.models import AnalysisRun, EventOutbox
 
 _TASK_STATE_EVENTS = {

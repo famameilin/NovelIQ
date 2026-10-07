@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from .identity import stable_digest
+from src.utils.identity import stable_digest
 
 Role = Literal["solo", "structure", "event", "evidence"]
 LANES: tuple[Role, ...] = ("structure", "event", "evidence")

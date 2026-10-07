@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .identity import text_digest
+from src.utils.identity import text_digest
 
 
 def evidence_for(execution: Any, paragraph_id: int | None = None) -> list[dict[str, Any]]:

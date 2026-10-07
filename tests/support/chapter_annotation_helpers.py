@@ -10,7 +10,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from src.agents.annotation.candidates import extract_dialogue_candidates
-from src.agents.annotation.identity import stable_digest
+from src.utils.identity import stable_digest
 from src.agents.annotation.schema import (
     BoundChapterAnnotation,
     BoundCharacterObservation,
@@ -582,7 +582,7 @@ def commit_test_resolution(
     reason: str,
 ) -> None:
     """关系变化/明确事件连接夹具直接保存领域事实，案例不夹带结构化裁决"""
-    from src.agents.annotation.identity import stable_uuid, text_digest
+    from src.utils.identity import stable_uuid, text_digest
     from src.agents.annotation.schema import RELATION_DEFINITIONS
     from src.fact_graph.graph import FactGraph
     from src.storage.models import (

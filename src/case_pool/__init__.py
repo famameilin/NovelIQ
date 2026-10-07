@@ -6,7 +6,7 @@ import unicodedata
 from copy import deepcopy
 from typing import Any
 
-from src.agents.annotation.identity import stable_digest
+from src.utils.identity import stable_digest
 
 
 class CasePool:

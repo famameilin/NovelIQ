@@ -116,7 +116,7 @@ class FactGraph:
         from sqlalchemy import select, text
 
         from src.agents.annotation.domain_storage import evidence_for
-        from src.agents.annotation.identity import stable_digest
+        from src.utils.identity import stable_digest
         from src.storage.models import GraphEntity, GraphFact, GraphRelation
         from src.storage.repositories.graph.identity import relation_id
 

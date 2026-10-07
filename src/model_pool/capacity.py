@@ -115,7 +115,7 @@ class ModelElectionPool:
         self._wake.set()
 
     async def run(self) -> None:
-        from src.agents.annotation.identity import stable_digest
+        from src.utils.identity import stable_digest
         from src.config import settings
         from src.config.model_assignment import select_annotation_model
 

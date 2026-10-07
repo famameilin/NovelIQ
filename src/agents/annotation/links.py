@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.tools import tool
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError, AnnotationStageRejection
-from .identity import stable_digest, text_digest
+from src.utils.identity import stable_digest, text_digest
 from .schema import SourceReference
 
 if TYPE_CHECKING:
