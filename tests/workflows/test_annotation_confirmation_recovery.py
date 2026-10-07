@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.agent import AnnotationAgent
-from src.agents.annotation.work import annotation_work_id
+from src.work.annotation_work import annotation_work_id
 from src.case_pool import CasePool
 from src.config import settings
 from src.event_bus import Message

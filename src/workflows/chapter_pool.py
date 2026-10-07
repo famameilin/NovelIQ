@@ -9,10 +9,10 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.work import WorkReceipt
 from src.event_bus import EventBus, Message
 from src.model_pool.capacity import ModelElectionPool
 from src.storage.models import AnnotationWork
+from src.work.annotation_work import WorkReceipt
 
 AgentStatus = Literal["submitted", "retry", "failed"]
 

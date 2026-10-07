@@ -13,7 +13,6 @@ from uuid import uuid4
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.work import WorkReceipt
 from src.agents.audit.module import AuditMessages
 from src.agents.audit.observer import AgentTurnObserver, build_invocation_context
 from src.agents.stream import AgentStream
@@ -23,8 +22,9 @@ from src.event_trees.submission import build_event_submission_tool
 from src.event_trees.trees import EventTrees
 from src.fact_graph.graph import FactGraph
 from src.storage.models import AnalysisOutput
-
 from src.utils.identity import stable_uuid
+from src.work.annotation_work import WorkReceipt
+
 from .ledger import AnnotationToolLedger
 from .paragraphs import build_chapter_paragraph_info
 from .subagent_graph import build_subagent_graph
@@ -94,13 +94,16 @@ class AnnotationAgent:
         session_factory: Callable[[], Session],
         *,
         novel_id: str,
-        fact_graph: FactGraph,
-        event_trees: EventTrees,
-        case_pool: CasePool,
+        fact_graph: FactGraph | None = None,
+        event_trees: EventTrees | None = None,
+        case_pool: CasePool | None = None,
     ) -> None:
         self.bus, self.run_id, self.session_factory, self.novel_id = bus, run_id, session_factory, novel_id
         self.address = f"agent:{run_id}"
-        self.fact_graph, self.event_trees, self.case_pool = fact_graph, event_trees, case_pool
+        # 三个域引擎由 agent 自建：编排层只派发 work，不持有事实图、事件树与案例池
+        self.fact_graph = fact_graph if fact_graph is not None else FactGraph(run_scope=run_id)
+        self.event_trees = event_trees if event_trees is not None else EventTrees(run_id)
+        self.case_pool = case_pool if case_pool is not None else CasePool(run_id)
         self.lock = asyncio.Lock()
         self.executions: dict[str, WorkExecution] = {}
         for topic, handler in (

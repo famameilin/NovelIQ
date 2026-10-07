@@ -7,8 +7,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.work import completed_chapters
 from src.storage.models import AnnotationWork, BookCase, Chapter, EventEdge, EventNode
+from src.storage.repositories.annotation.work_state import completed_chapters
 
 
 def book_state_view(session: Session, run_id: str) -> dict[str, Any]:

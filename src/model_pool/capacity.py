@@ -20,8 +20,8 @@ from uuid import uuid4
 
 from loguru import logger
 
-from src.agents.annotation.work import WorkReceipt
 from src.event_bus import EventBus, Message
+from src.work.annotation_work import WorkReceipt
 
 
 class ModelCapacity:
@@ -115,9 +115,9 @@ class ModelElectionPool:
         self._wake.set()
 
     async def run(self) -> None:
-        from src.utils.identity import stable_digest
         from src.config import settings
         from src.config.model_assignment import select_annotation_model
+        from src.utils.identity import stable_digest
 
         selection_error: Exception | None = None
         while not self.closed:

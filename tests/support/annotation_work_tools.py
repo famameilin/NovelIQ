@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from src.agents.annotation.agent import WorkExecution
 from src.agents.annotation.subagent_ir import SubagentAnnotation
-from src.agents.annotation.work import WorkReceipt, annotation_work_id
+from src.work.annotation_work import WorkReceipt, annotation_work_id
 from src.agents.annotation.work_tools import build_work_tools
 from src.case_pool import CasePool
 from src.event_trees.trees import EventTrees

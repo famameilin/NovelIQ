@@ -12,18 +12,16 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.agent import AnnotationAgent
-from src.agents.annotation.work import WorkReceipt, annotation_work_id, completed_chapters, required_roles
 from src.agents.audit.module import AuditModule
-from src.case_pool import CasePool
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
 from src.event_bus import EventBus, Message
-from src.event_trees.trees import EventTrees
-from src.fact_graph.graph import FactGraph
 from src.sse.consumer import SSEModule
 from src.sse.events import StreamEvent
 from src.storage.db import get_session_factory
 from src.storage.models import AnalysisOutput, AnnotationWork, Chapter, Paragraph
+from src.storage.repositories.annotation.work_state import completed_chapters
+from src.work.annotation_work import WorkReceipt, annotation_work_id, required_roles
 from src.workflows.chapter_pool import ChapterWorkerPool
 
 
@@ -122,15 +120,7 @@ async def run_annotate(
     if not total:
         return 0, 0, 0
     bus = EventBus()
-    agent = AnnotationAgent(
-        bus,
-        run_id,
-        factory,
-        novel_id=novel_id,
-        fact_graph=FactGraph(run_scope=run_id),
-        event_trees=EventTrees(run_id),
-        case_pool=CasePool(run_id),
-    )
+    agent = AnnotationAgent(bus, run_id, factory, novel_id=novel_id)
     audit = AuditModule(bus, run_id, factory)
     sse = SSEModule(bus, run_id, emitter)
     pool = ChapterWorkerPool(max_attempts=settings.models.annotation.total_attempts)

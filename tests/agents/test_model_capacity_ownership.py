@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from src.agents.annotation.work import WorkReceipt
+from src.work.annotation_work import WorkReceipt
 from src.config import settings
 from src.event_bus import EventBus, Message
 from src.model_pool.capacity import MODEL_CAPACITY, ModelElectionExhausted, ModelElectionPool

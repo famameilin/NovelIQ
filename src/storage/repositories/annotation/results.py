@@ -7,9 +7,9 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.work import completed_chapters
 from src.storage.models import AnalysisOutput, AnnotationWork, Chapter
 from src.storage.models.base import naive_utcnow
+from src.storage.repositories.annotation.work_state import completed_chapters
 
 _ROLE_ORDER = {"solo": 0, "structure": 0, "event": 1, "evidence": 2}
 

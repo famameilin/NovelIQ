@@ -432,7 +432,7 @@ def commit_test_annotation(
     from src.agents.annotation.ledger import AnnotationToolLedger
     from src.agents.annotation.paragraphs import build_chapter_paragraph_info
     from src.agents.annotation.subagent_ir import SubagentAnnotation
-    from src.agents.annotation.work import WorkReceipt, annotation_work_id
+    from src.work.annotation_work import WorkReceipt, annotation_work_id
     from src.case_pool import CasePool
     from src.event_bus import EventBus
     from src.event_trees.trees import EventTrees
