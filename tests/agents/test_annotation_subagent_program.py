@@ -29,7 +29,7 @@ from typing import Any
 import pytest
 
 from src.agents.annotation.errors import AnnotationInvariantError
-from src.agents.annotation.schema import ChapterParagraphInfo
+from src.fact_graph.schema import ChapterParagraphInfo
 from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.agents.annotation.subagent_program import (
     SubagentProgramRuntime,

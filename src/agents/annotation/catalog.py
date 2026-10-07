@@ -16,7 +16,7 @@ from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from .program import _PROGRAM_MAX_CODE_CHARS, _PROGRAM_MAX_OPS, render_list_signature
-from .schema import (
+from src.fact_graph.schema import (
     CLIFFHANGER_DESCRIPTION,
     ENTITY_REF_FIELD_HINT,
     EVENT_ROLE_FIELD_HINT,

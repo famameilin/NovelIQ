@@ -19,7 +19,7 @@ from uuid import NAMESPACE_DNS, uuid5
 import pytest
 from langchain_core.messages import AIMessage
 
-from src.agents.annotation.schema import (
+from src.fact_graph.schema import (
     BoundChapterAnnotation,
     BoundDialogue,
     BoundParagraphLabel,

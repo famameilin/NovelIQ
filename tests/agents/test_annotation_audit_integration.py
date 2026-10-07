@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
-from src.agents.annotation.schema import ChapterParagraphInfo
+from src.fact_graph.schema import ChapterParagraphInfo
 from src.agents.audit.observer import AgentTurnObserver, build_invocation_context
 from src.agents.audit.recorder import AgentAuditRecorder
 from src.agents.stream import ModelCallTiming

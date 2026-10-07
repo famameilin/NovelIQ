@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.annotation.schema import EntityInput, RelationInput
+from src.fact_graph.schema import EntityInput, RelationInput
 from src.fact_graph.graph import FactGraph
 
 

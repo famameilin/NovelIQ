@@ -27,7 +27,7 @@ import json
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.schema import ChapterParagraphInfo
+from src.fact_graph.schema import ChapterParagraphInfo
 from src.agents.annotation.tool_batch import _invoke_tool
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph

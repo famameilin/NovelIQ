@@ -439,7 +439,7 @@ class TestParagraphBoundary:
 
         from sqlalchemy import select
 
-        from src.agents.annotation.schema import (
+        from src.fact_graph.schema import (
             BoundChapterAnnotation,
             BoundParagraphLabel,
             ChapterMetricsInput,

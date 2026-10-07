@@ -13,7 +13,7 @@
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.schema import DialogueVerdict, EntityInput, ParticipantArg, Tone
+from src.fact_graph.schema import DialogueVerdict, EntityInput, ParticipantArg, Tone
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
 

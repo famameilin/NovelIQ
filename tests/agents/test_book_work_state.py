@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.agents.annotation.schema import BoundEvent, EntityInput
+from src.fact_graph.schema import BoundEvent, EntityInput
 from src.agents.annotation.work import annotation_work_id, completed_chapters, required_roles
 from src.case_pool import CasePool
 from src.event_bus import EventBus, Message, MissingSubscriber
@@ -142,7 +142,7 @@ def test_case_exclusion_lasts_until_own_work_confirmed() -> None:
 def test_role_finish_never_fills_metrics_or_skips_dialogue_candidates():
     from src.agents.annotation.agent import WorkExecution
     from src.agents.annotation.ledger import AnnotationToolLedger
-    from src.agents.annotation.schema import ChapterMetricsInput
+    from src.fact_graph.schema import ChapterMetricsInput
     from src.agents.annotation.subagent_ir import SubagentAnnotation
     from src.agents.annotation.work import WorkReceipt
 

@@ -7,7 +7,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from src.utils.identity import exact_digest, text_digest
-from src.agents.annotation.schema import ChapterParagraphInfo
+from src.fact_graph.schema import ChapterParagraphInfo
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
 from tests.support.annotation_work_tools import build_annotation_tools

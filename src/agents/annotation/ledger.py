@@ -28,7 +28,7 @@ from .errors import (
     AnnotationStageRejection,
 )
 from src.utils.identity import stable_uuid
-from .schema import (
+from src.fact_graph.schema import (
     EL_PATH_SEP,
     RELATION_DEFINITIONS,
     RESERVED_ROOT_KEY,

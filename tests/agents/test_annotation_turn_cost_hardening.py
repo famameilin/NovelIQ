@@ -25,7 +25,7 @@ from uuid import NAMESPACE_DNS, uuid5
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.schema import (
+from src.fact_graph.schema import (
     ChapterParagraphInfo,
 )
 from src.agents.annotation.tool_batch import _invoke_tool

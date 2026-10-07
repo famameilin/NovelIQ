@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.schema import (
+from src.fact_graph.schema import (
     BoundCharacterObservation,
     BoundEvent,
     ChapterParagraphInfo,

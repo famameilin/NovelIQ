@@ -17,7 +17,7 @@ from langchain_core.tools import tool
 from pydantic import Field, JsonValue
 
 from .ledger import AnnotationToolLedger
-from .schema import (
+from src.fact_graph.schema import (
     CLIFFHANGER_DESCRIPTION,
     ENTITY_TAG_MAX_CHARS,
     ENTITY_TAG_MAX_COUNT,

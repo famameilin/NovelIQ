@@ -9,7 +9,7 @@ from langchain_core.tools import tool
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError, AnnotationStageRejection
 from src.utils.identity import stable_digest, text_digest
-from .schema import SourceReference
+from src.fact_graph.schema import SourceReference
 
 if TYPE_CHECKING:
     from .tools import AnnotationQueryService, AnnotationToolLedger

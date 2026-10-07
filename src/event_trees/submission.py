@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Self
 from langchain_core.tools import StructuredTool
 from pydantic import Field, StrictInt, ValidationError, WithJsonSchema, field_validator, model_validator
 
-from src.agents.annotation.schema import (
+from src.fact_graph.schema import (
     Confidence,
     EntityType,
     EventChildType,
@@ -20,7 +20,7 @@ from src.agents.annotation.schema import (
     StrictModel,
     normalize_semantic_text,
 )
-from src.agents.annotation.vocabulary import (
+from src.fact_graph.vocabulary import (
     _EVENT_ONLY_ROLE_WORDS,
     _TONE_CHINESE_WORDS,
     clamp_emotion_score,

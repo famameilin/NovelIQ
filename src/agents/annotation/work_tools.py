@@ -8,7 +8,7 @@ from typing import Any, Literal
 from langchain_core.tools import tool
 from pydantic import TypeAdapter
 
-from .schema import ParticipantArg
+from src.fact_graph.schema import ParticipantArg
 from .tool_factories import build_annotation_tools
 from .tools import _forbid_undeclared_args
 
@@ -155,7 +155,7 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             if agent.case_pool.active(author) is not None:
                 execution.case_connections.append(identifier)
         else:
-            from .schema import RELATION_DEFINITIONS
+            from src.fact_graph.schema import RELATION_DEFINITIONS
 
             for identifier in (source_id, target_id):
                 if identifier not in ledger.shared_entity_ids:

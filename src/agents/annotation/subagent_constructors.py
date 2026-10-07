@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .program import _READ_TOOL_NAMES
-from .schema import (
+from src.fact_graph.schema import (
     ENTITY_TAG_MAX_CHARS,
     ENTITY_TAG_MAX_COUNT,
     Confidence,
@@ -52,7 +52,7 @@ from .subagent_ir import (
     namespace_event_el,
     normalize_evidence,
 )
-from .vocabulary import (
+from src.fact_graph.vocabulary import (
     _EVENT_ONLY_ROLE_WORDS,
     clamp_emotion_score,
     normalize_event_participant_role,

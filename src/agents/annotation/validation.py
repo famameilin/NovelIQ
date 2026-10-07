@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .errors import AnnotationInputError
-from .schema import BoundChapterAnnotation, ChapterParagraphInfo
+from src.fact_graph.schema import BoundChapterAnnotation, ChapterParagraphInfo
 
 
 def validate_bound_annotation(

@@ -222,7 +222,7 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     """
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-    from src.agents.annotation.schema import ChapterParagraphInfo
+    from src.fact_graph.schema import ChapterParagraphInfo
     from src.agents.annotation.subagent_graph import build_subagent_graph
     from src.agents.annotation.tools import AnnotationToolLedger
     from src.fact_graph.graph import FactGraph

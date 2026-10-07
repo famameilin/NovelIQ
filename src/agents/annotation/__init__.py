@@ -9,7 +9,7 @@ from .errors import (
     AnnotationProtocolError,
     AnnotationRetryableError,
 )
-from .schema import BoundChapterAnnotation
+from src.fact_graph.schema import BoundChapterAnnotation
 from .tools import (
     AnnotationQueryService,
     AnnotationToolLedger,

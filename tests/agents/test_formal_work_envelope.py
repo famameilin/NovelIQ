@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agents.annotation.schema import TextSearchResult
+from src.fact_graph.schema import TextSearchResult
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
 from tests.support.annotation_work_tools import build_annotation_tools

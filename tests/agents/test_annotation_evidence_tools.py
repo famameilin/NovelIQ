@@ -17,7 +17,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.schema import (
+from src.fact_graph.schema import (
     ChapterParagraphInfo,
     DialogueInput,
     EntityInput,

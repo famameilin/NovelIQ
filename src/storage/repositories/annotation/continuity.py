@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from src.agents.annotation.schema import BoundChapterAnnotation, BoundParagraphLabel, TextSearchResult
+from src.fact_graph.schema import BoundChapterAnnotation, BoundParagraphLabel, TextSearchResult
 from src.storage.text_search import TextSearchService
 from src.config import settings
 from src.embedding import EmbeddingClient

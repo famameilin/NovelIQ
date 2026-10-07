@@ -3,7 +3,7 @@
 from copy import deepcopy
 from types import SimpleNamespace
 
-from src.agents.annotation.schema import BoundEvent, EntityInput
+from src.fact_graph.schema import BoundEvent, EntityInput
 from src.case_pool import CasePool
 from src.event_trees.trees import EventTrees
 from src.fact_graph.graph import FactGraph, mention_uuid

@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .schema import (
+from src.fact_graph.schema import (
     EL_PATH_SEP,
     RELATION_DEFINITIONS,
     RESERVED_ROOT_KEY,

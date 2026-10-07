@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage
 
 from src.agents.annotation.program import PROGRAM_TOOL_NAME
 from src.agents.annotation.prompts import build_subagent_message
-from src.agents.annotation.schema import ChapterParagraphInfo, TextSearchResult
+from src.fact_graph.schema import ChapterParagraphInfo, TextSearchResult
 from src.agents.annotation.tool_batch import _build_tool_batch_node
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph

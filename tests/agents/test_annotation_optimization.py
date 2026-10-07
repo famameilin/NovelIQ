@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agents.annotation import program as program_module
 from src.agents.annotation.program import build_program_tool
-from src.agents.annotation.schema import ChapterParagraphInfo, EventParticipantRole, RoleFunction
+from src.fact_graph.schema import ChapterParagraphInfo, EventParticipantRole, RoleFunction
 from src.agents.annotation.subagent_graph import build_subagent_graph
 from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.agents.annotation.subagent_runtime import SubagentProgramRuntime

@@ -213,7 +213,7 @@ class EventTrees:
     def save_work(self, session: Any, execution: Any, annotation_id: str) -> None:
         from sqlalchemy import text
 
-        from src.agents.annotation.domain_storage import evidence_for
+        from src.fact_graph.evidence import evidence_for
         from src.storage.models import AnnotationWork, EventEdge, EventNode
 
         session.execute(

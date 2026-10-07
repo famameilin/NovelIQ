@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import NAMESPACE_DNS, uuid5
 
-from src.agents.annotation.schema import RELATION_DEFINITIONS, EntityType, RelationInput
+from src.fact_graph.schema import RELATION_DEFINITIONS, EntityType, RelationInput
 
 _CONTRIBUTION_FACT_TYPES = {"entity", "relation", "character_observation", "entity_reference"}
 
@@ -115,7 +115,7 @@ class FactGraph:
         """保存自己的不可变操作，再按实际章序和角色序重折数据库状态"""
         from sqlalchemy import select, text
 
-        from src.agents.annotation.domain_storage import evidence_for
+        from src.fact_graph.evidence import evidence_for
         from src.utils.identity import stable_digest
         from src.storage.models import GraphEntity, GraphFact, GraphRelation
         from src.storage.repositories.graph.identity import relation_id

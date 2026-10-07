@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from src.agents.annotation.schema import (
+from src.fact_graph.schema import (
     BoundChapterAnnotation,
     ChapterMetricsInput,
     NarrativeFunction,

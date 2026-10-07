@@ -39,7 +39,7 @@ from langchain_core.tools import tool
 from pydantic import ConfigDict, Field, create_model
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError
-from .schema import EL_PATH_SEP, RESERVED_ROOT_KEY, TextSearchResult
+from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY, TextSearchResult
 
 # 2026-09-13 领域写入工具表：正式写入工具集合与失败归因共用同一份声明
 _DOMAIN_WRITE_TOOLS: dict[str, tuple[str, ...]] = {
