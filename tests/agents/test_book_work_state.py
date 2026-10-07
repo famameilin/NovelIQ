@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.fact_graph.schema import BoundEvent, EntityInput
+from src.fact_graph.schema import EntityInput
+from src.event_trees.models import BoundEvent
 from src.agents.annotation.work import annotation_work_id, completed_chapters, required_roles
 from src.case_pool import CasePool
 from src.event_bus import EventBus, Message, MissingSubscriber

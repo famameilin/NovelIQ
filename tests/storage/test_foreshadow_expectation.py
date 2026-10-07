@@ -7,7 +7,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.fact_graph.schema import BoundEvent, Confidence
+from src.fact_graph.schema import Confidence
+from src.event_trees.models import BoundEvent
 from src.storage.models import EventNode
 from src.storage.repositories.annotation.repository import AnnotationRepository
 from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation

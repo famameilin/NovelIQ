@@ -95,6 +95,26 @@ class EventTrees:
             "content": content,
         }
 
+    def search_ids(
+        self, query: str = "", *, chapter_id: int | None = None, tree_id: str | None = None,
+    ) -> list[str]:
+        """先筛选稳定节点 ID，分页读取详情时不复制整本书的节点正文"""
+        parents = self._parents() if tree_id is not None else {}
+        values: list[str] = []
+        for identifier, node in sorted(self.nodes.items()):
+            if chapter_id is not None and node["chapter_id"] != chapter_id:
+                continue
+            if query.casefold() not in node["content"]["description"].casefold():
+                continue
+            if tree_id is not None:
+                root = identifier
+                while root in parents:
+                    root = parents[root]
+                if self.nodes[root]["content"]["tree_id"] != tree_id:
+                    continue
+            values.append(identifier)
+        return values
+
     def connect(
         self,
         author: tuple[str, str],

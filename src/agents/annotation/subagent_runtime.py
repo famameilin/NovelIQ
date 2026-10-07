@@ -90,7 +90,7 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         visible_tools = [by_name[name] for name in SUBAGENT_TOOL_NAMES if name in by_name]
         visible_tools.extend(
             by_name[name]
-            for name in ("promise_case", "search_cases", "search_events", "search_graph")
+            for name in ("promise_case", "search_cases", "search_events", "search_graph", "read_event", "read_entity")
             if name in by_name
         )
         namespace: dict[str, Any] = {str(tool.name): tool for tool in [*visible_tools, self.finish_tool]}

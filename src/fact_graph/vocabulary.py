@@ -14,10 +14,6 @@ import unicodedata
 from enum import StrEnum
 from typing import Literal, TypedDict
 
-# 2026-08-30 事件参与者专属角色词不能写进同一参与者的人物功能字段
-# （2026-09-11 见证者已并入 RoleFunction 词表，从拒绝表移除）
-_EVENT_ONLY_ROLE_WORDS = frozenset({"地点", "行动者", "承受者", "协助者", "对抗者"})
-
 
 class NarrativeFunction(StrEnum):
     """本章在叙事结构中的功能，只能取一个
@@ -133,22 +129,6 @@ _TONE_CHINESE_WORDS = frozenset(member.value for member in Tone)
 # record/field/code/expected 回执（含全词表与「其他」指引），与别的枚举参数同一条路径。
 
 
-class EventParticipantRole(StrEnum):
-    """参与实体在这次事件里的角色
-
-    主体=事件的发起者；客体=事件的承受者；接收者=接收对象；帮助者=协助主体的人；
-    反对者=阻碍事件的人；见证者=在场但未介入的人；地点=事件发生的场所（只给 location 实体用）。
-    """
-
-    SUBJECT = "主体"
-    OBJECT = "客体"
-    RECEIVER = "接收者"
-    HELPER = "帮助者"
-    OPPONENT = "反对者"
-    WITNESS = "见证者"
-    LOCATION = "地点"
-
-
 # 2026-10-04 合同由"缺失/越界即拒"改"缺省归一"（run 08f9ba42 审计：participants 族
 # 拒绝 482 次=全部被拒 53%，且是子代理盲发死循环的唯一燃料）。两条生产路径共用。
 ROLE_FUNCTION_ALIASES: dict[str, str] = {
@@ -190,26 +170,6 @@ def normalize_role_function(value: object) -> RoleFunction | None:
         return RoleFunction(text)
     except ValueError:
         return RoleFunction.SUBJECT
-
-
-def normalize_event_participant_role(value: object) -> EventParticipantRole | None:
-    """用于把模型写的参与角色词归一到 EventParticipantRole（缺省/未收录返回 None）
-
-    None 由生产面按实体登记类型给缺省（character→主体、location→地点、其余→客体）。
-    """
-    if value is None:
-        return None
-    if isinstance(value, EventParticipantRole):
-        return value
-    if not isinstance(value, str):
-        return None
-    text = unicodedata.normalize("NFC", value).strip()
-    if not text:
-        return None
-    try:
-        return EventParticipantRole(text)
-    except ValueError:
-        return None
 
 
 def clamp_emotion_score(value: object) -> int | None:
@@ -272,25 +232,10 @@ class EntityType(StrEnum):
     ORGANIZATION = "organization"
 
 
-class EventChildType(StrEnum):
-    """子事件在树内的位置
-
-    main=顺延主因链（成为新的链尾）；secondary=挂在当时主链尾（次因分支）。
-    """
-
-    MAIN = "main"
-    SECONDARY = "secondary"
-
-
 Directionality = Literal["directed", "bidirectional"]
 RelationSemantics = Literal["ordinary", "same_character"]
 CaseType = str
 DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
-
-# 2026-08-19 事件树内部节点角色（一棵树 = 一个完整事件；根 = 触发该
-# 事件的第一个自立动作；main = 主因链上；secondary = 父的兄弟即次因分支）
-# 2026-09-14 模型面 type 参数用 EventChildType（root 由 isroot=true 表达，不外露）
-EventCauseRole = Literal["root", "main", "secondary"]
 
 _ACTOR_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.CHARACTER, EntityType.ORGANIZATION)
 _CHARACTER_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.CHARACTER,)

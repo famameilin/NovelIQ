@@ -2,6 +2,8 @@
 章节标注 Agent 公共入口
 """
 
+from src.event_trees.models import BoundChapterAnnotation
+
 from .errors import (
     AnnotationAgentError,
     AnnotationAuthorizationError,
@@ -9,7 +11,6 @@ from .errors import (
     AnnotationProtocolError,
     AnnotationRetryableError,
 )
-from src.fact_graph.schema import BoundChapterAnnotation
 from .tools import (
     AnnotationQueryService,
     AnnotationToolLedger,

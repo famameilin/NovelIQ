@@ -9,11 +9,8 @@ from __future__ import annotations
 
 import uuid
 
-from src.fact_graph.schema import (
-    BoundChapterAnnotation,
-    ChapterMetricsInput,
-    NarrativeFunction,
-)
+from src.fact_graph.schema import NarrativeFunction
+from src.event_trees.models import BoundChapterAnnotation, ChapterMetricsInput
 from src.storage.repositories import (
     ChapterRepository,
     ParagraphRepository,

@@ -30,6 +30,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.event_trees.vocabulary import (
+    EventChildType,
+    EventParticipantRole,
+)
 from src.fact_graph.schema import (
     EL_PATH_SEP,
     RELATION_DEFINITIONS,
@@ -37,8 +41,6 @@ from src.fact_graph.schema import (
     Confidence,
     DialogueVerdict,
     EntityType,
-    EventChildType,
-    EventParticipantRole,
     NarrativeFunction,
     RoleFunction,
     Tone,

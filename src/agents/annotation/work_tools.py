@@ -8,7 +8,7 @@ from typing import Any, Literal
 from langchain_core.tools import tool
 from pydantic import TypeAdapter
 
-from src.fact_graph.schema import ParticipantArg
+from src.event_trees.models import ParticipantArg
 from .tool_factories import build_annotation_tools
 from .tools import _forbid_undeclared_args
 

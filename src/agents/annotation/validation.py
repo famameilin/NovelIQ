@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from src.event_trees.models import BoundChapterAnnotation
+from src.fact_graph.schema import ChapterParagraphInfo
+
 from .errors import AnnotationInputError
-from src.fact_graph.schema import BoundChapterAnnotation, ChapterParagraphInfo
 
 
 def validate_bound_annotation(

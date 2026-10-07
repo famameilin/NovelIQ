@@ -11,17 +11,8 @@ from sqlalchemy import select
 
 from src.agents.annotation.candidates import extract_dialogue_candidates
 from src.utils.identity import stable_digest
-from src.fact_graph.schema import (
-    BoundChapterAnnotation,
-    BoundCharacterObservation,
-    BoundDialogue,
-    BoundEvent,
-    ChapterMetricsInput,
-    EntityInput,
-    EntityType,
-    EventParticipantInput,
-    RelationInput,
-)
+from src.fact_graph.schema import EntityInput, EntityType, RelationInput
+from src.event_trees.models import BoundChapterAnnotation, BoundCharacterObservation, BoundDialogue, BoundEvent, ChapterMetricsInput, EventParticipantInput
 from src.storage.db import get_session_factory
 from src.storage.models import Chapter, Novel, Paragraph
 from src.storage.repositories import ChapterRepository, RunRepository

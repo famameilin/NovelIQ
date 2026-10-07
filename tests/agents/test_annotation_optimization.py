@@ -11,7 +11,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agents.annotation import program as program_module
 from src.agents.annotation.program import build_program_tool
-from src.fact_graph.schema import ChapterParagraphInfo, EventParticipantRole, RoleFunction
+from src.fact_graph.schema import ChapterParagraphInfo, RoleFunction
+from src.event_trees.models import EventParticipantRole
 from src.agents.annotation.subagent_graph import build_subagent_graph
 from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.agents.annotation.subagent_runtime import SubagentProgramRuntime
@@ -110,8 +111,14 @@ async def test_bad_item_does_not_reject_batch_and_only_failed_items_need_resubmi
     body = json.loads(await tool.ainvoke({"events": [bad, child, healthy]}))
 
     assert body["status"] == "partial", body
-    assert [item["status"] for item in body["items"]] == ["failed", "waiting", "written"]
+    assert [item["status"] for item in body["items"]] == ["failed", "failed", "written"]
     assert "events[0].participants.0.emotion" in body["items"][0]["failed"][0]["field"]
+    assert body["items"][0]["failed"][0]["actual"] == "愤怒"
+    dependency = body["items"][1]["failed"][0]
+    assert dependency["code"] == "dependency_failed"
+    assert dependency["actual"] == "bad"
+    assert "submission/bad" in dependency["expected"]
+    assert not ledger.pending_child_events
     assert len(ledger.bound_payloads["events"]) == 1
     bad["participants"][0]["emotion"] = 0
     repaired = json.loads(await tool.ainvoke({"events": [bad, child]}))

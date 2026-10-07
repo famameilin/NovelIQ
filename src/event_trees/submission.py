@@ -6,30 +6,34 @@ import hashlib
 import json
 import re
 import time
-from typing import TYPE_CHECKING, Annotated, Any, Self
+from typing import Annotated, Any, Self
 
 from langchain_core.tools import StructuredTool
 from pydantic import Field, StrictInt, ValidationError, WithJsonSchema, field_validator, model_validator
 
+from src.event_trees.program_contract import (
+    PROGRAM_MAX_CODE_CHARS,
+    ProgramFault,
+    ProgramRuntimeSurface,
+)
+from src.event_trees.vocabulary import (
+    _EVENT_ONLY_ROLE_WORDS,
+    EventChildType,
+    EventParticipantRole,
+    normalize_event_participant_role,
+)
 from src.fact_graph.schema import (
     Confidence,
     EntityType,
-    EventChildType,
-    EventParticipantRole,
     RoleFunction,
     StrictModel,
     normalize_semantic_text,
 )
 from src.fact_graph.vocabulary import (
-    _EVENT_ONLY_ROLE_WORDS,
     _TONE_CHINESE_WORDS,
     clamp_emotion_score,
-    normalize_event_participant_role,
     normalize_role_function,
 )
-
-if TYPE_CHECKING:
-    from src.agents.annotation.program_runtime import RestrictedProgramRuntime
 
 SUBMIT_EVENTS_TOOL_NAME = "submit_events"
 
@@ -57,22 +61,24 @@ class ParticipantSubmission(StrictModel):
         default=None,
         description=(
             "参与角色：主体/客体/接收者/帮助者/反对者/见证者/地点（地点作为参与者角色）；"
-            "可省略，缺省按实体登记类型取（character→主体、location→地点、其余→客体）"
+            "可省略，缺省按实体登记类型取（character→主体、location→地点、其余→客体）；"
+            "地点只用于 location，organization 作为群体按行动填主体/客体等，不填地点"
         ),
     )
     narrative_role: RoleFunction | None = Field(
         default=None,
         description="character 参与者的人物叙事功能：主体/客体/发送者/接收者/帮助者/反对者/见证者；"
-        "可省略，近义词自动归一",
+        "可省略，近义词自动归一；非 character 必须省略本字段",
     )
     action: str | None = Field(
-        default=None, min_length=1, description="character 参与者的一句话动作概括（不超过 15 字）；可省略",
+        default=None, min_length=1,
+        description="character 参与者的一句话动作概括（不超过 15 字）；可省略；非 character 必须省略",
     )
     emotion: int | None = Field(
         default=None,
         ge=-2,
         le=2,
-        description="character 参与者动作伴随的情绪分值 -2..2；可省略，越界按边界收敛",
+        description="character 参与者动作伴随的情绪分值 -2..2；可省略，越界按边界收敛；非 character 必须省略",
     )
     evidence: EvidencePosition | None = Field(default=None, description="实体原文位置，省略时沿用事件证据")
 
@@ -111,9 +117,17 @@ class ParticipantSubmission(StrictModel):
         self.name = normalize_semantic_text(self.name, label="participant.name")
         given = [value is not None for value in (self.narrative_role, self.action, self.emotion)]
         if self.entity_type != "character" and any(given):
-            raise ValueError("narrative_role/action/emotion 只属于 character 参与者")
+            fields = {key: getattr(self, key) for key in ("narrative_role", "action", "emotion")
+                      if getattr(self, key) is not None}
+            raise ValueError(
+                f"参与者 {self.name} entity_type={self.entity_type}，实际人物字段={fields}；"
+                "narrative_role/action/emotion 只属于 character，删除这些字段，保留 name/entity_type/role"
+            )
         if self.role == EventParticipantRole.LOCATION and self.entity_type != "location":
-            raise ValueError("地点角色必须使用 location 实体")
+            raise ValueError(
+                f"参与者 {self.name} entity_type={self.entity_type}，实际 role=地点；"
+                "地点角色必须使用 location 实体；保持真实实体类型，按行动改填主体/客体/接收者/帮助者/反对者/见证者"
+            )
         return self
 
 
@@ -197,7 +211,7 @@ def _local_key(value: str) -> str:
 class EventSubmissionEngine:
     """复用现有单条写入、回滚与审计，不另建正式数据写入链"""
 
-    def __init__(self, runtime: RestrictedProgramRuntime) -> None:
+    def __init__(self, runtime: ProgramRuntimeSurface) -> None:
         self.runtime = runtime
         self.ledger = runtime.ledger
         self.subagent = getattr(runtime, "subagent", None)
@@ -209,19 +223,21 @@ class EventSubmissionEngine:
         receipt = await self.runtime._dispatch(name, args, line=None)
         if self.runtime.ops[-1]["status"] != "success":
             result.setdefault("failed", []).append({
-                key: receipt[key] for key in ("record", "field", "code", "expected", "message", "error")
+                key: receipt[key] for key in ("record", "field", "actual", "code", "expected", "message", "error")
                 if key in receipt
             })
             result["status"] = "failed"
             return None
         return receipt
 
-    def _reject(self, result: dict[str, Any], *, field: str, message: str, code: str = "invalid_value") -> None:
+    def _reject(
+        self, result: dict[str, Any], *, field: str, message: str, code: str = "invalid_value", actual: Any = None,
+    ) -> None:
         started_ns = time.perf_counter_ns()
         op = self.runtime._next_op_index(line=None)
         receipt = {
             "status": "rejected", "record": f"submission/{result['id']}", "field": field,
-            "code": code, "expected": message, "message": message,
+            "code": code, "actual": actual, "expected": message, "message": message,
         }
         self.runtime._log_op(SUBMIT_EVENTS_TOOL_NAME, op_index=op, line=None, status="error", receipt=receipt)
         self.ledger.errors.append(message)
@@ -335,19 +351,23 @@ class EventSubmissionEngine:
 
     async def execute(self, items: list[Any]) -> None:
         """先建立树根，再按提交顺序写子事件；每项保留自己的失败路径"""
-        from src.agents.annotation import program as limits
 
         encoded = json.dumps([
             item.model_dump(mode="json") if isinstance(item, EventSubmission) else item for item in items
         ], ensure_ascii=False)
-        if len(encoded) > limits._PROGRAM_MAX_CODE_CHARS:
-            raise limits._ProgramFault("结构化提交超过程序字符上限", code="program_too_large")
+        if len(encoded) > PROGRAM_MAX_CODE_CHARS:
+            raise ProgramFault("结构化提交超过程序字符上限", code="program_too_large")
         proposals: list[tuple[int, EventSubmission]] = []
+        roots: dict[str, list[int]] = {}
         seen: set[str] = set()
         for index, raw in enumerate(items):
             self.results[index] = {"id": raw.id if isinstance(raw, EventSubmission) else (
                 str(raw.get("id") or f"#{index + 1}") if isinstance(raw, dict) else f"#{index + 1}"
             ), "status": "waiting"}
+            if (isinstance(raw, EventSubmission) and raw.root_id is None) or (
+                isinstance(raw, dict) and raw.get("root_id") is None
+            ):
+                roots.setdefault(self.results[index]["id"], []).append(index)
         for index, raw in enumerate(items):
             self.runtime._guard()
             result = self.results[index]
@@ -356,20 +376,33 @@ class EventSubmissionEngine:
             except ValidationError as exc:
                 issue = exc.errors(include_url=False, include_context=False)[0]
                 path = ".".join(str(part) for part in issue["loc"])
-                self._reject(result, field=f"events[{index}]" + (f".{path}" if path else ""), message=issue["msg"])
+                self._reject(
+                    result, field=f"events[{index}]" + (f".{path}" if path else ""),
+                    message=issue["msg"], actual=issue.get("input"),
+                )
                 continue
             if event.id in seen:
-                self._reject(result, field=f"events[{index}].id", message="同批事件 id 不能重复")
+                self._reject(result, field=f"events[{index}].id", message="同批事件 id 不能重复", actual=event.id)
                 continue
             seen.add(event.id)
             proposals.append((index, event))
         for index, event in [item for item in proposals if item[1].root_id is None] + [
             item for item in proposals if item[1].root_id is not None
         ]:
+            if event.root_id in roots and not any(
+                self.results[root_index]["status"] == "written" for root_index in roots[event.root_id]
+            ):
+                # 同批根失败不能转成合法暂挂；阻断依赖项也不能登记实体或污染待补根缓冲
+                self._reject(
+                    self.results[index], field=f"events[{index}].root_id", code="dependency_failed",
+                    actual=event.root_id,
+                    message=f"同批树根 submission/{event.root_id} 写入失败；先修复树根，再重提该子事件",
+                )
+                continue
             await self._event(event, self.results[index])
 
 
-def build_event_submission_tool(runtime: RestrictedProgramRuntime) -> Any:
+def build_event_submission_tool(runtime: ProgramRuntimeSurface) -> Any:
     """为章级与子代理提供同一结构化入口，减少模型手写引用和调用程序"""
     async def submit_events(events: list[Any]) -> str:
         engine = EventSubmissionEngine(runtime)
@@ -384,10 +417,13 @@ def build_event_submission_tool(runtime: RestrictedProgramRuntime) -> Any:
         description=(
             "直接调用本工具批量提交事件与参与者的数据，不能在 execute_code 程序里调用。"
             "优先使用本工具完成事件域：提交正文位置、实体名称与人物三态（三态与 role 均可省略或写偏，"
-            "引擎按实体登记类型给缺省、近义词归一、情绪分值钳制），"
+            "引擎按实体登记类型给缺省、近义词归一、情绪分值钳制）；"
+            "非 character 省略 narrative_role/action/emotion，只有 location 可以填 role=地点，"
+            "organization 按群体行动填主体/客体等，不能因活动发生在组织驻地就填地点。"
             "引擎建立局部键、先建树根、换算原文坐标、登记参与者并绑定证据，不需要编写程序或构造 source_ref。"
             "树内先后按数组顺序；同 id 重提按现有写入规则更新。items 只回成功键和失败/等待项："
-            "等待=子事件先于树根提交，已挂起待建根自动生效，重提亦可；失败项修复取值后仅重提失败或等待的 id，"
+            "等待=子事件先于树根提交，已挂起待建根自动生效，重提亦可；同批根失败的子事件直接报告 dependency_failed。"
+            "失败项修复取值后仅重提失败或等待的 id，"
             "成功项不用重写；其余标注域使用 execute_code。"
         ),
     )

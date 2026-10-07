@@ -12,9 +12,8 @@ from __future__ import annotations
 
 from pydantic import Field, model_validator
 
-from .inputs import ChapterMetricsInput, EventParticipantInput
 from .schema import StrictModel
-from .vocabulary import Confidence, EventCauseRole, RoleFunction, Tone
+from .vocabulary import RoleFunction, Tone
 
 
 class BoundCharacterObservation(StrictModel):
@@ -43,41 +42,11 @@ class BoundDialogue(StrictModel):
     is_inner_monologue: bool = False
 
 
-class BoundEvent(StrictModel):
-    """事件树节点：服务端生成稳定 ID，正式提交绑定本章段落证据"""
-
-    node_id: str = Field(min_length=1, description="服务端派生的节点 id（=落库 event_id）")
-    tree_id: str = Field(min_length=1)
-    parent_node_id: str | None = Field(default=None, description="root 为 None")
-    cause_role: EventCauseRole
-    description: str = Field(min_length=1)
-    evidence_paragraph_id: int | None = Field(default=None, ge=0, description="事件所在段的全局段落 ID")
-    participants: list[EventParticipantInput] = Field(default_factory=list)
-    is_foreshadow_setup: bool = False
-    # 2026-09-13 伏笔入森林：根事件携带伏笔属性（落库到 event_nodes 根列）
-    payoff_likelihood: Confidence | None = None
-
-
 class BoundParagraphLabel(StrictModel):
     """2026-09-14 段落级情绪监督绑定结果（paragraph_id 已在账本校验属于本章，无需再绑字符区间）"""
 
     paragraph_id: int = Field(ge=0)
     emotion: int
-
-
-class BoundChapterAnnotation(StrictModel):
-    """本章正式标注，实体与关系由独立局部命令提交
-
-    没有可标注段落或覆盖告警时使用空列表，不读取其他版本的载荷
-    """
-
-    metrics: ChapterMetricsInput
-    character_observations: list[BoundCharacterObservation]
-    dialogues: list[BoundDialogue]
-    events: list[BoundEvent]
-    paragraph_labels: list[BoundParagraphLabel] = Field(default_factory=list)
-    # 2026-09-05 冻结时系统确定性覆盖告警（如候选>0但载荷为空），仅留痕不阻断
-    coverage_warnings: list[str] = Field(default_factory=list)
 
 
 class TextSearchResult(StrictModel):

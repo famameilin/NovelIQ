@@ -16,7 +16,8 @@ from typing import Annotated, Any
 from langchain_core.tools import tool
 from pydantic import Field, JsonValue
 
-from .ledger import AnnotationToolLedger
+from src.event_trees.models import ParticipantArg
+from src.event_trees.vocabulary import EventChildType
 from src.fact_graph.schema import (
     CLIFFHANGER_DESCRIPTION,
     ENTITY_TAG_MAX_CHARS,
@@ -29,14 +30,14 @@ from src.fact_graph.schema import (
     EntityInput,
     EntityRef,
     EntityType,
-    EventChildType,
     NarrativeFunction,
     ParagraphLabelInput,
-    ParticipantArg,
     RelationType,
     Tone,
     relation_catalog_text,
 )
+
+from .ledger import AnnotationToolLedger
 from .tools import (
     AnnotationQueryService,
     EntityLocalKey,

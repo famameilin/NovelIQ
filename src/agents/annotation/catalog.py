@@ -16,20 +16,8 @@ from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from .program import _PROGRAM_MAX_CODE_CHARS, _PROGRAM_MAX_OPS, render_list_signature
-from src.fact_graph.schema import (
-    CLIFFHANGER_DESCRIPTION,
-    ENTITY_REF_FIELD_HINT,
-    EVENT_ROLE_FIELD_HINT,
-    PERSON_ROLE_FIELD_HINT,
-    PIVOT_MOMENT_DESCRIPTION,
-    Confidence,
-    DialogueVerdict,
-    EntityRefType,
-    EventParticipantRole,
-    RoleFunction,
-    Tone,
-    relation_catalog_text,
-)
+from src.fact_graph.schema import CLIFFHANGER_DESCRIPTION, ENTITY_REF_FIELD_HINT, EVENT_ROLE_FIELD_HINT, PERSON_ROLE_FIELD_HINT, PIVOT_MOMENT_DESCRIPTION, Confidence, DialogueVerdict, EntityRefType, RoleFunction, Tone, relation_catalog_text
+from src.event_trees.vocabulary import EventParticipantRole
 from .search_projection import (
     _PROJECTION_PARAMETER_LABELS,
     _PROJECTION_PARAMETERS,

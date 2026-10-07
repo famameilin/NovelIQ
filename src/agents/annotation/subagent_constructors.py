@@ -8,7 +8,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .program import _READ_TOOL_NAMES
+from src.event_trees.vocabulary import (
+    _EVENT_ONLY_ROLE_WORDS,
+    EventChildType,
+    normalize_event_participant_role,
+)
 from src.fact_graph.schema import (
     ENTITY_TAG_MAX_CHARS,
     ENTITY_TAG_MAX_COUNT,
@@ -16,11 +20,16 @@ from src.fact_graph.schema import (
     DialogueVerdict,
     EntityRef,
     EntityType,
-    EventChildType,
     NarrativeFunction,
     RelationType,
     Tone,
 )
+from src.fact_graph.vocabulary import (
+    clamp_emotion_score,
+    normalize_role_function,
+)
+
+from .program import _READ_TOOL_NAMES
 from .subagent_ir import (
     CONFIDENCE_VALUES,
     DIALOGUE_VERDICTS,
@@ -51,12 +60,6 @@ from .subagent_ir import (
     namespace_el,
     namespace_event_el,
     normalize_evidence,
-)
-from src.fact_graph.vocabulary import (
-    _EVENT_ONLY_ROLE_WORDS,
-    clamp_emotion_score,
-    normalize_event_participant_role,
-    normalize_role_function,
 )
 
 

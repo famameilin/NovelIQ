@@ -18,23 +18,23 @@ from typing import Any, cast
 
 from pydantic import ValidationError
 
-from src.fact_graph.graph import FactGraph
-
-from .candidates import extract_dialogue_candidates
-from .errors import (
-    AnnotationInputError,
-    AnnotationInvariantError,
-    AnnotationProtocolError,
-    AnnotationStageRejection,
+from src.event_trees.models import (
+    BoundEvent,
+    EventParticipantInput,
+    ParticipantArg,
 )
-from src.utils.identity import stable_uuid
+from src.event_trees.vocabulary import (
+    EventCauseRole,
+    EventChildType,
+    EventParticipantRole,
+)
+from src.fact_graph.graph import FactGraph
 from src.fact_graph.schema import (
     EL_PATH_SEP,
     RELATION_DEFINITIONS,
     RESERVED_ROOT_KEY,
     BoundCharacterObservation,
     BoundDialogue,
-    BoundEvent,
     BoundParagraphLabel,
     ChapterMetricsInput,
     ChapterParagraphInfo,
@@ -45,14 +45,18 @@ from src.fact_graph.schema import (
     EntityDirectoryInput,
     EntityInput,
     EntityType,
-    EventCauseRole,
-    EventChildType,
-    EventParticipantInput,
-    EventParticipantRole,
-    ParticipantArg,
     RelationInput,
     RelationType,
     Tone,
+)
+from src.utils.identity import stable_uuid
+
+from .candidates import extract_dialogue_candidates
+from .errors import (
+    AnnotationInputError,
+    AnnotationInvariantError,
+    AnnotationProtocolError,
+    AnnotationStageRejection,
 )
 from .subagent_ir import ROLE_NAMESPACE_SEP
 from .tools import _norm_entity_key, _norm_graph_name

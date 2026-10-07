@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from src.fact_graph.schema import BoundChapterAnnotation
+from src.event_trees.models import BoundChapterAnnotation
 from src.storage.models import (
     AnalysisOutput,
     Chapter,
