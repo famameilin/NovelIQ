@@ -45,7 +45,6 @@ def pre_merge_engine(db_session):
                     execution_id VARCHAR(64) UNIQUE,
                     attempt_number INTEGER NOT NULL,
                     model_name VARCHAR(100),
-                    model_provider VARCHAR(20),
                     status VARCHAR(20) NOT NULL,
                     final_error TEXT,
                     started_at TIMESTAMP NOT NULL,
@@ -239,8 +238,8 @@ def test_merge_migration_archives_sources_and_merges_rows(pre_merge_engine):
         connection.execute(
             text(
                 "INSERT INTO agent_invocations (run_id, task_type, chapter_id, work_id, role, execution_id, "
-                "attempt_number, model_name, model_provider, status, started_at, finished_at) "
-                "VALUES (:run_id, 'annotation', 1, 'work-1', 'solo', 'exec-ok', 1, 'test-model', 'local', "
+                "attempt_number, model_name, status, started_at, finished_at) "
+                "VALUES (:run_id, 'annotation', 1, 'work-1', 'solo', 'exec-ok', 1, 'test-model', "
                 "'success', now(), now())"
             ),
             {"run_id": run_id},
@@ -248,8 +247,8 @@ def test_merge_migration_archives_sources_and_merges_rows(pre_merge_engine):
         connection.execute(
             text(
                 "INSERT INTO agent_invocations (run_id, task_type, chapter_id, attempt_number, model_name, "
-                "model_provider, status, final_error, started_at, finished_at) "
-                "VALUES (:run_id, 'diagnosis', NULL, 1, 'test-model', 'cloud', 'error', 'dispatch failed', "
+                "status, final_error, started_at, finished_at) "
+                "VALUES (:run_id, 'diagnosis', NULL, 1, 'test-model', 'error', 'dispatch failed', "
                 "now(), now())"
             ),
             {"run_id": run_id},
@@ -331,7 +330,7 @@ def test_merge_migration_archives_sources_and_merges_rows(pre_merge_engine):
 
     inspector = inspect(engine)
     assert counts["model_turns"] == {"agent_turn": 1, "usage": 1, "attempt_error": 1}
-    assert counts["analysis_outputs"] == {"chapter_annotation": 1, "cloud_analysis": 1}
+    assert counts["analysis_outputs"] == {"chapter_annotation": 1, "agent_analysis": 1}
     for table in ("agent_invocations", "agent_turns", "token_usage", "audit_messages", "chapter_annotations",
                   "cloud_analysis", "book_case_states"):
         assert not inspector.has_table(table), table
@@ -364,8 +363,8 @@ def test_merge_migration_archives_sources_and_merges_rows(pre_merge_engine):
         ).all()
         chapter_row = next(row for row in outputs if row.kind == "chapter_annotation")
         assert chapter_row.output_id == "ann-1"
-        cloud_row = next(row for row in outputs if row.kind == "cloud_analysis")
-        assert cloud_row.payload["genre_labels"] == ["新标签"]
+        agent_row = next(row for row in outputs if row.kind == "agent_analysis")
+        assert agent_row.payload["genre_labels"] == ["新标签"]
         case = connection.execute(
             text("SELECT state, contributions FROM book_cases WHERE case_id = 'case-1'")
         ).one()

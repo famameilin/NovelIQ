@@ -19,7 +19,7 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.agents.diagnosis.schema import CloudAnalysis
+from src.agents.diagnosis.schema import AgentAnalysis
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
@@ -407,7 +407,7 @@ class TestStageCompleteChecks:
         assert stats_repo.has_topic_data(run_id)
 
     def test_is_diagnose_complete_no_data(self, db_session):
-        """无cloud_analysis时diagnose未完成"""
+        """无诊断产物时diagnose未完成"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(novel_id, session=db_session)
@@ -420,7 +420,7 @@ class TestStageCompleteChecks:
         assert not stats_repo.has_diagnosis_data(run_id)
 
     def test_is_diagnose_complete_with_data(self, db_session):
-        """有cloud_analysis时diagnose完成"""
+        """有诊断产物时diagnose完成"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(novel_id, session=db_session)
@@ -430,7 +430,7 @@ class TestStageCompleteChecks:
             title="Test Novel",
         )
         stats_repo = StatsRepository(db_session)
-        analysis = CloudAnalysis(
+        analysis = AgentAnalysis(
             novel_id=novel_id,
             foreshadow_expectation=0.5,
             arc_scores={"角色0": 8.2, "角色1": 7.4},
@@ -443,13 +443,13 @@ class TestStageCompleteChecks:
             main_characters=["角色0", "角色1"],
             core_cast=["角色0", "角色1"],
         )
-        stats_repo.insert_cloud_analysis(run_id, analysis)
+        stats_repo.insert_agent_analysis(run_id, analysis)
         assert stats_repo.has_diagnosis_data(run_id)
         # 主题标签被破坏成列表（应为 id→label 的 dict）时，合同校验不再放行
         db_session.execute(
             text(
                 "UPDATE analysis_outputs SET payload = jsonb_set(payload, '{topic_labels}', '[\"成长\"]') "
-                "WHERE run_id = :run_id AND kind = 'cloud_analysis'"
+                "WHERE run_id = :run_id AND kind = 'agent_analysis'"
             ),
             {"run_id": run_id},
         )
@@ -457,7 +457,7 @@ class TestStageCompleteChecks:
         assert not stats_repo.has_diagnosis_data(run_id)
 
     def test_is_diagnose_complete_rejects_incomplete_focus_contract_row(self, db_session):
-        """旧/半成品 cloud_analysis 行不应再把 diagnose 阶段标成完成"""
+        """旧/半成品诊断产物行不应再把 diagnose 阶段标成完成"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(novel_id, session=db_session)
@@ -471,7 +471,7 @@ class TestStageCompleteChecks:
             text(
                 "INSERT INTO analysis_outputs "
                 "(output_id, run_id, kind, payload, created_at) "
-                "VALUES (:output_id, :run_id, 'cloud_analysis', :payload, now())"
+                "VALUES (:output_id, :run_id, 'agent_analysis', :payload, now())"
             ),
             {
                 "output_id": uuid.uuid4().hex,
