@@ -32,7 +32,7 @@ Once analysis completes, the frontend provides:
 
 For an existing 0.1.0 database, follow the [one-time 0.1.1 upgrade guide](docs/upgrades/UPGRADE-0.1.1.md) before deploying this release.
 
-Stack: Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17 (pgvector); React 19 / Vite / ECharts / Tailwind CSS. LLMs go through an OpenAI-compatible interface (local vLLM or a cloud service both work); lexical analysis and word vectors are local offline models.
+Stack: Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17 (pgvector); React 19 / Vite / ECharts / Tailwind CSS. LLMs go through an OpenAI-compatible interface (self-hosted or third-party, both work); lexical analysis and word vectors are local offline models.
 
 ## Quick Start
 
@@ -162,7 +162,7 @@ Four progressive layers, all fully persisted:
 
 | Table | Granularity | Recorded content |
 |----|------|---------|
-| `agent_invocations` | one annotation / diagnosis attempt | run_id, task_type (annotation / diagnosis), chapter_id, attempt_number, model_name, model_provider (local / cloud), status (success / error), final_error, start/end times |
+| `agent_invocations` | one annotation / diagnosis attempt | run_id, task_type (annotation / diagnosis), chapter_id, attempt_number, model_name, status (success / error), final_error, start/end times |
 | `agent_turns` | one model request round | complete request messages, raw response, context summary, status and errors; six per-round timing columns — TTFT, first visible token, reasoning, model, tool wall-clock, round total |
 | `agent_tool_calls` | one tool call | parsed and raw parameter strings, full result, model-facing receipt, independent status and duration |
 | `token_usage` | each API usage entry | bucketed by novel / chapter / task_type / call_type / model; five token classes prompt / completion / total / cache_read / reasoning plus cost; agent rounds map one-to-one to `agent_turns.id`, non-agent rows such as embeddings bucket separately; `accounting_source` distinguishes reported from estimated |
