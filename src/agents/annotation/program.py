@@ -18,13 +18,16 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-# 2026-09-15 安全边界（护栏是常量不是设置项）：单程序字符数/内层操作数/循环项数/
-# AST 求值步数/墙钟各自硬限，越限一律结构化拒绝并可续跑（已成功的调用保留）
-_PROGRAM_MAX_CODE_CHARS = 100000
-_PROGRAM_MAX_OPS = 300
-_PROGRAM_MAX_LOOP_ITEMS = 500
-_PROGRAM_MAX_STEPS = 30000
-_PROGRAM_DEADLINE_S = 600.0
+from src.event_trees.program_contract import (
+    PRE_RUN_FAULT_CODES as _PRE_RUN_FAULT_CODES,
+    PROGRAM_DEADLINE_S as _PROGRAM_DEADLINE_S,
+    PROGRAM_MAX_CODE_CHARS as _PROGRAM_MAX_CODE_CHARS,
+    PROGRAM_MAX_LOOP_ITEMS as _PROGRAM_MAX_LOOP_ITEMS,
+    PROGRAM_MAX_OPS as _PROGRAM_MAX_OPS,
+    PROGRAM_MAX_STEPS as _PROGRAM_MAX_STEPS,
+    ProgramFault as _ProgramFault,
+)
+
 
 # 程序面工具名（唯一对外的绑定面）：写者只见这一条工具
 PROGRAM_TOOL_NAME = "execute_code"
@@ -38,10 +41,6 @@ _INNER_CALL_INDEX_BASE = 1000
 # （实验 run codeact-20260914 ch5 第五轮 KeyError: 'true' 白烧一轮），别名表在
 # 变量查找之前命中，True/False/None 本身是 Python 常量节点、天然可用
 _PROGRAM_NAME_CONSTANTS: dict[str, Any] = {"true": True, "false": False, "null": None, "none": None}
-
-# 未进入执行就失败的错误码（程序一个字都没跑）：语义上是"拒绝本次提交"，与
-# 执行期中断（已成功的调用保留）分开表达
-_PRE_RUN_FAULT_CODES = frozenset({"empty_program", "program_too_large", "syntax_error", "candidate_index_out_of_range"})
 
 # 2026-09-17 程序面回执回显只读检索结果：程序里的检索调用此前只把 payload 交给程序
 # 变量，模型看不到值（实验实测同一句 search_pool 连发 7 次、块会话整轮 burn 在"回查"
@@ -58,22 +57,6 @@ _READ_TOOL_NAMES = frozenset(
 )
 _READ_ECHO_MAX_CHARS = 1600
 _READ_ECHO_MAX_ITEMS = 8
-
-
-class _ProgramFault(Exception):
-    """2026-09-15 用于把程序面内部失败（非法节点/越限/运行错误）收敛成结构化 error"""
-
-    def __init__(self, message: str, *, code: str, line: int | None = None) -> None:
-        super().__init__(message)
-        self.code = code
-        self.line = line
-
-    def payload(self) -> dict[str, Any]:
-        """用于渲染模型可见的 error 结构（type 即错误码，line 供定位）"""
-        body: dict[str, Any] = {"type": self.code, "message": str(self)}
-        if self.line is not None:
-            body["line"] = self.line
-        return body
 
 
 def render_list_signature(name: str, parameters: list[tuple[str, str]]) -> str:
