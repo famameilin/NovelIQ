@@ -157,7 +157,6 @@ def build_token_usage_callback(*, bus: Any, run_id: str) -> TokenUsageCallback:
 
     def callback(
         task_type: str,
-        call_type: str,
         model: str,
         prompt_tokens: int,
         total_tokens: int,
@@ -180,7 +179,7 @@ def build_token_usage_callback(*, bus: Any, run_id: str) -> TokenUsageCallback:
                     "kwargs": {
                         "run_id": run_id,
                         "task_type": task_type,
-                        "call_type": call_type,
+                        "call_type": task_type,
                         "model": model,
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,

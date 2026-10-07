@@ -13,7 +13,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpe
 
 from src.config import settings
 
-TokenUsageCallback = Callable[[str, str, str, int, int, int | None, int | None], None]
+TokenUsageCallback = Callable[[str, str, int, int, int | None, int | None], None]
 BatchProgressCallback = Callable[[int, int, int], Awaitable[None] | None]
 RETRYABLE_EMBEDDING_STATUS_CODES = {429, 500, 502, 503, 504}
 EMBEDDING_MAX_RETRIES = 2
@@ -68,7 +68,6 @@ class EmbeddingClient:
 
         self._token_usage_callback = token_usage_callback
         self._novel_id = novel_id
-        self._is_cloud = self._check_is_cloud()
 
         self._client = AsyncOpenAI(
             base_url=self._base_url,
@@ -77,50 +76,18 @@ class EmbeddingClient:
             max_retries=0,
         )
 
-        if self._is_cloud:
-            logger.info(
-                "[云端模型] Embedding客户端初始化: base_url={} model={}",
-                self._base_url,
-                self._model,
-            )
-        else:
-            logger.debug(
-                "embedding client initialized: base_url={} model={}",
-                self._base_url,
-                self._model,
-            )
+        logger.debug(
+            "embedding client initialized: base_url={} model={}",
+            self._base_url,
+            self._model,
+        )
 
-    def _check_is_cloud(self) -> bool:
-        """判断是否为云端API"""
-        base_url = self._base_url or ""
-        return not base_url.startswith("http://127.0.0.1") and not base_url.startswith("http://localhost")
-
-    def _log(
-        self,
-        level: str,
-        cloud_msg: str,
-        local_msg: str,
-        *args,
-    ) -> None:
-        """
-        统一处理日志记录，根据是否为云端API选择不同的日志级别和消息格式
-
-        Args:
-            level: 日志级别 ("info", "debug", "error", "warning")
-            cloud_msg: 云端API使用的消息模板（带 "[云端模型]" 前缀）
-            local_msg: 本地API使用的消息模板
-            *args: 日志消息的参数
-        """
-        if self._is_cloud:
-            msg = f"[云端模型] {cloud_msg}"
-            log_func = getattr(logger, level, logger.info)
-        else:
-            msg = local_msg
-            if level == "info":
-                log_func = logger.debug
-            else:
-                log_func = getattr(logger, level, logger.debug)
-        log_func(msg, *args)
+    def _log(self, level: str, msg: str, *args) -> None:
+        """逐条/分批的 info 日志压到 debug（错误与警告按原级别），避免逐条刷屏"""
+        if level == "info":
+            logger.debug(msg, *args)
+            return
+        getattr(logger, level, logger.debug)(msg, *args)
 
     def _is_retryable_embedding_status_error(self, error: APIStatusError) -> bool:
         status_code = getattr(error, "status_code", None)
@@ -146,7 +113,6 @@ class EmbeddingClient:
                 self._log(
                     "error",
                     "embedding API错误: status={} base_url={} error={}",
-                    "embedding api status error: status={} base_url={} error={}",
                     e.status_code if hasattr(e, "status_code") else "unknown",
                     self._base_url,
                     str(e),
@@ -158,7 +124,6 @@ class EmbeddingClient:
                 self._log(
                     "warning" if should_retry else "error",
                     "embedding API状态错误: status={} attempt={}/{} base_url={} retry={} error={}",
-                    "embedding api status error: status={} attempt={}/{} base_url={} retry={} error={}",
                     status_code,
                     attempt,
                     EMBEDDING_MAX_RETRIES + 1,
@@ -183,7 +148,6 @@ class EmbeddingClient:
         self._log(
             "info",
             "get_embedding 开始: model={} text_len={} chunk_id={}",
-            "get_embedding start model={} text_len={}",
             self._model,
             len(text),
             chunk_id,
@@ -200,7 +164,6 @@ class EmbeddingClient:
                 # 而不是要求每一笔都必须退化成本地估算
                 self._token_usage_callback(
                     "embedding",
-                    "local",
                     self._model or "unknown",
                     response.usage.prompt_tokens,
                     response.usage.total_tokens,
@@ -211,7 +174,6 @@ class EmbeddingClient:
             self._log(
                 "info",
                 "get_embedding 完成: dim={} prompt_tokens={} total_tokens={}",
-                "get_embedding complete dim={}",
                 len(embedding),
                 response.usage.prompt_tokens if response.usage else 0,
                 response.usage.total_tokens if response.usage else 0,
@@ -221,7 +183,6 @@ class EmbeddingClient:
             self._log(
                 "error",
                 "get_embedding 连接错误: base_url={} error={}",
-                "connection error to embedding service: base_url={} error={}",
                 self._base_url,
                 str(e),
             )
@@ -230,7 +191,6 @@ class EmbeddingClient:
             self._log(
                 "error",
                 "get_embedding 超时错误: base_url={} error={}",
-                "timeout error: base_url={} error={}",
                 self._base_url,
                 str(e),
             )
@@ -239,7 +199,6 @@ class EmbeddingClient:
             self._log(
                 "error",
                 "get_embedding 未知错误: {}",
-                "get_embedding unexpected error: {}",
                 str(e),
             )
             raise
@@ -294,7 +253,6 @@ class EmbeddingClient:
             self._log(
                 "info",
                 "embed_texts 批处理开始: model={} batch_size={} batch_start={}",
-                "embed_texts batch start model={} batch_size={} batch_start={}",
                 self._model,
                 len(batch_texts),
                 batch_start,
@@ -306,7 +264,6 @@ class EmbeddingClient:
                 self._log(
                     "error",
                     "embed_texts 连接错误: base_url={} error={}",
-                    "embed_texts connection error: base_url={} error={}",
                     self._base_url,
                     str(e),
                 )
@@ -315,7 +272,6 @@ class EmbeddingClient:
                 self._log(
                     "error",
                     "embed_texts 超时错误: base_url={} error={}",
-                    "embed_texts timeout error: base_url={} error={}",
                     self._base_url,
                     str(e),
                 )
@@ -324,7 +280,6 @@ class EmbeddingClient:
                 self._log(
                     "error",
                     "embed_texts 未知错误: {}",
-                    "embed_texts unexpected error: {}",
                     str(e),
                 )
                 raise
@@ -346,7 +301,6 @@ class EmbeddingClient:
                 # provider 已返回 usage 时直接记实报，避免额外估算把更好的原始数据抹平
                 self._token_usage_callback(
                     "embedding",
-                    "local",
                     self._model or "unknown",
                     response.usage.prompt_tokens,
                     response.usage.total_tokens,
