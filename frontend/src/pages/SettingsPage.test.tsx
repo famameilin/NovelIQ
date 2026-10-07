@@ -10,14 +10,14 @@ const getSettingsSchemaMock = vi.fn();
 const getSettingsMock = vi.fn();
 const updateSettingsMock = vi.fn();
 const updateModelEnvMock = vi.fn();
-const testModelProviderMock = vi.fn();
+const testAgentModelMock = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/api/settings", () => ({
   getSettingsSchema: (...args: unknown[]) => getSettingsSchemaMock(...args),
   getSettings: (...args: unknown[]) => getSettingsMock(...args),
   updateSettings: (...args: unknown[]) => updateSettingsMock(...args),
   updateModelEnv: (...args: unknown[]) => updateModelEnvMock(...args),
-  testModelProvider: (...args: unknown[]) => testModelProviderMock(...args),
+  testAgentModel: (...args: unknown[]) => testAgentModelMock(...args),
   settingsQueryKey: ["settings"],
 }));
 
@@ -99,7 +99,7 @@ beforeEach(() => {
     if ("diagnosis_model_id" in patch) models.diagnosis_model_id = patch.diagnosis_model_id;
     return view;
   });
-  testModelProviderMock.mockResolvedValue({ ok: true, latency_ms: 42, model_ids: ["m"], error: null });
+  testAgentModelMock.mockResolvedValue({ ok: true, latency_ms: 42, model_ids: ["m"], error: null });
 });
 
 describe("SettingsPage", () => {
@@ -212,7 +212,7 @@ describe("SettingsPage", () => {
     const dialog = await editModel();
     fireEvent.change(dialog.getByLabelText("Key"), { target: { value: "sk-draft" } });
     await userEvent.click(dialog.getByRole("button", { name: "测试连接" }));
-    await waitFor(() => expect(testModelProviderMock).toHaveBeenCalledWith("pool", {
+    await waitFor(() => expect(testAgentModelMock).toHaveBeenCalledWith("pool", {
       base_url: "https://first.example/v1", model_id: "text-model", api_key: "sk-draft",
     }));
     expect(updateModelEnvMock).not.toHaveBeenCalled();
