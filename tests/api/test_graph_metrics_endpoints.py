@@ -181,3 +181,38 @@ def test_graph_and_keywords_require_completed_run(api_client: TestClient, db_ses
     assert graph_resp.status_code == 400
     keyword_resp = api_client.get(f"/api/novels/{novel_id}/keywords", params={"task_id": run_id[:8]})
     assert keyword_resp.status_code == 400
+
+
+def test_graph_tab_keeps_isolated_characters_without_relation_metrics(api_client: TestClient, db_session) -> None:
+    """有效空关系图保留人物与快照，两种读取入口均不能因数值求解失败返回 500"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session, texts=["两人独自行路。", "各自远行。"], chapter_ids=[1, 2], title="孤立人物"
+    )
+    for chapter_id in (1, 2):
+        persist_chapter_annotation(
+            db_session,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            characters=[
+                character_fact(chapter_id=chapter_id, name="顾承渊", action="独行"),
+                character_fact(chapter_id=chapter_id, name="苏映雪", action="远行"),
+            ],
+            relations=[],
+        )
+    _mark_completed(db_session, run_id)
+    db_session.commit()
+
+    for endpoint in ("graph/metrics", "tabs/graph-network"):
+        response = api_client.get(f"/api/novels/{novel_id}/{endpoint}", params={"task_id": run_id[:8]})
+        assert response.status_code == 200
+        body = response.json()
+        if endpoint == "tabs/graph-network":
+            assert len(body["snapshot"]["nodes"]) == 2
+            assert body["snapshot"]["edges"] == []
+            body = body["graph_metrics"]
+        assert body["algorithm"]["graph"]["edge_count"] == 0
+        assert body["pagerank"] == {"顾承渊": 0.5, "苏映雪": 0.5}
+        assert body["hits"]["authority"] == body["hits"]["hub"] == {}
+        assert body["hits"]["unavailable_reason"].startswith("no_relations:")
+        assert body["communities"]["modularity"] is None
+        assert body["communities"]["unavailable_reason"].startswith("no_relations:")

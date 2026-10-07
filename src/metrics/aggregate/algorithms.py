@@ -87,6 +87,14 @@ def compute_graph_structure_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
     pagerank_scores = nx.pagerank(graph, weight="weight")
     metrics["pagerank"] = {name: round(score, 6) for name, score in pagerank_scores.items()}
 
+    if graph.number_of_edges() == 0:
+        # 人物可保留为孤立节点，但没有关系时 HITS 和模块度没有定义
+        # 跳过数值求解，保留快照与 PageRank，避免空关系图触发 ARPACK/零分母异常
+        reason = "no_relations: 当前人物快照没有有效关系"
+        metrics["hits"] = {"authority": {}, "hub": {}, "unavailable_reason": reason}
+        metrics["communities"] = {"community_ids": {}, "modularity": None, "unavailable_reason": reason}
+        return metrics
+
     try:
         hub_scores, authority_scores = nx.hits(graph)
         metrics["hits"] = {
