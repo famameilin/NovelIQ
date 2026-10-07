@@ -32,7 +32,6 @@ def _turn_context(run_id: str, **overrides: Any) -> dict[str, Any]:
         "task_type": "annotation",
         "call_type": "agent",
         "model": "test-model",
-        "model_provider": "local",
         "execution_id": "exec-1",
         "attempt_number": 1,
         "chapter_id": 1,

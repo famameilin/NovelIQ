@@ -1,7 +1,7 @@
 """
 诊断 Agent 单元测试
 
-- 图循环：agent 调用 finish 提交 CloudAnalysis
+- 图循环：agent 调用 finish 提交诊断结果
 - 校验失败重试
 """
 
@@ -19,7 +19,7 @@ from src.agents.diagnosis.runner import (
     _validate_topic_label_ids,
     run_diagnosis_agent,
 )
-from src.agents.diagnosis.schema import CloudAnalysis
+from src.agents.diagnosis.schema import AgentAnalysis
 from src.agents.graph import build_agent_graph
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
@@ -126,12 +126,12 @@ class _CapturingRetryLLM(_FinishOnlyLLM):
 
 
 @pytest.mark.asyncio
-async def test_diagnosis_agent_produces_cloud_analysis() -> None:
+async def test_diagnosis_agent_produces_agent_analysis() -> None:
     graph = build_agent_graph(
         _FinishOnlyLLM(_analysis_payload(), wrapped=False),
         [],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
     )
 
@@ -147,7 +147,7 @@ async def test_diagnosis_agent_produces_cloud_analysis() -> None:
     )
 
     assert result.get("error") is None
-    analysis = CloudAnalysis.model_validate(result["output"])
+    analysis = AgentAnalysis.model_validate(result["output"])
     assert analysis.genre_labels == ["玄幻"]
     assert analysis.style_labels == ["爽文"]
     assert analysis.foreshadow_expectation == 0.35
@@ -160,7 +160,7 @@ async def test_diagnosis_agent_retries_on_invalid_output() -> None:
         llm,
         [],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
     )
 
@@ -192,7 +192,7 @@ async def test_retry_answers_every_pending_tool_call_with_tool_message() -> None
         llm,
         [],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
     )
 
@@ -272,7 +272,7 @@ async def test_truncated_tool_call_skips_invoke_and_returns_error_tool_message()
         llm,
         [tool],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
     )
 
@@ -299,7 +299,7 @@ async def test_truncated_tool_call_skips_invoke_and_returns_error_tool_message()
 
 @pytest.mark.asyncio
 async def test_run_diagnosis_agent_requires_run_scoped_tools() -> None:
-    """run_diagnosis_agent 装配诊断工具并输出 CloudAnalysis"""
+    """run_diagnosis_agent 装配诊断工具并产出诊断结果"""
     mock_session = MagicMock()
     payload = _analysis_payload()
     payload["novel_id"] = "model-invented-id"
@@ -321,7 +321,7 @@ async def test_run_diagnosis_agent_requires_run_scoped_tools() -> None:
             audit_recorder=MagicMock(),
         )
 
-    assert isinstance(analysis, CloudAnalysis)
+    assert isinstance(analysis, AgentAnalysis)
     assert analysis.genre_labels == ["玄幻"]
     assert analysis.novel_id == "n1"
     assert analysis.foreshadow_expectation == 0.62
@@ -352,13 +352,13 @@ def test_validate_topic_label_ids_rejects_mismatch() -> None:
     """
     2026-08-02 用于拒绝主题标签数量与实际主题数据不一致的诊断结果
     """
-    analysis = CloudAnalysis.model_validate(_analysis_payload())
+    analysis = AgentAnalysis.model_validate(_analysis_payload())
 
     with pytest.raises(ValueError, match="IDs must match"):
         _validate_topic_label_ids(analysis, expected_ids={0, 1, 8})
 
     with pytest.raises(ValueError, match="valid dictionary"):
-        CloudAnalysis.model_validate({"topic_labels": ["成长", "复仇"]})
+        AgentAnalysis.model_validate({"topic_labels": ["成长", "复仇"]})
 
 
 def test_finalize_diagnosis_result_overrides_model_owned_runtime_fields() -> None:
@@ -370,7 +370,7 @@ def test_finalize_diagnosis_result_overrides_model_owned_runtime_fields() -> Non
     payload["foreshadow_expectation"] = 0.99
 
     finalized = _finalize_diagnosis_result(
-        CloudAnalysis.model_validate(payload),
+        AgentAnalysis.model_validate(payload),
         novel_id="novel-real",
         foreshadow_expectation=0.41,
     )

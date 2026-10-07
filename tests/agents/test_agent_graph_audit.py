@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from src.agents.audit.observer import AgentTurnObserver, build_invocation_context
 from src.agents.audit.recorder import AgentAuditRecorder
-from src.agents.diagnosis.schema import CloudAnalysis
+from src.agents.diagnosis.schema import AgentAnalysis
 from src.agents.graph import build_agent_graph
 from src.storage.models.agent_audit import AgentToolCall, ModelTurn
 from tests.agents.test_diagnosis_agent import _analysis_payload
@@ -88,7 +88,6 @@ def _new_audit_context(db_session) -> tuple[AgentAuditRecorder, AgentTurnObserve
         execution_id="diag-exec",
         attempt_number=1,
         model="test-model",
-        model_provider="local",
     )
     invocation_id = recorder.start_invocation(**context)
     observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=context)
@@ -141,7 +140,7 @@ async def test_graph_finish_round_closes_turn_and_audits_finish_tool(db_session)
         llm,
         [evidence_tool],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
         observer=observer,
     )
@@ -187,7 +186,7 @@ async def test_graph_finish_validation_failure_records_error_tool_call(db_sessio
         llm,
         [],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
         observer=observer,
     )
@@ -250,7 +249,7 @@ async def test_graph_mixed_finish_round_records_error_submission_audit(db_sessio
         llm,
         [evidence_tool],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
         observer=observer,
     )
@@ -329,7 +328,7 @@ async def test_graph_tool_limit_round_closes_turn(db_session) -> None:
         llm,
         [evidence_tool],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
         max_tool_iterations=2,
         observer=observer,
@@ -357,7 +356,7 @@ async def test_graph_model_exception_records_error_turn(db_session) -> None:
         _FailingLLM(),
         [],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
         observer=observer,
     )
@@ -394,7 +393,7 @@ async def test_graph_retries_are_audited_as_separate_provider_requests(db_sessio
         llm,
         [],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
         observer=observer,
         model_retries=2,
@@ -441,7 +440,7 @@ async def test_graph_finish_emits_tool_call_succeeded_event() -> None:
         llm,
         [],
         max_attempts=5,
-        response_model=CloudAnalysis,
+        response_model=AgentAnalysis,
         first_hint="完成诊断",
         stream=AgentStream(emitter),
     )

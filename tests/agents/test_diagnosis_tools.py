@@ -16,7 +16,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from src.agents.diagnosis.schema import CloudAnalysis
+from src.agents.diagnosis.schema import AgentAnalysis
 from src.agents.diagnosis.tools import build_diagnosis_tools
 
 
@@ -28,8 +28,8 @@ def _invoke(tool, payload: dict | None = None) -> str:
     return tool.invoke(payload or {})
 
 
-def _make_analysis() -> CloudAnalysis:
-    return CloudAnalysis(
+def _make_analysis() -> AgentAnalysis:
+    return AgentAnalysis(
         novel_id="novel-1",
         foreshadow_expectation=0.3,
         arc_scores={"沈砚": 8.0},
@@ -204,10 +204,10 @@ def test_get_graph_signals_empty_signals() -> None:
 
 
 def test_finish_and_revise_finish_ok() -> None:
-    from src.storage.diagnosis_payload import CloudAnalysisPatch
+    from src.storage.diagnosis_payload import AgentAnalysisPatch
 
     tools = _build_tools()
     assert _invoke(tools[6], {"analysis": _make_analysis()}) == "OK"
-    assert _invoke(tools[7], {"patch": CloudAnalysisPatch(diagnosis="ok")}) == "OK"
+    assert _invoke(tools[7], {"patch": AgentAnalysisPatch(diagnosis="ok")}) == "OK"
 
 

@@ -221,7 +221,6 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
         execution_id="annot-exec",
         attempt_number=1,
         model="test-model",
-        model_provider="cloud",
         chapter_id=1,
     )
     invocation_id = recorder.start_invocation(**context)

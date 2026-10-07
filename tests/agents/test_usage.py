@@ -196,13 +196,13 @@ def test_build_token_usage_callback_records_embedding_usage() -> None:
     """
     bus = MagicMock()
     callback = build_token_usage_callback(bus=bus, run_id="run-1")
-    callback("embedding", "local", "embed-model", 10, 10, None, 7)
+    callback("embedding", "embed-model", 10, 10, None, 7)
     message = bus.publish.call_args.args[0]
     assert message.payload["method"] == "nonagent_usage"
     kwargs = message.payload["kwargs"]
     assert kwargs["run_id"] == "run-1"
     assert kwargs["task_type"] == "embedding"
-    assert kwargs["call_type"] == "local"
+    assert kwargs["call_type"] == "embedding"
     assert kwargs["model"] == "embed-model"
     assert kwargs["prompt_tokens"] == 10
     assert kwargs["total_tokens"] == 10
