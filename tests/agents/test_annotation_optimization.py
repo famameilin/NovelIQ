@@ -212,6 +212,30 @@ async def test_graph_search_filters_relations_pages_and_reads_attributes_on_dema
 
 
 @pytest.mark.asyncio
+async def test_program_business_failure_is_audited_without_rolling_back_applied_writes() -> None:
+    observer = _RecordingObserver()
+    runtime, _, execution = _real_work_runtime(observer=observer)
+    batch = _build_tool_batch_node(
+        [runtime.build_tool()], ledger=execution.ledger, observer=observer, program_tool_name="execute_code",
+    )
+    reply = _program_reply('entity(id="a", name="阿青", entity_type="character", evidence=1)\nprint("done")', "p")
+    await batch({"messages": [reply], "phase": "chapter_open", "iterations": 0, "error": None})
+    row = next(row for row in observer.rows if row["call_index"] == 0)
+    assert row["status"] == "error"
+    assert row["receipt"]["execution_status"] == "success"
+    assert row["receipt"]["business_status"] == "runtime_error"
+    assert row["receipt"]["applied"] == 1
+    assert "阿青" in execution.ledger.written_entities
+    assert "reads" in row["receipt"]["error"]["message"]
+    positional = json.loads(await runtime.execute('search_graph("阿青")'))
+    assert positional["error"]["type"] == "bad_call"
+    assert 'query=' in positional["error"]["message"]
+    reserved = json.loads(await runtime.execute('entity = read_entity(entity_id="unknown")'))
+    assert reserved["error"]["type"] == "name_reserved"
+    assert "entity_result" in reserved["error"]["message"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("role", [None, "event"])
 async def test_structured_events_resolve_dependencies_and_anchor_real_paragraphs(role: str | None) -> None:
     ledger = _ledger()
@@ -538,6 +562,9 @@ async def test_structured_item_failures_are_audited_and_native_submission_is_not
     assert len(ledger.bound_payloads["events"]) == 1
     native = next(row for row in observer.rows if row["tool_name"] == "submit_events" and row["call_index"] == 0)
     assert "_program" not in native["request_args"]
+    assert native["status"] == "error"
+    assert native["receipt"]["execution_status"] == "success"
+    assert native["receipt"]["business_status"] == "partial"
     assert observer.closed == 1
 
 

@@ -381,3 +381,13 @@ async def test_late_write_after_finish_is_refused_and_audited_without_reopening(
         .one()
     )
     assert rejected.status == "error"
+    program_call = (
+        db_session.query(AgentToolCall)
+        .join(ModelTurn, AgentToolCall.turn_id == ModelTurn.id)
+        .filter(ModelTurn.execution_id == execution, AgentToolCall.tool_name == "execute_code")
+        .one()
+    )
+    assert program_call.status == "error"
+    assert program_call.receipt["execution_status"] == "success"
+    assert program_call.receipt["business_status"] == "partial"
+    assert program_call.receipt["applied"] == 2

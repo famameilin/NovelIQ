@@ -249,6 +249,16 @@ async def _execute_call(
         written_record = receipt.get("record")
         if isinstance(written_record, str) and written_record:
             record_keys.add(written_record)
+    audit_status, audit_error = status, error
+    audit_receipt = receipt
+    if name in {"execute_code", SUBMIT_EVENTS_TOOL_NAME} and isinstance(receipt, dict):
+        # 返回 JSON 成功不代表业务全部成功；只改变监控口径，保留已生效写入与逐条事务语义
+        business_status = str(receipt.get("status") or "unknown")
+        audit_receipt = {**receipt, "execution_status": status, "business_status": business_status}
+        if status == "success" and business_status in {"partial", "runtime_error", "rejected"}:
+            audit_status = "error"
+            detail = receipt.get("error") or receipt.get("failed") or ""
+            audit_error = f"业务回执 status={business_status}，已生效调用={receipt.get('applied', 0)}；{detail}"
     if observer is not None:
         request_args = dict(call.get("args") or {})
         if program_meta is not None:
@@ -258,14 +268,16 @@ async def _execute_call(
             tool_name=name,
             request_args=request_args,
             raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
-            response=receipt,
-            receipt=receipt,
-            status=status,
-            error=error,
+            response=audit_receipt,
+            receipt=audit_receipt,
+            status=audit_status,
+            error=audit_error,
             tool_duration_ms=max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000)),
             started_ns=started_ns,
         )
-    await _tool_status_emitter(stream, observer)(name, status, result if status == "success" else (error or ""))
+    await _tool_status_emitter(stream, observer)(
+        name, audit_status, result if audit_status == "success" else (audit_error or ""),
+    )
     return _call_entry(
         call,
         index=call_index,
