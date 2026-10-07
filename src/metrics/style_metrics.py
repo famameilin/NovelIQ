@@ -5,41 +5,12 @@ import re
 from collections.abc import Iterable, Sequence
 
 from src.config import settings
-from src.config.constants import SEMANTIC_CATEGORY_MAPPING
 from src.utils.text_utils import dialogue_length, split_sentences, tokenize_words
 
 from .lexicon_metrics import count_mixed_hits
 
 SHORT_CHUNK_TOKEN_THRESHOLD = 12
 SHORT_CHUNK_MIN_POSITIVE_DENSITY = 1e-4
-
-
-def parse_semantic_category_lexicon(file_path: str) -> dict[str, list[str]]:
-    categories: dict[str, list[str]] = {}
-    current_category: str | None = None
-    current_terms: list[str] = []
-    pattern = re.compile(r"#\s*={5,}\s*(\d+)\.\s*(.+?)\s*={5,}")
-
-    with open(file_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-
-            match = pattern.match(line)
-            if match:
-                if current_category and current_terms:
-                    categories[current_category] = current_terms
-                category_name = match.group(2).strip()
-                current_category = SEMANTIC_CATEGORY_MAPPING.get(category_name)
-                current_terms = []
-            elif not line.startswith("#") and current_category:
-                current_terms.append(line)
-
-    if current_category and current_terms:
-        categories[current_category] = current_terms
-
-    return categories
 
 
 def ttr(tokens: Sequence[str]) -> float:

@@ -4,10 +4,8 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.metrics.style_metrics import (
-    parse_semantic_category_lexicon,
-    semantic_category_densities,
-)
+from src.metrics.style_metrics import semantic_category_densities
+from src.utils.lexicon_parser import parse_semantic_category_lexicon
 
 
 class TestParseSemanticCategoryLexicon(unittest.TestCase):

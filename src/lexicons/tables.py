@@ -14,7 +14,7 @@ from pathlib import Path
 
 from src.config.constants import LEXICON_FILES
 from src.lexicons.registry import LexiconRegistry
-from src.metrics.style_metrics import parse_semantic_category_lexicon
+from src.utils.lexicon_parser import parse_semantic_category_lexicon
 
 _registry = LexiconRegistry()
 _registry.load()

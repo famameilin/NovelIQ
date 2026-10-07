@@ -3,6 +3,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from src.config.constants import SEMANTIC_CATEGORY_MAPPING
+
+# 语义类别词表的分节标记："# ===== 3. 战斗 =====" 形态
+_SEMANTIC_SECTION_RE = re.compile(r"#\s*={5,}\s*(\d+)\.\s*(.+?)\s*={5,}")
+
 # 行内注释分隔：词条后跟空白 + # 视为注释（draft 词表 "词  # 证据" 格式）；
 # 要求 # 前有空白，避免误伤含 # 的词条本身。
 _INLINE_COMMENT_RE = re.compile(r"\s+#")
@@ -84,3 +89,34 @@ def load_weighted_lexicon(filepath: str | Path, default_weight: int = 1) -> dict
         result[term] = weight
 
     return result
+
+
+def parse_semantic_category_lexicon(file_path: str) -> dict[str, list[str]]:
+    """解析语义类别词表：分节标题给类别、标题后每行一个词条
+
+    说明: 与加权词表解析同族，从 metrics 下沉到公共层，切断 lexicons -> metrics 的
+    反向依赖；类别名经 config.constants 的映射表翻译成内部 key。
+    """
+    categories: dict[str, list[str]] = {}
+    current_category: str | None = None
+    current_terms: list[str] = []
+
+    with open(file_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            match = _SEMANTIC_SECTION_RE.match(line)
+            if match:
+                if current_category and current_terms:
+                    categories[current_category] = current_terms
+                current_category = SEMANTIC_CATEGORY_MAPPING.get(match.group(2).strip())
+                current_terms = []
+            elif not line.startswith("#") and current_category:
+                current_terms.append(line)
+
+    if current_category and current_terms:
+        categories[current_category] = current_terms
+
+    return categories
