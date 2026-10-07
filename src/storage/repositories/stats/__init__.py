@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 from .metrics import (
-    fetch_cloud_analysis,
+    fetch_agent_analysis,
     fetch_global_stats_dict,
     fetch_novel_title,
     fetch_token_usage_stats,
-    insert_cloud_analysis,
+    insert_agent_analysis,
     insert_global_stats,
     insert_model_turn,
 )
@@ -30,8 +30,8 @@ __all__ = [
     "fetch_global_stats_dict",
     "insert_model_turn",
     "fetch_token_usage_stats",
-    "insert_cloud_analysis",
-    "fetch_cloud_analysis",
+    "insert_agent_analysis",
+    "fetch_agent_analysis",
     "fetch_novel_title",
     # run 相关仓储
     "has_linguistic_data",

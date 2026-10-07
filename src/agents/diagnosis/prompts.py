@@ -8,7 +8,7 @@ SYSTEM_PROMPT = """你是专业的网络小说整体诊断 Agent，负责对已�
 
 ## 你的任务
 
-基于取证工具获取的全书证据，输出完整的 CloudAnalysis 诊断结果。
+基于取证工具获取的全书证据，输出完整的诊断结果。
 
 ## 工作流程
 
@@ -16,7 +16,7 @@ SYSTEM_PROMPT = """你是专业的网络小说整体诊断 Agent，负责对已�
 2. 调用 get_aggregate_signals 了解整体节奏与情感走向
 3. 调用 get_pivot_materials / get_relation_changes / get_topic_data 补充叙事结构与主题证据
 4. 证据不足时继续调用相关工具，不要臆测
-5. 全部取证完成后调用 finish 提交 CloudAnalysis
+5. 全部取证完成后调用 finish 提交诊断结果
 
 ## 输出要求
 

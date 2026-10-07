@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from src.agents.diagnosis.schema import CloudAnalysis as CloudAnalysisSchema
+from src.agents.diagnosis.schema import AgentAnalysis as AgentAnalysisSchema
 from src.storage.repositories.base import BaseRepository
 
 # 导入各模块函数
@@ -98,13 +98,13 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
 
     # ==================== metrics 模块补充方法 ====================
 
-    def insert_cloud_analysis(self, run_id: str, analysis: CloudAnalysisSchema) -> str:
+    def insert_agent_analysis(self, run_id: str, analysis: AgentAnalysisSchema) -> str:
         """诊断产物追加进分析产物表，返回产物 id"""
-        return metrics.insert_cloud_analysis(self.session, run_id, analysis)
+        return metrics.insert_agent_analysis(self.session, run_id, analysis)
 
-    def fetch_cloud_analysis(self, run_id: str) -> dict[str, Any] | None:
+    def fetch_agent_analysis(self, run_id: str) -> dict[str, Any] | None:
         """获取最新诊断产物"""
-        return metrics.fetch_cloud_analysis(self.session, run_id)
+        return metrics.fetch_agent_analysis(self.session, run_id)
 
     def fetch_novel_title(self, novel_id: str) -> str | None:
         """获取小说标题"""

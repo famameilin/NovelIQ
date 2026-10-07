@@ -46,7 +46,6 @@ class ModelTurn(Base):
     task_type: Mapped[str] = mapped_column(String(100), nullable=False, comment="任务类型")
     call_type: Mapped[str] = mapped_column(String(50), nullable=False, comment="调用类型")
     model: Mapped[str] = mapped_column(String(100), nullable=False, comment="模型名")
-    model_provider: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="模型提供方（local/cloud）")
     # Agent 上下文（非 Agent 记账行为空）
     execution_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="agent 执行身份（一次尝试）")
     attempt_number: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="第几次尝试（1 起）")

@@ -10,7 +10,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.agents.diagnosis.schema import CloudAnalysis as CloudAnalysisSchema
+from src.agents.diagnosis.schema import AgentAnalysis as AgentAnalysisSchema
 from src.storage.models import AnalysisOutput, GlobalStats, ModelTurn, Novel
 
 if TYPE_CHECKING:
@@ -254,12 +254,12 @@ def _detect_token_coverage_gaps(
     return sorted(gaps)
 
 
-def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysisSchema) -> str:
-    """诊断产物以 kind=cloud_analysis 追加进分析产物表，读侧取最新一行"""
+def insert_agent_analysis(session: Session, run_id: str, analysis: AgentAnalysisSchema) -> str:
+    """诊断产物以 kind=agent_analysis 追加进分析产物表，读侧取最新一行"""
     row = AnalysisOutput(
         output_id=str(uuid4()),
         run_id=run_id,
-        kind="cloud_analysis",
+        kind="agent_analysis",
         payload=analysis.model_dump(),
     )
     session.add(row)
@@ -267,11 +267,11 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
     return row.output_id
 
 
-def fetch_cloud_analysis(session: Session, run_id: str) -> dict[str, Any] | None:
+def fetch_agent_analysis(session: Session, run_id: str) -> dict[str, Any] | None:
     """读取当前诊断产物（最新一行），返回展平的合同字典"""
     result = session.execute(
         select(AnalysisOutput)
-        .where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "cloud_analysis")
+        .where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "agent_analysis")
         .order_by(AnalysisOutput.created_at.desc(), AnalysisOutput.output_id.desc())
         .limit(1)
     ).scalar_one_or_none()

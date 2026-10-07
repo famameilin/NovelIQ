@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select
 
-from src.agents.diagnosis.schema import CloudAnalysis as CloudAnalysisSchema
+from src.agents.diagnosis.schema import AgentAnalysis as AgentAnalysisSchema
 from src.storage.models import (
     AnalysisOutput,
     Chapter,
@@ -70,7 +70,7 @@ def _payload_has_valid_diagnosis_contract(payload: dict[str, Any]) -> bool:
         return False
 
     try:
-        CloudAnalysisSchema.model_validate(payload)
+        AgentAnalysisSchema.model_validate(payload)
     except Exception:
         return False
     return True
@@ -152,7 +152,7 @@ def has_diagnosis_data(session: Session, run_id: str) -> bool:
     """检查指定运行是否有诊断数据。Args: session/run_id；Returns: 是否存在。"""
     latest_row = session.execute(
         select(AnalysisOutput)
-        .where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "cloud_analysis")
+        .where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "agent_analysis")
         .order_by(AnalysisOutput.created_at.desc(), AnalysisOutput.output_id.desc())
         .limit(1)
     ).scalar_one_or_none()

@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from src.storage.diagnosis_payload import CloudAnalysisPatch
+from src.storage.diagnosis_payload import AgentAnalysisPatch
 
 
 class TopicInfo(BaseModel):
@@ -123,10 +123,10 @@ class TopicEmotionResponse(BaseModel):
     unavailable_reason: str | None = None
 
 
-class DiagnosisResult(CloudAnalysisPatch):
+class DiagnosisResult(AgentAnalysisPatch):
     """诊断结果响应 = 诊断契约字段 + 读侧派生的三项统计
 
-    字段集与 src/agents/diagnosis/contract.py 的 CloudAnalysisPatch 一致（同一契约，
+    字段集与 src/storage/diagnosis_payload.py 的 AgentAnalysisPatch 一致（同一契约，
     响应侧仅追加读侧派生字段），避免两处手写契约漂移。
     """
 

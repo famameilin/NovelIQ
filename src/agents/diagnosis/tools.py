@@ -2,7 +2,7 @@
 诊断 Agent 工具（工具化自主取证）
 
 agent 通过工具按需查询聚合指标、转折素材、人物、主题与图谱信号，
-自主决定查看哪些证据，最后通过 finish 输出 CloudAnalysis
+自主决定查看哪些证据，最后通过 finish 提交诊断结果
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from typing import Any
 from langchain_core.tools import tool
 from sqlalchemy.orm import Session
 
-from src.agents.diagnosis.schema import CloudAnalysis
-from src.storage.diagnosis_payload import CloudAnalysisPatch
+from src.agents.diagnosis.schema import AgentAnalysis
+from src.storage.diagnosis_payload import AgentAnalysisPatch
 
 from .evidence import DiagnosisEvidenceLedger
 
@@ -185,17 +185,17 @@ def build_diagnosis_tools(
         return "\n".join(f"{key}: {value}" for key, value in sorted(merged_signals.items()))
 
     @tool
-    def finish(analysis: CloudAnalysis) -> str:
+    def finish(analysis: AgentAnalysis) -> str:
         """
         完成诊断：提交最终诊断报告。
-        必须在完成所有取证后调用；输出必须是完整的 CloudAnalysis JSON。
+        必须在完成所有取证后调用；输出必须是完整的诊断结果 JSON。
         """
         return "OK"
 
     @tool
-    def revise_finish(patch: CloudAnalysisPatch) -> str:
+    def revise_finish(patch: AgentAnalysisPatch) -> str:
         """
-        局部修正上一次提交的 CloudAnalysis：只提交需要修改的字段，
+        局部修正上一次提交的诊断结果：只提交需要修改的字段，
         未提交字段沿用上一次完整结果。校验仍被拒时继续修正，不要重复提交完整结果。
         """
         return "OK"

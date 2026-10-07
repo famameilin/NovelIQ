@@ -1,10 +1,10 @@
 """分析产物 ORM 模型（章节标注与整体诊断统一落点）
 
-2026-10-06 表合并：chapter_annotations / cloud_analysis 两表收敛为 analysis_outputs
+2026-10-06 表合并：章节标注与诊断两表收敛为 analysis_outputs
 一张产物表——kind 区分产物种类，业务内容统一进 payload JSONB：
 - chapter_annotation：每 run×章×角色 一行（部分唯一索引守卫），payload 为标注产出，
   actual_input 为实际输入快照，invocation_id/work_id 溯源产生它的 agent；
-- cloud_analysis：诊断 agent 的整体产出，每执行追加一行、读侧取最新。
+- agent_analysis：诊断 agent 的整体产出，每执行追加一行、读侧取最新。
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ class AnalysisOutput(Base):
 
     __tablename__ = "analysis_outputs"
     __table_args__ = (
-        CheckConstraint("kind IN ('chapter_annotation', 'cloud_analysis')", name="ck_analysis_outputs_kind"),
+        CheckConstraint("kind IN ('chapter_annotation', 'agent_analysis')", name="ck_analysis_outputs_kind"),
         # 章节标注行每 run×章×角色 唯一（部分唯一索引；诊断行不在此约束内）
         Index(
             "uq_analysis_outputs_chapter_role",

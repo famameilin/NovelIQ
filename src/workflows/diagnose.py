@@ -2,7 +2,7 @@
 诊断工作流模块（LangGraph 诊断 Agent）
 
 诊断 agent 通过工具化自主取证（聚合指标/转折素材/人物/主题/图谱信号），
-最终输出 CloudAnalysis，不再预构建一次性大 payload
+最终产出诊断结果，不再预构建一次性大 payload
 """
 
 from __future__ import annotations
@@ -12,14 +12,14 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.agents.diagnosis.schema import CloudAnalysis
+from src.agents.diagnosis.schema import AgentAnalysis
 from src.agents.stream import AgentStream
 from src.config.analysis_logger import AnalysisLogger
 from src.sse.events import StreamEvent
 from src.storage.repositories import RunRepository
 
 
-def _log_diagnosis_results(result: CloudAnalysis) -> None:
+def _log_diagnosis_results(result: AgentAnalysis) -> None:
     """
     输出诊断结果日志
     """
@@ -51,7 +51,7 @@ async def run_diagnose(
     analysis_logger: AnalysisLogger | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
-) -> CloudAnalysis:
+) -> AgentAnalysis:
     """
     执行诊断流程（诊断 Agent 工具化自主取证）
 
@@ -61,7 +61,7 @@ async def run_diagnose(
         analysis_logger: 分析日志器
 
     Returns:
-        CloudAnalysis: 诊断分析结果
+        AgentAnalysis: 诊断分析结果
     """
     from src.agents import run_diagnosis_agent
     from src.workflows.cancellation import check_cancelled

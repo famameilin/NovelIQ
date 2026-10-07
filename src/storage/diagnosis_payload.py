@@ -1,6 +1,6 @@
 """诊断结果 payload 的字段契约
 
-说明: analysis_outputs 里 kind='cloud_analysis' 行的字段面——诊断 agent 提交局部修正
+说明: analysis_outputs 里 kind='agent_analysis' 行的字段面——诊断 agent 提交局部修正
 （revise_finish）、落库读写（stats 仓储）与 api 响应模型（DiagnosisResult）共用同一份，
 避免字段在两处漂移。完整结果模型（含领域校验）在 src/agents/diagnosis/schema.py。
 """
@@ -12,8 +12,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class CloudAnalysisPatch(BaseModel):
-    """2026-08-11 用于 revise_finish 只提交需要修改的字段，未提交字段沿用上一次完整结果"""
+class AgentAnalysisPatch(BaseModel):
+    """只提交需要修改的字段；未提交字段沿用上一次完整结果。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -38,4 +38,4 @@ class CloudAnalysisPatch(BaseModel):
     theme_color: str | None = None
 
 
-__all__ = ["CloudAnalysisPatch"]
+__all__ = ["AgentAnalysisPatch"]

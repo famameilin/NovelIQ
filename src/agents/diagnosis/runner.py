@@ -14,9 +14,9 @@ from typing import Any, cast
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.agents.diagnosis.schema import CloudAnalysis
+from src.agents.diagnosis.schema import AgentAnalysis
 from src.agents.stream import AgentStream
-from src.storage.diagnosis_payload import CloudAnalysisPatch
+from src.storage.diagnosis_payload import AgentAnalysisPatch
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
 from .evidence import DiagnosisEvidenceLedger
@@ -28,22 +28,13 @@ class DiagnosisAgentRunError(RuntimeError):
     """诊断 agent 运行失败"""
 
 
-def _model_provider(llm: Any) -> str:
-    """2026-08-10 用于从模型地址稳定区分本地与云端审计来源"""
-    raw_base_url = getattr(llm, "base_url", "") or getattr(llm, "openai_api_base", "") or ""
-    base_url = str(raw_base_url)
-    if base_url and "localhost" not in base_url and "127.0.0.1" not in base_url:
-        return "cloud"
-    return "local"
-
-
 def _model_name(llm: Any) -> str | None:
     """2026-08-10 用于从模型对象稳定读取审计用模型名"""
     return str(getattr(llm, "model_name", None) or getattr(llm, "model", "") or None) or None
 
 
 def _validate_topic_label_ids(
-    analysis: CloudAnalysis,
+    analysis: AgentAnalysis,
     *,
     expected_ids: set[int],
 ) -> None:
@@ -57,22 +48,22 @@ def _validate_topic_label_ids(
 
 
 def _finalize_diagnosis_result(
-    analysis: CloudAnalysis,
+    analysis: AgentAnalysis,
     *,
     novel_id: str,
     foreshadow_expectation: float | None,
-) -> CloudAnalysis:
+) -> AgentAnalysis:
     """
     2026-08-02 用于以运行元数据和伏笔 ledger 确定性收口诊断终态
     """
     payload = analysis.model_dump()
     payload["novel_id"] = novel_id
     payload["foreshadow_expectation"] = foreshadow_expectation
-    return CloudAnalysis.model_validate(payload)
+    return AgentAnalysis.model_validate(payload)
 
 
 def _validate_diagnosis_submission(
-    analysis: CloudAnalysis,
+    analysis: AgentAnalysis,
     *,
     expected_topic_ids: set[int],
     evidence_ledger: DiagnosisEvidenceLedger,
@@ -107,12 +98,12 @@ async def _run_diagnosis_agent(
     stream: AgentStream | None = None,
     audit_recorder: Any | None = None,
     is_cancelled: Callable[[], bool] | None = None,
-) -> CloudAnalysis:
+) -> AgentAnalysis:
     """
     运行诊断 agent（工具化自主取证）
 
     从数据库按需查询证据（聚合指标/转折素材/人物/主题/图谱信号），
-    自主决定查看哪些证据，最终输出 CloudAnalysis
+    自主决定查看哪些证据，最终产出诊断结果
     """
     from src.agents.audit.observer import AgentTurnObserver, build_invocation_context
     from src.agents.graph import build_agent_graph
@@ -139,14 +130,12 @@ async def _run_diagnosis_agent(
     max_attempts = max(1, settings.models.diagnosis.max_iterations)
     recorder: Any = audit_recorder
     model_name = _model_name(llm)
-    model_provider = _model_provider(llm)
     audit_context = build_invocation_context(
         run_id=run_id,
         task_type="diagnosis",
         execution_id=execution_id,
         attempt_number=1,
         model=model_name or "unknown",
-        model_provider=model_provider,
     )
     invocation_id = recorder.start_invocation(**audit_context)
     observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=audit_context)
@@ -154,15 +143,15 @@ async def _run_diagnosis_agent(
         llm,
         tools,
         max_attempts=max_attempts,
-        response_model=CloudAnalysis,
-        first_hint="请对当前小说完成整体诊断（按需取证，最后调用 finish 提交 CloudAnalysis）。",
+        response_model=AgentAnalysis,
+        first_hint="请对当前小说完成整体诊断（按需取证，最后调用 finish 提交诊断结果）。",
         response_validator=lambda analysis: _validate_diagnosis_submission(
             analysis,
             expected_topic_ids=expected_topic_ids,
             evidence_ledger=evidence_ledger,
         ),
         revision_tool_name="revise_finish",
-        revision_response_model=CloudAnalysisPatch,
+        revision_response_model=AgentAnalysisPatch,
         stream=stream,
         observer=observer,
         context_summary=_context_summary(evidence_ledger),
@@ -217,7 +206,7 @@ async def _run_diagnosis_agent(
 
     try:
         analysis = _finalize_diagnosis_result(
-            CloudAnalysis.model_validate(raw_output),
+            AgentAnalysis.model_validate(raw_output),
             novel_id=novel_id,
             foreshadow_expectation=foreshadow_expectation,
         )
@@ -246,12 +235,12 @@ async def _run_diagnosis_agent(
     return analysis
 
 
-def save_diagnosis_result(session: Session, run_id: str, analysis: CloudAnalysis) -> None:
+def save_diagnosis_result(session: Session, run_id: str, analysis: AgentAnalysis) -> None:
     """诊断 Agent 保存实际诊断结果，并直接委托事实图维护主角属性"""
     from src.fact_graph.graph import FactGraph
     from src.storage.repositories import StatsRepository
 
-    StatsRepository(session).insert_cloud_analysis(run_id, analysis)
+    StatsRepository(session).insert_agent_analysis(run_id, analysis)
     FactGraph(run_scope=run_id).save_main_characters(session, list(analysis.main_characters))
     session.commit()
 
@@ -266,7 +255,7 @@ async def run_diagnosis_agent(
     stream: AgentStream | None = None,
     audit_recorder: Any | None = None,
     is_cancelled: Callable[[], bool] | None = None,
-) -> CloudAnalysis:
+) -> AgentAnalysis:
     """默认执行只发送实际展示和审计消息，审计保存有独立生命周期"""
     from uuid import uuid4
 

@@ -9,11 +9,11 @@ from src.utils.character_reference_policy import is_global_character_surface_nam
 
 ValueLogicType = Literal["善义有价值", "强者为王", "混合型"]
 FocusStructureType = Literal["single", "dual", "ensemble"]
-class CloudAnalysis(BaseModel):
-    """
-    云端分析数据结构
 
-    说明: 从 dataclass 迁移至 Pydantic BaseModel，使用 field_validator 替代手动验证
+
+class AgentAnalysis(BaseModel):
+    """
+    小说整体诊断结果：题材与风格标签、价值观与叙事结构评价、角色弧线评分与核心阵容。
     """
 
     model_config = ConfigDict(frozen=True)

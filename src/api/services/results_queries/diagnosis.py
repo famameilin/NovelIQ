@@ -39,7 +39,7 @@ def _fetch_diagnosis(
     """
     从数据库获取诊断结果
     """
-    data = stats_repo.fetch_cloud_analysis(run_id)
+    data = stats_repo.fetch_agent_analysis(run_id)
     if not data:
         return None
     global_stats = stats_repo.fetch_global_stats_dict(run_id)

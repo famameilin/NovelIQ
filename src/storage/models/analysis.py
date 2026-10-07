@@ -4,7 +4,7 @@
 本模块定义分析结果相关的数据表：
 - GlobalStats: 全局统计表
 
-2026-10-06 表合并：CloudAnalysis 云端分析宽表已并入 analysis_outputs（kind='cloud_analysis'）。
+2026-10-06 表合并：旧诊断宽表已并入 analysis_outputs（kind='agent_analysis'）。
 """
 
 from __future__ import annotations

@@ -26,7 +26,6 @@ def build_invocation_context(
     execution_id: str,
     attempt_number: int,
     model: str,
-    model_provider: str | None,
     chapter_id: int | None = None,
     work_id: str | None = None,
     role: str | None = None,
@@ -37,7 +36,6 @@ def build_invocation_context(
         "task_type": task_type,
         "call_type": "agent" if task_type == "annotation" else task_type,
         "model": model or "unknown",
-        "model_provider": model_provider,
         "execution_id": execution_id,
         "attempt_number": attempt_number,
         "chapter_id": chapter_id,
@@ -131,7 +129,7 @@ class AgentTurnObserver:
     """2026-08-10 用于在 Agent 图节点间传递当前回合审计上下文并逐笔落库
 
     context 是本次尝试的 invocation 上下文（run_id/task_type/call_type/model/
-    model_provider/execution_id/attempt_number/chapter_id/work_id/role），随每条
+    execution_id/attempt_number/chapter_id/work_id/role），随每条
     审计调用流动，落库端不需要额外状态。
     """
 

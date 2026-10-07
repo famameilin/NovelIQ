@@ -33,12 +33,6 @@ from .subagent_runtime import SubagentProgramRuntime
 from .work_tools import build_work_tools
 
 
-def _model_provider(model: Any) -> str:
-    """模型地址决定审计来源，与工作执行协议无关"""
-    base_url = str(getattr(model, "base_url", "") or getattr(model, "openai_api_base", "") or "")
-    return "cloud" if base_url and "localhost" not in base_url and "127.0.0.1" not in base_url else "local"
-
-
 @dataclass
 class WorkExecution:
     receipt: WorkReceipt
@@ -184,7 +178,6 @@ class AnnotationAgent:
                 execution_id=invocation_id,
                 attempt_number=payload["attempt_number"],
                 model=model_name,
-                model_provider=_model_provider(model),
                 chapter_id=payload["chapter_id"],
                 work_id=receipt.work_id,
                 role=payload["role"],
