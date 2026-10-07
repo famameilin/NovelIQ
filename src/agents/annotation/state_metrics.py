@@ -85,3 +85,15 @@ class ChapterMetricsState:
         if len(labels) >= _PARAGRAPH_LABEL_MIN_PER_CHAPTER:
             return []
         return [f"情绪标签覆盖: 仅标注 {len(labels)} 段（每章应自选 2-3 段）"]
+
+    def fact_views(self) -> dict[str, Any]:
+        """只返回章级指标事实，保持审计与当前生效载荷一致"""
+        payloads = self.domain_payloads
+        views: dict[str, Any] = {}
+        if "metrics" in payloads:
+            views["metrics"] = {
+                "summary": payloads["metrics"].summary,
+                "emotional_valence": str(payloads["metrics"].emotional_valence),
+                "narrative_function": str(payloads["metrics"].narrative_function),
+            }
+        return views

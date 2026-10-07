@@ -615,3 +615,36 @@ class EventBindingState:
             if str(candidate) == node_id:
                 return str(node_key)
         return None
+
+    def fact_views(self, ctx: EventBindingStateContext) -> dict[str, Any]:
+        """只返回事件与人物观察事实，参与者身份由本状态绑定"""
+        payloads = self.domain_payloads
+        views: dict[str, Any] = {}
+        if "character_observations" in payloads:
+            views["character_observations"] = [
+                {
+                    "character": item.character,
+                    "action": item.action,
+                }
+                for item in payloads["character_observations"]
+            ]
+        if "events" in payloads:
+            views["events"] = [
+                {
+                    "node_id": item.node_id,
+                    "tree_id": item.tree_id,
+                    "parent_node_id": item.parent_node_id,
+                    "cause_role": item.cause_role,
+                    "description": item.description,
+                    "participants": [
+                        {
+                            "id": (ctx.graph.entity_id(participant.entity) if ctx.graph is not None else None),
+                            "entity": participant.entity,
+                            "role": str(participant.role),
+                        }
+                        for participant in item.participants
+                    ],
+                }
+                for item in payloads["events"]
+            ]
+        return views

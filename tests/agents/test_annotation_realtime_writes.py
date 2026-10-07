@@ -118,6 +118,40 @@ async def _judge_dialogues(tools: dict) -> None:
         await _call(tools, "write_dialogue", {"candidate_index": candidate_index, "verdict": "dialogue"})
 
 
+@pytest.mark.asyncio
+async def test_context_facts_cover_all_states_and_survive_restore() -> None:
+    """实际写入面产生的四状态事实在审计摘要和恢复后均完整保留"""
+    ledger = _ledger()
+    tools = _tools(ledger)
+    await _register_entities(tools)
+    await _seed_metrics(tools)
+    await _judge_dialogues(tools)
+    await _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "isroot": True,
+            "description": "顾霜喝止众人",
+            "characters": [{"entityid": "顾霜", "action": "喝止", "emotion": 1}],
+        },
+    )
+    await _call(tools, "write_relation", {"from_entity": "顾霜", "to_entity": "众人", "relation_type": "敌对"})
+    facts = ledger.context_summary()["facts"]
+    assert set(facts) == {"entities", "relations", "metrics", "events", "dialogues", "character_observations"}
+    assert facts["metrics"]["summary"] == "顾霜喝止众人"
+    assert facts["events"][0]["participants"][0]["entity"] == "顾霜"
+    assert facts["character_observations"][0]["action"] == "喝止"
+    assert [item["candidate_index"] for item in facts["dialogues"]] == [1, 2]
+    assert facts["relations"][0]["from"] == "顾霜"
+    snapshot = ledger.snapshot()
+    ledger.metrics.domain_payloads.clear()
+    ledger.events.domain_payloads.clear()
+    ledger.dialogue.domain_payloads.clear()
+    ledger.restore(snapshot)
+    assert ledger.context_summary()["facts"] == facts
+
+
 # ---------------------------------------------------------------------------
 # 事件：实时生长、三态与重复动态
 # ---------------------------------------------------------------------------

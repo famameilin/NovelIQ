@@ -23,6 +23,7 @@ from src.storage.models import AnalysisOutput, AnnotationWork, Chapter, Paragrap
 from src.work.annotation_work import WorkReceipt, annotation_work_id, required_roles
 from src.work.chapter_pool import ChapterWorkerPool
 from src.work.policy import completed_chapters
+from src.workflows.progress import stage_progress_percent
 
 
 def _load_work(session_factory: Callable[[], Session], run_id: str) -> tuple[list[WorkReceipt], set[int]]:
@@ -196,7 +197,12 @@ async def run_annotate(
                     run_id=run_id,
                     work_id=receipt.work_id,
                     invocation_id=invocation_id,
-                    payload={"current": current, "total": total},
+                    payload={
+                        "current": current,
+                        "total": total,
+                        "percent": stage_progress_percent("annotate", current, total),
+                        "sub_percent": current / total * 100,
+                    },
                 )
             )
 

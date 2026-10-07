@@ -63,6 +63,14 @@ def _stage_percent_range(stage: str) -> tuple[float, float]:
     return configured.start, configured.end
 
 
+def stage_progress_percent(stage: str, current: int, total: int) -> float:
+    """按阶段配置计算全局进度，保存回调与阶段事件共用同一口径"""
+    if total <= 0:
+        return 0.0
+    start, end = _stage_percent_range(stage)
+    return start + current / total * (end - start)
+
+
 class AnalysisEventBus:
     """
     分析事件总线
@@ -232,13 +240,7 @@ class AnalysisEventBus:
         - topic-model: 90-95%
         - diagnose: 95-100%
         """
-        if total <= 0:
-            return 0.0
-
-        progress_ratio = current / total
-
-        start, end = _stage_percent_range(stage)
-        return start + progress_ratio * (end - start)
+        return stage_progress_percent(stage, current, total)
 
     # 阶段级事件
 

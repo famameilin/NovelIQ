@@ -672,7 +672,13 @@ class AnnotationToolLedger:
     # 确定性上下文摘要与搜索压缩
 
     def _domain_fact_views(self) -> dict[str, Any]:
-        return self.entities._domain_fact_views(self)
+        # 各状态只读取本域载荷，账本只组装审计事实，不重新解释领域规则
+        return {
+            **self.metrics.fact_views(),
+            **self.entities.fact_views(),
+            **self.events.fact_views(self),
+            **self.dialogue.fact_views(),
+        }
 
     def context_summary(self) -> dict[str, Any]:
         """2026-08-10 用于从账本确定性生成当前模型请求的上下文摘要"""

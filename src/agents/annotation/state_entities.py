@@ -315,57 +315,15 @@ class EntityRelationState:
             )
         return key
 
-    def _domain_fact_views(self, ctx: EntityRelationStateContext) -> dict[str, Any]:
-        """2026-08-10 用于生成当前候选各领域的事实语义键视图"""
+    def fact_views(self) -> dict[str, Any]:
+        """只返回实体与关系事实，供账本组装审计摘要"""
         payloads = self.domain_payloads
         views: dict[str, Any] = {}
-        if "metrics" in payloads:
-            views["metrics"] = {
-                "summary": payloads["metrics"].summary,
-                "emotional_valence": str(payloads["metrics"].emotional_valence),
-                "narrative_function": str(payloads["metrics"].narrative_function),
-            }
         if "entities" in payloads:
             views["entities"] = {
                 "items": len(payloads["entities"].entities),
                 "names": [entity.name for entity in payloads["entities"].entities],
             }
-        if "character_observations" in payloads:
-            views["character_observations"] = [
-                {
-                    "character": item.character,
-                    "action": item.action,
-                }
-                for item in payloads["character_observations"]
-            ]
-        if "dialogues" in payloads:
-            views["dialogues"] = [
-                {
-                    "candidate_index": item.candidate_index,
-                    "verdict": str(item.verdict),
-                    "speaker": item.speaker,
-                }
-                for item in payloads["dialogues"]
-            ]
-        if "events" in payloads:
-            views["events"] = [
-                {
-                    "node_id": item.node_id,
-                    "tree_id": item.tree_id,
-                    "parent_node_id": item.parent_node_id,
-                    "cause_role": item.cause_role,
-                    "description": item.description,
-                    "participants": [
-                        {
-                            "id": (ctx.graph.entity_id(participant.entity) if ctx.graph is not None else None),
-                            "entity": participant.entity,
-                            "role": str(participant.role),
-                        }
-                        for participant in item.participants
-                    ],
-                }
-                for item in payloads["events"]
-            ]
         if "relations" in payloads:
             views["relations"] = [
                 {

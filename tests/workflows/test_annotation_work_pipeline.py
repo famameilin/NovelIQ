@@ -20,7 +20,7 @@ from tests.support.model_stream_adapter import StreamedFakeModelMixin
 class ProgramModel(StreamedFakeModelMixin):
     model_name = "test_model"
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str | list[str]) -> None:
         self.code = code
         self.calls = 0
 
@@ -29,13 +29,17 @@ class ProgramModel(StreamedFakeModelMixin):
 
     async def ainvoke(self, messages):
         self.calls += 1
+        code = self.code if isinstance(self.code, str) else self.code[self.calls - 1]
         return AIMessage(
-            content="", tool_calls=[{"name": "execute_code", "args": {"code": self.code}, "id": f"call{self.calls}"}]
+            content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": f"call{self.calls}"}]
         )
 
 
 @pytest.mark.asyncio
-async def test_solo_runs_real_program_and_saves_one_work(db_session) -> None:
+@pytest.mark.parametrize("start,end", [(10.0, 75.0), (20.0, 55.0)])
+async def test_solo_runs_real_program_and_saves_one_work(db_session, monkeypatch, start, end) -> None:
+    monkeypatch.setattr(settings.progress.annotate, "start", start)
+    monkeypatch.setattr(settings.progress.annotate, "end", end)
     novel_id, run_id = create_run_with_chunks(db_session, texts=["张三出门。"], chapter_ids=[1])
     model = ProgramModel(
         'entity(id="a1", name="张三", entity_type="character", evidence=1)\n'
@@ -59,6 +63,10 @@ async def test_solo_runs_real_program_and_saves_one_work(db_session) -> None:
     assert len(displayed) == 1
     assert displayed[0].work_id == records[0].work_id
     assert displayed[0].invocation_id == records[0].invocation_id
+    progress = [event for event in events if event.action == "progress" and event.current is not None]
+    assert progress[-1].current == progress[-1].total == 1
+    assert progress[-1].percent == end
+    assert progress[-1].sub_percent == 100
     outputs = (
         db_session.execute(
             select(AnalysisOutput).where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation")
@@ -68,6 +76,34 @@ async def test_solo_runs_real_program_and_saves_one_work(db_session) -> None:
     )
     assert len(outputs) == 1
     assert outputs[0].payload["metrics"]["summary"] == "出门"
+
+
+@pytest.mark.asyncio
+async def test_next_provider_turn_persists_all_domain_facts(db_session) -> None:
+    """下一模型回合的真实审计记录必须包含上一程序产生的所有领域事实"""
+    novel_id, run_id = create_run_with_chunks(db_session, texts=['“去吧。”张三出门。'])
+    model = ProgramModel([
+        'entity(id="a1", name="张三", entity_type="character", evidence=1)\n'
+        'event(el="t1", isroot=True, description="张三出门", evidence=1)\n'
+        'participants(el="t1", items=[{"entity_id": "a1", "role": "主体", "action": "出门", "emotion": 1}])\n'
+        'dialogue(candidate_index=1, verdict="dialogue", evidence=1, speaker_id="a1")\n'
+        'metric(summary="出门", emotional_valence=0, narrative_function="铺垫")',
+        'finish()',
+    ])
+    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+    db_session.expire_all()
+    turns = db_session.execute(
+        select(ModelTurn).where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
+        .order_by(ModelTurn.turn_index)
+    ).scalars().all()
+    assert len(turns) == 2
+    facts = turns[1].context_summary["facts"]
+    assert {"metrics", "events", "dialogues", "character_observations"} <= set(facts)
+    assert facts["metrics"]["summary"] == "出门"
+    assert facts["events"][0]["description"] == "张三出门"
+    assert facts["dialogues"][0]["speaker"] == "张三"
+    assert facts["character_observations"][0]["action"] == "出门"
 
 
 @pytest.mark.asyncio

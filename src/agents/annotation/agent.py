@@ -466,8 +466,8 @@ class AnnotationAgent:
                 chapter_id=payload["chapter_id"],
                 current=current,
                 total=total,
-                percent=10 + current / total * 70,
-                sub_percent=current / total * 100,
+                percent=progress["percent"],
+                sub_percent=progress["sub_percent"],
                 message=f"{payload['chapter_label']} {payload['role']} 已保存",
             ),
         ):

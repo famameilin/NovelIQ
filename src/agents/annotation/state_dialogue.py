@@ -132,3 +132,18 @@ class DialogueEvidenceState:
             "pending": pending,
             "judged": judged,
         }
+
+    def fact_views(self) -> dict[str, Any]:
+        """只返回已判定对话事实，不读取其他状态载荷"""
+        payloads = self.domain_payloads
+        views: dict[str, Any] = {}
+        if "dialogues" in payloads:
+            views["dialogues"] = [
+                {
+                    "candidate_index": item.candidate_index,
+                    "verdict": str(item.verdict),
+                    "speaker": item.speaker,
+                }
+                for item in payloads["dialogues"]
+            ]
+        return views
