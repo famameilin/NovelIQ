@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 
-from src.utils.lexicon_parser import load_weighted_lexicon as _load_weighted_lexicon
+from src.lexicons.parser import load_weighted_lexicon as _load_weighted_lexicon
 
 
 def _is_phrase_term(term: str) -> bool:

@@ -29,8 +29,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.config.constants import LEXICON_FILES
-from src.utils.lexicon_parser import load_lexicon_terms, load_weighted_lexicon
+from src.lexicons.constants import LEXICON_FILES
+from src.lexicons.parser import load_lexicon_terms, load_weighted_lexicon
 
 _DEFAULT_LEXICON_DIR = Path("data/lexicons")
 

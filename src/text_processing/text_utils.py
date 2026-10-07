@@ -48,6 +48,6 @@ def dialogue_length(text: str) -> int:
 
 def tokenize_words(text: str) -> list[str]:
     """调用项目统一分词器"""
-    from src.utils.tokenize import tokenize
+    from src.text_processing.tokenize import tokenize
 
     return tokenize(text)

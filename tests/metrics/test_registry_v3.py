@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from src.config.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES
+from src.lexicons.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES
 from src.lexicons.registry import LexiconRegistry
 from src.workflows.preprocess_helpers import _load_all_lexicons_for_preprocess
 

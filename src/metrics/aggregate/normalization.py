@@ -13,7 +13,7 @@ from typing import Any, Literal, Protocol, cast
 
 from loguru import logger
 
-from src.storage.path_resolver import resolve_model_dir
+from src.config.paths import resolve_model_dir
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.graph.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
 from src.utils.character_reference_policy import (

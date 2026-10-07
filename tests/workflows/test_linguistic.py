@@ -21,9 +21,9 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.linguistic.ltp_client import LtpPipelineOutput
 from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
-from src.storage.text_units import Chunk
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
 from src.workflows.linguistic import run_linguistic
-from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 
 _TEST_TEXTS = ["江湖快意恩仇，刀光剑影之间英雄辈出。", "他叫汤姆去拿外衣，但是天色已晚。"]
@@ -75,7 +75,7 @@ class TestRunLinguistic:
 
         # draft 审定门验证：draft 文件经 2026-09-07 审定后为空，注入非空 draft
         # 词条保持"draft 命中不计入正式密度"的门路径始终被测试覆盖
-        from src.config.constants import LEXICON_FILES
+        from src.lexicons.constants import LEXICON_FILES
         from src.lexicons.registry import LexiconRegistry
 
         self._draft_key = LEXICON_FILES["body_reaction_draft"]
@@ -204,7 +204,7 @@ class TestRunLinguistic:
             return run_model_dir
 
         monkeypatch.setattr(
-            "src.storage.path_resolver.resolve_run_model_dir",
+            "src.config.paths.resolve_run_model_dir",
             resolve_test_run_model_dir,
         )
 

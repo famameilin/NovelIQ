@@ -23,7 +23,7 @@ def test_topic_words_load_with_words(monkeypatch) -> None:
         return FakeModel()
 
     monkeypatch.setattr("src.topic.LDATrainer.load_model", fake_load)
-    from src.storage.path_resolver import resolve_model_dir
+    from src.config.paths import resolve_model_dir
 
     result = _topic_words_from_model_dir(resolve_model_dir("r1"))
     assert result == {

@@ -29,7 +29,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.config.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES
+from src.lexicons.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES
 from src.linguistic import TrainResult
 from src.sse.events import StreamEvent
 from src.storage.repositories import ParagraphRepository
@@ -238,8 +238,8 @@ async def run_linguistic(
     # Word2Vec：预训练初始化 + 按书微调（依赖 LTP 词元）
     # ------------------------------------------------------------------
     if w2v_settings.enabled and ltp_settings.enabled:
+        from src.config.paths import resolve_project_root
         from src.linguistic import load_shared_pretrained_vectors, resolve_shared_pretrained_path
-        from src.storage.path_resolver import resolve_project_root
 
         check_cancelled(is_cancelled)
         if not w2v_settings.model_dir:
@@ -432,8 +432,8 @@ def _train_and_build(
     pretrained_source: str,
 ) -> tuple[TrainResult, int]:
     """2026-08-30 用于完成预训练微调落库并构建词性聚合向量"""
+    from src.config.paths import resolve_run_model_dir
     from src.linguistic import build_pos_embeddings, train_book_model
-    from src.storage.path_resolver import resolve_run_model_dir
 
     train_result = train_book_model(
         token_sequences,

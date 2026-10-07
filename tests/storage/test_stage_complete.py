@@ -31,9 +31,9 @@ from src.storage.repositories.paragraph import (
     ParagraphEmbeddingRow,
     insert_paragraph_embeddings,
 )
-from src.storage.text_units import Chunk
 from src.storage.vector_schema import ensure_paragraph_embeddings_schema
-from src.workflows.paragraphs import split_chunk_paragraphs
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import persist_chapter_annotation
 

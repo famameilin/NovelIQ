@@ -17,7 +17,7 @@ from pathlib import Path
 
 from gensim.models import KeyedVectors
 
-from src.storage.path_resolver import resolve_project_root
+from src.config.paths import resolve_project_root
 
 #: 预训练词向量源文件目录（相对项目根）
 _DEFAULT_SOURCE_DIR = Path("models/word2vec/pretrained")

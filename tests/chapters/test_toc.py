@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.utils.chapters.toc import detect_toc_range
+from src.text_processing.chapters.toc import detect_toc_range
 
 
 def test_detects_toc_page() -> None:
@@ -42,7 +42,7 @@ def test_title_line_too_far_not_toc() -> None:
 
 
 def test_disabled_toc() -> None:
-    from src.utils.chapters.constants import ChapterConfig
+    from src.text_processing.chapters.constants import ChapterConfig
 
     config = ChapterConfig()
     config.toc_enabled = False

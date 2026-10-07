@@ -28,9 +28,9 @@ from src.storage.repositories import (
     StatsRepository,
 )
 from src.storage.repositories.paragraph_repository import ParagraphCurveRow
-from src.storage.text_units import Chunk
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
 from src.workflows.diagnose import run_diagnose
-from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 from tests.support.model_stream_adapter import StreamedFakeModelMixin

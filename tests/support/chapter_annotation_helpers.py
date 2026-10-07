@@ -26,9 +26,9 @@ from src.fact_graph.schema import (
 from src.storage.db import get_session_factory
 from src.storage.models import Chapter, Novel, Paragraph
 from src.storage.repositories import ChapterRepository, RunRepository
-from src.storage.text_units import Chunk as ChunkerChunk
+from src.text_processing.models import Chunk as ChunkerChunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
 from src.utils.identity import stable_digest
-from src.workflows.paragraphs import split_chunk_paragraphs
 
 
 def create_run_with_chunks(

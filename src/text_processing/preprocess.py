@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .tokenize import Tokenizer, get_tokenizer, tokenize
+from src.text_processing.tokenize import Tokenizer, get_tokenizer, tokenize
 
 
 def normalize_text(text: str) -> str:

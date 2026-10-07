@@ -4,7 +4,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.config.constants import LEXICON_FILES
+from src.lexicons.constants import LEXICON_FILES
 
 _LEXICON_DIR = Path("data/lexicons")
 

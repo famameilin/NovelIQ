@@ -20,7 +20,7 @@ from sqlalchemy import text
 
 from src.storage.db import get_session_factory
 from src.storage.repositories import ParagraphRepository, RunRepository
-from src.storage.text_units import ParagraphSpan
+from src.text_processing.models import ParagraphSpan
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 
 

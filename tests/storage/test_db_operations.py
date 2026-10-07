@@ -39,7 +39,7 @@ from src.storage.repositories import (
     RunRepository,
     StatsRepository,
 )
-from src.workflows.paragraphs import chunk_text, split_chunk_paragraphs
+from src.text_processing.paragraphs import chunk_text, split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 

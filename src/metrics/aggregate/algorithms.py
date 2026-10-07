@@ -20,7 +20,7 @@ from src.config import settings
 from src.lexicons.tables import STOPWORDS_TERMS
 from src.metrics.robust_smooth import robust_local_regression
 from src.storage.repositories import ParagraphRepository
-from src.utils.text_utils import split_sentences, tokenize_words
+from src.text_processing.text_utils import split_sentences, tokenize_words
 
 GRAPH_METRICS_VERSION = "graph-metrics-v1"
 KEYWORD_ALGORITHM_VERSION = "textrank-v1"

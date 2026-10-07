@@ -33,9 +33,9 @@ from sqlalchemy import text
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository
-from src.storage.text_units import Chunk
-from src.utils.tokenize import tokenize
-from src.workflows.paragraphs import split_chunk_paragraphs
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
+from src.text_processing.tokenize import tokenize
 from src.workflows.topic import run_topic_model
 from tests.support.analysis_factories import insert_test_novel
 

@@ -4,12 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.storage.path_resolver import (
-    _find_project_root,
-    resolve_model_dir,
-    resolve_project_root,
-    resolve_run_model_dir,
-)
+from src.config.paths import _find_project_root, resolve_model_dir, resolve_project_root, resolve_run_model_dir
 
 
 def test_resolve_project_root_is_repository_root() -> None:

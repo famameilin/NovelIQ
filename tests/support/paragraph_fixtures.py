@@ -20,7 +20,7 @@ from src.storage.repositories import (
     RunRepository,
 )
 from src.storage.repositories.paragraph_repository import ParagraphCurveRow, ParagraphMetricRow
-from src.storage.text_units import Chunk, ParagraphSpan
+from src.text_processing.models import Chunk, ParagraphSpan
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import commit_test_annotation
 

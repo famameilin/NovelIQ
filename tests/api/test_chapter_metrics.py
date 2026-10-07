@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 from src.metrics.style_metrics import mtld as mtld_fn
 from src.metrics.style_metrics import ttr as ttr_fn
-from src.utils.tokenize import tokenize
+from src.text_processing.tokenize import tokenize
 from tests.support.paragraph_fixtures import (
     create_completed_run,
     insert_chapter_annotation,

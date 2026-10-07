@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from src.config.constants.diagnosis import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
-from src.config.constants.lexicons import LEXICON_DRAFT_KEYS, LEXICON_FILES
 from src.config.constants.progress import STAGE_PROGRESS_MILESTONES
 from src.config.constants.text_normalization import (
     ALLOWED_PREV_CJK_CHARS,
     LIKELY_NAME_PREFIX_CHARS,
     TITLE_ALIAS_SUFFIXES,
 )
+from src.lexicons.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES, SEMANTIC_CATEGORY_MAPPING
 
 PROPP_FUNCTIONS: set[str] = {
     "主体",
@@ -21,18 +21,6 @@ PROPP_FUNCTIONS: set[str] = {
     "其他",
 }
 
-SEMANTIC_CATEGORY_MAPPING: dict[str, str] = {
-    "武功武器类": "combat",
-    "身体部件类": "body",
-    "人物关系类": "relation",
-    "门派派系类": "faction",
-    "使令动词类": "command",
-    "动作动词类": "action",
-    "心理动词类": "psychology",
-    "度量形容词类": "measure",
-    "情绪形容词类": "emotion",
-    "色彩形容词类": "color",
-}
 
 __all__ = [
     "PROPP_FUNCTIONS",

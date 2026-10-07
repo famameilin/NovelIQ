@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from src.config.constants import SEMANTIC_CATEGORY_MAPPING
+from src.lexicons.constants import SEMANTIC_CATEGORY_MAPPING
 
 # 语义类别词表的分节标记："# ===== 3. 战斗 =====" 形态
 _SEMANTIC_SECTION_RE = re.compile(r"#\s*={5,}\s*(\d+)\.\s*(.+?)\s*={5,}")

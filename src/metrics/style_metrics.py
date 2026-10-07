@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterable, Sequence
 
 from src.config import settings
-from src.utils.text_utils import dialogue_length, split_sentences, tokenize_words
+from src.text_processing.text_utils import dialogue_length, split_sentences, tokenize_words
 
 from .lexicon_metrics import count_mixed_hits
 

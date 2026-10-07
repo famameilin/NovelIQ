@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from src.utils.lexicon_parser import load_lexicon_terms, load_weighted_lexicon, parse_lexicon_term
+from src.lexicons.parser import load_lexicon_terms, load_weighted_lexicon, parse_lexicon_term
 
 
 class TestParseLexiconTerm:

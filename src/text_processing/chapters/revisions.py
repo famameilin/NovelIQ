@@ -15,8 +15,8 @@ import difflib
 
 from loguru import logger
 
-from src.utils.chapters.constants import ChapterConfig
-from src.utils.chapters.models import ChapterData
+from src.text_processing.chapters.constants import ChapterConfig
+from src.text_processing.chapters.models import ChapterData
 
 
 def drop_duplicate_revisions(

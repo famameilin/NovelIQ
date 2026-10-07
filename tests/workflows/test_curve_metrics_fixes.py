@@ -34,8 +34,8 @@ def _insert_paragraph_curves(
     """构造 4 章 4 段的 run（chapter_id = 1..4），写入段落曲线与基础指标。"""
     from dataclasses import replace
 
-    from src.storage.text_units import Chunk
-    from src.workflows.paragraphs import split_chunk_paragraphs
+    from src.text_processing.models import Chunk
+    from src.text_processing.paragraphs import split_chunk_paragraphs
 
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)

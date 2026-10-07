@@ -10,7 +10,7 @@ from typing import Any
 from src.metrics.lexicon_metrics import count_mixed_hits, get_emotion_spans
 from src.metrics.matching import count_token_hits_enhanced
 from src.metrics.negation import is_flipped, load_negation_spec
-from src.utils.text_utils import dialogue_length, split_sentences
+from src.text_processing.text_utils import dialogue_length, split_sentences
 
 # 与 style_metrics.metaphor_density 的 markers 保持一致
 # （该处未导出常量，此处本地声明一份，避免反向依赖）

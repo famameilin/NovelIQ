@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.utils.preprocess import normalize_text, split_paragraphs, split_sentences, strip_empty_lines
+from src.text_processing.preprocess import normalize_text, split_paragraphs, split_sentences, strip_empty_lines
 
 
 class TestCleaning(unittest.TestCase):

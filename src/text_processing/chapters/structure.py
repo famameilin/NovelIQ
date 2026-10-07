@@ -8,11 +8,8 @@ from __future__ import annotations
 
 from loguru import logger
 
-from src.utils.chapters.constants import (
-    PRELIMINARY_TITLE_RE,
-    ChapterConfig,
-)
-from src.utils.chapters.models import ChapterCandidate, ChapterData, ChapterLevel
+from src.text_processing.chapters.constants import PRELIMINARY_TITLE_RE, ChapterConfig
+from src.text_processing.chapters.models import ChapterCandidate, ChapterData, ChapterLevel
 
 
 def decide_structure(

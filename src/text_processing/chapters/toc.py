@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from src.utils.chapters.constants import _CN_NUMERALS_CLASS, ChapterConfig
+from src.text_processing.chapters.constants import _CN_NUMERALS_CLASS, ChapterConfig
 
 _TOC_TITLE_RE = re.compile(r"^[ \t]*目[ \t]*录[ \t]*[:：]?[ \t]*$")
 # 目录条目：与章节标题格式相近的行（第一章 XXX / 第1章 XXX / 卷一 风起 / Chapter 1 等），

@@ -16,8 +16,8 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.config import settings
+from src.config.paths import resolve_model_dir, resolve_project_root
 from src.sse.events import StreamEvent
-from src.storage.path_resolver import resolve_model_dir, resolve_project_root
 from src.storage.repositories import ParagraphRepository
 from src.topic import (
     INFERENCE_COMPLETE,

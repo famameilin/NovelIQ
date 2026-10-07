@@ -28,7 +28,7 @@ from src.metrics.style_metrics import (
     ttr,
     word_frequency_breadth,
 )
-from src.utils.text_utils import dialogue_length, split_sentences, tokenize_words
+from src.text_processing.text_utils import dialogue_length, split_sentences, tokenize_words
 
 
 class TestLexiconMetrics(unittest.TestCase):

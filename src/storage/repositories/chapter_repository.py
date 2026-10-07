@@ -21,9 +21,9 @@ from src.storage.repositories.paragraph import (
     has_paragraph_embeddings,
 )
 from src.storage.repositories.paragraph_repository import ParagraphRepository
-from src.storage.text_units import Chunk
 from src.storage.vector_schema import validate_paragraph_embeddings_schema
-from src.utils.chapters.models import ChapterData
+from src.text_processing.chapters.models import ChapterData
+from src.text_processing.models import Chunk
 
 
 class ChapterRepository(BaseRepository["ChapterModel"]):

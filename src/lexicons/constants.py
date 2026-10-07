@@ -32,3 +32,17 @@ LEXICON_FILES: dict[str, str] = {
 # 正式表空即降级，registry 测试据此豁免非空断言）；linguistic 阶段按此集合
 # 挂审定门，下一轮扩表新增 draft 表只需同时登记于此。
 LEXICON_DRAFT_KEYS: tuple[str, ...] = ("body_reaction_draft", "colloquial_expansion_draft")
+
+
+SEMANTIC_CATEGORY_MAPPING: dict[str, str] = {
+    "武功武器类": "combat",
+    "身体部件类": "body",
+    "人物关系类": "relation",
+    "门派派系类": "faction",
+    "使令动词类": "command",
+    "动作动词类": "action",
+    "心理动词类": "psychology",
+    "度量形容词类": "measure",
+    "情绪形容词类": "emotion",
+    "色彩形容词类": "color",
+}

@@ -12,7 +12,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.linguistic import analyze_paragraph
 from src.linguistic.ltp_client import LtpPipelineOutput
-from src.utils.text_utils import split_sentences
+from src.text_processing.text_utils import split_sentences
 
 
 def _output_for(sentences: list[str]) -> LtpPipelineOutput:

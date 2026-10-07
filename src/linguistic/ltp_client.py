@@ -17,7 +17,7 @@ from pathlib import Path
 from loguru import logger
 
 from src.config import settings
-from src.utils.text_utils import split_sentences
+from src.text_processing.text_utils import split_sentences
 
 from .schema import (
     LtpDependencyArc,

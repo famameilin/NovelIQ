@@ -105,7 +105,7 @@ def train_book_model(
       models/word2vec/{run_id}/word2vec.model（run 私有）
     - training_token_count 为全部文档的有效词元总数（含重复词元）
     """
-    from src.storage.path_resolver import resolve_run_model_dir
+    from src.config.paths import resolve_run_model_dir
 
     w2v_settings = settings.linguistic.word2vec
     window = window if window is not None else w2v_settings.window

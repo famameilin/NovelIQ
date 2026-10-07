@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from src.utils.chapters.constants import ChapterConfig
-from src.utils.chapters.models import ChapterLevel
-from src.utils.chapters.parser import parse_chapters
+from src.text_processing.chapters.constants import ChapterConfig
+from src.text_processing.chapters.models import ChapterLevel
+from src.text_processing.chapters.parser import parse_chapters
 
 
 def test_standard_chapter_format() -> None:

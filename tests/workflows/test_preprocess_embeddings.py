@@ -8,9 +8,9 @@ import pytest
 from src.sse.events import StreamEvent
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
-from src.storage.text_units import Chunk
-from src.utils.tokenize import tokenize
-from src.workflows.paragraphs import split_chunk_paragraphs, split_paragraphs
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs, split_paragraphs
+from src.text_processing.tokenize import tokenize
 from src.workflows.preprocess import (
     _generate_paragraph_embedding_rows,
     _generate_paragraph_embeddings,

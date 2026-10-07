@@ -1,8 +1,7 @@
+from src.config.constants import PROPP_FUNCTIONS
+from src.lexicons.constants import SEMANTIC_CATEGORY_MAPPING
+
 from . import bootstrap
-from .constants import (
-    PROPP_FUNCTIONS,
-    SEMANTIC_CATEGORY_MAPPING,
-)
 from .input_config import (
     TaskModelConfig,
     TaskType,

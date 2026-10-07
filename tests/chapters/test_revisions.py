@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import re
 
-from src.utils.chapters.constants import ChapterConfig
-from src.utils.chapters.models import ChapterData, ChapterLevel
-from src.utils.chapters.parser import parse_chapters
-from src.utils.chapters.revisions import drop_duplicate_revisions
+from src.text_processing.chapters.constants import ChapterConfig
+from src.text_processing.chapters.models import ChapterData, ChapterLevel
+from src.text_processing.chapters.parser import parse_chapters
+from src.text_processing.chapters.revisions import drop_duplicate_revisions
 
 _CORE = "西郊猎场的晨雾还未散去，猎队已经列队出发。" * 15
 _OLD_ENDING = "旧稿独有的结尾，火光一闪而熄。" * 2

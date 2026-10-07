@@ -124,7 +124,7 @@ def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
     2026-08-13 P2：模型目录必须基于项目根推导（干净检出以 pyproject.toml + config/ 为锚点），
     而不是相对 CWD 解析，避免服务启动目录不同导致词表/标签加载静默降级。
     """
-    from src.storage.path_resolver import resolve_model_dir
+    from src.config.paths import resolve_model_dir
 
     repo = _make_repo([_make_row(0, 100.0)])
     trainer = _make_trainer_with_model()

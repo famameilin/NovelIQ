@@ -25,8 +25,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from src.config.constants import LEXICON_FILES
-from src.utils.text_utils import tokenize_words
+from src.lexicons.constants import LEXICON_FILES
+from src.text_processing.text_utils import tokenize_words
 
 _SECTION_PATTERN = "====="
 _CLAUSE_BOUNDARY_CHARS = "，、；：,;:"

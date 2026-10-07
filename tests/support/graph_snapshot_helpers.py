@@ -26,7 +26,7 @@ def insert_graph_test_novel(db_session, novel_id: str) -> None:
 def insert_graph_test_chunks(db_session, run_id: str, chunk_ids: range) -> None:
     """为 graph relation event 测试补齐 chapters 外键依赖（M9a-2：chunks 表已合并）"""
     from src.storage.repositories import ChapterRepository
-    from src.storage.text_units import Chunk
+    from src.text_processing.models import Chunk
 
     ChapterRepository(db_session).insert_chapter_texts(
         run_id,

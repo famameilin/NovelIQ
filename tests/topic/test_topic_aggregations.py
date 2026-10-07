@@ -28,8 +28,8 @@ from src.metrics.aggregate.topic_aggregations import (
     fetch_paragraph_topic_series,
 )
 from src.storage.repositories import ParagraphRepository, RunRepository
-from src.storage.text_units import Chunk
-from src.workflows.paragraphs import split_chunk_paragraphs
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 
 _CHUNK_TEXTS = ["甲。\n乙。\n丙。", "丁。\n戊。\n己。"]

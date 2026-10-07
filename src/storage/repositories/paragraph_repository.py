@@ -58,7 +58,7 @@ from src.storage.repositories.paragraph.topic_ops import (
     insert_topic_model_run,
 )
 from src.storage.repositories.paragraph.writer import insert_paragraphs, validate_spans
-from src.storage.text_units import ParagraphSpan
+from src.text_processing.models import ParagraphSpan
 
 
 class ParagraphRepository(BaseRepository[Paragraph]):

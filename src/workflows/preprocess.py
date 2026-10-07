@@ -27,14 +27,14 @@ from src.storage.repositories.paragraph_repository import (
     ParagraphMetricRow,
     ParagraphRepository,
 )
-from src.storage.text_units import ParagraphSpan
 from src.storage.vector_schema import (
     ensure_paragraph_embeddings_schema,
 )
-from src.utils.preprocess import normalize_text
-from src.utils.text_reader import ingest_path
-from src.utils.tokenize import tokenize
-from src.workflows.paragraphs import chunk_documents_with_chapters, split_chunk_paragraphs
+from src.text_processing.models import ParagraphSpan
+from src.text_processing.paragraphs import chunk_documents_with_chapters, split_chunk_paragraphs
+from src.text_processing.preprocess import normalize_text
+from src.text_processing.text_reader import ingest_path
+from src.text_processing.tokenize import tokenize
 
 
 async def run_preprocess(

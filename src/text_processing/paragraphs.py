@@ -2,7 +2,7 @@
 文本分割模块（预处理阶段的段落切分）
 
 2026-10-06 自 src/chunking/chunker.py 收归：只做"章节 → 文本块 → 段落单元"的分割，
-行形态（Chunk/ParagraphSpan）在 `src.storage.text_units`。
+行形态（Chunk/ParagraphSpan）在 `src.text_processing.models`。
 
 分章策略：
 1. 优先按章节结构解析（src.chapters）分割：每个章节为一个 chunk，
@@ -19,10 +19,10 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from src.storage.text_units import Chunk, ParagraphSpan
-from src.utils.chapters.models import ChapterData
-from src.utils.chapters.parser import parse_chapters
-from src.utils.chapters.preprocess import preprocess_text
+from src.text_processing.chapters.models import ChapterData
+from src.text_processing.chapters.parser import parse_chapters
+from src.text_processing.chapters.preprocess import preprocess_text
+from src.text_processing.models import Chunk, ParagraphSpan
 
 if TYPE_CHECKING:
     from src.sse.events import StreamEvent

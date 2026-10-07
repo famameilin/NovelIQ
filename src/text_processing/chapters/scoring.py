@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import re
 
-from src.utils.chapters.constants import _CN_NUMERALS, ChapterConfig
-from src.utils.chapters.models import ChapterCandidate, ChapterLevel
+from src.text_processing.chapters.constants import _CN_NUMERALS, ChapterConfig
+from src.text_processing.chapters.models import ChapterCandidate, ChapterLevel
 
 _CN_NUMERAL_RE = re.compile(f"[{_CN_NUMERALS}]")
 _STRICTNESS_LEVELS = {

@@ -8,14 +8,14 @@
 
 from __future__ import annotations
 
-from src.utils.chapters.candidates import collect_candidates
-from src.utils.chapters.constants import ChapterConfig
-from src.utils.chapters.models import ChapterData
-from src.utils.chapters.preprocess import preprocess_text
-from src.utils.chapters.revisions import drop_duplicate_revisions
-from src.utils.chapters.scoring import score_candidates
-from src.utils.chapters.structure import auto_split, decide_structure, finalize
-from src.utils.chapters.toc import detect_toc_range
+from src.text_processing.chapters.candidates import collect_candidates
+from src.text_processing.chapters.constants import ChapterConfig
+from src.text_processing.chapters.models import ChapterData
+from src.text_processing.chapters.preprocess import preprocess_text
+from src.text_processing.chapters.revisions import drop_duplicate_revisions
+from src.text_processing.chapters.scoring import score_candidates
+from src.text_processing.chapters.structure import auto_split, decide_structure, finalize
+from src.text_processing.chapters.toc import detect_toc_range
 
 
 def parse_chapters(text: str, config: ChapterConfig | None = None) -> list[ChapterData]:

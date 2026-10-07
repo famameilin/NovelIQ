@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
+from src.config.paths import resolve_model_dir
 from src.storage.models import (
     Chapter,
     Paragraph,
@@ -17,7 +18,6 @@ from src.storage.models import (
     ParagraphTopic,
     ParagraphTopicInference,
 )
-from src.storage.path_resolver import resolve_model_dir
 from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingTreeView
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.graph import GraphRepository

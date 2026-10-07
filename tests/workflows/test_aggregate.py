@@ -38,9 +38,9 @@ from src.storage.repositories.paragraph_repository import (
     ParagraphMetricRow,
     ParagraphRepository,
 )
-from src.storage.text_units import Chunk
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
 from src.workflows.aggregate import run_aggregate
-from src.workflows.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import confirm_test_work, persist_chapter_annotation
 

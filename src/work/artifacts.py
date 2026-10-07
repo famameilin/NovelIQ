@@ -12,7 +12,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.storage.path_resolver import resolve_run_model_dir
+from src.config.paths import resolve_run_model_dir
 
 
 class ArtifactGcService:

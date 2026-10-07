@@ -30,7 +30,7 @@ from src.metrics.lexicon_metrics import (
     load_weighted_lexicon,
     term_weighted_counts,
 )
-from src.utils.tokenize import get_tokenizer
+from src.text_processing.tokenize import get_tokenizer
 
 
 class TestWeightedDensity:

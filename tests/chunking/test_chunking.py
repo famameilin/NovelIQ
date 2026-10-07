@@ -8,8 +8,8 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from loguru import logger
 
-from src.utils.chapters.preprocess import preprocess_text
-from src.workflows.paragraphs import chunk_documents, chunk_text
+from src.text_processing.chapters.preprocess import preprocess_text
+from src.text_processing.paragraphs import chunk_documents, chunk_text
 
 
 class TestChunking(unittest.IsolatedAsyncioTestCase):

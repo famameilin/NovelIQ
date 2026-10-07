@@ -20,8 +20,8 @@ from src.config import settings
 from src.storage.models import ParagraphCurve, ParagraphEmbedding, ParagraphMetric
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
-from src.utils.chapters.preprocess import preprocess_text
-from src.utils.preprocess import normalize_text
+from src.text_processing.chapters.preprocess import preprocess_text
+from src.text_processing.preprocess import normalize_text
 from src.workflows.preprocess import run_preprocess
 from tests.support.analysis_factories import insert_test_novel
 
