@@ -836,7 +836,7 @@ export interface SettingsViewResponse {
   sources: Record<string, SettingSource>;
 }
 
-export interface ModelProviderView {
+export interface EmbeddingModelView {
   base_url: string | null;
   model: string | null;
   api_key: string | null;
@@ -881,15 +881,15 @@ export interface ModelEnvUpdate {
   ltp_model_dir?: string | null;
 }
 
-export type ModelProviderTask = "pool" | "embedding";
+export type AgentModelTask = "pool" | "embedding";
 
-export interface ModelProviderTestRequest {
+export interface AgentModelTestRequest {
   base_url?: string;
   api_key?: string;
   model_id?: string;
 }
 
-export interface ModelProviderTestResponse {
+export interface AgentModelTestResponse {
   ok: boolean;
   latency_ms: number | null;
   model_ids: string[];

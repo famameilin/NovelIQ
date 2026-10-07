@@ -4,9 +4,9 @@
 import { apiClient } from "./client";
 import type {
   ModelEnvUpdate,
-  ModelProviderTask,
-  ModelProviderTestRequest,
-  ModelProviderTestResponse,
+  AgentModelTask,
+  AgentModelTestRequest,
+  AgentModelTestResponse,
   SettingsSchemaResponse,
   SettingsViewResponse,
 } from "./types";
@@ -36,12 +36,12 @@ export async function updateModelEnv(payload: ModelEnvUpdate): Promise<SettingsV
 }
 
 /** 测试模型服务连通性（字段缺省用当前生效配置） */
-export async function testModelProvider(
-  task: ModelProviderTask,
-  payload?: ModelProviderTestRequest
-): Promise<ModelProviderTestResponse> {
-  const { data } = await apiClient.post<ModelProviderTestResponse>(
-    `/api/settings/model-providers/${task}/test`,
+export async function testAgentModel(
+  task: AgentModelTask,
+  payload?: AgentModelTestRequest
+): Promise<AgentModelTestResponse> {
+  const { data } = await apiClient.post<AgentModelTestResponse>(
+    `/api/settings/agents/${task}/test`,
     payload ?? {}
   );
   return data;

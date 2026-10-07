@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Pencil, PlugZap, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { testModelProvider, updateModelEnv } from "@/api/settings";
+import { testAgentModel, updateModelEnv } from "@/api/settings";
 import type { ModelPoolEntry, ModelPoolEntryUpdate, SettingsViewResponse } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -89,7 +89,7 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
     mutationFn: () => {
       if (!dialog) throw new Error("没有正在编辑的模型");
       const entry = dialog.index === null ? null : current.entries[dialog.index];
-      return testModelProvider("pool", {
+      return testAgentModel("pool", {
         base_url: dialog.form.base_url.trim(),
         ...(entry?.original_model_id ? { model_id: entry.original_model_id } : {}),
         ...(dialog.form.api_key || entry?.api_key ? { api_key: dialog.form.api_key || entry?.api_key } : {}),

@@ -2,22 +2,22 @@ import { useId, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, PlugZap, RotateCcw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { testModelProvider, updateModelEnv } from "@/api/settings";
-import type { ModelEnvUpdate, ModelProviderView, SettingsViewResponse } from "@/api/types";
+import { testAgentModel, updateModelEnv } from "@/api/settings";
+import type { EmbeddingModelView, ModelEnvUpdate, SettingsViewResponse } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-interface ProviderForm {
+interface EmbeddingModelForm {
   base_url: string;
   model: string;
   api_key: string;
 }
 
-interface ModelProviderEditorProps {
-  value: ModelProviderView;
+interface EmbeddingModelEditorProps {
+  value: EmbeddingModelView;
   onSaved: (view: SettingsViewResponse) => void;
 }
 
@@ -28,14 +28,14 @@ function errorDetail(error: unknown): string {
   return String(error);
 }
 
-export function ModelProviderEditor({
+export function EmbeddingModelEditor({
   value, onSaved,
-}: ModelProviderEditorProps) {
+}: EmbeddingModelEditorProps) {
   const inputId = useId();
-  const [draft, setDraft] = useState<ProviderForm | null>(null);
+  const [draft, setDraft] = useState<EmbeddingModelForm | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const initial: ProviderForm = { base_url: value.base_url ?? "", model: value.model ?? "", api_key: "" };
+  const initial: EmbeddingModelForm = { base_url: value.base_url ?? "", model: value.model ?? "", api_key: "" };
   const form = draft ?? initial;
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
   const title = "嵌入模型";
@@ -61,7 +61,7 @@ export function ModelProviderEditor({
   });
 
   const test = useMutation({
-    mutationFn: () => testModelProvider("embedding", {
+    mutationFn: () => testAgentModel("embedding", {
       base_url: form.base_url.trim(),
       ...(form.api_key ? { api_key: form.api_key } : {}),
     }),
@@ -71,7 +71,7 @@ export function ModelProviderEditor({
     onError: (error: unknown) => setTestResult(`连接失败：${errorDetail(error)}`),
   });
 
-  const change = (field: keyof ProviderForm, next: string) => {
+  const change = (field: keyof EmbeddingModelForm, next: string) => {
     setDraft({ ...form, [field]: next });
     setTestResult(null);
   };
