@@ -15,9 +15,23 @@ from enum import StrEnum
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
-from .program import _PROGRAM_MAX_CODE_CHARS, _PROGRAM_MAX_OPS, render_list_signature
-from src.fact_graph.schema import CLIFFHANGER_DESCRIPTION, ENTITY_REF_FIELD_HINT, EVENT_ROLE_FIELD_HINT, PERSON_ROLE_FIELD_HINT, PIVOT_MOMENT_DESCRIPTION, Confidence, DialogueVerdict, EntityRefType, RoleFunction, Tone, relation_catalog_text
+from src.event_trees.program_contract import PROGRAM_MAX_CODE_CHARS, PROGRAM_MAX_OPS
 from src.event_trees.vocabulary import EventParticipantRole
+from src.fact_graph.schema import (
+    CLIFFHANGER_DESCRIPTION,
+    ENTITY_REF_FIELD_HINT,
+    EVENT_ROLE_FIELD_HINT,
+    PERSON_ROLE_FIELD_HINT,
+    PIVOT_MOMENT_DESCRIPTION,
+    Confidence,
+    DialogueVerdict,
+    EntityRefType,
+    RoleFunction,
+    Tone,
+    relation_catalog_text,
+)
+
+from .program import render_list_signature
 from .search_projection import (
     _PROJECTION_PARAMETER_LABELS,
     _PROJECTION_PARAMETERS,
@@ -297,9 +311,19 @@ SUBAGENT_CONTRACT_TEXT: str = (
     "- 语法：变量赋值、列表/字典/元组、下标、for 列表循环、if 与 ==/!=/in；调用只写具名参数；"
     "没有 import、属性访问、函数定义或其他 Python API。常量写 True/False/None（也接受 true/false/null）；\n"
     "字典/列表一律写字面量（{…}/[…]）：dict()/list() 等构造器与列表推导不可用，循环一律用 for。\n"
+    "- 检索结果自动出现在 reads，无需 print（未开放）。具名调用示例：\n"
+    '  events_page = search_events(query="院门", chapter_id=24, limit=5, offset=0)\n'
+    '  graph_page = search_graph(query="阿青", limit=5, offset=0, relation_offset=0)\n'
+    '  for candidate in graph_page["entities"]:\n'
+    '      entity_detail = read_entity(entity_id=candidate["id"])\n'
+    '  for item in events_page["events"]:\n'
+    '      detail = read_event(node_id=item["node_id"])\n'
+    "  后续翻页沿用原 query/筛选条件，offset 填上一页 next_offset；None 表示没有下一页。\n"
     "- 变量：程序里赋的变量在本章后续程序里保留；构造器与检索的返回值都能用变量承接。\n"
+    "  工具名全部保留，不得作为变量（如 entity/event/metric/finish）；"
+    "实体详情用 entity_detail，事件详情用 event_detail，检索页用 graph_page/events_page。\n"
     "- 失败：业务失败只作废该条调用、后面的语句继续执行；语法或运行错误停止本程序、已成功的调用保留。\n"
-    f"- 上限：单个程序最多 {_PROGRAM_MAX_CODE_CHARS} 字符、{_PROGRAM_MAX_OPS} 条调用。\n"
+    f"- 上限：单个程序最多 {PROGRAM_MAX_CODE_CHARS} 字符、{PROGRAM_MAX_OPS} 条调用。\n"
     "回执字段：\n"
     "- status：本次程序的整体结果。\n"
     "- applied：本程序成功的调用条数。\n"
@@ -315,6 +339,8 @@ SUBAGENT_CONTRACT_TEXT: str = (
     "工作方式：\n"
     "- 一次程序把本章该判的内容写完：同一段程序里连续调用多个构造器、写多条记录都可以。\n"
     "- 判不了的用 pending 登记，不要硬套：正文只说见面、对峙这类没有闭合关系可表达的，宁缺勿滥。\n"
-    "- reads 已经是本程序检索到的数据，不要为看同一份结果反复检索；failed 里那一条按 expected 当场改。\n"
+    "- reads 已经是本程序检索到的数据，不要用 print 或为看同一份结果反复检索；"
+    "search_events 的节点列表在 events 字段，search_graph 的两组列表在 entities/relations 字段；"
+    "failed 里那一条按 expected 当场改。\n"
     "- 产出写完时调用 finish 收尾：收尾不减损已写入的记录，回执点名还缺什么，缺的当场补。\n\n"
 )

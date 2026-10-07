@@ -15,11 +15,17 @@ from typing import Any
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.fact_graph.schema import ChapterParagraphInfo, EntityDirectoryInput, RelationInput, RelationType
-from src.event_trees.models import BoundCharacterObservation, BoundEvent
 from src.agents.annotation.tool_batch import _invoke_tool
 from src.agents.annotation.tools import AnnotationToolLedger
+from src.event_trees.models import BoundEvent
 from src.fact_graph.graph import FactGraph
+from src.fact_graph.schema import (
+    BoundCharacterObservation,
+    ChapterParagraphInfo,
+    EntityDirectoryInput,
+    RelationInput,
+    RelationType,
+)
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 

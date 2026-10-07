@@ -4,22 +4,34 @@ from __future__ import annotations
 
 import copy
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agents.annotation import program as program_module
+from src.agents.annotation.agent import WorkExecution
 from src.agents.annotation.program import build_program_tool
-from src.fact_graph.schema import ChapterParagraphInfo, RoleFunction
-from src.event_trees.models import EventParticipantRole
 from src.agents.annotation.subagent_graph import build_subagent_graph
 from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.agents.annotation.subagent_runtime import SubagentProgramRuntime
 from src.agents.annotation.tool_batch import _build_tool_batch_node
 from src.agents.annotation.tools import AnnotationToolLedger
+from src.agents.annotation.work_tools import SHARED_SEARCH_MAX_CHARS, build_work_tools
+from src.case_pool import CasePool
+from src.event_trees import program_contract
+from src.event_trees.models import BoundEvent
 from src.event_trees.submission import build_event_submission_tool
+from src.event_trees.trees import EventTrees
+from src.event_trees.vocabulary import EventParticipantRole
 from src.fact_graph.graph import FactGraph
+from src.fact_graph.schema import (
+    ChapterParagraphInfo,
+    EntityInput,
+    RoleFunction,
+)
+from src.work.annotation_work import WorkReceipt
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
@@ -68,6 +80,137 @@ def _root(identifier: str = "opening", *, paragraph_id: int = 1) -> dict[str, An
     }
 
 
+def _real_work_runtime(*, role: str = "event", observer: Any = None) -> tuple[Any, Any, WorkExecution]:
+    """直接装配发布全书状态的生产工具，避免领域隔离夹具掩盖暂挂回执错误"""
+    ledger = _ledger()
+    ledger.role = role
+    work = WorkReceipt("work", ledger.run_scope, "annotation", {"chapter_id": 24, "role": role})
+    execution = WorkExecution(work, "invocation", ledger, SubagentAnnotation(role=role))
+    cases, trees = CasePool(ledger.run_scope), EventTrees(ledger.run_scope)
+    cases.begin(execution.work_id, execution.invocation_id)
+    trees.begin(execution.work_id, execution.invocation_id)
+    agent = SimpleNamespace(case_pool=cases, event_trees=trees, fact_graph=ledger.graph)
+    ledger.work_id, ledger.invocation_id = execution.work_id, execution.invocation_id
+    ledger.finish_work = execution.validate
+    tool_map = {tool.name: tool for tool in build_work_tools(agent, execution, _QueryService())}
+    runtime = SubagentProgramRuntime(tool_map, ledger, execution.subagent, observer=observer)
+    return runtime, agent, execution
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["solo", "event"])
+async def test_production_work_defers_child_without_id_then_publishes_after_root(role: str) -> None:
+    runtime, agent, execution = _real_work_runtime(role=role)
+    tool = build_event_submission_tool(runtime)
+    child = {"id": "enter", "root_id": "opening", "type": "main", "description": "阿青走进院门",
+             "evidence": {"paragraph_id": 2}}
+    deferred = json.loads(await tool.ainvoke({"events": [child]}))
+    assert deferred["status"] == "applied", deferred
+    assert deferred["items"][0]["status"] == "waiting"
+    assert execution.ledger.pending_child_events
+    assert not agent.event_trees.nodes
+    assert not execution.event_reads
+    with pytest.raises(ValueError, match="metrics=None" if role == "solo" else "挂起节点"):
+        execution.validate()
+    written = json.loads(await tool.ainvoke({"events": [_root()]}))
+    assert written["status"] == "applied", written
+    assert len(agent.event_trees.nodes) == 2
+    assert not execution.ledger.pending_child_events
+    retry = json.loads(await tool.ainvoke({"events": [child]}))
+    assert retry["items"][0]["status"] == "written", retry
+    assert len(agent.event_trees.nodes) == 2
+    assert not execution.ledger.errors
+
+
+@pytest.mark.asyncio
+async def test_failed_root_read_blocks_child_before_any_production_write() -> None:
+    runtime, agent, execution = _real_work_runtime()
+    root = _root(paragraph_id=999)
+    child = {"id": "enter", "root_id": "opening", "type": "main", "description": "进入院门",
+             "evidence": {"paragraph_id": 2}, "participants": _root()["participants"]}
+    body = json.loads(await build_event_submission_tool(runtime).ainvoke({"events": [child, root]}))
+    assert [item["status"] for item in body["items"]] == ["failed", "failed"], body
+    assert body["items"][0]["failed"][0]["code"] == "dependency_failed"
+    assert not execution.ledger.pending_child_events
+    assert not execution.ledger.written_entities
+    assert not agent.event_trees.nodes
+
+
+@pytest.mark.asyncio
+async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(monkeypatch) -> None:
+    runtime, agent, execution = _real_work_runtime()
+    trees = agent.event_trees
+    trees.begin("foreign", "saved")
+    nodes = [BoundEvent(
+        node_id=f"node-{index:04d}", tree_id=f"tree-{index % 3}", parent_node_id=None, cause_role="root",
+        description=f"院门事件{index}" + "正文" * 1500, evidence_paragraph_id=201,
+    ) for index in range(247)]
+    trees.sync(("foreign", "saved"), 12, nodes)
+    trees.confirm("foreign", "saved")
+    calls = []
+    original_read = trees.read
+
+    def read(identifier: str) -> Any:
+        calls.append(identifier)
+        return original_read(identifier)
+
+    monkeypatch.setattr(trees, "read", read)
+    tool = runtime.tools["search_events"]
+    first_text = await tool.ainvoke({"query": "院门", "limit": 20})
+    first = json.loads(first_text)
+    assert len(first_text) <= SHARED_SEARCH_MAX_CHARS
+    assert first["total"] == 247
+    assert 0 < len(first["events"]) <= 20
+    assert len(calls) == 20
+    assert set(execution.event_reads) == {item["node_id"] for item in first["events"]}
+    assert "node-0246" not in execution.event_reads
+    next_page = json.loads(await tool.ainvoke({"query": "院门", "limit": 20, "offset": first["next_offset"]}))
+    assert first["events"][-1]["node_id"] < next_page["events"][0]["node_id"]
+    filtered = json.loads(await tool.ainvoke({"chapter_id": 12, "tree_id": "tree-2"}))
+    assert all(item["tree_id"] == "tree-2" for item in filtered["events"])
+    assert json.loads(await tool.ainvoke({"chapter_id": 99}))["total"] == 0
+    detail = json.loads(await runtime.tools["read_event"].ainvoke({"node_id": "node-0246"}))
+    assert len(detail["content"]["description"]) > 3000
+    assert execution.event_reads["node-0246"] == detail
+    echo = json.loads(await runtime.execute('page = search_events(query="院门", limit=20)'))
+    echoed_page = json.loads(echo["reads"][0]["result"])
+    assert echoed_page == first
+    assert len(echo["reads"][0]["result"]) <= SHARED_SEARCH_MAX_CHARS
+
+
+@pytest.mark.asyncio
+async def test_graph_search_filters_relations_pages_and_reads_attributes_on_demand() -> None:
+    runtime, agent, execution = _real_work_runtime()
+    graph = agent.fact_graph
+    graph.register_entities([EntityInput(name=f"角色{index:02d}", entity_type="character") for index in range(50)])
+    graph.register_entities([EntityInput(name="院门", entity_type="location")])
+    graph.entity_attributes["角色00"] = {"description": "原文" * 5000}
+    graph.active_relations.update((f"角色{index:02d}", f"角色{index + 1:02d}", "认识") for index in range(49))
+    tool = runtime.tools["search_graph"]
+    page_text = await tool.ainvoke({"query": "角色00", "limit": 20})
+    page = json.loads(page_text)
+    assert len(page_text) <= SHARED_SEARCH_MAX_CHARS
+    assert page["total_entities"] == 1
+    assert page["total_relations"] == 1
+    assert "attributes" not in page["entities"][0]
+    assert execution.ledger.shared_entity_ids == {graph.entity_id("角色00"), graph.entity_id("角色01")}
+    assert graph.entity_id("角色49") not in execution.ledger.shared_entity_ids
+    first = json.loads(await tool.ainvoke({"limit": 20}))
+    assert 0 < len(first["entities"]) <= 20
+    assert 0 < len(first["relations"]) <= 20
+    assert first["next_offset"] is not None and first["next_relation_offset"] is not None
+    second = json.loads(await tool.ainvoke({
+        "limit": 20, "offset": first["next_offset"], "relation_offset": first["next_relation_offset"],
+    }))
+    assert first["entities"][-1]["id"] not in {item["id"] for item in second["entities"]}
+    assert first["relations"][-1] not in second["relations"]
+    locations = json.loads(await tool.ainvoke({"entity_type": "location"}))
+    assert [item["name"] for item in locations["entities"]] == ["院门"]
+    assert not locations["relations"]
+    detail = json.loads(await runtime.tools["read_entity"].ainvoke({"entity_id": graph.entity_id("角色00")}))
+    assert detail["attributes"]["description"] == "原文" * 5000
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("role", [None, "event"])
 async def test_structured_events_resolve_dependencies_and_anchor_real_paragraphs(role: str | None) -> None:
@@ -114,6 +257,7 @@ async def test_bad_item_does_not_reject_batch_and_only_failed_items_need_resubmi
     assert [item["status"] for item in body["items"]] == ["failed", "failed", "written"]
     assert "events[0].participants.0.emotion" in body["items"][0]["failed"][0]["field"]
     assert body["items"][0]["failed"][0]["actual"] == "愤怒"
+    assert body["failed"][0]["actual"] == "愤怒"
     dependency = body["items"][1]["failed"][0]
     assert dependency["code"] == "dependency_failed"
     assert dependency["actual"] == "bad"
@@ -312,17 +456,48 @@ async def test_invalid_quote_and_duplicate_ids_are_rejected_without_losing_good_
 async def test_structured_submission_keeps_program_operation_limit_and_prior_success(monkeypatch) -> None:
     ledger = _ledger()
     tool = build_event_submission_tool(_runtime(ledger))
-    monkeypatch.setattr(program_module, "_PROGRAM_MAX_OPS", 2)
+    monkeypatch.setattr(program_contract, "PROGRAM_MAX_OPS", 2)
     body = json.loads(await tool.ainvoke({"events": [_root(), _root("later")]}))
     assert body["error"]["type"] == "too_many_ops"
     assert set(ledger.written_entities) == {"阿青"}
     assert not ledger.bound_payloads.get("events")
     assert [item["id"] for item in body["items"]] == ["opening", "later"]
     assert all(item["status"] == "waiting" for item in body["items"])
-    monkeypatch.setattr(program_module, "_PROGRAM_MAX_OPS", 300)
+    monkeypatch.setattr(program_contract, "PROGRAM_MAX_OPS", 300)
     body = json.loads(await tool.ainvoke({"events": [_root()]}))
     assert body["status"] == "applied", body
     assert len(ledger.bound_payloads["events"]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", [None, "event"])
+async def test_organization_receipts_name_actual_fields_and_repair_keeps_entity_type(role: str | None) -> None:
+    ledger = _ledger(["青云宗弟子来到院门。"])
+    tool = build_event_submission_tool(_runtime(ledger, role))
+    group = _root("group")
+    group["description"] = "青云宗弟子来到院门"
+    group["participants"] = [{
+        "name": "青云宗", "entity_type": "organization", "role": "主体", "action": "来到院门", "emotion": 0,
+    }]
+    misuse = json.loads(await tool.ainvoke({"events": [group]}))
+    failure = misuse["items"][0]["failed"][0]
+    assert failure["record"] == "submission/group"
+    assert failure["actual"]["entity_type"] == "organization"
+    assert failure["actual"]["action"] == "来到院门"
+    assert "删除这些字段" in failure["expected"]
+    assert "青云宗" in failure["expected"]
+    group["participants"] = [{"name": "青云宗", "entity_type": "organization", "role": "地点"}]
+    wrong_role = json.loads(await tool.ainvoke({"events": [group]}))
+    failure = wrong_role["items"][0]["failed"][0]
+    assert "entity_type=organization" in failure["expected"]
+    assert "实际 role=地点" in failure["expected"]
+    assert not ledger.written_entities
+    group["participants"][0]["role"] = "主体"
+    fixed = json.loads(await tool.ainvoke({"events": [group]}))
+    assert fixed["status"] == "applied", fixed
+    assert ledger.written_entities["青云宗"].entity_type == "organization"
+    assert len(ledger.bound_payloads["events"][0].participants) == 1
+    assert not ledger.bound_payloads.get("character_observations")
 
 
 class _RecordingObserver:

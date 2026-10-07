@@ -6,9 +6,10 @@
 
 # 创建时间：2026-10-02　创建者：Trae
 # 任务：program.py 大文件拆分——检索投影层迁出至 search_projection.py，API 目录渲染 +
-# 合同文案迁出至 catalog.py，两个 runtime 迁出至 program_runtime.py；本模块保留限额常量/
-# _ProgramFault/build_program_tool/render_list_signature 并对迁出符号 re-export
-# （既有导入方零改动）。
+# 合同文案迁出至 catalog.py，两个 runtime 迁出至 program_runtime.py；本模块保留
+# build_program_tool/render_list_signature 并对迁出符号 re-export（既有导入方零改动）。
+# 2026-10-07 体积/步数上限与 ProgramFault 再下沉至 src/event_trees/program_contract.py：
+# 事件树与标注 agent 共用同一份护栏，agent 不必被写入目标反向 import。
 # 说明：纯结构搬移，不改任何运行逻辑与签名；program_runtime 仍经 tool_batch._execute_call
 # 复用生产单条事务边界。
 
@@ -17,17 +18,6 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.tools import StructuredTool
-
-from src.event_trees.program_contract import (
-    PRE_RUN_FAULT_CODES as _PRE_RUN_FAULT_CODES,
-    PROGRAM_DEADLINE_S as _PROGRAM_DEADLINE_S,
-    PROGRAM_MAX_CODE_CHARS as _PROGRAM_MAX_CODE_CHARS,
-    PROGRAM_MAX_LOOP_ITEMS as _PROGRAM_MAX_LOOP_ITEMS,
-    PROGRAM_MAX_OPS as _PROGRAM_MAX_OPS,
-    PROGRAM_MAX_STEPS as _PROGRAM_MAX_STEPS,
-    ProgramFault as _ProgramFault,
-)
-
 
 # 程序面工具名（唯一对外的绑定面）：写者只见这一条工具
 PROGRAM_TOOL_NAME = "execute_code"
@@ -50,6 +40,8 @@ _READ_TOOL_NAMES = frozenset(
         "search_graph",
         "search_events",
         "search_cases",
+        "read_event",
+        "read_entity",
         "search_text",
         "read_text",
         "read_chapter_text",

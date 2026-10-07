@@ -335,8 +335,8 @@ async def test_program_can_read_shared_nodes_claim_case_and_save_cross_chapter_l
             else:
                 self.code = (
                     'cases = search_cases()\npromise_case(case_id=cases[0]["case_id"])\n'
-                    'nodes = search_events(query="拾得")\n'
-                    'read_text(paragraph_id=nodes[0]["content"]["evidence_paragraph_id"])\n'
+                    'page = search_events(query="拾得")\nnodes = page["events"]\n'
+                    'read_text(paragraph_id=nodes[0]["evidence_paragraph_id"])\n'
                     'event(el="t1", isroot=True, description="读懂旧信", evidence=1, '
                     'type="main", parent_ref=nodes[0]["node_id"])\n'
                     'metric(summary="读信", emotional_valence=0, narrative_function="铺垫")\n'

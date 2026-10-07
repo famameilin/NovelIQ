@@ -27,10 +27,10 @@ import json
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.fact_graph.schema import ChapterParagraphInfo
 from src.agents.annotation.tool_batch import _invoke_tool
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
+from src.fact_graph.schema import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 

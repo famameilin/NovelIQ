@@ -19,11 +19,16 @@ from uuid import NAMESPACE_DNS, uuid5
 import pytest
 from langchain_core.messages import AIMessage
 
-from src.fact_graph.schema import ChapterParagraphInfo
-from src.event_trees.models import BoundChapterAnnotation, BoundDialogue, BoundParagraphLabel, ChapterMetricsInput
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.agents.annotation.validation import validate_bound_annotation
+from src.event_trees.models import BoundChapterAnnotation
 from src.fact_graph.graph import FactGraph
+from src.fact_graph.schema import (
+    BoundDialogue,
+    BoundParagraphLabel,
+    ChapterMetricsInput,
+    ChapterParagraphInfo,
+)
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 

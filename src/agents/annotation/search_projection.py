@@ -17,6 +17,9 @@ from typing import Any
 
 from .errors import AnnotationStageRejection
 
+# 全书检索的预览与程序回显使用同一预算，正文详情保留按需读取入口
+SHARED_SEARCH_MAX_CHARS = 6000
+
 
 @dataclass(frozen=True)
 class _SearchProjection:
@@ -136,6 +139,7 @@ def _failed_view(op: dict[str, Any]) -> dict[str, Any]:
     for key, source in (
         ("record", "record"),
         ("field", "field"),
+        ("actual", "actual"),
         ("code", "error_code"),
         ("expected", "expected"),
         ("message", "message"),

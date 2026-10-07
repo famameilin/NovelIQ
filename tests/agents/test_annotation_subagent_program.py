@@ -29,7 +29,6 @@ from typing import Any
 import pytest
 
 from src.agents.annotation.errors import AnnotationInvariantError
-from src.fact_graph.schema import ChapterParagraphInfo
 from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.agents.annotation.subagent_program import (
     SubagentProgramRuntime,
@@ -38,6 +37,7 @@ from src.agents.annotation.subagent_program import (
 )
 from src.agents.annotation.tools import AnnotationToolLedger
 from src.fact_graph.graph import FactGraph
+from src.fact_graph.schema import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
 
 # 三段正文：¶1/¶2/¶3 各有一个引号对话候选，整章共 3 条候选（对话判定候选号 1..3）；

@@ -7,10 +7,10 @@ from typing import Any
 
 import pytest
 
-from src.agents.annotation import program as program_module
-from src.fact_graph.schema import ChapterParagraphInfo
 from src.agents.annotation.tools import AnnotationToolLedger
+from src.event_trees import program_contract
 from src.fact_graph.graph import FactGraph
+from src.fact_graph.schema import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 
@@ -100,7 +100,7 @@ async def test_syntax_size_and_empty_programs_are_rejected() -> None:
     for code, error_code in [
         ("   ", "empty_program"),
         ("write_entity(el=", "syntax_error"),
-        ("value = " + "0" * (program_module._PROGRAM_MAX_CODE_CHARS + 1), "program_too_large"),
+        ("value = " + "0" * (program_contract.PROGRAM_MAX_CODE_CHARS + 1), "program_too_large"),
     ]:
         receipt = await _run(runtime, code)
         assert receipt["status"] == "rejected"
@@ -169,10 +169,10 @@ finish()
 async def test_limits_keep_applied_ops_and_allow_next_program(monkeypatch: pytest.MonkeyPatch) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
-    monkeypatch.setattr(program_module, "_PROGRAM_MAX_LOOP_ITEMS", 2)
+    monkeypatch.setattr(program_contract, "PROGRAM_MAX_LOOP_ITEMS", 2)
     loop = await _run(runtime, "for item in [1, 2, 3]:\n    pass")
     assert loop["error"]["type"] == "loop_too_long" and loop["applied"] == 0
-    monkeypatch.setattr(program_module, "_PROGRAM_MAX_OPS", 2)
+    monkeypatch.setattr(program_contract, "PROGRAM_MAX_OPS", 2)
     ops = await _run(runtime, """
 write_entity(el="a1", name="顾霜", entity_type="character")
 write_entity(el="a2", name="贺府", entity_type="organization")
@@ -183,14 +183,14 @@ write_relation(from_entity="a1", to_entity="a2", relation_type="隶属")
     assert set(ledger.written_entities) == {"顾霜", "贺府"}
     retry = await _run(runtime, 'write_relation(from_entity="a1", to_entity="a2", relation_type="隶属")')
     assert retry["applied"] == 1
-    monkeypatch.setattr(program_module, "_PROGRAM_MAX_STEPS", 3)
+    monkeypatch.setattr(program_contract, "PROGRAM_MAX_STEPS", 3)
     steps = await _run(runtime, "for item in [1, 2]:\n    pass")
     assert steps["error"]["type"] == "too_many_steps"
 
 
 @pytest.mark.asyncio
 async def test_deadline_is_structured(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(program_module, "_PROGRAM_DEADLINE_S", -1.0)
+    monkeypatch.setattr(program_contract, "PROGRAM_DEADLINE_S", -1.0)
     receipt = await _run(_runtime(_ledger()), "value = 1")
     assert receipt["error"]["type"] == "deadline_exceeded"
     assert receipt["applied"] == 0

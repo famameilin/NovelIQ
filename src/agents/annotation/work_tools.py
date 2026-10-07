@@ -3,14 +3,36 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from langchain_core.tools import tool
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 
 from src.event_trees.models import ParticipantArg
+from src.fact_graph.schema import EntityType
+
+from .search_projection import SHARED_SEARCH_MAX_CHARS
 from .tool_factories import build_annotation_tools
 from .tools import _forbid_undeclared_args
+
+SearchLimit = Annotated[int, Field(ge=1, le=20)]
+SearchOffset = Annotated[int, Field(ge=0)]
+
+
+def _search_page(values: list[Any], *, offset: int, limit: int, budget: int) -> tuple[list[Any], int | None]:
+    """按整项预算分页，保留返回项的完整引用，下一页从实际未返回的位置继续"""
+    page: list[Any] = []
+    size = 2
+    for value in values[offset:offset + limit]:
+        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        if size + len(encoded) + 1 > budget:
+            break
+        page.append(value)
+        size += len(encoded) + 1
+    next_offset = offset + len(page)
+    if not page and offset < len(values):
+        raise ValueError("检索单项超过预览预算，请按 ID 读取详情")
+    return page, next_offset if next_offset < len(values) else None
 
 
 def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any]:
@@ -42,32 +64,89 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         return json.dumps(agent.case_pool.search(), ensure_ascii=False)
 
     @tool
-    def search_events(query: str = "") -> str:
-        """读取全书事件节点，node_id 可用于 event 的 parent_ref/node_ref，原文须另行读取"""
-        values = agent.event_trees.search(query)
-        for value in values:
+    def search_events(
+        query: str = "", chapter_id: int | None = None, tree_id: str | None = None,
+        limit: SearchLimit = 5, offset: SearchOffset = 0,
+    ) -> str:
+        """分页预览事件，可筛选章/树；events 为本页，next_offset 为续页位置，read_event 读取详情"""
+        identifiers = agent.event_trees.search_ids(query, chapter_id=chapter_id, tree_id=tree_id)
+        reads = [agent.event_trees.read(identifier) for identifier in identifiers[offset:offset + limit]]
+        previews = [{
+            "node_id": value["node_id"], "chapter_id": value["chapter_id"], "saved": value["saved"],
+            "tree_id": value["content"]["tree_id"], "parent_node_id": value["content"]["parent_node_id"],
+            "evidence_paragraph_id": value["content"]["evidence_paragraph_id"],
+            "description": value["content"]["description"][:160],
+        } for value in reads]
+        page, _ = _search_page(previews, offset=0, limit=limit, budget=SHARED_SEARCH_MAX_CHARS - 600)
+        # 只授权实际返回页，完整快照留在服务端用于生产者与内容新鲜度校验
+        for value in reads[:len(page)]:
             execution.event_reads[value["node_id"]] = value
-        execution.case_reads.extend(values)
-        return json.dumps(values, ensure_ascii=False)
+        execution.case_reads.extend(page)
+        next_offset = offset + len(page)
+        return json.dumps({
+            "events": page, "total": len(identifiers),
+            "next_offset": next_offset if next_offset < len(identifiers) else None,
+        }, ensure_ascii=False, separators=(",", ":"))
 
     @tool
-    def search_graph(query: str = "") -> str:
-        """读取全书事实图已登记实体与关系，不授权未读过的原文"""
+    def read_event(node_id: str) -> str:
+        """按实际节点 ID 读取完整事件详情；原文证据仍须 read_text/read_chapter_text 授权"""
+        value = agent.event_trees.read(node_id)
+        execution.event_reads[node_id] = value
+        execution.case_reads.append(value)
+        return json.dumps(value, ensure_ascii=False)
+
+    @tool
+    def search_graph(
+        query: str = "", entity_type: EntityType | None = None,
+        limit: SearchLimit = 5, offset: SearchOffset = 0, relation_offset: SearchOffset = 0,
+    ) -> str:
+        """分页预览实体和命中端点的关系；两组 next_offset 独立续页，read_entity 读取完整属性"""
+        matching = {
+            key for key, name in agent.fact_graph.entity_names.items()
+            if query.casefold() in name.casefold()
+            and (entity_type is None or str(agent.fact_graph.entity_types[key]) == entity_type)
+        }
         values = [
             {
                 "id": agent.fact_graph.entity_id(name),
-                "name": name,
+                "name": name[:160],
                 "entity_type": agent.fact_graph.entity_types[key],
-                "attributes": agent.fact_graph.entity_attributes.get(key, {}),
             }
             for key, name in sorted(agent.fact_graph.entity_names.items())
-            if query.casefold() in name.casefold()
+            if key in matching
         ]
-        ledger.shared_entity_ids.update(value["id"] for value in values)
-        execution.case_reads.extend(values)
-        return json.dumps(
-            {"entities": values, "relations": sorted(agent.fact_graph.active_relations)}, ensure_ascii=False
+        relations = [{
+            "source_id": agent.fact_graph.entity_id(left), "target_id": agent.fact_graph.entity_id(right),
+            "relation_type": kind,
+        } for left, right, kind in sorted(agent.fact_graph.active_relations) if left in matching or right in matching]
+        entities_page, next_offset = _search_page(values, offset=offset, limit=limit, budget=2600)
+        relations_page, next_relation_offset = _search_page(
+            relations, offset=relation_offset, limit=limit, budget=2600,
         )
+        ledger.shared_entity_ids.update(value["id"] for value in entities_page)
+        ledger.shared_entity_ids.update(
+            value[field] for value in relations_page for field in ("source_id", "target_id")
+        )
+        execution.case_reads.extend([*entities_page, *relations_page])
+        return json.dumps({
+            "entities": entities_page, "relations": relations_page, "total_entities": len(values),
+            "total_relations": len(relations), "next_offset": next_offset,
+            "next_relation_offset": next_relation_offset,
+        }, ensure_ascii=False, separators=(",", ":"))
+
+    @tool
+    def read_entity(entity_id: str) -> str:
+        """按实体 UUID 读取完整名称、类型和属性，不授权未读过的原文"""
+        name = agent.fact_graph.resolve_entity_id(entity_id, label="entity_id")
+        key = next(key for key, identifier in agent.fact_graph.entity_ids.items() if identifier == entity_id)
+        value = {
+            "id": entity_id, "name": name, "entity_type": agent.fact_graph.entity_types[key],
+            "attributes": agent.fact_graph.entity_attributes.get(key, {}),
+        }
+        ledger.shared_entity_ids.add(entity_id)
+        execution.case_reads.append(value)
+        return json.dumps(value, ensure_ascii=False)
 
     @tool
     def write_event(
@@ -109,6 +188,10 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             )
             agent.event_trees.sync(author, ledger.current_chapter_id, ledger.bound_payloads.get("events", []))
             content = ledger.event_content(el=el, isroot=isroot)
+            if content.get("deferred"):
+                if parent_ref is not None:
+                    raise ValueError(f"event/{el} 尚未建根，不能连接 parent_ref={parent_ref}")
+                return json.dumps({"status": "deferred", "record": el, "content": content}, ensure_ascii=False)
             node_id = content["id"]
             execution.event_reads[node_id] = agent.event_trees.read(node_id)
         connection_id = None
@@ -229,7 +312,10 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             ensure_ascii=False,
         )
 
-    tools.extend([write_event, write_link, push_case, promise_case, search_cases, search_events, search_graph, finish])
+    tools.extend([
+        write_event, write_link, push_case, promise_case, search_cases, search_events, search_graph,
+        read_event, read_entity, finish,
+    ])
     for candidate in tools:
         _forbid_undeclared_args(candidate)
     return tools

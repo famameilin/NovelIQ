@@ -79,7 +79,7 @@ def test_catalog_is_current_formal_tool_surface() -> None:
     assert {tool.name for tool in tools} == {
         "search_text", "write_entity", "write_metrics", "write_event", "write_relation", "write_dialogue",
         "push_case", "promise_case", "search_cases", "search_events", "search_graph", "finish",
-        "read_text", "read_chapter_text", "anchor_record", "write_link",
+        "read_text", "read_chapter_text", "anchor_record", "write_link", "read_event", "read_entity",
     }
     assert program_tool.name == PROGRAM_TOOL_NAME
     for name in ("entity", "relation", "event", "participants", "dialogue", "label", "metric", "pending"):
