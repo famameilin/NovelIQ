@@ -13,14 +13,14 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.agents.diagnosis.schema import CloudAnalysis
+from src.agents.diagnosis.schema import AgentAnalysis
 from src.storage.repositories import RunRepository
 from src.workflows.diagnose import run_diagnose
 from tests.support.analysis_factories import insert_test_novel
 
 
-def _fake_analysis(novel_id: str) -> CloudAnalysis:
-    return CloudAnalysis(
+def _fake_analysis(novel_id: str) -> AgentAnalysis:
+    return AgentAnalysis(
         novel_id=novel_id,
         foreshadow_expectation=0.1,
         arc_scores={"角色0": 8.5, "角色1": 7.0},
@@ -63,5 +63,5 @@ class TestCli:
         assert analysis.genre_labels == ["通用"]
         assert analysis.style_labels == ["严肃"]
         # 诊断 agent 完整通过注解完成度闸门并被派发；落库断言见
-        # tests/workflows/test_cloud_diagnose_routes.py 的真 agent 路径
+        # tests/workflows/test_agent_diagnose_routes.py 的真 agent 路径
         fake.assert_awaited_once()

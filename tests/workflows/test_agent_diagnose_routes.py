@@ -19,7 +19,7 @@ from langchain_core.messages import AIMessage
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.agents.diagnosis.schema import CloudAnalysis
+from src.agents.diagnosis.schema import AgentAnalysis
 from src.storage.repositories import (
     ChapterRepository,
     DiagnosisRepository,
@@ -61,8 +61,8 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
         )
 
 
-def _fake_analysis(novel_id: str) -> CloudAnalysis:
-    return CloudAnalysis(
+def _fake_analysis(novel_id: str) -> AgentAnalysis:
+    return AgentAnalysis(
         novel_id=novel_id,
         foreshadow_expectation=0.1,
         arc_scores={"角色0": 8.5, "角色1": 7.0},
@@ -228,7 +228,7 @@ class TestDiagnosisRoutes:
         rows = list(
             self.db_session.execute(
                 select(AnalysisOutput).where(
-                    AnalysisOutput.run_id == self.run_id, AnalysisOutput.kind == "cloud_analysis"
+                    AnalysisOutput.run_id == self.run_id, AnalysisOutput.kind == "agent_analysis"
                 )
             ).scalars()
         )
@@ -247,7 +247,7 @@ class TestDiagnosisRoutes:
             )
 
         stats_repo = StatsRepository(self.db_session)
-        fetched = stats_repo.fetch_cloud_analysis(self.run_id)
+        fetched = stats_repo.fetch_agent_analysis(self.run_id)
         assert fetched is not None
         assert fetched["novel_id"] == self.novel_id
         assert fetched["genre_labels"] == ["通用"]
