@@ -62,7 +62,7 @@ async def run_topic_model(
     → 完整分布 paragraph_topics；同 run 重跑先清本阶段旧行，不允许新旧结果混合。
     取消在段落推断的批边界生效：LDA 训练与推断是库内调用，不能中途中断
     """
-    from src.workflows.cancellation import check_cancelled
+    from src.utils.cancellation import check_cancelled
 
     _num_topics = num_topics if num_topics is not None else settings.topic_model.num_topics
     _passes = passes if passes is not None else settings.topic_model.passes

@@ -4,7 +4,7 @@
 说明: 负责执行分析的各个阶段（预处理、标注、聚合、主题建模、诊断）
 
 各阶段都可选接收 is_cancelled：长阶段据此在处理单元边界响应取消，
-不必等整个阶段跑完（见 src/workflows/cancellation.py）
+不必等整个阶段跑完（见 src/utils/cancellation.py）
 """
 
 from __future__ import annotations

@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from src.workflows.cancellation import check_cancelled, run_cancellable
+from src.utils.cancellation import check_cancelled, run_cancellable
 
 
 def test_check_cancelled_allows_absent_and_false_signal() -> None:

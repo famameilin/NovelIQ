@@ -49,7 +49,7 @@ async def run_linguistic(
     batch_size 控制每批处理的段落数并限制阶段内存峰值
     取消在每个段落批边界生效：LTP 批推理是线程内重活，不能安全硬中断
     """
-    from src.workflows.cancellation import check_cancelled
+    from src.utils.cancellation import check_cancelled
 
     start_time = time.time()
     paragraph_repo = ParagraphRepository(session)

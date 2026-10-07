@@ -180,7 +180,7 @@ async def _run_diagnosis_agent(
     try:
         # 取消要立即停：诊断取证是逐回合 LLM 调用，等整轮跑完再响应会拖住取消，
         # 故与标注 agent 同语义直接中断这次的图调用（取消由上层 handle_cancel 收口）
-        from src.workflows.cancellation import run_cancellable
+        from src.utils.cancellation import run_cancellable
 
         result_state = cast(
             dict[str, Any], await run_cancellable(graph.ainvoke(initial_state), is_cancelled)

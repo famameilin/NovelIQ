@@ -159,7 +159,7 @@ async def run_aggregate(
 
     Args: run_id / session / emitter(async StreamEvent->None)  Returns: (总章数, 全局统计条数, 保留位0)
     """
-    from src.workflows.cancellation import check_cancelled
+    from src.utils.cancellation import check_cancelled
 
     start_time = time.time()
     # 2026-10-03 改短事务版边界检查：编排器 session 是长活事务，在其上取 FOR SHARE

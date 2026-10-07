@@ -46,7 +46,7 @@ async def run_preprocess(
     is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, int, float]:
     """执行预处理流程。Args: source_path/run_id/session/metadata_path  Returns: (总块数, 总字符数, 耗时s)"""
-    from src.workflows.cancellation import check_cancelled
+    from src.utils.cancellation import check_cancelled
     from src.workflows.preprocess_helpers import _load_all_lexicons_for_preprocess
 
     start_time = time.time()
@@ -339,7 +339,7 @@ async def _generate_paragraph_embedding_rows(
     """
     from src.storage.db import get_session_factory
     from src.storage.repositories.paragraph_repository import ParagraphRepository
-    from src.workflows.cancellation import check_cancelled
+    from src.utils.cancellation import check_cancelled
 
     with get_session_factory()() as session:
         paragraph_refs: list[tuple[int, int, int, int, int, int, int, str]] = []

@@ -64,7 +64,7 @@ async def run_diagnose(
         AgentAnalysis: 诊断分析结果
     """
     from src.agents import run_diagnosis_agent
-    from src.workflows.cancellation import check_cancelled
+    from src.utils.cancellation import check_cancelled
 
     check_cancelled(is_cancelled)
 
