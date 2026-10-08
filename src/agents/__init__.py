@@ -8,9 +8,8 @@ from importlib import import_module
 from typing import Any
 
 _ANNOTATION_EXPORTS = {
-    "AgentRunResult",
     "BoundChapterAnnotation",
-    "run_annotation_agent",
+    "AnnotationAgent",
 }
 _DIAGNOSIS_EXPORTS = {
     "DiagnosisAgentRunError",
@@ -18,10 +17,9 @@ _DIAGNOSIS_EXPORTS = {
 }
 
 __all__ = [
-    "AgentRunResult",
     "BoundChapterAnnotation",
     "DiagnosisAgentRunError",
-    "run_annotation_agent",
+    "AnnotationAgent",
     "run_diagnosis_agent",
 ]
 

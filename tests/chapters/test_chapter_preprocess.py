@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.chapters.preprocess import preprocess_text
+from src.text_processing.chapters.preprocess import preprocess_text
 
 
 def test_strips_bom() -> None:

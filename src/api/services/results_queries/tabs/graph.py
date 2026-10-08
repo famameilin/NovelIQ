@@ -9,8 +9,11 @@ from sqlalchemy.orm import Session
 from src.api.models.graph import GraphSnapshotResponse
 from src.api.services.results_queries.characters import _fetch_characters
 from src.api.services.results_queries.diagnosis import _fetch_diagnosis, _has_diagnosis_result
-from src.api.services.results_queries.graph import _fetch_graph_changes_page, _fetch_graph_snapshot
-from src.api.services.results_queries.graph_metrics import compute_graph_metrics
+from src.api.services.results_queries.graph import (
+    _fetch_graph_changes_page,
+    _fetch_graph_snapshot,
+    compute_graph_metrics,
+)
 from src.storage.repositories import AnnotationRepository, StatsRepository
 
 

@@ -5,18 +5,20 @@ from collections.abc import Collection
 
 import networkx as nx
 
-from src.config import settings
-from src.config.constants import PROPP_FUNCTIONS
-from src.relation_network_metrics import summarize_relation_network
+from src.fact_graph.relation_network import summarize_relation_network
 
-GREIMAS_FUNCTIONS = {
+# 指标分类保留七项旧口径，与标注写入的动作角色值域各自有明确用途
+PROPP_FUNCTIONS: set[str] = {
     "主体",
     "客体",
     "发送者",
     "接收者",
     "帮助者",
     "反对者",
+    "其他",
 }
+
+GREIMAS_FUNCTIONS = PROPP_FUNCTIONS - {"其他"}
 
 
 # 保留无向图构建，供中心性和聚类系数等关系指标复用
@@ -57,72 +59,6 @@ def compute_relation_network_density(
         node_names=node_names,
     )
     return density
-
-
-def compute_protagonist_betweenness(
-    relations: list[tuple[str, str]],
-    protagonist_name: str,
-    graph: nx.Graph | None = None,
-) -> float:
-    if not relations or not protagonist_name:
-        return 0.0
-
-    G = graph or build_character_graph(relations)
-
-    if protagonist_name not in G:
-        return 0.0
-
-    if G.number_of_nodes() < 3:
-        return 0.0
-
-    betweenness = nx.betweenness_centrality(G, normalized=True)
-    return betweenness.get(protagonist_name, 0.0)
-
-
-def compute_character_closeness_centrality(
-    relations: list[tuple[str, str]],
-    graph: nx.Graph | None = None,
-) -> dict[str, float]:
-    if not relations:
-        return {}
-
-    G = graph or build_character_graph(relations)
-    centrality = nx.closeness_centrality(G)
-    return dict(centrality)
-
-
-def compute_character_eigenvector_centrality(
-    relations: list[tuple[str, str]],
-    max_iter: int | None = None,
-    graph: nx.Graph | None = None,
-) -> dict[str, float]:
-    if max_iter is None:
-        max_iter = settings.metrics.character_max_iter
-    if not relations:
-        return {}
-
-    G = graph or build_character_graph(relations)
-
-    if G.number_of_nodes() < 2:
-        return dict.fromkeys(G.nodes(), 0.0)
-
-    try:
-        centrality = nx.eigenvector_centrality(G, max_iter=max_iter)
-        return dict(centrality)
-    except nx.NetworkXException:
-        return dict.fromkeys(G.nodes(), 0.0)
-
-
-def compute_clustering_coefficient(
-    relations: list[tuple[str, str]],
-    graph: nx.Graph | None = None,
-) -> dict[str, float]:
-    if not relations:
-        return {}
-
-    G = graph or build_character_graph(relations)
-    clustering = nx.clustering(G)
-    return dict(clustering)
 
 
 def compute_average_clustering(

@@ -12,7 +12,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.linguistic import analyze_paragraph
 from src.linguistic.ltp_client import LtpPipelineOutput
-from src.utils.text_utils import split_sentences
+from src.text_processing.text_utils import split_sentences
 
 
 def _output_for(sentences: list[str]) -> LtpPipelineOutput:
@@ -28,7 +28,7 @@ def _output_for(sentences: list[str]) -> LtpPipelineOutput:
         heads = [0] + [1] * (len(words) - 1) if len(words) > 1 else [0]
         dep.append({"head": heads, "label": ["HED"] + ["ATT"] * (len(words) - 1)})
         ner.append([])
-    return LtpPipelineOutput(cws=cws, pos=pos, ner=ner, dep=dep)
+    return LtpPipelineOutput(cws=cws, pos=pos, ner=ner, dep=dep, sdp=[])
 
 
 class TestAnalyzeParagraph(unittest.TestCase):
@@ -70,6 +70,7 @@ class TestAnalyzeParagraph(unittest.TestCase):
             pos=[["v", "n", "n"]],
             ner=[[]],
             dep=[{"head": [0, 1, 2], "label": ["HED", "ATT", "ATT"]}],
+            sdp=[],
         )
         result = analyze_paragraph("abc", output)
         self.assertEqual(result.dependency_node_count, 3)
@@ -82,10 +83,7 @@ class TestAnalyzeParagraph(unittest.TestCase):
     def test_dependency_cycle_defensive_depth(self) -> None:
         # 环：1→2→1，防御按深度 1 处理
         output = LtpPipelineOutput(
-            cws=[["a", "b"]],
-            pos=[["v", "n"]],
-            ner=[[]],
-            dep=[{"head": [2, 1], "label": ["ATT", "ATT"]}],
+            cws=[["a", "b"]], pos=[["v", "n"]], ner=[[]], dep=[{"head": [2, 1], "label": ["ATT", "ATT"]}], sdp=[]
         )
         result = analyze_paragraph("ab", output)
         self.assertEqual(result.dependency_node_count, 2)
@@ -98,6 +96,7 @@ class TestAnalyzeParagraph(unittest.TestCase):
             pos=[["r", "v", "nh", "v", "v", "n", "wp"]],
             ner=[[("Nh", "汤姆", 2, 2)]],
             dep=[{"head": [2, 0, 2, 5, 2, 5, 2], "label": ["SBV", "HED", "DBL", "ADV", "VOB", "VOB", "WP"]}],
+            sdp=[],
         )
         result = analyze_paragraph(text, output)
         self.assertEqual(len(result.entities), 1)
@@ -119,6 +118,7 @@ class TestAnalyzeParagraph(unittest.TestCase):
                 # 第二句：head=3 原本是句内索引（指向"跑了"），换算后应为全局索引
                 {"head": [2, 0, 2, 2], "label": ["SBV", "HED", "RAD", "WP"]},
             ],
+            sdp=[],
         )
         result = analyze_paragraph(text, output)
         # 第一句：token_index 1-4，head 换算后不变（第一句 sent_token_start=1）
@@ -132,7 +132,8 @@ class TestAnalyzeParagraph(unittest.TestCase):
             if arc.head_index == 0:
                 continue  # ROOT 永远正确
             self.assertGreaterEqual(
-                arc.head_index, 5,
+                arc.head_index,
+                5,
                 f"dependent_index={arc.dependent_index} 的 head_index={arc.head_index} 应在第二句区间",
             )
         # 全句统计：节点数=8，根数=2（每句一个 ROOT）
@@ -140,7 +141,7 @@ class TestAnalyzeParagraph(unittest.TestCase):
         self.assertEqual(result.dependency_root_count, 2)
 
     def test_empty_input_returns_zero_result(self) -> None:
-        result = analyze_paragraph("", LtpPipelineOutput(cws=[], pos=[], ner=[], dep=[]))
+        result = analyze_paragraph("", LtpPipelineOutput(cws=[], pos=[], ner=[], dep=[], sdp=[]))
         self.assertEqual(result.ltp_token_count, 0)
         self.assertEqual(result.sentence_count, 0)
         self.assertEqual(result.word_length_counts, {})
@@ -165,6 +166,7 @@ def test_ltp_session_requires_local_model_dir(monkeypatch) -> None:
 
 if __name__ == "__main__":
     unittest.main()
+
 
 class TestSdpArcParsing:
     """2026-09-05 B 批：sdp 语义弧解析（句内坐标 → 段内全局 token_index）"""
@@ -227,13 +229,19 @@ class TestSdpArcParsing:
         # 第二句 token_index 5-6：head=1（担心）→ 全局 5，dependent=2（安危）→ 全局 6
         assert [(a.head_index, a.dependent_index, a.label) for a in result.sdp_arcs] == [(5, 6, "DATV")]
 
-    def test_missing_sdp_output_defaults_to_empty(self) -> None:
-        """旧构造（无 sdp 键）不报错，弧为空"""
+    def test_explicit_empty_sdp_has_no_arcs(self) -> None:
+        """当前合同允许显式空语义弧"""
         output = LtpPipelineOutput(
             cws=[["他", "走"]],
             pos=[["r", "v"]],
             ner=[[]],
             dep=[{"head": [2, 0], "label": ["SBV", "HED"]}],
+            sdp=[],
         )
         result = analyze_paragraph("他走", output)
         assert result.sdp_arcs == []
+
+    def test_missing_sdp_output_is_rejected(self) -> None:
+        """缺少语义依存输出的旧构造不能进入特征计算"""
+        with pytest.raises(TypeError, match="sdp"):
+            LtpPipelineOutput(**{"cws": [], "pos": [], "ner": [], "dep": []})

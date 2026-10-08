@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from src.api.models.responses import ForeshadowingTreeResponse
+from src.event_trees.read.foreshadowing import fetch_foreshadowing_trees
 from src.storage.repositories import AnnotationRepository
 
 
@@ -16,7 +17,7 @@ def _fetch_foreshadowing_trees(
     获取伏笔树汇总视图
     """
 
-    rows = annotation_repo.fetch_foreshadowing_trees(run_id)
+    rows = fetch_foreshadowing_trees(annotation_repo.session, run_id)
     return [
         ForeshadowingTreeResponse(
             root_event_id=row.root_event_id,

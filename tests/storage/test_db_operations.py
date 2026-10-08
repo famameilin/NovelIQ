@@ -32,14 +32,14 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import chunk_text, split_chunk_paragraphs
-from src.models.cloud.schema import CloudAnalysis
+from src.diagnosis.schema import AgentAnalysis
 from src.storage.repositories import (
     ChapterRepository,
     ParagraphRepository,
     RunRepository,
     StatsRepository,
 )
+from src.text_processing.paragraphs import chunk_text, split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 
@@ -100,7 +100,7 @@ def test_insert_chapter_texts_keeps_duplicate_chapter_titles_separate(db_session
 
     chapter_repo = ChapterRepository(db_session)
     chapter_repo.insert_chapter_texts(run_id, chunks)
-    rows = chapter_repo.fetch_chapters_with_text(run_id)
+    rows = chapter_repo.fetch_chapter_texts(run_id)
 
     assert [row[0] for row in rows] == [1, 2, 3]
 
@@ -125,16 +125,16 @@ def test_get_run_by_run_id_prefix_escapes_like_wildcards(db_session) -> None:
     assert run_repo.get_run_by_run_id_prefix("pre_2X")["run_id"] == "pre_2Xfix"
 
 
-def test_insert_cloud_analysis(db_session) -> None:
+def test_insert_agent_analysis(db_session) -> None:
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
-    analysis = CloudAnalysis(
+    analysis = AgentAnalysis(
         novel_id=novel_id,
         foreshadow_expectation=0.5,
         arc_scores={"角色0": 8.2, "角色1": 7.4},
         genre_labels=["通用"],
         style_labels=["严肃"],
-        topic_labels=["成长"],
+        topic_labels={"0": "成长"},
         diagnosis="ok",
         narrative_arc_type="白手起家",
         focus_structure="dual",
@@ -147,17 +147,15 @@ def test_insert_cloud_analysis(db_session) -> None:
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 
     stats_repo = StatsRepository(db_session)
-    stats_repo.insert_cloud_analysis(run_id, analysis)
-    row = db_session.execute(
-        text("SELECT novel_id, foreshadow_expectation, narrative_arc_type FROM cloud_analysis WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    ).fetchone()
-    assert row[0] == novel_id
-    assert row[1] == 0.5
-    assert row[2] == "白手起家"
+    stats_repo.insert_agent_analysis(run_id, analysis.model_dump())
+    fetched = stats_repo.fetch_agent_analysis(run_id)
+    assert fetched is not None
+    assert fetched["novel_id"] == novel_id
+    assert fetched["foreshadow_expectation"] == 0.5
+    assert fetched["narrative_arc_type"] == "白手起家"
 
 
-def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> None:
+def test_fetch_agent_analysis_prefers_latest_row_for_same_run(db_session) -> None:
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
 
@@ -165,44 +163,44 @@ def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> Non
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 
     stats_repo = StatsRepository(db_session)
-    stats_repo.insert_cloud_analysis(
+    stats_repo.insert_agent_analysis(
         run_id,
-        CloudAnalysis(
+        AgentAnalysis(
             novel_id=novel_id,
             foreshadow_expectation=0.2,
             arc_scores={"角色0": 7.0},
             genre_labels=["通用"],
             style_labels=["严肃"],
-            topic_labels=["旧主题"],
+            topic_labels={"0": "旧主题"},
             diagnosis="old",
             narrative_arc_type="白手起家",
             focus_structure="single",
             focus_characters=["角色0"],
             main_characters=["角色0"],
             core_cast=["角色0"],
-        ),
+        ).model_dump(),
     )
-    stats_repo.insert_cloud_analysis(
+    stats_repo.insert_agent_analysis(
         run_id,
-        CloudAnalysis(
+        AgentAnalysis(
             novel_id=novel_id,
             foreshadow_expectation=0.8,
             arc_scores={"角色1": 9.0},
             genre_labels=["科幻"],
             style_labels=["硬核"],
-            topic_labels=["新主题"],
+            topic_labels={"0": "新主题"},
             diagnosis="new",
             narrative_arc_type="白手起家",
             focus_structure="single",
             focus_characters=["角色1"],
             main_characters=["角色1"],
             core_cast=["角色1"],
-        ),
+        ).model_dump(),
     )
 
-    fetched = stats_repo.fetch_cloud_analysis(novel_id, run_id)
+    fetched = stats_repo.fetch_agent_analysis(run_id)
 
     assert fetched is not None
-    assert fetched["genre_labels"] == '["科幻"]'
-    assert fetched["style_labels"] == '["硬核"]'
+    assert fetched["genre_labels"] == ["科幻"]
+    assert fetched["style_labels"] == ["硬核"]
     assert fetched["foreshadow_expectation"] == 0.8

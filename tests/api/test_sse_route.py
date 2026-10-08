@@ -44,6 +44,7 @@ async def test_sse_streams_events_with_type_and_data() -> None:
     queue.put_nowait({"type": "complete", "data": {"status": "ok"}, "seq": 2})
 
     mock_em = MagicMock()
+    mock_em.replay = AsyncMock(return_value=[])
     mock_em.connect = AsyncMock(return_value=queue)
     mock_em.disconnect = AsyncMock()
 
@@ -66,6 +67,7 @@ async def test_sse_defaults_when_message_lacks_type_and_data() -> None:
     queue.put_nowait({"reason": "no type field"})
 
     mock_em = MagicMock()
+    mock_em.replay = AsyncMock(return_value=[])
     mock_em.connect = AsyncMock(return_value=queue)
     mock_em.disconnect = AsyncMock()
 
@@ -85,6 +87,7 @@ async def test_sse_disconnects_cleanly_when_client_disconnects() -> None:
     queue: asyncio.Queue[dict] = asyncio.Queue()
 
     mock_em = MagicMock()
+    mock_em.replay = AsyncMock(return_value=[])
     mock_em.connect = AsyncMock(return_value=queue)
     mock_em.disconnect = AsyncMock()
 
@@ -103,6 +106,7 @@ async def test_sse_prefers_last_event_id_header_over_query_param() -> None:
     queue: asyncio.Queue[dict] = asyncio.Queue()
 
     mock_em = MagicMock()
+    mock_em.replay = AsyncMock(return_value=[])
     mock_em.connect = AsyncMock(return_value=queue)
     mock_em.disconnect = AsyncMock()
 
@@ -124,6 +128,7 @@ async def test_sse_uses_query_param_when_header_missing() -> None:
     queue: asyncio.Queue[dict] = asyncio.Queue()
 
     mock_em = MagicMock()
+    mock_em.replay = AsyncMock(return_value=[])
     mock_em.connect = AsyncMock(return_value=queue)
     mock_em.disconnect = AsyncMock()
 

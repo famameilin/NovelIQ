@@ -8,8 +8,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from loguru import logger
 
-from src.chapters.preprocess import preprocess_text
-from src.chunking.chunker import chunk_documents, chunk_text
+from src.text_processing.paragraphs import chunk_text
 
 
 class TestChunking(unittest.IsolatedAsyncioTestCase):
@@ -44,47 +43,6 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks[0].text, "第一段。  \n\n 第二段。")
         self.assertEqual(chunks[0].start, 2)
         self.assertEqual(chunks[0].end, len(text))
-
-    async def test_chunk_documents_accumulates_run_global_offsets(self) -> None:
-        """
-        创建时间: 2026-04-24
-        任务: full-global-offset-rollout
-        说明: 多文档分块时，后续文档的 chunk offset 应累加前序文档长度，形成 run 级连续全文坐标。
-        """
-        chunks = await chunk_documents(
-            [" 第一篇。", " 第二篇。"],
-        )
-
-        self.assertEqual(len(chunks), 2)
-        self.assertEqual(chunks[0].start, 1)
-        self.assertEqual(chunks[0].end, 5)
-        self.assertEqual(chunks[1].start, 6)
-
-    async def test_chunk_documents_offsets_use_preprocessed_length(self) -> None:
-        """
-        2026-08-12 用于验证多文档 offset 累加基于预处理后长度：
-        前序文档含零宽字符/多余空行（preprocess 会缩短文本）时，
-        后续文档的坐标不漂移。
-        """
-        first = "第一段\u200b。\n\n\n第二段。"  # 零宽字符 + 双空行，preprocess 后变短
-        second = "林渡与顾霜相见。"  # 纯正文，避免被章节模式解析
-
-        chunks = await chunk_documents([first, second])
-
-        normalized_first_len = len(preprocess_text(first))
-        self.assertEqual(len(chunks), 2)
-        self.assertEqual(chunks[1].start, normalized_first_len)
-        # chunk 偏移相对各自文档的预处理后文本，全 run 坐标 = 前序归一化长度累加
-        self.assertEqual(chunks[1].end, normalized_first_len + len(second))
-
-    async def test_chunk_documents_accumulates_chapter_ids(self) -> None:
-        """
-        多文档分块时，后续文档的 chapter_id 应在 run 级全局章节编号中累加
-        """
-        chunks = await chunk_documents(
-            ["第一章 甲\n内容。\n第二章 乙\n内容。", "第三章 丙\n内容。"],
-        )
-        self.assertEqual([chunk.chapter_id for chunk in chunks], [1, 2, 3])
 
     async def test_duplicate_chapter_titles_keep_distinct_occurrence_indices(self) -> None:
         """

@@ -1,9 +1,6 @@
 """
 主题与诊断结果查询路由
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（routes/results.py → 同目录资源域子模块）
 说明: 从 src/api/routes/results.py 拆出主题族路由（topics/aggregate/series/shifts/emotion）
 与诊断、伏笔树路由（diagnosis/foreshadowing-trees），行为保持不变。
 """
@@ -31,19 +28,19 @@ from src.api.routes.results_common import (
     get_db_session,
     resolve_run_id,
 )
-from src.api.routes.results_fetchers import (
+from src.api.services.results_queries import (
     _fetch_diagnosis,
     _fetch_foreshadowing_trees,
     _fetch_topics,
 )
-from src.api.services.results_queries.topic_aggregations import (
+from src.metrics.aggregate.algorithms import compute_topic_shift_candidates
+from src.storage.repositories import AnnotationRepository, ParagraphRepository, StatsRepository
+from src.topic.queries import (
     aggregate_book_topics,
     aggregate_chapter_topics,
     compute_topic_emotion,
-    compute_topic_shift_candidates,
     fetch_paragraph_topic_series,
 )
-from src.storage.repositories import AnnotationRepository, ParagraphRepository, StatsRepository
 
 # 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
@@ -102,18 +99,12 @@ async def get_topic_shifts(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-    window_size: Annotated[
-        int | None, Query(ge=1, description="窗口段落数，缺省取 topic_shift 配置")
-    ] = None,
+    window_size: Annotated[int | None, Query(ge=1, description="窗口段落数，缺省取 topic_shift 配置")] = None,
     min_tokens_per_window: Annotated[
         int | None, Query(ge=1, description="窗口最小实际入模 token 数，缺省取配置")
     ] = None,
-    score_threshold: Annotated[
-        float | None, Query(gt=0, le=1, description="候选点 JS 散度阈值，缺省取配置")
-    ] = None,
-    max_candidates: Annotated[
-        int | None, Query(ge=1, description="候选点数量上限，缺省取配置")
-    ] = None,
+    score_threshold: Annotated[float | None, Query(gt=0, le=1, description="候选点 JS 散度阈值，缺省取配置")] = None,
+    max_candidates: Annotated[int | None, Query(ge=1, description="候选点数量上限，缺省取配置")] = None,
 ) -> TopicShiftResponse:
     """
     主题变化候选点（D2）：相邻不重叠窗口分布（入模 token 加权）的 JS 散度
@@ -135,16 +126,10 @@ async def get_topic_shifts(
             config=TopicShiftConfig(
                 window_size=window_size if window_size is not None else shift_settings.window_size,
                 min_tokens_per_window=(
-                    min_tokens_per_window
-                    if min_tokens_per_window is not None
-                    else shift_settings.min_tokens_per_window
+                    min_tokens_per_window if min_tokens_per_window is not None else shift_settings.min_tokens_per_window
                 ),
-                score_threshold=(
-                    score_threshold if score_threshold is not None else shift_settings.score_threshold
-                ),
-                max_candidates=(
-                    max_candidates if max_candidates is not None else shift_settings.max_candidates
-                ),
+                score_threshold=(score_threshold if score_threshold is not None else shift_settings.score_threshold),
+                max_candidates=(max_candidates if max_candidates is not None else shift_settings.max_candidates),
             ),
             unavailable_reason=series["unavailable_reason"],
         )

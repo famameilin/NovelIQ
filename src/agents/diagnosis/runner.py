@@ -15,10 +15,10 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.agents.stream import AgentStream
-from src.models.cloud.schema import CloudAnalysis
-from src.storage.repositories.diagnosis_repository import DiagnosisRepository
+from src.diagnosis.patch import AgentAnalysisPatch
+from src.diagnosis.queries import DiagnosisQueries
+from src.diagnosis.schema import AgentAnalysis
 
-from .contract import CloudAnalysisPatch
 from .evidence import DiagnosisEvidenceLedger
 from .prompts import build_diagnosis_system_prompt
 from .tools import build_diagnosis_tools
@@ -28,28 +28,17 @@ class DiagnosisAgentRunError(RuntimeError):
     """诊断 agent 运行失败"""
 
 
-def _model_provider(llm: Any) -> str:
-    """2026-08-10 用于从模型地址稳定区分本地与云端审计来源"""
-    raw_base_url = getattr(llm, "base_url", "") or getattr(llm, "openai_api_base", "") or ""
-    base_url = str(raw_base_url)
-    if base_url and "localhost" not in base_url and "127.0.0.1" not in base_url:
-        return "cloud"
-    return "local"
-
-
 def _model_name(llm: Any) -> str | None:
     """2026-08-10 用于从模型对象稳定读取审计用模型名"""
     return str(getattr(llm, "model_name", None) or getattr(llm, "model", "") or None) or None
 
 
 def _validate_topic_label_ids(
-    analysis: CloudAnalysis,
+    analysis: AgentAnalysis,
     *,
     expected_ids: set[int],
 ) -> None:
-    """主题标签必须按实际模型 topic_id 键控，历史数组不具备可验证对应关系。"""
-    if not isinstance(analysis.topic_labels, dict):
-        raise ValueError("topic_labels must be keyed by topic_id")
+    """核对标签键与本轮模型实际 topic_id 完全一致"""
     actual_ids = {int(topic_id) for topic_id in analysis.topic_labels}
     if actual_ids != expected_ids:
         raise ValueError(
@@ -59,22 +48,22 @@ def _validate_topic_label_ids(
 
 
 def _finalize_diagnosis_result(
-    analysis: CloudAnalysis,
+    analysis: AgentAnalysis,
     *,
     novel_id: str,
     foreshadow_expectation: float | None,
-) -> CloudAnalysis:
+) -> AgentAnalysis:
     """
     2026-08-02 用于以运行元数据和伏笔 ledger 确定性收口诊断终态
     """
     payload = analysis.model_dump()
     payload["novel_id"] = novel_id
     payload["foreshadow_expectation"] = foreshadow_expectation
-    return CloudAnalysis.model_validate(payload)
+    return AgentAnalysis.model_validate(payload)
 
 
 def _validate_diagnosis_submission(
-    analysis: CloudAnalysis,
+    analysis: AgentAnalysis,
     *,
     expected_topic_ids: set[int],
     evidence_ledger: DiagnosisEvidenceLedger,
@@ -98,40 +87,40 @@ def _context_summary(
     }
 
 
-async def run_diagnosis_agent(
+async def _run_diagnosis_agent(
     *,
     session: Session,
     run_id: str,
     novel_id: str,
+    execution_id: str,
     novel_title: str | None = None,
     llm: Any | None = None,
     stream: AgentStream | None = None,
     audit_recorder: Any | None = None,
-) -> CloudAnalysis:
+    is_cancelled: Callable[[], bool] | None = None,
+) -> AgentAnalysis:
     """
     运行诊断 agent（工具化自主取证）
 
     从数据库按需查询证据（聚合指标/转折素材/人物/主题/图谱信号），
-    自主决定查看哪些证据，最终输出 CloudAnalysis
+    自主决定查看哪些证据，最终产出诊断结果
     """
-    from src.agents.audit.observer import AgentTurnObserver
-    from src.agents.audit.recorder import AgentAuditRecorder
     from src.agents.graph import build_agent_graph
+    from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
     from src.config import settings
-    from src.storage.db import get_session_factory
 
     start_time = time.time()
 
     if llm is None:
-        from src.agents.llm import build_chat_model
-        from src.config.input_config import load_task_config
+        from src.model_pool.configuration import load_task_config
+        from src.model_pool.llm import build_chat_model
 
         model_config = load_task_config("diagnosis")
         llm = build_chat_model("diagnosis", config=model_config)
 
     if stream is not None:
         await stream.thinking("诊断 Agent 开始取证...")
-    diagnosis_repo = DiagnosisRepository(session)
+    diagnosis_repo = DiagnosisQueries(session)
     topic_rows = diagnosis_repo.fetch_topic_words(run_id)
     expected_topic_ids = {int(row["topic_id"]) for row in topic_rows}
     foreshadow_expectation = diagnosis_repo.calculate_foreshadow_expectation(run_id)
@@ -139,40 +128,30 @@ async def run_diagnosis_agent(
     evidence_ledger = DiagnosisEvidenceLedger()
     tools = build_diagnosis_tools(session, run_id, evidence_ledger=evidence_ledger)
     max_attempts = max(1, settings.models.diagnosis.max_iterations)
-    recorder = audit_recorder or AgentAuditRecorder(get_session_factory())
+    recorder: Any = audit_recorder
     model_name = _model_name(llm)
-    model_provider = _model_provider(llm)
-    invocation_id = recorder.start_invocation(
+    audit_context = build_invocation_context(
         run_id=run_id,
         task_type="diagnosis",
-        chapter_id=None,
+        execution_id=execution_id,
         attempt_number=1,
-        model_name=model_name,
-        model_provider=model_provider,
+        model=model_name or "unknown",
     )
-    observer = AgentTurnObserver(
-        recorder,
-        invocation_id=invocation_id,
-        run_id=run_id,
-        novel_id=novel_id,
-        task_type="diagnosis",
-        call_type="diagnosis",
-        model_name=model_name or "unknown",
-        model_provider=model_provider,
-    )
+    invocation_id = recorder.start_invocation(**audit_context)
+    observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=audit_context)
     graph = build_agent_graph(
         llm,
         tools,
         max_attempts=max_attempts,
-        response_model=CloudAnalysis,
-        first_hint="请对当前小说完成整体诊断（按需取证，最后调用 finish 提交 CloudAnalysis）。",
+        response_model=AgentAnalysis,
+        first_hint="请对当前小说完成整体诊断（按需取证，最后调用 finish 提交诊断结果）。",
         response_validator=lambda analysis: _validate_diagnosis_submission(
             analysis,
             expected_topic_ids=expected_topic_ids,
             evidence_ledger=evidence_ledger,
         ),
         revision_tool_name="revise_finish",
-        revision_response_model=CloudAnalysisPatch,
+        revision_response_model=AgentAnalysisPatch,
         stream=stream,
         observer=observer,
         context_summary=_context_summary(evidence_ledger),
@@ -199,36 +178,49 @@ async def run_diagnosis_agent(
     }
 
     try:
-        result_state = cast(dict[str, Any], await graph.ainvoke(initial_state))
-    except Exception as exc:
+        # 取消要立即停：诊断取证是逐回合 LLM 调用，等整轮跑完再响应会拖住取消，
+        # 故与标注 agent 同语义直接中断这次的图调用（取消由上层 handle_cancel 收口）
+        from src.utils.cancellation import run_cancellable
+
+        result_state = cast(dict[str, Any], await run_cancellable(graph.ainvoke(initial_state), is_cancelled))
+    except BaseException as exc:
         logger.error("diagnosis agent graph failed: run_id={} error={}", run_id, exc)
-        recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
+        recorder.finish_invocation(**audit_context, status="error", final_error=str(exc))
+        if not isinstance(exc, Exception):
+            raise
         raise DiagnosisAgentRunError(f"诊断 agent 运行失败: {exc}") from exc
 
     if result_state.get("error"):
         error = str(result_state["error"])
         logger.error("diagnosis agent finalize error: run_id={} error={}", run_id, error)
-        recorder.finish_invocation(invocation_id, status="error", final_error=error)
+        recorder.finish_invocation(**audit_context, status="error", final_error=error)
         raise DiagnosisAgentRunError(error)
 
     raw_output = result_state.get("output")
     if raw_output is None:
         error = "诊断 agent 未产出结果"
-        recorder.finish_invocation(invocation_id, status="error", final_error=error)
+        recorder.finish_invocation(**audit_context, status="error", final_error=error)
         raise DiagnosisAgentRunError(error)
 
     try:
         analysis = _finalize_diagnosis_result(
-            CloudAnalysis.model_validate(raw_output),
+            AgentAnalysis.model_validate(raw_output),
             novel_id=novel_id,
             foreshadow_expectation=foreshadow_expectation,
         )
     except Exception as exc:
         logger.error("diagnosis finalize failed: run_id={} error={}", run_id, exc)
-        recorder.finish_invocation(invocation_id, status="error", final_error=str(exc))
+        recorder.finish_invocation(**audit_context, status="error", final_error=str(exc))
         raise DiagnosisAgentRunError(f"诊断结果终态校验失败: {exc}") from exc
+    # 诊断产物由 agent 自存（与标注 agent 同责），工作流只负责派发与收口展示
+    try:
+        save_diagnosis_result(session, run_id, analysis)
+    except Exception as exc:
+        logger.error("diagnosis save failed: run_id={} error={}", run_id, exc)
+        recorder.finish_invocation(**audit_context, status="error", final_error=str(exc))
+        raise DiagnosisAgentRunError(f"诊断结果落库失败: {exc}") from exc
     elapsed = time.time() - start_time
-    recorder.finish_invocation(invocation_id, status="success")
+    recorder.finish_invocation(**audit_context, status="success")
     logger.info(
         "diagnosis agent complete: run_id={} genre_labels={} style_labels={} elapsed={:.2f}s",
         run_id,
@@ -239,3 +231,77 @@ async def run_diagnosis_agent(
     if stream is not None:
         await stream.output("整体诊断完成，结果已通过校验")
     return analysis
+
+
+def save_diagnosis_result(session: Session, run_id: str, analysis: AgentAnalysis) -> None:
+    """诊断 Agent 保存实际诊断结果，并直接委托事实图维护主角属性"""
+    from src.fact_graph.graph import FactGraph
+    from src.storage.repositories import StatsRepository
+
+    StatsRepository(session).insert_agent_analysis(run_id, analysis.model_dump())
+    FactGraph(run_scope=run_id).save_main_characters(session, list(analysis.main_characters))
+    session.commit()
+
+
+async def run_diagnosis_agent(
+    *,
+    session: Session,
+    run_id: str,
+    novel_id: str,
+    novel_title: str | None = None,
+    llm: Any | None = None,
+    stream: AgentStream | None = None,
+    audit_recorder: Any | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+) -> AgentAnalysis:
+    """默认执行只发送实际展示和审计消息，审计保存有独立生命周期"""
+    from uuid import uuid4
+
+    from src.audit.module import AuditMessages, AuditModule
+    from src.event_bus import EventBus, Message
+    from src.sse.consumer import SSEModule
+    from src.storage.db import get_session_factory
+
+    bus = EventBus()
+    execution_id = uuid4().hex
+    audit = AuditModule(bus, run_id, get_session_factory()) if audit_recorder is None else None
+    recorder = (
+        audit_recorder if audit_recorder is not None else AuditMessages(bus, run_id, "", execution_id, "diagnosis")
+    )
+    sse = SSEModule(bus, run_id, stream._emitter if stream is not None else None)
+
+    async def emit(event: Any) -> None:
+        await bus.request(
+            Message(
+                topic="sse.show",
+                source="diagnosis",
+                target=sse.address,
+                run_id=run_id,
+                invocation_id=execution_id,
+                payload=event,
+            )
+        )
+
+    relay = AgentStream(emit, sub_stage="diagnosis", stream_id=execution_id) if stream is not None else None
+    try:
+        if relay is not None:
+            from src.sse.events import StreamEvent
+
+            await emit(
+                StreamEvent(action="work_reset", stage="diagnose", sub_stage="diagnosis", stream_id=execution_id)
+            )
+        return await _run_diagnosis_agent(
+            session=session,
+            run_id=run_id,
+            novel_id=novel_id,
+            execution_id=execution_id,
+            novel_title=novel_title,
+            llm=llm,
+            stream=relay,
+            audit_recorder=recorder,
+            is_cancelled=is_cancelled,
+        )
+    finally:
+        sse.close()
+        if audit is not None:
+            await audit.close()

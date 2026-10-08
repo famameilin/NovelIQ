@@ -1,14 +1,6 @@
-from __future__ import annotations
+"""
+API 服务包
 
-from src.api.services.analysis_service import AnalysisService
-from src.api.services.event_manager import EventManager
-from src.api.services.novel_service import NovelService
-from src.api.services.task_manager import TaskInfo, TaskManager
-
-__all__ = [
-    "AnalysisService",
-    "EventManager",
-    "NovelService",
-    "TaskManager",
-    "TaskInfo",
-]
+说明: 读侧投影（结果查询、结果契约、结果导出）与聚合指标缓存服务同属 API 层；
+      运行生命周期与任务读写实现在 src/workflows/，小说导入实现在本包 novel_service.py
+"""

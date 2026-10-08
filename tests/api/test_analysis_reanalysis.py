@@ -11,10 +11,10 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from src.api.models.requests import ReanalyzeRequest
 from src.api.routes import analysis as analysis_mod
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
+from src.workflows.schemas import ReanalyzeRequest
 
 
 class TestReanalysis:
@@ -140,9 +140,9 @@ class TestReanalysis:
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
 
-        from src.api.dependencies import get_novel_service
+        from src.api.dependencies import get_task_service
 
-        service = get_novel_service()
+        service = get_task_service()
         expected_request = ReanalyzeRequest(force_preprocess=True, force_diagnose=True, num_topics=9)
         task_id = service.create_task(
             novel_id,

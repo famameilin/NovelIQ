@@ -5,11 +5,12 @@ from uuid import uuid4
 
 import pytest
 
-from src.api.models.events import StreamEvent
-from src.chunking.chunker import Chunk, split_chunk_paragraphs, split_paragraphs
-from src.preprocess.tokenize import tokenize
+from src.sse.events import StreamEvent
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs, split_paragraphs
+from src.text_processing.tokenize import tokenize
 from src.workflows.preprocess import (
     _generate_paragraph_embedding_rows,
     _generate_paragraph_embeddings,
@@ -58,7 +59,7 @@ async def test_generate_paragraph_embeddings_uses_probed_dimension_for_schema_an
     mock_client.embed_texts = AsyncMock(return_value=[[0.5, 0.6], [0.7, 0.8]])
 
     with (
-        patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client) as mock_client_factory,
+        patch("src.embedding.EmbeddingClient", return_value=mock_client) as mock_client_factory,
         patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
         patch("src.storage.repositories.paragraph.insert_paragraph_embeddings") as mock_insert_paragraph_embeddings,
     ):
@@ -93,7 +94,7 @@ async def test_generate_paragraph_embeddings_skips_when_no_paragraphs(db_session
     mock_client = MagicMock()
 
     with (
-        patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client) as mock_client_factory,
+        patch("src.embedding.EmbeddingClient", return_value=mock_client) as mock_client_factory,
         patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
     ):
         inserted = await _generate_paragraph_embeddings(
@@ -114,7 +115,7 @@ async def test_generate_paragraph_embeddings_fails_fast_when_embedding_client_in
     run_id, _ = _insert_chapter_texts_and_paragraphs(db_session, chunks)
 
     with (
-        patch("src.models.local.embedding.EmbeddingClient", side_effect=ValueError("missing embedding config")),
+        patch("src.embedding.EmbeddingClient", side_effect=ValueError("missing embedding config")),
         patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
     ):
         with pytest.raises(RuntimeError, match="embedding client initialization failed"):
@@ -236,4 +237,3 @@ def test_split_paragraphs_oversized_without_sentence_boundaries_falls_back_hard_
     assert len(paragraphs) > 1
     assert all(len(p.text) <= 1500 for p in paragraphs)
     assert "".join(p.text for p in paragraphs) == text
-

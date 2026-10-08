@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from src.agents.diagnosis.tools import _format_topic_rows
-from src.storage.repositories.diagnosis_repository import _topic_words_from_model_dir
+from src.topic.artifacts import load_topic_artifact
 
 
 def test_topic_words_load_with_words(monkeypatch) -> None:
@@ -23,17 +23,16 @@ def test_topic_words_load_with_words(monkeypatch) -> None:
         return FakeModel()
 
     monkeypatch.setattr("src.topic.LDATrainer.load_model", fake_load)
-    from src.storage.path_resolver import resolve_model_dir
+    from src.config.paths import resolve_model_dir
 
-    result = _topic_words_from_model_dir(resolve_model_dir("r1"))
-    assert result == {
-        0: (["修炼"], "修行"),
-        1: ([], "战斗"),
-    }
+    result = load_topic_artifact(resolve_model_dir("r1"))
+    assert result == ({0: ["修炼"], 1: []}, {0: "修行", 1: "战斗"}, None)
 
 
 def test_topic_words_missing_model_dir() -> None:
-    assert _topic_words_from_model_dir(Path("__不存在的目录__")) == {}
+    words, labels, reason = load_topic_artifact(Path("__不存在的目录__"))
+    assert words == {} and labels == {}
+    assert reason is not None and reason.startswith("topic_model_artifact_missing:")
 
 
 def test_format_topic_rows_with_words() -> None:

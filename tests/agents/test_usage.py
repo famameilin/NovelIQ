@@ -1,10 +1,10 @@
 """Agent 模型用量审计测试"""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from src.agents.usage import (
+from src.model_pool.usage import (
     build_token_usage_callback,
     estimate_agent_token_usage,
     extract_agent_token_usage,
@@ -194,17 +194,15 @@ def test_build_token_usage_callback_records_embedding_usage() -> None:
     """
     2026-08-10 用于验证 EmbeddingClient 的 token 用量回调逐笔落入账本
     """
-    session = MagicMock()
-
-    with patch("src.storage.repositories.StatsRepository") as stats_repository:
-        callback = build_token_usage_callback(session=session, run_id="run-1")
-        callback("novel-1", "embedding", "local", "embed-model", 10, 10, None, 7)
-
-    kwargs = stats_repository.return_value.insert_token_usage.call_args_list[0].kwargs
+    bus = MagicMock()
+    callback = build_token_usage_callback(bus=bus, run_id="run-1")
+    callback("embedding", "embed-model", 10, 10, None, 7)
+    message = bus.publish.call_args.args[0]
+    assert message.payload["method"] == "nonagent_usage"
+    kwargs = message.payload["kwargs"]
     assert kwargs["run_id"] == "run-1"
-    assert kwargs["novel_id"] == "novel-1"
     assert kwargs["task_type"] == "embedding"
-    assert kwargs["call_type"] == "local"
+    assert kwargs["call_type"] == "embedding"
     assert kwargs["model"] == "embed-model"
     assert kwargs["prompt_tokens"] == 10
     assert kwargs["total_tokens"] == 10
@@ -215,7 +213,7 @@ def test_turn_usage_records_estimates_missing_usage() -> None:
     """
     2026-08-10 用于验证回合观察器在 Provider 无用量时记录本地估算
     """
-    from src.agents.audit.observer import _usage_for_turn
+    from src.agents.turn_observer import _usage_for_turn
 
     request = [AIMessage(content="问")]
     response = AIMessage(content="分析结果")
@@ -234,7 +232,7 @@ def test_turn_usage_records_keeps_reported_usage() -> None:
     """
     2026-08-10 用于验证回合观察器实报路径保留缓存/费用/推理明细
     """
-    from src.agents.audit.observer import _usage_for_turn
+    from src.agents.turn_observer import _usage_for_turn
 
     request = [AIMessage(content="问")]
     response = AIMessage(

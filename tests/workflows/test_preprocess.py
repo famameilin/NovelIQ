@@ -20,6 +20,8 @@ from unittest.mock import patch
 
 import pytest
 
+from src.workflows.preprocess_readiness import is_preprocess_complete
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.storage.repositories import ChapterRepository, RunRepository
@@ -100,7 +102,7 @@ class TestPreprocess:
         return source_path
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_basic(self, db_session, tmp_path) -> None:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
 
@@ -122,13 +124,13 @@ class TestPreprocess:
         assert total_chars > 0
 
         chapter_repo = ChapterRepository(db_session)
-        assert chapter_repo.is_preprocess_complete(run_id)
+        assert is_preprocess_complete(chapter_repo.session, run_id)
 
         rows = chapter_repo.fetch_chapter_texts(run_id)
         assert len(rows) == chunks_inserted
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_empty_file(self, db_session, tmp_path) -> None:
         source_path = self._create_source_file(str(tmp_path), "")
 
@@ -150,7 +152,7 @@ class TestPreprocess:
         assert total_chars == 0
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClient)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClient)
     async def test_preprocess_chapter_split(self, db_session, tmp_path) -> None:
         content = "第一章 测试\n" + "内容" * 200 + "\n\n第二章 测试\n" + "内容" * 200
         source_path = self._create_source_file(str(tmp_path), content)
@@ -172,7 +174,7 @@ class TestPreprocess:
         assert chunks_inserted > 0
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_resume(self, db_session, tmp_path) -> None:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
 

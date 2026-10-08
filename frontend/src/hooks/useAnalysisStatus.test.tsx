@@ -21,6 +21,8 @@ const streamStoreState = {
   setTaskId: vi.fn(),
   updateProgress: vi.fn(),
   appendLLMOutput: vi.fn(),
+  resetWorkOutput: vi.fn(),
+  resetChapterOutput: vi.fn(),
   setError: vi.fn(),
   setStageDuration: vi.fn(),
   reset: vi.fn(),
@@ -116,6 +118,8 @@ describe("useAnalysisStatus", () => {
     streamStoreState.setTaskId.mockReset();
     streamStoreState.updateProgress.mockReset();
     streamStoreState.appendLLMOutput.mockReset();
+    streamStoreState.resetWorkOutput.mockReset();
+    streamStoreState.resetChapterOutput.mockReset();
     streamStoreState.setError.mockReset();
     streamStoreState.setStageDuration.mockReset();
     streamStoreState.reset.mockReset();
@@ -125,18 +129,56 @@ describe("useAnalysisStatus", () => {
     vi.useRealTimers();
   });
 
-  it("仅在 cutoff 释放及任务完成后刷新可见边界", async () => {
+  it("仅在 work 保存及任务完成后刷新可见边界", async () => {
     getTaskStatusMock.mockResolvedValue(createRunningStatus("task-boundary"));
     render(<HookHarness novelId="novel-1" taskId="task-boundary" />);
     await waitFor(() => expect(getTaskStatusMock).toHaveBeenCalled());
     invalidateQueriesMock.mockClear();
     emitSSEEvent("pipeline_progress", { event_type: "work_submitted" });
     expect(invalidateQueriesMock).not.toHaveBeenCalled();
-    emitSSEEvent("pipeline_progress", { event_type: "cutoff_released" });
+    emitSSEEvent("pipeline_progress", { event_type: "work_saved" });
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ["pipeline", "novel-1", "task-boundary"] });
     invalidateQueriesMock.mockClear();
     emitSSEEvent("task_complete", { action: "complete", stage: "completed", percent: 100 });
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ["pipeline", "novel-1", "task-boundary"] });
+  });
+
+  it("work_reset 到达后重置当前角色输出", async () => {
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-reset"));
+    render(<HookHarness novelId="novel-1" taskId="task-reset" />);
+    await waitFor(() => expect(getTaskStatusMock).toHaveBeenCalled());
+    const event = { action: "work_reset", stage: "annotate", chapter_id: 2, sub_stage: "event", invocation_id: "new" };
+    emitSSEEvent("work_reset", event);
+    expect(streamStoreState.resetWorkOutput).toHaveBeenCalledWith(event);
+  });
+
+  it("重跑后迟到旧 invocation 不进入批量缓冲，也不能用旧 reset 回退", async () => {
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-late"));
+    render(<HookHarness novelId="novel-1" taskId="task-late" />);
+    await waitFor(() => expect(getTaskStatusMock).toHaveBeenCalled());
+    vi.useFakeTimers();
+    const base = {stage: "annotate", chapter_id: 1, sub_stage: "event", work_id: "work", stream_id: "same"};
+    emitSSEEvent("work_reset", {...base, invocation_id: "old"});
+    emitSSEEvent("work_reset", {...base, invocation_id: "new"});
+    streamStoreState.resetWorkOutput.mockClear();
+    emitSSEEvent("llm_output", {...base, action: "output", invocation_id: "new", content: "新"});
+    emitSSEEvent("llm_output", {...base, action: "output", invocation_id: "old", content: "迟到旧"});
+    emitSSEEvent("work_reset", {...base, invocation_id: "old"});
+    await act(async () => { vi.advanceTimersByTime(120); });
+    expect(streamStoreState.appendLLMOutput).toHaveBeenCalledTimes(1);
+    expect(streamStoreState.appendLLMOutput).toHaveBeenCalledWith(expect.objectContaining({invocation_id: "new", content: "新"}));
+    expect(streamStoreState.resetWorkOutput).not.toHaveBeenCalled();
+  });
+
+  it("resume 展示边界只同步当前状态，不执行旧取消回调", async () => {
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-resume"));
+    const cancelled = vi.fn();
+    render(<HookHarness novelId="novel-1" taskId="task-resume" onCancelled={cancelled} />);
+    await waitFor(() => expect(getTaskStatusMock).toHaveBeenCalledTimes(1));
+    emitSSEEvent("task_reset", {action: "task_reset"});
+    await waitFor(() => expect(getTaskStatusMock).toHaveBeenCalledTimes(2));
+    expect(cancelled).not.toHaveBeenCalled();
+    expect(streamStoreState.setError).toHaveBeenCalledWith(null);
   });
 
   it("检测到已激活的 mock service worker 时跳过 SSE 连接", async () => {

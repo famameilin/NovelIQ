@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import uuid
 
+from src.metrics.queries.global_stats import query_global_stats as compute_global_stats
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import (
     ParagraphCurveRow,
     ParagraphMetricRow,
     ParagraphRepository,
 )
-from src.workflows.curve_metrics import compute_global_stats
 from tests.support.analysis_factories import insert_test_novel
 
 
@@ -34,7 +34,8 @@ def _insert_paragraph_curves(
     """构造 4 章 4 段的 run（chapter_id = 1..4），写入段落曲线与基础指标。"""
     from dataclasses import replace
 
-    from src.chunking.chunker import Chunk, split_chunk_paragraphs
+    from src.text_processing.models import Chunk
+    from src.text_processing.paragraphs import split_chunk_paragraphs
 
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
@@ -71,7 +72,7 @@ def _insert_paragraph_curves(
             sensory_hit_count=0,
             imagery_hit_count=0,
             metaphor_sentence_count=0,
-                    body_reaction_hit_count=0,
+            body_reaction_hit_count=0,
             function_word_counts={},
             semantic_category_counts={},
         )

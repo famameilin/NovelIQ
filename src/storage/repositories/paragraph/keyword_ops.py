@@ -14,7 +14,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from src.storage.models import Chapter, Paragraph
-from src.utils.text_utils import like_pattern, term_matches
+from src.storage.query_terms import like_pattern, term_matches
 
 
 @dataclass(frozen=True)

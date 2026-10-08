@@ -1,11 +1,15 @@
 """
-说明: 提供错误处理和ID转换等中间件功能
+说明: HTTP 错误 body 统一契约（三字段 detail/error_type/status_code）与请求日志中间件
+
+域异常由各域定义（运行编排 src/workflows、事实图 src/fact_graph、配置 src/config、存储 src/storage），
+本模块只做「异常类型 → 状态码 + 文案」的映射表与注册。
 """
 
 from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 
 from fastapi import HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -16,13 +20,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from src.api.exceptions import (
     AnalysisError,
     AnalysisNotCompleteError,
-    FileStorageError,
     GraphReadinessError,
-    InvalidFileError,
     NovelNotFoundError,
     SettingsValidationError,
 )
 from src.storage.id_mapping import IDMappingError, TaskIDNotFoundError
+from src.workflows.exceptions import FileStorageError, InvalidFileError, TaskApplicationError
 
 
 class ErrorResponse:
@@ -56,75 +59,46 @@ def create_error_response(
     return ErrorResponse(detail=detail, error_type=error_type, status_code=status_code, extra=extra)
 
 
-async def novel_not_found_handler(request: Request, exc: NovelNotFoundError) -> JSONResponse:
-    logger.error(f"NovelNotFoundError: {exc.message}")
-    error_response = create_error_response(
-        detail=exc.message,
-        error_type="NovelNotFoundError",
-        status_code=status.HTTP_404_NOT_FOUND,
-    )
-    return error_response.to_json_response()
+def _message_of(exc: Exception) -> str:
+    return getattr(exc, "message", None) or str(exc)
 
 
-async def invalid_file_handler(request: Request, exc: InvalidFileError) -> JSONResponse:
-    logger.error(f"InvalidFileError: {exc.message}")
-    error_response = create_error_response(
-        detail=exc.message,
-        error_type="InvalidFileError",
-        status_code=status.HTTP_400_BAD_REQUEST,
-    )
-    return error_response.to_json_response()
+def _run_status_extra(exc: Exception) -> dict | None:
+    run_status = getattr(exc, "run_status", None)
+    return {"run_status": run_status} if run_status is not None else None
 
 
-async def analysis_not_complete_handler(request: Request, exc: AnalysisNotCompleteError) -> JSONResponse:
-    logger.info(f"AnalysisNotCompleteError: {exc.message}")
-    error_response = create_error_response(
-        detail=exc.message,
-        error_type="AnalysisNotCompleteError",
-        status_code=status.HTTP_400_BAD_REQUEST,
-        extra={"run_status": exc.run_status} if exc.run_status is not None else None,
-    )
-    return error_response.to_json_response()
+# 域异常映射表：(异常类型, error_type 标签, HTTP 状态码, 日志级别, 附加字段提取)
+_EXCEPTION_MAP: tuple[tuple[type[Exception], str, int, str, Callable[[Exception], dict | None] | None], ...] = (
+    (NovelNotFoundError, "NovelNotFoundError", status.HTTP_404_NOT_FOUND, "error", None),
+    (InvalidFileError, "InvalidFileError", status.HTTP_400_BAD_REQUEST, "error", None),
+    (AnalysisNotCompleteError, "AnalysisNotCompleteError", status.HTTP_400_BAD_REQUEST, "info", _run_status_extra),
+    (AnalysisError, "AnalysisError", status.HTTP_500_INTERNAL_SERVER_ERROR, "error", None),
+    (FileStorageError, "FileStorageError", status.HTTP_500_INTERNAL_SERVER_ERROR, "error", None),
+    (GraphReadinessError, "GraphReadinessError", status.HTTP_409_CONFLICT, "error", None),
+    (SettingsValidationError, "SettingsValidationError", status.HTTP_422_UNPROCESSABLE_ENTITY, "error", None),
+    (TaskIDNotFoundError, "TaskIDNotFoundError", status.HTTP_404_NOT_FOUND, "error", None),
+    (IDMappingError, "IDMappingError", status.HTTP_400_BAD_REQUEST, "error", None),
+)
 
 
-async def analysis_error_handler(request: Request, exc: AnalysisError) -> JSONResponse:
-    logger.error(f"AnalysisError: {exc.message}")
-    error_response = create_error_response(
-        detail=exc.message,
-        error_type="AnalysisError",
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-    )
-    return error_response.to_json_response()
+def _make_domain_handler(
+    error_type: str,
+    status_code: int,
+    log_level: str,
+    extra_of: Callable[[Exception], dict | None] | None,
+) -> Callable[[Request, Exception], object]:
+    async def handler(request: Request, exc: Exception) -> JSONResponse:
+        message = _message_of(exc)
+        getattr(logger, log_level)(f"{error_type}: {message}")
+        return create_error_response(
+            detail=message,
+            error_type=error_type,
+            status_code=status_code,
+            extra=extra_of(exc) if extra_of else None,
+        ).to_json_response()
 
-
-async def file_storage_error_handler(request: Request, exc: FileStorageError) -> JSONResponse:
-    logger.error(f"FileStorageError: {exc.message}")
-    error_response = create_error_response(
-        detail=exc.message,
-        error_type="FileStorageError",
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-    )
-    return error_response.to_json_response()
-
-
-async def graph_readiness_error_handler(request: Request, exc: GraphReadinessError) -> JSONResponse:
-    logger.error(f"GraphReadinessError: {exc.message}")
-    error_response = create_error_response(
-        detail=exc.message,
-        error_type="GraphReadinessError",
-        status_code=status.HTTP_409_CONFLICT,
-    )
-    return error_response.to_json_response()
-
-
-async def settings_validation_error_handler(request: Request, exc: SettingsValidationError) -> JSONResponse:
-    logger.error(f"SettingsValidationError: {exc.message}")
-    error_response = create_error_response(
-        detail=exc.message,
-        error_type="SettingsValidationError",
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-    )
-    return error_response.to_json_response()
+    return handler
 
 
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -150,6 +124,12 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     return error_response.to_json_response()
 
 
+async def task_application_error_handler(request: Request, exc: TaskApplicationError) -> JSONResponse:
+    """业务原因在 HTTP 边界映射，保留原有错误载荷字段与标签"""
+    codes = {"missing_task": 404, "invalid_state": 400, "persistence_failed": 500}
+    return create_error_response(str(exc), "HTTPException", codes[exc.reason]).to_json_response()
+
+
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """2026-08-13 统一错误 body 契约：请求参数校验失败（422）也走三字段格式，
     detail 转可读字符串（FastAPI 默认 detail 是 [{loc, msg, type}] 列表）。"""
@@ -165,51 +145,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return error_response.to_json_response()
 
 
-# ID转换相关异常处理器
-
-
-async def task_id_not_found_handler(request: Request, exc: TaskIDNotFoundError) -> JSONResponse:
-    """处理TaskIDNotFoundError异常"""
-    logger.error(f"TaskIDNotFoundError: {str(exc)}")
-    error_response = create_error_response(
-        detail=str(exc),
-        error_type="TaskIDNotFoundError",
-        status_code=status.HTTP_404_NOT_FOUND,
-    )
-    return error_response.to_json_response()
-
-
-async def id_mapping_error_handler(request: Request, exc: IDMappingError) -> JSONResponse:
-    """处理IDMappingError异常"""
-    logger.error(f"IDMappingError: {str(exc)}")
-    error_response = create_error_response(
-        detail=str(exc),
-        error_type="IDMappingError",
-        status_code=status.HTTP_400_BAD_REQUEST,
-    )
-    return error_response.to_json_response()
-
-
-# 异常处理器注册
-
-
 def register_exception_handlers(app) -> None:
-    """注册所有异常处理器"""
-    # 原有的异常处理器
-    app.add_exception_handler(NovelNotFoundError, novel_not_found_handler)
-    app.add_exception_handler(InvalidFileError, invalid_file_handler)
-    app.add_exception_handler(AnalysisNotCompleteError, analysis_not_complete_handler)
-    app.add_exception_handler(AnalysisError, analysis_error_handler)
-    app.add_exception_handler(FileStorageError, file_storage_error_handler)
-    app.add_exception_handler(GraphReadinessError, graph_readiness_error_handler)
-    app.add_exception_handler(SettingsValidationError, settings_validation_error_handler)
-
-    # ID转换相关异常处理器
-    app.add_exception_handler(TaskIDNotFoundError, task_id_not_found_handler)
-    app.add_exception_handler(IDMappingError, id_mapping_error_handler)
+    """注册域异常映射表 + 三个契约级处理器（HTTPException/校验失败/兜底）"""
+    for exc_type, error_type, status_code, log_level, extra_of in _EXCEPTION_MAP:
+        app.add_exception_handler(exc_type, _make_domain_handler(error_type, status_code, log_level, extra_of))
 
     # 2026-08-13 统一错误 body 契约：路由内 HTTPException 与请求校验失败
     # 不再返回 FastAPI 默认 {detail}，与自定义异常处理器同为三字段结构
+    app.add_exception_handler(TaskApplicationError, task_application_error_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
 

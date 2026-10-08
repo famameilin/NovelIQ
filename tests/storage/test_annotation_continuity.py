@@ -8,16 +8,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
+from src.agents.annotation.queries import DatabaseAnnotationQueryService
 from src.config import settings
-from src.preprocess.tokenize import tokenize
 from src.storage.models import (
     Chapter,
 )
-from src.storage.repositories.annotation.continuity import (
-    DatabaseAnnotationQueryService,
-)
 from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
+from src.text_processing.tokenize import tokenize
 from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
 )
@@ -132,14 +131,14 @@ async def test_text_search_ranges_use_chapter_sequence_when_ids_are_out_of_order
     future = await service.search_text("顾霜", range_name="future")
     all_results = await service.search_text("顾霜", range_name="all")
 
-    assert [(item.chapter_id, item.paragraph_ids) for item in previous] == [(100, [1])]
-    assert previous[0].content == "前文顾霜初次现身"
-    assert [(item.chapter_id, item.paragraph_ids) for item in future] == [(900, [0])]
-    assert future[0].content == "后文顾霜身份揭晓"
-    assert {(item.chapter_id, tuple(item.paragraph_ids), item.content) for item in all_results} == {
-        (100, (1,), "前文顾霜初次现身"),
-        (500, (2,), "当前章顾霜入城"),
-        (900, (0,), "后文顾霜身份揭晓"),
+    assert [(item.chapter_id, item.paragraph_id) for item in previous] == [(100, 1)]
+    assert previous[0].excerpt == "前文顾霜初次现身"
+    assert [(item.chapter_id, item.paragraph_id) for item in future] == [(900, 0)]
+    assert future[0].excerpt == "后文顾霜身份揭晓"
+    assert {(item.chapter_id, item.paragraph_id, item.excerpt) for item in all_results} == {
+        (100, 1, "前文顾霜初次现身"),
+        (500, 2, "当前章顾霜入城"),
+        (900, 0, "后文顾霜身份揭晓"),
     }
 
 
@@ -168,7 +167,7 @@ async def test_search_text_keyword_channel_supports_wildcards_and_multi_terms(
     multi = await service.search_text("伯安 风雪", range_name="all", limit=8)
     miss = await service.search_text("不存在词", range_name="previous", limit=8)
 
-    assert any("赤羽炽尾鸡" in item.content for item in wildcard)
+    assert any("赤羽炽尾鸡" in item.excerpt for item in wildcard)
     assert {item.chapter_id for item in multi} == {1, 2}
     assert miss == []
 
@@ -221,8 +220,11 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     """
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-    from src.agents.annotation.graph import build_annotation_graph
-    from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+    from src.agents.annotation.ledger import AnnotationToolLedger
+    from src.agents.annotation.subagent_graph import build_subagent_graph
+    from src.fact_graph.graph import FactGraph
+    from src.fact_graph.inputs import ChapterParagraphInfo
+    from tests.support.annotation_work_tools import build_annotation_tools, build_program_test_runtime
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="模型回话不占连接")
     tracker = _SessionTracker(db_session)
@@ -238,6 +240,8 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
         current_chapter_id=1,
         current_chapter_text="顾霜身份成谜",
         allow_future_context=False,
+        graph=FactGraph(run_scope=run_id),
+        paragraph_info=ChapterParagraphInfo(paragraph_ids=[0], char_spans=[(0, 6)], texts=["顾霜身份成谜"]),
     )
     tools = build_annotation_tools(service, ledger)
     live_at_model_reply: list[int] = []
@@ -255,18 +259,28 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
             return AIMessage(
                 content="",
                 tool_calls=[
-                    {"name": "search_text", "args": {"query": "顾霜"}, "id": "c1", "type": "tool_call"},
                     {
-                        "name": "write_metrics",
-                        "args": {"summary": "顾霜身份成谜", "emotional_valence": 0, "narrative_function": "铺垫"},
+                        "name": "execute_code",
+                        "args": {
+                            "code": 'search_text(query="顾霜")\n'
+                            'metric(summary="顾霜身份成谜", emotional_valence=0, narrative_function="铺垫")\n'
+                            "finish()"
+                        },
                         "id": "c2",
                         "type": "tool_call",
                     },
-                    {"name": "finish", "args": {}, "id": "c3", "type": "tool_call"},
                 ],
             )
 
-    graph = build_annotation_graph(_SearchThenFinishLLM(), tools, ledger=ledger, max_iterations=1)
+    runtime = build_program_test_runtime(tools, ledger)
+    graph = build_subagent_graph(
+        _SearchThenFinishLLM(),
+        runtime.build_tool(),
+        runtime.finish_tool,
+        ledger=ledger,
+        subagent=runtime.subagent,
+        max_iterations=1,
+    )
     state = await graph.ainvoke(
         {
             "messages": [SystemMessage(content="test"), HumanMessage(content="chunk")],

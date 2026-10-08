@@ -27,7 +27,7 @@ from src.agents.graph_finalize import _FINISH_TOOL_NAME, _build_finalize_node, _
 from src.agents.stream import AgentStream, emit_tool_results, run_model_call
 
 if TYPE_CHECKING:
-    from src.agents.audit.observer import AgentTurnObserver
+    from src.agents.turn_observer import AgentTurnObserver
 
 
 class AgentLoopState(TypedDict):

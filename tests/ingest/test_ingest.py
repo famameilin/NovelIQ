@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.ingest.reader import ingest_path, load_metadata, read_text_file
-from src.preprocess import normalize_text, split_paragraphs, split_sentences, strip_empty_lines
+from src.text_processing.preprocess import normalize_text, split_paragraphs, split_sentences
+from src.text_processing.text_reader import ingest_path, load_metadata, read_text_file
 
 
 class TestIngest(unittest.TestCase):
@@ -59,7 +59,7 @@ class TestIngest(unittest.TestCase):
             docs = ingest_path(novel_dir)
             text = docs[0].text
         normalized = normalize_text(text)
-        cleaned = strip_empty_lines(normalized)
+        cleaned = normalized
         paragraphs_raw = split_paragraphs(normalized)
         paragraphs = split_paragraphs(cleaned)
         sentences = split_sentences(cleaned)

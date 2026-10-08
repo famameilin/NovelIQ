@@ -4,10 +4,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.metrics.style_metrics import (
-    parse_semantic_category_lexicon,
-    semantic_category_densities,
-)
+from src.lexicons.parser import parse_semantic_category_lexicon
 
 
 class TestParseSemanticCategoryLexicon(unittest.TestCase):
@@ -74,74 +71,6 @@ class TestParseSemanticCategoryLexicon(unittest.TestCase):
         self.assertIn("color", result)
         self.assertIn("红色", result["color"])
         self.assertIn("金色", result["color"])
-
-
-class TestSemanticCategoryDensities(unittest.TestCase):
-    def test_empty_text(self) -> None:
-        category_terms = {"combat": ["长剑", "宝剑"], "body": ["头颅"]}
-        result = semantic_category_densities("", category_terms)
-        self.assertEqual(result["combat"], 0.0)
-        self.assertEqual(result["body"], 0.0)
-
-    def test_single_category_hit(self) -> None:
-        category_terms = {"combat": ["长剑", "宝剑"], "body": ["头颅"]}
-        text = "他手持长剑"
-        result = semantic_category_densities(text, category_terms)
-        self.assertGreater(result["combat"], 0.0)
-        self.assertEqual(result["body"], 0.0)
-
-    def test_multiple_categories_hit(self) -> None:
-        category_terms = {
-            "combat": ["长剑", "宝剑"],
-            "body": ["头颅", "心脏"],
-            "relation": ["父亲", "师父"],
-        }
-        text = "他手持长剑刺向敌人的心脏"
-        result = semantic_category_densities(text, category_terms)
-        self.assertGreater(result["combat"], 0.0)
-        self.assertGreater(result["body"], 0.0)
-        self.assertEqual(result["relation"], 0.0)
-
-    def test_density_calculation(self) -> None:
-        category_terms = {"combat": ["剑"]}
-        text = "剑剑剑"
-        result = semantic_category_densities(text, category_terms)
-        self.assertAlmostEqual(result["combat"], 1.0, places=2)
-
-    def test_empty_category_terms(self) -> None:
-        category_terms = {"combat": [], "body": ["头颅"]}
-        text = "他手持长剑"
-        result = semantic_category_densities(text, category_terms)
-        self.assertEqual(result["combat"], 0.0)
-
-    def test_all_ten_categories(self) -> None:
-        category_terms = {
-            "combat": ["长剑"],
-            "body": ["头颅"],
-            "relation": ["父亲"],
-            "faction": ["宗门"],
-            "command": ["命令"],
-            "action": ["行走"],
-            "psychology": ["思考"],
-            "measure": ["巨大"],
-            "emotion": ["欢喜"],
-            "color": ["红色"],
-        }
-        text = "长剑头颅父亲宗门命令行走思考巨大欢喜红色"
-        result = semantic_category_densities(text, category_terms)
-        for key in category_terms.keys():
-            self.assertIn(key, result)
-            self.assertGreaterEqual(result[key], 0.0)
-
-    def test_with_real_lexicon(self) -> None:
-        lexicon_path = str(Path(__file__).resolve().parents[2] / "data" / "lexicons" / "semantic_category.txt")
-        category_terms = parse_semantic_category_lexicon(lexicon_path)
-        text = "他手持长剑，修炼神功，心中思考着父亲的教诲。"
-        result = semantic_category_densities(text, category_terms)
-        self.assertIn("combat", result)
-        self.assertIn("psychology", result)
-        self.assertIn("relation", result)
-        self.assertGreater(result["combat"], 0.0)
 
 
 if __name__ == "__main__":

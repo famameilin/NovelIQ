@@ -1,58 +1,24 @@
+"""
+API 异常与错误映射
+
+说明: 小说文本导入自身的输入异常（文件类型/文件存储）由 api 定义；运行与编排异常
+      归 workflows，事实图与配置异常归各自域。API 中间件据此映射 HTTP 状态码。
+"""
+
 from __future__ import annotations
 
+from src.config.exceptions import SettingsValidationError
+from src.fact_graph.errors import GraphReadinessError
+from src.workflows.exceptions import (
+    AnalysisError,
+    AnalysisNotCompleteError,
+    NovelNotFoundError,
+)
 
-class NovelNotFoundError(Exception):
-    def __init__(self, novel_id: str | None = None, message: str | None = None):
-        self.novel_id = novel_id
-        self.message = message or (f"Novel not found: {novel_id}" if novel_id else "Novel not found")
-        super().__init__(self.message)
-
-
-class InvalidFileError(Exception):
-    def __init__(self, filename: str | None = None, message: str | None = None):
-        self.filename = filename
-        self.message = message or (f"Invalid file: {filename}" if filename else "Invalid file")
-        super().__init__(self.message)
-
-
-class AnalysisNotCompleteError(Exception):
-    def __init__(
-        self,
-        novel_id: str | None = None,
-        message: str | None = None,
-        run_status: str | None = None,
-    ):
-        self.novel_id = novel_id
-        self.run_status = run_status
-        self.message = message or (
-            f"Analysis not complete for novel: {novel_id}" if novel_id else "Analysis not complete"
-        )
-        super().__init__(self.message)
-
-
-class AnalysisError(Exception):
-    def __init__(self, novel_id: str | None = None, message: str | None = None):
-        self.novel_id = novel_id
-        self.message = message or (f"Analysis error for novel: {novel_id}" if novel_id else "Analysis error")
-        super().__init__(self.message)
-
-
-class FileStorageError(Exception):
-    def __init__(self, filename: str | None = None, message: str | None = None):
-        self.filename = filename
-        self.message = message or (f"File storage error: {filename}" if filename else "File storage error")
-        super().__init__(self.message)
-
-
-class GraphReadinessError(RuntimeError):
-    def __init__(self, message: str):
-        self.message = message
-        super().__init__(message)
-
-
-class SettingsValidationError(ValueError):
-    """2026-09-10 设置保存校验失败（配置解析快速失败 / .env 白名单违规 / 凭据组合不完整）"""
-
-    def __init__(self, message: str):
-        self.message = message
-        super().__init__(message)
+__all__ = [
+    "AnalysisError",
+    "AnalysisNotCompleteError",
+    "GraphReadinessError",
+    "NovelNotFoundError",
+    "SettingsValidationError",
+]

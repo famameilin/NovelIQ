@@ -18,9 +18,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from src.chunking.spans import ParagraphSpan
 from src.storage.db import get_session_factory
 from src.storage.repositories import ParagraphRepository, RunRepository
+from src.text_processing.models import ParagraphSpan
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
 
 
@@ -85,15 +85,7 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
             ],
         )
         session.execute(
-            text(
-                """
-                INSERT INTO global_context (novel_id, novel_title, run_id)
-                VALUES (:novel_id, :novel_title, :run_id)
-                ON CONFLICT (novel_id) DO UPDATE
-                SET novel_title = EXCLUDED.novel_title, run_id = EXCLUDED.run_id
-                """
-            ),
-            {"novel_id": novel_id, "novel_title": "测试小说", "run_id": run_id},
+            text("UPDATE novels SET title=:title WHERE novel_id=:novel"), {"novel": novel_id, "title": "测试小说"}
         )
         session.commit()
 
@@ -196,7 +188,10 @@ class TestNovelUpload:
                 {"run_id_1": "11111111", "run_id_2": "22222222"},
             ).scalar_one()
             annotation_count = session.execute(
-                text("SELECT COUNT(*) FROM chapter_annotations WHERE run_id IN (:run_id_1, :run_id_2)"),
+                text(
+                    "SELECT COUNT(*) FROM analysis_outputs WHERE kind = 'chapter_annotation' "
+                    "AND run_id IN (:run_id_1, :run_id_2)"
+                ),
                 {"run_id_1": "11111111", "run_id_2": "22222222"},
             ).scalar_one()
             graph_count = session.execute(

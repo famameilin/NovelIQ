@@ -1,9 +1,6 @@
 """
 聚合统计响应模型
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（models/responses.py → responses/ 包）
 说明: 自 src/api/models/responses.py 拆出角色统计、叙事结构/情感/风格统计、
 全书波动统计与 token 用量统计响应模型，字段与语义保持不变。
 """
@@ -106,18 +103,19 @@ class TokenUsageSummary(BaseModel):
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
     total_tokens: int = 0
-    accounting_method: Literal["estimated"] = "estimated"
-    coverage_status: Literal["complete", "partial"] = "complete"
+    accounting_method: Literal["reported", "estimated", "unknown"] = "unknown"
+    coverage_status: Literal["recorded_calls", "partial", "unknown"] = "unknown"
+    coverage_scope: str = "实际审计请求及已记录的非 Agent 调用；未记录链路不能推断完整"
 
 
 class TokenUsageByTask(BaseModel):
+    """单个任务/调用类型/模型的 token 用量（三者同一形状，共用本模型）"""
+
     call_count: int
     total_tokens: int
 
 
-class TokenUsageByModel(BaseModel):
-    call_count: int
-    total_tokens: int
+TokenUsageByModel = TokenUsageByTask
 
 
 class TokenUsageStats(BaseModel):

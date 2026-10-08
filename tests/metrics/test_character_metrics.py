@@ -7,15 +7,11 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.metrics.character_metrics import (
     compute_antagonist_strength_gap,
     compute_average_clustering,
-    compute_character_closeness_centrality,
     compute_character_degree_centrality,
-    compute_character_eigenvector_centrality,
     compute_character_function_coverage,
-    compute_clustering_coefficient,
     compute_greimas_coverage,
     compute_largest_component_size,
     compute_number_of_connected_components,
-    compute_protagonist_betweenness,
     compute_relation_change_frequency,
     compute_relation_network_density,
 )
@@ -52,50 +48,6 @@ class TestRelationNetworkDensity(unittest.TestCase):
             node_names=["A", "B", "C", "D"],
         )
         self.assertAlmostEqual(result, 4 / 6, places=6)
-
-
-class TestProtagonistBetweenness(unittest.TestCase):
-    def test_empty_relations(self) -> None:
-        result = compute_protagonist_betweenness([], "主角")
-        self.assertEqual(result, 0.0)
-
-    def test_protagonist_not_in_network(self) -> None:
-        result = compute_protagonist_betweenness([("A", "B")], "主角")
-        self.assertEqual(result, 0.0)
-
-    def test_protagonist_as_bridge(self) -> None:
-        relations = [("主角", "A"), ("主角", "B"), ("A", "B")]
-        result = compute_protagonist_betweenness(relations, "主角")
-        self.assertGreaterEqual(result, 0.0)
-
-
-class TestCharacterClosenessCentrality(unittest.TestCase):
-    def test_empty_relations(self) -> None:
-        result = compute_character_closeness_centrality([])
-        self.assertEqual(result, {})
-
-    def test_single_relation(self) -> None:
-        result = compute_character_closeness_centrality([("A", "B")])
-        self.assertEqual(result["A"], 1.0)
-        self.assertEqual(result["B"], 1.0)
-
-
-class TestCharacterEigenvectorCentrality(unittest.TestCase):
-    def test_empty_relations(self) -> None:
-        result = compute_character_eigenvector_centrality([])
-        self.assertEqual(result, {})
-
-
-class TestClusteringCoefficient(unittest.TestCase):
-    def test_empty_relations(self) -> None:
-        result = compute_clustering_coefficient([])
-        self.assertEqual(result, {})
-
-    def test_triangle_graph(self) -> None:
-        result = compute_clustering_coefficient([("A", "B"), ("B", "C"), ("A", "C")])
-        self.assertEqual(result["A"], 1.0)
-        self.assertEqual(result["B"], 1.0)
-        self.assertEqual(result["C"], 1.0)
 
 
 class TestAverageClustering(unittest.TestCase):

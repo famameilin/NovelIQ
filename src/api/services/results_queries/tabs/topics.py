@@ -7,13 +7,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from src.api.services.results_queries.diagnosis import _fetch_diagnosis
-from src.api.services.results_queries.keywords import compute_keywords
-from src.api.services.results_queries.topic_aggregations import (
-    aggregate_book_topics,
-    aggregate_chapter_topics,
-)
 from src.api.services.results_queries.topics import _fetch_topics
+from src.metrics.queries.keywords import query_keywords as compute_keywords
 from src.storage.repositories import ParagraphRepository, StatsRepository
+from src.topic.queries import aggregate_book_topics, aggregate_chapter_topics
 
 
 def build_topics_overview(run_id: str, session: Session, novel_id: str) -> dict[str, Any]:
@@ -23,7 +20,7 @@ def build_topics_overview(run_id: str, session: Session, novel_id: str) -> dict[
     - 主题词沿用 /topics 的模型工件读取口径（无工件时 words 为空）
     - 分布与 unavailable_reason 以全书聚合为准（章节级同一模型契约）
     - TextRank 关键词与 LDA 口径独立，单独回显不可用原因
-    - topic_labels 只使用按 topic_id 键控的诊断标签；历史数组无法安全对应主题
+    - topic_labels 使用按实际 topic_id 键控的诊断标签
     """
     paragraph_repo = ParagraphRepository(session)
     topics = _fetch_topics(run_id, paragraph_repo)
@@ -39,11 +36,7 @@ def build_topics_overview(run_id: str, session: Session, novel_id: str) -> dict[
         "distribution": book.get("distribution"),
         "chapters": chapters.get("chapters", []),
         "keywords": keywords.get("keywords", []),
-        "topic_labels": (
-            diagnosis.topic_labels
-            if diagnosis is not None and isinstance(diagnosis.topic_labels, dict)
-            else None
-        ),
+        "topic_labels": diagnosis.topic_labels if diagnosis is not None else None,
         "unavailable_reason": book.get("unavailable_reason"),
         "keyword_unavailable_reason": keywords.get("unavailable_reason"),
     }

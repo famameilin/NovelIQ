@@ -11,25 +11,19 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, ToolCall, UsageMetadata
 
 from src.agents.stream_audit import ModelCallTiming
+from src.agents.stream_errors import StreamEmitError
 
 if TYPE_CHECKING:
     from src.agents.stream import AgentStream
 
 logger = logging.getLogger(__name__)
-
-
-def _now_ns() -> int:
-    """2026-10-02 用于经 stream 模块延迟解析计时器：拆分后仍保持对
-    monkeypatch(src.agents.stream.perf_counter_ns) 的实时解析语义不变"""
-    from src.agents.stream import perf_counter_ns
-
-    return perf_counter_ns()
 
 
 def extract_reasoning_content(chunk: Any) -> str:
@@ -157,9 +151,11 @@ class StreamChunkAggregator:
         started_ns: int | None = None,
         skip_output_prefix: str = "",
         announced_tools: set[str] | None = None,
+        clock_ns: Callable[[], int] = time.perf_counter_ns,
     ) -> None:
+        self._clock_ns = clock_ns
         self._stream = stream
-        self._started_ns = started_ns if started_ns is not None else _now_ns()
+        self._started_ns = started_ns if started_ns is not None else self._clock_ns()
         self._content_parts: list[str] = []
         self._reasoning_parts: list[str] = []
         self._tool_call_chunks: list[dict[str, Any]] = []
@@ -196,9 +192,8 @@ class StreamChunkAggregator:
 
     async def add_chunk(self, chunk: Any) -> None:
         """处理单个流式 chunk：提取并推送文本/工具调用增量，累积用量与计时"""
-        from src.agents.stream import StreamEmitError  # 2026-10-02 拆分：延迟导入避免与 stream.py 循环依赖
 
-        now_ns = _now_ns()
+        now_ns = self._clock_ns()
         content = getattr(chunk, "content", "")
         if isinstance(content, str) and content:
             # 断流重试后跳过与上次已推送部分重叠的前缀，避免客户端看到重复输出。
@@ -288,7 +283,7 @@ class StreamChunkAggregator:
 
     def timing(self) -> ModelCallTiming:
         """2026-08-10 用于按采集时间戳计算逐项耗时（毫秒）并记录计时口径备注"""
-        now_ns = _now_ns()
+        now_ns = self._clock_ns()
         reasoning_ms = None
         if self._first_reasoning_ns is not None and self._last_reasoning_ns is not None:
             reasoning_ms = round((self._last_reasoning_ns - self._first_reasoning_ns) / 1_000_000)

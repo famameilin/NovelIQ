@@ -16,10 +16,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.api.models.events import AnalysisEventBus, StreamEvent
 from src.api.routes.sse import sse_endpoint
-from src.api.services.event_manager import event_manager
-from src.api.services.task_manager import TaskManager
+from src.sse.events import StreamEvent
+from src.sse.manager import event_manager
+from src.work.task_manager import TaskManager
+from src.workflows.progress import AnalysisEventBus
 
 
 @pytest.fixture(autouse=True)

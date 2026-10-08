@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from src.chapters.constants import ChapterConfig
-from src.chapters.models import ChapterCandidate, ChapterData, ChapterLevel
-from src.chapters.structure import auto_split, decide_structure, finalize, guess_preliminary_title
+from src.text_processing.chapters.constants import ChapterConfig
+from src.text_processing.chapters.models import ChapterCandidate, ChapterData, ChapterLevel
+from src.text_processing.chapters.structure import auto_split, decide_structure, finalize, guess_preliminary_title
 
 
 def _candidate(
@@ -61,7 +61,7 @@ def test_empty_chapter_kept_in_catalog_with_warning() -> None:
         _candidate(title="第八章", display_title="", number=8, start_char=9),
         _candidate(title="第九章", display_title="", number=9, start_char=13),
     ]
-    with patch("src.chapters.structure.logger.warning") as mock_warning:
+    with patch("src.text_processing.chapters.structure.logger.warning") as mock_warning:
         chapters = _decide(text, candidates)
     assert [ch.title for ch in chapters] == ["第七章", "第八章", "第九章"]
     assert any("第八章" in str(call.args) for call in mock_warning.call_args_list)

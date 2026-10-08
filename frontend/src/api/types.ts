@@ -179,6 +179,25 @@ export interface ChapterMetricsResponse {
   book: BookAggregateStats;
 }
 
+export interface TokenUsageSummary {
+  call_count: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_tokens: number;
+  accounting_method: "reported" | "estimated" | "unknown";
+  coverage_status: "recorded_calls" | "partial" | "unknown";
+  /** 只说明实际记录的范围，不代表完整分析链路 */
+  coverage_scope: string;
+}
+
+export interface TokenUsageStats {
+  summary: TokenUsageSummary;
+  by_task: Record<string, { call_count: number; total_tokens: number }>;
+  by_call_type: Record<string, { call_count: number; total_tokens: number }>;
+  by_model: Record<string, { call_count: number; total_tokens: number }>;
+  coverage_gaps: string[];
+}
+
 export interface GlobalStats {
   total_chapters?: number | null;
   total_chars?: number | null;
@@ -246,7 +265,7 @@ export interface DiagnosisResult {
   cultural_depth_reason?: string | null;
   focus_structure?: "single" | "dual" | "ensemble" | null;
   focus_characters?: string[] | null;
-  topic_labels?: Record<string, string> | string[] | null;
+  topic_labels?: Record<string, string> | null;
   emotion_avg?: number | null;
   lexicon_zero_hit_share?: number | null;
   core_cast?: string[] | null;
@@ -817,7 +836,7 @@ export interface SettingsViewResponse {
   sources: Record<string, SettingSource>;
 }
 
-export interface ModelProviderView {
+export interface EmbeddingModelView {
   base_url: string | null;
   model: string | null;
   api_key: string | null;
@@ -862,15 +881,15 @@ export interface ModelEnvUpdate {
   ltp_model_dir?: string | null;
 }
 
-export type ModelProviderTask = "pool" | "embedding";
+export type AgentModelTask = "pool" | "embedding";
 
-export interface ModelProviderTestRequest {
+export interface AgentModelTestRequest {
   base_url?: string;
   api_key?: string;
   model_id?: string;
 }
 
-export interface ModelProviderTestResponse {
+export interface AgentModelTestResponse {
   ok: boolean;
   latency_ms: number | null;
   model_ids: string[];

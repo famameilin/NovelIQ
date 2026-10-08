@@ -44,6 +44,7 @@ def _as_naive_utc(value: datetime | None) -> datetime | None:
         return value
     return value.astimezone(UTC).replace(tzinfo=None)
 
+
 _UNSET = object()
 T = TypeVar("T")
 
@@ -106,7 +107,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "task_kind": run.task_kind,
             "request_payload": request_payload_dict,
             "cancel_requested": run.cancel_requested,
-            "annotation_cutoff_hash": run.annotation_cutoff_hash,
             "worker_id": run.worker_id,
             "heartbeat_at": _utc_isoformat(run.heartbeat_at),
             "started_at": _utc_isoformat(run.started_at),
@@ -162,24 +162,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             return None
         return self._to_dict_with_deserialization(run)
 
-    def update_run_status(self, run_id: str, status: str) -> None:
-        """
-        更新运行状态
-
-        Args:
-            run_id: 运行ID
-            status: 新状态
-        """
-        now = _naive_utcnow()
-        stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
-        run = self.session.execute(stmt).scalar_one_or_none()
-        if run:
-            run.status = status
-            if status in ("completed", "failed", "cancelled"):
-                run.completed_at = now
-            run.updated_at = now
-            self.session.commit()
-
     def get_runs_by_novel(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取指定小说的所有运行记录
@@ -193,21 +175,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         stmt = select(AnalysisRun).where(AnalysisRun.novel_id == novel_id).order_by(AnalysisRun.created_at.desc())
         runs = self.session.execute(stmt).scalars().all()
         return [self._to_dict_with_deserialization(run) for run in runs]
-
-    def cancel_run(self, run_id: str) -> bool:
-        """原子性设置取消标记（DB 驱动 cancel_requested）。Args: run_id；Returns: 是否成功。"""
-        from sqlalchemy import update
-
-        stmt = (
-            update(AnalysisRun)
-            .where(AnalysisRun.run_id == run_id)
-            .where(AnalysisRun.cancel_requested.is_(False))
-            .values(cancel_requested=True, cancellation_epoch=AnalysisRun.cancellation_epoch + 1,
-                    updated_at=_naive_utcnow())
-        )
-        result = self.session.execute(stmt)
-        self.session.commit()
-        return result.rowcount > 0  # type: ignore[attr-defined]
 
     def request_task_cancellation(self, run_id: str) -> str | None:
         """
@@ -228,7 +195,6 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             .values(
                 status="cancelling",
                 cancel_requested=True,
-                cancellation_epoch=AnalysisRun.cancellation_epoch + 1,
                 updated_at=now,
             )
         )
@@ -405,11 +371,13 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         self.session.flush()
         return True
 
-    def mark_running_as_failed(self, *, stale_before: datetime) -> int:
+    def mark_running_as_failed(self) -> int:
         """
-        将明确可判定为孤儿的 running 任务标记为 failed
+        启动时把所有 running 任务标记为 failed
 
-        仅回收带有 worker 归属且心跳超时的任务，避免新进程误收口其他活跃实例上的真实运行任务
+        任务运行态与 work 队列都只活在进程内，也没有租约或半成品持久态：
+        进程重启后 running 行不存在活着的执行方，必然是孤儿，一律收口。
+        前提是单实例部署——将来两个进程共库时，新进程会终结旧进程正在跑的任务。
 
         Returns:
             受影响的行数
@@ -420,15 +388,14 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "running")
-            .where(AnalysisRun.worker_id.is_not(None))
-            .where(AnalysisRun.heartbeat_at.is_not(None))
-            .where(AnalysisRun.heartbeat_at < stale_before)
             # 2026-08-14 P2-12：孤儿回收同时落 error/completed_at，
             # 前端 failed 不再缺错误原因与完成时间
             .values(
                 status="failed",
-                error="孤儿任务回收（worker 心跳超时）",
+                error="进程重启，运行中的任务已终止",
                 completed_at=now,
+                worker_id=None,
+                heartbeat_at=None,
                 updated_at=now,
             )
         )
@@ -436,14 +403,14 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         self.session.commit()
         count = result.rowcount  # type: ignore[attr-defined]
         if count > 0:
-            logger.info(f"Marked {count} orphaned running task(s) as failed on startup")
+            logger.info(f"Marked {count} running task(s) as failed on startup")
         return count
 
-    def mark_cancelling_as_cancelled(self, *, stale_before: datetime) -> int:
+    def mark_cancelling_as_cancelled(self) -> int:
         """
-        将明确可判定为孤儿的 cancelling 任务收口为 cancelled
+        启动时把所有 cancelling 任务收口为 cancelled
 
-        仅回收带有 worker 归属且心跳超时的任务，避免误终结仍在其他实例中收尾的任务
+        与 running 同理：重启后不存在仍在收尾的执行方，cancelling 只会是死状态
 
         Returns:
             受影响的行数
@@ -454,15 +421,12 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "cancelling")
-            .where(
-                AnalysisRun.worker_id.is_(None)
-                | AnalysisRun.heartbeat_at.is_(None)
-                | (AnalysisRun.heartbeat_at < stale_before)
-            )
             .values(
                 status="cancelled",
                 cancel_requested=False,
                 completed_at=now,
+                worker_id=None,
+                heartbeat_at=None,
                 updated_at=now,
             )
         )
@@ -470,5 +434,5 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         self.session.commit()
         count = result.rowcount  # type: ignore[attr-defined]
         if count > 0:
-            logger.info(f"Marked {count} orphaned cancelling task(s) as cancelled on startup")
+            logger.info(f"Marked {count} cancelling task(s) as cancelled on startup")
         return count

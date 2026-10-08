@@ -10,7 +10,7 @@ def test_reasoning_content_patch_preserves_delta_reasoning() -> None:
     import langchain_openai.chat_models.base as base
     from langchain_core.messages import AIMessageChunk
 
-    from src.agents.llm import _install_reasoning_content_patch
+    from src.model_pool.llm import _install_reasoning_content_patch
 
     _install_reasoning_content_patch()
 

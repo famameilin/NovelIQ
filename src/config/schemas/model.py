@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
-from src.runtime_env import ModelEnvironment
+from src.config.runtime_env import ModelEnvironment
 
 
 @dataclass
@@ -52,7 +52,7 @@ class TaskModelSettings:
     allow_future_context: bool = True
     # 2026-10-02 恢复（随章内三子代理路径加回）：章正文超过该字数派发三条职责 subagent 并发，
     # 不超线走单 agent 路径（派发点在 PipelineAgentExecutor.execute）
-    sub_chunk_max_chars: int = 5000
+    sub_chunk_max_chars: int = 3500
 
 
 @dataclass
@@ -239,7 +239,7 @@ def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings
         max_iterations=_positive_integer(json_data, "max_iterations", 10),
         total_attempts=_positive_integer(json_data, "total_attempts", 3),
         allow_future_context=json_data.get("allow_future_context", True),
-        sub_chunk_max_chars=_positive_integer(json_data, "sub_chunk_max_chars", 5000),
+        sub_chunk_max_chars=_positive_integer(json_data, "sub_chunk_max_chars", 3500),
     )
 
 

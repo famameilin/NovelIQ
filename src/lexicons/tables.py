@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.config.constants import LEXICON_FILES
+from src.lexicons.constants import LEXICON_FILES
+from src.lexicons.parser import parse_semantic_category_lexicon
 from src.lexicons.registry import LexiconRegistry
-from src.metrics.style_metrics import parse_semantic_category_lexicon
 
 _registry = LexiconRegistry()
 _registry.load()

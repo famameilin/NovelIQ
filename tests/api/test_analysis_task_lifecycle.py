@@ -18,14 +18,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from src.api.models.events import AnalysisEventBus, StreamEvent
 from src.api.routes import analysis as analysis_mod
-from src.api.services.analysis.error_handler import AnalysisErrorHandler
-from src.api.services.analysis_service import AnalysisService, CancellationStateCheckError
-from src.api.services.task_application_service import cleanup_task_runtime_before_delete
-from src.api.services.task_manager import TaskManager
+from src.sse.events import StreamEvent
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
+from src.work.task_manager import TaskManager
+from src.workflows.analysis.error_handler import AnalysisErrorHandler
+from src.workflows.application import cleanup_task_runtime_before_delete
+from src.workflows.progress import AnalysisEventBus
+from src.workflows.service import AnalysisService, CancellationStateCheckError
 from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
 
 
@@ -184,15 +185,8 @@ class TestDeleteAnalysis:
                 {"chapter_id": 1, "text": "待删除分块", "len": 5, "run_id": run_id},
             )
             session.execute(
-                text(
-                    """
-                    INSERT INTO global_context (novel_id, novel_title, run_id)
-                    VALUES (:novel_id, :novel_title, :run_id)
-                    ON CONFLICT (novel_id) DO UPDATE
-                    SET novel_title = EXCLUDED.novel_title, run_id = EXCLUDED.run_id
-                    """
-                ),
-                {"novel_id": novel_id, "novel_title": "待删除小说", "run_id": run_id},
+                text("UPDATE novels SET title = :title WHERE novel_id = :novel_id"),
+                {"novel_id": novel_id, "title": "待删除小说"},
             )
             session.commit()
 
@@ -214,14 +208,8 @@ class TestDeleteAnalysis:
                 text("SELECT COUNT(*) FROM chapters WHERE run_id = :run_id AND text IS NOT NULL"),
                 {"run_id": run_id},
             ).scalar_one()
-            remaining_context = session.execute(
-                text("SELECT COUNT(*) FROM global_context WHERE run_id = :run_id"),
-                {"run_id": run_id},
-            ).scalar_one()
-
         assert remaining_run == 0
         assert remaining_chapters == 0
-        assert remaining_context == 0
         assert not log_dir.exists()
         assert not output_file.exists()
 
@@ -308,7 +296,7 @@ class TestExecutionClaimResumeRace:
     @staticmethod
     def _make_service(db_session: Session) -> AnalysisService:
         return AnalysisService(
-            novel_service=MagicMock(),
+            task_service=MagicMock(),
             task_manager=TaskManager(worker_id="worker-new"),
             session_factory=_ClaimSessionFactory(db_session),
         )
@@ -413,7 +401,7 @@ class TestCancellationStateCheck:
                 return BrokenDbSession()
 
         service = AnalysisService(
-            novel_service=MagicMock(),
+            task_service=MagicMock(),
             task_manager=TaskManager(),
             session_factory=BrokenSessionFactory(),
         )
@@ -435,7 +423,7 @@ class TestAnalysisErrorHandler:
         run_repo = RunRepository(db_session)
         run_id = run_repo.create_run(novel_id="novel001")
         handler = AnalysisErrorHandler(
-            novel_service=MagicMock(),
+            task_service=MagicMock(),
             task_manager=MagicMock(),
         )
 
@@ -466,7 +454,7 @@ class TestAnalysisErrorHandler:
         task_manager = TaskManager()
         task_manager.create_task(run_id[:8], "novel001")
         handler = AnalysisErrorHandler(
-            novel_service=MagicMock(),
+            task_service=MagicMock(),
             task_manager=task_manager,
         )
 
@@ -488,21 +476,21 @@ class TestAnalysisErrorHandler:
     @pytest.mark.asyncio
     async def test_handle_success_invalidates_shared_metrics_service_cache(self, db_session):
         """测试成功收口会失效依赖注入单例上的聚合缓存，而不是新建临时实例。"""
+        from src.api.dependencies import get_metrics_service, invalidate_metrics_cache
+
         _insert_test_novel("novel001", session=db_session)
         run_repo = RunRepository(db_session)
         run_id = run_repo.create_run(novel_id="novel001")
 
-        task_manager = TaskManager()
+        task_manager = TaskManager(run_completed_callback=invalidate_metrics_cache)
         task_manager.create_task(run_id[:8], "novel001")
         handler = AnalysisErrorHandler(
-            novel_service=MagicMock(),
+            task_service=MagicMock(),
             task_manager=task_manager,
         )
 
-        from src.api.dependencies import get_metrics_service
-
         metrics_service = get_metrics_service()
-        metrics_service._cache[metrics_service._get_cache_key(run_id)] = (("cached",), 9999999999.0)
+        metrics_service.query._cache[run_id] = (("cached",), 9999999999.0)
 
         await handler.handle_success(
             task_id=run_id[:8],
@@ -514,7 +502,7 @@ class TestAnalysisErrorHandler:
             bus=None,
         )
 
-        assert metrics_service._get_from_cache(run_id) is None
+        assert run_id not in metrics_service.query._cache
 
     @pytest.mark.asyncio
     async def test_handle_success_persists_progress_100_and_completed_at(self, db_session):
@@ -530,7 +518,7 @@ class TestAnalysisErrorHandler:
         task_manager = TaskManager()
         task_manager.create_task(run_id[:8], "novel001")
         handler = AnalysisErrorHandler(
-            novel_service=MagicMock(),
+            task_service=MagicMock(),
             task_manager=task_manager,
         )
 
@@ -663,7 +651,7 @@ class TestAnalysisEventBus:
         task_manager.update_task.side_effect = RuntimeError("db write failed")
         bus = AnalysisEventBus("task-1", task_manager)
 
-        with patch("src.api.services.event_manager.event_manager.send", new=AsyncMock()):
+        with patch("src.sse.manager.event_manager.send", new=AsyncMock()):
             with pytest.raises(RuntimeError, match="db write failed"):
                 await bus.emit(
                     StreamEvent(

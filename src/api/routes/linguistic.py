@@ -1,13 +1,4 @@
-"""语言结构基础数据查询端点（《分析能力扩展路线图》§3.3 B/C 赛道 API）
-
-聚合端点：
-- GET /{novel_id}/linguistic/features?level=book|chapter 词性/词长/句式/依存聚合
-- GET /{novel_id}/linguistic/entities                 LTP 实体候选（审核面数据源）
-- GET /{novel_id}/linguistic/phrases                  固定短语命中统计
-- GET /{novel_id}/linguistic/word2vec                 词向量契约 + POS 覆盖率与质心
-
-全部复合结果查询时计算；语言阶段未运行时返回 unavailable_reason。
-"""
+"""语言结构基础数据查询端点（《分析能力扩展路线图》§3.3 B/C 赛道）"""
 
 from __future__ import annotations
 
@@ -32,7 +23,7 @@ from src.api.models.responses import (
     LinguisticPhrasesResponse,
     Word2VecStatsResponse,
 )
-from src.api.services.results_queries.linguistic import (
+from src.linguistic.queries import (
     aggregate_linguistic_features,
     aggregate_phrase_stats,
     fetch_entity_candidates,

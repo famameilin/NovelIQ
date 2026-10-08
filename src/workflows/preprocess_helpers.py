@@ -40,8 +40,7 @@ def _load_all_lexicons_for_preprocess() -> dict[str, list[str] | dict[str, Any]]
     lexicons["imagery"] = IMAGERY_TERMS
     # 2026-09-05 C 批：身体反应转喻（独立命中计数，不进正负极性）
     lexicons["body_reaction"] = BODY_REACTION_TERMS
-    # 战斗词条用于 fight_density（tension_proxy 只取词条键，
-    # 权重不参与密度计算，统一按 1.0 登记）
+    # 战斗词条用于 fight_density，只取词条键，权重不参与密度计算，统一按 1.0 登记
     lexicons["fight_terms"] = dict.fromkeys(COMBAT_TERMS, 1.0)
     # 段落情绪分子（§5.3 positive/negative_weight_sum）：加权词表（v3 过渡期，
     # M4 弃用权重后改词条集合统一 1.0）

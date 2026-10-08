@@ -65,13 +65,6 @@ class TestLexiconRegistryLoad:
 # ====================================================================
 
 
-class TestVersionHash:
-    def test_hash_is_deterministic(self, registry):
-        h1 = registry.version_hash()
-        h2 = registry.version_hash()
-        assert h1 == h2
-
-
 # ====================================================================
 # 4. 多模式匹配
 # ====================================================================

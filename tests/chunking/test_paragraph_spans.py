@@ -9,7 +9,8 @@
 
 from __future__ import annotations
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs, split_paragraphs
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs, split_paragraphs
 
 
 def test_split_paragraphs_basic_identity() -> None:

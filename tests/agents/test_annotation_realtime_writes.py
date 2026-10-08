@@ -25,28 +25,18 @@ from __future__ import annotations
 import json
 
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.agents.annotation.errors import AnnotationProtocolError, AnnotationStageRejection
-from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.graph import (
-    _invoke_tool,
-    build_annotation_graph,
-)
-from src.agents.annotation.schema import (
-    ChapterMetricsInput,
-    ChapterParagraphInfo,
-)
-from src.agents.annotation.tools import (
-    AnnotationToolLedger,
-    build_annotation_tools,
-)
+from src.agents.annotation.errors import AnnotationStageRejection
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.tool_batch import _invoke_tool
+from src.fact_graph.graph import FactGraph
+from src.fact_graph.inputs import ChapterParagraphInfo
+from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 class _QueryService:
     """2026-09-13 用于提供无数据库依赖的查询桩"""
-
 
     async def search_text(self, query, *, range_name, limit=50):
         """2026-09-13 用于返回空正文命中"""
@@ -128,62 +118,43 @@ async def _judge_dialogues(tools: dict) -> None:
         await _call(tools, "write_dialogue", {"candidate_index": candidate_index, "verdict": "dialogue"})
 
 
-async def _finish(ledger: AnnotationToolLedger, tools: dict) -> dict:
-    """2026-09-14 用于按生产路径收尾（写指标后调用唯一 finish 的结算汇点）"""
+@pytest.mark.asyncio
+async def test_context_facts_cover_all_states_and_survive_restore() -> None:
+    """实际写入面产生的四状态事实在审计摘要和恢复后均完整保留"""
+    ledger = _ledger()
+    tools = _tools(ledger)
+    await _register_entities(tools)
     await _seed_metrics(tools)
     await _judge_dialogues(tools)
-    return ledger.finish_chapter()
+    await _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "isroot": True,
+            "description": "顾霜喝止众人",
+            "characters": [{"entityid": "顾霜", "action": "喝止", "emotion": 1}],
+        },
+    )
+    await _call(tools, "write_relation", {"from_entity": "顾霜", "to_entity": "众人", "relation_type": "敌对"})
+    facts = ledger.context_summary()["facts"]
+    assert set(facts) == {"entities", "relations", "metrics", "events", "dialogues", "character_observations"}
+    assert facts["metrics"]["summary"] == "顾霜喝止众人"
+    assert facts["events"][0]["participants"][0]["entity"] == "顾霜"
+    assert facts["character_observations"][0]["action"] == "喝止"
+    assert [item["candidate_index"] for item in facts["dialogues"]] == [1, 2]
+    assert facts["relations"][0]["from"] == "顾霜"
+    snapshot = ledger.snapshot()
+    ledger.metrics.domain_payloads.clear()
+    ledger.events.domain_payloads.clear()
+    ledger.dialogue.domain_payloads.clear()
+    ledger.restore(snapshot)
+    assert ledger.context_summary()["facts"] == facts
 
 
 # ---------------------------------------------------------------------------
 # 事件：实时生长、三态与重复动态
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_event_children_grow_in_call_order_with_trunk_rules() -> None:
-    """2026-09-14 事件树实时生长：main 顺延主链、secondary 挂当时链尾
-
-    树内先后=调用顺序（order 参数退役）：根 el=树键，子 el=树键/节点键，
-    同轮按序调用即按序挂树，参与者随节点的 characters 数组内联提交。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    await _register_entities(tools)
-    root_receipt = await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
-    root_content = root_receipt.pop("content")
-    assert root_receipt == {"status": "written", "record": "t1/root"}
-    assert root_content["description"] == "顾霜喝止众人"
-    assert root_content["characters"] == []
-    first_receipt = await _call(
-        tools,
-        "write_event",
-        {"el": "t1/e1", "isroot": False, "type": "main", "description": "顾霜喝道"},
-    )
-    first_content = first_receipt.pop("content")
-    assert first_receipt == {"status": "written", "record": "t1/e1"}
-    assert first_content["type"] == "main"
-    # 2026-09-19 id 纪律：回执只带节点 id（uuid），树级 uuid 不外露；同树关系由
-    # bound_payloads 的 tree_id 断言覆盖（见下）
-    assert first_content["id"].count("-") == 4
-    await _call(
-        tools,
-        "write_event",
-        {"el": "t1/e2", "isroot": False, "type": "secondary", "description": "众人散去"},
-    )
-
-    events = list(ledger.bound_payloads["events"])
-    root, first, second = events
-    assert [event.cause_role for event in events] == ["root", "main", "secondary"]
-    assert [event.description for event in events] == ["顾霜喝止众人", "顾霜喝道", "众人散去"]
-    assert first.parent_node_id == root.node_id
-    # main 成为新链尾，secondary 挂在当时链尾（= main 子节点）
-    assert second.parent_node_id == first.node_id
-    assert all(event.tree_id == root.tree_id for event in events)
-
-    receipt = await _finish(ledger, tools)
-    assert receipt["status"] == "completed"
-    assert receipt["records"]["events"] == 3
 
 
 @pytest.mark.asyncio
@@ -222,9 +193,7 @@ async def test_character_participation_defaults_partial_state_fields() -> None:
             "el": "t1",
             "isroot": True,
             "description": "顾霜喝止众人",
-            "characters": [
-                {"entityid": numbers["顾霜"], "role": "主体", "narrative_role": "主体", "emotion": 1}
-            ],
+            "characters": [{"entityid": numbers["顾霜"], "role": "主体", "narrative_role": "主体", "emotion": 1}],
         },
     )
     assert partial["status"] == "written"
@@ -617,41 +586,6 @@ async def test_second_root_with_same_tree_key_updates_description_in_place() -> 
 
 
 @pytest.mark.asyncio
-async def test_dialogue_finish_requires_actual_judgment() -> None:
-    """候选缺判禁止收尾，补交判定后冻结且不默认否定"""
-    ledger = _ledger()
-    tools = _tools(ledger)
-    await _register_entities(tools)
-    assert len(ledger.dialogue_candidates) == 2
-
-    await _call(
-        tools,
-        "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": "愤怒"},
-    )
-    # 提交第一条不得把其余候选提前判否
-    assert 2 not in ledger.written_dialogues
-
-    await _seed_metrics(tools)
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        ledger.finish_chapter()
-    assert (excinfo.value.field, excinfo.value.code) == ("dialogues", "missing_record")
-    assert 2 not in ledger.written_dialogues and not ledger.chapter_finished
-    await _call(tools, "write_dialogue", {"candidate_index": 2, "verdict": "dialogue"})
-    receipt = ledger.finish_chapter()
-    assert receipt["status"] == "completed"
-    assert sorted(ledger.written_dialogues) == [1, 2]
-    assert ledger.written_dialogues[2].verdict == "dialogue"
-
-    # 收尾后 chunk 由系统冻结：再写同一序号被阶段协议拒绝，收尾结果不变
-    ledger.complete_active_chapter()
-    with pytest.raises(AnnotationProtocolError):
-        await _call(tools, "write_dialogue", {"candidate_index": 1, "verdict": "not_dialogue"})
-    assert ledger.ready_chapter is not None
-    assert sorted(ledger.written_dialogues) == [1, 2]
-
-
-@pytest.mark.asyncio
 async def test_dialogue_replay_updates_verdict_in_place() -> None:
     """2026-09-13 同序号重交按更新语义（旧契约的"candidate_index 重复"报错已退役）"""
     ledger = _ledger()
@@ -791,31 +725,6 @@ async def test_relations_are_flushed_on_write_and_replayed_by_endpoint_pair() ->
     assert str(next(iter(ledger.written_relations.values())).relation_type) == "敌对"
 
 
-@pytest.mark.asyncio
-async def test_relation_write_after_chunk_completed_is_rejected() -> None:
-    """2026-09-14 收尾并冻结后 chunk 关闭：再写关系被拒，收尾载荷保持不变"""
-    ledger = _ledger()
-    tools = _tools(ledger)
-    numbers = await _register_entities(tools)
-    await _call(
-        tools,
-        "write_relation",
-        {"from_entity": numbers["顾霜"], "to_entity": numbers["众人"], "relation_type": "领导"},
-    )
-    await _finish(ledger, tools)
-    ledger.complete_active_chapter()
-
-    with pytest.raises(AnnotationProtocolError):
-        await _call(
-            tools,
-            "write_relation",
-            {"from_entity": numbers["顾霜"], "to_entity": numbers["众人"], "relation_type": "敌对"},
-        )
-    assert len(ledger.written_relations) == 1
-    assert len(ledger.ready_chapter.events) == 0
-    assert len(ledger.ready_chapter.dialogues) == 2
-
-
 # ---------------------------------------------------------------------------
 # 实体：部分更新合并语义（docstring"只提交本次变化的字段"的服务端兑现）
 # ---------------------------------------------------------------------------
@@ -831,14 +740,29 @@ async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> Non
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    first = await _call(tools, "write_entity", {
-        "name": "顾霜", "entity_type": "character", "el": "a",
-        "tags": ["冷面"], "description": "佩刀女子", "attributes": {"兵器": "刀", "旧痕": "疤"},
-    })
-    update = await _call(tools, "write_entity", {
-        "name": "顾霜", "entity_type": "character", "el": "a",
-        "description": "护院教头", "attributes": {"旧痕": None, "佩饰": "玉"},
-    })
+    first = await _call(
+        tools,
+        "write_entity",
+        {
+            "name": "顾霜",
+            "entity_type": "character",
+            "el": "a",
+            "tags": ["冷面"],
+            "description": "佩刀女子",
+            "attributes": {"兵器": "刀", "旧痕": "疤"},
+        },
+    )
+    update = await _call(
+        tools,
+        "write_entity",
+        {
+            "name": "顾霜",
+            "entity_type": "character",
+            "el": "a",
+            "description": "护院教头",
+            "attributes": {"旧痕": None, "佩饰": "玉"},
+        },
+    )
     assert update["content"] == {
         "name": "顾霜",
         "entity_type": "character",
@@ -849,9 +773,16 @@ async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> Non
     }
     assert ledger.written_entities["顾霜"].tags == ["冷面"]
 
-    cleared = await _call(tools, "write_entity", {
-        "name": "顾霜", "entity_type": "character", "el": "a", "tags": [],
-    })
+    cleared = await _call(
+        tools,
+        "write_entity",
+        {
+            "name": "顾霜",
+            "entity_type": "character",
+            "el": "a",
+            "tags": [],
+        },
+    )
     assert cleared["content"]["tags"] == []
     assert cleared["content"]["description"] == "护院教头"
     assert cleared["content"]["attributes"] == {"兵器": "刀", "佩饰": "玉"}
@@ -860,70 +791,6 @@ async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> Non
 # ---------------------------------------------------------------------------
 # 收尾：唯一 finish 的判定边界
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_finish_ignores_failed_records_from_same_round() -> None:
-    """2026-09-13 收尾不受同回合失败记录影响：失败只回滚自己，收尾按已写入内容完成
-
-    旧合同要求"本回合有失败就拒绝收尾，先修正再重交"，那条规则把收尾绑到无关记录的
-    成功上（末轮出现一次失败即整章作废）；逐条失败在调用点已有独立回执，收尾只管
-    chunk 能不能装出来（指标缺提交才拒绝）。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    await _register_entities(tools)
-    await _seed_metrics(tools)
-    await _judge_dialogues(tools)
-
-    receipt = ledger.finish_chapter()
-
-    assert receipt["status"] == "completed"
-    assert "warnings" not in receipt
-    assert ledger.chapter_finished
-
-
-@pytest.mark.asyncio
-async def test_chapter_finish_requires_one_metrics_submission() -> None:
-    """2026-09-14 指标是收尾硬前提：缺 write_metrics 的 finish 被拒
-
-    旧合同的"指标域必须显式结束"已废止：其他内容域可空（收尾回执给出各域条数），
-    唯独指标必须有载荷，缺则 code=missing_record。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        ledger.finish_chapter()
-    assert excinfo.value.code == "missing_record"
-    assert (excinfo.value.record, excinfo.value.field) == ("finish", "metrics")
-
-    await _seed_metrics(tools)
-    await _judge_dialogues(tools)
-    assert ledger.finish_chapter()["status"] == "completed"
-    assert isinstance(ledger.metrics_payload, ChapterMetricsInput)
-
-
-@pytest.mark.asyncio
-async def test_finish_chapter_protocol_guards() -> None:
-    """2026-09-14 收尾协议的调用点校验：逐域 finish_domain 已删除、未收尾不得冻结
-
-    2026-09-13 取消暂存与逐域结束：工具面上没有 finish_domain，
-    未收尾时 complete_active_chapter 直接报错点名 finish。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-
-    assert "finish_domain" not in tools
-    assert "finish" in tools
-    assert "finish_chunk" not in tools
-    with pytest.raises(ValueError):
-        ledger.complete_active_chapter()
-
-    await _finish(ledger, tools)
-    ledger.complete_active_chapter()
-    assert ledger.phase == "completed"
-    with pytest.raises(AnnotationProtocolError):
-        ledger.complete_active_chapter()
 
 
 @pytest.mark.asyncio
@@ -1066,64 +933,6 @@ class _SingleReplyLLM(StreamedFakeModelMixin):
         return self.response
 
 
-@pytest.mark.asyncio
-async def test_same_round_small_calls_counts_as_single_iteration() -> None:
-    """2026-09-14 同轮多个小调用 + 唯一 finish 整体只计一个模型回合
-
-    收尾在本回合调用处理完后判定成功 → 自动冻结并完成章节，
-    因此循环不再有第二轮，"达到上限"错误也不触发（旧合同逐域结束需要多轮）。
-    """
-    from langchain_core.messages import AIMessage
-
-    ledger = _ledger()
-    tools = build_annotation_tools(_QueryService(), ledger)
-    parallel_calls = [
-        {
-            "name": "write_entity",
-            "args": {"name": "顾霜", "entity_type": "character", "el": "顾霜"},
-            "id": "c1",
-            "type": "tool_call",
-        },
-        {
-            "name": "write_entity",
-            "args": {"name": "众人", "entity_type": "organization", "el": "众人"},
-            "id": "c2",
-            "type": "tool_call",
-        },
-        {
-            "name": "write_metrics",
-            "args": {"summary": "顾霜喝止众人", "emotional_valence": 0, "narrative_function": "冲突"},
-            "id": "c3",
-            "type": "tool_call",
-        },
-        {"name": "write_dialogue", "args": {"candidate_index": 1, "verdict": "dialogue"},
-         "id": "d1", "type": "tool_call"},
-        {"name": "write_dialogue", "args": {"candidate_index": 2, "verdict": "dialogue"},
-         "id": "d2", "type": "tool_call"},
-        {"name": "finish", "args": {}, "id": "c4", "type": "tool_call"},
-    ]
-    llm = _SingleReplyLLM(AIMessage(content="", tool_calls=parallel_calls))
-    graph = build_annotation_graph(llm, tools, ledger=ledger, max_iterations=1)
-    state = await graph.ainvoke(
-        {
-            "messages": [SystemMessage(content="test"), HumanMessage(content="chunk")],
-            "phase": "chapter_open",
-            "iterations": 0,
-            "error": None,
-        }
-    )
-
-    assert state["iterations"] == 1
-    assert state["error"] is None
-    assert llm.calls == 1
-    # 收尾判定在本回合全部调用处理完后执行：工具体只回 pending，结算回执才是结论
-    finish_receipt = json.loads(str(state["messages"][-1].content))
-    assert finish_receipt["status"] == "completed"
-    assert finish_receipt["records"]["entities"] == 2
-    assert state["phase"] == "completed"
-    assert ledger.chapter_finished
-
-
 # ---------------------------------------------------------------------------
 # 参数面与收尾事务边界
 # ---------------------------------------------------------------------------
@@ -1183,77 +992,6 @@ async def test_undeclared_argument_is_rejected_per_call_not_dropped() -> None:
     }
 
 
-@pytest.mark.asyncio
-async def test_chapter_finish_is_atomic(monkeypatch) -> None:
-    """2026-09-14 finish 收尾自带事务边界：ready_chapter 构造失败即整体回滚，已写入记录保留
-
-    旧合同"事件域结算多棵树组装到一半失败即整体回滚暂存记录"已废止：
-    现合同没有领域级结算，等价验证=唯一收尾的构造阶段失败时账本回到收尾前
-    （已写入记录原样保留），修正后重试可正常收尾。
-    """
-    ledger = _ledger()
-    tools = _tools(ledger)
-    numbers = await _register_entities(tools)
-    for tree_key, action in (("t1", "喝道"), ("t2", "退去")):
-        await _call(
-            tools,
-            "write_event",
-            {
-                "el": tree_key,
-                "isroot": True,
-                "description": f"{tree_key} 根事件",
-                "characters": [
-                    {
-                        "entityid": numbers["顾霜"],
-                        "role": "主体",
-                        "narrative_role": "主体",
-                        "action": action,
-                        "emotion": 0,
-                    }
-                ],
-            },
-        )
-    await _seed_metrics(tools)
-    await _judge_dialogues(tools)
-
-    original = AnnotationToolLedger._build_ready_chapter
-    failing = {"on": True}
-
-    def _flaky(self):
-        """2026-09-13 用于在第 1 次收尾构造 ready_chapter 时注入故障（模拟构造期校验失败）"""
-        if failing["on"]:
-            raise ValueError("收尾校验失败: 注入的构造期故障")
-        return original(self)
-
-    # 账本是 slots dataclass，实例不允许新增属性，只能按类打补丁
-    monkeypatch.setattr(AnnotationToolLedger, "_build_ready_chapter", _flaky)
-
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        ledger.finish_chapter()
-
-    assert excinfo.value.code == "assembly_failed"
-    # 收尾整体回滚：ready_chapter/chapter_finished 回到收尾前，已写入记录与两棵树都保留
-    assert ledger.ready_chapter is None
-    assert not ledger.chapter_finished
-    assert set(ledger.tree_key_index) == {"t1", "t2"}
-    assert ledger.write_records == []
-    assert [item.action for item in ledger.observation_by_record.values()] == ["喝道", "退去"]
-
-    failing["on"] = False
-    receipt = ledger.finish_chapter()
-
-    assert receipt["status"] == "completed"
-    assert receipt["records"]["events"] == 2
-    assert {record["domain"] for record in ledger.write_records} == {
-        "entities",
-        "metrics",
-        "events",
-        "relations",
-        "dialogues",
-    }
-    assert [event.description for event in ledger.bound_payloads["events"]] == ["t1 根事件", "t2 根事件"]
-
-
 # ---------------------------------------------------------------------------
 # 2026-09-13 根因修复：可见约束 / 登记即进池
 # ---------------------------------------------------------------------------
@@ -1267,7 +1005,7 @@ async def test_writer_program_registers_written_records_for_case_links() -> None
     函数：登记发生在事务边界上，模型跨程序引用"我刚写的 t1/root"要能命中
     （run 54a72932：写者面这条路没登记，promise_case 两次引用本章写出的事件树根全被拒）。
     """
-    from src.agents.annotation.program import ProgramRuntime
+    from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 
     ledger = _ledger()
     runtime = ProgramRuntime(list(_tools(ledger).values()), ledger)

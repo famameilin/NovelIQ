@@ -13,22 +13,21 @@ API 分析端点测试
 
 import tempfile
 import uuid
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
+from src.api.dependencies import get_task_manager, get_task_service
 from src.api.exceptions import NovelNotFoundError
-from src.api.models.requests import ReanalyzeRequest
 from src.api.routes import analysis as analysis_mod
-from src.api.services import task_application_service as task_application_mod
-from src.api.services.novel_service import NovelService
-from src.api.services.task_manager import TaskManager
 from src.storage.database_url import resolve_database_url_from_env
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
+from src.work.task_manager import TaskManager
+from src.workflows import application as task_application_mod
+from src.workflows.schemas import ReanalyzeRequest
 from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
 
 
@@ -71,18 +70,6 @@ class TestRunTimestampContract:
         assert persisted.tzinfo is None
         delta = abs((datetime.now(UTC).replace(tzinfo=None) - persisted).total_seconds())
         assert delta < 5, f"completed_at 与当前时刻偏差过大（可能仍被时区污染）: {delta}s"
-
-    def test_update_run_status_completed_at_is_consistent_with_started_at(self, api_client: TestClient):
-        """验证 update_run_status 终态时间与 started_at 同口径，无 8 小时跨度假象"""
-        _insert_test_novel("tz_run2")
-        with get_session_factory()() as session:
-            run_repo = RunRepository(session)
-            run_id = run_repo.create_run(novel_id="tz_run2", title="tz-regression-2")
-            run_repo.update_run_status(run_id, "completed")
-            run = run_repo.get_run(run_id)
-        assert run["started_at"] is None
-        assert run["completed_at"] is not None and run["completed_at"].endswith("Z")
-        assert run["updated_at"] is not None and run["updated_at"].endswith("Z")
 
 
 class TestAnalysis:
@@ -152,11 +139,11 @@ class TestAnalysis:
             def get_task(self, task_id: str):
                 raise NovelNotFoundError(message=f"db task missing: {task_id}")
 
-        api_client.app.dependency_overrides[analysis_mod.get_novel_service] = lambda: MissingTaskNovelService()
+        api_client.app.dependency_overrides[analysis_mod.get_task_service] = lambda: MissingTaskNovelService()
         try:
             response = api_client.get("/api/novels/novel-1/tasks/memory123/status")
         finally:
-            api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
+            api_client.app.dependency_overrides.pop(analysis_mod.get_task_service, None)
         assert response.status_code == 404
 
     def test_get_task_status_returns_500_when_db_query_fails(self, api_client: TestClient):
@@ -166,16 +153,16 @@ class TestAnalysis:
             def get_task(self, task_id: str):
                 raise RuntimeError(f"db unavailable for {task_id}")
 
-        api_client.app.dependency_overrides[analysis_mod.get_novel_service] = lambda: BrokenNovelService()
+        api_client.app.dependency_overrides[analysis_mod.get_task_service] = lambda: BrokenNovelService()
         try:
             with (
-                patch("src.api.main._recover_orphaned_tasks", return_value=(0, 0)),
-                patch("src.api.main._resume_pending_tasks", new=AsyncMock(return_value=(0, 0))),
+                patch("src.api.main.recover_orphaned_runs", return_value=(0, 0)),
+                patch("src.api.main.resume_pending_tasks", new=AsyncMock(return_value=(0, 0))),
                 TestClient(api_client.app, raise_server_exceptions=False) as client,
             ):
                 response = client.get("/api/novels/novel-1/tasks/broken123/status")
         finally:
-            api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
+            api_client.app.dependency_overrides.pop(analysis_mod.get_task_service, None)
         assert response.status_code == 500
 
     def test_list_tasks_returns_500_when_db_query_fails(self, api_client: TestClient):
@@ -185,16 +172,16 @@ class TestAnalysis:
             def get_tasks_by_novel(self, novel_id: str):
                 raise RuntimeError(f"db unavailable for {novel_id}")
 
-        api_client.app.dependency_overrides[analysis_mod.get_novel_service] = lambda: BrokenNovelService()
+        api_client.app.dependency_overrides[analysis_mod.get_task_service] = lambda: BrokenNovelService()
         try:
             with (
-                patch("src.api.main._recover_orphaned_tasks", return_value=(0, 0)),
-                patch("src.api.main._resume_pending_tasks", new=AsyncMock(return_value=(0, 0))),
+                patch("src.api.main.recover_orphaned_runs", return_value=(0, 0)),
+                patch("src.api.main.resume_pending_tasks", new=AsyncMock(return_value=(0, 0))),
                 TestClient(api_client.app, raise_server_exceptions=False) as client,
             ):
                 response = client.get("/api/novels/novel-1/tasks")
         finally:
-            api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
+            api_client.app.dependency_overrides.pop(analysis_mod.get_task_service, None)
         assert response.status_code == 500
 
     def test_resume_pending_task_success(self, api_client: TestClient):
@@ -209,9 +196,8 @@ class TestAnalysis:
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
         # 直接创建 pending 任务，不触发自动分析，确保 resume 语义稳定可测。
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         task_id = service.create_task(novel_id)
         with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
             resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
@@ -231,9 +217,9 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        service = NovelService(upload_dir=Path("data/uploads"))
+        service = get_task_service()
         with patch(
-            "src.api.services.novel_service.RunRepository.create_run",
+            "src.workflows.tasks.RunRepository.create_run",
             side_effect=RuntimeError("db unavailable"),
         ):
             with pytest.raises(RuntimeError, match="db unavailable"):
@@ -250,9 +236,8 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         task_id = service.create_task(novel_id)
         response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         assert response.status_code == 200
@@ -281,9 +266,8 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         task_id = service.create_task(novel_id)
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
@@ -315,21 +299,22 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         task_id = service.create_task(novel_id)
         task_manager = TaskManager()
         task_manager.create_task(task_id, novel_id)
-        api_client.app.dependency_overrides[analysis_mod.get_task_manager] = lambda: task_manager
+        api_client.app.dependency_overrides[analysis_mod.get_task_application_service] = lambda: (
+            task_application_mod.TaskApplicationService(get_task_service(), task_manager)
+        )
         try:
             with patch(
-                "src.api.services.task_application_service.RunRepository.request_task_cancellation",
+                "src.workflows.application.RunRepository.request_task_cancellation",
                 side_effect=RuntimeError("db write failed"),
             ):
                 response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         finally:
-            api_client.app.dependency_overrides.pop(analysis_mod.get_task_manager, None)
+            api_client.app.dependency_overrides.pop(analysis_mod.get_task_application_service, None)
         assert response.status_code == 500
         assert response.json()["detail"] == "任务取消持久化失败，请稍后重试"
         task_info = task_manager.get_task(task_id)
@@ -349,9 +334,8 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         task_id = service.create_task(novel_id)
 
         def _simulate_other_worker_finished(_task_id: str) -> bool:
@@ -389,9 +373,8 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         task_id = service.create_task(novel_id)
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
@@ -437,9 +420,8 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         task_id = service.create_task(novel_id)
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
@@ -480,9 +462,8 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         task_id = service.create_task(novel_id)
         # 直接更新 DB，不经过 TaskManager 内存缓存
         with get_session_factory()() as session:
@@ -507,84 +488,78 @@ class TestAnalysis:
         assert data["status"] == "running"
         assert data["message"] == "正在分析第 42 个分块"
 
-    def test_recover_orphaned_tasks_finalizes_cancelling_tasks(self, api_client: TestClient):
-        """测试启动恢复只会收口带有旧心跳的孤儿任务"""
+    def test_recover_orphaned_tasks_fails_every_running_row(self, api_client: TestClient):
+        """启动时所有 running 任务一律 failed：进程内运行态没有可恢复语义
+
+        心跳新也不豁免——任务缓存与 work 队列都只活在进程内，重启后不存在活着的执行方
+        """
         from src.api import main as main_mod
 
         session_factory = get_session_factory()
-        # 2026-08-13 P2：heartbeat_at 列无时区，落库统一为 naive UTC 挂钟
-        stale_heartbeat = (datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)).replace(
-            tzinfo=None
-        )
-        # 使用唯一 ID 避免测试间数据污染
-        running_novel_id = uuid.uuid4().hex[:8]
-        cancelling_novel_id = uuid.uuid4().hex[:8]
+        fresh_heartbeat = datetime.now(UTC).replace(tzinfo=None)
+        novel_id = uuid.uuid4().hex[:8]
         with session_factory() as session:
-            _insert_test_novel(running_novel_id, session=session)
-            _insert_test_novel(cancelling_novel_id, session=session)
+            _insert_test_novel(novel_id, session=session)
             run_repo = RunRepository(session)
-            running_run_id = run_repo.create_run(novel_id=running_novel_id)
-            cancelling_run_id = run_repo.create_run(novel_id=cancelling_novel_id)
+            run_id = run_repo.create_run(novel_id=novel_id)
             run_repo.update_run_task_fields(
-                running_run_id,
+                run_id,
                 status="running",
                 worker_id="worker-a",
-                heartbeat_at=stale_heartbeat,
+                heartbeat_at=fresh_heartbeat,
             )
-            run_repo.update_run_task_fields(
-                cancelling_run_id,
-                status="cancelling",
-                cancel_requested=True,
-                worker_id="worker-a",
-                heartbeat_at=stale_heartbeat,
-            )
-        failed_count, cancelled_count = main_mod._recover_orphaned_tasks()
-        # 验证我们创建的任务被正确处理
+
+        failed_count, _ = main_mod.recover_orphaned_runs()
+
         with session_factory() as session:
-            run_repo = RunRepository(session)
-            running_run = run_repo.get_run(running_run_id)
-            cancelling_run = run_repo.get_run(cancelling_run_id)
+            running_run = RunRepository(session).get_run(run_id)
         assert running_run is not None
         assert running_run["status"] == "failed"
-        assert cancelling_run is not None
-        assert cancelling_run["status"] == "cancelled"
-        assert cancelling_run["cancel_requested"] is False
-        assert cancelling_run["completed_at"] is not None
-        # 验证至少各有一个任务被收口（不排除其他测试残留任务也被一并处理）
+        assert running_run["error"]
+        assert running_run["completed_at"] is not None
+        assert running_run["worker_id"] is None
+        assert running_run["heartbeat_at"] is None
         assert failed_count >= 1
-        assert cancelled_count >= 1
 
-    def test_recover_orphaned_tasks_finalizes_cancelling_rows_without_worker_heartbeat(self, api_client: TestClient):
-        """测试无 owner 的 cancelling 行也会在启动恢复时收口，避免遗留死状态"""
+    def test_recover_orphaned_tasks_finalizes_every_cancelling_row(self, api_client: TestClient):
+        """启动时所有 cancelling 行收口为 cancelled，带 worker 心跳的也不例外"""
         from src.api import main as main_mod
 
         session_factory = get_session_factory()
-        running_novel_id = "runno001"
-        cancelling_novel_id = "canno001"
+        fresh_heartbeat = datetime.now(UTC).replace(tzinfo=None)
+        with_worker_novel_id = uuid.uuid4().hex[:8]
+        without_worker_novel_id = uuid.uuid4().hex[:8]
         with session_factory() as session:
-            _insert_test_novel(running_novel_id, session=session)
-            _insert_test_novel(cancelling_novel_id, session=session)
+            _insert_test_novel(with_worker_novel_id, session=session)
+            _insert_test_novel(without_worker_novel_id, session=session)
             run_repo = RunRepository(session)
-            running_run_id = run_repo.create_run(novel_id=running_novel_id)
-            cancelling_run_id = run_repo.create_run(novel_id=cancelling_novel_id)
-            run_repo.update_run_task_fields(running_run_id, status="running")
+            with_worker_run_id = run_repo.create_run(novel_id=with_worker_novel_id)
+            without_worker_run_id = run_repo.create_run(novel_id=without_worker_novel_id)
             run_repo.update_run_task_fields(
-                cancelling_run_id,
+                with_worker_run_id,
+                status="cancelling",
+                cancel_requested=True,
+                worker_id="worker-a",
+                heartbeat_at=fresh_heartbeat,
+            )
+            run_repo.update_run_task_fields(
+                without_worker_run_id,
                 status="cancelling",
                 cancel_requested=True,
             )
-        failed_count, cancelled_count = main_mod._recover_orphaned_tasks()
-        assert failed_count == 0
-        assert cancelled_count == 1
+
+        _, cancelled_count = main_mod.recover_orphaned_runs()
+
+        assert cancelled_count >= 2
         with session_factory() as session:
             run_repo = RunRepository(session)
-            running_run = run_repo.get_run(running_run_id)
-            cancelling_run = run_repo.get_run(cancelling_run_id)
-        assert running_run is not None
-        assert running_run["status"] == "running"
-        assert cancelling_run is not None
-        assert cancelling_run["status"] == "cancelled"
-        assert cancelling_run["cancel_requested"] is False
+            with_worker_run = run_repo.get_run(with_worker_run_id)
+            without_worker_run = run_repo.get_run(without_worker_run_id)
+        for cancelling_run in (with_worker_run, without_worker_run):
+            assert cancelling_run is not None
+            assert cancelling_run["status"] == "cancelled"
+            assert cancelling_run["cancel_requested"] is False
+            assert cancelling_run["completed_at"] is not None
 
     @pytest.mark.asyncio
     async def test_resume_pending_tasks_reschedules_pending_runs(self, api_client: TestClient):
@@ -600,19 +575,26 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         task_id = service.create_task(novel_id)
         scheduled_calls: list[tuple[str, str]] = []
 
         def _record_schedule(
-            self, scheduled_task_id: str, novel: dict, task_kind: str, request=None, *, resume: bool = False,
+            self,
+            scheduled_task_id: str,
+            novel: dict,
+            task_kind: str,
+            request=None,
+            *,
+            resume: bool = False,
         ) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
         with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule):
-            scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
+            scheduled_count, cancelled_count = await main_mod.resume_pending_tasks(
+                get_task_service(), get_task_manager()
+            )
         assert scheduled_count == len(scheduled_calls)
         assert cancelled_count == 0
         assert (task_id, novel_id) in scheduled_calls
@@ -631,9 +613,8 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         valid_task_id = service.create_task(novel_id)
         skipped_task_id = "skipme01"
         _insert_test_novel(skipped_task_id)
@@ -648,7 +629,13 @@ class TestAnalysis:
             return scheduled_task_id
 
         def _record_schedule(
-            self, scheduled_task_id: str, novel: dict, task_kind: str, request=None, *, resume: bool = False,
+            self,
+            scheduled_task_id: str,
+            novel: dict,
+            task_kind: str,
+            request=None,
+            *,
+            resume: bool = False,
         ) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
@@ -656,7 +643,9 @@ class TestAnalysis:
             patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule),
             patch.object(analysis_mod.AnalysisService, "resume_task", new=_resume_or_skip),
         ):
-            scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
+            scheduled_count, cancelled_count = await main_mod.resume_pending_tasks(
+                get_task_service(), get_task_manager()
+            )
         assert cancelled_count == 0
         assert scheduled_count == len(scheduled_calls)
         assert (valid_task_id, novel_id) in scheduled_calls
@@ -676,9 +665,8 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        from src.api.dependencies import get_novel_service
 
-        service = get_novel_service()
+        service = get_task_service()
         expected_request = ReanalyzeRequest(force_annotate=True, force_topic_model=True, num_topics=7)
         task_id = service.create_task(
             novel_id,
@@ -699,7 +687,9 @@ class TestAnalysis:
             reanalysis_calls.append((scheduled_task_id, novel["novel_id"], task_kind, request))
 
         with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule):
-            scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
+            scheduled_count, cancelled_count = await main_mod.resume_pending_tasks(
+                get_task_service(), get_task_manager()
+            )
         target_calls = [call for call in reanalysis_calls if call[0] == task_id]
         assert target_calls
         assert cancelled_count == 0
@@ -725,9 +715,7 @@ class TestAnalysis:
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
 
-        from src.api.dependencies import get_novel_service
-
-        service = get_novel_service()
+        service = get_task_service()
         task_id = service.create_task(novel_id)
 
         with (

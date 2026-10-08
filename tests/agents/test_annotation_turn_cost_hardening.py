@@ -25,17 +25,15 @@ from uuid import NAMESPACE_DNS, uuid5
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.graph import _invoke_tool
-from src.agents.annotation.schema import (
-    ChapterParagraphInfo,
-)
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.tool_batch import _invoke_tool
+from src.fact_graph.graph import FactGraph
+from src.fact_graph.inputs import ChapterParagraphInfo
+from tests.support.annotation_work_tools import build_annotation_tools
 
 
 class _QueryServiceStub:
     """2026-09-12 用于无数据库依赖的空查询桩"""
-
 
     async def search_text(self, query, *, range_name, limit=50):
         del query, range_name, limit
@@ -61,10 +59,7 @@ def _writer_ledger(
 
 
 def _writer_tools(ledger: AnnotationToolLedger, query_service: Any = None) -> dict[str, Any]:
-    return {
-        tool.name: tool
-        for tool in build_annotation_tools(query_service or _QueryServiceStub(), ledger)
-    }
+    return {tool.name: tool for tool in build_annotation_tools(query_service or _QueryServiceStub(), ledger)}
 
 
 def _write_call(name: str, args: dict, *, call_id: str) -> dict:
@@ -202,9 +197,7 @@ async def test_failed_record_keeps_prior_written_records_repairable() -> None:
         )
 
     tree = _tree(ledger, "t1")
-    root_event = next(
-        event for event in ledger.bound_payloads["events"] if event.node_id == tree["root_node_id"]
-    )
+    root_event = next(event for event in ledger.bound_payloads["events"] if event.node_id == tree["root_node_id"])
     assert root_event.description == "根事件"
     assert set(tree["nodes"]) == {"root"}
 

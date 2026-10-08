@@ -7,7 +7,7 @@ import httpx
 import pytest
 from openai import BadRequestError, InternalServerError
 
-from src.models.local.embedding import EmbeddingClient
+from src.embedding import EmbeddingClient
 
 
 def _build_httpx_response(status_code: int) -> httpx.Response:
@@ -49,7 +49,7 @@ async def test_embed_texts_retries_retryable_502_and_recovers() -> None:
     )
     client._client = SimpleNamespace(embeddings=SimpleNamespace(create=create_mock))
 
-    with patch("src.models.local.embedding.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+    with patch("src.embedding.asyncio.sleep", new=AsyncMock()) as sleep_mock:
         embeddings = await client.embed_texts(["第一段", "第二段"])
 
     assert embeddings == [[0.1, 0.2], [0.3, 0.4]]
@@ -75,7 +75,7 @@ async def test_embed_texts_does_not_retry_bad_request() -> None:
     )
     client._client = SimpleNamespace(embeddings=SimpleNamespace(create=create_mock))
 
-    with patch("src.models.local.embedding.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+    with patch("src.embedding.asyncio.sleep", new=AsyncMock()) as sleep_mock:
         with pytest.raises(RuntimeError):
             await client.embed_texts(["第一段"])
 

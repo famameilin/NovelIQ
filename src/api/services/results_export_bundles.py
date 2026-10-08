@@ -1,20 +1,4 @@
-"""
-结果导出 bundle 装载服务
-
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（results_export_service.py → results_export_bundles.py）
-说明: 自 src/api/services/results_export_service.py 拆出各 bundle 装载函数
-（load_core_results/load_character_bundle/load_chapter_bundle/load_graph_signal_bundle/
-load_aggregate_metrics_bundle/load_export_relation_bundle/_fetch_timeline_data），
-行为保持不变。
-
-其中结果获取依赖（_fetch_paragraph_curves/_fetch_diagnosis/_fetch_characters/
-_fetch_global_stats/_fetch_token_usage_stats/_fetch_character_relations/
-_fetch_hierarchical_relations/get_metrics_service）按调用期经
-src/api/services/results_export_service 模块命名空间解析（函数内延迟导入），
-与原同模块全局查找语义完全一致（含测试对上述名称的 monkeypatch），且不产生导入期循环。
-"""
+"""结果导出 bundle 装载；查询依赖直接来自所属装配模块"""
 
 from __future__ import annotations
 
@@ -22,21 +6,19 @@ from typing import Any
 
 from loguru import logger
 
+from src.api.services.metrics_service import get_metrics_service
 from src.api.services.results_queries import (
     _fetch_chapter_annotations,
     _fetch_topics,
 )
-from src.api.services.results_queries.diagnosis import _has_diagnosis_result
-from src.knowledge.authority import (
-    ExportGraphAuthorityView,
-    GraphAuthorityReport,
-    serialize_graph_report_signals,
-)
-from src.metrics.event_timeline_metrics import (
-    build_event_timeline_plan,
-    serialize_event_timeline_node,
-    serialize_event_timeline_phases,
-)
+from src.api.services.results_queries.characters import _fetch_characters
+from src.api.services.results_queries.diagnosis import _fetch_diagnosis, _has_diagnosis_result
+from src.api.services.results_queries.graph import _fetch_character_relations, _fetch_hierarchical_relations
+from src.api.services.results_queries.metadata import _fetch_global_stats, _fetch_token_usage_stats
+from src.api.services.results_queries.paragraphs import _fetch_paragraph_curves
+from src.fact_graph.read import ExportGraphAuthorityView, GraphAuthorityReport, serialize_graph_report_signals
+from src.metrics.event_timeline_metrics import serialize_event_timeline_node, serialize_event_timeline_phases
+from src.metrics.queries.timeline import build_event_timeline_plan
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
@@ -71,7 +53,6 @@ def load_core_results(
     Returns:
         (paragraph_curves, missing_fields)
     """
-    from src.api.services.results_export_service import _fetch_paragraph_curves
 
     missing_fields: list[str] = []
 
@@ -97,7 +78,6 @@ def load_character_bundle(
     Returns:
         (characters, arc_scores, main_characters, valid_character_names, missing_fields)
     """
-    from src.api.services.results_export_service import _fetch_characters, _fetch_diagnosis
 
     missing_fields: list[str] = []
 
@@ -150,7 +130,7 @@ def load_chapter_bundle(
     topics = _fetch_topics(run_id, paragraph_repo)
     # 2026-09-05 A6：artifact 缺失导致聚合被静默清空时，给出显式原因进 missing_fields
     if not topics:
-        from src.api.services.results_queries.topics import describe_topics_unavailability
+        from src.topic.artifacts import describe_topics_unavailability
 
         reason = describe_topics_unavailability(run_id)
         missing_fields.append(f"topics（{reason}）" if reason else "topics")
@@ -192,14 +172,9 @@ def load_aggregate_metrics_bundle(
     aggregate_metrics 与 /metrics/* 现在统一复用 MetricsService 的缓存入口，
     避免 export 和 metrics 各自重复跑一遍 aggregate_all_metrics()
     """
-    from src.api.services.results_export_service import (
-        _fetch_global_stats,
-        _fetch_token_usage_stats,
-        get_metrics_service,
-    )
 
     global_stats = _fetch_global_stats(run_id, stats_repo, chapter_repo)
-    token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
+    token_usage_stats = _fetch_token_usage_stats(run_id, stats_repo)
 
     aggregate_metrics = get_metrics_service().get_aggregate_metrics_contract(run_id, stats_repo.session)
 
@@ -230,10 +205,6 @@ def load_export_relation_bundle(
                 graph_quality_report,
     )
     """
-    from src.api.services.results_export_service import (
-        _fetch_character_relations,
-        _fetch_hierarchical_relations,
-    )
 
     character_relations = _fetch_character_relations(
         run_id,
@@ -272,9 +243,9 @@ def _fetch_timeline_data(
     stats_repo: StatsRepository,
 ) -> dict[str, Any] | None:
     """获取用于导出的事件森林时间轴数据"""
-    from src.storage.repositories.graph import EventForestRepository
+    from src.event_trees.read.forest import EventForestQuery
 
-    snapshot = EventForestRepository(stats_repo.session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(stats_repo.session).fetch_snapshot(run_id)
     if snapshot is None:
         logger.warning(f"No event forest snapshot for run {run_id}")
         return None

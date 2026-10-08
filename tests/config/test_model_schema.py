@@ -1,12 +1,12 @@
 import pytest
 
+from src.config.runtime_env import ModelEnvironment
 from src.config.schemas import (
     _parse_embedding_model_settings,
     _parse_models_settings,
     _parse_task_model_settings,
 )
 from src.config.schemas.model import _parse_model_pool, apply_model_environment
-from src.runtime_env import ModelEnvironment
 
 
 def test_parse_embedding_model_settings_includes_runtime_parameters() -> None:

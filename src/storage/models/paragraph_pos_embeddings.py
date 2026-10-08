@@ -9,33 +9,19 @@ paragraph_pos_embeddings 每行是一个段落内某一归一词性分组的 Wor
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, ForeignKeyConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
-
-
-def _utcnow() -> datetime:
-    """created_at 默认值：UTC 带时区当前时间（避免模块导入期求值）"""
-    return datetime.now(UTC)
+from .base import Base, naive_utcnow
 
 
 class ParagraphPosEmbedding(Base):
     """段落词性聚合向量表（每段落、词性分组一行）"""
 
     __tablename__ = "paragraph_pos_embeddings"
-
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    pos_group: Mapped[str] = mapped_column(String(50), primary_key=True)
-    embedding_vector: Mapped[list[float] | None] = mapped_column(Vector(None), nullable=True)
-    source_token_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    in_vocabulary_token_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-
     __table_args__ = (
         ForeignKeyConstraint(["run_id"], ["word2vec_model_runs.run_id"], ondelete="CASCADE"),
         ForeignKeyConstraint(
@@ -49,6 +35,22 @@ class ParagraphPosEmbedding(Base):
             ondelete="CASCADE",
         ),
         Index("idx_pos_embeddings_run_pos_para", "run_id", "pos_group", "paragraph_id"),
+        {"comment": "段落词性聚合向量表：段落内某归一词性分组的 Word2Vec 加权均值向量"},
+    )
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
+    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="所属段落编号")
+    pos_group: Mapped[str] = mapped_column(String(50), primary_key=True, comment="归一词性分组")
+    embedding_vector: Mapped[list[float] | None] = mapped_column(
+        Vector(None), nullable=True, comment="词性分组均值向量（维度随 word2vec 模型）"
+    )
+    source_token_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="来源 token 数")
+    in_vocabulary_token_count: Mapped[int] = mapped_column(
+        Integer, nullable=False,
+        comment="词表内 token 数（0 时向量为空）",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
     )
 
     def __repr__(self) -> str:

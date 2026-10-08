@@ -2,12 +2,6 @@
 章节标注批执行核心：工具调用执行、批次节点与回执消息渲染（原生批次与程序面共用）
 """
 
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：graph.py 大文件拆分——批执行核心（_tool_status_emitter/_call_entry/_program_meta/
-# _failed_entry/_execute_call/_build_tool_batch_node/_tool_messages 及其专属 helper）迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；_failed_receipt/_tool_calls/_settle_chapter_finish
-# 等 graph.py 保留件由本模块反向引用（graph.py 末尾 re-export 本模块符号，导入方零改动）。
-
 from __future__ import annotations
 
 import json
@@ -17,24 +11,21 @@ from typing import TYPE_CHECKING, Any, get_args
 from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
+from src.agents.annotation.event_submission import SUBMIT_EVENTS_TOOL_NAME
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.tools import _WRITE_TOOL_NAMES
+from src.agents.annotation.validation_errors import translate_write_validation_error
+
 from .errors import AnnotationInvariantError
-from .event_submission import SUBMIT_EVENTS_TOOL_NAME
 from .graph import (
     AnnotationGraphState,
     _failed_receipt,
-    _settle_chapter_finish,
     _tool_calls,
-)
-from .tools import (
-    _WRITE_TOOL_NAMES,
-    FINISH_TOOL_NAME,
-    AnnotationToolLedger,
-    translate_write_validation_error,
 )
 
 if TYPE_CHECKING:
-    from src.agents.audit.observer import AgentTurnObserver
     from src.agents.stream import AgentStream
+    from src.agents.turn_observer import AgentTurnObserver
 
 
 def _tool_batch_protocol_error(
@@ -206,21 +197,14 @@ async def _execute_call(
     observer: AgentTurnObserver | None = None,
     stream: AgentStream | None = None,
     call_index: int,
-    settle_finish: bool = False,
     program_meta: dict[str, Any] | None = None,
-    chapter_finish_name: str | None = FINISH_TOOL_NAME,
     record_keys: set[str] | None = None,
 ) -> dict[str, Any]:
-    """2026-09-15 用于执行单条工具调用（原生 tool_batch 与程序面执行器共用同一实现）
+    """原生调用和程序内部调用共用单条事务及审计边界
 
-    2026-09-13 实时写入语义原样保留：写入即生效；单条业务错误只回滚该条（账本与图
-    各自快照恢复）、之前写入的记录保留；合同违反（AnnotationInvariantError）不可
-    恢复，先闭合回合审计计时再上抛。finish 默认只登记（收尾判定由批次末尾统一结算），
-    程序面在程序末尾调用时传 settle_finish=True 就地结算。
-    2026-09-18 收尾工具名的两个面同名（都叫 finish）：只有写者面的 finish 是章级收尾，
-    传 None 的面（subagent 面）按普通工具执行——subagent 的 finish 只声明本 subagent 完毕。
-    2026-10-02 恢复 chapter_finish_name：随章内三子代理路径一并加回。
-    成功回执的记录键即时登记，push_case 只能绑定本章实际产出
+    单条业务错误只撤销该调用，已成功产出保留；共享状态由 Agent 自己按贡献回滚。
+    finish 立即校验当前 work 并关闭写入。合同违反不可恢复，闭合审计后上抛。
+    成功记录键即时登记，供后续原文锚点校验。
     """
     name = str(call.get("name"))
     started_ns = time.perf_counter_ns()
@@ -232,33 +216,16 @@ async def _execute_call(
             observer=observer,
             stream=stream,
         )
-    if chapter_finish_name is not None and name == chapter_finish_name:
-        # 收尾声明：校验与冻结推迟到本回合全部调用处理完之后
-        # （逐条失败只回滚该调用、不阻塞收尾），因此"同轮多个小调用 + 收尾"仍计一个回合
-        content = await _invoke_tool(tool_map, call)
-        entry = _call_entry(
-            call,
-            index=call_index,
-            content=content,
-            status="pending",
-            error=None,
-            receipt=json.loads(content),
-            started_ns=started_ns,
-        )
-        if settle_finish:
-            await _settle_chapter_finish(
-                ledger,
-                [entry],
-                observer=observer,
-                emit_tool_status=_tool_status_emitter(stream, observer),
-            )
-        return entry
     ledger_snapshot = ledger.snapshot()
-    graph_snapshot = ledger.graph.snapshot() if ledger.graph is not None else None
+    graph_snapshot = ledger.graph.snapshot() if ledger.graph is not None and ledger.invoke_tool is None else None
     try:
         if stream is not None:
             await stream.tool_call_started(name)
-        result = await _invoke_tool(tool_map, call)
+        result = (
+            await ledger.invoke_tool(tool_map, call)
+            if ledger.invoke_tool is not None
+            else await _invoke_tool(tool_map, call)
+        )
         status = "success"
         error: str | None = None
         receipt = json.loads(result)
@@ -280,6 +247,16 @@ async def _execute_call(
         written_record = receipt.get("record")
         if isinstance(written_record, str) and written_record:
             record_keys.add(written_record)
+    audit_status, audit_error = status, error
+    audit_receipt = receipt
+    if name in {"execute_code", SUBMIT_EVENTS_TOOL_NAME} and isinstance(receipt, dict):
+        # 返回 JSON 成功不代表业务全部成功；只改变监控口径，保留已生效写入与逐条事务语义
+        business_status = str(receipt.get("status") or "unknown")
+        audit_receipt = {**receipt, "execution_status": status, "business_status": business_status}
+        if status == "success" and business_status in {"partial", "runtime_error", "rejected"}:
+            audit_status = "error"
+            detail = receipt.get("error") or receipt.get("failed") or ""
+            audit_error = f"业务回执 status={business_status}，已生效调用={receipt.get('applied', 0)}；{detail}"
     if observer is not None:
         request_args = dict(call.get("args") or {})
         if program_meta is not None:
@@ -289,14 +266,18 @@ async def _execute_call(
             tool_name=name,
             request_args=request_args,
             raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
-            response=receipt,
-            receipt=receipt,
-            status=status,
-            error=error,
+            response=audit_receipt,
+            receipt=audit_receipt,
+            status=audit_status,
+            error=audit_error,
             tool_duration_ms=max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000)),
             started_ns=started_ns,
         )
-    await _tool_status_emitter(stream, observer)(name, status, result if status == "success" else (error or ""))
+    await _tool_status_emitter(stream, observer)(
+        name,
+        audit_status,
+        result if audit_status == "success" else (audit_error or ""),
+    )
     return _call_entry(
         call,
         index=call_index,
@@ -315,19 +296,11 @@ def _build_tool_batch_node(
     observer: AgentTurnObserver | None = None,
     stream: AgentStream | None = None,
     program_tool_name: str | None = None,
-    chapter_finish_name: str | None = FINISH_TOOL_NAME,
 ):
-    """2026-08-10 用于构建逐调用独立提交且互不回滚的工具节点
+    """串行执行本回合调用，各调用独立校验、回滚和审计
 
-    2026-09-13 实时写入：一个回合的多个调用串行处理、共享账本、写入即生效；
-    finish 的收尾判定推迟到本回合全部调用处理完再执行，因此
-    "同轮多个小调用 + 一个收尾声明"整体只计一个模型回合。失败只影响该调用自己，
-    不影响同回合其他调用、也不阻塞收尾（收尾判定见 _settle_chapter_finish）。
-
-    2026-09-15 program_tool_name：程序模式绑定面收成程序面工具（写者面
-    [execute_code, finish]），模型偶尔直发原生工具调用（实验 ch5 第一轮实测）——这类调用转入同一个内层
-    dispatcher 并按同一套校验执行，审计记 direct_fallback；未知名逐条协议错误，
-    同批其他调用照常执行、不执行任何写入。该容错层不依赖任何厂商 tool_choice 行为。
+    只允许实际绑定的工具名；程序模式下未知调用逐条拒绝，不影响同批其他调用。
+    成功 finish 立即关闭当前 work，后续迟到调用不能撤销此前的完成事实。
     """
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
@@ -363,7 +336,8 @@ def _build_tool_batch_node(
                 )
                 continue
             direct_fallback = program_tool_name is not None and name not in {
-                program_tool_name, SUBMIT_EVENTS_TOOL_NAME,
+                program_tool_name,
+                SUBMIT_EVENTS_TOOL_NAME,
             }
             rendered.append(
                 await _execute_call(
@@ -373,9 +347,7 @@ def _build_tool_batch_node(
                     observer=observer,
                     stream=stream,
                     call_index=call_index,
-                    chapter_finish_name=chapter_finish_name,
-                    # 原生面的回执就是模型读到的回执：写入成功即把 record 登记进章级账本，
-                    # push_case.record_id / promise_case.result_id 按它校验
+                    # 写入成功即登记当前 work 的记录键，供原文锚点使用
                     record_keys=ledger.written_record_keys,
                     program_meta=(
                         {
@@ -390,13 +362,6 @@ def _build_tool_batch_node(
                     ),
                 )
             )
-        await _settle_chapter_finish(
-            ledger,
-            rendered,
-            observer=observer,
-            emit_tool_status=_tool_status_emitter(stream, observer),
-            chapter_finish_name=chapter_finish_name,
-        )
         if observer is not None:
             observer.close_turn()
         return {"messages": _tool_messages(rendered), "phase": ledger.phase}
@@ -405,7 +370,7 @@ def _build_tool_batch_node(
 
 
 def _tool_messages(rendered: list[dict[str, Any]]) -> list[ToolMessage]:
-    """2026-09-13 用于按调用顺序把回执渲染成 ToolMessage（含失败回执与延迟判定的收尾回执）"""
+    """按调用顺序渲染模型可见回执，包括失败和即时收尾结果"""
     messages: list[ToolMessage] = []
     for entry in rendered:
         call = entry["call"]

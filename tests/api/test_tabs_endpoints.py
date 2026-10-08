@@ -23,6 +23,7 @@ from tests.support.paragraph_fixtures import (
     make_curve_row,
     make_span,
 )
+from tests.support.run_records import set_run_status
 
 # 与 test_topics_endpoints 相同的两章六段主题三表 fixture
 _TOKENS = [10, 10, 20, 10, 10, 20]
@@ -46,10 +47,7 @@ def _insert_topic_fixture(db_session, run_id: str) -> None:
     )
     repo.insert_paragraph_topic_inferences(
         run_id,
-        [
-            (paragraph_id, 2, _TOKENS[paragraph_id], "complete", None, 1.0)
-            for paragraph_id in range(6)
-        ],
+        [(paragraph_id, 2, _TOKENS[paragraph_id], "complete", None, 1.0) for paragraph_id in range(6)],
     )
     repo.insert_paragraph_topics(
         run_id,
@@ -70,9 +68,7 @@ def _create_topic_fixture_run(db_session) -> tuple[str, str]:
     novel_id, run_id = create_completed_run(db_session, chapter_texts=["甲。\n乙。\n丙。", "丁。\n戊。\n己。"])
     texts = ["甲。", "乙。", "丙。", "丁。", "戊。", "己。"]
     spans = []
-    for paragraph_id, (chapter_id, paragraph_index) in enumerate(
-        [(1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2)]
-    ):
+    for paragraph_id, (chapter_id, paragraph_index) in enumerate([(1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2)]):
         spans.append(
             make_span(
                 paragraph_id=paragraph_id,
@@ -204,9 +200,7 @@ def test_linguistic_entities_tab_reports_real_zero_when_features_have_no_hits(
 def test_tabs_require_completed_run(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["甲。\n乙。"], status="failed")
 
-    topics_response = api_client.get(
-        f"/api/novels/{novel_id}/tabs/topics-overview", params={"task_id": run_id[:8]}
-    )
+    topics_response = api_client.get(f"/api/novels/{novel_id}/tabs/topics-overview", params={"task_id": run_id[:8]})
     assert topics_response.status_code == 400
 
     linguistic_response = api_client.get(
@@ -415,8 +409,7 @@ def _seed_graph(db_session, run_id: str) -> None:
             run_id=run_id,
             chapter_id=chapter_id,
             characters=[
-                character_fact(chapter_id=chapter_id, name=name, action="同行")
-                for name in ("林渡", "顾霜", "萧遥")
+                character_fact(chapter_id=chapter_id, name=name, action="同行") for name in ("林渡", "顾霜", "萧遥")
             ],
             relations=[
                 relation_fact(chapter_id=chapter_id, from_name=from_name, to_name=to_name, relation_type="盟友")
@@ -435,7 +428,7 @@ def _create_graph_fixture_run(db_session, *, seed_graph: bool = True) -> tuple[s
     )
     if seed_graph:
         _seed_graph(db_session, run_id)
-    RunRepository(db_session).update_run_status(run_id, "completed")
+    set_run_status(RunRepository(db_session).session, run_id, "completed")
     db_session.commit()
     if seed_graph:
         assert GraphRepository(db_session).fetch_snapshot(run_id) is not None
@@ -460,9 +453,7 @@ def test_dashboard_tab_bundles_eight_sections(api_client: TestClient, db_session
 def test_rhythm_tab_returns_curves_with_max_points(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_metrics_fixture_run(db_session)
 
-    response = api_client.get(
-        f"/api/novels/{novel_id}/tabs/rhythm", params={"task_id": run_id[:8], "max_points": 5}
-    )
+    response = api_client.get(f"/api/novels/{novel_id}/tabs/rhythm", params={"task_id": run_id[:8], "max_points": 5})
     assert response.status_code == 200
     body = response.json()
     # 每章两段时全部 6 点均为章节边界强制保留点，max_points 不得裁掉边界
@@ -523,9 +514,9 @@ def test_graph_network_tab_bundles_snapshot_metrics_and_change_total(api_client:
 def test_graph_network_tab_requires_graph_data(api_client: TestClient, db_session) -> None:
     """无章节图数据时与 /graph 族端点一致返回 409（GraphReadinessError 透传）"""
     novel_id, run_id = _create_graph_fixture_run(db_session, seed_graph=False)
-    from tests.support.chapter_annotation_helpers import publish_test_cutoff
+    from tests.support.chapter_annotation_helpers import confirm_test_work
 
-    publish_test_cutoff(db_session, run_id)
+    confirm_test_work(db_session, run_id)
 
     response = api_client.get(f"/api/novels/{novel_id}/tabs/graph-network", params={"task_id": run_id[:8]})
     assert response.status_code == 409

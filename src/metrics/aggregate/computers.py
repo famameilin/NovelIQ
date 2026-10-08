@@ -11,8 +11,6 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-from src.config import settings
-
 from ..character_metrics import (
     build_character_graph,
     compute_antagonist_strength_gap,
@@ -165,10 +163,12 @@ def _null_narrative_structure(event_types: list[str]) -> dict[str, Any]:
 def compute_narrative_structure_metrics(
     annotation_data: AnnotationData,
     tension_data: TensionData,
+    *,
+    small_sample_min_chapters: int,
 ) -> dict[str, Any]:
     """叙事结构聚合：归一化字符进度轴；小样本/无进度 → null。"""
     aligned_inputs = _align_narrative_structure_inputs(annotation_data, tension_data)
-    small_sample = len(aligned_inputs.chapter_ids) < settings.metrics.small_sample_min_chapters
+    small_sample = len(aligned_inputs.chapter_ids) < small_sample_min_chapters
     if small_sample or not _positions_are_usable(aligned_inputs.positions):
         # 叙事功能占比分母为全部有效标注章节，不随张力交集收缩（契约：分母=有效标注章数）
         return _null_narrative_structure(annotation_data.event_types)
@@ -211,6 +211,8 @@ def compute_emotion_curve_metrics(
     emotion_data: EmotionData,
     annotation_data: AnnotationData,
     char_data: CharacterData,
+    *,
+    small_sample_min_chapters: int,
 ) -> dict[str, Any]:
     """情感曲线聚合：恢复速度/词表趋势走进度轴。"""
     positions = emotion_data.positions
@@ -220,7 +222,7 @@ def compute_emotion_curve_metrics(
         "emotion_recovery_speed": (compute_emotion_recovery_speed(positions, values) if can_use_progress else None),
         "chapter_pivot_rate": (
             compute_pivot_moment_density(annotation_data.pivot_moments)
-            if len(annotation_data.chapter_ids) >= settings.metrics.small_sample_min_chapters
+            if len(annotation_data.chapter_ids) >= small_sample_min_chapters
             else None
         ),
         **compute_emotion_polarity_distribution(annotation_data.emotional_valences),

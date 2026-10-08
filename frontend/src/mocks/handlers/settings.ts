@@ -168,7 +168,7 @@ export const settingsEnvHandler = http.put(`${BASE}/api/settings/env`, async () 
 });
 
 export const settingsTestHandler = http.post(
-  `${BASE}/api/settings/model-providers/:task/test`,
+  `${BASE}/api/settings/agents/:task/test`,
   async () => {
     await delay(600);
     return HttpResponse.json({ ok: true, latency_ms: 42.3, model_ids: ["mock-model"], error: null });

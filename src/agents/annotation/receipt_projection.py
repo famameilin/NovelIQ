@@ -5,11 +5,27 @@ from __future__ import annotations
 import json
 from typing import Any
 
-REFERENCE_FIELDS = frozenset({
-    "source_ref", "chapter_id", "paragraph_id", "char_start", "char_end", "text_hash",
-})
+REFERENCE_FIELDS = frozenset(
+    {
+        "source_ref",
+        "chapter_id",
+        "paragraph_id",
+        "char_start",
+        "char_end",
+        "text_hash",
+    }
+)
 _PROTECTED_FIELDS = REFERENCE_FIELDS | {
-    "id", "record", "entity_id", "event_id", "paragraph_ids", "capability",
+    "id",
+    "record",
+    "entity_id",
+    "event_id",
+    "paragraph_ids",
+    "capability",
+    "node_id",
+    "case_id",
+    "work_id",
+    "producer_invocation_id",
 }
 
 

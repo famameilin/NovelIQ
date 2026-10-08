@@ -4,8 +4,6 @@ from unittest.mock import MagicMock
 
 from sqlalchemy import text
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
-from src.preprocess.tokenize import tokenize
 from src.storage.repositories.paragraph.embedding_ops import (
     ParagraphEmbeddingRow,
     get_incomplete_paragraph_embedding_paragraph_ids,
@@ -14,6 +12,9 @@ from src.storage.repositories.paragraph.embedding_ops import (
 )
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.storage.vector_schema import ensure_paragraph_embeddings_schema, hnsw_index_uses_halfvec
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
+from src.text_processing.tokenize import tokenize
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 

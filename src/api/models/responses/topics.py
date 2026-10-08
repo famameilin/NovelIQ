@@ -1,9 +1,6 @@
 """
 主题与诊断响应模型
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（models/responses.py → responses/ 包）
 说明: 自 src/api/models/responses.py 拆出主题信息、主题聚合/序列/变化/情感统计、
 诊断结果（DiagnosisResult）、通用错误与结果写盘响应模型（§5.8/§5.11 等），
 字段与语义保持不变。
@@ -12,6 +9,8 @@
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from src.diagnosis.read_models import DiagnosisReadResult
 
 
 class TopicInfo(BaseModel):
@@ -124,32 +123,11 @@ class TopicEmotionResponse(BaseModel):
     unavailable_reason: str | None = None
 
 
-class DiagnosisResult(BaseModel):
-    foreshadow_expectation: float | None = Field(
-        default=None,
-        description=("伏笔回收预期，基于 setup thread ledger 加权估算的近似值，取值范围 0-1，不是严格全文事实回收率。"),
-    )
-    arc_scores: dict[str, float] | None = None
-    genre_labels: list[str] | None = None
-    style_labels: list[str] | None = None
-    topic_labels: dict[str, str] | list[str] | None = None
-    emotion_avg: float | None = None
-    lexicon_zero_hit_share: float | None = None
-    diagnosis: str | None = None
-    value_logic_type: str | None = None
-    value_logic_reason: str | None = None
-    power_stance_score: int | None = None
-    power_stance_reason: str | None = None
-    common_people_dignity: int | None = None
-    dignity_reason: str | None = None
-    cultural_depth_score: int | None = None
-    cultural_depth_reason: str | None = None
-    narrative_arc_type: str | None = None
-    focus_structure: Literal["single", "dual", "ensemble"] | None = None
-    focus_characters: list[str] | None = None
-    main_characters: list[str] | None = None
-    core_cast: list[str] | None = None
-    theme_color: str | None = Field(default=None, description="小说主题色，十六进制格式，如 #4A90D9")
+class DiagnosisResult(DiagnosisReadResult):
+    """诊断结果响应 = 诊断契约字段 + 读侧派生的三项统计
+
+    字段集与 src/storage/diagnosis_payload.py 的 AgentAnalysisPatch 一致（同一契约，
+    响应侧仅追加读侧派生字段），避免两处手写契约漂移。"""
 
 
 class ErrorResponse(BaseModel):

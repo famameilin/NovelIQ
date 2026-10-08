@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.config.constants import STAGE_PROGRESS_MILESTONES
-from src.runtime_env import LtpEnvironment
+from src.config.runtime_env import LtpEnvironment
 
 
 @dataclass

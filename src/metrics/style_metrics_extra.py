@@ -9,7 +9,7 @@ from collections import Counter
 import jieba
 
 from src.config import settings
-from src.utils.text_utils import tokenize_words
+from src.text_processing.text_utils import tokenize_words
 
 from .lexicon_metrics import count_mixed_hits
 

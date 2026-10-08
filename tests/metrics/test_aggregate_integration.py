@@ -26,7 +26,7 @@ class TestComputeNarrativeStructureMetrics:
             positions=[0.0, 0.5, 1.0],
         )
 
-        result = compute_narrative_structure_metrics(annotation_data, tension_data)
+        result = compute_narrative_structure_metrics(annotation_data, tension_data, small_sample_min_chapters=10)
 
         # 章 2 张力 None 被对齐丢弃 → 结构类指标小样本返回 null；
         # 叙事功能占比分母为全部有效标注章节（3 章），不随张力交集收缩

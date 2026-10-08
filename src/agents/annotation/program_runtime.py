@@ -2,13 +2,6 @@
 程序面运行时：受限 AST 解释器基座与写者面程序运行时
 """
 
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：program.py 大文件拆分——两个 runtime（RestrictedProgramRuntime/ProgramRuntime）
-# 迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；限额常量与 _ProgramFault 保留在 program.py、
-# 目录渲染与合同文案在 catalog.py、检索投影在 search_projection.py，均由本模块引用；
-# program.py 对两个 runtime 保留 re-export，既有导入方零改动。
-
 from __future__ import annotations
 
 import ast
@@ -19,14 +12,16 @@ from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
+from src.agents.annotation import program_contract
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.program_contract import ProgramFault
+from src.agents.annotation.tools import tool_record_key
+
 # 限额常量经 program 模块属性读取（而非值拷贝）：tests 以 KEEP_*") 调整安全护栏，属性访问保持这一注入缝隙逐字生效。
-from . import program as _program
-from .catalog import PROGRAM_CONTRACT_TEXT, call_parameters
-from .program import _ProgramFault, render_list_signature
+from . import program_contract as _program
+from .catalog import call_parameters, render_list_signature
 from .receipt_projection import compact_read_result, read_references
-from .search_projection import _failed_view, build_program_tools
-from .tool_batch import _execute_call
-from .tools import FINISH_TOOL_NAME, AnnotationToolLedger, tool_record_key
+from .search_projection import SHARED_SEARCH_MAX_CHARS, _failed_view
 
 # 2026-10-04 重复失败批守卫（两级）：失败条数达到 _REPEAT_FAILED_BATCH_MIN_OPS 且
 # 连续两次程序的失败清单逐条相同时注入聚合提示，第三次相同判本程序失败。
@@ -90,6 +85,7 @@ class RestrictedProgramRuntime:
         程序内已经成功的调用不回滚（程序错误只中断后续语句），失败逐条进 failed；
         收尾类意图由子类在 _after_program 里结算（写者面即 finish）。
         """
+
         async def run() -> None:
             nodes = self._parse(code)
             await self._preflight_dialogue_indices(nodes)
@@ -106,7 +102,8 @@ class RestrictedProgramRuntime:
         names = {"write_dialogue", "dialogue"} & self.tools.keys()
         if not any(
             isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in names
-            for statement in nodes for node in ast.walk(statement)
+            for statement in nodes
+            for node in ast.walk(statement)
         ):
             return
         unknown = object()
@@ -123,7 +120,7 @@ class RestrictedProgramRuntime:
         def assign_known(target: ast.AST, value: Any) -> None:
             try:
                 self._assign(target, value)
-            except _ProgramFault:
+            except ProgramFault:
                 # 预检只拒绝候选号越界，其它赋值错误留在原执行点报出
                 invalidate(target)
 
@@ -132,7 +129,7 @@ class RestrictedProgramRuntime:
                 return unknown
             try:
                 return await self._value(node)
-            except _ProgramFault as fault:
+            except ProgramFault as fault:
                 if fault.code in {"too_many_steps", "deadline_exceeded"}:
                     raise
                 return unknown
@@ -175,7 +172,7 @@ class RestrictedProgramRuntime:
                 elif isinstance(statement, ast.For):
                     await check_calls(statement.iter)
                     values = await pure_value(statement.iter)
-                    if not isinstance(values, (list, tuple)) or len(values) > _program._PROGRAM_MAX_LOOP_ITEMS:
+                    if not isinstance(values, (list, tuple)) or len(values) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
                         invalidate(statement)
                         continue
                     for value in values:
@@ -191,9 +188,10 @@ class RestrictedProgramRuntime:
         if invalid:
             records = "、".join(f"dialogue/{index}(candidate_index={index})" for index in invalid)
             available = f"1..{total}" if total else "无可用候选"
-            raise _ProgramFault(
+            raise ProgramFault(
                 f"DialogueCandidates total={total}，candidate_index 范围={available}；越界记录：{records}",
-                code="candidate_index_out_of_range", line=next(iter(invalid.values())),
+                code="candidate_index_out_of_range",
+                line=next(iter(invalid.values())),
             )
 
     async def _execute_program(self, action: Callable[[], Awaitable[None]]) -> str:
@@ -205,23 +203,21 @@ class RestrictedProgramRuntime:
         self.reads = []
         self._read_references = []
         self._reads_omitted = 0
-        self._deadline = time.monotonic() + _program._PROGRAM_DEADLINE_S
+        self._deadline = time.monotonic() + program_contract.PROGRAM_DEADLINE_S
         self._reset_program_state()
         error: dict[str, Any] | None = None
         status = "applied"
         try:
             await action()
-        except _ProgramFault as fault:
+        except ProgramFault as fault:
             error = fault.payload()
-            status = "rejected" if fault.code in _program._PRE_RUN_FAULT_CODES else "runtime_error"
+            status = "rejected" if fault.code in program_contract.PRE_RUN_FAULT_CODES else "runtime_error"
         # 2026-10-04 重复失败批守卫：判败时不结算收尾意图（与运行错误同口径——
         # 收尾之后的语句没跑完，冻结即不可逆地丢内容），模型必须真正修改失败取值。
         # 守卫用结算前的 ops 快照判定；回执计数在收尾结算后取全量（finish 结算也记 op）。
         repeat = 0
         if error is None:
-            pre_failed = [
-                op for op in self.ops if op["program_id"] == self._program_id and op["status"] != "success"
-            ]
+            pre_failed = [op for op in self.ops if op["program_id"] == self._program_id and op["status"] != "success"]
             repeat = self._register_failed_batch(pre_failed)
             if repeat >= _REPEAT_FAILED_BATCH_FATAL_AT:
                 error = {
@@ -292,7 +288,7 @@ class RestrictedProgramRuntime:
     async def _dispatch(self, name: str, args: dict[str, Any], *, line: int | None) -> Any:
         """子类钩子：执行一次具名调用（默认拒绝，子类必须覆盖）"""
         # 回执只报事实（哪个名字没开放）：可用名字在 execute_code 的说明里，属提示词面
-        raise _ProgramFault(
+        raise ProgramFault(
             f"未开放函数：{name}",
             code="unknown_tool",
             line=line,
@@ -305,18 +301,18 @@ class RestrictedProgramRuntime:
     def _parse(self, code: str) -> list[Any]:
         """用于解析程序文本（空程序/超长/语法错误一律结构化拒绝、不进执行）"""
         if not isinstance(code, str) or not code.strip():
-            raise _ProgramFault("程序为空：请提交要执行的 Python 程序", code="empty_program")
-        if len(code) > _program._PROGRAM_MAX_CODE_CHARS:
-            raise _ProgramFault(
-                f"程序超过 {_program._PROGRAM_MAX_CODE_CHARS} 字符（当前 {len(code)}）",
+            raise ProgramFault("程序为空：请提交要执行的 Python 程序", code="empty_program")
+        if len(code) > program_contract.PROGRAM_MAX_CODE_CHARS:
+            raise ProgramFault(
+                f"程序超过 {program_contract.PROGRAM_MAX_CODE_CHARS} 字符（当前 {len(code)}）",
                 code="program_too_large",
             )
         try:
             body = ast.parse(code).body
         except SyntaxError as exc:
-            raise _ProgramFault(f"语法错误：{exc.msg}", code="syntax_error", line=exc.lineno) from None
+            raise ProgramFault(f"语法错误：{exc.msg}", code="syntax_error", line=exc.lineno) from None
         if not body:
-            raise _ProgramFault("程序为空：请提交要执行的 Python 程序", code="empty_program")
+            raise ProgramFault("程序为空：请提交要执行的 Python 程序", code="empty_program")
         return body
 
     def _receipt(
@@ -389,7 +385,7 @@ class RestrictedProgramRuntime:
             elif isinstance(node, ast.Pass):
                 continue
             else:
-                raise _ProgramFault(
+                raise ProgramFault(
                     f"未支持的 Python 语句：{type(node).__name__}（只支持赋值、函数调用、for、if）",
                     code="unsupported_statement",
                     line=getattr(node, "lineno", None),
@@ -399,14 +395,14 @@ class RestrictedProgramRuntime:
         """用于执行有上限的 for（迭代项必须是有界列表/元组，不支持 while）"""
         values = await self._value(node.iter)
         if not isinstance(values, (list, tuple)):
-            raise _ProgramFault(
+            raise ProgramFault(
                 "for 只能遍历列表或元组（可用变量或字面量）",
                 code="unsupported_expression",
                 line=node.lineno,
             )
-        if len(values) > _program._PROGRAM_MAX_LOOP_ITEMS:
-            raise _ProgramFault(
-                f"for 的迭代项超过 {_program._PROGRAM_MAX_LOOP_ITEMS} 条（当前 {len(values)}）",
+        if len(values) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
+            raise ProgramFault(
+                f"for 的迭代项超过 {program_contract.PROGRAM_MAX_LOOP_ITEMS} 条（当前 {len(values)}）",
                 code="loop_too_long",
                 line=node.lineno,
             )
@@ -420,13 +416,13 @@ class RestrictedProgramRuntime:
         """用于变量赋值（单名或等长解包；禁止覆盖工具名与 _ 前缀内部名）"""
         if isinstance(node, ast.Name):
             if node.id in self.tools:
-                raise _ProgramFault(
-                    f"不允许覆盖工具名：{node.id}",
+                raise ProgramFault(
+                    f"不允许覆盖工具名：{node.id}；请把变量改为 {node.id}_result，工具名须保留以便后续调用",
                     code="name_reserved",
                     line=getattr(node, "lineno", None),
                 )
             if node.id.startswith("_"):
-                raise _ProgramFault(
+                raise ProgramFault(
                     f"不允许使用 _ 前缀变量名：{node.id}",
                     code="name_reserved",
                     line=getattr(node, "lineno", None),
@@ -436,7 +432,7 @@ class RestrictedProgramRuntime:
         if isinstance(node, (ast.Tuple, ast.List)):
             items = value if isinstance(value, (list, tuple)) else None
             if items is None or len(items) != len(node.elts):
-                raise _ProgramFault(
+                raise ProgramFault(
                     "赋值解包两端长度必须相等",
                     code="bad_assignment",
                     line=getattr(node, "lineno", None),
@@ -444,7 +440,7 @@ class RestrictedProgramRuntime:
             for target, item in zip(node.elts, items, strict=True):
                 self._assign(target, item)
             return
-        raise _ProgramFault(
+        raise ProgramFault(
             "只支持变量赋值与等长解包",
             code="bad_assignment",
             line=getattr(node, "lineno", None),
@@ -457,7 +453,7 @@ class RestrictedProgramRuntime:
         if isinstance(node, ast.Constant):
             if isinstance(node.value, (str, int, float, bool)) or node.value is None:
                 return node.value
-            raise _ProgramFault(f"不支持的常量：{type(node.value).__name__}", code="unsupported_expression", line=line)
+            raise ProgramFault(f"不支持的常量：{type(node.value).__name__}", code="unsupported_expression", line=line)
         if isinstance(node, ast.Name):
             return self._resolve_name(node.id, line=line)
         if isinstance(node, ast.List):
@@ -475,17 +471,17 @@ class RestrictedProgramRuntime:
             try:
                 return value[index]
             except (KeyError, IndexError, TypeError) as exc:
-                raise _ProgramFault(f"下标不可用：{exc}", code="runtime_error", line=line) from None
+                raise ProgramFault(f"下标不可用：{exc}", code="runtime_error", line=line) from None
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
             operand = await self._value(node.operand)
             if not isinstance(operand, (int, float)) or isinstance(operand, bool):
-                raise _ProgramFault("一元负号只接受数字", code="runtime_error", line=line)
+                raise ProgramFault("一元负号只接受数字", code="runtime_error", line=line)
             return -operand
         if isinstance(node, ast.Compare) and len(node.ops) == 1:
             return await self._compare(node, line=line)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             return await self._call(node, line=line)
-        raise _ProgramFault(
+        raise ProgramFault(
             f"未支持的 Python 表达式：{type(node).__name__}",
             code="unsupported_expression",
             line=line,
@@ -502,9 +498,9 @@ class RestrictedProgramRuntime:
             return left != right
         if isinstance(operator, ast.In):
             if not isinstance(right, (list, tuple, dict, str)):
-                raise _ProgramFault("in 的右侧需要列表/元组/字典/字符串", code="runtime_error", line=line)
+                raise ProgramFault("in 的右侧需要列表/元组/字典/字符串", code="runtime_error", line=line)
             return left in right
-        raise _ProgramFault(
+        raise ProgramFault(
             f"未支持的比较运算：{type(operator).__name__}（只支持 ==/!=/in）",
             code="unsupported_expression",
             line=line,
@@ -519,7 +515,7 @@ class RestrictedProgramRuntime:
             return self.env[name]
         known = "、".join(sorted(self.env)[:12])
         hint = f"；已定义变量：{known}" if known else ""
-        raise _ProgramFault(
+        raise ProgramFault(
             f"未定义的名称：{name}（常量请写 True/False/None，也接受 true/false/null）{hint}",
             code="undefined_name",
             line=line,
@@ -542,21 +538,32 @@ class RestrictedProgramRuntime:
         """用于执行一次具名调用（名字必须属于本面命名空间，参数只接受具名形式）"""
         function = node.func
         if not isinstance(function, ast.Name):
-            raise _ProgramFault(
+            raise ProgramFault(
                 "只支持直接调用工具函数（不支持属性访问或嵌套调用）",
                 code="unsupported_expression",
                 line=line,
             )
         name = function.id
         if name not in self.tools:
-            raise _ProgramFault(
-                f"未开放函数：{name}",
+            raise ProgramFault(
+                f"未开放函数：{name}"
+                + (
+                    "；检索结果自动回显在 reads，请删除 print，直接用变量 = search_events(query=...) "
+                    "或 search_graph(query=...) 读取"
+                    if name == "print"
+                    else ""
+                ),
                 code="unknown_tool",
                 line=line,
             )
         if node.args or any(keyword.arg is None for keyword in node.keywords):
-            raise _ProgramFault(
-                f"工具只接受具名参数，不支持 *args/**kwargs；{name} 的正确写法：{self._call_hint(name)}",
+            hint = (
+                f'{name}(query="关键词", limit=5)'
+                if name in {"search_events", "search_graph"}
+                else self._call_hint(name)
+            )
+            raise ProgramFault(
+                f"工具只接受具名参数，不支持 *args/**kwargs；{name} 的正确写法：{hint}",
                 code="bad_call",
                 line=line,
             )
@@ -565,9 +572,9 @@ class RestrictedProgramRuntime:
 
     def _next_op_index(self, *, line: int | None) -> int:
         """用于分配程序内 op 序号并强制单程序操作条数硬限（越限可续跑）"""
-        if self._ops_in_program >= _program._PROGRAM_MAX_OPS:
-            raise _ProgramFault(
-                f"单个程序的内层操作超过 {_program._PROGRAM_MAX_OPS} 条",
+        if self._ops_in_program >= program_contract.PROGRAM_MAX_OPS:
+            raise ProgramFault(
+                f"单个程序的内层操作超过 {program_contract.PROGRAM_MAX_OPS} 条",
                 code="too_many_ops",
                 line=line,
             )
@@ -604,6 +611,7 @@ class RestrictedProgramRuntime:
                 "record": body.get("record") or tool_record_key(name, dict(call_args or {})),
                 "error_code": body.get("code"),
                 "field": body.get("field"),
+                "actual": body.get("actual"),
                 "expected": body.get("expected"),
                 "message": body.get("message") or body.get("error") or error,
                 "direct_fallback": direct_fallback,
@@ -619,7 +627,11 @@ class RestrictedProgramRuntime:
         整轮推理烧在"回查"上。这里把 payload 原样回显（投影已在 _ProgramSearchTool 做过），
         按条数与字符数双上限截断。
         """
-        text, omitted = compact_read_result(receipt, max_chars=_program._READ_ECHO_MAX_CHARS)
+        # 全书检索已按整项分页限流，保留可读预览与续页字段，避免二次压缩只剩 ID 骨架
+        max_chars = (
+            SHARED_SEARCH_MAX_CHARS if name in {"search_events", "search_graph"} else _program._READ_ECHO_MAX_CHARS
+        )
+        text, omitted = compact_read_result(receipt, max_chars=max_chars)
         item: dict[str, Any] = {"op": op_index, "tool": name}
         if line is not None:
             item["line"] = line
@@ -638,131 +650,13 @@ class RestrictedProgramRuntime:
     def _guard(self) -> None:
         """用于在每条语句/表达式前检查步数与墙钟硬限"""
         self._steps += 1
-        if self._steps > _program._PROGRAM_MAX_STEPS:
-            raise _ProgramFault(
-                f"单次程序执行步数超过 {_program._PROGRAM_MAX_STEPS}（疑似循环过大）",
+        if self._steps > program_contract.PROGRAM_MAX_STEPS:
+            raise ProgramFault(
+                f"单次程序执行步数超过 {program_contract.PROGRAM_MAX_STEPS}（疑似循环过大）",
                 code="too_many_steps",
             )
         if time.monotonic() > self._deadline:
-            raise _ProgramFault(
-                f"单次程序执行超过 {int(_program._PROGRAM_DEADLINE_S)} 秒硬限",
+            raise ProgramFault(
+                f"单次程序执行超过 {int(program_contract.PROGRAM_DEADLINE_S)} 秒硬限",
                 code="deadline_exceeded",
             )
-
-
-class ProgramRuntime(RestrictedProgramRuntime):
-    """2026-09-15 写者面程序运行时：受限解释器里逐条复用生产单条事务边界
-
-    2026-09-19 随 agent 路径恢复：单块章的模型可见面=[execute_code, finish]，程序内直接
-    调用正式工具（检索+写入+finish）；每条内层调用都走 graph._execute_call，与
-    正式与连续性工具面共用同一份"快照 → 调用 → 按条回滚 → 审计"实现。
-    生命周期：每个章尝试建一次、跨回合复用（变量环境与逐 op 记录随之保留）。
-    """
-
-    contract_text = PROGRAM_CONTRACT_TEXT
-
-    def __init__(
-        self,
-        tools: list[Any],
-        ledger: Any,
-        *,
-        observer: Any = None,
-        stream: Any = None,
-    ) -> None:
-        """用于绑定程序面工具、账本与审计/事件出口"""
-        tool_list = build_program_tools(tools)
-        super().__init__(
-            tool_list,
-            {str(tool.name): tool for tool in tool_list},
-            observer=observer,
-            stream=stream,
-        )
-        self.ledger = ledger
-        self._finish_requested = False
-        self._finish_line: int | None = None
-
-    def _reset_program_state(self) -> None:
-        """用于在一个程序开始时清掉上一次的收尾意图"""
-        self._finish_requested = False
-        self._finish_line = None
-
-    def _progress(self) -> dict[str, int]:
-        """用于回执 progress（与 finish 回执同源的域计数）"""
-        return self.ledger._written_counts()
-
-    async def _after_program(self) -> None:
-        """用于在程序末尾结算 finish 收尾意图（与批次收尾同一条判定路径）"""
-        if self._finish_requested:
-            await self._settle_finish()
-
-    async def _dispatch(self, name: str, args: dict[str, Any], *, line: int | None) -> Any:
-        """用于把一次程序内调用交给生产单条事务边界（收尾声明只登记不结算）"""
-        if name == FINISH_TOOL_NAME:
-            if args:
-                raise _ProgramFault(f"{FINISH_TOOL_NAME} 无参数", code="bad_call", line=line)
-            self._finish_requested = True
-            self._finish_line = line
-            return {"status": "pending", "note": "收尾已登记：本程序全部语句执行完后结算"}
-        return await self._run_op(name=name, args=args, line=line)
-
-    async def _run_op(self, *, name: str, args: dict[str, Any], line: int | None) -> dict[str, Any]:
-        """用于把一次工具调用交给生产单条事务边界执行并登记逐 op 记录"""
-        op_index = self._next_op_index(line=line)
-        entry = await _execute_call(
-            {"name": name, "args": args, "id": f"{self._program_id}-op{op_index}"},
-            tool_map=self.tools,
-            ledger=self.ledger,
-            observer=self.observer,
-            stream=self.stream,
-            call_index=self._next_call_index(),
-            # 2026-09-20 写者面也要登记本章已写出的记录键：案例工具（push_case.record_id /
-            # promise_case.result_id）按 ledger.written_record_keys 校验，这条路此前没登记
-            # （原生批次与 正式与连续性工具面都登记了），于是写者面每次引用自己刚写的记录都被
-            # unknown_record 拒（run 54a72932：t2/t3 树根引用两次全废）。
-            record_keys=self.ledger.written_record_keys,
-            program_meta={
-                "program_id": self._program_id,
-                "op_index": op_index,
-                "source_line": line,
-                "record": tool_record_key(name, args),
-                "direct_fallback": False,
-            },
-        )
-        raw_call = entry.get("call")
-        call_args: dict[str, Any] = dict(raw_call.get("args") or {}) if isinstance(raw_call, dict) else {}
-        self._log_op(
-            name,
-            op_index=op_index,
-            line=line,
-            status=str(entry.get("status") or "error"),
-            receipt=entry.get("receipt"),
-            call_args=call_args,
-        )
-        return entry.get("receipt") or {}
-
-    async def _settle_finish(self) -> None:
-        """用于在程序末尾结算 finish 收尾意图（就地结算，不再只登记）"""
-        op_index = self._ops_in_program + 1
-        entry = await _execute_call(
-            {"name": FINISH_TOOL_NAME, "args": {}, "id": f"{self._program_id}-finish"},
-            tool_map=self.tools,
-            ledger=self.ledger,
-            observer=self.observer,
-            stream=self.stream,
-            call_index=self._next_call_index(),
-            settle_finish=True,
-            program_meta={
-                "program_id": self._program_id,
-                "op_index": op_index,
-                "source_line": self._finish_line,
-                "record": FINISH_TOOL_NAME,
-                "direct_fallback": False,
-            },
-        )
-        self._log_op(
-            FINISH_TOOL_NAME,
-            op_index=op_index,
-            line=self._finish_line,
-            status=str(entry.get("status") or "error"),
-            receipt=entry.get("receipt"),
-        )

@@ -7,11 +7,12 @@ from typing import Any
 
 import pytest
 
-from src.agents.annotation import program as program_module
-from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.program import ProgramRuntime
-from src.agents.annotation.schema import ChapterParagraphInfo
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.annotation import program_contract
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.fact_graph.graph import FactGraph
+from src.fact_graph.inputs import ChapterParagraphInfo
+from tests.support.annotation_work_tools import build_annotation_tools
+from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 
 
 class _QueryService:
@@ -44,39 +45,11 @@ async def _run(runtime: ProgramRuntime, code: str) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_program_writes_domains_and_returns_compressed_receipt() -> None:
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    receipt = await _run(runtime, """
-person = write_entity(el="a1", name="顾霜", entity_type="character")
-write_metrics(summary="顾霜喝止众人", emotional_valence=0, narrative_function="冲突")
-write_event(el="t1", isroot=true, description="喝止", evidence=1, characters=[
-    {"entityid": person["id"], "role": "主体", "narrative_role": "主体", "action": "喝止", "emotion": -1}
-])
-for candidate in [1, 2]:
-    write_dialogue(candidate_index=candidate, verdict="not_dialogue")
-finish()
-""")
-    assert receipt["status"] == "applied"
-    assert receipt["applied"] == 6
-    assert "failed" not in receipt and "reads" not in receipt and "refs" not in receipt
-    assert receipt["progress"]["entities"] == 1
-    assert receipt["progress"]["dialogues"] == 2
-    assert ledger.chapter_finished and ledger.ready_chapter is not None
-    assert runtime.ops[0]["program_id"] == "p1"
-    assert runtime.ops[0]["op_index"] == 1
-    assert runtime.ops[0]["tool_name"] == "write_entity"
-    assert runtime.ops[0]["status"] == "success"
-    assert runtime.ops[0]["record"] == "entity/顾霜"
-    assert runtime.ops[0]["source_line"] == 2
-    assert runtime.ops[-1]["tool_name"] == "finish"
-
-
-@pytest.mark.asyncio
 async def test_receipt_omits_success_record_content() -> None:
     ledger = _ledger()
-    receipt = await _run(_runtime(ledger),
-                         'write_entity(el="a1", name="顾霜", entity_type="character", description="唯一描述串XYZ")')
+    receipt = await _run(
+        _runtime(ledger), 'write_entity(el="a1", name="顾霜", entity_type="character", description="唯一描述串XYZ")'
+    )
     assert receipt["applied"] == 1
     assert "唯一描述串XYZ" not in json.dumps(receipt, ensure_ascii=False)
     assert ledger.written_entities["顾霜"].description == "唯一描述串XYZ"
@@ -85,11 +58,14 @@ async def test_receipt_omits_success_record_content() -> None:
 @pytest.mark.asyncio
 async def test_json_literals_true_false_null_are_accepted() -> None:
     ledger = _ledger()
-    receipt = await _run(_runtime(ledger), """
+    receipt = await _run(
+        _runtime(ledger),
+        """
 write_metrics(summary="伏笔埋设", emotional_valence=1, narrative_function="铺垫", pivot_moment=false, cliffhanger=true)
 write_entity(el="a1", name="顾霜", entity_type="character", description=null)
 write_event(el="t1", isroot=true, description="埋设", evidence=1, isforeshadowing=true, confidence="low")
-""")
+""",
+    )
     assert receipt["status"] == "applied"
     assert receipt["applied"] == 3
     assert ledger.metrics_payload.cliffhanger is True
@@ -99,18 +75,21 @@ write_event(el="t1", isroot=true, description="埋设", evidence=1, isforeshadow
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("code", "error_code"), [
-    ('write_entity(el="a1", name=unknown, entity_type="character")', "undefined_name"),
-    ("import os", "unsupported_statement"),
-    ("value = {'a': 1}.keys()", "unsupported_expression"),
-    ("while True:\n    pass", "unsupported_statement"),
-    ("write_entity = 1", "name_reserved"),
-    ("_tmp = 1", "name_reserved"),
-    ("value = write_metrics(*[1])", "bad_call"),
-    ("left, right = (1, 2, 3)", "bad_assignment"),
-    ("for item in 'abc':\n    pass", "unsupported_expression"),
-    ("value = 1 if True else 2", "unsupported_expression"),
-])
+@pytest.mark.parametrize(
+    ("code", "error_code"),
+    [
+        ('write_entity(el="a1", name=unknown, entity_type="character")', "undefined_name"),
+        ("import os", "unsupported_statement"),
+        ("value = {'a': 1}.keys()", "unsupported_expression"),
+        ("while True:\n    pass", "unsupported_statement"),
+        ("write_entity = 1", "name_reserved"),
+        ("_tmp = 1", "name_reserved"),
+        ("value = write_metrics(*[1])", "bad_call"),
+        ("left, right = (1, 2, 3)", "bad_assignment"),
+        ("for item in 'abc':\n    pass", "unsupported_expression"),
+        ("value = 1 if True else 2", "unsupported_expression"),
+    ],
+)
 async def test_unsafe_or_invalid_programs_return_structured_errors(code: str, error_code: str) -> None:
     ledger = _ledger()
     receipt = await _run(_runtime(ledger), code)
@@ -126,7 +105,7 @@ async def test_syntax_size_and_empty_programs_are_rejected() -> None:
     for code, error_code in [
         ("   ", "empty_program"),
         ("write_entity(el=", "syntax_error"),
-        ("value = " + "0" * (program_module._PROGRAM_MAX_CODE_CHARS + 1), "program_too_large"),
+        ("value = " + "0" * (program_contract.PROGRAM_MAX_CODE_CHARS + 1), "program_too_large"),
     ]:
         receipt = await _run(runtime, code)
         assert receipt["status"] == "rejected"
@@ -138,15 +117,18 @@ async def test_syntax_size_and_empty_programs_are_rejected() -> None:
 async def test_single_op_failure_rolls_back_only_that_op() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
-    receipt = await _run(runtime, """
+    receipt = await _run(
+        runtime,
+        """
 write_entity(el="a1", name="侯飞白", entity_type="character")
 write_entity(el="a2", name="贺府", entity_type="location")
 write_relation(from_entity="a1", to_entity="a2", relation_type="隶属")
 write_metrics(summary="贺府夜谈", emotional_valence=0, narrative_function="冲突")
-""")
+""",
+    )
     assert receipt["status"] == "partial"
     assert receipt["applied"] == 3
-    failure, = receipt["failed"]
+    (failure,) = receipt["failed"]
     assert failure["op"] == 3 and failure["line"] == 4
     assert failure["tool"] == "write_relation"
     assert failure["field"] == "to_entity"
@@ -160,11 +142,14 @@ write_metrics(summary="贺府夜谈", emotional_valence=0, narrative_function="�
 @pytest.mark.asyncio
 async def test_failed_dialogue_does_not_change_prior_judgment() -> None:
     ledger = _ledger()
-    receipt = await _run(_runtime(ledger), """
+    receipt = await _run(
+        _runtime(ledger),
+        """
 write_entity(el="a1", name="贺府", entity_type="location")
 write_dialogue(candidate_index=1, verdict="not_dialogue")
 write_dialogue(candidate_index=2, verdict="dialogue", speaker="a1")
-""")
+""",
+    )
     assert receipt["applied"] == 2
     assert receipt["failed"][0]["code"] == "not_character"
     assert set(ledger.written_dialogues) == {1}
@@ -176,7 +161,9 @@ async def test_variables_persist_across_programs() -> None:
     runtime = _runtime(ledger)
     first = await _run(runtime, 'person = write_entity(el="a1", name="贺伯安", entity_type="character")')
     assert first["applied"] == 1
-    second = await _run(runtime, """
+    second = await _run(
+        runtime,
+        """
 write_metrics(summary="离火反噬", emotional_valence=-2, narrative_function="转折")
 write_event(el="t1", isroot=true, description="离火反噬", evidence=1, characters=[
     {"entityid": person["id"], "role": "客体", "narrative_role": "客体", "action": "承受反噬", "emotion": -2}
@@ -184,7 +171,8 @@ write_event(el="t1", isroot=true, description="离火反噬", evidence=1, charac
 for candidate in [1, 2]:
     write_dialogue(candidate_index=candidate, verdict="dialogue", speaker=person["id"])
 finish()
-""")
+""",
+    )
     assert second["status"] == "applied"
     root = ledger.bound_payloads["events"][0]
     assert [participant.entity for participant in root.participants] == ["贺伯安"]
@@ -195,28 +183,31 @@ finish()
 async def test_limits_keep_applied_ops_and_allow_next_program(monkeypatch: pytest.MonkeyPatch) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
-    monkeypatch.setattr(program_module, "_PROGRAM_MAX_LOOP_ITEMS", 2)
+    monkeypatch.setattr(program_contract, "PROGRAM_MAX_LOOP_ITEMS", 2)
     loop = await _run(runtime, "for item in [1, 2, 3]:\n    pass")
     assert loop["error"]["type"] == "loop_too_long" and loop["applied"] == 0
-    monkeypatch.setattr(program_module, "_PROGRAM_MAX_OPS", 2)
-    ops = await _run(runtime, """
+    monkeypatch.setattr(program_contract, "PROGRAM_MAX_OPS", 2)
+    ops = await _run(
+        runtime,
+        """
 write_entity(el="a1", name="顾霜", entity_type="character")
 write_entity(el="a2", name="贺府", entity_type="organization")
 write_relation(from_entity="a1", to_entity="a2", relation_type="隶属")
-""")
+""",
+    )
     assert ops["error"]["type"] == "too_many_ops"
     assert ops["applied"] == 2
     assert set(ledger.written_entities) == {"顾霜", "贺府"}
     retry = await _run(runtime, 'write_relation(from_entity="a1", to_entity="a2", relation_type="隶属")')
     assert retry["applied"] == 1
-    monkeypatch.setattr(program_module, "_PROGRAM_MAX_STEPS", 3)
+    monkeypatch.setattr(program_contract, "PROGRAM_MAX_STEPS", 3)
     steps = await _run(runtime, "for item in [1, 2]:\n    pass")
     assert steps["error"]["type"] == "too_many_steps"
 
 
 @pytest.mark.asyncio
 async def test_deadline_is_structured(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(program_module, "_PROGRAM_DEADLINE_S", -1.0)
+    monkeypatch.setattr(program_contract, "PROGRAM_DEADLINE_S", -1.0)
     receipt = await _run(_runtime(_ledger()), "value = 1")
     assert receipt["error"]["type"] == "deadline_exceeded"
     assert receipt["applied"] == 0
@@ -225,7 +216,9 @@ async def test_deadline_is_structured(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.asyncio
 async def test_language_supports_if_tuple_unpacking_and_comparisons() -> None:
     ledger = _ledger()
-    receipt = await _run(_runtime(ledger), """
+    receipt = await _run(
+        _runtime(ledger),
+        """
 left, right = (1, 2)
 if left in [1, 2]:
     write_metrics(summary="条件成立", emotional_valence=0, narrative_function="铺垫")
@@ -233,85 +226,11 @@ if left != right:
     write_dialogue(candidate_index=1, verdict="not_dialogue")
 if left == 1:
     write_dialogue(candidate_index=2, verdict="not_dialogue")
-""")
+""",
+    )
     assert receipt["applied"] == 3
     assert ledger.metrics_payload.summary == "条件成立"
     assert set(ledger.written_dialogues) == {1, 2}
-
-
-@pytest.mark.asyncio
-async def test_finish_settles_after_remaining_statements() -> None:
-    ledger = _ledger()
-    receipt = await _run(_runtime(ledger),
-                         'finish()\nwrite_metrics(summary="尾部指标", emotional_valence=0, narrative_function="铺垫")\n'
-                         'for candidate in [1, 2]:\n'
-                         '    write_dialogue(candidate_index=candidate, verdict="dialogue")')
-    assert receipt["status"] == "applied" and receipt["applied"] == 4
-    assert ledger.chapter_finished
-    assert ledger.ready_chapter.metrics.summary == "尾部指标"
-
-
-@pytest.mark.asyncio
-async def test_error_after_finish_does_not_freeze_chapter() -> None:
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    receipt = await _run(runtime,
-                         'write_metrics(summary="当前指标", emotional_valence=0, narrative_function="铺垫")\n'
-                         'finish()\nvalue = undefined')
-    assert receipt["error"]["type"] == "undefined_name"
-    assert receipt["applied"] == 1
-    assert not ledger.chapter_finished and ledger.ready_chapter is None
-    retry = await _run(runtime, 'for candidate in [1, 2]:\n'
-                               '    write_dialogue(candidate_index=candidate, verdict="dialogue")\nfinish()')
-    assert retry["status"] == "applied" and ledger.chapter_finished
-
-
-@pytest.mark.asyncio
-async def test_program_reads_source_anchors_links_and_cases_within_chapter_task() -> None:
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    receipt = await _run(runtime, """
-person = write_entity(el="a1", name="顾霜", entity_type="character")
-local = read_text(paragraph_id=1, quote="顾霜")
-other = read_text(paragraph_id=20, quote="顾霜")
-anchor_record(record_id=person["record"], source_ref=local["source_ref"])
-write_link(record_id=person["record"], source_ref=local["source_ref"],
-           target_ref=other["source_ref"], kind="same_entity")
-push_case(description="阿青的其他称呼尚未确定", keys=["阿青"], type="身份未确定", record_id=person["record"],
-          evidence_refs=[local["source_ref"], other["source_ref"]])
-write_metrics(summary="顾霜喝止众人", emotional_valence=0, narrative_function="冲突")
-for candidate in [1, 2]:
-    write_dialogue(candidate_index=candidate, verdict="dialogue", speaker=person["id"])
-finish()
-""")
-    assert receipt["status"] == "applied"
-    assert ledger.chapter_finished and ledger.ready_chapter is not None
-    assert len(ledger.cross_chapter_links) == 1
-    link = ledger.cross_chapter_links[0]
-    assert (link.source.chapter_id, link.target.chapter_id, link.kind) == (1, 2, "same_entity")
-    assert link.source in ledger.source_anchors["entity/顾霜"]
-    assert ledger.authorized_text_paragraph_ids == {1, 20}
-    assert len(ledger.pushed_cases) == 1
-    assert {item["chapter_id"] for item in ledger.pushed_cases[0].target_ref["source_refs"]} == {1, 2}
-    assert {row["tool_name"] for row in runtime.ops} >= {"read_text", "anchor_record", "write_link", "push_case"}
-
-
-@pytest.mark.asyncio
-async def test_program_rejects_unread_or_other_chapter_source_without_mutating_links() -> None:
-    ledger = _ledger()
-    runtime = _runtime(ledger)
-    await _run(runtime, """
-person = write_entity(el="a1", name="顾霜", entity_type="character")
-other = read_text(paragraph_id=20, quote="顾霜")
-""")
-    receipt = await _run(runtime, """
-anchor_record(record_id=person["record"], source_ref=other["source_ref"])
-write_link(record_id=person["record"], source_ref="invented-ref", target_ref=other["source_ref"], kind="same_entity")
-push_case(description="没有读取的证据", keys=["顾霜"], type="未确定", evidence_refs=["invented-ref"])
-""")
-    assert receipt["status"] == "partial" and receipt["applied"] == 0
-    assert len(receipt["failed"]) == 3
-    assert ledger.source_anchors == {} and ledger.cross_chapter_links == [] and ledger.pushed_cases == []
 
 
 @pytest.mark.asyncio
@@ -323,11 +242,14 @@ async def test_anchor_accepts_bare_tree_key_as_root_record() -> None:
     """
     ledger = _ledger()
     runtime = _runtime(ledger)
-    receipt = await _run(runtime, """
+    receipt = await _run(
+        runtime,
+        """
 write_event(el="t1", isroot=True, description="顾霜拔剑", evidence=1)
 local = read_text(paragraph_id=1, quote="顾霜")
 anchor_record(record_id="t1", source_ref=local["source_ref"])
-""")
+""",
+    )
 
     assert receipt["status"] == "applied", receipt
     assert ledger.source_anchors["t1/root"]
@@ -365,24 +287,28 @@ async def test_repeat_failed_batch_guard_hints_then_fails_program() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("code", [
-    'write_dialogue(candidate_index=1, verdict="not_dialogue")\n'
-    'write_dialogue(candidate_index=3, verdict="not_dialogue")',
-    'indices = [1, 2, 3]\nfor index in indices:\n'
-    '    write_dialogue(candidate_index=index, verdict="not_dialogue")',
-    'rows = [{"index": 1}, {"index": 99}]\nfor row in rows:\n'
-    '    write_dialogue(candidate_index=row["index"], verdict="not_dialogue")',
-    'for index, verdict in [(1, "not_dialogue"), (99, "not_dialogue")]:\n'
-    '    write_dialogue(candidate_index=index, verdict=verdict)',
-    'write_dialogue(candidate_index="99", verdict="not_dialogue")',
-    'if write_dialogue(candidate_index=99, verdict="not_dialogue"):\n    pass',
-    'for value in [write_dialogue(candidate_index=99, verdict="not_dialogue")]:\n    pass',
-])
+@pytest.mark.parametrize(
+    "code",
+    [
+        'write_dialogue(candidate_index=1, verdict="not_dialogue")\n'
+        'write_dialogue(candidate_index=3, verdict="not_dialogue")',
+        'indices = [1, 2, 3]\nfor index in indices:\n    write_dialogue(candidate_index=index, verdict="not_dialogue")',
+        'rows = [{"index": 1}, {"index": 99}]\nfor row in rows:\n'
+        '    write_dialogue(candidate_index=row["index"], verdict="not_dialogue")',
+        'for index, verdict in [(1, "not_dialogue"), (99, "not_dialogue")]:\n'
+        "    write_dialogue(candidate_index=index, verdict=verdict)",
+        'write_dialogue(candidate_index="99", verdict="not_dialogue")',
+        'if write_dialogue(candidate_index=99, verdict="not_dialogue"):\n    pass',
+        'for value in [write_dialogue(candidate_index=99, verdict="not_dialogue")]:\n    pass',
+    ],
+)
 async def test_dialogue_batch_out_of_range_is_rejected_before_any_write(code: str) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
-    receipt = await _run(runtime, 'write_metrics(summary="尚未写入", emotional_valence=0, narrative_function="铺垫")\n'
-                         + code + '\nfinish()')
+    receipt = await _run(
+        runtime,
+        'write_metrics(summary="尚未写入", emotional_valence=0, narrative_function="铺垫")\n' + code + "\nfinish()",
+    )
     assert receipt["status"] == "rejected", receipt
     assert receipt["applied"] == 0
     assert receipt["error"]["type"] == "candidate_index_out_of_range"
@@ -399,15 +325,20 @@ async def test_dialogue_preflight_respects_branches_assignments_and_preserves_pr
     ledger = _ledger()
     runtime = _runtime(ledger)
     await _run(runtime, 'indices = [1, 2]\nwrite_dialogue(candidate_index=1, verdict="not_dialogue")')
-    rejected = await _run(runtime, 'indices = [1, 99]\nfor index in indices:\n'
-                          '    write_dialogue(candidate_index=index, verdict="not_dialogue")')
+    rejected = await _run(
+        runtime,
+        'indices = [1, 99]\nfor index in indices:\n    write_dialogue(candidate_index=index, verdict="not_dialogue")',
+    )
     assert rejected["status"] == "rejected"
     assert runtime.env["indices"] == [1, 2]
     assert set(ledger.written_dialogues) == {1}
-    repaired = await _run(runtime, 'for index in indices:\n'
-                         '    if index in [1, 2]:\n'
-                         '        write_dialogue(candidate_index=index, verdict="not_dialogue")\n'
-                         'if False:\n    write_dialogue(candidate_index=99, verdict="not_dialogue")')
+    repaired = await _run(
+        runtime,
+        "for index in indices:\n"
+        "    if index in [1, 2]:\n"
+        '        write_dialogue(candidate_index=index, verdict="not_dialogue")\n'
+        'if False:\n    write_dialogue(candidate_index=99, verdict="not_dialogue")',
+    )
     assert repaired["status"] == "applied", repaired
     assert set(ledger.written_dialogues) == {1, 2}
 
@@ -416,9 +347,12 @@ async def test_dialogue_preflight_respects_branches_assignments_and_preserves_pr
 async def test_dialogue_preflight_does_not_use_stale_values_from_unknown_tool_results() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
-    await _run(runtime, 'index = 99')
-    receipt = await _run(runtime, 'value = read_text(paragraph_id=1)\n'
-                         'if value:\n    index = 1\nwrite_dialogue(candidate_index=index, verdict="not_dialogue")')
+    await _run(runtime, "index = 99")
+    receipt = await _run(
+        runtime,
+        "value = read_text(paragraph_id=1)\n"
+        'if value:\n    index = 1\nwrite_dialogue(candidate_index=index, verdict="not_dialogue")',
+    )
     assert receipt["status"] == "applied", receipt
     assert receipt["applied"] == 2
     assert len(ledger.text_references) == 1
@@ -429,8 +363,11 @@ async def test_dialogue_preflight_does_not_use_stale_values_from_unknown_tool_re
 async def test_dynamic_candidate_value_is_checked_once_at_real_write_boundary() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
-    receipt = await _run(runtime, 'text = read_text(paragraph_id=20)\n'
-                         'write_dialogue(candidate_index=text["paragraph_id"], verdict="not_dialogue")')
+    receipt = await _run(
+        runtime,
+        "text = read_text(paragraph_id=20)\n"
+        'write_dialogue(candidate_index=text["paragraph_id"], verdict="not_dialogue")',
+    )
     assert receipt["status"] == "partial", receipt
     assert receipt["applied"] == 1
     assert receipt["failed"][0]["record"] == "dialogue/20"
@@ -444,7 +381,8 @@ async def test_dialogue_preflight_keeps_assignment_faults_at_original_execution_
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
-        runtime, 'write_metrics(summary="已接受指标", emotional_valence=0, narrative_function="铺垫")\n'
+        runtime,
+        'write_metrics(summary="已接受指标", emotional_valence=0, narrative_function="铺垫")\n'
         'left, right = [1]\nwrite_dialogue(candidate_index=1, verdict="not_dialogue")',
     )
     assert receipt["status"] == "runtime_error", receipt

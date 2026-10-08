@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pgvector.sqlalchemy import HALFVEC
@@ -57,7 +57,7 @@ def insert_paragraph_embeddings(
     if not materialized:
         return 0
     model_settings = settings.models.paragraph_embedding
-    created_at = datetime.now().isoformat()
+    created_at = datetime.now(UTC).replace(tzinfo=None)
     insert_rows = [
         {
             "run_id": run_id,

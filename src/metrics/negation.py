@@ -1,8 +1,8 @@
 """
 否定处理共享计算层（docs/词表体系重设计-修订版实施计划.md M5）
 
-供生产路径 `paragraph_metrics.compute_paragraph_metric_counts` 与
-`emotion_metrics.lexical_sentiment_density` 共用，杜绝两处否定逻辑漂移。
+供生产路径 `paragraph_metrics.compute_paragraph_metric_counts` 使用，
+否定规则只此一处，不在调用方复制。
 
 规则：
 1. 句边界：否定词必须与情绪词在同一句（句界为 。！？!? 与换行）
@@ -25,8 +25,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from src.config.constants import LEXICON_FILES
-from src.utils.text_utils import tokenize_words
+from src.lexicons.constants import LEXICON_FILES
+from src.text_processing.text_utils import tokenize_words
 
 _SECTION_PATTERN = "====="
 _CLAUSE_BOUNDARY_CHARS = "，、；：,;:"

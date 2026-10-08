@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.preprocess import normalize_text, split_paragraphs, split_sentences, strip_empty_lines
+from src.text_processing.preprocess import normalize_text, split_paragraphs, split_sentences
 
 
 class TestCleaning(unittest.TestCase):
@@ -12,10 +12,6 @@ class TestCleaning(unittest.TestCase):
         raw = "  第一章\r\n\r\n第二章\u3000  \t内容  "
         normalized = normalize_text(raw)
         self.assertEqual(normalized, "第一章\n\n第二章 内容")
-
-    def test_strip_empty_lines(self) -> None:
-        raw = "第一章\n\n\n第二章\n\n"
-        self.assertEqual(strip_empty_lines(raw), "第一章\n第二章")
 
 
 class TestSegment(unittest.TestCase):

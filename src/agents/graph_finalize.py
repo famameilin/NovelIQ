@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 
 if TYPE_CHECKING:
-    from src.agents.audit.observer import AgentTurnObserver
     from src.agents.graph import AgentLoopState
     from src.agents.stream import AgentStream
+    from src.agents.turn_observer import AgentTurnObserver
 
 _FINISH_TOOL_NAME = "finish"
 

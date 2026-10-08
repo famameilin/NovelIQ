@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
-from src.chunking.spans import ParagraphSpan
+from src.storage.input_records import ParagraphRecord as ParagraphSpan
 from src.storage.models import Chapter, Paragraph
 
 

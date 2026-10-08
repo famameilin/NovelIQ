@@ -3,19 +3,18 @@
 
 主Repository类，通过组合方式使用各模块函数
 
-添加 graphs, summaries 模块导入和对应方法
+添加 graphs 模块导入和对应方法
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
-from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
 from src.storage.repositories.base import BaseRepository
 
 # 导入各模块函数
-from . import metrics, runs, summaries
+from . import metrics, runs
 
 
 class StatsRepository(BaseRepository[dict[str, Any]]):
@@ -31,10 +30,10 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """获取全局统计数据字典"""
         return metrics.fetch_global_stats_dict(self.session, run_id)
 
-    def insert_token_usage(
+    def insert_model_turn(
         self,
+        *,
         run_id: str,
-        novel_id: str,
         task_type: str,
         call_type: str,
         model: str,
@@ -46,30 +45,25 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         cost: float | None = None,
         accounting_source: str = "reported",
         reasoning_tokens: int | None = None,
-        agent_turn_id: int | None = None,
-    ) -> int | None:
-        """插入 token 使用记录"""
-        return metrics.insert_token_usage(
+        message_key: str | None = None,
+    ) -> int:
+        """插入非 Agent 模型调用记账行"""
+        return metrics.insert_model_turn(
             self.session,
-            run_id,
-            novel_id,
-            task_type,
-            call_type,
-            model,
-            prompt_tokens,
-            total_tokens,
-            completion_tokens,
-            chapter_id,
-            cache_read_tokens,
-            cost,
-            accounting_source,
-            reasoning_tokens,
-            agent_turn_id,
+            run_id=run_id,
+            task_type=task_type,
+            call_type=call_type,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            total_tokens=total_tokens,
+            completion_tokens=completion_tokens,
+            chapter_id=chapter_id,
+            cache_read_tokens=cache_read_tokens,
+            cost=cost,
+            accounting_source=accounting_source,
+            reasoning_tokens=reasoning_tokens,
+            message_key=message_key,
         )
-
-    def fetch_token_usage_stats(self, run_id: str, novel_id: str) -> dict[str, Any]:
-        """获取 token 使用统计"""
-        return metrics.fetch_token_usage_stats(self.session, run_id, novel_id)
 
     # ==================== runs 模块方法 ====================
 
@@ -81,66 +75,16 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """检查指定运行是否有语言结构基础数据"""
         return runs.has_linguistic_data(self.session, run_id)
 
-    def is_linguistic_complete(self, run_id: str) -> bool:
-        """检查全部段落的语言结构基础数据是否齐备"""
-        return runs.is_linguistic_complete(self.session, run_id)
-
-    def is_topic_model_complete(self, run_id: str) -> bool:
-        """检查主题模型契约、段落终态和分布覆盖是否完整"""
-        return runs.is_topic_model_complete(self.session, run_id)
-
-    def has_diagnosis_data(self, run_id: str) -> bool:
-        """检查指定运行是否有诊断数据"""
-        return runs.has_diagnosis_data(self.session, run_id)
-
-    def is_aggregate_complete(self, run_id: str) -> bool:
-        """检查聚合阶段是否完成"""
-        return runs.is_aggregate_complete(self.session, run_id)
-
     # ==================== metrics 模块补充方法 ====================
 
-    def insert_cloud_analysis(self, run_id: str, analysis: CloudAnalysisSchema) -> None:
-        """插入云端分析结果"""
-        return metrics.insert_cloud_analysis(self.session, run_id, analysis)
+    def insert_agent_analysis(self, run_id: str, payload: Mapping[str, Any]) -> str:
+        """诊断产物追加进分析产物表，返回产物 id"""
+        return metrics.insert_agent_analysis(self.session, run_id, payload)
 
-    def fetch_cloud_analysis(self, novel_id: str, run_id: str) -> dict[str, Any] | None:
-        """获取云端分析结果"""
-        return metrics.fetch_cloud_analysis(self.session, novel_id, run_id)
-
-    def insert_global_context(
-        self,
-        run_id: str,
-        novel_id: str,
-        core_characters: str,
-        world_setting: str,
-        novel_title: str | None = None,
-    ) -> None:
-        """插入全局上下文"""
-        return metrics.insert_global_context(
-            self.session, run_id, novel_id, core_characters, world_setting, novel_title
-        )
-
-    def fetch_global_context(self, novel_id: str) -> tuple[str, str, str, str] | None:
-        """获取全局上下文"""
-        return metrics.fetch_global_context(self.session, novel_id)
-
-    def update_global_context(self, novel_id: str, **kwargs: Any) -> None:
-        """更新全局上下文"""
-        return metrics.update_global_context(self.session, novel_id, **kwargs)
+    def fetch_agent_analysis(self, run_id: str) -> dict[str, Any] | None:
+        """获取最新诊断产物"""
+        return metrics.fetch_agent_analysis(self.session, run_id)
 
     def fetch_novel_title(self, novel_id: str) -> str | None:
         """获取小说标题"""
         return metrics.fetch_novel_title(self.session, novel_id)
-
-    def has_global_context(self, novel_id: str) -> bool:
-        """
-        检查是否已存在 global_context 记录
-
-        """
-        return metrics.has_global_context(self.session, novel_id)
-
-    # ==================== summaries 模块方法 ====================
-
-    def insert_chapter_summary(self, run_id: str, chapter_id: int, summary: str, *, commit: bool = True) -> None:
-        """插入分块摘要"""
-        return summaries.insert_chapter_summary(self.session, run_id, chapter_id, summary, commit=commit)

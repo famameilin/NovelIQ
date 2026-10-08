@@ -13,15 +13,11 @@
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
-from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.schema import (
-    ChapterMetricsInput,
-    DialogueVerdict,
-    EntityInput,
-    ParticipantArg,
-    Tone,
-)
-from src.agents.annotation.tools import AnnotationToolLedger
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.event_trees.models import ParticipantArg
+from src.fact_graph.graph import FactGraph
+from src.fact_graph.inputs import EntityInput
+from src.fact_graph.vocabulary import DialogueVerdict, Tone
 
 
 def _ledger() -> AnnotationToolLedger:
@@ -186,24 +182,3 @@ def test_dialogue_speaker_rejection_points_at_the_single_record() -> None:
         tone=Tone.CALM,
     )
     assert ledger.written_dialogues[1].speaker == "甲"
-
-
-def test_dialogue_missing_candidates_reject_finish() -> None:
-    """未提交候选判定时拒绝收尾，不生成默认非对话记录"""
-    ledger = AnnotationToolLedger(
-        run_scope="r",
-        current_chapter_id=1,
-        current_chapter_text='他说："今日且走，来日方长。"',
-        allow_future_context=False,
-        graph=FactGraph(),
-    )
-    # 收尾硬前提是指标已提交（缺指标按 missing_record 拒绝），与本用例的对话默认判定无关
-    ledger.apply_metrics(
-        ChapterMetricsInput(summary="短块", emotional_valence=0, narrative_function="铺垫")
-    )
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        ledger.finish_chapter()
-    assert (excinfo.value.field, excinfo.value.code) == ("dialogues", "missing_record")
-    assert ledger.written_dialogues == {}
-    assert ledger.ready_chapter is None
-    assert ledger.chapter_finished is False

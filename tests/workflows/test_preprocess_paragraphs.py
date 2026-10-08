@@ -16,13 +16,14 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from src.chapters.preprocess import preprocess_text
 from src.config import settings
-from src.preprocess import normalize_text
 from src.storage.models import ParagraphCurve, ParagraphEmbedding, ParagraphMetric
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.text_processing.chapters.preprocess import preprocess_text
+from src.text_processing.preprocess import normalize_text
 from src.workflows.preprocess import run_preprocess
+from src.workflows.preprocess_readiness import is_preprocess_complete
 from tests.support.analysis_factories import insert_test_novel
 
 
@@ -74,7 +75,7 @@ class TestPreprocessParagraphs:
         )
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_generates_paragraphs(self, db_session, tmp_path) -> None:
         """
         2026-08-14 用于验证 preprocess 无条件生成段落事实源：
@@ -115,7 +116,7 @@ class TestPreprocessParagraphs:
         assert all(row.token_count is not None for row in rows)
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_paragraphs_identical_when_semantic_disabled(
         self,
         db_session,
@@ -162,7 +163,7 @@ class TestPreprocessParagraphs:
         ]
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_embeddings_aligned_with_paragraphs(self, db_session, tmp_path) -> None:
         """
         2026-08-14 二期段落化：embedding 从段落事实源读取后按 paragraph_id 严格对齐：
@@ -199,7 +200,7 @@ class TestPreprocessParagraphs:
             assert embedding_row.embedding_dimension == 1024
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_resume_skips_when_paragraphs_exist(self, db_session, tmp_path) -> None:
         """
         2026-08-14 用于验证 is_preprocess_complete 要求段落事实源存在：
@@ -215,7 +216,7 @@ class TestPreprocessParagraphs:
         )
         assert chunks1 > 0
         assert ParagraphRepository(db_session).count_paragraphs(run_id) > 0
-        assert ChapterRepository(db_session).is_preprocess_complete(run_id)
+        assert is_preprocess_complete(ChapterRepository(db_session).session, run_id)
 
         chunks2, chars2, elapsed2 = await run_preprocess(
             source_path=source_path,
@@ -225,7 +226,7 @@ class TestPreprocessParagraphs:
         assert (chunks2, chars2, elapsed2) == (0, 0, 0.0)
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_generates_paragraph_metrics(self, db_session, tmp_path) -> None:
         """
         2026-08-14 用于验证段落指标（§5.3）随 preprocess 无条件生成：
@@ -259,7 +260,7 @@ class TestPreprocessParagraphs:
             assert row.semantic_category_counts is not None
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_paragraph_metrics_counts_conservation(self, db_session, tmp_path) -> None:
         """
         2026-08-14 用于验证段落指标与段落事实源守恒：
@@ -295,7 +296,7 @@ class TestPreprocessParagraphs:
                 assert variance >= 0.0
 
     @pytest.mark.asyncio()
-    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
+    @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_generates_paragraph_curves(self, db_session, tmp_path) -> None:
         """
         2026-08-14 用于验证段落曲线（§5.5）随 preprocess 无条件生成：

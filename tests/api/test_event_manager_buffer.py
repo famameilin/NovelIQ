@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from src.api.services.event_manager import EventManager
+from src.sse.manager import EventManager
 
 
 @pytest.mark.asyncio
@@ -224,5 +224,332 @@ async def test_concurrent_connect_and_send_no_duplicate_or_mutation_error() -> N
         contents = [m["data"]["content"] for m in messages]
         assert contents.count("mid") == 1
         assert len(contents) == len(set(contents))
+    finally:
+        manager.reset_for_testing()
+
+
+@pytest.mark.asyncio
+async def test_failed_persistence_replays_actual_cache_with_same_cursor_and_identity():
+    class DelayedOutbox:
+        def __init__(self):
+            self.rows = []
+            self.failed = True
+
+        def reserve_sequence(self, task_id, message_id):
+            return 41
+
+        def display_state(self, task_id):
+            from src.sse.state import DisplayState
+
+            return DisplayState()
+
+        def emit(self, task_id, event_type, data, *, sequence):
+            if self.failed:
+                raise RuntimeError("保存延迟")
+            if not self.rows:
+                self.rows.append({"seq": sequence, "type": event_type, "data": data})
+
+        def replay(self, task_id, after_seq):
+            return [row for row in self.rows if row["seq"] > after_seq]
+
+    manager = EventManager()
+    outbox = DelayedOutbox()
+    manager.configure_outbox(outbox)
+    data = {"message_id": "actual-message", "invocation_id": "current-inv", "content": "实际输出"}
+    try:
+        with pytest.raises(RuntimeError, match="保存延迟"):
+            await manager.send("task", "llm_output", data)
+        assert (await manager.replay("task", 0))[0]["seq"] == 41
+        outbox.failed = False
+        await manager.send("task", "llm_output", data)
+        await manager.send("task", "llm_output", data)
+        replay = await manager.replay("task", 0)
+        assert len(replay) == 1 and replay[0]["data"] == data
+        assert await manager.replay("task", 41) == []
+    finally:
+        manager.reset_for_testing()
+
+
+@pytest.mark.asyncio
+async def test_replay_short_page_and_concurrent_send_keep_all_persisted_sequences():
+    """短页查询期间发送超过缓存容量，客户端仍能逐页收到全部持久消息"""
+    from copy import deepcopy
+
+    from src.sse.state import DisplayState
+
+    class ConcurrentOutbox:
+        def __init__(self):
+            self.rows = []
+            self.seq = 0
+            self.loop = asyncio.get_running_loop()
+            self.ready = asyncio.Event()
+            self.release = asyncio.Event()
+            self.sent_during_snapshot = asyncio.Event()
+            self.querying = False
+
+        def display_state(self, task_id):
+            return DisplayState()
+
+        def reserve_sequence(self, task_id, message_id):
+            if self.querying:
+                self.loop.call_soon_threadsafe(self.sent_during_snapshot.set)
+            self.seq += 1
+            return self.seq
+
+        def emit(self, task_id, event_type, data, *, sequence):
+            self.rows.append({"type": event_type, "data": deepcopy(data), "seq": sequence})
+
+        def replay(self, task_id, after_seq):
+            snapshot = [deepcopy(row) for row in self.rows if row["seq"] > after_seq][:128]
+            self.querying = True
+            self.loop.call_soon_threadsafe(self.ready.set)
+            asyncio.run_coroutine_threadsafe(self.release.wait(), self.loop).result()
+            self.querying = False
+            return snapshot
+
+    outbox = ConcurrentOutbox()
+    manager = EventManager()
+    manager.configure_outbox(outbox)
+
+    async def send_many():
+        for index in range(400):
+            await manager.send("task", "llm_output", {"content": f"new-{index}"})
+
+    sender = None
+    pending = None
+    try:
+        for index in range(10):
+            await manager.send("task", "llm_output", {"content": f"initial-{index}"})
+        pending = asyncio.create_task(manager.replay("task", 0))
+        await asyncio.wait_for(outbox.ready.wait(), timeout=1)
+        sender = asyncio.create_task(send_many())
+        # 查询未完成前不能产生比该持久页更晚的缓存消息
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(outbox.sent_during_snapshot.wait(), timeout=0.05)
+        outbox.release.set()
+        messages = await pending
+        await sender
+        while page := await manager.replay("task", messages[-1]["seq"]):
+            messages.extend(page)
+        assert [message["seq"] for message in messages] == list(range(1, 411))
+    finally:
+        outbox.release.set()
+        if pending is not None:
+            await pending
+        if sender is not None:
+            await sender
+        manager.reset_for_testing()
+
+
+@pytest.mark.asyncio
+async def test_postgres_outbox_keeps_generated_sequence_across_reversed_save_and_restart(db_session):
+    from src.sse.persistence import SseMessageRepository
+    from src.storage.db import get_session_factory
+    from src.storage.models import EventOutbox
+    from tests.support.chapter_annotation_helpers import create_run_with_chunks
+
+    _novel, run_id = create_run_with_chunks(db_session, texts=["原文。"])
+    outbox = SseMessageRepository(get_session_factory())
+    first = {"message_id": "first:" + run_id, "invocation_id": "actual-inv", "content": "先产生"}
+    second = {"message_id": "second:" + run_id, "invocation_id": "actual-inv", "content": "后产生"}
+    a = outbox.reserve_sequence(run_id, first["message_id"])
+    b = outbox.reserve_sequence(run_id, second["message_id"])
+    assert a < b
+    outbox.emit(run_id, "llm_output", second, sequence=b)
+    outbox.emit(run_id, "llm_output", first, sequence=a)
+    manager = EventManager(outbox=outbox)
+    try:
+        assert [row["seq"] for row in await manager.replay(run_id, 0)] == [a, b]
+        await manager.send(run_id, "llm_output", first)
+        await manager.send(run_id, "llm_output", first)
+        assert [row["seq"] for row in await manager.replay(run_id, 0)] == [a, b]
+        assert db_session.query(EventOutbox).filter(EventOutbox.run_id == run_id).count() == 2
+    finally:
+        manager.reset_for_testing()
+
+
+@pytest.mark.asyncio
+async def test_resume_preserves_saved_work_display_but_filters_persisted_old_terminal(db_session):
+    from src.sse.persistence import SseMessageRepository
+    from src.storage.db import get_session_factory
+    from tests.support.chapter_annotation_helpers import create_run_with_chunks
+
+    _novel, run_id = create_run_with_chunks(db_session, texts=["第一章原文。", "第二章原文。"], chapter_ids=[1, 2])
+    outbox = SseMessageRepository(get_session_factory())
+    manager = EventManager(outbox=outbox)
+    completed = {
+        "work_id": "complete-work",
+        "invocation_id": "complete-inv",
+        "stage": "annotate",
+        "chapter_id": 1,
+        "sub_stage": "solo",
+    }
+    try:
+        await manager.send(run_id, "work_reset", {**completed, "message_id": "reset-complete:" + run_id})
+        await manager.send(
+            run_id,
+            "llm_output",
+            {
+                **completed,
+                "message_id": "shown-complete:" + run_id,
+                "stream_id": "complete-inv",
+                "content": "保留完成章",
+            },
+        )
+        await manager.send(run_id, "task_cancelled", {"message_id": "old-stop:" + run_id})
+        await manager.restart_display(run_id)
+        await manager.send(run_id, "stage_start", {"message_id": "new-stage:" + run_id, "stage": "annotate"})
+        restarted = EventManager(outbox=outbox)
+        try:
+            replay = await restarted.replay(run_id, 0)
+            assert "task_cancelled" not in {message["type"] for message in replay}
+            output = next(message for message in replay if message["type"] == "llm_output")
+            assert output["data"]["content"] == "保留完成章"
+            assert replay[-1]["type"] == "stage_start"
+        finally:
+            restarted.reset_for_testing()
+    finally:
+        manager.reset_for_testing()
+
+
+@pytest.mark.asyncio
+async def test_reset_filters_old_invocation_after_restart_without_deleting_message_history(db_session):
+    from src.sse.persistence import SseMessageRepository
+    from src.storage.db import get_session_factory
+    from src.storage.models import EventOutbox
+    from tests.support.chapter_annotation_helpers import create_run_with_chunks
+
+    _novel, run_id = create_run_with_chunks(db_session, texts=["原文。"])
+    outbox = SseMessageRepository(get_session_factory())
+    manager = EventManager(outbox=outbox)
+    base = {"work_id": "same-work", "stage": "annotate", "sub_stage": "event", "chapter_id": 1}
+    try:
+        await manager.send(run_id, "work_reset", {**base, "invocation_id": "old", "message_id": "old-reset:" + run_id})
+        await manager.send(
+            run_id,
+            "llm_output",
+            {**base, "invocation_id": "old", "message_id": "old-output:" + run_id, "content": "旧执行"},
+        )
+        await manager.send(run_id, "work_reset", {**base, "invocation_id": "new", "message_id": "new-reset:" + run_id})
+        await manager.send(
+            run_id,
+            "llm_output",
+            {**base, "invocation_id": "new", "message_id": "new-output:" + run_id, "content": "新执行"},
+        )
+        restarted = EventManager(outbox=outbox)
+        try:
+            await restarted.send(
+                run_id,
+                "llm_output",
+                {**base, "invocation_id": "old", "message_id": "late:" + run_id, "content": "迟到旧执行"},
+            )
+            await restarted.send(
+                run_id, "work_reset", {**base, "invocation_id": "old", "message_id": "late-reset:" + run_id}
+            )
+            replay = await restarted.replay(run_id, 0)
+            assert [message["data"]["invocation_id"] for message in replay] == ["new", "new"]
+            assert db_session.query(EventOutbox).filter(EventOutbox.run_id == run_id).count() == 4
+        finally:
+            restarted.reset_for_testing()
+    finally:
+        manager.reset_for_testing()
+
+
+@pytest.mark.asyncio
+async def test_sse_module_ignores_old_execution_and_retired_reset():
+    from src.event_bus import EventBus, Message
+    from src.sse.consumer import SSEModule
+    from src.sse.events import StreamEvent
+
+    bus = EventBus()
+    shown = []
+
+    async def emit(event):
+        shown.append(event)
+
+    module = SSEModule(bus, "run", emit)
+
+    async def send(action, invocation, content=""):
+        await module.show(
+            Message(
+                "sse.show",
+                "agent",
+                module.address,
+                "run",
+                "work",
+                invocation,
+                payload=StreamEvent(
+                    action=action, sub_stage="event", chapter_id=1, stream_id=invocation, content=content
+                ),
+            )
+        )
+
+    try:
+        await send("work_reset", "old")
+        await send("work_reset", "new")
+        await send("output", "old", "迟到")
+        await send("work_reset", "old")
+        await send("output", "new", "当前")
+        assert [(event.action, event.invocation_id) for event in shown] == [
+            ("work_reset", "old"),
+            ("work_reset", "new"),
+            ("output", "new"),
+        ]
+    finally:
+        module.close()
+
+
+@pytest.mark.asyncio
+async def test_chapter_reset_retires_old_lanes_but_keeps_other_chapters_after_restart(db_session):
+    from src.sse.persistence import SseMessageRepository
+    from src.storage.db import get_session_factory
+    from tests.support.chapter_annotation_helpers import create_run_with_chunks
+
+    _novel, run_id = create_run_with_chunks(db_session, texts=["完成章。", "未完成章。"], chapter_ids=[1, 2])
+    outbox = SseMessageRepository(get_session_factory())
+    manager = EventManager(outbox=outbox)
+    try:
+        for chapter, work, invocation, role in [(1, "complete", "saved", "solo"), (2, "old-event", "old", "event")]:
+            data = {
+                "work_id": work,
+                "invocation_id": invocation,
+                "chapter_id": chapter,
+                "stage": "annotate",
+                "sub_stage": role,
+            }
+            await manager.send(run_id, "work_reset", {**data, "message_id": f"{run_id}:reset:{work}"})
+            await manager.send(run_id, "llm_output", {**data, "content": work, "message_id": f"{run_id}:output:{work}"})
+        await manager.send(run_id, "chapter_reset", {"stage": "annotate", "chapter_id": 2})
+        data = {
+            "work_id": "new-solo",
+            "invocation_id": "new",
+            "chapter_id": 2,
+            "stage": "annotate",
+            "sub_stage": "solo",
+        }
+        await manager.send(run_id, "work_reset", {**data, "message_id": f"{run_id}:reset:solo"})
+        await manager.send(run_id, "llm_output", {**data, "content": "new-solo", "message_id": f"{run_id}:output:solo"})
+        restarted = EventManager(outbox=outbox)
+        try:
+            await restarted.send(
+                run_id,
+                "llm_output",
+                {
+                    "stage": "annotate",
+                    "chapter_id": 2,
+                    "sub_stage": "event",
+                    "work_id": "old-event",
+                    "invocation_id": "old",
+                    "content": "迟到旧角色",
+                    "message_id": f"{run_id}:late",
+                },
+            )
+            replay = await restarted.replay(run_id, 0)
+            assert [message["data"]["content"] for message in replay if message["type"] == "llm_output"] == [
+                "complete",
+                "new-solo",
+            ]
+        finally:
+            restarted.reset_for_testing()
     finally:
         manager.reset_for_testing()

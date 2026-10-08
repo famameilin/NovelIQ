@@ -54,7 +54,7 @@ class TestTrainBookModel(unittest.TestCase):
             pretrained = _load_vectors(tmp_path)
             run_model_dir = tmp_path / "test-run"
             with patch(
-                "src.storage.path_resolver.resolve_run_model_dir",
+                "src.config.paths.resolve_run_model_dir",
                 return_value=run_model_dir,
             ) as resolve_dir:
                 train_result = train_book_model(
@@ -89,7 +89,7 @@ class TestBuildPosEmbeddings(unittest.TestCase):
         tmp_path = Path(self._tmp.name)
         pretrained = _load_vectors(tmp_path)
         run_model_dir = tmp_path / "pos-test"
-        with patch("src.storage.path_resolver.resolve_run_model_dir", return_value=run_model_dir):
+        with patch("src.config.paths.resolve_run_model_dir", return_value=run_model_dir):
             train_book_model(
                 _SENTENCES,
                 "pos-test",

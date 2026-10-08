@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.api.models.events import AnalysisEventBus, StreamEvent
+from src.sse.events import StreamEvent
+from src.workflows.progress import AnalysisEventBus
 
 
 @pytest.mark.asyncio
@@ -17,7 +18,7 @@ async def test_eventbus_emits_sub_percent():
 
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
 
-    with patch("src.api.services.event_manager.event_manager") as mock_em:
+    with patch("src.sse.manager.event_manager") as mock_em:
         mock_em.send = AsyncMock()
 
         event = StreamEvent(
@@ -43,7 +44,7 @@ async def test_eventbus_emits_sub_percent_none_when_not_provided():
 
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
 
-    with patch("src.api.services.event_manager.event_manager") as mock_em:
+    with patch("src.sse.manager.event_manager") as mock_em:
         mock_em.send = AsyncMock()
 
         event = StreamEvent(
@@ -67,7 +68,7 @@ async def test_eventbus_preserves_sub_percent_from_context():
 
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
 
-    with patch("src.api.services.event_manager.event_manager") as mock_em:
+    with patch("src.sse.manager.event_manager") as mock_em:
         mock_em.send = AsyncMock()
 
         event1 = StreamEvent(
@@ -111,7 +112,7 @@ async def test_eventbus_progress_message_without_sub_stage_preserves_phase_conte
 
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
 
-    with patch("src.api.services.event_manager.event_manager") as mock_em:
+    with patch("src.sse.manager.event_manager") as mock_em:
         mock_em.send = AsyncMock()
 
         await bus.emit(
@@ -160,7 +161,7 @@ async def test_eventbus_calculates_percent_from_current_total():
 
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
 
-    with patch("src.api.services.event_manager.event_manager") as mock_em:
+    with patch("src.sse.manager.event_manager") as mock_em:
         mock_em.send = AsyncMock()
 
         # 先发送一个 progress 事件设置 stage 和 current/total
@@ -238,7 +239,7 @@ async def test_eventbus_start_event_without_current_does_not_write_none_progress
     task_manager = MagicMock()
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
 
-    with patch("src.api.services.event_manager.event_manager") as mock_em:
+    with patch("src.sse.manager.event_manager") as mock_em:
         mock_em.send = AsyncMock()
 
         await bus.emit(StreamEvent(action="start", stage="preprocess", message="开始预处理", sub_percent=0.0))
@@ -266,7 +267,7 @@ async def test_emit_stage_complete_uses_stage_end_percent_instead_of_global_100(
     task_manager = MagicMock()
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
 
-    with patch("src.api.services.event_manager.event_manager") as mock_em:
+    with patch("src.sse.manager.event_manager") as mock_em:
         mock_em.send = AsyncMock()
 
         await bus.emit_stage_complete("preprocess")
@@ -289,7 +290,7 @@ async def test_emit_stage_start_resets_progress_context_and_never_writes_total_z
     task_manager = MagicMock()
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
 
-    with patch("src.api.services.event_manager.event_manager") as mock_em:
+    with patch("src.sse.manager.event_manager") as mock_em:
         mock_em.send = AsyncMock()
 
         # annotate 阶段携带章节进度上下文（current/total/percent）
@@ -313,3 +314,27 @@ async def test_emit_stage_start_resets_progress_context_and_never_writes_total_z
     send_data = [call.kwargs["data"] for call in mock_em.send.call_args_list]
     assert send_data[1]["total"] == 0
     assert send_data[2]["percent"] == 80.0
+
+
+@pytest.mark.asyncio
+async def test_actual_work_identity_and_saved_refresh_are_preserved_through_api_bus():
+    bus = AnalysisEventBus(task_id="test-task", task_manager=MagicMock())
+    with patch("src.sse.manager.event_manager") as manager:
+        manager.send = AsyncMock()
+        await bus.emit(
+            StreamEvent(
+                action="work_saved",
+                stage="annotate",
+                sub_stage="event",
+                chapter_id=2,
+                work_id="work",
+                invocation_id="actual-inv",
+                message_id="actual-inv:sse:4",
+            )
+        )
+        kwargs = manager.send.call_args.kwargs
+    assert kwargs["event_type"] == "pipeline_progress"
+    assert kwargs["data"]["event_type"] == "work_saved"
+    assert kwargs["data"]["work_id"] == "work"
+    assert kwargs["data"]["invocation_id"] == "actual-inv"
+    assert kwargs["data"]["message_id"] == "actual-inv:sse:4"

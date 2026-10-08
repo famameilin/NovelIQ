@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from src.api.services.results_queries.characters import _fetch_characters
+from src.fact_graph.read.annotations import fetch_chapter_characters_full
 from tests.support.chapter_annotation_helpers import (
     character_fact,
     create_run_with_chunks,
@@ -29,7 +30,7 @@ def test_character_emotion_preserves_numeric_graph_fact(db_session) -> None:
     from src.storage.repositories import AnnotationRepository
 
     repo = AnnotationRepository(db_session)
-    assert repo.fetch_characters_with_scores(run_id)[0].emotion_score == -2
+    assert fetch_chapter_characters_full(repo.session, run_id)[0].emotion_score == -2
     result = _fetch_characters(run_id=run_id, annotation_repo=repo, limit=None)
     assert result[0].avg_emotion_score == -2.0
 

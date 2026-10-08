@@ -489,7 +489,7 @@ export function createDiagnosis(): DiagnosisResult {
     dignity_reason: "通过多个配角视角，展现了普通人在强权世界中的尊严与价值。",
     cultural_depth_score: 4,
     cultural_depth_reason: "融合了道家思想、中医理论等传统文化元素，文化底蕴较深。",
-    topic_labels: ["修炼成长", "热血战斗", "情感纠葛", "势力博弈", "秘境探索", "友情义气"],
+    topic_labels: { "0": "修炼成长", "1": "热血战斗", "2": "情感纠葛", "3": "势力博弈", "4": "秘境探索", "5": "友情义气" },
     core_cast: ["萧炎", "药老", "纳兰嫣然", "美杜莎", "小医仙", "薰儿"],
     main_characters: ["萧炎", "药老", "纳兰嫣然", "美杜莎"],
     theme_color: "#6366F1",

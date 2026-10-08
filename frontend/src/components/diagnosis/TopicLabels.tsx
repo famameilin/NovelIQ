@@ -5,8 +5,8 @@ import { useCompactAnalysisViewport } from "@/hooks/useCompactAnalysisViewport";
 import { cn } from "@/lib/cn";
 
 export interface TopicLabelsProps {
-  /** 当前 ID 映射或历史无 ID 标签数组 */
-  labels?: Record<string, string> | string[] | null;
+  /** 本轮模型 topic_id 到主题说明的映射 */
+  labels?: Record<string, string> | null;
   className?: string;
 }
 
@@ -16,9 +16,7 @@ export interface TopicLabelsProps {
 export function TopicLabels({ labels, className }: TopicLabelsProps) {
   const [page, setPage] = useState(1);
   const compact = useCompactAnalysisViewport();
-  const entries = Array.isArray(labels)
-    ? labels.map((label, index) => [String(index), label] as const)
-    : Object.entries(labels ?? {}).sort(([a], [b]) => Number(a) - Number(b));
+  const entries = Object.entries(labels ?? {}).sort(([a], [b]) => Number(a) - Number(b));
   if (entries.length === 0) {
     return (
       <div className={cn("text-sm text-text-muted", className)}>

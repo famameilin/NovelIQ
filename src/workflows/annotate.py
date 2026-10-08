@@ -1,43 +1,104 @@
-"""按章节序的进程内并行标注主流程：任务即章节，状态即章节侧正式标注"""
+"""角色 work 并行标注，按成功保存的必需角色聚合章进度"""
 
 from __future__ import annotations
 
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from types import SimpleNamespace
 
 from loguru import logger
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from src.api.models.events import StreamEvent
+from src.agents.annotation.agent import AnnotationAgent
+from src.audit.module import AuditModule
+from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
+from src.event_bus import EventBus, Message
+from src.sse.consumer import SSEModule
+from src.sse.events import StreamEvent
 from src.storage.db import get_session_factory
-from src.storage.models import AnalysisRun
-from src.storage.repositories.pipeline_projection import CutoffNotReady, PipelineProjectionRepository
-from src.storage.repositories.pipeline_source import formal_committed_chapter_ids, prepare_formal_work
-from src.storage.repositories.pipeline_work import WorkReceipt
-from src.workflows.chapter_pool import AgentStatus, ChapterWorkerPool
-from src.workflows.pipeline_agent import PipelineAgentExecutor
-from src.workflows.pipeline_materialization import materialize_cutoff
+from src.storage.models import AnalysisOutput, AnnotationWork, Chapter, Paragraph
+from src.work.annotation_work import WorkReceipt, annotation_work_id, required_roles
+from src.work.chapter_pool import ChapterWorkerPool
+from src.work.policy import completed_chapters
+from src.workflows.progress import stage_progress_percent
 
 
-async def project_and_release(repository: PipelineProjectionRepository, cutoff_hash: str) -> None:
-    """投影无模型请求；只有全部 ACK 后才切换现有 API 的读模型"""
-    await asyncio.to_thread(repository.resume_projection, cutoff_hash)
-
-    deadline = time.monotonic() + 300
-    while True:
-        if await asyncio.to_thread(repository.project_next, cutoff_hash):
-            continue
-        state, counts = await asyncio.to_thread(repository.projection_progress, cutoff_hash)
-        if state == "released":
-            return
-        if state == "failed" or time.monotonic() >= deadline:
-            raise CutoffNotReady("投影分区失败或等待其他进程 ACK 超时")
-        if not counts.get("waiting", 0):
-            break
-        await asyncio.sleep(0.05)
-    await asyncio.to_thread(repository.release, cutoff_hash, materialize=materialize_cutoff)
+def _load_work(session_factory: Callable[[], Session], run_id: str) -> tuple[list[WorkReceipt], set[int]]:
+    with session_factory() as session:
+        chapters = (
+            session.execute(
+                select(Chapter).where(Chapter.run_id == run_id).order_by(Chapter.sequence, Chapter.chapter_id)
+            )
+            .scalars()
+            .all()
+        )
+        records = session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id)).scalars().all()
+        outputs = {
+            value.work_id: value
+            for value in session.execute(
+                select(AnalysisOutput).where(
+                    AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation"
+                )
+            ).scalars()
+        }
+        valid = [
+            record
+            for record in records
+            if record.work_id in outputs
+            and outputs[record.work_id].invocation_id == record.invocation_id
+            and outputs[record.work_id].role == record.role
+            and outputs[record.work_id].actual_input
+        ]
+        complete = completed_chapters(valid)
+        orders = [{"chapter_id": chapter.chapter_id, "sequence": chapter.sequence} for chapter in chapters]
+        work: list[WorkReceipt] = []
+        for chapter in chapters:
+            if chapter.chapter_id in complete:
+                continue
+            if not chapter.text:
+                raise ValueError(f"chapter_id={chapter.chapter_id} 缺少实际章输入")
+            rows = (
+                session.execute(
+                    select(Paragraph)
+                    .where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter.chapter_id)
+                    .order_by(Paragraph.paragraph_index)
+                )
+                .scalars()
+                .all()
+            )
+            paragraphs = [
+                SimpleNamespace(
+                    **{
+                        name: getattr(row, name)
+                        for name in ("chapter_id", "paragraph_id", "local_start_char", "local_end_char", "text")
+                    }
+                )
+                for row in rows
+            ]
+            if not paragraphs:
+                raise ValueError(f"chapter_id={chapter.chapter_id} 缺少实际原文段落")
+            for role in required_roles(chapter.text, settings.models.annotation.sub_chunk_max_chars):
+                work.append(
+                    WorkReceipt(
+                        work_id=annotation_work_id(run_id, chapter.chapter_id, role),
+                        run_id=run_id,
+                        work_kind="annotation_agent",
+                        payload={
+                            "chapter_id": chapter.chapter_id,
+                            "chapter_sequence": chapter.sequence,
+                            "chapter_label": chapter.display_index_label or f"第{chapter.sequence}章",
+                            "chapter_text": chapter.text,
+                            "chapter_chars": len(chapter.text),
+                            "role": role,
+                            "paragraphs": paragraphs,
+                            "chapter_orders": orders,
+                        },
+                    )
+                )
+        return work, complete
 
 
 async def run_annotate(
@@ -50,57 +111,122 @@ async def run_annotate(
     is_cancelled: Callable[[], bool] | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
-    """章节独立执行；正式标注提交与 cutoff 是恢复与可见性的真相源"""
-    del analysis_logger, use_context_enhancement
-    from src.config import settings
-
+    """完成章节保留；未完成章节全部角色先丢弃，再按当前输入与阈值重建"""
+    del analysis_logger, use_context_enhancement, novel_title
     started_at = time.perf_counter()
     session.commit()
     factory = get_session_factory()
-    work = await asyncio.to_thread(prepare_formal_work, factory, run_id)
-    total = len(work)
+    work, retained = await asyncio.to_thread(_load_work, factory, run_id)
+    total = len(retained | {item.payload["chapter_id"] for item in work})
     if not total:
         return 0, 0, 0
-    committed = await asyncio.to_thread(formal_committed_chapter_ids, factory, run_id)
-    pending = [receipt for receipt in work if int(receipt.payload["chapter_id"]) not in committed]
+    bus = EventBus()
+    agent = AnnotationAgent(bus, run_id, factory, novel_id=novel_id)
+    audit = AuditModule(bus, run_id, factory)
+    sse = SSEModule(bus, run_id, emitter)
     pool = ChapterWorkerPool(max_attempts=settings.models.annotation.total_attempts)
-    executor = PipelineAgentExecutor(factory, owner=pool.owner, novel_id=novel_id, novel_title=novel_title,
-                                     emitter=emitter)
+    try:
+        recovery_session = factory()
+        try:
+            records = await asyncio.to_thread(
+                lambda: (
+                    recovery_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id))
+                    .scalars()
+                    .all()
+                )
+            )
+            outputs = (
+                recovery_session.execute(
+                    select(AnalysisOutput).where(
+                        AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation"
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            discard = list({item.work_id for item in [*records, *outputs] if item.chapter_id not in retained})
+            await bus.request(
+                Message(
+                    topic="agent.recover",
+                    source=f"queue:{run_id}",
+                    target=agent.address,
+                    run_id=run_id,
+                    payload={"session": recovery_session, "discard": discard},
+                )
+            )
+            await asyncio.to_thread(
+                recovery_session.execute, delete(AnnotationWork).where(AnnotationWork.work_id.in_(discard))
+            )
+            await asyncio.to_thread(recovery_session.commit)
+            # 整章废弃已提交后再清除旧角色展示，阈值变化不会遗留旧 lane
+            if work:
+                await bus.request(
+                    Message(
+                        topic="agent.recover",
+                        source=f"queue:{run_id}",
+                        target=agent.address,
+                        run_id=run_id,
+                        payload={
+                            "mode": "chapter_reset",
+                            "chapter_ids": sorted({item.payload["chapter_id"] for item in work}),
+                        },
+                    )
+                )
+        except BaseException:
+            recovery_session.rollback()
+            raise
+        finally:
+            recovery_session.close()
 
-    async def emit_progress(chapter_id: int | None = None, label: str = "") -> None:
-        if emitter is None:
-            return
-        submitted = await asyncio.to_thread(formal_committed_chapter_ids, factory, run_id)
-        current = len(submitted)
-        await emitter(StreamEvent(
-            action="progress", stage="annotate", sub_stage="chapter_agent", chapter_id=chapter_id,
-            current=current, total=total, percent=10 + current / total * 70,
-            sub_percent=current / total * 100,
-            message=f"章节 {label} 已提交" if label else f"共 {total} 个章节，按章节序并发处理",
-        ))
+        async def progress(receipt: WorkReceipt) -> None:
+            with factory() as progress_session:
+                records = await asyncio.to_thread(
+                    lambda: (
+                        progress_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id))
+                        .scalars()
+                        .all()
+                    )
+                )
+                current = len(completed_chapters(records))
+                invocation_id = next(item.invocation_id for item in records if item.work_id == receipt.work_id)
+            await bus.request(
+                Message(
+                    topic="agent.saved_progress",
+                    source=f"queue:{run_id}",
+                    target=agent.address,
+                    run_id=run_id,
+                    work_id=receipt.work_id,
+                    invocation_id=invocation_id,
+                    payload={
+                        "current": current,
+                        "total": total,
+                        "percent": stage_progress_percent("annotate", current, total),
+                        "sub_percent": current / total * 100,
+                    },
+                )
+            )
 
-    async def execute_formal(receipt: WorkReceipt) -> AgentStatus:
-        outcome = await executor.execute(receipt)
-        if outcome == "submitted":
-            await emit_progress(int(receipt.payload["chapter_id"]), receipt.payload["chapter_label"])
-        return outcome
-
-    await emit_progress()
-    await pool.run(pending, execute=execute_formal, is_cancelled=is_cancelled)
-    projections = PipelineProjectionRepository(factory)
-    boundary = await asyncio.to_thread(projections.latest_released, run_id)
-    if boundary is None:
-        cutoff_hash = await asyncio.to_thread(projections.seal, run_id, round_kind="formal", round_number=0)
-        await project_and_release(projections, cutoff_hash)
-    boundary = await asyncio.to_thread(projections.latest_released, run_id)
-    if boundary is None:
-        raise RuntimeError("标注完成但没有可见 cutoff")
-    with factory() as completion_session, completion_session.begin():
-        run = completion_session.get(AnalysisRun, run_id, with_for_update=True)
-        if run is None or run.cancel_requested:
-            raise asyncio.CancelledError("完成标注前分析已取消")
-        run.annotation_cutoff_hash = boundary["cutoff_hash"]
-    logger.info("parallel annotate completed run_id={} chapters={} elapsed={:.2f}s",
-                run_id, total, time.perf_counter() - started_at)
-    final_committed = await asyncio.to_thread(formal_committed_chapter_ids, factory, run_id)
-    return len(final_committed), 0, total
+        await pool.run(work, bus=bus, session_factory=factory, is_cancelled=is_cancelled, on_saved=progress)
+        await bus.request(Message(topic="audit.barrier", source=agent.address, target=audit.address, run_id=run_id))
+        with factory() as final_session:
+            records = await asyncio.to_thread(
+                lambda: (
+                    final_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id)).scalars().all()
+                )
+            )
+            actual = completed_chapters(records)
+        if len(actual) != total:
+            raise RuntimeError(f"必需角色未全部成功保存: completed={len(actual)} total={total}")
+        logger.info(
+            "annotation work completed run_id={} chapters={} elapsed={:.2f}s",
+            run_id,
+            total,
+            time.perf_counter() - started_at,
+        )
+        return len(actual), 0, total
+    finally:
+        try:
+            await audit.close()
+        finally:
+            sse.close()
+            agent.close()

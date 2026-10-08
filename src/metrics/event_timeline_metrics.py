@@ -3,32 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
-from loguru import logger
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session
-
+from src.event_trees.read.models import EventForestSnapshot
 from src.metrics.timeline_phase import (
     TimelinePhaseDTO,
     calculate_tension_percentile,
     compute_four_phases,
     convert_to_timeline_phases,
 )
-from src.storage.repositories.graph.event_forest import EventForestSnapshot
-
-
-class ChapterRepositoryProtocol(Protocol):
-    """2026-08-20 用于 build_event_timeline_plan 的章节仓储协议（需提供 fetch_chapter_texts）"""
-
-    def fetch_chapter_texts(self, run_id: str) -> list[tuple[int, str]]: ...
-
-
-class StatsRepositoryProtocol(Protocol):
-    """2026-08-20 用于 build_event_timeline_plan 的统计仓储协议（需暴露 session）"""
-
-    @property
-    def session(self) -> Session: ...
 
 
 @dataclass(slots=True)
@@ -125,49 +108,29 @@ def serialize_event_timeline_phases(phases: list[TimelinePhaseDTO]) -> list[dict
 
 
 def build_event_timeline_plan(
-    run_id: str,
-    chapter_repo: ChapterRepositoryProtocol,
-    stats_repo: StatsRepositoryProtocol,
+    chapter_texts: list[tuple[int, str]],
     forest_snapshot: EventForestSnapshot | None,
+    *,
+    tension_by_chapter: dict[int, float],
+    progress_map: dict[int, float],
+    tension_available: bool,
 ) -> EventTimelinePlanBuildResult:
     """从事件森林快照构建时间轴规划"""
-    chapter_texts: list[tuple[int, str]] = []
-    try:
-        chapter_texts = chapter_repo.fetch_chapter_texts(run_id)
-    except (DBAPIError, ValueError, KeyError) as e:
-        logger.warning("build_event_timeline_plan fetch_chapter_texts fallback for run {}: {}", run_id, e)
-        chapter_texts = []
-    chapter_ids: list[int] = [cid for cid, _ in chapter_texts]
+    chapter_ids = [cid for cid, _ in chapter_texts]
     total_chapters = len(chapter_ids)
-    chapter_id_to_order: dict[int, int] = {cid: idx + 1 for idx, cid in enumerate(chapter_ids)}
-
-    if total_chapters == 0:
-        if forest_snapshot is not None:
-            total_chapters = forest_snapshot.visible_through_chapter_order
-
-    tension_by_chapter: dict[int, float] = {}
-    tension_scores: list[float] = []
-    positions: list[float] | None = None
-    try:
-        from src.storage.repositories.paragraph_repository import ParagraphRepository
-
-        rows = ParagraphRepository(stats_repo.session).fetch_chapter_tension_scores(run_id)
-        tension_by_chapter = {int(cid): float(v) for cid, v in rows}
+    chapter_id_to_order = {cid: idx + 1 for idx, cid in enumerate(chapter_ids)}
+    if total_chapters == 0 and forest_snapshot is not None:
+        total_chapters = forest_snapshot.visible_through_chapter_order
+    if tension_available:
         tension_scores = [tension_by_chapter.get(cid, 0.5) for cid in chapter_ids]
-        from src.metrics.aggregate.fetchers import _fetch_chapter_progress_map
-
-        progress_map = _fetch_chapter_progress_map(stats_repo.session, run_id)
         if total_chapters <= 1:
             positions = [0.0] * total_chapters
         else:
-            positions = []
-            for idx, cid in enumerate(chapter_ids):
-                positions.append(progress_map.get(cid, idx / (total_chapters - 1)))
+            positions = [progress_map.get(cid, idx / (total_chapters - 1)) for idx, cid in enumerate(chapter_ids)]
             for i in range(1, len(positions)):
                 if positions[i] <= positions[i - 1]:
                     positions[i] = min(1.0, positions[i - 1] + 1e-6)
-    except (DBAPIError, ValueError, KeyError) as e:
-        logger.warning("build_event_timeline_plan tension fallback for run {}: {}", run_id, e)
+    else:
         tension_scores = [0.5] * total_chapters if total_chapters else []
         positions = [i / max(total_chapters - 1, 1) for i in range(total_chapters)] if total_chapters else []
 

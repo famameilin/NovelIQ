@@ -20,11 +20,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.api.services.results_queries.topics import (
-    _fetch_topics,
-    _validate_agg_row,
-    describe_topics_unavailability,
-)
+from src.api.services.results_queries.topics import _fetch_topics
+from src.topic.artifacts import describe_topics_unavailability, validate_topic_aggregation_row
 
 
 def _make_row(topic_id: int, weighted_total: float) -> SimpleNamespace:
@@ -82,12 +79,10 @@ def test_fetch_topics_with_model_fills_words_labels_and_normalizes() -> None:
     assert second.weight == round(50.0 / 150.0, 6)
 
 
-def test_fetch_topics_keeps_raw_weight_without_inference_rows() -> None:
-    """
-    2026-10-02 移除旧 Top-5 运行兼容：无 paragraph_topic_inference 行
-    （fetch_topic_inference_total 返回 None）时不做归一，保留原始加权和
-    """
-    repo = _make_repo([_make_row(0, 100.0), _make_row(1, 50.0)], book_total=None)
+@pytest.mark.parametrize("book_total", [None, 0.0])
+def test_fetch_topics_rejects_rows_without_current_inference(book_total: float | None) -> None:
+    """旧 Top-5 行不能充当当前全量分布，不加载模型或返回原始权重"""
+    repo = _make_repo([_make_row(0, 100.0), _make_row(1, 50.0)], book_total=book_total)
     trainer = _make_trainer_with_model()
 
     with (
@@ -96,9 +91,9 @@ def test_fetch_topics_keeps_raw_weight_without_inference_rows() -> None:
     ):
         result = _fetch_topics("run-legacy", repo)
 
-    assert len(result) == 2
-    assert result[0].weight == 100.0
-    assert result[1].weight == 50.0
+    assert result == []
+    repo.fetch_paragraph_topics_agg.assert_not_called()
+    trainer.load_model.assert_not_called()
 
 
 def test_fetch_topics_model_load_failure_degrades() -> None:
@@ -126,7 +121,7 @@ def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
     2026-08-13 P2：模型目录必须基于项目根推导（干净检出以 pyproject.toml + config/ 为锚点），
     而不是相对 CWD 解析，避免服务启动目录不同导致词表/标签加载静默降级。
     """
-    from src.storage.path_resolver import resolve_model_dir
+    from src.config.paths import resolve_model_dir
 
     repo = _make_repo([_make_row(0, 100.0)])
     trainer = _make_trainer_with_model()
@@ -145,14 +140,14 @@ def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
 def test_validate_agg_row_rejects_missing_fields() -> None:
     """2026-08-20 验证聚合结果缺字段时快速失败"""
     with pytest.raises(RuntimeError):
-        _validate_agg_row(SimpleNamespace(topic_id=1))
+        validate_topic_aggregation_row(SimpleNamespace(topic_id=1))
 
 
 @pytest.mark.parametrize("weighted_total", [float("nan"), float("inf"), -1.0])
 def test_validate_agg_row_rejects_invalid_weight(weighted_total: float) -> None:
     """2026-08-20 验证聚合权重必须是非负有限数"""
     with pytest.raises(RuntimeError, match="weighted_total"):
-        _validate_agg_row(SimpleNamespace(topic_id=1, weighted_total=weighted_total))
+        validate_topic_aggregation_row(SimpleNamespace(topic_id=1, weighted_total=weighted_total))
 
 
 def test_describe_topics_unavailability_reports_missing_artifact() -> None:

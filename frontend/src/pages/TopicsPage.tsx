@@ -38,7 +38,7 @@ const STALE_TIME = 5 * 60 * 1000;
 const OVERVIEW_PAGE_SIZE = 8;
 const RANKING_PAGE_SIZE = 10;
 
-type DistributionView = "ranking" | "chapters" | "cloud" | "catalog";
+type DistributionView = "ranking" | "chapters" | "wordcloud" | "catalog";
 
 function pageItems<T>(items: readonly T[], page: number, pageSize: number) {
   const pageCount = Math.ceil(items.length / pageSize);
@@ -302,7 +302,7 @@ export function TopicsPage() {
                     <AnalysisViewSwitcher value={distributionView} onValueChange={setDistributionView} label="主题分布视图" options={[
                       { value: "ranking", label: "权重排行" },
                       { value: "chapters", label: "全书与章节" },
-                      { value: "cloud", label: "关键词词云" },
+                      { value: "wordcloud", label: "关键词词云" },
                       { value: "catalog", label: "主题清单" },
                     ]} />
                   </div>
@@ -314,7 +314,7 @@ export function TopicsPage() {
                     {distributionView === "chapters" && <div className="h-full min-h-0 rounded-xl border border-border/60 bg-surface/70 p-4">
                       <TopicDistributionChart distribution={overview.distribution} chapters={overview.chapters} className="h-full" />
                     </div>}
-                    {distributionView === "cloud" && <TopicWordCloud topics={topics} maxWords={100} className="h-full min-h-0" />}
+                    {distributionView === "wordcloud" && <TopicWordCloud topics={topics} maxWords={100} className="h-full min-h-0" />}
                     {distributionView === "catalog" && <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
                       <TopicTable topics={topics} className="h-full min-h-0" />
                       <TopicKeywordsCard keywords={overview.keywords} unavailableReason={overview.keyword_unavailable_reason} columns={2} className="h-full min-h-0" />

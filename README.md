@@ -32,7 +32,7 @@
 
 已有 0.1.0 数据库升级到 0.1.1 时，请先阅读 [一次性升级说明](docs/upgrades/UPGRADE-0.1.1.md)。
 
-技术栈：Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17（pgvector）；React 19 / Vite / ECharts / Tailwind CSS。LLM 走 OpenAI 兼容接口（本地 vLLM 或云端服务均可），词法分析与词向量为本地离线模型。
+技术栈：Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17（pgvector）；React 19 / Vite / ECharts / Tailwind CSS。LLM 走 OpenAI 兼容接口（自建服务或第三方 API 均可），词法分析与词向量为本地离线模型。
 
 ## 快速开始
 
@@ -162,7 +162,7 @@ flowchart LR
 
 | 表 | 粒度 | 记录内容 |
 |----|------|---------|
-| `agent_invocations` | 一次标注 / 诊断尝试 | run_id、task_type（annotation / diagnosis）、chapter_id、attempt_number、model_name、model_provider（local / cloud）、status（success / error）、final_error、起止时间 |
+| `agent_invocations` | 一次标注 / 诊断尝试 | run_id、task_type（annotation / diagnosis）、chapter_id、attempt_number、model_name、status（success / error）、final_error、起止时间 |
 | `agent_turns` | 一轮模型请求 | 完整请求消息、原始响应、上下文摘要、状态与错误；逐回合计时六列——TTFT、首可见 token、推理、模型、工具墙钟、回合总耗时 |
 | `agent_tool_calls` | 一次工具调用 | 解析后参数与原始参数串、完整结果、模型回执、独立状态与耗时 |
 | `token_usage` | 每笔 API 用量 | 按 novel / chapter / task_type / call_type / model 归桶；prompt / completion / total / cache_read / reasoning 五类 token 加 cost；Agent 回合与 `agent_turns.id` 一对一，Embedding 等非 Agent 行单独归桶；`accounting_source` 区分上报与估算 |

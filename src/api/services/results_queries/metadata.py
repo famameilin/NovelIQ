@@ -15,6 +15,7 @@ from src.api.models.responses import (
     TokenUsageStats,
     TokenUsageSummary,
 )
+from src.audit.queries import fetch_token_usage_stats
 from src.storage.repositories import ChapterRepository, StatsRepository
 
 
@@ -50,17 +51,18 @@ def _fetch_novel_name(novel_id: str, stats_repo: StatsRepository) -> str | None:
     return stats_repo.fetch_novel_title(novel_id)
 
 
-def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsRepository) -> TokenUsageStats:
+def _fetch_token_usage_stats(run_id: str, stats_repo: StatsRepository) -> TokenUsageStats:
     """获取 token 使用统计"""
     try:
-        stats = stats_repo.fetch_token_usage_stats(run_id, novel_id)
+        stats = fetch_token_usage_stats(stats_repo.session, run_id)
         summary = TokenUsageSummary(
             call_count=stats["summary"]["call_count"],
             total_prompt_tokens=stats["summary"]["total_prompt_tokens"],
             total_completion_tokens=stats["summary"]["total_completion_tokens"],
             total_tokens=stats["summary"]["total_tokens"],
-            accounting_method=stats["summary"].get("accounting_method", "estimated"),
-            coverage_status=stats["summary"].get("coverage_status", "complete"),
+            accounting_method=stats["summary"]["accounting_method"],
+            coverage_status=stats["summary"]["coverage_status"],
+            coverage_scope=stats["summary"]["coverage_scope"],
         )
         by_task = {
             task: TokenUsageByTask(

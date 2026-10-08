@@ -4,13 +4,13 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from src.config.settings import Settings
-from src.runtime_env import (
+from src.config.runtime_env import (
     load_database_environment,
     load_ltp_environment,
     load_model_environment,
     load_model_pool_environment,
 )
+from src.config.settings import Settings
 
 
 def _set_database_environment(

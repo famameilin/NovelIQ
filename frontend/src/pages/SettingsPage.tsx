@@ -20,7 +20,7 @@ import {
   updateSettings,
 } from "@/api/settings";
 import type { ModelPoolEntry, SettingFieldSpec } from "@/api/types";
-import { ModelProviderEditor } from "@/components/settings/ModelProviderEditor";
+import { EmbeddingModelEditor } from "@/components/settings/EmbeddingModelEditor";
 import { ModelPoolEditor } from "@/components/settings/ModelPoolEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -219,7 +219,7 @@ export function SettingsPage() {
       <ModelPoolEditor entries={modelPool} diagnosisModelId={diagnosisModelId}
         onSaved={(view) => queryClient.setQueryData(settingsQueryKey, view)} />
 
-      <ModelProviderEditor value={{
+      <EmbeddingModelEditor value={{
         base_url: embedding.base_url as string | null,
         model: embedding.model as string | null,
         api_key: embedding.api_key as string | null,

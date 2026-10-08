@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
-
-from src.utils.lexicon_parser import load_weighted_lexicon as _load_weighted_lexicon
+from collections.abc import Iterable, Sequence
 
 
 def _is_phrase_term(term: str) -> bool:
@@ -140,32 +138,3 @@ def get_emotion_spans(text: str, tokens: Sequence[str], terms: Iterable[str]) ->
 
     spans.sort(key=lambda x: x[0])
     return spans
-
-
-def load_weighted_lexicon(filepath: str, default_weight: int = 1) -> dict[str, int]:
-    """加载带权重词典"""
-    return _load_weighted_lexicon(filepath, default_weight=default_weight)
-
-
-def term_weighted_counts(
-    text: str, tokens: Sequence[str], weighted_terms: Mapping[str, float]
-) -> dict[str, tuple[int, float]]:
-    """返回词条的命中次数和权重"""
-    if not weighted_terms:
-        return {}
-
-    text_value = text or ""
-    counts = _count_non_overlapping_spans(text_value, weighted_terms.keys(), tokens)
-
-    result: dict[str, tuple[int, float]] = {}
-    for term, count in counts.items():
-        weight = weighted_terms.get(term, 1)
-        result[term] = (count, weight)
-
-    return result
-
-
-def count_weighted_hits(text: str, tokens: Sequence[str], weighted_terms: Mapping[str, float]) -> float:
-    """计算词条命中次数与权重的乘积和"""
-    weighted_counts = term_weighted_counts(text, tokens, weighted_terms)
-    return sum(count * weight for count, weight in weighted_counts.values())

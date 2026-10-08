@@ -73,6 +73,8 @@ describe("useSSEListener", () => {
       "task_complete",
       "task_error",
       "task_cancelled",
+      "task_reset",
+      "chapter_reset",
       "pipeline_progress",
       "reconnect_required",
       "message",

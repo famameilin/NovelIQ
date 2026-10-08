@@ -10,60 +10,21 @@ from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db_session, get_novel_service
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
-from src.api.models.event_timeline import (
-    EventTimelineCausalEdge,
-    EventTimelineForeshadowingEdge,
+from src.api.models.events import (
     EventTimelineMeta,
     EventTimelineNode,
     EventTimelinePhase,
     EventTimelineResponse,
 )
 from src.api.models.responses import ErrorResponse
-from src.api.services.novel_service import NovelService
-from src.metrics.event_timeline_metrics import (
-    build_event_timeline_plan,
-    serialize_event_timeline_node,
-    serialize_event_timeline_phases,
-)
+from src.api.services.results_queries.event_projection import serialize_snapshot_edges
+from src.event_trees.read.forest import EventForestQuery
+from src.metrics.event_timeline_metrics import serialize_event_timeline_node, serialize_event_timeline_phases
+from src.metrics.queries.timeline import build_event_timeline_plan
 from src.storage.repositories import ChapterRepository, RunRepository, StatsRepository
-from src.storage.repositories.graph import EventForestRepository
-from src.storage.repositories.graph.event_forest import EventForestSnapshot
+from src.workflows.novels import NovelService
 
 router = APIRouter(prefix="/novels", tags=["timeline"])
-
-
-def _serialize_snapshot_edges(
-    snapshot: EventForestSnapshot,
-) -> tuple[list[EventTimelineCausalEdge], list[EventTimelineForeshadowingEdge]]:
-    """序列化事件森林快照中的边"""
-    causal = [
-        EventTimelineCausalEdge(
-            edge_id=e.edge_id,
-            edge_type="causal",
-            source_event_id=e.source_event_id,
-            target_event_id=e.target_event_id,
-            source_chapter_id=e.source_chapter_id,
-            target_chapter_id=e.target_chapter_id,
-            is_active=e.is_active,
-            evidence=list(e.evidence),
-            expired_at=e.expired_at,
-        )
-        for e in snapshot.causal_edges
-    ]
-    foreshadowing = [
-        EventTimelineForeshadowingEdge(
-            root_event_id=e.root_event_id,
-            payoff_event_id=e.payoff_event_id,
-            first_chapter_id=e.first_chapter_id,
-            last_chapter_id=e.last_chapter_id,
-            tree_id=e.tree_id,
-            description=e.description,
-            status=e.status,
-            active=e.active,
-        )
-        for e in snapshot.foreshadowing_edges
-    ]
-    return causal, foreshadowing
 
 
 @router.get(
@@ -118,7 +79,7 @@ async def get_timeline(
     chapter_repo = ChapterRepository(session)
     stats_repo = StatsRepository(session)
 
-    snapshot = EventForestRepository(session).fetch_snapshot(run_id, chapter_id=None)
+    snapshot = EventForestQuery(session).fetch_snapshot(run_id, chapter_id=None)
     if snapshot is None:
         logger.warning("No event forest snapshot for run {}", run_id)
         response.headers["X-Timeline-Empty-Reason"] = "no_event_forest"
@@ -149,7 +110,7 @@ async def get_timeline(
     api_phases = [
         EventTimelinePhase.model_validate(item) for item in serialize_event_timeline_phases(timeline_plan.phases)
     ]
-    api_causal_edges, api_foreshadowing_edges = _serialize_snapshot_edges(snapshot)
+    api_causal_edges, api_foreshadowing_edges = serialize_snapshot_edges(snapshot)
 
     if api_nodes:
         logger.info(

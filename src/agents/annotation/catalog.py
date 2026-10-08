@@ -15,28 +15,24 @@ from enum import StrEnum
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
-from .links import LINK_KIND_CHANGE_PAIRING_TEXT
-from .program import _PROGRAM_MAX_CODE_CHARS, _PROGRAM_MAX_OPS, render_list_signature
-from .schema import (
+from src.agents.annotation.program_contract import PROGRAM_MAX_CODE_CHARS, PROGRAM_MAX_OPS
+from src.agents.annotation.validation_errors import _STAGE_FIELD_EXPECTATIONS
+from src.event_trees.vocabulary import EventParticipantRole
+from src.fact_graph.schema import (
     CLIFFHANGER_DESCRIPTION,
     ENTITY_REF_FIELD_HINT,
     EVENT_ROLE_FIELD_HINT,
     PERSON_ROLE_FIELD_HINT,
     PIVOT_MOMENT_DESCRIPTION,
-    Confidence,
-    DialogueVerdict,
     EntityRefType,
-    EventParticipantRole,
-    RoleFunction,
-    Tone,
-    relation_catalog_text,
 )
+from src.fact_graph.vocabulary import Confidence, DialogueVerdict, RoleFunction, Tone, relation_catalog_text
+
 from .search_projection import (
     _PROJECTION_PARAMETER_LABELS,
     _PROJECTION_PARAMETERS,
     _SEARCH_PROJECTIONS,
 )
-from .tools import _STAGE_FIELD_EXPECTATIONS
 
 
 def _dedent_catalog_text(text: str) -> str:
@@ -150,8 +146,7 @@ def _schema_parameters(tool: Any, *, extra: tuple[str, ...] = ()) -> list[tuple[
             default = "None" if field.default is None else repr(field.default)
             optional.append((str(name), f"{head} = {default}"))
     optional.extend(
-        (name, _parameter_head(name, _PROJECTION_PARAMETER_LABELS.get(name, "")) + " = None")
-        for name in extra
+        (name, _parameter_head(name, _PROJECTION_PARAMETER_LABELS.get(name, "")) + " = None") for name in extra
     )
     return [*required, *optional]
 
@@ -279,13 +274,9 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
     "pivot_moment": PIVOT_MOMENT_DESCRIPTION,
     "cliffhanger": CLIFFHANGER_DESCRIPTION,
     "push_case.description": "待处理疑点的人类可读说明，不超过 100 字",
-    "push_case.keys": "疑点的匹配关键词，可给多个",
-    "push_case.type": "疑点类型，不在正式工作中领取或订正",
     "record_id": "本章写入回执中的 record 原值；没有明确记录可省略",
     "candidate_index": "候选表的 1 基编号，范围 1..DialogueCandidates.total；total=0 时无候选",
-    "write_link.kind": LINK_KIND_CHANGE_PAIRING_TEXT,
     "write_link.change_kind": "relation_change 必填，按原文选择变化方向；其它 kind 省略或 None（见 kind 配对表）",
-    "write_link.source_ref": "本次读取已授权的本章原文引用，关联成功时自动绑定到 record_id",
     "characters": '[{"entityid": 参与者实体引用, "role": 参与角色, "narrative_role": 叙事功能, '
     '"action": 做了什么, "emotion": -2..2 整数}, …]；'
     "role/narrative_role/action/emotion 都可省略或写偏：role 缺省按实体登记类型取"
@@ -314,9 +305,19 @@ SUBAGENT_CONTRACT_TEXT: str = (
     "- 语法：变量赋值、列表/字典/元组、下标、for 列表循环、if 与 ==/!=/in；调用只写具名参数；"
     "没有 import、属性访问、函数定义或其他 Python API。常量写 True/False/None（也接受 true/false/null）；\n"
     "字典/列表一律写字面量（{…}/[…]）：dict()/list() 等构造器与列表推导不可用，循环一律用 for。\n"
+    "- 检索结果自动出现在 reads，无需 print（未开放）。具名调用示例：\n"
+    '  events_page = search_events(query="院门", chapter_id=24, limit=5, offset=0)\n'
+    '  graph_page = search_graph(query="阿青", limit=5, offset=0, relation_offset=0)\n'
+    '  for candidate in graph_page["entities"]:\n'
+    '      entity_detail = read_entity(entity_id=candidate["id"])\n'
+    '  for item in events_page["events"]:\n'
+    '      detail = read_event(node_id=item["node_id"])\n'
+    "  后续翻页沿用原 query/筛选条件，offset 填上一页 next_offset；None 表示没有下一页。\n"
     "- 变量：程序里赋的变量在本章后续程序里保留；构造器与检索的返回值都能用变量承接。\n"
+    "  工具名全部保留，不得作为变量（如 entity/event/metric/finish）；"
+    "实体详情用 entity_detail，事件详情用 event_detail，检索页用 graph_page/events_page。\n"
     "- 失败：业务失败只作废该条调用、后面的语句继续执行；语法或运行错误停止本程序、已成功的调用保留。\n"
-    f"- 上限：单个程序最多 {_PROGRAM_MAX_CODE_CHARS} 字符、{_PROGRAM_MAX_OPS} 条调用。\n"
+    f"- 上限：单个程序最多 {PROGRAM_MAX_CODE_CHARS} 字符、{PROGRAM_MAX_OPS} 条调用。\n"
     "回执字段：\n"
     "- status：本次程序的整体结果。\n"
     "- applied：本程序成功的调用条数。\n"
@@ -332,43 +333,18 @@ SUBAGENT_CONTRACT_TEXT: str = (
     "工作方式：\n"
     "- 一次程序把本章该判的内容写完：同一段程序里连续调用多个构造器、写多条记录都可以。\n"
     "- 判不了的用 pending 登记，不要硬套：正文只说见面、对峙这类没有闭合关系可表达的，宁缺勿滥。\n"
-    "- reads 已经是本程序检索到的数据，不要为看同一份结果反复检索；failed 里那一条按 expected 当场改。\n"
+    "- reads 已经是本程序检索到的数据，不要用 print 或为看同一份结果反复检索；"
+    "search_events 的节点列表在 events 字段，search_graph 的两组列表在 entities/relations 字段；"
+    "failed 里那一条按 expected 当场改。\n"
     "- 产出写完时调用 finish 收尾：收尾不减损已写入的记录，回执点名还缺什么，缺的当场补。\n\n"
 )
 
-# 2026-09-15 程序合同文案：语法边界 + 回执口径 + 变量持久（与工具面同轮下发）
-# 2026-09-17 批量纪律句的措辞几经反复：分阶段（"按阶段分多个增量程序"）被模型当成模板执行，
-# 实测每章固定 3-4 个写入回合（逐领域一个回合），而 main 时代同一本书每章只花 1 个写入回合。
-# 2026-09-18 重写成逐条：原来的单段散文把五个主题（语法/常量/失败/上限/回执）串成一句，
-# 批量纪律与收尾纪律又夹在回执字段定义中间，模型要在几百字里切主题。分三块——运行规则、
-# 回执字段是机制，引用与证据口径是取值面，工作方式是行为合同：**四块都在这一份说明里**
-# （模型在这个面只有 execute_code 与 finish 两件工具，说明就是它读得到的全部合同）。
-PROGRAM_CONTRACT_TEXT: str = (
-    "执行一段 Python 程序，程序里的每次调用立即生效：成功就写入正式记录，失败只作废那一条。\n"
-    "运行规则：\n"
-    "- 对话序号：执行前预检可确定的 candidate_index 范围，越界时本程序不执行；动态返回值仍逐项校验。\n"
-    "- 语法：变量赋值、列表/字典/元组、下标、for 列表循环、if 与 ==/!=/in；调用只写具名参数；"
-    "没有 import、属性访问、函数定义或其他 Python API。常量写 True/False/None（也接受 true/false/null）；\n"
-    "字典/列表一律写字面量（{…}/[…]）：dict()/list() 等构造器与列表推导不可用，循环一律用 for。\n"
-    "- 变量：程序里赋的变量在本章后续程序里保留；调用的返回值都能用变量承接。\n"
-    "- 失败：业务失败只作废该条调用、后面的语句继续执行；语法或运行错误停止本程序、已成功的调用保留。\n"
-    f"- 上限：单个程序最多 {_PROGRAM_MAX_CODE_CHARS} 字符、{_PROGRAM_MAX_OPS} 条调用。\n"
-    "回执字段：\n"
-    "- status：本次程序的整体结果。\n"
-    "- applied：本程序成功的调用条数。\n"
-    "- failed：失败清单，每条给 op（第几条调用）、line（源码行）、record、field、code、expected。\n"
-    "- written：本程序成功的 record 键，直接照抄，不自行拼接。\n"
-    "- reads：本程序最近的读结果，正文可截短；references 保留全部 source_ref 与坐标，"
-    "variables 给出仍可使用的原文引用变量，reads_omitted 是省略正文回显的实际条数。\n"
-    "- progress：本章各类已写入记录的条数。\n"
-    "- error：程序在写完之前就失败时的错误详情（type 与 message）。\n"
-    "- 单次调用：写类回 status=written 带 record；读类直接给数据；"
-    "被拒一律 status=rejected 带 record/field/code/expected/message。\n"
-    "写类调用的成功正文不回显：记录键看 written，进度看 progress，原文句柄看 references。\n"
-    "工作方式：\n"
-    "- 一次程序把本章该判的内容写完：同一段程序里连续写多条记录都可以。\n"
-    "- 全部领域通常 1-2 个程序完成：判完即写、一批收章，不要逐领域各发一个程序。\n"
-    "- reads 已经是本程序检索到的数据，不要为看同一份结果反复检索；failed 里那一条按 expected 当场改。\n"
-    "- 产出写完时调用 finish 收尾：finish 在本程序全部语句执行完后结算，"
-    "回执点名还缺什么，缺的当场补。\n\n"
-)
+
+def render_list_signature(name: str, parameters: list[tuple[str, str]]) -> str:
+    """2026-09-16 用于渲染调用签名（参数清单从函数签名或 args_schema 读出，不手抄）
+
+    2026-09-18 参数清单先在调用方算好（构造器读函数、工具读 schema），本函数只做排版：
+    构造器与工具在目录里是同一种签名的写法。
+    2026-09-20 参数那一截自带类型标签（见 _type_label），本函数只负责拼。
+    """
+    return f"{name}(" + ", ".join(text for _, text in parameters) + ")"

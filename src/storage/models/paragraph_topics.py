@@ -27,12 +27,6 @@ class ParagraphTopic(Base):
     """
 
     __tablename__ = "paragraph_topics"
-
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    topic_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    topic_weight: Mapped[float] = mapped_column(Float, nullable=False)
-
     __table_args__ = (
         ForeignKeyConstraint(["run_id"], ["topic_model_runs.run_id"], ondelete="CASCADE"),
         ForeignKeyConstraint(
@@ -47,7 +41,13 @@ class ParagraphTopic(Base):
         ),
         # 单主题段落序列：主键已覆盖按段落读取
         Index("idx_paragraph_topics_topic_paragraph", "run_id", "topic_id", "paragraph_id"),
+        {"comment": "段落主题表：段落×主题的完整 LDA 分布权重（每完成段恰 K 行，和为 1）"},
     )
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
+    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="所属段落编号")
+    topic_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="主题 id（run 内完整覆盖 0..K-1）")
+    topic_weight: Mapped[float] = mapped_column(Float, nullable=False, comment="主题权重（段内权重和为 1）")
 
     def __repr__(self) -> str:
         return (

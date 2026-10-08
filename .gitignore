@@ -176,6 +176,7 @@ docs/*
 # ============================================================================
 scripts/db/*
 scripts/tools/*
+!scripts/tools/compare_module_results.py
 scripts/experiments/
 
 # ============================================================================
@@ -214,8 +215,9 @@ tests/jmeter/test_novel.txt
 deprecated/
 
 # ============================================================================
-# 测试根目录文件不上传（显式保留 conftest.py）
+# 测试根目录文件不上传（显式保留 conftest.py 与边界锁测试）
 # ============================================================================
 /tests/*.py
 !/tests/conftest.py
 !/tests/__init__.py
+!/tests/test_api_work_boundary.py

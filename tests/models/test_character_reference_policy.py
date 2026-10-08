@@ -1,4 +1,4 @@
-from src.models.local.character_reference_policy import (
+from src.fact_graph.character_reference_policy import (
     decide_character_reference,
     filter_global_character_names,
     is_global_character_surface_name,

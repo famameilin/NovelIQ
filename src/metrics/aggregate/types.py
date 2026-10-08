@@ -99,3 +99,18 @@ class StyleData:
 
     dialogue_ratio: float | None
     avg_sent_len: float | None
+
+
+@dataclass(frozen=True)
+class AggregateInputs:
+    """取数层准备的指标输入，纯计算不持有仓储或会话"""
+
+    annotation: AnnotationData
+    emotion: EmotionData
+    characters: CharacterData
+    relations: RelationData
+    text: TextData
+    tension: TensionData
+    dialogue: DialogueData
+    style: StyleData
+    total_chars: int

@@ -6,6 +6,7 @@ analyze_paragraph 纯函数路径保持真实；短语匹配与 Word2Vec 全真�
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import uuid
 from dataclasses import replace
@@ -17,10 +18,11 @@ from sqlalchemy.engine import Row
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
 from src.linguistic.ltp_client import LtpPipelineOutput
 from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
 from src.workflows.linguistic import run_linguistic
 from tests.support.analysis_factories import insert_test_novel
 
@@ -41,7 +43,7 @@ class FakeLtpSession:
             pos.append(["n" if w != "，" and w != "。" else "wp" for w in words])
             dep.append({"head": [0] * len(words), "label": ["HED"] * len(words)})
             ner.append([("Nh", "汤姆", 2, 2)] if "汤姆" in sentence else [])
-        return LtpPipelineOutput(cws=cws, pos=pos, ner=ner, dep=dep)
+        return LtpPipelineOutput(cws=cws, pos=pos, ner=ner, dep=dep, sdp=[])
 
 
 class TestRunLinguistic:
@@ -73,7 +75,7 @@ class TestRunLinguistic:
 
         # draft 审定门验证：draft 文件经 2026-09-07 审定后为空，注入非空 draft
         # 词条保持"draft 命中不计入正式密度"的门路径始终被测试覆盖
-        from src.config.constants import LEXICON_FILES
+        from src.lexicons.constants import LEXICON_FILES
         from src.lexicons.registry import LexiconRegistry
 
         self._draft_key = LEXICON_FILES["body_reaction_draft"]
@@ -103,7 +105,6 @@ class TestRunLinguistic:
         paragraphs, features = await run_linguistic(self.run_id, self.db_session)
         assert paragraphs == 2
         assert features == 2
-
         assert self._count("paragraph_linguistic_features") == 2
         assert self._count("paragraph_entities") > 0  # 汤姆 Nh person
         assert self._count("paragraph_phrase_hits") > 0  # 快意恩仇/刀光剑影命中
@@ -121,6 +122,22 @@ class TestRunLinguistic:
         rows = self._feature_rows()
         assert len(rows) == 2
         assert all(row.paragraph_id in (0, 1) for row in rows)
+
+    @pytest.mark.asyncio()
+    async def test_cancel_takes_effect_at_paragraph_batch_boundary(self) -> None:
+        """取消在段落批边界生效：不会把整卷 LTP 跑完才响应，也不写完整结果"""
+        checks = {"count": 0}
+
+        def is_cancelled() -> bool:
+            checks["count"] += 1
+            return checks["count"] > 1
+
+        with pytest.raises(asyncio.CancelledError):
+            await run_linguistic(self.run_id, self.db_session, batch_size=1, is_cancelled=is_cancelled)
+
+        # 第一批已放行、第二批边界命中取消：没跑完整卷
+        assert checks["count"] >= 2
+        assert self._count("paragraph_linguistic_features") < 2
 
     @pytest.mark.asyncio()
     async def test_ltp_inference_runs_off_event_loop(self, monkeypatch) -> None:
@@ -187,7 +204,7 @@ class TestRunLinguistic:
             return run_model_dir
 
         monkeypatch.setattr(
-            "src.storage.path_resolver.resolve_run_model_dir",
+            "src.config.paths.resolve_run_model_dir",
             resolve_test_run_model_dir,
         )
 
@@ -368,9 +385,7 @@ class TestMnegCorrection:
 
         # 曲线按修正分子重算：net_density = (0 - 1) / 4
         curve_row = self.db_session.execute(
-            text(
-                "SELECT net_density FROM paragraph_curves WHERE run_id = :run_id AND paragraph_id = 0"
-            ),
+            text("SELECT net_density FROM paragraph_curves WHERE run_id = :run_id AND paragraph_id = 0"),
             {"run_id": self.run_id},
         ).one()
         assert float(curve_row.net_density) == -0.25
@@ -422,12 +437,10 @@ class TestParagraphBoundary:
 
         from sqlalchemy import select
 
-        from src.agents.annotation.schema import (
-            BoundChapterAnnotation,
-            BoundParagraphLabel,
-            ChapterMetricsInput,
-            NarrativeFunction,
-        )
+        from src.agents.annotation.output_models import BoundChapterAnnotation
+        from src.fact_graph.inputs import ChapterMetricsInput
+        from src.fact_graph.outputs import BoundParagraphLabel
+        from src.fact_graph.vocabulary import NarrativeFunction
         from src.storage.models import Paragraph
         from tests.support.chapter_annotation_helpers import commit_test_annotation
 
@@ -449,7 +462,10 @@ class TestParagraphBoundary:
                 paragraph_labels=chapter_labels,
             )
             commit_test_annotation(
-                self.db_session, run_id=self.run_id, chapter_id=chapter_id, annotation=annotation,
+                self.db_session,
+                run_id=self.run_id,
+                chapter_id=chapter_id,
+                annotation=annotation,
             )
 
     def _insert_paragraph_embeddings(self, vectors_by_id: dict[int, list[float]]) -> None:

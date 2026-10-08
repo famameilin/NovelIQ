@@ -21,6 +21,7 @@ CLI topic model 模块测试（段落粒度，设计 §11.1）
 修改内容: 主题文档使用段落（paragraphs 是唯一事实源），写入 paragraph_topics
 """
 
+import asyncio
 import sys
 import uuid
 from dataclasses import replace
@@ -31,9 +32,10 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import Chunk, split_chunk_paragraphs
-from src.preprocess.tokenize import tokenize
 from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository
+from src.text_processing.models import Chunk
+from src.text_processing.paragraphs import split_chunk_paragraphs
+from src.text_processing.tokenize import tokenize
 from src.workflows.topic import run_topic_model
 from tests.support.analysis_factories import insert_test_novel
 
@@ -118,6 +120,29 @@ class TestTopicModel:
         assert model_run.training_document_count == 10
         assert model_run.inference_paragraph_count == 10
         assert model_run.dictionary_size > 0
+
+    @pytest.mark.asyncio()
+    async def test_cancel_takes_effect_during_inference(self) -> None:
+        """取消在推断批边界生效：放行训练后命中，不写主题契约行"""
+        self._create_paragraphs(70)
+        checks = {"count": 0}
+
+        def is_cancelled() -> bool:
+            checks["count"] += 1
+            return checks["count"] > 2
+
+        with pytest.raises(asyncio.CancelledError):
+            await run_topic_model(
+                run_id=self.run_id,
+                session=self.db_session,
+                num_topics=3,
+                passes=5,
+                iterations=50,
+                is_cancelled=is_cancelled,
+            )
+
+        assert checks["count"] >= 3
+        assert self._count_paragraph_topics() == 0
 
     @pytest.mark.asyncio()
     async def test_short_paragraph_is_inferred_but_excluded_from_training(self, monkeypatch) -> None:

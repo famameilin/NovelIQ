@@ -2,7 +2,7 @@
 诊断 Agent 工具（工具化自主取证）
 
 agent 通过工具按需查询聚合指标、转折素材、人物、主题与图谱信号，
-自主决定查看哪些证据，最后通过 finish 输出 CloudAnalysis
+自主决定查看哪些证据，最后通过 finish 提交诊断结果
 """
 
 from __future__ import annotations
@@ -13,9 +13,9 @@ from typing import Any
 from langchain_core.tools import tool
 from sqlalchemy.orm import Session
 
-from src.models.cloud.schema import CloudAnalysis
+from src.diagnosis.patch import AgentAnalysisPatch
+from src.diagnosis.schema import AgentAnalysis
 
-from .contract import CloudAnalysisPatch
 from .evidence import DiagnosisEvidenceLedger
 
 
@@ -65,11 +65,11 @@ def build_diagnosis_tools(
         查询转折点/高张力/伏笔线程等诊断素材。
         用于判断叙事结构、伏笔兑现与高潮分布。
         """
-        from src.storage.repositories.diagnosis_repository import DiagnosisRepository
+        from src.diagnosis.queries import DiagnosisQueries
 
         ledger.record_tool_call("get_pivot_materials")
 
-        repo = DiagnosisRepository(session)
+        repo = DiagnosisQueries(session)
         parts: list[str] = []
 
         pivot_blocks = repo.fetch_pivot_blocks(run_id, limit=20)
@@ -119,11 +119,11 @@ def build_diagnosis_tools(
         查询人物关系变化事件。
         用于判断角色关系网络发展与主线羁绊。
         """
-        from src.storage.repositories.diagnosis_repository import DiagnosisRepository
+        from src.diagnosis.queries import DiagnosisQueries
 
         ledger.record_tool_call("get_relation_changes")
 
-        repo = DiagnosisRepository(session)
+        repo = DiagnosisQueries(session)
         relations = repo.fetch_relation_changes(run_id, limit=50)
         if not relations:
             return "（无关系变化数据）"
@@ -138,11 +138,11 @@ def build_diagnosis_tools(
         查询数据库事实图中的已确认人物节点。
         用于判断核心阵容与主配角。
         """
-        from src.storage.repositories.diagnosis_repository import DiagnosisRepository
+        from src.diagnosis.queries import DiagnosisQueries
 
         ledger.record_tool_call("get_character_data")
 
-        repo = DiagnosisRepository(session)
+        repo = DiagnosisQueries(session)
         known_characters = repo.fetch_known_characters(run_id)
         if known_characters:
             return f"已知人物: {known_characters}"
@@ -154,11 +154,11 @@ def build_diagnosis_tools(
         查询主题词与主题分布（返回 topic_id、累计权重、主题词与标签）。
         用于判断全书主题方向与话题覆盖。
         """
-        from src.storage.repositories import DiagnosisRepository
+        from src.diagnosis.queries import DiagnosisQueries
 
         ledger.record_tool_call("get_topic_data")
 
-        repo = DiagnosisRepository(session)
+        repo = DiagnosisQueries(session)
         topic_rows = repo.fetch_topic_words(run_id)
         if not topic_rows:
             return "（无主题数据）"
@@ -170,7 +170,7 @@ def build_diagnosis_tools(
         查询人物图谱质量信号（节点数、关系数、活跃度等）。
         用于判断角色网络规模与图谱完整性。
         """
-        from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
+        from src.fact_graph.read import KnowledgeGraphAuthorityService, serialize_graph_report_signals
 
         ledger.record_tool_call("get_graph_signals")
 
@@ -185,17 +185,17 @@ def build_diagnosis_tools(
         return "\n".join(f"{key}: {value}" for key, value in sorted(merged_signals.items()))
 
     @tool
-    def finish(analysis: CloudAnalysis) -> str:
+    def finish(analysis: AgentAnalysis) -> str:
         """
         完成诊断：提交最终诊断报告。
-        必须在完成所有取证后调用；输出必须是完整的 CloudAnalysis JSON。
+        必须在完成所有取证后调用；输出必须是完整的诊断结果 JSON。
         """
         return "OK"
 
     @tool
-    def revise_finish(patch: CloudAnalysisPatch) -> str:
+    def revise_finish(patch: AgentAnalysisPatch) -> str:
         """
-        局部修正上一次提交的 CloudAnalysis：只提交需要修改的字段，
+        局部修正上一次提交的诊断结果：只提交需要修改的字段，
         未提交字段沿用上一次完整结果。校验仍被拒时继续修正，不要重复提交完整结果。
         """
         return "OK"

@@ -8,7 +8,7 @@ from typing import Literal, overload
 
 from sqlalchemy.engine import make_url
 
-from src.runtime_env import DatabaseEnvironmentName, load_database_environment
+from src.config.runtime_env import DatabaseEnvironmentName, load_database_environment
 
 
 @overload

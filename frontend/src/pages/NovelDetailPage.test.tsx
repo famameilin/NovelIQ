@@ -234,7 +234,7 @@ describe("NovelDetailPage", () => {
         arc_scores: { 沈砚: 8.2 },
         focus_structure: "single",
         focus_characters: ["沈砚"],
-        topic_labels: ["成长"],
+        topic_labels: { "0": "成长" },
         main_characters: ["沈砚"],
         core_cast: ["沈砚"],
       },

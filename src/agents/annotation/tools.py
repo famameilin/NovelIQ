@@ -20,26 +20,22 @@ run+规范名确定性铸造（uuid5，回执与落库主键同值），事件�
 没有逐域 finish，失败只指向一个语义单元，模型只重调那一条记录。
 """
 
-# ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入（大文件拆分聚合面）。
-
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：tools.py 大文件拆分——AnnotationToolLedger 迁出至 ledger.py，校验错误翻译层
-# 迁出至 validation_errors.py，build_annotation_tools 工厂段迁出至 tool_factories.py；
-# 本模块保留常量/键规范化/AnnotationQueryService/build_search_tools 并对迁出符号
-# re-export（既有导入方零改动）。
-# 说明：纯结构搬移，不改任何运行逻辑与签名。
+# 账本与工具工厂按实际定义导入；本文件只维护查询工具和键规范化
 
 from __future__ import annotations
 
 import json
 import unicodedata
-from typing import Annotated, Any, Protocol
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Annotated, Any, Protocol
 
 from langchain_core.tools import tool
 from pydantic import ConfigDict, Field, create_model
 
+from src.fact_graph.outputs import TextSearchResult
+from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
+
 from .errors import AnnotationAuthorizationError, AnnotationInputError
-from .schema import EL_PATH_SEP, RESERVED_ROOT_KEY, TextSearchResult
 
 # 2026-09-13 领域写入工具表：正式写入工具集合与失败归因共用同一份声明
 _DOMAIN_WRITE_TOOLS: dict[str, tuple[str, ...]] = {
@@ -129,7 +125,9 @@ class AnnotationQueryService(Protocol):
         *,
         range_name: str,
         limit: int = 50,
-    ) -> list[TextSearchResult]: ...
+    ) -> Sequence[Any]:
+        """返回段落级候选行（storage 的 TextSearchCandidate），域模型由本层构造"""
+        ...
 
     async def read_paragraph(self, paragraph_id: int, *, allow_future_context: bool) -> dict[str, Any]: ...
 
@@ -186,11 +184,20 @@ def build_search_tools(
         if ledger.phase != "chapter_open":
             raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 search_text")
         expected_range = "all" if ledger.allow_future_context else "previous"
-        results = await query_service.search_text(
-            normalized_query,
-            range_name=expected_range,
-            limit=offset + 9,
-        )
+        results = [
+            TextSearchResult(
+                chapter_id=row.chapter_id,
+                paragraph_ids=[row.paragraph_id],
+                content=row.excerpt,
+                keyword_score=row.keyword_score,
+                semantic_score=row.semantic_score,
+            )
+            for row in await query_service.search_text(
+                normalized_query,
+                range_name=expected_range,
+                limit=offset + 9,
+            )
+        ]
         views: list[dict[str, Any]] = []
         for item in results[offset : offset + 8]:
             visible_content = item.content[:2000]
@@ -224,17 +231,5 @@ def build_search_tools(
     return [search_text]
 
 
-from .ledger import AnnotationToolLedger as AnnotationToolLedger  # noqa: E402
-from .tool_factories import build_annotation_tools as build_annotation_tools  # noqa: E402
-from .validation_errors import (  # noqa: E402
-    _STAGE_FIELD_EXPECTATIONS as _STAGE_FIELD_EXPECTATIONS,
-)
-from .validation_errors import (
-    translate_write_validation_error as translate_write_validation_error,
-)
-
-__all__ = [
-    "AnnotationQueryService",
-    "AnnotationToolLedger",
-    "build_annotation_tools",
-]
+if TYPE_CHECKING:
+    from .ledger import AnnotationToolLedger

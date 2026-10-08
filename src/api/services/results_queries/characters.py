@@ -1,44 +1,20 @@
 """
 角色查询组装器
 
-说明: 承载 characters 相关查询组装逻辑
+说明: 承载 characters 相关取数与响应装配；出现量归并、焦点评分与别名归一
+分别在 `src.metrics.aggregate.aggregations` 与 `normalization`。
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-from src.agents.annotation.schema import coerce_emotion_score
 from src.api.models.responses import CharacterStats
-from src.knowledge.authority import KnowledgeGraphAuthorityService
-from src.models.local.character_reference_policy import decide_character_reference
+from src.fact_graph.read.annotations import fetch_chapter_characters_full
+from src.fact_graph.read.normalization import build_name_resolution
+from src.metrics.aggregate.aggregations import (
+    merge_character_appearances,
+    rank_character_appearances,
+)
 from src.storage.repositories import AnnotationRepository
-
-from .common import _calculate_narrative_focus_scores
-
-
-def _build_name_resolution(
-    annotation_repo: AnnotationRepository,
-    run_id: str,
-    preferred_names: list[str] | None = None,
-) -> dict[str, str]:
-    """2026-08-09 用于把别名角色名归一到代表角色名"""
-    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
-    entities = authority_service.build_export_view(run_id).canonical_entities
-    preferred = set(preferred_names or [])
-    name_resolution: dict[str, str] = {}
-    for entity in entities:
-        aliases = [alias for alias in entity.aliases if alias and alias != entity.name]
-        representative = entity.name
-        if preferred:
-            chosen = next((alias for alias in aliases if alias in preferred), None)
-            if chosen is not None:
-                representative = chosen
-        for alias in aliases:
-            name_resolution[alias] = representative
-        if representative != entity.name:
-            name_resolution[entity.name] = representative
-    return name_resolution
 
 
 def _fetch_characters(
@@ -50,73 +26,19 @@ def _fetch_characters(
     limit: int | None = 50,
 ) -> list:
     """组装角色榜，过滤局部引用、归并别名并对齐诊断名单"""
-    rows = annotation_repo.fetch_characters_with_scores(run_id)
-    name_resolution = _build_name_resolution(
+    rows = fetch_chapter_characters_full(annotation_repo.session, run_id)
+    name_resolution = build_name_resolution(
         annotation_repo,
         run_id,
         preferred_names=main_characters,
     )
-
-    merged: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        name: str = str(getattr(row, "surface_name", None) or row.name)
-        decision = decide_character_reference(
-            name,
-            resolved_global_name=getattr(row, "resolved_global_name", None),
-        )
-        canonical = decision.resolved_global_name
-        if canonical is None:
-            continue
-        canonical = name_resolution.get(canonical, canonical)
-        role_function: str = str(row.role_function) if row.role_function else "unknown"
-        emotion_score = coerce_emotion_score(row.emotion_score)
-
-        if canonical not in merged:
-            merged[canonical] = {
-                "count": 1,
-                "role_function_counts": {role_function: 1},
-                "weighted_score": emotion_score,
-            }
-        else:
-            merged[canonical]["count"] += 1
-            merged[canonical]["weighted_score"] += emotion_score
-            rf_counts = merged[canonical]["role_function_counts"]
-            rf_counts[role_function] = rf_counts.get(role_function, 0) + 1
-
-    result = []
-    for name, data in merged.items():
-        avg_score = data["weighted_score"] / data["count"] if data["count"] > 0 else 0
-        rf_counts = data["role_function_counts"]
-        total_count = data["count"]
-        dominant_role = max(rf_counts, key=lambda key: rf_counts[key] or 0)
-        dominant_count = rf_counts[dominant_role]
-        dominant_ratio = dominant_count / total_count if total_count > 0 else 0.0
-
-        result.append(
-            CharacterStats(
-                name=name,
-                appearance_count=int(total_count),
-                dominant_role_function=dominant_role,
-                role_function_distribution=rf_counts,
-                dominant_role_ratio=dominant_ratio,
-                narrative_focus_score=None,
-                is_focus_character=False,
-                avg_emotion_score=avg_score,
-            )
-        )
-
-    result.sort(key=lambda item: item.appearance_count, reverse=True)
-    if arc_scores is not None and main_characters is not None and focus_characters is not None:
-        main_resolved = [name_resolution.get(name, name) for name in main_characters]
-        focus_resolved = [name_resolution.get(name, name) for name in focus_characters]
-        arc_resolved = {name_resolution.get(name, name): score for name, score in arc_scores.items()}
-        result = _calculate_narrative_focus_scores(
-            result,
-            arc_resolved,
-            focus_resolved,
-            main_resolved,
-        )
-
-    if limit is None:
-        return result
-    return result[:limit]
+    appearances = merge_character_appearances(rows, name_resolution)
+    ranked = rank_character_appearances(
+        appearances,
+        name_resolution=name_resolution,
+        arc_scores=arc_scores,
+        focus_characters=focus_characters,
+        main_characters=main_characters,
+        limit=limit,
+    )
+    return [CharacterStats(**payload) for payload in ranked]

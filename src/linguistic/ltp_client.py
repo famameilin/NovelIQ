@@ -12,13 +12,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from dataclasses import field as dataclasses_field
 from pathlib import Path
 
 from loguru import logger
 
 from src.config import settings
-from src.utils.text_utils import split_sentences
+from src.text_processing.text_utils import split_sentences
 
 from .schema import (
     LtpDependencyArc,
@@ -77,17 +76,13 @@ _SENTENCE_PATTERN_KEYS = ("short", "medium", "long", "compound", "parallel_candi
 
 @dataclass(frozen=True)
 class LtpPipelineOutput:
-    """LTP pipeline 原始输出（mock 测试面）
-
-    2026-09-05 B 批：新增 sdp（语义依存，逐句 dict {'head','dependent','label'}）；
-    旧构造（无 sdp）按空列表处理，sdp 未运行时情绪事件为空。
-    """
+    """LTP 原始输出，显式提供五组实际推理结果"""
 
     cws: list[list[str]]
     pos: list[list[str]]
     ner: list[list[tuple[str, str, int, int]]]
     dep: list[dict[str, list]]
-    sdp: list[dict[str, list]] = dataclasses_field(default_factory=list)
+    sdp: list[dict[str, list]]
 
 
 class LtpSession:
@@ -130,7 +125,7 @@ class LtpSession:
             pos=out["pos"],
             ner=out["ner"],
             dep=out["dep"],
-            sdp=out.get("sdp", []),
+            sdp=out["sdp"],
         )
 
 
@@ -384,9 +379,7 @@ def analyze_paragraph_batch(texts: Sequence[str]) -> list[ParagraphLinguisticRes
     for text in texts:
         sentences = split_sentences(text)
         if not sentences:
-            results.append(
-                analyze_paragraph(text, LtpPipelineOutput(cws=[], pos=[], ner=[], dep=[]))
-            )
+            results.append(analyze_paragraph(text, LtpPipelineOutput(cws=[], pos=[], ner=[], dep=[], sdp=[])))
             continue
         output = session.pipeline(sentences, tasks=("cws", "pos", "ner", "dep", "sdp"))
         results.append(analyze_paragraph(text, output))

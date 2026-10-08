@@ -21,12 +21,12 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.exceptions import GraphReadinessError
-from src.api.models.events import StreamEvent
-from src.metrics.aggregate import aggregate_all_metrics
-from src.storage.repositories import AnnotationRepository, ChapterRepository, StatsRepository
+from src.fact_graph.errors import GraphReadinessError
+from src.metrics.queries.aggregate import query_aggregate_metrics
+from src.sse.events import StreamEvent
+from src.storage.repositories import ChapterRepository, StatsRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
-from src.workflows.curve_metrics import compute_global_stats
+from src.work.queries import is_annotate_complete
 
 QUALITY_TARGETS = {
     "tone_distribution_non_empty_rate": 1.0,
@@ -153,19 +153,23 @@ async def run_aggregate(
     run_id: str,
     session: Session,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, int, int]:
     """执行聚合流程 — 2026-08-14 M8b 不再写 chunk_curves(源 paragraph_curves)，
     仅写 global_stats(§9.1守恒聚合)并跑 /metrics。
 
     Args: run_id / session / emitter(async StreamEvent->None)  Returns: (总章数, 全局统计条数, 保留位0)
     """
+    from src.utils.cancellation import check_cancelled
+
     start_time = time.time()
     # 2026-10-03 改短事务版边界检查：编排器 session 是长活事务，在其上取 FOR SHARE
     # 会把 analysis_runs 行锁持有整个阶段，饿死任务心跳的 UPDATE（详见
     # require_released_cutoff_short docstring）
-    from src.storage.repositories.pipeline_visibility import require_released_cutoff_short
+    from src.storage.repositories.annotation import AnnotationRepository
 
-    require_released_cutoff_short(run_id)
+    if not is_annotate_complete(AnnotationRepository(session).session, run_id):
+        raise ValueError("必需角色 work 尚未全部成功保存，不能聚合")
 
     chapter_repo = ChapterRepository(session)
     stats_repo = StatsRepository(session)
@@ -180,15 +184,19 @@ async def run_aggregate(
     total_chapters = len(chunk_texts)
     logger.info(f"loaded {total_chapters} chunks from db")
 
-    global_stats = compute_global_stats(session, run_id)
-    stats_repo.insert_global_stats(run_id, global_stats)
+    from src.metrics.queries.global_stats import save_global_stats
+
+    check_cancelled(is_cancelled)
+    global_stats = save_global_stats(session, run_id)
     logger.info(f"inserted {len(global_stats)} global stats")
 
     logger.info("Computing aggregate metrics...")
     try:
         # 2026-10-03 指标聚合移出事件循环（run 08f9ba42 实证单次 7s API 冻结）：
         # 全书章节/图事实的 CPU 聚合同为重活，与 linguistic 同待遇
-        agg_result = await asyncio.to_thread(aggregate_all_metrics, run_id, ann_repo, chapter_repo, stats_repo)
+        agg_result = await asyncio.to_thread(query_aggregate_metrics, run_id, ann_repo, chapter_repo, stats_repo)
+        # 聚合是单次线程内调用，无法中途中断：返回后立刻兑现取消
+        check_cancelled(is_cancelled)
         _log_aggregate_results(agg_result)
         quality_report = _build_quality_gate_report(run_id, agg_result, session)
         _log_quality_gate_report(run_id, quality_report)

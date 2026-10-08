@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-from src.api.exceptions import (
-    AnalysisError,
-    AnalysisNotCompleteError,
-    FileStorageError,
-    InvalidFileError,
-    NovelNotFoundError,
-)
+from src.api.exceptions import AnalysisError, AnalysisNotCompleteError, NovelNotFoundError
 from src.api.middleware import register_exception_handlers
+from src.workflows.exceptions import FileStorageError, InvalidFileError
 
 __all__ = [
     "app",

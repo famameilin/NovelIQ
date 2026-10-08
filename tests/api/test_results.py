@@ -18,23 +18,23 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from src.storage.repositories import RunRepository
-from tests.support.chapter_annotation_helpers import publish_test_cutoff
+from tests.support.chapter_annotation_helpers import confirm_test_work
 from tests.support.graph_snapshot_helpers import insert_graph_test_novel
+from tests.support.run_records import set_run_status
 
 
 class TestResults:
     """测试结果端点"""
 
     @pytest.mark.parametrize("endpoint", ["pipeline", "results", "graph"])
-    def test_unpublished_results_are_not_visible(self, api_client, db_session, endpoint) -> None:
+    def test_saved_work_boundary_without_legacy_publication_gate(self, api_client, db_session, endpoint) -> None:
         novel_id = uuid.uuid4().hex[:8]
         insert_graph_test_novel(db_session, novel_id)
         repository = RunRepository(db_session)
         run_id = repository.create_run(novel_id=novel_id)
-        repository.update_run_status(run_id, "completed")
+        set_run_status(repository.session, run_id, "completed")
         response = api_client.get(f"/api/novels/{novel_id}/{endpoint}", params={"task_id": run_id[:8]})
-        assert response.status_code == 400
-        assert "尚未完成发布" in response.json()["detail"]
+        assert response.status_code == {"pipeline": 200, "results": 409, "graph": 404}[endpoint]
 
     def test_get_results_not_found(self, api_client: TestClient):
         """
@@ -90,20 +90,22 @@ class TestResults:
             source_path="test",
             title="Diagnosis Incomplete Contract",
         )
-        run_repo.update_run_status(run_id, "completed")
-        publish_test_cutoff(db_session, run_id)
+        set_run_status(run_repo.session, run_id, "completed")
+        confirm_test_work(db_session, run_id)
         db_session.execute(
             text(
-                "INSERT INTO cloud_analysis "
-                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
-                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
+                "INSERT INTO analysis_outputs "
+                "(output_id, run_id, kind, payload, created_at) "
+                "VALUES (:output_id, :run_id, 'agent_analysis', :payload, now())"
             ),
             {
-                "novel_id": novel_id,
-                "foreshadow_expectation": 0.42,
-                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
-                "diagnosis": "诊断记录只包含当前已有字段",
+                "output_id": uuid.uuid4().hex,
                 "run_id": run_id,
+                "payload": (
+                    f'{{"novel_id": "{novel_id}", "foreshadow_expectation": 0.42, '
+                    f'"arc_scores": {{"角色0": 8.2, "角色1": 7.4}}, '
+                    f'"diagnosis": "诊断记录只包含当前已有字段"}}'
+                ),
             },
         )
         db_session.commit()
@@ -137,20 +139,22 @@ class TestResults:
             source_path="test",
             title="Graph Incomplete Contract",
         )
-        run_repo.update_run_status(run_id, "completed")
-        publish_test_cutoff(db_session, run_id)
+        set_run_status(run_repo.session, run_id, "completed")
+        confirm_test_work(db_session, run_id)
         db_session.execute(
             text(
-                "INSERT INTO cloud_analysis "
-                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
-                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
+                "INSERT INTO analysis_outputs "
+                "(output_id, run_id, kind, payload, created_at) "
+                "VALUES (:output_id, :run_id, 'agent_analysis', :payload, now())"
             ),
             {
-                "novel_id": novel_id,
-                "foreshadow_expectation": 0.42,
-                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
-                "diagnosis": "诊断记录只包含当前已有字段",
+                "output_id": uuid.uuid4().hex,
                 "run_id": run_id,
+                "payload": (
+                    f'{{"novel_id": "{novel_id}", "foreshadow_expectation": 0.42, '
+                    f'"arc_scores": {{"角色0": 8.2, "角色1": 7.4}}, '
+                    f'"diagnosis": "诊断记录只包含当前已有字段"}}'
+                ),
             },
         )
         db_session.commit()
@@ -216,7 +220,7 @@ def test_result_routes_reject_non_terminal_run_status(api_client: TestClient, db
         source_path="test",
         title="Metrics Non Terminal Run",
     )
-    run_repo.update_run_status(run_id, "running")
+    set_run_status(run_repo.session, run_id, "running")
 
     response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
 
@@ -244,7 +248,7 @@ def test_diagnosis_and_characters_routes_reject_non_terminal_run_status(
         source_path="test",
         title="Results Non Terminal Run",
     )
-    run_repo.update_run_status(run_id, "running")
+    set_run_status(run_repo.session, run_id, "running")
 
     response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.chapters.cn2int import chinese_to_int, extract_number
+from src.text_processing.chapters.cn2int import chinese_to_int, extract_number
 
 
 @pytest.mark.parametrize(

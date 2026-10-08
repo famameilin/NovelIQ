@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from src.metrics.event_timeline_metrics import (
-    build_event_timeline_plan,
-    serialize_event_timeline_node,
-)
+from src.event_trees.read.forest import EventForestQuery
+from src.metrics.event_timeline_metrics import serialize_event_timeline_node
+from src.metrics.queries.timeline import build_event_timeline_plan
 from src.storage.repositories import ChapterRepository, StatsRepository
-from src.storage.repositories.graph.event_forest import EventForestRepository
 from tests.support.chapter_annotation_helpers import create_run_with_chunks, persist_chapter_annotation
 
 
@@ -126,7 +124,7 @@ def test_level_quantile_66_33(db_session) -> None:
     _, run_id = _build_forest_three_trees(db_session)
     chapter_repo = ChapterRepository(db_session)
     stats_repo = StatsRepository(db_session)
-    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
     assert snapshot is not None
     plan = build_event_timeline_plan(run_id, chapter_repo, stats_repo, snapshot)
     assert len(plan.nodes) == 3
@@ -171,7 +169,7 @@ def test_level_all_equal_only_max_is_1(db_session) -> None:
         ],
     )
     db_session.commit()
-    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
     assert snapshot is not None
     plan = build_event_timeline_plan(run_id, ChapterRepository(db_session), StatsRepository(db_session), snapshot)
     assert len(plan.nodes) == 3
@@ -182,7 +180,7 @@ def test_level_all_equal_only_max_is_1(db_session) -> None:
 
 def test_progress_calculation(db_session) -> None:
     _, run_id = _build_forest_three_trees(db_session)
-    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
     plan = build_event_timeline_plan(run_id, ChapterRepository(db_session), StatsRepository(db_session), snapshot)
     by_tree = {n.tree_id: n for n in plan.nodes}
     assert by_tree["tree-A"].progress == pytest.approx(1 / 3)
@@ -195,7 +193,7 @@ def test_progress_calculation(db_session) -> None:
 
 def test_phase_mapping(db_session) -> None:
     _, run_id = _build_forest_three_trees(db_session)
-    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
     plan = build_event_timeline_plan(run_id, ChapterRepository(db_session), StatsRepository(db_session), snapshot)
     phase_names = {p.name for p in plan.phases}
     for node in plan.nodes:
@@ -205,7 +203,7 @@ def test_phase_mapping(db_session) -> None:
 
 def test_importance_score_formula(db_session) -> None:
     _, run_id = _build_forest_three_trees(db_session)
-    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
     plan = build_event_timeline_plan(run_id, ChapterRepository(db_session), StatsRepository(db_session), snapshot)
     by_tree = {n.tree_id: n for n in plan.nodes}
     assert by_tree["tree-B"].importance_score > by_tree["tree-C"].importance_score
@@ -227,7 +225,7 @@ def test_empty_snapshot_returns_no_nodes_but_phases(db_session) -> None:
         [ParagraphCurveRow(0, 0.1, 0.02, 0.08, 0.08, 0.6, 0.6)],
     )
     db_session.commit()
-    snapshot = EventForestRepository(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
     assert snapshot is None
     plan = build_event_timeline_plan(
         run_id,

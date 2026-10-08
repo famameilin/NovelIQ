@@ -7,7 +7,8 @@ from unittest.mock import patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.config import Settings, TaskModelConfig, load_task_config
+from src.config import Settings, TaskModelConfig
+from src.model_pool.configuration import load_task_config
 
 
 class TestTaskModelConfigFromEnv(unittest.TestCase):
@@ -17,8 +18,17 @@ class TestTaskModelConfigFromEnv(unittest.TestCase):
         """
 
         env_vars = {
-            "MODEL_POOL": json.dumps([{"base_url": "https://api.example.com/v1", "model_id": "text-model",
-                                       "api_key": "text-key", "weight": 1, "max_in_flight": 3}]),
+            "MODEL_POOL": json.dumps(
+                [
+                    {
+                        "base_url": "https://api.example.com/v1",
+                        "model_id": "text-model",
+                        "api_key": "text-key",
+                        "weight": 1,
+                        "max_in_flight": 3,
+                    }
+                ]
+            ),
             "DIAGNOSIS_MODEL_ID": "text-model",
             "EMBEDDING_MODEL_BASE_URL": "http://localhost:8080/v1",
             "EMBEDDING_MODEL_ID": "embedding-model",

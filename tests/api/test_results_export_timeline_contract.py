@@ -15,7 +15,7 @@ from src.api.services.results_export_service import (
     load_export_relation_bundle,
     load_graph_signal_bundle,
 )
-from src.knowledge.authority import (
+from src.fact_graph.read import (
     CanonicalEntity,
     ExportGraphAuthorityView,
     ExportRelationSnapshot,
@@ -35,9 +35,9 @@ from src.storage.repositories import (
 )
 from tests.support.chapter_annotation_helpers import (
     commit_test_event_link,
+    confirm_test_work,
     create_run_with_chunks,
     persist_chapter_annotation,
-    publish_test_cutoff,
 )
 
 
@@ -109,14 +109,26 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     from src.storage.models import EventEdge
 
     commit_test_event_link(
-        db_session, run_id=run_id, chapter_id=2, source_event_id=eid2, target_event_id=palace_root,
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        source_event_id=eid2,
+        target_event_id=palace_root,
     )
     commit_test_event_link(
-        db_session, run_id=run_id, chapter_id=2, source_event_id=palace_root, target_event_id=strike_root,
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
+        source_event_id=palace_root,
+        target_event_id=strike_root,
     )
-    inactive_edge = db_session.execute(select(EventEdge).where(
-        EventEdge.run_id == run_id, EventEdge.source_event_id == eid2, EventEdge.target_event_id == palace_root,
-    )).scalar_one()
+    inactive_edge = db_session.execute(
+        select(EventEdge).where(
+            EventEdge.run_id == run_id,
+            EventEdge.source_event_id == eid2,
+            EventEdge.target_event_id == palace_root,
+        )
+    ).scalar_one()
     inactive_edge.is_active = False
     inactive_edge.expired_at = datetime.now(UTC)
     db_session.commit()
@@ -206,20 +218,14 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
         style_labels=["严肃"],
         focus_structure="single",
         focus_characters=["沈砚"],
-        topic_labels=["成长"],
+        topic_labels={"0": "成长"},
         main_characters=["沈砚"],
         core_cast=["沈砚"],
     )
     characters = [SimpleNamespace(name="沈砚")]
 
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_diagnosis",
-        lambda *_args, **_kwargs: diagnosis,
-    )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_characters",
-        lambda *_args, **_kwargs: characters,
-    )
+    patch_export_dependency(monkeypatch, "_fetch_diagnosis", lambda *_args, **_kwargs: diagnosis)
+    patch_export_dependency(monkeypatch, "_fetch_characters", lambda *_args, **_kwargs: characters)
 
     export_graph_view = ExportGraphAuthorityView(
         canonical_entities=[
@@ -266,14 +272,8 @@ def test_load_character_bundle_accepts_partial_diagnosis(
     def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo):
         return diagnosis
 
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_diagnosis",
-        _fake_fetch_diagnosis,
-    )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_characters",
-        lambda *_args, **_kwargs: characters,
-    )
+    patch_export_dependency(monkeypatch, "_fetch_diagnosis", _fake_fetch_diagnosis)
+    patch_export_dependency(monkeypatch, "_fetch_characters", lambda *_args, **_kwargs: characters)
 
     export_graph_view = ExportGraphAuthorityView(
         canonical_entities=[
@@ -297,7 +297,8 @@ def test_load_character_bundle_accepts_partial_diagnosis(
 
 
 def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(
-    monkeypatch: pytest.MonkeyPatch, db_session,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session,
 ) -> None:
     """
     创建时间: 2026-04-26
@@ -314,10 +315,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(
         "src.api.services.results_export_service.load_character_bundle",
         lambda *_args, **_kwargs: ([], None, None, set(), ["diagnosis"]),
     )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_diagnosis",
-        lambda *_args, **_kwargs: None,
-    )
+    patch_export_dependency(monkeypatch, "_fetch_diagnosis", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         "src.api.services.results_export_service.load_chapter_bundle",
         lambda *_args, **_kwargs: ([], [], []),
@@ -365,7 +363,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(
     )
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["导出测试。"])
-    publish_test_cutoff(db_session, run_id)
+    confirm_test_work(db_session, run_id)
     results_data, missing_fields, novel_name = fetch_all_results_data(
         novel_id=novel_id,
         task_id=run_id[:8],
@@ -395,20 +393,14 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
         style_labels=["严肃"],
         focus_structure="single",
         focus_characters=["沈砚"],
-        topic_labels=["成长"],
+        topic_labels={"0": "成长"},
         main_characters=["沈砚"],
         core_cast=["沈砚"],
     )
     characters = [SimpleNamespace(name="沈砚")]
 
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_diagnosis",
-        lambda *_args, **_kwargs: diagnosis,
-    )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_characters",
-        lambda *_args, **_kwargs: characters,
-    )
+    patch_export_dependency(monkeypatch, "_fetch_diagnosis", lambda *_args, **_kwargs: diagnosis)
+    patch_export_dependency(monkeypatch, "_fetch_characters", lambda *_args, **_kwargs: characters)
 
     export_graph_view = ExportGraphAuthorityView(
         canonical_entities=[
@@ -454,10 +446,7 @@ def test_load_core_results_keeps_export_on_raw_paragraph_curves(monkeypatch: pyt
         smoothed_surface_tension=0.39,
     )
 
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_paragraph_curves",
-        lambda *_args, **_kwargs: [paragraph_point],
-    )
+    patch_export_dependency(monkeypatch, "_fetch_paragraph_curves", lambda *_args, **_kwargs: [paragraph_point])
 
     paragraph_curves, missing_fields = load_core_results(
         run_id="run-export-curves",
@@ -475,18 +464,17 @@ def test_load_core_results_keeps_export_on_raw_paragraph_curves(monkeypatch: pyt
 
 
 def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_character_relations",
+    patch_export_dependency(
+        monkeypatch,
+        "_fetch_character_relations",
         lambda *_args, **_kwargs: [SimpleNamespace(from_char="苏镜", to_char="程霜", type="隶属")],
     )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_hierarchical_relations",
-        lambda *_args, **_kwargs: [SimpleNamespace(rel_id="relation-22")],
+    patch_export_dependency(
+        monkeypatch, "_fetch_hierarchical_relations", lambda *_args, **_kwargs: [SimpleNamespace(rel_id="relation-22")]
     )
-    monkeypatch.setattr("src.api.services.results_export_service._fetch_global_stats", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_token_usage_stats",
-        lambda *_args, **_kwargs: SimpleNamespace(model_dump=lambda **_kw: {}),
+    patch_export_dependency(monkeypatch, "_fetch_global_stats", lambda *_args, **_kwargs: None)
+    patch_export_dependency(
+        monkeypatch, "_fetch_token_usage_stats", lambda *_args, **_kwargs: SimpleNamespace(model_dump=lambda **_kw: {})
     )
     metrics_service = MagicMock()
     metrics_service.get_aggregate_metrics_contract.return_value = {
@@ -495,7 +483,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
         "character_stats": None,
         "style_stats": None,
     }
-    monkeypatch.setattr("src.api.services.results_export_service.get_metrics_service", lambda: metrics_service)
+    patch_export_dependency(monkeypatch, "get_metrics_service", lambda: metrics_service)
 
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
@@ -600,10 +588,9 @@ def test_shared_graph_signal_serializer_rejects_non_report_consumers() -> None:
 
 
 def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("src.api.services.results_export_service._fetch_global_stats", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_token_usage_stats",
-        lambda *_args, **_kwargs: SimpleNamespace(model_dump=lambda **_kw: {}),
+    patch_export_dependency(monkeypatch, "_fetch_global_stats", lambda *_args, **_kwargs: None)
+    patch_export_dependency(
+        monkeypatch, "_fetch_token_usage_stats", lambda *_args, **_kwargs: SimpleNamespace(model_dump=lambda **_kw: {})
     )
     metrics_service = MagicMock()
     metrics_service.get_aggregate_metrics_contract.return_value = {
@@ -612,7 +599,7 @@ def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monk
         "character_stats": None,
         "style_stats": None,
     }
-    monkeypatch.setattr("src.api.services.results_export_service.get_metrics_service", lambda: metrics_service)
+    patch_export_dependency(monkeypatch, "get_metrics_service", lambda: metrics_service)
 
     _global_stats, _token_usage_stats, aggregate_metrics = load_aggregate_metrics_bundle(
         run_id="run-aggregate-only",
@@ -664,7 +651,7 @@ def test_build_export_payload_rejects_graph_fields_inside_aggregate_metrics() ->
 
 
 def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
-    """2026-08-18 用于拦截与 event_forest 无关的兄弟 loader，保留真实 EventForestRepository 读取
+    """2026-08-18 用于拦截与 event_forest 无关的兄弟 loader，保留真实 EventForestQuery 读取
 
     对照组：test_fetch_all_results_data_deduplicates_missing_diagnosis_marker。
     """
@@ -676,10 +663,7 @@ def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
         "src.api.services.results_export_service.load_character_bundle",
         lambda *_args, **_kwargs: ([], None, None, set(), []),
     )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service._fetch_diagnosis",
-        lambda *_args, **_kwargs: None,
-    )
+    patch_export_dependency(monkeypatch, "_fetch_diagnosis", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         "src.api.services.results_export_service.load_chapter_bundle",
         lambda *_args, **_kwargs: ([], [], []),
@@ -820,7 +804,7 @@ def test_fetch_all_results_data_emits_empty_event_forest_for_unannotated_run(db_
         title="空事件森林",
     )
     db_session.commit()
-    publish_test_cutoff(db_session, run_id)
+    confirm_test_work(db_session, run_id)
 
     _stub_export_sibling_loaders(monkeypatch)
 
@@ -834,3 +818,9 @@ def test_fetch_all_results_data_emits_empty_event_forest_for_unannotated_run(db_
     )
 
     assert results_data["event_forest"] == {}
+
+
+def patch_export_dependency(monkeypatch, name, value):
+    """同一读取依赖在两个装配点分别注入，不靠反向导入共享测试替身"""
+    monkeypatch.setattr("src.api.services.results_export_service." + name, value)
+    monkeypatch.setattr("src.api.services.results_export_bundles." + name, value)

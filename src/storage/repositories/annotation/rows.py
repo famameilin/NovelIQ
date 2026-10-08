@@ -62,10 +62,6 @@ class DialogueFactRow:
     speaker_references: list[dict[str, Any]]
     length: int
     tone: str | None
-    formal_value: dict[str, Any] = field(default_factory=dict)
-    continuity_value: dict[str, Any] = field(default_factory=dict)
-    continuity_state: str | None = None
-    cutoff_hash: str | None = None
 
 
 @dataclass(frozen=True)

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from src.fact_graph.graph import FactGraph
 from src.storage.models import GraphEntity
-from src.workflows.diagnose import _persist_main_character_attributes
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
@@ -18,7 +18,7 @@ def test_persist_main_character_attributes_clears_previous_run_flags(db_session,
     避免只置位不清理导致已下榜角色残留主角标记"""
     from uuid import NAMESPACE_DNS, uuid5
 
-    from src.knowledge.authority import KnowledgeGraphAuthorityService
+    from src.fact_graph.read import KnowledgeGraphAuthorityService
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
 
@@ -65,11 +65,7 @@ def test_persist_main_character_attributes_clears_previous_run_flags(db_session,
         lambda session: fake_service,
     )
 
-    _persist_main_character_attributes(
-        db_session,
-        run_id=run_id,
-        main_characters=["新主角"],
-    )
+    FactGraph(run_scope=run_id).save_main_characters(db_session, ["新主角"])
 
     db_session.flush()
     rows = {

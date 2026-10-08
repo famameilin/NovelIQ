@@ -9,21 +9,19 @@ from __future__ import annotations
 
 import uuid
 
-from src.agents.annotation.schema import (
-    BoundChapterAnnotation,
-    ChapterMetricsInput,
-    NarrativeFunction,
-)
-from src.chunking.chunker import Chunk
-from src.chunking.spans import ParagraphSpan
+from src.agents.annotation.output_models import BoundChapterAnnotation
+from src.fact_graph.inputs import ChapterMetricsInput
+from src.fact_graph.vocabulary import NarrativeFunction
 from src.storage.repositories import (
     ChapterRepository,
     ParagraphRepository,
     RunRepository,
 )
 from src.storage.repositories.paragraph_repository import ParagraphCurveRow, ParagraphMetricRow
+from src.text_processing.models import Chunk, ParagraphSpan
 from tests.support.analysis_factories import insert_test_novel
-from tests.support.chapter_annotation_helpers import commit_test_annotation, publish_test_cutoff
+from tests.support.chapter_annotation_helpers import commit_test_annotation
+from tests.support.run_records import set_run_status
 
 
 def create_completed_run(
@@ -54,8 +52,7 @@ def create_completed_run(
         )
         offset += len(text)
     ChapterRepository(db_session).insert_chapter_texts(run_id, chunks)
-    RunRepository(db_session).update_run_status(run_id, "completed")
-    publish_test_cutoff(db_session, run_id)
+    set_run_status(RunRepository(db_session).session, run_id, "completed")
     return novel_id, run_id
 
 
@@ -74,9 +71,7 @@ def create_run_with_status(
         title="段落接口门禁测试",
     )
     if status != "pending":
-        RunRepository(db_session).update_run_status(run_id, status)
-    if status == "completed":
-        publish_test_cutoff(db_session, run_id)
+        set_run_status(RunRepository(db_session).session, run_id, status)
     return novel_id, run_id
 
 
@@ -146,7 +141,7 @@ def make_metric_row(
         sensory_hit_count=0,
         imagery_hit_count=0,
         metaphor_sentence_count=0,
-                    body_reaction_hit_count=0,
+        body_reaction_hit_count=0,
         function_word_counts={},
         semantic_category_counts={},
     )

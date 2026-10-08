@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from src.api.services.results_queries.graph_metrics import compute_graph_metrics
+from src.api.services.results_queries.graph import compute_graph_metrics
 from src.storage.repositories import GraphRepository, RunRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
@@ -15,6 +15,7 @@ from tests.support.chapter_annotation_helpers import (
     relation_fact,
 )
 from tests.support.paragraph_fixtures import create_run_with_status
+from tests.support.run_records import set_run_status
 
 
 def _seed_graph(db_session, run_id: str) -> None:
@@ -41,14 +42,13 @@ def _seed_graph(db_session, run_id: str) -> None:
     db_session.commit()
 
 
-
-
 def _mark_completed(db_session, run_id: str) -> None:
     """create_run_with_chunks 生成的 run 状态回到 completed 以通过读门禁"""
-    RunRepository(db_session).update_run_status(run_id, "completed")
-    from tests.support.chapter_annotation_helpers import publish_test_cutoff
+    set_run_status(RunRepository(db_session).session, run_id, "completed")
+    from tests.support.chapter_annotation_helpers import confirm_test_work
 
-    publish_test_cutoff(db_session, run_id)
+    confirm_test_work(db_session, run_id)
+
 
 def test_graph_metrics_returns_pagerank_hits_communities(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_chunks(
@@ -99,10 +99,10 @@ def test_graph_metrics_accumulates_reverse_relations(monkeypatch) -> None:
         return dict.fromkeys(graph.nodes, 1 / 3)
 
     monkeypatch.setattr(
-        "src.api.services.results_queries.graph_metrics._require_snapshot",
+        "src.api.services.results_queries.graph._fetch_graph_snapshot",
         MagicMock(return_value=snapshot),
     )
-    monkeypatch.setattr("src.api.services.results_queries.graph_metrics.nx.pagerank", capture_pagerank)
+    monkeypatch.setattr("src.metrics.aggregate.algorithms.nx.pagerank", capture_pagerank)
 
     compute_graph_metrics("run-1", MagicMock())
 
@@ -181,3 +181,38 @@ def test_graph_and_keywords_require_completed_run(api_client: TestClient, db_ses
     assert graph_resp.status_code == 400
     keyword_resp = api_client.get(f"/api/novels/{novel_id}/keywords", params={"task_id": run_id[:8]})
     assert keyword_resp.status_code == 400
+
+
+def test_graph_tab_keeps_isolated_characters_without_relation_metrics(api_client: TestClient, db_session) -> None:
+    """有效空关系图保留人物与快照，两种读取入口均不能因数值求解失败返回 500"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session, texts=["两人独自行路。", "各自远行。"], chapter_ids=[1, 2], title="孤立人物"
+    )
+    for chapter_id in (1, 2):
+        persist_chapter_annotation(
+            db_session,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            characters=[
+                character_fact(chapter_id=chapter_id, name="顾承渊", action="独行"),
+                character_fact(chapter_id=chapter_id, name="苏映雪", action="远行"),
+            ],
+            relations=[],
+        )
+    _mark_completed(db_session, run_id)
+    db_session.commit()
+
+    for endpoint in ("graph/metrics", "tabs/graph-network"):
+        response = api_client.get(f"/api/novels/{novel_id}/{endpoint}", params={"task_id": run_id[:8]})
+        assert response.status_code == 200
+        body = response.json()
+        if endpoint == "tabs/graph-network":
+            assert len(body["snapshot"]["nodes"]) == 2
+            assert body["snapshot"]["edges"] == []
+            body = body["graph_metrics"]
+        assert body["algorithm"]["graph"]["edge_count"] == 0
+        assert body["pagerank"] == {"顾承渊": 0.5, "苏映雪": 0.5}
+        assert body["hits"]["authority"] == body["hits"]["hub"] == {}
+        assert body["hits"]["unavailable_reason"].startswith("no_relations:")
+        assert body["communities"]["modularity"] is None
+        assert body["communities"]["unavailable_reason"].startswith("no_relations:")

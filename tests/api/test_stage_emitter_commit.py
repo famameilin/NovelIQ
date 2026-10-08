@@ -16,11 +16,12 @@ from uuid import uuid4
 
 import pytest
 
-from src.api.models.events import AnalysisEventBus, StreamEvent
-from src.api.services.analysis.stage_orchestrator import StageOrchestratorMixin
-from src.api.services.task_manager import TaskManager
+from src.sse.events import StreamEvent
 from src.storage.db import get_session, get_session_factory
 from src.storage.models import AnalysisRun, Novel
+from src.work.task_manager import TaskManager
+from src.workflows.analysis.stage_orchestrator import StageOrchestratorMixin
+from src.workflows.progress import AnalysisEventBus
 
 pytestmark = pytest.mark.asyncio
 
@@ -53,7 +54,7 @@ async def test_stage_emitter_commits_session_before_emit() -> None:
         emitter = StageOrchestratorMixin._make_stage_emitter(bus, "aggregate", orchestrator_session)
         event = StreamEvent(action="complete", stage="aggregate", current=1, total=1, percent=90.0)
 
-        with patch("src.api.services.event_manager.event_manager") as mock_em:
+        with patch("src.sse.manager.event_manager") as mock_em:
             mock_em.send = AsyncMock()
             await asyncio.wait_for(emitter(event), timeout=15.0)
 

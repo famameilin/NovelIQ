@@ -18,13 +18,8 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.api.models.events import StreamEvent
-from src.chunking.chunker import chunk_documents_with_chapters, split_chunk_paragraphs
-from src.chunking.spans import ParagraphSpan
 from src.config import settings
-from src.ingest.reader import ingest_path
-from src.preprocess import normalize_text
-from src.preprocess.tokenize import tokenize
+from src.sse.events import StreamEvent
 from src.storage.repositories import (
     ChapterRepository,
 )
@@ -35,6 +30,12 @@ from src.storage.repositories.paragraph_repository import (
 from src.storage.vector_schema import (
     ensure_paragraph_embeddings_schema,
 )
+from src.text_processing.models import ParagraphSpan
+from src.text_processing.paragraphs import chunk_documents_with_chapters, split_chunk_paragraphs
+from src.text_processing.preprocess import normalize_text
+from src.text_processing.text_reader import ingest_path
+from src.text_processing.tokenize import tokenize
+from src.workflows.preprocess_readiness import is_preprocess_complete
 
 
 async def run_preprocess(
@@ -43,8 +44,10 @@ async def run_preprocess(
     session: Session,
     metadata_path: Path | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, int, float]:
     """执行预处理流程。Args: source_path/run_id/session/metadata_path  Returns: (总块数, 总字符数, 耗时s)"""
+    from src.utils.cancellation import check_cancelled
     from src.workflows.preprocess_helpers import _load_all_lexicons_for_preprocess
 
     start_time = time.time()
@@ -53,9 +56,11 @@ async def run_preprocess(
         await emitter(StreamEvent(action="start", stage="preprocess", message="开始预处理", sub_percent=0.0))
 
     chapter_repo = ChapterRepository(session)
-    if chapter_repo.is_preprocess_complete(run_id):
+    if is_preprocess_complete(chapter_repo.session, run_id):
         logger.info(f"preprocess already complete for run_id={run_id}, skipping")
         return 0, 0, 0.0
+
+    check_cancelled(is_cancelled)
 
     docs = ingest_path(source_path, metadata_path)
     if not docs:
@@ -72,7 +77,6 @@ async def run_preprocess(
 
     all_chunks, all_chapters = await chunk_documents_with_chapters(
         normalized_texts,
-        emitter=emitter,
     )
 
     total_chapters = len(all_chunks)
@@ -107,7 +111,7 @@ async def run_preprocess(
     # 的充分统计量（sentence_count/sum/sum_sq、dialogue_char_count 等）为事实源。
     if settings.models.paragraph_embedding.semantic_enabled:
         logger.info("generating paragraph embeddings for semantic text retrieval")
-        await _generate_paragraph_embeddings(session, run_id, emitter=emitter)
+        await _generate_paragraph_embeddings(session, run_id, emitter=emitter, is_cancelled=is_cancelled)
 
     elapsed = time.time() - start_time
     logger.info(f"preprocess completed chunks={total_chapters} chars={total_chars} time={elapsed:.2f}s")
@@ -246,12 +250,13 @@ async def _generate_paragraph_embeddings(
     session: Session,
     run_id: str,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> int:
     """为 paragraphs 生成 embedding 落库；从 paragraphs 读不重切段，0行跳过。
     RAG 粒度固定自然段(仅 paragraph)。Args: session/run_id/emitter  Returns: embedding 数量
     """
-    from src.agents.usage import build_token_usage_callback
-    from src.models.local.embedding import EmbeddingClient
+    from src.embedding import EmbeddingClient
+    from src.model_pool.usage import build_token_usage_callback
     from src.storage.models import AnalysisRun
     from src.storage.repositories.paragraph import (
         ParagraphEmbeddingRow,
@@ -263,53 +268,63 @@ async def _generate_paragraph_embeddings(
         logger.info("no paragraphs found for run_id={}, skip paragraph embeddings", run_id)
         return 0
 
+    from src.audit.module import AuditModule
+    from src.event_bus import EventBus
+    from src.storage.db import get_session_factory
+
+    audit_bus = EventBus()
+    audit = AuditModule(audit_bus, run_id, get_session_factory())
     try:
-        novel_id = session.execute(
-            select(AnalysisRun.novel_id).where(AnalysisRun.run_id == run_id)
-        ).scalar_one_or_none()
-        embedding_client = EmbeddingClient(
-            novel_id=novel_id if isinstance(novel_id, str) and novel_id else "unknown",
-            token_usage_callback=build_token_usage_callback(session=session, run_id=run_id),
-        )
-    except ValueError as e:
-        raise RuntimeError(
-            "embedding client initialization failed during preprocess: "
-            f"semantic text retrieval requires paragraph embeddings, error={e}"
-        ) from e
-
-    # 维度以嵌入服务实测输出为准（2026-09-10 删配置）：探针锁定客户端校验基准，
-    # 建表列宽按探测值固化；换模型维度变化时 ensure 的列类型校验快速失败
-    embedding_dim = await embedding_client.detect_embedding_dimension()
-
-    ensure_paragraph_embeddings_schema(session, embedding_dim)
-    _commit_preprocess_writes(session, step="ensure_embedding_schemas")
-
-    paragraph_rows = await _generate_paragraph_embedding_rows(
-        embedding_client,
-        run_id,
-        ParagraphEmbeddingRow,
-        emitter=emitter,
-    )
-    if paragraph_rows:
-        insert_paragraph_embeddings(session, run_id, paragraph_rows, embedding_dimension=embedding_dim)
-        _commit_preprocess_writes(session, step="insert_embedding_rows")
-        logger.info(
-            "inserted {} paragraph embeddings into db (run_id={})",
-            len(paragraph_rows),
-            run_id,
-        )
-
-    if emitter:
-        await emitter(
-            StreamEvent(
-                action="complete",
-                stage="preprocess",
-                message="向量嵌入生成完成",
-                sub_percent=100.0,
+        try:
+            novel_id = session.execute(
+                select(AnalysisRun.novel_id).where(AnalysisRun.run_id == run_id)
+            ).scalar_one_or_none()
+            embedding_client = EmbeddingClient(
+                novel_id=novel_id if isinstance(novel_id, str) and novel_id else "unknown",
+                token_usage_callback=build_token_usage_callback(bus=audit_bus, run_id=run_id),
             )
-        )
+        except ValueError as e:
+            raise RuntimeError(
+                "embedding client initialization failed during preprocess: "
+                f"semantic text retrieval requires paragraph embeddings, error={e}"
+            ) from e
 
-    return len(paragraph_rows)
+        # 维度以嵌入服务实测输出为准（2026-09-10 删配置）：探针锁定客户端校验基准，
+        # 建表列宽按探测值固化；换模型维度变化时 ensure 的列类型校验快速失败
+        embedding_dim = await embedding_client.detect_embedding_dimension()
+
+        ensure_paragraph_embeddings_schema(session, embedding_dim)
+        _commit_preprocess_writes(session, step="ensure_embedding_schemas")
+
+        paragraph_rows = await _generate_paragraph_embedding_rows(
+            embedding_client,
+            run_id,
+            ParagraphEmbeddingRow,
+            emitter=emitter,
+            is_cancelled=is_cancelled,
+        )
+        if paragraph_rows:
+            insert_paragraph_embeddings(session, run_id, paragraph_rows, embedding_dimension=embedding_dim)
+            _commit_preprocess_writes(session, step="insert_embedding_rows")
+            logger.info(
+                "inserted {} paragraph embeddings into db (run_id={})",
+                len(paragraph_rows),
+                run_id,
+            )
+
+        if emitter:
+            await emitter(
+                StreamEvent(
+                    action="complete",
+                    stage="preprocess",
+                    message="向量嵌入生成完成",
+                    sub_percent=100.0,
+                )
+            )
+
+        return len(paragraph_rows)
+    finally:
+        await audit.close()
 
 
 async def _generate_paragraph_embedding_rows(
@@ -317,12 +332,14 @@ async def _generate_paragraph_embedding_rows(
     run_id: str,
     row_factory: Any,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> list[Any]:
     """生成 paragraph embedding 写入 DTO — 段落源 paragraphs(不重切，仅 paragraph_id+向量)，
     坐标从 paragraphs 读；批量 embed_texts 防单条退化。缺失 fail fast(防 readiness 假成功)，progress_callback 发 SSE。
     """
     from src.storage.db import get_session_factory
     from src.storage.repositories.paragraph_repository import ParagraphRepository
+    from src.utils.cancellation import check_cancelled
 
     with get_session_factory()() as session:
         paragraph_refs: list[tuple[int, int, int, int, int, int, int, str]] = []
@@ -352,6 +369,8 @@ async def _generate_paragraph_embedding_rows(
         发射 preprocess 阶段 paragraph embedding 的批次进度
 
         """
+        # 批间是取消的安全边界：在飞的 embedding 请求不受取消影响，先让本批收尾
+        check_cancelled(is_cancelled)
         if emitter is None or total_batches <= 0:
             return
 

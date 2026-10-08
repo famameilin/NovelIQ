@@ -12,12 +12,12 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from src.agents.stream import (
     AgentStream,
     ContentStallTimeoutError,
-    StreamChunkAggregator,
     _is_transient_model_error,
-    _provider_request_metadata,
     emit_tool_results,
     run_model_call,
 )
+from src.agents.stream_aggregator import StreamChunkAggregator
+from src.agents.stream_audit import _provider_request_metadata
 
 
 def _collect_events() -> list[tuple[str, str, str]]:
@@ -367,8 +367,11 @@ async def test_run_model_call_content_stall_kills_silent_chunks_and_exhausts_ret
 
     with pytest.raises(ContentStallTimeoutError, match="内容进度停摆"):
         await run_model_call(
-            model, [AIMessage(content="问")], stream,
-            total_attempts=2, content_stall_timeout_s=0.2,
+            model,
+            [AIMessage(content="问")],
+            stream,
+            total_attempts=2,
+            content_stall_timeout_s=0.2,
         )
 
     assert len(model.captured_messages) == 2
@@ -389,8 +392,11 @@ async def test_run_model_call_content_stall_watchdog_resets_on_each_content_chun
     )
 
     response = await run_model_call(
-        model, [AIMessage(content="问")], stream,
-        total_attempts=1, content_stall_timeout_s=0.2,
+        model,
+        [AIMessage(content="问")],
+        stream,
+        total_attempts=1,
+        content_stall_timeout_s=0.2,
     )
 
     assert response.content == "你好"
@@ -406,14 +412,16 @@ async def test_run_model_call_content_stall_watchdog_counts_reasoning_as_content
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     reasoning_chunks = [
-        AIMessageChunk(content="", additional_kwargs={"reasoning_content": f"第{i}步"})
-        for i in range(4)
+        AIMessageChunk(content="", additional_kwargs={"reasoning_content": f"第{i}步"}) for i in range(4)
     ]
     model = _TimedChunkLLM([*reasoning_chunks, _tool_call_chunk()], interval_s=0.06)
 
     response = await run_model_call(
-        model, [AIMessage(content="问")], stream,
-        total_attempts=1, content_stall_timeout_s=0.2,
+        model,
+        [AIMessage(content="问")],
+        stream,
+        total_attempts=1,
+        content_stall_timeout_s=0.2,
     )
 
     assert "第3步" in (response.additional_kwargs.get("reasoning_content") or "")
@@ -875,7 +883,6 @@ async def test_run_model_call_records_ttft_first_visible_and_reasoning_timings(m
             500_000_000,
         ]
     )
-    monkeypatch.setattr("src.agents.stream.perf_counter_ns", lambda: next(ticks))
     model = _StreamingLLM(
         [
             AIMessageChunk(content="", additional_kwargs={"reasoning_content": "先分析"}),
@@ -893,7 +900,7 @@ async def test_run_model_call_records_ttft_first_visible_and_reasoning_timings(m
         del message
         captured["timing"] = timing
 
-    response = await run_model_call(model, [], None, on_turn_complete=on_turn_complete)
+    response = await run_model_call(model, [], None, on_turn_complete=on_turn_complete, clock_ns=lambda: next(ticks))
 
     assert response.content == "正文结尾"
     timing = captured["timing"]
@@ -909,8 +916,7 @@ async def test_aggregator_notes_reasoning_not_streamed(monkeypatch) -> None:
     2026-08-11 用于验证流式响应未探测到思考内容时回合审计记录未流出原因
     """
     ticks = iter([100_000_000, 200_000_000])
-    monkeypatch.setattr("src.agents.stream.perf_counter_ns", lambda: next(ticks))
-    aggregator = StreamChunkAggregator(None, started_ns=0)
+    aggregator = StreamChunkAggregator(None, started_ns=0, clock_ns=lambda: next(ticks))
 
     await aggregator.add_chunk(AIMessageChunk(content="正文"))
 
@@ -926,8 +932,7 @@ async def test_aggregator_notes_empty_stream_without_payload(monkeypatch) -> Non
     2026-08-11 用于验证流式调用完全未流出任何内容时记录无 payload 原因
     """
     ticks = iter([100_000_000, 200_000_000])
-    monkeypatch.setattr("src.agents.stream.perf_counter_ns", lambda: next(ticks))
-    aggregator = StreamChunkAggregator(None, started_ns=0)
+    aggregator = StreamChunkAggregator(None, started_ns=0, clock_ns=lambda: next(ticks))
 
     await aggregator.add_chunk(AIMessageChunk(content=""))
 
@@ -1080,7 +1085,7 @@ async def test_merge_truncated_args_marks_call_instead_of_raw_wrap() -> None:
 
 def test_merge_tool_call_chunks_carries_raw_args() -> None:
     """2026-08-11 用于验证合并后的工具调用保留原始参数片段供审计"""
-    from src.agents.stream import _merge_tool_call_chunks
+    from src.agents.stream_aggregator import _merge_tool_call_chunks
 
     chunks = [
         {"index": 0, "name": "push_case", "args": '{"description": "', "id": "call_1"},

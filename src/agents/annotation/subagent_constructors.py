@@ -2,49 +2,30 @@
 章内 subagent 构造器：八类记录构造器、收尾工具与程序面回执 helper
 """
 
-# ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入（大文件拆分聚合面）。
-
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：subagent_program.py 大文件拆分——回执 helpers + 规范化 + 构造器账本 +
-# build_subagent_constructors（八类构造器闭包）+ build_subagent_finish_tool 迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑、签名与模型可见文案；_SUBAGENT_CONSTRUCTOR_ORDER
-# 等常量保留在 subagent_program.py，由本模块末尾反向引用（双向均定义先于引用，
-# 任意导入顺序安全）；subagent_program.py 对本模块符号保留 re-export。
-
 from __future__ import annotations
 
-import inspect
-import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from langchain_core.tools import StructuredTool
-
-from .program import _READ_TOOL_NAMES, _dedent_catalog_text
-from .schema import (
-    ENTITY_TAG_MAX_CHARS,
-    ENTITY_TAG_MAX_COUNT,
-    Confidence,
-    DialogueVerdict,
-    EntityRef,
-    EntityType,
-    EventChildType,
-    NarrativeFunction,
-    RelationType,
-    Tone,
+from src.agents.annotation.ir_validation import (
+    _reject,
+    _require_enum,
+    _require_local_key,
+    _require_name,
+    _require_paragraph_id,
+    _require_score,
+    _require_text,
+    namespace_el,
+    namespace_event_el,
 )
-from .subagent_ir import (
+from src.agents.annotation.subagent_ir import (
     CONFIDENCE_VALUES,
     DIALOGUE_VERDICTS,
-    EL_PATH_SEP,
     ENTITY_TYPES,
     EVENT_CHILD_TYPES,
     NARRATIVE_FUNCTIONS,
-    PENDING_CASE_TYPES,
-    PENDING_KINDS,
     RELATION_TYPES,
-    RESERVED_ROOT_KEY,
     RUNTIME_ROLES,
     TONE_VALUES,
     SubagentAnnotation,
@@ -56,25 +37,26 @@ from .subagent_ir import (
     SubagentParticipant,
     SubagentPending,
     SubagentRelation,
-    _reject,
-    _require_enum,
-    _require_local_key,
-    _require_name,
-    _require_paragraph_id,
-    _require_score,
-    _require_text,
-    namespace_el,
-    namespace_event_el,
     normalize_evidence,
-    truncate_case_description,
 )
-from .tools import FINISH_TOOL_NAME, _forbid_undeclared_args
-from .vocabulary import (
+from src.event_trees.vocabulary import (
     _EVENT_ONLY_ROLE_WORDS,
-    clamp_emotion_score,
+    EventChildType,
     normalize_event_participant_role,
+)
+from src.fact_graph.schema import EL_PATH_SEP, ENTITY_TAG_MAX_CHARS, ENTITY_TAG_MAX_COUNT, RESERVED_ROOT_KEY, EntityRef
+from src.fact_graph.vocabulary import (
+    Confidence,
+    DialogueVerdict,
+    EntityType,
+    NarrativeFunction,
+    RelationType,
+    Tone,
+    clamp_emotion_score,
     normalize_role_function,
 )
+
+from .program_contract import _READ_TOOL_NAMES
 
 
 def _record_of(subagent: SubagentAnnotation, field: str) -> str:
@@ -253,6 +235,7 @@ class _ConstructorBook:
     role: str
     paragraph_text_by_id: dict[int, str]
     candidate_total: int
+    shared_entity_ids: Callable[[], set[str]] | None = None
 
 
 def _event_write_args(
@@ -285,6 +268,8 @@ def _event_write_args(
 
 def _require_known_entity_id(book: _ConstructorBook, value: Any, *, record: str, field_name: str) -> str:
     """用于校验实体引用是"本 subagent 已登记的 id"（未登记即结构化拒绝并列出已知 id）"""
+    if book.shared_entity_ids is not None and value in book.shared_entity_ids():
+        return str(value)
     normalized = _require_local_key(value, record=record, field_name=field_name)
     known = book.subagent.entity_ids()
     if normalized not in known:
@@ -299,11 +284,16 @@ def _require_known_entity_id(book: _ConstructorBook, value: Any, *, record: str,
     return normalized
 
 
+def _entity_ref(book: _ConstructorBook, identifier: str) -> str:
+    return namespace_el(book.role, identifier) if identifier in book.subagent.entity_ids() else identifier
+
+
 def build_subagent_constructors(
     subagent: SubagentAnnotation,
     *,
     paragraph_text_by_id: dict[int, str],
     candidate_total: int,
+    shared_entity_ids: Callable[[], set[str]] | None = None,
 ) -> list[tuple[str, Any, str]]:
     """用于构造 subagent 命名空间里的记录构造器（返回 (名字, 可调用, 一句话说明) 列表）
 
@@ -320,6 +310,7 @@ def build_subagent_constructors(
         role=subagent.role,
         paragraph_text_by_id=paragraph_text_by_id,
         candidate_total=candidate_total,
+        shared_entity_ids=shared_entity_ids,
     )
 
     def entity(
@@ -382,9 +373,7 @@ def build_subagent_constructors(
             entity_type=kind,
             tags=normalized_tags,
             description=(
-                _require_text(description, record=record, field_name="description")
-                if description is not None
-                else None
+                _require_text(description, record=record, field_name="description") if description is not None else None
             ),
             attributes=normalized_attributes,
             evidence=normalize_evidence(evidence, record=record, paragraph_text_by_id=book.paragraph_text_by_id),
@@ -436,8 +425,8 @@ def build_subagent_constructors(
             ),
         )
         args: dict[str, Any] = {
-            "from_entity": namespace_el(book.role, item.from_id),
-            "to_entity": namespace_el(book.role, item.to_id),
+            "from_entity": _entity_ref(book, item.from_id),
+            "to_entity": _entity_ref(book, item.to_id),
             "relation_type": item.relation_type,
         }
         return _ConstructorCall(
@@ -458,22 +447,37 @@ def build_subagent_constructors(
         )
 
     def event(
-        el: str,
-        isroot: bool,
-        description: str,
-        evidence: int,
+        el: str | None = None,
+        isroot: bool | None = None,
+        description: str | None = None,
+        evidence: int | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
         type: EventChildType | None = None,
+        parent_ref: str | None = None,
+        node_ref: str | None = None,
     ) -> _ConstructorCall:
         """写一个事件节点（el 根=树键 t1、子=树键/节点键 t1/e2；树内先后=调用顺序）
 
         type=main 顺延主因链 / secondary 挂当时主链尾（子事件必填，根事件不填）。
         伏笔属性只属于根：isforeshadowing=True 时 confidence 必填（high/medium/low）。
-        参与者用 participants(el=本键, items=[...]) 追加。同 el 重写=更新语义。
+        参与者用 participants(el=本键, items=[...]) 追加；节点核心内容不允许重复改写。
         2026-10-02 对齐 0.2.0 写面：伏笔挂树参数（foreshadowing_action/root_event_id 等）
         已随案例裁决机器退役——跨章伏笔照应由 write_link 关联工具承担。
         """
+        if node_ref is not None:
+            return _ConstructorCall(
+                record=_record_of(subagent, f"connection/{node_ref}"),
+                tool="write_event",
+                args={"node_ref": node_ref, "parent_ref": parent_ref, "type": type},
+                ref={"node_id": node_ref},
+                commit=lambda: None,
+            )
+        if el is None or isroot is None or description is None:
+            raise ValueError("创建 event 必须填写 el/isroot/description")
+        connection_type = type
+        if parent_ref is not None and isroot:
+            type = None
         record = _record_of(subagent, f"event/{el}")
         normalized_el = _normalize_el(el, record=record)
         tree_key, _, node_key = normalized_el.partition(EL_PATH_SEP)
@@ -524,7 +528,7 @@ def build_subagent_constructors(
                     record=record,
                     field="el",
                     code="bad_el",
-                    expected="形如 t1/e2；建树请用 event(el=\"t1\", isroot=True, ...)",
+                    expected='形如 t1/e2；建树请用 event(el="t1", isroot=True, ...)',
                 )
             if node_key == RESERVED_ROOT_KEY:
                 raise _reject(
@@ -571,7 +575,10 @@ def build_subagent_constructors(
         return _ConstructorCall(
             record=record,
             tool="write_event",
-            args=_event_write_args(book, item),
+            args={
+                **_event_write_args(book, item),
+                **({"parent_ref": parent_ref, "type": connection_type} if parent_ref is not None else {}),
+            },
             ref=ref,
             commit=lambda: _put_by(subagent.events, item, key=lambda current: current.el),
         )
@@ -600,7 +607,7 @@ def build_subagent_constructors(
         characters: list[dict[str, Any]] = []
         for participant in normalized_participants:
             entry: dict[str, Any] = {
-                "entityid": namespace_el(book.role, participant.entity_id),
+                "entityid": _entity_ref(book, participant.entity_id),
                 "role": participant.role,
             }
             if participant.narrative_role is not None:
@@ -667,9 +674,7 @@ def build_subagent_constructors(
                 )
         else:
             if speaker_id is not None:
-                normalized_speaker = _require_known_entity_id(
-                    book, speaker_id, record=record, field_name="speaker_id"
-                )
+                normalized_speaker = _require_known_entity_id(book, speaker_id, record=record, field_name="speaker_id")
             if tone is not None:
                 normalized_tone = _require_enum(tone, TONE_VALUES, record=record, field_name="tone")
         item = SubagentDialogue(
@@ -686,7 +691,7 @@ def build_subagent_constructors(
         )
         args: dict[str, Any] = {"candidate_index": item.candidate_index, "verdict": item.verdict}
         if item.speaker_id is not None:
-            args["speaker"] = namespace_el(book.role, item.speaker_id)
+            args["speaker"] = _entity_ref(book, item.speaker_id)
         if item.tone is not None:
             args["tone"] = item.tone
         return _ConstructorCall(
@@ -694,9 +699,7 @@ def build_subagent_constructors(
             tool="write_dialogue",
             args=args,
             ref={"kind": "dialogue", "candidate_index": item.candidate_index, "verdict": item.verdict},
-            commit=lambda: _put_by(
-                subagent.dialogues, item, key=lambda current: current.candidate_index
-            ),
+            commit=lambda: _put_by(subagent.dialogues, item, key=lambda current: current.candidate_index),
         )
 
     def label(paragraph_id: int, emotion: int) -> _ConstructorCall:
@@ -763,64 +766,24 @@ def build_subagent_constructors(
             commit=commit,
         )
 
-    def pending(
-        kind: str,
-        detail: str,
-        evidence: int | None = None,
-        keys: list[str] | None = None,
-    ) -> _ConstructorCall:
-        """登记一个你判不了的疑点（keys 写本 subagent 已登记的实体 id 逐条列表）
-
-        kind: unresolved_reference=引用无法解析 / event_continuation=事件疑似与既有事件树
-        延续 / case_clue=疑似案例线索 / other。
-        case_clue 必须带 evidence（候选/线索所在段落的段首号）。
-        2026-10-02 对齐 0.2.0 案例面：case_id 授权随 search_pool 退役，疑点只登记不指向既有案例。
-        """
-        normalized_kind = _require_enum(kind, PENDING_KINDS, record=_record_of(subagent, "pending"), field_name="kind")
-        record = _record_of(subagent, f"pending/{normalized_kind}")
-        normalized_keys: list[str] = []
-        for raw_key in keys or []:
-            normalized_keys.append(
-                _require_known_entity_id(book, raw_key, record=record, field_name="keys")
-            )
-        item = SubagentPending(
-            kind=normalized_kind,
-            detail=_require_text(detail, record=record, field_name="detail"),
-            keys=normalized_keys,
-            evidence=normalize_evidence(
-                evidence,
-                record=record,
-                paragraph_text_by_id=book.paragraph_text_by_id,
-                required=False,
-            ),
-        )
-        if item.kind == "case_clue" and not item.evidence:
+    def pending(description: str) -> _ConstructorCall:
+        """登记普通文字案例，只有 description，不承载目标或证据参数"""
+        record = _record_of(subagent, "pending")
+        item = SubagentPending(description=_require_text(description, record=record, field_name="description"))
+        if len(item.description) > 100:
             raise _reject(
-                "case_clue 必须带证据段号",
+                f"description={item.description!r} 超过 100 字",
                 record=record,
-                field="evidence",
-                code="missing_evidence",
-                expected=f"单个段首可见号整数（正文每段开头的 `N：`，范围 1..{len(book.paragraph_text_by_id)}）",
+                field="description",
+                code="too_long",
+                expected="1..100 字普通文字",
             )
-        entities = subagent.entity_ids()
-        description = item.detail
-
-        def commit() -> None:
-            """写入成功后才登记这条待决项（被拒即整条作废，与案例池里那条保持一致）"""
-            subagent.pending.append(item)
-
         return _ConstructorCall(
             record=record,
             tool="push_case",
-            args={
-                "description": truncate_case_description(description),
-                # 案例池的 keys 是与实体名匹配的人类可读字符串，这里把本 subagent 的
-                # 局部引用键翻成登记名；没有 keys 的疑点用它自己的种类
-                "keys": [entities[key].name for key in item.keys if key in entities] or [item.kind],
-                "type": PENDING_CASE_TYPES.get(item.kind, "其他疑点"),
-            },
-            ref={"kind": "pending", "pending_kind": item.kind},
-            commit=commit,
+            args={"description": item.description},
+            ref={"kind": "pending"},
+            commit=lambda: subagent.pending.append(item),
         )
 
     functions = {
@@ -831,53 +794,6 @@ def build_subagent_constructors(
         "dialogue": (dialogue, "判定一条对话候选（candidate_index+verdict）"),
         "label": (label, "给一个段落打整段情绪标签（段首号）"),
         "metric": (metric, "提交本章摘要与叙事指标（整域一次提交）"),
-        "pending": (pending, "登记一个判不了的疑点（keys 写本 subagent 实体 id）"),
+        "pending": (pending, "登记一个判不了的疑点（只填 description）"),
     }
     return [(name, functions[name][0], functions[name][1]) for name in _SUBAGENT_CONSTRUCTOR_ORDER]
-
-
-def build_subagent_finish_tool(subagent: SubagentAnnotation, *, candidate_total: int) -> Any:
-    """2026-09-18 用于构造 subagent 面唯一的收尾工具 finish（面上一等工具，不是构造器）
-
-    三个 subagent 的产出由系统在三个 subagent 齐之后统一落库，所以本工具是 subagent 完整性的
-    唯一凭据：它只置位与回报，不做校验、不冻结整章（章级冻结由系统在本章收束后做）。
-    本工具同时出现在绑定面与 execute_code 的程序目录里——两处同一个对象，
-    名字与语义只有一份。
-    """
-
-    def _finish() -> str:
-        """声明本 subagent 的标注已写完：回执列出各类记录条数、还缺哪些候选判定与指标
-
-        判不了的疑点先用 pending 或 push_case 登记再收尾，别为了收尾去补假数据；
-        构造器的写入是即时生效的（收尾不减损已写入的记录），收尾后仍可继续写入。
-        """
-        subagent.finished = True
-        from .subagent_program import subagent_gap
-
-        gap = subagent_gap(subagent, candidate_total=candidate_total)
-        return json.dumps(
-            {
-                "status": "written",
-                "record": _record_of(subagent, "finish"),
-                "ref": {
-                    "role": subagent.role,
-                    "finished": True,
-                    "counts": subagent.counts(),
-                    "unjudged_candidates": gap["missing_candidates"],
-                    "candidate_total": candidate_total if subagent.role == "evidence" else 0,
-                    "missing_metric": gap["missing_metric"],
-                },
-            },
-            ensure_ascii=False,
-        )
-
-    # 说明文本在构造时就去掉源码缩进：本工具既进 execute_code 的目录、又是绑定面的
-    # 一等工具，两处读同一份 description（否则同一段话在目录里左对齐、在绑定的
-    # schema 里带 8 空格缩进）。
-    tool_candidate = StructuredTool.from_function(
-        func=_finish,
-        name=FINISH_TOOL_NAME,
-        description=_dedent_catalog_text(inspect.getdoc(_finish) or ""),
-    )
-    _forbid_undeclared_args(tool_candidate)
-    return tool_candidate

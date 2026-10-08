@@ -4,18 +4,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.api.exceptions import GraphReadinessError
-from src.api.routes.results_fetchers import (
-    _fetch_chapter_annotations,
-    _fetch_character_relations,
-    _fetch_characters,
-    _fetch_diagnosis,
-    _fetch_foreshadowing_trees,
-    _fetch_hierarchical_relations,
-    _normalize_arc_scores,
-    _normalize_name_list,
-)
-from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
+from src.api.services.results_queries import _fetch_character_relations, _fetch_diagnosis, _fetch_hierarchical_relations
+from src.diagnosis.normalization import normalize_arc_scores, normalize_name_list
+from src.fact_graph.read import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
 from src.storage.repositories.annotation import ForeshadowingTreeView
+from tests.support.results_query_stubs import _fetch_chapter_annotations, _fetch_characters, _fetch_foreshadowing_trees
 
 
 class _DummyRow:
@@ -56,8 +49,7 @@ class _DummyStatsRepo:
         self.payload = payload
         self.global_stats = global_stats or {}
 
-    def fetch_cloud_analysis(self, novel_id, run_id):
-        assert novel_id == "novel-1"
+    def fetch_agent_analysis(self, run_id):
         assert run_id == "run-1"
         return self.payload
 
@@ -86,7 +78,7 @@ class _DummyAnnotationRepo:
         self.session = MagicMock()
         self.foreshadow_expectation = None
 
-    def fetch_characters_with_scores(self, run_id):
+    def fetch_chapter_characters_full(self, run_id):
         assert run_id == "run-1"
         return self._rows
 
@@ -106,7 +98,7 @@ class _DummyAnnotationRepo:
 def test_normalize_name_list_deduplicates_graph_names():
     values = ["柳婉儿", "柳婉儿", "白芷"]
 
-    assert _normalize_name_list(values) == ["柳婉儿", "白芷"]
+    assert normalize_name_list(values) == ["柳婉儿", "白芷"]
 
 
 def test_fetch_diagnosis_preserves_graph_resolved_character_fields():
@@ -143,7 +135,7 @@ def test_fetch_diagnosis_preserves_graph_resolved_character_fields():
     assert result.arc_scores == {"\u4faf\u98de\u767d": 6.5, "\u6797\u7acb\u679c": 6.0}
     assert result.genre_labels == ["\u901a\u7528"]
     assert result.style_labels == ["\u4e25\u8083"]
-    assert result.topic_labels == ["\u67f3\u5a49\u513f", "\u767d\u82b7"]
+    assert result.topic_labels is None  # 历史数组不再转成当前主题标签
     assert result.diagnosis == (
         "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
     )
@@ -190,7 +182,7 @@ def test_fetch_foreshadowing_trees_preserves_status_field():
     assert rows[0].status == "reinforced"
 
 
-def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
+def test_fetch_diagnosis_returns_none_when_agent_result_missing():
     stats_repo = _DummyStatsRepo(None)
 
     result = _fetch_diagnosis(
@@ -202,7 +194,7 @@ def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
     assert result is None
 
 
-def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
+def test_fetch_diagnosis_uses_agent_analysis_expectation_as_single_contract():
     """
     创建时间: 2026-04-29
     任务: split-genre-style-labels-review-fixes
@@ -472,7 +464,7 @@ def test_fetch_diagnosis_drops_non_mapping_arc_scores():
     assert result.main_characters == []
 
 
-def test_fetch_diagnosis_returns_partial_cloud_row():
+def test_fetch_diagnosis_returns_partial_agent_row():
     stats_repo = _DummyStatsRepo(
         {
             "foreshadow_expectation": 0.42,
@@ -552,12 +544,18 @@ def test_fetch_diagnosis_preserves_distinct_graph_entity_names():
 
 def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
     rows = []
-    rows.extend([_DummyRow(name="\u7532", role_function="\u5ba2\u4f53", emotion_score=0)] * 20)
-    rows.extend([_DummyRow(name="\u4e59", role_function="\u4e3b\u4f53", emotion_score=0)] * 10)
+    rows.extend(
+        [_DummyRow(surface_name="\u7532", resolved_global_name="\u7532", role_function="\u5ba2\u4f53", emotion_score=0)]
+        * 20
+    )
+    rows.extend(
+        [_DummyRow(surface_name="\u4e59", resolved_global_name="\u4e59", role_function="\u4e3b\u4f53", emotion_score=0)]
+        * 10
+    )
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
-    with patch("src.api.services.results_queries.characters._build_name_resolution", return_value={}):
+    with patch("src.api.services.results_queries.characters.build_name_resolution", return_value={}):
         result = _fetch_characters(
             run_id="run-1",
             annotation_repo=annotation_repo,
@@ -578,13 +576,13 @@ def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
 
 def test_fetch_characters_returns_all_items_when_limit_is_none():
     rows = []
-    rows.extend([_DummyRow(name="甲", role_function="主体", emotion_score=0)] * 3)
-    rows.extend([_DummyRow(name="乙", role_function="客体", emotion_score=0)] * 2)
-    rows.extend([_DummyRow(name="丙", role_function="帮助者", emotion_score=0)] * 1)
+    rows.extend([_DummyRow(surface_name="甲", resolved_global_name="甲", role_function="主体", emotion_score=0)] * 3)
+    rows.extend([_DummyRow(surface_name="乙", resolved_global_name="乙", role_function="客体", emotion_score=0)] * 2)
+    rows.extend([_DummyRow(surface_name="丙", resolved_global_name="丙", role_function="帮助者", emotion_score=0)] * 1)
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
-    with patch("src.api.services.results_queries.characters._build_name_resolution", return_value={}):
+    with patch("src.api.services.results_queries.characters.build_name_resolution", return_value={}):
         result = _fetch_characters(
             run_id="run-1",
             annotation_repo=annotation_repo,
@@ -601,13 +599,13 @@ def test_fetch_characters_filters_unresolved_pronoun_references():
     说明: 角色榜只展示 global-character 准入后的名字，未解析“我”不能进入聚合结果。
     """
     rows = [
-        _DummyRow(name="我", role_function="主体", emotion_score=0),
-        _DummyRow(name="沈砚", role_function="主体", emotion_score=0),
+        _DummyRow(surface_name="我", resolved_global_name="我", role_function="主体", emotion_score=0),
+        _DummyRow(surface_name="沈砚", resolved_global_name="沈砚", role_function="主体", emotion_score=0),
     ]
 
     annotation_repo = _DummyAnnotationRepo(rows=rows)
 
-    with patch("src.api.services.results_queries.characters._build_name_resolution", return_value={}):
+    with patch("src.api.services.results_queries.characters.build_name_resolution", return_value={}):
         result = _fetch_characters(
             run_id="run-1",
             annotation_repo=annotation_repo,
@@ -620,7 +618,7 @@ def test_fetch_characters_filters_unresolved_pronoun_references():
 def test_normalize_arc_scores_preserves_named_scores():
     arc_scores = {"monkey": 6.5, "hou_fei_bai": 8.0, "abacus": 4.0}
 
-    assert _normalize_arc_scores(arc_scores) == {
+    assert normalize_arc_scores(arc_scores) == {
         "monkey": 6.5,
         "hou_fei_bai": 8.0,
         "abacus": 4.0,
@@ -628,7 +626,7 @@ def test_normalize_arc_scores_preserves_named_scores():
 
 
 def test_normalize_arc_scores_returns_none_when_payload_is_not_named_mapping():
-    assert _normalize_arc_scores([8.0, 6.0]) is None
+    assert normalize_arc_scores([8.0, 6.0]) is None
 
 
 def test_fetch_character_relations_deduplicates_across_chunks():
@@ -641,7 +639,7 @@ def test_fetch_character_relations_deduplicates_across_chunks():
     )
 
     with patch(
-        "src.knowledge.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.fact_graph.read.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -684,7 +682,7 @@ def test_fetch_character_relations_skips_inactive_current_relations():
     )
 
     with patch(
-        "src.knowledge.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.fact_graph.read.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -705,7 +703,7 @@ def test_fetch_character_relations_uses_last_seen_chapter_id():
     )
 
     with patch(
-        "src.knowledge.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.fact_graph.read.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -722,7 +720,7 @@ def test_fetch_character_relations_uses_last_seen_chapter_id():
 def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
     annotation_repo = _DummyAnnotationRepo2()
     with patch(
-        "src.knowledge.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.fact_graph.read.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(
             assert_graph_ready=lambda _run_id: (_ for _ in ()).throw(
                 GraphReadinessError(
@@ -742,7 +740,7 @@ def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
 def test_fetch_character_relations_allows_empty_graph_when_no_pending():
     annotation_repo = _DummyAnnotationRepo2()
     with patch(
-        "src.knowledge.authority.KnowledgeGraphAuthorityService.from_session",
+        "src.fact_graph.read.KnowledgeGraphAuthorityService.from_session",
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
@@ -891,7 +889,7 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
             return [
                 _DummyRow(
                     chapter_id=3,
-                    emotional_valence="正向",
+                    emotional_valence=1,
                     event_type="冲突",
                     pivot_moment=True,
                     cliffhanger=False,
@@ -967,7 +965,7 @@ def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
             return [
                 _DummyRow(
                     chapter_id=3,
-                    emotional_valence="正向",
+                    emotional_valence=1,
                     event_type="冲突",
                     pivot_moment=True,
                     cliffhanger=False,
@@ -1041,3 +1039,14 @@ def test_fetch_chapter_annotations_propagates_database_graph_failure(monkeypatch
             run_id="run-1",
             annotation_repo=annotation_repo,
         )
+
+
+@pytest.mark.parametrize("emotion", ["正向", "1", True, 3])
+def test_chapter_results_reject_legacy_or_invalid_emotion_values(emotion: object) -> None:
+    """查询不能把旧文字值或非法分值静默伪装成中性结果"""
+    repo = MagicMock()
+    repo.fetch_chapter_annotations_full.return_value = [SimpleNamespace(chapter_id=1, emotional_valence=emotion)]
+    repo.fetch_chapter_characters_full.return_value = []
+    repo.fetch_chapter_dialogues_full.return_value = []
+    with pytest.raises(ValueError, match="emotion="):
+        _fetch_chapter_annotations("run-1", repo, export_graph_view=ExportGraphAuthorityView())

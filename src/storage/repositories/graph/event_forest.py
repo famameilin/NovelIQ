@@ -1,119 +1,20 @@
-"""章节事件森林查询 Repository"""
+"""事件森林原始记录读取，不组装事件树、排序或解释伏笔状态"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.storage.models import (
-    Chapter,
-    ChapterAnnotationRecord,
-    EventEdge,
-    EventNode,
-)
-from src.storage.models.graph import ChapterBoundary
-from src.storage.repositories.event_order import formal_event_ordinals
+from src.storage.models import AnalysisOutput, AnnotationWork, Chapter, EventEdge, EventNode
 
 
-@dataclass(frozen=True)
-class EventNodeRow:
-    """2026-08-19 用于返回章节事件节点"""
-
-    event_id: str
-    chapter_id: int
-    chapter_order: int
-    description: str
-    participants: list[dict[str, Any]]
-    anchor_paragraph_ids: list[int]
-    char_start: int
-    char_end: int
-    evidence: list[dict[str, Any]]
-    causal_event_refs: list[str]
-    tree_id: str
-    cause_role: str
-    parent_event_id: str | None
-    evidence_scope: str
-    payload_path: str
-    event_ordinal: int
-
-
-@dataclass(frozen=True)
-class EventEdgeRow:
-    """2026-08-19 用于返回章节事件因果边"""
-
-    edge_id: str
-    edge_type: str
-    source_event_id: str
-    target_event_id: str
-    source_chapter_id: int
-    target_chapter_id: int
-    is_active: bool
-    evidence: list[dict[str, Any]]
-    expired_at: datetime | None = None
-
-
-@dataclass(frozen=True)
-class ForeshadowingEdgeRow:
-    """2026-09-13 用于返回章节伏笔树视图（伏笔即事件树，一行一棵树）"""
-
-    root_event_id: str
-    run_id: str
-    tree_id: str
-    payoff_event_id: str | None
-    first_chapter_id: int
-    last_chapter_id: int
-    description: str
-    status: str
-    active: bool
-
-
-@dataclass(frozen=True)
-class EventSecondaryGroupRow:
-    """2026-08-19 用于返回事件树的次因分支"""
-
-    target_event_id: str
-    branch: list[str]
-
-
-@dataclass(frozen=True)
-class EventTreeRow:
-    """2026-08-19 用于返回一棵事件树"""
-
-    tree_id: str
-    root_event_id: str
-    main_chain: list[str]
-    secondary_groups: list[EventSecondaryGroupRow]
-    chapter_ids: list[int]
-    char_start: int
-    char_end: int
-
-
-@dataclass(frozen=True)
-class EventForestSnapshot:
-    """2026-08-19 用于返回章节边界内的事件森林"""
-
-    chapter_id: int
-    chapter_order: int
-    visible_through_chapter_order: int
-    derived_event_order: list[str]
-    event_nodes: list[EventNodeRow]
-    event_trees: list[EventTreeRow]
-    causal_edges: list[EventEdgeRow]
-    foreshadowing_edges: list[ForeshadowingEdgeRow]
-
-
-class EventForestRepository:
-    """2026-08-19 用于查询章节事件森林"""
-
+class EventForestRecords:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def _chapter_rows(self, run_id: str) -> list[Chapter]:
-        """2026-08-19 用于按章节身份读取有正文章节并确定排序"""
+    def fetch_chapters(self, run_id: str):
         return list(
             self.session.execute(
                 select(Chapter)
@@ -122,148 +23,40 @@ class EventForestRepository:
             ).scalars()
         )
 
-    def _chapter_ids_for_order(
-        self, run_id: str, max_chapter_order: int, *, chapters: list[Chapter] | None = None
-    ) -> set[int]:
-        """2026-08-19 用于按 chapter_order 解析可见章节集合（复用已缓存 chapters 避免 N+1）"""
-        if chapters is None:
-            chapters = self._chapter_rows(run_id)
-        return {
-            int(chapter.chapter_id) for index, chapter in enumerate(chapters, start=1) if index <= max_chapter_order
-        }
-
-    def resolve_chapter_boundary(
-        self,
-        run_id: str,
-        *,
-        chapter_id: int | None = None,
-        chapters: list[Chapter] | None = None,
-    ) -> ChapterBoundary | None:
-        """2026-08-19 用于按章节身份解析当前运行的图谱边界（缓存 chapters，批量查 annotation 避免逆序 N+1）"""
-        if chapters is None:
-            chapters = self._chapter_rows(run_id)
-        if chapter_id is None:
-            if not chapters:
-                return None
-            # 批量查询 annotation 避免逆序 N+1
-            chapter_ids = [int(c.chapter_id) for c in chapters]
-            rows = list(
-                self.session.execute(
-                    select(ChapterAnnotationRecord).where(
-                        ChapterAnnotationRecord.run_id == run_id,
-                        ChapterAnnotationRecord.chapter_id.in_(chapter_ids),
-                    )
-                ).scalars()
-            )
-            annotation_by_chapter: dict[int, ChapterAnnotationRecord] = {int(row.chapter_id): row for row in rows}
-            target = None
-            annotation = None
-            for candidate in reversed(chapters):
-                cand_annotation = annotation_by_chapter.get(int(candidate.chapter_id))
-                if cand_annotation is not None:
-                    target = candidate
-                    annotation = cand_annotation
-                    break
-            if target is None or annotation is None:
-                return None
-            order = chapters.index(target) + 1
-            return ChapterBoundary(
-                run_id=run_id,
-                chapter_id=int(target.chapter_id),
-                chapter_order=order,
-                first_chapter_id=int(target.chapter_id),
-                last_chapter_id=int(target.chapter_id),
-                annotation_id=str(annotation.annotation_id),
-            )
-        target = next((chapter for chapter in chapters if int(chapter.chapter_id) == chapter_id), None)
-        if target is None:
-            return None
-        annotation = self.session.execute(
-            select(ChapterAnnotationRecord).where(
-                ChapterAnnotationRecord.run_id == run_id,
-                ChapterAnnotationRecord.chapter_id == target.chapter_id,
-            )
-        ).scalar_one_or_none()
-        if annotation is None:
-            return None
-        order = chapters.index(target) + 1
-        return ChapterBoundary(
-            run_id=run_id,
-            chapter_id=int(target.chapter_id),
-            chapter_order=order,
-            first_chapter_id=int(target.chapter_id),
-            last_chapter_id=int(target.chapter_id),
-            annotation_id=str(annotation.annotation_id),
+    def fetch_saved_outputs(self, run_id: str):
+        return list(
+            self.session.execute(
+                select(AnalysisOutput)
+                .join(AnnotationWork, AnnotationWork.work_id == AnalysisOutput.work_id)
+                .where(
+                    AnalysisOutput.run_id == run_id,
+                    AnalysisOutput.kind == "chapter_annotation",
+                    AnnotationWork.state == "saved",
+                    AnnotationWork.invocation_id == AnalysisOutput.invocation_id,
+                )
+            ).scalars()
         )
 
-    def fetch_event_nodes(self, run_id: str, *, max_chapter_order: int) -> list[EventNodeRow]:
-        """读取边界内节点，并从正式章标注恢复树内父节点与证据粒度"""
-        rows = list(self.session.execute(
-            select(EventNode)
-            .where(EventNode.run_id == run_id, EventNode.chapter_order <= max_chapter_order)
-            .order_by(EventNode.chapter_order, EventNode.event_id)
-        ).scalars())
-        if not rows:
-            return []
-        annotation_ids = {node.annotation_id for node in rows}
-        annotations = list(self.session.execute(
-            select(ChapterAnnotationRecord).where(ChapterAnnotationRecord.annotation_id.in_(annotation_ids))
-        ).scalars())
-        # parent_node_id 只在正式标注载荷里，批量读取避免每个节点再查一次
-        payload_events: dict[str, dict[str, Any]] = {}
-        for annotation in annotations:
-            for event in annotation.payload["events"]:
-                payload_events[event["node_id"]] = event
-        ordinals = formal_event_ordinals(annotations)
-        node_by_id = {node.event_id: node for node in rows}
+    def fetch_nodes(self, run_id: str, max_chapter_order: int):
+        return list(
+            self.session.execute(
+                select(EventNode)
+                .where(EventNode.run_id == run_id, EventNode.chapter_order <= max_chapter_order)
+                .order_by(EventNode.chapter_order, EventNode.event_id)
+            ).scalars()
+        )
 
-        def parent_event_id(node: EventNode) -> str | None:
-            parent_id = payload_events[node.event_id]["parent_node_id"]
-            parent = node_by_id.get(str(parent_id)) if parent_id else None
-            return str(parent_id) if parent is not None and parent.tree_id == node.tree_id else None
+    def fetch_outputs(self, annotation_ids: set[str]):
+        return list(
+            self.session.execute(
+                select(AnalysisOutput).where(
+                    AnalysisOutput.kind == "chapter_annotation",
+                    AnalysisOutput.output_id.in_(annotation_ids),
+                )
+            ).scalars()
+        )
 
-        return [
-            EventNodeRow(
-                event_id=node.event_id,
-                chapter_id=node.chapter_id,
-                chapter_order=node.chapter_order,
-                description=node.description,
-                participants=list(node.participants),
-                anchor_paragraph_ids=list(node.anchor_paragraph_ids),
-                char_start=node.char_start,
-                char_end=node.char_end,
-                evidence=list(node.evidence),
-                causal_event_refs=list(node.causal_event_refs),
-                tree_id=node.tree_id,
-                cause_role=node.cause_role,
-                parent_event_id=parent_event_id(node),
-                evidence_scope="paragraph",
-                payload_path=node.payload_path,
-                event_ordinal=ordinals[node.event_id],
-            )
-            for node in rows
-        ]
-
-    def fetch_event_edges(
-        self,
-        run_id: str,
-        *,
-        max_chapter_order: int,
-        include_inactive: bool = False,
-        chapters: list[Chapter] | None = None,
-    ) -> list[EventEdgeRow]:
-        """2026-08-19 用于读取截止章节边界的因果边（支持复用已缓存 chapters）"""
-        chapter_ids = self._chapter_ids_for_order(run_id, max_chapter_order, chapters=chapters)
-        if not chapter_ids:
-            return []
-        return self._fetch_event_edges_by_chapter_ids(run_id, chapter_ids, include_inactive=include_inactive)
-
-    def _fetch_event_edges_by_chapter_ids(
-        self, run_id: str, chapter_ids: set[int], *, include_inactive: bool = False
-    ) -> list[EventEdgeRow]:
-        """按可见章节读取因果边，伏笔关联由独立通道返回"""
-        if not chapter_ids:
-            return []
+    def fetch_causal_edges(self, run_id: str, chapter_ids: set[int], *, include_inactive: bool = False):
         filters: list[Any] = [
             EventEdge.run_id == run_id,
             EventEdge.edge_type == "causal",
@@ -272,154 +65,33 @@ class EventForestRepository:
         ]
         if not include_inactive:
             filters.append(EventEdge.is_active.is_(True))
-        rows = self.session.execute(select(EventEdge).where(*filters).order_by(EventEdge.edge_id)).scalars()
-        return [
-            EventEdgeRow(
-                edge_id=edge.edge_id,
-                edge_type=edge.edge_type,
-                source_event_id=edge.source_event_id,
-                target_event_id=edge.target_event_id,
-                source_chapter_id=edge.source_chapter_id,
-                target_chapter_id=edge.target_chapter_id,
-                is_active=bool(edge.is_active),
-                evidence=list(edge.evidence),
-                expired_at=edge.expired_at,
-            )
-            for edge in rows
-        ]
+        return list(self.session.execute(select(EventEdge).where(*filters).order_by(EventEdge.edge_id)).scalars())
 
-    def _fetch_foreshadowing_edges_by_chapter_ids(
-        self, run_id: str, chapter_ids: set[int]
-    ) -> list[ForeshadowingEdgeRow]:
-        """内部：按已解析 chapter_ids 查询伏笔树（根在可见章节内的树）"""
-        if not chapter_ids:
-            return []
-        root_rows = self.session.execute(
-            select(EventNode)
-            .join(
-                Chapter,
-                (Chapter.run_id == EventNode.run_id) & (Chapter.chapter_id == EventNode.chapter_id),
-            )
-            .where(
-                EventNode.run_id == run_id,
-                EventNode.is_foreshadowing_root.is_(True),
-                EventNode.chapter_id.in_(chapter_ids),
-            )
-            .order_by(Chapter.sequence, EventNode.chapter_id, EventNode.event_id)
-        ).scalars()
-        roots = list(root_rows)
-        if not roots:
-            return []
-        edges_by_root: dict[str, list[EventEdge]] = {}
-        for edge in self.session.execute(
-            select(EventEdge).where(
-                EventEdge.run_id == run_id,
-                EventEdge.edge_type == "foreshadowing",
-            )
-        ).scalars().all():
-            edges_by_root.setdefault(edge.source_event_id, []).append(edge)
-        return [
-            ForeshadowingEdgeRow(
-                root_event_id=root.event_id,
-                run_id=run_id,
-                tree_id=root.tree_id,
-                payoff_event_id=None,
-                first_chapter_id=root.chapter_id,
-                last_chapter_id=max(
-                    [root.chapter_id, *(edge.target_chapter_id for edge in edges_by_root.get(root.event_id, []))]
-                ),
-                description=root.description,
-                status=root.foreshadowing_status or "open",
-                active=(root.foreshadowing_status or "open") != "likely_paid_off",
-            )
-            for root in roots
-        ]
+    def fetch_foreshadow_roots(self, run_id: str, chapter_ids: set[int]):
+        return list(
+            self.session.execute(
+                select(EventNode)
+                .join(
+                    Chapter,
+                    (Chapter.run_id == EventNode.run_id) & (Chapter.chapter_id == EventNode.chapter_id),
+                )
+                .where(
+                    EventNode.run_id == run_id,
+                    EventNode.is_foreshadowing_root.is_(True),
+                    EventNode.chapter_id.in_(chapter_ids),
+                )
+                .order_by(Chapter.sequence, EventNode.chapter_id, EventNode.event_id)
+            ).scalars()
+        )
 
-    def _build_event_trees(self, event_nodes: list[EventNodeRow]) -> list[EventTreeRow]:
-        """2026-08-19 用于按 tree_id 组装事件树视图"""
-        nodes_by_tree: dict[str, list[EventNodeRow]] = {}
-        for node in event_nodes:
-            nodes_by_tree.setdefault(node.tree_id, []).append(node)
-
-        def sort_key(node: EventNodeRow) -> tuple[int, int, int, str]:
-            return node.chapter_order, node.char_start, node.event_ordinal, node.event_id
-
-        trees: list[tuple[EventTreeRow, tuple[int, int, int, str]]] = []
-        for tree_id, nodes in nodes_by_tree.items():
-            ordered = sorted(nodes, key=sort_key)
-            roots = [node for node in ordered if node.cause_role == "root"]
-            root_id = roots[0].event_id if len(roots) == 1 else ordered[0].event_id
-            secondary_by_target: dict[str, list[str]] = {}
-            for node in ordered:
-                if node.cause_role != "secondary":
-                    continue
-                # 缺失挂接点时保留旁支节点，以 tree_id 作为“未确定挂接”分组标记
-                target = node.parent_event_id or tree_id
-                secondary_by_target.setdefault(target, []).append(node.event_id)
-            trees.append(
-                (
-                    EventTreeRow(
-                        tree_id=tree_id,
-                        root_event_id=root_id,
-                        main_chain=[node.event_id for node in ordered if node.cause_role in ("root", "main")],
-                        secondary_groups=[
-                            EventSecondaryGroupRow(target_event_id=target, branch=branch)
-                            for target, branch in secondary_by_target.items()
-                        ],
-                        chapter_ids=sorted({node.chapter_id for node in nodes}),
-                        char_start=min(node.char_start for node in nodes),
-                        char_end=max(node.char_end for node in nodes),
-                    ),
-                    sort_key(ordered[0]),
+    def fetch_foreshadow_edges(self, run_id: str):
+        return list(
+            self.session.execute(
+                select(EventEdge).where(
+                    EventEdge.run_id == run_id,
+                    EventEdge.edge_type == "foreshadowing",
                 )
             )
-        trees.sort(key=lambda pair: pair[1])
-        return [tree for tree, _sort in trees]
-
-    def fetch_snapshot(self, run_id: str, *, chapter_id: int | None = None) -> EventForestSnapshot | None:
-        """2026-08-19 用于返回章节边界内的事件森林快照（单次缓存 chapters，避免 4 次 _chapter_rows + 逆序 N+1）"""
-        chapters = self._chapter_rows(run_id)
-        boundary = self.resolve_chapter_boundary(run_id, chapter_id=chapter_id, chapters=chapters)
-        if boundary is None:
-            return None
-        event_nodes = self.fetch_event_nodes(run_id, max_chapter_order=boundary.chapter_order)
-        # 复用已缓存 chapters 解析可见章节集合，单次计算供两类边复用
-        visible_chapter_ids = self._chapter_ids_for_order(run_id, boundary.chapter_order, chapters=chapters)
-        causal_edges = self._fetch_event_edges_by_chapter_ids(run_id, visible_chapter_ids, include_inactive=True)
-        foreshadowing_edges = self._fetch_foreshadowing_edges_by_chapter_ids(run_id, visible_chapter_ids)
-        visible_event_ids = {node.event_id for node in event_nodes}
-        visible_threads = [
-            ForeshadowingEdgeRow(
-                root_event_id=edge.root_event_id,
-                run_id=edge.run_id,
-                tree_id=edge.tree_id,
-                payoff_event_id=edge.payoff_event_id if edge.payoff_event_id in visible_event_ids else None,
-                first_chapter_id=edge.first_chapter_id,
-                last_chapter_id=(
-                    edge.last_chapter_id
-                    if edge.payoff_event_id in visible_event_ids or edge.payoff_event_id is None
-                    else edge.first_chapter_id
-                ),
-                description=edge.description,
-                status=edge.status
-                if edge.payoff_event_id in visible_event_ids or edge.payoff_event_id is None
-                else "open",
-                active=edge.active
-                if edge.payoff_event_id in visible_event_ids or edge.payoff_event_id is None
-                else True,
-            )
-            for edge in foreshadowing_edges
-        ]
-        ordered_nodes = sorted(
-            event_nodes, key=lambda node: (node.chapter_order, node.char_start, node.event_ordinal, node.event_id)
-        )
-        return EventForestSnapshot(
-            chapter_id=boundary.chapter_id,
-            chapter_order=boundary.chapter_order,
-            visible_through_chapter_order=boundary.chapter_order,
-            derived_event_order=[node.event_id for node in ordered_nodes],
-            event_nodes=event_nodes,
-            event_trees=self._build_event_trees(event_nodes),
-            causal_edges=causal_edges,
-            foreshadowing_edges=visible_threads,
+            .scalars()
+            .all()
         )

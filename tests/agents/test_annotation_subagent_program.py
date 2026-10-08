@@ -28,16 +28,14 @@ from typing import Any
 
 import pytest
 
-from src.agents.annotation.fact_graph import FactGraph
-from src.agents.annotation.schema import ChapterParagraphInfo
+from src.agents.annotation.errors import AnnotationInvariantError
+from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.subagent_ir import SubagentAnnotation
-from src.agents.annotation.subagent_program import (
-    SubagentProgramRuntime,
-    build_subagent_finish_tool,
-    subagent_gap,
-    subagent_gap_is_clean,
-)
-from src.agents.annotation.tools import AnnotationToolLedger, build_annotation_tools
+from src.agents.annotation.subagent_program import subagent_gap
+from src.agents.annotation.subagent_runtime import SubagentProgramRuntime
+from src.fact_graph.graph import FactGraph
+from src.fact_graph.inputs import ChapterParagraphInfo
+from tests.support.annotation_work_tools import build_annotation_tools
 
 # 三段正文：¶1/¶2/¶3 各有一个引号对话候选，整章共 3 条候选（对话判定候选号 1..3）；
 # "长刀" 在 ¶2，作为 item 实体与参与者测试的锚点
@@ -69,7 +67,7 @@ participants(el="t1", items=[{"entity_id": "a1", "role": "主体", "narrative_ro
 dialogue(candidate_index=1, verdict="dialogue", speaker_id="a1", tone="愤怒", evidence=1)
 label(paragraph_id=1, emotion=-1)
 metric(summary="冲突", emotional_valence=-1, narrative_function="冲突")
-pending(kind="case_clue", detail="长刀来路不明", evidence=2, keys=["a2"])
+pending(description="长刀来路不明")
 """
 
 
@@ -127,6 +125,8 @@ def _runtime(
         subagent = SubagentAnnotation(role="structure")
     if tool_map is None:
         tool_map = _tools(ledger)
+    ledger.role = subagent.role
+    ledger.finish_work.__self__.subagent = subagent
     return SubagentProgramRuntime(tool_map, ledger, subagent, **kwargs)
 
 
@@ -150,9 +150,25 @@ async def _runtime_rejection(runtime: SubagentProgramRuntime, code: str) -> dict
     return entry
 
 
-def _finish_tool(subagent: SubagentAnnotation, *, candidate_total: int = 3):
-    """用于按生产路径构造 subagent 的收尾工具（面上一等工具，不是构造器）"""
-    return build_subagent_finish_tool(subagent, candidate_total=candidate_total)
+@pytest.mark.asyncio
+async def test_pending_rejects_removed_structured_parameters() -> None:
+    """旧案例字段不能绕过当前纯文字契约"""
+    ledger = _ledger()
+    runtime = _runtime(ledger)
+    receipt = _failed_entry(await _run(runtime, 'pending(kind="case_clue", detail="疑点", evidence=1)'))
+    assert receipt["code"] == "invalid_call"
+    assert "kind" in receipt["message"]
+    assert "pending(description:" in receipt["expected"]
+    assert runtime.subagent.pending == []
+
+
+def test_runtime_rejects_missing_work_finish_validation() -> None:
+    """没有独立 work 校验时直接失败，不再创建旧角色收尾工具"""
+    ledger = _ledger()
+    tools = _tools(ledger)
+    ledger.finish_work = None
+    with pytest.raises(AnnotationInvariantError, match="work 收尾校验未装配"):
+        SubagentProgramRuntime(tools, ledger, SubagentAnnotation(role="structure"))
 
 
 # ----------------------------------------------------------------------
@@ -172,15 +188,19 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     assert receipt["status"] == "applied"
     assert receipt["applied"] == 11
     assert "failed" not in receipt
-    assert receipt["progress"] == subagent.counts() == {
-        "entities": 3,
-        "relations": 1,
-        "events": 2,
-        "dialogues": 1,
-        "labels": 1,
-        "metrics": 1,
-        "pending": 1,
-    }
+    assert (
+        receipt["progress"]
+        == subagent.counts()
+        == {
+            "entities": 3,
+            "relations": 1,
+            "events": 2,
+            "dialogues": 1,
+            "labels": 1,
+            "metrics": 1,
+            "pending": 1,
+        }
+    )
 
     # 逐 op 记录：构造器名 + 角色命名空间化的记录键，全部成功
     records = [op["record"] for op in runtime.ops]
@@ -193,7 +213,7 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     assert "structure/dialogue/1" in records
     assert "structure/label/1" in records
     assert "structure/metric" in records
-    assert "structure/pending/case_clue" in records
+    assert "structure/pending" in records
 
     # subagent 的产出记录
     assert [item.id for item in subagent.entities] == ["a1", "a2", "a3"]
@@ -205,7 +225,7 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     assert subagent.dialogues[0].speaker_id == "a1"
     assert [item.paragraph_id for item in subagent.labels] == [1]
     assert subagent.metric is not None and subagent.metric.summary == "冲突"
-    assert subagent.pending[0].keys == ["a2"]
+    assert subagent.pending[0].description == "长刀来路不明"
 
     # 共享章级账本：实体 el 索引、事件树键索引、关系、对话、指标都当场可见
     assert set(ledger.written_entities) == {"沈遥", "长刀", "剑宗"}
@@ -255,10 +275,8 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     assert label_plan.ref == {"kind": "label", "paragraph_id": 1, "emotion": -1}
     metric_plan = runtime.tools["metric"](summary="冲突", emotional_valence=-1, narrative_function="冲突")
     assert metric_plan.ref == {"kind": "metric", "summary": "冲突"}
-    pending_plan = runtime.tools["pending"](
-        kind="case_clue", detail="长刀来路不明", evidence=E_KNIFE, keys=["a2"]
-    )
-    assert pending_plan.ref == {"kind": "pending", "pending_kind": "case_clue"}
+    pending_plan = runtime.tools["pending"](description="长刀来路不明")
+    assert pending_plan.ref == {"kind": "pending"}
     # 直接调用没有落账：计数与计划调用前一致
     assert subagent.counts() == receipt["progress"]
 
@@ -321,9 +339,7 @@ async def test_entity_rejects_out_of_range_type_without_writing() -> None:
     ledger = _ledger()
     subagent = SubagentAnnotation(role="structure")
     runtime = _runtime(ledger, subagent)
-    entry = await _runtime_rejection(
-        runtime, 'entity(id="a1", name="沈遥", entity_type="divinity", evidence=1)'
-    )
+    entry = await _runtime_rejection(runtime, 'entity(id="a1", name="沈遥", entity_type="divinity", evidence=1)')
     assert entry["code"] == "invalid_value"
     assert entry["field"] == "entity_type"
     assert subagent.entities == []
@@ -364,9 +380,7 @@ async def test_relation_rejects_out_of_range_type_without_writing() -> None:
         'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
         'entity(id="a2", name="长刀", entity_type="item", evidence=2)',
     )
-    entry = await _runtime_rejection(
-        runtime, 'relation(from_id="a1", to_id="a2", relation_type="父女", evidence=2)'
-    )
+    entry = await _runtime_rejection(runtime, 'relation(from_id="a1", to_id="a2", relation_type="父女", evidence=2)')
     assert entry["code"] == "invalid_value"
     assert entry["field"] == "relation_type"
     assert subagent.relations == []
@@ -448,9 +462,7 @@ async def test_participants_rejects_unknown_event_and_lands_partial_three_state(
     ledger = _ledger()
     subagent = SubagentAnnotation(role="event")
     runtime = _runtime(ledger, subagent)
-    unknown = await _runtime_rejection(
-        runtime, 'participants(el="t9", items=[{"entity_id": "a1", "role": "主体"}])'
-    )
+    unknown = await _runtime_rejection(runtime, 'participants(el="t9", items=[{"entity_id": "a1", "role": "主体"}])')
     assert unknown["code"] == "unknown_reference"
     assert unknown["field"] == "el"
     await _run(
@@ -480,9 +492,7 @@ async def test_dialogue_rejections_do_not_write() -> None:
     ledger = _ledger()
     subagent = SubagentAnnotation(role="evidence")
     runtime = _runtime(ledger, subagent)
-    out_of_range = await _run(
-        runtime, 'dialogue(candidate_index=9, verdict="dialogue", evidence=1)'
-    )
+    out_of_range = await _run(runtime, 'dialogue(candidate_index=9, verdict="dialogue", evidence=1)')
     assert out_of_range["status"] == "rejected"
     assert out_of_range["applied"] == 0
     assert out_of_range["error"]["type"] == "candidate_index_out_of_range"
@@ -512,10 +522,10 @@ async def test_label_rejections_do_not_write() -> None:
     ledger = _ledger()
     subagent = SubagentAnnotation(role="evidence")
     runtime = _runtime(ledger, subagent)
-    foreign = await _runtime_rejection(runtime, 'label(paragraph_id=99, emotion=0)')
+    foreign = await _runtime_rejection(runtime, "label(paragraph_id=99, emotion=0)")
     assert foreign["code"] == "out_of_range"
     assert foreign["field"] == "paragraph_id"
-    out_of_range = await _runtime_rejection(runtime, 'label(paragraph_id=1, emotion=3)')
+    out_of_range = await _runtime_rejection(runtime, "label(paragraph_id=1, emotion=3)")
     assert out_of_range["code"] == "invalid_value"
     assert out_of_range["field"] == "emotion"
     assert subagent.labels == []
@@ -528,30 +538,11 @@ async def test_metric_rejects_out_of_range_narrative_function() -> None:
     ledger = _ledger()
     subagent = SubagentAnnotation(role="evidence")
     runtime = _runtime(ledger, subagent)
-    entry = await _runtime_rejection(
-        runtime, 'metric(summary="x", emotional_valence=0, narrative_function="高潮")'
-    )
+    entry = await _runtime_rejection(runtime, 'metric(summary="x", emotional_valence=0, narrative_function="高潮")')
     assert entry["code"] == "invalid_value"
     assert entry["field"] == "narrative_function"
     assert subagent.metric is None
     assert ledger.metrics_payload is None
-
-
-@pytest.mark.asyncio
-async def test_pending_rejects_case_clue_without_evidence() -> None:
-    """case_clue 缺引文即拒绝，subagent 里不留待决项
-
-    2026-10-02 对齐 0.2.0 案例面：case_id 授权随 search_pool 退役，
-    原未授权 case_id 的拒绝路径一并删除。
-    """
-    ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
-    runtime = _runtime(ledger, subagent)
-    missing_evidence = await _runtime_rejection(runtime, 'pending(kind="case_clue", detail="长刀来路不明")')
-    assert missing_evidence["code"] == "missing_evidence"
-    assert missing_evidence["field"] == "evidence"
-    assert subagent.pending == []
-    assert ledger.pushed_cases == []
 
 
 # ----------------------------------------------------------------------
@@ -625,7 +616,7 @@ async def test_participants_observation_on_non_character_is_rejected_by_producti
         runtime,
         'entity(id="a2", name="长刀", entity_type="item", evidence=2)\n'
         'event(el="t1", isroot=True, description="喝止", evidence=1)\n'
-        "participants(el=\"t1\", items=[{\"entity_id\": \"a2\", \"role\": \"客体\", "
+        'participants(el="t1", items=[{"entity_id": "a2", "role": "客体", '
         '"narrative_role": "客体", "action": "被喝", "emotion": -1}])',
     )
     assert entry["code"] == "observation_on_noncharacter"
@@ -670,29 +661,6 @@ async def test_same_name_across_subagents_merges_into_one_entity() -> None:
 # 六、pending 进案例池：keys 是登记名（不是局部 id）
 
 
-@pytest.mark.asyncio
-async def test_pending_pool_keys_are_registered_names() -> None:
-    """pending 的案例池 keys 取本 subagent 的登记名，且这条当场进共享账本的案例池"""
-    ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
-    runtime = _runtime(ledger, subagent)
-    receipt = await _run(
-        runtime,
-        'entity(id="a2", name="长刀", entity_type="item", evidence=2)\n'
-        'pending(kind="case_clue", detail="长刀来路不明", evidence=2, keys=["a2"])',
-    )
-    assert receipt["status"] == "applied"
-    # subagent 里记的是局部引用键；案例池里记的是登记名
-    assert subagent.pending[0].keys == ["a2"]
-    assert ledger.pushed_cases[0].keys == ["长刀"]
-    assert ledger.pushed_cases[0].type == "伏笔疑点"
-
-    # 没有 keys 时案例池登记名退化为 kind，type 取 PENDING_CASE_TYPES 映射
-    await _run(runtime, 'pending(kind="other", detail="存疑")')
-    assert ledger.pushed_cases[1].keys == ["other"]
-    assert ledger.pushed_cases[1].type == "其他疑点"
-
-
 # ----------------------------------------------------------------------
 # 七、标签只在 journal、指标当场落 write_metrics 域
 
@@ -703,7 +671,7 @@ async def test_label_only_lands_in_journal_and_metric_hits_ledger() -> None:
     ledger = _ledger()
     subagent = SubagentAnnotation(role="evidence")
     runtime = _runtime(ledger, subagent)
-    await _run(runtime, 'label(paragraph_id=1, emotion=-1)\nlabel(paragraph_id=2, emotion=2)')
+    await _run(runtime, "label(paragraph_id=1, emotion=-1)\nlabel(paragraph_id=2, emotion=2)")
     assert [item.paragraph_id for item in subagent.labels] == [1, 2]
     # 标签与指标同属 write_metrics 一个域：没有指标时标签也不单独落库
     assert ledger.metrics_payload is None
@@ -781,7 +749,7 @@ async def test_label_same_paragraph_rewrite_is_update() -> None:
     ledger = _ledger()
     subagent = SubagentAnnotation(role="evidence")
     runtime = _runtime(ledger, subagent)
-    await _run(runtime, 'label(paragraph_id=1, emotion=-1)\nlabel(paragraph_id=1, emotion=2)')
+    await _run(runtime, "label(paragraph_id=1, emotion=-1)\nlabel(paragraph_id=1, emotion=2)")
     assert len(subagent.labels) == 1
     assert subagent.labels[0].emotion == 2
 
@@ -790,51 +758,26 @@ async def test_label_same_paragraph_rewrite_is_update() -> None:
 # 九、finish 工具与 subagent_gap
 
 
-@pytest.mark.asyncio
-async def test_finish_tool_marks_subagent_finished_and_reports_counts_and_gap() -> None:
-    """finish 置 finished=True，回执给出各域计数与未判候选号"""
-    ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
-    runtime = _runtime(ledger, subagent)
-    await _run(
-        runtime,
-        'dialogue(candidate_index=1, verdict="not_dialogue")\n'
-        'dialogue(candidate_index=2, verdict="dialogue", evidence=1)',
-    )
-    receipt = json.loads(_finish_tool(subagent).invoke({}))
-    assert subagent.finished is True
-    assert receipt["status"] == "written"
-    reference = receipt["ref"]
-    assert reference["role"] == "evidence"
-    assert reference["finished"] is True
-    assert reference["candidate_total"] == 3
-    assert reference["unjudged_candidates"] == [3]
-    assert reference["counts"]["dialogues"] == 2
-    assert reference["counts"]["metrics"] == 0
-
-
 def test_subagent_gap_for_non_evidence_subagent_only_looks_at_finished() -> None:
     """非证据 subagent 的缺口只看 finished；候选与指标不属于它的口径"""
     subagent = SubagentAnnotation(role="structure")
     gap = subagent_gap(subagent, candidate_total=0)
     assert gap == {"finished": False, "missing_candidates": [], "missing_metric": False}
-    assert subagent_gap_is_clean(gap) is False
     subagent.finished = True
     gap = subagent_gap(subagent, candidate_total=3)
     assert gap == {"finished": True, "missing_candidates": [], "missing_metric": False}
-    assert subagent_gap_is_clean(gap) is True
 
 
 @pytest.mark.asyncio
-async def test_subagent_gap_for_evidence_subagent_also_looks_at_candidates_and_metric() -> None:
-    """证据 subagent 的缺口还要看未判候选与 missing_metric，两者未消即不 clean"""
+@pytest.mark.parametrize("role", ["solo", "evidence"])
+async def test_subagent_gap_for_evidence_subagent_also_looks_at_candidates_and_metric(role: str) -> None:
+    """solo 与 evidence 都必须齐备候选判定和指标，不能默认放行"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
+    subagent = SubagentAnnotation(role=role)
     runtime = _runtime(ledger, subagent)
     subagent.finished = True
     gap = subagent_gap(subagent, candidate_total=3)
     assert gap == {"finished": True, "missing_candidates": [1, 2, 3], "missing_metric": True}
-    assert subagent_gap_is_clean(gap) is False
 
     await _run(
         runtime,
@@ -845,19 +788,18 @@ async def test_subagent_gap_for_evidence_subagent_also_looks_at_candidates_and_m
     gap = subagent_gap(subagent, candidate_total=3)
     assert gap["missing_candidates"] == []
     assert gap["missing_metric"] is True
-    assert subagent_gap_is_clean(gap) is False
 
     await _run(runtime, 'metric(summary="冲突", emotional_valence=0, narrative_function="冲突")')
     gap = subagent_gap(subagent, candidate_total=3)
     assert gap == {"finished": True, "missing_candidates": [], "missing_metric": False}
-    assert subagent_gap_is_clean(gap) is True
 
 
 @pytest.mark.asyncio
-async def test_subagent_gap_evidence_subagent_is_incomplete_without_finish_declaration() -> None:
-    """证据 subagent 未声明收尾：即使候选判完、指标交了，也不算 clean"""
+@pytest.mark.parametrize("role", ["solo", "evidence"])
+async def test_subagent_gap_evidence_subagent_is_incomplete_without_finish_declaration(role: str) -> None:
+    """solo 与 evidence 未成功收尾时不能算完成"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
+    subagent = SubagentAnnotation(role=role)
     runtime = _runtime(ledger, subagent)
     await _run(
         runtime,
@@ -870,4 +812,3 @@ async def test_subagent_gap_evidence_subagent_is_incomplete_without_finish_decla
     assert gap["finished"] is False
     assert gap["missing_candidates"] == []
     assert gap["missing_metric"] is False
-    assert subagent_gap_is_clean(gap) is False
