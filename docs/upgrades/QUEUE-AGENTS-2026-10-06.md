@@ -77,23 +77,19 @@
 
 ## 上线与迁移
 
-本次只对现有数据库执行了迁移只读检查，没有执行生产 `--apply`、服务重启或付费模型调用。生产升级前需要停下写入和分析，确认没有 running/cancelling run，并保存完整数据库备份和当前发布代码。
+本节记录 2026-10-06 的历史迁移设计与预检，不是当前可执行的升级说明。原 `scripts.db.migrate_queue_agents` 源码未进入 Git，当前版本不提供该命令；历史实现与测试结果不能代替当前升级验收。0.2.1 当前可执行入口、源结构限制与回退方法见 [0.2.1 升级检查](UPGRADE-0.2.1.md)。
 
-从项目根目录执行只读检查：
+2026-10-08 当前 `novel_analysis/public` 只读复查已满足 0.2.1 ORM 的表、字段和外键要求，没有待运行、运行中或取消中的任务；没有执行生产 DDL。下面的历史章数与身份冲突计数不能当作当前库的阻塞项。
 
-```powershell
-uv run python -m scripts.db.migrate_queue_agents
-```
-
-先在生产备份的隔离数据库执行演练、核对历史结果与用量，再在已批准的发布窗口执行：
+当前版本从项目根目录执行只读结构检查：
 
 ```powershell
-uv run python -m scripts.db.migrate_queue_agents --apply
+uv run python -m scripts.migrations.check_0_2_1 --schema public
 ```
 
-如使用非默认 schema，两条命令均显式加 `--schema <实际 schema>`。脚本读取项目 `.env` 的 DATABASE 配置，不能把测试数据库演练结果当成生产迁移完成。
+非默认 schema 必须显式指定实际名称。检查器不建表、不更改历史数据。原始 0.2.0 旧库仍需先完成历史业务合同转换，不能直接用六表合并替代转换，也不能靠 `init_db()` 补表后声称完成迁移。
 
-默认只读回执新增 `identity_preflight` 和 `output_preflight`。前者检查原 canonical 裁决是否已有迁移拟重建的同一人物关系支持、是否有真实作者来源，并列出端点类型或裁决冲突；后者发现当前已保存 work 与历史章混存时列出实际 annotation_id，执行迁移在 DDL 前拒绝该混合状态。
+以下均为历史设计和当时预检。原只读回执中的 `identity_preflight` 检查 canonical 裁决支持与真实作者来源，`output_preflight` 检查当前已保存 work 与历史章混存。当前只读结构检查器不重做这两项语义转换，也不据此补造人物身份或作者。
 
 2026-10-06 修复后生产只读预检：108 份历史章、0 份当前 work；37 对明确旧归并中，33 对由迁移拟重建的实际关系覆盖，1 对可按真实 identity 事实新增贡献，3 对无法转换为“同一人物”。这些计数是转换预检，尚未在生产执行转换或验收读侧归并。3 对的两端实际 `entity_type` 均为 `item`：
 
