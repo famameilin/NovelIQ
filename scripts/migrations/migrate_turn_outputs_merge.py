@@ -332,7 +332,8 @@ def _migrate_model_turns(connection: Connection) -> dict[str, int]:
             )
             SELECT 'usage', tk.run_id, tk.task_type, tk.call_type, tk.model, tk.chapter_id, 'success',
                    tk.prompt_tokens, tk.completion_tokens, tk.total_tokens, tk.cache_read_tokens,
-                   tk.reasoning_tokens, tk.cost, tk.accounting_source, tk.created_at, tk.created_at
+                   tk.reasoning_tokens, tk.cost, tk.accounting_source,
+                   tk.created_at::timestamp, tk.created_at::timestamp
             FROM token_usage tk
             WHERE tk.agent_turn_id IS NULL
             """
