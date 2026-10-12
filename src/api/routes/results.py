@@ -1,9 +1,11 @@
 """分析结果查询路由的注册入口（各资源域子模块见同目录 results_*.py）"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter
 
 from src.api.routes import (
+    event_trees,
     results_common,
     results_export,
     results_graph,
@@ -14,7 +16,7 @@ from src.api.routes import (
 
 router = APIRouter(prefix="/novels", tags=["results"])
 
-# 1) pipeline 快照（results_common，同时承载共享 Depends 与公共工具）
+# 1) 共享 Depends 与公共工具（results_common）
 router.include_router(results_common.router)
 # 2) 完整结果导出
 router.include_router(results_export.router)
@@ -27,4 +29,4 @@ router.include_router(results_graph.router)
 # 6) metrics/* 聚合指标
 router.include_router(results_metrics.router)
 # 7) 事件森林（原注册顺序位于 metrics/* 之后）
-router.include_router(results_graph.event_forest_router)
+router.include_router(event_trees.router)

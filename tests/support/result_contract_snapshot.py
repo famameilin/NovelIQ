@@ -10,10 +10,9 @@ from pathlib import Path
 from typing import Any
 
 ENDPOINTS = (
-    "pipeline",
     "tabs/dashboard",
     "graph",
-    "event-forest",
+    "event-trees",
     "timeline",
     "topics",
     "topics/aggregate",
@@ -26,8 +25,12 @@ ENDPOINTS = (
 
 def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
     """身份和模型训练种子固定，前后版本读取同一份提交后的记录与模型产物"""
+    from sqlalchemy import select
+
     from src.config import settings
+    from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence, save_organization
     from src.metrics.queries.global_stats import save_global_stats
+    from src.storage.models import AnalysisOutput
     from src.workflows.topic import run_topic_model
     from tests.support import chapter_annotation_helpers
     from tests.support.chapter_annotation_helpers import relation_fact
@@ -82,6 +85,29 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
             ],
         },
     )
+    draft = EventOrganizationDraft(session, scenario.run_id)
+    arc_id = draft.register_arc(
+        key="journey",
+        kind="main",
+        title="初入江湖",
+        objective="寻找同行者",
+        role="核心问题",
+        reason="四个事件共同推进最初的旅程",
+        evidence=[OrganizationEvidence(event_id="arch-root")],
+    )
+    draft.assign_events(
+        ["arch-root", "arch-main", "arch-side", "arch-second"],
+        arc_id=arc_id,
+        role="推进旅程",
+        reason="行动推进同行者的出现",
+        evidence=[OrganizationEvidence(event_id="arch-root")],
+    )
+    organization = draft.finish()
+    output = session.scalar(
+        select(AnalysisOutput).where(AnalysisOutput.run_id == scenario.run_id, AnalysisOutput.kind == "agent_analysis")
+    )
+    output.payload = {**output.payload, "narrative_organization": organization.model_dump(mode="json")}
+    save_organization(session, scenario.run_id, organization, output.output_id)
     monkeypatch.setattr(settings.topic_model, "min_paragraph_train_tokens", 1)
     asyncio.run(run_topic_model(scenario.run_id, session, num_topics=2, passes=1, iterations=10, force=True))
     save_global_stats(session, scenario.run_id)

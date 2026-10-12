@@ -211,7 +211,6 @@ def api_write_violations(root: Path) -> list[str]:
     prefixes = {
         "fact_graph": ("src.fact_graph.read", "src.fact_graph.errors"),
         "event_trees": ("src.event_trees.read",),
-        "case_pool": ("src.case_pool.read",),
         "work": ("src.work.queries", "src.work.policy", "src.work.annotation_work"),
     }
     bad = set()

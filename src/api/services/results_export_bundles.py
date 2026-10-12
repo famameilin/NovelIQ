@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from loguru import logger
-
 from src.api.services.metrics_service import get_metrics_service
 from src.api.services.results_queries import (
     _fetch_chapter_annotations,
@@ -17,8 +15,7 @@ from src.api.services.results_queries.graph import _fetch_character_relations, _
 from src.api.services.results_queries.metadata import _fetch_global_stats, _fetch_token_usage_stats
 from src.api.services.results_queries.paragraphs import _fetch_paragraph_curves
 from src.fact_graph.read import ExportGraphAuthorityView, GraphAuthorityReport, serialize_graph_report_signals
-from src.metrics.event_timeline_metrics import serialize_event_timeline_node, serialize_event_timeline_phases
-from src.metrics.queries.timeline import build_event_timeline_plan
+from src.metrics.queries.progression import ProgressionQuery
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
@@ -242,50 +239,5 @@ def _fetch_timeline_data(
     chapter_repo: ChapterRepository,
     stats_repo: StatsRepository,
 ) -> dict[str, Any] | None:
-    """获取用于导出的事件森林时间轴数据"""
-    from src.event_trees.read.forest import EventForestQuery
-
-    snapshot = EventForestQuery(stats_repo.session).fetch_snapshot(run_id)
-    if snapshot is None:
-        logger.warning(f"No event forest snapshot for run {run_id}")
-        return None
-    timeline_plan = build_event_timeline_plan(
-        run_id,
-        chapter_repo,
-        stats_repo,
-        snapshot,
-    )
-    return {
-        "phases": serialize_event_timeline_phases(timeline_plan.phases),
-        "nodes": [serialize_event_timeline_node(node) for node in timeline_plan.nodes],
-        "causal_edges": [
-            {
-                "edge_id": e.edge_id,
-                "edge_type": e.edge_type,
-                "source_event_id": e.source_event_id,
-                "target_event_id": e.target_event_id,
-                "source_chapter_id": e.source_chapter_id,
-                "target_chapter_id": e.target_chapter_id,
-                "is_active": e.is_active,
-                "evidence": list(e.evidence),
-                "expired_at": e.expired_at.isoformat() if e.expired_at else None,
-            }
-            for e in snapshot.causal_edges
-        ],
-        "foreshadowing_edges": [
-            {
-                "root_event_id": fe.root_event_id,
-                "payoff_event_id": fe.payoff_event_id,
-                "first_chapter_id": fe.first_chapter_id,
-                "last_chapter_id": fe.last_chapter_id,
-                "description": fe.description,
-                "status": fe.status,
-                "active": fe.active,
-            }
-            for fe in snapshot.foreshadowing_edges
-        ],
-        "derived_event_order": timeline_plan.derived_event_order,
-        "tension_curve": timeline_plan.tension_curve,
-        "total_chapters": timeline_plan.total_chapters,
-        "phase_basis": timeline_plan.phase_basis,
-    }
+    """导出与正式页面使用同一独立变化查询，包含全部章节与变化"""
+    return ProgressionQuery(stats_repo.session, run_id).export()

@@ -1,141 +1,86 @@
-"""事件森林时间轴 API 路由"""
+"""独立时间轴及变化详情，统一复用任务完成读取规则"""
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, cast
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Response
-from loguru import logger
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_db_session, get_novel_service
-from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
-from src.api.models.events import (
-    EventTimelineMeta,
-    EventTimelineNode,
-    EventTimelinePhase,
-    EventTimelineResponse,
-)
-from src.api.models.responses import ErrorResponse
-from src.api.services.results_queries.event_projection import serialize_snapshot_edges
-from src.event_trees.read.forest import EventForestQuery
-from src.metrics.event_timeline_metrics import serialize_event_timeline_node, serialize_event_timeline_phases
-from src.metrics.queries.timeline import build_event_timeline_plan
-from src.storage.repositories import ChapterRepository, RunRepository, StatsRepository
-from src.workflows.novels import NovelService
+from src.api.dependencies import get_db_session, require_readable_run_status, require_run_for_novel, resolve_run_id
+from src.fact_graph.read.source import read_evidence_source
+from src.metrics.queries.progression import ProgressionQuery
 
 router = APIRouter(prefix="/novels", tags=["timeline"])
+SessionDep = Annotated[Session, Depends(get_db_session)]
+RunDep = Annotated[str, Depends(resolve_run_id)]
 
 
-@router.get(
-    "/{novel_id}/timeline",
-    response_model=EventTimelineResponse,
-    summary="获取事件森林时间轴（一树一节点）",
-    description="基于事件森林快照与段落张力生成一树一节点的时间轴视图",
-    responses={
-        200: {
-            "description": "时间轴数据",
-        },
-        404: {
-            "description": "小说或任务未找到",
-            "model": ErrorResponse,
-        },
-        400: {
-            "description": "分析未完成",
-            "model": ErrorResponse,
-        },
-    },
-)
+def authorize(session: Session, novel_id: str, run_id: str) -> None:
+    require_readable_run_status(require_run_for_novel(session, novel_id, run_id))
+
+
+def query_error(error: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=404 if isinstance(error, LookupError) else 400, detail={"code": str(error), "message": str(error)}
+    )
+
+
+@router.get("/{novel_id}/timeline")
 async def get_timeline(
     novel_id: str,
-    task_id: Annotated[str, Query(description="分析任务ID（8位短UUID）")],
-    session: Annotated[Session, Depends(get_db_session)],
-    service: Annotated[NovelService, Depends(get_novel_service)],
-    response: Response,
-    include_curve: Annotated[bool, Query(description="是否包含张力曲线数据")] = False,
-) -> EventTimelineResponse:
-    """获取事件森林时间轴数据"""
-
-    novels = service.list_novels()
-    novel_info = next((novel for novel in novels if novel.get("novel_id") == novel_id), None)
-    if novel_info is None:
-        raise NovelNotFoundError(f"小说不存在: {novel_id}")
-
-    novel_name = novel_info.get("filename", "未知")
-    run_repo = RunRepository(session)
-    run_data = run_repo.get_run_by_run_id_prefix(task_id)
-    if run_data is None:
-        raise NovelNotFoundError(f"任务不存在: {task_id}")
-
-    if run_data.get("novel_id") != novel_id:
-        raise NovelNotFoundError(f"任务 {task_id} 不属于小说 {novel_id}")
-
-    run_id = run_data["run_id"]
-    if run_data["status"] not in ("completed",):
-        raise AnalysisNotCompleteError(
-            f"分析尚未完成，当前状态: {run_data['status']}",
-            run_status=run_data["status"],
+    session: SessionDep,
+    run_id: RunDep,
+    through_chapter_id: int | None = None,
+    window_start_chapter_id: int | None = None,
+    window_end_chapter_id: int | None = None,
+    subject_id: str | None = None,
+    dimension: Literal["plot", "character", "relationship", "foreshadowing"] | None = None,
+    q: str = "",
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    source_fact_id: str | None = None,
+) -> dict[str, Any]:
+    authorize(session, novel_id, run_id)
+    try:
+        return ProgressionQuery(session, run_id).fetch(
+            through_chapter_id=through_chapter_id,
+            window_start_chapter_id=window_start_chapter_id,
+            window_end_chapter_id=window_end_chapter_id,
+            subject_id=subject_id,
+            dimension=dimension,
+            q=q,
+            cursor=cursor,
+            limit=limit,
+            source_fact_id=source_fact_id,
         )
-    chapter_repo = ChapterRepository(session)
-    stats_repo = StatsRepository(session)
+    except (ValueError, LookupError) as error:
+        raise query_error(error) from error
 
-    snapshot = EventForestQuery(session).fetch_snapshot(run_id, chapter_id=None)
-    if snapshot is None:
-        logger.warning("No event forest snapshot for run {}", run_id)
-        response.headers["X-Timeline-Empty-Reason"] = "no_event_forest"
-        return EventTimelineResponse(
-            meta=EventTimelineMeta(
-                novel_id=novel_id,
-                novel_name=novel_name,
-                total_chapters=0,
-            ),
-            phases=[],
-            nodes=[],
-            causal_edges=[],
-            foreshadowing_edges=[],
-            derived_event_order=[],
-            tension_curve=None,
-            phase_basis="tension",
-            total_chapters=0,
-        )
 
-    timeline_plan = build_event_timeline_plan(
-        run_id,
-        chapter_repo,
-        stats_repo,
-        snapshot,
-    )
+@router.get("/{novel_id}/timeline/changes/{change_id}")
+async def get_timeline_change(
+    novel_id: str, change_id: str, through_chapter_id: int, session: SessionDep, run_id: RunDep
+) -> dict[str, Any]:
+    authorize(session, novel_id, run_id)
+    try:
+        return ProgressionQuery(session, run_id).detail(change_id, through_chapter_id)
+    except (ValueError, LookupError) as error:
+        raise query_error(error) from error
 
-    api_nodes = [EventTimelineNode.model_validate(serialize_event_timeline_node(node)) for node in timeline_plan.nodes]
-    api_phases = [
-        EventTimelinePhase.model_validate(item) for item in serialize_event_timeline_phases(timeline_plan.phases)
-    ]
-    api_causal_edges, api_foreshadowing_edges = serialize_snapshot_edges(snapshot)
 
-    if api_nodes:
-        logger.info(
-            "Event timeline generated for novel {} task {}: {} nodes, {} phases, {} causal edges",
-            novel_id,
-            task_id,
-            len(api_nodes),
-            len(api_phases),
-            len(api_causal_edges),
-        )
-    else:
-        logger.info("Timeline empty for run {}: {} phases, 0 nodes", run_id, len(api_phases))
-
-    return EventTimelineResponse(
-        meta=EventTimelineMeta(
-            novel_id=novel_id,
-            novel_name=novel_name,
-            total_chapters=timeline_plan.total_chapters,
-        ),
-        phases=api_phases,
-        nodes=api_nodes,
-        causal_edges=api_causal_edges,
-        foreshadowing_edges=api_foreshadowing_edges,
-        derived_event_order=timeline_plan.derived_event_order,
-        tension_curve=timeline_plan.tension_curve if include_curve else None,
-        phase_basis=cast(Literal["tension", "fixed_percentage"], timeline_plan.phase_basis),
-        total_chapters=timeline_plan.total_chapters,
-    )
+@router.get("/{novel_id}/timeline/changes/{change_id}/source")
+async def get_timeline_source(
+    novel_id: str,
+    change_id: str,
+    through_chapter_id: int,
+    session: SessionDep,
+    run_id: RunDep,
+    chapter_id: int | None = None,
+) -> dict[str, Any]:
+    authorize(session, novel_id, run_id)
+    try:
+        detail = ProgressionQuery(session, run_id).detail(change_id, through_chapter_id)
+        return read_evidence_source(session, run_id, detail["evidence"], chapter_id)
+    except (ValueError, LookupError) as error:
+        raise query_error(error) from error

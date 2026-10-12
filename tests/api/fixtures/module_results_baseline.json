@@ -9,79 +9,6 @@
     "export.character_relations"
   ],
   "responses": {
-    "pipeline": {
-      "completed_chapters": 5,
-      "total_chapters": 5,
-      "saved_work_count": 5,
-      "case_states": {
-        "pending": 0,
-        "resolved": 0,
-        "deferred": 0,
-        "contested": 0
-      },
-      "cases": [],
-      "connections": [
-        {
-          "connection_id": "8d6efc68-f36b-508b-a42e-0e0ef99e92f2",
-          "parent_node_id": "arch-root",
-          "node_id": "arch-main",
-          "type": "main",
-          "author_work_id": "3fb33761aed74fda5ec9009d14a77a1f87e80dab5d5c020ae4029ea41b0c6b87",
-          "parent_description": "顾承渊踏入江湖",
-          "description": "顾承渊记下线索",
-          "parent_chapter_id": 1,
-          "chapter_id": 1
-        },
-        {
-          "connection_id": "d07f2421-781b-567b-befc-8a81e642da57",
-          "parent_node_id": "arch-root",
-          "node_id": "arch-side",
-          "type": "secondary",
-          "author_work_id": "3fb33761aed74fda5ec9009d14a77a1f87e80dab5d5c020ae4029ea41b0c6b87",
-          "parent_description": "顾承渊踏入江湖",
-          "description": "顾承渊检查石碑",
-          "parent_chapter_id": 1,
-          "chapter_id": 1
-        }
-      ],
-      "works": [
-        {
-          "work_id": "3fb33761aed74fda5ec9009d14a77a1f87e80dab5d5c020ae4029ea41b0c6b87",
-          "chapter_id": 1,
-          "role": "solo",
-          "state": "saved",
-          "invocation_id": "1d9f92ab2a945a67a51b5adae2acd5cd"
-        },
-        {
-          "work_id": "617c671e77521adcd174d26caa2466be842808bb73c8ba6e20a7834038f45433",
-          "chapter_id": 2,
-          "role": "solo",
-          "state": "saved",
-          "invocation_id": "c992a1cd4beb586e96142ab4252516f7"
-        },
-        {
-          "work_id": "a53bc2de9a161b352094f1eb19eab985b69da2ff84dcef59f19863f601158b2f",
-          "chapter_id": 3,
-          "role": "solo",
-          "state": "saved",
-          "invocation_id": "765877b1775354a5a51f9da4af2a2269"
-        },
-        {
-          "work_id": "bc7b0337954df45efb51416d58ed0746fd5835f240181e20b577a2289bf01bba",
-          "chapter_id": 4,
-          "role": "solo",
-          "state": "saved",
-          "invocation_id": "ab5e1c2936925478908993b4849eb356"
-        },
-        {
-          "work_id": "ba7a1fd930212692f876b95f0212edac200cae1001ec8df4fa74e93f046b8474",
-          "chapter_id": 5,
-          "role": "solo",
-          "state": "saved",
-          "invocation_id": "6201ace1bbe15c2eb3ed2c9258de5b32"
-        }
-      ]
-    },
     "tabs/dashboard": {
       "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
       "narrative_structure": {
@@ -459,167 +386,105 @@
         }
       ]
     },
-    "event-forest": {
-      "chapter_id": 5,
-      "chapter_order": 5,
-      "visible_through_chapter_order": 5,
-      "derived_event_order": [
-        "arch-root",
-        "arch-main",
-        "arch-side",
-        "arch-second"
-      ],
-      "event_nodes": [
+    "timeline": {
+      "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+      "chapters": [
         {
-          "event_id": "arch-main",
           "chapter_id": 1,
-          "chapter_order": 1,
-          "description": "顾承渊记下线索",
-          "participants": [],
-          "anchor_paragraph_ids": [
-            0
-          ],
-          "char_start": 0,
-          "char_end": 8,
-          "evidence": [
-            {
-              "char_end": 8,
-              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-              "chapter_id": 1,
-              "char_start": 0,
-              "paragraph_id": 0
-            }
-          ],
-          "causal_event_refs": [],
-          "tree_id": "arrival",
-          "cause_role": "main",
-          "parent_event_id": "arch-root",
-          "evidence_scope": "paragraph"
+          "order": 1,
+          "title": "第1章"
         },
         {
-          "event_id": "arch-root",
-          "chapter_id": 1,
-          "chapter_order": 1,
-          "description": "顾承渊踏入江湖",
-          "participants": [],
-          "anchor_paragraph_ids": [
-            0
-          ],
-          "char_start": 0,
-          "char_end": 8,
-          "evidence": [
-            {
-              "char_end": 8,
-              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-              "chapter_id": 1,
-              "char_start": 0,
-              "paragraph_id": 0
-            }
-          ],
-          "causal_event_refs": [],
-          "tree_id": "arrival",
-          "cause_role": "root",
-          "parent_event_id": null,
-          "evidence_scope": "paragraph"
-        },
-        {
-          "event_id": "arch-side",
-          "chapter_id": 1,
-          "chapter_order": 1,
-          "description": "顾承渊检查石碑",
-          "participants": [],
-          "anchor_paragraph_ids": [
-            0
-          ],
-          "char_start": 0,
-          "char_end": 8,
-          "evidence": [
-            {
-              "char_end": 8,
-              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-              "chapter_id": 1,
-              "char_start": 0,
-              "paragraph_id": 0
-            }
-          ],
-          "causal_event_refs": [],
-          "tree_id": "arrival",
-          "cause_role": "secondary",
-          "parent_event_id": "arch-root",
-          "evidence_scope": "paragraph"
-        },
-        {
-          "event_id": "arch-second",
           "chapter_id": 2,
-          "chapter_order": 2,
-          "description": "苏映雪现身同行",
-          "participants": [],
+          "order": 2,
+          "title": "第 2 章"
+        },
+        {
+          "chapter_id": 3,
+          "order": 3,
+          "title": "第 3 章"
+        },
+        {
+          "chapter_id": 4,
+          "order": 4,
+          "title": "第 4 章"
+        },
+        {
+          "chapter_id": 5,
+          "order": 5,
+          "title": "第 5 章"
+        }
+      ],
+      "through_chapter_id": 1,
+      "changes": [
+        {
+          "progression_change_id": "6f4bb966-2b27-5473-b84e-c281464a4216",
+          "dimension": "foreshadowing",
+          "subject_id": "arch-root",
+          "subject_title": "顾承渊踏入江湖",
+          "title": "已埋设",
+          "chapter_id": 1,
+          "chapter_order": 1,
+          "before": null,
+          "after": "已埋设",
+          "deltas": [],
+          "action": "setup",
+          "evidence_scope": "paragraph",
+          "evidence": [
+            {
+              "text": "顾承渊初入江湖。",
+              "char_end": 8,
+              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
+              "chapter_id": 1,
+              "char_start": 0,
+              "paragraph_id": 0
+            }
+          ],
           "anchor_paragraph_ids": [
-            1
+            0
           ],
-          "char_start": 0,
-          "char_end": 10,
-          "evidence": [
-            {
-              "char_end": 10,
-              "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f",
-              "chapter_id": 2,
-              "char_start": 0,
-              "paragraph_id": 1
-            }
+          "source_event_ids": [
+            "arch-root"
           ],
-          "causal_event_refs": [],
-          "tree_id": "companion",
-          "cause_role": "root",
-          "parent_event_id": null,
-          "evidence_scope": "paragraph"
-        }
-      ],
-      "event_trees": [
-        {
-          "tree_id": "arrival",
-          "root_event_id": "arch-root",
-          "main_chain": [
-            "arch-root",
-            "arch-main"
-          ],
-          "secondary_groups": [
-            {
-              "target_event_id": "arch-root",
-              "branch": [
-                "arch-side"
-              ]
-            }
-          ],
-          "chapter_ids": [
-            1
-          ],
-          "char_start": 0,
-          "char_end": 8
+          "source_fact_ids": []
         },
         {
-          "tree_id": "companion",
-          "root_event_id": "arch-second",
-          "main_chain": [
-            "arch-second"
+          "progression_change_id": "4a1669e4-58ef-59ae-8d48-c6de386d0adb",
+          "dimension": "character",
+          "subject_id": "7bde1329-9bc6-54fb-ac9d-8cc82d19b9fa",
+          "subject_title": "顾承渊",
+          "title": "初入江湖",
+          "chapter_id": 1,
+          "chapter_order": 1,
+          "before": {
+            "role_function": null,
+            "action": null,
+            "emotion": null
+          },
+          "after": {
+            "role_function": "主体",
+            "action": "初入江湖",
+            "emotion": 0
+          },
+          "deltas": [
+            {
+              "field": "role_function",
+              "before": null,
+              "after": "主体"
+            },
+            {
+              "field": "action",
+              "before": null,
+              "after": "初入江湖"
+            },
+            {
+              "field": "emotion",
+              "before": null,
+              "after": 0
+            }
           ],
-          "secondary_groups": [],
-          "chapter_ids": [
-            2
-          ],
-          "char_start": 0,
-          "char_end": 10
-        }
-      ],
-      "causal_edges": [
-        {
-          "edge_id": "8d6efc68-f36b-508b-a42e-0e0ef99e92f2",
-          "edge_type": "causal",
-          "source_event_id": "arch-root",
-          "target_event_id": "arch-main",
-          "source_chapter_id": 1,
-          "target_chapter_id": 1,
-          "is_active": true,
+          "action": null,
+          "evidence_scope": "chapter",
           "evidence": [
             {
               "char_end": 8,
@@ -628,203 +493,64 @@
               "char_start": 0,
               "paragraph_id": 0
             }
-          ]
-        },
-        {
-          "edge_id": "d07f2421-781b-567b-befc-8a81e642da57",
-          "edge_type": "causal",
-          "source_event_id": "arch-root",
-          "target_event_id": "arch-side",
-          "source_chapter_id": 1,
-          "target_chapter_id": 1,
-          "is_active": true,
-          "evidence": [
-            {
-              "char_end": 8,
-              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-              "chapter_id": 1,
-              "char_start": 0,
-              "paragraph_id": 0
-            }
+          ],
+          "anchor_paragraph_ids": [],
+          "source_event_ids": [],
+          "source_fact_ids": [
+            "01e78e068166464e39b9d19d059a0d3ff405d1a2d96a46f782648cc82ca39e9b"
           ]
         }
       ],
-      "foreshadowing_edges": [
+      "states": [
         {
-          "root_event_id": "arch-root",
-          "tree_id": "arrival",
-          "payoff_event_id": null,
-          "first_chapter_id": 1,
-          "last_chapter_id": 1,
-          "description": "顾承渊踏入江湖",
-          "status": "open",
-          "active": true
+          "subject_id": "7bde1329-9bc6-54fb-ac9d-8cc82d19b9fa",
+          "subject_title": "顾承渊",
+          "dimension": "character",
+          "chapter_id": 1,
+          "chapter_order": 1,
+          "state": {
+            "role_function": "主体",
+            "action": "初入江湖",
+            "emotion": 0
+          }
+        },
+        {
+          "subject_id": "arch-root",
+          "subject_title": "顾承渊踏入江湖",
+          "dimension": "foreshadowing",
+          "chapter_id": 1,
+          "chapter_order": 1,
+          "state": "已埋设"
+        }
+      ],
+      "subjects": [
+        {
+          "dimension": "character",
+          "subject_id": "7bde1329-9bc6-54fb-ac9d-8cc82d19b9fa",
+          "subject_title": "顾承渊"
+        },
+        {
+          "dimension": "foreshadowing",
+          "subject_id": "arch-root",
+          "subject_title": "顾承渊踏入江湖"
+        }
+      ],
+      "total": 2,
+      "next_cursor": null,
+      "distribution": [
+        {
+          "chapter_id": 1,
+          "chapter_order": 1,
+          "dimension": "character",
+          "count": 1
+        },
+        {
+          "chapter_id": 1,
+          "chapter_order": 1,
+          "dimension": "foreshadowing",
+          "count": 1
         }
       ]
-    },
-    "timeline": {
-      "meta": {
-        "novel_id": "5d76f3fd",
-        "novel_name": "5d76f3fd.txt",
-        "total_chapters": 5
-      },
-      "phases": [
-        {
-          "name": "引入期",
-          "start": 1,
-          "end": 2,
-          "ratio": 0.4
-        },
-        {
-          "name": "发展期",
-          "start": 3,
-          "end": 3,
-          "ratio": 0.2
-        },
-        {
-          "name": "高潮期",
-          "start": 4,
-          "end": 4,
-          "ratio": 0.2
-        },
-        {
-          "name": "收束期",
-          "start": 5,
-          "end": 5,
-          "ratio": 0.2
-        }
-      ],
-      "nodes": [
-        {
-          "tree_id": "arrival",
-          "root_event_id": "arch-root",
-          "title": "顾承渊踏入江湖",
-          "summary": "顾承渊踏入江湖",
-          "anchor_chapter_id": 1,
-          "anchor_chapter_order": 1,
-          "start_chapter_id": 1,
-          "end_chapter_id": 1,
-          "start_progress": 0.2,
-          "end_progress": 0.2,
-          "progress": 0.2,
-          "chapter_ids": [
-            1
-          ],
-          "char_start": 0,
-          "char_end": 8,
-          "participants": [],
-          "character_names": [],
-          "importance_score": 19.2,
-          "level": 2,
-          "phase_name": "引入期",
-          "main_chain": [
-            "arch-root",
-            "arch-main"
-          ],
-          "secondary_groups": [
-            {
-              "target_event_id": "arch-root",
-              "branch": [
-                "arch-side"
-              ]
-            }
-          ],
-          "causal_in": 2,
-          "causal_out": 2,
-          "node_type": "event"
-        },
-        {
-          "tree_id": "companion",
-          "root_event_id": "arch-second",
-          "title": "苏映雪现身同行",
-          "summary": "苏映雪现身同行",
-          "anchor_chapter_id": 2,
-          "anchor_chapter_order": 2,
-          "start_chapter_id": 2,
-          "end_chapter_id": 2,
-          "start_progress": 0.4,
-          "end_progress": 0.4,
-          "progress": 0.4,
-          "chapter_ids": [
-            2
-          ],
-          "char_start": 0,
-          "char_end": 10,
-          "participants": [],
-          "character_names": [],
-          "importance_score": 24.4,
-          "level": 1,
-          "phase_name": "引入期",
-          "main_chain": [
-            "arch-second"
-          ],
-          "secondary_groups": [],
-          "causal_in": 0,
-          "causal_out": 0,
-          "node_type": "event"
-        }
-      ],
-      "causal_edges": [
-        {
-          "edge_id": "8d6efc68-f36b-508b-a42e-0e0ef99e92f2",
-          "edge_type": "causal",
-          "source_event_id": "arch-root",
-          "target_event_id": "arch-main",
-          "source_chapter_id": 1,
-          "target_chapter_id": 1,
-          "is_active": true,
-          "evidence": [
-            {
-              "char_end": 8,
-              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-              "chapter_id": 1,
-              "char_start": 0,
-              "paragraph_id": 0
-            }
-          ],
-          "expired_at": null
-        },
-        {
-          "edge_id": "d07f2421-781b-567b-befc-8a81e642da57",
-          "edge_type": "causal",
-          "source_event_id": "arch-root",
-          "target_event_id": "arch-side",
-          "source_chapter_id": 1,
-          "target_chapter_id": 1,
-          "is_active": true,
-          "evidence": [
-            {
-              "char_end": 8,
-              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-              "chapter_id": 1,
-              "char_start": 0,
-              "paragraph_id": 0
-            }
-          ],
-          "expired_at": null
-        }
-      ],
-      "foreshadowing_edges": [
-        {
-          "root_event_id": "arch-root",
-          "tree_id": "arrival",
-          "payoff_event_id": null,
-          "first_chapter_id": 1,
-          "last_chapter_id": 1,
-          "description": "顾承渊踏入江湖",
-          "status": "open",
-          "active": true
-        }
-      ],
-      "derived_event_order": [
-        "arch-root",
-        "arch-main",
-        "arch-side",
-        "arch-second"
-      ],
-      "tension_curve": null,
-      "phase_basis": "fixed_percentage",
-      "total_chapters": 5
     },
     "topics": [
       {
@@ -1551,215 +1277,104 @@
         "low_confidence_count": 0
       },
       "timeline": {
-        "phases": [
+        "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+        "chapters": [
           {
-            "name": "引入期",
-            "start": 1,
-            "end": 2,
-            "ratio": 0.4
+            "chapter_id": 1,
+            "order": 1,
+            "title": "第1章"
           },
           {
-            "name": "发展期",
-            "start": 3,
-            "end": 3,
-            "ratio": 0.2
+            "chapter_id": 2,
+            "order": 2,
+            "title": "第2章"
           },
           {
-            "name": "高潮期",
-            "start": 4,
-            "end": 4,
-            "ratio": 0.2
+            "chapter_id": 3,
+            "order": 3,
+            "title": "第3章"
           },
           {
-            "name": "收束期",
-            "start": 5,
-            "end": 5,
-            "ratio": 0.2
+            "chapter_id": 4,
+            "order": 4,
+            "title": "第4章"
+          },
+          {
+            "chapter_id": 5,
+            "order": 5,
+            "title": "第5章"
           }
         ],
-        "nodes": [
+        "through_chapter_id": 5,
+        "changes": [
           {
-            "tree_id": "arrival",
-            "root_event_id": "arch-root",
-            "title": "顾承渊踏入江湖",
-            "summary": "顾承渊踏入江湖",
-            "anchor_chapter_id": 1,
-            "anchor_chapter_order": 1,
-            "start_chapter_id": 1,
-            "end_chapter_id": 1,
-            "start_progress": 0.2,
-            "end_progress": 0.2,
-            "progress": 0.2,
-            "chapter_ids": [
-              1
-            ],
-            "char_start": 0,
-            "char_end": 8,
-            "participants": [],
-            "character_names": [],
-            "importance_score": 19.2,
-            "level": 2,
-            "phase_name": "引入期",
-            "main_chain": [
-              "arch-root",
-              "arch-main"
-            ],
-            "secondary_groups": [
-              {
-                "target_event_id": "arch-root",
-                "branch": [
-                  "arch-side"
-                ]
-              }
-            ],
-            "causal_in": 2,
-            "causal_out": 2,
-            "node_type": "event"
-          },
-          {
-            "tree_id": "companion",
-            "root_event_id": "arch-second",
-            "title": "苏映雪现身同行",
-            "summary": "苏映雪现身同行",
-            "anchor_chapter_id": 2,
-            "anchor_chapter_order": 2,
-            "start_chapter_id": 2,
-            "end_chapter_id": 2,
-            "start_progress": 0.4,
-            "end_progress": 0.4,
-            "progress": 0.4,
-            "chapter_ids": [
-              2
-            ],
-            "char_start": 0,
-            "char_end": 10,
-            "participants": [],
-            "character_names": [],
-            "importance_score": 24.4,
-            "level": 1,
-            "phase_name": "引入期",
-            "main_chain": [
-              "arch-second"
-            ],
-            "secondary_groups": [],
-            "causal_in": 0,
-            "causal_out": 0,
-            "node_type": "event"
-          }
-        ],
-        "causal_edges": [
-          {
-            "edge_id": "8d6efc68-f36b-508b-a42e-0e0ef99e92f2",
-            "edge_type": "causal",
-            "source_event_id": "arch-root",
-            "target_event_id": "arch-main",
-            "source_chapter_id": 1,
-            "target_chapter_id": 1,
-            "is_active": true,
-            "evidence": [
-              {
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-                "chapter_id": 1,
-                "char_start": 0,
-                "paragraph_id": 0
-              }
-            ],
-            "expired_at": null
-          },
-          {
-            "edge_id": "d07f2421-781b-567b-befc-8a81e642da57",
-            "edge_type": "causal",
-            "source_event_id": "arch-root",
-            "target_event_id": "arch-side",
-            "source_chapter_id": 1,
-            "target_chapter_id": 1,
-            "is_active": true,
-            "evidence": [
-              {
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-                "chapter_id": 1,
-                "char_start": 0,
-                "paragraph_id": 0
-              }
-            ],
-            "expired_at": null
-          }
-        ],
-        "foreshadowing_edges": [
-          {
-            "root_event_id": "arch-root",
-            "payoff_event_id": null,
-            "first_chapter_id": 1,
-            "last_chapter_id": 1,
-            "description": "顾承渊踏入江湖",
-            "status": "open",
-            "active": true
-          }
-        ],
-        "derived_event_order": [
-          "arch-root",
-          "arch-main",
-          "arch-side",
-          "arch-second"
-        ],
-        "tension_curve": [
-          0.6,
-          0.7,
-          0.9,
-          0.5,
-          0.4
-        ],
-        "total_chapters": 5,
-        "phase_basis": "fixed_percentage"
-      },
-      "event_forest": {
-        "chapter_id": 5,
-        "chapter_order": 5,
-        "visible_through_chapter_order": 5,
-        "derived_event_order": [
-          "arch-root",
-          "arch-main",
-          "arch-side",
-          "arch-second"
-        ],
-        "event_nodes": [
-          {
-            "event_id": "arch-main",
+            "progression_change_id": "6f4bb966-2b27-5473-b84e-c281464a4216",
+            "dimension": "foreshadowing",
+            "subject_id": "arch-root",
+            "subject_title": "顾承渊踏入江湖",
+            "title": "已埋设",
             "chapter_id": 1,
             "chapter_order": 1,
-            "description": "顾承渊记下线索",
-            "participants": [],
+            "before": null,
+            "after": "已埋设",
+            "deltas": [],
+            "action": "setup",
+            "evidence_scope": "paragraph",
+            "evidence": [
+              {
+                "text": "顾承渊初入江湖。",
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
+                "chapter_id": 1,
+                "char_start": 0,
+                "paragraph_id": 0
+              }
+            ],
             "anchor_paragraph_ids": [
               0
             ],
-            "char_start": 0,
-            "char_end": 8,
-            "evidence": [
-              {
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-                "chapter_id": 1,
-                "char_start": 0,
-                "paragraph_id": 0
-              }
+            "source_event_ids": [
+              "arch-root"
             ],
-            "causal_event_refs": [],
-            "tree_id": "arrival",
-            "cause_role": "main"
+            "source_fact_ids": []
           },
           {
-            "event_id": "arch-root",
+            "progression_change_id": "4a1669e4-58ef-59ae-8d48-c6de386d0adb",
+            "dimension": "character",
+            "subject_id": "7bde1329-9bc6-54fb-ac9d-8cc82d19b9fa",
+            "subject_title": "顾承渊",
+            "title": "初入江湖",
             "chapter_id": 1,
             "chapter_order": 1,
-            "description": "顾承渊踏入江湖",
-            "participants": [],
-            "anchor_paragraph_ids": [
-              0
+            "before": {
+              "role_function": null,
+              "action": null,
+              "emotion": null
+            },
+            "after": {
+              "role_function": "主体",
+              "action": "初入江湖",
+              "emotion": 0
+            },
+            "deltas": [
+              {
+                "field": "role_function",
+                "before": null,
+                "after": "主体"
+              },
+              {
+                "field": "action",
+                "before": null,
+                "after": "初入江湖"
+              },
+              {
+                "field": "emotion",
+                "before": null,
+                "after": 0
+              }
             ],
-            "char_start": 0,
-            "char_end": 8,
+            "action": null,
+            "evidence_scope": "chapter",
             "evidence": [
               {
                 "char_end": 8,
@@ -1769,45 +1384,49 @@
                 "paragraph_id": 0
               }
             ],
-            "causal_event_refs": [],
-            "tree_id": "arrival",
-            "cause_role": "root"
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "01e78e068166464e39b9d19d059a0d3ff405d1a2d96a46f782648cc82ca39e9b"
+            ]
           },
           {
-            "event_id": "arch-side",
-            "chapter_id": 1,
-            "chapter_order": 1,
-            "description": "顾承渊检查石碑",
-            "participants": [],
-            "anchor_paragraph_ids": [
-              0
-            ],
-            "char_start": 0,
-            "char_end": 8,
-            "evidence": [
-              {
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-                "chapter_id": 1,
-                "char_start": 0,
-                "paragraph_id": 0
-              }
-            ],
-            "causal_event_refs": [],
-            "tree_id": "arrival",
-            "cause_role": "secondary"
-          },
-          {
-            "event_id": "arch-second",
+            "progression_change_id": "73dd1e20-ae7d-5b2b-88c9-e2b65c1fb515",
+            "dimension": "character",
+            "subject_id": "2178531f-ffd4-56a8-866e-0261cad1af79",
+            "subject_title": "苏映雪",
+            "title": "现身",
             "chapter_id": 2,
             "chapter_order": 2,
-            "description": "苏映雪现身同行",
-            "participants": [],
-            "anchor_paragraph_ids": [
-              1
+            "before": {
+              "role_function": null,
+              "action": null,
+              "emotion": null
+            },
+            "after": {
+              "role_function": "帮助者",
+              "action": "现身",
+              "emotion": 0
+            },
+            "deltas": [
+              {
+                "field": "role_function",
+                "before": null,
+                "after": "帮助者"
+              },
+              {
+                "field": "action",
+                "before": null,
+                "after": "现身"
+              },
+              {
+                "field": "emotion",
+                "before": null,
+                "after": 0
+              }
             ],
-            "char_start": 0,
-            "char_end": 10,
+            "action": null,
+            "evidence_scope": "chapter",
             "evidence": [
               {
                 "char_end": 10,
@@ -1817,172 +1436,1446 @@
                 "paragraph_id": 1
               }
             ],
-            "causal_event_refs": [],
-            "tree_id": "companion",
-            "cause_role": "root"
-          }
-        ],
-        "event_trees": [
-          {
-            "tree_id": "arrival",
-            "root_event_id": "arch-root",
-            "main_chain": [
-              "arch-root",
-              "arch-main"
-            ],
-            "secondary_groups": [
-              {
-                "target_event_id": "arch-root",
-                "branch": [
-                  "arch-side"
-                ]
-              }
-            ],
-            "chapter_ids": [
-              1
-            ],
-            "char_start": 0,
-            "char_end": 8
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "253396c7a213f6b7f5a5bdbc2774527d57a2d659e370b699327e807067fbcc57"
+            ]
           },
           {
-            "tree_id": "companion",
-            "root_event_id": "arch-second",
-            "main_chain": [
-              "arch-second"
-            ],
-            "secondary_groups": [],
-            "chapter_ids": [
-              2
-            ],
-            "char_start": 0,
-            "char_end": 10
-          }
-        ],
-        "causal_edges": [
-          {
-            "edge_id": "8d6efc68-f36b-508b-a42e-0e0ef99e92f2",
-            "edge_type": "causal",
-            "source_event_id": "arch-root",
-            "target_event_id": "arch-main",
-            "source_chapter_id": 1,
-            "target_chapter_id": 1,
-            "is_active": true,
+            "progression_change_id": "5901b739-d121-5b52-8da4-0415f01f6be4",
+            "dimension": "relationship",
+            "subject_id": "33bc1282-8666-5501-8c4b-34f75762ec7f",
+            "subject_title": "顾承渊 · 苏映雪",
+            "title": "盟友：首次记录",
+            "chapter_id": 3,
+            "chapter_order": 3,
+            "before": null,
+            "after": {
+              "relation_type": "盟友",
+              "active": true
+            },
+            "deltas": [],
+            "action": "assert",
+            "evidence_scope": "chapter",
             "evidence": [
               {
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-                "chapter_id": 1,
+                "char_end": 19,
+                "text_hash": "0ba5c6c5d29d9193a1d0bf6443996fc00306432bf04119c2f6240a215e43f43b",
+                "chapter_id": 3,
                 "char_start": 0,
-                "paragraph_id": 0
+                "paragraph_id": 2
               }
             ],
-            "expired_at": null
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "cc6c9364e3bc4cb92f203f411438ab1aad5d13d76e97b96d8a1914d6f9a0952c"
+            ]
           },
           {
-            "edge_id": "d07f2421-781b-567b-befc-8a81e642da57",
-            "edge_type": "causal",
-            "source_event_id": "arch-root",
-            "target_event_id": "arch-side",
-            "source_chapter_id": 1,
-            "target_chapter_id": 1,
-            "is_active": true,
+            "progression_change_id": "a75d77fb-2562-53e4-8432-9c35b09951b0",
+            "dimension": "relationship",
+            "subject_id": "d62349fb-caca-57e3-a637-b4accc82f2af",
+            "subject_title": "顾承渊 · 天衡宗",
+            "title": "隶属：首次记录",
+            "chapter_id": 3,
+            "chapter_order": 3,
+            "before": null,
+            "after": {
+              "relation_type": "隶属",
+              "active": true
+            },
+            "deltas": [],
+            "action": "assert",
+            "evidence_scope": "chapter",
             "evidence": [
               {
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
-                "chapter_id": 1,
+                "char_end": 19,
+                "text_hash": "0ba5c6c5d29d9193a1d0bf6443996fc00306432bf04119c2f6240a215e43f43b",
+                "chapter_id": 3,
                 "char_start": 0,
-                "paragraph_id": 0
+                "paragraph_id": 2
               }
             ],
-            "expired_at": null
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "4fd112d2eeded48ca01e8f7344663fb9635af107c041abeb3d766584df3197d6"
+            ]
+          },
+          {
+            "progression_change_id": "f9f0505d-9137-5696-9d33-4dc3a167eb6b",
+            "dimension": "character",
+            "subject_id": "7bde1329-9bc6-54fb-ac9d-8cc82d19b9fa",
+            "subject_title": "顾承渊",
+            "title": "结盟",
+            "chapter_id": 3,
+            "chapter_order": 3,
+            "before": {
+              "action": "初入江湖",
+              "emotion": 0
+            },
+            "after": {
+              "action": "结盟",
+              "emotion": -2
+            },
+            "deltas": [
+              {
+                "field": "action",
+                "before": "初入江湖",
+                "after": "结盟"
+              },
+              {
+                "field": "emotion",
+                "before": 0,
+                "after": -2
+              }
+            ],
+            "action": null,
+            "evidence_scope": "chapter",
+            "evidence": [
+              {
+                "char_end": 19,
+                "text_hash": "0ba5c6c5d29d9193a1d0bf6443996fc00306432bf04119c2f6240a215e43f43b",
+                "chapter_id": 3,
+                "char_start": 0,
+                "paragraph_id": 2
+              }
+            ],
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "8fab5ca6bc9e7efa9cc3b0a81657f397f6b2f5b8b2c16d8814070498c3802adc"
+            ]
+          },
+          {
+            "progression_change_id": "bf24eea3-11b3-5ffc-8b71-12843b41cf89",
+            "dimension": "character",
+            "subject_id": "2178531f-ffd4-56a8-866e-0261cad1af79",
+            "subject_title": "苏映雪",
+            "title": "回应",
+            "chapter_id": 3,
+            "chapter_order": 3,
+            "before": {
+              "action": "现身"
+            },
+            "after": {
+              "action": "回应"
+            },
+            "deltas": [
+              {
+                "field": "action",
+                "before": "现身",
+                "after": "回应"
+              }
+            ],
+            "action": null,
+            "evidence_scope": "chapter",
+            "evidence": [
+              {
+                "char_end": 19,
+                "text_hash": "0ba5c6c5d29d9193a1d0bf6443996fc00306432bf04119c2f6240a215e43f43b",
+                "chapter_id": 3,
+                "char_start": 0,
+                "paragraph_id": 2
+              }
+            ],
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "846e1f2d3f25beac8804860be18d0a8b564aa25d9ab2342a6c24eb6bd72a9805"
+            ]
+          },
+          {
+            "progression_change_id": "8e2452fc-acb5-536f-85d9-083fe9fffe6c",
+            "dimension": "character",
+            "subject_id": "2178531f-ffd4-56a8-866e-0261cad1af79",
+            "subject_title": "苏映雪",
+            "title": "离开",
+            "chapter_id": 4,
+            "chapter_order": 4,
+            "before": {
+              "action": "回应",
+              "emotion": 0
+            },
+            "after": {
+              "action": "离开",
+              "emotion": -1
+            },
+            "deltas": [
+              {
+                "field": "action",
+                "before": "回应",
+                "after": "离开"
+              },
+              {
+                "field": "emotion",
+                "before": 0,
+                "after": -1
+              }
+            ],
+            "action": null,
+            "evidence_scope": "chapter",
+            "evidence": [
+              {
+                "char_end": 11,
+                "text_hash": "d338e70addc4a69ef63558f97dcdf386f9f8cf2144b42fa7c9863773d1b1eaa0",
+                "chapter_id": 4,
+                "char_start": 0,
+                "paragraph_id": 3
+              }
+            ],
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "eb9722428b9acc31f40c7772e8cb4b029765f08b270b277811c8335111e17ec4"
+            ]
+          },
+          {
+            "progression_change_id": "c99b4c3a-a80e-54c1-b1dd-1c7d8adb0159",
+            "dimension": "relationship",
+            "subject_id": "045d9a56-4929-571c-a45b-1856eaa67824",
+            "subject_title": "顾承渊 · 苏映雪",
+            "title": "友情：首次记录",
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "before": null,
+            "after": {
+              "relation_type": "友情",
+              "active": true
+            },
+            "deltas": [],
+            "action": "assert",
+            "evidence_scope": "chapter",
+            "evidence": [
+              {
+                "char_end": 17,
+                "text_hash": "5aa9c81bf9abc0e693d5040d60c3dc4ebff9dd2067cc099727b14e5c7a7b4b7e",
+                "chapter_id": 5,
+                "char_start": 0,
+                "paragraph_id": 4
+              }
+            ],
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "a50c6df57cabcd18373df447375802facfff525fda1f99b715aefe3a9c28b835"
+            ]
+          },
+          {
+            "progression_change_id": "c7b7b453-f64b-5869-9dd2-b9f33b58d4c7",
+            "dimension": "relationship",
+            "subject_id": "bc22d4ac-2646-5227-8df0-7cb604a574da",
+            "subject_title": "顾承渊 · 陆遥",
+            "title": "友情：首次记录",
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "before": null,
+            "after": {
+              "relation_type": "友情",
+              "active": true
+            },
+            "deltas": [],
+            "action": "assert",
+            "evidence_scope": "chapter",
+            "evidence": [
+              {
+                "char_end": 17,
+                "text_hash": "5aa9c81bf9abc0e693d5040d60c3dc4ebff9dd2067cc099727b14e5c7a7b4b7e",
+                "chapter_id": 5,
+                "char_start": 0,
+                "paragraph_id": 4
+              }
+            ],
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "e7486d985a0a3c2104501c99f364a0fdc9a3045eb68b6b55753c24ba6a83a9d7"
+            ]
+          },
+          {
+            "progression_change_id": "b8c3e90e-ea88-5e8e-89a9-0d7c316c95b8",
+            "dimension": "relationship",
+            "subject_id": "b4db616d-1231-5596-9d16-326708760c49",
+            "subject_title": "苏映雪 · 陆遥",
+            "title": "友情：首次记录",
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "before": null,
+            "after": {
+              "relation_type": "友情",
+              "active": true
+            },
+            "deltas": [],
+            "action": "assert",
+            "evidence_scope": "chapter",
+            "evidence": [
+              {
+                "char_end": 17,
+                "text_hash": "5aa9c81bf9abc0e693d5040d60c3dc4ebff9dd2067cc099727b14e5c7a7b4b7e",
+                "chapter_id": 5,
+                "char_start": 0,
+                "paragraph_id": 4
+              }
+            ],
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "9fad71573180d2c5357e68cd1980cb08fedbe89ed4ea0b493780eaf30ca55d3a"
+            ]
+          },
+          {
+            "progression_change_id": "a1929376-3918-543d-bb98-24e7f4190b98",
+            "dimension": "character",
+            "subject_id": "7bde1329-9bc6-54fb-ac9d-8cc82d19b9fa",
+            "subject_title": "顾承渊",
+            "title": "独行",
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "before": {
+              "action": "结盟",
+              "emotion": -2
+            },
+            "after": {
+              "action": "独行",
+              "emotion": 0
+            },
+            "deltas": [
+              {
+                "field": "action",
+                "before": "结盟",
+                "after": "独行"
+              },
+              {
+                "field": "emotion",
+                "before": -2,
+                "after": 0
+              }
+            ],
+            "action": null,
+            "evidence_scope": "chapter",
+            "evidence": [
+              {
+                "char_end": 17,
+                "text_hash": "5aa9c81bf9abc0e693d5040d60c3dc4ebff9dd2067cc099727b14e5c7a7b4b7e",
+                "chapter_id": 5,
+                "char_start": 0,
+                "paragraph_id": 4
+              }
+            ],
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "138dcd6d0244ae668c8cb2e50daa666f40c0c2e7766481ad7793cc6b4f6d9a8a"
+            ]
+          },
+          {
+            "progression_change_id": "f2c60758-7246-57df-a3aa-793f86864156",
+            "dimension": "relationship",
+            "subject_id": "33bc1282-8666-5501-8c4b-34f75762ec7f",
+            "subject_title": "顾承渊 · 苏映雪",
+            "title": "决裂",
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "before": {
+              "relation_type": "盟友",
+              "active": true
+            },
+            "after": {
+              "relation_type": "盟友",
+              "active": false,
+              "change": "break",
+              "reason": "决裂"
+            },
+            "deltas": [],
+            "action": "break",
+            "evidence_scope": "chapter",
+            "evidence": [
+              {
+                "char_end": 17,
+                "text_hash": "5aa9c81bf9abc0e693d5040d60c3dc4ebff9dd2067cc099727b14e5c7a7b4b7e",
+                "chapter_id": 5,
+                "char_start": 0,
+                "paragraph_id": 4
+              }
+            ],
+            "anchor_paragraph_ids": [],
+            "source_event_ids": [],
+            "source_fact_ids": [
+              "db62ac4424f8d17607611d241890236821d483eb7d479bd53910d82dabf9f79c"
+            ]
           }
         ],
-        "foreshadowing_edges": [
+        "states": [
           {
-            "root_event_id": "arch-root",
-            "payoff_event_id": null,
-            "first_chapter_id": 1,
-            "last_chapter_id": 1,
-            "description": "顾承渊踏入江湖",
-            "status": "open",
-            "active": true
+            "subject_id": "7bde1329-9bc6-54fb-ac9d-8cc82d19b9fa",
+            "subject_title": "顾承渊",
+            "dimension": "character",
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "state": {
+              "role_function": "主体",
+              "action": "独行",
+              "emotion": 0
+            }
+          },
+          {
+            "subject_id": "2178531f-ffd4-56a8-866e-0261cad1af79",
+            "subject_title": "苏映雪",
+            "dimension": "character",
+            "chapter_id": 4,
+            "chapter_order": 4,
+            "state": {
+              "role_function": "帮助者",
+              "action": "离开",
+              "emotion": -1
+            }
+          },
+          {
+            "subject_id": "33bc1282-8666-5501-8c4b-34f75762ec7f",
+            "subject_title": "顾承渊 · 苏映雪",
+            "dimension": "relationship",
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "state": {
+              "relation_type": "盟友",
+              "active": false,
+              "change": "break",
+              "reason": "决裂"
+            }
+          },
+          {
+            "subject_id": "d62349fb-caca-57e3-a637-b4accc82f2af",
+            "subject_title": "顾承渊 · 天衡宗",
+            "dimension": "relationship",
+            "chapter_id": 3,
+            "chapter_order": 3,
+            "state": {
+              "relation_type": "隶属",
+              "active": true
+            }
+          },
+          {
+            "subject_id": "045d9a56-4929-571c-a45b-1856eaa67824",
+            "subject_title": "顾承渊 · 苏映雪",
+            "dimension": "relationship",
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "state": {
+              "relation_type": "友情",
+              "active": true
+            }
+          },
+          {
+            "subject_id": "bc22d4ac-2646-5227-8df0-7cb604a574da",
+            "subject_title": "顾承渊 · 陆遥",
+            "dimension": "relationship",
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "state": {
+              "relation_type": "友情",
+              "active": true
+            }
+          },
+          {
+            "subject_id": "b4db616d-1231-5596-9d16-326708760c49",
+            "subject_title": "苏映雪 · 陆遥",
+            "dimension": "relationship",
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "state": {
+              "relation_type": "友情",
+              "active": true
+            }
+          },
+          {
+            "subject_id": "arch-root",
+            "subject_title": "顾承渊踏入江湖",
+            "dimension": "foreshadowing",
+            "chapter_id": 1,
+            "chapter_order": 1,
+            "state": "已埋设"
+          }
+        ],
+        "subjects": [
+          {
+            "dimension": "character",
+            "subject_id": "7bde1329-9bc6-54fb-ac9d-8cc82d19b9fa",
+            "subject_title": "顾承渊"
+          },
+          {
+            "dimension": "character",
+            "subject_id": "2178531f-ffd4-56a8-866e-0261cad1af79",
+            "subject_title": "苏映雪"
+          },
+          {
+            "dimension": "relationship",
+            "subject_id": "33bc1282-8666-5501-8c4b-34f75762ec7f",
+            "subject_title": "顾承渊 · 苏映雪"
+          },
+          {
+            "dimension": "relationship",
+            "subject_id": "d62349fb-caca-57e3-a637-b4accc82f2af",
+            "subject_title": "顾承渊 · 天衡宗"
+          },
+          {
+            "dimension": "relationship",
+            "subject_id": "045d9a56-4929-571c-a45b-1856eaa67824",
+            "subject_title": "顾承渊 · 苏映雪"
+          },
+          {
+            "dimension": "relationship",
+            "subject_id": "bc22d4ac-2646-5227-8df0-7cb604a574da",
+            "subject_title": "顾承渊 · 陆遥"
+          },
+          {
+            "dimension": "relationship",
+            "subject_id": "b4db616d-1231-5596-9d16-326708760c49",
+            "subject_title": "苏映雪 · 陆遥"
+          },
+          {
+            "dimension": "foreshadowing",
+            "subject_id": "arch-root",
+            "subject_title": "顾承渊踏入江湖"
+          }
+        ],
+        "total": 13,
+        "next_cursor": null,
+        "distribution": [
+          {
+            "chapter_id": 1,
+            "chapter_order": 1,
+            "dimension": "character",
+            "count": 1
+          },
+          {
+            "chapter_id": 1,
+            "chapter_order": 1,
+            "dimension": "foreshadowing",
+            "count": 1
+          },
+          {
+            "chapter_id": 2,
+            "chapter_order": 2,
+            "dimension": "character",
+            "count": 1
+          },
+          {
+            "chapter_id": 3,
+            "chapter_order": 3,
+            "dimension": "character",
+            "count": 2
+          },
+          {
+            "chapter_id": 3,
+            "chapter_order": 3,
+            "dimension": "relationship",
+            "count": 2
+          },
+          {
+            "chapter_id": 4,
+            "chapter_order": 4,
+            "dimension": "character",
+            "count": 1
+          },
+          {
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "dimension": "character",
+            "count": 1
+          },
+          {
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "dimension": "relationship",
+            "count": 4
           }
         ]
       },
-      "pipeline": {
-        "completed_chapters": 5,
-        "total_chapters": 5,
-        "saved_work_count": 5,
-        "case_states": {
-          "pending": 0,
-          "resolved": 0,
-          "deferred": 0,
-          "contested": 0
-        },
-        "cases": [],
-        "connections": [
+      "event_trees": {
+        "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+        "title": "寻找同行者",
+        "chapters": [
           {
-            "connection_id": "8d6efc68-f36b-508b-a42e-0e0ef99e92f2",
-            "parent_node_id": "arch-root",
-            "node_id": "arch-main",
-            "type": "main",
-            "author_work_id": "3fb33761aed74fda5ec9009d14a77a1f87e80dab5d5c020ae4029ea41b0c6b87",
-            "parent_description": "顾承渊踏入江湖",
-            "description": "顾承渊记下线索",
-            "parent_chapter_id": 1,
-            "chapter_id": 1
+            "chapter_id": 1,
+            "order": 1,
+            "title": "第1章"
           },
           {
-            "connection_id": "d07f2421-781b-567b-befc-8a81e642da57",
-            "parent_node_id": "arch-root",
-            "node_id": "arch-side",
-            "type": "secondary",
-            "author_work_id": "3fb33761aed74fda5ec9009d14a77a1f87e80dab5d5c020ae4029ea41b0c6b87",
-            "parent_description": "顾承渊踏入江湖",
-            "description": "顾承渊检查石碑",
-            "parent_chapter_id": 1,
-            "chapter_id": 1
+            "chapter_id": 2,
+            "order": 2,
+            "title": "第2章"
+          },
+          {
+            "chapter_id": 3,
+            "order": 3,
+            "title": "第3章"
+          },
+          {
+            "chapter_id": 4,
+            "order": 4,
+            "title": "第4章"
+          },
+          {
+            "chapter_id": 5,
+            "order": 5,
+            "title": "第5章"
           }
         ],
-        "works": [
+        "total_events": 4,
+        "arcs": [
           {
-            "work_id": "3fb33761aed74fda5ec9009d14a77a1f87e80dab5d5c020ae4029ea41b0c6b87",
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "parent_arc_id": null,
+            "kind": "main",
+            "title": "初入江湖",
+            "objective": "寻找同行者",
+            "role": "核心问题",
+            "reason": "四个事件共同推进最初的旅程",
+            "evidence": [
+              {
+                "event_id": "arch-root",
+                "paragraph_id": null
+              }
+            ]
+          }
+        ],
+        "nodes": [
+          {
+            "node_id": "root",
+            "kind": "root",
+            "title": "寻找同行者",
+            "parent_id": null,
+            "child_count": 1
+          },
+          {
+            "node_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "kind": "arc",
+            "title": "初入江湖",
+            "parent_id": "root",
+            "child_count": 2,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880"
+          },
+          {
+            "node_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+            "kind": "group",
+            "title": "顾承渊踏入江湖",
+            "parent_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "child_count": 1,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "arrival"
+          },
+          {
+            "node_id": "event:arch-main",
+            "kind": "event",
+            "title": "顾承渊记下线索",
+            "parent_id": "event:arch-root",
+            "child_count": 0,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "arrival",
+            "event_id": "arch-main",
             "chapter_id": 1,
-            "role": "solo",
-            "state": "saved",
-            "invocation_id": "1d9f92ab2a945a67a51b5adae2acd5cd"
+            "chapter_order": 1
           },
           {
-            "work_id": "617c671e77521adcd174d26caa2466be842808bb73c8ba6e20a7834038f45433",
+            "node_id": "event:arch-root",
+            "kind": "event",
+            "title": "顾承渊踏入江湖",
+            "parent_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+            "child_count": 2,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "arrival",
+            "event_id": "arch-root",
+            "chapter_id": 1,
+            "chapter_order": 1
+          },
+          {
+            "node_id": "event:arch-side",
+            "kind": "event",
+            "title": "顾承渊检查石碑",
+            "parent_id": "event:arch-root",
+            "child_count": 0,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "arrival",
+            "event_id": "arch-side",
+            "chapter_id": 1,
+            "chapter_order": 1
+          },
+          {
+            "node_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+            "kind": "group",
+            "title": "苏映雪现身同行",
+            "parent_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "child_count": 1,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "companion"
+          },
+          {
+            "node_id": "event:arch-second",
+            "kind": "event",
+            "title": "苏映雪现身同行",
+            "parent_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+            "child_count": 0,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "companion",
+            "event_id": "arch-second",
             "chapter_id": 2,
-            "role": "solo",
-            "state": "saved",
-            "invocation_id": "c992a1cd4beb586e96142ab4252516f7"
+            "chapter_order": 2
+          }
+        ],
+        "edges": [
+          {
+            "source_id": "root",
+            "target_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "kind": "organization"
           },
           {
-            "work_id": "a53bc2de9a161b352094f1eb19eab985b69da2ff84dcef59f19863f601158b2f",
-            "chapter_id": 3,
-            "role": "solo",
-            "state": "saved",
-            "invocation_id": "765877b1775354a5a51f9da4af2a2269"
+            "source_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "target_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+            "kind": "organization"
           },
           {
-            "work_id": "bc7b0337954df45efb51416d58ed0746fd5835f240181e20b577a2289bf01bba",
-            "chapter_id": 4,
-            "role": "solo",
-            "state": "saved",
-            "invocation_id": "ab5e1c2936925478908993b4849eb356"
+            "source_id": "event:arch-root",
+            "target_id": "event:arch-main",
+            "kind": "local_parent"
           },
           {
-            "work_id": "ba7a1fd930212692f876b95f0212edac200cae1001ec8df4fa74e93f046b8474",
-            "chapter_id": 5,
-            "role": "solo",
-            "state": "saved",
-            "invocation_id": "6201ace1bbe15c2eb3ed2c9258de5b32"
+            "source_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+            "target_id": "event:arch-root",
+            "kind": "organization"
+          },
+          {
+            "source_id": "event:arch-root",
+            "target_id": "event:arch-side",
+            "kind": "local_parent"
+          },
+          {
+            "source_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "target_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+            "kind": "organization"
+          },
+          {
+            "source_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+            "target_id": "event:arch-second",
+            "kind": "organization"
+          },
+          {
+            "source_id": "event:arch-root",
+            "target_id": "event:arch-main",
+            "kind": "causal"
+          },
+          {
+            "source_id": "event:arch-root",
+            "target_id": "event:arch-side",
+            "kind": "causal"
+          }
+        ],
+        "total": 8,
+        "next_cursor": null,
+        "matches": [],
+        "details": [
+          {
+            "node_id": "root",
+            "kind": "root",
+            "title": "寻找同行者",
+            "parent_id": null,
+            "child_count": 1,
+            "path": [
+              {
+                "node_id": "root",
+                "kind": "root",
+                "title": "寻找同行者",
+                "parent_id": null,
+                "child_count": 1
+              }
+            ],
+            "role": null,
+            "reason": null,
+            "organization_evidence": [],
+            "evidence": [],
+            "evidence_scope": "chapter",
+            "anchor_paragraph_ids": [],
+            "participants": [],
+            "relations": [
+              {
+                "source_id": "root",
+                "target_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "kind": "organization",
+                "title": "组织归属"
+              }
+            ],
+            "references": []
+          },
+          {
+            "node_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "kind": "arc",
+            "title": "初入江湖",
+            "parent_id": "root",
+            "child_count": 2,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "path": [
+              {
+                "node_id": "root",
+                "kind": "root",
+                "title": "寻找同行者",
+                "parent_id": null,
+                "child_count": 1
+              },
+              {
+                "node_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "kind": "arc",
+                "title": "初入江湖",
+                "parent_id": "root",
+                "child_count": 2,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880"
+              }
+            ],
+            "role": "核心问题",
+            "reason": "四个事件共同推进最初的旅程",
+            "organization_evidence": [
+              {
+                "event_id": "arch-root",
+                "paragraph_id": null
+              }
+            ],
+            "evidence": [
+              {
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
+                "chapter_id": 1,
+                "char_start": 0,
+                "paragraph_id": 0
+              }
+            ],
+            "evidence_scope": "chapter",
+            "anchor_paragraph_ids": [],
+            "participants": [],
+            "relations": [
+              {
+                "source_id": "root",
+                "target_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "kind": "organization",
+                "title": "组织归属"
+              },
+              {
+                "source_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "target_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "kind": "organization",
+                "title": "组织归属"
+              },
+              {
+                "source_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "target_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+                "kind": "organization",
+                "title": "组织归属"
+              }
+            ],
+            "references": []
+          },
+          {
+            "node_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+            "kind": "group",
+            "title": "顾承渊踏入江湖",
+            "parent_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "child_count": 1,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "arrival",
+            "path": [
+              {
+                "node_id": "root",
+                "kind": "root",
+                "title": "寻找同行者",
+                "parent_id": null,
+                "child_count": 1
+              },
+              {
+                "node_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "kind": "arc",
+                "title": "初入江湖",
+                "parent_id": "root",
+                "child_count": 2,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880"
+              },
+              {
+                "node_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "kind": "group",
+                "title": "顾承渊踏入江湖",
+                "parent_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "child_count": 1,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "arrival"
+              }
+            ],
+            "role": "核心问题",
+            "reason": "四个事件共同推进最初的旅程",
+            "organization_evidence": [
+              {
+                "event_id": "arch-root",
+                "paragraph_id": null
+              }
+            ],
+            "evidence": [
+              {
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
+                "chapter_id": 1,
+                "char_start": 0,
+                "paragraph_id": 0
+              }
+            ],
+            "evidence_scope": "chapter",
+            "anchor_paragraph_ids": [],
+            "participants": [],
+            "relations": [
+              {
+                "source_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "target_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "kind": "organization",
+                "title": "组织归属"
+              },
+              {
+                "source_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "target_id": "event:arch-root",
+                "kind": "organization",
+                "title": "组织归属"
+              }
+            ],
+            "references": []
+          },
+          {
+            "node_id": "event:arch-main",
+            "kind": "event",
+            "title": "顾承渊记下线索",
+            "parent_id": "event:arch-root",
+            "child_count": 0,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "arrival",
+            "event_id": "arch-main",
+            "chapter_id": 1,
+            "chapter_order": 1,
+            "path": [
+              {
+                "node_id": "root",
+                "kind": "root",
+                "title": "寻找同行者",
+                "parent_id": null,
+                "child_count": 1
+              },
+              {
+                "node_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "kind": "arc",
+                "title": "初入江湖",
+                "parent_id": "root",
+                "child_count": 2,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880"
+              },
+              {
+                "node_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "kind": "group",
+                "title": "顾承渊踏入江湖",
+                "parent_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "child_count": 1,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "arrival"
+              },
+              {
+                "node_id": "event:arch-root",
+                "kind": "event",
+                "title": "顾承渊踏入江湖",
+                "parent_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "child_count": 2,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "arrival",
+                "event_id": "arch-root",
+                "chapter_id": 1,
+                "chapter_order": 1
+              },
+              {
+                "node_id": "event:arch-main",
+                "kind": "event",
+                "title": "顾承渊记下线索",
+                "parent_id": "event:arch-root",
+                "child_count": 0,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "arrival",
+                "event_id": "arch-main",
+                "chapter_id": 1,
+                "chapter_order": 1
+              }
+            ],
+            "role": "推进旅程",
+            "reason": "行动推进同行者的出现",
+            "organization_evidence": [
+              {
+                "event_id": "arch-root",
+                "paragraph_id": null
+              }
+            ],
+            "evidence": [
+              {
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
+                "chapter_id": 1,
+                "char_start": 0,
+                "paragraph_id": 0
+              }
+            ],
+            "evidence_scope": "paragraph",
+            "anchor_paragraph_ids": [
+              0
+            ],
+            "participants": [],
+            "relations": [
+              {
+                "source_id": "event:arch-root",
+                "target_id": "event:arch-main",
+                "kind": "local_parent",
+                "title": "局部父子"
+              },
+              {
+                "source_id": "event:arch-root",
+                "target_id": "event:arch-main",
+                "kind": "causal",
+                "title": "因果关联"
+              }
+            ],
+            "references": []
+          },
+          {
+            "node_id": "event:arch-root",
+            "kind": "event",
+            "title": "顾承渊踏入江湖",
+            "parent_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+            "child_count": 2,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "arrival",
+            "event_id": "arch-root",
+            "chapter_id": 1,
+            "chapter_order": 1,
+            "path": [
+              {
+                "node_id": "root",
+                "kind": "root",
+                "title": "寻找同行者",
+                "parent_id": null,
+                "child_count": 1
+              },
+              {
+                "node_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "kind": "arc",
+                "title": "初入江湖",
+                "parent_id": "root",
+                "child_count": 2,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880"
+              },
+              {
+                "node_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "kind": "group",
+                "title": "顾承渊踏入江湖",
+                "parent_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "child_count": 1,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "arrival"
+              },
+              {
+                "node_id": "event:arch-root",
+                "kind": "event",
+                "title": "顾承渊踏入江湖",
+                "parent_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "child_count": 2,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "arrival",
+                "event_id": "arch-root",
+                "chapter_id": 1,
+                "chapter_order": 1
+              }
+            ],
+            "role": "推进旅程",
+            "reason": "行动推进同行者的出现",
+            "organization_evidence": [
+              {
+                "event_id": "arch-root",
+                "paragraph_id": null
+              }
+            ],
+            "evidence": [
+              {
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
+                "chapter_id": 1,
+                "char_start": 0,
+                "paragraph_id": 0
+              }
+            ],
+            "evidence_scope": "paragraph",
+            "anchor_paragraph_ids": [
+              0
+            ],
+            "participants": [],
+            "relations": [
+              {
+                "source_id": "event:arch-root",
+                "target_id": "event:arch-main",
+                "kind": "local_parent",
+                "title": "局部父子"
+              },
+              {
+                "source_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "target_id": "event:arch-root",
+                "kind": "organization",
+                "title": "组织归属"
+              },
+              {
+                "source_id": "event:arch-root",
+                "target_id": "event:arch-side",
+                "kind": "local_parent",
+                "title": "局部父子"
+              },
+              {
+                "source_id": "event:arch-root",
+                "target_id": "event:arch-main",
+                "kind": "causal",
+                "title": "因果关联"
+              },
+              {
+                "source_id": "event:arch-root",
+                "target_id": "event:arch-side",
+                "kind": "causal",
+                "title": "因果关联"
+              }
+            ],
+            "references": []
+          },
+          {
+            "node_id": "event:arch-side",
+            "kind": "event",
+            "title": "顾承渊检查石碑",
+            "parent_id": "event:arch-root",
+            "child_count": 0,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "arrival",
+            "event_id": "arch-side",
+            "chapter_id": 1,
+            "chapter_order": 1,
+            "path": [
+              {
+                "node_id": "root",
+                "kind": "root",
+                "title": "寻找同行者",
+                "parent_id": null,
+                "child_count": 1
+              },
+              {
+                "node_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "kind": "arc",
+                "title": "初入江湖",
+                "parent_id": "root",
+                "child_count": 2,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880"
+              },
+              {
+                "node_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "kind": "group",
+                "title": "顾承渊踏入江湖",
+                "parent_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "child_count": 1,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "arrival"
+              },
+              {
+                "node_id": "event:arch-root",
+                "kind": "event",
+                "title": "顾承渊踏入江湖",
+                "parent_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:arrival",
+                "child_count": 2,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "arrival",
+                "event_id": "arch-root",
+                "chapter_id": 1,
+                "chapter_order": 1
+              },
+              {
+                "node_id": "event:arch-side",
+                "kind": "event",
+                "title": "顾承渊检查石碑",
+                "parent_id": "event:arch-root",
+                "child_count": 0,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "arrival",
+                "event_id": "arch-side",
+                "chapter_id": 1,
+                "chapter_order": 1
+              }
+            ],
+            "role": "推进旅程",
+            "reason": "行动推进同行者的出现",
+            "organization_evidence": [
+              {
+                "event_id": "arch-root",
+                "paragraph_id": null
+              }
+            ],
+            "evidence": [
+              {
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
+                "chapter_id": 1,
+                "char_start": 0,
+                "paragraph_id": 0
+              }
+            ],
+            "evidence_scope": "paragraph",
+            "anchor_paragraph_ids": [
+              0
+            ],
+            "participants": [],
+            "relations": [
+              {
+                "source_id": "event:arch-root",
+                "target_id": "event:arch-side",
+                "kind": "local_parent",
+                "title": "局部父子"
+              },
+              {
+                "source_id": "event:arch-root",
+                "target_id": "event:arch-side",
+                "kind": "causal",
+                "title": "因果关联"
+              }
+            ],
+            "references": []
+          },
+          {
+            "node_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+            "kind": "group",
+            "title": "苏映雪现身同行",
+            "parent_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "child_count": 1,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "companion",
+            "path": [
+              {
+                "node_id": "root",
+                "kind": "root",
+                "title": "寻找同行者",
+                "parent_id": null,
+                "child_count": 1
+              },
+              {
+                "node_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "kind": "arc",
+                "title": "初入江湖",
+                "parent_id": "root",
+                "child_count": 2,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880"
+              },
+              {
+                "node_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+                "kind": "group",
+                "title": "苏映雪现身同行",
+                "parent_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "child_count": 1,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "companion"
+              }
+            ],
+            "role": "核心问题",
+            "reason": "四个事件共同推进最初的旅程",
+            "organization_evidence": [
+              {
+                "event_id": "arch-root",
+                "paragraph_id": null
+              }
+            ],
+            "evidence": [
+              {
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97",
+                "chapter_id": 1,
+                "char_start": 0,
+                "paragraph_id": 0
+              }
+            ],
+            "evidence_scope": "chapter",
+            "anchor_paragraph_ids": [],
+            "participants": [],
+            "relations": [
+              {
+                "source_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "target_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+                "kind": "organization",
+                "title": "组织归属"
+              },
+              {
+                "source_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+                "target_id": "event:arch-second",
+                "kind": "organization",
+                "title": "组织归属"
+              }
+            ],
+            "references": []
+          },
+          {
+            "node_id": "event:arch-second",
+            "kind": "event",
+            "title": "苏映雪现身同行",
+            "parent_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+            "child_count": 0,
+            "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+            "tree_id": "companion",
+            "event_id": "arch-second",
+            "chapter_id": 2,
+            "chapter_order": 2,
+            "path": [
+              {
+                "node_id": "root",
+                "kind": "root",
+                "title": "寻找同行者",
+                "parent_id": null,
+                "child_count": 1
+              },
+              {
+                "node_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "kind": "arc",
+                "title": "初入江湖",
+                "parent_id": "root",
+                "child_count": 2,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880"
+              },
+              {
+                "node_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+                "kind": "group",
+                "title": "苏映雪现身同行",
+                "parent_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "child_count": 1,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "companion"
+              },
+              {
+                "node_id": "event:arch-second",
+                "kind": "event",
+                "title": "苏映雪现身同行",
+                "parent_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+                "child_count": 0,
+                "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+                "tree_id": "companion",
+                "event_id": "arch-second",
+                "chapter_id": 2,
+                "chapter_order": 2
+              }
+            ],
+            "role": "推进旅程",
+            "reason": "行动推进同行者的出现",
+            "organization_evidence": [
+              {
+                "event_id": "arch-root",
+                "paragraph_id": null
+              }
+            ],
+            "evidence": [
+              {
+                "char_end": 10,
+                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f",
+                "chapter_id": 2,
+                "char_start": 0,
+                "paragraph_id": 1
+              }
+            ],
+            "evidence_scope": "paragraph",
+            "anchor_paragraph_ids": [
+              1
+            ],
+            "participants": [],
+            "relations": [
+              {
+                "source_id": "group:d06ded66-dbb5-5eab-b2af-9f4eb311e880:companion",
+                "target_id": "event:arch-second",
+                "kind": "organization",
+                "title": "组织归属"
+              }
+            ],
+            "references": []
           }
         ]
       }
+    },
+    "event-trees": {
+      "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+      "title": "寻找同行者",
+      "chapters": [
+        {
+          "chapter_id": 1,
+          "order": 1,
+          "title": "第1章"
+        },
+        {
+          "chapter_id": 2,
+          "order": 2,
+          "title": "第2章"
+        },
+        {
+          "chapter_id": 3,
+          "order": 3,
+          "title": "第3章"
+        },
+        {
+          "chapter_id": 4,
+          "order": 4,
+          "title": "第4章"
+        },
+        {
+          "chapter_id": 5,
+          "order": 5,
+          "title": "第5章"
+        }
+      ],
+      "total_events": 4,
+      "arcs": [
+        {
+          "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+          "parent_arc_id": null,
+          "kind": "main",
+          "title": "初入江湖",
+          "objective": "寻找同行者",
+          "role": "核心问题",
+          "reason": "四个事件共同推进最初的旅程",
+          "evidence": [
+            {
+              "event_id": "arch-root",
+              "paragraph_id": null
+            }
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "node_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+          "kind": "arc",
+          "title": "初入江湖",
+          "parent_id": "root",
+          "child_count": 2,
+          "arc_id": "d06ded66-dbb5-5eab-b2af-9f4eb311e880"
+        },
+        {
+          "node_id": "root",
+          "kind": "root",
+          "title": "寻找同行者",
+          "parent_id": null,
+          "child_count": 1
+        }
+      ],
+      "edges": [
+        {
+          "source_id": "root",
+          "target_id": "arc:d06ded66-dbb5-5eab-b2af-9f4eb311e880",
+          "kind": "organization"
+        }
+      ],
+      "total": 2,
+      "next_cursor": null,
+      "matches": []
     }
-  }
+  },
+  "narrative_contract_updated": "2026-10-09: independent progression timeline and final book organization; all other response fields unchanged"
 }

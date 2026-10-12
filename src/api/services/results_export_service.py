@@ -89,12 +89,12 @@ def build_export_payload(
     graph_summary: dict[str, Any] | None = None,
     graph_quality_report: dict[str, Any] | None = None,
     timeline_data: dict[str, Any] | None = None,
-    event_forest: dict[str, Any] | None = None,
+    event_trees: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     构建导出 payload
 
-    2026-08-18：新增 event_forest 段，包含事件、边、锚点和直接引用的 Evidence。
+    时间轴与事件树分别使用独立变化和全书组织投影
     """
     # export payload 中的 aggregate_metrics 只允许保留 aggregate 结论，
     # 这里在最终装配前再次做运行时校验，防止后续改动把 graph signals 混回去
@@ -119,7 +119,7 @@ def build_export_payload(
         "graph_summary": graph_summary or {},
         "graph_quality_report": graph_quality_report or {},
         "timeline": timeline_data,
-        "event_forest": event_forest or {},
+        "event_trees": event_trees or {},
     }
 
 
@@ -180,82 +180,10 @@ def fetch_all_results_data(
 
     novel_name = _fetch_novel_name(novel_id, stats_repo)
 
-    # 2026-08-19 事件森林/DAG：导出 event_forest 段（ 树视图 + 树间边）
-    from src.event_trees.read.forest import EventForestQuery
+    from src.event_trees.read.organization import EventOrganizationQuery
 
-    event_forest_repo = EventForestQuery(stats_repo.session)
-    event_forest_snapshot = event_forest_repo.fetch_snapshot(run_id)
-    event_forest_data: dict[str, Any] | None = None
-    if event_forest_snapshot is not None:
-        event_forest_data = {
-            "chapter_id": event_forest_snapshot.chapter_id,
-            "chapter_order": event_forest_snapshot.chapter_order,
-            "visible_through_chapter_order": event_forest_snapshot.visible_through_chapter_order,
-            "derived_event_order": event_forest_snapshot.derived_event_order,
-            "event_nodes": [
-                {
-                    "event_id": node.event_id,
-                    "chapter_id": node.chapter_id,
-                    "chapter_order": node.chapter_order,
-                    "description": node.description,
-                    "participants": node.participants,
-                    "anchor_paragraph_ids": node.anchor_paragraph_ids,
-                    "char_start": node.char_start,
-                    "char_end": node.char_end,
-                    "evidence": node.evidence,
-                    "causal_event_refs": node.causal_event_refs,
-                    "tree_id": node.tree_id,
-                    "cause_role": node.cause_role,
-                }
-                for node in event_forest_snapshot.event_nodes
-            ],
-            "event_trees": [
-                {
-                    "tree_id": tree.tree_id,
-                    "root_event_id": tree.root_event_id,
-                    "main_chain": tree.main_chain,
-                    "secondary_groups": [
-                        {
-                            "target_event_id": group.target_event_id,
-                            "branch": group.branch,
-                        }
-                        for group in tree.secondary_groups
-                    ],
-                    "chapter_ids": tree.chapter_ids,
-                    "char_start": tree.char_start,
-                    "char_end": tree.char_end,
-                }
-                for tree in event_forest_snapshot.event_trees
-            ],
-            "causal_edges": [
-                {
-                    "edge_id": edge.edge_id,
-                    "edge_type": edge.edge_type,
-                    "source_event_id": edge.source_event_id,
-                    "target_event_id": edge.target_event_id,
-                    "source_chapter_id": edge.source_chapter_id,
-                    "target_chapter_id": edge.target_chapter_id,
-                    "is_active": edge.is_active,
-                    "evidence": edge.evidence,
-                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
-                }
-                for edge in event_forest_snapshot.causal_edges
-            ],
-            "foreshadowing_edges": [
-                {
-                    "root_event_id": fe.root_event_id,
-                    "payoff_event_id": fe.payoff_event_id,
-                    "first_chapter_id": fe.first_chapter_id,
-                    "last_chapter_id": fe.last_chapter_id,
-                    "description": fe.description,
-                    "status": fe.status,
-                    "active": fe.active,
-                }
-                for fe in event_forest_snapshot.foreshadowing_edges
-            ],
-        }
+    event_tree_data = EventOrganizationQuery(stats_repo.session, run_id).export()
 
-    # 获取时间轴数据（仅新森林路径）
     timeline_data = _fetch_timeline_data(
         run_id=run_id,
         chapter_repo=chapter_repo,
@@ -286,12 +214,8 @@ def fetch_all_results_data(
         graph_summary=graph_summary,
         graph_quality_report=graph_quality_report,
         timeline_data=timeline_data,
-        event_forest=event_forest_data,
+        event_trees=event_tree_data,
     )
-    from src.api.services.pipeline_view import book_state_view
-
-    results_data["pipeline"] = book_state_view(stats_repo.session, run_id)
-
     return results_data, missing_fields, novel_name
 
 

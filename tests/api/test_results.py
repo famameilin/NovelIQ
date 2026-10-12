@@ -26,7 +26,7 @@ from tests.support.run_records import set_run_status
 class TestResults:
     """测试结果端点"""
 
-    @pytest.mark.parametrize("endpoint", ["pipeline", "results", "graph"])
+    @pytest.mark.parametrize("endpoint", ["results", "graph"])
     def test_saved_work_boundary_without_legacy_publication_gate(self, api_client, db_session, endpoint) -> None:
         novel_id = uuid.uuid4().hex[:8]
         insert_graph_test_novel(db_session, novel_id)
@@ -34,7 +34,7 @@ class TestResults:
         run_id = repository.create_run(novel_id=novel_id)
         set_run_status(repository.session, run_id, "completed")
         response = api_client.get(f"/api/novels/{novel_id}/{endpoint}", params={"task_id": run_id[:8]})
-        assert response.status_code == {"pipeline": 200, "results": 409, "graph": 404}[endpoint]
+        assert response.status_code == {"results": 409, "graph": 404}[endpoint]
 
     def test_get_results_not_found(self, api_client: TestClient):
         """

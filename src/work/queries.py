@@ -57,25 +57,3 @@ def is_annotate_complete(session: Session, run_id: str) -> bool:
         return False
     actual = {record.chapter_id for record in chapter_annotations(session, run_id)}
     return actual == expected
-
-
-def work_progress_view(session: Session, run_id: str) -> dict[str, object]:
-    """只读已登记工作，完整性由唯一角色策略裁决"""
-    from src.storage.repositories.book_state import chapter_count, work_records
-
-    work = work_records(session, run_id)
-    return {
-        "completed_chapters": len(completed_chapters(work)),
-        "total_chapters": chapter_count(session, run_id),
-        "saved_work_count": len(work),
-        "works": [
-            {
-                "work_id": item.work_id,
-                "chapter_id": item.chapter_id,
-                "role": item.role,
-                "state": item.state,
-                "invocation_id": item.invocation_id,
-            }
-            for item in work
-        ],
-    }

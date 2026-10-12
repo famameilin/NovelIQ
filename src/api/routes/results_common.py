@@ -1,13 +1,11 @@
-"""结果查询共享依赖、pipeline 快照路由与查询参数解析"""
+"""结果查询共享依赖与查询参数解析"""
 
 from __future__ import annotations
 
 import json
 import math
-from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, HTTPException
 
 from src.api.dependencies import (
     get_db_session,
@@ -31,18 +29,6 @@ __all__ = [
 
 # 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
-
-
-@router.get("/{novel_id}/pipeline", summary="已释放快照与连续性状态")
-async def get_pipeline_snapshot(
-    novel_id: str,
-    run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
-) -> dict[str, Any]:
-    from src.api.services.pipeline_view import book_state_view
-
-    _require_run_for_novel(session, novel_id, run_id)
-    return book_state_view(session, run_id)
 
 
 def _parse_emotion_trend_range(

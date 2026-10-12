@@ -41,7 +41,7 @@ from tests.support.chapter_annotation_helpers import (
 )
 
 
-def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> None:
+def test_fetch_timeline_data_reuses_independent_progression_contract(db_session) -> None:
     """2026-08-20 迁移至事件森林：验证新森林路径（含 nodes/causal_edges/foreshadowing_edges）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -143,33 +143,16 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     )
 
     assert timeline_data is not None
-    # 新合同字段
-    assert "nodes" in timeline_data
-    assert "causal_edges" in timeline_data
-    assert "foreshadowing_edges" in timeline_data
-    assert "derived_event_order" in timeline_data
-    assert "phases" in timeline_data
-    assert timeline_data["total_chapters"] == 2
-    # nodes 按 derivedOrder，前后端均可按此排序
-    assert len(timeline_data["nodes"]) >= 2
-    for node in timeline_data["nodes"]:
-        assert "tree_id" in node
-        assert "participants" in node
-        assert isinstance(node["participants"], list)
-        if node["participants"]:
-            assert isinstance(node["participants"][0], dict)
-            p0 = node["participants"][0]
-            assert "name" in p0 or "entity" in p0
-            if "name" not in p0 and "entity" in p0:
-                assert "name" in p0["entity"]
+    from src.metrics.queries.progression import ProgressionQuery
 
-    # causal_edges 应包含 inactive 边且保留 expired_at
-    assert any(not e["is_active"] for e in timeline_data["causal_edges"])
-    inactive = next(e for e in timeline_data["causal_edges"] if not e["is_active"])
-    assert "expired_at" in inactive
-    assert inactive["expired_at"] is not None
-    # 活性边仍存在
-    assert any(e["is_active"] for e in timeline_data["causal_edges"])
+    expected = ProgressionQuery(db_session, run_id).fetch(through_chapter_id=2, limit=500)
+    assert timeline_data == expected
+    assert timeline_data["through_chapter_id"] == 2
+    assert len(timeline_data["chapters"]) == 2
+    assert timeline_data["total"] == 1
+    assert timeline_data["changes"][0]["action"] == "setup"
+    assert timeline_data["changes"][0]["source_event_ids"] == [eid1]
+    assert "causal_edges" not in timeline_data
 
 
 def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() -> None:
@@ -720,7 +703,7 @@ def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypatch) -> None:
+def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeypatch) -> None:
     """2026-08-19 用于验证导出 payload 包含事件森林段（树视图/因果边/伏笔边）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -756,6 +739,29 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
     )
     db_session.commit()
 
+    from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence, save_organization
+
+    draft = EventOrganizationDraft(db_session, run_id)
+    evidence = [OrganizationEvidence(event_id=eid1)]
+    arc = draft.register_arc(
+        key="gate",
+        kind="main",
+        title="入门立誓",
+        objective="守护山门",
+        role="核心冲突",
+        reason="两次行动推动同一目标",
+        evidence=evidence,
+    )
+    draft.assign_events(
+        [eid1, "evt-export-gate-main"], arc_id=arc, role="推动", reason="推进守护目标", evidence=evidence
+    )
+    organization = draft.finish()
+    output = StatsRepository(db_session).insert_agent_analysis(
+        run_id, {"narrative_organization": organization.model_dump()}
+    )
+    save_organization(db_session, run_id, organization, output)
+    db_session.commit()
+
     _stub_export_sibling_loaders(monkeypatch)
 
     results_data, _missing_fields, _novel_name = fetch_all_results_data(
@@ -767,37 +773,24 @@ def test_fetch_all_results_data_emits_event_forest_section(db_session, monkeypat
         chapter_repo=ChapterRepository(db_session),
     )
 
-    forest = results_data["event_forest"]
-    assert forest != {}
-    assert forest["chapter_order"] == 1
-    nodes = {node["event_id"]: node for node in forest["event_nodes"]}
-    assert set(nodes) == {
-        eid1,
-        "evt-export-gate-main",
-    }
-    assert nodes[eid1]["description"] == "顾霜进入山门"
-    assert nodes[eid1]["tree_id"] == "gate"
-    assert nodes[eid1]["cause_role"] == "root"
+    from src.event_trees.read.organization import EventOrganizationQuery
 
-    # 树视图 + 因果边（contains 派生化：event_edges 键移除）
-    assert "event_edges" not in forest
-    trees = {tree["tree_id"]: tree for tree in forest["event_trees"]}
-    assert trees["gate"]["main_chain"] == [
-        eid1,
-        "evt-export-gate-main",
-    ]
-    causal_edges = forest["causal_edges"]
-    assert len(causal_edges) == 1
-    assert causal_edges[0]["source_event_id"] == eid1
-    assert causal_edges[0]["target_event_id"] == "evt-export-gate-main"
-
-    assert len(forest["foreshadowing_edges"]) == 1
-    assert forest["foreshadowing_edges"][0]["root_event_id"] == eid1
-    assert forest["foreshadowing_edges"][0]["payoff_event_id"] is None
+    tree = results_data["event_trees"]
+    assert tree == EventOrganizationQuery(db_session, run_id).export()
+    assert tree["total_events"] == 2
+    assert tree["arcs"][0]["arc_id"] == arc
+    assert {node["event_id"] for node in tree["nodes"] if node["kind"] == "event"} == {eid1, "evt-export-gate-main"}
+    assert any(
+        edge["source_id"] == f"event:{eid1}"
+        and edge["target_id"] == "event:evt-export-gate-main"
+        and edge["kind"] == "local_parent"
+        for edge in tree["edges"]
+    )
+    assert "event_forest" not in results_data
 
 
-def test_fetch_all_results_data_emits_empty_event_forest_for_unannotated_run(db_session, monkeypatch) -> None:
-    """2026-08-18 用于验证无事件标注的 run 导出 event_forest 为空对象"""
+def test_fetch_all_results_data_emits_empty_organization_for_no_events(db_session, monkeypatch) -> None:
+    """无事件时导出空组织与导航根"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["未标注原文。"],
@@ -817,7 +810,9 @@ def test_fetch_all_results_data_emits_empty_event_forest_for_unannotated_run(db_
         chapter_repo=ChapterRepository(db_session),
     )
 
-    assert results_data["event_forest"] == {}
+    assert results_data["event_trees"]["total_events"] == 0
+    assert results_data["event_trees"]["arcs"] == []
+    assert [node["node_id"] for node in results_data["event_trees"]["nodes"]] == ["root"]
 
 
 def patch_export_dependency(monkeypatch, name, value):
