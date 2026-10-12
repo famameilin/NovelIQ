@@ -104,7 +104,7 @@ def test_single_work_tree_recovery_preserves_other_inflight_nodes():
     snapshot = {
         "author": ("saved", "s1"), "nodes": {
             "saved-node": {"author": ("saved", "s1"), "chapter_id": 1, "content": saved.model_dump(mode="json")}
-        }, "connections": {},
+        }, "connections": {}, "actions": {},
     }
     trees.recover_work(snapshot)
     trees.recover_work(snapshot)
