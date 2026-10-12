@@ -199,6 +199,8 @@ frontend/dist/
 frontend/coverage/
 frontend/playwright-report/
 frontend/test-results/
+# 设计原型与验收截图（本地保留，不入库）
+frontend/designs/
 
 # ============================================================================
 # JMeter 测试报告与数据
