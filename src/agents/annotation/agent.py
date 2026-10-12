@@ -518,6 +518,7 @@ class AnnotationAgent:
         contributions = {
             "facts": facts,
             "events": {
+                "actions": self.event_trees.freeze_actions(author, execution.receipt.payload["paragraphs"]),
                 "nodes": deepcopy(
                     {key: value for key, value in self.event_trees.nodes.items() if value["author"] == author}
                 ),
@@ -652,12 +653,41 @@ class AnnotationAgent:
                     ("entity", expected["entity_ops"]),
                     ("relation", expected["relation_assert_ops"]),
                     ("character_observation", execution.output()["character_observations"]),
+                    ("plot_progression", expected.get("progression_ops", [])),
                 ):
                     actual = sorted(
                         (fact for fact in facts if fact.fact_type == kind),
                         key=lambda fact: fact.content["operation_order"],
                     )
                     if [fact.value for fact in actual] != operations:
+                        return False
+                from src.storage.models import ForeshadowingAction
+
+                actual_actions = {
+                    row.action_id: row
+                    for row in session.scalars(
+                        select(ForeshadowingAction).where(
+                            ForeshadowingAction.run_id == self.run_id,
+                            ForeshadowingAction.source_work_id == execution.work_id,
+                        )
+                    )
+                }
+                expected_actions = execution.contributions["events"]["actions"]
+                if set(actual_actions) != set(expected_actions):
+                    return False
+                for identifier, value in expected_actions.items():
+                    if any(
+                        getattr(actual_actions[identifier], field) != value[field]
+                        for field in (
+                            "root_event_id",
+                            "target_event_id",
+                            "action_type",
+                            "chapter_id",
+                            "source_operation_id",
+                            "operation_order",
+                            "evidence",
+                        )
+                    ):
                         return False
                 for identifier, value in execution.contributions["events"]["nodes"].items():
                     node = session.get(EventNode, identifier)

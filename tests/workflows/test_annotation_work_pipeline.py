@@ -354,7 +354,6 @@ async def test_no_eligible_model_ends_without_starting_or_saving_work(db_session
 
 @pytest.mark.asyncio
 async def test_program_can_read_shared_nodes_claim_case_and_save_cross_chapter_link(db_session, configured_model_pool):
-    from src.api.services.pipeline_view import book_state_view
     from src.storage.models import BookCase, EventEdge
 
     settings.models.model_pool[0].max_in_flight = 1
@@ -386,11 +385,10 @@ async def test_program_can_read_shared_nodes_claim_case_and_save_cross_chapter_l
     with patch("src.model_pool.llm.build_chat_model", return_value=SharedModel("")):
         assert await run_annotate(run_id, db_session, novel_id=novel_id) == (2, 0, 2)
     db_session.expire_all()
-    snapshot = book_state_view(db_session, run_id)
-    assert snapshot["case_states"]["resolved"] == 1 and len(snapshot["connections"]) == 1
-    assert snapshot["connections"][0]["type"] == "main"
-    state = db_session.get(BookCase, snapshot["cases"][0]["case_id"])
-    assert len(state.contributions) == 2
+    resolved = db_session.query(BookCase).filter(BookCase.run_id == run_id, BookCase.state == "resolved").all()
+    assert len(resolved) == 1 and len(resolved[0].contributions) == 2
+    active_edges = db_session.query(EventEdge).filter(EventEdge.run_id == run_id, EventEdge.is_active.is_(True)).all()
+    assert len(active_edges) == 1 and active_edges[0].cause_role == "main"
     assert db_session.query(EventEdge).filter(EventEdge.run_id == run_id).count() == 1
 
 

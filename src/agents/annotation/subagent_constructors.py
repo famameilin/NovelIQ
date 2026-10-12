@@ -83,7 +83,12 @@ def _sync_entity_ref(ref: dict[str, Any], production_receipt: Any) -> None:
     丢弃本次入参的 entity_type；ref 若照抄输入，模型看到的大类与现实不符
     （run faff5efe ch14 实测：event lane 提交 location、生效 organization）。
     """
-    if ref.get("kind") != "entity" or not isinstance(production_receipt, dict):
+    if not isinstance(production_receipt, dict):
+        return
+    if ref.get("kind") in {"progression", "foreshadow_action"}:
+        ref.update(production_receipt.get("ref") or {})
+        return
+    if ref.get("kind") != "entity":
         return
     content = production_receipt.get("content")
     if isinstance(content, dict) and "entity_type" in content:
@@ -786,7 +791,54 @@ def build_subagent_constructors(
             commit=lambda: subagent.pending.append(item),
         )
 
+    def progression(
+        subject_title: str,
+        description: str,
+        after: str,
+        evidence: int,
+        before: str | None = None,
+        subject_id: str | None = None,
+        event_id: str | None = None,
+    ) -> _ConstructorCall:
+        """记录有原文依据的问题推进、目标改变或线索揭示，before未知用None；主体ID可沿用既有回执"""
+        args = {
+            "subject_title": subject_title,
+            "description": description,
+            "after": after,
+            "evidence": evidence,
+            "before": before,
+            "subject_id": subject_id,
+            "event_id": event_id,
+        }
+        return _ConstructorCall(
+            record=_record_of(subagent, "progression"),
+            tool="write_progression",
+            args=args,
+            ref={"kind": "progression"},
+            commit=lambda: subagent.progressions.append(args),
+        )
+
+    def foreshadow_action(
+        root_event_id: str, action_type: str, evidence: int, target_event_id: str | None = None
+    ) -> _ConstructorCall:
+        """明确reinforce强化或payoff疑似回收；先read_event读取伏笔根，埋设由伏笔事件自动记录"""
+        args = {
+            "root_event_id": root_event_id,
+            "action_type": action_type,
+            "evidence": evidence,
+            "target_event_id": target_event_id,
+        }
+        return _ConstructorCall(
+            record=_record_of(subagent, "foreshadow_action"),
+            tool="write_foreshadowing_action",
+            args=args,
+            ref={"kind": "foreshadow_action"},
+            commit=lambda: subagent.foreshadow_actions.append(args),
+        )
+
     functions = {
+        "progression": (progression, "保存情节推进及前后状态，evidence为本章段首号"),
+        "foreshadow_action": (foreshadow_action, "保存明确强化或疑似回收，照应边不等于动作"),
         "entity": (entity, "登记本章的一个实体（id=本 subagent 引用键，name 照抄正文写法仅展示）"),
         "relation": (relation, "写一条闭合关系边（两端写本 subagent 已登记的实体 id）"),
         "event": (event, "写一个事件节点（el 根=树键、子=树键/节点键）"),

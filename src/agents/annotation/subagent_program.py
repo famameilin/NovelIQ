@@ -63,6 +63,8 @@ _SUBAGENT_CONSTRUCTOR_ORDER: tuple[str, ...] = (
     "label",
     "metric",
     "pending",
+    "progression",
+    "foreshadow_action",
 )
 
 

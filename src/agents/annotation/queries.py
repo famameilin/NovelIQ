@@ -61,6 +61,7 @@ class DatabaseAnnotationQueryService:
             if current_chapter_id not in chapter_ids:
                 raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
             self.current_chapter_order = chapter_ids.index(current_chapter_id) + 1
+            self.chapter_orders = {chapter_id: index + 1 for index, chapter_id in enumerate(chapter_ids)}
 
     @contextmanager
     def _read_scope(self) -> Iterator[Session]:

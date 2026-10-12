@@ -25,3 +25,6 @@ class EventContribution:
 
     def entities(self) -> dict[str, Any]:
         return json.loads(self.entities_json)
+
+    def actions(self) -> dict[str, dict[str, Any]]:
+        return self.snapshot().get("actions", {})

@@ -199,6 +199,8 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
             "labels": 1,
             "metrics": 1,
             "pending": 1,
+            "progressions": 0,
+            "foreshadow_actions": 0,
         }
     )
 

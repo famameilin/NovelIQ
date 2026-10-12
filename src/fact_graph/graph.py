@@ -85,6 +85,7 @@ class FactGraph:
                 "role": role,
                 "entity_ops": [],
                 "relation_assert_ops": [],
+                "progression_ops": [],
             },
         )
 
@@ -204,6 +205,44 @@ class FactGraph:
                         evidence=evidence_for(frozen.paragraphs),
                     )
                 )
+        for index, item in enumerate(contribution.get("progression_ops", [])):
+            path = f"work/{frozen.work_id}/plot_progression/{item['source_operation_id']}"
+            if (
+                session.scalar(
+                    select(GraphFact).where(GraphFact.run_id == self.run_scope, GraphFact.payload_path == path)
+                )
+                is not None
+            ):
+                continue
+            operation = item["operation"]
+            session.add(
+                GraphFact(
+                    run_id=self.run_scope,
+                    chapter_id=chapter_id,
+                    fact_id=stable_digest(path),
+                    fact_type="plot_progression",
+                    subject_entity_id=None,
+                    predicate="plot_progression",
+                    value=item,
+                    participants=[],
+                    scope="book",
+                    assertion="asserted",
+                    confidence="high",
+                    content={
+                        "kind": "plot_progression",
+                        "operation": operation,
+                        "operation_order": index,
+                        "source_operation_id": item["source_operation_id"],
+                    },
+                    effective_chapter_id=chapter_id,
+                    source_kind="annotation",
+                    annotation_id=annotation_id,
+                    payload_path=path,
+                    author_work_id=frozen.work_id,
+                    event_id=item.get("event_id"),
+                    evidence=item["evidence"],
+                )
+            )
         session.flush()
         self.rebuild_storage(session, preserve=set(contribution["entities"]))
 
@@ -452,7 +491,7 @@ class FactGraph:
             facts = list(
                 session.execute(select(GraphFact).where(GraphFact.annotation_id == record.output_id)).scalars()
             )
-            facts = [fact for fact in facts if fact.fact_type in _CONTRIBUTION_FACT_TYPES]
+            facts = [fact for fact in facts if fact.fact_type in _CONTRIBUTION_FACT_TYPES | {"plot_progression"}]
             facts.sort(key=lambda fact: fact.content["operation_order"])
             self.restore_work(
                 record.work_id,
@@ -462,6 +501,7 @@ class FactGraph:
                 [fact.value for fact in facts if fact.fact_type == "entity"],
                 [fact.value for fact in facts if fact.fact_type == "relation"],
                 [fact.value for fact in facts if fact.fact_type == "entity_reference"],
+                [fact.value for fact in facts if fact.fact_type == "plot_progression"],
             )
         self._fold()
 
@@ -479,7 +519,7 @@ class FactGraph:
                 select(GraphFact).where(GraphFact.run_id == self.run_scope, GraphFact.author_work_id == work_id)
             ).scalars()
         )
-        facts = [fact for fact in facts if fact.fact_type in _CONTRIBUTION_FACT_TYPES]
+        facts = [fact for fact in facts if fact.fact_type in _CONTRIBUTION_FACT_TYPES | {"plot_progression"}]
         facts.sort(key=lambda fact: fact.content["operation_order"])
         return {
             "author": (work_id, invocation_id),
@@ -488,6 +528,7 @@ class FactGraph:
             "entity_ops": deepcopy([fact.value for fact in facts if fact.fact_type == "entity"]),
             "relation_assert_ops": deepcopy([fact.value for fact in facts if fact.fact_type == "relation"]),
             "entity_references": deepcopy([fact.value for fact in facts if fact.fact_type == "entity_reference"]),
+            "progression_ops": deepcopy([fact.value for fact in facts if fact.fact_type == "plot_progression"]),
         }
 
     def recover_work(self, snapshot: dict[str, Any]) -> None:
@@ -500,6 +541,7 @@ class FactGraph:
             snapshot["entity_ops"],
             snapshot["relation_assert_ops"],
             snapshot["entity_references"],
+            snapshot.get("progression_ops", []),
         )
 
     def restore_work(
@@ -511,6 +553,7 @@ class FactGraph:
         entity_ops: list[dict[str, Any]],
         relation_ops: list[dict[str, Any]],
         entity_references: list[dict[str, Any]] | None = None,
+        progression_ops: list[dict[str, Any]] | None = None,
     ) -> None:
         self.contributions[(work_id, invocation_id)] = {
             "sequence": sequence,
@@ -518,6 +561,7 @@ class FactGraph:
             "entity_ops": deepcopy(entity_ops),
             "relation_assert_ops": deepcopy(relation_ops),
             "entity_references": deepcopy(entity_references or []),
+            "progression_ops": deepcopy(progression_ops or []),
         }
         self.saved.add((work_id, invocation_id))
         self._fold()
@@ -720,6 +764,11 @@ class FactGraph:
             return deepcopy(
                 {
                     "entity_ops": contribution["entity_ops"],
+                    **(
+                        {"progression_ops": contribution["progression_ops"]}
+                        if contribution.get("progression_ops")
+                        else {}
+                    ),
                     "relation_assert_ops": [
                         *contribution["relation_assert_ops"],
                         *contribution.get("relation_link_ops", []),

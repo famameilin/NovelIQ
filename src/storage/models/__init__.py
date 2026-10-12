@@ -9,6 +9,8 @@ from src.storage.models.chapter import Chapter
 from src.storage.models.core import AnalysisRun
 from src.storage.models.dialogue import DialogueRecord
 from src.storage.models.event_forest import EventEdge, EventNode
+from src.storage.models.event_organization import EventMembership, EventReference, NarrativeArc
+from src.storage.models.foreshadowing_action import ForeshadowingAction
 from src.storage.models.graph import (
     ChapterBoundary,
     EntityState,
@@ -43,6 +45,10 @@ __all__ = [
     "ModelTurn",
     "EventNode",
     "EventEdge",
+    "EventMembership",
+    "EventReference",
+    "NarrativeArc",
+    "ForeshadowingAction",
     "Chapter",
     "Paragraph",
     "ParagraphEmbedding",

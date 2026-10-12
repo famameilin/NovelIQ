@@ -16,6 +16,9 @@ def _read_prompt_text(filename: str) -> str:
 
 
 ANNOTATION_SCOPE_POLICY = (
+    "\n事件职责（solo/event）：同时记录正文明确的问题推进、目标改变、线索揭示，"
+    "调用 progression 并提供前后状态与本章段首证据。"
+    "既有伏笔被强化或疑似回收时，先读取伏笔根再调用 foreshadow_action；仅有照应边不能判回收，埋设随伏笔根自动保存。\n"
     "\n统一判据：\n"
     "- 人物：有姓名、代号、独立行动或实际发言的都登记；匿名行动者或说话人按正文称谓登记，"
     "不编造姓名。无独立行动的路人、士兵等背景群体不登记；代词和泛泛称呼不单独建实体。\n"
@@ -35,7 +38,7 @@ SUBAGENT_SYSTEM_PROMPT = _read_prompt_text("sub_agent.txt") + ANNOTATION_SCOPE_P
 # 参数、引用、证据与收尾纪律由 execute_code 的目录说明给出
 SUBAGENT_ROLE_SCOPES: dict[str, str] = {
     "structure": (
-        "<RoleScope role=\"实体与关系\">\n"
+        '<RoleScope role="实体与关系">\n'
         "你负责这一章的两个域：\n"
         "- entity：按统一判据登记正文里的人物、地点、物品与组织；\n"
         "- relation：实体之间成立的闭合关系边都写。\n"
@@ -43,15 +46,16 @@ SUBAGENT_ROLE_SCOPES: dict[str, str] = {
         "</RoleScope>"
     ),
     "event": (
-        "<RoleScope role=\"事件与参与者\">\n"
+        '<RoleScope role="事件与参与者">\n'
         "你负责这一章的两个域：\n"
         "- event 与 participants：有正文依据的事件都建节点并填写参与者；优先直接调用 submit_events 工具，"
         "提交数据数组，引用与原文锚点由引擎完成。\n"
+        "- progression 与 foreshadow_action：保存本章明确的情节推进及伏笔强化/疑似回收，不用实体首次登记冒充推进。\n"
         "实体间的关系边、对话判定、段落标签与章级指标都不属于你。\n"
         "</RoleScope>"
     ),
     "evidence": (
-        "<RoleScope role=\"对话与章级证据\">\n"
+        '<RoleScope role="对话与章级证据">\n'
         "你负责这一章的三个域：\n"
         "- dialogue：<DialogueCandidates> 表里的候选逐条判定，一条不落；\n"
         "- label：本章自选 2~3 段的整段情绪标签；\n"
@@ -79,8 +83,6 @@ def _candidate_views(candidates: list[DialogueCandidate]) -> list[dict]:
     ]
 
 
-
-
 def _render_paragraph_numbered_text(chapter_text: str, paragraph_info: ChapterParagraphInfo | None) -> str:
     """2026-09-18 用于按段首可见号渲染正文（每段一行，以 `N：` 开头）
 
@@ -100,8 +102,6 @@ def _render_paragraph_numbered_text(chapter_text: str, paragraph_info: ChapterPa
     return rendered if parts else chapter_text
 
 
-
-
 def build_subagent_message(
     *,
     role: str,
@@ -116,7 +116,7 @@ def build_subagent_message(
     """
     paragraph_views = _render_paragraph_numbered_text("", paragraph_info)
     sections = [
-        f"<CurrentChapter role=\"{role}\">\n{paragraph_views}\n</CurrentChapter>",
+        f'<CurrentChapter role="{role}">\n{paragraph_views}\n</CurrentChapter>',
         "<DialogueCandidates>\n"
         f"total: {len(candidates)}\n"
         f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"
@@ -124,8 +124,6 @@ def build_subagent_message(
         role_scope,
     ]
     return "\n\n".join(section for section in sections if section)
-
-
 
 
 __all__ = [

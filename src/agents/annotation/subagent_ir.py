@@ -317,6 +317,8 @@ class SubagentAnnotation:
     labels: list[SubagentLabel] = field(default_factory=list)
     metric: SubagentMetric | None = None
     pending: list[SubagentPending] = field(default_factory=list)
+    progressions: list[dict[str, Any]] = field(default_factory=list)
+    foreshadow_actions: list[dict[str, Any]] = field(default_factory=list)
     coverage: tuple[int, ...] = ()
     finished: bool = False
 
@@ -338,6 +340,8 @@ class SubagentAnnotation:
             "labels": len(self.labels),
             "metrics": 1 if self.metric is not None else 0,
             "pending": len(self.pending),
+            "progressions": len(self.progressions),
+            "foreshadow_actions": len(self.foreshadow_actions),
         }
 
     def index(self) -> dict[str, Any]:
@@ -353,4 +357,6 @@ class SubagentAnnotation:
             "labels": [item.to_dict() for item in self.labels],
             "metric": self.metric.to_dict() if self.metric is not None else None,
             "pending": [item.to_dict() for item in self.pending],
+            "progressions": list(self.progressions),
+            "foreshadow_actions": list(self.foreshadow_actions),
         }

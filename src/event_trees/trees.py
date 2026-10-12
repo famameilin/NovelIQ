@@ -20,6 +20,7 @@ class EventTrees:
         self.connections: dict[str, dict[str, Any]] = {}
         self.executions: set[tuple[str, str]] = set()
         self.saved: set[tuple[str, str]] = set()
+        self.actions: dict[str, dict[str, Any]] = {}
 
     def begin(self, work_id: str, invocation_id: str) -> None:
         self.executions.add((work_id, invocation_id))
@@ -39,6 +40,21 @@ class EventTrees:
                     raise ValueError(f"node_id={identifier} 重复节点业务内容冲突")
             self.nodes[identifier] = {"author": author, "chapter_id": chapter_id, "content": deepcopy(content)}
         self._parents()
+
+    def write_action(self, author: tuple[str, str], value: dict[str, Any]) -> str:
+        """明确动作沿用来源操作身份，同章多次动作分别保留"""
+        if author not in self.executions or author in self.saved:
+            raise ValueError(f"事件执行已停止: {author}")
+        identifier = stable_uuid(self.run_id, author[0], value["source_operation_id"])
+        action = {**deepcopy(value), "author": author}
+        existing = self.actions.get(identifier)
+        if existing is not None:
+            # 相同来源重试不能因已写动作数量增加而误判为内容冲突
+            action["operation_order"] = existing["operation_order"]
+        if existing is not None and existing != action:
+            raise ValueError(f"source_operation_id={value['source_operation_id']} 业务内容冲突")
+        self.actions[identifier] = action
+        return identifier
 
     def _parents(self) -> dict[str, str]:
         parents = {
@@ -222,13 +238,39 @@ class EventTrees:
             for key, value in self.connections.items()
             if value["author"] != author and not {value["parent"], value["child"]} & removed
         }
+        self.actions = {key: value for key, value in self.actions.items() if value["author"] != author}
 
     def snapshot(self, author: tuple[str, str]) -> dict[str, Any]:
-        return deepcopy({"nodes": self.nodes, "connections": self.connections})
+        return deepcopy({"nodes": self.nodes, "connections": self.connections, "actions": self.actions})
 
     def restore(self, snapshot: dict[str, Any]) -> None:
         self.nodes = snapshot["nodes"]
         self.connections = snapshot["connections"]
+        self.actions = snapshot.get("actions", {})
+
+    def freeze_actions(self, author: tuple[str, str], paragraphs: Any) -> dict[str, dict[str, Any]]:
+        """自动埋设和显式动作进入同一冻结贡献，保存确认与恢复按同一份事实核对"""
+        from src.fact_graph.evidence import evidence_for
+
+        actions = deepcopy({key: value for key, value in self.actions.items() if value["author"] == author})
+        for node_id, node in self.nodes.items():
+            if node["author"] != author or not node["content"]["is_foreshadow_setup"]:
+                continue
+            paragraph = next(row for row in paragraphs if row.paragraph_id == node["content"]["evidence_paragraph_id"])
+            operation = f"setup/{node_id}"
+            actions[stable_uuid(self.run_id, author[0], operation)] = {
+                "author": author,
+                "root_event_id": node_id,
+                "target_event_id": node_id,
+                "action_type": "setup",
+                "chapter_id": node["chapter_id"],
+                "source_operation_id": operation,
+                "operation_order": 0,
+                "evidence": [
+                    {**item, "text": paragraph.text} for item in evidence_for(paragraphs, paragraph.paragraph_id)
+                ],
+            }
+        return actions
 
     def search(self, query: str = "") -> list[dict[str, Any]]:
         return [
@@ -242,12 +284,14 @@ class EventTrees:
 
         from src.fact_graph.evidence import evidence_for
         from src.storage.models import AnnotationWork, EventEdge, EventNode
+        from src.storage.models.foreshadowing_action import ForeshadowingAction
 
         session.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": f"event_trees:{self.run_id}"}
         )
         contribution = frozen.snapshot()
         nodes = contribution["nodes"]
+        actions = deepcopy(contribution.get("actions", {}))
         for node_id, node in nodes.items():
             content = node["content"]
             paragraph = next(row for row in frozen.paragraphs if row.paragraph_id == content["evidence_paragraph_id"])
@@ -286,6 +330,44 @@ class EventTrees:
                 )
             )
         session.flush()
+        for identifier, action in actions.items():
+            root = session.get(EventNode, action["root_event_id"])
+            if root is None or not root.is_foreshadowing_root:
+                raise ValueError(f"root_event_id={action['root_event_id']} 不是已保存伏笔根")
+            paragraph = next(
+                (row for row in frozen.paragraphs if row.paragraph_id == action["evidence"][0]["paragraph_id"]), None
+            )
+            if paragraph is None or action["chapter_id"] != paragraph.chapter_id:
+                raise ValueError("伏笔动作证据必须属于当前保存章")
+            for key in ("root_event_id", "target_event_id"):
+                endpoint_id = action.get(key)
+                endpoint = session.get(EventNode, endpoint_id) if endpoint_id else None
+                if endpoint_id and (endpoint is None or endpoint.run_id != self.run_id):
+                    raise ValueError(f"{key}={endpoint_id} 没有有效保存")
+                if endpoint is not None and endpoint.chapter_order > frozen.chapter_order:
+                    raise ValueError(f"{key}={endpoint_id} 来源章晚于当前动作章")
+                if endpoint is not None and endpoint.author_work_id != frozen.work_id:
+                    work = session.get(AnnotationWork, endpoint.author_work_id)
+                    if work is None or work.state != "saved" or work.invocation_id != endpoint.producer_invocation_id:
+                        raise ValueError(f"{key}={endpoint_id} 所属 work 未有效保存")
+            if session.get(ForeshadowingAction, identifier) is None:
+                session.add(
+                    ForeshadowingAction(
+                        action_id=identifier,
+                        run_id=self.run_id,
+                        root_event_id=action["root_event_id"],
+                        target_event_id=action.get("target_event_id"),
+                        action_type=action["action_type"],
+                        chapter_id=action["chapter_id"],
+                        chapter_order=frozen.chapter_order,
+                        source_work_id=frozen.work_id,
+                        source_operation_id=action["source_operation_id"],
+                        operation_order=action["operation_order"],
+                        evidence=action["evidence"],
+                        evidence_scope="paragraph",
+                        annotation_id=annotation_id,
+                    )
+                )
         connections = dict(contribution["connections"])
         for node_id, node in nodes.items():
             content = node["content"]
@@ -329,7 +411,7 @@ class EventTrees:
         session.flush()
         self.rebuild_storage(session)
 
-    def rebuild_storage(self, session: Any) -> None:
+    def rebuild_structure(self, session: Any) -> None:
         """重折有效父边和整个子树，后续连接不修改生产 work 的不可变输出"""
         from sqlalchemy import select
 
@@ -385,24 +467,37 @@ class EventTrees:
             node.tree_id = base[root]["tree_id"]
             node.parent_node_id = parents.get(identifier)
             node.cause_role = kinds.get(identifier, "root")
-        payoffs = set(
-            session.execute(
-                select(EventEdge.source_event_id).where(
-                    EventEdge.run_id == self.run_id,
-                    EventEdge.edge_type == "foreshadowing",
-                    EventEdge.is_active.is_(True),
-                )
-            ).scalars()
+        session.flush()
+
+    def rebuild_storage(self, session: Any) -> None:
+        """更新保存后的结构与明确伏笔动作状态，二者使用各自的领域事实"""
+        from sqlalchemy import select
+
+        from src.event_trees.action_order import action_order
+        from src.storage.models import EventNode
+        from src.storage.models.foreshadowing_action import ForeshadowingAction
+
+        self.rebuild_structure(session)
+        actions = sorted(
+            session.scalars(select(ForeshadowingAction).where(ForeshadowingAction.run_id == self.run_id)),
+            key=action_order,
         )
-        for identifier, node in nodes.items():
+        statuses = {
+            action.root_event_id: {"setup": "open", "reinforce": "reinforced", "payoff": "likely_paid_off"}[
+                action.action_type
+            ]
+            for action in actions
+        }
+        for node in session.scalars(select(EventNode).where(EventNode.run_id == self.run_id)):
             if node.is_foreshadowing_root:
-                node.foreshadowing_status = "likely_paid_off" if identifier in payoffs else "open"
+                node.foreshadowing_status = statuses.get(node.event_id, "open")
         session.flush()
 
     def discard_storage(self, session: Any, work_ids: set[str]) -> None:
         from sqlalchemy import delete, select
 
         from src.storage.models import EventEdge, EventNode, GraphFact
+        from src.storage.models.foreshadowing_action import ForeshadowingAction
 
         identifiers = list(
             session.execute(
@@ -412,6 +507,14 @@ class EventTrees:
             ).scalars()
         )
         session.execute(delete(GraphFact).where(GraphFact.event_id.in_(identifiers)))
+        session.execute(
+            delete(ForeshadowingAction).where(
+                ForeshadowingAction.run_id == self.run_id,
+                ForeshadowingAction.source_work_id.in_(work_ids)
+                | ForeshadowingAction.root_event_id.in_(identifiers)
+                | ForeshadowingAction.target_event_id.in_(identifiers),
+            )
+        )
         session.execute(
             delete(EventEdge).where(
                 EventEdge.run_id == self.run_id,
@@ -429,11 +532,15 @@ class EventTrees:
 
         self.nodes.clear()
         self.connections.clear()
+        self.actions.clear()
         self.saved.clear()
         self.executions.clear()
         authors = {record.work_id: (record.work_id, record.invocation_id) for record in records}
         for record in records:
             author = authors[record.work_id]
+            self.actions.update(
+                self.load_saved_work(session, record.work_id, record.invocation_id, record.output_id)["actions"]
+            )
             for content in record.payload["events"]:
                 self.nodes[content["node_id"]] = {
                     "author": author,
@@ -479,7 +586,31 @@ class EventTrees:
                 )
             ).scalars()
         }
-        return {"author": author, "nodes": nodes, "connections": connections}
+        from src.storage.models import ForeshadowingAction
+
+        actions = {
+            row.action_id: {
+                "author": author,
+                **{
+                    name: getattr(row, name)
+                    for name in (
+                        "root_event_id",
+                        "target_event_id",
+                        "action_type",
+                        "chapter_id",
+                        "source_operation_id",
+                        "operation_order",
+                        "evidence",
+                    )
+                },
+            }
+            for row in session.scalars(
+                select(ForeshadowingAction).where(
+                    ForeshadowingAction.run_id == self.run_id, ForeshadowingAction.source_work_id == work_id
+                )
+            )
+        }
+        return {"author": author, "nodes": nodes, "connections": connections, "actions": actions}
 
     def recover_work(self, snapshot: dict[str, Any]) -> None:
         """同 run 锁内只替换当前作者的贡献，不恢复全书快照"""
@@ -488,6 +619,8 @@ class EventTrees:
         self.connections = {key: value for key, value in self.connections.items() if value["author"] != author}
         self.nodes.update(deepcopy(snapshot["nodes"]))
         self.connections.update(deepcopy(snapshot["connections"]))
+        self.actions = {key: value for key, value in self.actions.items() if value["author"] != author}
+        self.actions.update(deepcopy(snapshot.get("actions", {})))
         self.saved.add(author)
         self.stop(author)
         self._parents()

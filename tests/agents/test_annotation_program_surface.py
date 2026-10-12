@@ -89,6 +89,8 @@ def test_catalog_is_current_formal_tool_surface() -> None:
         "write_entity",
         "write_metrics",
         "write_event",
+        "write_progression",
+        "write_foreshadowing_action",
         "write_relation",
         "write_dialogue",
         "push_case",

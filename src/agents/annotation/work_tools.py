@@ -23,7 +23,7 @@ def _search_page(values: list[Any], *, offset: int, limit: int, budget: int) -> 
     """按整项预算分页，保留返回项的完整引用，下一页从实际未返回的位置继续"""
     page: list[Any] = []
     size = 2
-    for value in values[offset:offset + limit]:
+    for value in values[offset : offset + limit]:
         encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
         if size + len(encoded) + 1 > budget:
             break
@@ -43,6 +43,119 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         for candidate in build_annotation_tools(query_service, ledger)
         if candidate.name not in {"push_case", "finish", "write_event", "write_link"}
     ]
+
+    def current_evidence(visible_id: int) -> list[dict[str, Any]]:
+        from src.utils.identity import text_digest
+
+        mapping = dict(zip(ledger.paragraph_info.visible_ids(), ledger.paragraph_info.paragraph_ids, strict=True))
+        if isinstance(visible_id, bool) or visible_id not in mapping:
+            raise ValueError(f"evidence={visible_id}，期望本章段首可见号 {list(mapping)}")
+        paragraph = next(
+            row for row in execution.receipt.payload["paragraphs"] if row.paragraph_id == mapping[visible_id]
+        )
+        return [
+            {
+                "chapter_id": ledger.current_chapter_id,
+                "paragraph_id": paragraph.paragraph_id,
+                "char_start": 0,
+                "char_end": len(paragraph.text),
+                "text_hash": text_digest(paragraph.text),
+                "text": paragraph.text,
+            }
+        ]
+
+    def require_event(identifier: str) -> dict[str, Any]:
+        value = agent.event_trees.read(identifier)
+        if execution.event_reads.get(identifier) != value:
+            raise ValueError(f"event_id={identifier} 尚未读取当前内容，请先 read_event")
+        if (value["work_id"], value["producer_invocation_id"]) != author and not value["saved"]:
+            raise ValueError(f"event_id={identifier} 所属 work 尚未保存")
+        # 允许读取后文上下文不等于允许把后文事件记成本章已经披露的变化
+        if query_service.chapter_orders[value["chapter_id"]] > query_service.current_chapter_order:
+            raise ValueError(f"event_id={identifier} 来源章晚于当前章，不能写入本章变化")
+        return value
+
+    @tool
+    def write_progression(
+        subject_title: str,
+        description: str,
+        after: str,
+        evidence: int,
+        before: str | None = None,
+        subject_id: str | None = None,
+        event_id: str | None = None,
+    ) -> str:
+        """记录本章明确的问题推进、目标改变或线索揭示；附真实段号与前后状态，不能把实体登记当推进"""
+        from src.utils.identity import stable_uuid
+
+        if not all(value.strip() for value in (subject_title, description, after)) or before == after:
+            raise ValueError("情节推进需要非空主体、描述和变化后的状态，前后不能相同")
+        if ledger.role not in {"solo", "event"}:
+            raise ValueError("情节推进由事件角色写入")
+        if event_id:
+            require_event(event_id)
+        known = {
+            item["operation"]["subject_id"]
+            for owner, contribution in agent.fact_graph.contributions.items()
+            if owner == author or owner in agent.fact_graph.saved
+            for item in contribution.get("progression_ops", [])
+        }
+        if subject_id and subject_id not in known:
+            raise ValueError(f"subject_id={subject_id} 没有已保存或本执行的推进来源")
+        subject_id = subject_id or stable_uuid(agent.run_id, "progression_subject", subject_title.strip())
+        item = {
+            "source_operation_id": execution.call_id,
+            "event_id": event_id,
+            "operation": {
+                "subject_id": subject_id,
+                "subject_title": subject_title.strip(),
+                "description": description.strip(),
+                "before": before,
+                "after": after,
+            },
+            "evidence": current_evidence(evidence),
+        }
+        operations = agent.fact_graph.contributions[author].setdefault("progression_ops", [])
+        existing = next((value for value in operations if value["source_operation_id"] == execution.call_id), None)
+        if existing and existing != item:
+            raise ValueError("同一来源操作的情节推进内容冲突")
+        if existing is None:
+            operations.append(item)
+        return json.dumps(
+            {"status": "written", "record": "progression", "ref": {"subject_id": subject_id}}, ensure_ascii=False
+        )
+
+    @tool
+    def write_foreshadowing_action(
+        root_event_id: str,
+        action_type: Literal["reinforce", "payoff"],
+        evidence: int,
+        target_event_id: str | None = None,
+    ) -> str:
+        """记录明确强化或疑似回收，埋设随伏笔根自动保存；静态照应边不能代替动作，无case也照常记录"""
+        if ledger.role not in {"solo", "event"}:
+            raise ValueError("伏笔动作由事件角色写入")
+        root = require_event(root_event_id)
+        if not root["content"]["is_foreshadow_setup"]:
+            raise ValueError(f"root_event_id={root_event_id} 不是伏笔根")
+        if target_event_id:
+            require_event(target_event_id)
+        evidence_rows = current_evidence(evidence)
+        identifier = agent.event_trees.write_action(
+            author,
+            {
+                "source_operation_id": execution.call_id,
+                "root_event_id": root_event_id,
+                "target_event_id": target_event_id,
+                "action_type": action_type,
+                "chapter_id": ledger.current_chapter_id,
+                "evidence": evidence_rows,
+                "operation_order": 1 + sum(value["author"] == author for value in agent.event_trees.actions.values()),
+            },
+        )
+        return json.dumps(
+            {"status": "written", "record": "foreshadow_action", "ref": {"action_id": identifier}}, ensure_ascii=False
+        )
 
     @tool
     def push_case(description: str) -> str:
@@ -65,28 +178,42 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
 
     @tool
     def search_events(
-        query: str = "", chapter_id: int | None = None, tree_id: str | None = None,
-        limit: SearchLimit = 5, offset: SearchOffset = 0,
+        query: str = "",
+        chapter_id: int | None = None,
+        tree_id: str | None = None,
+        limit: SearchLimit = 5,
+        offset: SearchOffset = 0,
     ) -> str:
         """分页预览事件，可筛选章/树；events 为本页，next_offset 为续页位置，read_event 读取详情"""
         identifiers = agent.event_trees.search_ids(query, chapter_id=chapter_id, tree_id=tree_id)
-        reads = [agent.event_trees.read(identifier) for identifier in identifiers[offset:offset + limit]]
-        previews = [{
-            "node_id": value["node_id"], "chapter_id": value["chapter_id"], "saved": value["saved"],
-            "tree_id": value["content"]["tree_id"], "parent_node_id": value["content"]["parent_node_id"],
-            "evidence_paragraph_id": value["content"]["evidence_paragraph_id"],
-            "description": value["content"]["description"][:160],
-        } for value in reads]
+        reads = [agent.event_trees.read(identifier) for identifier in identifiers[offset : offset + limit]]
+        previews = [
+            {
+                "node_id": value["node_id"],
+                "chapter_id": value["chapter_id"],
+                "saved": value["saved"],
+                "tree_id": value["content"]["tree_id"],
+                "parent_node_id": value["content"]["parent_node_id"],
+                "evidence_paragraph_id": value["content"]["evidence_paragraph_id"],
+                "description": value["content"]["description"][:160],
+            }
+            for value in reads
+        ]
         page, _ = _search_page(previews, offset=0, limit=limit, budget=SHARED_SEARCH_MAX_CHARS - 600)
         # 只授权实际返回页，完整快照留在服务端用于生产者与内容新鲜度校验
-        for value in reads[:len(page)]:
+        for value in reads[: len(page)]:
             execution.event_reads[value["node_id"]] = value
         execution.case_reads.extend(page)
         next_offset = offset + len(page)
-        return json.dumps({
-            "events": page, "total": len(identifiers),
-            "next_offset": next_offset if next_offset < len(identifiers) else None,
-        }, ensure_ascii=False, separators=(",", ":"))
+        return json.dumps(
+            {
+                "events": page,
+                "total": len(identifiers),
+                "next_offset": next_offset if next_offset < len(identifiers) else None,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
 
     @tool
     def read_event(node_id: str) -> str:
@@ -98,12 +225,16 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
 
     @tool
     def search_graph(
-        query: str = "", entity_type: EntityType | None = None,
-        limit: SearchLimit = 5, offset: SearchOffset = 0, relation_offset: SearchOffset = 0,
+        query: str = "",
+        entity_type: EntityType | None = None,
+        limit: SearchLimit = 5,
+        offset: SearchOffset = 0,
+        relation_offset: SearchOffset = 0,
     ) -> str:
         """分页预览实体和命中端点的关系；两组 next_offset 独立续页，read_entity 读取完整属性"""
         matching = {
-            key for key, name in agent.fact_graph.entity_names.items()
+            key
+            for key, name in agent.fact_graph.entity_names.items()
             if query.casefold() in name.casefold()
             and (entity_type is None or str(agent.fact_graph.entity_types[key]) == entity_type)
         }
@@ -116,24 +247,39 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             for key, name in sorted(agent.fact_graph.entity_names.items())
             if key in matching
         ]
-        relations = [{
-            "source_id": agent.fact_graph.entity_id(left), "target_id": agent.fact_graph.entity_id(right),
-            "relation_type": kind,
-        } for left, right, kind in sorted(agent.fact_graph.active_relations) if left in matching or right in matching]
+        relations = [
+            {
+                "source_id": agent.fact_graph.entity_id(left),
+                "target_id": agent.fact_graph.entity_id(right),
+                "relation_type": kind,
+            }
+            for left, right, kind in sorted(agent.fact_graph.active_relations)
+            if left in matching or right in matching
+        ]
         entities_page, next_offset = _search_page(values, offset=offset, limit=limit, budget=2600)
         relations_page, next_relation_offset = _search_page(
-            relations, offset=relation_offset, limit=limit, budget=2600,
+            relations,
+            offset=relation_offset,
+            limit=limit,
+            budget=2600,
         )
         ledger.shared_entity_ids.update(value["id"] for value in entities_page)
         ledger.shared_entity_ids.update(
             value[field] for value in relations_page for field in ("source_id", "target_id")
         )
         execution.case_reads.extend([*entities_page, *relations_page])
-        return json.dumps({
-            "entities": entities_page, "relations": relations_page, "total_entities": len(values),
-            "total_relations": len(relations), "next_offset": next_offset,
-            "next_relation_offset": next_relation_offset,
-        }, ensure_ascii=False, separators=(",", ":"))
+        return json.dumps(
+            {
+                "entities": entities_page,
+                "relations": relations_page,
+                "total_entities": len(values),
+                "total_relations": len(relations),
+                "next_offset": next_offset,
+                "next_relation_offset": next_relation_offset,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
 
     @tool
     def read_entity(entity_id: str) -> str:
@@ -141,7 +287,9 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         name = agent.fact_graph.resolve_entity_id(entity_id, label="entity_id")
         key = next(key for key, identifier in agent.fact_graph.entity_ids.items() if identifier == entity_id)
         value = {
-            "id": entity_id, "name": name, "entity_type": agent.fact_graph.entity_types[key],
+            "id": entity_id,
+            "name": name,
+            "entity_type": agent.fact_graph.entity_types[key],
             "attributes": agent.fact_graph.entity_attributes.get(key, {}),
         }
         ledger.shared_entity_ids.add(entity_id)
@@ -312,10 +460,22 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             ensure_ascii=False,
         )
 
-    tools.extend([
-        write_event, write_link, push_case, promise_case, search_cases, search_events, search_graph,
-        read_event, read_entity, finish,
-    ])
+    tools.extend(
+        [
+            write_progression,
+            write_foreshadowing_action,
+            write_event,
+            write_link,
+            push_case,
+            promise_case,
+            search_cases,
+            search_events,
+            search_graph,
+            read_event,
+            read_entity,
+            finish,
+        ]
+    )
     for candidate in tools:
         _forbid_undeclared_args(candidate)
     return tools
