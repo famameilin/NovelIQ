@@ -95,9 +95,9 @@ class EventOrganizationQuery:
         # 局部结构只服从已保存父字段，跨归属父边另列为真实关系
         for event in self.events.values():
             node = self.nodes[f"event:{event.event_id}"]
-            parent = self.nodes.get(f"event:{event.parent_node_id}")
-            if parent and parent["arc_id"] == node["arc_id"] and parent["tree_id"] == node["tree_id"]:
-                node["parent_id"] = parent["node_id"]
+            parent_node = self.nodes.get(f"event:{event.parent_node_id}")
+            if parent_node and parent_node["arc_id"] == node["arc_id"] and parent_node["tree_id"] == node["tree_id"]:
+                node["parent_id"] = parent_node["node_id"]
             if event.cause_role == "root":
                 group_id = f"group:{node['arc_id'] or 'unassigned'}:{event.tree_id}"
                 self.nodes[group_id]["title"] = event.description
@@ -107,12 +107,12 @@ class EventOrganizationQuery:
             group_id = f"group:{node['arc_id'] or 'unassigned'}:{event.tree_id}"
             self.group_events[group_id].append(event)
         for group_id, events in self.group_events.items():
-            group = self.nodes[group_id]
+            group_node = self.nodes[group_id]
             first = events[0]
             # 跨线分组可能没有原树根，仍用本组最早事件标识，不能冒用其他分组或整条支线
-            if group["title"] == "局部事件组":
-                group["title"] = first.description
-            group.update(chapter_id=first.chapter_id, chapter_order=self.orders[first.chapter_id])
+            if group_node["title"] == "局部事件组":
+                group_node["title"] = first.description
+            group_node.update(chapter_id=first.chapter_id, chapter_order=self.orders[first.chapter_id])
         counts = Counter(node["parent_id"] for node in self.nodes.values())
         for node in self.nodes.values():
             node["child_count"] = counts[node["node_id"]]
@@ -205,7 +205,7 @@ class EventOrganizationQuery:
         if searching and parent_id:
             candidates = [node for node in candidates if parent_id in self.path(node["node_id"])[:-1]]
         # 全书分页具有独立查询身份，不能误用骨架、分支或搜索的游标
-        context = [self.run_id, "all"] if expand_all else [self.run_id, parent_id, q, chapter_id]
+        context: list[Any] = [self.run_id, "all"] if expand_all else [self.run_id, parent_id, q, chapter_id]
         offset = 0
         if cursor:
             try:
@@ -284,9 +284,9 @@ class EventOrganizationQuery:
         if key not in self.nodes:
             raise LookupError("NODE_NOT_FOUND")
         node = self.nodes[key]
-        event = self.events.get(node.get("event_id"))
+        event = self.events.get(node.get("event_id") or "")
         group_events = self.group_events.get(key, [])
-        owner = self.members.get(event.event_id) if event else self.arcs.get(node.get("arc_id"))
+        owner = self.members.get(event.event_id) if event else self.arcs.get(node.get("arc_id") or "")
         evidence = list(event.evidence) if event else [item for member in group_events for item in member.evidence]
         if node["kind"] == "arc" and owner:
             for reference in owner.evidence:

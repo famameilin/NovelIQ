@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import inspect, text
 
-from scripts.migrations.check_0_2_1 import inspect_current_schema
+from scripts.migrations.migrate_0_2_0_to_0_2_1 import inspect_current_schema
 from src.storage.db import get_database_schema, get_engine, init_db
 from src.storage.models import Base
 

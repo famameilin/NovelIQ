@@ -301,7 +301,10 @@ def migrate(
                 },
                 "active_run_ids": list(
                     connection.execute(
-                        text("SELECT run_id FROM analysis_runs WHERE status IN ('running', 'cancelling') ORDER BY run_id")
+                        text(
+                            "SELECT run_id FROM analysis_runs "
+                            "WHERE status IN ('running', 'cancelling') ORDER BY run_id"
+                        )
                     ).scalars()
                 ),
             }

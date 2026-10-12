@@ -337,13 +337,12 @@ def validate_organization(session: Session, run_id: str, organization: Narrative
         )
     draft = EventOrganizationDraft(session, run_id)
     # 批量归属常复用同一判断证据，去重分批校验避免逐事件重复查库
-    evidence = list(
-        {
-            (ref.event_id, ref.paragraph_id): ref
-            for item in [*organization.arcs, *organization.memberships, *organization.references]
-            for ref in item.evidence
-        }.values()
-    )
+    evidence_by_key: dict[tuple[str, int | None], OrganizationEvidence] = {}
+    for drafts in (organization.arcs, organization.memberships, organization.references):
+        for item in drafts:
+            for ref in item.evidence:
+                evidence_by_key[(ref.event_id, ref.paragraph_id)] = ref
+    evidence = list(evidence_by_key.values())
     for start in range(0, len(evidence), 100):
         draft._validate_evidence(evidence[start : start + 100])
 

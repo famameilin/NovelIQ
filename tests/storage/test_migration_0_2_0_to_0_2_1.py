@@ -468,7 +468,7 @@ def test_upgrade_does_not_guess_producer_from_multiple_successful_attempts(old_r
             ),
             {"run": run_id},
         )
-    report = _apply(old_release_engine)
+    _apply(old_release_engine)
     with old_release_engine.connect() as connection:
         assert connection.execute(text("SELECT invocation_id FROM analysis_outputs")).scalar_one() == annotation_id
         assert connection.execute(text("SELECT count(*) FROM model_turns")).scalar_one() == 0

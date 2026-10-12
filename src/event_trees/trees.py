@@ -334,10 +334,10 @@ class EventTrees:
             root = session.get(EventNode, action["root_event_id"])
             if root is None or not root.is_foreshadowing_root:
                 raise ValueError(f"root_event_id={action['root_event_id']} 不是已保存伏笔根")
-            paragraph = next(
+            action_paragraph = next(
                 (row for row in frozen.paragraphs if row.paragraph_id == action["evidence"][0]["paragraph_id"]), None
             )
-            if paragraph is None or action["chapter_id"] != paragraph.chapter_id:
+            if action_paragraph is None or action["chapter_id"] != action_paragraph.chapter_id:
                 raise ValueError("伏笔动作证据必须属于当前保存章")
             for key in ("root_event_id", "target_event_id"):
                 endpoint_id = action.get(key)
