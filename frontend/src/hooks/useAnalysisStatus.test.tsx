@@ -212,7 +212,10 @@ describe("useAnalysisStatus", () => {
     await waitFor(() => {
       expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-live");
     });
-    expect(latestSSEUrl).toContain("/api/novels/novel-1/events/tasks/task-live");
+    // 回填判明活跃后才建立 SSE 连接
+    await waitFor(() => {
+      expect(latestSSEUrl).toContain("/api/novels/novel-1/events/tasks/task-live");
+    });
   });
 
   it("会把 pending 任务回填成活跃态并触发 onRunning", async () => {
@@ -328,6 +331,8 @@ describe("useAnalysisStatus", () => {
       );
     });
 
+    // 终态任务不订阅 SSE，避免已完成 run 的全量事件回放
+    expect(latestSSEUrl).toBeNull();
     expect(onCompleted).not.toHaveBeenCalled();
   });
 

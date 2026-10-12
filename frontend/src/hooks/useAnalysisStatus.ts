@@ -1,6 +1,6 @@
 /** 通过 SSE 和 HTTP backfill 同步分析任务状态 */
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSSEListener } from "./useEventSource";
 import { useStreamStore } from "@/store/streamStore";
@@ -109,6 +109,9 @@ export function useAnalysisStatus(
 
   const enabled = !!novelId && !!taskId && (options?.enabled ?? true);
   const prevStatusRef = useRef<string | null>(null);
+  // SSE 订阅闸门：只有回填判明任务活跃后才连接；判明终态（或 SSE 收到终态事件）
+  // 即关闭——终态任务的 SSE 只会全量回放旧事件流，对结果页是纯开销
+  const [sseGate, setSseGate] = useState<"pending" | "open" | "closed">("pending");
   const stageStartTimeRef = useRef<number | null>(null);
   const llmOutputBufferRef = useRef<Map<string, StreamEventData>>(new Map());
   const executionRef = useRef(new Map<string, string>());
@@ -150,6 +153,7 @@ export function useAnalysisStatus(
   const applyTaskStatusBackfill = useCallback(
     (status: TaskStatusResponse, options: ApplyTaskStatusBackfillOptions) => {
       if (status.status === "pending" || status.status === "running" || status.status === "cancelling") {
+        setSseGate("open");
         updateProgress(buildBackfillProgress(status));
         setError(null);
         if (prevStatusRef.current !== status.status) {
@@ -160,6 +164,7 @@ export function useAnalysisStatus(
       }
 
       if (status.status === "completed") {
+        setSseGate("closed");
         updateProgress({
           action: "complete",
           stage: "completed",
@@ -180,6 +185,7 @@ export function useAnalysisStatus(
       }
 
       if (status.status === "cancelled") {
+        setSseGate("closed");
         updateProgress({
           action: "complete",
           stage: "cancelled",
@@ -200,6 +206,7 @@ export function useAnalysisStatus(
       }
 
       if (status.status === "failed") {
+        setSseGate("closed");
         setError(status.error || "分析失败");
         if (options.notifyTerminalCallbacks && prevStatusRef.current !== "failed") {
           optionsRef.current?.onFailed?.(status.error || "分析失败");
@@ -224,6 +231,7 @@ export function useAnalysisStatus(
       })
       .catch((error: unknown) => {
         // HTTP backfill 只是 SSE 的补偿路径，失败时不终止监听，但必须显式暴露错误
+        setSseGate((current) => (current === "pending" ? "open" : current));
         console.warn("Failed to backfill analysis task status", error);
         setError("任务状态同步失败，正在等待实时事件恢复");
       });
@@ -399,6 +407,7 @@ export function useAnalysisStatus(
         }
 
         case "task_error":
+          setSseGate("closed");
           flushBufferedLLMOutputs();
           setError((data as ErrorData).error);
           prevStatusRef.current = "failed";
@@ -406,6 +415,7 @@ export function useAnalysisStatus(
           break;
 
         case "task_cancelled":
+          setSseGate("closed");
           flushBufferedLLMOutputs();
           updateProgress({
             action: "complete",
@@ -424,6 +434,7 @@ export function useAnalysisStatus(
           break;
 
         case "task_complete":
+          setSseGate("closed");
           void queryClient.invalidateQueries({ queryKey: ["pipeline", novelId, taskId] });
           flushBufferedLLMOutputs();
           updateProgress({
@@ -447,7 +458,7 @@ export function useAnalysisStatus(
   );
 
   const sseUrl =
-    enabled && !!taskId && !isMockEnabled()
+    enabled && !!taskId && !isMockEnabled() && sseGate === "open"
       ? `${SSE_URL}/api/novels/${novelId}/events/tasks/${taskId}`
       : null;
 
@@ -491,6 +502,7 @@ export function useAnalysisStatus(
       hasHydratedTaskStatusRef.current = false;
       stageStartTimeRef.current = null;
       hasConnectedOnceRef.current = false;
+      setSseGate("pending");
       llmOutputBufferRef.current.clear();
       if (flushTimerRef.current !== null) {
         window.clearTimeout(flushTimerRef.current);
