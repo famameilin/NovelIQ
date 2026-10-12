@@ -1,15 +1,14 @@
-import { useState } from "react";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
-import { PagedControls } from "@/components/common/PagedControls";
-import { useCompactAnalysisViewport } from "@/hooks/useCompactAnalysisViewport";
 import { cn } from "@/lib/cn";
-import { paginateText } from "@/lib/paginateText";
 import { FileText } from "lucide-react";
+import { DiagnosisPagedText } from "./DiagnosisPagedText";
 
 export interface DiagnosisTextProps {
   /** 诊断文本内容（支持 Markdown） */
   diagnosisText?: string | null;
   className?: string;
+  title?: string;
+  textClassName?: string;
 }
 
 const DIAGNOSIS_TEXT_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
@@ -39,35 +38,22 @@ function formatDiagnosisText(text: string): string {
  * 2026-04-21，任务：多页面卡片风格统一
  * 修改原因：统一诊断报告页文本卡片的容器视觉，和仪表盘卡片维持同一套 accent 语言
  *
- * 2026-04-28，任务：分析详情页单屏 Tabs 改造
- * 修改原因：长诊断正文进入单屏工作区后不再额外包滚动壳，溢出直接暴露布局问题
+ * 长正文根据卡片实际尺寸分页，保留完整文字及桌面单屏边界
  */
-export function DiagnosisText({ diagnosisText, className }: DiagnosisTextProps) {
-  const [page, setPage] = useState(1);
-  const compact = useCompactAnalysisViewport();
+export function DiagnosisText({ diagnosisText, className, title = "综合诊断", textClassName }: DiagnosisTextProps) {
   const formattedDiagnosisText = diagnosisText ? formatDiagnosisText(diagnosisText) : null;
-  const passages = formattedDiagnosisText ? paginateText(formattedDiagnosisText, compact ? 420 : 800) : [];
-  const currentPage = Math.min(page, Math.max(passages.length, 1));
-  const currentPassage = (passages[currentPage - 1] ?? "").trimStart();
 
   return (
     <DashboardCardShell
-      title="综合诊断"
+      title={title}
       icon={<FileText className="h-4 w-4" />}
       accent="primary"
       showOrb
       className={cn(className)}
-      contentClassName="flex h-full flex-col"
-      bodyClassName="min-h-0 flex-1 gap-3"
+      contentClassName="min-h-0 [&>div:first-child]:shrink-0"
+      bodyClassName="min-h-0 flex-1"
     >
-      {formattedDiagnosisText ? (
-        <div data-testid="diagnosis-passage" className="min-h-0 flex-1 whitespace-pre-wrap rounded-lg border border-border/60 bg-surface/70 p-4 text-sm leading-6 text-text-muted">
-          {currentPassage}
-        </div>
-      ) : (
-        <p className="text-sm text-text-muted">暂无诊断文本</p>
-      )}
-      <PagedControls page={currentPage} pageCount={passages.length} onPageChange={setPage} label="综合诊断" />
+      <DiagnosisPagedText key={formattedDiagnosisText} text={formattedDiagnosisText} label={title} emptyText="暂无诊断文本" testId="diagnosis-passage" className={textClassName} />
     </DashboardCardShell>
   );
 }

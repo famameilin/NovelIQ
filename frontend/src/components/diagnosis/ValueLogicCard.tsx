@@ -1,16 +1,15 @@
-import { useState } from "react";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
-import { PagedControls } from "@/components/common/PagedControls";
-import { useCompactAnalysisViewport } from "@/hooks/useCompactAnalysisViewport";
 import { cn } from "@/lib/cn";
-import { paginateText } from "@/lib/paginateText";
 import { Scale } from "lucide-react";
+import { DiagnosisPagedText } from "./DiagnosisPagedText";
 
 export interface ValueLogicCardProps {
   /** 价值逻辑类型 */
   valueLogicType?: string | null;
   /** 价值逻辑原因说明 */
   valueLogicReason?: string | null;
+  /** 当前报告的相关诊断与评分依据，和价值逻辑一起供连续阅读 */
+  contextText?: string | null;
   className?: string;
 }
 
@@ -21,33 +20,25 @@ export interface ValueLogicCardProps {
 export function ValueLogicCard({
   valueLogicType,
   valueLogicReason,
+  contextText,
   className,
 }: ValueLogicCardProps) {
-  const [page, setPage] = useState(1);
-  const compact = useCompactAnalysisViewport();
-  const passages = paginateText(valueLogicReason ?? "", compact ? 80 : 110);
-  const currentPage = Math.min(page, Math.max(passages.length, 1));
   return (
     <DashboardCardShell
-      title="价值逻辑"
+      title={contextText ? "价值与主题诊断" : "价值逻辑"}
       icon={<Scale className="h-4 w-4" />}
       accent="chart-2"
       showOrb
       className={cn(className)}
-      contentClassName="flex h-full flex-col"
-      bodyClassName={compact ? "min-h-0 flex-1 gap-2" : "min-h-0 flex-1 gap-3"}
+      contentClassName="min-h-0 [&>div:first-child]:shrink-0"
+      bodyClassName="min-h-0 flex-1 gap-2"
     >
-      {valueLogicType ? (
-        <div className={compact ? "flex flex-col gap-2" : "flex flex-col gap-3"}>
-          <div className="inline-flex w-fit items-center rounded-full bg-chart-2/12 px-3 py-1 text-sm font-medium text-chart-2">
+      {valueLogicType || valueLogicReason || contextText ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          {valueLogicType && <div className="inline-flex w-fit shrink-0 items-center rounded-full bg-chart-2/12 px-3 py-1 text-sm font-medium text-chart-2">
             {valueLogicType}
-          </div>
-          {valueLogicReason && (
-            <div className={compact ? "rounded-2xl border border-border/60 bg-surface/70 px-3 py-2" : "rounded-2xl border border-border/60 bg-surface/70 px-4 py-3"}>
-              <p className={compact ? "whitespace-pre-wrap text-xs leading-5 text-text-muted" : "whitespace-pre-wrap text-xs leading-6 text-text-muted"}>{passages[currentPage - 1]}</p>
-            </div>
-          )}
-          <PagedControls page={currentPage} pageCount={passages.length} onPageChange={setPage} label="价值逻辑理由" />
+          </div>}
+          <DiagnosisPagedText key={`${valueLogicReason}-${contextText}`} text={[valueLogicReason, contextText].filter(Boolean).join("\n\n")} label="价值主题" testId="value-logic-passage" className="text-base leading-7" />
         </div>
       ) : (
         <p className="text-sm text-text-muted">暂无价值逻辑数据</p>

@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getDiagnosis, getForeshadowingTrees } from "@/api/results";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
-import { useCompactAnalysisViewport } from "@/hooks/useCompactAnalysisViewport";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
 import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
@@ -16,6 +15,8 @@ import { DiagnosisText } from "@/components/diagnosis/DiagnosisText";
 import { ValueLogicCard } from "@/components/diagnosis/ValueLogicCard";
 import { TopicLabels } from "@/components/diagnosis/TopicLabels";
 import { CharacterCastCard } from "@/components/diagnosis/CharacterCastCard";
+import { DiagnosisPagedText } from "@/components/diagnosis/DiagnosisPagedText";
+import { useDiagnosisCapacity } from "@/components/diagnosis/useDiagnosisCapacity";
 import { ArcScoresChart } from "@/components/charts/ArcScoresChart";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,7 +24,6 @@ import { Button } from "@/components/ui/button";
 import { AlertCircle, Tags } from "lucide-react";
 import type { ForeshadowingTree } from "@/api/types";
 import { cn } from "@/lib/cn";
-import { paginateText } from "@/lib/paginateText";
 
 const STALE_TIME = 5 * 60 * 1000;
 
@@ -61,36 +61,42 @@ interface OverviewMetric {
 }
 
 function OverviewReasonCard({ metric }: { metric: OverviewMetric }) {
-  const [page, setPage] = useState(1);
-  const passages = paginateText(metric.reason ?? "", 220);
-  const currentPage = Math.min(page, Math.max(passages.length, 1));
-
   return (
-    <DashboardCardShell title={`${metric.title}依据`} accent="chart-2" className="min-h-0" contentClassName="flex h-full flex-col" bodyClassName="min-h-0 flex-1 gap-3">
-      <p className="whitespace-pre-wrap text-xs leading-6 text-text-muted">{passages[currentPage - 1] ?? "暂无补充依据"}</p>
-      <div className="mt-auto"><PagedControls page={currentPage} pageCount={passages.length} onPageChange={setPage} label={`${metric.title}依据`} /></div>
+    <DashboardCardShell title={`${metric.title}依据`} accent="chart-2" className="h-full min-h-0" contentClassName="min-h-0 [&>div:first-child]:shrink-0" bodyClassName="min-h-0 flex-1">
+      <DiagnosisPagedText key={metric.reason} text={metric.reason} label={`${metric.title}依据`} className="text-xs leading-5" />
     </DashboardCardShell>
   );
 }
 
-/** 四项评分和三段依据分别占据整行与三列，不再让标签独占半页。 */
-function DiagnosisOverview({ metrics, labels }: { metrics: OverviewMetric[]; labels: ReactNode }) {
+/** 先读评分与依据，再读综合正文，短卡片不承担整屏高度 */
+function DiagnosisOverview({ metrics, labels, diagnosisText }: { metrics: OverviewMetric[]; labels: ReactNode; diagnosisText?: string | null }) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid shrink-0 grid-cols-4 gap-3">
         {metrics.map((item) => (
-          <div key={item.title} className="rounded-lg border border-border/70 bg-surface/75 px-4 py-3">
+          <div key={item.title} className="rounded-lg border border-border/70 bg-surface/75 px-4 py-2">
             <span className="block text-xs text-text-muted">{item.title}</span>
             <span className="mt-1 block text-xl font-semibold tabular-nums text-text">{item.value}</span>
           </div>
         ))}
       </div>
       <div className="shrink-0">{labels}</div>
-      <div className="grid min-h-0 flex-1 grid-cols-3 gap-3">
+      <DiagnosisText diagnosisText={diagnosisText} className="min-h-0 flex-1" />
+      <div className="grid h-[180px] shrink-0 grid-cols-3 gap-3">
         {metrics.slice(1).map((metric) => <OverviewReasonCard key={metric.title} metric={metric} />)}
       </div>
     </div>
   );
+}
+
+/** 复用报告正文中已有的专题段落，未分段的报告保留综合正文入口 */
+function getDiagnosisSection(text: string | null | undefined, topic: "cast" | "value") {
+  const pattern = topic === "cast" ? /人物|角色/u : /主题|价值/u;
+  const sections = (text ?? "").split(/(?=【[^】]+】)/u).filter(section => {
+    const title = section.match(/^【([^】]+)】/u)?.[1];
+    return title && pattern.test(title);
+  });
+  return { text: sections.length ? sections.map(section => section.trim()).join("\n\n") : text, title: sections.length ? (topic === "cast" ? "人物诊断" : "主题与价值诊断") : "综合诊断" };
 }
 
 /**
@@ -137,130 +143,89 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
   const [filter, setFilter] = useState<"all" | "open" | "reinforced" | "likely_paid_off">("all");
   const [selectedRootId, setSelectedRootId] = useState<string | null>(props.foreshadowingTrees[0]?.root_event_id ?? null);
   const [page, setPage] = useState(1);
-  const [detailPage, setDetailPage] = useState(1);
-  const [detailView, setDetailView] = useState<"reason" | "tracking">("reason");
+  const { ref, capacity } = useDiagnosisCapacity(64, 0, 6);
   const counts = useMemo(() => {
     const result = { open: 0, reinforced: 0, likely_paid_off: 0 };
-    props.foreshadowingTrees.forEach((tree) => {
+    props.foreshadowingTrees.forEach(tree => {
       if (tree.status in result) result[tree.status as keyof typeof result] += 1;
     });
     return result;
   }, [props.foreshadowingTrees]);
-  const visibleTrees = filter === "all"
-    ? props.foreshadowingTrees
-    : props.foreshadowingTrees.filter((tree) => tree.status === filter);
-  const pageCount = Math.ceil(visibleTrees.length / 2);
+  const visibleTrees = filter === "all" ? props.foreshadowingTrees : props.foreshadowingTrees.filter(tree => tree.status === filter);
+  const pageCount = Math.ceil(visibleTrees.length / capacity);
   const currentPage = Math.min(page, Math.max(pageCount, 1));
-  const pageTrees = visibleTrees.slice((currentPage - 1) * 2, currentPage * 2);
-  const selectedTree =
-    pageTrees.find((tree) => tree.root_event_id === selectedRootId) ?? pageTrees[0] ?? null;
-  const detailPassages = paginateText([
-    selectedTree?.latest_reason ? `最近判断依据：${selectedTree.latest_reason}` : "最近判断依据：暂无补充判断",
-    selectedTree?.latest_why_unresolved_now ? `暂未回收原因：${selectedTree.latest_why_unresolved_now}` : "",
-  ].filter(Boolean).join("\n\n"), 100);
-  const currentDetailPage = Math.min(detailPage, Math.max(detailPassages.length, 1));
+  const pageTrees = visibleTrees.slice((currentPage - 1) * capacity, currentPage * capacity);
+  const selectedTree = visibleTrees.find(tree => tree.root_event_id === selectedRootId) ?? pageTrees[0] ?? null;
+  const detailText = selectedTree ? [
+    selectedTree.description,
+    `最近判断依据：${selectedTree.latest_reason || "暂无补充判断"}`,
+    selectedTree.latest_why_unresolved_now ? `暂未回收原因：${selectedTree.latest_why_unresolved_now}` : "",
+    `锚点章节：${selectedTree.anchor_chapter_ids.join("、") || "—"}`,
+  ].filter(Boolean).join(selectedTree.latest_reason || selectedTree.latest_why_unresolved_now ? "\n\n" : "\n") : "";
+  const hasReason = !!(selectedTree?.latest_reason || selectedTree?.latest_why_unresolved_now);
 
-  if (props.foreshadowingTrees.length === 0) {
-    return (
-      <div className="flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-border/60 bg-surface/50 px-6 text-center text-sm text-text-muted">
-        当前任务暂无伏笔线索
-      </div>
-    );
+  if (!props.foreshadowingTrees.length) {
+    return <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border/60 text-sm text-text-muted">当前任务暂无伏笔线索</div>;
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <AnalysisMetricStrip
-        items={[
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+        <AnalysisMetricStrip items={[
           { label: "待回收", value: counts.open },
           { label: "持续强化", value: counts.reinforced },
           { label: "疑似回收", value: counts.likely_paid_off },
-        ]}
-        className="grid-cols-3 [&>div]:px-3 [&>div]:py-1.5 [&>div>dd]:text-base"
-      />
+        ]} className="grid-cols-3 [&>div]:px-3 [&>div]:py-1.5 [&>div>dd]:text-base" />
+        <AnalysisViewSwitcher value={filter} onValueChange={value => { setFilter(value); setPage(1); }}
+          label="伏笔状态筛选" options={[
+            { value: "all", label: "全部" }, { value: "open", label: "待回收" },
+            { value: "reinforced", label: "持续强化" }, { value: "likely_paid_off", label: "疑似回收" },
+          ]} />
+      </div>
 
-      <AnalysisViewSwitcher
-        value={filter}
-        onValueChange={(value) => { setFilter(value); setPage(1); setDetailPage(1); }}
-        label="伏笔状态筛选"
-        options={[
-          { value: "all", label: "全部" },
-          { value: "open", label: "待回收" },
-          { value: "reinforced", label: "持续强化" },
-          { value: "likely_paid_off", label: "疑似回收" },
-        ]}
-      />
-
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)] gap-4">
-        <div className="flex min-h-0 flex-col gap-2">
-          {pageTrees.map((tree) => {
-            const statusMeta = getThreadStatusMeta(tree.status);
-            const isSelected = selectedTree?.root_event_id === tree.root_event_id;
+      <section className="flex min-h-0 flex-1 flex-col gap-2" aria-label="伏笔线索列表">
+        <div className="flex shrink-0 items-center justify-between text-xs text-text-muted">
+          <h2 className="text-sm font-semibold text-text">伏笔线索 · {visibleTrees.length} 条</h2>
+          {visibleTrees.length > 0 && <span>当前 {((currentPage - 1) * capacity) + 1}–{Math.min(currentPage * capacity, visibleTrees.length)} 条</span>}
+        </div>
+        <div className="grid shrink-0 grid-cols-[90px_minmax(0,1fr)_140px_88px_80px] gap-3 px-3 text-xs text-text-muted">
+          <span>状态</span><span>线索</span><span>章节与锚点</span><span>回收可能性</span><span>线索强度</span>
+        </div>
+        <div ref={ref} className="min-h-0 flex-1 rounded-lg border border-border/70 bg-surface/70">
+          {pageTrees.map(tree => {
+            const status = getThreadStatusMeta(tree.status);
             return (
-              <button
-                key={tree.root_event_id}
-                type="button"
-                aria-pressed={isSelected}
-                onClick={() => { setSelectedRootId(tree.root_event_id); setDetailPage(1); }}
-                className={cn(
-                  "w-full rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
-                  isSelected ? "border-primary/35 bg-primary/5" : "border-border/70 bg-surface/70 hover:bg-surface-hover",
-                )}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
-                    </div>
-                    <p className="mt-2 text-sm font-semibold leading-6 text-text">{tree.description}</p>
-                  </div>
-                  <div className="text-right text-xs text-text-muted">
-                    <div>回收可能性</div>
-                    <div className="mt-1 font-medium text-text">{getLevelLabel(tree.payoff_likelihood)}</div>
-                  </div>
-                </div>
-                <p className="mt-2 text-xs text-text-muted">第 {tree.first_chapter_id} 至 {tree.last_chapter_id} 章 · {tree.anchor_chapter_ids.length} 个锚点</p>
+              <button key={tree.root_event_id} type="button" aria-pressed={selectedTree?.root_event_id === tree.root_event_id}
+                aria-label={`${tree.description} · 回收可能性 ${getLevelLabel(tree.payoff_likelihood)}`}
+                onClick={() => setSelectedRootId(tree.root_event_id)}
+                className={cn("grid h-16 w-full grid-cols-[90px_minmax(0,1fr)_140px_88px_80px] items-center gap-3 border-b border-l-2 border-b-border/50 px-3 text-left text-xs first:rounded-t-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45",
+                  selectedTree?.root_event_id === tree.root_event_id ? "border-l-primary bg-primary/10" : "border-l-transparent hover:bg-surface-hover")}>
+                <span><Badge variant={status.variant}>{status.label}</Badge></span>
+                <span data-diagnosis-preview className="line-clamp-2 text-sm leading-5 text-text">{tree.description}</span>
+                <span className="text-text-muted">第 {tree.first_chapter_id} 至 {tree.last_chapter_id} 章 · {tree.anchor_chapter_ids.length} 个锚点</span>
+                <span>{getLevelLabel(tree.payoff_likelihood)}</span><span>{getLevelLabel(tree.strength)}</span>
               </button>
             );
           })}
-          {visibleTrees.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border/60 p-6 text-center text-sm text-text-muted">当前筛选下没有伏笔线索</div>
-          ) : null}
-          <PagedControls page={currentPage} pageCount={pageCount} onPageChange={(nextPage) => { setPage(nextPage); setDetailPage(1); }} label="伏笔线索" />
+          {!visibleTrees.length && <p className="p-4 text-sm text-text-muted">当前筛选下没有伏笔线索</p>}
         </div>
+        <div className="h-8 shrink-0"><PagedControls page={currentPage} pageCount={pageCount} onPageChange={next => {
+          setPage(next);
+          setSelectedRootId(visibleTrees[(next - 1) * capacity]?.root_event_id ?? null);
+        }} label="伏笔线索" /></div>
+      </section>
 
-        {selectedTree ? (
-          <aside className="min-h-0 rounded-lg border border-border/70 bg-surface/75 p-4" aria-label="伏笔详情">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={getThreadStatusMeta(selectedTree.status).variant}>{getThreadStatusMeta(selectedTree.status).label}</Badge>
-            </div>
-            <h2 className="mt-2 text-base font-semibold leading-6 text-text">{selectedTree.description}</h2>
-            <AnalysisViewSwitcher value={detailView} onValueChange={setDetailView} label="伏笔详情内容" className="mt-3" options={[
-              { value: "reason", label: "判断依据" },
-              { value: "tracking", label: "跟踪信息" },
-            ]} />
-            {detailView === "reason" ? (
-              <>
-                <div className="mt-3 rounded-lg bg-surface-hover/55 p-3">
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-text">{detailPassages[currentDetailPage - 1]}</p>
-                  <PagedControls page={currentDetailPage} pageCount={detailPassages.length} onPageChange={setDetailPage} label="伏笔判断" />
-                </div>
-                <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg border border-border/60 p-2"><dt className="text-text-muted">线索强度</dt><dd className="mt-1 font-medium text-text">{getLevelLabel(selectedTree.strength)}</dd></div>
-                  <div className="rounded-lg border border-border/60 p-2"><dt className="text-text-muted">跟踪状态</dt><dd className="mt-1 font-medium text-text">{selectedTree.active ? "继续跟踪" : "已经结束"}</dd></div>
-                  <div className="col-span-2 rounded-lg border border-border/60 p-2"><dt className="text-text-muted">锚点章节</dt><dd className="mt-1 font-medium text-text">{selectedTree.anchor_chapter_ids.join("、") || "—"}</dd></div>
-                </dl>
-              </>
-            ) : (
-              <dl className="mt-3 grid gap-2 text-sm">
-                <div><dt className="text-text-muted">线索强度</dt><dd className="font-medium text-text">{getLevelLabel(selectedTree.strength)}</dd></div>
-                <div><dt className="text-text-muted">跟踪状态</dt><dd className="font-medium text-text">{selectedTree.active ? "继续跟踪" : "已经结束"}</dd></div>
-                <div><dt className="text-text-muted">锚点章节</dt><dd className="font-medium text-text">{selectedTree.anchor_chapter_ids.join("、") || "—"}</dd></div>
-              </dl>
-            )}
-          </aside>
-        ) : null}
-      </div>
+      {selectedTree && <aside aria-label="伏笔详情" className={cn("flex min-h-0 shrink-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/75 p-3", hasReason ? "h-[32%]" : "h-[132px]")}>
+        <div className="flex shrink-0 items-center justify-between gap-4">
+          <h2 className="text-sm font-semibold text-text">伏笔详情</h2>
+          <dl className="flex items-center gap-4 text-xs">
+            <div className="flex gap-2"><dt className="text-text-muted">线索强度</dt><dd>{getLevelLabel(selectedTree.strength)}</dd></div>
+            <div className="flex gap-2"><dt className="text-text-muted">跟踪状态</dt><dd>{selectedTree.active ? "继续跟踪" : "已经结束"}</dd></div>
+            <div className="flex gap-2"><dt className="text-text-muted">回收可能性</dt><dd>{getLevelLabel(selectedTree.payoff_likelihood)}</dd></div>
+          </dl>
+        </div>
+        <DiagnosisPagedText key={selectedTree.root_event_id} text={detailText} label="伏笔判断" testId="foreshadowing-detail-passage" />
+      </aside>}
     </div>
   );
 }
@@ -329,7 +294,6 @@ function SkeletonGrid() {
 export function DiagnosisPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
-  const compact = useCompactAnalysisViewport();
 
   const urlTaskId = searchParams.get("task_id");
 
@@ -436,6 +400,7 @@ export function DiagnosisPage() {
         <AnalysisWorkspace.Tabs defaultValue="overview">
           <AnalysisWorkspace.Tab value="overview" label="综合概览">
             <DiagnosisOverview
+              diagnosisText={diagnosis.diagnosis}
               metrics={[
                 { title: "伏笔回收预期", value: foreshadowMetric != null ? `${Math.round(foreshadowMetric * 100)}%` : "—", reason: null },
                 { title: "权力立场", value: diagnosis.power_stance_score != null ? `${diagnosis.power_stance_score}/5` : "—", reason: diagnosis.power_stance_reason },
@@ -451,58 +416,52 @@ export function DiagnosisPage() {
           </AnalysisWorkspace.Tab>
 
           <AnalysisWorkspace.Tab value="value-topic" label="价值主题">
-            <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] gap-4">
-              {diagnosis.diagnosis ? (
-                <DiagnosisText diagnosisText={diagnosis.diagnosis} className="h-full min-h-0" />
-              ) : (
-                <DashboardCardShell
-                  title="综合诊断"
-                  icon={<AlertCircle className="h-4 w-4" />}
-                  accent="chart-2"
-                  className="h-full min-h-0"
-                  bodyClassName="items-center justify-center text-center"
-                >
-                  <p className="text-sm text-text-muted">当前任务暂无综合诊断文本。</p>
-                </DashboardCardShell>
-              )}
-              <div className={compact ? "flex min-h-0 flex-col gap-2" : "flex min-h-0 flex-col gap-4"}>
+            <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] gap-4">
+              <div className="flex min-h-0 flex-col gap-3">
                 <ValueLogicCard
                   valueLogicType={diagnosis.value_logic_type}
                   valueLogicReason={diagnosis.value_logic_reason}
-                  className="shrink-0"
+                  contextText={[
+                    getDiagnosisSection(diagnosis.diagnosis, "value").text,
+                    diagnosis.power_stance_reason && `【权力立场依据】\n${diagnosis.power_stance_reason}`,
+                    diagnosis.dignity_reason && `【平民尊严依据】\n${diagnosis.dignity_reason}`,
+                    diagnosis.cultural_depth_reason && `【文化深度依据】\n${diagnosis.cultural_depth_reason}`,
+                  ].filter(Boolean).join("\n\n")}
+                  className="min-h-0 flex-1"
                 />
-                <DashboardCardShell
-                  title={`主题标签 · ${diagnosis.topic_labels ? Object.keys(diagnosis.topic_labels).length : 0} 个`}
-                  icon={<Tags className="h-4 w-4" />}
-                  accent="chart-4"
-                  contentClassName={compact ? "gap-1 p-2" : "gap-2 p-3"}
-                  bodyClassName="gap-2"
-                  className="shrink-0"
-                >
-                  <div className={compact ? "rounded-lg border border-border/60 bg-surface/70 p-2" : "rounded-lg border border-border/60 bg-surface/70 p-3"}>
-                    <TopicLabels labels={diagnosis.topic_labels} />
-                  </div>
-                </DashboardCardShell>
-                <div data-testid="diagnosis-emotion-note" className="rounded-lg border border-border/60 bg-surface/70 px-3 py-2 text-xs text-text-muted">
+                <div data-testid="diagnosis-emotion-note" className="shrink-0 rounded-lg border border-border/60 bg-surface/70 px-4 py-2 text-xs leading-5 text-text-muted">
                   词典情绪均值：{diagnosis.emotion_avg != null ? diagnosis.emotion_avg.toFixed(8) : "—"}；
                   零信号字符占比：{diagnosis.lexicon_zero_hit_share != null
                     ? `${(diagnosis.lexicon_zero_hit_share * 100).toFixed(2)}%`
                     : "—"}。词典未命中不代表正文没有情绪。
                 </div>
               </div>
+                <DashboardCardShell
+                  title={`主题标签 · ${diagnosis.topic_labels ? Object.keys(diagnosis.topic_labels).length : 0} 个`}
+                  icon={<Tags className="h-4 w-4" />}
+                  accent="chart-4"
+                  className="h-full min-h-0"
+                  contentClassName="min-h-0 [&>div:first-child]:shrink-0"
+                  bodyClassName="min-h-0 flex-1 gap-2"
+                >
+                  <TopicLabels labels={diagnosis.topic_labels} />
+                </DashboardCardShell>
             </div>
           </AnalysisWorkspace.Tab>
 
           <AnalysisWorkspace.Tab value="cast-structure" label="角色结构">
-            <div className="grid h-full min-h-0 grid-cols-2 gap-4">
+            <div className="flex h-full min-h-0 flex-col gap-3">
               <CharacterCastCard
                 focusStructure={diagnosis.focus_structure ?? undefined}
                 focusCharacters={diagnosis.focus_characters}
                 coreCast={diagnosis.core_cast}
                 majorCast={diagnosis.main_characters}
-                className="h-full min-h-0"
+                className="shrink-0"
               />
-              <ArcScoresChart arcScores={diagnosis.arc_scores} className="h-full min-h-0" />
+              <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-4">
+                <ArcScoresChart arcScores={diagnosis.arc_scores} className="h-full min-h-0" />
+                <DiagnosisText diagnosisText={getDiagnosisSection(diagnosis.diagnosis, "cast").text} title={getDiagnosisSection(diagnosis.diagnosis, "cast").title} textClassName="text-base leading-8" className="h-full min-h-0" />
+              </div>
             </div>
           </AnalysisWorkspace.Tab>
 

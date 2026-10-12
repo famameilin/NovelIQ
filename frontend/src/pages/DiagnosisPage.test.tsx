@@ -311,9 +311,40 @@ describe("DiagnosisPage", () => {
     expect(screen.getAllByText("铜铃异响反复指向山门旧案").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("开放线索")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "跟踪信息" }));
-    expect(screen.getByText("线索强度")).toBeInTheDocument();
-    expect(screen.getByText("3、5、8")).toBeInTheDocument();
+    // 判断依据与跟踪字段并列呈现，无需切换详情内的第二层页签
+    expect(within(screen.getByRole("complementary", { name: "伏笔详情" })).getByText("线索强度")).toBeInTheDocument();
+    expect(screen.getByTestId("foreshadowing-detail-passage")).toHaveTextContent("3、5、8");
     expect(screen.queryByText("判断置信度")).not.toBeInTheDocument();
+  });
+
+  it("伏笔分页后末页线索可选，长判断依据通过翻页完整可达", async () => {
+    const user = userEvent.setup();
+    getDiagnosisMock.mockResolvedValue(null);
+    const reason = "判断依据完整保留".repeat(50);
+    getForeshadowingTreesMock.mockResolvedValue(Array.from({ length: 17 }, (_, index) => ({
+      root_event_id: `root-${index}`, tree_id: `tree-${index}`,
+      first_chapter_id: index + 1, last_chapter_id: index + 1, anchor_chapter_ids: [index + 1],
+      description: `第${index + 1}条线索`, status: "open", active: true, strength: "medium",
+      payoff_likelihood: "high", latest_reason: reason,
+    })));
+    renderDiagnosisPage();
+    await user.click(await screen.findByRole("tab", { name: "伏笔追踪" }));
+    expect(screen.getByRole("button", { name: /第6条线索/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /第7条线索/ })).not.toBeInTheDocument();
+    const navigation = screen.getByRole("navigation", { name: "伏笔线索分页" });
+    await user.click(within(navigation).getByRole("button", { name: "下一页" }));
+    await user.click(within(navigation).getByRole("button", { name: "下一页" }));
+    await user.click(screen.getByRole("button", { name: /第17条线索/ }));
+    expect(screen.getByRole("button", { name: /第17条线索/, pressed: true })).toBeInTheDocument();
+    const detail = screen.getByRole("complementary", { name: "伏笔详情" });
+    let collected = screen.getByTestId("foreshadowing-detail-passage").textContent || "";
+    for (let index = 0; index < 10; index++) {
+      const next = within(detail).queryByRole("button", { name: "下一页" });
+      if (!next || next.hasAttribute("disabled")) break;
+      await user.click(next);
+      collected += screen.getByTestId("foreshadowing-detail-passage").textContent;
+    }
+    expect(collected).toContain(reason);
+    expect(collected).toContain("锚点章节：17");
   });
 });
