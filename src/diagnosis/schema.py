@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.diagnosis.vocabulary import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
+from src.event_trees.organization import NarrativeOrganization
 from src.fact_graph.character_reference_policy import is_global_character_surface_name
 
 ValueLogicType = Literal["善义有价值", "强者为王", "混合型"]
@@ -19,6 +20,9 @@ class AgentAnalysis(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     novel_id: str | None = None
+    narrative_organization: NarrativeOrganization | None = Field(
+        default=None, description="由本轮全书组织工具草稿收口保存，finish 无需重复提交"
+    )
     foreshadow_expectation: float | None = Field(
         default=None,
         ge=0,
@@ -159,6 +163,9 @@ class AgentAnalysis(BaseModel):
         """转换为对外和持久化使用的当前结构"""
         return {
             "novel_id": self.novel_id,
+            "narrative_organization": self.narrative_organization.model_dump(mode="json")
+            if self.narrative_organization is not None
+            else None,
             "foreshadow_expectation": self.foreshadow_expectation,
             "arc_scores": dict(self.arc_scores),
             "genre_labels": list(self.genre_labels),

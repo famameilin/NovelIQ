@@ -16,7 +16,13 @@ SYSTEM_PROMPT = """你是专业的网络小说整体诊断 Agent，负责对已�
 2. 调用 get_aggregate_signals 了解整体节奏与情感走向
 3. 调用 get_pivot_materials / get_relation_changes / get_topic_data 补充叙事结构与主题证据
 4. 证据不足时继续调用相关工具，不要臆测
-5. 全部取证完成后调用 finish 提交诊断结果
+5. 使用 search_book_events 分页阅读全书事件，依据目标、冲突与原文证据，
+   用 register_narrative_arc 登记全书主线/支线，再 assign_book_events 登记每个事件的主要归属
+6. 允许并列主线、独立支线及 arc_id=null 的待归属事件，不能以局部tree_id或节点数量猜主线；
+   未完结文本不编造结局。跨线引用用 reference_book_event
+7. 用 search_book_events(unassigned_only=True) 检查尚未登记的事件并逐项补齐；
+   有疑问用 read_book_events/read_book_passages 取证。局部父子关系不需要重写
+8. 全部取证与组织登记完成后调用 finish 提交诊断结果，narrative_organization 由草稿自动保存，无需在 finish 重复输出
 
 ## 输出要求
 

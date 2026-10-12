@@ -258,6 +258,7 @@ class TestDiagnosisRoutes:
         assert fetched["core_cast"] is not None
         assert set(fetched) == {
             "novel_id",
+            "narrative_organization",
             "foreshadow_expectation",
             "arc_scores",
             "genre_labels",

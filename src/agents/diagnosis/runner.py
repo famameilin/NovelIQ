@@ -18,6 +18,7 @@ from src.agents.stream import AgentStream
 from src.diagnosis.patch import AgentAnalysisPatch
 from src.diagnosis.queries import DiagnosisQueries
 from src.diagnosis.schema import AgentAnalysis
+from src.event_trees.organization import EventOrganizationDraft, NarrativeOrganization, save_organization
 
 from .evidence import DiagnosisEvidenceLedger
 from .prompts import build_diagnosis_system_prompt
@@ -52,6 +53,7 @@ def _finalize_diagnosis_result(
     *,
     novel_id: str,
     foreshadow_expectation: float | None,
+    organization: NarrativeOrganization | None = None,
 ) -> AgentAnalysis:
     """
     2026-08-02 用于以运行元数据和伏笔 ledger 确定性收口诊断终态
@@ -59,6 +61,7 @@ def _finalize_diagnosis_result(
     payload = analysis.model_dump()
     payload["novel_id"] = novel_id
     payload["foreshadow_expectation"] = foreshadow_expectation
+    payload["narrative_organization"] = organization
     return AgentAnalysis.model_validate(payload)
 
 
@@ -67,12 +70,15 @@ def _validate_diagnosis_submission(
     *,
     expected_topic_ids: set[int],
     evidence_ledger: DiagnosisEvidenceLedger,
+    organization_draft: EventOrganizationDraft | None = None,
 ) -> None:
     """
     2026-08-04 用于同时校验诊断结果主题合同与工具取证来源
     """
     _validate_topic_label_ids(analysis, expected_ids=expected_topic_ids)
     evidence_ledger.require_evidence()
+    if organization_draft is not None:
+        organization_draft.finish()
 
 
 def _context_summary(
@@ -126,7 +132,10 @@ async def _run_diagnosis_agent(
     foreshadow_expectation = diagnosis_repo.calculate_foreshadow_expectation(run_id)
 
     evidence_ledger = DiagnosisEvidenceLedger()
-    tools = build_diagnosis_tools(session, run_id, evidence_ledger=evidence_ledger)
+    organization_draft = EventOrganizationDraft(session, run_id)
+    tools = build_diagnosis_tools(
+        session, run_id, evidence_ledger=evidence_ledger, organization_draft=organization_draft
+    )
     max_attempts = max(1, settings.models.diagnosis.max_iterations)
     recorder: Any = audit_recorder
     model_name = _model_name(llm)
@@ -139,16 +148,20 @@ async def _run_diagnosis_agent(
     )
     invocation_id = recorder.start_invocation(**audit_context)
     observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=audit_context)
+    # 全书组织需要分页取证与批量归属，工具预算独立于报告提交重试次数
+    tool_budget = max(max_attempts, 24 + organization_draft.search_events(limit=1)["total"] // 5)
     graph = build_agent_graph(
         llm,
         tools,
         max_attempts=max_attempts,
+        max_tool_iterations=tool_budget,
         response_model=AgentAnalysis,
         first_hint="请对当前小说完成整体诊断（按需取证，最后调用 finish 提交诊断结果）。",
         response_validator=lambda analysis: _validate_diagnosis_submission(
             analysis,
             expected_topic_ids=expected_topic_ids,
             evidence_ledger=evidence_ledger,
+            organization_draft=organization_draft,
         ),
         revision_tool_name="revise_finish",
         revision_response_model=AgentAnalysisPatch,
@@ -182,7 +195,13 @@ async def _run_diagnosis_agent(
         # 故与标注 agent 同语义直接中断这次的图调用（取消由上层 handle_cancel 收口）
         from src.utils.cancellation import run_cancellable
 
-        result_state = cast(dict[str, Any], await run_cancellable(graph.ainvoke(initial_state), is_cancelled))
+        result_state = cast(
+            dict[str, Any],
+            await run_cancellable(
+                graph.ainvoke(initial_state, config={"recursion_limit": 2 * tool_budget + 3 * max_attempts + 10}),
+                is_cancelled,
+            ),
+        )
     except BaseException as exc:
         logger.error("diagnosis agent graph failed: run_id={} error={}", run_id, exc)
         recorder.finish_invocation(**audit_context, status="error", final_error=str(exc))
@@ -207,6 +226,7 @@ async def _run_diagnosis_agent(
             AgentAnalysis.model_validate(raw_output),
             novel_id=novel_id,
             foreshadow_expectation=foreshadow_expectation,
+            organization=organization_draft.finish(),
         )
     except Exception as exc:
         logger.error("diagnosis finalize failed: run_id={} error={}", run_id, exc)
@@ -238,9 +258,16 @@ def save_diagnosis_result(session: Session, run_id: str, analysis: AgentAnalysis
     from src.fact_graph.graph import FactGraph
     from src.storage.repositories import StatsRepository
 
-    StatsRepository(session).insert_agent_analysis(run_id, analysis.model_dump())
-    FactGraph(run_scope=run_id).save_main_characters(session, list(analysis.main_characters))
-    session.commit()
+    if analysis.narrative_organization is None:
+        raise ValueError("诊断结果缺少全书叙事组织")
+    try:
+        output_id = StatsRepository(session).insert_agent_analysis(run_id, analysis.model_dump())
+        FactGraph(run_scope=run_id).save_main_characters(session, list(analysis.main_characters))
+        save_organization(session, run_id, analysis.narrative_organization, output_id)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
 
 
 async def run_diagnosis_agent(

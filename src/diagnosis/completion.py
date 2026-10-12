@@ -17,6 +17,14 @@ def _payload_has_valid_diagnosis_contract(payload: dict[str, Any]) -> bool:
     raw_focus_characters = payload.get("focus_characters")
     raw_main_characters = payload.get("main_characters")
     raw_core_cast = payload.get("core_cast")
+    if not isinstance(payload.get("narrative_organization"), dict):
+        return False
+    from src.event_trees.organization import NarrativeOrganization
+
+    try:
+        NarrativeOrganization.model_validate(payload["narrative_organization"])
+    except ValueError:
+        return False
 
     # 正式诊断必须有焦点结构和三组角色名单，只有旧字段的半成品行不算完成
     if (

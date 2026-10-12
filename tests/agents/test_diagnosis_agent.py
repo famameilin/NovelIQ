@@ -301,6 +301,10 @@ async def test_truncated_tool_call_skips_invoke_and_returns_error_tool_message()
 async def test_run_diagnosis_agent_requires_run_scoped_tools() -> None:
     """run_diagnosis_agent 装配诊断工具并产出诊断结果"""
     mock_session = MagicMock()
+    mock_session.scalar.return_value = 0
+    mock_session.scalars.return_value.all.return_value = []
+    mock_session.get.return_value.run_id = "run-1"
+    mock_session.get.return_value.kind = "agent_analysis"
     payload = _analysis_payload()
     payload["novel_id"] = "model-invented-id"
     payload["foreshadow_expectation"] = 0.99
@@ -333,6 +337,8 @@ async def test_run_diagnosis_agent_rejects_finish_without_evidence_tool() -> Non
     2026-08-04 用于保证诊断 Agent 不能绕过工具取证直接提交结果
     """
     mock_session = MagicMock()
+    mock_session.scalar.return_value = 0
+    mock_session.scalars.return_value.all.return_value = []
     diagnosis_repo = MagicMock()
     diagnosis_repo.fetch_topic_words.return_value = [{"topic_id": 0}, {"topic_id": 1}]
     diagnosis_repo.calculate_foreshadow_expectation.return_value = 0.62

@@ -20,8 +20,8 @@ from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.diagnosis.schema import AgentAnalysis
 
 
-def _build_tools(session=None, ledger=None) -> list:
-    return build_diagnosis_tools(session or MagicMock(), "run-1", evidence_ledger=ledger)
+def _build_tools(session=None, ledger=None) -> dict:
+    return {tool.name: tool for tool in build_diagnosis_tools(session or MagicMock(), "run-1", evidence_ledger=ledger)}
 
 
 def _invoke(tool, payload: dict | None = None) -> str:
@@ -56,7 +56,7 @@ def test_get_aggregate_signals_with_stats() -> None:
     with patch("src.storage.repositories.StatsRepository") as repo_cls:
         repo_cls.return_value.fetch_global_stats_dict.return_value = {"tension": 0.8, "pace": 0.5}
         tools = _build_tools(ledger=ledger)
-        out = _invoke(tools[0])
+        out = _invoke(tools["get_aggregate_signals"])
 
     assert "tension: 0.8" in out
     assert "pace: 0.5" in out
@@ -67,7 +67,7 @@ def test_get_aggregate_signals_empty() -> None:
     with patch("src.storage.repositories.StatsRepository") as repo_cls:
         repo_cls.return_value.fetch_global_stats_dict.return_value = {}
         tools = _build_tools()
-        assert _invoke(tools[0]) == "（无聚合指标数据）"
+        assert _invoke(tools["get_aggregate_signals"]) == "（无聚合指标数据）"
 
 
 # ============================================================================
@@ -103,7 +103,7 @@ def test_get_pivot_materials_with_all_sections() -> None:
     )
     with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
-        out = _invoke(tools[1])
+        out = _invoke(tools["get_pivot_materials"])
 
     assert "天衡宗将庇护顾霜" in out
 
@@ -112,7 +112,7 @@ def test_get_pivot_materials_empty() -> None:
     repo = _mock_pivot_repo()
     with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
-        assert _invoke(tools[1]) == "（无转折素材数据）"
+        assert _invoke(tools["get_pivot_materials"]) == "（无转折素材数据）"
 
 
 # ============================================================================
@@ -125,7 +125,7 @@ def test_get_relation_changes_formats_rows() -> None:
     repo.fetch_relation_changes.return_value = [(3, "甲", "乙", "盟友", "assert")]
     with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
-        assert _invoke(tools[2]) == "[chunk 3] 甲 -> 乙 (盟友, assert)"
+        assert _invoke(tools["get_relation_changes"]) == "[chunk 3] 甲 -> 乙 (盟友, assert)"
 
 
 def test_get_relation_changes_empty() -> None:
@@ -133,7 +133,7 @@ def test_get_relation_changes_empty() -> None:
     repo.fetch_relation_changes.return_value = []
     with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
-        assert _invoke(tools[2]) == "（无关系变化数据）"
+        assert _invoke(tools["get_relation_changes"]) == "（无关系变化数据）"
 
 
 # ============================================================================
@@ -146,7 +146,7 @@ def test_get_character_data_with_known_characters() -> None:
     repo.fetch_known_characters.return_value = ["沈砚", "顾霜"]
     with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
-        assert _invoke(tools[3]) == "已知人物: ['沈砚', '顾霜']"
+        assert _invoke(tools["get_character_data"]) == "已知人物: ['沈砚', '顾霜']"
 
 
 def test_get_character_data_empty() -> None:
@@ -154,7 +154,7 @@ def test_get_character_data_empty() -> None:
     repo.fetch_known_characters.return_value = []
     with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
-        assert _invoke(tools[3]) == "（无人物数据）"
+        assert _invoke(tools["get_character_data"]) == "（无人物数据）"
 
 
 # ============================================================================
@@ -167,7 +167,7 @@ def test_get_topic_data_empty() -> None:
     repo.fetch_topic_words.return_value = []
     with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
         tools = _build_tools()
-        assert _invoke(tools[4]) == "（无主题数据）"
+        assert _invoke(tools["get_topic_data"]) == "（无主题数据）"
 
 
 # ============================================================================
@@ -183,7 +183,7 @@ def test_get_graph_signals_merges_summary_and_quality() -> None:
         svc_cls.from_session.return_value.build_graph_report.return_value = object()
         serialize.return_value = ({"nodes": 10}, {"quality": "high"})
         tools = _build_tools()
-        out = _invoke(tools[5])
+        out = _invoke(tools["get_graph_signals"])
 
     assert "nodes: 10" in out
     assert "quality: high" in out
@@ -195,7 +195,7 @@ def test_get_graph_signals_empty_signals() -> None:
         patch("src.fact_graph.read.serialize_graph_report_signals", return_value=({}, {})),
     ):
         tools = _build_tools()
-        assert _invoke(tools[5]) == "（无图谱信号数据）"
+        assert _invoke(tools["get_graph_signals"]) == "（无图谱信号数据）"
 
 
 # ============================================================================
@@ -207,5 +207,5 @@ def test_finish_and_revise_finish_ok() -> None:
     from src.diagnosis.patch import AgentAnalysisPatch
 
     tools = _build_tools()
-    assert _invoke(tools[6], {"analysis": _make_analysis()}) == "OK"
-    assert _invoke(tools[7], {"patch": AgentAnalysisPatch(diagnosis="ok")}) == "OK"
+    assert _invoke(tools["finish"], {"analysis": _make_analysis()}) == "OK"
+    assert _invoke(tools["revise_finish"], {"patch": AgentAnalysisPatch(diagnosis="ok")}) == "OK"

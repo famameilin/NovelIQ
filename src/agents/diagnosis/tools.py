@@ -8,13 +8,14 @@ agent 通过工具按需查询聚合指标、转折素材、人物、主题与�
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.tools import tool
 from sqlalchemy.orm import Session
 
 from src.diagnosis.patch import AgentAnalysisPatch
 from src.diagnosis.schema import AgentAnalysis
+from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
 
 from .evidence import DiagnosisEvidenceLedger
 
@@ -39,9 +40,87 @@ def build_diagnosis_tools(
     run_id: str,
     *,
     evidence_ledger: DiagnosisEvidenceLedger | None = None,
+    organization_draft: EventOrganizationDraft | None = None,
 ) -> list[Any]:
     """构建诊断 agent 工具集"""
     ledger = evidence_ledger or DiagnosisEvidenceLedger()
+    draft = organization_draft or EventOrganizationDraft(session, run_id)
+
+    @tool
+    def search_book_events(
+        query: str = "",
+        chapter_id: int | None = None,
+        tree_id: str | None = None,
+        unassigned_only: bool = False,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> str:
+        """分页阅读全书已保存事件，unassigned_only 查尚未登记主要归属的事件，按 next_offset 续页"""
+        return json.dumps(
+            draft.search_events(
+                query,
+                chapter_id=chapter_id,
+                tree_id=tree_id,
+                unassigned_only=unassigned_only,
+                offset=offset,
+                limit=limit,
+            ),
+            ensure_ascii=False,
+        )
+
+    @tool
+    def read_book_events(event_ids: list[str]) -> str:
+        """读取指定事件真实内容与原文段号，每次最多100个"""
+        return json.dumps(draft.read_events(event_ids), ensure_ascii=False)
+
+    @tool
+    def read_book_passages(paragraph_ids: list[int], offset: int = 0, limit: int = 10) -> str:
+        """读取事件依据原文，每段最多2000字符，next_offset 继续读取该段"""
+        return json.dumps(draft.read_passages(paragraph_ids, offset, limit), ensure_ascii=False)
+
+    @tool
+    def register_narrative_arc(
+        key: str,
+        kind: Literal["main", "subplot"],
+        title: str,
+        objective: str,
+        role: str,
+        reason: str,
+        evidence: list[OrganizationEvidence],
+        parent_arc_id: str | None = None,
+    ) -> str:
+        """依据全书目标、冲突和原文登记主支线，返回稳定 arc_id；同key用于修正，局部tree_id不是全书线"""
+        return draft.register_arc(
+            key=key,
+            kind=kind,
+            title=title,
+            objective=objective,
+            role=role,
+            reason=reason,
+            evidence=evidence,
+            parent_arc_id=parent_arc_id,
+        )
+
+    @tool
+    def assign_book_events(
+        event_ids: list[str], arc_id: str | None, role: str, reason: str, evidence: list[OrganizationEvidence]
+    ) -> str:
+        """批量登记事件唯一主要归属；不能确定时arc_id=null并说明原因；evidence引用真实event_id"""
+        draft.assign_events(event_ids, arc_id=arc_id, role=role, reason=reason, evidence=evidence)
+        return "已保存草稿"
+
+    @tool
+    def reference_book_event(
+        arc_id: str, event_id: str, role: str, reason: str, evidence: list[OrganizationEvidence]
+    ) -> str:
+        """登记其他叙事线对同一事件的引用，不复制事件，不改变其主要归属"""
+        draft.reference_event(arc_id=arc_id, event_id=event_id, role=role, reason=reason, evidence=evidence)
+        return "已保存草稿"
+
+    @tool
+    def read_organization_draft(offset: int = 0, limit: int = 50) -> str:
+        """分页检查本轮已登记的叙事线、主要归属和跨线引用数量及内容"""
+        return json.dumps(draft.read_draft(offset, limit), ensure_ascii=False)
 
     @tool
     def get_aggregate_signals() -> str:
@@ -201,6 +280,13 @@ def build_diagnosis_tools(
         return "OK"
 
     return [
+        search_book_events,
+        read_book_events,
+        read_book_passages,
+        register_narrative_arc,
+        assign_book_events,
+        reference_book_event,
+        read_organization_draft,
         get_aggregate_signals,
         get_pivot_materials,
         get_relation_changes,
