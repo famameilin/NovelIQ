@@ -169,25 +169,14 @@ test.describe('分析结果页面', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          meta: { novel_id: NOVEL_ID, novel_name: '测试小说', total_chapters: 100 },
-          phases: [
-            { name: '引入期', start: 1, end: 15, ratio: 0.15 },
-            { name: '发展期', start: 16, end: 70, ratio: 0.55 },
-            { name: '高潮期', start: 71, end: 85, ratio: 0.14 },
-            { name: '收束期', start: 86, end: 100, ratio: 0.16 },
-          ],
-          nodes: [],
-          causal_edges: [],
-          foreshadowing_edges: [],
-          derived_event_order: [],
-          tension_curve: Array(100).fill(0.5),
-          phase_basis: 'fixed_percentage',
-          total_chapters: 100,
+          run_id: TASK_ID, chapters: [{ chapter_id: 1, order: 1, title: '第一章' }],
+          through_chapter_id: 1, changes: [], states: [], subjects: [],
+          distribution: [], total: 0, next_cursor: null,
         }),
       });
     });
     await page.goto(`/novels/${NOVEL_ID}/timeline?task_id=${TASK_ID}`);
-    await expect(page.getByText('暂无时间轴节点')).toBeVisible();
+    await expect(page.getByText('此截点内没有符合条件的变化')).toBeVisible();
   });
 
   test('诊断页应正常加载', async ({ page }) => {

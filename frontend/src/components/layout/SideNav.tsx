@@ -69,6 +69,8 @@ export function SideNav() {
             key={item.to}
             to={`${basePath}${item.to}${taskQuery}`}
             end={item.to === ""}
+            aria-label={item.label}
+            title={item.label}
             className={({ isActive }) =>
               cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",

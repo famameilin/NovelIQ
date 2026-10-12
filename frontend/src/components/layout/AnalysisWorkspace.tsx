@@ -15,7 +15,6 @@ import type { NovelHeaderProps } from "@/components/common/NovelHeader";
 import { AnalysisPageViewport } from "@/components/layout/AnalysisPageViewport";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/cn";
-import { PipelineBoundary } from "@/components/common/PipelineBoundary";
 
 interface AnalysisWorkspaceProps {
   title: string;
@@ -75,7 +74,6 @@ function AnalysisWorkspaceRoot({
             contentClassName,
           )}
         >
-          <PipelineBoundary />
           {children}
         </div>
       </AnalysisPageViewport>

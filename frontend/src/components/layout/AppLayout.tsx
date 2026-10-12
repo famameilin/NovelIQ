@@ -99,7 +99,7 @@ export function AppLayout({ mode = "default" }: AppLayoutProps) {
             </div>
           </HomeContext.Provider>
         ) : (
-          <div className="flex-1 overflow-y-auto">
+          <div className="min-w-0 flex-1 overflow-y-auto">
             <Outlet />
           </div>
         )}
