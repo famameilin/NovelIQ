@@ -1,216 +1,352 @@
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { AxiosResponse } from "axios";
+import { arc, eventA, eventB, installNarrativeApi, renderNarrative, root, tree, treeDetail } from "@/test/narrativeFixtures";
+import type { NarrativeTreeDetail, NarrativeTreeNode } from "@/api/narrativeTypes";
 
-import type { EventForestNode, EventForestResponse } from "@/api/types";
-import { EventTreesPage } from "@/pages/EventTreesPage";
-import { useNovelStore } from "@/store/novelStore";
-
-const getEventForestMock = vi.fn();
-const getEventSourceChapterMock = vi.fn();
-
-vi.mock("@/api/results", () => ({
-  getEventForest: (...args: unknown[]) => getEventForestMock(...args),
-  getEventSourceChapter: (...args: unknown[]) => getEventSourceChapterMock(...args),
-}));
-
-vi.mock("@/components/layout/AnalysisWorkspace", () => ({
-  AnalysisWorkspace: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-}));
-
-function node(
-  eventId: string,
-  treeId: string,
-  description: string,
-  causeRole: EventForestNode["cause_role"],
-  parentEventId: string | null,
-  evidenceScope: EventForestNode["evidence_scope"] = "chapter",
-): EventForestNode {
-  return {
-    event_id: eventId, tree_id: treeId, description, cause_role: causeRole,
-    parent_event_id: parentEventId, evidence_scope: evidenceScope,
-    chapter_id: 1, chapter_order: 1, participants: [], anchor_paragraph_ids: [0],
-    char_start: 0, char_end: 10, evidence: [{ paragraph_ids: [0] }], causal_event_refs: [],
-  };
-}
-
-const forest: EventForestResponse = {
-  chapter_id: 1, chapter_order: 1, visible_through_chapter_order: 1,
-  derived_event_order: ["root-a", "main-a", "side-a", "root-b"],
-  event_nodes: [
-    node("root-a", "tree-a", "山门开启", "root", null),
-    node("main-a", "tree-a", "主角入门", "main", "root-a"),
-    node("side-a", "tree-a", "守卫走旁门", "secondary", "main-a", "paragraph"),
-    node("root-b", "tree-b", "第二棵树", "root", null),
-  ],
-  event_trees: [
-    { tree_id: "tree-a", root_event_id: "root-a", main_chain: ["root-a", "main-a"], secondary_groups: [{ target_event_id: "main-a", branch: ["side-a"] }], chapter_ids: [1], char_start: 0, char_end: 10 },
-    { tree_id: "tree-b", root_event_id: "root-b", main_chain: ["root-b"], secondary_groups: [], chapter_ids: [1], char_start: 0, char_end: 10 },
-  ],
-  causal_edges: [], foreshadowing_edges: [],
-};
-
-function renderPage(url = "/novels/novel-1/event-trees?task_id=task-1") {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const router = createMemoryRouter(
-    [{ path: "/novels/:novelId/event-trees", element: <EventTreesPage /> }],
-    { initialEntries: [url] },
-  );
-  render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
-  return router;
-}
-
+vi.mock("@/components/layout/AnalysisWorkspace", () => ({ AnalysisWorkspace: ({ children }: { children: ReactNode }) => <main>{children}</main> }));
+let api: ReturnType<typeof installNarrativeApi>;
 beforeEach(() => {
-  getEventForestMock.mockReset().mockResolvedValue(forest);
-  getEventSourceChapterMock.mockReset().mockResolvedValue({
-    chapter_id: 1, title: "第一章", paragraphs: [
-      { paragraph_id: 0, paragraph_index: 0, text: "山门前的原文。" },
-      { paragraph_id: 1, paragraph_index: 1, text: "另一段原文。" },
-    ],
+  api = installNarrativeApi();
+  // jsdom 不计算布局，显式提供桌面画布尺寸，初始化取景不能依赖零宽矩形
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    return this.getAttribute("aria-label") === "事件树画布" ? new DOMRect(0, 0, 1000, 650) : new DOMRect();
   });
-  useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: "task-1" });
+});
+afterEach(() => { vi.restoreAllMocks(); window.getSelection()?.removeAllRanges(); });
+const url = "/novels/novel-1/event-trees?task_id=task-a";
+
+it("完整消费全书分页，根与所有叙事线可达", async () => {
+  api.mockResolvedValueOnce({ data: { ...tree, nodes: [tree.nodes[1]], next_cursor: "skeleton-2" } } as AxiosResponse)
+    .mockResolvedValueOnce({ data: { ...tree, nodes: [tree.nodes[0]] } } as AxiosResponse);
+  renderNarrative(url);
+  await screen.findByRole("region", { name: "全书事件树" });
+  expect(api.mock.calls.some(([, config]) => config?.params?.cursor === "skeleton-2")).toBe(true);
+  expect(api.mock.calls.filter(([path]) => String(path).endsWith("/event-trees")).every(([, config]) => config?.params?.expand_all === true)).toBe(true);
+  expect(within(screen.getByLabelText("事件树画布")).getByRole("button", { name: "全书问题" })).toBeInTheDocument();
 });
 
-describe("EventTreesPage", () => {
-  it("默认展现整片森林，放大真实旁支后才读取原文", async () => {
-    const user = userEvent.setup();
-    const router = renderPage();
-    expect(await screen.findByRole("region", { name: "整片事件森林" })).toBeInTheDocument();
-    expect(getEventSourceChapterMock).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: /第 1 章事件树：山门开启/ }));
-    expect(screen.getByRole("region", { name: "事件树结构" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "事件树结构" }).querySelector('[data-parent-id="main-a"][data-child-id="side-a"]')).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /次因旁支.*守卫走旁门/ }));
-    expect(await screen.findByText("段落级依据")).toBeInTheDocument();
-    expect(router.state.location.search).toContain("tree_id=tree-a&event_id=side-a");
-    await user.click(screen.getByRole("button", { name: "阅读本章原文" }));
-    expect(await screen.findByRole("dialog", { name: "章节原文" })).toBeInTheDocument();
-    expect(screen.getByText("山门前的原文。")).toHaveClass("bg-primary/10");
-    expect(getEventSourceChapterMock).toHaveBeenCalledWith("novel-1", "task-1", 1);
+it("事件点与标题共用选择操作，圆不再提供折叠且小点保持最小点击尺寸", async () => {
+  const base = api.getMockImplementation()!;
+  const group: NarrativeTreeNode = { node_id: "group:circle", kind: "group", parent_id: arc.node_id, title: "事件组完整名称", child_count: 1, chapter_order: 2 };
+  const point = { ...eventA, parent_id: group.node_id, child_count: 0 };
+  api.mockImplementation(async (path, config) => {
+    if (String(path).endsWith("/novels/novel-1")) return { data: { title: "验收小说" } } as AxiosResponse;
+    if (config?.params?.expand_all) return { data: { ...tree, nodes: [root, arc, group, point], edges: [...tree.edges, { source_id: arc.node_id, target_id: group.node_id, kind: "organization" }, { source_id: group.node_id, target_id: point.node_id, kind: "organization" }] } } as AxiosResponse;
+    if (String(path).endsWith(encodeURIComponent(point.node_id))) return { data: { ...treeDetail(point), path: [root, arc, group, point] } } as AxiosResponse;
+    return base(path, config);
   });
+  renderNarrative(url);
+  const canvas = await screen.findByLabelText("事件树画布");
+  expect(within(canvas).getByRole("button", { name: group.title })).toBeInTheDocument();
+  expect(canvas.querySelector("button[aria-expanded]")).toBeNull();
+  const select = await within(canvas).findByRole("button", { name: point.title });
+  expect(canvas.querySelector("button button")).toBeNull();
+  expect(canvas.querySelector('[data-node-kind="root"] [data-node-symbol]')).toBeVisible();
+  expect(canvas.querySelector('[data-node-kind="root"] [data-node-ring]')).toBeVisible();
+  expect(canvas.querySelector('[data-node-kind="root"] [data-node-title]')).toHaveClass("font-serif");
+  await waitFor(() => expect(canvas.querySelector('[data-node-kind="root"] [data-node-title]')).toHaveTextContent("验收小说"));
+  expect(canvas.querySelector('[data-node-kind="root"] [data-node-context]')).toHaveTextContent(root.title);
+  expect(within(canvas).getByRole("button", { name: root.title })).toHaveAttribute("title", root.title);
+  expect(canvas.querySelector('[data-node-kind="arc"] [data-node-description]')).toHaveTextContent("解开谜团");
+  await userEvent.click(select.querySelector("[data-node-symbol]")!);
+  expect(await screen.findByRole("dialog", { name: "节点详情" })).toHaveTextContent(point.title);
+  expect(select.closest("article")).toHaveAttribute("data-selected", "true");
+  await userEvent.click(screen.getByRole("button", { name: "缩小画布" }));
+  const scale = JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!).scale;
+  const hit = select.querySelector<HTMLElement>("[data-event-hit-target]")!;
+  expect(parseFloat(hit.style.width) * scale).toBeGreaterThanOrEqual(28);
+  expect(parseFloat(hit.style.height) * scale).toBeGreaterThanOrEqual(28);
+});
 
-  it("支持深链定位和关键词筛选，无匹配时给出空状态", async () => {
-    const user = userEvent.setup();
-    renderPage("/novels/novel-1/event-trees?task_id=task-1&tree_id=tree-b&event_id=root-b");
-    expect(await screen.findByRole("region", { name: "事件树结构" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "第二棵树" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "返回整片森林" }));
-    expect(screen.getByRole("region", { name: "整片事件森林" })).toBeInTheDocument();
-    await user.type(screen.getByPlaceholderText("搜索事件描述"), "不存在的情节");
-    expect(screen.getByText("当前筛选下没有事件树")).toBeInTheDocument();
+it("默认展开含后页的全部事件，重新进入仍可见后页选中事件", async () => {
+  localStorage.setItem("novel-1:run-a:event-trees", JSON.stringify({ collapsed: ["root", arc.node_id], expanded: ["root"] }));
+  const first = renderNarrative(url);
+  const canvas = await screen.findByLabelText("事件树画布");
+  await userEvent.click(await within(canvas).findByRole("button", { name: "隐藏的末页事件" }));
+  expect(await screen.findByRole("dialog", { name: "节点详情" })).toHaveTextContent("隐藏的末页事件");
+  first.unmount();
+  renderNarrative(url);
+  await waitFor(() => expect(within(screen.getByLabelText("事件树画布")).getByRole("button", { name: "隐藏的末页事件" })).toBeInTheDocument());
+  expect(JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!)).not.toHaveProperty("collapsed");
+  expect(JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!)).not.toHaveProperty("expanded");
+  expect(api.mock.calls.some(([, config]) => config?.params?.cursor === "all-second")).toBe(true);
+});
+
+it("全书搜索从概览定位具体事件，保持全部节点并打开本页详情", async () => {
+  localStorage.setItem("novel-1:run-a:event-trees", JSON.stringify({ scale: .3 }));
+  renderNarrative(url);
+  await userEvent.type(await screen.findByRole("textbox", { name: "搜索全书事件" }), "隐藏");
+  await userEvent.click(await within(screen.getByLabelText("全书结构目录")).findByRole("button", { name: "隐藏的末页事件" }));
+  expect(await screen.findByRole("dialog", { name: "节点详情" })).toHaveTextContent("隐藏的末页事件");
+  expect(screen.getByLabelText("事件树画布").querySelectorAll("article")).toHaveLength(4);
+  expect(JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!).scale).toBeGreaterThanOrEqual(.85);
+  expect(screen.queryByRole("button", { name: /时间轴/ })).not.toBeInTheDocument();
+});
+
+it("中心结构放得下时按实际尺寸阅读，选择与适配不再隐藏节点", async () => {
+  renderNarrative(url);
+  const canvas = await screen.findByLabelText("事件树画布");
+  await waitFor(() => expect(JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!).scale).toBe(1));
+  expect(canvas.querySelectorAll("article")).toHaveLength(4);
+  expect(screen.queryByRole("button", { name: /收起分支|全部展开|^折叠 |^展开 / })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "放大画布" }));
+  const scale = JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!).scale;
+  await userEvent.click(within(canvas).getByRole("button", { name: eventA.title }));
+  await screen.findByRole("dialog", { name: "节点详情" });
+  expect(JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!).scale).toBe(scale);
+  await userEvent.click(screen.getByRole("button", { name: "适应分支" }));
+  expect(canvas.querySelectorAll("article")).toHaveLength(4);
+  await userEvent.click(screen.getByRole("button", { name: "适应全图" }));
+  expect(canvas.querySelectorAll("article")).toHaveLength(4);
+  await userEvent.click(screen.getByRole("button", { name: "恢复100%倍率" }));
+  expect(JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!).scale).toBe(1);
+});
+
+it("默认中心取景完整保留七条叙事线与说明，避免首屏裁切圆和文字", async () => {
+  const base = api.getMockImplementation()!;
+  const arcs = Array.from({ length: 7 }, (_, index) => ({ ...arc, node_id: `arc:center-${index}`, arc_id: `center-${index}`, title: `叙事线 ${index}`, child_count: 0 }));
+  api.mockImplementation(async (path, config) => config?.params?.expand_all
+    ? { data: { ...tree, nodes: [{ ...root, child_count: 7 }, ...arcs], arcs: arcs.map(node => ({ ...tree.arcs[0], arc_id: node.arc_id!, title: node.title })) } } as AxiosResponse
+    : base(path, config));
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+    return this.getAttribute("aria-label") === "事件树画布" ? new DOMRect(0, 0, 1000, 500) : new DOMRect();
   });
+  const originalObserver = globalThis.ResizeObserver;
+  vi.stubGlobal("ResizeObserver", class {
+    private callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+    observe(element: Element) { this.callback([{ target: element, contentRect: new DOMRect(0, 0, 1000, 500) } as ResizeObserverEntry], this as ResizeObserver); }
+    unobserve() {}
+    disconnect() {}
+  });
+  const rendered = renderNarrative(url);
+  try {
+    const canvas = await screen.findByLabelText("事件树画布");
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!)?.scale).toBeGreaterThan(0));
+    const [x, y, scale] = (canvas.firstElementChild as HTMLElement).style.transform.match(/-?\d*\.?\d+(?:e[+-]?\d+)?/gi)!.map(Number);
+    expect(scale).toBeLessThan(1);
+    const nodes = [...canvas.querySelectorAll<HTMLElement>("article")];
+    expect(nodes).toHaveLength(8);
+    for (const node of nodes) {
+      const left = x + parseFloat(node.style.left) * scale, top = y + parseFloat(node.style.top) * scale;
+      expect(left).toBeGreaterThanOrEqual(15.99);
+      expect(top).toBeGreaterThanOrEqual(15.99);
+      expect(left + parseFloat(node.style.width) * scale).toBeLessThanOrEqual(984.01);
+      expect(top + parseFloat(node.style.height) * scale).toBeLessThanOrEqual(484.01);
+    }
+  } finally {
+    rendered.unmount();
+    vi.stubGlobal("ResizeObserver", originalObserver);
+  }
+});
 
-  it("沿真实父链展示多级旁支，缺失父节点时保留待确认节点", async () => {
-    getEventForestMock.mockResolvedValue({
-      ...forest,
-      event_nodes: [
-        ...forest.event_nodes,
-        node("side-child", "tree-a", "守卫随后追击", "secondary", "side-a"),
-        node("side-orphan", "tree-a", "来源待确认的事件", "secondary", null),
-      ],
-      event_trees: [
-        {
-          ...forest.event_trees[0],
-          secondary_groups: [
-            ...forest.event_trees[0].secondary_groups,
-            { target_event_id: "side-a", branch: ["side-child"] },
-            { target_event_id: "tree-a", branch: ["side-orphan"] },
-          ],
-        },
-        forest.event_trees[1],
-      ],
+it("并列分支始终可见，搜索、详情与重新进入不筛掉其他分支", async () => {
+  const base = api.getMockImplementation()!;
+  const other = { ...arc, node_id: "arc:other", arc_id: "other", title: "另一条支线", child_count: 1 };
+  const target = { ...eventB, parent_id: other.node_id, arc_id: other.arc_id };
+  const book = { ...tree, nodes: [root, arc, other, eventA, target], edges: [...tree.edges, { source_id: root.node_id, target_id: other.node_id, kind: "organization" }, { source_id: arc.node_id, target_id: eventA.node_id, kind: "organization" }, { source_id: other.node_id, target_id: target.node_id, kind: "organization" }], arcs: [...tree.arcs, { ...tree.arcs[0], arc_id: other.arc_id, title: other.title, kind: "subplot" as const }] };
+  api.mockImplementation(async (path, config) => {
+    if (config?.params?.expand_all) return { data: book } as AxiosResponse;
+    if (config?.params?.q) return { data: { ...book, total: 1, matches: [{ node_id: target.node_id, title: target.title, ancestor_ids: [root.node_id, other.node_id], chapter_id: 3, chapter_order: 3 }] } } as AxiosResponse;
+    if (String(path).endsWith(encodeURIComponent(target.node_id))) return { data: { ...treeDetail(target), path: [root, other, target] } } as AxiosResponse;
+    return base(path, config);
+  });
+  const first = renderNarrative(url);
+  const canvas = await screen.findByLabelText("事件树画布");
+  expect(within(canvas).getByRole("button", { name: eventA.title })).toBeInTheDocument();
+  expect(within(canvas).getByRole("button", { name: eventB.title })).toBeInTheDocument();
+  await userEvent.type(screen.getByRole("textbox", { name: "搜索全书事件" }), "隐藏");
+  await userEvent.click(await within(screen.getByLabelText("全书结构目录")).findByRole("button", { name: target.title }));
+  expect(await screen.findByRole("dialog", { name: "节点详情" })).toHaveTextContent(target.title);
+  expect(canvas.querySelectorAll("article")).toHaveLength(5);
+  expect(within(canvas).getByRole("button", { name: eventA.title })).toBeInTheDocument();
+  first.unmount();
+  renderNarrative(url);
+  await screen.findByRole("dialog", { name: "节点详情" });
+  expect(within(screen.getByLabelText("事件树画布")).getByRole("button", { name: eventA.title })).toBeInTheDocument();
+  expect(within(screen.getByLabelText("事件树画布")).getByRole("button", { name: eventB.title })).toBeInTheDocument();
+});
+
+it("关系保留方向与类型，点击未加载目标补齐路径并选中，保留其他节点", async () => {
+  const base = api.getMockImplementation()!;
+  const group: NarrativeTreeNode = { node_id: "group:hidden", kind: "group", parent_id: arc.node_id, title: "隐藏事件组", child_count: 1, chapter_order: 3 };
+  const target: NarrativeTreeNode = { ...eventB, node_id: "event:c", title: "未加载的关联目标", parent_id: group.node_id };
+  const relation: NarrativeTreeDetail["relations"][number] = { source_id: eventB.node_id, target_id: target.node_id, kind: "causal", title: "因果关联", direction: "outgoing", related_node: target, ancestor_ids: [root.node_id, arc.node_id, group.node_id] };
+  api.mockImplementation(async (path, config) => {
+    if (String(path).endsWith(encodeURIComponent(target.node_id))) return { data: { ...treeDetail(target), path: [root, arc, group, target] } } as AxiosResponse;
+    const result = await base(path, config) as AxiosResponse;
+    if (String(path).includes("/nodes/") && String(path).endsWith(encodeURIComponent(eventB.node_id))) result.data = { ...result.data, relations: [relation, { ...relation, kind: "local_parent", title: "局部父子" }] };
+    return result;
+  });
+  renderNarrative(url);
+  await userEvent.type(await screen.findByRole("textbox", { name: "搜索全书事件" }), "隐藏");
+  await userEvent.click(await within(screen.getByLabelText("全书结构目录")).findByRole("button", { name: eventB.title }));
+  const relations = await screen.findByRole("region", { name: "真实关系" });
+  expect(within(relations).getAllByRole("button")).toHaveLength(1);
+  expect(relations).toHaveTextContent("指向 · 因果关联、局部父子");
+  await userEvent.click(within(relations).getByRole("button", { name: /未加载的关联目标/ }));
+  await waitFor(() => expect(within(screen.getByRole("dialog", { name: "节点详情" })).getByRole("heading", { name: target.title })).toBeInTheDocument());
+  expect(within(screen.getByLabelText("事件树画布")).getByRole("button", { name: eventA.title })).toBeInTheDocument();
+  expect(within(screen.getByLabelText("事件树画布")).getByRole("button", { name: target.title }).closest("article")).toHaveAttribute("data-selected", "true");
+});
+
+it("同向父子和因果只绘一条线，伏笔状态在画布与详情可读", async () => {
+  const base = api.getMockImplementation()!;
+  const flagged = { ...eventA, child_count: 1, is_foreshadowing_root: true, foreshadowing_status: "likely_paid_off" as const };
+  api.mockImplementation(async (path, config) => {
+    const result = await base(path, config) as AxiosResponse;
+    if (config?.params?.expand_all) result.data = { ...tree, nodes: [root, arc, flagged, { ...eventB, parent_id: eventA.node_id }], edges: [...tree.edges, { source_id: arc.node_id, target_id: eventA.node_id, kind: "organization" }, { source_id: eventA.node_id, target_id: eventB.node_id, kind: "local_parent" }, { source_id: eventA.node_id, target_id: eventB.node_id, kind: "causal" }] };
+    if (String(path).includes("/nodes/") && String(path).endsWith(encodeURIComponent(eventA.node_id))) result.data = treeDetail(flagged);
+    return result;
+  });
+  renderNarrative(url);
+  await screen.findByLabelText("事件树画布");
+  const canvas = screen.getByLabelText("事件树画布");
+  await userEvent.click(await within(canvas).findByRole("button", { name: eventA.title }));
+  expect(canvas).toHaveTextContent("疑似回收");
+  expect(await screen.findByRole("dialog", { name: "节点详情" })).toHaveTextContent("伏笔状态：疑似回收");
+  await userEvent.click(within(canvas).getByRole("button", { name: eventB.title }));
+  const paths = canvas.querySelectorAll('path[data-source-id="event:a"][data-target-id="event:b"]');
+  expect(paths).toHaveLength(1);
+  expect(paths[0]).toHaveAttribute("data-kinds", "local_parent causal");
+  expect(paths[0]).toHaveAttribute("marker-end");
+});
+
+it("原文键盘焦点留在弹窗，Esc 仅关闭原文并恢复阅读按钮焦点", async () => {
+  renderNarrative(url);
+  await screen.findByLabelText("事件树画布");
+  await userEvent.click(await within(screen.getByLabelText("事件树画布")).findByRole("button", { name: eventA.title }));
+  const opener = await screen.findByRole("button", { name: "阅读原文" });
+  await userEvent.click(opener);
+  const reader = await screen.findByRole("dialog", { name: "章节原文" });
+  await waitFor(() => expect(reader).toHaveTextContent("1 / 3"));
+  for (let i = 0; i < 8; i++) { await userEvent.tab(); expect(reader.contains(document.activeElement)).toBe(true); }
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "章节原文" })).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "节点详情" })).toHaveTextContent(eventA.title);
+  await waitFor(() => expect(opener).toHaveFocus());
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "节点详情" })).not.toBeInTheDocument();
+});
+
+it("普通滚轮围绕鼠标位置缩放，连续输入累积且不会滚动页面", async () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    return this.getAttribute("aria-label") === "事件树画布" ? new DOMRect(120, 80, 1000, 650) : new DOMRect();
+  });
+  renderNarrative(url);
+  const canvas = await screen.findByLabelText("事件树画布");
+  await waitFor(() => expect(JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!).scale).toBe(1));
+  const transform = () => (canvas.firstElementChild as HTMLElement).style.transform.match(/-?\d*\.?\d+(?:e[+-]?\d+)?/gi)!.map(Number);
+  const before = transform();
+  const world = { x: (250 - before[0]) / before[2], y: (150 - before[1]) / before[2] };
+  const wheel = (deltaY: number, deltaMode = 0) => new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 370, clientY: 230, deltaY, deltaMode });
+  const first = wheel(-120);
+  fireEvent(canvas, first);
+  expect(first.defaultPrevented).toBe(true);
+  await waitFor(() => expect(transform()[2]).toBeGreaterThan(1));
+  let after = transform();
+  expect(after[0] + world.x * after[2]).toBeCloseTo(250);
+  expect(after[1] + world.y * after[2]).toBeCloseTo(150);
+  fireEvent(canvas, wheel(120));
+  await waitFor(() => expect(transform()[2]).toBeCloseTo(1));
+  act(() => { fireEvent(canvas, wheel(-120)); fireEvent(canvas, wheel(-120)); });
+  expect(transform()[2]).toBeCloseTo(Math.exp(.48));
+  fireEvent(canvas, wheel(2, 1));
+  after = transform();
+  expect(after[2]).toBeCloseTo(Math.exp(.48 - .064));
+  expect(after[0] + world.x * after[2]).toBeCloseTo(250);
+  expect(after[1] + world.y * after[2]).toBeCloseTo(150);
+  expect(canvas.querySelectorAll("article")).toHaveLength(4);
+  const outside = wheel(120);
+  fireEvent(screen.getByRole("main"), outside);
+  expect(outside.defaultPrevented).toBe(false);
+  expect(transform()).toEqual(after);
+});
+
+it("拖动画布只平移节点，阻止文字选择、原生拖放并在丢失捕获后停止", async () => {
+  renderNarrative(url);
+  const canvas = await screen.findByLabelText("事件树画布");
+  Object.defineProperty(canvas, "setPointerCapture", { value: vi.fn() });
+  await waitFor(() => expect(JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!)?.scale).toBeGreaterThan(0));
+  const selection = window.getSelection()!;
+  const range = document.createRange();
+  range.selectNodeContents(canvas.querySelector("[data-node-title]")!);
+  selection.addRange(range);
+  expect(selection.toString()).not.toBe("");
+  expect(canvas).toHaveClass("select-none");
+  const before = JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!);
+  const pointer = (type: string, x: number, y: number) => new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y });
+  const start = pointer("pointerdown", 200, 180);
+  fireEvent(canvas.querySelector("article > small")!, start);
+  expect(start.defaultPrevented).toBe(true);
+  expect(selection.isCollapsed).toBe(true);
+  fireEvent(canvas, pointer("pointermove", 330, 235));
+  fireEvent(canvas, pointer("pointerup", 330, 235));
+  const after = JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!);
+  expect(after.x - before.x).toBe(130);
+  expect(after.y - before.y).toBe(55);
+  expect(after.scale).toBe(before.scale);
+  expect(after.selected).toBe(before.selected);
+  expect(canvas.querySelectorAll("article")).toHaveLength(4);
+  const nativeDrag = new Event("dragstart", { bubbles: true, cancelable: true });
+  fireEvent(canvas, nativeDrag);
+  expect(nativeDrag.defaultPrevented).toBe(true);
+  fireEvent(canvas, pointer("pointerdown", 330, 235));
+  fireEvent(canvas, new Event("lostpointercapture", { bubbles: true }));
+  fireEvent(canvas, pointer("pointermove", 400, 300));
+  expect(JSON.parse(localStorage.getItem("novel-1:run-a:event-trees")!)).toEqual(after);
+});
+
+it("节点点击保留默认焦点行为，画布外的详情文字仍可选择复制", async () => {
+  renderNarrative(url);
+  const canvas = await screen.findByLabelText("事件树画布");
+  const button = within(canvas).getByRole("button", { name: eventA.title });
+  const press = new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 });
+  fireEvent(button.querySelector("[data-node-title]")!, press);
+  expect(press.defaultPrevented).toBe(false);
+  await userEvent.click(button);
+  const detail = await screen.findByRole("dialog", { name: "节点详情" });
+  const title = within(detail).getByRole("heading", { name: eventA.title });
+  expect(title.closest(".select-none")).toBeNull();
+  const range = document.createRange();
+  range.selectNodeContents(title);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  expect(window.getSelection()!.toString()).toBe(eventA.title);
+});
+
+it("打开详情后等画布宽度测量完成再按节点圆心定位", async () => {
+  const originalObserver = globalThis.ResizeObserver;
+  let reportResize: (width: number) => void = () => {};
+  vi.stubGlobal("ResizeObserver", class {
+    private callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+    observe(element: Element) { reportResize = width => this.callback([{ target: element, contentRect: new DOMRect(0, 0, width, 650) } as ResizeObserverEntry], this as ResizeObserver); }
+    unobserve() {}
+    disconnect() {}
+  });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    return this.getAttribute("aria-label") === "事件树画布" ? new DOMRect(0, 0, document.querySelector('[role="dialog"][aria-label="节点详情"]') ? 600 : 1000, 650) : new DOMRect();
+  });
+  const rendered = renderNarrative(url);
+  try {
+    const canvas = await screen.findByLabelText("事件树画布");
+    await userEvent.click(within(canvas).getByRole("button", { name: eventA.title }));
+    await screen.findByRole("dialog", { name: "节点详情" });
+    // 先让详情列完成一轮绘制，再模拟随后到达的宽度通知
+    await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); });
+    act(() => reportResize(600));
+    await waitFor(() => {
+      const point = canvas.querySelector('[data-selected="true"]')!;
+      const transform = (canvas.firstElementChild as HTMLElement).style.transform.match(/-?\d*\.?\d+/g)!.map(Number);
+      expect(transform[0] + Number(point.getAttribute("data-node-x")) * transform[2]).toBeCloseTo(300, 4);
+      expect(transform[1] + Number(point.getAttribute("data-node-y")) * transform[2]).toBeCloseTo(325, 4);
     });
-    renderPage();
-    await screen.findByRole("region", { name: "整片事件森林" });
-    await userEvent.setup().click(screen.getByRole("button", { name: /第 1 章事件树：山门开启/ }));
-    const structure = screen.getByRole("region", { name: "事件树结构" });
-    expect(structure.querySelector('[data-parent-id="side-a"][data-child-id="side-child"]')).toBeInTheDocument();
-    expect(structure.querySelector('[data-child-id="side-orphan"]')).not.toBeInTheDocument();
-    expect(screen.getByText(/挂接点待确认：1 个节点/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /次因旁支.*来源待确认的事件/ })).toBeInTheDocument();
-  });
-
-  it("组合章节、伏笔和旁支筛选时显示符合条件的树与空状态", async () => {
-    const user = userEvent.setup();
-    getEventForestMock.mockResolvedValue({
-      ...forest,
-      event_nodes: forest.event_nodes.map((event) => event.tree_id === "tree-b"
-        ? { ...event, chapter_id: 2, chapter_order: 2 }
-        : event),
-      event_trees: [forest.event_trees[0], { ...forest.event_trees[1], chapter_ids: [2] }],
-      foreshadowing_edges: [{
-        root_event_id: "root-b", tree_id: "tree-b", payoff_event_id: null,
-        first_chapter_id: 2, last_chapter_id: 2, description: "第二棵树",
-        status: "open", active: true,
-      }],
-    });
-    renderPage();
-    await screen.findByRole("region", { name: "整片事件森林" });
-    await user.selectOptions(screen.getByLabelText("伏笔"), "foreshadow");
-    expect(screen.getByRole("region", { name: "整片事件森林" }).querySelector('[data-tree-id="tree-b"]')).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "整片事件森林" }).querySelector('[data-tree-id="tree-a"]')).not.toBeInTheDocument();
-    await user.click(screen.getByLabelText("只看含旁支"));
-    expect(screen.getByText("当前筛选下没有事件树")).toBeInTheDocument();
-    await user.click(screen.getByLabelText("只看含旁支"));
-    await user.selectOptions(screen.getByLabelText("章节"), "1");
-    expect(screen.getByText("当前筛选下没有事件树")).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("伏笔"), "all");
-    const restoredForest = await screen.findByRole("region", { name: "整片事件森林" });
-    expect(restoredForest.querySelector('[data-tree-id="tree-a"]')).toBeInTheDocument();
-    expect(restoredForest.querySelector('[data-tree-id="tree-b"]')).not.toBeInTheDocument();
-  });
-
-  it("章节筛选可深链，跨章树只归入锚定章，放大后返回仍保留章节", async () => {
-    const user = userEvent.setup();
-    getEventForestMock.mockResolvedValue({
-      ...forest,
-      event_nodes: forest.event_nodes.map((event) => event.tree_id === "tree-b"
-        ? { ...event, chapter_id: 2, chapter_order: 2 }
-        : event),
-      event_trees: [
-        { ...forest.event_trees[0], chapter_ids: [1, 2] },
-        { ...forest.event_trees[1], chapter_ids: [2] },
-      ],
-    });
-    const router = renderPage("/novels/novel-1/event-trees?task_id=task-1&chapter=2");
-    const forestView = await screen.findByRole("region", { name: "整片事件森林" });
-    expect(forestView.querySelector('[data-tree-id="tree-a"]')).not.toBeInTheDocument();
-    expect(forestView.querySelector('[data-tree-id="tree-b"]')).toBeInTheDocument();
-    await user.click(forestView.querySelector('[data-tree-id="tree-b"]') as Element);
-    expect(router.state.location.search).toContain("chapter=2");
-    await user.click(screen.getByRole("button", { name: "返回整片森林" }));
-    expect(router.state.location.search).toBe("?task_id=task-1&chapter=2");
-    expect(screen.getByLabelText("章节")).toHaveValue("2");
-  });
-
-  it("从时间轴进入没有树的章节时显示该章和筛选空状态", async () => {
-    getEventForestMock.mockResolvedValue({ ...forest, visible_through_chapter_order: 3 });
-    renderPage("/novels/novel-1/event-trees?task_id=task-1&chapter=3");
-    expect(await screen.findByText("当前筛选下没有事件树")).toBeInTheDocument();
-    expect(screen.getByLabelText("章节")).toHaveValue("3");
-  });
-
-  it("长章节可以翻到末页，关闭阅读层后仍停留在选中事件", async () => {
-    const user = userEvent.setup();
-    getEventSourceChapterMock.mockResolvedValue({
-      chapter_id: 1, title: "第一章", paragraphs: [
-        { paragraph_id: 0, paragraph_index: 0, text: `${"山门风起。".repeat(180)}章节末尾。` },
-      ],
-    });
-    renderPage("/novels/novel-1/event-trees?task_id=task-1&tree_id=tree-a&event_id=root-a");
-    await screen.findByRole("region", { name: "事件树结构" });
-    await user.click(screen.getByRole("button", { name: "阅读本章原文" }));
-    const next = await screen.findByRole("button", { name: "下一页" });
-    expect(next).toBeEnabled();
-    for (let index = 0; index < 10 && !next.hasAttribute("disabled"); index += 1) await user.click(next);
-    expect(next).toBeDisabled();
-    expect(screen.getByText(/章节末尾。/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭原文" }));
-    expect(screen.queryByRole("dialog", { name: "章节原文" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "山门开启" })).toBeInTheDocument();
-  });
+  } finally {
+    rendered.unmount();
+    vi.stubGlobal("ResizeObserver", originalObserver);
+  }
 });
