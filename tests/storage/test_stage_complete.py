@@ -435,6 +435,7 @@ class TestStageCompleteChecks:
         stats_repo = StatsRepository(db_session)
         analysis = AgentAnalysis(
             novel_id=novel_id,
+            narrative_organization={"arcs": [], "memberships": [], "references": []},
             foreshadow_expectation=0.5,
             arc_scores={"角色0": 8.2, "角色1": 7.4},
             genre_labels=["通用"],
