@@ -140,18 +140,6 @@ SOURCE_COLUMNS = {
     "event_nodes": {"annotation_id"},
     "event_edges": {"annotation_id"},
 }
-# 回退所需的旧表数据在归档 schema 中留全量副本
-ARCHIVE_TABLES = (
-    "agent_invocations",
-    "agent_turns",
-    "token_usage",
-    "audit_messages",
-    "chapter_annotations",
-    "cloud_analysis",
-    "book_case_states",
-    "agent_tool_calls",
-    "book_cases",
-)
 
 
 def _identifier(value: str) -> str:
@@ -190,17 +178,14 @@ def migration_plan(connection: Connection) -> dict[str, Any]:
         if "analysis_runs" in tables and not {"run_id", "status"}.intersection(missing_columns["analysis_runs"])
         else []
     )
-    archive = schema[:35] + "_turn_outputs_archive"
     return {
         "schema": schema,
-        "archive_schema": schema[:35] + "_turn_outputs_archive",
         "source_tables": sources,
         "already_migrated": already_migrated,
         "partial_target": bool(targets or book_case_state_column) and not already_migrated,
         "missing_source_tables": sorted(set(SOURCE_TABLES) - tables),
         "missing_source_columns": {table: missing for table, missing in missing_columns.items() if missing},
         "active_run_ids": [str(run_id) for run_id in active],
-        "archive_collision": inspector.has_schema(archive) and bool(inspector.get_table_names(schema=archive)),
         "book_cases_already_merged": book_case_state_column,
         "unmigrated_run_ids": [
             str(run_id)
@@ -211,17 +196,6 @@ def migration_plan(connection: Connection) -> dict[str, Any]:
         if "agent_invocations" in tables and "run_id" not in missing_columns["agent_invocations"]
         else [],
     }
-
-
-def _archive(connection: Connection, schema: str, archive: str) -> None:
-    connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {_identifier(archive)}"))
-    for table in ARCHIVE_TABLES:
-        connection.execute(
-            text(
-                f"CREATE TABLE {_identifier(archive)}.{_identifier(table)} AS "
-                f"TABLE {_identifier(schema)}.{_identifier(table)}"
-            )
-        )
 
 
 def _create_model_turns(connection: Connection) -> None:
@@ -538,8 +512,6 @@ def _drop_source_tables(connection: Connection) -> None:
 
 def apply_migration(connection: Connection) -> dict[str, Any]:
     plan = migration_plan(connection)
-    schema = str(plan["schema"])
-    archive = str(plan["archive_schema"])
     if plan["already_migrated"]:
         raise ValueError("检测到目标结构已存在（model_turns/analysis_outputs 或 book_cases.state），无需重复迁移")
     if plan["partial_target"]:
@@ -551,11 +523,7 @@ def apply_migration(connection: Connection) -> dict[str, Any]:
         raise ValueError(f"源字段不满足角色 work 中间结构，不能跳过旧数据转换: {plan['missing_source_columns']}")
     if plan["active_run_ids"]:
         raise ValueError("存在待运行或运行中的分析任务，请先停写并收口任务")
-    if plan["archive_collision"]:
-        raise ValueError("归档 schema 已有表，拒绝覆盖恢复依据")
     counts: dict[str, Any] = {}
-    connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {_identifier(archive)}"))
-    _archive(connection, schema, archive)
     _create_model_turns(connection)
     counts["model_turns"] = _migrate_model_turns(connection)
     _retarget_tool_call_fk(connection)
@@ -564,7 +532,6 @@ def apply_migration(connection: Connection) -> dict[str, Any]:
     _retarget_output_fks(connection)
     counts["book_cases_merged_states"] = _merge_book_case_states(connection)
     _drop_source_tables(connection)
-    counts["archive_schema"] = archive
     return counts
 
 

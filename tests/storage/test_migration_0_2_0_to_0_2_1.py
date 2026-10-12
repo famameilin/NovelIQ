@@ -14,9 +14,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from scripts.migrations.migrate_0_2_0_to_0_2_1 import RETIRED, main, migrate
-from src.event_trees.trees import EventTrees
 from src.fact_graph.graph import FactGraph, mention_uuid
-from src.storage.models import AnalysisOutput
+from src.storage.models import AnalysisOutput, EventNode
 from src.work.annotation_work import annotation_work_id
 from tests.conftest import _build_test_engine
 
@@ -36,7 +35,7 @@ def old_release_engine(db_session: Session) -> Generator[Engine, None, None]:
     finally:
         engine.dispose()
         with parent.begin() as connection:
-            for name in (schema, schema + "_annotation_archive", schema + "_turn_outputs_archive"):
+            for name in (schema,):
                 connection.execute(text(f'DROP SCHEMA IF EXISTS "{name}" CASCADE'))
 
 
@@ -186,7 +185,7 @@ def test_upgrade_preserves_outputs_usage_and_is_idempotent(old_release_engine: E
         )
         assert (
             connection.execute(
-                text(f'SELECT payload FROM "{result["archive_schema"]}".chapter_annotations WHERE annotation_id=:id'),
+                text("SELECT payload FROM analysis_outputs WHERE output_id=:id"),
                 {"id": annotation_id},
             ).scalar_one()
             == payload
@@ -194,7 +193,6 @@ def test_upgrade_preserves_outputs_usage_and_is_idempotent(old_release_engine: E
     inspector = inspect(engine)
     for table in RETIRED:
         assert not inspector.has_table(table)
-        assert inspector.has_table(table, schema=result["archive_schema"])
     with engine.begin() as connection:
         connection.execute(text("UPDATE analysis_runs SET status='running' WHERE run_id=:run"), {"run": run_id})
     again = _apply(engine)
@@ -202,18 +200,7 @@ def test_upgrade_preserves_outputs_usage_and_is_idempotent(old_release_engine: E
     assert again["active_run_ids"] == [run_id]
     with engine.begin() as connection:
         connection.execute(text("DELETE FROM analysis_runs WHERE run_id=:run"), {"run": run_id})
-        # 新运行数据的级联删除不能触及归档恢复依据
         assert connection.execute(text("SELECT count(*) FROM analysis_outputs")).scalar_one() == 0
-        assert (
-            connection.execute(text(f'SELECT count(*) FROM "{result["archive_schema"]}".continuity_cases')).scalar_one()
-            == 1
-        )
-        assert (
-            connection.execute(
-                text(f'SELECT count(*) FROM "{result["archive_schema"]}".chapter_annotations')
-            ).scalar_one()
-            == 1
-        )
 
 
 @pytest.mark.parametrize("status", ["pending", "running", "cancelling"])
@@ -228,7 +215,6 @@ def test_upgrade_refuses_active_tasks_before_ddl(old_release_engine: Engine, sta
     with pytest.raises(ValueError, match="任务尚未收口"):
         _apply(old_release_engine)
     assert inspect(old_release_engine).has_table("work_items")
-    assert not inspect(old_release_engine).has_schema(plan["archive_schema"])
 
 
 def test_upgrade_rolls_back_both_stages_on_orphan_usage(old_release_engine: Engine) -> None:
@@ -247,7 +233,6 @@ def test_upgrade_rolls_back_both_stages_on_orphan_usage(old_release_engine: Engi
     assert not inspector.has_table("analysis_outputs")
     assert inspector.has_table("chapter_annotations") and inspector.has_table("work_items")
     assert "role" not in {row["name"] for row in inspector.get_columns("chapter_annotations")}
-    assert not inspector.has_schema(_schema(old_release_engine) + "_annotation_archive")
 
 
 def _seed_identity(engine: Engine, *, kind: str) -> tuple[str, str, dict[str, str]]:
@@ -325,7 +310,6 @@ def test_upgrade_refuses_non_character_identity_without_rewriting_data(old_relea
         assert (
             connection.execute(text("SELECT count(*) FROM graph_entities WHERE entity_type='item'")).scalar_one() == 2
         )
-        assert not inspect(connection).has_schema(plan["archive_schema"])
 
 
 def test_upgrade_refuses_wrong_database_and_missing_schema(old_release_engine: Engine) -> None:
@@ -360,15 +344,12 @@ def test_upgrade_refuses_mixed_saved_work_before_ddl(old_release_engine: Engine)
     assert plan["identity_preflight"]["issues"] == []
 
 
-@pytest.mark.parametrize("conflict", ["archive", "partial", "missing_column"])
+@pytest.mark.parametrize("conflict", ["partial", "missing_column"])
 def test_upgrade_refuses_unsafe_source_shapes(old_release_engine: Engine, conflict: str) -> None:
     _seed(old_release_engine)
     schema = _schema(old_release_engine)
     with old_release_engine.begin() as connection:
-        if conflict == "archive":
-            connection.execute(text(f'CREATE SCHEMA "{schema}_annotation_archive"'))
-            connection.execute(text(f'CREATE TABLE "{schema}_annotation_archive".original_data (id int)'))
-        elif conflict == "partial":
+        if conflict == "partial":
             connection.execute(text("CREATE TABLE model_turns (id int)"))
         else:
             connection.execute(text("ALTER TABLE chapters DROP COLUMN text"))
@@ -432,12 +413,22 @@ def test_upgrade_preserves_main_edges_and_cross_tree_causality(old_release_engin
     with Session(old_release_engine) as session:
         output = session.get(AnalysisOutput, annotation_id)
         assert output is not None and output.payload == payload
-        trees = EventTrees(run_id)
-        trees.restore_storage(session, [output])
-        assert trees.read("child")["content"]["parent_node_id"] == "root"
-        assert trees.read("other")["content"]["parent_node_id"] is None
-        assert trees.read("other")["content"]["tree_id"] == "tree-b"
-        assert trees.connections["cross-edge"]["type"] == "causal"
+        # 验证历史迁移的持久化结果，不要求 0.2.1 库具有后续新增动作表
+        assert session.get(EventNode, "child").parent_node_id == "root"
+        assert session.get(EventNode, "other").parent_node_id is None
+        assert session.get(EventNode, "other").tree_id == "tree-b"
+        cross = (
+            session.execute(
+                text("SELECT edge_type, source_event_id, target_event_id FROM event_edges WHERE edge_id='cross-edge'")
+            )
+            .mappings()
+            .one()
+        )
+        assert (
+            cross["edge_type"] == "causal"
+            and cross["source_event_id"] == "root"
+            and cross["target_event_id"] == "other"
+        )
         roles = {
             row["edge_id"]: row["cause_role"]
             for row in session.execute(text("SELECT edge_id, cause_role FROM event_edges")).mappings()
@@ -481,9 +472,4 @@ def test_upgrade_does_not_guess_producer_from_multiple_successful_attempts(old_r
     with old_release_engine.connect() as connection:
         assert connection.execute(text("SELECT invocation_id FROM analysis_outputs")).scalar_one() == annotation_id
         assert connection.execute(text("SELECT count(*) FROM model_turns")).scalar_one() == 0
-        assert (
-            connection.execute(
-                text(f'SELECT count(*) FROM "{report["archive_schema"]}".agent_invocations')
-            ).scalar_one()
-            == 2
-        )
+        assert not inspect(connection).has_table("agent_invocations")

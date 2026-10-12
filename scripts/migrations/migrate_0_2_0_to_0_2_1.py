@@ -17,7 +17,6 @@ from sqlalchemy import Connection, DateTime, Engine, create_engine, inspect, sel
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
-from scripts.migrations.check_0_2_1 import inspect_current_schema
 from scripts.migrations.migrate_turn_outputs_merge import SOURCE_COLUMNS
 from scripts.migrations.migrate_turn_outputs_merge import apply_migration as merge_turn_outputs
 from src.agents.annotation.output_models import BoundChapterAnnotation
@@ -41,6 +40,86 @@ from src.utils.identity import stable_digest
 from src.work.annotation_work import annotation_work_id
 
 VERSION = "0.2.1"
+
+# 历史发布检查固定在该版本的表边界，不能随当前 ORM 增长而要求后续功能表
+RELEASE_TABLES = frozenset(
+    {
+        "agent_tool_calls",
+        "analysis_outputs",
+        "analysis_runs",
+        "annotation_work",
+        "book_cases",
+        "chapters",
+        "dialogue_records",
+        "entity_states",
+        "event_edges",
+        "event_nodes",
+        "event_outbox",
+        "global_stats",
+        "graph_entities",
+        "graph_facts",
+        "graph_relations",
+        "model_turns",
+        "novels",
+        "paragraph_curves",
+        "paragraph_entities",
+        "paragraph_linguistic_features",
+        "paragraph_metrics",
+        "paragraph_phrase_hits",
+        "paragraph_pos_embeddings",
+        "paragraph_topic_inference",
+        "paragraph_topics",
+        "paragraphs",
+        "relation_states",
+        "topic_model_runs",
+        "word2vec_model_runs",
+    }
+)
+
+
+def inspect_current_schema(engine: Engine | Connection, *, schema: str = "public") -> dict[str, Any]:
+    """核对 0.2.1 发布表的字段与外键，动态向量表继续由专用入口管理"""
+    schema_inspector = inspect(engine)
+    existing = set(schema_inspector.get_table_names(schema=schema))
+    required = {name: Base.metadata.tables[name] for name in RELEASE_TABLES}
+    missing_tables = sorted(required.keys() - existing)
+    missing_columns: dict[str, list[str]] = {}
+    missing_foreign_keys: dict[str, list[str]] = {}
+    for name, table in required.items():
+        if name not in existing:
+            continue
+        columns = {column["name"] for column in schema_inspector.get_columns(name, schema=schema)}
+        missing = sorted(set(table.columns.keys()) - columns)
+        if missing:
+            missing_columns[name] = missing
+        actual = {
+            (
+                tuple(fk["constrained_columns"]),
+                fk.get("referred_schema") or schema,
+                fk["referred_table"],
+                tuple(fk["referred_columns"]),
+            )
+            for fk in schema_inspector.get_foreign_keys(name, schema=schema)
+        }
+        for fk in table.foreign_key_constraints:
+            expected = (
+                tuple(element.parent.name for element in fk.elements),
+                fk.referred_table.schema or schema,
+                fk.referred_table.name,
+                tuple(element.column.name for element in fk.elements),
+            )
+            if expected not in actual:
+                missing_foreign_keys.setdefault(name, []).append(
+                    f"{','.join(expected[0])} -> {expected[1]}.{expected[2]}({','.join(expected[3])})"
+                )
+    return {
+        "ready": not missing_tables and not missing_columns and not missing_foreign_keys,
+        "missing_tables": missing_tables,
+        "missing_columns": missing_columns,
+        "missing_foreign_keys": missing_foreign_keys,
+    }
+
+
 RETIRED = (
     "work_items",
     "semantic_commands",
@@ -58,6 +137,19 @@ RETIRED = (
     "chapter_summaries",
     "stage_summaries",
 )
+# 六表合并迁移会 DROP 的源表；外键解除与退役范围都包含它们
+MERGE_DROPPED = frozenset(
+    {
+        "audit_messages",
+        "token_usage",
+        "agent_turns",
+        "agent_invocations",
+        "chapter_annotations",
+        "cloud_analysis",
+        "book_case_states",
+    }
+)
+RETIRED_TABLES = frozenset(RETIRED) | MERGE_DROPPED
 ADDITIONS = {
     "chapter_annotations": {
         "role": "varchar(20) NOT NULL DEFAULT 'solo'",
@@ -92,66 +184,6 @@ def _constraint_identifier(name: str | None) -> str:
     return _identifier(name)
 
 
-def _isolate_archive_references(connection: Connection, schema: str, archive: str, tables: list[str]) -> None:
-    """归档外键只指向归档快照，避免新运行数据删除时级联破坏恢复依据"""
-    inspector = inspect(connection)
-    unique_targets: set[tuple[str, tuple[str, ...]]] = set()
-    for table in set(tables) & set(RETIRED):
-        references = {
-            row["constraint_name"]: row
-            for row in connection.execute(
-                text(
-                    "SELECT c.conname AS constraint_name, n.nspname AS target_schema, t.relname AS target_table "
-                    "FROM pg_constraint c JOIN pg_class t ON t.oid=c.confrelid "
-                    "JOIN pg_namespace n ON n.oid=t.relnamespace "
-                    "WHERE c.contype='f' AND c.conrelid=to_regclass(:table)"
-                ),
-                {"table": f"{_identifier(archive)}.{_identifier(table)}"},
-            ).mappings()
-        }
-        for fk in inspector.get_foreign_keys(table, schema=archive, postgresql_ignore_search_path=True):
-            # 同名快照会影响 SQLAlchemy 的 schema 推断，实际目标以 PostgreSQL OID 为准
-            reference = references[fk["name"]]
-            target = reference["target_table"]
-            if reference["target_schema"] != schema or target not in tables:
-                continue
-            columns = tuple(fk["referred_columns"])
-            target_key = (target, columns)
-            if target_key not in unique_targets:
-                unique_targets.add(target_key)
-                constraint = "uq_backup_" + stable_digest(target, *columns)[:24]
-                connection.execute(
-                    text(
-                        f"ALTER TABLE {_identifier(archive)}.{_identifier(target)} "
-                        f"ADD CONSTRAINT {_identifier(constraint)} "
-                        f"UNIQUE ({', '.join(_identifier(column) for column in columns)})"
-                    )
-                )
-            qualified_table = f"{_identifier(archive)}.{_identifier(table)}"
-            constraint_name = _constraint_identifier(fk["name"])
-            connection.execute(text(f"ALTER TABLE {qualified_table} DROP CONSTRAINT {constraint_name}"))
-            options = fk.get("options", {})
-            suffix = ""
-            for option, clause in (("ondelete", "ON DELETE"), ("onupdate", "ON UPDATE")):
-                action = options.get(option, "NO ACTION")
-                if action not in {"NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"}:
-                    raise ValueError(f"归档外键 {fk['name']} 的 {option} 不受支持: {action}")
-                suffix += f" {clause} {action}"
-            if options.get("deferrable"):
-                initially = options.get("initially", "IMMEDIATE")
-                if initially not in {"IMMEDIATE", "DEFERRED"}:
-                    raise ValueError(f"归档外键 {fk['name']} 的延迟约束选项不受支持")
-                suffix += f" DEFERRABLE INITIALLY {initially}"
-            connection.execute(
-                text(
-                    f"ALTER TABLE {qualified_table} ADD CONSTRAINT {constraint_name} "
-                    f"FOREIGN KEY ({', '.join(_identifier(column) for column in fk['constrained_columns'])}) "
-                    f"REFERENCES {_identifier(archive)}.{_identifier(target)} "
-                    f"({', '.join(_identifier(column) for column in columns)}){suffix}"
-                )
-            )
-
-
 def normalized_name(value: str) -> str:
     """冻结 0.2.0 身份裁决的名称口径，不修改当前运行时接口"""
     return unicodedata.normalize("NFC", value).strip().casefold()
@@ -184,11 +216,9 @@ def migration_plan(connection: Connection) -> dict[str, Any]:
     tables = set(inspector.get_table_names(schema=schema))
     current = inspect_current_schema(connection, schema=schema)
     retired = sorted(set(RETIRED) & tables)
-    archive = schema[:35] + "_annotation_archive"
     result: dict[str, Any] = {
         "version": VERSION,
         "schema": schema,
-        "archive_schema": archive,
         "already_migrated": current["ready"] and not retired,
         "retired_tables": retired,
         "current_schema": current,
@@ -212,7 +242,7 @@ def migration_plan(connection: Connection) -> dict[str, Any]:
     required = {
         table.name: set(table.columns.keys()) - set(ADDITIONS.get(table.name, {}))
         for table in Base.metadata.sorted_tables
-        if table.name not in NEW_TABLES and table.name != "paragraph_embeddings"
+        if table.name in RELEASE_TABLES - NEW_TABLES
     }
     for name, fields in SOURCE_COLUMNS.items():
         if name in {"book_cases", "book_case_states", "audit_messages"}:
@@ -245,9 +275,6 @@ def migration_plan(connection: Connection) -> dict[str, Any]:
     )
     if result["active_run_ids"]:
         issues.append({"reason": "分析任务尚未收口", "run_ids": result["active_run_ids"]})
-    for target in (archive, schema[:35] + "_turn_outputs_archive"):
-        if inspector.has_schema(target) and inspector.get_table_names(schema=target):
-            issues.append({"reason": "归档已存在，不能覆盖恢复依据", "schema": target})
     records = _legacy_annotations(connection)
     current_records = [
         row for row in records if getattr(row, "actual_input", None) and getattr(row, "invocation_id", None)
@@ -333,32 +360,16 @@ def migration_plan(connection: Connection) -> dict[str, Any]:
 
 
 def _prepare_role_schema(connection: Connection, plan: dict[str, Any]) -> None:
-    schema, archive = plan["schema"], plan["archive_schema"]
+    """原 schema 增量改造：解除退役表外键、补列建表、替换约束，不复制不归档"""
+    schema = plan["schema"]
     inspector = inspect(connection)
     source_tables = inspector.get_table_names(schema=schema)
-    connection.execute(text(f"CREATE SCHEMA {_identifier(archive)}"))
-    # 原始记录先保存完整数据副本；退出的旧流水线表连索引与约束迁入归档
     for table in source_tables:
-        if table not in RETIRED:
-            connection.execute(
-                text(
-                    f"CREATE TABLE {_identifier(archive)}.{_identifier(table)} "
-                    f"AS TABLE {_identifier(schema)}.{_identifier(table)}"
-                )
-            )
-    for table in source_tables:
-        if table in RETIRED:
-            continue
         for fk in inspector.get_foreign_keys(table, schema=schema):
-            if fk["referred_table"] in RETIRED:
+            if fk["referred_table"] in RETIRED_TABLES:
                 connection.execute(
                     text(f"ALTER TABLE {_identifier(table)} DROP CONSTRAINT {_constraint_identifier(fk['name'])}")
                 )
-    for table in plan["retired_tables"]:
-        connection.execute(
-            text(f"ALTER TABLE {_identifier(schema)}.{_identifier(table)} SET SCHEMA {_identifier(archive)}")
-        )
-    _isolate_archive_references(connection, schema, archive, source_tables)
     columns = {column["name"] for column in inspect(connection).get_columns("chapter_annotations", schema=schema)}
     if "work_id" not in columns:
         if "formal_work_id" in columns:
@@ -417,7 +428,7 @@ def _prepare_role_schema(connection: Connection, plan: dict[str, Any]) -> None:
     if "global_context" in plan["retired_tables"]:
         connection.execute(
             text(
-                f"UPDATE novels n SET title=g.novel_title FROM {_identifier(archive)}.global_context g "
+                f"UPDATE novels n SET title=g.novel_title FROM {_identifier('global_context')} g "
                 "WHERE n.novel_id=g.novel_id AND n.title IS NULL"
             )
         )
@@ -428,7 +439,7 @@ def _align_timestamps(connection: Connection, schema: str) -> None:
     inspector = inspect(connection)
     tables = set(inspector.get_table_names(schema=schema))
     for table in Base.metadata.sorted_tables:
-        if table.name not in tables or table.name == "paragraph_embeddings":
+        if table.name not in tables or table.name not in RELEASE_TABLES:
             continue
         for column in inspector.get_columns(table.name, schema=schema):
             expected = table.columns.get(column["name"])
@@ -548,13 +559,13 @@ def _convert_outputs(session: Session) -> int:
     return len(records)
 
 
-def _convert_cases(session: Session, archive: str) -> int:
-    """只迁移真实保存章的纯文字登记，旧结构化办理状态完整保留在归档"""
-    if not inspect(session.connection()).has_table("continuity_cases", schema=archive):
+def _convert_cases(session: Session) -> int:
+    """只迁移真实保存章的纯文字登记，旧结构化办理状态随退役表一并退出"""
+    if not inspect(session.connection()).has_table("continuity_cases"):
         return 0
     by_id = {row.annotation_id: row for row in _current_annotations(session)}
     count = 0
-    for row in session.execute(text(f"SELECT * FROM {_identifier(archive)}.continuity_cases")).mappings():
+    for row in session.execute(text(f"SELECT * FROM {_identifier('continuity_cases')}")).mappings():
         record = by_id.get(row["originating_annotation_id"])
         if record is None:
             continue
@@ -1024,7 +1035,8 @@ def _convert_graph(session: Session) -> int:
         )
         FactGraph(run_scope=record.run_id).save_work(session, contribution, record.annotation_id)
     for run_id in {record.run_id for record in records}:
-        EventTrees(run_id).rebuild_storage(session)
+        # 此发布版本只有结构边，保留当时已经保存的伏笔状态，不读取后续动作表
+        EventTrees(run_id).rebuild_structure(session)
 
     for content in retained_facts:
         session.add(GraphFact(**remap(content)))
@@ -1074,7 +1086,7 @@ def migrate(
             merged = merge_turn_outputs(connection)
             session.expire_all()
             identities = _convert_graph(session) if chapters else 0
-            cases = _convert_cases(session, plan["archive_schema"])
+            cases = _convert_cases(session)
             session.flush()
         for table, columns in {
             "analysis_runs": ("cancellation_epoch", "annotation_cutoff_hash"),
@@ -1083,6 +1095,10 @@ def migrate(
             existing = {column["name"] for column in inspect(connection).get_columns(table, schema=schema)}
             for column in set(columns) & existing:
                 connection.execute(text(f"ALTER TABLE {_identifier(table)} DROP COLUMN {_identifier(column)}"))
+        # 转换已在原 schema 就地完成，退出旧流水线表连数据一并退役
+        connection.execute(
+            text("DROP TABLE IF EXISTS " + ", ".join(_identifier(name) for name in sorted(RETIRED)) + " CASCADE")
+        )
         result = inspect_current_schema(connection, schema=schema)
         if not result["ready"]:
             raise ValueError(json.dumps({"target_schema_errors": result}, ensure_ascii=False))

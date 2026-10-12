@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine, make_url
 
-from scripts.migrations.check_0_2_1 import inspect_current_schema
+from scripts.migrations.migrate_0_2_0_to_0_2_1 import inspect_current_schema
 from scripts.migrations.migrate_turn_outputs_merge import apply_migration, main, migration_plan
 from tests.conftest import _build_test_engine, _create_all_orm_tables
 
@@ -236,7 +236,7 @@ def _seed_novel_and_run(engine) -> str:
     return run_id
 
 
-def test_merge_migration_archives_sources_and_merges_rows(pre_merge_engine):
+def test_merge_migration_drops_sources_and_merges_rows(pre_merge_engine):
     engine = pre_merge_engine
     run_id = _seed_novel_and_run(engine)
     with engine.begin() as connection:
@@ -347,9 +347,6 @@ def test_merge_migration_archives_sources_and_merges_rows(pre_merge_engine):
     ):
         assert not inspector.has_table(table), table
     assert inspector.has_table("agent_tool_calls")
-    archive = plan["archive_schema"]
-    assert inspector.has_table("agent_turns", schema=archive)
-    assert inspector.has_table("chapter_annotations", schema=archive)
 
     with engine.connect() as connection:
         turn = connection.execute(
@@ -424,7 +421,6 @@ def test_merge_migration_refuses_active_runs_before_ddl(pre_merge_engine: Engine
     with pre_merge_engine.connect() as connection:
         plan = migration_plan(connection)
     assert plan["active_run_ids"] == [run_id]
-    assert not inspector.has_schema(plan["archive_schema"])
 
 
 @pytest.mark.parametrize(
@@ -447,22 +443,7 @@ def test_merge_migration_refuses_incompatible_shapes_before_ddl(
             apply_migration(connection)
     with pre_merge_engine.connect() as connection:
         plan = migration_plan(connection)
-    assert not inspect(pre_merge_engine).has_schema(plan["archive_schema"])
     assert not inspect(pre_merge_engine).has_table("analysis_outputs")
-
-
-def test_merge_migration_refuses_existing_archive(pre_merge_engine: Engine) -> None:
-    with pre_merge_engine.begin() as connection:
-        plan = migration_plan(connection)
-        archive = plan["archive_schema"]
-        connection.execute(text(f'CREATE SCHEMA "{archive}"'))
-        connection.execute(text(f'CREATE TABLE "{archive}".restore_evidence (id INTEGER)'))
-    with pytest.raises(ValueError, match="拒绝覆盖"):
-        with pre_merge_engine.begin() as connection:
-            apply_migration(connection)
-    inspector = inspect(pre_merge_engine)
-    assert inspector.has_table("restore_evidence", schema=archive)
-    assert not inspector.has_table("model_turns")
 
 
 def test_merge_migration_cli_applies_one_transaction(
