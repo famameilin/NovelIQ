@@ -16,34 +16,14 @@ export function buildGraphUrl(
   return `/novels/${novelId}/graph?${params.toString()}`;
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P1
-// 统一时间轴入口 URL，确保图谱页各跳转点保持同一默认参数口径
-//
-
-// - 时间轴默认入口改为 `view=composite`
-// - 移除未消费的 `show_tension` 参数，避免 URL 语义继续漂移
+/** 图谱仅传真实来源事实，由时间轴查询映射独立变化身份 */
 export function buildTimelineUrl(novelId: string, taskId: string): string {
-  return `/novels/${novelId}/timeline?task_id=${taskId}&max_level=3&view=composite`;
+  return `/novels/${novelId}/timeline?task_id=${taskId}`;
 }
-
-// 2026-04-23，任务：复杂度与耦合审查 P1
-// 把时间轴联动参数拼装从页面组件中抽出，减少 UI 代码中的字符串拼接
-export function buildTimelineSelectionUrl(
-  baseUrl: string,
-  options?: { selectedNodeId?: string | null; chapterId?: number | null; changeId?: string | null }
-): string {
-  const params: string[] = [];
-  if (options?.selectedNodeId) {
-    params.push(`selected_node_id=${encodeURIComponent(options.selectedNodeId)}`);
-  }
-  if (options?.chapterId != null) {
-    params.push(`selected_chapter=${options.chapterId}`);
-  }
-  if (options?.changeId) {
-    params.push(`change_id=${encodeURIComponent(options.changeId)}`);
-  }
-  if (params.length === 0) {
-    return baseUrl;
-  }
-  return `${baseUrl}&${params.join("&")}`;
+export function buildTimelineSelectionUrl(baseUrl: string, options?: { chapterId?: number | null; sourceFactId?: string | null }): string {
+  const [path, query] = baseUrl.split("?");
+  const params = new URLSearchParams(query);
+  if (options?.chapterId != null) params.set("through_chapter_id", String(options.chapterId));
+  if (options?.sourceFactId) params.set("source_fact_id", options.sourceFactId);
+  return `${path}?${params}`;
 }

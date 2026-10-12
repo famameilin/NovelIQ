@@ -3,7 +3,6 @@ import type {
   DiagnosisResult,
   ForeshadowingTree,
   GraphChangesPageResponse,
-  EventTimelineResponse,
   EventForestResponse,
   EventSourceChapterResponse,
   EmotionTrendWindow,
@@ -11,6 +10,7 @@ import type {
   TopicSeriesResponse,
   TopicShiftResponse,
 } from "./types";
+import type { NarrativeTreeDetail, NarrativeTreeResponse, NarrativeSource, ProgressionChange, ProgressionDimension, ProgressionTimelineResponse } from "./narrativeTypes";
 
 // 情绪趋势窗口聚合：window_paragraphs 作用于 range 区间内（缺省=全书）；
 // 情绪趋势 tab 的数据源（单源端点直接作为 tab API）
@@ -76,22 +76,65 @@ export async function getGraphChanges(
   return data;
 }
 
-// 获取叙事时间轴数据，支持 include_curve 参数（仅新森林合同 EventTimelineResponse）；
-// 时间轴/节点详情 tab 的数据源
+/** 截点约束所有事实；窗口仅控制显示范围，状态由服务端完整归并 */
 export async function getTimeline(
   novelId: string,
   taskId: string,
-  options?: { includeCurve?: boolean }
-): Promise<EventTimelineResponse> {
-  const { data } = await apiClient.get<EventTimelineResponse>(
+  options: { throughChapterId?: number; windowStartChapterId?: number; windowEndChapterId?: number; subjectId?: string; dimension?: ProgressionDimension; q?: string; cursor?: string; limit?: number; sourceFactId?: string; signal?: AbortSignal } = {},
+): Promise<ProgressionTimelineResponse> {
+  const { signal, ...query } = options;
+  const { data } = await apiClient.get<ProgressionTimelineResponse>(
     `/api/novels/${novelId}/timeline`,
     {
       params: {
         task_id: taskId,
-        include_curve: options?.includeCurve ?? true,
+        ...definedParams({ through_chapter_id: query.throughChapterId, window_start_chapter_id: query.windowStartChapterId, window_end_chapter_id: query.windowEndChapterId, subject_id: query.subjectId, dimension: query.dimension, q: query.q, cursor: query.cursor, limit: query.limit, source_fact_id: query.sourceFactId }),
       },
+      signal,
     }
   );
+  return data;
+}
+
+function definedParams(values: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
+}
+
+/** 分支分页和全书搜索使用同一任务身份，原文请求不复用另一页上下文 */
+export async function getEventTrees(novelId: string, taskId: string, options: { parentId?: string; q?: string; chapterId?: number; cursor?: string; limit?: number; expandAll?: boolean; signal?: AbortSignal } = {}): Promise<NarrativeTreeResponse> {
+  const { data } = await apiClient.get<NarrativeTreeResponse>(`/api/novels/${novelId}/event-trees`, { params: { task_id: taskId, ...definedParams({ parent_id: options.parentId, q: options.q, chapter_id: options.chapterId, cursor: options.cursor, limit: options.limit, expand_all: options.expandAll }) }, signal: options.signal });
+  return data;
+}
+
+/** 默认展开全书，自动消费分页，不能把每个分支的第一页当成完整事件树 */
+export async function getEventTreeBook(novelId: string, taskId: string, signal?: AbortSignal): Promise<NarrativeTreeResponse> {
+  const first = await getEventTrees(novelId, taskId, { limit: 500, expandAll: true, signal });
+  const nodes = new Map(first.nodes.map(node => [node.node_id, node]));
+  const edgeKey = (edge: NarrativeTreeResponse["edges"][number]) => `${edge.source_id}:${edge.target_id}:${edge.kind}`;
+  const edges = new Map(first.edges.map(edge => [edgeKey(edge), edge]));
+  let cursor = first.next_cursor;
+  while (cursor) {
+    const page = await getEventTrees(novelId, taskId, { limit: 500, expandAll: true, cursor, signal });
+    page.nodes.forEach(node => nodes.set(node.node_id, node));
+    page.edges.forEach(edge => edges.set(edgeKey(edge), edge));
+    cursor = page.next_cursor;
+  }
+  return { ...first, nodes: [...nodes.values()], edges: [...edges.values()], next_cursor: null };
+}
+
+export async function getEventTreeNode(novelId: string, taskId: string, nodeId: string, signal?: AbortSignal): Promise<NarrativeTreeDetail> {
+  const { data } = await apiClient.get<NarrativeTreeDetail>(`/api/novels/${novelId}/event-trees/nodes/${encodeURIComponent(nodeId)}`, { params: { task_id: taskId }, signal });
+  return data;
+}
+
+export async function getTimelineChange(novelId: string, taskId: string, changeId: string, throughChapterId: number, signal?: AbortSignal): Promise<ProgressionChange> {
+  const { data } = await apiClient.get<ProgressionChange>(`/api/novels/${novelId}/timeline/changes/${encodeURIComponent(changeId)}`, { params: { task_id: taskId, through_chapter_id: throughChapterId }, signal });
+  return data;
+}
+
+export async function getNarrativeSource(novelId: string, taskId: string, context: { page: "timeline" | "event-trees"; id: string; chapterId?: number; throughChapterId?: number }, signal?: AbortSignal): Promise<NarrativeSource> {
+  const resource = context.page === "timeline" ? "changes" : "nodes";
+  const { data } = await apiClient.get<NarrativeSource>(`/api/novels/${novelId}/${context.page}/${resource}/${encodeURIComponent(context.id)}/source`, { params: { task_id: taskId, ...definedParams({ chapter_id: context.chapterId, through_chapter_id: context.throughChapterId }) }, signal });
   return data;
 }
 

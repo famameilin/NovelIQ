@@ -13,6 +13,8 @@ export const apiClient = axios.create({
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    // 切换搜索或分支会取消旧请求，取消仍传回调用方，但不能误报服务器断连
+    if (axios.isCancel(error)) return Promise.reject(error);
     if (error.response) {
       const detail = error.response.data?.detail || "请求失败";
       console.error(`[API Error] ${error.response.status}: ${detail}`);

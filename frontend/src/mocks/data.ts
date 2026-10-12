@@ -251,6 +251,12 @@ novelList.forEach((novel) => {
   taskDb.set(novel.novel_id, tasks);
 });
 
+// 固定的虚构设计样本，便于把正式页面与原示意稿放在同一内容下检查
+const narrativePreviewNovel = createNovel({ novel_id: "narrative-design-demo", title: "雾港来信 · 设计样本", filename: "雾港来信-虚构样本.txt", author: "虚构示例", file_size: 2400 });
+novelDb.set(narrativePreviewNovel.novel_id, narrativePreviewNovel);
+novelList.push(narrativePreviewNovel);
+taskDb.set(narrativePreviewNovel.novel_id, [createTask(narrativePreviewNovel.novel_id, "completed", { task_id: "narrative-design-task" })]);
+
 /* ------------------------------------------------------------------ */
 /*  角色                                                               */
 /* ------------------------------------------------------------------ */

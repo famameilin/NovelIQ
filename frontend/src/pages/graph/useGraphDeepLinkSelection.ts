@@ -176,26 +176,24 @@ export function useGraphDeepLinkSelection({
     }
     navigate(
       buildTimelineSelectionUrl(timelineUrl, {
-        selectedNodeId: selectedChange?.change_id ?? null,
-        chapterId: selectedChange?.effective_chapter_id ?? initialSelectedChapter,
-        changeId: selectedChange?.change_id,
+        sourceFactId: selectedChange?.fact_id ?? null,
+        chapterId: selectedChange?.chapter_id ?? initialSelectedChapter,
       })
     );
   }, [initialSelectedChapter, navigate, selectedChange, timelineUrl]);
 
   const handleOpenTimelineChapter = useCallback(
     // 未选中章节时没有可打开的时间线定位
-    (chapterId?: number | null, changeId?: string | null, selectedNodeId?: string | null) => {
+    (chapterId?: number | null, changeId?: string | null) => {
       if (!timelineUrl || chapterId == null) return;
       navigate(
         buildTimelineSelectionUrl(timelineUrl, {
-          selectedNodeId,
           chapterId,
-          changeId,
+          sourceFactId: sortedChanges.find(change => change.change_id === changeId)?.fact_id,
         })
       );
     },
-    [navigate, timelineUrl]
+    [navigate, timelineUrl, sortedChanges]
   );
 
   return {

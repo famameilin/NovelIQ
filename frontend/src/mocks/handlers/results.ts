@@ -10,9 +10,11 @@ import {
   createForeshadowingTrees,
   createDiagnosis,
   createGraphChangesPage,
-  createEventTimeline,
   taskDb,
 } from "../data";
+
+import { narrativeResponse } from "../narrativeData";
+import { narrativePreviewResponse, NARRATIVE_PREVIEW_NOVEL } from "../narrativePreview";
 
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
 // 2026-08-14 D3：新管线只写 completed，aggregated/diagnosed 为旧合同状态（与后端 READABLE_RUN_STATUSES 对齐）
@@ -131,23 +133,19 @@ export const graphChangesHandler = http.get(
   }
 );
 
-// 获取 /api/novels/:novelId/timeline（2026-08-20 事件森林一树一节点）
-export const timelineHandler = http.get(
-  `${BASE}/api/novels/:novelId/timeline`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const url = new URL(request.url);
-    const taskId = url.searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(400);
-    const data = createEventTimeline();
-    data.meta.novel_id = novelId as string;
-    return HttpResponse.json(data);
-  }
-);
+// 两页各自的列表、详情和原文端点均遵循 completed 读取规则
+export const narrativeHandlers = [
+  "/timeline", "/timeline/changes/:changeId", "/timeline/changes/:changeId/source",
+  "/event-trees", "/event-trees/nodes/:nodeId", "/event-trees/nodes/:nodeId/source",
+].map(suffix => http.get(`${BASE}/api/novels/:novelId${suffix}`, async ({ request, params }) => {
+  const url = new URL(request.url);
+  const taskId = url.searchParams.get("task_id") ?? "";
+  const err = await checkTaskReady(params.novelId as string, taskId);
+  if (err) return err;
+  await delay(80);
+  const response = (params.novelId === NARRATIVE_PREVIEW_NOVEL ? narrativePreviewResponse : narrativeResponse)(url.pathname, url.searchParams, taskId);
+  return new HttpResponse(JSON.stringify(response.data), { status: response.status, headers: { "Content-Type": "application/json" } });
+}));
 
 // 主题全量分布 mock（赛道 D）：4 主题 × 60 段，权重和为 1
 const MOCK_NUM_TOPICS = 4;

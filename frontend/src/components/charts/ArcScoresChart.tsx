@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import ReactEChartsCore from "echarts-for-react";
 import * as echarts from "echarts/core";
 import { BarChart } from "echarts/charts";
@@ -10,6 +10,8 @@ import {
 import { CanvasRenderer } from "echarts/renderers";
 import { GitBranch } from "lucide-react";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { PagedControls } from "@/components/common/PagedControls";
+import { useDiagnosisCapacity } from "@/components/diagnosis/useDiagnosisCapacity";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
@@ -26,28 +28,33 @@ export interface ArcScoresChartProps {
  * 2026-04-21，任务：多页面卡片风格统一
  * 修改原因：把诊断页弧线图也接入共享卡片壳，避免图表页和信息卡页出现两套容器体系
  *
- * 2026-04-28，任务：分析详情页单屏 Tabs 改造
- * 修改原因：弧线图在诊断页 tab 中需要跟随面板高度伸缩，避免固定高度造成外层滚动
+ * 少量评分按人数确定高度，大量评分分页浏览，保留全部人物的可达性
  */
 export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
   const themeSignature = useChartThemeSignature();
   const primaryColor = getCSSColorVar("--primary");
+  const [page, setPage] = useState(1);
+  const scoreCount = Object.keys(arcScores ?? {}).length;
+  const { ref, capacity } = useDiagnosisCapacity(26, 56);
+  const pageSize = Math.min(12, capacity);
+  const pageCount = Math.ceil(scoreCount / pageSize);
+  const currentPage = Math.min(page, Math.max(pageCount, 1));
 
   const option = useMemo(() => {
     if (!arcScores || Object.keys(arcScores).length === 0) {
       return {};
     }
 
-    // 按得分排序，取前 10 个
+    // 先对完整集合排序，再分页，避免仅按当前页排序改变排名口径
     const sortedEntries = Object.entries(arcScores)
       .sort(([, a], [, b]) => b - a)
-      .slice(0, 10);
+      .slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
     const names = sortedEntries.map(([name]) => name);
     const values = sortedEntries.map(([, score]) => score);
 
     return {
-      grid: { top: 20, right: 20, bottom: 40, left: 60, containLabel: false },
+      grid: { top: 12, right: 48, bottom: 28, left: 12, containLabel: true },
       tooltip: {
         trigger: "axis" as const,
         axisPointer: { type: "shadow" as const },
@@ -69,6 +76,7 @@ export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
       },
       yAxis: {
         type: "category" as const,
+        inverse: true,
         data: names,
         axisLine: { show: false },
         axisTick: { show: false },
@@ -79,7 +87,7 @@ export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
           name: "弧线得分",
           type: "bar",
           data: values,
-          barWidth: "60%",
+          barMaxWidth: 20,
           itemStyle: {
             borderRadius: [0, 4, 4, 0],
             color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
@@ -99,7 +107,7 @@ export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
         },
       ],
     };
-  }, [arcScores, primaryColor]);
+  }, [arcScores, primaryColor, currentPage, pageSize]);
 
   const hasData = arcScores && Object.keys(arcScores).length > 0;
 
@@ -109,10 +117,11 @@ export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
       icon={<GitBranch className="h-4 w-4" />}
       accent="chart-3"
       className={cn(className)}
-      contentClassName="flex h-full flex-col"
-      bodyClassName="min-h-0 flex-1 gap-3"
+      contentClassName="min-h-0 [&>div:first-child]:shrink-0"
+      bodyClassName="min-h-0 flex-1 gap-2"
+      headerRight={<span className="text-xs text-text-muted">{scoreCount} 人 · 满分 10</span>}
     >
-      <div className="min-h-[260px] flex-1 w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
+      <div ref={ref} className="min-h-0 w-full flex-1 rounded-lg border border-border/60 bg-surface/70 p-2">
         {hasData ? (
           <ReactEChartsCore
             key={themeSignature}
@@ -128,6 +137,7 @@ export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
           </div>
         )}
       </div>
+      <div className="h-8 shrink-0"><PagedControls page={currentPage} pageCount={pageCount} onPageChange={setPage} label="角色弧线" /></div>
     </DashboardCardShell>
   );
 }
