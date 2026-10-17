@@ -18,12 +18,28 @@ BatchProgressCallback = Callable[[int, int, int], Awaitable[None] | None]
 RETRYABLE_EMBEDDING_STATUS_CODES = {429, 500, 502, 503, 504}
 EMBEDDING_MAX_RETRIES = 2
 EMBEDDING_RETRY_BASE_DELAY_S = 0.5
+# 2026-10-16 用户裁定「加连接级重试」：连接建立失败/超时类错误批内重试最多 3 次、指数退避；
+# 状态码路径预算不变；嵌入请求只读幂等，重发无数据副作用
+EMBEDDING_CONNECTION_MAX_RETRIES = 3
+EMBEDDING_CONNECTION_RETRY_DELAY_S = 0.5
 
 # 2026-09-25 用于查询侧嵌入按 Qwen3-Embedding 官方非对称检索配方加 instruct 前缀：
 # 检索文档侧（embed_texts）必须直发原文不加前缀，只有查询侧走 format_query_instruct；
 # 指令按官方建议写英文。换成对称嵌入模型（如原 ritrieve BERT 系）时须移除前缀，
 # 否则查询向量分布与文档向量分布偏离、相似度失真。
 QUERY_INSTRUCT_TASK = "Given a query about a novel, retrieve original novel passages relevant to the query"
+
+
+class EmbeddingServiceError(RuntimeError):
+    """嵌入依赖故障，由调用方终止任务，不交给模型修正"""
+
+
+class EmbeddingConnectionError(EmbeddingServiceError, ConnectionError):
+    """保留连接异常语义，同时标明故障来自嵌入服务"""
+
+
+class EmbeddingTimeoutError(EmbeddingServiceError, TimeoutError):
+    """保留超时语义，同时标明故障来自嵌入服务"""
 
 
 def format_query_instruct(query: str) -> str:
@@ -82,6 +98,10 @@ class EmbeddingClient:
             self._model,
         )
 
+    async def aclose(self) -> None:
+        """释放当前检索调用持有的 HTTP 连接，取消时同样执行"""
+        await self._client.close()
+
     def _log(self, level: str, msg: str, *args) -> None:
         """逐条/分批的 info 日志压到 debug（错误与警告按原级别），避免逐条刷屏"""
         if level == "info":
@@ -101,14 +121,55 @@ class EmbeddingClient:
             raise ValueError("embedding model is required")
         return self._model
 
+    async def _connection_retry(self, error: APIConnectionError, attempt: int) -> None:
+        """2026-10-16 用于记录一次连接级重试并按指数退避等待；APITimeoutError 是其子类同走该路径"""
+        delay = EMBEDDING_CONNECTION_RETRY_DELAY_S * (2 ** (attempt - 1))
+        self._log(
+            "warning",
+            "embedding 连接级重试: base_url={} attempt={}/{} delay_s={} error={}",
+            self._base_url,
+            attempt,
+            EMBEDDING_CONNECTION_MAX_RETRIES,
+            delay,
+            str(error),
+        )
+        await asyncio.sleep(delay)
+
     async def _create_embeddings_with_retry(self, text_input: str | list[str]):
+        """连接/超时类错误按裁定在批内重试最多 3 次；状态码路径保持原预算；耗尽后原样抛出保留下游分类"""
         model_name = self._require_model_name()
-        for attempt in range(1, EMBEDDING_MAX_RETRIES + 2):
+        connection_attempts = 0
+        status_attempts = 0
+        while True:
             try:
                 response = await self._client.embeddings.create(
                     model=model_name, input=text_input, encoding_format="float",
                 )
                 return response
+            except APITimeoutError as e:
+                connection_attempts += 1
+                if connection_attempts > EMBEDDING_CONNECTION_MAX_RETRIES:
+                    self._log(
+                        "error",
+                        "embedding 连接重试耗尽: base_url={} attempts={} error={}",
+                        self._base_url,
+                        connection_attempts - 1,
+                        str(e),
+                    )
+                    raise
+                await self._connection_retry(e, connection_attempts)
+            except APIConnectionError as e:
+                connection_attempts += 1
+                if connection_attempts > EMBEDDING_CONNECTION_MAX_RETRIES:
+                    self._log(
+                        "error",
+                        "embedding 连接重试耗尽: base_url={} attempts={} error={}",
+                        self._base_url,
+                        connection_attempts - 1,
+                        str(e),
+                    )
+                    raise
+                await self._connection_retry(e, connection_attempts)
             except BadRequestError as e:
                 self._log(
                     "error",
@@ -117,23 +178,23 @@ class EmbeddingClient:
                     self._base_url,
                     str(e),
                 )
-                raise RuntimeError(f"embedding 服务错误: {e}") from e
+                raise EmbeddingServiceError(f"embedding 服务错误: {e}") from e
             except APIStatusError as e:
-                status_code = getattr(e, "status_code", "unknown")
-                should_retry = self._is_retryable_embedding_status_error(e) and attempt <= EMBEDDING_MAX_RETRIES
+                status_attempts += 1
+                should_retry = self._is_retryable_embedding_status_error(e) and status_attempts <= EMBEDDING_MAX_RETRIES
                 self._log(
                     "warning" if should_retry else "error",
                     "embedding API状态错误: status={} attempt={}/{} base_url={} retry={} error={}",
-                    status_code,
-                    attempt,
+                    getattr(e, "status_code", "unknown"),
+                    status_attempts,
                     EMBEDDING_MAX_RETRIES + 1,
                     self._base_url,
                     should_retry,
                     str(e),
                 )
                 if not should_retry:
-                    raise RuntimeError(f"embedding 服务错误: {e}") from e
-                await asyncio.sleep(EMBEDDING_RETRY_BASE_DELAY_S * attempt)
+                    raise EmbeddingServiceError(f"embedding 服务错误: {e}") from e
+                await asyncio.sleep(EMBEDDING_RETRY_BASE_DELAY_S * status_attempts)
 
     async def get_embedding(self, text: str, chunk_id: int | None = None) -> list[float]:
         """
@@ -179,6 +240,15 @@ class EmbeddingClient:
                 response.usage.total_tokens if response.usage else 0,
             )
             return embedding
+        except APITimeoutError as e:
+            # SDK 超时继承连接异常，必须先匹配才能保留超时分类
+            self._log(
+                "error",
+                "get_embedding 超时错误: base_url={} error={}",
+                self._base_url,
+                str(e),
+            )
+            raise EmbeddingTimeoutError("embedding 服务请求超时，请检查服务响应") from e
         except APIConnectionError as e:
             self._log(
                 "error",
@@ -186,15 +256,7 @@ class EmbeddingClient:
                 self._base_url,
                 str(e),
             )
-            raise ConnectionError(f"无法连接到 embedding 服务 ({self._base_url})，请检查服务是否启动") from e
-        except APITimeoutError as e:
-            self._log(
-                "error",
-                "get_embedding 超时错误: base_url={} error={}",
-                self._base_url,
-                str(e),
-            )
-            raise TimeoutError("embedding 服务请求超时，请检查服务响应") from e
+            raise EmbeddingConnectionError(f"无法连接到 embedding 服务 ({self._base_url})，请检查服务是否启动") from e
         except Exception as e:
             self._log(
                 "error",
@@ -260,14 +322,6 @@ class EmbeddingClient:
 
             try:
                 response = await self._create_embeddings_with_retry(batch_texts)
-            except APIConnectionError as e:
-                self._log(
-                    "error",
-                    "embed_texts 连接错误: base_url={} error={}",
-                    self._base_url,
-                    str(e),
-                )
-                raise ConnectionError(f"无法连接到 embedding 服务 ({self._base_url})，请检查服务是否启动") from e
             except APITimeoutError as e:
                 self._log(
                     "error",
@@ -275,7 +329,17 @@ class EmbeddingClient:
                     self._base_url,
                     str(e),
                 )
-                raise TimeoutError("embedding 服务请求超时，请检查服务响应") from e
+                raise EmbeddingTimeoutError("embedding 服务请求超时，请检查服务响应") from e
+            except APIConnectionError as e:
+                self._log(
+                    "error",
+                    "embed_texts 连接错误: base_url={} error={}",
+                    self._base_url,
+                    str(e),
+                )
+                raise EmbeddingConnectionError(
+                    f"无法连接到 embedding 服务 ({self._base_url})，请检查服务是否启动"
+                ) from e
             except Exception as e:
                 self._log(
                     "error",
