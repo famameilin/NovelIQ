@@ -1,10 +1,18 @@
-"""诊断结果查询及归一化；返回领域读模型"""
+"""诊断结果查询及归一化；返回领域读模型
+
+2026-10-16 全库 3NF 改造（35 表冻结结构）：读侧从 diagnosis_reports 报告头及
+analysis_assessments 的标签/名单/评分条目重组，novel_id 从运行取，
+foreshadow_expectation 从正式伏笔链与阶段声明绑定投影；对 API 的中文字段语义、
+空值与顺序保持与旧 payload 一致。
+"""
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from src.diagnosis.normalization import (
     derive_focus_structure_from_characters,
@@ -17,19 +25,127 @@ from src.diagnosis.normalization import (
 )
 from src.diagnosis.read_models import DiagnosisReadResult
 from src.diagnosis.vocabulary import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
-from src.storage.repositories import StatsRepository
+from src.event_trees.storage_map import run_execution_ids
 from src.utils.parsing import parse_int_field, parse_json_field
+
+
+def _declaration_bindings(session: Session, run_id: str) -> dict[str, str]:
+    """正式声明绑定：阶段版本绑定声明，完整事件→声明，供伏笔预期沿绑定取事件身份"""
+    from src.storage.models import CompleteEvent, EventRevision
+
+    stmt = (
+        select(EventRevision.declaration_id, EventRevision.event_id)
+        .join(CompleteEvent, CompleteEvent.event_id == EventRevision.event_id)
+        .where(
+            EventRevision.declaration_id.is_not(None),
+            CompleteEvent.producer_execution_id.in_(run_execution_ids(run_id)),
+        )
+    )
+    return {str(declaration_id): str(event_id) for declaration_id, event_id in session.execute(stmt)}
+
+
+def fetch_diagnosis_payload(session: Session, run_id: str) -> dict[str, Any] | None:
+    """正式诊断报告的扁平投影；无报告返回 None（与旧产物读取语义一致）"""
+    from src.storage.models import (
+        AnalysisAssessment,
+        AnalysisRun,
+        DiagnosisReport,
+        Execution,
+        GraphEntity,
+    )
+
+    report = session.scalars(
+        select(DiagnosisReport)
+        .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
+        .where(Execution.session_run_id == run_id)
+        .order_by(DiagnosisReport.created_at.desc(), DiagnosisReport.report_id.desc())
+        .limit(1)
+    ).first()
+    if report is None:
+        return None
+    report_id = report.report_id
+
+    def _labels(column: Any) -> list[str]:
+        return list(
+            session.scalars(
+                select(column)
+                .where(AnalysisAssessment.report_id == report_id, column.is_not(None))
+                .order_by(AnalysisAssessment.ordinal)
+            )
+        )
+
+    def _members(cast_role: str) -> list[str]:
+        stmt = (
+            select(GraphEntity.canonical_name)
+            .join(AnalysisAssessment, AnalysisAssessment.cast_entity_id == GraphEntity.entity_id)
+            .where(
+                AnalysisAssessment.report_id == report_id,
+                AnalysisAssessment.cast_role == cast_role,
+            )
+            .order_by(AnalysisAssessment.ordinal)
+        )
+        return list(session.scalars(stmt))
+
+    topic_labels = {
+        str(row.topic_id): row.topic_label
+        for row in session.scalars(
+            select(AnalysisAssessment)
+            .where(AnalysisAssessment.report_id == report_id, AnalysisAssessment.topic_label.is_not(None))
+            .order_by(AnalysisAssessment.topic_id)
+        )
+    }
+    arc_scores = {
+        str(name): float(score)
+        for name, score in session.execute(
+            select(GraphEntity.canonical_name, AnalysisAssessment.character_score)
+            .join(AnalysisAssessment, AnalysisAssessment.scored_entity_id == GraphEntity.entity_id)
+            .where(
+                AnalysisAssessment.report_id == report_id,
+                AnalysisAssessment.character_score.is_not(None),
+            )
+        )
+    }
+    from src.event_trees.read.foreshadowing import calculate_foreshadow_expectation
+
+    payload: dict[str, Any] = {
+        "run_id": run_id,
+        "novel_id": session.scalar(select(AnalysisRun.novel_id).where(AnalysisRun.run_id == run_id)),
+        "foreshadow_expectation": calculate_foreshadow_expectation(
+            session, run_id, declaration_bindings=_declaration_bindings(session, run_id)
+        ),
+        "arc_scores": arc_scores,
+        "genre_labels": _labels(AnalysisAssessment.genre_label),
+        "style_labels": _labels(AnalysisAssessment.style_label),
+        "topic_labels": topic_labels,
+        "diagnosis": report.diagnosis,
+        "value_logic_type": report.value_logic_type,
+        "value_logic_reason": report.value_logic_reason,
+        "power_stance_score": report.power_stance_score,
+        "power_stance_reason": report.power_stance_reason,
+        "common_people_dignity": report.common_people_dignity,
+        "dignity_reason": report.dignity_reason,
+        "cultural_depth_score": report.cultural_depth_score,
+        "cultural_depth_reason": report.cultural_depth_reason,
+        "narrative_arc_type": report.narrative_arc_type,
+        "focus_structure": report.focus_structure,
+        "focus_characters": _members("focus"),
+        "main_characters": _members("main"),
+        "core_cast": _members("core"),
+        "theme_color": report.theme_color,
+    }
+    return payload
 
 
 def query_diagnosis(
     run_id: str,
     novel_id: str,
-    stats_repo: StatsRepository,
+    stats_repo: Any,
 ) -> DiagnosisReadResult | None:
     """
     从数据库获取诊断结果
     """
-    data = stats_repo.fetch_agent_analysis(run_id)
+    session: Session = stats_repo.session
+    data = fetch_diagnosis_payload(session, run_id)
     if not data:
         return None
     global_stats = stats_repo.fetch_global_stats_dict(run_id)
