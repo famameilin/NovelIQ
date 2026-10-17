@@ -1,7 +1,7 @@
 """诊断结果 payload 的字段契约
 
 说明: analysis_outputs 里 kind='agent_analysis' 行的字段面——诊断 agent 提交局部修正
-（revise_finish）、落库读写（stats 仓储）与 api 响应模型（DiagnosisResult）共用同一份，
+（write_diagnosis 的 patch）、落库读写（stats 仓储）与 api 响应模型（DiagnosisResult）共用同一份，
 避免字段在两处漂移。完整结果模型（含领域校验）在 src/agents/diagnosis/schema.py。
 """
 
