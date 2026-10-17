@@ -8,6 +8,7 @@ import ast
 import json
 import time
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
@@ -30,6 +31,21 @@ from .search_projection import SHARED_SEARCH_MAX_CHARS, _failed_view
 _REPEAT_FAILED_BATCH_MIN_OPS = 5
 _REPEAT_FAILED_BATCH_FATAL_AT = 3
 _DIALOGUE_INDEX_ADAPTER = TypeAdapter(int)
+
+
+def _unknown_function_message(name: str) -> str:
+    """未开放函数的回执点名可用范围；print 另有检索回显替代写法
+
+    run 52cbb1ac 第 10 轮实证：工作 a8aa18fc 的收尾程序在末行写了 len(targets)，
+    预检整段拒收、连同程序内 write_event 与 finish 一起作废，最后一个回合零进展耗尽。
+    预检与运行时两条路径共用本条回执，避免 print 提示只挂在执行路径成为死文案。
+    """
+    if name == "print":
+        return (
+            "未开放函数：print；检索结果自动回显在 reads，请删除 print，"
+            "直接用变量 = search_events(query=...) 或 search_graph(query=...) 读取"
+        )
+    return f"未开放函数：{name}；可调用的函数只有目录列出的工具与 range，没有其他内置函数"
 
 
 class RestrictedProgramRuntime:
@@ -88,6 +104,7 @@ class RestrictedProgramRuntime:
 
         async def run() -> None:
             nodes = self._parse(code)
+            self._preflight_syntax(nodes)
             await self._preflight_dialogue_indices(nodes)
             await self._statements(nodes)
 
@@ -108,7 +125,8 @@ class RestrictedProgramRuntime:
             return
         unknown = object()
         original_env, original_steps = self.env, self._steps
-        self.env = dict(original_env)
+        # 下标赋值会修改容器；预检必须隔离已有变量，不能提前改变真实程序环境
+        self.env = deepcopy(original_env)
         invalid: dict[int, int | None] = {}
         total = len(self.ledger.dialogue_candidates)
 
@@ -116,16 +134,25 @@ class RestrictedProgramRuntime:
             for target in ast.walk(node):
                 if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store):
                     self.env.pop(target.id, None)
+                if isinstance(target, ast.Subscript) and isinstance(target.ctx, ast.Store):
+                    root = target.value
+                    while isinstance(root, ast.Subscript):
+                        root = root.value
+                    if isinstance(root, ast.Name):
+                        self.env.pop(root.id, None)
 
-        def assign_known(target: ast.AST, value: Any) -> None:
+        async def assign_known(target: ast.AST, value: Any) -> None:
             try:
-                self._assign(target, value)
+                await self._assign(target, value)
             except ProgramFault:
                 # 预检只拒绝候选号越界，其它赋值错误留在原执行点报出
                 invalidate(target)
 
         async def pure_value(node: ast.AST) -> Any:
-            if any(isinstance(child, ast.Call) for child in ast.walk(node)):
+            if any(
+                isinstance(child, ast.Call) and not (isinstance(child.func, ast.Name) and child.func.id == "range")
+                for child in ast.walk(node)
+            ):
                 return unknown
             try:
                 return await self._value(node)
@@ -159,9 +186,10 @@ class RestrictedProgramRuntime:
                     await check_calls(statement.value)
                     if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
                         value = await pure_value(statement.value)
-                        invalidate(statement)
-                        if value is not unknown:
-                            assign_known(statement.targets[0], value)
+                        if value is unknown:
+                            invalidate(statement)
+                        else:
+                            await assign_known(statement.targets[0], value)
                 elif isinstance(statement, ast.If):
                     await check_calls(statement.test)
                     value = await pure_value(statement.test)
@@ -177,7 +205,7 @@ class RestrictedProgramRuntime:
                         continue
                     for value in values:
                         self._guard()
-                        assign_known(statement.target, value)
+                        await assign_known(statement.target, value)
                         await visit(statement.body)
                     await visit(statement.orelse)
 
@@ -315,6 +343,62 @@ class RestrictedProgramRuntime:
             raise ProgramFault("程序为空：请提交要执行的 Python 程序", code="empty_program")
         return body
 
+    def _preflight_syntax(self, nodes: list[ast.stmt]) -> None:
+        """整段检查语法白名单；不求值、不调用工具，避免前半段写入后才发现禁用语法"""
+        statements = (ast.Assign, ast.Expr, ast.For, ast.If, ast.Pass)
+        expressions = (
+            ast.Constant,
+            ast.Name,
+            ast.List,
+            ast.Tuple,
+            ast.Dict,
+            ast.Subscript,
+            ast.UnaryOp,
+            ast.BinOp,
+            ast.Compare,
+            ast.Call,
+        )
+        markers = (ast.Load, ast.Store, ast.USub, ast.Add, ast.Eq, ast.NotEq, ast.In, ast.keyword)
+        for statement in nodes:
+            for node in ast.walk(statement):
+                self._guard()
+                line = getattr(node, "lineno", None)
+                if isinstance(node, ast.stmt) and not isinstance(node, statements):
+                    raise ProgramFault(
+                        f"未支持的 Python 语句：{type(node).__name__}", code="unsupported_statement", line=line
+                    )
+                if not isinstance(node, (*statements, *expressions, *markers)):
+                    raise ProgramFault(
+                        f"未支持的 Python 表达式：{type(node).__name__}", code="unsupported_expression", line=line
+                    )
+                if isinstance(node, ast.Assign) and len(node.targets) != 1:
+                    raise ProgramFault("只支持单目标赋值或等长解包", code="bad_assignment", line=line)
+                if isinstance(node, (ast.Assign, ast.For)):
+                    target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+                    if any(isinstance(part, ast.Call) for part in ast.walk(target)):
+                        raise ProgramFault("赋值目标不能调用函数", code="bad_assignment", line=line)
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                    if node.id in self.tools or node.id == "range" or node.id.startswith("_"):
+                        raise ProgramFault(f"不允许使用保留变量名：{node.id}", code="name_reserved", line=line)
+                if isinstance(node, ast.Dict) and any(key is None for key in node.keys):
+                    raise ProgramFault("字典不支持 ** 解包", code="unsupported_expression", line=line)
+                if isinstance(node, ast.Compare) and len(node.ops) != 1:
+                    raise ProgramFault("不支持链式比较", code="unsupported_expression", line=line)
+                if isinstance(node, ast.Call):
+                    if not isinstance(node.func, ast.Name):
+                        raise ProgramFault("不支持属性调用", code="unsupported_expression", line=line)
+                    name = node.func.id
+                    if name not in self.tools and name != "range":
+                        raise ProgramFault(_unknown_function_message(name), code="unknown_tool", line=line)
+                    if name == "range":
+                        invalid = not 1 <= len(node.args) <= 3 or bool(node.keywords)
+                    else:
+                        invalid = bool(node.args) or any(keyword.arg is None for keyword in node.keywords)
+                    if invalid:
+                        raise ProgramFault(
+                            "range 只接受1至3个整数位置参数；工具只接受具名参数", code="bad_call", line=line
+                        )
+
     def _receipt(
         self,
         *,
@@ -374,7 +458,7 @@ class RestrictedProgramRuntime:
         for node in nodes:
             self._guard()
             if isinstance(node, ast.Assign) and len(node.targets) == 1:
-                self._assign(node.targets[0], await self._value(node.value))
+                await self._assign(node.targets[0], await self._value(node.value))
             elif isinstance(node, ast.Expr):
                 await self._value(node.value)
             elif isinstance(node, ast.For):
@@ -408,14 +492,14 @@ class RestrictedProgramRuntime:
             )
         for item in values:
             self._guard()
-            self._assign(node.target, item)
+            await self._assign(node.target, item)
             await self._statements(node.body)
         await self._statements(node.orelse)
 
-    def _assign(self, node: Any, value: Any) -> None:
-        """用于变量赋值（单名或等长解包；禁止覆盖工具名与 _ 前缀内部名）"""
+    async def _assign(self, node: Any, value: Any) -> None:
+        """变量、等长解包及字典下标赋值；容器不允许环或无限增长"""
         if isinstance(node, ast.Name):
-            if node.id in self.tools:
+            if node.id in self.tools or node.id == "range":
                 raise ProgramFault(
                     f"不允许覆盖工具名：{node.id}；请把变量改为 {node.id}_result，工具名须保留以便后续调用",
                     code="name_reserved",
@@ -438,7 +522,25 @@ class RestrictedProgramRuntime:
                     line=getattr(node, "lineno", None),
                 )
             for target, item in zip(node.elts, items, strict=True):
-                self._assign(target, item)
+                await self._assign(target, item)
+            return
+        if isinstance(node, ast.Subscript):
+            container = await self._value(node.value)
+            key = await self._value(node.slice)
+            if not isinstance(container, dict) or type(key) not in (str, int, float, bool, type(None)):
+                raise ProgramFault("下标赋值只接受字典与标量键", code="bad_assignment", line=node.lineno)
+            if key not in container and len(container) >= program_contract.PROGRAM_MAX_LOOP_ITEMS:
+                raise ProgramFault("字典条目超过容器上限", code="collection_too_long", line=node.lineno)
+            pending, visited = [value], set()
+            while pending:
+                self._guard()
+                item = pending.pop()
+                if item is container:
+                    raise ProgramFault("字典赋值不能形成循环引用", code="bad_assignment", line=node.lineno)
+                if isinstance(item, (dict, list, tuple)) and id(item) not in visited:
+                    visited.add(id(item))
+                    pending.extend(item.values() if isinstance(item, dict) else item)
+            container[key] = value
             return
         raise ProgramFault(
             "只支持变量赋值与等长解包",
@@ -471,7 +573,16 @@ class RestrictedProgramRuntime:
             try:
                 return value[index]
             except (KeyError, IndexError, TypeError) as exc:
-                raise ProgramFault(f"下标不可用：{exc}", code="runtime_error", line=line) from None
+                keys = "、".join(str(key) for key in value)[:300] if isinstance(value, dict) else ""
+                hint = f"；实际可用键：{keys}" if keys else ""
+                raise ProgramFault(f"下标不可用：{exc}{hint}", code="runtime_error", line=line) from None
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, right = await self._value(node.left), await self._value(node.right)
+            if not isinstance(left, list) or not isinstance(right, list):
+                raise ProgramFault("+ 只支持列表拼接", code="runtime_error", line=line)
+            if len(left) + len(right) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
+                raise ProgramFault("列表拼接超过容器上限", code="collection_too_long", line=line)
+            return left + right
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
             operand = await self._value(node.operand)
             if not isinstance(operand, (int, float)) or isinstance(operand, bool):
@@ -544,15 +655,22 @@ class RestrictedProgramRuntime:
                 line=line,
             )
         name = function.id
+        if name == "range":
+            arguments = [await self._value(arg) for arg in node.args]
+            if node.keywords or not 1 <= len(arguments) <= 3 or any(type(arg) is not int for arg in arguments):
+                raise ProgramFault("range 只接受1至3个整数位置参数", code="bad_call", line=line)
+            try:
+                values = range(*arguments)
+                if len(values) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
+                    raise OverflowError
+            except OverflowError:
+                raise ProgramFault("range 项数超过循环上限", code="loop_too_long", line=line) from None
+            except ValueError:
+                raise ProgramFault("range 的步长不能为0", code="bad_call", line=line) from None
+            return list(values)
         if name not in self.tools:
             raise ProgramFault(
-                f"未开放函数：{name}"
-                + (
-                    "；检索结果自动回显在 reads，请删除 print，直接用变量 = search_events(query=...) "
-                    "或 search_graph(query=...) 读取"
-                    if name == "print"
-                    else ""
-                ),
+                _unknown_function_message(name),
                 code="unknown_tool",
                 line=line,
             )
@@ -608,6 +726,7 @@ class RestrictedProgramRuntime:
                 "source_line": line,
                 "tool_name": name,
                 "status": status,
+                "receipt": {key: body[key] for key in ("record", "ref", "warnings", "case_link") if key in body},
                 "record": body.get("record") or tool_record_key(name, dict(call_args or {})),
                 "error_code": body.get("code"),
                 "field": body.get("field"),
@@ -627,11 +746,13 @@ class RestrictedProgramRuntime:
         整轮推理烧在"回查"上。这里把 payload 原样回显（投影已在 _ProgramSearchTool 做过），
         按条数与字符数双上限截断。
         """
-        # 全书检索已按整项分页限流，保留可读预览与续页字段，避免二次压缩只剩 ID 骨架
-        max_chars = (
-            SHARED_SEARCH_MAX_CHARS if name in {"search_events", "search_graph"} else _program._READ_ECHO_MAX_CHARS
-        )
-        text, omitted = compact_read_result(receipt, max_chars=max_chars)
+        # 事件索引已经限制条数和单字段预览长度，整页回显不能再次裁掉后半页业务字段
+        if name == "search_events":
+            text = receipt if isinstance(receipt, str) else json.dumps(receipt, ensure_ascii=False)
+            omitted = 0
+        else:
+            max_chars = SHARED_SEARCH_MAX_CHARS if name == "search_graph" else _program._READ_ECHO_MAX_CHARS
+            text, omitted = compact_read_result(receipt, max_chars=max_chars)
         item: dict[str, Any] = {"op": op_index, "tool": name}
         if line is not None:
             item["line"] = line
