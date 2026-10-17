@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from src.storage.models import Paragraph
 from src.storage.repositories import ChapterRepository, RunRepository
-from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.storage.repositories.paragraph_repository import ParagraphMetricRow, ParagraphRepository
 from src.text_processing.models import Chunk, ParagraphSpan
 from src.text_processing.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
@@ -39,6 +39,28 @@ def _make_spans(chunks: list[Chunk], token_counts: list[int] | None = None) -> l
     if token_counts is None:
         token_counts = [10] * len(spans)
     return [replace(span, token_count=tc) for span, tc in zip(spans, token_counts, strict=True)]
+
+
+def _metric_row(paragraph_id: int, *, token_count: int) -> ParagraphMetricRow:
+    """最小合法指标行：token_count 是段落读取投影的口径来源"""
+    return ParagraphMetricRow(
+        paragraph_id=paragraph_id,
+        token_count=token_count,
+        sentence_count=0,
+        sentence_char_sum=0.0,
+        sentence_char_sum_sq=0.0,
+        positive_weight_sum=0.0,
+        negative_weight_sum=0.0,
+        fight_weight_sum=0.0,
+        exclaim_count=0,
+        question_count=0,
+        pause_count=0,
+        dialogue_char_count=0,
+        sensory_hit_count=0,
+        imagery_hit_count=0,
+        metaphor_sentence_count=0,
+        body_reaction_hit_count=0,
+    )
 
 
 def _single_chunk(text: str = "第一段。\n", start: int = 0) -> list[Chunk]:
@@ -74,6 +96,27 @@ def _span(
     )
 
 
+def _paragraph_model(
+    run_id: str,
+    *,
+    paragraph_id: int,
+    local_start_char: int,
+    text: str,
+    chapter_id: int = 1,
+) -> Paragraph:
+    """直接构造段落 ORM 行（绕过 repository 校验，用于数据库约束反例）"""
+    return Paragraph(
+        run_id=run_id,
+        paragraph_id=paragraph_id,
+        chapter_id=chapter_id,
+        paragraph_index=paragraph_id,
+        source_paragraph_index=0,
+        fragment_index=0,
+        local_start_char=local_start_char,
+        text=text,
+    )
+
+
 def test_insert_and_fetch_paragraphs(db_session) -> None:
     run_id = _create_run(db_session)
     chunks = _single_chunk(CHUNK_TEXT, start=0)
@@ -91,17 +134,36 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
     assert [row.paragraph_id for row in rows] == [0, 1, 2]
     for i, (row, span) in enumerate(zip(rows, spans, strict=True)):
         assert row.chapter_id == span.chapter_id == 1
-        assert row.chapter_id == span.chapter_id == 1
         assert row.paragraph_index == span.paragraph_index == i
         assert row.source_paragraph_index == span.source_paragraph_index
         assert row.fragment_index == span.fragment_index
         assert row.local_start_char == span.local_start_char
+        # 2026-10-16 3NF：local_end_char/global/char_count 是读取投影
         assert row.local_end_char == span.local_end_char
         assert row.global_start_char == span.global_start_char
         assert row.global_end_char == span.global_end_char
         assert row.char_count == span.char_count == len(span.text)
-        assert row.token_count == span.token_count
         assert row.text == span.text
+        # token_count 读取投影来自 paragraph_metrics（本用例未写指标行）
+        assert row.token_count is None
+
+
+def test_paragraph_token_count_projection_comes_from_metrics(db_session) -> None:
+    """2026-10-16 3NF：token_count 从 paragraph_metrics 读取投影（预处理与指标同批 token）"""
+    run_id = _create_run(db_session)
+    chunks = _single_chunk(CHUNK_TEXT, start=0)
+    _insert_chapter_texts(db_session, run_id, chunks)
+    spans = _make_spans(chunks, token_counts=[3, 5, 7])
+
+    repo = ParagraphRepository(db_session)
+    repo.insert_paragraphs(run_id, spans)
+    assert [row.token_count for row in repo.fetch_paragraph_rows(run_id)] == [None, None, None]
+
+    repo.insert_paragraph_metrics(
+        run_id,
+        [_metric_row(span.paragraph_id, token_count=span.token_count) for span in spans],
+    )
+    assert [row.token_count for row in repo.fetch_paragraph_rows(run_id)] == [3, 5, 7]
 
 
 def test_chapter_paragraph_batch_filters_in_database(db_session) -> None:
@@ -249,27 +311,50 @@ def test_insert_paragraphs_rejects_inconsistent_global_offset(db_session) -> Non
         ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
 
 
-def test_db_constraint_rejects_invalid_local_order(db_session) -> None:
-    """绕过 repository 校验直接插入违反 local_start_char < local_end_char 的行时触发 IntegrityError"""
+def test_db_constraint_rejects_duplicate_local_start_in_chapter(db_session) -> None:
+    """绕过 repository 校验直接插入同章重复 local_start_char 时触发 IntegrityError
+
+    2026-10-16 3NF：local_end_char 不再落列，DDL 层不再有 local_start < local_end 检查，
+    同章定位唯一性（uq_paragraphs_run_chapter_local_start）仍是数据库约束。
+    """
     run_id = _create_run(db_session)
     chunks = _single_chunk("一段。")
     _insert_chapter_texts(db_session, run_id, chunks)
-    db_session.add(
-        Paragraph(
-            run_id=run_id,
-            paragraph_id=0,
-            chapter_id=1,
-            paragraph_index=0,
-            source_paragraph_index=0,
-            fragment_index=0,
-            local_start_char=5,
-            local_end_char=5,
-            global_start_char=0,
-            global_end_char=5,
-            char_count=5,
-            token_count=1,
-            text="abcde",
-        )
-    )
+    db_session.add(_paragraph_model(run_id, paragraph_id=0, local_start_char=0, text="abcde"))
+    db_session.add(_paragraph_model(run_id, paragraph_id=1, local_start_char=0, text="fghij"))
     with pytest.raises(IntegrityError):
         db_session.flush()
+
+
+def test_db_constraint_rejects_paragraph_of_missing_chapter(db_session) -> None:
+    """段落所属章节不存在时由外键拒绝（段落身份必须挂在真实章节上）"""
+    run_id = _create_run(db_session)
+    db_session.add(_paragraph_model(run_id, paragraph_id=0, local_start_char=0, text="abcde", chapter_id=99))
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_fetch_paragraph_rows_batch_cursor_paging(db_session) -> None:
+    """keyset 游标分页：limit 截断批次、after_id 排除上一批最后一条"""
+    run_id = _create_run(db_session)
+    chunks = _single_chunk(CHUNK_TEXT)
+    _insert_chapter_texts(db_session, run_id, chunks)
+    spans = _make_spans(chunks)
+    ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
+
+    repo = ParagraphRepository(db_session)
+    first_batch = repo.fetch_paragraph_rows_batch(run_id, limit=2)
+    assert [row.paragraph_id for row in first_batch] == [0, 1]
+    second_batch = repo.fetch_paragraph_rows_batch(run_id, after_id=1, limit=2)
+    assert [row.paragraph_id for row in second_batch] == [2]
+
+
+def test_insert_paragraphs_rejects_local_span_text_length_mismatch(db_session) -> None:
+    """local 坐标跨度与原文长度不一致时必须拒绝（投影坐标会与文本不符）"""
+    run_id = _create_run(db_session)
+    span = replace(
+        _span(paragraph_id=0, local_start=0, local_end=5, global_start=0, global_end=5),
+        text="abc",
+    )
+    with pytest.raises(ValueError):
+        ParagraphRepository(db_session).insert_paragraphs(run_id, [span])

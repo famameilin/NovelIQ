@@ -4,13 +4,14 @@ import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { getNarrativeSource } from "@/api/results";
-import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
+import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus, isRunRequiresRebuildError } from "@/api/errorGuards";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { control, narrativeLine, narrativeMuted, narrativePaper } from "./presentation";
 import { useNarrativeState } from "./useNarrativeState";
 
 export function NarrativeError({ error, retry }: { error: unknown; retry: () => void }) {
   if (isAnalysisNotCompleteError(error)) return <AnalysisNotCompleteState description="任务完成后才能查看结果。" failed={getAnalysisNotCompleteRunStatus(error) === "failed"} />;
+  if (isRunRequiresRebuildError(error)) return <p role="alert" className="p-6 text-sm text-text-muted">该任务的事件树需要从原文重建，请选择按新版契约生成的任务。</p>;
   return <div role="alert" className={`border p-6 text-sm ${narrativeLine}`}>加载失败，请重试。<button className={`${control} ml-4`} onClick={retry}>重试</button></div>;
 }
 
@@ -28,7 +29,7 @@ export function FloatingDetail({ title, children, onClose, inline = false }: { t
   return inline ? panel : createPortal(panel, document.body);
 }
 
-type EvidenceLocation = { id: string; evidence_scope: "chapter" | "paragraph"; anchor_paragraph_ids: number[]; chapter_id?: number; evidence: Array<Record<string, unknown>> };
+type EvidenceLocation = { id: string; kind?: "event" | "declaration"; evidence_scope: "chapter" | "paragraph"; anchor_paragraph_ids: number[]; chapter_id?: number; evidence: Array<Record<string, unknown>> };
 export function NarrativeReader({ novelId, runId, page, location, throughChapterId, onClose }: { novelId: string; runId: string; page: "timeline" | "event-trees"; location: EvidenceLocation; throughChapterId?: number; onClose: () => void }) {
   const [opener] = useState(() => document.activeElement as HTMLElement | null);
   const reader = useRef<HTMLDivElement>(null);
@@ -38,7 +39,7 @@ export function NarrativeReader({ novelId, runId, page, location, throughChapter
   const [offset, setOffset] = useState<number | null>(null);
   const [anchor, setAnchor] = useState(location.anchor_paragraph_ids[0]);
   const chapterAnchors = location.evidence.filter(item => Number(item.chapter_id) === chapter).map(item => Number(item.paragraph_id)).filter(id => Number.isFinite(id) && location.anchor_paragraph_ids.includes(id));
-  const source = useQuery({ queryKey: [page, "source", novelId, runId, location.id, chapter, throughChapterId], queryFn: ({ signal }) => getNarrativeSource(novelId, runId, { page, id: location.id, chapterId: chapter, throughChapterId }, signal), retry: false, staleTime: 0 });
+  const source = useQuery({ queryKey: [page, "source", novelId, runId, location.kind, location.id, chapter, throughChapterId], queryFn: ({ signal }) => getNarrativeSource(novelId, runId, { page, id: location.id, kind: location.kind, chapterId: chapter, throughChapterId }, signal), retry: false, staleTime: 0 });
   // 段落较长时在阅读层分片，段落身份不变，选锚点直接落到相应纸页
   const fragments = source.data?.paragraphs.flatMap(paragraph => {
     const items = [];

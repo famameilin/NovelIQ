@@ -14,18 +14,16 @@ from src.event_trees.models import (
     BoundEvent,
     ParticipantArg,
 )
-from src.event_trees.vocabulary import (
-    EventChildType,
-)
 from src.fact_graph.graph import FactGraph
 from src.fact_graph.inputs import (
+    BoundRelationInput,
     ChapterMetricsInput,
     ChapterParagraphInfo,
     DialogueCandidate,
     DialogueInput,
     EntityDirectoryInput,
     EntityInput,
-    RelationInput,
+    EntityNameRef,
 )
 from src.fact_graph.outputs import BoundCharacterObservation
 from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
@@ -33,7 +31,6 @@ from src.fact_graph.vocabulary import Confidence, DialogueVerdict, EntityType, R
 
 from .candidates import extract_dialogue_candidates
 from .errors import (
-    AnnotationInputError,
     AnnotationInvariantError,
     AnnotationProtocolError,
     AnnotationStageRejection,
@@ -95,12 +92,18 @@ class AnnotationToolLedger:
     written_record_keys: set[str] = field(default_factory=set)
     # 2026-09-13 收尾声明：唯一 finish 置位后由系统冻结当前章
     chapter_finished: bool = False
+    # 2026-10-12 完整事件跨章引用授权面：work 开始时从本 run 已确认（confirm）状态装载，
+    # 跨章引用只接受这里的身份；快照/回滚随账本深拷贝一并覆盖
+    confirmed_complete_event_index: dict[str, dict[str, Any]] = field(default_factory=dict)
+    confirmed_declaration_ids: set[str] = field(default_factory=set)
+    confirmed_containment_parents: dict[str, str] = field(default_factory=dict)
 
     work_id: str = ""
     invocation_id: str = ""
     role: str = "solo"
     invoke_tool: Any = None
     finish_work: Any = None
+    end_requested: bool = False
 
     @property
     def written_entities(self) -> dict[str, EntityInput]:
@@ -111,11 +114,11 @@ class AnnotationToolLedger:
         self.entities.written_entities = value
 
     @property
-    def written_relations(self) -> dict[tuple[str, str], RelationInput]:
+    def written_relations(self) -> dict[tuple[str, str], BoundRelationInput]:
         return self.entities.written_relations
 
     @written_relations.setter
-    def written_relations(self, value: dict[tuple[str, str], RelationInput]) -> None:
+    def written_relations(self, value: dict[tuple[str, str], BoundRelationInput]) -> None:
         self.entities.written_relations = value
 
     @property
@@ -235,9 +238,11 @@ class AnnotationToolLedger:
         }
 
     def __post_init__(self) -> None:
-        """2026-08-07 用于初始化唯一章的对话候选"""
-        if not self.current_chapter_text.strip():
-            raise AnnotationInputError("current_chapter_text 不能为空")
+        """2026-08-07 用于初始化唯一章的对话候选
+
+        2026-10-15 诊断会话复用标注三节点图，账本传空章文本（无章职责，对话候选自然为空）；
+        非空校验随构造职责下沉：标注面在 agent 建账本前检查（agent.py），账本不再拦。
+        """
         self.dialogue_candidates = extract_dialogue_candidates(
             self.current_chapter_id,
             self.current_chapter_text,
@@ -269,8 +274,10 @@ class AnnotationToolLedger:
             setattr(self, field_name, value)
 
     def resolve_entity_ref(self, ref: str, *, record: str, field: str) -> str:
-        """2026-09-14 用于把模型面实体引用（run 级 uuid id / 自定 el）解析成登记名
+        """2026-09-14 用于把模型面实体引用（run 级 uuid id / 自定 el）解析成实体身份键
 
+        2026-10-13 身份=规范名+实体大类：解析结果是复合身份键（不是显示名），
+        需要人读名称的回执/观察再经 graph.display_name 翻译。
         两种键空间同一条解析路径：字符串先查本章 的 el 索引，未命中再按
         uuid 反查图登记（uuid5 确定性 id）；未知的 id/el 结构化拒绝并列出已知键。
         """
@@ -278,8 +285,7 @@ class AnnotationToolLedger:
             raise AnnotationInvariantError("实体引用解析需要常驻事实图，graph 缺失")
         key = self.entity_el_index.get(str(ref).strip())
         if key is not None:
-            display_name = self.graph.entity_names.get(key)
-            if display_name is None:
+            if key not in self.graph.entity_names:
                 raise AnnotationStageRejection(
                     f"el 指向的实体尚未入图: {ref}",
                     record=record,
@@ -287,7 +293,7 @@ class AnnotationToolLedger:
                     code="unregistered",
                     expected="先用 write_entity 登记该实体（el 在登记当场绑定）",
                 )
-            return display_name
+            return key
         try:
             return self.graph.resolve_entity_id(str(ref).strip(), label=f"{record}.{field}")
         except ValueError as exc:
@@ -325,8 +331,8 @@ class AnnotationToolLedger:
     # ------------------------------------------------------------------
 
     def _require_writable(self, record: str) -> None:
-        """用于在每个写入入口统一校验阶段（章冻结后不再接受写入）"""
-        if self.phase != "chapter_open":
+        """用于在每个写入入口统一校验阶段（章冻结后不再接受写入；诊断阶段承接案例处置写入）"""
+        if self.phase not in {"chapter_open", "diagnosis_open"}:
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许写入正式标注")
 
     def _bound_event(self, node_id: str) -> BoundEvent:
@@ -351,7 +357,12 @@ class AnnotationToolLedger:
     # 对话域：按候选序号即时落账三态判定
 
     def apply_dialogue(
-        self, *, candidate_index: int, verdict: DialogueVerdict, speaker_ref: str | None, tone: Tone | None
+        self,
+        *,
+        candidate_index: int,
+        verdict: DialogueVerdict,
+        speaker_ref: EntityNameRef | dict[str, Any] | None,
+        tone: Tone | None,
     ) -> str:
         return self.dialogue.apply_dialogue(
             self, candidate_index=candidate_index, verdict=verdict, speaker_ref=speaker_ref, tone=tone
@@ -361,7 +372,11 @@ class AnnotationToolLedger:
     # 关系域：即时入图，同一对端点重写即整体替换
 
     def apply_relation(
-        self, *, from_ref: str, to_ref: str, relation_type: RelationType
+        self,
+        *,
+        from_ref: EntityNameRef | dict[str, Any],
+        to_ref: EntityNameRef | dict[str, Any],
+        relation_type: RelationType,
     ) -> tuple[str, str, dict[str, Any]]:
         return self.entities.apply_relation(self, from_ref=from_ref, to_ref=to_ref, relation_type=relation_type)
 
@@ -372,23 +387,29 @@ class AnnotationToolLedger:
         self,
         *,
         el: str,
-        isroot: bool,
-        description: str,
+        title: str,
+        problem: str,
+        summary: str,
+        event_type: str,
+        status: str,
         evidence: int | None = None,
+        progress: str | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
-        node_type: EventChildType | None = None,
         characters: list[ParticipantArg] | None = None,
     ) -> str:
         return self.events.apply_event(
             self,
             el=el,
-            isroot=isroot,
-            description=description,
+            title=title,
+            problem=problem,
+            summary=summary,
+            event_type=event_type,
+            status=status,
             evidence=evidence,
+            progress=progress,
             isforeshadowing=isforeshadowing,
             confidence=confidence,
-            node_type=node_type,
             characters=characters,
         )
 
@@ -415,8 +436,8 @@ class AnnotationToolLedger:
         if match is not None:
             role, domain, body = match.groups()
             if domain == "entity":
-                name = self.resolve_entity_ref(f"{role}:{body}", record=key, field="record_id")
-                return f"entity/{name}"
+                entity_key = self.resolve_entity_ref(f"{role}:{body}", record=key, field="record_id")
+                return f"entity/{self.graph.display_name(entity_key) if self.graph else entity_key}"
             if domain == "dialogue":
                 return f"dialogue/{body}"
             if domain == "event":
@@ -463,13 +484,13 @@ class AnnotationToolLedger:
             )
         if self.graph is None:
             raise AnnotationInvariantError("关系键消解需要常驻事实图，graph 缺失")
-        names: list[str] = []
+        keys: list[str] = []
         for el in (from_el, to_el):
-            names.append(self.resolve_entity_ref(f"{role}{ROLE_NAMESPACE_SEP}{el}", record=key, field="record_id"))
+            keys.append(self.resolve_entity_ref(f"{role}{ROLE_NAMESPACE_SEP}{el}", record=key, field="record_id"))
         types = {
             str(op["relation_type"])
             for op in self.graph.relation_assert_ops
-            if op["from_entity"] == names[0] and op["to_entity"] == names[1]
+            if op["from_entity"] == keys[0] and op["to_entity"] == keys[1]
         }
         if len(types) != 1:
             raise AnnotationStageRejection(
@@ -479,6 +500,7 @@ class AnnotationToolLedger:
                 code="unknown_record",
                 expected="两端之间恰好写出过一条关系边时才能作为案例目标；请换可消解的记录或省略 record_id",
             )
+        names = [self.graph.display_name(entity_key) for entity_key in keys]
         return f"relation/{names[0]}-{names[1]}/{types.pop()}"
 
     def _reconcile_pending_children(self) -> None:
@@ -501,7 +523,7 @@ class AnnotationToolLedger:
         return self.dialogue.dialogue_content(candidate_index)
 
     def event_content(self, *, el: str, isroot: bool) -> dict[str, Any]:
-        return self.events.event_content(el=el, isroot=isroot)
+        return self.events.event_content(self, el=el, isroot=isroot)
 
     # ------------------------------------------------------------------
     # 2026-09-14 进度账本数据源（每回合注入最新进展，不走回执 rollup）：
@@ -515,10 +537,10 @@ class AnnotationToolLedger:
         return self.dialogue.dialogue_ledger()
 
     # ------------------------------------------------------------------
-    # 收尾声明：唯一 finish，系统据此校验并冻结当前章（冻结单位=整章）
+    # 程序完整性检查和当前 work 的输出整理
 
     def _ensure_domain_payloads(self) -> None:
-        """finish 协调合法空状态，四状态分别拥有自己的输出"""
+        """协调合法空状态，四状态分别拥有自己的输出"""
         self.entities.domain_payloads.setdefault(
             "entities", EntityDirectoryInput(entities=list(self.written_entities.values()))
         )
@@ -675,7 +697,7 @@ class AnnotationToolLedger:
         # 各状态只读取本域载荷，账本只组装审计事实，不重新解释领域规则
         return {
             **self.metrics.fact_views(),
-            **self.entities.fact_views(),
+            **self.entities.fact_views(self),
             **self.events.fact_views(self),
             **self.dialogue.fact_views(),
         }
@@ -692,7 +714,9 @@ class AnnotationToolLedger:
             "entities": {
                 "declared": [
                     {
-                        "id": (self.graph.entity_id(entity.name) if self.graph is not None else None),
+                        "id": (
+                            self.graph.entity_id(entity.name, entity.entity_type) if self.graph is not None else None
+                        ),
                         "name": entity.name,
                         "entity_type": entity.entity_type,
                     }
@@ -701,7 +725,7 @@ class AnnotationToolLedger:
                 "registered": (
                     [
                         {
-                            "id": self.graph.entity_id(display_name),
+                            "id": self.graph.entity_id_for_key(key),
                             "name": display_name,
                             "entity_type": self.graph.entity_types[key],
                         }

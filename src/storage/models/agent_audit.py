@@ -1,122 +1,204 @@
-"""模型回合台账 ORM 模型定义（Agent 审计与 token 计账统一落点）
+"""
+模型与工具调用审计及消息发件箱 ORM 模型（2026-10-16 全库 3NF 改造）
 
-2026-10-06 表合并：agent_invocations / agent_turns / audit_messages / token_usage
-四表收敛为 model_turns 一张回合级台账——
-- invocation 上下文（execution_id/attempt_number/chapter/work/role）反规范化到每个回合行；
-- token 计账列内联在回合行上（原 token_usage 与 agent_turns 一对一，非 Agent 调用如
-  embedding 以 execution_id 为空的行同表记账）；
-- 原 audit_messages 回执表的幂等职责由 message_key 唯一列承担（每条审计消息自带唯一 id）。
-每次审计写入使用独立短事务即时提交，不随候选状态或最终标注事务回滚；
-审计写入失败时直接终止 Agent，不静默忽略。
+- model_calls：每条真实模型请求及该请求的审计观测（Agent 上下文或 standalone
+  上下文恰一；用量分项/供应商实报总量/费用/五类计时/通信文档均为本表明确列）
+- agent_tool_calls：每次真实外层工具调用及该调用的审计观测（原始参数与实际
+  执行参数分别保存，工具耗时独立测量）
+- event_outbox：实际消息、路由、游标与投递时间（emitted_bytes 原样重放）
+
+审计保持独立短事务；合成总量/合成耗时读取计算（turn_ms = model_ms + tool_wall_ms
+按原规则），供应商实报与程序 fallback 明确区分；bytes 文档仅原样审计/展示，
+不用于正式业务查询/修改。
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+)
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
+from .base import Base, naive_utcnow
 
 
-class ModelTurn(Base):
-    """一行 = 一次模型调用：Agent 回合（execution_id 非空）或非 Agent 记账行"""
+class ModelCall(Base):
+    """
+    模型调用表（每条真实请求一行）
 
-    __tablename__ = "model_turns"
+    Agent 调用有 execution+turn（(execution,turn) 唯一，turn 从 1 起）；
+    非 Agent 调用相反（standalone_* 上下文），不伪造 work。调用前失败不生成
+    turn=0 的假请求。
+    """
+
+    __tablename__ = "model_calls"
     __table_args__ = (
-        Index("idx_model_turns_run", "run_id"),
-        Index("idx_model_turns_task_type", "run_id", "task_type"),
-        Index("idx_model_turns_execution", "execution_id"),
         CheckConstraint(
-            "row_kind IN ('agent_turn', 'usage', 'attempt_error')", name="ck_model_turns_row_kind"
+            "(execution_id IS NOT NULL AND turn_index IS NOT NULL AND standalone_run_id IS NULL"
+            " AND standalone_chapter_id IS NULL AND standalone_task_type IS NULL"
+            " AND standalone_call_type IS NULL)"
+            " OR (execution_id IS NULL AND turn_index IS NULL AND standalone_run_id IS NOT NULL"
+            " AND standalone_task_type IS NOT NULL AND standalone_call_type IS NOT NULL)",
+            name="ck_model_calls_shape",
         ),
-        {"comment": "模型回合台账：Agent 回合（含 invocation 上下文与 token 计账）与非 Agent 模型调用统一记账"},
+        Index(
+            "uq_model_calls_execution_turn", "execution_id", "turn_index",
+            unique=True, postgresql_where=sql_text("execution_id IS NOT NULL"),
+        ),
+        Index("idx_model_calls_status", "status"),
+        Index("idx_model_calls_standalone_run", "standalone_run_id"),
+        {"comment": "模型调用表：真实请求的模型/状态/用量/费用/计时/通信文档（Agent 或 standalone 恰一）"},
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="自增主键")
-    run_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
-        nullable=False,
-        comment="所属分析运行",
-    )
-    # task_type: annotation/diagnosis/embedding；call_type: agent/diagnosis/local
-    task_type: Mapped[str] = mapped_column(String(100), nullable=False, comment="任务类型")
-    call_type: Mapped[str] = mapped_column(String(50), nullable=False, comment="调用类型")
+    call_id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True, comment="调用流水")
     model: Mapped[str] = mapped_column(String(100), nullable=False, comment="模型名")
-    # Agent 上下文（非 Agent 记账行为空）
-    execution_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="agent 执行身份（一次尝试）")
-    attempt_number: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="第几次尝试（1 起）")
-    chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="章节编号")
-    work_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="关联标注工作")
-    role: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="章内角色")
-    turn_index: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="回合序号（执行内 1 起）")
-    # 回合事实
-    row_kind: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="agent_turn", server_default="agent_turn",
-        comment="行种类（agent_turn=Agent 回合/usage=非Agent记账/attempt_error=尝试派发失败行）",
-    )
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="running", server_default="running",
-        comment="状态（running/success/error/interrupted）",
-    )
-    error: Mapped[str | None] = mapped_column(Text, nullable=True, comment="回合错误信息（派发行存最终错误）")
-    raw_response: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="模型原始响应")
-    context_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="上下文摘要")
-    request_messages: Mapped[list | None] = mapped_column(JSONB, nullable=True, comment="请求消息列表")
-    timing_notes: Mapped[list | None] = mapped_column(JSONB, nullable=True, comment="计时明细备注")
-    ttft_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="首 token 时间（毫秒）")
-    first_visible_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="首个可见内容时间（毫秒）")
-    reasoning_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="推理耗时（毫秒）")
-    model_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="模型生成耗时（毫秒）")
-    tool_wall_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="工具执行墙钟（毫秒）")
-    turn_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="回合总耗时（毫秒）")
-    # token 计账（原 token_usage 列）
-    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输入 token 数")
-    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输出 token 数")
-    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="总 token 数")
-    cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="缓存读取 token 数")
-    reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="推理 token 数")
-    cost: Mapped[float | None] = mapped_column(Float, nullable=True, comment="成本")
-    accounting_source: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="reported", comment="计账来源（reported=服务商回执）"
-    )
-    # 幂等键：产生本行的审计消息 id（派发行/非 Agent 行同样携带），跨重启重放据此去重
-    message_key: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True, comment="审计消息幂等键")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running", comment="调用状态")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True, comment="调用错误信息")
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="开始时间")
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="结束时间")
+    message_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, unique=True, comment="审计消息幂等键（非空时唯一，缺失表示无键）"
+    )
+
+    # Agent 上下文（execution+turn 恰一于 standalone 组）
+    execution_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("executions.execution_id", ondelete="CASCADE", name="model_calls_execution_fkey"),
+        nullable=True,
+        comment="所属真实 invocation",
+    )
+    turn_index: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="回合序号（execution 内 1 起）")
+
+    # 非 Agent 独立上下文（不伪造成 work）
+    standalone_run_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("analysis_runs.run_id", ondelete="CASCADE", name="model_calls_standalone_run_fkey"),
+        nullable=True,
+        comment="独立调用所属分析运行",
+    )
+    standalone_chapter_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="独立调用章节编号（可空，run 内局部）"
+    )
+    standalone_task_type: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="独立任务类型")
+    standalone_call_type: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="独立调用类型")
+
+    # 用量分项与计账来源（reasoning/cache 是否含于其他分项沿供应商口径，不擅自相加）
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输入 token 数")
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输出 token 数")
+    cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="缓存读取 token 数")
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="推理 token 数")
+    accounting_source: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="计账来源（reported 等）")
+
+    # 供应商实报总量（程序 fallback 不落列）与实际费用（不按当前单价重算）
+    reported_total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="供应商实报总量")
+    cost: Mapped[float | None] = mapped_column(Float, nullable=True, comment="本次实际费用")
+
+    # 五类计时独立观测（turn_ms 为读取投影）
+    ttft_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="首 token 耗时（毫秒）")
+    first_visible_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="首可见输出耗时（毫秒）")
+    reasoning_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="推理耗时（毫秒）")
+    model_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="模型耗时（毫秒）")
+    tool_wall_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="工具墙钟耗时（毫秒）")
+
+    # 真实通信/提示正文/审计观察/计时备注文档（原样审计，仅展示/重放）
+    request_messages_bytes: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, comment="实际发送消息文档"
+    )
+    raw_response_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, comment="供应商原始回执文档")
+    context_observed_bytes: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, comment="当时审计上下文文档"
+    )
+    timing_notes_bytes: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, comment="有序计时诊断备注文档"
+    )
+
+    def __repr__(self) -> str:
+        return f"<ModelCall(call_id={self.call_id}, model={self.model}, status={self.status})>"
 
 
 class AgentToolCall(Base):
-    """2026-08-10 用于保存每个工具的完整参数、完整结果、模型回执、独立状态和耗时"""
+    """工具调用表：每次真实外层工具调用的身份、顺序与观察字节"""
 
     __tablename__ = "agent_tool_calls"
     __table_args__ = (
-        Index("idx_agent_tool_calls_turn", "turn_id", "call_index"),
-        {"comment": "Agent 工具调用审计表：每个工具调用一行，保存完整参数、结果、模型回执与耗时"},
+        Index("uq_agent_tool_calls_call_index", "call_id", "call_index", unique=True),
+        {"comment": "工具调用审计表：每个工具调用一行（原始参数与实际执行参数分列保存）"},
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="自增主键")
-    turn_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("model_turns.id", ondelete="CASCADE"),
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True, comment="工具调用流水")
+    call_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("model_calls.call_id", ondelete="CASCADE", name="agent_tool_calls_call_fkey"),
         nullable=False,
-        index=True,
-        comment="所属回合",
+        comment="所属模型调用",
     )
     tool_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="工具名")
-    call_index: Mapped[int] = mapped_column(Integer, nullable=False, comment="回合内调用序号")
-    request_args: Mapped[dict] = mapped_column(JSONB, nullable=False, comment="解析后的调用参数")
-    raw_args: Mapped[str | None] = mapped_column(Text, nullable=True, comment="模型原始参数文本")
-    response: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="工具执行结果")
-    receipt: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="写入回执")
+    call_index: Mapped[int] = mapped_column(Integer, nullable=False, comment="调用内序号")
     status: Mapped[str] = mapped_column(String(20), nullable=False, comment="调用状态")
     error: Mapped[str | None] = mapped_column(Text, nullable=True, comment="调用错误信息")
-    tool_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="工具耗时（毫秒）")
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="开始时间")
-    message_key: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True, comment="审计消息幂等键")
+    tool_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="实际测量耗时（毫秒）")
+    message_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, unique=True, comment="审计消息幂等键（非空时唯一）"
+    )
+    raw_args_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, comment="模型原始参数文档")
+    executed_args_bytes: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, comment="程序实际执行参数文档"
+    )
+    response_observed_bytes: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, comment="原始工具返回文档"
+    )
+    receipt_observed_bytes: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, comment="原始程序回执文档"
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentToolCall(id={self.id}, tool={self.tool_name}, status={self.status})>"
 
 
-__all__ = ["AgentToolCall", "ModelTurn"]
+class EventOutbox(Base):
+    """SSE 发件箱表：实际展示消息、路由、稳定游标与投递时间"""
+
+    __tablename__ = "event_outbox"
+    __table_args__ = (
+        Index("idx_event_outbox_created", "created_at"),
+        Index("idx_event_outbox_run_type", "run_id", "event_type"),
+        {"comment": "SSE 事件发件箱表：消息身份、全局游标、路由与实际投递（emitted_bytes 原样重放）"},
+    )
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="消息身份")
+    stream_id: Mapped[int] = mapped_column(
+        BigInteger, Identity(), nullable=False, unique=True,
+        comment="全局单调游标（产生时分配）",
+    )
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("analysis_runs.run_id", ondelete="CASCADE", name="event_outbox_run_fkey"),
+        nullable=False,
+        comment="真实路由运行",
+    )
+    chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="真实路由章节编号（可空）")
+    event_type: Mapped[str] = mapped_column(String(60), nullable=False, comment="事件类型")
+    emitted_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, comment="实际发出消息字节")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=naive_utcnow, comment="产生时间"
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, comment="实际投递时间（未投递为空，不补创建时间）"
+    )
+
+    def __repr__(self) -> str:
+        return f"<EventOutbox(event_id={self.event_id}, stream_id={self.stream_id})>"

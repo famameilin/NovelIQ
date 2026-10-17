@@ -15,8 +15,6 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-from sqlalchemy import text
-
 from src.diagnosis.completion import has_diagnosis_data
 from src.metrics.queries.completion import is_aggregate_complete
 from src.work.queries import is_annotate_complete
@@ -40,7 +38,10 @@ from src.storage.vector_schema import ensure_paragraph_embeddings_schema
 from src.text_processing.models import Chunk
 from src.text_processing.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
-from tests.support.chapter_annotation_helpers import persist_chapter_annotation
+from tests.support.chapter_annotation_helpers import (
+    create_run_with_chunks,
+    persist_chapter_annotation,
+)
 
 
 def _create_chunks(count: int = 3) -> list[Chunk]:
@@ -80,9 +81,9 @@ def _insert_paragraph_derived_rows(db_session, run_id: str, paragraph_ids: list[
         run_id,
         [
             ParagraphMetricRow(
+                # 2026-10-16 3NF：char_count/词类计数是读取投影，不是 paragraph_metrics 可写列
                 paragraph_id=paragraph_id,
                 token_count=1,
-                char_count=2,
                 sentence_count=1,
                 sentence_char_sum=2.0,
                 sentence_char_sum_sq=4.0,
@@ -97,8 +98,6 @@ def _insert_paragraph_derived_rows(db_session, run_id: str, paragraph_ids: list[
                 imagery_hit_count=0,
                 metaphor_sentence_count=0,
                 body_reaction_hit_count=0,
-                function_word_counts={},
-                semantic_category_counts={},
             )
             for paragraph_id in paragraph_ids
         ],
@@ -364,6 +363,19 @@ class TestStageCompleteChecks:
         chapter_repo.insert_chapter_texts(run_id, chunks)
         assert not is_aggregate_complete(stats_repo.session, run_id)
 
+    def test_insert_global_stats_registers_aggregate_completion(self, db_session):
+        """写入全书统计即登记聚合阶段完成事实（2026-10-17 run 52cbb1ac）
+
+        缺写者时序：每次续跑 is_aggregate_complete 恒假，聚合重跑且跳过条件
+        连带压住主题与诊断阶段；补齐后一次写入即可判定完成。
+        """
+        _novel_id, run_id = create_run_with_chunks(db_session, texts=["测试文本" * 100])
+        assert not is_aggregate_complete(db_session, run_id)
+
+        StatsRepository(db_session).insert_global_stats(run_id, [("avg_mtld", 58.4)])
+
+        assert is_aggregate_complete(db_session, run_id)
+
     def test_is_topic_model_complete_no_data(self, db_session):
         """无paragraph_topics时topic_model未完成"""
         run_repo = RunRepository(db_session)
@@ -423,68 +435,67 @@ class TestStageCompleteChecks:
         assert not has_diagnosis_data(stats_repo.session, run_id)
 
     def test_is_diagnose_complete_with_data(self, db_session):
-        """有诊断产物时diagnose完成"""
-        run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
-        insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
+        """2026-10-16 3NF：正式报告 + 已发布完整事件 + 焦点结构与名单条目才判定 diagnose 完成"""
+        from src.agents.diagnosis.persistence import save_diagnosis_report
+        from src.event_trees.diagnosis_persistence import save_diagnosis_events
+        from src.event_trees.organization import save_organization
+        from tests.support.event_tree_fixtures import (
+            add_annotation_source,
+            add_declaration,
+            close_structure,
+            first_paragraph,
+            identity_every_declaration,
         )
-        stats_repo = StatsRepository(db_session)
-        analysis = AgentAnalysis(
-            novel_id=novel_id,
-            narrative_organization={"arcs": [], "memberships": [], "references": []},
-            foreshadow_expectation=0.5,
-            arc_scores={"角色0": 8.2, "角色1": 7.4},
-            genre_labels=["通用"],
-            style_labels=["严肃"],
-            topic_labels={"0": "成长"},
-            diagnosis="ok",
-            focus_structure="dual",
-            focus_characters=["角色0", "角色1"],
-            main_characters=["角色0", "角色1"],
-            core_cast=["角色0", "角色1"],
+
+        novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻找山门并点灯。"])
+        paragraph = first_paragraph(db_session, run_id)
+        record_id, _work_id, _execution_id = add_annotation_source(db_session, run_id, 1, role="event")
+        add_declaration(
+            db_session,
+            record_id=record_id,
+            paragraph=paragraph,
+            phrase="顾霜寻找山门",
+            title="寻找山门",
+            summary="顾霜寻找山门",
+            participants=(("顾霜", "主体"),),
         )
-        stats_repo.insert_agent_analysis(run_id, analysis.model_dump())
-        assert has_diagnosis_data(stats_repo.session, run_id)
-        # 焦点结构被破坏成契约外取值时，阶段完成判定不再放行
-        db_session.execute(
-            text(
-                "UPDATE analysis_outputs SET payload = jsonb_set(payload, '{focus_structure}', '\"solo\"') "
-                "WHERE run_id = :run_id AND kind = 'agent_analysis'"
+        db_session.flush()
+        draft, _meta = identity_every_declaration(db_session, run_id)
+        close_structure(db_session, draft, evidence_paragraph_id=paragraph.paragraph_id)
+        organization = draft.finish()
+        report_id = save_diagnosis_report(
+            db_session,
+            run_id,
+            str(draft.execution_id),
+            AgentAnalysis(
+                novel_id=novel_id,
+                narrative_organization=organization,
+                diagnosis="顾霜寻路并点灯",
+                focus_structure="single",
+                focus_characters=["顾霜"],
+                main_characters=["顾霜"],
+                core_cast=["顾霜"],
             ),
-            {"run_id": run_id},
         )
+        save_diagnosis_events(db_session, run_id, organization, report_id)
+        save_organization(db_session, run_id, organization, report_id)
         db_session.commit()
-        assert not has_diagnosis_data(stats_repo.session, run_id)
+
+        stats_repo = StatsRepository(db_session)
+        assert has_diagnosis_data(stats_repo.session, run_id)
 
     def test_is_diagnose_complete_rejects_incomplete_focus_contract_row(self, db_session):
-        """旧/半成品诊断产物行不应再把 diagnose 阶段标成完成"""
-        run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
-        insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        """2026-10-16 3NF：只有正文、缺焦点结构与名单条目的半成品报告行不算 diagnose 完成"""
+        from src.agents.diagnosis.persistence import save_diagnosis_report
+        from tests.support.event_tree_fixtures import add_diagnosis_context
 
-        db_session.execute(
-            text(
-                "INSERT INTO analysis_outputs "
-                "(output_id, run_id, kind, payload, created_at) "
-                "VALUES (:output_id, :run_id, 'agent_analysis', :payload, now())"
-            ),
-            {
-                "output_id": uuid.uuid4().hex,
-                "run_id": run_id,
-                "payload": (
-                    f'{{"novel_id": "{novel_id}", "foreshadow_expectation": 0.5, '
-                    f'"arc_scores": {{"角色0": 8.2}}, "diagnosis": "旧 row 缺少 focus contract"}}'
-                ),
-            },
+        novel_id, run_id = create_run_with_chunks(db_session, texts=["旧 row 缺少焦点合同。"])
+        session_id, _work_id, _execution_id = add_diagnosis_context(db_session, run_id)
+        save_diagnosis_report(
+            db_session,
+            run_id,
+            session_id,
+            AgentAnalysis(novel_id=novel_id, diagnosis="旧 row 缺少 focus contract"),
         )
         db_session.commit()
 

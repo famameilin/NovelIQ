@@ -207,6 +207,48 @@ def test_search_paragraphs_by_keywords_matches_case_insensitively() -> None:
     assert results[0].match_count == 1
 
 
+def test_fetch_chunk_text_returns_text_when_missing_returns_none(db_session) -> None:
+    """
+    2026-10-16 3NF 运行级验证：关键词检索的 local/global 坐标由 chapters.char_offset
+    与段落正文长度投影得到，章节正文读取 chapters.text（正文与目录同键一行）
+    """
+    import uuid
+    from dataclasses import replace
+
+    from src.storage.repositories import ChapterRepository, RunRepository
+    from src.storage.repositories.paragraph_repository import ParagraphRepository
+    from src.text_processing.models import Chunk
+    from src.text_processing.paragraphs import split_chunk_paragraphs
+    from src.text_processing.tokenize import tokenize
+    from tests.support.analysis_factories import insert_test_novel
+
+    novel_id = uuid.uuid4().hex[:8]
+    insert_test_novel(novel_id, session=db_session)
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Keyword Test")
+    chunk_text = "灰衣人站在门外。\n屋内传来声响。\n"
+    ChapterRepository(db_session).insert_chapter_texts(
+        run_id,
+        [Chunk(index=0, text=chunk_text, start=100, end=100 + len(chunk_text), chapter_id=1)],
+    )
+    spans = split_chunk_paragraphs(
+        [Chunk(index=0, text=chunk_text, start=100, end=100 + len(chunk_text), chapter_id=1)]
+    )
+    spans = [replace(span, token_count=len(tokenize(span.text))) for span in spans]
+    ParagraphRepository(db_session).insert_paragraphs(run_id, spans)
+    db_session.commit()
+
+    results = search_paragraphs_by_keywords(db_session, run_id=run_id, keywords=["灰衣人"], top_k=5)
+    assert len(results) == 1
+    hit = results[0]
+    assert hit.paragraph_text == "灰衣人站在门外。"
+    assert (hit.local_start_char, hit.local_end_char) == (0, len("灰衣人站在门外。"))
+    assert hit.global_start_char == 100 + hit.local_start_char
+    assert hit.global_end_char == 100 + hit.local_end_char
+
+    assert fetch_chunk_text(db_session, run_id=run_id, chapter_id=1) == chunk_text
+    assert fetch_chunk_text(db_session, run_id=run_id, chapter_id=99) is None
+
+
 def test_fetch_chunk_text_returns_text_when_present() -> None:
     """
     2026-08-02 用于返回存在的历史 chunk 原文

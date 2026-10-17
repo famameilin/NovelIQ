@@ -1,17 +1,17 @@
 """
-段落主题表 ORM 模型定义
+段落主题表 ORM 模型定义（2026-10-16 全库 3NF 改造）
 
 paragraph_topics 保存每个段落（LDA 文档）的完整 K 维主题推断分布
-（《分析能力扩展路线图》§5.10）：每个完成段落恰有 K 行，topic_id 完整覆盖
-0..K-1，每段 topic_weight 和在数值容差内等于 1。
+（《分析能力扩展路线图》§5.10）：每个推断状态为 complete 的段落恰有 K 行，
+topic_id 完整覆盖 0..K-1，每段 topic_weight 和在数值容差内等于 1。
 
-token 数与推断状态统一从 paragraph_topic_inference 读取，不在 K 条主题行
-重复保存；章节/全书聚合按 inference_token_count 加权，禁止等权求和。
+完整 K 维覆盖与权重和由数据库延迟约束触发器验证；token 数与推断状态统一
+从 paragraph_metrics 读取，模型 K 从分析运行合同读取。
 """
 
 from __future__ import annotations
 
-from sqlalchemy import Float, ForeignKeyConstraint, Index, Integer, String
+from sqlalchemy import CheckConstraint, Float, ForeignKeyConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -22,18 +22,12 @@ class ParagraphTopic(Base):
     段落主题表
 
     每行是一个段落对一个主题的完整分布权重；只有推断状态为 complete 的
-    段落可以写入主题行，主键 (run_id, paragraph_id, topic_id) 保证主题 ID
-    无缺口且不重复。
+    段落可以写入主题行（跨表约束由延迟触发器保证）。
     """
 
     __tablename__ = "paragraph_topics"
     __table_args__ = (
-        ForeignKeyConstraint(["run_id"], ["topic_model_runs.run_id"], ondelete="CASCADE"),
-        ForeignKeyConstraint(
-            ["run_id", "paragraph_id"],
-            ["paragraph_topic_inference.run_id", "paragraph_topic_inference.paragraph_id"],
-            ondelete="CASCADE",
-        ),
+        CheckConstraint("topic_weight >= 0 AND topic_weight <= 1", name="ck_paragraph_topics_weight_range"),
         ForeignKeyConstraint(
             ["run_id", "paragraph_id"],
             ["paragraphs.run_id", "paragraphs.paragraph_id"],

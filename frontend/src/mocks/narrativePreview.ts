@@ -1,4 +1,5 @@
-import type { NarrativeTreeDetail, NarrativeTreeNode, NarrativeTreeResponse, ProgressionChange, ProgressionDimension, ProgressionTimelineResponse } from "../api/narrativeTypes";
+import { eventTreeResponse } from "./narrativeData";
+import type { PlotlineChange, PlotlineDimension, PlotlineTimelineResponse } from "../api/narrativeTypes";
 
 export const NARRATIVE_PREVIEW_NOVEL = "narrative-design-demo";
 export const NARRATIVE_PREVIEW_TASK = "narrative-design-task";
@@ -33,65 +34,29 @@ const referenceChanges = [
         {id:"c11",chapter:11,channel:"investigation",type:"冲突",title:"调查转为对峙",before:"秘密追查",after:"公开质问幕后者",sources:["e11"]},
         {id:"c12",chapter:12,channel:"investigation",type:"回应",title:"核心疑问获回应",before:"失踪原因未明",after:"失踪真相揭示",sources:["e12"]}
       ];
-const roles: Record<string, string> = {
-        e1:"提出核心问题，为全书调查提供动机。", e2:"为身世支线建立辨认线索，同时埋下调查主线所需的身份依据。",
-        e3:"提供调查主线中的关键线索，把失踪案与港口交易连接起来。", e4:"确立阿岚的援手角色，为人物支线中的信任冲突提供基础。",
-        e5:"提供指向货船的行动线索，是锁定货船事件组的关键证据。", e6:"连接玉佩物证与档案记录，是身世支线中的证据枢纽。",
-        e7:"形成旧友支线中的信任冲突，与其最终抉择互相支撑。", e8:"将零散线索整合为明确对象，承担主线的目标确认作用。",
-        e9:"为身份疑问提供回应，并为调查主线中的人物指认提供依据。", e10:"完成人物支线的关键抉择，也为调查主线提供缺失的证据。",
-        e11:"汇合物证与人证，承载核心冲突。", e12:"回答全书核心问题，是调查主线的结构终点。"
-      };
-
 const chapters = events.map(event => ({ chapter_id: event.chapter, order: event.chapter, title: event.title }));
-const channelInfo: Record<string, { dimension: ProgressionDimension; subject: string }> = {
+const channelInfo: Record<string, { dimension: PlotlineDimension; subject: string }> = {
   investigation: { dimension: "plot", subject: "调查状态" },
   relationship: { dimension: "relationship", subject: "人物关系" },
   foreshadow: { dimension: "foreshadowing", subject: "玉佩伏笔" },
 };
-const changes: ProgressionChange[] = referenceChanges.map(change => ({
-  progression_change_id: change.id, chapter_id: change.chapter, chapter_order: change.chapter,
+const changes: PlotlineChange[] = referenceChanges.map(change => ({
+  plotline_change_id: change.id, chapter_id: change.chapter, chapter_order: change.chapter,
   dimension: channelInfo[change.channel].dimension, subject_id: change.channel, subject_title: channelInfo[change.channel].subject,
   title: change.title, before: change.before, after: change.after, deltas: [],
   action: ({ "埋设": "setup", "强化": "reinforce", "疑似回收": "payoff" } as Record<string, string>)[change.type] ?? null,
   source_event_ids: change.sources, source_fact_ids: [], evidence_scope: "paragraph", anchor_paragraph_ids: [change.chapter],
   evidence: change.sources.map(id => ({ chapter_id: events.find(event => event.id === id)!.chapter, paragraph_id: events.find(event => event.id === id)!.chapter })),
 }));
-const arcs: NarrativeTreeResponse["arcs"] = [
-  { arc_id: "main", parent_arc_id: null, kind: "main", title: "失踪案调查", objective: "查明同伴失踪的真相", role: "全书核心冲突", reason: "调查贯穿全文，并在结尾回应失踪原因", evidence: [{ event_id: "e1" }, { event_id: "e12" }] },
-  { arc_id: "identity", parent_arc_id: "main", kind: "subplot", title: "玉佩与身世", objective: "查清玉佩主人的身份", role: "身份追索", reason: "玉佩与档案、族谱形成同一条身份线索", evidence: [{ event_id: "e2" }, { event_id: "e6" }, { event_id: "e9" }] },
-  { arc_id: "ally", parent_arc_id: "main", kind: "subplot", title: "旧友与背叛", objective: "追踪旧友的信任与抉择", role: "人物抉择", reason: "援手、隐瞒与交证形成旧友支线", evidence: [{ event_id: "e4" }, { event_id: "e7" }, { event_id: "e10" }] },
-];
-const groups = [
-  { id: "group:a-ship", title: "锁定货船", ids: ["e5", "e8"] },
-  { id: "group:b-pursuit", title: "追查失踪", ids: ["e1", "e3"] },
-  { id: "group:c-truth", title: "揭开真相", ids: ["e11", "e12"] },
-];
-const nodes: NarrativeTreeNode[] = [
-  { node_id: "root", kind: "root", title: "雾港来信 · 全书组织", parent_id: null, child_count: 1 },
-  ...arcs.map(arc => ({ node_id: `arc:${arc.arc_id}`, kind: "arc" as const, title: arc.title, parent_id: arc.parent_arc_id ? `arc:${arc.parent_arc_id}` : "root", arc_id: arc.arc_id, child_count: arc.arc_id === "main" ? 5 : 3 })),
-  ...groups.map(group => ({ node_id: group.id, kind: "group" as const, title: group.title, parent_id: "arc:main", arc_id: "main", child_count: group.ids.length })),
-  ...events.map(event => ({ node_id: `event:${event.id}`, event_id: event.id, kind: "event" as const, title: event.title, parent_id: groups.find(group => group.ids.includes(event.id))?.id ?? `arc:${event.arc}`, arc_id: event.arc, child_count: 0, chapter_id: event.chapter, chapter_order: event.chapter })),
-];
-const edges = nodes.filter(node => node.parent_id).map(node => ({ source_id: node.parent_id!, target_id: node.node_id, kind: "organization" }));
-const pathTo = (node: NarrativeTreeNode): NarrativeTreeNode[] => node.parent_id ? [...pathTo(nodes.find(parent => parent.node_id === node.parent_id)!), node] : [node];
-
-function previewDetail(node: NarrativeTreeNode): NarrativeTreeDetail {
-  const event = events.find(item => item.id === node.event_id), arc = arcs.find(item => item.arc_id === node.arc_id);
-  return { ...node, path: pathTo(node), role: event ? roles[event.id] : arc?.role ?? null, reason: arc?.reason ?? null,
-    evidence_scope: event ? "paragraph" : "chapter", anchor_paragraph_ids: event ? [event.chapter] : [],
-    evidence: event ? [{ chapter_id: event.chapter, paragraph_id: event.chapter, text: event.quote }] : events.filter(item => !node.arc_id || item.arc === node.arc_id).map(item => ({ chapter_id: item.chapter })),
-    participants: event ? [{ name: "林舟", role: "调查者" }] : [], relations: [], references: [],
-  };
-}
-
 /** 与正式接口同形的只读响应；样本状态来自 mock 任务，不触及业务任务 */
 export function narrativePreviewResponse(path: string, params: URLSearchParams, runId = NARRATIVE_PREVIEW_TASK): { status: number; data: unknown } {
+  if (path.includes("/event-trees")) return eventTreeResponse(path, params, runId);
   const cutoff = Math.min(12, Math.max(1, Number(params.get("through_chapter_id")) || 1));
   const id = decodeURIComponent(path.split("/").at(path.endsWith("/source") ? -2 : -1)!);
-  const change = changes.find(item => item.progression_change_id === id), node = nodes.find(item => item.node_id === id);
+  const change = changes.find(item => item.plotline_change_id === id);
   if (path.includes("/timeline/changes/") && (!change || change.chapter_order > cutoff)) return { status: 404, data: { detail: { code: "CHANGE_NOT_VISIBLE" } } };
   if (path.endsWith("/source")) {
-    const chapterId = Number(params.get("chapter_id")) || change?.chapter_id || node?.chapter_id || 1;
+    const chapterId = Number(params.get("chapter_id")) || change?.chapter_id || 1;
     const event = events.find(item => item.chapter === chapterId);
     if (!event || (path.includes("/timeline/") && chapterId > cutoff)) return { status: 404, data: { detail: "SOURCE_NOT_VISIBLE" } };
     return { status: 200, data: { chapter_id: chapterId, title: event.title, paragraphs: [{ paragraph_id: chapterId, paragraph_index: 0, text: event.quote }] } };
@@ -104,7 +69,7 @@ export function narrativePreviewResponse(path: string, params: URLSearchParams, 
     const windowed = filtered.filter(item => item.chapter_order >= (Number(params.get("window_start_chapter_id")) || 1));
     const offset = Number(params.get("cursor")) || 0, limit = Number(params.get("limit")) || 80;
     const distribution = [...new Map(filtered.map(item => [`${item.dimension}:${item.chapter_id}`, { chapter_id: item.chapter_id, chapter_order: item.chapter_order, dimension: item.dimension, count: filtered.filter(other => other.dimension === item.dimension && other.chapter_id === item.chapter_id).length }])).values()];
-    const data: ProgressionTimelineResponse = {
+    const data: PlotlineTimelineResponse = {
       run_id: runId, chapters, through_chapter_id: cutoff, changes: windowed.slice(offset, offset + limit),
       states: [...stateMap.values()].map(item => ({ subject_id: item.subject_id, subject_title: item.subject_title, dimension: item.dimension, state: item.after, chapter_id: item.chapter_id, chapter_order: item.chapter_order })),
       subjects: [...stateMap.values()].map(item => ({ subject_id: item.subject_id, subject_title: item.subject_title, dimension: item.dimension })),
@@ -112,17 +77,5 @@ export function narrativePreviewResponse(path: string, params: URLSearchParams, 
     };
     return { status: 200, data };
   }
-  if (path.includes("/event-trees/nodes/")) return node ? { status: 200, data: previewDetail(node) } : { status: 404, data: { detail: "NODE_NOT_FOUND" } };
-  const searching = params.get("q") || params.get("chapter_id");
-  const candidates = searching ? nodes.filter(item => item.kind === "event" && (!params.get("q") || item.title.includes(params.get("q")!)) && (!params.get("chapter_id") || item.chapter_id === Number(params.get("chapter_id")))) : params.get("parent_id") ? nodes.filter(item => item.parent_id === params.get("parent_id")) : params.get("expand_all") === "true" ? nodes : nodes.filter(item => ["root", "arc"].includes(item.kind));
-  const offset = Number(params.get("cursor")) || 0, limit = Number(params.get("limit")) || 100;
-  const page = candidates.slice(offset, offset + limit);
-  const visibleNodes = [...new Map(page.flatMap(pathTo).map(item => [item.node_id, item])).values()];
-  const data: NarrativeTreeResponse = {
-    run_id: runId, title: "雾港来信 · 全书组织", chapters, total_events: 12, arcs, nodes: visibleNodes,
-    edges: edges.filter(edge => visibleNodes.some(item => item.node_id === edge.source_id) && visibleNodes.some(item => item.node_id === edge.target_id)),
-    total: candidates.length, next_cursor: offset + limit < candidates.length ? String(offset + limit) : null,
-    matches: searching ? page.map(item => ({ node_id: item.node_id, title: item.title, ancestor_ids: pathTo(item).slice(0, -1).map(parent => parent.node_id), chapter_id: item.chapter_id ?? null, chapter_order: item.chapter_order ?? null })) : [],
-  };
-  return { status: 200, data };
+  return { status: 404, data: { detail: "NOT_FOUND" } };
 }

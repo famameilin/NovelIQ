@@ -212,7 +212,7 @@ async def test_query_scope_returns_every_session_even_when_query_fails(db_sessio
 
 
 @pytest.mark.asyncio
-async def test_graph_round_holds_no_query_connection_while_model_replies(db_session) -> None:
+async def test_graph_round_holds_no_query_connection_while_model_replies(db_session, monkeypatch) -> None:
     """2026-09-16 模型回话那一刻连接占用为零：检索工具用完即还，live 在每次模型调用时都是 0
 
     计数工厂挂在真实查询服务上，脚本化模型每次回话前现读 live——只要有一轮工具
@@ -226,6 +226,8 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     from src.fact_graph.inputs import ChapterParagraphInfo
     from tests.support.annotation_work_tools import build_annotation_tools, build_program_test_runtime
 
+    # 本用例只验证关键词查询的连接归还，未装配的嵌入依赖不能靠吞错绕过
+    monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="模型回话不占连接")
     tracker = _SessionTracker(db_session)
     service = DatabaseAnnotationQueryService(
@@ -280,6 +282,7 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
         ledger=ledger,
         subagent=runtime.subagent,
         max_iterations=1,
+        completion_check=lambda: [],
     )
     state = await graph.ainvoke(
         {

@@ -24,6 +24,12 @@ def node(description: str = "事件") -> BoundEvent:
         cause_role="root",
         description=description,
         evidence_paragraph_id=1,
+        title=description,
+        problem="明确事件问题",
+        summary=description,
+        event_type="行动",
+        status="ongoing",
+        declaration_id="node",
     )
 
 
@@ -70,13 +76,13 @@ def test_fact_rollback_preserves_other_work_and_cross_chapter_entity_id() -> Non
     with graph.author("a", "a1"):
         graph.register_entities([entity])
         graph.record_entity_ops([entity], chapter_id=1)
-    identifier = graph.entity_id("张三")
+    identifier = graph.entity_id("张三", "character")
     with graph.author("b", "b1"):
         graph.register_entities([entity])
         graph.record_entity_ops([entity], chapter_id=2)
     graph.confirm("b", "b1")
     graph.rollback("a", "a1")
-    assert graph.entity_id("张三") == identifier
+    assert graph.entity_id("张三", "character") == identifier
     assert graph.drain_ops("b", "b1")["entity_ops"][0]["chapter_id"] == 2
 
 
@@ -97,7 +103,8 @@ def test_old_node_read_rejected_after_same_id_rebuilt() -> None:
         trees.connect(("b", "b1"), "child", "node", "main", reads, {1})
     reads["node"] = trees.read("node")
     trees.connect(("b", "b1"), "child", "node", "main", reads, {1})
-    assert trees.read("child")["content"]["tree_id"] == "tree"
+    assert trees.read("child")["content"]["tree_id"] == "child_tree"
+    assert trees.read("child")["content"]["parent_node_id"] is None
 
 
 def test_changed_content_and_unsaved_foreign_endpoints_rejected() -> None:
@@ -105,7 +112,9 @@ def test_changed_content_and_unsaved_foreign_endpoints_rejected() -> None:
     trees.begin("a", "a1")
     trees.sync(("a", "a1"), 1, [node()])
     read = trees.read("node")
-    trees.sync(("a", "a1"), 1, [node().model_copy(update={"is_foreshadow_setup": True})])
+    with pytest.raises(ValueError, match="业务内容冲突"):
+        trees.sync(("a", "a1"), 1, [node().model_copy(update={"is_foreshadow_setup": True})])
+    read["content"]["summary"] = "已过期内容"
     trees.begin("b", "b1")
     child = node().model_copy(update={"node_id": "child"})
     trees.sync(("b", "b1"), 2, [child])
@@ -122,17 +131,18 @@ def test_case_exclusion_lasts_until_own_work_confirmed() -> None:
     a, b = ("a", "a1"), ("b", "b1")
     pool.begin(*a)
     pool.begin(*b)
-    case = pool.push("核查关联", a)
-    assert set(case) == {"case_id", "description"}
-    pool.push("核查关联", b)
+    case = pool.push("dialogue", "核查关联", a)
+    assert set(case) == {"case_id", "case_type", "description", "payload"}
+    pool.push("dialogue", "核查关联", b)
     assert pool.promise(case["case_id"], a)["status"] == "claimed"
     assert pool.promise(case["case_id"], b)["status"] == "busy"
-    pool.deliver(
-        {"case_id": case["case_id"], "state": "resolved", "reason": "原文已核查，无需连接"},
+    pool.associate(
+        case["case_id"],
         a,
-        call_id="finish",
-        connections=[],
-        reads=[{"actual": "read"}],
+        tool_name="write_event",
+        call_id="write",
+        receipt={"status": "written", "record": "process"},
+        is_write=True,
     )
     assert pool.promise(case["case_id"], b)["status"] == "busy"
     pool.confirm(*a)
@@ -162,11 +172,9 @@ def test_role_finish_never_fills_metrics_or_skips_dialogue_candidates():
             execution.validate()
             assert execution.output()["metrics"] is None
         else:
-            with pytest.raises(ValueError, match="metrics=None"):
-                execution.validate()
+            assert "metrics" in execution.validate()
             ledger.apply_metrics(ChapterMetricsInput(summary="出发", emotional_valence=0, narrative_function="铺垫"))
-            with pytest.raises(ValueError, match="未判候选"):
-                execution.validate()
+            assert any("dialogue_candidates" in item for item in execution.validate())
 
 
 def test_duplicate_node_conflict_does_not_overwrite_original_content():

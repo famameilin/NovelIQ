@@ -18,9 +18,9 @@ from src.storage.repositories import ParagraphRepository
 from tests.support.paragraph_fixtures import (
     create_completed_run,
     create_run_with_status,
-    insert_curves,
+    insert_metrics,
     insert_spans,
-    make_curve_row,
+    make_metric_row,
     make_span,
 )
 
@@ -45,6 +45,20 @@ def _insert_topic_fixture(db_session, run_id: str) -> None:
         inference_paragraph_count=6,
         artifact_key=f"models/topic/{run_id}",
     )
+    # 净密度是「分子÷同口径 token 分母」读投影：段 5 无指标行 → 净密度为空，情感统计排除
+    insert_metrics(
+        db_session,
+        run_id,
+        [
+            make_metric_row(
+                paragraph_id,
+                token_count=2,
+                positive_weight_sum=1.0 if _NET_DENSITY[paragraph_id] == 0.5 else 0.0,
+                negative_weight_sum=1.0 if _NET_DENSITY[paragraph_id] == -0.5 else 0.0,
+            )
+            for paragraph_id in range(5)
+        ],
+    )
     repo.insert_paragraph_topic_inferences(
         run_id,
         [
@@ -60,11 +74,7 @@ def _insert_topic_fixture(db_session, run_id: str) -> None:
             for topic_id in range(2)
         ],
     )
-    insert_curves(
-        db_session,
-        run_id,
-        [make_curve_row(i, net_density=_NET_DENSITY[i]) for i in range(6)],
-    )
+    db_session.commit()
 
 
 def _create_fixture_run(db_session) -> tuple[str, str]:

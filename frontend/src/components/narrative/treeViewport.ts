@@ -1,28 +1,13 @@
-export interface TreeViewport { scale: number; x: number; y: number }
-export interface TreeFrame { width: number; height: number; canvasWidth: number; canvasHeight: number }
+/** 事件树画布固定阅读尺度，只允许横向平移；视口状态只有 x，没有缩放和纵向位移 */
+export interface TreeViewportX { x: number }
 
-export function treeCenter(frame: TreeFrame, scale: number) {
-  return { x: (frame.width - frame.canvasWidth * scale) / 2, y: Math.max(0, (frame.height - frame.canvasHeight * scale) / 2) };
+/** 画布比视口窄时整体居中，否则平移范围钳制在完整内容边界内 */
+export function clampX(x: number, frameWidth: number, canvasWidth: number): number {
+  if (canvasWidth <= frameWidth) return (frameWidth - canvasWidth) / 2;
+  return Math.min(0, Math.max(frameWidth - canvasWidth, x));
 }
 
-/** 以当前视口的同一阅读点缩放，深处节点不会随缩放倍率飞出画布 */
-export function zoomTree(view: TreeViewport, frame: TreeFrame, nextScale: number, anchor = { x: frame.width / 2, y: frame.height / 2 }): TreeViewport {
-  const before = treeCenter(frame, view.scale), after = treeCenter(frame, nextScale);
-  const worldX = (anchor.x - before.x - view.x) / view.scale;
-  const worldY = (anchor.y - before.y - view.y) / view.scale;
-  return { scale: nextScale, x: anchor.x - worldX * nextScale - after.x, y: anchor.y - worldY * nextScale - after.y };
-}
-
-/** 适应已展开结构的两个方向，完整边界包含标题与节点 */
-export function fitTree(frame: TreeFrame): TreeViewport {
-  const scale = Math.min(1, Math.max(1, frame.width - 40) / frame.canvasWidth, Math.max(1, frame.height - 40) / frame.canvasHeight);
-  const center = treeCenter(frame, scale);
-  return { scale, x: (frame.width - frame.canvasWidth * scale) / 2 - center.x, y: (frame.height - frame.canvasHeight * scale) / 2 - center.y };
-}
-
-/** 全书中心按中心圆与直属叙事线的完整边界取景，保留已展开的外围分支 */
-export function fitTreeBounds(frame: TreeFrame, bounds: { left: number; top: number; width: number; height: number }, padding = 16): TreeViewport {
-  const scale = Math.min(1, Math.max(1, frame.width - padding * 2) / Math.max(1, bounds.width), Math.max(1, frame.height - padding * 2) / Math.max(1, bounds.height));
-  const center = treeCenter(frame, scale);
-  return { scale, x: frame.width / 2 - (bounds.left + bounds.width / 2) * scale - center.x, y: frame.height / 2 - (bounds.top + bounds.height / 2) * scale - center.y };
+/** 定位操作只改变横向平移，让目标内容的横向中心落在视口中心 */
+export function locateX(frameWidth: number, canvasWidth: number, contentX: number): number {
+  return clampX(frameWidth / 2 - contentX, frameWidth, canvasWidth);
 }

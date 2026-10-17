@@ -15,6 +15,7 @@ import pytest
 from src.storage.models import AnalysisRun, Novel
 from src.storage.repositories import RunRepository
 from src.workflows.tasks import TaskService
+from tests.support.run_records import set_run_status
 
 
 class TestTaskServiceTaskLogic:
@@ -50,16 +51,14 @@ class TestTaskServiceTaskLogic:
         if run_id is None:
             run_id = str(uuid.uuid4())
 
-        run = AnalysisRun(
-            run_id=run_id,
+        run_id = self.run_repo.create_run(
             novel_id=self.test_novel_id,
             source_path="test.txt",
             title="Test Novel",
             author="Test Author",
-            status=status,
+            run_id=run_id,
         )
-        self.db_session.add(run)
-        self.db_session.commit()
+        set_run_status(self.db_session, run_id, status)
         return run_id
 
     def test_get_task_counts_by_status_empty(self) -> None:

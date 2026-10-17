@@ -142,10 +142,11 @@ def test_database_schema() -> str:
 
 
 def _create_all_orm_tables(engine) -> None:
-    """与生产 init_db 同口径：paragraph_embeddings 由 ensure_paragraph_embeddings_schema
-    按探测维度建表（2026-09-10 维度不再是配置），create_all 排除之，避免建成无维度 vector 列"""
-    tables = [table for table in Base.metadata.sorted_tables if table.name != "paragraph_embeddings"]
-    Base.metadata.create_all(bind=engine, tables=tables)
+    """与生产 init_db 同口径：建全部 35 张基表并安装领域约束触发器"""
+    from src.storage.constraints import install_domain_constraints
+
+    Base.metadata.create_all(bind=engine)
+    install_domain_constraints(engine)
 
 
 @pytest.fixture(scope="session")

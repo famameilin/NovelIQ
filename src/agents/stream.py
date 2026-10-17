@@ -19,8 +19,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -165,6 +166,10 @@ def _is_transient_model_error(exc: BaseException) -> bool:
     覆盖内置 ConnectionError/TimeoutError 以及 openai/httpx 异常类型
     （APIConnectionError/APITimeoutError/RateLimitError/ConnectError/ReadTimeout 等）。
     """
+    # 配额耗尽只能等待额度恢复，不能按频率限流重发或重派整个 work
+    code = _model_error_code(exc)
+    if code in {"AccountQuotaExceeded", "QuotaExceeded", "SetLimitExceeded"} or code.startswith("QuotaExceeded."):
+        return False
     status = getattr(exc, "status_code", None)
     if status is None:
         status = getattr(getattr(exc, "response", None), "status_code", None)
@@ -178,6 +183,19 @@ def _is_transient_model_error(exc: BaseException) -> bool:
     return any(marker in name for marker in _TRANSIENT_ERROR_MARKERS)
 
 
+def _model_error_code(exc: BaseException) -> str:
+    """读取 SDK 的结构化错误码，支持直接错误体及带 error 的响应体"""
+    code = getattr(exc, "code", None)
+    if isinstance(code, str) and code:
+        return code
+    body = getattr(exc, "body", None)
+    if isinstance(body, Mapping):
+        error = body.get("error", body)
+        if isinstance(error, Mapping):
+            return str(error.get("code") or "")
+    return ""
+
+
 def _retry_after_seconds(exc: BaseException) -> float | None:
     """读取服务端 429 响应的 Retry-After 头（秒数或 HTTP 日期），无法解析返回 None"""
     from datetime import UTC, datetime
@@ -188,7 +206,8 @@ def _retry_after_seconds(exc: BaseException) -> float | None:
     if raw is None:
         return None
     try:
-        return max(0.0, float(raw))
+        seconds = float(raw)
+        return seconds if math.isfinite(seconds) and seconds >= 0 else None
     except (TypeError, ValueError):
         try:
             date = parsedate_to_datetime(str(raw))
@@ -200,12 +219,10 @@ def _retry_after_seconds(exc: BaseException) -> float | None:
 
 
 def _retry_backoff_seconds(attempt: int, exc: BaseException | None = None) -> float:
-    """2026-08-13 P2-12 用于计算重试前退避时长：0.5s × 2^attempt 指数退避，上限 3s
+    """频率限流遵守服务端冷却时间，缺失时等待 60、120 秒
 
-    attempt 从 1 起计（第一次重试前等待 1s，第二次 2s，第三次 3s 封顶）。
-    仅对 429/连接类瞬态错误生效，其余错误不额外等待。
-    2026-10-03 429 退避归本模块管（permit 层已删）：服务端给了 Retry-After 时取
-    max(指数退避, Retry-After)，上限放宽到 30s，避免压垮限流网关。
+    attempt 从 1 起计；429 最多在原回合重试两次，不截短 Retry-After。
+    其他瞬态故障及无工具回复保留原来的 1、2、3 秒封顶退避。
     """
     backoff = min(0.5 * (2 ** max(attempt, 1)), 3.0)
     if exc is not None:
@@ -215,7 +232,8 @@ def _retry_backoff_seconds(attempt: int, exc: BaseException | None = None) -> fl
         if status == 429:
             retry_after = _retry_after_seconds(exc)
             if retry_after is not None:
-                return min(max(backoff, retry_after), 30.0)
+                return retry_after
+            return 60.0 * min(max(attempt, 1), 2)
     return backoff
 
 
@@ -347,8 +365,10 @@ async def run_model_call(
     已失败尝试的用量与最终用量分别交给物理请求审计记账，避免跨请求混合。
     耗尽后抛出最后一次异常。SSE 推送失败（StreamEmitError）不触发重试。
     网络/限流等瞬态错误（_is_transient_model_error）与"响应不含任何工具调用"
-    均按调用层故障共用 total_attempts 预算退避重发（2026-08-22），耗尽后上抛
-    RuntimeError；参数/鉴权等确定性错误直接失败。
+    均按调用层故障共用 total_attempts 预算退避重发（2026-08-22）。频率类 429
+    最多重试两次，完整遵守 Retry-After，缺失时分别冷却 60、120 秒；额度耗尽
+    直接失败。请求异常耗尽后原样上抛；空工具回复耗尽后抛 RuntimeError。
+    参数/鉴权等确定性错误直接失败。
     2026-10-04 流消费经内容进度看门狗包装（_guard_content_progress）："流块
     持续到达而内容零增长"超过 content_stall_timeout_s（缺省
     CONTENT_STALL_TIMEOUT_S=300s，0/负值关闭）判死为 ContentStallTimeoutError，
@@ -380,6 +400,7 @@ async def run_model_call(
     skip_output_prefix = ""
     announced_tools: set[str] = set()
     attempt = 0
+    rate_limit_retries = 0
     while True:
         attempt += 1
         started_ns = clock_ns()
@@ -405,24 +426,41 @@ async def run_model_call(
         except Exception as exc:
             if on_turn_failed is not None:
                 on_turn_failed(_format_turn_error(exc), aggregator.timing(), aggregator.finish())
-            if retries_remaining <= 0 or not _is_transient_model_error(exc):
+            status = getattr(exc, "status_code", None)
+            if status is None:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+            rate_limited = status == 429
+            if (
+                retries_remaining <= 0
+                or not _is_transient_model_error(exc)
+                or (rate_limited and rate_limit_retries >= 2)
+            ):
                 logger.warning("模型输出流中断且重试耗尽: error=%r", exc, exc_info=True)
                 raise
             failed_attempt = total_attempts - retries_remaining
             retries_remaining -= 1
+            if rate_limited:
+                rate_limit_retries += 1
+            delay = _retry_backoff_seconds(rate_limit_retries if rate_limited else failed_attempt, exc)
             logger.warning(
-                "模型输出流中断，重发当前模型请求: error=%r retries_remaining=%s",
+                "模型请求失败，等待 %s 秒后重发当前回合: error=%r retries_remaining=%s",
+                delay,
                 exc,
                 retries_remaining,
                 exc_info=True,
             )
             if stream is not None:
-                await stream.thinking(f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）")
+                if rate_limited:
+                    await stream.thinking(
+                        f"模型请求触发限流，等待 {delay:g} 秒后重试当前回合"
+                        f"（剩余 {min(retries_remaining, 3 - rate_limit_retries)} 次）"
+                    )
+                else:
+                    await stream.thinking(f"模型输出流中断，正在重试当前请求（剩余 {retries_remaining} 次）")
             skip_output_prefix = "".join(aggregator._content_parts)
             announced_tools = set(aggregator._announced_tools)
-            # 2026-08-13 P2-12 仅 429/连接类瞬态错误在重试前退避，避免压垮网关
-            if _is_transient_model_error(exc):
-                await asyncio.sleep(_retry_backoff_seconds(failed_attempt, exc))
+            # 异步等待不推进模型轮次、不执行工具，阶段取消仍能立即打断
+            await asyncio.sleep(delay)
             continue
         timing = aggregator.timing()
         # 2026-08-22 调用未正常结束（响应不含工具调用，含网关思考阶段静默截断产生的空回复）

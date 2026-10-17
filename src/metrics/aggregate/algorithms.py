@@ -50,6 +50,38 @@ def _undirected_edge_key(source: str, target: str) -> tuple[str, str]:
     return (source, target) if source <= target else (target, source)
 
 
+def _hits_scores(graph: nx.Graph) -> tuple[dict[str, float], dict[str, float]]:
+    """HITS 幂迭代（确定性全 1 起点，按和归一化）
+
+    networkx 的 svds 求解对退化谱（并列不连边、等距二分结构）取随机起始向量，
+    同一图跨运行会给出不同结果；图结构指标自持单调幂迭代保证结果可复现，
+    非退化图上与主奇异向量一致。返回 (hub, authority)。
+    """
+    nodes = list(graph)
+    adjacency = nx.to_numpy_array(graph, nodelist=nodes, weight="weight", dtype=float)
+    authority = np.ones(len(nodes), dtype=float)
+    for _ in range(1000):
+        hub = adjacency @ authority
+        candidate = adjacency.T @ hub
+        total = float(candidate.sum())
+        if total <= 0.0:
+            authority = np.zeros(len(nodes), dtype=float)
+            break
+        candidate = candidate / total
+        if np.allclose(candidate, authority, atol=1e-12, rtol=0.0):
+            authority = candidate
+            break
+        authority = candidate
+    hub = adjacency @ authority
+    total = float(hub.sum())
+    if total > 0.0:
+        hub = hub / total
+    return (
+        {node: float(score) for node, score in zip(nodes, hub, strict=False)},
+        {node: float(score) for node, score in zip(nodes, authority, strict=False)},
+    )
+
+
 def compute_graph_structure_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
     """PageRank / HITS / Louvain 结构指标（赛道 A1/A2）
 
@@ -96,12 +128,12 @@ def compute_graph_structure_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
         return metrics
 
     try:
-        hub_scores, authority_scores = nx.hits(graph)
+        hub_scores, authority_scores = _hits_scores(graph)
         metrics["hits"] = {
             "authority": {name: round(score, 6) for name, score in authority_scores.items()},
             "hub": {name: round(score, 6) for name, score in hub_scores.items()},
         }
-    except (nx.PowerIterationFailedConvergence, ValueError, ZeroDivisionError) as exc:
+    except (ValueError, ZeroDivisionError) as exc:
         logger.warning("HITS 未收敛，authority/hub 返回空: {}", exc)
         metrics["hits"] = {"authority": {}, "hub": {}, "unavailable_reason": f"hits_not_converged: {exc}"}
 

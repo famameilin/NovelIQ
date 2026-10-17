@@ -5,8 +5,20 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from sqlalchemy import func, select
 
 from src.sse.manager import EventManager
+
+
+def _persisted_message_count(db_session, run_id: str) -> int:
+    """2026-10-16 用于按真实路由列统计 run 内已保存的展示消息（run 归属在 event_outbox 宽行）"""
+    from src.storage.models import EventOutbox
+
+    return int(
+        db_session.execute(
+            select(func.count()).select_from(EventOutbox).where(EventOutbox.run_id == run_id)
+        ).scalar_one()
+    )
 
 
 @pytest.mark.asyncio
@@ -345,7 +357,6 @@ async def test_replay_short_page_and_concurrent_send_keep_all_persisted_sequence
 async def test_postgres_outbox_keeps_generated_sequence_across_reversed_save_and_restart(db_session):
     from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
-    from src.storage.models import EventOutbox
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
     _novel, run_id = create_run_with_chunks(db_session, texts=["原文。"])
@@ -363,7 +374,7 @@ async def test_postgres_outbox_keeps_generated_sequence_across_reversed_save_and
         await manager.send(run_id, "llm_output", first)
         await manager.send(run_id, "llm_output", first)
         assert [row["seq"] for row in await manager.replay(run_id, 0)] == [a, b]
-        assert db_session.query(EventOutbox).filter(EventOutbox.run_id == run_id).count() == 2
+        assert _persisted_message_count(db_session, run_id) == 2
     finally:
         manager.reset_for_testing()
 
@@ -416,7 +427,6 @@ async def test_resume_preserves_saved_work_display_but_filters_persisted_old_ter
 async def test_reset_filters_old_invocation_after_restart_without_deleting_message_history(db_session):
     from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
-    from src.storage.models import EventOutbox
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
     _novel, run_id = create_run_with_chunks(db_session, texts=["原文。"])
@@ -448,7 +458,7 @@ async def test_reset_filters_old_invocation_after_restart_without_deleting_messa
             )
             replay = await restarted.replay(run_id, 0)
             assert [message["data"]["invocation_id"] for message in replay] == ["new", "new"]
-            assert db_session.query(EventOutbox).filter(EventOutbox.run_id == run_id).count() == 4
+            assert _persisted_message_count(db_session, run_id) == 4
         finally:
             restarted.reset_for_testing()
     finally:
@@ -553,3 +563,61 @@ async def test_chapter_reset_retires_old_lanes_but_keeps_other_chapters_after_re
             restarted.reset_for_testing()
     finally:
         manager.reset_for_testing()
+
+
+def test_outbox_keeps_identity_route_emitted_bytes_and_publication(db_session):
+    """2026-10-16 用于验证发件箱宽行保存消息身份、路由、当时发出字节与投递事实，
+    并以原字节解码重放（中文契约不变）"""
+    from src.sse.persistence import SseMessageRepository
+    from src.storage.db import get_session_factory
+    from src.storage.models import EventOutbox
+    from src.storage.repositories.event_outbox import decode_document
+    from src.utils.identity import stable_digest
+    from tests.support.chapter_annotation_helpers import create_run_with_chunks
+
+    _novel, run_id = create_run_with_chunks(db_session, texts=["原文。"], chapter_ids=[2])
+    outbox = SseMessageRepository(get_session_factory())
+    data = {
+        "message_id": f"document:{run_id}",
+        "invocation_id": "inv-1",
+        "chapter_id": 2,
+        "stage": "annotate",
+        "sub_stage": "solo",
+        "content": "中文内容：住手",
+    }
+    emitted = outbox.emit(run_id, "llm_output", data)
+
+    db_session.rollback()
+    event_id = stable_digest(run_id, data["message_id"])
+    row = db_session.get(EventOutbox, event_id)
+    assert (row.run_id, row.chapter_id, row.event_type) == (run_id, 2, "llm_output")
+    assert row.created_at is not None
+    assert decode_document(bytes(row.emitted_bytes)) == {
+        "type": "llm_output",
+        "data": data,
+        "message_id": data["message_id"],
+    }
+    assert row.published_at is not None
+
+    replayed = outbox.replay(run_id, 0)
+    assert replayed == [{"type": "llm_output", "data": data, "seq": emitted["seq"]}]
+    assert isinstance(emitted["seq"], int) and emitted["seq"] > 0
+
+
+def test_outbox_rejects_same_message_id_with_different_content(db_session):
+    """2026-10-16 用于验证同一消息身份的重复投递只要内容不同就报冲突，不改写已发出字节"""
+    from src.sse.persistence import SseMessageRepository
+    from src.storage.db import get_session_factory
+    from tests.support.chapter_annotation_helpers import create_run_with_chunks
+
+    _novel, run_id = create_run_with_chunks(db_session, texts=["原文。"])
+    outbox = SseMessageRepository(get_session_factory())
+    data = {"message_id": f"conflict:{run_id}", "invocation_id": "inv-1", "content": "原始内容"}
+    first = outbox.emit(run_id, "llm_output", data)
+
+    with pytest.raises(ValueError, match="冲突"):
+        outbox.emit(run_id, "llm_output", {**data, "content": "改写内容"})
+    assert outbox.reserve_sequence(run_id, data["message_id"]) == first["seq"]
+
+    replayed = outbox.replay(run_id, 0)
+    assert [message["data"]["content"] for message in replayed] == ["原始内容"]

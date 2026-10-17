@@ -21,8 +21,8 @@ from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.text_search import TextSearchCandidate
 from src.agents.annotation.tool_batch import _invoke_tool
 from src.event_trees.models import EventParticipantInput
-from src.fact_graph.graph import FactGraph, mention_uuid
-from src.fact_graph.inputs import ChapterParagraphInfo, DialogueInput, EntityInput, RelationInput
+from src.fact_graph.graph import FactGraph, entity_key, mention_uuid
+from src.fact_graph.inputs import BoundRelationInput, ChapterParagraphInfo, DialogueInput, EntityInput
 from src.fact_graph.outputs import TextSearchResult
 from tests.support.annotation_work_tools import build_annotation_tools
 
@@ -67,9 +67,9 @@ def _graph_relation(
     from_entity: str,
     to_entity: str,
     relation_type: str,
-) -> RelationInput:
+) -> BoundRelationInput:
     """2026-08-12 用于构造三字段关系边输入（本章确认存在的边）"""
-    return RelationInput(
+    return BoundRelationInput(
         from_entity=from_entity,
         to_entity=to_entity,
         relation_type=relation_type,
@@ -81,9 +81,9 @@ def _find_tool(tools: list, name: str):
     return next(candidate for candidate in tools if candidate.name == name)
 
 
-def _entity_id(name: str) -> str:
-    """按测试章内图的 scope 和 chapter_id 计算提及 ID"""
-    return mention_uuid("", 0, name)
+def _entity_id(name: str, entity_type: str = "character") -> str:
+    """按测试章内图的 scope 和 chapter_id 计算提及 ID（2026-10-13 名+大类复合身份）"""
+    return mention_uuid("", 0, name, entity_type)
 
 
 def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
@@ -116,11 +116,17 @@ def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
 
 
 def _graph_with_entities(names: dict[str, str], *, relations: set[tuple[str, str, str]] | None = None) -> FactGraph:
-    """登记当前章图测试实体，不加载历史状态"""
+    """登记当前章图测试实体，不加载历史状态（关系端点按名+大类复合键）"""
     graph = FactGraph()
     graph.register_entities([EntityInput(name=name, entity_type=entity_type) for name, entity_type in names.items()])
     for from_name, to_name, relation_type in relations or set():
-        graph.apply_relation(RelationInput(from_entity=from_name, to_entity=to_name, relation_type=relation_type))
+        graph.apply_relation(
+            BoundRelationInput(
+                from_entity=entity_key(from_name, names[from_name]),
+                to_entity=entity_key(to_name, names[to_name]),
+                relation_type=relation_type,
+            )
+        )
     return graph
 
 
@@ -223,7 +229,7 @@ def _dialogue_calls(items: list[tuple] | None = None) -> list[dict]:
             {
                 "candidate_index": candidate_index,
                 "verdict": verdict,
-                "speaker": speaker,
+                "speaker": {"name": speaker, "entity_type": "character"} if speaker else None,
                 "tone": tone,
             },
         )
@@ -237,7 +243,11 @@ def _relation_calls(items: list[tuple[int, int, str]] | None = None) -> list[dic
     return [
         _write_call(
             "write_relation",
-            {"from_entity": from_entity, "to_entity": to_entity, "relation_type": relation_type},
+            {
+                "from_entity": {"name": from_entity, "entity_type": "character"},
+                "to_entity": {"name": to_entity, "entity_type": "character"},
+                "relation_type": relation_type,
+            },
         )
         for from_entity, to_entity, relation_type in resolved
     ]
@@ -263,35 +273,44 @@ def _event_calls(
             "write_event",
             {
                 "el": tree_key,
-                "isroot": True,
-                "description": description,
                 "characters": [
                     {
-                        "entityid": _entity_id("顾霜"),
+                        "name": "顾霜",
+                        "entity_type": "character",
                         "role": "主体",
                         "narrative_role": "主体",
                         "action": action,
                         "emotion": -1,
                     }
                 ],
+                "title": description,
+                "problem": "明确事件问题",
+                "summary": description,
+                "event_type": "行动",
+                "status": "ongoing",
+                "evidence": 1,
             },
         ),
         _write_call(
             "write_event",
             {
                 "el": f"{tree_key}/{child_key}",
-                "isroot": False,
-                "type": "main",
-                "description": child_description,
                 "characters": [
                     {
-                        "entityid": _entity_id("顾霜"),
+                        "name": "顾霜",
+                        "entity_type": "character",
                         "role": "主体",
                         "narrative_role": "主体",
                         "action": child_action,
                         "emotion": 0,
                     }
                 ],
+                "title": child_description,
+                "problem": "明确事件问题",
+                "summary": child_description,
+                "event_type": "行动",
+                "status": "ongoing",
+                "evidence": 1,
             },
         ),
     ]
@@ -359,7 +378,7 @@ def test_dialogue_verdict_contract_rules() -> None:
             {
                 "candidate_index": 1,
                 "verdict": "not_dialogue",
-                "speaker": "顾霜",
+                "speaker": {"name": "顾霜", "entity_type": "character"},
                 "tone": None,
             }
         )
@@ -384,29 +403,35 @@ def test_dialogue_verdict_contract_rules() -> None:
 
 
 def test_entity_attributes_merge_patch_validation() -> None:
-    """2026-08-11 用于验证 attributes 键规范化与空键拒绝"""
+    """2026-10-16 3NF：任意键值 attributes 已退场（实体只有 description/tags/representative）
+
+    可写可选字段的规范化仍须成立：description 去空白、缺省 None，tags 缺省空列表；
+    旧 attributes 输入不再被静默接收，提交即拒绝。
+    """
     entity = EntityInput.model_validate(
         {
             "name": "顾霜",
             "entity_type": "character",
-            "attributes": {" 修为 ": "筑基", "伤势": None},
+            "description": "  护院教头  ",
         }
     )
-    assert entity.attributes == {"修为": "筑基", "伤势": None}
-    null_patch = EntityInput.model_validate(
-        {
-            "name": "顾霜",
-            "entity_type": "character",
-            "attributes": None,
-        }
-    )
-    assert null_patch.attributes == {}
+    assert entity.description == "护院教头"
+    assert entity.tags == []
+    assert entity.representative is None
     with pytest.raises(ValidationError):
         EntityInput.model_validate(
             {
                 "name": "顾霜",
                 "entity_type": "character",
-                "attributes": {"  ": "值"},
+                "attributes": {"修为": "筑基"},
+            }
+        )
+    with pytest.raises(ValidationError):
+        EntityInput.model_validate(
+            {
+                "name": "顾霜",
+                "entity_type": "character",
+                "description": "   ",
             }
         )
 
@@ -487,52 +512,73 @@ def test_dialogue_verdict_binds_inner_monologue() -> None:
 
 
 def test_fact_endpoint_validation_moves_to_write_time() -> None:
-    """2026-08-30 用于验证非人物事件参与者不得携带人物动态状态
+    """2026-08-30 用于验证非人物事件参与者不产人物动态状态
 
     2026-09-13 取消暂存：校验移到参与者写入调用点。2026-09-14 写入面重构：两类
-    参与者工具折叠进 write_event 的 characters 数组——location 实体条目携带三态
-    字段在调用点被拒（结构化拒绝 code=observation_on_noncharacter，旧分工具时代
-    的 not_character 在新参数面上的等价物）；非 character 条目只填 entityid/role
-    （ParticipantArg 的参数面承接旧 write_noncharacter_participation 的窄表），
-    参与者写入即挂到实时落账的事件节点上。
+    参与者工具折叠进 write_event 的 characters 数组；非 character 条目只收录
+    entityid/role（ParticipantArg 的参数面承接旧 write_noncharacter_participation
+    的窄表）。2026-10-13：非 character 条目携带三态不再拒绝，改为忽略三态、只保留
+    entityid/role，参与者写入即挂到实时落账的事件节点上。
     """
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
 
     _call(tools, "write_entity", {"name": "山门", "entity_type": "location", "el": "山门"})
-    _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "山门震动"})
+    _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "title": "山门震动",
+            "problem": "明确事件问题",
+            "summary": "山门震动",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
+    )
     # 山门是本用例唯一登记实体，运行期编号为 1
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        _call(
-            tools,
-            "write_event",
-            {
-                "el": "t1",
-                "isroot": True,
-                "description": "山门震动",
-                "characters": [
-                    {
-                        "entityid": "山门",
-                        "role": "主体",
-                        "narrative_role": "主体",
-                        "action": "震动",
-                        "emotion": 0,
-                    }
-                ],
-            },
-        )
-    assert excinfo.value.record == "t1/root/participant/山门"
-    assert excinfo.value.field == "narrative_role"
-    assert excinfo.value.code == "observation_on_noncharacter"
+    # 2026-10-13：非 character 条目带三态不再拒绝，改为忽略三态、保留 entityid/role
+    ignored = _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "characters": [
+                {
+                    "name": "山门",
+                    "entity_type": "location",
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "震动",
+                    "emotion": 0,
+                }
+            ],
+            "title": "山门震动",
+            "problem": "明确事件问题",
+            "summary": "山门震动",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
+    )
+    assert ignored["content"]["characters"] == [
+        {"entity": "山门", "role": "主体", "narrative_role": None, "action": None, "emotion": None}
+    ]
+    assert ledger.observation_by_record == {}
     receipt = _call(
         tools,
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "山门震动",
-            "characters": [{"entityid": "山门", "role": "地点"}],
+            "characters": [{"name": "山门", "entity_type": "location", "role": "地点"}],
+            "title": "山门震动",
+            "problem": "明确事件问题",
+            "summary": "山门震动",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
     receipt_content = receipt.pop("content")
@@ -542,18 +588,20 @@ def test_fact_endpoint_validation_moves_to_write_time() -> None:
     ]
     root_event = ledger.bound_payloads["events"][0]
     participant = root_event.participants[0]
-    assert participant.entity == "山门"
+    assert ledger.graph.display_name(participant.entity) == "山门"
     assert (participant.narrative_role, participant.action, participant.emotion) == (None, None, None)
     assert ledger.observation_by_record == {}
 
 
-def test_event_location_participant_role_requires_location_type() -> None:
-    """2026-08-11 用于验证事件参与者角色为地点时端点必须是 location 实体
+def test_event_location_participant_role_rejects_character_endpoint() -> None:
+    """2026-08-11 用于验证事件参与者角色为地点时端点不能是人物
 
     2026-09-13 取消暂存：地点角色校验移到参与者写入调用点（结构化拒绝
     code=role_type_mismatch）。2026-09-14 写入面重构：参与者折叠进 write_event 的
     characters 数组，经生产路径（graph._invoke_tool + 单次调用回滚）拒绝，失败只
     拒绝该条记录、不挂到已落账的事件节点、也不在人物动态状态上留痕迹。
+    2026-10-14 口径统一：地点角色放开为接受 location 与 organization，人物/道具
+    端点仍拒（本用例即人物端点）。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -561,24 +609,41 @@ def test_event_location_participant_role_requires_location_type() -> None:
 
     _call(tools, "write_metrics", _write_metrics_args())
     _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
-    _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
+    _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
+    )
     receipt = _reject(
         tools,
         ledger,
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": "顾霜",
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "地点",
                     "narrative_role": "主体",
                     "action": "喝止",
                     "emotion": -1,
                 }
             ],
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
     assert receipt["status"] == "rejected"
@@ -587,6 +652,52 @@ def test_event_location_participant_role_requires_location_type() -> None:
     assert receipt["field"] == "role"
     assert ledger.bound_payloads["events"][0].participants == []
     assert ledger.observation_by_record == {}
+
+
+def test_event_location_participant_role_accepts_organization_endpoint() -> None:
+    """2026-10-14 口径统一：地点角色接受 organization 型端点
+
+    注解策略要求"机构名称兼指场所时统一登记 organization"，太学/兵部/贺府 这类
+    既是机构又是场所的词条只登记 organization；此前地点角色校验硬要求 location 型
+    端点，与策略互相矛盾（模型照策略登记反而被拒）。本用例锁定放开后的行为：
+    organization 型端点当地点可直接落账，不再是 role_type_mismatch。
+    """
+    service = _QueryService()
+    ledger = _ledger()
+    tools = _tools(service, ledger)
+
+    _call(tools, "write_entity", {"name": "太学", "entity_type": "organization", "el": "太学"})
+    _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "title": "太学门外聚众",
+            "problem": "明确事件问题",
+            "summary": "太学门外聚众",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
+    )
+    receipt = _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "characters": [{"name": "太学", "entity_type": "organization", "role": "地点"}],
+            "title": "太学门外聚众",
+            "problem": "明确事件问题",
+            "summary": "太学门外聚众",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
+    )
+    assert receipt["status"] == "written"
+    root_event = ledger.bound_payloads["events"][0]
+    assert ledger.graph.display_name(root_event.participants[0].entity) == "太学"
+    assert root_event.participants[0].role == "地点"
 
 
 def test_write_entity_without_prior_search_graph_is_allowed() -> None:
@@ -604,15 +715,14 @@ def test_write_entity_without_prior_search_graph_is_allowed() -> None:
     receipt = _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     assert receipt["status"] == "written"
     assert receipt["id"] == _entity_id("顾霜")
-    assert list(ledger.written_entities) == ["顾霜"]
+    assert list(ledger.written_entities) == [entity_key("顾霜", "character")]
 
 
-def test_write_entity_rejects_registered_entity_type_change() -> None:
-    """2026-08-09 用于验证已登记实体重新提交时大类必须保持一致（写入时即失败）
+def test_write_entity_same_name_different_type_is_new_entity() -> None:
+    """2026-10-13 身份=规范名+实体大类：同名换大类不再拒绝，登记为独立实体
 
-    2026-09-13 取消暂存：整目录提交改为单实体 write_entity，类型冲突变成结构化
-    拒绝（code=type_conflict、field=entity_type、record=entity/顾霜），失败不入账。
-    2026-09-14 写入面重构：write_entity 必填 el。
+    旧合同（2026-08-09 起）同一登记名改大类即结构化拒绝 type_conflict；新合同下
+    (名, 大类) 才是身份，同名不同类各自登记、各自 id，原大类实体不受影响。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -620,12 +730,14 @@ def test_write_entity_rejects_registered_entity_type_change() -> None:
     tools = _tools(service, ledger)
 
     _call(tools, "write_metrics", _write_metrics_args())
-    with pytest.raises(AnnotationStageRejection) as excinfo:
-        _call(tools, "write_entity", {"name": "顾霜", "entity_type": "item", "el": "顾霜"})
-    assert excinfo.value.record == "entity/顾霜"
-    assert excinfo.value.field == "entity_type"
-    assert excinfo.value.code == "type_conflict"
-    assert ledger.written_entities == {}
+    receipt = _call(tools, "write_entity", {"name": "顾霜", "entity_type": "item", "el": "顾霜"})
+    assert receipt["status"] == "written"
+    assert receipt["content"]["entity_type"] == "item"
+    assert receipt["id"] != _entity_id("顾霜", "character")
+    assert receipt["id"] == _entity_id("顾霜", "item")
+    assert set(ledger.written_entities) == {entity_key("顾霜", "item")}
+    # 原 character 身份仍在图上、id 不变
+    assert ledger.graph.entity_id("顾霜", "character") == _entity_id("顾霜", "character")
 
 
 def test_write_tools_reject_invalid_enum_at_call_time() -> None:
@@ -689,9 +801,13 @@ def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
             "write_event",
             {
                 "el": "t1",
-                "isroot": True,
-                "description": "身份线索埋下",
                 "isforeshadowing": True,
+                "title": "身份线索埋下",
+                "problem": "明确事件问题",
+                "summary": "身份线索埋下",
+                "event_type": "行动",
+                "status": "ongoing",
+                "evidence": 1,
             },
         )
     assert excinfo.value.record == "t1/root"
@@ -703,10 +819,14 @@ def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "身份线索埋下",
             "isforeshadowing": True,
             "confidence": "medium",
+            "title": "身份线索埋下",
+            "problem": "明确事件问题",
+            "summary": "身份线索埋下",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
     response_content = response.pop("content")
@@ -716,7 +836,15 @@ def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
     _call(
         tools,
         "write_event",
-        {"el": "t1/e1", "isroot": False, "type": "main", "description": "身份线索再次出现"},
+        {
+            "el": "t1/e1",
+            "title": "身份线索再次出现",
+            "problem": "明确事件问题",
+            "summary": "身份线索再次出现",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
     )
 
     tree = next(iter(ledger.event_trees.values()))
@@ -729,10 +857,20 @@ def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
         tools,
         ledger,
         "write_event",
-        {"el": "t9", "isroot": True, "description": "伏笔", "isforeshadowing": True, "setup_kind": "其他"},
+        {
+            "el": "t9",
+            "isforeshadowing": True,
+            "setup_kind": "其他",
+            "title": "伏笔",
+            "problem": "明确事件问题",
+            "summary": "伏笔",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
     )
     assert setup_kind_receipt["status"] == "rejected"
-    assert setup_kind_receipt["record"] == "t9/root"
+    assert setup_kind_receipt["record"] == "t9"
     assert setup_kind_receipt["field"] == "setup_kind"
     assert setup_kind_receipt["code"] == "unknown_field"
 
@@ -810,7 +948,7 @@ def test_write_relation_rejects_unregistered_entity_reference() -> None:
     unknown_pair = "00000000-0000-0000-0000-000000000987-00000000-0000-0000-0000-000000000002"
     assert receipt["record"] == f"relation/{unknown_pair}/同一人物"
     assert receipt["field"] == "from_entity"
-    assert receipt["code"] == "unknown_entity_id"
+    assert receipt["code"] == "model_type"
     assert "00000000-0000-0000-0000-000000000987" in receipt["message"]
     assert ledger.written_relations == {}
     assert ledger.graph.relation_assert_ops == []
@@ -832,7 +970,12 @@ def test_dialogue_small_calls_bind_speaker_tone_and_null_fields() -> None:
     _call(
         tools,
         "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": "平静"},
+        {
+            "candidate_index": 1,
+            "verdict": "dialogue",
+            "speaker": {"name": "顾霜", "entity_type": "character"},
+            "tone": "平静",
+        },
     )
     stored = ledger.domain_payloads["dialogues"]
     assert stored[0].verdict == "dialogue"
@@ -846,7 +989,12 @@ def test_dialogue_small_calls_bind_speaker_tone_and_null_fields() -> None:
     _call(
         replay_tools,
         "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": "平静"},
+        {
+            "candidate_index": 1,
+            "verdict": "dialogue",
+            "speaker": {"name": "顾霜", "entity_type": "character"},
+            "tone": "平静",
+        },
     )
     _call(
         replay_tools,
@@ -877,7 +1025,12 @@ def test_write_dialogue_rejects_foreign_tone_word_with_full_catalog(foreign_tone
         tools,
         ledger,
         "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": foreign_tone},
+        {
+            "candidate_index": 1,
+            "verdict": "dialogue",
+            "speaker": {"name": "顾霜", "entity_type": "character"},
+            "tone": foreign_tone,
+        },
     )
 
     assert receipt["status"] == "rejected"
@@ -919,7 +1072,11 @@ def test_relation_write_asserts_new_edge_immediately() -> None:
     receipt = _call(
         tools,
         "write_relation",
-        {"from_entity": _entity_id("顾霜"), "to_entity": _entity_id("顾老"), "relation_type": "友情"},
+        {
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "顾老", "entity_type": "character"},
+            "relation_type": "友情",
+        },
     )
     assert receipt == {
         "status": "written",
@@ -927,9 +1084,11 @@ def test_relation_write_asserts_new_edge_immediately() -> None:
         "outcome": "assert",
         "content": {"from_entity": "顾霜", "to_entity": "顾老", "relation_type": "友情"},
     }
-    assert ("顾老", "顾霜", "友情") in ledger.graph.active_relations
+    assert (entity_key("顾老", "character"), entity_key("顾霜", "character"), "友情") in ledger.graph.active_relations
     ops = ledger.graph.relation_assert_ops
-    assert [(op["from_entity"], op["to_entity"], op["relation_type"]) for op in ops] == [("顾霜", "顾老", "友情")]
+    assert [(op["from_entity"], op["to_entity"], op["relation_type"]) for op in ops] == [
+        (entity_key("顾霜", "character"), entity_key("顾老", "character"), "友情")
+    ]
     assert ledger.domain_payloads["relations"][0].relation_type == "友情"
 
 
@@ -944,8 +1103,8 @@ def test_relation_repeated_write_keeps_single_local_edge() -> None:
         tools,
         "write_relation",
         {
-            "from_entity": _entity_id("顾霜"),
-            "to_entity": _entity_id("顾老"),
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "顾老", "entity_type": "character"},
             "relation_type": "友情",
         },
     )
@@ -953,7 +1112,11 @@ def test_relation_repeated_write_keeps_single_local_edge() -> None:
     receipt = _call(
         tools,
         "write_relation",
-        {"from_entity": _entity_id("顾霜"), "to_entity": _entity_id("顾老"), "relation_type": "友情"},
+        {
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "顾老", "entity_type": "character"},
+            "relation_type": "友情",
+        },
     )
     assert receipt == {
         "status": "written",
@@ -961,7 +1124,7 @@ def test_relation_repeated_write_keeps_single_local_edge() -> None:
         "outcome": "assert",
         "content": {"from_entity": "顾霜", "to_entity": "顾老", "relation_type": "友情"},
     }
-    assert ("顾老", "顾霜", "友情") in ledger.graph.active_relations
+    assert (entity_key("顾老", "character"), entity_key("顾霜", "character"), "友情") in ledger.graph.active_relations
     assert len(ledger.graph.active_relations) == 1
     assert next(iter(ledger.graph.relation_attributes.values()))["support_count"] == 1
 
@@ -976,13 +1139,21 @@ def test_relation_type_replacement_rebuilds_local_aliases() -> None:
     _call(
         tools,
         "write_relation",
-        {"from_entity": _entity_id("猴子"), "to_entity": _entity_id("侯飞白"), "relation_type": "同一人物"},
+        {
+            "from_entity": {"name": "猴子", "entity_type": "character"},
+            "to_entity": {"name": "侯飞白", "entity_type": "character"},
+            "relation_type": "同一人物",
+        },
     )
     # 同一对端点换类型即整体替换：同一人物边被友情边替换
     receipt = _call(
         tools,
         "write_relation",
-        {"from_entity": _entity_id("猴子"), "to_entity": _entity_id("侯飞白"), "relation_type": "友情"},
+        {
+            "from_entity": {"name": "猴子", "entity_type": "character"},
+            "to_entity": {"name": "侯飞白", "entity_type": "character"},
+            "relation_type": "友情",
+        },
     )
     assert receipt == {
         "status": "written",
@@ -991,20 +1162,23 @@ def test_relation_type_replacement_rebuilds_local_aliases() -> None:
         "content": {"from_entity": "猴子", "to_entity": "侯飞白", "relation_type": "友情"},
     }
     assert len(ledger.written_relations) == 1
-    assert ledger.written_relations[("猴子", "侯飞白")].relation_type == "友情"
+    relation = ledger.written_relations[(entity_key("猴子", "character"), entity_key("侯飞白", "character"))]
+    assert relation.relation_type == "友情"
 
     assert len(ledger.graph.relation_assert_ops) == 1
     assert not any(from_key == to_key for from_key, to_key, _relation_type in ledger.graph.active_relations)
-    # 同一人物/友情均为双向关系：稳定键按端点名排序
-    assert ("侯飞白", "猴子", "同一人物") not in ledger.graph.active_relations
-    assert ("侯飞白", "猴子", "友情") in ledger.graph.active_relations
+    # 同一人物/友情均为双向关系：稳定键按端点键排序
+    assert (entity_key("侯飞白", "character"), entity_key("猴子", "character"), "同一人物") not in (
+        ledger.graph.active_relations
+    )
+    assert (entity_key("侯飞白", "character"), entity_key("猴子", "character"), "友情") in ledger.graph.active_relations
 
 
 def test_relation_state_field_rejected_from_contract() -> None:
     """2026-08-12 用于验证关系合同已删除 state 字段
 
     2026-09-13 取消暂存：write_relation 扁平三参数——state 在工具参数面上根本
-    不存在（多余字段经生产路径整条拒绝）；内部形态 RelationInput 仍以
+    不存在（多余字段经生产路径整条拒绝）；内部形态 BoundRelationInput 仍以
     extra=forbid 兜底拒绝该字段。
     """
     service = _QueryService()
@@ -1013,7 +1187,7 @@ def test_relation_state_field_rejected_from_contract() -> None:
     tools = _tools(service, ledger)
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        RelationInput.model_validate(
+        BoundRelationInput.model_validate(
             {
                 "from_entity": "顾霜",
                 "to_entity": "顾老",
@@ -1025,7 +1199,12 @@ def test_relation_state_field_rejected_from_contract() -> None:
         tools,
         ledger,
         "write_relation",
-        {"from_entity": "顾霜", "to_entity": "顾老", "relation_type": "友情", "state": "ended"},
+        {
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "顾老", "entity_type": "character"},
+            "relation_type": "友情",
+            "state": "ended",
+        },
     )
     assert receipt["field"] == "state"
     assert receipt["code"] == "unknown_field"
@@ -1140,7 +1319,12 @@ def test_tone_rejection_receipt_is_self_correcting_through_production_path() -> 
         tools,
         ledger,
         "write_dialogue",
-        {"candidate_index": 2, "verdict": "dialogue", "speaker": _entity_id("顾霜"), "tone": "强装镇定"},
+        {
+            "candidate_index": 2,
+            "verdict": "dialogue",
+            "speaker": {"name": "顾霜", "entity_type": "character"},
+            "tone": "强装镇定",
+        },
     )
     assert receipt["status"] == "rejected"
     assert receipt["record"] == "dialogue/2"
@@ -1149,71 +1333,49 @@ def test_tone_rejection_receipt_is_self_correcting_through_production_path() -> 
     assert not ledger.written_dialogues
 
 
-def test_entity_ref_contract_rejects_name_as_reference_with_guidance() -> None:
-    """2026-09-14 双键空间 → 2026-09-19 id 纪律：名称写进实体引用槽仍被拒且可自纠
-
-    实体引用只有两条通道：本章 write_entity 登记的 el 键、write_entity /
-    search_graph 回执里的 run 级 uuid id。名称写进引用槽既不是 el 也不是 id，
-    在账本解析点结构化拒绝（code=unknown_entity_id），报错列出已登记 id 样例，
-    expected 指回两条合法通道，语义意图（可自纠引导）不变。
-    """
-    service = _QueryService()
+def test_entity_name_reference_is_accepted_without_prior_registration() -> None:
     ledger = _ledger()
-    ledger.graph = _graph_with_entities({"顾霜": "character"})
-    tools = _tools(service, ledger)
-    _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "a1"})
-
-    participant_receipt = _reject(
+    tools = _tools(_QueryService(), ledger)
+    _call(
         tools,
-        ledger,
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
-            "characters": [
-                {
-                    "entityid": "顾霜",
-                    "role": "主体",
-                    "narrative_role": "主体",
-                    "action": "喝止",
-                    "emotion": -1,
-                }
-            ],
+            "evidence": 1,
+            "characters": [{"name": "顾霜", "entity_type": "character", "role": "主体"}],
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
         },
     )
-    assert participant_receipt["record"] == "t1/root/participant/顾霜"
-    assert participant_receipt["field"] == "entityid"
-    assert participant_receipt["code"] == "unknown_entity_id"
-    relation_receipt = _reject(
-        tools,
-        ledger,
-        "write_relation",
-        {"from_entity": "顾霜", "to_entity": "顾老", "relation_type": "友情"},
-    )
-    assert relation_receipt["field"] == "from_entity"
-    assert relation_receipt["code"] == "unknown_entity_id"
-    # 生产口径：失败调用只回滚自己，登记与引用解析不留下半途状态
-    assert ledger.written_relations == {}
+    edge = {
+        "from_entity": {"name": "顾霜", "entity_type": "character"},
+        "to_entity": {"name": "顾老", "entity_type": "character"},
+        "relation_type": "友情",
+    }
+    _call(tools, "write_relation", edge)
+    before = len(ledger.graph.entity_ops)
+    _call(tools, "write_relation", edge)
+    assert set(ledger.graph.entity_names.values()) == {"顾霜", "顾老"}
+    assert len(ledger.graph.entity_ops) == before
+    assert len(ledger.written_relations) == 1
 
 
-def test_write_dialogue_speaker_name_gets_self_correction_guidance() -> None:
-    """2026-09-19 id 纪律：write_dialogue speaker 写名称给出可自纠报错
-
-    名称写进 speaker 引用槽既不是 el 键也不是 run 级 id，账本解析点结构化拒绝
-    （code=unknown_entity_id），message 带已登记 id 样例、expected 指回两条合法通道。
-    """
-    service = _QueryService()
+def test_write_dialogue_accepts_and_registers_speaker_name() -> None:
     ledger = _ledger()
-    tools = _tools(service, ledger)
-
-    receipt = _reject(
+    tools = _tools(_QueryService(), ledger)
+    receipt = _call(
         tools,
-        ledger,
         "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": None},
+        {
+            "candidate_index": 1,
+            "verdict": "dialogue",
+            "speaker": {"name": "顾霜", "entity_type": "character"},
+            "tone": None,
+        },
     )
-    assert receipt["record"] == "dialogue/1"
-    assert receipt["field"] == "speaker"
-    assert receipt["code"] == "unknown_entity_id"
-    assert ledger.written_dialogues == {}
+    assert receipt["status"] == "written"
+    assert ledger.written_dialogues[1].speaker == "顾霜"
+    assert ledger.graph.entity_id("顾霜", "character") is not None

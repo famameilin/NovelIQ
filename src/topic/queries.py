@@ -17,7 +17,7 @@ from src.topic.artifacts import validate_topic_aggregation_row
 
 
 def model_meta(dict_row: Any | None) -> dict[str, Any] | None:
-    """topic_model_runs 契约行的 API 元数据视图"""
+    """analysis_runs.lda_* 构建事实的 API 元数据视图（model_key/artifact_key 为合同投影）"""
     if dict_row is None:
         return None
     return {
@@ -31,7 +31,7 @@ def model_meta(dict_row: Any | None) -> dict[str, Any] | None:
 
 def model_unavailable_reason(model_row: Any | None) -> str | None:
     if model_row is None:
-        return "topic_inference_unavailable: 无 topic_model_runs 契约行（旧 Top-5 运行不进入聚合）"
+        return "topic_inference_unavailable: 无 LDA 构建事实行（旧 Top-5 运行不进入聚合）"
     return None
 
 
@@ -197,8 +197,9 @@ def compute_topic_emotion(run_id: str, session: Session) -> dict[str, Any]:
     """
     主题-情感统计（D3）：sum(weight * token * net_density) / sum(weight * token)
 
-    情感输入使用 paragraph_curves.net_density 原始值；空值段落在 SQL 层
-    同时从分子分母排除；权重和为零时返回空值并记录原因。
+    情感输入使用指标分子/分母投影的净密度原始值（原曲线宽表退场后同一口径）；
+    净密度为空的段落（token=0 或指标缺失）在 SQL 层同时从分子分母排除；
+    权重和为零时返回空值并记录原因。
     """
     paragraph_repo = ParagraphRepository(session)
     model_row = paragraph_repo.fetch_topic_model_run(run_id)

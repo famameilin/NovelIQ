@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -16,10 +17,10 @@ from src.work.annotation_work import WorkReceipt
 from src.work.chapter_pool import ChapterWorkerPool
 
 
-def _receipt() -> WorkReceipt:
+def _receipt(run_id: str = "run", work_id: str = "work") -> WorkReceipt:
     return WorkReceipt(
-        "work",
-        "run",
+        work_id,
+        run_id,
         "annotation_agent",
         {
             "chapter_id": 1,
@@ -123,29 +124,44 @@ async def test_empty_slot_and_unavailable_model_stops_analysis(monkeypatch: Any)
     pool.close()
 
 
-def _no_storage() -> Any:
-    raise AssertionError("模型池结束分析时不得访问业务存储")
+def _storage(db_session: Any) -> Any:
+    """业务存储入口：2026-10-16 3NF 起派发前先登记 work 身份，登记之外不得写任何产物"""
+    from sqlalchemy.orm import sessionmaker
+
+    return sessionmaker(bind=db_session.get_bind())
 
 
 @pytest.mark.asyncio
-async def test_queue_propagates_election_failure_reason(monkeypatch: Any) -> None:
-    """选举失败的真实原因必须传到调用方，且不触碰业务存储"""
+async def test_queue_propagates_election_failure_reason(monkeypatch: Any, db_session: Any) -> None:
+    """选举失败的真实原因必须传到调用方，且不落任何正式产物"""
+    from src.storage.models import ChapterAnnotation
+    from src.utils.identity import stable_uuid
+    from tests.support.chapter_annotation_helpers import create_run_with_chunks
+
     monkeypatch.setattr(settings.models, "model_pool", [])
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文。"])
+    receipt = _receipt(run_id=run_id)
 
     with pytest.raises(ValueError, match="正权重"):
         await asyncio.wait_for(
             ChapterWorkerPool(max_attempts=1, poll_seconds=0.001).run(
-                [_receipt()], bus=EventBus(), session_factory=_no_storage
+                [receipt], bus=EventBus(), session_factory=_storage(db_session)
             ),
             2,
         )
 
     assert not any(MODEL_CAPACITY.snapshot().values())
+    # 没有任何正式产物：模型池结束分析时 work 未保存
+    assert db_session.get(ChapterAnnotation, stable_uuid(run_id, receipt.work_id)) is None
 
 
 @pytest.mark.asyncio
-async def test_queue_appends_no_stop_message_when_pool_ends_analysis(monkeypatch: Any) -> None:
+async def test_queue_appends_no_stop_message_when_pool_ends_analysis(
+    monkeypatch: Any, db_session: Any
+) -> None:
     """模型池直接结束分析时不追加队列停止消息，也没有在飞 work 可停"""
+    from tests.support.chapter_annotation_helpers import create_run_with_chunks
+
     monkeypatch.setattr(settings.models, "model_pool", [])
     bus = EventBus()
     stop_messages: list[Message] = []
@@ -155,10 +171,13 @@ async def test_queue_appends_no_stop_message_when_pool_ends_analysis(monkeypatch
 
     bus.handle("agent.cancel", "agent:run", spy)
 
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文。"])
     with pytest.raises(ValueError, match="正权重"):
         await asyncio.wait_for(
             ChapterWorkerPool(max_attempts=1, poll_seconds=0.001).run(
-                [_receipt()], bus=bus, session_factory=_no_storage
+                [_receipt(run_id=run_id, work_id=f"work-{uuid4().hex[:8]}")],
+                bus=bus,
+                session_factory=_storage(db_session),
             ),
             2,
         )

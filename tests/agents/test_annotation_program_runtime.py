@@ -9,7 +9,7 @@ import pytest
 
 from src.agents.annotation import program_contract
 from src.agents.annotation.ledger import AnnotationToolLedger
-from src.fact_graph.graph import FactGraph
+from src.fact_graph.graph import FactGraph, entity_key
 from src.fact_graph.inputs import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
@@ -52,7 +52,7 @@ async def test_receipt_omits_success_record_content() -> None:
     )
     assert receipt["applied"] == 1
     assert "唯一描述串XYZ" not in json.dumps(receipt, ensure_ascii=False)
-    assert ledger.written_entities["顾霜"].description == "唯一描述串XYZ"
+    assert ledger.written_entities[entity_key("顾霜", "character")].description == "唯一描述串XYZ"
 
 
 @pytest.mark.asyncio
@@ -60,17 +60,21 @@ async def test_json_literals_true_false_null_are_accepted() -> None:
     ledger = _ledger()
     receipt = await _run(
         _runtime(ledger),
-        """
-write_metrics(summary="伏笔埋设", emotional_valence=1, narrative_function="铺垫", pivot_moment=false, cliffhanger=true)
-write_entity(el="a1", name="顾霜", entity_type="character", description=null)
-write_event(el="t1", isroot=true, description="埋设", evidence=1, isforeshadowing=true, confidence="low")
-""",
+        (
+            "write_metrics(summary='伏笔埋设', emotional_valence=1, narrative_func"
+            "tion='铺垫', pivot_moment=false, cliffhanger=true)\n"
+            "write_entity(el='a1', name='顾霜', entity_type='character', descrip"
+            "tion=null)\n"
+            "write_event(el='t1', evidence=1, isforeshadowing=true, confidence"
+            "='low', title='埋设', problem='明确事件问题', summary='埋设', event_type='行"
+            "动', status='ongoing')"
+        ),
     )
     assert receipt["status"] == "applied"
     assert receipt["applied"] == 3
     assert ledger.metrics_payload.cliffhanger is True
     assert ledger.metrics_payload.pivot_moment is False
-    assert ledger.written_entities["顾霜"].description is None
+    assert ledger.written_entities[entity_key("顾霜", "character")].description is None
     assert next(iter(ledger.event_trees.values()))["isforeshadowing"] is True
 
 
@@ -88,6 +92,8 @@ write_event(el="t1", isroot=true, description="埋设", evidence=1, isforeshadow
         ("left, right = (1, 2, 3)", "bad_assignment"),
         ("for item in 'abc':\n    pass", "unsupported_expression"),
         ("value = 1 if True else 2", "unsupported_expression"),
+        ("count = len('abc')", "unknown_tool"),
+        ("write_metrics(cliffhanger=True)\ncount = len('abc')", "unknown_tool"),
     ],
 )
 async def test_unsafe_or_invalid_programs_return_structured_errors(code: str, error_code: str) -> None:
@@ -122,7 +128,11 @@ async def test_single_op_failure_rolls_back_only_that_op() -> None:
         """
 write_entity(el="a1", name="侯飞白", entity_type="character")
 write_entity(el="a2", name="贺府", entity_type="location")
-write_relation(from_entity="a1", to_entity="a2", relation_type="隶属")
+write_relation(
+    from_entity={"name": "侯飞白", "entity_type": "character"},
+    to_entity={"name": "贺府", "entity_type": "location"},
+    relation_type="隶属",
+)
 write_metrics(summary="贺府夜谈", emotional_valence=0, narrative_function="冲突")
 """,
     )
@@ -133,7 +143,10 @@ write_metrics(summary="贺府夜谈", emotional_valence=0, narrative_function="�
     assert failure["tool"] == "write_relation"
     assert failure["field"] == "to_entity"
     assert failure["code"] == "endpoint_invalid"
-    assert set(ledger.written_entities) == {"侯飞白", "贺府"}
+    assert set(ledger.written_entities) == {
+        entity_key("侯飞白", "character"),
+        entity_key("贺府", "location"),
+    }
     assert ledger.written_relations == {}
     assert ledger.metrics_payload is not None
     assert runtime.ops[2]["error_code"] == "endpoint_invalid"
@@ -147,7 +160,7 @@ async def test_failed_dialogue_does_not_change_prior_judgment() -> None:
         """
 write_entity(el="a1", name="贺府", entity_type="location")
 write_dialogue(candidate_index=1, verdict="not_dialogue")
-write_dialogue(candidate_index=2, verdict="dialogue", speaker="a1")
+write_dialogue(candidate_index=2, verdict="dialogue", speaker={"name": "贺府", "entity_type": "location"})
 """,
     )
     assert receipt["applied"] == 2
@@ -163,19 +176,24 @@ async def test_variables_persist_across_programs() -> None:
     assert first["applied"] == 1
     second = await _run(
         runtime,
-        """
-write_metrics(summary="离火反噬", emotional_valence=-2, narrative_function="转折")
-write_event(el="t1", isroot=true, description="离火反噬", evidence=1, characters=[
-    {"entityid": person["id"], "role": "客体", "narrative_role": "客体", "action": "承受反噬", "emotion": -2}
-])
-for candidate in [1, 2]:
-    write_dialogue(candidate_index=candidate, verdict="dialogue", speaker=person["id"])
-finish()
-""",
+        (
+            "write_metrics(summary='离火反噬', emotional_valence=-2, narrative_fun"
+            "ction='转折')\n"
+            "write_event(el='t1', evidence=1, characters=[{'name': person['con"
+            "tent']['name'], 'entity_type': person['content']['entity_type'], "
+            "'role': '客体', 'narrative_role': '客体', 'action': '承受反噬', 'emotion'"
+            ": -2}], title='离火反噬', problem='明确事件问题', summary='离火反噬', event_typ"
+            "e='行动', status='ongoing')\n"
+            "for candidate in [1, 2]:\n"
+            "    write_dialogue(candidate_index=candidate, verdict='dialogue',"
+            " speaker={'name': person['content']['name'], 'entity_type': perso"
+            "n['content']['entity_type']})\n"
+            "finish()"
+        ),
     )
     assert second["status"] == "applied"
     root = ledger.bound_payloads["events"][0]
-    assert [participant.entity for participant in root.participants] == ["贺伯安"]
+    assert [ledger.graph.display_name(participant.entity) for participant in root.participants] == ["贺伯安"]
     assert runtime.ops[-1]["program_id"] == "p2"
 
 
@@ -192,13 +210,27 @@ async def test_limits_keep_applied_ops_and_allow_next_program(monkeypatch: pytes
         """
 write_entity(el="a1", name="顾霜", entity_type="character")
 write_entity(el="a2", name="贺府", entity_type="organization")
-write_relation(from_entity="a1", to_entity="a2", relation_type="隶属")
+write_relation(
+    from_entity={"name": "顾霜", "entity_type": "character"},
+    to_entity={"name": "贺府", "entity_type": "organization"},
+    relation_type="隶属",
+)
 """,
     )
     assert ops["error"]["type"] == "too_many_ops"
     assert ops["applied"] == 2
-    assert set(ledger.written_entities) == {"顾霜", "贺府"}
-    retry = await _run(runtime, 'write_relation(from_entity="a1", to_entity="a2", relation_type="隶属")')
+    assert set(ledger.written_entities) == {
+        entity_key("顾霜", "character"),
+        entity_key("贺府", "organization"),
+    }
+    retry = await _run(
+        runtime,
+        (
+            'write_relation(from_entity={"name": "顾霜", "entity_type": "charact'
+            'er"}, to_entity={"name": "贺府", "entity_type": "organization"}, re'
+            'lation_type="隶属")'
+        ),
+    )
     assert retry["applied"] == 1
     monkeypatch.setattr(program_contract, "PROGRAM_MAX_STEPS", 3)
     steps = await _run(runtime, "for item in [1, 2]:\n    pass")
@@ -244,11 +276,12 @@ async def test_anchor_accepts_bare_tree_key_as_root_record() -> None:
     runtime = _runtime(ledger)
     receipt = await _run(
         runtime,
-        """
-write_event(el="t1", isroot=True, description="顾霜拔剑", evidence=1)
-local = read_text(paragraph_id=1, quote="顾霜")
-anchor_record(record_id="t1", source_ref=local["source_ref"])
-""",
+        (
+            "write_event(el='t1', evidence=1, title='顾霜拔剑', problem='明确事件问题', "
+            "summary='顾霜拔剑', event_type='行动', status='ongoing')\n"
+            "local = read_text(paragraph_id=1, quote='顾霜')\n"
+            "anchor_record(record_id='t1', source_ref=local['source_ref'])"
+        ),
     )
 
     assert receipt["status"] == "applied", receipt

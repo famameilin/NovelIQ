@@ -205,6 +205,37 @@ class TestTopicAggregations:
     def _insert_topic_fixture(self) -> None:
         """段落 0..5 = 章1 段0-2 + 章2 段3-5；手工构造完整 2 维分布与状态行"""
         repo = ParagraphRepository(self.db_session)
+        # 顺序与正式链一致：指标行先落（会被先删后插整批替换），推断列随后 upsert
+        from src.storage.repositories.paragraph_repository import ParagraphMetricRow
+
+        positive_sums = [5.0, 5.0, 5.0, 0.0, 0.0, 0.0]
+        negative_sums = [0.0, 0.0, 0.0, 5.0, 5.0, 0.0]
+        metric_rows = [
+            ParagraphMetricRow(
+                paragraph_id=paragraph_id,
+                token_count=10 if paragraph_id < 5 else 0,
+                sentence_count=1,
+                sentence_char_sum=10.0,
+                sentence_char_sum_sq=100.0,
+                positive_weight_sum=positive_sums[paragraph_id],
+                negative_weight_sum=negative_sums[paragraph_id],
+                fight_weight_sum=0.0,
+                exclaim_count=0,
+                question_count=0,
+                pause_count=0,
+                dialogue_char_count=0,
+                sensory_hit_count=0,
+                imagery_hit_count=0,
+                metaphor_sentence_count=0,
+                body_reaction_hit_count=0,
+            )
+            for paragraph_id in range(6)
+        ]
+        repo.insert_paragraph_metrics(self.run_id, metric_rows)
+        # 与正式链同序：指标行落库先提交（此时尚无 LDA 模型合同，段落主题约束不适用），
+        # 主题推断状态与主题分配随后一个事务写入
+        self.db_session.commit()
+
         repo.insert_topic_model_run(
             self.run_id,
             model_key="gensim-lda",
@@ -228,24 +259,6 @@ class TestTopicAggregations:
             for topic_id in range(2)
         ]
         repo.insert_paragraph_topics(self.run_id, topic_rows)
-
-        # 情感曲线：段5 net_density 空值，验证分子分母同时排除
-        from src.storage.repositories.paragraph_repository import ParagraphCurveRow
-
-        net_densities = [0.5, 0.5, 0.5, -0.5, -0.5, None]
-        curve_rows = [
-            ParagraphCurveRow(
-                paragraph_id=i,
-                pos_density=None,
-                neg_density=None,
-                net_density=net_densities[i],
-                smoothed_net_density=None,
-                surface_tension=None,
-                smoothed_surface_tension=None,
-            )
-            for i in range(6)
-        ]
-        repo.insert_paragraph_curves(self.run_id, curve_rows)
 
     def test_book_aggregate_normalizes_by_per_paragraph_denominator(self) -> None:
         result = aggregate_book_topics(self.run_id, self.db_session)

@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from src.fact_graph.read.alias_heuristics import find_heuristic_character_edges
+from src.fact_graph.identity_resolution import resolve_identities
 from src.storage.repositories.graph.repository import EntitySnapshotRow, RelationSnapshotRow
 
 
@@ -23,6 +23,8 @@ class AliasResolution:
     representative_by_alias: dict[str, str] = field(default_factory=dict)
     name_to_representative: dict[str, str] = field(default_factory=dict)
     aliases_by_representative: dict[str, list[str]] = field(default_factory=dict)
+    conflicts: dict[str, str] = field(default_factory=dict)
+    names_by_entity_id: dict[str, str] = field(default_factory=dict)
 
     def resolve_entity_id(self, entity_id: str | None) -> str | None:
         """2026-08-09 用于把别名实体 ID 重写为代表实体 ID"""
@@ -36,6 +38,11 @@ class AliasResolution:
             return name
         return self.name_to_representative.get(name, name)
 
+    def resolve_entity_name(self, entity_id: str, fallback: str) -> str:
+        """按大类隔离后的身份取名，避免同名机构被人物别名映射覆盖"""
+        resolved = self.resolve_entity_id(entity_id)
+        return self.names_by_entity_id.get(resolved or entity_id, fallback)
+
 
 def build_alias_resolution(
     relations: Sequence[RelationSnapshotRow],
@@ -48,49 +55,19 @@ def build_alias_resolution(
     代表优先使用实体 is_representative 标记，否则按分量内最小 entity_id 确定
     """
     entity_by_id = {str(entity.entity_id): entity for entity in entities}
-    parent: dict[str, str] = {}
-
-    def find(node: str) -> str:
-        if parent.get(node, node) != node:
-            parent[node] = find(parent[node])
-        return parent[node]
-
-    for relation in relations:
-        if not relation.is_active:
-            continue
-        if relation.relation_semantics != "same_character":
-            continue
-        from_id = str(relation.from_entity_id)
-        to_id = str(relation.to_entity_id)
-        parent.setdefault(from_id, from_id)
-        parent.setdefault(to_id, to_id)
-        root_a, root_b = find(from_id), find(to_id)
-        if root_a != root_b:
-            parent[root_b] = root_a
-
-    # P11：LLM same_character 声明之外，叠加高精度名称启发式边（子串/姓氏片段）
-    for from_id, to_id in find_heuristic_character_edges(entities):
-        parent.setdefault(from_id, from_id)
-        parent.setdefault(to_id, to_id)
-        root_a, root_b = find(from_id), find(to_id)
-        if root_a != root_b:
-            parent[root_b] = root_a
-
-    representative_by_alias: dict[str, str] = {}
-    components: dict[str, list[str]] = {}
-    for node in parent:
-        components.setdefault(find(node), []).append(node)
-    for members in components.values():
-        flagged: list[str] = []
-        for member in members:
-            entity = entity_by_id.get(member)
-            if entity is not None and bool((entity.attributes or {}).get("is_representative")):
-                flagged.append(member)
-        representative = flagged[0] if flagged else min(members)
-        for member in members:
-            if member != representative:
-                representative_by_alias[member] = representative
-
+    same = {
+        (str(row.from_entity_id), str(row.to_entity_id))
+        for row in relations
+        if row.is_active and row.relation_semantics == "same_character"
+    }
+    different = {
+        (str(row.from_entity_id), str(row.to_entity_id))
+        for row in relations
+        if getattr(row, "attributes", {}).get("identity_kind") == "different"
+    }
+    preferred = {key for key, entity in entity_by_id.items() if entity.attributes.get("is_representative")}
+    resolved = resolve_identities(set(entity_by_id), same, different, preferred)
+    representative_by_alias = {key: value for key, value in resolved.representatives.items() if key != value}
     name_to_representative: dict[str, str] = {}
     aliases_by_representative: dict[str, list[str]] = {}
     entity_names = {str(entity.entity_id): str(entity.name) for entity in entities}
@@ -110,6 +87,8 @@ def build_alias_resolution(
         representative_by_alias=representative_by_alias,
         name_to_representative=name_to_representative,
         aliases_by_representative=aliases_by_representative,
+        conflicts=resolved.conflicts,
+        names_by_entity_id=entity_names,
     )
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from src.fact_graph.character_reference_policy import is_global_character_surface_name
+from src.fact_graph.read.references import EntityReferenceProjection
 from src.storage.repositories.annotation.repository import AnnotationRepository
 from src.storage.repositories.annotation.rows import (
     CharacterFactRow,
@@ -13,28 +14,30 @@ from src.storage.repositories.annotation.rows import (
 
 
 def fetch_chapter_characters_full(session: Session, run_id: str) -> list[CharacterFactRow]:
-    """2026-08-05 用于从数据库图人物事实展开 章节人物记录"""
+    """2026-08-05 用于从数据库图人物事实展开 章节人物记录
+
+    2026-10-16 全库 3NF：旧 content JSON 退场，人物动态观测从事实行的参与者
+    投影列读取（实体名/大类、叙事角色、动作、情绪均为声明参与者的正式列）。
+    """
     rows: list[CharacterFactRow] = []
     for fact in AnnotationRepository(session).fetch_graph_facts(run_id, content_kind="character_observation"):
-        content = dict(fact.content)
-        entity = content.get("entity")
-        if not isinstance(entity, dict):
+        name = str(fact.participant_entity_name or "").strip()
+        if fact.participant_entity_type != "character" or not is_global_character_surface_name(name):
             continue
-        name = str(entity.get("name") or "").strip()
-        if entity.get("entity_type") != "character" or not is_global_character_surface_name(name):
+        if fact.chapter_id is None:
             continue
         rows.append(
             CharacterFactRow(
-                chapter_id=int(content["chapter_id"]),
+                chapter_id=int(fact.chapter_id),
                 name=name,
                 surface_name=name,
                 reference_kind="global_character",
                 reference_slot=None,
                 resolved_global_name=name,
                 global_skip_reason=None,
-                role_function=str(content["role_function"]),
-                action=str(content["action"]),
-                emotion_score=content["emotion"],
+                role_function=fact.participant_narrative_role,
+                action=fact.participant_action,
+                emotion_score=fact.participant_emotion,
             )
         )
     return rows
@@ -58,9 +61,11 @@ def fetch_chapter_dialogues_full(session: Session, run_id: str) -> list[Dialogue
     """
     rows: list[DialogueFactRow] = []
     entities_by_id = AnnotationRepository(session).fetch_entities_by_id(run_id)
+    projection = EntityReferenceProjection.load(session, run_id)
     for record in AnnotationRepository(session).fetch_dialogue_records(run_id):
-        speaker_id = record.speaker
-        speaker_entity = entities_by_id.get(str(speaker_id)) if speaker_id is not None else None
+        speaker_id = record.speaker_entity_id
+        resolved_id = projection.resolution.resolve_entity_id(speaker_id)
+        speaker_entity = entities_by_id.get(str(resolved_id)) if resolved_id is not None else None
         valid_speaker: str | None = None
         if speaker_entity is not None:
             speaker_name = str(speaker_entity.canonical_name).strip()

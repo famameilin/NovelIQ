@@ -75,7 +75,11 @@ def reset_pretrained_cache() -> None:
 
 @dataclass(frozen=True)
 class TrainResult:
-    """按书微调产物摘要（word2vec_model_runs 契约）"""
+    """按书微调产物摘要（word2vec_model_runs 契约）
+
+    2026-10-16 3NF：训练参数在契约表按明确列落库，这里同时给出逐列字段
+    与聚合的 parameters（供调用方对照/测试使用）。
+    """
 
     embedding_dimension: int
     vocabulary_size: int
@@ -83,6 +87,10 @@ class TrainResult:
     training_document_count: int
     training_token_count: int
     artifact_key: str
+    window_size: int
+    min_count: int
+    epochs: int
+    pretrained_vocabulary_size: int
 
 
 def train_book_model(
@@ -153,6 +161,10 @@ def train_book_model(
         training_document_count=len(non_empty),
         training_token_count=total_tokens,
         artifact_key=f"models/word2vec/{run_id}/word2vec.model",
+        window_size=int(window),
+        min_count=int(min_count),
+        epochs=int(epochs),
+        pretrained_vocabulary_size=int(len(pretrained_vectors)),
     )
 
 

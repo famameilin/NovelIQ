@@ -9,6 +9,16 @@ from src.config.schemas import (
 from src.config.schemas.model import _parse_model_pool, apply_model_environment
 
 
+def test_diagnosis_budget_defaults_to_ten_and_inherits_configured_value() -> None:
+    from src.config.schemas.model import ModelsSettings
+
+    assert ModelsSettings().diagnosis.max_iterations == 10
+    assert _parse_models_settings({}).diagnosis.max_iterations == 10
+    assert _parse_models_settings({"diagnosis": {}}).diagnosis.max_iterations == 10
+    for value in (3, 8, 20):
+        assert _parse_models_settings({"diagnosis": {"max_iterations": value}}).diagnosis.max_iterations == value
+
+
 def test_parse_embedding_model_settings_includes_runtime_parameters() -> None:
     """
     2026-08-03 用于验证 Embedding 行为参数继续来自 settings JSON

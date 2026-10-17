@@ -135,7 +135,8 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
             SettingFieldSpec(
                 path=("models", "diagnosis", "max_iterations"),
                 field_type="integer",
-                label="诊断最大回合数",
+                label="诊断每份工作累计回合上限",
+                description="每个诊断 subagent 继承此上限，身份、结构及恢复累计计数",
                 min_value=1,
             ),
             SettingFieldSpec(

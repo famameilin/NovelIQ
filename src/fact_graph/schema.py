@@ -47,12 +47,11 @@ EL_PATH_SEP = "/"
 RESERVED_ROOT_KEY = "root"
 
 
-# 2026-09-19 id 纪律：实体引用 = run 级 uuid id 或本 章内 write_entity 自定的 el 键。
-# el 由模型指定、登记即绑定（同回合后面的调用直接可用，不等回执）；id 由服务端确定性铸造、
-# 回执与检索视图同值；名称仍是非法引用，在账本解析点按 unknown_el / unknown_entity_id 拒绝。
+# 四个生产引用面使用 EntityNameRef，由运行时解析正文名字与大类
+# 下方字符串类型仅保留给其他内部定位面，参与者、关系两端与说话人不再使用它
 ENTITY_REF_FIELD_HINT = (
-    "（字符串=write_entity 回执里的 run 级 id；"
-    "或本章 write_entity 自定的 el 键；不接受实体名称）"
+    "（对象={name: 正文名字, entity_type: character/item/location/organization}；"
+    "运行时解析，未登记则自动登记；不再写 id）"
 )
 
 

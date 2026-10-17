@@ -461,51 +461,6 @@ export interface EventTimelineResponse {
   total_chapters: number;
 }
 
-// 事件树页直接使用森林快照，保留每个事件节点的描述与证据
-export interface EventForestNode {
-  event_id: string;
-  chapter_id: number;
-  chapter_order: number;
-  description: string;
-  participants: TimelineEventParticipant[];
-  anchor_paragraph_ids: number[];
-  char_start: number;
-  char_end: number;
-  evidence: Array<Record<string, unknown>>;
-  causal_event_refs: string[];
-  tree_id: string;
-  cause_role: "root" | "main" | "secondary";
-  parent_event_id: string | null;
-  evidence_scope: "chapter" | "paragraph";
-}
-
-export interface EventForestTree {
-  tree_id: string;
-  root_event_id: string;
-  main_chain: string[];
-  secondary_groups: TimelineEventSecondaryGroup[];
-  chapter_ids: number[];
-  char_start: number;
-  char_end: number;
-}
-
-export interface EventForestResponse {
-  chapter_id: number;
-  chapter_order: number;
-  visible_through_chapter_order: number;
-  derived_event_order: string[];
-  event_nodes: EventForestNode[];
-  event_trees: EventForestTree[];
-  causal_edges: TimelineEventCausalEdge[];
-  foreshadowing_edges: TimelineEventForeshadowingEdge[];
-}
-
-export interface EventSourceChapterResponse {
-  chapter_id: number;
-  title: string;
-  paragraphs: Array<{ paragraph_id: number; paragraph_index: number; text: string }>;
-}
-
 // 指标
 
 export interface NarrativeStructureMetrics {

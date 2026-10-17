@@ -47,15 +47,17 @@ _STAGE_FIELD_EXPECTATIONS: dict[str, str] = {
     "narrative_function": "冲突 / 铺垫 / 转折",
     "confidence": "high / medium / low（伏笔回收可能性三档）",
     "payoff_likelihood": "high / medium / low",
-    "type": '"main"（顺延主因链）或 "secondary"（挂在当时主链尾）',
+    "status": "ongoing / resolved；章末不自动结束事件",
+    "event_type": "简短事件类型",
+    "title": "非空事件标题",
+    "problem": "事件围绕的具体问题",
     "emotion": "-2..2 整数分值（-2 强烈负面 … 2 强烈正面）",
     "emotional_valence": "-2..2 整数分值（-2 强烈负面 … 2 强烈正面）",
-    "entityid": "实体引用：本章自定的 el 键，或 write_entity 回执里的 run 级 id",
-    "speaker": "说话人实体引用：el 键或 run 级 id",
+    "name": "实体引用写正文名字",
+    "speaker": "说话人写 {name: 正文名字, entity_type: character}，运行时自动登记",
     "candidate_index": "1 基候选序号（见 DialogueCandidates 表）",
-    "el": "实体/事件节点的章内局部键（实体如 a1；事件根如 t1、子事件如 t1/e2），由你指定",
-    "isroot": "true=建事件树根（el=树键），false=子事件（el=树键/节点键）",
-    "characters": "参与者数组，每项 {entityid, role[, narrative_role, action, emotion]}（character 三态必填）",
+    "el": "实体或事件声明的章内来源键（如 a1、e1），路径不表示包含",
+    "characters": "参与者数组，每项 {name, entity_type, role[, narrative_role, action, emotion]}，运行时自动登记",
     "labels": "段落情绪标签数组，每项 {paragraph_id, emotion}（paragraph_id 取段首可见号，即正文每段开头的 `N：`）",
     "paragraph_id": "段首可见号（正文每段开头的 `N：`）",
     "tags": f"字符串数组，{ENTITY_TAGS_RULE_TEXT}",
@@ -130,8 +132,8 @@ def _translate_record_validation(
         index = raw_location[1]
         if isinstance(participants, list) and isinstance(index, int) and 0 <= index < len(participants):
             participant = participants[index]
-            if isinstance(participant, dict) and participant.get("entityid") is not None:
-                record_label = f"{record}/participant/{participant['entityid']}"
+            if isinstance(participant, dict) and participant.get("name") is not None:
+                record_label = f"{record}/participant/{participant['name']}"
     # 缺失与显式 null 分开报告，字段错误只回显该字段的实际输入
     if location:
         submitted = "<未提供>" if kind == "missing" else repr(first.get("input"))

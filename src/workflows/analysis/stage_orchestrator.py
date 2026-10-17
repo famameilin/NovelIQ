@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -53,7 +54,16 @@ class StageOrchestratorMixin(TaskClaimMixin):
         """
 
         async def emitter(event: StreamEvent) -> None:
-            session.commit()
+            try:
+                session.commit()
+            except BaseException:
+                # 2026-10-17 run 52cbb1ac 实证：提交中途被打断会把会话留在 PREPARED
+                # 中间态，之后任意一次 SQL 都报 "session is in 'prepared' state" 且难
+                # 归因（曾伪装成诊断工具依赖故障）。先回滚把会话救回健康态再原样上抛：
+                # 失败必须当场可归因，不允许毒化会话流入下游。
+                with contextlib.suppress(Exception):
+                    session.rollback()
+                raise
             if not event.stage:
                 # 用 dataclass replace 补全 stage，避免手动重建丢失字段
                 from dataclasses import replace

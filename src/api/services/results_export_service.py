@@ -134,6 +134,10 @@ def fetch_all_results_data(
     """
     获取所有分析结果数据
     """
+    from src.event_trees.read.organization import EventTreeQuery
+
+    # 全结果包含正式事件树，先检查版本，避免历史运行落入其他装配错误后变成 500
+    event_tree_data = EventTreeQuery(stats_repo.session, run_id).export()
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
     graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
     graph_authority_service.assert_graph_ready(run_id)
@@ -179,10 +183,6 @@ def fetch_all_results_data(
     )
 
     novel_name = _fetch_novel_name(novel_id, stats_repo)
-
-    from src.event_trees.read.organization import EventOrganizationQuery
-
-    event_tree_data = EventOrganizationQuery(stats_repo.session, run_id).export()
 
     timeline_data = _fetch_timeline_data(
         run_id=run_id,

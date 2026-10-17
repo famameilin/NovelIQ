@@ -173,7 +173,7 @@ async def get_event_source_chapter(
     """按需读取当前任务的一章原文，供事件树节点核对依据"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    chapter = session.get(Chapter, (chapter_id, run_id))
+    chapter = session.get(Chapter, (run_id, chapter_id))
     if chapter is None or chapter.text is None:
         raise HTTPException(status_code=404, detail="当前任务没有该章节原文")
     paragraphs = list(

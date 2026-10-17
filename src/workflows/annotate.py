@@ -6,12 +6,14 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
+from typing import cast
 
 from loguru import logger
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.agent import AnnotationAgent
+from src.agents.annotation.chapter_consolidation import eligible_chapters
 from src.audit.module import AuditModule
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
@@ -19,10 +21,11 @@ from src.event_bus import EventBus, Message
 from src.sse.consumer import SSEModule
 from src.sse.events import StreamEvent
 from src.storage.db import get_session_factory
-from src.storage.models import AnalysisOutput, AnnotationWork, Chapter, Paragraph
+from src.storage.models import Chapter, Paragraph, WorkItem
 from src.work.annotation_work import WorkReceipt, annotation_work_id, required_roles
 from src.work.chapter_pool import ChapterWorkerPool
 from src.work.policy import completed_chapters
+from src.work.queries import fetch_annotation_work_states
 from src.workflows.progress import stage_progress_percent
 
 
@@ -35,24 +38,8 @@ def _load_work(session_factory: Callable[[], Session], run_id: str) -> tuple[lis
             .scalars()
             .all()
         )
-        records = session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id)).scalars().all()
-        outputs = {
-            value.work_id: value
-            for value in session.execute(
-                select(AnalysisOutput).where(
-                    AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation"
-                )
-            ).scalars()
-        }
-        valid = [
-            record
-            for record in records
-            if record.work_id in outputs
-            and outputs[record.work_id].invocation_id == record.invocation_id
-            and outputs[record.work_id].role == record.role
-            and outputs[record.work_id].actual_input
-        ]
-        complete = completed_chapters(valid)
+        # 完成判定按新形状推导：work_items 标注形状 + 该 work 是否存在正式产物行
+        complete = completed_chapters(fetch_annotation_work_states(session, run_id))
         orders = [{"chapter_id": chapter.chapter_id, "sequence": chapter.sequence} for chapter in chapters]
         work: list[WorkReceipt] = []
         for chapter in chapters:
@@ -69,12 +56,14 @@ def _load_work(session_factory: Callable[[], Session], run_id: str) -> tuple[lis
                 .scalars()
                 .all()
             )
+            # 段落终点是读取投影（local_start_char + 字符长度），与既有派发载荷字段名同口径
             paragraphs = [
                 SimpleNamespace(
-                    **{
-                        name: getattr(row, name)
-                        for name in ("chapter_id", "paragraph_id", "local_start_char", "local_end_char", "text")
-                    }
+                    chapter_id=row.chapter_id,
+                    paragraph_id=row.paragraph_id,
+                    local_start_char=row.local_start_char,
+                    local_end_char=row.local_start_char + len(row.text),
+                    text=row.text,
                 )
                 for row in rows
             ]
@@ -128,23 +117,8 @@ async def run_annotate(
     try:
         recovery_session = factory()
         try:
-            records = await asyncio.to_thread(
-                lambda: (
-                    recovery_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id))
-                    .scalars()
-                    .all()
-                )
-            )
-            outputs = (
-                recovery_session.execute(
-                    select(AnalysisOutput).where(
-                        AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation"
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            discard = list({item.work_id for item in [*records, *outputs] if item.chapter_id not in retained})
+            states = await asyncio.to_thread(fetch_annotation_work_states, recovery_session, run_id)
+            discard = sorted({state.work_id for state in states if state.chapter_id not in retained})
             await bus.request(
                 Message(
                     topic="agent.recover",
@@ -154,9 +128,11 @@ async def run_annotate(
                     payload={"session": recovery_session, "discard": discard},
                 )
             )
-            await asyncio.to_thread(
-                recovery_session.execute, delete(AnnotationWork).where(AnnotationWork.work_id.in_(discard))
-            )
+            if discard:
+                # 整章废弃：域数据已由 agent 同会话清除，再删 work 身份（级联真实尝试行）
+                await asyncio.to_thread(
+                    recovery_session.execute, delete(WorkItem).where(WorkItem.work_id.in_(discard))
+                )
             await asyncio.to_thread(recovery_session.commit)
             # 整章废弃已提交后再清除旧角色展示，阈值变化不会遗留旧 lane
             if work:
@@ -178,17 +154,35 @@ async def run_annotate(
         finally:
             recovery_session.close()
 
+        async def consolidate(chapter_id: int) -> None:
+            await bus.request(Message(topic="audit.barrier", source=agent.address, target=audit.address, run_id=run_id))
+            await bus.request(
+                Message(
+                    topic="agent.consolidate_chapter",
+                    source=f"queue:{run_id}",
+                    target=agent.address,
+                    run_id=run_id,
+                    payload={"chapter_id": chapter_id},
+                )
+            )
+
+        # 恢复只补本版本已经保存但章末事务尚未完成的章，旧版本保留章不追溯入池
+        with factory() as recovery_check:
+            retry_chapters = eligible_chapters(recovery_check, run_id) & retained
+        for chapter_id in sorted(retry_chapters):
+            await consolidate(chapter_id)
+
         async def progress(receipt: WorkReceipt) -> None:
             with factory() as progress_session:
-                records = await asyncio.to_thread(
-                    lambda: (
-                        progress_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id))
-                        .scalars()
-                        .all()
-                    )
+                states = await asyncio.to_thread(fetch_annotation_work_states, progress_session, run_id)
+                completed = completed_chapters(states)
+                current = len(completed)
+                invocation_id = next(
+                    # 收到回执的 work 必有一次真实尝试，invocation_id 取那次执行
+                    cast(str, state.invocation_id)
+                    for state in states
+                    if state.work_id == receipt.work_id
                 )
-                current = len(completed_chapters(records))
-                invocation_id = next(item.invocation_id for item in records if item.work_id == receipt.work_id)
             await bus.request(
                 Message(
                     topic="agent.saved_progress",
@@ -205,18 +199,19 @@ async def run_annotate(
                     },
                 )
             )
+            chapter_id = receipt.payload["chapter_id"]
+            if chapter_id in completed and chapter_id not in retained:
+                await consolidate(chapter_id)
 
         await pool.run(work, bus=bus, session_factory=factory, is_cancelled=is_cancelled, on_saved=progress)
         await bus.request(Message(topic="audit.barrier", source=agent.address, target=audit.address, run_id=run_id))
         with factory() as final_session:
-            records = await asyncio.to_thread(
-                lambda: (
-                    final_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id)).scalars().all()
-                )
-            )
-            actual = completed_chapters(records)
+            states = await asyncio.to_thread(fetch_annotation_work_states, final_session, run_id)
+            actual = completed_chapters(states)
         if len(actual) != total:
             raise RuntimeError(f"必需角色未全部成功保存: completed={len(actual)} total={total}")
+        for chapter_id in sorted(actual - retained):
+            await consolidate(chapter_id)
         logger.info(
             "annotation work completed run_id={} chapters={} elapsed={:.2f}s",
             run_id,

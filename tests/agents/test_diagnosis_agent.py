@@ -1,25 +1,23 @@
-"""
-诊断 Agent 单元测试
+"""诊断报告写入与结束信号分离，真实回合预算及同会话补齐
 
-- 图循环：agent 调用 finish 提交诊断结果
-- 校验失败重试
+2026-10-15 用户裁定「没复用agent，去改」：诊断会话图改用
+annotation/subagent_graph.build_subagent_graph 同一图结构，绑定面只有程序面
+execute_code 与 finish；本文件断言的都仍是行为面（报告内容、同会话补齐与预算终止）。
 """
 
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, HumanMessage
 
-from src.agents.diagnosis.runner import (
-    DiagnosisAgentRunError,
-    _finalize_diagnosis_result,
-    _validate_topic_label_ids,
-    run_diagnosis_agent,
-)
-from src.agents.graph import build_agent_graph
+from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.subagent_graph import build_subagent_graph
+from src.agents.annotation.subagent_ir import SubagentAnnotation
+from src.agents.diagnosis.program_runtime import DiagnosisProgramRuntime, bind_finish_ledger
+from src.agents.diagnosis.runner import _finalize_diagnosis_result, _validate_topic_label_ids
+from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.diagnosis.schema import AgentAnalysis
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
@@ -48,310 +46,158 @@ def _analysis_payload() -> dict:
     }
 
 
-class _FinishOnlyLLM(StreamedFakeModelMixin):
-    def __init__(self, payload: dict, *, first_bad: bool = False, wrapped: bool = True) -> None:
-        self.payload = payload
-        self.first_bad = first_bad
-        self.wrapped = wrapped
-        self.calls = 0
+def _report_code(payload: dict) -> str:
+    return f"write_diagnosis(analysis={payload!r})"
+
+
+def _analysis_code() -> str:
+    return _report_code(_analysis_payload())
+
+
+class Replies(StreamedFakeModelMixin):
+    def __init__(self, responses):
+        self.responses, self.requests = responses, []
+        self.bound: list[str] = []
 
     def bind_tools(self, tools):
+        self.bound = [tool.name for tool in tools]
         return self
 
     async def ainvoke(self, messages):
-        self.calls += 1
-        if self.first_bad and self.calls == 1:
-            bad = dict(self.payload)
-            bad["power_stance_score"] = 99
-            args = {"analysis": bad} if self.wrapped else bad
-            return AIMessage(
-                content="",
-                tool_calls=[{"name": "finish", "args": args, "id": "c1", "type": "tool_call"}],
-            )
-        args = {"analysis": self.payload} if self.wrapped else self.payload
-        return AIMessage(
-            content="",
-            tool_calls=[{"name": "finish", "args": args, "id": "c1", "type": "tool_call"}],
-        )
+        self.requests.append(list(messages))
+        return self.responses[len(self.requests) - 1]
 
 
-class _EvidenceThenFinishLLM(_FinishOnlyLLM):
-    """先调用取证工具再提交诊断的测试模型"""
+def call(name, args=None, id="call"):
+    return {"name": name, "args": args or {}, "id": id, "type": "tool_call"}
 
-    async def ainvoke(self, messages):
-        """
-        2026-08-04 用于模拟诊断 Agent 的合法取证后 finish 调用序列
-        """
-        self.calls += 1
-        if self.calls == 1:
-            return AIMessage(
+
+def build_graph(responses, *, maximum=5, observer=None, stream=None, retries=None, completion_check=None):
+    """按生产会话图装配（程序面 execute_code + finish），finish 与无工具响应共用检查"""
+    report = {}
+    session = MagicMock()
+    tools = build_diagnosis_tools(session, "run", report_draft=report, execution_id="diagnosis")
+    model = Replies(responses)
+    ledger = AnnotationToolLedger(run_scope="run", current_chapter_id=0, current_chapter_text="",
+                                  allow_future_context=False)
+    runtime = DiagnosisProgramRuntime(tools, observer=observer)
+
+    def check():
+        try:
+            if "analysis" not in report:
+                raise ValueError("缺少报告")
+            _validate_topic_label_ids(AgentAnalysis.model_validate(report["analysis"]), expected_ids={0, 1})
+        except ValueError as exc:
+            return [str(exc)]
+        return []
+
+    graph = build_subagent_graph(
+        model,
+        runtime.build_tool(),
+        bind_finish_ledger(runtime.tools["finish"], ledger),
+        ledger=ledger,
+        subagent=SubagentAnnotation(role="event"),
+        max_iterations=maximum,
+        observer=observer,
+        stream=stream,
+        retries=retries,
+        completion_check=completion_check or check,
+    )
+    return graph, model, report
+
+
+async def run_graph(graph):
+    return await graph.ainvoke(
+        {
+            "messages": [HumanMessage(content="诊断")],
+            "phase": "chapter_open",
+            "iterations": 0,
+            "error": None,
+        },
+        config={"recursion_limit": 40},
+    )
+
+
+async def test_report_then_both_end_signals_produce_same_result():
+    graph, model, report = build_graph([
+        AIMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
+        AIMessage(content="完成"),
+    ])
+    result = await run_graph(graph)
+    assert result.get("halted") is None and result["completion_ok"] is True
+    assert report["analysis"]["diagnosis"] == "结构完整，节奏张弛有度"
+    assert result["iterations"] == len(model.requests) == 2
+    assert model.bound == ["execute_code", "finish"]
+
+
+async def test_writing_finish_inside_same_program_checks_final_batch_state():
+    """finish 与业务写入同程序：整批执行完再检查，最终状态决定完整性"""
+    code = f"{_analysis_code()}\nwrite_diagnosis(patch={{'diagnosis': '读取夹具补充概要'}})\nfinish()"
+    graph, model, report = build_graph([AIMessage(content="", tool_calls=[call("execute_code", {"code": code})])])
+    result = await run_graph(graph)
+    assert report["analysis"] and result["completion_ok"] is True and len(model.requests) == 1
+
+
+async def test_missing_report_continues_same_history_then_saves():
+    graph, model, report = build_graph(
+        [
+            AIMessage(content="完成"),
+            AIMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
+            AIMessage(content="完成"),
+        ]
+    )
+    result = await run_graph(graph)
+    assert result["completion_ok"] is True and len(model.requests) == 3
+    assert any("缺少报告" in str(msg.content) for msg in model.requests[1])
+
+
+async def test_report_validation_rejection_preserves_last_valid_draft():
+    graph, model, report = build_graph(
+        [
+            AIMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
+            AIMessage(
                 content="",
                 tool_calls=[
-                    {
-                        "name": "get_aggregate_signals",
-                        "args": {},
-                        "id": "get-signals",
-                        "type": "tool_call",
-                    }
+                    call("execute_code", {"code": "write_diagnosis(patch={'power_stance_score': 99})\nfinish()"})
                 ],
-            )
-        args = {"analysis": self.payload} if self.wrapped else self.payload
-        return AIMessage(
-            content="",
-            tool_calls=[{"name": "finish", "args": args, "id": "finish", "type": "tool_call"}],
-        )
+            ),
+        ]
+    )
+    result = await run_graph(graph)
+    assert report["analysis"]["power_stance_score"] == 4 and result["completion_ok"] is True
+    assert len(model.requests) == 2
 
 
-class _CapturingRetryLLM(_FinishOnlyLLM):
-    """先提交非法 finish 再重试，并捕获第二次收到的完整消息序列"""
-
-    def __init__(self, payload: dict) -> None:
-        super().__init__(payload, first_bad=True, wrapped=False)
-        self.captured_messages: list | None = None
-
-    async def ainvoke(self, messages):
-        self.calls += 1
-        if self.calls == 1:
-            bad = dict(self.payload)
-            bad["power_stance_score"] = 99
-            return AIMessage(
+async def test_topic_gap_can_be_repaired_after_no_tool_response():
+    payload = {**_analysis_payload(), "topic_labels": {"0": "成长"}}
+    graph, model, report = build_graph(
+        [
+            AIMessage(content="", tool_calls=[call("execute_code", {"code": _report_code(payload)})]),
+            AIMessage(
                 content="",
-                tool_calls=[{"name": "finish", "args": bad, "id": "c1", "type": "tool_call"}],
-            )
-        self.captured_messages = list(messages)
-        return AIMessage(
-            content="",
-            tool_calls=[{"name": "finish", "args": self.payload, "id": "c1", "type": "tool_call"}],
-        )
-
-
-@pytest.mark.asyncio
-async def test_diagnosis_agent_produces_agent_analysis() -> None:
-    graph = build_agent_graph(
-        _FinishOnlyLLM(_analysis_payload(), wrapped=False),
-        [],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
+                tool_calls=[call("execute_code", {"code": "write_diagnosis(patch={'topic_labels': "
+                                                        "{'0': '成长', '1': '复仇'}})"})],
+            ),
+            AIMessage(content="完成"),
+        ]
     )
-
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    result = await graph.ainvoke(
-        {
-            "messages": [SystemMessage(content="sys"), HumanMessage(content="诊断")],
-            "attempts": 0,
-            "output": None,
-            "error": None,
-        }
-    )
-
-    assert result.get("error") is None
-    analysis = AgentAnalysis.model_validate(result["output"])
-    assert analysis.genre_labels == ["玄幻"]
-    assert analysis.style_labels == ["爽文"]
-    assert analysis.foreshadow_expectation == 0.35
+    result = await run_graph(graph)
+    assert len(model.requests) == 3 and result["completion_ok"] is True
+    assert report["analysis"]["topic_labels"]["1"] == "复仇"
 
 
-@pytest.mark.asyncio
-async def test_diagnosis_agent_retries_on_invalid_output() -> None:
-    llm = _FinishOnlyLLM(_analysis_payload(), first_bad=True, wrapped=False)
-    graph = build_agent_graph(
-        llm,
-        [],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
-    )
-
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    result = await graph.ainvoke(
-        {
-            "messages": [SystemMessage(content="sys"), HumanMessage(content="诊断")],
-            "attempts": 0,
-            "output": None,
-            "error": None,
-        }
-    )
-
-    assert result.get("error") is None
-    assert llm.calls == 2
-
-
-@pytest.mark.asyncio
-async def test_retry_answers_every_pending_tool_call_with_tool_message() -> None:
-    """
-    2026-08-09 用于保证校验失败重试时最后 AIMessage 的每条 tool_call
-    都有紧随的 ToolMessage 响应，避免真实 OpenAI 400 tool_calls 悬空
-    """
-    from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-
-    llm = _CapturingRetryLLM(_analysis_payload())
-    graph = build_agent_graph(
-        llm,
-        [],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
-    )
-
-    result = await graph.ainvoke(
-        {
-            "messages": [SystemMessage(content="sys"), HumanMessage(content="诊断")],
-            "attempts": 0,
-            "output": None,
-            "error": None,
-        }
-    )
-
-    assert result.get("error") is None
-    assert llm.calls == 2
-    assert llm.captured_messages is not None
-    messages = llm.captured_messages
-    for message, next_message in zip(messages, messages[1:], strict=False):
-        if not isinstance(message, AIMessage) or not message.tool_calls:
-            continue
-        for call in message.tool_calls:
-            assert isinstance(next_message, ToolMessage)
-            assert next_message.tool_call_id == call["id"]
-            assert next_message.name == call["name"]
-
-
-@pytest.mark.asyncio
-async def test_truncated_tool_call_skips_invoke_and_returns_error_tool_message() -> None:
-    """
-    2026-08-11 用于验证通用图对截断标记调用不执行业务工具，
-    直接生成错误 ToolMessage 回喂模型，模型修正后正常完成。
-    """
-    from unittest.mock import AsyncMock, MagicMock
-
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    tool = MagicMock()
-    tool.name = "get_aggregate_signals"
-    tool.ainvoke = AsyncMock()
-
-    class _TruncatedThenFinishLLM(_FinishOnlyLLM):
-        def __init__(self, payload: dict) -> None:
-            super().__init__(payload)
-            self.captured_messages: list[list] = []
-
-        async def astream(self, messages):
-            # 2026-10-02 统一流式后截断由聚合器 JSON 解析失败产生：
-            # 首回合发出 args 被截断的工具调用 chunk，绕过 mixin 的完整 AIMessage 包装
-            self.calls += 1
-            self.captured_messages.append(list(messages))
-            if self.calls == 1:
-                yield AIMessageChunk(
-                    content="",
-                    tool_call_chunks=[
-                        {
-                            "name": "get_aggregate_signals",
-                            "args": '{"metric": "sig',
-                            "id": "get-signals",
-                            "index": 0,
-                        }
-                    ],
-                )
-            else:
-                yield AIMessageChunk(
-                    content="",
-                    tool_call_chunks=[
-                        {
-                            "name": "finish",
-                            "args": json.dumps({"analysis": self.payload}, ensure_ascii=False),
-                            "id": "finish",
-                            "index": 0,
-                        }
-                    ],
-                )
-
-    llm = _TruncatedThenFinishLLM(_analysis_payload())
-    graph = build_agent_graph(
-        llm,
-        [tool],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
-    )
-
-    result = await graph.ainvoke(
-        {
-            "messages": [SystemMessage(content="sys"), HumanMessage(content="诊断")],
-            "attempts": 0,
-            "output": None,
-            "error": None,
-        }
-    )
-
-    assert result.get("error") is None
-    assert llm.calls == 2
-    tool.ainvoke.assert_not_awaited()
-    second_round = llm.captured_messages[1]
-    error_messages = [
-        str(message.content)
-        for message in second_round
-        if getattr(message, "type", "") == "tool" and "Error" in str(message.content)
-    ]
-    assert len(error_messages) == 1
-
-
-@pytest.mark.asyncio
-async def test_run_diagnosis_agent_requires_run_scoped_tools() -> None:
-    """run_diagnosis_agent 装配诊断工具并产出诊断结果"""
-    mock_session = MagicMock()
-    mock_session.scalar.return_value = 0
-    mock_session.scalars.return_value.all.return_value = []
-    mock_session.get.return_value.run_id = "run-1"
-    mock_session.get.return_value.kind = "agent_analysis"
-    payload = _analysis_payload()
-    payload["novel_id"] = "model-invented-id"
-    payload["foreshadow_expectation"] = 0.99
-    llm = _EvidenceThenFinishLLM(payload)
-    diagnosis_repo = MagicMock()
-    diagnosis_repo.fetch_topic_words.return_value = [{"topic_id": 0}, {"topic_id": 1}]
-    diagnosis_repo.calculate_foreshadow_expectation.return_value = 0.62
-
-    with patch(
-        "src.agents.diagnosis.runner.DiagnosisQueries",
-        return_value=diagnosis_repo,
-    ):
-        analysis = await run_diagnosis_agent(
-            session=mock_session,
-            run_id="run-1",
-            novel_id="n1",
-            llm=llm,
-            audit_recorder=MagicMock(),
-        )
-
-    assert isinstance(analysis, AgentAnalysis)
-    assert analysis.genre_labels == ["玄幻"]
-    assert analysis.novel_id == "n1"
-    assert analysis.foreshadow_expectation == 0.62
-
-
-@pytest.mark.asyncio
-async def test_run_diagnosis_agent_rejects_finish_without_evidence_tool() -> None:
-    """
-    2026-08-04 用于保证诊断 Agent 不能绕过工具取证直接提交结果
-    """
-    mock_session = MagicMock()
-    mock_session.scalar.return_value = 0
-    mock_session.scalars.return_value.all.return_value = []
-    diagnosis_repo = MagicMock()
-    diagnosis_repo.fetch_topic_words.return_value = [{"topic_id": 0}, {"topic_id": 1}]
-    diagnosis_repo.calculate_foreshadow_expectation.return_value = 0.62
-
-    with patch("src.agents.diagnosis.runner.DiagnosisQueries", return_value=diagnosis_repo):
-        with pytest.raises(DiagnosisAgentRunError):
-            await run_diagnosis_agent(
-                session=mock_session,
-                run_id="run-1",
-                novel_id="n1",
-                llm=_FinishOnlyLLM(_analysis_payload()),
-                audit_recorder=MagicMock(),
-            )
+@pytest.mark.parametrize(
+    "response",
+    [
+        AIMessage(content="完成"),
+        AIMessage(content="", tool_calls=[call("execute_code", {"code": "finish()"})]),
+        AIMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
+    ],
+)
+async def test_final_round_without_complete_end_is_budget_exhausted(response):
+    graph, model, report = build_graph([response], maximum=1)
+    result = await run_graph(graph)
+    assert result.get("halted") is True and len(model.requests) == 1
 
 
 def test_validate_topic_label_ids_rejects_mismatch() -> None:
@@ -383,19 +229,3 @@ def test_finalize_diagnosis_result_overrides_model_owned_runtime_fields() -> Non
 
     assert finalized.novel_id == "novel-real"
     assert finalized.foreshadow_expectation == 0.41
-
-
-def test_diagnosis_context_summary_carries_evidence_keys() -> None:
-    """
-    2026-08-10 用于保证诊断回合的确定性上下文摘要携带证据工具键
-    """
-    from src.agents.diagnosis.evidence import DiagnosisEvidenceLedger
-    from src.agents.diagnosis.runner import _context_summary
-
-    ledger = DiagnosisEvidenceLedger(tool_calls=["get_aggregate_signals"])
-    summary = _context_summary(ledger)({"attempts": 2, "tool_iterations": 3, "output": None, "error": None})
-
-    assert summary["phase"] == "diagnosis"
-    assert summary["attempts"] == 2
-    assert summary["tool_iterations"] == 3
-    assert summary["evidence"] == {"tool_calls": ["get_aggregate_signals"]}

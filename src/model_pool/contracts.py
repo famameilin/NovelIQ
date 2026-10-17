@@ -11,6 +11,8 @@ class SelectionRequest:
 
     run_id: str
     work_id: str
+    # 依赖屏障后只重获容量，不能计成失败重派或刷新逻辑执行
+    resume_attempt: int | None = None
 
 
 @dataclass(frozen=True)

@@ -1,13 +1,22 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
+from src.agents.diagnosis.persistence import save_diagnosis_report
 from src.api.exceptions import GraphReadinessError
 from src.api.services.results_queries import _fetch_character_relations, _fetch_diagnosis, _fetch_hierarchical_relations
 from src.diagnosis.normalization import normalize_arc_scores, normalize_name_list
+from src.diagnosis.schema import AgentAnalysis
+from src.event_trees.organization import register_diagnosis_session
 from src.fact_graph.read import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
+from src.metrics.queries.global_stats import save_global_stats
+from src.storage.repositories import StatsRepository
 from src.storage.repositories.annotation import ForeshadowingTreeView
+from tests.support.chapter_annotation_helpers import create_run_with_chunks
+from tests.support.event_tree_fixtures import ensure_character
+from tests.support.paragraph_fixtures import insert_metrics, make_metric_row
 from tests.support.results_query_stubs import _fetch_chapter_annotations, _fetch_characters, _fetch_foreshadowing_trees
 
 
@@ -43,33 +52,62 @@ class _DummyAnnotationRepo2:
         self.session = object()
 
 
-class _DummyStatsRepo:
-    def __init__(self, payload, global_stats=None):
-        """2026-08-19 用于保存当前诊断查询测试数据"""
-        self.payload = payload
-        self.global_stats = global_stats or {}
+def _publish_diagnosis(
+    db_session,
+    run_id: str,
+    *,
+    register_names: bool = True,
+    **fields: object,
+) -> str:
+    """正式发布链写入一份诊断报告：标签/名单/评分随报告落库
 
-    def fetch_agent_analysis(self, run_id):
-        assert run_id == "run-1"
-        return self.payload
+    名单与评分引用的角色必须先是本 run 的正式 character 实体；报告正文与
+    评分形状由 AgentAnalysis 收口，测试不再手拼读取载荷。
+    """
+    names = {
+        *dict(fields.get("arc_scores") or {}),
+        *list(fields.get("focus_characters") or []),
+        *list(fields.get("main_characters") or []),
+        *list(fields.get("core_cast") or []),
+    }
+    if register_names:
+        for name in sorted(str(item) for item in names):
+            ensure_character(db_session, run_id=run_id, name=name)
+    session_id = f"diag-session-{uuid4().hex[:12]}"
+    register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
+    report_id = save_diagnosis_report(db_session, run_id, session_id, AgentAnalysis(**fields))
+    db_session.commit()
+    return report_id
 
-    def fetch_global_stats_dict(self, run_id):
-        assert run_id == "run-1"
-        return self.global_stats
+
+def _diagnosis_scenario(db_session, **fields: object) -> tuple[str, str]:
+    """一段正文 + 一份正式诊断报告的读取场景，返回 (novel_id, run_id)"""
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["伯安帮了柳婉儿。"], title="诊断读取测试")
+    _publish_diagnosis(db_session, run_id, **fields)
+    return novel_id, run_id
 
 
-def test_fetch_diagnosis_preserves_topic_ids_and_precise_emotion_context():
-    stats_repo = _DummyStatsRepo(
-        {"topic_labels": '{"8":"家门与师门","0":"学堂日常"}'},
-        {"emotion_avg": -0.001836261935702582, "lexicon_zero_hit_share": 0.8737257021451069},
+def _diagnosis_result(db_session, novel_id: str, run_id: str):
+    """按生产读入口读取诊断：运行统计走正式仓储，不注入假载荷"""
+    return _fetch_diagnosis(run_id=run_id, novel_id=novel_id, stats_repo=StatsRepository(db_session))
+
+
+def test_fetch_diagnosis_preserves_topic_ids_and_precise_emotion_context(db_session) -> None:
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        topic_labels={"8": "家门与师门", "0": "学堂日常"},
     )
+    # 情绪上下文来自本运行的正式充分统计量（分子/分母守恒密度）
+    insert_metrics(db_session, run_id, [make_metric_row(0, token_count=2, positive_weight_sum=1.0)])
+    save_global_stats(db_session, run_id)
 
-    result = _fetch_diagnosis(run_id="run-1", novel_id="novel-1", stats_repo=stats_repo)
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
+    # 主题命名按实际 topic_id 键控透传
     assert result.topic_labels == {"8": "家门与师门", "0": "学堂日常"}
-    assert result.emotion_avg == pytest.approx(-0.001836261935702582)
-    assert result.lexicon_zero_hit_share == pytest.approx(0.8737257021451069)
+    assert result.emotion_avg == pytest.approx(0.5)
+    assert result.lexicon_zero_hit_share == pytest.approx(0.0)
 
 
 class _DummyAnnotationRepo:
@@ -101,55 +139,42 @@ def test_normalize_name_list_deduplicates_graph_names():
     assert normalize_name_list(values) == ["柳婉儿", "白芷"]
 
 
-def test_fetch_diagnosis_preserves_graph_resolved_character_fields():
-    stats_repo = _DummyStatsRepo(
-        {
-            "foreshadow_expectation": 0.3,
-            "arc_scores": '{"\\u4faf\\u98de\\u767d": 6.5, "\\u6797\\u7acb\\u679c": 6.0}',
-            "genre_labels": '["\\u901a\\u7528"]',
-            "style_labels": '["\\u4e25\\u8083"]',
-            "topic_labels": '["\\u67f3\\u5a49\\u513f", "\\u67f3\\u5a49\\u513f", "\\u767d\\u82b7"]',
-            "diagnosis": (
-                "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
-            ),
-            "value_logic_reason": "\u67f3\u5a49\u513f\u5f71\u54cd\u4e86\u4faf\u98de\u767d\u7684\u5224\u65ad\u3002",
-            "power_stance_reason": "\u6797\u7acb\u679c\u538b\u5236\u4e86\u67f3\u5a49\u513f\u3002",
-            "dignity_reason": "\u67f3\u5a49\u513f\u4fdd\u6301\u4f53\u9762\u3002",
-            "cultural_depth_reason": (
-                "\u4faf\u98de\u767d\u548c\u67f3\u5a49\u513f\u7684\u79f0\u547c\u5f88\u5e02\u4e95\u3002"
-            ),
-            "focus_structure": "dual",
-            "focus_characters": '["\\u4faf\\u98de\\u767d", "\\u6797\\u7acb\\u679c"]',
-            "main_characters": '["\\u4faf\\u98de\\u767d", "\\u6797\\u7acb\\u679c"]',
-            "core_cast": '["\\u4faf\\u98de\\u767d", "\\u6797\\u7acb\\u679c"]',
-        }
+def test_fetch_diagnosis_preserves_graph_resolved_character_fields(db_session) -> None:
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        arc_scores={"侯飞白": 6.5, "林立果": 6.0},
+        genre_labels=["通用"],
+        style_labels=["严肃"],
+        diagnosis="侯飞白帮助柳婉儿，林立果随后出现。",
+        value_logic_reason="柳婉儿影响了侯飞白的判断。",
+        power_stance_reason="林立果压制了柳婉儿。",
+        dignity_reason="柳婉儿保持体面。",
+        cultural_depth_reason="侯飞白和柳婉儿的称呼很市井。",
+        focus_structure="dual",
+        focus_characters=["侯飞白", "林立果"],
+        main_characters=["侯飞白", "林立果"],
+        core_cast=["侯飞白", "林立果"],
     )
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
-    assert result.arc_scores == {"\u4faf\u98de\u767d": 6.5, "\u6797\u7acb\u679c": 6.0}
-    assert result.genre_labels == ["\u901a\u7528"]
-    assert result.style_labels == ["\u4e25\u8083"]
-    assert result.topic_labels is None  # 历史数组不再转成当前主题标签
-    assert result.diagnosis == (
-        "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
-    )
-    assert result.value_logic_reason == "\u67f3\u5a49\u513f\u5f71\u54cd\u4e86\u4faf\u98de\u767d\u7684\u5224\u65ad\u3002"
-    assert result.power_stance_reason == "\u6797\u7acb\u679c\u538b\u5236\u4e86\u67f3\u5a49\u513f\u3002"
-    assert result.dignity_reason == "\u67f3\u5a49\u513f\u4fdd\u6301\u4f53\u9762\u3002"
-    assert result.cultural_depth_reason == (
-        "\u4faf\u98de\u767d\u548c\u67f3\u5a49\u513f\u7684\u79f0\u547c\u5f88\u5e02\u4e95\u3002"
-    )
+    assert result.arc_scores == {"侯飞白": 6.5, "林立果": 6.0}
+    assert result.genre_labels == ["通用"]
+    assert result.style_labels == ["严肃"]
+    # 历史主题标签数组形态已无法经正式写面产生（写面只收 topic_id→标签映射）
+    assert not result.topic_labels
+    assert result.diagnosis == "侯飞白帮助柳婉儿，林立果随后出现。"
+    assert result.value_logic_reason == "柳婉儿影响了侯飞白的判断。"
+    assert result.power_stance_reason == "林立果压制了柳婉儿。"
+    assert result.dignity_reason == "柳婉儿保持体面。"
+    assert result.cultural_depth_reason == "侯飞白和柳婉儿的称呼很市井。"
     assert result.focus_structure == "dual"
-    assert result.focus_characters == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
-    assert result.main_characters == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
-    assert result.core_cast == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
-    assert result.foreshadow_expectation == 0.3
+    assert result.focus_characters == ["侯飞白", "林立果"]
+    assert result.main_characters == ["侯飞白", "林立果"]
+    assert result.core_cast == ["侯飞白", "林立果"]
+    # 伏笔预期是正式伏笔链的读投影：本例没有伏笔链，不冒充旧 payload 的存储值
+    assert result.foreshadow_expectation is None
 
 
 def test_fetch_foreshadowing_trees_preserves_status_field():
@@ -182,357 +207,218 @@ def test_fetch_foreshadowing_trees_preserves_status_field():
     assert rows[0].status == "reinforced"
 
 
-def test_fetch_diagnosis_returns_none_when_agent_result_missing():
-    stats_repo = _DummyStatsRepo(None)
+def test_fetch_diagnosis_returns_none_when_agent_result_missing(db_session) -> None:
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["伯安帮了柳婉儿。"], title="无诊断报告")
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is None
 
 
-def test_fetch_diagnosis_uses_agent_analysis_expectation_as_single_contract():
-    """
-    创建时间: 2026-04-29
-    任务: split-genre-style-labels-review-fixes
-    说明: diagnosis 成功结果现在必须同时携带题材与风格标签；这里覆盖完整新合同的成功路径。
-    """
-    stats_repo = _DummyStatsRepo(
-        {
-            "foreshadow_expectation": 0.42,
-            "arc_scores": '{"沈砚": 8.2}',
-            "genre_labels": '["科幻"]',
-            "style_labels": '["严肃"]',
-            "topic_labels": '["成长"]',
-            "focus_structure": "single",
-            "focus_characters": '["沈砚"]',
-            "main_characters": '["沈砚"]',
-            "core_cast": '["沈砚"]',
-        }
+def test_fetch_diagnosis_uses_agent_analysis_expectation_as_single_contract(db_session) -> None:
+    """诊断成功结果同时携带题材与风格标签与焦点合同（正式报告单一来源）"""
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        arc_scores={"沈砚": 8.2},
+        genre_labels=["科幻"],
+        style_labels=["严肃"],
+        topic_labels={"0": "成长"},
+        focus_structure="single",
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+        core_cast=["沈砚"],
     )
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
-    assert result.foreshadow_expectation == 0.42
     assert result.genre_labels == ["科幻"]
     assert result.style_labels == ["严肃"]
     assert result.focus_structure == "single"
     assert result.focus_characters == ["沈砚"]
 
 
-def test_fetch_diagnosis_keeps_missing_arc_scores_as_none():
-    stats_repo = _DummyStatsRepo(
-        {
-            "focus_structure": "single",
-            "focus_characters": '["沈砚"]',
-            "main_characters": '["沈砚"]',
-            "core_cast": '["沈砚"]',
-        }
+def test_fetch_diagnosis_keeps_missing_arc_scores_as_none(db_session) -> None:
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        focus_structure="single",
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+        core_cast=["沈砚"],
     )
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
     assert result.arc_scores is None
+    # 没有评分时名单不得冒充有效焦点合同
     assert result.focus_characters == []
     assert result.focus_structure is None
 
 
-def test_fetch_diagnosis_keeps_missing_topic_labels_as_none():
-    stats_repo = _DummyStatsRepo(
-        {
-            "arc_scores": '{"沈砚": 8.2}',
-            "focus_structure": "single",
-            "focus_characters": '["沈砚"]',
-            "main_characters": '["沈砚"]',
-            "core_cast": '["沈砚"]',
-        }
+def test_fetch_diagnosis_keeps_missing_topic_labels_as_none(db_session) -> None:
+    """缺少主题命名时不得对外暴露标签（关系行缺失读为空集合）"""
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        arc_scores={"沈砚": 8.2},
+        focus_structure="single",
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+        core_cast=["沈砚"],
     )
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
-    assert result.topic_labels is None
+    assert not result.topic_labels
     assert result.focus_characters == ["沈砚"]
 
 
-def test_fetch_diagnosis_keeps_missing_genre_labels_as_none():
-    """
-    创建时间: 2026-04-29
-    任务: split-genre-style-labels-review-fixes
-    说明: 题材标签缺失时保留其余诊断字段
-    """
-    stats_repo = _DummyStatsRepo(
-        {
-            "arc_scores": '{"沈砚": 8.2}',
-            "style_labels": '["严肃"]',
-            "topic_labels": '["成长"]',
-            "focus_structure": "single",
-            "focus_characters": '["沈砚"]',
-            "main_characters": '["沈砚"]',
-            "core_cast": '["沈砚"]',
-        }
+def test_fetch_diagnosis_keeps_missing_genre_labels_as_none(db_session) -> None:
+    """题材标签缺失时保留其余诊断字段"""
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        arc_scores={"沈砚": 8.2},
+        style_labels=["严肃"],
+        topic_labels={"0": "成长"},
+        focus_structure="single",
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+        core_cast=["沈砚"],
     )
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
-    assert result.genre_labels is None
+    assert not result.genre_labels
     assert result.style_labels == ["严肃"]
 
 
-def test_fetch_diagnosis_keeps_missing_style_labels_as_none():
-    """
-    创建时间: 2026-04-29
-    任务: split-genre-style-labels-review-fixes
-    说明: 风格标签缺失时保留其余诊断字段
-    """
-    stats_repo = _DummyStatsRepo(
-        {
-            "arc_scores": '{"沈砚": 8.2}',
-            "genre_labels": '["科幻"]',
-            "topic_labels": '["成长"]',
-            "focus_structure": "single",
-            "focus_characters": '["沈砚"]',
-            "main_characters": '["沈砚"]',
-            "core_cast": '["沈砚"]',
-        }
+def test_fetch_diagnosis_keeps_missing_style_labels_as_none(db_session) -> None:
+    """风格标签缺失时保留其余诊断字段"""
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        arc_scores={"沈砚": 8.2},
+        genre_labels=["科幻"],
+        topic_labels={"0": "成长"},
+        focus_structure="single",
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+        core_cast=["沈砚"],
     )
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
     assert result.genre_labels == ["科幻"]
-    assert result.style_labels is None
+    assert not result.style_labels
 
 
-def test_fetch_diagnosis_drops_invalid_controlled_labels():
-    """
-    创建时间: 2026-04-29
-    任务: split-genre-style-labels-review-fixes
-    说明: 读取层丢弃不在允许集合内的题材和风格标签
-    """
-    stats_repo = _DummyStatsRepo(
-        {
-            "arc_scores": '{"沈砚": 8.2}',
-            "genre_labels": '["bad-genre"]',
-            "style_labels": '["bad-style"]',
-            "topic_labels": '["成长"]',
-            "focus_structure": "single",
-            "focus_characters": '["沈砚"]',
-            "main_characters": '["沈砚"]',
-            "core_cast": '["沈砚"]',
-        }
+def test_fetch_diagnosis_drops_invalid_controlled_labels(db_session) -> None:
+    """读取层丢弃逻辑下沉为正式写面拒绝：非法受控标签写不进报告"""
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["伯安帮了柳婉儿。"], title="非法标签")
+
+    with pytest.raises(ValueError):
+        _publish_diagnosis(db_session, run_id, genre_labels=["bad-genre"])
+    with pytest.raises(ValueError):
+        _publish_diagnosis(db_session, run_id, style_labels=["bad-style"])
+
+
+def test_fetch_diagnosis_normalizes_controlled_labels_before_returning(db_session) -> None:
+    """带空白与重复的受控标签在正式写面归一，读取层不暴露脏数据"""
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        genre_labels=[" 科幻 ", "科幻", " "],
+        style_labels=[" 严肃 ", "严肃"],
     )
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
-
-    assert result is not None
-    assert result.genre_labels is None
-    assert result.style_labels is None
-
-
-def test_fetch_diagnosis_normalizes_controlled_labels_before_returning():
-    """
-    创建时间: 2026-04-29
-    任务: split-genre-style-labels-review-fixes
-    说明: 合法标签中的空白和重复值应在读取层被归一化，避免对外继续暴露脏数据。
-    """
-    stats_repo = _DummyStatsRepo(
-        {
-            "arc_scores": '{"沈砚": 8.2}',
-            "genre_labels": '[" 科幻 ", "科幻", " "]',
-            "style_labels": '[" 严肃 ", "严肃"]',
-            "topic_labels": '["成长"]',
-            "focus_structure": "single",
-            "focus_characters": '["沈砚"]',
-            "main_characters": '["沈砚"]',
-            "core_cast": '["沈砚"]',
-        }
-    )
-
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
     assert result.genre_labels == ["科幻"]
     assert result.style_labels == ["严肃"]
 
 
-def test_fetch_diagnosis_blank_narrative_arc_type_is_none() -> None:
+def test_fetch_diagnosis_blank_narrative_arc_type_is_none(db_session) -> None:
     """P3 回归：空白 narrative_arc_type 不应透传空串，读取层归一化为 None。"""
-    stats_repo = _DummyStatsRepo(
-        {
-            "foreshadow_expectation": 0.42,
-            "arc_scores": '{"沈砚": 8.2}',
-            "genre_labels": '["科幻"]',
-            "style_labels": '["严肃"]',
-            "topic_labels": '["成长"]',
-            "focus_structure": "single",
-            "focus_characters": '["沈砚"]',
-            "main_characters": '["沈砚"]',
-            "core_cast": '["沈砚"]',
-            "narrative_arc_type": "   ",
-        }
-    )
+    novel_id, run_id = _diagnosis_scenario(db_session, narrative_arc_type="  ")
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
     assert result.narrative_arc_type is None
 
 
-def test_fetch_diagnosis_strips_narrative_arc_type_whitespace() -> None:
+def test_fetch_diagnosis_strips_narrative_arc_type_whitespace(db_session) -> None:
     """P3 回归：narrative_arc_type 首尾空白应被剥离，不把脏串写入诊断结果。"""
-    stats_repo = _DummyStatsRepo(
-        {
-            "foreshadow_expectation": 0.42,
-            "arc_scores": '{"沈砚": 8.2}',
-            "genre_labels": '["科幻"]',
-            "style_labels": '["严肃"]',
-            "topic_labels": '["成长"]',
-            "focus_structure": "single",
-            "focus_characters": '["沈砚"]',
-            "main_characters": '["沈砚"]',
-            "core_cast": '["沈砚"]',
-            "narrative_arc_type": " 三幕式 ",
-        }
-    )
+    novel_id, run_id = _diagnosis_scenario(db_session, narrative_arc_type=" 三幕式")
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
     assert result.narrative_arc_type == "三幕式"
 
 
-def test_fetch_diagnosis_drops_non_mapping_arc_scores():
-    stats_repo = _DummyStatsRepo(
-        {
-            "arc_scores": "[8.2, 6.1]",
-            "main_characters": '["沈砚", "陆明"]',
-            "core_cast": '["沈砚", "陆明"]',
-        }
+def test_fetch_diagnosis_drops_non_mapping_arc_scores(db_session) -> None:
+    """读取层丢弃逻辑下沉为正式写面拒绝：评分引用的角色必须是本 run 的正式实体"""
+    _novel_id, run_id = create_run_with_chunks(db_session, texts=["伯安帮了柳婉儿。"], title="非法评分名")
+
+    with pytest.raises(ValueError):
+        _publish_diagnosis(db_session, run_id, register_names=False, arc_scores={"贺伯安": 8.2})
+
+
+def test_fetch_diagnosis_returns_partial_agent_row(db_session) -> None:
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        arc_scores={"沈砚": 8.2, "陆明": 7.4},
+        main_characters=["沈砚", "陆明"],
+        core_cast=["沈砚", "陆明"],
+        diagnosis="诊断记录只包含当前已有字段",
     )
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
-
-    assert result is not None
-    assert result.arc_scores is None
-    assert result.main_characters == []
-
-
-def test_fetch_diagnosis_returns_partial_agent_row():
-    stats_repo = _DummyStatsRepo(
-        {
-            "foreshadow_expectation": 0.42,
-            "arc_scores": '{"沈砚": 8.2, "陆明": 7.4}',
-            "main_characters": '["沈砚", "陆明"]',
-            "core_cast": '["沈砚", "陆明"]',
-            "diagnosis": "诊断记录只包含当前已有字段",
-        }
-    )
-
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
     assert result.diagnosis == "诊断记录只包含当前已有字段"
-    assert result.focus_characters is None
+    assert not result.focus_characters
 
 
-def test_fetch_diagnosis_returns_current_fields():
-    """2026-08-19 用于验证当前诊断字段直接返回"""
-    stats_repo = _DummyStatsRepo(
-        {
-            "foreshadow_expectation": 0.42,
-            "arc_scores": '{"沈砚": 8.2}',
-            "genre_labels": '["科幻"]',
-            "style_labels": '["严肃"]',
-            "topic_labels": '["成长"]',
-            "focus_structure": "single",
-            "focus_characters": '["沈砚"]',
-            "main_characters": '["沈砚"]',
-            "core_cast": '["沈砚"]',
-        }
+def test_fetch_diagnosis_returns_current_fields(db_session) -> None:
+    """当前诊断字段按正式报告直接返回"""
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        arc_scores={"沈砚": 8.2},
+        genre_labels=["科幻"],
+        style_labels=["严肃"],
+        topic_labels={"0": "成长"},
+        focus_structure="single",
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+        core_cast=["沈砚"],
     )
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
-    assert result.foreshadow_expectation == 0.42
+    assert result.arc_scores == {"沈砚": 8.2}
     assert result.focus_structure == "single"
     assert result.focus_characters == ["沈砚"]
 
 
-def test_fetch_diagnosis_preserves_distinct_graph_entity_names():
-    stats_repo = _DummyStatsRepo(
-        {
-            "arc_scores": '{"伯安": 7.2, "贺伯安": 8.3}',
-            "genre_labels": '["通用"]',
-            "style_labels": '["严肃"]',
-            "topic_labels": '["成长"]',
-            "focus_structure": "dual",
-            "focus_characters": '["伯安", "贺伯安"]',
-            "main_characters": '["伯安", "贺伯安"]',
-            "core_cast": '["伯安", "贺伯安"]',
-        }
+def test_fetch_diagnosis_preserves_distinct_graph_entity_names(db_session) -> None:
+    novel_id, run_id = _diagnosis_scenario(
+        db_session,
+        arc_scores={"伯安": 7.2, "贺伯安": 8.3},
+        genre_labels=["通用"],
+        style_labels=["严肃"],
+        topic_labels={"0": "成长"},
+        focus_structure="dual",
+        focus_characters=["伯安", "贺伯安"],
+        main_characters=["伯安", "贺伯安"],
+        core_cast=["伯安", "贺伯安"],
     )
 
-    result = _fetch_diagnosis(
-        run_id="run-1",
-        novel_id="novel-1",
-        stats_repo=stats_repo,
-    )
+    result = _diagnosis_result(db_session, novel_id, run_id)
 
     assert result is not None
     assert result.arc_scores == {"伯安": 7.2, "贺伯安": 8.3}

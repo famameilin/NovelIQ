@@ -8,9 +8,9 @@ from tests.support.chapter_annotation_helpers import (
     character_fact,
     create_run_with_chunks,
     identity_relation_output,
-    persist_chapter_annotation,
     relation_fact,
 )
+from tests.support.character_observation_helpers import persist_observed_characters
 
 
 def test_character_emotion_preserves_numeric_graph_fact(db_session) -> None:
@@ -19,7 +19,7 @@ def test_character_emotion_preserves_numeric_graph_fact(db_session) -> None:
         texts=["贺重明感到愤怒"],
         title="角色非零情绪",
     )
-    persist_chapter_annotation(
+    persist_observed_characters(
         db_session,
         run_id=run_id,
         chapter_id=1,
@@ -42,7 +42,7 @@ def test_fetch_characters_merges_same_character_aliases(db_session) -> None:
         texts=["伯安与猴子同游"],
         title="角色榜消歧合并",
     )
-    persist_chapter_annotation(
+    persist_observed_characters(
         db_session,
         run_id=run_id,
         chapter_id=1,
@@ -89,7 +89,7 @@ def test_fetch_characters_prefers_diagnosis_name_as_representative(db_session) -
         texts=["伯安与贺重明同游"],
         title="角色榜诊断命名对齐",
     )
-    persist_chapter_annotation(
+    persist_observed_characters(
         db_session,
         run_id=run_id,
         chapter_id=1,
@@ -122,7 +122,7 @@ def test_fetch_characters_normalizes_diagnosis_keys_for_focus_scores(db_session)
         texts=["伯安与贺重明同游"],
         title="角色榜聚焦评分对齐",
     )
-    persist_chapter_annotation(
+    persist_observed_characters(
         db_session,
         run_id=run_id,
         chapter_id=1,

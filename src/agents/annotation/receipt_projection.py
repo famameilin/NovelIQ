@@ -20,6 +20,7 @@ _PROTECTED_FIELDS = REFERENCE_FIELDS | {
     "record",
     "entity_id",
     "event_id",
+    "declaration_id",
     "paragraph_ids",
     "capability",
     "node_id",

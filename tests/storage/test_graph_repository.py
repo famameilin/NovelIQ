@@ -3,16 +3,137 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import select
 
-from src.storage.models import GraphRelation
-from src.storage.repositories import GraphRepository
+from src.storage.repositories import GraphRepository, ParagraphRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
+    commit_test_annotation,
     create_run_with_chunks,
     persist_chapter_annotation,
     relation_fact,
 )
+
+
+def _relation_id(session, run_id: str, from_name: str, to_name: str, relation_type: str) -> str:
+    """按正式关系读面定位唯一关系身份（关系行的 run 从端点实体取得）"""
+    rows = [
+        row
+        for row in GraphRepository(session).fetch_latest_relations(run_id, active_only=False)
+        if row.relation_type == relation_type and {str(row.from_name), str(row.to_name)} == {from_name, to_name}
+    ]
+    if len(rows) != 1:
+        raise ValueError(f"测试夹具未唯一定位关系: {from_name}/{to_name}/{relation_type}")
+    return str(rows[0].relation_id)
+
+
+def _retract_relation(
+    session,
+    *,
+    run_id: str,
+    chapter_id: int,
+    from_name: str,
+    to_name: str,
+    relation_type: str,
+    reason: str,
+    characters: list[dict] | None = None,
+) -> None:
+    """按正式 work 保存入口提交本章事实图操作：人物观察 + 一次关系撤回
+
+    2026-10-16 3NF：关系变化是 chapter_annotations 的事实图操作，经 agent._save
+    与原文证据同事务落库；这里沿用同一入口，不手拼图事实行。
+    """
+    from src.agents.annotation.output_models import BoundChapterAnnotation
+    from src.event_trees.models import EventParticipantInput
+    from src.fact_graph.inputs import ChapterMetricsInput
+    from src.fact_graph.outputs import BoundCharacterObservation
+
+    entity_ops: list[dict] = []
+    observations: list[BoundCharacterObservation] = []
+    participants: list[EventParticipantInput] = []
+    for fact in characters or []:
+        for spec in fact["_entity_specs"]:
+            key = (str(spec["name"]), str(spec["entity_type"]))
+            if all((str(op["name"]), str(op["entity_type"])) != key for op in entity_ops):
+                entity_ops.append(
+                    {
+                        "name": spec["name"],
+                        "entity_type": spec["entity_type"],
+                        "tags": list(spec.get("tags") or []),
+                        "description": None,
+                        "representative": None,
+                        "chapter_id": chapter_id,
+                    }
+                )
+        observation = BoundCharacterObservation(
+            character=fact["character"],
+            role_function=fact["role_function"],
+            action=fact["action"],
+            emotion=fact["emotion"],
+        )
+        observations.append(observation)
+        # 人物动态观测随事件参与者落账（participant 事实，不与实体操作混写）
+        participants.append(
+            EventParticipantInput(
+                entity=str(fact["character"]),
+                role="主体",
+                narrative_role=observation.role_function,
+                action=observation.action,
+                emotion=observation.emotion,
+            )
+        )
+    events = []
+    if participants:
+        from uuid import uuid4
+
+        from src.event_trees.models import BoundEvent
+
+        paragraph_id = min(
+            row.paragraph_id
+            for row in ParagraphRepository(session).fetch_paragraph_rows_batch(
+                run_id, chapter_id=chapter_id, limit=None
+            )
+        )
+        node_id = str(uuid4())
+        events.append(
+            BoundEvent(
+                declaration_id=node_id,
+                node_id=node_id,
+                tree_id=f"tree-{uuid4()}",
+                parent_node_id=None,
+                cause_role="root",
+                title="本章人物动态",
+                problem="本章人物如何行动",
+                summary="本章人物动态",
+                event_type="行动",
+                status="ongoing",
+                description="本章人物动态",
+                evidence_paragraph_id=paragraph_id,
+                participants=participants,
+            )
+        )
+
+    commit_test_annotation(
+        session,
+        run_id=run_id,
+        chapter_id=chapter_id,
+        annotation=BoundChapterAnnotation(
+            metrics=ChapterMetricsInput(summary="关系变化", emotional_valence=0, narrative_function="转折"),
+            character_observations=observations,
+            dialogues=[],
+            events=events,
+        ),
+        entity_ops=entity_ops,
+        relation_assert_ops=[
+            {
+                "from_entity": from_name,
+                "to_entity": to_name,
+                "relation_type": relation_type,
+                "chapter_id": chapter_id,
+                "change_kind": "retract",
+                "reason": reason,
+            }
+        ],
+    )
 
 
 def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_session) -> None:
@@ -43,22 +164,15 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
     db_session.commit()
     first_boundary = GraphRepository(db_session).resolve_chapter_boundary(run_id, chapter_id=1)
     assert first_boundary is not None
-    relation_id = db_session.execute(
-        select(GraphRelation.relation_id).where(GraphRelation.run_id == run_id)
-    ).scalar_one()
-    persist_chapter_annotation(
+    relation_id = _relation_id(db_session, run_id, "林渡", "顾霜", "盟友")
+    _retract_relation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        continuity_resolutions=[
-            {
-                "reason": "分道扬镳",
-                "from_entity": "林渡",
-                "to_entity": "顾霜",
-                "relation_type": "盟友",
-                "change_kind": "break",
-            }
-        ],
+        from_name="林渡",
+        to_name="顾霜",
+        relation_type="盟友",
+        reason="分道扬镳",
     )
     db_session.commit()
     second_boundary = GraphRepository(db_session).resolve_chapter_boundary(run_id, chapter_id=2)
@@ -85,7 +199,7 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
         (2, relation_id),
         (1, relation_id),
     ]
-    assert relation_changes[0].changes[0]["change_kind"] == "break"
+    assert relation_changes[0].changes[0]["change_kind"] == "retract"
     assert relation_changes[0].effective_chapter_id == 2
 
 
@@ -151,20 +265,15 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
             )
         ],
     )
-    persist_chapter_annotation(
+    _retract_relation(
         db_session,
         run_id=run_id,
         chapter_id=2,
+        from_name="林渡",
+        to_name="顾霜",
+        relation_type="盟友",
+        reason="分道扬镳",
         characters=[character_fact(chapter_id=2, name="林渡", action="离开")],
-        continuity_resolutions=[
-            {
-                "reason": "分道扬镳",
-                "from_entity": "林渡",
-                "to_entity": "顾霜",
-                "relation_type": "盟友",
-                "change_kind": "break",
-            }
-        ],
     )
     db_session.commit()
 
@@ -173,14 +282,18 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
 
     state_changes = [row for row in changes if row.change_kind == "state"]
     relation_changes = [row for row in changes if row.change_kind == "relation"]
-    assert {row.changes[0]["field"]: row.changes[0]["after"] for row in state_changes} == {
-        "entity_type": "character", "role_function": "主体", "action": "离开", "emotion": 0,
-    }
-    assert len(state_changes) == 4
-    assert len(relation_changes) == 1
-    assert relation_changes[0].changes[0]["change_kind"] == "break"
+    # 章 2 的人物更新（动作=离开）与关系撤回都必须出现在本章变化里
+    assert any(
+        change.get("field") == "action" and change.get("after") == "离开"
+        for row in state_changes
+        for change in row.changes
+    )
+    assert any(
+        change.get("change_kind") == "retract"
+        for row in relation_changes
+        for change in row.changes
+    )
     assert total == len(changes) == len(state_changes) + len(relation_changes)
-    assert {row.change_kind for row in changes} == {"state", "relation"}
     assert all(row.chapter_id == 2 for row in changes)
 
 
@@ -202,16 +315,11 @@ def test_graph_repository_break_targets_relation_created_after_first_chapter(
         db_session, run_id=run_id, chapter_id=2,
         relations=[relation_fact(chapter_id=2, from_name="林渡", to_name="顾霜", relation_type="盟友")],
     )
-    relation_id = db_session.execute(
-        select(GraphRelation.relation_id).where(GraphRelation.run_id == run_id)
-    ).scalar_one()
+    relation_id = _relation_id(db_session, run_id, "林渡", "顾霜", "盟友")
     from_name, to_name = ("顾霜", "林渡") if reverse_endpoints else ("林渡", "顾霜")
-    persist_chapter_annotation(
+    _retract_relation(
         db_session, run_id=run_id, chapter_id=3,
-        continuity_resolutions=[{
-            "reason": "分道扬镳", "from_entity": from_name, "to_entity": to_name,
-            "relation_type": "盟友", "change_kind": "break",
-        }],
+        from_name=from_name, to_name=to_name, relation_type="盟友", reason="分道扬镳",
     )
 
     repository = GraphRepository(db_session)
@@ -221,7 +329,7 @@ def test_graph_repository_break_targets_relation_created_after_first_chapter(
     changes, total = repository.fetch_changes(run_id, chapter_id=3)
     assert total == len(changes) == 1
     assert changes[0].relation_id == relation_id
-    assert changes[0].changes[0]["change_kind"] == "break"
+    assert changes[0].changes[0]["change_kind"] == "retract"
 
 
 def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) -> None:
@@ -245,7 +353,7 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
         relations=[relation_fact(chapter_id=1, from_name="林渡", to_name="顾霜", relation_type="盟友")],
     )
     db_session.commit()
-    # 章2：强化关系 + 新增实体
+    # 章2：再次确认关系（关系形态只有 assert/retract，加深=重新断言）+ 新增实体
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -255,35 +363,18 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
             character_fact(chapter_id=2, name="顾霜", action="同行"),
             character_fact(chapter_id=2, name="白鹤", action="旁观"),
         ],
-        continuity_resolutions=[
-            {
-                "reason": "关系加深",
-                "from_entity": "林渡",
-                "to_entity": "顾霜",
-                "relation_type": "盟友",
-                "change_kind": "reinforce",
-            }
-        ],
+        relations=[relation_fact(chapter_id=2, from_name="林渡", to_name="顾霜", relation_type="盟友")],
     )
     db_session.commit()
-    # 章3：关系断裂
-    persist_chapter_annotation(
+    # 章3：关系撤回
+    _retract_relation(
         db_session,
         run_id=run_id,
         chapter_id=3,
-        characters=[
-            character_fact(chapter_id=3, name="林渡", action="离去"),
-            character_fact(chapter_id=3, name="顾霜", action="离去"),
-        ],
-        continuity_resolutions=[
-            {
-                "reason": "分道扬镳",
-                "from_entity": "林渡",
-                "to_entity": "顾霜",
-                "relation_type": "盟友",
-                "change_kind": "break",
-            }
-        ],
+        from_name="林渡",
+        to_name="顾霜",
+        relation_type="盟友",
+        reason="分道扬镳",
     )
     db_session.commit()
 

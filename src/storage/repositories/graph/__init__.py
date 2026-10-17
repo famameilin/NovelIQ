@@ -1,4 +1,5 @@
 from .repository import (
+    ChapterBoundary,
     EntitySnapshotRow,
     GraphChangeRow,
     GraphRepository,
@@ -7,6 +8,7 @@ from .repository import (
 )
 
 __all__ = [
+    "ChapterBoundary",
     "EntitySnapshotRow",
     "GraphChangeRow",
     "GraphRepository",

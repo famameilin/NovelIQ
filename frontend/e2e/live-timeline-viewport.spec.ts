@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { ProgressionTimelineResponse } from "../src/api/narrativeTypes";
+import type { PlotlineTimelineResponse } from "../src/api/narrativeTypes";
 
 const novelId = process.env.LIVE_NOVEL_ID;
 const taskId = process.env.LIVE_TASK_ID;
@@ -44,7 +44,7 @@ for (const viewport of [{ width: 1920, height: 924 }, { width: 1440, height: 900
     const endpoint = `/api/novels/${novelId}/timeline?task_id=${taskId}`;
     const access = await request.get(endpoint);
     expect(access.ok()).toBe(true);
-    const initial = await access.json() as ProgressionTimelineResponse;
+    const initial = await access.json() as PlotlineTimelineResponse;
     const last = initial.chapters.at(-1)!;
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
@@ -57,7 +57,7 @@ for (const viewport of [{ width: 1920, height: 924 }, { width: 1440, height: 900
 
     const fullResponse = await request.get(`${endpoint}&through_chapter_id=${last.chapter_id}&limit=1`);
     expect(fullResponse.ok()).toBe(true);
-    const full = await fullResponse.json() as ProgressionTimelineResponse;
+    const full = await fullResponse.json() as PlotlineTimelineResponse;
     const cutoff = page.getByRole("combobox", { name: "阅读截点" });
     await cutoff.selectOption(String(last.chapter_id));
     await expect(page.getByRole("status")).toContainText(`${full.total} 条已发生的变化`);
@@ -77,7 +77,7 @@ for (const viewport of [{ width: 1920, height: 924 }, { width: 1440, height: 900
     const chapter = initial.chapters.find(item => item.order === chapterOrder)!;
     const groupResponse = await request.get(`${endpoint}&through_chapter_id=${chapter.chapter_id}&window_start_chapter_id=${chapter.chapter_id}&dimension=plot`);
     expect(groupResponse.ok()).toBe(true);
-    const group = await groupResponse.json() as ProgressionTimelineResponse;
+    const group = await groupResponse.json() as PlotlineTimelineResponse;
     await node.click();
     const groupDialog = page.getByRole("dialog", { name: "本章变化" });
     await expect(groupDialog).toContainText(`第 ${chapter.order} 章 · 情节推进`);

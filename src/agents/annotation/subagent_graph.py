@@ -1,5 +1,5 @@
 """
-章节内 subagent 会话图：程序、结构化事件提交与显式收尾状态机
+章节内 subagent 会话图：程序执行、结束请求与程序完整性检查
 """
 
 # 创建时间：2026-10-02　创建者：Trae
@@ -11,10 +11,10 @@
 
 from __future__ import annotations
 
-import json
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from src.agents.annotation.ledger import AnnotationToolLedger
@@ -30,47 +30,17 @@ if TYPE_CHECKING:
 
 
 def _route_after_subagent_agent(state: AnnotationGraphState) -> str:
-    """2026-09-17 三代理并发用于 subagent 会话路由：错误收口、工具批次、无工具回复即产出完毕
-
-    撞轮次上限时 halted 置位，同样按会话收束结束。
-    2026-10-02 恢复：随章内三子代理路径一并加回。
-    """
+    """无工具响应也是结束请求，交给程序完整性检查"""
     if state.get("error") or state.get("halted"):
         return "end"
     if not _tool_calls(state):
-        return "end"
+        return "check"
     return "tool_batch"
 
 
-def _route_after_subagent_batch(state: AnnotationGraphState) -> str:
-    """当前批次无失败、显式收尾且职责缺口清零时，直接结束子代理会话"""
-    finished = False
-    for message in reversed(state["messages"]):
-        if not isinstance(message, ToolMessage):
-            break
-        try:
-            body = json.loads(str(message.content))
-        except (TypeError, ValueError):
-            return "agent"
-        if not isinstance(body, dict):
-            return "agent"
-        if body.get("error") or body.get("failed") or body.get("accepted") is False:
-            return "agent"
-        if body.get("status") in {"partial", "rejected", "runtime_error", "error"}:
-            return "agent"
-        gap = body.get("finish")
-        if message.name == "finish" and body.get("status") == "written":
-            ref = body.get("ref") or {}
-            gap = {
-                "finished": ref.get("finished"),
-                "missing_candidates": ref.get("unjudged_candidates"),
-                "missing_metric": ref.get("missing_metric", True),
-            }
-        if isinstance(gap, dict):
-            finished = finished or (
-                gap.get("finished") is True and not gap.get("missing_candidates") and gap.get("missing_metric") is False
-            )
-    return "end" if finished else "agent"
+def _route_after_check(state: AnnotationGraphState) -> str:
+    """完整则结束，否则把缺口提示带回同一模型会话"""
+    return "end" if state.get("completion_ok") or state.get("error") else "agent"
 
 
 def build_subagent_graph(
@@ -84,13 +54,14 @@ def build_subagent_graph(
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
     retries: int | None = None,
-    event_submission_tool: Any | None = None,
+    completion_check: Callable[[], list[str]] | None = None,
+    thinking_message: Callable[[int], str] | None = None,
 ) -> Any:
-    """构建独立 work 会话，成功 finish 后直接结束
+    """构建独立 work 会话；finish 和无工具响应都进入同一完整性检查节点
 
-    无工具回复或轮次上限仅停止会话，Agent 必须确认成功 finish 才能交付队列保存。
+    thinking_message：调用侧省略时保持章节标注文案；诊断等复用面传入 own 文案。
     """
-    bind_tools = [program_tool, *([event_submission_tool] if event_submission_tool is not None else []), finish_tool]
+    bind_tools = [program_tool, finish_tool]
     program_tool_name = str(program_tool.name)
     graph = StateGraph(AnnotationGraphState)
     graph.add_node(
@@ -103,6 +74,7 @@ def build_subagent_graph(
             stream=stream,
             observer=observer,
             retries=retries,
+            thinking_message=thinking_message,
         ),
     )
     execute_batch = _build_tool_batch_node(
@@ -114,24 +86,49 @@ def build_subagent_graph(
     )
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
+        ledger.end_requested = False
         result = await execute_batch(state)
         return result
 
     def route_batch(state: AnnotationGraphState) -> str:
-        # 新 work 的成功 finish 已关闭写面，后续同批迟到写入不撤销关闭事实
-        if ledger.chapter_finished:
-            return "end"
-        return _route_after_subagent_batch(state)
+        return "check" if ledger.end_requested else "agent"
+
+    def check(state: AnnotationGraphState) -> dict[str, Any]:
+        end_signal = "finish" if ledger.end_requested else "no_tool"
+        if observer is not None:
+            observer.close_turn()
+        if completion_check is None:
+            return {"completion_ok": False, "error": "未装配 work 完整性检查"}
+        missing = list(completion_check())
+        if not missing:
+            return {"completion_ok": True, "missing": [], "end_signal": end_signal}
+        ledger.end_requested = False
+        return {
+            "completion_ok": False,
+            "missing": missing,
+            "end_signal": end_signal,
+            "messages": [
+                HumanMessage(
+                    content=(
+                        "程序检查到当前 work 仍有缺口，请在同一会话补齐后再次结束：\n"
+                        + "\n".join(f"- {item}" for item in missing)
+                    )
+                )
+            ],
+        }
 
     graph.add_node("tool_batch", tool_batch)
+    graph.add_node("check", check)
     graph.add_edge(START, "agent")
     graph.add_conditional_edges(
         "agent",
         _route_after_subagent_agent,
         {
             "tool_batch": "tool_batch",
+            "check": "check",
             "end": END,
         },
     )
-    graph.add_conditional_edges("tool_batch", route_batch, {"agent": "agent", "end": END})
+    graph.add_conditional_edges("tool_batch", route_batch, {"agent": "agent", "check": "check"})
+    graph.add_conditional_edges("check", _route_after_check, {"agent": "agent", "end": END})
     return graph.compile()

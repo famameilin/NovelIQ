@@ -4,12 +4,12 @@ from __future__ import annotations
 
 
 def _turn_budget_reminder(remaining: int, *, total: int | None = None) -> str:
-    """提醒只属于本次请求；是否保存由角色必需产物和显式 finish 决定"""
+    """提醒只属于本次请求；是否保存由结束请求后的程序完整性检查决定"""
     if remaining <= 1:
         return (
             "【轮次预算】本轮是当前 work 内部循环的最后一轮：把已确认记录与 finish 放在"
-            "同一批提交。只有通过角色校验的 finish 才能保存；未成功收尾的 work 将失败并由"
-            "队列决定是否重试，不要再发起新的检索。"
+            "同一批提交。结束请求后由程序检查角色完整性；本轮仍未完整结束则预算耗尽，不由"
+            "队列从头重试，不要再发起新的检索。"
         )
     scope = f"{remaining}/{total} 轮" if total else f"{remaining} 轮"
     return (

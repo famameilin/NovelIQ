@@ -19,3 +19,6 @@ export function valueText(value: unknown, field?: string): string {
   if (typeof value === "boolean") return value ? "是" : "否";
   return String(value);
 }
+
+/** 图表色板循环，叙事线不因颜色数量限制而截断 */
+export function chartVar(index: number): string { return `--chart-${(index % 8) + 1}`; }

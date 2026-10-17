@@ -44,10 +44,13 @@ if TYPE_CHECKING:
 
 
 def _fetch_chapter_progress_map(session: Session, run_id: str) -> dict[int, float]:
-    """章起点归一化进度：char_offset / max(char_end_offset)。缺 offset 的章不入表。"""
-    total = session.execute(
-        select(func.max(Chapter.char_end_offset)).where(Chapter.run_id == run_id)
-    ).scalar_one_or_none()
+    """章起点归一化进度：char_offset / max(章正文终点)。缺 offset 的章不入表。
+
+    2026-10-16 全库 3NF 改造：正文终点 = char_offset + 正文精确字符长度（读投影，
+    不再有 char_end_offset 列）；正文与起点同为空（成对约束），空章不参与。
+    """
+    chapter_end_char = Chapter.char_offset + func.length(Chapter.text)
+    total = session.execute(select(func.max(chapter_end_char)).where(Chapter.run_id == run_id)).scalar_one_or_none()
     if total is None or int(total) <= 0:
         # 回退：用 max(char_offset)+1，避免全空
         total = session.execute(

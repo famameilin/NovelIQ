@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -19,13 +20,12 @@ from src.event_trees.vocabulary import (
     EventParticipantRole,
     normalize_event_participant_role,
 )
+from src.fact_graph.inputs import EntityNameRef
 from src.fact_graph.schema import (
     EMOTION_SCORE_DESCRIPTION,
     EVENT_ROLE_FIELD_HINT,
     PERSON_ROLE_FIELD_HINT,
-    EntityRef,
     StrictModel,
-    entity_ref_field_description,
     normalize_semantic_text,
 )
 from src.fact_graph.vocabulary import (
@@ -105,7 +105,7 @@ class EventParticipantInput(StrictModel):
         return self
 
 
-class ParticipantArg(StrictModel):
+class ParticipantArg(EntityNameRef):
     """事件的一个参与者（write_event.characters 数组元素）
 
     2026-10-04 合同放开：role/narrative_role/action/emotion 均可省略或写偏——缺省值
@@ -113,12 +113,11 @@ class ParticipantArg(StrictModel):
     拒绝面只留字段误用（事件角色词写进叙事功能、语气词写进情绪分值）。
     """
 
-    entityid: EntityRef = Field(description=entity_ref_field_description("参与者实体引用"))
     role: EventParticipantRole | None = Field(
         default=None,
         description=(
             f"参与角色：{EVENT_ROLE_FIELD_HINT}；取 {_enum_values_text(EventParticipantRole)}"
-            "（地点角色只用于 location 实体）；可省略，缺省按实体登记类型取"
+            "（地点角色用于 location 或 organization 实体）；可省略，缺省按实体登记类型取"
             "（character→主体、location→地点、其余→客体）"
         ),
     )
@@ -179,9 +178,16 @@ class ParticipantArg(StrictModel):
 
 
 class BoundEvent(StrictModel):
-    """事件树节点：服务端生成稳定 ID，正式提交绑定本章段落证据"""
+    """不可变章级事件声明，声明来源键不代表全书正式事件身份"""
 
-    node_id: str = Field(min_length=1, description="服务端派生的节点 id（=落库 event_id）")
+    declaration_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    problem: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    event_type: str = Field(min_length=1)
+    status: Literal["ongoing", "resolved"]
+    progress: str | None = None
+    node_id: str = Field(min_length=1, description="内部来源键，等于 declaration_id；不是正式事件身份")
     tree_id: str = Field(min_length=1)
     parent_node_id: str | None = Field(default=None, description="root 为 None")
     cause_role: EventCauseRole
@@ -191,6 +197,19 @@ class BoundEvent(StrictModel):
     is_foreshadow_setup: bool = False
     # 2026-09-13 伏笔入森林：根事件携带伏笔属性（落库到 event_nodes 根列）
     payoff_likelihood: Confidence | None = None
+
+    @field_validator("title", "problem", "summary", "event_type")
+    @classmethod
+    def normalize_declaration_text(cls, value: str) -> str:
+        """声明业务字段必须有实际内容，不能以纯空白通过必填检查"""
+        return normalize_semantic_text(value, label="declaration")
+
+    @model_validator(mode="after")
+    def validate_source_identity(self) -> BoundEvent:
+        """node_id 仅是现有来源容器键的内部别名，不另造第二个来源身份"""
+        if self.declaration_id != self.node_id:
+            raise ValueError("declaration_id 必须与内部来源 node_id 一致")
+        return self
 
 
 __all__ = [

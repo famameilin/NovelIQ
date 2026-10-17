@@ -1,16 +1,21 @@
-"""本领域的独立只读投影，不返回 HTTP 模型"""
+"""本领域的独立只读投影，不返回 HTTP 模型
+
+2026-10-16 全库 3NF 改造（35 表冻结结构）：伏笔来源声明 = event_declarations 的
+伏笔根行（属性随行保存，strength 为 payoff_likelihood 读投影）；动作事实 =
+event_foreshadowing_actions，经阶段声明绑定投影正式事件身份。
+"""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.storage.models import (
-    EventEdge,
-    EventNode,
-)
-from src.storage.repositories.annotation.repository import AnnotationRepository
+from src.event_trees import storage_map as smap
+from src.event_trees.action_order import ForeshadowingActionRow, action_order, load_foreshadowing_actions
+from src.event_trees.read.organization import EventTreeQuery
+from src.storage.models import CompleteEvent, EventDeclaration, EventRevision, SourceEvidence
 from src.storage.repositories.annotation.rows import (
     ForeshadowingTreeView,
 )
@@ -22,103 +27,190 @@ _EXPECTATION_STATUS_WEIGHT = {"open": 0.75, "reinforced": 1.0, "likely_paid_off"
 _EXPECTATION_STRENGTH_WEIGHT = {"high": 0.05, "medium": 0.0, "low": -0.05}
 
 
-def foreshadowing_by_chapter(session: Session, run_id: str) -> dict[int, dict[str, Any]]:
-    """2026-09-13 用于把伏笔树（根事件 + foreshadowing 挂边）展开到实际命中章节
+def _foreshadowing_roots(
+    session: Session, run_id: str
+) -> tuple[list[EventDeclaration], dict[str, tuple[int | None, int | None]]]:
+    """本 run 的伏笔根声明及来源章信息，按真实章序与本地地址稳定排序"""
+    declarations = smap.run_declaration_ids(session, run_id)
+    if not declarations:
+        return [], {}
+    rows = list(
+        session.scalars(
+            select(EventDeclaration).where(
+                EventDeclaration.declaration_id.in_(declarations),
+                EventDeclaration.is_foreshadowing_root.is_(True),
+            )
+        )
+    )
+    sources = smap.declaration_sources(session, {row.record_id for row in rows})
+    rows.sort(
+        key=lambda row: (
+            (sources.get(row.record_id) or (None, None))[1] or 0,
+            row.local_key,
+            row.declaration_id,
+        )
+    )
+    return rows, sources
 
-    埋设章 linked 为 None（该章就是根所在）；后续挂边章 linked 指向树根事件 id。
-    """
-    roots = AnnotationRepository(session).fetch_foreshadowing_roots(run_id)
-    if not roots:
+
+def _bound_events(session: Session, run_id: str, declaration_ids: list[str]) -> dict[str, str]:
+    """伏笔来源声明的正式事件身份绑定（阶段声明绑定 + 完整事件生产者属于本 run）"""
+    if not declaration_ids:
         return {}
-    root_by_id = {root.event_id: root for root in roots}
-    sequence_map = AnnotationRepository(session).fetch_chapter_sequence_map(run_id)
+    return {
+        row.declaration_id: row.event_id
+        for row in session.scalars(
+            select(EventRevision)
+            .join(CompleteEvent, CompleteEvent.event_id == EventRevision.event_id)
+            .where(
+                EventRevision.declaration_id.in_(declaration_ids),
+                CompleteEvent.producer_execution_id.in_(smap.run_execution_ids(run_id)),
+            )
+        )
+        if row.declaration_id is not None
+    }
 
-    def _entry(root: EventNode, *, linked: str | None) -> dict[str, Any]:
-        return {
-            "has_foreshadowing": True,
-            "is_strong_setup": (root.strength == "high") if root.strength is not None else None,
-            "foreshadowing_desc": root.description,
-            "why_unresolved_now": None,
-            "payoff_likelihood": root.payoff_likelihood,
-            "foreshadowing_root_event_id": linked,
-        }
 
+def foreshadowing_by_chapter(session: Session, run_id: str) -> dict[int, dict[str, Any]]:
+    """章节伏笔投影引用已发布事件，不把来源声明作为事件暴露
+
+    动作事实携带来源声明列（root/target 事件身份是读投影），章号取动作真实来源章；
+    诊断发布前没有正式事件身份，描述回退来源声明标题、章号仍按真实来源投影，
+    事件身份保持空不回填冒充（与动作读取合同一致）。
+    """
+    query = EventTreeQuery(session, run_id)
+    query.fetch()
     by_chapter: dict[int, dict[str, Any]] = {}
-    for root in sorted(roots, key=lambda r: (sequence_map.get(r.chapter_id, r.chapter_id), r.event_id)):
-        by_chapter[root.chapter_id] = _entry(root, linked=None)
-    edges = AnnotationRepository(session).fetch_foreshadowing_edges(run_id)
-    for edge in sorted(
-        edges,
-        key=lambda e: (sequence_map.get(e.target_chapter_id, e.target_chapter_id), e.edge_id),
-    ):
-        root_node = root_by_id.get(edge.source_event_id)
-        if root_node is None:
-            continue
-        by_chapter[edge.target_chapter_id] = _entry(root_node, linked=root_node.event_id)
+    for action in sorted(load_foreshadowing_actions(session, run_id), key=action_order):
+        if action.chapter_id is None:
+            raise ValueError("伏笔动作缺少真实来源章")
+        declaration = query.declarations[action.source_declaration_id]
+        event = None if action.root_event_id is None else query.events[action.root_event_id]
+        by_chapter[action.chapter_id] = {
+            "has_foreshadowing": True,
+            "is_strong_setup": declaration.strength == "high" if declaration.strength is not None else None,
+            "foreshadowing_desc": event.title if event is not None else declaration.title,
+            "why_unresolved_now": None,
+            "payoff_likelihood": declaration.payoff_likelihood,
+            "foreshadowing_root_event_id": None if action.action_type == "setup" or event is None else event.event_id,
+        }
     return by_chapter
 
 
 def fetch_foreshadowing_trees(session: Session, run_id: str) -> list[ForeshadowingTreeView]:
-    """2026-09-13 用于汇总伏笔树（根事件属性 + 全部挂边章节与事件）"""
-    sequence_map = AnnotationRepository(session).fetch_chapter_sequence_map(run_id)
-    roots = AnnotationRepository(session).fetch_foreshadowing_roots(run_id, ordered=True)
-    if not roots:
-        return []
-    edges_by_root: dict[str, list[EventEdge]] = {}
-    targets_by_id: dict[str, EventNode] = {}
-    all_edges = AnnotationRepository(session).fetch_foreshadowing_edges(run_id, ordered=True)
-    for edge in all_edges:
-        edges_by_root.setdefault(edge.source_event_id, []).append(edge)
-    target_ids = {edge.target_event_id for edge in all_edges}
-    if target_ids:
-        for node in AnnotationRepository(session).fetch_event_records(run_id, target_ids):
-            targets_by_id[node.event_id] = node
-    views: list[ForeshadowingTreeView] = []
-    for root in roots:
-        edges = edges_by_root.get(root.event_id, [])
-        anchor_chapter_ids = sorted(
-            {root.chapter_id, *(edge.target_chapter_id for edge in edges)},
-            key=lambda chapter_id: (sequence_map.get(chapter_id, chapter_id), chapter_id),
+    """按正式事件聚合明确伏笔动作；只有来源属性通过声明追索"""
+    query = EventTreeQuery(session, run_id)
+    query.fetch()
+    by_root: dict[str, list[ForeshadowingActionRow]] = {}
+    for action in sorted(load_foreshadowing_actions(session, run_id), key=action_order):
+        if action.root_event_id is None:
+            raise ValueError("已发布伏笔缺少正式事件身份")
+        by_root.setdefault(action.root_event_id, []).append(action)
+    result: list[ForeshadowingTreeView] = []
+    for event_id, actions in by_root.items():
+        event = query.events[event_id]
+        first, latest = actions[0], actions[-1]
+        declaration = query.declarations[first.source_declaration_id]
+        chapters = sorted(
+            {row.chapter_id for row in actions if row.chapter_id is not None}, key=query.orders.__getitem__
         )
-        last_chapter_id = anchor_chapter_ids[-1] if anchor_chapter_ids else root.chapter_id
-        latest_edge = edges[-1] if edges else None
-        latest_node = targets_by_id.get(latest_edge.target_event_id) if latest_edge else None
-        status = root.foreshadowing_status or "open"
-        views.append(
+        status = {"setup": "open", "reinforce": "reinforced", "payoff": "likely_paid_off"}[latest.action_type]
+        result.append(
             ForeshadowingTreeView(
-                root_event_id=root.event_id,
-                tree_id=root.tree_id,
-                first_chapter_id=root.chapter_id,
-                last_chapter_id=last_chapter_id,
-                anchor_chapter_ids=anchor_chapter_ids,
-                description=root.description,
-                payoff_likelihood=root.payoff_likelihood,
-                strength=root.strength,
+                root_event_id=event_id,
+                tree_id=event_id,
+                # 动作事实的真实生产者是标注 work（trees.save_work 写入），来源章随该 work 投影
+                first_chapter_id=cast(int, first.chapter_id),
+                last_chapter_id=cast(int, latest.chapter_id),
+                anchor_chapter_ids=chapters,
+                description=cast(str, event.title),
+                payoff_likelihood=declaration.payoff_likelihood,
+                strength=declaration.strength,
                 status=status,
                 active=status != "likely_paid_off",
-                latest_reason=latest_node.description if latest_node is not None else None,
+                latest_reason=query.events[latest.target_event_id].title if latest.target_event_id else None,
                 latest_why_unresolved_now=None,
             )
         )
-    return views
+    return result
 
 
-def calculate_foreshadow_expectation(session: Session, run_id: str) -> float | None:
-    """2026-09-13 用于按伏笔树根生命周期属性计算回收预期（权重口径不变）"""
-    roots = AnnotationRepository(session).fetch_foreshadowing_roots(run_id)
+def fetch_foreshadowing_sources(session: Session, run_id: str) -> list[dict[str, Any]]:
+    """诊断发布前读取真实声明及动作材料，来源标识不能冒充正式事件"""
+    roots, sources = _foreshadowing_roots(session, run_id)
+    actions = sorted(load_foreshadowing_actions(session, run_id), key=action_order)
+    evidence = smap.fetch_evidence(
+        session, SourceEvidence.declaration_id, [row.declaration_id for row in roots]
+    )
+    return [
+        {
+            "declaration_id": row.declaration_id,
+            "title": row.title,
+            "problem": row.problem,
+            "summary": row.summary,
+            "chapter_id": (sources.get(row.record_id) or (None, None))[0],
+            "payoff_likelihood": row.payoff_likelihood,
+            # strength 是 payoff_likelihood 的读投影，不双存第二份属性
+            "strength": row.payoff_likelihood,
+            "evidence": smap.evidence_payloads(session, run_id, evidence.get(row.declaration_id, [])),
+            "source_actions": [
+                {
+                    "action_id": action.action_id,
+                    "action_type": action.action_type,
+                    "source_declaration_id": action.source_declaration_id,
+                    "target_declaration_id": action.target_declaration_id,
+                    "chapter_id": action.chapter_id,
+                    "evidence": action.evidence,
+                }
+                for action in actions
+                if action.source_declaration_id == row.declaration_id
+            ],
+        }
+        for row in roots
+    ]
+
+
+def calculate_foreshadow_expectation(
+    session: Session,
+    run_id: str,
+    *,
+    declaration_bindings: dict[str, str] | None = None,
+) -> float | None:
+    """沿明确身份归组及正文动作计算既有指标，不改写不可变声明状态"""
+    roots, _sources = _foreshadowing_roots(session, run_id)
     if not roots:
         return None
-    edge_counts = AnnotationRepository(session).fetch_foreshadowing_edge_counts(run_id)
+    bindings = (
+        declaration_bindings
+        if declaration_bindings is not None
+        else _bound_events(session, run_id, [root.declaration_id for root in roots])
+    )
+    if declaration_bindings is not None and any(root.declaration_id not in bindings for root in roots):
+        raise ValueError("冻结身份缺少伏笔来源声明绑定")
+    grouped_roots: dict[str, list[EventDeclaration]] = {}
+    for root in roots:
+        grouped_roots.setdefault(bindings.get(root.declaration_id, root.declaration_id), []).append(root)
+    grouped_actions: dict[str, list[ForeshadowingActionRow]] = {}
+    for action in sorted(load_foreshadowing_actions(session, run_id), key=action_order):
+        grouped_actions.setdefault(
+            bindings.get(action.source_declaration_id, action.source_declaration_id), []
+        ).append(action)
     weighted_total = 0.0
     total_weight = 0.0
     has_evidence = False
-    for root in roots:
-        # 挂边数 + 埋设本体记 1（旧 hit_count 口径：埋设也是一条命中）
-        hit_count = 1 + edge_counts.get(root.event_id, 0)
+    for identity, sources in grouped_roots.items():
+        # 同一正式伏笔沿最初埋设的属性计分，后续动作只贡献命中和正文最新状态
+        root = sources[0]
+        actions = grouped_actions.get(identity, [])
+        hit_count = max(1, len(actions))
         # 2026-08-16 P3：字段为 None 时不冒充 LLM 判断；若全树都无
-        # payoff_likelihood/strength 证据，说明上游输入退化，结果为 None。
-        has_evidence = has_evidence or any(value is not None for value in (root.payoff_likelihood, root.strength))
-        status = root.foreshadowing_status or "open"
+        # payoff_likelihood 证据，说明上游输入退化，结果为 None。
+        has_evidence = has_evidence or root.payoff_likelihood is not None
+        status = (
+            {"setup": "open", "reinforce": "reinforced", "payoff": "likely_paid_off"}[actions[-1].action_type]
+            if actions
+            else "open"
+        )
         base = _EXPECTATION_BASE_SCORE_BY_PAYOFF.get(
             root.payoff_likelihood or "",
             _EXPECTATION_BASE_SCORE_BY_PAYOFF["medium"],
@@ -128,7 +220,7 @@ def calculate_foreshadow_expectation(session: Session, run_id: str) -> float | N
             _EXPECTATION_STATUS_BONUS["open"],
         )
         strength_bonus = _EXPECTATION_STRENGTH_BONUS.get(
-            root.strength or "",
+            root.payoff_likelihood or "",
             _EXPECTATION_STRENGTH_BONUS["low"],
         )
         score = min(
@@ -143,7 +235,7 @@ def calculate_foreshadow_expectation(session: Session, run_id: str) -> float | N
             _EXPECTATION_STATUS_WEIGHT["open"],
         )
         strength_weight = _EXPECTATION_STRENGTH_WEIGHT.get(
-            root.strength or "",
+            root.payoff_likelihood or "",
             _EXPECTATION_STRENGTH_WEIGHT["low"],
         )
         weight = status_weight + (0.20 if hit_count >= 3 else 0.10 if hit_count == 2 else 0.0) + strength_weight

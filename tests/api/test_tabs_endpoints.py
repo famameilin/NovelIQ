@@ -19,8 +19,10 @@ from tests.support.paragraph_fixtures import (
     create_completed_run,
     create_run_with_status,
     insert_curves,
+    insert_metrics,
     insert_spans,
     make_curve_row,
+    make_metric_row,
     make_span,
 )
 from tests.support.run_records import set_run_status
@@ -31,7 +33,12 @@ _DISTRIBUTIONS = [[1.0, 0.0]] * 3 + [[0.0, 1.0]] * 3
 _NET_DENSITY = [0.5, 0.5, 0.5, -0.5, -0.5, None]
 
 
-def _insert_topic_fixture(db_session, run_id: str) -> None:
+def _insert_topic_fixture(db_session, run_id: str, *, metric_rows: list | None = None) -> None:
+    """主题三表契约；指标行由调用方给定（缺省按本文件的净密度剧本）
+
+    指标行先于主题行落库：主题行要求本段推断状态为 complete，且指标行是
+    净密度（分子÷分母读投影）的唯一来源。
+    """
     repo = ParagraphRepository(db_session)
     repo.insert_topic_model_run(
         run_id,
@@ -45,23 +52,32 @@ def _insert_topic_fixture(db_session, run_id: str) -> None:
         inference_paragraph_count=6,
         artifact_key=f"models/topic/{run_id}",
     )
+    if metric_rows is None:
+        # 净密度剧本：段 0..2 为 +0.5、段 3..4 为 -0.5、段 5 无指标行（净密度为空）
+        metric_rows = [
+            make_metric_row(
+                paragraph_id,
+                token_count=2,
+                positive_weight_sum=1.0 if _NET_DENSITY[paragraph_id] == 0.5 else 0.0,
+                negative_weight_sum=1.0 if _NET_DENSITY[paragraph_id] == -0.5 else 0.0,
+            )
+            for paragraph_id in range(5)
+        ]
+    insert_metrics(db_session, run_id, metric_rows)
+    # 推断/主题行覆盖本文件全部段落（缺指标行的段落由推断 upsert 补完成行）
     repo.insert_paragraph_topic_inferences(
         run_id,
-        [(paragraph_id, 2, _TOKENS[paragraph_id], "complete", None, 1.0) for paragraph_id in range(6)],
+        [(paragraph_id, 2, _TOKENS[paragraph_id], "complete", None, 1.0) for paragraph_id in range(len(_TOKENS))],
     )
     repo.insert_paragraph_topics(
         run_id,
         [
             (paragraph_id, topic_id, _DISTRIBUTIONS[paragraph_id][topic_id])
-            for paragraph_id in range(6)
+            for paragraph_id in range(len(_TOKENS))
             for topic_id in range(2)
         ],
     )
-    insert_curves(
-        db_session,
-        run_id,
-        [make_curve_row(i, net_density=_NET_DENSITY[i]) for i in range(6)],
-    )
+    db_session.commit()
 
 
 def _create_topic_fixture_run(db_session) -> tuple[str, str]:
@@ -183,7 +199,10 @@ def test_linguistic_entities_tab_reports_real_zero_when_features_have_no_hits(
         row = _make_feature_row(paragraph_id, tokens_count=2)
         row["run_id"] = run_id
         rows.append(row)
-    LinguisticRepository(db_session).insert_linguistic_features(run_id, rows)
+    ling_repo = LinguisticRepository(db_session)
+    ling_repo.insert_linguistic_features(run_id, rows)
+    # 短语阶段跑完但零命中：仍要写完成事实，读取侧才能区分「未跑」与「真实零」
+    ling_repo.mark_phrase_completed(run_id, [0, 1])
     db_session.commit()
 
     response = api_client.get(f"/api/novels/{novel_id}/tabs/linguistic-entities", params={"task_id": run_id[:8]})
@@ -213,14 +232,15 @@ def _make_feature_row(paragraph_id: int, *, tokens_count: int) -> dict:
     """构造 paragraph_linguistic_features 的合法插入行（paragraph_entities 外键依赖它）"""
     tokens = [
         {
-            "token_index": 1,
+            "token_index": index + 1,
             "text": "词",
-            "local_start_char": 0,
-            "local_end_char": 1,
+            "local_start_char": index,
+            "local_end_char": index + 1,
             "pos_tag": "n",
             "pos_group": "noun",
         }
-    ] * tokens_count
+        for index in range(tokens_count)
+    ]
     return {
         "run_id": None,
         "paragraph_id": paragraph_id,
@@ -249,8 +269,11 @@ def _make_feature_row(paragraph_id: int, *, tokens_count: int) -> dict:
 
 
 def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[str, str]:
-    """两段运行 + 可选的语言阶段行（特征 / 实体候选 / 短语命中）"""
-    novel_id, run_id = create_completed_run(db_session, chapter_texts=["甲。\n乙。"])
+    """两段运行 + 可选的语言阶段行（特征 / 实体候选 / 短语命中）
+
+    段落原文与候选坐标一致：实体/短语词面是原文切片读投影，不再有落库词面列。
+    """
+    novel_id, run_id = create_completed_run(db_session, chapter_texts=["汤姆来访。\n乙。"])
     insert_spans(
         db_session,
         run_id,
@@ -259,7 +282,7 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
                 paragraph_id=0,
                 chapter_id=1,
                 paragraph_index=0,
-                text="甲。",
+                text="汤姆来访。",
                 local_start=0,
                 chunk_offset=0,
                 token_count=2,
@@ -269,7 +292,7 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
                 chapter_id=1,
                 paragraph_index=1,
                 text="乙。",
-                local_start=3,
+                local_start=6,
                 chunk_offset=0,
                 token_count=2,
             ),
@@ -292,8 +315,8 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
                     "surface_text": "汤姆",
                     "raw_entity_type": "Nh",
                     "normalized_entity_type": "person",
-                    "local_start_char": 2,
-                    "local_end_char": 4,
+                    "local_start_char": 0,
+                    "local_end_char": 2,
                     "confidence": None,
                     "source_kind": "ltp",
                 }
@@ -326,6 +349,8 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
                 },
             ],
         )
+        # 短语阶段完成事实（含零命中段落）：区分「短语未跑」与「跑完零命中」
+        repo.mark_phrase_completed(run_id, [0, 1])
         db_session.commit()
     return novel_id, run_id
 
@@ -340,10 +365,9 @@ from src.storage.repositories import GraphRepository, RunRepository  # noqa: E40
 from tests.support.chapter_annotation_helpers import (  # noqa: E402
     character_fact,
     create_run_with_chunks,
-    persist_chapter_annotation,
     relation_fact,
 )
-from tests.support.paragraph_fixtures import insert_metrics, make_metric_row  # noqa: E402
+from tests.support.character_observation_helpers import persist_observed_characters  # noqa: E402
 
 _CHAPTER_TEXTS = ["林渡与顾霜并肩迎敌。", "萧遥前来助阵。", "三人共商大计。"]
 
@@ -375,15 +399,19 @@ def _create_metrics_fixture_run(db_session) -> tuple[str, str]:
             paragraph_id += 1
         offset += len(chapter_text)
     insert_spans(db_session, run_id, spans)
-    _insert_topic_fixture(db_session, run_id)
-    insert_metrics(
+    # 指标行 + 曲线平滑样本行 + 主题三表：段落级读面（曲线/章节指标/主题）都由此驱动
+    insert_curves(
         db_session,
         run_id,
-        [
+        [make_curve_row(paragraph_id, smoothed_net_density=0.1) for paragraph_id in range(6)],
+    )
+    _insert_topic_fixture(
+        db_session,
+        run_id,
+        metric_rows=[
             make_metric_row(
                 paragraph_id,
                 token_count=2,
-                char_count=2,
                 sentence_count=1,
                 sentence_char_sum=2.0,
                 sentence_char_sum_sq=4.0,
@@ -398,13 +426,16 @@ def _create_metrics_fixture_run(db_session) -> tuple[str, str]:
 
 
 def _seed_graph(db_session, run_id: str) -> None:
-    """三章人物三角图（与 test_graph_metrics_endpoints 相同口径）"""
+    """三章人物三角图（与 test_graph_metrics_endpoints 相同口径）
+
+    人物观测是「声明参与者三态」的读投影，故经观测夹具落账，出场统计才有事实源。
+    """
     for chapter_id, relations in {
         1: [("林渡", "顾霜"), ("林渡", "萧遥")],
         2: [("林渡", "顾霜"), ("顾霜", "萧遥")],
         3: [("林渡", "萧遥"), ("顾霜", "萧遥")],
     }.items():
-        persist_chapter_annotation(
+        persist_observed_characters(
             db_session,
             run_id=run_id,
             chapter_id=chapter_id,

@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Any, get_args
 from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
-from src.agents.annotation.event_submission import SUBMIT_EVENTS_TOOL_NAME
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.tools import _WRITE_TOOL_NAMES
 from src.agents.annotation.validation_errors import translate_write_validation_error
+from src.case_pool.tool_binding import current_case_call_id
 
-from .errors import AnnotationInvariantError
+from .errors import AnnotationDependencyError, AnnotationInvariantError
 from .graph import (
     AnnotationGraphState,
     _failed_receipt,
@@ -81,6 +81,7 @@ async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
     args = dict(call.get("args") or {})
     if name in _WRITE_TOOL_NAMES:
         args = _coerce_nullish_write_args(candidate, args)
+    case_binding = current_case_call_id.set(str(call.get("id") or ""))
     try:
         result = await candidate.ainvoke(args)
     except ValidationError as exc:
@@ -88,8 +89,9 @@ async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
         if name in _WRITE_TOOL_NAMES | {"anchor_record", "write_link"}:
             raise translate_write_validation_error(name, args, exc) from None
         raise
+    finally:
+        current_case_call_id.reset(case_binding)
     return str(result)
-
 
 def _truncated_error(name: str) -> str:
     """2026-08-11 用于构造流截断调用不执行写入时模型可见的独立回执"""
@@ -203,7 +205,7 @@ async def _execute_call(
     """原生调用和程序内部调用共用单条事务及审计边界
 
     单条业务错误只撤销该调用，已成功产出保留；共享状态由 Agent 自己按贡献回滚。
-    finish 立即校验当前 work 并关闭写入。合同违反不可恢复，闭合审计后上抛。
+    finish 仅请求结束，同批工具全部执行。合同违反不可恢复，闭合审计后上抛。
     成功记录键即时登记，供后续原文锚点校验。
     """
     name = str(call.get("name"))
@@ -218,6 +220,7 @@ async def _execute_call(
         )
     ledger_snapshot = ledger.snapshot()
     graph_snapshot = ledger.graph.snapshot() if ledger.graph is not None and ledger.invoke_tool is None else None
+    dependency_error: AnnotationDependencyError | None = None
     try:
         if stream is not None:
             await stream.tool_call_started(name)
@@ -243,13 +246,15 @@ async def _execute_call(
         status = "error"
         error = str(exc)
         receipt = json.loads(result)
+        if isinstance(exc, AnnotationDependencyError):
+            dependency_error = exc
     if record_keys is not None and status == "success" and isinstance(receipt, dict):
         written_record = receipt.get("record")
         if isinstance(written_record, str) and written_record:
             record_keys.add(written_record)
     audit_status, audit_error = status, error
     audit_receipt = receipt
-    if name in {"execute_code", SUBMIT_EVENTS_TOOL_NAME} and isinstance(receipt, dict):
+    if name == "execute_code" and isinstance(receipt, dict):
         # 返回 JSON 成功不代表业务全部成功；只改变监控口径，保留已生效写入与逐条事务语义
         business_status = str(receipt.get("status") or "unknown")
         audit_receipt = {**receipt, "execution_status": status, "business_status": business_status}
@@ -278,6 +283,11 @@ async def _execute_call(
         audit_status,
         result if audit_status == "success" else (audit_error or ""),
     )
+    if dependency_error is not None:
+        # 先记录失败调用，再中止本批和模型会话，不返回可修正回执
+        if observer is not None:
+            observer.close_turn()
+        raise dependency_error
     return _call_entry(
         call,
         index=call_index,
@@ -300,7 +310,7 @@ def _build_tool_batch_node(
     """串行执行本回合调用，各调用独立校验、回滚和审计
 
     只允许实际绑定的工具名；程序模式下未知调用逐条拒绝，不影响同批其他调用。
-    成功 finish 立即关闭当前 work，后续迟到调用不能撤销此前的完成事实。
+    同批 finish 后仍执行剩余调用，再由程序检查完整性。
     """
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
@@ -337,7 +347,7 @@ def _build_tool_batch_node(
                 continue
             direct_fallback = program_tool_name is not None and name not in {
                 program_tool_name,
-                SUBMIT_EVENTS_TOOL_NAME,
+                program_tool_name,
             }
             rendered.append(
                 await _execute_call(

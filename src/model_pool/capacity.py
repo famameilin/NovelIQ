@@ -70,7 +70,8 @@ class ModelElectionExhausted(RuntimeError):
 class ModelElectionPool:
     """本轮模型池只发布选举结果，预算、失败权重和退避仅保留在内存"""
 
-    def __init__(self, bus: EventBus, run_id: str, *, max_attempts: int, poll_seconds: float = 0.1) -> None:
+    def __init__(self, bus: EventBus, run_id: str, *, max_attempts: int, poll_seconds: float = 0.1,
+                 allowed_model_ids: frozenset[str] | None = None, fixed_model_id: str | None = None) -> None:
         self.bus = bus
         self.run_id = run_id
         # 池子地址同时是容量预留的归属：close() 按它归还
@@ -78,6 +79,8 @@ class ModelElectionPool:
         self.assignment_topic = f"assignment:{run_id}"
         self.max_attempts = max_attempts
         self.poll_seconds = poll_seconds
+        self.allowed_model_ids = allowed_model_ids
+        self.fixed_model_id = fixed_model_id
         self.pending: deque[SelectionRequest] = deque()
         self.attempts: dict[str, int] = {}
         self.failures: dict[str, dict[str, int]] = {}
@@ -94,6 +97,12 @@ class ModelElectionPool:
             raise TypeError("模型池只接收 SelectionRequest")
         if (receipt.run_id, receipt.work_id) != (message.run_id, message.work_id) or receipt.run_id != self.run_id:
             raise ValueError("选举请求与消息身份不一致")
+        if receipt.resume_attempt is not None and not 1 <= receipt.resume_attempt <= self.max_attempts:
+            raise ValueError("恢复租约必须引用原有效尝试，不得重开预算")
+        previous_attempt = self.attempts.get(receipt.work_id)
+        if (receipt.resume_attempt is not None and previous_attempt is not None
+                and receipt.resume_attempt != previous_attempt):
+            raise ValueError("恢复租约尝试号与原work不一致，禁止回退选举预算")
         if any(item.work_id == receipt.work_id for item in self.pending):
             return
         if self.attempts.get(receipt.work_id, 0):
@@ -127,21 +136,34 @@ class ModelElectionPool:
             if self.pending:
                 receipt = self.pending[0]
                 attempts = self.attempts.get(receipt.work_id, 0)
+                resumed = receipt.resume_attempt is not None
+                if resumed:
+                    attempts = int(receipt.resume_attempt or 0)
                 model_id = None
                 if (
                     receipt.work_id not in self.reservations
-                    and attempts < self.max_attempts
+                    and (resumed or attempts < self.max_attempts)
                     and time.monotonic() >= self.available_at.get(receipt.work_id, 0)
                     and selection_error is None
                 ):
                     try:
                         # 空位过滤读配置的 max_in_flight：容量热更新无需另立登记
-                        model_id = select_annotation_model(
-                            stable_digest(receipt.work_id, attempts),
-                            settings.models.model_pool,
-                            in_flight=MODEL_CAPACITY.snapshot(),
-                            failures=self.failures.get(receipt.work_id, {}),
-                        )
+                        if self.fixed_model_id is not None:
+                            selected = next((item for item in settings.models.model_pool
+                                             if item.model_id == self.fixed_model_id), None)
+                            if selected is None:
+                                raise ValueError("指定诊断模型不在模型池中")
+                            # 诊断显式选模不受标注权重影响，仍共用同一容量账本
+                            if MODEL_CAPACITY.snapshot().get(selected.model_id, 0) < selected.max_in_flight:
+                                model_id = selected.model_id
+                        else:
+                            model_id = select_annotation_model(
+                                stable_digest(receipt.work_id, attempts),
+                                [item for item in settings.models.model_pool
+                                 if self.allowed_model_ids is None or item.model_id in self.allowed_model_ids],
+                                in_flight=MODEL_CAPACITY.snapshot(),
+                                failures=self.failures.get(receipt.work_id, {}),
+                            )
                     except Exception as exc:
                         # 配置故障不处罚模型，也不能中断已有预留的执行和保存确认
                         selection_error = exc
@@ -149,7 +171,8 @@ class ModelElectionPool:
                     reservation_id = uuid4().hex
                     MODEL_CAPACITY.reserve(self.address, reservation_id, model_id)
                     self.reservations[receipt.work_id] = (reservation_id, model_id)
-                    self.attempts[receipt.work_id] = attempts + 1
+                    selected_attempt = attempts if resumed else attempts + 1
+                    self.attempts[receipt.work_id] = selected_attempt
                     self.pending.popleft()
                     self.bus.publish(
                         Message(
@@ -162,7 +185,7 @@ class ModelElectionPool:
                                 run_id=receipt.run_id,
                                 work_id=receipt.work_id,
                                 model_id=model_id,
-                                attempt_number=attempts + 1,
+                                attempt_number=selected_attempt,
                                 reservation_id=reservation_id,
                             ),
                         )

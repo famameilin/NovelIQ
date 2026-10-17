@@ -28,10 +28,13 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from sqlalchemy import text
+import pytest
+from sqlalchemy.exc import IntegrityError
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.agents.diagnosis.persistence import save_diagnosis_report
+from src.diagnosis.read import fetch_diagnosis_payload
 from src.diagnosis.schema import AgentAnalysis
 from src.storage.repositories import (
     ChapterRepository,
@@ -42,6 +45,7 @@ from src.storage.repositories import (
 from src.text_processing.paragraphs import chunk_text, split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
+from tests.support.event_tree_fixtures import add_diagnosis_context, ensure_character
 
 
 def test_create_and_insert(db_session) -> None:
@@ -74,13 +78,10 @@ def test_create_and_insert(db_session) -> None:
     rows = chapter_repo.fetch_chapter_texts(run_id)
     assert len(rows) == len(chunks)
     assert rows[0][0] == 1
-    offset_row = db_session.execute(
-        text("SELECT char_offset, char_end_offset FROM chapters WHERE run_id = :run_id AND chapter_id = 1"),
-        {"run_id": run_id},
-    ).fetchone()
-    assert offset_row is not None
-    assert offset_row.char_offset == chunks[0].start
-    assert offset_row.char_end_offset == chunks[0].end
+    # 2026-10-16 3NF：正文终点不是章节列，读面按 char_offset + 字符长度投影
+    bodies = {row.chapter_id: row for row in chapter_repo.fetch_chapter_bodies(run_id)}
+    assert bodies[1].char_offset == chunks[0].start
+    assert bodies[1].char_end_offset == chunks[0].end
 
 
 def test_insert_chapter_texts_keeps_duplicate_chapter_titles_separate(db_session) -> None:
@@ -125,82 +126,91 @@ def test_get_run_by_run_id_prefix_escapes_like_wildcards(db_session) -> None:
     assert run_repo.get_run_by_run_id_prefix("pre_2X")["run_id"] == "pre_2Xfix"
 
 
-def test_insert_agent_analysis(db_session) -> None:
+def test_retired_analysis_output_entrypoints_raise(db_session) -> None:
+    """2026-10-16 3NF：旧通用分析产物入口已退役，诊断报告只走 diagnosis_reports 正式关系"""
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
-    analysis = AgentAnalysis(
-        novel_id=novel_id,
-        foreshadow_expectation=0.5,
-        arc_scores={"角色0": 8.2, "角色1": 7.4},
-        genre_labels=["通用"],
-        style_labels=["严肃"],
-        topic_labels={"0": "成长"},
-        diagnosis="ok",
-        narrative_arc_type="白手起家",
-        focus_structure="dual",
-        focus_characters=["角色0", "角色1"],
-        main_characters=["角色0", "角色1"],
-        core_cast=["角色0", "角色1"],
-    )
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Test Novel")
+    stats_repo = StatsRepository(db_session)
 
+    with pytest.raises(NotImplementedError):
+        stats_repo.insert_agent_analysis(run_id, {"novel_id": novel_id})
+    with pytest.raises(NotImplementedError):
+        stats_repo.fetch_agent_analysis(run_id)
+
+
+def test_insert_agent_analysis(db_session) -> None:
+    """2026-10-16 3NF：正式诊断经 diagnosis_reports 保存，按正式读接口取回"""
+    novel_id = uuid.uuid4().hex[:8]
+    insert_test_novel(novel_id, session=db_session)
     run_repo = RunRepository(db_session)
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
+    for name in ("角色0", "角色1"):
+        ensure_character(db_session, run_id=run_id, name=name)
 
-    stats_repo = StatsRepository(db_session)
-    stats_repo.insert_agent_analysis(run_id, analysis.model_dump())
-    fetched = stats_repo.fetch_agent_analysis(run_id)
+    session_id, _work_id, _execution_id = add_diagnosis_context(db_session, run_id)
+    save_diagnosis_report(
+        db_session,
+        run_id,
+        session_id,
+        AgentAnalysis(
+            novel_id=novel_id,
+            arc_scores={"角色0": 8.2, "角色1": 7.4},
+            diagnosis="ok",
+            narrative_arc_type="白手起家",
+            focus_structure="dual",
+            focus_characters=["角色0", "角色1"],
+            main_characters=["角色0", "角色1"],
+            core_cast=["角色0", "角色1"],
+        ),
+    )
+    db_session.commit()
+
+    fetched = fetch_diagnosis_payload(db_session, run_id)
     assert fetched is not None
     assert fetched["novel_id"] == novel_id
-    assert fetched["foreshadow_expectation"] == 0.5
     assert fetched["narrative_arc_type"] == "白手起家"
+    assert fetched["focus_structure"] == "dual"
+    assert fetched["arc_scores"] == {"角色0": 8.2, "角色1": 7.4}
 
 
 def test_fetch_agent_analysis_prefers_latest_row_for_same_run(db_session) -> None:
+    """2026-10-16 3NF：同一 run 至多一份正式诊断发布（第二次发布被领域约束拒绝）"""
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
 
     run_repo = RunRepository(db_session)
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
+    ensure_character(db_session, run_id=run_id, name="角色0")
 
-    stats_repo = StatsRepository(db_session)
-    stats_repo.insert_agent_analysis(
+    session_id, _work_id, _execution_id = add_diagnosis_context(db_session, run_id)
+    save_diagnosis_report(
+        db_session,
         run_id,
+        session_id,
         AgentAnalysis(
             novel_id=novel_id,
-            foreshadow_expectation=0.2,
-            arc_scores={"角色0": 7.0},
-            genre_labels=["通用"],
-            style_labels=["严肃"],
-            topic_labels={"0": "旧主题"},
-            diagnosis="old",
-            narrative_arc_type="白手起家",
+            diagnosis="first",
             focus_structure="single",
             focus_characters=["角色0"],
             main_characters=["角色0"],
             core_cast=["角色0"],
-        ).model_dump(),
+        ),
     )
-    stats_repo.insert_agent_analysis(
-        run_id,
-        AgentAnalysis(
-            novel_id=novel_id,
-            foreshadow_expectation=0.8,
-            arc_scores={"角色1": 9.0},
-            genre_labels=["科幻"],
-            style_labels=["硬核"],
-            topic_labels={"0": "新主题"},
-            diagnosis="new",
-            narrative_arc_type="白手起家",
-            focus_structure="single",
-            focus_characters=["角色1"],
-            main_characters=["角色1"],
-            core_cast=["角色1"],
-        ).model_dump(),
-    )
+    db_session.commit()
 
-    fetched = stats_repo.fetch_agent_analysis(run_id)
+    second_session_id, _work_id2, _execution_id2 = add_diagnosis_context(db_session, run_id)
+    with pytest.raises(IntegrityError):
+        save_diagnosis_report(
+            db_session,
+            run_id,
+            second_session_id,
+            AgentAnalysis(novel_id=novel_id, diagnosis="second"),
+        )
+        # 唯一性由领域约束在提交时校验，第二次发布不得覆盖已发布报告
+        db_session.commit()
+    db_session.rollback()
 
+    fetched = fetch_diagnosis_payload(db_session, run_id)
     assert fetched is not None
-    assert fetched["genre_labels"] == ["科幻"]
-    assert fetched["style_labels"] == ["硬核"]
-    assert fetched["foreshadow_expectation"] == 0.8
+    assert fetched["focus_structure"] == "single"

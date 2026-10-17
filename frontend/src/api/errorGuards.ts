@@ -18,6 +18,15 @@ export function isAnalysisNotCompleteError(error: unknown): boolean {
   return error.response?.status === 400 && error.response?.data?.error_type === "AnalysisNotCompleteError";
 }
 
+/** 旧任务的事件树响应不是 2026-10-12 契约，页面提示重建而不是兼容旧格式 */
+export function isRunRequiresRebuildError(error: unknown): boolean {
+  if (!axios.isAxiosError<AxiosErrorPayload>(error)) {
+    return false;
+  }
+  const detail = error.response?.data?.detail;
+  return error.response?.status === 400 && typeof detail === "object" && detail?.code === "RUN_REQUIRES_REBUILD";
+}
+
 /**
  * 提取 AnalysisNotCompleteError 携带的运行状态（failed/running/pending 等）。
  * 优先读后端结构化字段 run_status，缺失时从 detail 文本“当前状态: X”解析兜底。

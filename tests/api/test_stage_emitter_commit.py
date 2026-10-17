@@ -26,6 +26,40 @@ from src.workflows.progress import AnalysisEventBus
 pytestmark = pytest.mark.asyncio
 
 
+async def test_stage_emitter_rolls_back_and_reraises_when_commit_fails(monkeypatch) -> None:
+    """提交失败必须回滚救回会话再原样上抛：不允许中间态毒化会话流入下游
+
+    2026-10-17 run 52cbb1ac 实证：管线会话一次提交中途被打断留在 PREPARED 后，
+    任意后续 SQL 都抛 "session is in 'prepared' state"；诊断工具读取被伪装成
+    "依赖故障"，真实原因与失败点全部丢失。emitter 是管线会话的提交闸门，
+    失败时先 rollback（PREPARED 态允许回滚）再上抛，失败当场可归因。
+    """
+    factory = get_session_factory()
+    session = factory()
+    rollbacks: list[bool] = []
+    real_rollback = session.rollback
+
+    def interrupted_commit() -> None:
+        raise RuntimeError("commit interrupted")
+
+    def counting_rollback() -> None:
+        rollbacks.append(True)
+        real_rollback()
+
+    monkeypatch.setattr(session, "commit", interrupted_commit)
+    monkeypatch.setattr(session, "rollback", counting_rollback)
+
+    class _Bus:
+        async def emit(self, event: StreamEvent) -> None:
+            raise AssertionError("提交失败时不得继续发事件")
+
+    emitter = StageOrchestratorMixin._make_stage_emitter(_Bus(), "diagnose", session)
+    with pytest.raises(RuntimeError, match="commit interrupted"):
+        await emitter(StreamEvent(action="progress"))
+    assert rollbacks == [True]
+    session.close()
+
+
 async def test_stage_emitter_commits_session_before_emit() -> None:
     """emitter 发事件前提交 session：编排器事务持有的 analysis_runs 行锁不再阻塞 emit 写回
 

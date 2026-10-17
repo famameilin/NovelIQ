@@ -1,9 +1,18 @@
-"""章节正式标注与数据库图测试夹具（agent-semantic-v2 合同）"""
+"""章节正式标注与数据库图测试夹具（全库 3NF 写面：work_items/executions/chapter_annotations）
+
+写面合同（与 src/agents/annotation/agent.py 的 _save 一致）：
+- work 身份 = work_items 的标注形状（role + annotation_run_id/chapter_id）
+- 真实尝试 = executions 的 invocation 形状（work_id + attempt_number + status）
+- 正式产物 = chapter_annotations 头 + 五组件同事务（事件声明、事实图、对话与
+  逐段情绪、案例）
+本模块只用当前正式关系，不读任何已退场关系（analysis_outputs/annotation_work/
+event_nodes/event_edges）。
+"""
 
 from __future__ import annotations
 
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
@@ -12,15 +21,44 @@ from sqlalchemy import select
 from src.agents.annotation.candidates import extract_dialogue_candidates
 from src.agents.annotation.output_models import BoundChapterAnnotation
 from src.event_trees.models import BoundEvent, EventParticipantInput
-from src.fact_graph.inputs import ChapterMetricsInput, EntityInput, RelationInput
+from src.fact_graph.inputs import BoundRelationInput, ChapterMetricsInput, EntityInput
 from src.fact_graph.outputs import BoundCharacterObservation, BoundDialogue
 from src.fact_graph.vocabulary import EntityType
 from src.storage.db import get_session_factory
-from src.storage.models import Chapter, Novel, Paragraph
+from src.storage.models import (
+    Chapter,
+    ChapterAnnotation,
+    Execution,
+    Novel,
+    Paragraph,
+    WorkItem,
+)
+from src.storage.models.base import naive_utcnow
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.text_processing.models import Chunk as ChunkerChunk
 from src.text_processing.paragraphs import split_chunk_paragraphs
-from src.utils.identity import stable_digest
+from src.utils.identity import stable_uuid
+from src.work.annotation_work import annotation_work_id
+
+
+@dataclass(frozen=True, slots=True)
+class _SavedWorkRecord:
+    """已保存标注 work 的复读身份：同时满足事实图（execution/record）与树（invocation/output）两个读面命名"""
+
+    work_id: str
+    invocation_id: str
+    output_id: str
+    chapter_id: int
+    role: str
+    sequence: int
+
+    @property
+    def execution_id(self) -> str:
+        return self.invocation_id
+
+    @property
+    def record_id(self) -> str:
+        return self.output_id
 
 
 def create_run_with_chunks(
@@ -79,6 +117,91 @@ def create_run_with_chunks(
         ParagraphRepository(session).insert_paragraphs(run_id, spans)
         session.commit()
     return novel_id, run_id
+
+
+def _saved_work_records(session: Any, run_id: str) -> list[_SavedWorkRecord]:
+    """按正式关系复读本 run 已保存标注 work（章末核对与域重建共用读取身份）"""
+    rows = session.execute(
+        select(
+            WorkItem.work_id,
+            WorkItem.role,
+            WorkItem.annotation_chapter_id,
+            Execution.execution_id,
+            ChapterAnnotation.record_id,
+            Chapter.sequence,
+        )
+        .join(Execution, Execution.work_id == WorkItem.work_id)
+        .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
+        .join(
+            Chapter,
+            (Chapter.run_id == WorkItem.annotation_run_id)
+            & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+        )
+        .where(WorkItem.annotation_run_id == run_id)
+        .order_by(Chapter.sequence, WorkItem.role, WorkItem.work_id)
+    ).all()
+    return [
+        _SavedWorkRecord(
+            work_id=str(work_id),
+            invocation_id=str(execution_id),
+            output_id=str(record_id),
+            chapter_id=int(chapter_id),
+            role=str(role),
+            sequence=int(sequence),
+        )
+        for work_id, role, chapter_id, execution_id, record_id, sequence in rows
+    ]
+
+
+def _create_work_identity(
+    session: Any, *, run_id: str, chapter_id: int, role: str = "solo"
+) -> tuple[str, str]:
+    """登记 work_items 标注形状与 executions 的真实尝试，返回 (work_id, invocation_id)"""
+    work_id = annotation_work_id(run_id, chapter_id, role)
+    if session.get(WorkItem, work_id) is None:
+        session.add(
+            WorkItem(
+                work_id=work_id,
+                role=role,
+                annotation_run_id=run_id,
+                annotation_chapter_id=chapter_id,
+            )
+        )
+        session.flush()
+    attempt = int(session.scalar(select(Execution.attempt_number).where(Execution.work_id == work_id)) or 0) + 1
+    invocation = uuid4().hex
+    session.add(
+        Execution(
+            execution_id=invocation,
+            work_id=work_id,
+            attempt_number=attempt,
+            started_at=naive_utcnow(),
+            status="running",
+        )
+    )
+    session.flush()
+    return work_id, invocation
+
+
+def _finish_execution(session: Any, invocation: str) -> None:
+    """真实尝试在当前事务内收口为成功终态（失败尝试不写正式产物）"""
+    execution = session.get(Execution, invocation)
+    if execution is not None:
+        execution.status = "success"
+        execution.finished_at = naive_utcnow()
+    session.flush()
+
+
+def _work_execution_of_chapter(session: Any, run_id: str, chapter_id: int) -> str:
+    """按章取本 run 已保存标注 work 的真实执行（优先 solo/evidence 的正式产物作者）"""
+    records = [
+        record for record in _saved_work_records(session, run_id) if record.chapter_id == chapter_id
+    ]
+    if not records:
+        raise ValueError(f"章节没有已保存 work 的真实执行: run_id={run_id} chapter_id={chapter_id}")
+    preference = {"solo": 0, "evidence": 1, "structure": 2, "event": 3}
+    record = min(records, key=lambda item: (preference.get(item.role, 9), item.work_id))
+    return record.invocation_id
 
 
 def _entity_spec(
@@ -197,16 +320,30 @@ def make_bound_event(
     parent_node_id: str | None = None,
     cause_role: str = "root",
     evidence_paragraph_id: int | None = None,
+    title: str | None = None,
+    problem: str = "明确事件问题",
+    summary: str | None = None,
+    event_type: str = "行动",
+    status: str = "ongoing",
+    progress: str | None = None,
 ) -> BoundEvent:
     """构造带本章段落证据的正式事件"""
+    node_id = node_id or str(uuid4())
     return BoundEvent(
-        node_id=node_id or str(uuid4()),
+        node_id=node_id,
         tree_id=tree_id or f"tree-{uuid4()}",
         parent_node_id=parent_node_id,
         cause_role=cause_role,
         description=description,
         evidence_paragraph_id=evidence_paragraph_id,
-        participants=[EventParticipantInput(entity=p["entity"], role=p["role"]) for p in (participants or [])],
+        participants=[EventParticipantInput(entity=p["entity"], role=p["role"]) for p in participants or []],
+        title=title if title is not None else description,
+        problem=problem,
+        summary=summary if summary is not None else description,
+        event_type=event_type,
+        status=status,
+        progress=progress,
+        declaration_id=node_id,
     )
 
 
@@ -255,12 +392,14 @@ def persist_chapter_annotation(
     directories = {key: {"entities": []} for key in keys}
     observations_by_chapter: dict[int, list[BoundCharacterObservation]] = {key: [] for key in keys}
     dialogues_by_chapter: dict[int, list[BoundDialogue]] = {key: [] for key in keys}
-    relations_by_chapter: dict[int, list[RelationInput]] = {key: [] for key in keys}
+    relations_by_chapter: dict[int, list[BoundRelationInput]] = {key: [] for key in keys}
 
     for fact in characters or []:
         chapter_id = int(fact["chapter_id"])
         if chapter_id not in chapter_text_by_id:
             raise ValueError(f"测试事实引用了非本章章节: {chapter_id}")
+        # 本形参只落观测载荷：3NF 后人物观测的可读行需要带三态的声明参与者，
+        # 需要读面人物行请用 character_observation_helpers.persist_observed_characters
         for spec in fact.get("_entity_specs", []):
             _register_entity(
                 directories[chapter_id],
@@ -289,7 +428,7 @@ def persist_chapter_annotation(
                 tags=spec.get("tags"),
             )
         relations_by_chapter[chapter_id].append(
-            RelationInput(
+            BoundRelationInput(
                 from_entity=fact["from_entity"],
                 to_entity=fact["to_entity"],
                 relation_type=fact["relation_type"],
@@ -326,15 +465,24 @@ def persist_chapter_annotation(
     for (chapter_id, entity_name), attributes in (entity_attributes or {}).items():
         if chapter_id not in chapter_text_by_id:
             raise ValueError(f"测试实体属性引用了非本章章节: {chapter_id}")
+        # 2026-10-16 3NF：实体不再存任意属性列，只有 description/representative 是显式字段；
+        # 其余测试键不落库（夹具保留形参以维持调用面）
+        merged = dict(attributes)
+        description = merged.pop("description", None)
+        representative = merged.pop("representative", None)
         registered = [entity for entity in directories[chapter_id]["entities"] if entity.name == entity_name]
         if registered:
-            registered[0].attributes = dict(attributes)
+            if description is not None:
+                registered[0].description = description
+            if representative is not None:
+                registered[0].representative = representative
         else:
             directories[chapter_id]["entities"].append(
                 EntityInput(
                     name=entity_name,
                     entity_type="character",
-                    attributes=dict(attributes),
+                    description=description,
+                    representative=representative,
                 )
             )
 
@@ -357,6 +505,12 @@ def persist_chapter_annotation(
                 parent_node_id=event_spec.get("parent_node_id"),
                 cause_role=event_spec.get("cause_role", "root"),
                 evidence_paragraph_id=event_spec.get("evidence_paragraph_id", paragraph_id),
+                title=event_spec.get("title"),
+                problem=event_spec.get("problem", "明确事件问题"),
+                summary=event_spec.get("summary"),
+                event_type=event_spec.get("event_type", "行动"),
+                status=event_spec.get("status", "ongoing"),
+                progress=event_spec.get("progress"),
             )
             # 2026-09-13 伏笔即事件树：isforeshadowing=true 的章内事件即伏笔树根
             # （2026-09-14 伏笔属性收敛：expected_payoff_family 退役）
@@ -395,7 +549,7 @@ def persist_chapter_annotation(
                     "entity_type": str(entity.entity_type),
                     "tags": list(entity.tags or []),
                     "description": entity.description,
-                    "attributes": dict(entity.attributes or {}),
+                    "representative": entity.representative,
                     "chapter_id": chapter_id,
                 }
             )
@@ -439,19 +593,27 @@ def commit_test_annotation(
     from src.event_bus import EventBus
     from src.event_trees.trees import EventTrees
     from src.fact_graph.graph import FactGraph
-    from src.storage.models import AnalysisOutput, AnnotationWork
-    from src.work.annotation_work import WorkReceipt, annotation_work_id
+    from src.work.annotation_work import WorkReceipt
 
-    chapter = session.get(Chapter, (chapter_id, run_id))
-    paragraphs = list(
-        session.execute(
-            select(Paragraph)
-            .where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id)
-            .order_by(Paragraph.paragraph_index)
-        ).scalars()
-    )
-    work_id = annotation_work_id(run_id, chapter_id, "solo")
-    invocation = uuid4().hex
+    # chapters 主键顺序为 (run_id, chapter_id)
+    chapter = session.get(Chapter, (run_id, chapter_id))
+    # 2026-10-16 3NF：local_end_char/global 坐标/char_count 是读取投影，不是段落列；
+    # 夹具按生产派发口径组装段落事实（与 annotate 的 _load_work 同形）
+    from types import SimpleNamespace
+
+    from src.storage.repositories import ParagraphRepository
+
+    paragraphs = [
+        SimpleNamespace(
+            chapter_id=row.chapter_id,
+            paragraph_id=row.paragraph_id,
+            local_start_char=row.local_start_char,
+            local_end_char=row.local_end_char,
+            text=row.text,
+        )
+        for row in ParagraphRepository(session).fetch_paragraph_rows_batch(run_id, chapter_id=chapter_id, limit=None)
+    ]
+    work_id, invocation = _create_work_identity(session, run_id=run_id, chapter_id=chapter_id, role="solo")
     payload = {
         "chapter_id": chapter_id,
         "chapter_sequence": chapter.sequence,
@@ -471,13 +633,27 @@ def commit_test_annotation(
         event_trees=trees,
         case_pool=cases,
     )
-    records = list(session.execute(select(AnalysisOutput).where(AnalysisOutput.run_id == run_id)).scalars())
+    records = _saved_work_records(session, run_id)
     graph.restore_storage(session, records)
     trees.restore_storage(session, records)
     graph.begin(work_id, invocation, chapter.sequence, "solo")
     graph.contributions[(work_id, invocation)]["entity_ops"] = entity_ops or []
     graph.contributions[(work_id, invocation)]["relation_assert_ops"] = relation_assert_ops or []
     graph._fold()
+    # 2026-10-13 身份=规范名+实体大类：夹具的历史操作与参与者以登记名给出，
+    # 冻结前按图登记把端点/参与者翻成实体身份键（生产面存的就是复合键）
+    name_to_key = {display: key for key, display in graph.entity_names.items()}
+
+    def _to_key(name: str) -> str:
+        return name_to_key.get(name, name)
+
+    for op in graph.contributions[(work_id, invocation)]["relation_assert_ops"]:
+        op["from_entity"] = _to_key(str(op["from_entity"]))
+        op["to_entity"] = _to_key(str(op["to_entity"]))
+    graph._fold()
+    for event in annotation.events:
+        for participant in event.participants:
+            participant.entity = _to_key(participant.entity)
     trees.begin(work_id, invocation)
     trees.sync((work_id, invocation), chapter_id, annotation.events)
     cases.begin(work_id, invocation)
@@ -494,6 +670,7 @@ def commit_test_annotation(
     )
     ledger.metrics_payload = annotation.metrics
     ledger.events.bound_payloads["events"] = annotation.events
+    # 标注只保存过程；消费者需要的完整事件通过诊断夹具另行建立
     ledger.events.bound_payloads["character_observations"] = annotation.character_observations
     ledger.dialogue.bound_payloads["dialogues"] = annotation.dialogues
     ledger.metrics.bound_payloads["paragraph_labels"] = annotation.paragraph_labels
@@ -505,13 +682,8 @@ def commit_test_annotation(
         finished=True,
     )
     agent.freeze(execution)
-    session.add(
-        AnnotationWork(
-            work_id=work_id, run_id=run_id, chapter_id=chapter_id, role="solo", invocation_id=invocation, state="saved"
-        )
-    )
-    session.flush()
     result = agent._save(execution, session)
+    _finish_execution(session, invocation)
     session.commit()
     agent.close()
     return result
@@ -575,65 +747,48 @@ def commit_test_resolution(
     reason: str,
 ) -> None:
     """关系变化/明确事件连接夹具直接保存领域事实，案例不夹带结构化裁决"""
-    from src.fact_graph.graph import FactGraph
-    from src.fact_graph.identity import relation_id
-    from src.fact_graph.vocabulary import RELATION_DEFINITIONS
-    from src.storage.models import (
-        AnalysisOutput,
-        AnnotationWork,
-        EventEdge,
-        EventNode,
-        GraphFact,
-    )
-    from src.utils.identity import stable_uuid, text_digest
+    from src.storage.models import GraphEntity, GraphFact, GraphRelation, NarrativeLink, SourceEvidence
 
-    work = session.execute(
-        select(AnnotationWork).where(AnnotationWork.run_id == run_id, AnnotationWork.chapter_id == chapter_id)
-    ).scalar_one()
-    record = session.execute(select(AnalysisOutput).where(AnalysisOutput.work_id == work.work_id)).scalar_one()
+    invocation = _work_execution_of_chapter(session, run_id, chapter_id)
     paragraph = (
-        session.execute(select(Paragraph).where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id))
+        session.execute(
+            select(Paragraph).where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id)
+        )
         .scalars()
         .first()
     )
-    evidence = [
-        {
-            "chapter_id": chapter_id,
-            "paragraph_id": paragraph.paragraph_id,
-            "char_start": 0,
-            "char_end": len(paragraph.text),
-            "text_hash": text_digest(paragraph.text),
-        }
-    ]
     if target["domain"] == "event":
-        parent, child = (
-            session.get(EventNode, resolution["root_event_id"]),
-            session.get(EventNode, resolution["event_id"]),
-        )
-        edge_type = resolution["edge_type"]
+        # 章级声明之间的显式关联是 narrative_links 的语义/因果形状（声明端点）
+        link_type = str(resolution["edge_type"])
+        source_id = str(resolution["root_event_id"])
+        target_id = str(resolution["event_id"])
+        link_id = stable_uuid(run_id, invocation, source_id, target_id, link_type)
         session.add(
-            EventEdge(
-                edge_id=stable_uuid(run_id, work.work_id, parent.event_id, child.event_id, edge_type),
-                run_id=run_id,
-                source_event_id=parent.event_id,
-                target_event_id=child.event_id,
-                source_chapter_id=parent.chapter_id,
-                target_chapter_id=child.chapter_id,
-                edge_type=edge_type,
-                evidence=evidence,
-                is_active=True,
-                annotation_id=record.output_id,
-                payload_path=f"fixture/{parent.event_id}/{child.event_id}",
-                author_work_id=work.work_id,
-                cause_role=None,
+            NarrativeLink(
+                link_id=link_id,
+                producer_execution_id=invocation,
+                reason=reason,
+                semantic_source_declaration_id=source_id,
+                semantic_target_declaration_id=target_id,
+                relation_type=link_type,
+                source_operation_local_key=f"fixture-link/{link_id}"[:128],
             )
         )
         session.flush()
-        from src.event_trees.trees import EventTrees
-
-        EventTrees(run_id).rebuild_storage(session)
+        session.add(
+            SourceEvidence(
+                evidence_id=str(uuid4()),
+                narrative_link_id=link_id,
+                ordinal=0,
+                paragraph_id=int(paragraph.paragraph_id),
+                start_char=0,
+                end_char=len(paragraph.text),
+            )
+        )
+        session.flush()
     elif target["domain"] == "relation":
-        from src.storage.models import GraphEntity
+        from src.fact_graph.identity import relation_id
+        from src.fact_graph.vocabulary import RELATION_DEFINITIONS
 
         left, right = (
             session.get(GraphEntity, target["from_entity_id"]),
@@ -646,39 +801,31 @@ def commit_test_resolution(
             target["relation_type"],
             RELATION_DEFINITIONS[target["relation_type"]]["directionality"],
         )
-        op = {
-            "from_entity": left.canonical_name,
-            "to_entity": right.canonical_name,
-            "relation_type": target["relation_type"],
-            "chapter_id": chapter_id,
-            "change_kind": resolution["change_kind"],
-            "reason": reason,
-        }
-        fact_id = stable_digest(run_id, chapter_id, op)
+        relation = session.get(GraphRelation, identifier)
+        if relation is None:
+            raise ValueError(f"关系历史夹具必须引用已存在的关系: relation_id={identifier}")
+        fact = GraphFact(
+            direct_producer_execution_id=invocation,
+            operation_order=1000,
+            relation_id=relation.relation_id,
+            relation_change_kind=str(resolution["change_kind"]),
+            reason=reason,
+        )
+        session.add(fact)
+        session.flush()
         session.add(
-            GraphFact(
-                run_id=run_id,
-                chapter_id=chapter_id,
-                fact_id=fact_id,
-                fact_type="relation",
-                subject_entity_id=left.entity_id,
-                predicate="relation",
-                object=None,
-                value=op,
-                participants=[],
-                scope="book",
-                assertion="asserted",
-                confidence="high",
-                content={"kind": "relation", "operation": op, "operation_order": 1000, "relation_id": identifier},
-                effective_chapter_id=chapter_id,
-                source_kind="annotation",
-                annotation_id=record.output_id,
-                payload_path=f"fixture/{fact_id}",
-                author_work_id=work.work_id,
-                evidence=evidence,
+            SourceEvidence(
+                evidence_id=str(uuid4()),
+                graph_fact_id=fact.graph_fact_id,
+                ordinal=0,
+                paragraph_id=int(paragraph.paragraph_id),
+                start_char=0,
+                end_char=len(paragraph.text),
             )
         )
         session.flush()
+        from src.fact_graph.graph import FactGraph
+
         FactGraph(run_scope=run_id).rebuild_storage(session)
     else:
         raise ValueError("夹具必须指定当前领域有效端点")
@@ -694,7 +841,7 @@ def commit_test_event_link(
     target_event_id: str,
     edge_type: str = "causal",
 ) -> None:
-    """跨树事件关联经当前连续性事务生成，不插入历史格式的因果边"""
+    """跨树事件关联经当前声明候选关系事务生成，不插入历史格式的因果边"""
     commit_test_resolution(
         session,
         run_id=run_id,
@@ -709,9 +856,17 @@ def commit_test_event_link(
 
 def confirm_test_work(session: Any, run_id: str, *, create_missing: bool = False) -> None:
     """只读查询夹具显式构造实际保存 work，不再设置发布 hash"""
-    from src.storage.models import AnnotationWork
+    from src.storage.models import EventDeclaration, GraphEntity
 
-    saved = set(session.execute(select(AnnotationWork.chapter_id).where(AnnotationWork.run_id == run_id)).scalars())
+    saved = {
+        int(chapter_id)
+        for chapter_id in session.execute(
+            select(WorkItem.annotation_chapter_id)
+            .join(Execution, Execution.work_id == WorkItem.work_id)
+            .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
+            .where(WorkItem.annotation_run_id == run_id, WorkItem.annotation_chapter_id.is_not(None))
+        ).scalars()
+    }
     for chapter in session.execute(select(Chapter).where(Chapter.run_id == run_id)).scalars().all():
         paragraphs_exist = (
             session.execute(
@@ -721,12 +876,19 @@ def confirm_test_work(session: Any, run_id: str, *, create_missing: bool = False
             ).first()
             is not None
         )
-        from src.storage.models import EventNode, GraphEntity
-
         graph_exists = (
             session.execute(select(GraphEntity.entity_id).where(GraphEntity.run_id == run_id)).first() is not None
         )
-        event_exists = session.execute(select(EventNode.event_id).where(EventNode.run_id == run_id)).first() is not None
+        event_exists = (
+            session.execute(
+                select(EventDeclaration.declaration_id)
+                .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+                .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+                .join(WorkItem, WorkItem.work_id == Execution.work_id)
+                .where(WorkItem.annotation_run_id == run_id)
+            ).first()
+            is not None
+        )
         if chapter.chapter_id not in saved and paragraphs_exist and (create_missing or graph_exists or event_exists):
             commit_test_annotation(
                 session,

@@ -1,5 +1,18 @@
 """
-原文自然段 pgvector schema 管理
+原文自然段语义向量 pgvector schema 管理（2026-10-16 全库 3NF 冻结结构）
+
+段落语义向量不再是独立表：向量行是 paragraph_features 的 semantic_vector 行
+（通用 vector 列，列宽按运行模型合同解析）。本模块负责建/校验该列上的
+HNSW 检索索引：
+
+- 向量列（paragraph_features.vector_value）由 ORM/新库初始化建立，本模块不建表、
+  不 DROP 任何对象；结构或索引不兼容时校验失败即停止
+- 语义向量的 HNSW 索引按维度建立**部分表达式索引**：同一列里还有不同维度的
+  POS 向量行与其它运行的历史维度，只有固定维度表达式 + 维度谓词才能安全建索引，
+  且查询侧必须带同谓词才能命中（见 embedding_ops.search_similar_paragraphs）
+- pgvector 对 vector 类型的 HNSW 索引上限 2000 维；更高维（如 Qwen3-Embedding-4B
+  的 2560 维）必须改用 halfvec 表达式索引（上限 4000 维），形态判定共用
+  hnsw_index_uses_halfvec
 """
 
 from __future__ import annotations
@@ -10,6 +23,20 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.storage.db import get_database_schema
+
+#: 语义向量 feature_code（paragraph_features 封闭计算种类）
+_FEATURE_SEMANTIC_VECTOR = "semantic_vector"
+
+#: paragraph_features 必须具备的向量列
+_REQUIRED_FEATURE_COLUMNS = {
+    "run_id",
+    "paragraph_id",
+    "feature_code",
+    "vector_value",
+}
+
+# 2026-09-25 pgvector 对 vector 类型的 HNSW 索引上限 2000 维
+_HNSW_MAX_VECTOR_DIM = 2000
 
 
 def _runtime_schema() -> str:
@@ -56,143 +83,77 @@ def _get_column_format_type(session: Session, table_name: str, column_name: str)
     ).scalar_one_or_none()
 
 
-def _get_embedding_vector_type(session: Session, table_name: str) -> str | None:
-    """2026-08-07 用于读取 pgvector 列的格式化数据库类型"""
-    return _get_column_format_type(session, table_name, "embedding_vector")
-
-
-# 二期段落化（§5.2）新结构：旧列（chunk_id/paragraph_index/paragraph_text/
-# local_*/global_*）全部移除，段落身份收敛为 paragraphs 表的 paragraph_id。
-# 旧数据旧代码不兼容：列集合不匹配时直接 DROP TABLE 后重建，数据不回填。
-_REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS = {
-    "run_id",
-    "paragraph_id",
-    "embedding_vector",
-    "embedding_model_key",
-    "embedding_dimension",
-    "created_at",
-}
-
-
-# 2026-09-25 pgvector 对 vector 类型的 HNSW 索引上限 2000 维；更高维（如
-# Qwen3-Embedding-4B 的 2560 维）建 vector_cosine_ops 索引会抛 ProgramLimitExceeded，
-# 必须改用 halfvec 表达式索引（上限 4000 维）。检索侧 embedding_ops 须做同型 cast
-# 才能命中该索引，形态判定共用 hnsw_index_uses_halfvec。
-_HNSW_MAX_VECTOR_DIM = 2000
-
-
 def hnsw_index_uses_halfvec(embedding_dim: int) -> bool:
     """2026-09-25 用于判定段落向量 HNSW 索引是否需要 halfvec 表达式形态"""
     return embedding_dim > _HNSW_MAX_VECTOR_DIM
 
 
-def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
-    """2026-08-07 用于创建或验证原文自然段向量表
+def _semantic_hnsw_index_name(embedding_dim: int) -> str:
+    return f"idx_paragraph_features_semantic_hnsw_{embedding_dim}"
 
-    2026-08-14 二期段落化：列集合与当前结构不一致（含旧结构）时，
-    DROP TABLE 后按新结构重建；重建不迁移旧数据（不兼容旧数据策略）。
+
+def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
+    """2026-08-07 用于准备原文自然段语义向量的检索索引（按实测维度）
+
+    2026-10-16 3NF：不再动态建表（语义向量是 paragraph_features 的行）：
+    只校验目标表/列就绪，并按维度建立语义向量的 HNSW 部分表达式索引。
+    表结构不兼容（缺列/列类型不是 vector）时抛出 ValueError，由新库初始化
+    或另行授权的重建处理，运行读写期间不销毁任何已有结果。
     """
     if embedding_dim <= 0:
         raise ValueError("embedding_dim must be positive")
     session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     schema = _runtime_schema()
-    table_regclass = f"{schema}.paragraph_embeddings"
+    table_regclass = f"{schema}.paragraph_features"
     table_exists = session.execute(
         text("SELECT to_regclass(:table_name)"),
         {"table_name": table_regclass},
     ).scalar_one()
-    existing_columns = _get_table_columns(session, "paragraph_embeddings") if table_exists is not None else set()
-    # 2026-10-06 created_at 由 VARCHAR 字符串改为 naive UTC timestamp：旧类型视为
-    # 不兼容结构，与列集合不符同策略 DROP 重建，数据不回填
-    created_at_type = (
-        _get_column_format_type(session, "paragraph_embeddings", "created_at") if table_exists is not None else None
-    )
-    if table_exists is not None and (
-        existing_columns != _REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS
-        or created_at_type != "timestamp without time zone"
-    ):
-        # 2026-08-14 二期段落化：旧结构（含一期段落 embedding 结构）直接 DROP 重建，
-        # 不尝试 ALTER 兼容——旧列与新结构语义完全不同，且旧数据不回填
-        session.execute(text(f"DROP TABLE {table_regclass}"))
-        table_exists = None
     if table_exists is None:
-        session.execute(
-            text(
-                f"""
-                CREATE TABLE {schema}.paragraph_embeddings (
-                    run_id VARCHAR(36) NOT NULL,
-                    paragraph_id INTEGER NOT NULL,
-                    embedding_vector vector({embedding_dim}),
-                    embedding_model_key VARCHAR,
-                    embedding_dimension INTEGER,
-                    created_at TIMESTAMP,
-                    PRIMARY KEY (run_id, paragraph_id),
-                    FOREIGN KEY (run_id) REFERENCES {schema}.analysis_runs(run_id) ON DELETE CASCADE,
-                    FOREIGN KEY (run_id, paragraph_id)
-                        REFERENCES {schema}.paragraphs(run_id, paragraph_id) ON DELETE CASCADE
-                )
-                """
-            )
-        )
-    vector_type = _get_embedding_vector_type(session, "paragraph_embeddings")
-    expected_type = f"vector({embedding_dim})"
-    if vector_type != expected_type:
         raise ValueError(
-            "paragraph_embeddings.embedding_vector type mismatch: "
-            f"expected {expected_type}, got {vector_type or 'unknown'}"
+            "paragraph_features table does not exist: 语义向量依赖新库初始化的段落特征表"
         )
-    session.execute(
-        text(
-            f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_run_id "
-            f"ON {schema}.paragraph_embeddings USING btree (run_id)"
+    existing_columns = _get_table_columns(session, "paragraph_features")
+    missing = _REQUIRED_FEATURE_COLUMNS - existing_columns
+    if missing:
+        raise ValueError(
+            "paragraph_features schema mismatch (expected "
+            f"{sorted(_REQUIRED_FEATURE_COLUMNS)}): missing={sorted(missing)}; "
+            "运行时不再自动 DROP/建表，请在新库初始化中建立目标结构"
         )
+    vector_type = _get_column_format_type(session, "paragraph_features", "vector_value")
+    if vector_type is None or not vector_type.startswith("vector"):
+        raise ValueError(
+            "paragraph_features.vector_value type mismatch: "
+            f"expected vector, got {vector_type or 'unknown'}"
+        )
+
+    # 固定维度表达式 + 覆盖该维度的部分索引谓词：
+    # 只索引 semantic_vector 行且维度等于本维度，其它维度/POS 向量行不受影响
+    index_name = _semantic_hnsw_index_name(embedding_dim)
+    predicate = (
+        f"feature_code = '{_FEATURE_SEMANTIC_VECTOR}' "
+        f"AND vector_dims(vector_value) = {embedding_dim}"
     )
-    # 2026-08-13 P2：章节 Agent 语义检索（search_similar_paragraphs）此前对同 run 全量
-    # 向量做余弦全表扫描，加 HNSW ANN 索引（需 pgvector ≥ 0.5）；查询按向量距离检索后
-    # 再叠加 run_id 边界过滤即可命中
     if hnsw_index_uses_halfvec(embedding_dim):
-        session.execute(
-            text(
-                f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_embedding_hnsw "
-                f"ON {schema}.paragraph_embeddings USING hnsw "
-                f"((embedding_vector::halfvec({embedding_dim})) halfvec_cosine_ops)"
-            )
+        index_sql = (
+            f"CREATE INDEX IF NOT EXISTS {index_name} "
+            f"ON {schema}.paragraph_features USING hnsw "
+            f"((vector_value::halfvec({embedding_dim})) halfvec_cosine_ops) "
+            f"WHERE {predicate}"
         )
     else:
-        session.execute(
-            text(
-                f"CREATE INDEX IF NOT EXISTS idx_paragraph_embeddings_embedding_hnsw "
-                f"ON {schema}.paragraph_embeddings USING hnsw (embedding_vector vector_cosine_ops)"
-            )
+        index_sql = (
+            f"CREATE INDEX IF NOT EXISTS {index_name} "
+            f"ON {schema}.paragraph_features USING hnsw "
+            f"((vector_value::vector({embedding_dim})) vector_cosine_ops) "
+            f"WHERE {predicate}"
         )
-    _apply_paragraph_embeddings_comments(session, schema)
-
-
-# 2026-10-06 动态建表不走 ORM comment 元数据（init_db 排除本表），表/列注释在此幂等补齐
-_EMBEDDINGS_COMMENTS: tuple[tuple[str, str], ...] = (
-    ("TABLE {schema}.paragraph_embeddings", "段落向量嵌入表：段落语义向量与溯源（列宽按嵌入模型实测维度固化）"),
-    ("COLUMN {schema}.paragraph_embeddings.run_id", "所属分析运行"),
-    ("COLUMN {schema}.paragraph_embeddings.paragraph_id", "所属段落编号"),
-    ("COLUMN {schema}.paragraph_embeddings.embedding_vector", "段落语义向量（列宽按嵌入模型维度固化）"),
-    ("COLUMN {schema}.paragraph_embeddings.embedding_model_key", "生成向量的嵌入模型 key"),
-    ("COLUMN {schema}.paragraph_embeddings.embedding_dimension", "嵌入维度（preprocess 探测值）"),
-    ("COLUMN {schema}.paragraph_embeddings.created_at", "创建时间"),
-)
-
-
-def _apply_paragraph_embeddings_comments(session: Session, schema: str) -> None:
-    """为 paragraph_embeddings 写入表/列注释（覆盖式，幂等）
-
-    COMMENT ON 的 IS 子句不支持绑定参数，只能拼接字面量；schema 已过
-    _runtime_schema 白名单校验，注释文本为代码内常量，单引号转义后内插。
-    """
-    for target_template, comment in _EMBEDDINGS_COMMENTS:
-        literal = comment.replace("'", "''")
-        session.execute(text(f"COMMENT ON {target_template.format(schema=schema)} IS '{literal}'"))
+    session.execute(text(index_sql))
 
 
 def _hnsw_index_exists(session: Session, schema: str) -> bool:
-    """2026-08-13 用于校验 paragraph_embeddings 是否已建 HNSW 向量索引"""
+    """2026-08-13 用于校验 paragraph_features 是否已建语义向量 HNSW 索引"""
     return (
         session.execute(
             text(
@@ -200,8 +161,8 @@ def _hnsw_index_exists(session: Session, schema: str) -> bool:
                 SELECT 1
                 FROM pg_indexes
                 WHERE schemaname = :schema_name
-                  AND tablename = 'paragraph_embeddings'
-                  AND indexdef ILIKE '%USING hnsw%embedding_vector%'
+                  AND tablename = 'paragraph_features'
+                  AND indexdef ILIKE '%USING hnsw%vector_value%'
                 LIMIT 1
                 """
             ),
@@ -212,25 +173,25 @@ def _hnsw_index_exists(session: Session, schema: str) -> bool:
 
 
 def validate_paragraph_embeddings_schema(session: Session) -> None:
-    """2026-08-07 用于校验原文自然段向量表结构就绪（二期段落化列集）
+    """2026-08-07 用于校验原文自然段向量存储就绪（2026-10-16 3NF 目标结构）
 
-    2026-09-10 维度不再是配置：列宽与模型的比对在 preprocess 的
-    ensure（按探测值）完成，这里只做结构性校验。
+    2026-09-10 维度不再是配置：维度校验在 ensure（按探测值）完成，
+    这里只做结构与索引校验。
     """
     schema = _runtime_schema()
     table_exists = session.execute(
         text("SELECT to_regclass(:table_name)"),
-        {"table_name": f"{schema}.paragraph_embeddings"},
+        {"table_name": f"{schema}.paragraph_features"},
     ).scalar_one()
     if table_exists is None:
-        raise ValueError("paragraph_embeddings table does not exist")
-    actual_columns = _get_table_columns(session, "paragraph_embeddings")
-    if actual_columns != _REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS:
+        raise ValueError("paragraph_features table does not exist")
+    actual_columns = _get_table_columns(session, "paragraph_features")
+    missing = _REQUIRED_FEATURE_COLUMNS - actual_columns
+    if missing:
         raise ValueError(
-            "paragraph_embeddings schema mismatch: "
-            f"expected={sorted(_REQUIRED_PARAGRAPH_EMBEDDING_COLUMNS)} "
-            f"actual={sorted(actual_columns)}"
+            "paragraph_features schema mismatch: "
+            f"expected={sorted(_REQUIRED_FEATURE_COLUMNS)} missing={sorted(missing)}"
         )
     if not _hnsw_index_exists(session, schema):
         # 2026-08-13 P2：索引缺失时不再静默通过，避免语义检索继续全表扫描
-        raise ValueError("paragraph_embeddings missing HNSW index on embedding_vector")
+        raise ValueError("paragraph_features missing HNSW index on vector_value (semantic_vector)")

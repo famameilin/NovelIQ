@@ -148,7 +148,7 @@ class EventTimelineNode(BaseModel):
     char_end: int = Field(gt=0)
     participants: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="参与者透传 list[dict{name, entity_type, role, entity_id?}]",
+        description="参与者透传 list[dict{entity: {entity_id, name, entity_type}, role, action?, emotion?}]",
     )
     character_names: list[str] = Field(default_factory=list, description="角色名派生")
     importance_score: float = Field(ge=0)

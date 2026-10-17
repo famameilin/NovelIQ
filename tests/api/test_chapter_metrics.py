@@ -102,7 +102,6 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
             make_metric_row(
                 0,
                 token_count=5,
-                char_count=6,
                 sentence_count=1,
                 sentence_char_sum=4.0,
                 sentence_char_sum_sq=16.0,
@@ -113,7 +112,6 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
             make_metric_row(
                 1,
                 token_count=5,
-                char_count=6,
                 sentence_count=1,
                 sentence_char_sum=8.0,
                 sentence_char_sum_sq=64.0,
@@ -125,7 +123,6 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
             make_metric_row(
                 2,
                 token_count=7,
-                char_count=8,
                 sentence_count=1,
                 sentence_char_sum=8.0,
                 sentence_char_sum_sq=64.0,
@@ -135,7 +132,6 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
             make_metric_row(
                 3,
                 token_count=6,
-                char_count=8,
                 sentence_count=1,
                 sentence_char_sum=8.0,
                 sentence_char_sum_sq=64.0,

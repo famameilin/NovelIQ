@@ -19,6 +19,14 @@ class AnnotationInputError(AnnotationAgentError):
     """2026-08-05 用于标记章节输入与身份不合法的直接失败"""
 
 
+class AnnotationDependencyError(AnnotationAgentError):
+    """必需服务不可用，闭合审计后直接失败，不消耗模型修正或重派预算"""
+
+
+class AnnotationBudgetExhaustedError(AnnotationAgentError):
+    """当前会话回合耗尽，保留审计并终止 work，不重新执行模型"""
+
+
 class AnnotationAuthorizationError(AnnotationAgentError):
     """2026-08-05 用于标记检索读取授权不合法的直接失败"""
 
@@ -48,6 +56,7 @@ class AnnotationStageRejection(AnnotationInputError):
         field: str | None = None,
         code: str | None = None,
         expected: str | None = None,
+        actual: Any = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
@@ -55,6 +64,7 @@ class AnnotationStageRejection(AnnotationInputError):
         self.field = field
         self.code = code
         self.expected = expected
+        self.actual = actual
         self.extra = dict(extra or {})
 
     def receipt(self) -> dict[str, Any]:
@@ -65,6 +75,7 @@ class AnnotationStageRejection(AnnotationInputError):
             ("field", self.field),
             ("code", self.code),
             ("expected", self.expected),
+            ("actual", self.actual),
         ):
             if value is not None:
                 body[key] = value

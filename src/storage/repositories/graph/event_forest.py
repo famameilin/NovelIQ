@@ -1,13 +1,26 @@
-"""事件森林原始记录读取，不组装事件树、排序或解释伏笔状态"""
+"""事件森林原始记录读取，不组装事件树、排序或解释伏笔状态
+
+2026-10-16 全库 3NF 改造（35 表冻结结构）：
+- 章节原文与章节目录同键（chapters.text），不再有 chapter_bodies
+- 已保存产物 = chapter_annotations 行（存在即成功事实，经真实标注执行取得运行归属）
+- 章级声明 = event_declarations，经来源记录取得运行归属
+- 因果/伏笔边 = narrative_links 的语义形状（relation_type 表达旧 edge_type）
+"""
 
 from __future__ import annotations
-
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.storage.models import AnalysisOutput, AnnotationWork, Chapter, EventEdge, EventNode
+from src.event_trees.storage_map import run_execution_ids
+from src.storage.models import (
+    Chapter,
+    ChapterAnnotation,
+    EventDeclaration,
+    Execution,
+    NarrativeLink,
+    WorkItem,
+)
 
 
 class EventForestRecords:
@@ -24,74 +37,144 @@ class EventForestRecords:
         )
 
     def fetch_saved_outputs(self, run_id: str):
-        return list(
-            self.session.execute(
-                select(AnalysisOutput)
-                .join(AnnotationWork, AnnotationWork.work_id == AnalysisOutput.work_id)
-                .where(
-                    AnalysisOutput.run_id == run_id,
-                    AnalysisOutput.kind == "chapter_annotation",
-                    AnnotationWork.state == "saved",
-                    AnnotationWork.invocation_id == AnalysisOutput.invocation_id,
-                )
-            ).scalars()
+        """本 run 已正式保存的章节标注：行存在即保存事实，章号从标注 work 取得"""
+        stmt = (
+            select(
+                ChapterAnnotation.record_id.label("output_id"),
+                ChapterAnnotation.record_id,
+                ChapterAnnotation.execution_id,
+                WorkItem.annotation_chapter_id.label("chapter_id"),
+            )
+            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+            .join(WorkItem, WorkItem.work_id == Execution.work_id)
+            .where(WorkItem.annotation_run_id == run_id)
+            .order_by(WorkItem.annotation_chapter_id)
         )
+        return list(self.session.execute(stmt).all())
 
     def fetch_nodes(self, run_id: str, max_chapter_order: int):
+        """本 run 在阅读截点内的章级声明，按章序与声明身份稳定排序"""
+        stmt = (
+            select(
+                EventDeclaration.declaration_id.label("event_id"),
+                EventDeclaration.declaration_id,
+                EventDeclaration.record_id,
+                EventDeclaration.local_key,
+                EventDeclaration.title,
+                EventDeclaration.problem,
+                EventDeclaration.summary,
+                EventDeclaration.event_type,
+                EventDeclaration.status,
+                EventDeclaration.progress,
+                EventDeclaration.is_foreshadowing_root,
+                EventDeclaration.payoff_likelihood,
+                WorkItem.annotation_chapter_id.label("chapter_id"),
+                Chapter.sequence.label("chapter_order"),
+            )
+            .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+            .join(WorkItem, WorkItem.work_id == Execution.work_id)
+            .join(
+                Chapter,
+                (Chapter.run_id == WorkItem.annotation_run_id) & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+            )
+            .where(
+                WorkItem.annotation_run_id == run_id,
+                Chapter.sequence <= max_chapter_order,
+            )
+            .order_by(Chapter.sequence, EventDeclaration.declaration_id)
+        )
+        return list(self.session.execute(stmt).all())
+
+    def fetch_outputs(self, annotation_ids: set[str]):
+        if not annotation_ids:
+            return []
         return list(
             self.session.execute(
-                select(EventNode)
-                .where(EventNode.run_id == run_id, EventNode.chapter_order <= max_chapter_order)
-                .order_by(EventNode.chapter_order, EventNode.event_id)
+                select(ChapterAnnotation)
+                .where(ChapterAnnotation.record_id.in_(annotation_ids))
+                .order_by(ChapterAnnotation.record_id)
             ).scalars()
         )
 
-    def fetch_outputs(self, annotation_ids: set[str]):
+    def _event_chapters(self, run_id: str, event_ids: set[str]) -> dict[str, set[int]]:
+        """完整事件的来源章：由其自身证据的段落所属章节投影，不按当前章替代"""
+        from src.storage.models import Paragraph, SourceEvidence
+
+        result: dict[str, set[int]] = {event_id: set() for event_id in event_ids}
+        if not event_ids:
+            return result
+        stmt = (
+            select(SourceEvidence.complete_event_id, Paragraph.chapter_id)
+            .join(Paragraph, (Paragraph.run_id == run_id) & (Paragraph.paragraph_id == SourceEvidence.paragraph_id))
+            .where(SourceEvidence.complete_event_id.in_(list(event_ids)))
+        )
+        for event_id, chapter_id in self.session.execute(stmt).all():
+            result[str(event_id)].add(int(chapter_id))
+        return result
+
+    def _semantic_links(self, run_id: str, *, relation_type: str):
+        """本 run 的正式语义链路：两端都必须是完整事件，按链路身份稳定排序"""
         return list(
             self.session.execute(
-                select(AnalysisOutput).where(
-                    AnalysisOutput.kind == "chapter_annotation",
-                    AnalysisOutput.output_id.in_(annotation_ids),
+                select(NarrativeLink)
+                .where(
+                    NarrativeLink.producer_execution_id.in_(run_execution_ids(run_id)),
+                    NarrativeLink.relation_type == relation_type,
+                    NarrativeLink.semantic_source_event_id.is_not(None),
+                    NarrativeLink.semantic_target_event_id.is_not(None),
                 )
+                .order_by(NarrativeLink.link_id)
             ).scalars()
         )
 
     def fetch_causal_edges(self, run_id: str, chapter_ids: set[int], *, include_inactive: bool = False):
-        filters: list[Any] = [
-            EventEdge.run_id == run_id,
-            EventEdge.edge_type == "causal",
-            EventEdge.source_chapter_id.in_(chapter_ids),
-            EventEdge.target_chapter_id.in_(chapter_ids),
-        ]
+        links = self._semantic_links(run_id, relation_type="causal")
         if not include_inactive:
-            filters.append(EventEdge.is_active.is_(True))
-        return list(self.session.execute(select(EventEdge).where(*filters).order_by(EventEdge.edge_id)).scalars())
+            links = [row for row in links if row.is_active is not False]
+        event_ids = {row.semantic_source_event_id for row in links} | {
+            row.semantic_target_event_id for row in links
+        }
+        chapters = self._event_chapters(run_id, {item for item in event_ids if item is not None})
+        return [
+            row
+            for row in links
+            if chapters.get(str(row.semantic_source_event_id), set()) <= chapter_ids
+            and chapters.get(str(row.semantic_target_event_id), set()) <= chapter_ids
+        ]
 
     def fetch_foreshadow_roots(self, run_id: str, chapter_ids: set[int]):
-        return list(
-            self.session.execute(
-                select(EventNode)
+        rows = list(
+            self.session.scalars(
+                select(EventDeclaration)
+                .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+                .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+                .join(WorkItem, WorkItem.work_id == Execution.work_id)
                 .join(
                     Chapter,
-                    (Chapter.run_id == EventNode.run_id) & (Chapter.chapter_id == EventNode.chapter_id),
+                    (Chapter.run_id == WorkItem.annotation_run_id)
+                    & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
                 )
                 .where(
-                    EventNode.run_id == run_id,
-                    EventNode.is_foreshadowing_root.is_(True),
-                    EventNode.chapter_id.in_(chapter_ids),
+                    WorkItem.annotation_run_id == run_id,
+                    EventDeclaration.is_foreshadowing_root.is_(True),
                 )
-                .order_by(Chapter.sequence, EventNode.chapter_id, EventNode.event_id)
-            ).scalars()
+                .order_by(Chapter.sequence, EventDeclaration.declaration_id)
+            )
+        )
+        if not chapter_ids:
+            return rows
+        return [row for row in rows if self._declaration_chapter(row.record_id) in chapter_ids]
+
+    def _declaration_chapter(self, record_id: str) -> int | None:
+        return self.session.scalar(
+            select(WorkItem.annotation_chapter_id)
+            .join(Execution, Execution.work_id == WorkItem.work_id)
+            .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
+            .where(ChapterAnnotation.record_id == record_id)
+            .limit(1)
         )
 
     def fetch_foreshadow_edges(self, run_id: str):
-        return list(
-            self.session.execute(
-                select(EventEdge).where(
-                    EventEdge.run_id == run_id,
-                    EventEdge.edge_type == "foreshadowing",
-                )
-            )
-            .scalars()
-            .all()
-        )
+        """伏笔语义链路：来源/目标都必须是完整事件，声明身份不回填冒充"""
+        return self._semantic_links(run_id, relation_type="foreshadowing")

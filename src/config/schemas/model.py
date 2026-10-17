@@ -47,7 +47,7 @@ class TaskModelSettings:
     timeout_s: float | None = None
     thinking: bool = False
     # 2026-10-02 删除 streaming 字段：流式输出不再可配置，LLM 调用固定开启（src/agents/llm.py）
-    max_iterations: int = 10
+    max_iterations: int = 15
     total_attempts: int = 3
     allow_future_context: bool = True
     # 2026-10-02 恢复（随章内三子代理路径加回）：章正文超过该字数派发三条职责 subagent 并发，
@@ -83,7 +83,7 @@ class ModelsSettings:
     diagnosis_model_id: str | None = None
     annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
     paragraph_embedding: EmbeddingModelSettings = field(default_factory=EmbeddingModelSettings)
-    diagnosis: TaskModelSettings = field(default_factory=TaskModelSettings)
+    diagnosis: TaskModelSettings = field(default_factory=lambda: TaskModelSettings(max_iterations=10))
 
 
 def _positive_integer(data: dict[str, Any], key: str, default: int) -> int:
@@ -106,12 +106,20 @@ def _parse_pool_sampling(item: dict[str, Any]) -> tuple[float, float, int]:
     """
 
     temperature = item.get("temperature", 0.7)
-    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) \
-            or not math.isfinite(temperature) or not 0 <= temperature <= 2:
+    if (
+        isinstance(temperature, bool)
+        or not isinstance(temperature, (int, float))
+        or not math.isfinite(temperature)
+        or not 0 <= temperature <= 2
+    ):
         raise ValueError("模型温度必须是 [0, 2] 内的数值")
     top_p = item.get("top_p", 0.8)
-    if isinstance(top_p, bool) or not isinstance(top_p, (int, float)) \
-            or not math.isfinite(top_p) or not 0 <= top_p <= 1:
+    if (
+        isinstance(top_p, bool)
+        or not isinstance(top_p, (int, float))
+        or not math.isfinite(top_p)
+        or not 0 <= top_p <= 1
+    ):
         raise ValueError("模型 top_p 必须是 [0, 1] 内的数值")
     max_tokens = item.get("max_tokens", 131072)
     if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1:
@@ -149,11 +157,18 @@ def _parse_model_pool(value: Any) -> list[WeightedModelSettings]:
         if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
             raise ValueError("模型并发必须是正整数")
         temperature, top_p, max_tokens = _parse_pool_sampling(item)
-        result.append(WeightedModelSettings(
-            model_id=name.strip(), base_url=base_url.strip().rstrip("/"), api_key=api_key,
-            temperature=temperature, top_p=top_p, max_tokens=max_tokens,
-            weight=float(weight), max_in_flight=concurrency,
-        ))
+        result.append(
+            WeightedModelSettings(
+                model_id=name.strip(),
+                base_url=base_url.strip().rstrip("/"),
+                api_key=api_key,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                weight=float(weight),
+                max_in_flight=concurrency,
+            )
+        )
     if len({item.model_id for item in result}) != len(result):
         raise ValueError("模型 ID 不能重复")
     if not any(item.weight > 0 for item in result):
@@ -226,7 +241,7 @@ def _normalize_model_base_url_for_docker(base_url: str | None) -> str | None:
     return _replace_url_hostname(parts, host_alias)
 
 
-def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings:
+def _parse_task_model_settings(data: dict[str, Any] | None, *, default_iterations: int = 15) -> TaskModelSettings:
     """
     2026-08-03 用于解析任务模型的非敏感行为参数
     """
@@ -236,7 +251,7 @@ def _parse_task_model_settings(data: dict[str, Any] | None) -> TaskModelSettings
         timeout_s=json_data.get("timeout_s"),
         thinking=json_data.get("thinking", False),
         # 2026-10-02 streaming 键不再解析（残留值静默忽略），流式固定开启
-        max_iterations=_positive_integer(json_data, "max_iterations", 10),
+        max_iterations=_positive_integer(json_data, "max_iterations", default_iterations),
         total_attempts=_positive_integer(json_data, "total_attempts", 3),
         allow_future_context=json_data.get("allow_future_context", True),
         sub_chunk_max_chars=_positive_integer(json_data, "sub_chunk_max_chars", 3500),
@@ -266,10 +281,11 @@ def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
         data = {}
     if "model_pool" in data or "diagnosis_model_id" in data:
         raise ValueError("模型池和诊断模型请通过模型池配置接口保存")
+    diagnosis = _parse_task_model_settings(data.get("diagnosis"), default_iterations=10)
     return ModelsSettings(
         annotation=_parse_task_model_settings(data.get("annotation")),
         paragraph_embedding=_parse_embedding_model_settings(data.get("paragraph_embedding")),
-        diagnosis=_parse_task_model_settings(data.get("diagnosis")),
+        diagnosis=diagnosis,
     )
 
 

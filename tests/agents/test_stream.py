@@ -3,21 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from openai import RateLimitError
 
 from src.agents.stream import (
     AgentStream,
     ContentStallTimeoutError,
     _is_transient_model_error,
+    _retry_backoff_seconds,
     emit_tool_results,
     run_model_call,
 )
 from src.agents.stream_aggregator import StreamChunkAggregator
 from src.agents.stream_audit import _provider_request_metadata
+from src.utils.cancellation import run_cancellable
 
 
 def _collect_events() -> list[tuple[str, str, str]]:
@@ -682,6 +688,153 @@ def test_retry_backoff_seconds_exponential_with_cap() -> None:
     assert _retry_backoff_seconds(2) == 2.0
     assert _retry_backoff_seconds(3) == 3.0
     assert _retry_backoff_seconds(10) == 3.0
+
+
+def _rate_limit_error(code: str = "AccountRateLimitExceeded", *, retry_after: str | None = None, nested=False):
+    """使用真实 SDK 异常验证结构化错误码及服务端冷却头"""
+    body = {"code": code, "message": "provider rejected request", "type": "TooManyRequests"}
+    headers = {"Retry-After": retry_after} if retry_after is not None else {}
+    response = httpx.Response(429, headers=headers, request=httpx.Request("POST", "http://model.test/chat"))
+    return RateLimitError("provider rejected request", response=response, body={"error": body} if nested else body)
+
+
+class _RateLimitedStreamingLLM(_StreamingLLM):
+    """在相同会话中先拒绝请求，再返回原回合的成功结果"""
+
+    def __init__(self, failures):
+        super().__init__([AIMessageChunk(content="完成"), _tool_call_chunk()])
+        self.failures = list(failures)
+
+    async def astream(self, messages):
+        self.captured_messages.append(list(messages))
+        if self.failures:
+            raise self.failures.pop(0)
+        for chunk in self.chunks:
+            yield chunk
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_cools_original_turn_and_audits_each_attempt(monkeypatch) -> None:
+    """两次限流后复用完整历史，逐次审计不混合、不重建诊断会话"""
+    model = _RateLimitedStreamingLLM([_rate_limit_error(), _rate_limit_error()])
+    messages = [HumanMessage(content="已有取证和诊断进度")]
+    sleeps = _noop_sleep(monkeypatch)
+    audit = []
+    events, emitter = _collect_events()
+    result = await run_model_call(
+        model,
+        messages,
+        AgentStream(emitter),
+        total_attempts=3,
+        on_turn_started=lambda request, started: audit.append(("started", request["attempt"])),
+        on_turn_failed=lambda error, timing, message: audit.append(("error", None)),
+        on_turn_complete=lambda message, timing: audit.append(("success", None)),
+    )
+    assert result.content == "完成"
+    assert sleeps == [60.0, 120.0]
+    assert model.captured_messages == [messages] * 3
+    assert audit == [
+        ("started", 1),
+        ("error", None),
+        ("started", 2),
+        ("error", None),
+        ("started", 3),
+        ("success", None),
+    ]
+    assert any("等待 60 秒" in text for kind, text, status in events if kind == "thinking")
+    assert any("等待 120 秒" in text for kind, text, status in events if kind == "thinking")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("total_attempts,expected_calls", [(1, 1), (3, 3), (5, 3)])
+async def test_rate_limit_is_bounded_by_two_retries_and_caller_budget(monkeypatch, total_attempts, expected_calls):
+    """耗尽后上抛原错误，即使调用方预算更大也不无限请求同一限流窗口"""
+    model = _RateLimitedStreamingLLM([_rate_limit_error() for _ in range(5)])
+    sleeps = _noop_sleep(monkeypatch)
+    with pytest.raises(RateLimitError):
+        await run_model_call(model, [HumanMessage(content="诊断")], None, total_attempts=total_attempts)
+    assert len(model.captured_messages) == expected_calls
+    assert sleeps == [60.0, 120.0][: expected_calls - 1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("code", ["AccountQuotaExceeded", "QuotaExceeded", "QuotaExceeded.AgentPlanQuotaExceeded"])
+async def test_quota_exhaustion_fails_once_without_cooldown_or_reselection(monkeypatch, code, nested):
+    """额度错误直接结束，且不进入标注层使用的瞬态 work 重派判据"""
+    failure = _rate_limit_error(code, nested=nested, retry_after="180")
+    model = _RateLimitedStreamingLLM([failure])
+    sleeps = _noop_sleep(monkeypatch)
+    failed = []
+    assert _is_transient_model_error(failure) is False
+    with pytest.raises(RateLimitError) as error:
+        await run_model_call(
+            model,
+            [HumanMessage(content="诊断")],
+            None,
+            total_attempts=5,
+            on_turn_failed=lambda error, timing, message: failed.append(error),
+        )
+    assert error.value is failure and len(failed) == 1
+    assert len(model.captured_messages) == 1 and sleeps == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header,expected", [("0", 0.0), ("15", 15.0), ("180", 180.0)])
+async def test_rate_limit_honors_retry_after_without_shortening(monkeypatch, header, expected):
+    model = _RateLimitedStreamingLLM([_rate_limit_error(retry_after=header)])
+    sleeps = _noop_sleep(monkeypatch)
+    await run_model_call(model, [HumanMessage(content="诊断")], None, total_attempts=3)
+    assert sleeps == [expected]
+
+
+def test_retry_after_http_date_is_not_capped() -> None:
+    header = format_datetime(datetime.now(UTC) + timedelta(seconds=180), usegmt=True)
+    assert 178 < _retry_backoff_seconds(1, _rate_limit_error(retry_after=header)) <= 180
+
+
+@pytest.mark.parametrize("header", ["invalid", "nan", "inf", "-1"])
+def test_invalid_retry_after_uses_frequency_cooldown(header) -> None:
+    failure = _rate_limit_error(retry_after=header)
+    assert _retry_backoff_seconds(1, failure) == 60.0
+    assert _retry_backoff_seconds(2, failure) == 120.0
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_cooldown_is_independent_of_previous_transport_retry(monkeypatch) -> None:
+    model = _RateLimitedStreamingLLM([ConnectionError("network"), _rate_limit_error(), _rate_limit_error()])
+    sleeps = _noop_sleep(monkeypatch)
+    await run_model_call(model, [HumanMessage(content="诊断")], None, total_attempts=4)
+    assert sleeps == [1.0, 60.0, 120.0]
+
+
+@pytest.mark.asyncio
+async def test_cancel_interrupts_real_rate_limit_cooldown_without_another_request() -> None:
+    """走实际阶段取消入口，60 秒异步等待可立即取消，不等冷却到期"""
+    model = _RateLimitedStreamingLLM([_rate_limit_error()])
+    waiting = asyncio.Event()
+    cancelled = False
+
+    async def emit(event):
+        if event.action == "thinking" and "等待 60 秒" in event.content:
+            waiting.set()
+
+    task = asyncio.create_task(
+        run_cancellable(
+            run_model_call(model, [HumanMessage(content="诊断")], AgentStream(emit), total_attempts=3),
+            lambda: cancelled,
+            poll_seconds=0.001,
+        )
+    )
+    try:
+        await asyncio.wait_for(waiting.wait(), timeout=1)
+        cancelled = True
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+        assert len(model.captured_messages) == 1
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio

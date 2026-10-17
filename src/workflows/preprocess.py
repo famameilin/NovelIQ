@@ -3,13 +3,17 @@
 
 包含文本清洗、分块、写入数据库，以及风格/文化指标计算等功能。
 
-
+2026-10-16 全库 3NF 改造（原文链）：章节身份写 chapters、正文切片写 chapter_bodies；
+段落身份/原文写 paragraphs、tokenizer 计数写 paragraph_preprocess_observations；
+段落向量写 paragraph_embeddings，运行模型合同（模型 key + 实测维度）写
+embedding_model_runs；表面张力 z、功能词/语义类别计数写各自固定领域表。
+坐标、长度与密度的读取投影见各仓储模块。
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -92,8 +96,9 @@ async def run_preprocess(
     _commit_preprocess_writes(session, step="insert_chapter_texts")
     logger.info(f"inserted {total_chapters} chunks into db (run_id={run_id})")
 
-    # 段落事实源：chunks 落库后无条件生成段落行（语义检索开关不影响 paragraphs 的生成和内容），
-    # 段落身份以 paragraphs 表为准，embedding/检索/指标均从该表读取，保证与段落严格对齐
+    # 章节正文切片（chapter_bodies）落库后无条件生成段落行（语义检索开关不影响
+    # paragraphs 的生成和内容），段落身份以 paragraphs 表为准，
+    # embedding/检索/指标均从该表读取，保证与段落严格对齐
     spans = split_chunk_paragraphs(all_chunks, max_chars=settings.paragraphs.max_chars)
     tokenized: list[list[str]] = [tokenize(span.text) for span in spans]
     spans = [replace(span, token_count=len(tokens)) for span, tokens in zip(spans, tokenized, strict=True)]
@@ -102,10 +107,11 @@ async def run_preprocess(
     _commit_preprocess_writes(session, step="insert_paragraphs")
     logger.info(f"inserted {len(spans)} paragraphs into db (run_id={run_id})")
 
-    # 段落指标（§5.3）：原始计数与充分统计量；surface_tension 在 run 内稳健标准化后写入
+    # 段落指标（§5.3）：原始计数与充分统计量；表面张力 z 在 run 内稳健标准化后
+    # 写入 paragraph_tension_observations（sigmoid 展示值读取投影）
     if spans:
-        metric_rows = _insert_paragraph_metrics(session, run_id, spans, tokenized, lexicons)
-        _insert_paragraph_curves(session, run_id, spans, metric_rows)
+        _insert_paragraph_metrics(session, run_id, spans, tokenized, lexicons)
+        _insert_paragraph_curves(session, run_id, spans)
 
     # 2026-08-14 M8b：chunk_style 链已删除——风格指标以 paragraph_metrics
     # 的充分统计量（sentence_count/sum/sum_sq、dialogue_char_count 等）为事实源。
@@ -154,19 +160,26 @@ def _insert_paragraph_metrics(
     计算并落库段落指标（§5.3 原始计数与充分统计量）
 
     表面张力（§9.2）在 run 内两遍计算：先收集全部段落的 5 个分量原始值，
-    再做稳健标准化（median/MAD）得到 z，sigmoid 后与 z 一并写入
-    paragraph_metrics 行。
+    再做稳健标准化（median/MAD）得到 z，z 写入 paragraph_tension_observations
+    （sigmoid 展示值不落库，由读取投影计算）。
+
+    2026-10-16 3NF：功能词/语义类别计数写入各自固定领域计数表，
+    char_count 由段落正文长度投影，均不再随 paragraph_metrics 行写入。
 
     Returns:
-        写入的 ParagraphMetricRow 列表，供段落曲线（§5.5）复用内存数据
-        （避免再次查询，行内容与刚落库的数据一致）
+        写入的 ParagraphMetricRow 列表（基础计数与充分统计量，便于同一步内
+        日志核对；密度/张力等派生值一律由读取投影给出）
     """
     from src.metrics.paragraph_metrics import compute_paragraph_metric_counts
     from src.metrics.paragraph_surface_tension import (
         robust_standardize_components,
         surface_tension_components,
-        surface_tension_sigmoid,
         surface_tension_z_value,
+    )
+    from src.storage.repositories.paragraph import (
+        insert_paragraph_function_word_counts,
+        insert_paragraph_semantic_category_counts,
+        insert_paragraph_tension_observations,
     )
 
     counts_list = [
@@ -177,17 +190,18 @@ def _insert_paragraph_metrics(
     weights = settings.metrics.surface_tension_weights
 
     rows: list[ParagraphMetricRow] = []
+    tension_rows: list[tuple[int, float]] = []
+    function_word_rows: list[tuple[int, dict[str, int]]] = []
+    semantic_category_rows: list[tuple[int, dict[str, int]]] = []
     for span, counts, z_comp in zip(spans, counts_list, z_components, strict=True):
         paragraph_id = span.paragraph_id
         if paragraph_id is None:
             # insert_paragraphs 已校验段落身份完整，此处仅为类型收窄
             raise ValueError(f"段落指标写入失败：paragraph_id 未分配，paragraph_index={span.paragraph_index}")
-        z_value = surface_tension_z_value(z_comp, weights)
         rows.append(
             ParagraphMetricRow(
                 paragraph_id=paragraph_id,
                 token_count=counts.token_count,
-                char_count=counts.char_count,
                 sentence_count=counts.sentence_count,
                 sentence_char_sum=counts.sentence_char_sum,
                 sentence_char_sum_sq=counts.sentence_char_sum_sq,
@@ -202,15 +216,18 @@ def _insert_paragraph_metrics(
                 imagery_hit_count=counts.imagery_hit_count,
                 metaphor_sentence_count=counts.metaphor_sentence_count,
                 body_reaction_hit_count=counts.body_reaction_hit_count,
-                function_word_counts=counts.function_word_counts,
-                semantic_category_counts=counts.semantic_category_counts,
-                surface_tension_z=z_value,
-                surface_tension=surface_tension_sigmoid(z_value),
             )
         )
+        tension_rows.append((paragraph_id, surface_tension_z_value(z_comp, weights)))
+        function_word_rows.append((paragraph_id, counts.function_word_counts))
+        semantic_category_rows.append((paragraph_id, counts.semantic_category_counts))
 
     paragraph_repo = ParagraphRepository(session)
     paragraph_repo.insert_paragraph_metrics(run_id, rows)
+    # 同族观测外键引用 paragraph_metrics 行：指标行落库后再写张力/分类计数
+    insert_paragraph_tension_observations(session, run_id, tension_rows)
+    insert_paragraph_function_word_counts(session, run_id, function_word_rows)
+    insert_paragraph_semantic_category_counts(session, run_id, semantic_category_rows)
     _commit_preprocess_writes(session, step="insert_paragraph_metrics")
     logger.info(f"inserted {len(rows)} paragraph metrics into db (run_id={run_id})")
     return rows
@@ -220,24 +237,30 @@ def _insert_paragraph_curves(
     session: Session,
     run_id: str,
     spans: list[ParagraphSpan],
-    metric_rows: Sequence[ParagraphMetricRow],
 ) -> int:
     """
     计算并落库段落曲线（§5.5 / §9）
 
-    段落坐标与字符权重从段落事实源读取（fetch_paragraph_rows），指标分子/分母
-    复用 _insert_paragraph_metrics 的内存行（同一 run 刚写入，内容与库中一致）；
-    total_chars 取段落 span 字符数之和。LOWESS 参数默认取 settings.metrics
-    的 lowess_bandwidth / lowess_min_points（§9.3）。
+    段落坐标与字符权重取段落事实源读取投影（fetch_paragraph_rows：local_end/
+    global 坐标/char_count 都不落列）；指标分子/分母取指标读取投影
+    （fetch_paragraph_metrics：char_count 为正文长度、surface_tension 为
+    sigmoid(z)、z 取自 paragraph_tension_observations）。两侧都从同一 run 的
+    正式落库结果读取，投影口径与其它消费者一致。total_chars 取段落 span
+    字符数之和；LOWESS 参数默认取 settings.metrics 的 lowess_bandwidth /
+    lowess_min_points（§9.3）。
+
+    2026-10-16 3NF：段落曲线的正式计算结果（计算合同 + 净密度/表面张力平滑
+    样本）由曲线面负责落库。
     """
     from src.workflows.paragraph_curves import compute_paragraph_curves
 
     paragraph_repo = ParagraphRepository(session)
     paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
+    metric_projection_rows = paragraph_repo.fetch_paragraph_metrics(run_id)
     total_chars = sum(span.char_count for span in spans)
     curve_rows = compute_paragraph_curves(
         paragraphs=paragraph_rows,
-        metric_rows=metric_rows,
+        metric_rows=metric_projection_rows,
         total_chars=total_chars,
     )
     paragraph_repo.insert_paragraph_curves(run_id, curve_rows)
@@ -304,6 +327,8 @@ async def _generate_paragraph_embeddings(
             is_cancelled=is_cancelled,
         )
         if paragraph_rows:
+            # 2026-10-16 3NF：向量行只存 (run_id,paragraph_id)/向量/时间，
+            # 运行模型合同（模型 key + 实测维度）由本调用同事务写入 embedding_model_runs
             insert_paragraph_embeddings(session, run_id, paragraph_rows, embedding_dimension=embedding_dim)
             _commit_preprocess_writes(session, step="insert_embedding_rows")
             logger.info(

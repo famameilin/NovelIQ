@@ -1,4 +1,12 @@
-"""段落曲线（§5.5/§9/§15.2）：按 paragraph_id 对齐计算密度、位置及 LOWESS 平滑。"""
+"""段落曲线（§5.5/§9/§15.2）：按 paragraph_id 对齐计算密度、位置及 LOWESS 平滑。
+
+2026-10-16 全库 3NF 改造（35 表冻结结构）：本函数只做算法计算，算法口径
+（LOWESS 参数、位置权重、NULL 语义）不变。输入两端都是读取投影——段落侧
+（fetch_paragraph_rows 的 global 坐标/char_count）与指标侧
+（fetch_paragraph_metrics 的 token_count/分子/sigmoid 后的 surface_tension，
+张力来源已改为 paragraph_features 的 tension_z 行）；结果由
+insert_paragraph_curves 写 paragraph_features 的两类 LOWESS 平滑行。
+"""
 
 from __future__ import annotations
 

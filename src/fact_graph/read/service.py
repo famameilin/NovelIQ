@@ -8,6 +8,7 @@ from src.fact_graph.errors import GraphReadinessError
 from src.fact_graph.read.alias import AliasResolution, build_alias_resolution
 from src.fact_graph.read.entities import fetch_latest_entities
 from src.fact_graph.read.graph_outputs import build_graph_quality_report, build_graph_shared_summary
+from src.fact_graph.read.references import relation_projection_key
 from src.fact_graph.read.types import (
     CanonicalEntity,
     ConfirmedRelation,
@@ -44,7 +45,9 @@ class KnowledgeGraphAuthorityService:
         self.assert_graph_ready(run_id)
         entities = fetch_latest_entities(self._graph_repo, run_id)
         relations = self._graph_repo.fetch_latest_relations(run_id, active_only=True)
-        resolution = self._build_alias_resolution(relations, entities)
+        resolution = self._build_alias_resolution(
+            self._graph_repo.fetch_latest_relations(run_id, active_only=False), entities
+        )
         return Level1AuthoritySnapshot(
             canonical_entities=self._build_canonical_entities(entities, resolution=resolution),
             confirmed_relations=self._build_confirmed_relations(relations, resolution=resolution),
@@ -59,8 +62,9 @@ class KnowledgeGraphAuthorityService:
         """2026-08-07 用于提供章节关系版本变化与角色状态生命周期"""
         self.assert_graph_ready(run_id)
         characters = fetch_latest_entities(self._graph_repo, run_id, entity_type="character")
-        relations = self._graph_repo.fetch_latest_relations(run_id, active_only=True)
-        resolution = self._build_alias_resolution(relations, characters)
+        resolution = self._build_alias_resolution(
+            self._graph_repo.fetch_latest_relations(run_id, active_only=False), characters
+        )
         character_ids = {
             str(entity.entity_id)
             for entity in characters
@@ -119,7 +123,7 @@ class KnowledgeGraphAuthorityService:
         resolution = self._build_alias_resolution(current_relations, entities)
         return ExportGraphAuthorityView(
             canonical_entities=self._build_canonical_entities(entities, resolution=resolution),
-            current_relations=self._build_export_relation_snapshots(current_relations),
+            current_relations=self._build_export_relation_snapshots(current_relations, resolution),
             graph_changes=self._build_graph_changes(changes),
         )
 
@@ -134,16 +138,18 @@ class KnowledgeGraphAuthorityService:
         endpoint_ids = {
             entity_id for relation in relations for entity_id in (relation.from_entity_id, relation.to_entity_id)
         }
-        entities = [
-            entity for entity in fetch_latest_entities(self._graph_repo, run_id) if entity.entity_id in endpoint_ids
-        ]
+        all_entities = fetch_latest_entities(self._graph_repo, run_id)
+        resolution = self._build_alias_resolution(
+            self._graph_repo.fetch_latest_relations(run_id, active_only=False), all_entities
+        )
+        endpoint_ids.update(resolution.resolve_entity_id(identifier) or identifier for identifier in list(endpoint_ids))
+        entities = [entity for entity in all_entities if entity.entity_id in endpoint_ids]
         changes, _total = self._graph_repo.fetch_changes(run_id, limit=None)
         graph_changes = [
             change
             for change in changes
             if change.change_kind != "relation" or change.relation_semantics != "same_character"
         ]
-        resolution = self._build_alias_resolution(relations, entities)
         return GraphAuthorityView(
             canonical_entities=self._build_canonical_entities(entities, resolution=resolution),
             confirmed_relations=self._build_confirmed_relations(relations, resolution=resolution),
@@ -202,14 +208,23 @@ class KnowledgeGraphAuthorityService:
     ) -> list[ConfirmedRelation]:
         """2026-08-07 用于把稳定关系最新版本转换为当前关系合同"""
         result: list[ConfirmedRelation] = []
+        by_key: dict[tuple[str, str, str], ConfirmedRelation] = {}
         for relation in sorted(
             relations,
             key=lambda row: (row.from_name, row.to_name, row.relation_type),
         ):
             if relation.relation_semantics == "same_character":
                 continue
-            from_name = resolution.resolve_name(relation.from_name) if resolution is not None else relation.from_name
-            to_name = resolution.resolve_name(relation.to_name) if resolution is not None else relation.to_name
+            from_name = (
+                resolution.resolve_entity_name(relation.from_entity_id, relation.from_name)
+                if resolution is not None
+                else relation.from_name
+            )
+            to_name = (
+                resolution.resolve_entity_name(relation.to_entity_id, relation.to_name)
+                if resolution is not None
+                else relation.to_name
+            )
             from_entity_id = (
                 resolution.resolve_entity_id(relation.from_entity_id)
                 if resolution is not None
@@ -218,6 +233,16 @@ class KnowledgeGraphAuthorityService:
             to_entity_id = (
                 resolution.resolve_entity_id(relation.to_entity_id) if resolution is not None else relation.to_entity_id
             )
+            key = relation_projection_key(
+                from_entity_id or "", to_entity_id or "", relation.relation_type, relation.directionality
+            )
+            duplicate = by_key.get(key)
+            if duplicate is not None:
+                duplicate.support_count = (duplicate.support_count or 0) + int(
+                    relation.attributes.get("support_count", 1)
+                )
+                duplicate.change_count = (duplicate.change_count or 0) + len(relation.changes)
+                continue
             result.append(
                 ConfirmedRelation(
                     from_name=from_name or "",
@@ -233,18 +258,20 @@ class KnowledgeGraphAuthorityService:
                     tension_index=float(relation.attributes.get("tension_index", 0.0)),
                 )
             )
+            by_key[key] = result[-1]
         return result
 
     def _build_export_relation_snapshots(
         self,
         relations: Iterable[RelationSnapshotRow],
+        resolution: AliasResolution,
     ) -> list[ExportRelationSnapshot]:
         """2026-08-07 用于把稳定关系最新版本转换为导出关系快照"""
         return [
             ExportRelationSnapshot(
                 relation_id=relation.relation_id,
-                from_name=relation.from_name,
-                to_name=relation.to_name,
+                from_name=resolution.resolve_entity_name(relation.from_entity_id, relation.from_name) or "",
+                to_name=resolution.resolve_entity_name(relation.to_entity_id, relation.to_name) or "",
                 relation_type=relation.relation_type,
                 first_seen_chapter=relation.first_seen_chapter,
                 last_seen_chapter=relation.last_seen_chapter,

@@ -1,19 +1,28 @@
 """语言结构基础数据阶段（《分析能力扩展路线图》§3.1 B/C 赛道）
 
-执行顺序与落库契约：
+执行顺序与落库契约（2026-10-16 全库 3NF 冻结结构：旧宽表与拆分观测表退场，
+逐段事实落 linguistic_spans / linguistic_arcs / paragraph_features /
+paragraph_metrics）：
 1. LTP 词法/句法/实体/语义：analyze_paragraph_batch（cws/pos/ner/dep/sdp）→
-   paragraph_linguistic_features（每段一行）+ paragraph_entities（实体候选，非图谱事实）
-2. 固定短语：fixed_phrases.txt 词表匹配 → paragraph_phrase_hits
-   （draft 词表不计入正式密度，is_metric_hit=false）
-3. 情绪事件与 mNEG 修正（2026-09-05 B 批，2026-09-05 ltp.enabled 时生效）：
+   linguistic_spans 词元行（token_index/raw_pos）+ linguistic_arcs
+   （dep:*/sdp:*，source_ordinal 保留源顺序）+ paragraph_features 的五类
+   句式计数行；完成事实与共享句数写 paragraph_metrics
+   （linguistic_completed_at/sentence_count）；NER 候选写 linguistic_spans
+   的 raw_entity_type 行（非图谱事实；词面与归一类型读取投影）
+2. 固定短语：唯一 fixed_phrases 词表匹配 → linguistic_spans 的
+   phrase_match_kind 行（lexicon/four_char_candidate）+ 完成事实
+   （phrase_completed_at）；词表来源与计量合同登记在 analysis_runs
+   （fixed_phrase_lexicon_key/fixed_phrase_contract_version）
+3. 情绪事件与 mNEG 修正（2026-09-05 B 批，ltp.enabled 时生效）：
    情绪词典只做谓词极性候选标记，持有者/对象/否定/程度取 sdp 的 AGT/DATV/
    mNEG/mDEPD；mNEG 接管词典否定翻转后回写 paragraph_metrics 情绪计数并
-   整卷重算段落曲线（对照计数留痕在 paragraph_linguistic_features）
+   整卷重算段落曲线（词典窗口规则基线与 mNEG 对照计数由读取投影按同一
+   正式词元/弧重算，不落第二份可违反守恒的副本）
 4. Word2Vec（可开关）：预训练词向量初始化 + 本书语料微调（warm-start）→
-   word2vec_model_runs 契约 + paragraph_pos_embeddings（按词性聚合向量）
+   analysis_runs 的 w2v_* 实际构建列 + paragraph_features 的 pos_vector 行
 
 同 run 重跑先清后插（仓储层），不允许新旧结果混合；LTP 关闭时词法
-阶段跳过（表为空），Word2Vec 关闭时不写契约行。
+阶段跳过（各语言关系为空），Word2Vec 关闭时不写 w2v_* 列。
 """
 
 from __future__ import annotations
@@ -29,7 +38,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.lexicons.constants import LEXICON_DRAFT_KEYS, LEXICON_FILES
+from src.lexicons.constants import LEXICON_FILES
 from src.linguistic import TrainResult
 from src.linguistic.queries import fetch_paragraph_labels
 from src.sse.events import StreamEvent
@@ -59,7 +68,7 @@ async def run_linguistic(
     ltp_settings = settings.linguistic.ltp
     w2v_settings = settings.linguistic.word2vec
 
-    # 分批处理控制内存峰值：段落文本、LTP 输出、feature/entity/phrase 行都只保留当前批，
+    # 分批处理控制内存峰值：段落文本、LTP 输出、特征/实体/短语行都只保留当前批，
     # 不随全书段落数线性增长。Word2Vec 需要全书词元训练，token_sequences 仍全量累积。
     total_paragraphs = paragraph_repo.count_paragraphs(run_id)
     if total_paragraphs == 0:
@@ -73,14 +82,28 @@ async def run_linguistic(
         from src.lexicons import LexiconRegistry
         from src.lexicons.tables import NEGATIVE_TERMS, POSITIVE_TERMS
         from src.linguistic import (
+            ENTITY_TYPE_MAP,
+            POS_GROUP_MAP,
             analyze_paragraph_batch,
             extract_emotion_events,
+            ltp_pipeline_contract,
             match_fixed_phrases,
             mneg_corrected_counts,
         )
 
         registry = LexiconRegistry()
         terms = registry.get(LEXICON_FILES["fixed_phrases"])
+
+        # 2026-10-16 3NF：先落 run 级 LTP 管线/模型合同（归一映射是版本化代码
+        # 合同，不镜像成数据库表；读取侧按 pipeline_version 投影 pos_group/类型）
+        pipeline_version, model_key = ltp_pipeline_contract()
+        ling_repo.ensure_ltp_contract(
+            run_id,
+            pipeline_version=pipeline_version,
+            model_key=model_key,
+            pos_mappings=POS_GROUP_MAP,
+            entity_type_mappings=ENTITY_TYPE_MAP,
+        )
 
         # 2026-09-05 B 批：词典情绪计数对照基线（命中集与 preprocess 同源，
         # 读 paragraph_metrics 现值作为窗口规则口径）
@@ -124,6 +147,8 @@ async def run_linguistic(
                     NEGATIVE_TERMS,
                 )
                 lexicon_pos, lexicon_neg = lexicon_counts.get(int(row.paragraph_id), (0.0, 0.0))
+                # 派生量（事件/计数）不落库，由读取投影按同一正式词元/弧重算；
+                # 这里只用于 mNEG 回写清单
                 data["emotion_events"] = [event.to_dict() for event in events]
                 data["emotion_event_count"] = len(events)
                 data["emotion_pos_event_count"] = sum(1 for event in events if event.polarity == "positive")
@@ -147,17 +172,15 @@ async def run_linguistic(
                     }
                 )
                 for entity in result.entities:
+                    # 3NF：只写候选区间与原始类型；词面按原文切片、
+                    # 归一类型按版本合同、来源与空 confidence 按语言合同投影
                     entity_rows.append(
                         {
                             "run_id": run_id,
                             "paragraph_id": row.paragraph_id,
-                            "surface_text": entity.surface_text,
                             "raw_entity_type": entity.raw_entity_type,
-                            "normalized_entity_type": entity.normalized_entity_type,
                             "local_start_char": entity.local_start_char,
                             "local_end_char": entity.local_end_char,
-                            "confidence": None,
-                            "source_kind": "ltp",
                         }
                     )
                 # Word2Vec 按书微调需要全书词元序列，逐批累积
@@ -168,32 +191,19 @@ async def run_linguistic(
             ling_repo.insert_linguistic_features(run_id, feature_rows, clear_first=first_batch)
             ling_repo.insert_entities(run_id, entity_rows, clear_first=first_batch)
             total_feature_paragraphs += len(feature_rows)
-            logger.info(f"LTP 特征落库：段落={len(feature_rows)} 实体候选={len(entity_rows)}")
+            logger.info(f"LTP 事实落库：段落={len(feature_rows)} 实体候选={len(entity_rows)}")
 
-            # 固定短语匹配：词表命中 + 四字候选（依赖 LTP 词法特征行）
-            # 2026-09-05 C 批：draft 词表（body_reaction/colloquial 扩表候选）
-            # 同扫描，命中行 is_metric_hit=false——审定门，不计入正式密度
+            # 固定短语匹配：唯一 fixed_phrases 词表的词表命中 + 四字候选
+            # （依赖 LTP 词元行；词表来源/计量合同登记在运行行）
+            fixed_phrase_key = LEXICON_FILES["fixed_phrases"]
             phrase_rows: list[dict] = []
-            draft_terms: dict[str, list[str]] = {
-                LEXICON_FILES[k]: registry.get(LEXICON_FILES[k]) for k in LEXICON_DRAFT_KEYS
-            }
             for row in batch:
                 hits = match_fixed_phrases(
                     row.text,
                     terms,
-                    lexicon_key=LEXICON_FILES["fixed_phrases"],
+                    lexicon_key=fixed_phrase_key,
                     metric_enabled=False,
                 )
-                for draft_key, draft_list in draft_terms.items():
-                    hits.extend(
-                        match_fixed_phrases(
-                            row.text,
-                            draft_list,
-                            lexicon_key=draft_key,
-                            metric_enabled=False,
-                            four_char_candidate_enabled=False,
-                        )
-                    )
                 for hit in hits:
                     phrase_rows.append(
                         {
@@ -209,12 +219,11 @@ async def run_linguistic(
                         }
                     )
             ling_repo.insert_phrase_hits(run_id, phrase_rows, clear_first=first_batch)
-            logger.info(f"固定短语落库：{len(phrase_rows)} 行（词表 {LEXICON_FILES['fixed_phrases']}）")
+            # 短语完成事实覆盖本批全部段落（含零命中：完成≠有命中）
+            ling_repo.mark_phrase_completed(run_id, [int(row.paragraph_id) for row in batch])
+            logger.info(f"固定短语落库：{len(phrase_rows)} 行（词表 {fixed_phrase_key}）")
             first_batch = False
 
-        if total_paragraphs == 0:
-            logger.warning(f"no paragraphs found for run_id={run_id}")
-            return 0, 0
         logger.info(f"LTP 全库完成：段落={total_paragraphs} 词法特征段落={total_feature_paragraphs}")
 
         # 2026-09-05 B 批：mNEG 接管词典否定翻转——回写 paragraph_metrics 情绪
@@ -227,11 +236,11 @@ async def run_linguistic(
 
     # ------------------------------------------------------------------
     # 2026-09-14 段落级监督（按书边界）：全书自选段标签现算该书线性边界，
-    # 逐段打分回写 paragraph_linguistic_features 两列。不依赖 LTP——向量源是
-    # paragraph_embeddings（preprocess 落库），故挂在 ltp 闸门之外；
-    # 标签不足或类别单一时无边界（两列 NULL），段落曲线维持 mNEG 口径，不伪造。
+    # 逐段打分回写 paragraph_metrics 的两列边界观测。不依赖 LTP——向量源是
+    # paragraph_features 的 semantic_vector 行（preprocess 落库），故挂在
+    # ltp 闸门之外；标签不足或类别单一时无边界（两列 NULL），不伪造。
     check_cancelled(is_cancelled)
-    boundary_rows = _apply_paragraph_boundary_scores(run_id, paragraph_repo)
+    boundary_rows = _apply_paragraph_boundary_scores(run_id, paragraph_repo, ling_repo)
     if boundary_rows:
         logger.info(f"段落级边界打分回写：{boundary_rows} 段获得分值（样本来自标注 agent 自选段标签）")
 
@@ -281,25 +290,25 @@ async def run_linguistic(
     return total_paragraphs, total_feature_paragraphs
 
 
-def _apply_paragraph_boundary_scores(run_id: str, paragraph_repo: ParagraphRepository) -> int:
+def _apply_paragraph_boundary_scores(
+    run_id: str,
+    paragraph_repo: ParagraphRepository,
+    ling_repo: LinguisticRepository,
+) -> int:
     """2026-09-14 段落级监督（按书边界，用户定稿）：全书自选段标签 → 岭回归边界 → 逐段打分
 
-    链路：ChapterAnnotationRepository.fetch_paragraph_labels 读全书标签（agent 逐章
-    自选 2-3 段随 chapter_annotations 落库）→ paragraph_embeddings 取全书段落向量
-    （preprocess 落库的 ritrieve 向量，零新模型文件、零 LTP 依赖）→
-    fit_emotion_boundary 现算该书线性边界 → 全书逐段打分回写
-    paragraph_linguistic_features.boundary_pos_score_sum / boundary_neg_score_sum。
-    两列语义为段落级定值（2026-09-14 由"段内逐句分值求和"改为"段落本身边界分值"）。
+    链路：analysis_assessments 逐段情绪标签读全书标签（agent 逐章自选 2-3 段）→
+    paragraph_features 的 semantic_vector 行取全书段落向量（preprocess 落库的
+    ritrieve 向量，零新模型文件、零 LTP 依赖）→ fit_emotion_boundary 现算该书
+    线性边界 → 全书逐段打分回写 paragraph_metrics 的
+    boundary_pos_score_sum / boundary_neg_score_sum。
 
     边界无效（标签 <2 或全同分值）、段落向量缺失时返回 0，两列维持 NULL，不伪造；
     打分本地免费（CPU 前向），跨书曲线口径不同不可比（用户已接受）。
     """
     import numpy as np
-    from sqlalchemy import bindparam, select, update
-    from sqlalchemy.sql.schema import Table as SaTable
 
     from src.linguistic import fit_emotion_boundary
-    from src.storage.models import ParagraphEmbedding, ParagraphLinguisticFeature
 
     session = paragraph_repo.session
     labels = fetch_paragraph_labels(session, run_id)
@@ -308,16 +317,11 @@ def _apply_paragraph_boundary_scores(run_id: str, paragraph_repo: ParagraphRepos
         return 0
 
     vectors_by_id: dict[int, np.ndarray] = {
-        int(paragraph_id): np.asarray(embedding, dtype=np.float64)
-        for paragraph_id, embedding in session.execute(
-            select(ParagraphEmbedding.paragraph_id, ParagraphEmbedding.embedding_vector).where(
-                ParagraphEmbedding.run_id == run_id,
-                ParagraphEmbedding.embedding_vector.is_not(None),
-            )
-        ).all()
+        paragraph_id: np.asarray(vector, dtype=np.float64)
+        for paragraph_id, vector in ling_repo.fetch_semantic_vectors(run_id).items()
     }
     if not vectors_by_id:
-        logger.info("段落边界跳过：本 run 无段落向量（paragraph_embeddings 未就绪），两列保持 NULL")
+        logger.info("段落边界跳过：本 run 无段落语义向量（paragraph_features 未就绪），两列保持 NULL")
         return 0
     fit_labels = [label for label in labels if label["paragraph_id"] in vectors_by_id]
     if len(fit_labels) < 2:
@@ -332,7 +336,7 @@ def _apply_paragraph_boundary_scores(run_id: str, paragraph_repo: ParagraphRepos
         return 0
 
     expected_dim = len(boundary.weights)
-    updates: list[dict[str, float | int]] = []
+    updates: list[tuple[int, float, float]] = []
     for row in paragraph_repo.fetch_paragraph_rows(run_id):
         paragraph_id = int(row.paragraph_id)
         vector = vectors_by_id.get(paragraph_id)
@@ -343,29 +347,9 @@ def _apply_paragraph_boundary_scores(run_id: str, paragraph_repo: ParagraphRepos
             score = boundary.score(vector)
             pos_sum = float(score) if score > 0 else 0.0
             neg_sum = float(-score) if score < 0 else 0.0
-        updates.append(
-            {
-                "b_paragraph_id": paragraph_id,
-                "b_pos": pos_sum,
-                "b_neg": neg_sum,
-            }
-        )
+        updates.append((paragraph_id, pos_sum, neg_sum))
 
-    feature_table = cast(SaTable, ParagraphLinguisticFeature.__table__)
-    statement = (
-        update(feature_table)
-        .where(
-            feature_table.c.run_id == bindparam("b_run_id"),
-            feature_table.c.paragraph_id == bindparam("b_paragraph_id"),
-        )
-        .values(
-            boundary_pos_score_sum=bindparam("b_pos"),
-            boundary_neg_score_sum=bindparam("b_neg"),
-        )
-    )
-    params = [{**row, "b_run_id": run_id} for row in updates]
-    session.execute(statement, params, execution_options={"synchronize_session": False})
-    return len(params)
+    return ling_repo.insert_boundary_scores(run_id, updates)
 
 
 def _apply_mneg_correction(
@@ -446,13 +430,14 @@ def _train_and_build(
             "run_id": run_id,
             "embedding_dimension": train_result.embedding_dimension,
             "vocabulary_size": train_result.vocabulary_size,
-            "parameters": train_result.parameters,
+            "window_size": train_result.window_size,
+            "min_count": train_result.min_count,
+            "epochs": train_result.epochs,
+            "pretrained_vocabulary_size": train_result.pretrained_vocabulary_size,
             "source_uri": pretrained_source,
             "license_name": None,
             "training_document_count": train_result.training_document_count,
             "training_token_count": train_result.training_token_count,
-            "artifact_key": train_result.artifact_key,
-            "artifact_scope": "run_owned",
         },
     )
     run_model_dir = resolve_run_model_dir(run_id, "word2vec")
@@ -464,13 +449,13 @@ def _train_and_build(
             vectors,
             paragraph_id=paragraph_id,
         ):
+            # source_token_count 不再是存储列：读取侧由正式词元 + 版本分组投影
             pos_rows.append(
                 {
                     "run_id": run_id,
                     "paragraph_id": entry.paragraph_id,
                     "pos_group": entry.pos_group,
                     "embedding_vector": entry.embedding_vector,
-                    "source_token_count": entry.source_token_count,
                     "in_vocabulary_token_count": entry.in_vocabulary_token_count,
                 }
             )

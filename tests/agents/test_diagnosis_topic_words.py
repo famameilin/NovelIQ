@@ -1,8 +1,10 @@
 """主题词查询与工具输出测试"""
 
+import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from src.agents.diagnosis.tools import _format_topic_rows
+from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.topic.artifacts import load_topic_artifact
 
 
@@ -35,13 +37,14 @@ def test_topic_words_missing_model_dir() -> None:
     assert reason is not None and reason.startswith("topic_model_artifact_missing:")
 
 
-def test_format_topic_rows_with_words() -> None:
+def test_read_topics_with_words() -> None:
     rows = [
         {"topic_id": 23, "weight": 2.0737, "words": ["修炼", "境界"], "label": "修行"},
         {"topic_id": 7, "weight": 1.2, "words": [], "label": None},
     ]
-    text = _format_topic_rows(rows)
-    assert "修炼" in text
-    assert "境界" in text
-    assert "topic 23" in text
-    assert "2.0737" in text
+    with patch("src.diagnosis.queries.DiagnosisQueries") as repo:
+        repo.return_value.fetch_topic_words.return_value = rows
+        tools = {item.name: item for item in build_diagnosis_tools(MagicMock(), "run")}
+        result = json.loads(tools["read_topics"].invoke({}))
+    assert result == {"topics": rows}
+    assert [item["topic_id"] for item in result["topics"]] == [23, 7]

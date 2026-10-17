@@ -4,20 +4,12 @@
 核心合同: 写入面为五个领域工具（write_entity / write_metrics / write_event /
 write_relation / write_dialogue），实体与事件节点用模型自定的 el 局部键寻址、
 写入即生效并返回真实回执（{status: written, record}）；领域没有结束声明，
-全部写完后用唯一 finish 收尾，系统据此刻校验并冻结当前章。
+finish 与无工具响应是等价的结束请求；程序在批次完成后检查并冻结当前 work。
 完整参数和完整结果只进入审计库，不回到模型上下文。
 
-2026-09-19 id 纪律（模型面三条款）：所有 id 都是 run 级 uuid——实体 id 由服务端按
-run+规范名确定性铸造（uuid5，回执与落库主键同值），事件节点 id 按章内局部键稳定生成，
-=落库 event_id），案例 id 就是案例池行的 uuid；别名只能是 el（模型自定的局部键，
-写入当场绑定，仅供同轮引用）；一个事件或实体或操作只有一个 id——回执与检索
-视图里对象只带 id，record 是本章 的写入地址、不是第二 id。
-2026-09-14 写入面重构：根/子/两参与者五工具合并为 write_event（el 层级键挂树、
-树内先后=调用顺序）；句标签收编进 write_metrics.labels（段落级监督）；实体
-引用增加 el 键空间；伏笔属性收敛为 isforeshadowing+confidence。
-2026-09-13 改造前是"一次大载荷 write 完成整个领域"（整树起草 + 整批返工）：
-先拆成同轮多个有类型小调用，再取消暂存概念——没有暂存区，
-没有逐域 finish，失败只指向一个语义单元，模型只重调那一条记录。
+事件声明来源身份为 declaration_id，正式 event_id 由诊断发布生成；局部 el 只用于
+本 work 寻址，不表达包含结构或调用顺序。伏笔与情节推进只引用来源声明。
+
 """
 
 # 账本与工具工厂按实际定义导入；本文件只维护查询工具和键规范化
@@ -27,12 +19,13 @@ from __future__ import annotations
 import json
 import unicodedata
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Annotated, Any, Protocol
+from typing import Annotated, Any, Protocol
 
 from langchain_core.tools import tool
 from pydantic import ConfigDict, Field, create_model
 
-from src.fact_graph.outputs import TextSearchResult
+from src.fact_graph.inputs import ChapterParagraphInfo
+from src.fact_graph.outputs import SourceReference, TextSearchResult
 from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError
@@ -59,9 +52,11 @@ _ROOT_NODE_KEY = RESERVED_ROOT_KEY
 _EL_PATH_SEP = EL_PATH_SEP
 
 
-def _norm_entity_key(name: str) -> str:
-    """2026-09-13 用于生成实体记录键（与 FactGraph 名称归一化同源）"""
-    return unicodedata.normalize("NFC", name).strip().casefold()
+def _norm_entity_key(name: str, entity_type: object = "") -> str:
+    """2026-10-13 用于生成实体身份键（与 FactGraph 复合键同源：规范名+实体大类）"""
+    from src.fact_graph.graph import entity_key
+
+    return entity_key(name, entity_type)
 
 
 # 2026-09-14 写入面重构：局部键由模型自行指定、写入即生效——同一轮里先建的键，
@@ -162,9 +157,29 @@ def _forbid_undeclared_args(tool_candidate: Any) -> None:
     )
 
 
+class TextReadLedger(Protocol):
+    """原文工具只依赖读取授权，不要求调用方拥有章级写入账本"""
+
+    @property
+    def run_scope(self) -> str: ...
+    @property
+    def phase(self) -> str: ...
+    @property
+    def allow_future_context(self) -> bool: ...
+    @property
+    def current_chapter_id(self) -> int | None: ...
+    @property
+    def paragraph_info(self) -> ChapterParagraphInfo | None: ...
+    @property
+    def text_references(self) -> dict[str, SourceReference]: ...
+    @property
+    def authorized_text_paragraph_ids(self) -> set[int]: ...
+    def append_search_log(self, entry: dict[str, Any]) -> None: ...
+
+
 def build_search_tools(
     query_service: AnnotationQueryService,
-    ledger: AnnotationToolLedger,
+    ledger: TextReadLedger,
 ) -> list[Any]:
     """标注仅检索原文，不依赖其他章节的分析完成顺序"""
 
@@ -181,7 +196,7 @@ def build_search_tools(
         normalized_query = _normalize_query(query, tool_name="search_text")
         if offset < 0:
             raise AnnotationInputError("offset 不能为负数")
-        if ledger.phase != "chapter_open":
+        if ledger.phase not in {"chapter_open", "diagnosis_open"}:
             raise AnnotationAuthorizationError(f"阶段 {ledger.phase} 不允许 search_text")
         expected_range = "all" if ledger.allow_future_context else "previous"
         results = [
@@ -229,7 +244,3 @@ def build_search_tools(
         return json.dumps(views, ensure_ascii=False)
 
     return [search_text]
-
-
-if TYPE_CHECKING:
-    from .ledger import AnnotationToolLedger

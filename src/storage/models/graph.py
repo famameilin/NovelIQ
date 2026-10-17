@@ -1,58 +1,54 @@
-"""章节图谱当前状态 ORM 模型"""
+"""
+事实图谱 ORM 模型（2026-10-16 全库 3NF 改造）
+
+- graph_entities：实体身份（run+规范名+大类的 Unicode 比较合同由写入链保持一致；
+  当前标签/属性/动态状态从贡献读取，不存缓存）
+- graph_relations：稳定关系身份及真实端点（run 从端点取得，双向按既有身份排序；
+  十二种关系的方向/语义为版本化代码合同，不逐行保存）
+- graph_facts：封闭类型的正式图谱贡献与字段操作（五种互斥形状）
+- fact_entity_tags：一次标签设置的有序成员（父事实 tags_submitted=true 且零行=清空）
+
+operation kind 由具体列形状表达，不存由引用决定的重复 operation_code；
+graph 与 plotline 两个列表都从 0 开始，不能用 producer+order 作全表键。
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
-    ForeignKeyConstraint,
+    Identity,
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, naive_utcnow
 
-
-@dataclass(frozen=True, slots=True)
-class ChapterBoundary:
-    """2026-08-19 用于表示由章节身份派生的图谱边界"""
-
-    run_id: str
-    chapter_id: int
-    chapter_order: int
-    first_chapter_id: int
-    last_chapter_id: int
-    annotation_id: str
+#: 实体类型封闭取值
+ENTITY_TYPES = ("character", "location", "item", "organization")
+#: 字段操作三态封闭取值（omit 表示未提交，不落列值）
+FIELD_ACTIONS = ("omit", "set", "clear")
 
 
 class GraphEntity(Base):
-    """2026-08-19 用于保存单次分析运行内稳定的实体身份
-
-    2026-09-19 id 纪律：所有 id 都是 uuid——entity_id 主键从自增 int 改为
-    String(36) uuid（uuid5 按 run+规范名确定性铸造，agent 运行面与落库同值，
-    见 fact_graph._entity_uuid）。
-    """
+    """图实体表：run 内稳定实体身份（uuid5 按 run+规范名+大类确定性铸造）"""
 
     __tablename__ = "graph_entities"
     __table_args__ = (
-        CheckConstraint(
-            "entity_type IN ('character', 'location', 'item', 'organization')",
-            name="ck_graph_entities_type",
-        ),
+        UniqueConstraint("run_id", "canonical_name", "entity_type", name="uq_graph_entities_run_name_type"),
         Index("idx_graph_entities_run_canonical", "run_id", "canonical_name"),
         Index("idx_graph_entities_run_type", "run_id", "entity_type"),
-        Index("idx_graph_entities_run_last_seen", "run_id", "last_seen_chapter"),
-        {"comment": "图实体表：run 内稳定实体身份（uuid5 按 run+规范名确定性铸造）"},
+        {"comment": "图实体表：run 内稳定实体身份（名称比较须与 NFC/strip/casefold 身份规则一致）"},
     )
 
     entity_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="实体主键（uuid）")
@@ -63,10 +59,6 @@ class GraphEntity(Base):
     entity_type: Mapped[str] = mapped_column(
         String(50), nullable=False, comment="实体类型（character/location/item/organization）"
     )
-    tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, comment="标签列表")
-    attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, comment="实体属性字典")
-    first_seen_chapter: Mapped[int] = mapped_column(Integer, nullable=False, comment="首次出现章")
-    last_seen_chapter: Mapped[int] = mapped_column(Integer, nullable=False, comment="最后出现章")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
     )
@@ -75,172 +67,241 @@ class GraphEntity(Base):
     )
 
 
-class GraphFact(Base):
-    """2026-08-19 用于保存章节事实及其来源证据"""
-
-    __tablename__ = "graph_facts"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["chapter_id", "run_id"],
-            ["chapters.chapter_id", "chapters.run_id"],
-            ondelete="CASCADE",
-            name="graph_facts_chapter_run_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["effective_chapter_id", "run_id"],
-            ["chapters.chapter_id", "chapters.run_id"],
-            ondelete="CASCADE",
-            name="graph_facts_effective_chapter_run_fkey",
-        ),
-        CheckConstraint("jsonb_array_length(evidence) > 0", name="ck_graph_facts_evidence_non_empty"),
-        UniqueConstraint("run_id", "chapter_id", "fact_id", name="uq_graph_facts_run_chapter_fact"),
-        UniqueConstraint("run_id", "chapter_id", "payload_path", name="uq_graph_facts_chapter_payload_path"),
-        Index("idx_graph_facts_run_chapter", "run_id", "chapter_id"),
-        Index("idx_graph_facts_run_subject_predicate", "run_id", "subject_entity_id", "predicate"),
-        Index("idx_graph_facts_run_event", "run_id", "event_id"),
-        {"comment": "图事实表：章节事实（主谓宾+断言强度+生效章）及其原文证据"},
-    )
-
-    graph_fact_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="自增主键")
-    run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, comment="所属分析运行"
-    )
-    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="事实登记章")
-    fact_id: Mapped[str] = mapped_column(String(128), nullable=False, comment="章内事实键")
-    fact_type: Mapped[str] = mapped_column(String(100), nullable=False, comment="事实类型")
-    subject_entity_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("graph_entities.entity_id", ondelete="RESTRICT"),
-        nullable=True,
-        comment="主语实体（可空）",
-    )
-    predicate: Mapped[str] = mapped_column(String(255), nullable=False, comment="谓词")
-    object: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True, comment="宾语（可空）")
-    value: Mapped[Any | None] = mapped_column(JSONB, nullable=True, comment="值（可空）")
-    participants: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, comment="参与者列表")
-    scope: Mapped[str] = mapped_column(String(255), nullable=False, comment="作用域")
-    story_time: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True, comment="故事内时间（可空）")
-    assertion: Mapped[str] = mapped_column(String(20), nullable=False, comment="断言类型")
-    confidence: Mapped[str] = mapped_column(String(20), nullable=False, comment="置信度")
-    content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, comment="事实内容")
-    effective_chapter_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="生效章")
-    source_kind: Mapped[str] = mapped_column(String(30), nullable=False, comment="来源种类")
-    annotation_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("analysis_outputs.output_id", ondelete="CASCADE"),
-        nullable=False,
-        comment="来源标注 id",
-    )
-    payload_path: Mapped[str] = mapped_column(String(255), nullable=False, comment="章内 payload 路径（章内唯一）")
-    author_work_id: Mapped[str | None] = mapped_column(String(64), comment="产生该行的 agent 执行 work 标识")
-    event_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("event_nodes.event_id", ondelete="RESTRICT"),
-        nullable=True,
-        comment="关联事件（可空）",
-    )
-    evidence: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list, comment="原文证据列表（非空）"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
-    )
-
-
-class EntityState(Base):
-    """2026-08-19 用于保存实体在章节边界的状态和变化"""
-
-    __tablename__ = "entity_states"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["chapter_id", "run_id"],
-            ["chapters.chapter_id", "chapters.run_id"],
-            ondelete="CASCADE",
-            name="entity_states_chapter_run_fkey",
-        ),
-        CheckConstraint("jsonb_array_length(changes) > 0", name="ck_entity_states_changes_non_empty"),
-        Index("idx_entity_states_run_entity", "run_id", "entity_id", "chapter_id"),
-        {"comment": "实体状态表：实体在章节边界的状态快照与变化记录（每实体每章一行）"},
-    )
-
-    run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), primary_key=True, comment="所属分析运行"
-    )
-    chapter_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="章节编号")
-    entity_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), primary_key=True, comment="实体 id"
-    )
-    state: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, comment="章末状态")
-    changes: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, comment="本章变化列表（非空）")
-    author_work_id: Mapped[str | None] = mapped_column(String(64), comment="产生该行的 agent 执行 work 标识")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
-    )
-
-
 class GraphRelation(Base):
-    """2026-08-19 用于保存稳定关系身份及其实体端点"""
+    """图关系表：稳定关系身份及真实端点；run 从端点取得（两端必须同 run）"""
 
     __tablename__ = "graph_relations"
     __table_args__ = (
-        CheckConstraint("directionality IN ('directed', 'bidirectional')", name="ck_graph_relations_directionality"),
-        CheckConstraint("relation_semantics IN ('ordinary', 'same_character')", name="ck_graph_relations_semantics"),
+        UniqueConstraint("from_entity_id", "to_entity_id", "relation_type", name="uq_graph_relations_endpoints_type"),
         CheckConstraint("from_entity_id <> to_entity_id", name="ck_graph_relations_distinct_endpoints"),
-        Index("idx_graph_relations_run_from", "run_id", "from_entity_id"),
-        Index("idx_graph_relations_run_to", "run_id", "to_entity_id"),
-        {"comment": "图关系表：稳定关系身份及其实体端点（方向性与语义受约束）"},
+        Index("idx_graph_relations_from", "from_entity_id"),
+        Index("idx_graph_relations_to", "to_entity_id"),
+        {"comment": "图关系表：稳定关系身份及实体端点（类型决定方向与语义，不逐行保存）"},
     )
 
     relation_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="关系主键（uuid）")
-    run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, comment="所属分析运行"
-    )
     from_entity_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), nullable=False, comment="起点实体"
     )
     to_entity_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), nullable=False, comment="终点实体"
     )
-    directionality: Mapped[str] = mapped_column(
-        String(20), nullable=False, comment="方向性（directed/bidirectional）"
-    )
-    relation_semantics: Mapped[str] = mapped_column(
-        String(30), nullable=False, comment="关系语义（ordinary/same_character）"
-    )
+    relation_type: Mapped[str] = mapped_column(String(100), nullable=False, comment="关系类型（版本化关系合同）")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
     )
 
 
-class RelationState(Base):
-    """2026-08-19 用于保存关系在章节边界的状态和变化"""
+class GraphFact(Base):
+    """
+    图事实表（五种互斥形状）
 
-    __tablename__ = "relation_states"
+    - 实体引用/更新：direct_producer+entity；description/representative 为
+      omit/set/clear 操作列，tags_submitted 区分没提交与提交空集合
+    - 实体关系操作：direct_producer+relation+relation_change_kind；identity_kind/reason 按合同
+    - 人物动态观测：participant_id（作者/实体/动态值从参与者来源取，不填 direct_producer）
+    - 独立情节推进：direct_producer+business_call_id+subject/description/after（write_plotline 真实记录）
+    - 章末程序核对回执：program_work_id 指向实际章末核对来源（结论按固定规则投影）
+
+    run 从真实生产来源取得；effective_chapter_id 仅真实独立选章时保存。
+    """
+
+    __tablename__ = "graph_facts"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["chapter_id", "run_id"],
-            ["chapters.chapter_id", "chapters.run_id"],
-            ondelete="CASCADE",
-            name="relation_states_chapter_run_fkey",
+        CheckConstraint(
+            "description_action IS NULL OR description_action IN ('omit', 'set', 'clear')",
+            name="ck_graph_facts_description_action",
         ),
-        CheckConstraint("jsonb_array_length(changes) > 0", name="ck_relation_states_changes_non_empty"),
-        Index("idx_relation_states_run_relation", "run_id", "relation_id", "chapter_id"),
-        Index("idx_relation_states_run_active", "run_id", "is_active"),
-        {"comment": "关系状态表：关系在章节边界的状态与变化记录（每关系每章一行）"},
+        CheckConstraint(
+            "representative_action IS NULL OR representative_action IN ('omit', 'set', 'clear')",
+            name="ck_graph_facts_representative_action",
+        ),
+        CheckConstraint(
+            # 未提交（action 与值同空）或「set 当且仅当有值」
+            "(description_action IS NULL AND description_value IS NULL)"
+            " OR ((description_action = 'set') IS NOT DISTINCT FROM (description_value IS NOT NULL))",
+            name="ck_graph_facts_description_value_pair",
+        ),
+        CheckConstraint(
+            "(representative_action IS NULL AND representative_value IS NULL)"
+            " OR ((representative_action = 'set') IS NOT DISTINCT FROM (representative_value IS NOT NULL))",
+            name="ck_graph_facts_representative_value_pair",
+        ),
+        CheckConstraint(
+            # 关系变化的取值就是写面合同的七类（不把 break 归一为 retract：
+            # 旧读面对断裂与撤回各有展示标签，值原样入事实行）
+            "relation_change_kind IS NULL OR relation_change_kind IN"
+            " ('assert', 'reinforce', 'weaken', 'retract', 'refine', 'supersede', 'break')",
+            name="ck_graph_facts_relation_change_kind",
+        ),
+        CheckConstraint(
+            "identity_kind IS NULL OR identity_kind IN ('same', 'different')",
+            name="ck_graph_facts_identity_kind",
+        ),
+        CheckConstraint(
+            # 实体引用/更新形状
+            "(direct_producer_execution_id IS NOT NULL AND entity_id IS NOT NULL AND operation_order IS NOT NULL"
+            " AND relation_id IS NULL AND participant_id IS NULL AND program_work_id IS NULL"
+            " AND business_call_id IS NULL AND declaration_id IS NULL"
+            " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
+            " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
+            " AND relation_change_kind IS NULL AND identity_kind IS NULL AND reason IS NULL)"
+            # 实体关系操作形状
+            " OR (direct_producer_execution_id IS NOT NULL AND relation_id IS NOT NULL"
+            " AND operation_order IS NOT NULL AND relation_change_kind IS NOT NULL"
+            " AND entity_id IS NULL AND participant_id IS NULL AND program_work_id IS NULL"
+            " AND business_call_id IS NULL AND declaration_id IS NULL"
+            " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
+            " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
+            " AND description_action IS NULL AND description_value IS NULL"
+            " AND representative_action IS NULL AND representative_value IS NULL AND tags_submitted IS NULL)"
+            # 人物动态观测形状
+            " OR (participant_id IS NOT NULL AND direct_producer_execution_id IS NULL"
+            " AND operation_order IS NULL AND relation_id IS NULL AND entity_id IS NULL"
+            " AND program_work_id IS NULL AND business_call_id IS NULL AND declaration_id IS NULL"
+            " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
+            " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
+            " AND description_action IS NULL AND description_value IS NULL"
+            " AND representative_action IS NULL AND representative_value IS NULL AND tags_submitted IS NULL"
+            " AND relation_change_kind IS NULL AND identity_kind IS NULL AND reason IS NULL)"
+            # 独立情节推进形状
+            " OR (direct_producer_execution_id IS NOT NULL AND business_call_id IS NOT NULL"
+            " AND operation_order IS NOT NULL AND plotline_subject_id IS NOT NULL"
+            " AND plotline_subject_title IS NOT NULL AND plotline_description IS NOT NULL"
+            " AND plotline_after IS NOT NULL"
+            " AND entity_id IS NULL AND relation_id IS NULL AND participant_id IS NULL"
+            " AND program_work_id IS NULL"
+            " AND description_action IS NULL AND description_value IS NULL"
+            " AND representative_action IS NULL AND representative_value IS NULL AND tags_submitted IS NULL"
+            " AND relation_change_kind IS NULL AND identity_kind IS NULL AND reason IS NULL)"
+            # 章末程序核对回执形状
+            " OR (program_work_id IS NOT NULL AND direct_producer_execution_id IS NULL"
+            " AND operation_order IS NULL AND entity_id IS NULL AND relation_id IS NULL"
+            " AND participant_id IS NULL AND business_call_id IS NULL AND declaration_id IS NULL"
+            " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
+            " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
+            " AND description_action IS NULL AND description_value IS NULL"
+            " AND representative_action IS NULL AND representative_value IS NULL AND tags_submitted IS NULL"
+            " AND relation_change_kind IS NULL AND identity_kind IS NULL AND reason IS NULL)",
+            name="ck_graph_facts_shape",
+        ),
+        Index(
+            "uq_graph_facts_producer_order", "direct_producer_execution_id", "operation_order",
+            unique=True,
+            postgresql_where=sql_text(
+                "direct_producer_execution_id IS NOT NULL AND business_call_id IS NULL"
+            ),
+        ),
+        Index(
+            "uq_graph_facts_business_call", "business_call_id",
+            unique=True, postgresql_where=sql_text("business_call_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_graph_facts_participant", "participant_id",
+            unique=True, postgresql_where=sql_text("participant_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_graph_facts_program_work", "program_work_id",
+            unique=True, postgresql_where=sql_text("program_work_id IS NOT NULL"),
+        ),
+        Index("idx_graph_facts_producer_execution", "direct_producer_execution_id"),
+        {"comment": "图事实表：实体/关系/参与者/情节推进/程序核对五种互斥形状（运行从生产来源取得）"},
     )
 
-    run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), primary_key=True, comment="所属分析运行"
+    graph_fact_id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True, comment="事实流水")
+    # 真实生产执行（实体/关系/情节推进形状必填；人物观测从参与者来源取，不填）
+    direct_producer_execution_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="graph_facts_producer_fkey"),
+        nullable=True,
+        comment="直接生产执行（实体/关系/情节推进）",
     )
-    chapter_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="章节编号")
-    relation_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("graph_relations.relation_id", ondelete="CASCADE"), primary_key=True, comment="关系 id"
+    # 章末程序核对回执来源
+    program_work_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("work_items.work_id", ondelete="RESTRICT", name="graph_facts_program_work_fkey"),
+        nullable=True,
+        comment="章末核对程序 work（回执形状）",
     )
-    relation_type: Mapped[str] = mapped_column(String(100), nullable=False, comment="关系类型")
-    attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, comment="关系属性")
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, comment="是否活跃")
-    changes: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, comment="本章变化列表（非空）")
-    author_work_id: Mapped[str | None] = mapped_column(String(64), comment="产生该行的 agent 执行 work 标识")
+    operation_order: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="执行内操作顺序（0 起）")
+    business_call_id: Mapped[str | None] = mapped_column(Text, nullable=True, comment="情节推进的实际程序 call_id")
+    effective_chapter_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="真实独立选章时的有效章节编号"
+    )
+    entity_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("graph_entities.entity_id", ondelete="RESTRICT", name="graph_facts_entity_fkey"),
+        nullable=True,
+        comment="实体目标",
+    )
+    relation_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("graph_relations.relation_id", ondelete="RESTRICT", name="graph_facts_relation_fkey"),
+        nullable=True,
+        comment="关系目标",
+    )
+    participant_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "declaration_participants.participant_id", ondelete="RESTRICT", name="graph_facts_participant_fkey"
+        ),
+        nullable=True,
+        comment="人物动态观测的源参与者（唯一）",
+    )
+    declaration_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("event_declarations.declaration_id", ondelete="RESTRICT", name="graph_facts_declaration_fkey"),
+        nullable=True,
+        comment="情节推进的可选来源声明",
+    )
+    description_action: Mapped[str | None] = mapped_column(
+        String(10), nullable=True, comment="description 操作（omit/set/clear）"
+    )
+    description_value: Mapped[str | None] = mapped_column(Text, nullable=True, comment="description 设置值")
+    representative_action: Mapped[str | None] = mapped_column(
+        String(10), nullable=True, comment="代表标记操作（omit/set/clear）"
+    )
+    representative_value: Mapped[bool | None] = mapped_column(Boolean, nullable=True, comment="代表标记设置值")
+    tags_submitted: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, comment="标签集合显式提交：true 且零成员=清空；NULL=没提交；False=身份确认引用"
+    )
+    relation_change_kind: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="关系操作（assert/reinforce/weaken/retract/refine/supersede/break）"
+    )
+    identity_kind: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="同一身份判断（same/different）"
+    )
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="操作理由")
+    plotline_subject_id: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="推进序列业务标识")
+    plotline_subject_title: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="本次提交的主体标题")
+    plotline_description: Mapped[str | None] = mapped_column(Text, nullable=True, comment="本次推进描述")
+    plotline_before: Mapped[str | None] = mapped_column(Text, nullable=True, comment="推进前状态")
+    plotline_after: Mapped[str | None] = mapped_column(Text, nullable=True, comment="推进后状态")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
     )
+
+    def __repr__(self) -> str:
+        return f"<GraphFact(graph_fact_id={self.graph_fact_id})>"
+
+
+class FactEntityTag(Base):
+    """标签成员：去重且保留顺序（父事实 tags_submitted=true 且零行表示清空）"""
+
+    __tablename__ = "fact_entity_tags"
+    __table_args__ = (
+        UniqueConstraint("graph_fact_id", "tag", name="uq_fact_entity_tags_tag"),
+        {"comment": "事实标签表：标签集合的具名成员（有序、去重，不复制 entity/producer）"},
+    )
+
+    graph_fact_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("graph_facts.graph_fact_id", ondelete="CASCADE", name="fact_entity_tags_fact_fkey"),
+        primary_key=True,
+        comment="事实流水",
+    )
+    tag_ordinal: Mapped[int] = mapped_column(Integer, primary_key=True, comment="标签序号（0 起）")
+    tag: Mapped[str] = mapped_column(String(100), nullable=False, comment="标签文本")
+
+    def __repr__(self) -> str:
+        return f"<FactEntityTag(graph_fact_id={self.graph_fact_id}, tag={self.tag})>"

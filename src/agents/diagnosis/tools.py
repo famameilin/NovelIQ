@@ -1,38 +1,53 @@
-"""
-诊断 Agent 工具（工具化自主取证）
-
-agent 通过工具按需查询聚合指标、转折素材、人物、主题与图谱信号，
-自主决定查看哪些证据，最后通过 finish 提交诊断结果
-"""
+"""诊断五个写入面与两个指标读取面，其余工具使用标注的同一实现"""
 
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from collections.abc import Sequence
+from typing import Annotated, Any
 
 from langchain_core.tools import tool
+from pydantic import Field
 from sqlalchemy.orm import Session
 
+from src.agents.annotation.links import build_text_read_tool
+from src.agents.annotation.shared_tools import build_case_tools, build_finish_tool, build_state_read_tools
+from src.agents.annotation.text_search import TextSearchService
+from src.agents.annotation.tools import _forbid_undeclared_args, build_search_tools
 from src.diagnosis.patch import AgentAnalysisPatch
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
+from src.event_trees.organization import EventOrganizationDraft
 
 from .evidence import DiagnosisEvidenceLedger
+from .inputs import ArcWriteItem, ConflictItem, EventWriteItem, OutcomeWriteItem, WriteItem
+from .read_context import (
+    DiagnosisDeclarationSource,
+    DiagnosisGraphSource,
+    DiagnosisOrganizationSource,
+    DiagnosisTextAccess,
+    DiagnosisTextQuery,
+    graph_signals,
+)
+
+WRITE_NAMES = frozenset({"write_diagnosis", "write_event", "write_arc", "write_outcome", "write_conflict",
+    "write_entity", "write_relation", "write_dialogue"})
 
 
-def _format_topic_rows(rows: list[dict[str, Any]]) -> str:
-    """2026-08-11 用于渲染主题词工具输出（含主题词与标签）"""
-    parts: list[str] = []
-    for index, row in enumerate(rows, start=1):
-        words = "、".join(row.get("words") or [])
-        label = row.get("label")
-        head = f"{index}. [topic {row['topic_id']}，权重 {row['weight']}]"
-        if words:
-            head += f" 主题词：{words}"
-        if label:
-            head += f"，标签：{label}"
-        parts.append(head)
-    return "\n".join(parts)
+def _write_items(items: Sequence[WriteItem], handlers: dict[str, Any]) -> str:
+    """逐项调用原领域原语，业务拒绝仅影响该项；系统故障直接抛出"""
+    results: list[Any] = []
+    failed: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        operation = getattr(item, "operation", "conflict")
+        args = {key: getattr(item, key) for key in type(item).model_fields if key != "operation"}
+        try:
+            results.append(handlers[operation](**args))
+        except ValueError as exc:
+            results.append(None)
+            failed.append({"index": index, "operation": operation, "message": str(exc)})
+    return json.dumps(
+        {"status": "partial" if failed else "written", "results": results, "failed": failed}, ensure_ascii=False
+    )
 
 
 def build_diagnosis_tools(
@@ -41,258 +56,208 @@ def build_diagnosis_tools(
     *,
     evidence_ledger: DiagnosisEvidenceLedger | None = None,
     organization_draft: EventOrganizationDraft | None = None,
+    report_draft: dict[str, Any] | None = None,
+    case_pool: Any = None,
+    execution_id: str = "",
+    text_search: TextSearchService | None = None,
+    work_id: str | None = None,
+    producer_invocation_id: str | None = None,
+    case_writes_graph: Any | None = None,
+    case_source_chapter: int | None = None,
+    case_dialogue_candidates: list[Any] | None = None,
+    case_writer_store: dict[str, Any] | None = None,
 ) -> list[Any]:
-    """构建诊断 agent 工具集"""
+    """装配真实诊断身份，保留正式原文绑定、案例关联和结束检查职责"""
+    from src.case_pool import CasePool
+
     ledger = evidence_ledger or DiagnosisEvidenceLedger()
-    draft = organization_draft or EventOrganizationDraft(session, run_id)
+    draft = organization_draft or EventOrganizationDraft(session, run_id, execution_id)
+    report = report_draft if report_draft is not None else {}
+    if case_pool is None:
+        case_pool = CasePool(run_id)
+        case_pool.load_storage(session)
+    author = (work_id or f"diagnosis:{execution_id}", producer_invocation_id or execution_id)
+    case_pool.begin(*author)
 
     @tool
-    def search_book_events(
-        query: str = "",
-        chapter_id: int | None = None,
-        tree_id: str | None = None,
-        unassigned_only: bool = False,
-        offset: int = 0,
-        limit: int = 50,
-    ) -> str:
-        """分页阅读全书已保存事件，unassigned_only 查尚未登记主要归属的事件，按 next_offset 续页"""
-        return json.dumps(
-            draft.search_events(
-                query,
-                chapter_id=chapter_id,
-                tree_id=tree_id,
-                unassigned_only=unassigned_only,
-                offset=offset,
-                limit=limit,
-            ),
-            ensure_ascii=False,
+    def write_event(items: Annotated[list[EventWriteItem], Field(min_length=1, max_length=300)]) -> str:
+        """批量提交声明核对、身份阶段判断、跨章事件、显式包含/其他关系或事件核对"""
+        return _write_items(
+            items,
+            {
+                "identity": draft.identity,
+                "event": draft.event,
+                "contain": draft.contain,
+                "declaration_review": draft.review_declarations,
+                "relation": draft.relate_events,
+                "review": draft.review_events,
+                "compare": draft.compare_declarations,
+                "retract": draft.retract,
+                "structure_review": draft.structure_review,
+            },
         )
 
     @tool
-    def read_book_events(event_ids: list[str]) -> str:
-        """读取指定事件真实内容与原文段号，每次最多100个"""
-        return json.dumps(draft.read_events(event_ids), ensure_ascii=False)
+    def write_arc(items: Annotated[list[ArcWriteItem], Field(min_length=1, max_length=300)]) -> str:
+        """批量写主支线或事件关联，operation=arc/link；各项分别给出理由及原文证据"""
+        return _write_items(items, {"arc": draft.register_arc, "link": draft.link_event_arc})
 
     @tool
-    def read_book_passages(paragraph_ids: list[int], offset: int = 0, limit: int = 10) -> str:
-        """读取事件依据原文，每段最多2000字符，next_offset 继续读取该段"""
-        return json.dumps(draft.read_passages(paragraph_ids, offset, limit), ensure_ascii=False)
+    def write_outcome(items: Annotated[list[OutcomeWriteItem], Field(min_length=1, max_length=300)]) -> str:
+        """批量写全书结果或顶层事件贡献，operation=outcome/link；不自动替换子事件端点"""
+        return _write_items(items, {"outcome": draft.register_outcome, "link": draft.link_event_outcome})
 
     @tool
-    def register_narrative_arc(
-        key: str,
-        kind: Literal["main", "subplot"],
-        title: str,
-        objective: str,
-        role: str,
-        reason: str,
-        evidence: list[OrganizationEvidence],
-        parent_arc_id: str | None = None,
-    ) -> str:
-        """依据全书目标、冲突和原文登记主支线，返回稳定 arc_id；同key用于修正，局部tree_id不是全书线"""
-        return draft.register_arc(
-            key=key,
-            kind=kind,
-            title=title,
-            objective=objective,
-            role=role,
-            reason=reason,
-            evidence=evidence,
-            parent_arc_id=parent_arc_id,
-        )
+    def write_conflict(items: Annotated[list[ConflictItem], Field(min_length=1, max_length=300)]) -> str:
+        """批量保留冲突对象、各说法及各自证据；原冲突校验保持，不裁定唯一答案"""
+        return _write_items(items, {"conflict": draft.register_conflict})
 
     @tool
-    def assign_book_events(
-        event_ids: list[str], arc_id: str | None, role: str, reason: str, evidence: list[OrganizationEvidence]
-    ) -> str:
-        """批量登记事件唯一主要归属；不能确定时arc_id=null并说明原因；evidence引用真实event_id"""
-        draft.assign_events(event_ids, arc_id=arc_id, role=role, reason=reason, evidence=evidence)
-        return "已保存草稿"
+    def write_diagnosis(analysis: AgentAnalysis | None = None, patch: AgentAnalysisPatch | None = None) -> str:
+        """提交报告或明确修订，analysis 与 patch 恰选一项，失败不覆盖有效草稿"""
+        if (analysis is None) == (patch is None):
+            raise ValueError("write_diagnosis 必须且只能提供 analysis 或 patch")
+        if patch is not None:
+            if "analysis" not in report:
+                raise ValueError("尚无报告草稿，请先 write_diagnosis(analysis=...)")
+            analysis = AgentAnalysis.model_validate(
+                {**report["analysis"], **patch.model_dump(exclude_unset=True, mode="json")}
+            )
+        if analysis is None:
+            raise ValueError("诊断报告不能为空")
+        report["analysis"] = analysis.model_dump(mode="json")
+        return json.dumps({"status": "written", "record": "diagnosis_report"}, ensure_ascii=False)
 
     @tool
-    def reference_book_event(
-        arc_id: str, event_id: str, role: str, reason: str, evidence: list[OrganizationEvidence]
-    ) -> str:
-        """登记其他叙事线对同一事件的引用，不复制事件，不改变其主要归属"""
-        draft.reference_event(arc_id=arc_id, event_id=event_id, role=role, reason=reason, evidence=evidence)
-        return "已保存草稿"
-
-    @tool
-    def read_organization_draft(offset: int = 0, limit: int = 50) -> str:
-        """分页检查本轮已登记的叙事线、主要归属和跨线引用数量及内容"""
-        return json.dumps(draft.read_draft(offset, limit), ensure_ascii=False)
-
-    @tool
-    def get_aggregate_signals() -> str:
-        """
-        查询全书聚合指标（情绪曲线、张力、节奏等全局统计）。
-        用于判断整体叙事节奏与情感走向。
-        """
+    def read_metrics() -> str:
+        """读真实聚合指标与转折、高张力、伏笔、关系变化、图谱统计素材；不重算指标或吞系统故障"""
+        from src.diagnosis.queries import DiagnosisQueries
         from src.storage.repositories import StatsRepository
 
-        ledger.record_tool_call("get_aggregate_signals")
-
-        stats_repo = StatsRepository(session)
-        stats = stats_repo.fetch_global_stats_dict(run_id)
-        if not stats:
-            return "（无聚合指标数据）"
-        return "\n".join(f"{key}: {value}" for key, value in sorted(stats.items()))
+        repo = DiagnosisQueries(session)
+        ledger.record_tool_call("read_metrics")
+        payload = {
+            "aggregate": StatsRepository(session).fetch_global_stats_dict(run_id),
+            "pivots": [
+                {"chapter_id": chapter_id, "text": text[:300], "event_type": event_type}
+                for chapter_id, text, event_type in repo.fetch_pivot_blocks(run_id, limit=20)
+            ],
+            "high_tension": [
+                {"paragraph_id": paragraph_id, "text": text[:300], "tension": tension}
+                for paragraph_id, text, tension in repo.fetch_high_tension_chunks(run_id, limit=10)
+            ],
+            "foreshadowing": repo.fetch_foreshadowing_sources(run_id),
+            "foreshadow_expectation": repo.calculate_foreshadow_expectation(run_id),
+            "relation_changes": [
+                {
+                    "chapter_id": chapter_id,
+                    "from_name": left,
+                    "to_name": right,
+                    "relation_type": kind,
+                    "change_kind": change,
+                }
+                for chapter_id, left, right, kind, change in repo.fetch_relation_changes(run_id, limit=50)
+            ],
+            "graph_signals": graph_signals(session, run_id),
+        }
+        return json.dumps(payload, ensure_ascii=False)
 
     @tool
-    def get_pivot_materials() -> str:
-        """
-        查询转折点/高张力/伏笔线程等诊断素材。
-        用于判断叙事结构、伏笔兑现与高潮分布。
-        """
+    def read_topics() -> str:
+        """读取真实 topic_id、累计权重、主题词及标签；报告逐一覆盖这些 ID，不按排序猜测"""
         from src.diagnosis.queries import DiagnosisQueries
 
-        ledger.record_tool_call("get_pivot_materials")
+        ledger.record_tool_call("read_topics")
+        return json.dumps({"topics": DiagnosisQueries(session).fetch_topic_words(run_id)}, ensure_ascii=False)
 
-        repo = DiagnosisQueries(session)
-        parts: list[str] = []
+    access = DiagnosisTextAccess(run_id)
+    query = DiagnosisTextQuery(session, run_id, text_search)
+    state_tools = build_state_read_tools(
+        DiagnosisGraphSource(session, run_id),
+        DiagnosisDeclarationSource(draft),
+        event_reads={},
+        entity_ids=set(),
+        case_reads=[],
+        resolve_event=lambda value: value,
+        organization=DiagnosisOrganizationSource(draft),
+    )
+    read_text = build_text_read_tool(query, access)
+    tools = [
+        write_diagnosis,
+        write_event,
+        write_arc,
+        write_outcome,
+        write_conflict,
+        read_metrics,
+        read_topics,
+        *build_search_tools(query, access),
+        read_text,
+        *state_tools,
+        *build_case_tools(case_pool, author),
+        build_finish_tool(lambda: {"status": "end_requested"}),
+    ]
+    if case_writes_graph is not None and case_writer_store is not None and work_id is not None:
+        # 2026-10-15 用户裁定「复用标注工具」「没权限」：人物/关系/对话案例处置复用
+        # 标注语义写入工具原形；来源章归属本 work 声明章，对话候选来自持久化对话记录
+        from src.agents.annotation.ledger import AnnotationToolLedger
+        from src.agents.diagnosis.case_write_tools import build_case_write_tools
 
-        pivot_blocks = repo.fetch_pivot_blocks(run_id, limit=20)
-        if pivot_blocks:
-            parts.append("<转折块>")
-            for chunk_id, chunk_text, event_type in pivot_blocks:
-                preview = (chunk_text or "")[:300]
-                parts.append(f"[chunk {chunk_id}] ({event_type}) {preview}")
-            parts.append("</转折块>")
+        writer = AnnotationToolLedger(
+            run_scope=run_id,
+            current_chapter_id=int(case_source_chapter or 0),
+            current_chapter_text="",
+            allow_future_context=False,
+        )
+        writer.phase = "diagnosis_open"
+        writer.graph = case_writes_graph
+        writer.dialogue.dialogue_candidates = list(case_dialogue_candidates or [])
+        case_author = author
+        case_writes_graph.begin(*case_author, int(case_source_chapter or 0), "diagnosis")
+        case_tools = build_case_write_tools(query, writer)
+        case_writer_store[work_id] = (writer, case_author)
 
-        high_tension = repo.fetch_high_tension_chunks(run_id, limit=10)
-        if high_tension:
-            parts.append("<高张力>")
-            for paragraph_id, paragraph_text, tension in high_tension:
-                preview = (paragraph_text or "")[:300]
-                parts.append(f"[paragraph {paragraph_id}] (tension={tension:.4f}) {preview}")
-            parts.append("</高张力>")
+        def _bind_case_execution(candidate: Any) -> Any:
+            original_func, original_coroutine = candidate.func, candidate.coroutine
 
-        foreshadowing_trees = repo.fetch_foreshadowing_trees(run_id)
-        if foreshadowing_trees:
-            parts.append("<伏笔树>")
-            for tree in foreshadowing_trees[:30]:
-                parts.append(
-                    json.dumps(
-                        {
-                            "root_event_id": tree.root_event_id,
-                            "description": tree.description,
-                            "payoff_likelihood": tree.payoff_likelihood,
-                            "strength": tree.strength,
-                            "status": tree.status,
-                            "anchor_chapter_ids": tree.anchor_chapter_ids,
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-            parts.append("</伏笔树>")
+            def invoke(*args: Any, **kwargs: Any) -> Any:
+                with case_writes_graph.author(*case_author):
+                    snapshot = case_writes_graph.snapshot()
+                    try:
+                        return original_func(*args, **kwargs)
+                    except BaseException:
+                        case_writes_graph.restore(snapshot)
+                        raise
 
-        foreshadow_expectation = repo.calculate_foreshadow_expectation(run_id)
-        if foreshadow_expectation is not None:
-            parts.append(f"伏笔兑现预期: {foreshadow_expectation:.2%}")
+            async def ainvoke(*args: Any, **kwargs: Any) -> Any:
+                with case_writes_graph.author(*case_author):
+                    snapshot = case_writes_graph.snapshot()
+                    try:
+                        return await original_coroutine(*args, **kwargs)
+                    except BaseException:
+                        case_writes_graph.restore(snapshot)
+                        raise
 
-        return "\n".join(parts) if parts else "（无转折素材数据）"
+            if original_func is not None:
+                candidate.func = invoke
+            if original_coroutine is not None:
+                candidate.coroutine = ainvoke
+            return candidate
 
-    @tool
-    def get_relation_changes() -> str:
-        """
-        查询人物关系变化事件。
-        用于判断角色关系网络发展与主线羁绊。
-        """
-        from src.diagnosis.queries import DiagnosisQueries
+        tools.extend(_bind_case_execution(candidate) for candidate in case_tools)
 
-        ledger.record_tool_call("get_relation_changes")
+    from src.case_pool.tool_binding import bind_caseid, current_case_call_id
 
-        repo = DiagnosisQueries(session)
-        relations = repo.fetch_relation_changes(run_id, limit=50)
-        if not relations:
-            return "（无关系变化数据）"
-        return "\n".join(
-            f"[chunk {chunk_id}] {from_char} -> {to_char} ({rel_type}, {change})"
-            for chunk_id, from_char, to_char, rel_type, change in relations
+    def associate(*, caseid: Any, tool_name: str, receipt: dict[str, Any]) -> dict[str, Any]:
+        return case_pool.associate(
+            caseid,
+            author,
+            tool_name=tool_name,
+            call_id=current_case_call_id.get(),
+            receipt=receipt,
+            is_write=tool_name in WRITE_NAMES,
         )
 
-    @tool
-    def get_character_data() -> str:
-        """
-        查询数据库事实图中的已确认人物节点。
-        用于判断核心阵容与主配角。
-        """
-        from src.diagnosis.queries import DiagnosisQueries
-
-        ledger.record_tool_call("get_character_data")
-
-        repo = DiagnosisQueries(session)
-        known_characters = repo.fetch_known_characters(run_id)
-        if known_characters:
-            return f"已知人物: {known_characters}"
-        return "（无人物数据）"
-
-    @tool
-    def get_topic_data() -> str:
-        """
-        查询主题词与主题分布（返回 topic_id、累计权重、主题词与标签）。
-        用于判断全书主题方向与话题覆盖。
-        """
-        from src.diagnosis.queries import DiagnosisQueries
-
-        ledger.record_tool_call("get_topic_data")
-
-        repo = DiagnosisQueries(session)
-        topic_rows = repo.fetch_topic_words(run_id)
-        if not topic_rows:
-            return "（无主题数据）"
-        return _format_topic_rows(topic_rows)
-
-    @tool
-    def get_graph_signals() -> str:
-        """
-        查询人物图谱质量信号（节点数、关系数、活跃度等）。
-        用于判断角色网络规模与图谱完整性。
-        """
-        from src.fact_graph.read import KnowledgeGraphAuthorityService, serialize_graph_report_signals
-
-        ledger.record_tool_call("get_graph_signals")
-
-        try:
-            graph_report = KnowledgeGraphAuthorityService.from_session(session).build_graph_report(run_id)
-        except Exception as exc:
-            return f"（图谱信号不可用: {exc}）"
-        summary, quality = serialize_graph_report_signals(graph_report)
-        merged_signals = {**summary, **quality}
-        if not merged_signals:
-            return "（无图谱信号数据）"
-        return "\n".join(f"{key}: {value}" for key, value in sorted(merged_signals.items()))
-
-    @tool
-    def finish(analysis: AgentAnalysis) -> str:
-        """
-        完成诊断：提交最终诊断报告。
-        必须在完成所有取证后调用；输出必须是完整的诊断结果 JSON。
-        """
-        return "OK"
-
-    @tool
-    def revise_finish(patch: AgentAnalysisPatch) -> str:
-        """
-        局部修正上一次提交的诊断结果：只提交需要修改的字段，
-        未提交字段沿用上一次完整结果。校验仍被拒时继续修正，不要重复提交完整结果。
-        """
-        return "OK"
-
-    return [
-        search_book_events,
-        read_book_events,
-        read_book_passages,
-        register_narrative_arc,
-        assign_book_events,
-        reference_book_event,
-        read_organization_draft,
-        get_aggregate_signals,
-        get_pivot_materials,
-        get_relation_changes,
-        get_character_data,
-        get_topic_data,
-        get_graph_signals,
-        finish,
-        revise_finish,
-    ]
+    for candidate in tools:
+        _forbid_undeclared_args(candidate)
+        bind_caseid(candidate, associate)
+    return tools

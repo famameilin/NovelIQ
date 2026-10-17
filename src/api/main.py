@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="小说量化分析 API",
-    version="0.2.1",
+    version="0.2.2",
     description="小说文本量化分析服务的 RESTful API",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -121,7 +121,7 @@ async def health_check():
         return {
             "status": "healthy",
             "service": "novel-qa-api",
-            "version": "0.2.1",
+            "version": "0.2.2",
             "pool": pool_status,
         }
     except Exception as e:
@@ -133,7 +133,7 @@ async def health_check():
             content={
                 "status": "unhealthy",
                 "service": "novel-qa-api",
-                "version": "0.2.1",
+                "version": "0.2.2",
                 "error": "服务暂不可用，请稍后重试",
             },
         )

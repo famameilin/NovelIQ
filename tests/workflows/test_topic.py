@@ -68,7 +68,11 @@ class TestTopicModel:
         self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
 
     def _create_paragraphs(self, paragraph_count: int) -> None:
-        """每个章节插入一个段落，构造 paragraphs 唯一事实源测试数据"""
+        """每个章节插入一个段落，构造 paragraphs 唯一事实源测试数据
+
+        2026-10-16 3NF：token_count 是指标/预处理同批唯一口径，落 paragraph_metrics
+        （正式链由 preprocess 写入），训练达标判定读该行。
+        """
         chapter_repo = ChapterRepository(self.db_session)
         chapters = [
             Chunk(
@@ -83,7 +87,34 @@ class TestTopicModel:
         chapter_repo.insert_chapter_texts(self.run_id, chapters)
 
         spans = [replace(span, token_count=len(tokenize(span.text))) for span in split_chunk_paragraphs(chapters)]
-        ParagraphRepository(self.db_session).insert_paragraphs(self.run_id, spans)
+        paragraph_repo = ParagraphRepository(self.db_session)
+        paragraph_repo.insert_paragraphs(self.run_id, spans)
+        from src.storage.repositories.paragraph_repository import ParagraphMetricRow
+
+        paragraph_repo.insert_paragraph_metrics(
+            self.run_id,
+            [
+                ParagraphMetricRow(
+                    paragraph_id=span.paragraph_id,
+                    token_count=span.token_count,
+                    sentence_count=1,
+                    sentence_char_sum=float(len(span.text)),
+                    sentence_char_sum_sq=float(len(span.text) ** 2),
+                    positive_weight_sum=0.0,
+                    negative_weight_sum=0.0,
+                    fight_weight_sum=0.0,
+                    exclaim_count=0,
+                    question_count=0,
+                    pause_count=0,
+                    dialogue_char_count=0,
+                    sensory_hit_count=0,
+                    imagery_hit_count=0,
+                    metaphor_sentence_count=0,
+                    body_reaction_hit_count=0,
+                )
+                for span in spans
+            ],
+        )
 
     def _count_paragraph_topics(self) -> int:
         count = self.db_session.execute(
@@ -109,14 +140,14 @@ class TestTopicModel:
         assert topics == 3
         assert self._count_paragraph_topics() > 0
 
-        # §5.8 模型契约单行：参数快照与 artifact key 齐备
+        # §5.8 模型契约单行：参数拆列，model_key/artifact_key/推断段落数为合同投影
         paragraph_repo = ParagraphRepository(self.db_session)
         model_run = paragraph_repo.fetch_topic_model_run(self.run_id)
         assert model_run is not None
         assert model_run.num_topics == 3
         assert model_run.model_key == "gensim-lda"
-        assert model_run.parameters["num_topics"] == 3
-        assert model_run.parameters["passes"] == 5
+        assert model_run.passes == 5
+        assert model_run.artifact_key == f"models/topic/{self.run_id}"
         assert model_run.training_document_count == 10
         assert model_run.inference_paragraph_count == 10
         assert model_run.dictionary_size > 0
@@ -150,9 +181,10 @@ class TestTopicModel:
         paragraph_repo = ParagraphRepository(self.db_session)
         rows = list(paragraph_repo.fetch_paragraph_rows(self.run_id))
         short_row = rows[0]
+        # 2026-10-16 3NF：预处理/指标同批 token_count 观测落 paragraph_metrics（唯一口径）
         self.db_session.execute(
             text(
-                "UPDATE paragraphs SET token_count = :token_count "
+                "UPDATE paragraph_metrics SET token_count = :token_count "
                 "WHERE run_id = :run_id AND paragraph_id = :paragraph_id"
             ),
             {"token_count": 1, "run_id": self.run_id, "paragraph_id": short_row.paragraph_id},

@@ -177,10 +177,10 @@ class TestDeleteAnalysis:
                 text(
                     "INSERT INTO chapters "
                     "(chapter_id, sequence, title, display_title, display_index_label, "
-                    "level, start_pos, end_pos, text, char_offset, char_end_offset, run_id) "
+                    "level, start_pos, end_pos, text, char_offset, run_id) "
                     "VALUES "
                     "(:chapter_id, 1, '第1章', '第1章', NULL, 'chapter', "
-                    "0, :len, :text, 0, :len, :run_id)"
+                    "0, :len, :text, 0, :run_id)"
                 ),
                 {"chapter_id": 1, "text": "待删除分块", "len": 5, "run_id": run_id},
             )

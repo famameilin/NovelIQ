@@ -2,11 +2,14 @@
 分析运行记录的数据库操作实现
 
 从 sqlite3.Connection 迁移到 SQLAlchemy Session
+
+2026-10-16 全库 3NF：analysis_runs 的 title/author 改名 source_title/source_author
+（运行开始时的来源观察）；原 request_payload JSON 列拆成六个 force_* 与
+requested_num_topics 具名标量（无请求该组全空，false 仍为实际提交）。
 """
 
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any, TypeGuard, TypeVar
@@ -48,6 +51,242 @@ def _as_naive_utc(value: datetime | None) -> datetime | None:
 _UNSET = object()
 T = TypeVar("T")
 
+#: run 级表的清理顺序（子 → 父）。RESTRICT 外键决定依赖方必须先删；
+#: 两处互相引用按可删方向显式排定：book_cases 先于 case_entries
+#: （pending_event_entry_id 是 RESTRICT 回指），work_items 先于 executions
+#: （diagnosis_session_id 是 RESTRICT 回指）。novels 是全局书目，不在此表。
+_RUN_PURGE_ORDER: tuple[str, ...] = (
+    "source_evidence",
+    "conflict_claims",
+    "fact_entity_tags",
+    "conflict_records",
+    "book_cases",
+    "case_entries",
+    "graph_facts",
+    "organization_checks",
+    "narrative_links",
+    "event_revisions",
+    "event_foreshadowing_actions",
+    "dialogue_records",
+    "declaration_participants",
+    "event_declarations",
+    "analysis_assessments",
+    "agent_tool_calls",
+    "narrative_groups",
+    "model_calls",
+    "linguistic_arcs",
+    "diagnosis_reports",
+    "complete_events",
+    "chapter_annotations",
+    "work_items",
+    "executions",
+    "paragraph_topics",
+    "paragraph_metrics",
+    "paragraph_features",
+    "linguistic_spans",
+    "paragraphs",
+    "graph_relations",
+    "graph_entities",
+    "event_outbox",
+    "chapters",
+    "analysis_runs",
+)
+
+
+def _run_purge_predicates(run_id: str) -> dict[str, Any]:
+    """每张 run 级表「属于该 run」的谓词：有 run_id 列直接用，其余按外键链解析"""
+    from sqlalchemy import or_
+
+    m = Base.metadata.tables
+
+    def col(table: str, name: str) -> Any:
+        return m[table].c[name]
+
+    def ids(table: str, column: str, predicate: Any) -> Any:
+        return select(m[table].c[column]).where(predicate)
+
+    entities = ids("graph_entities", "entity_id", col("graph_entities", "run_id") == run_id)
+    sessions = ids("executions", "execution_id", col("executions", "session_run_id") == run_id)
+    work_items = ids(
+        "work_items",
+        "work_id",
+        or_(
+            col("work_items", "program_run_id") == run_id,
+            col("work_items", "annotation_run_id") == run_id,
+            col("work_items", "diagnosis_session_id").in_(sessions),
+        ),
+    )
+    executions = ids(
+        "executions",
+        "execution_id",
+        or_(
+            col("executions", "session_run_id") == run_id,
+            col("executions", "work_id").in_(work_items),
+        ),
+    )
+    model_calls = ids(
+        "model_calls",
+        "call_id",
+        or_(col("model_calls", "standalone_run_id") == run_id, col("model_calls", "execution_id").in_(executions)),
+    )
+    annotations = ids("chapter_annotations", "record_id", col("chapter_annotations", "execution_id").in_(executions))
+    events = ids("complete_events", "event_id", col("complete_events", "producer_execution_id").in_(executions))
+    declarations = ids("event_declarations", "declaration_id", col("event_declarations", "record_id").in_(annotations))
+    reports = ids("diagnosis_reports", "report_id", col("diagnosis_reports", "session_id").in_(executions))
+    links = ids("narrative_links", "link_id", col("narrative_links", "producer_execution_id").in_(executions))
+    groups = ids("narrative_groups", "group_id", col("narrative_groups", "producer_execution_id").in_(executions))
+    conflicts = ids("conflict_records", "conflict_id", col("conflict_records", "producer_execution_id").in_(executions))
+    claims = ids("conflict_claims", "claim_id", col("conflict_claims", "producer_execution_id").in_(executions))
+    checks = ids("organization_checks", "check_id", col("organization_checks", "producer_execution_id").in_(executions))
+    actions = ids(
+        "event_foreshadowing_actions",
+        "action_id",
+        col("event_foreshadowing_actions", "producer_execution_id").in_(executions),
+    )
+    participants = ids(
+        "declaration_participants",
+        "participant_id",
+        col("declaration_participants", "declaration_id").in_(declarations),
+    )
+    relations = ids(
+        "graph_relations",
+        "relation_id",
+        or_(
+            col("graph_relations", "from_entity_id").in_(entities),
+            col("graph_relations", "to_entity_id").in_(entities),
+        ),
+    )
+    dialogues = ids(
+        "dialogue_records",
+        "dialogue_id",
+        or_(
+            col("dialogue_records", "creation_execution_id").in_(executions),
+            col("dialogue_records", "current_attribution_execution_id").in_(executions),
+        ),
+    )
+    facts = ids(
+        "graph_facts",
+        "graph_fact_id",
+        or_(
+            col("graph_facts", "direct_producer_execution_id").in_(executions),
+            col("graph_facts", "program_work_id").in_(work_items),
+            col("graph_facts", "entity_id").in_(entities),
+            col("graph_facts", "relation_id").in_(relations),
+            col("graph_facts", "participant_id").in_(participants),
+        ),
+    )
+
+    return {
+        "source_evidence": or_(
+            col("source_evidence", "declaration_id").in_(declarations),
+            col("source_evidence", "complete_event_id").in_(events),
+            col("source_evidence", "related_complete_event_id").in_(events),
+            col("source_evidence", "graph_fact_id").in_(facts),
+            col("source_evidence", "narrative_link_id").in_(links),
+            col("source_evidence", "foreshadow_action_id").in_(actions),
+            col("source_evidence", "narrative_group_id").in_(groups),
+            col("source_evidence", "conflict_id").in_(conflicts),
+            col("source_evidence", "claim_id").in_(claims),
+            col("source_evidence", "check_id").in_(checks),
+        ),
+        "conflict_claims": col("conflict_claims", "producer_execution_id").in_(executions),
+        "fact_entity_tags": col("fact_entity_tags", "graph_fact_id").in_(facts),
+        "conflict_records": col("conflict_records", "producer_execution_id").in_(executions),
+        "book_cases": col("book_cases", "registration_run_id") == run_id,
+        "case_entries": or_(
+            col("case_entries", "producer_execution_id").in_(executions),
+            col("case_entries", "candidate_producer_execution_id").in_(executions),
+        ),
+        "graph_facts": col("graph_facts", "graph_fact_id").in_(facts),
+        "organization_checks": col("organization_checks", "producer_execution_id").in_(executions),
+        "narrative_links": col("narrative_links", "producer_execution_id").in_(executions),
+        "event_revisions": or_(
+            col("event_revisions", "declaration_id").in_(declarations),
+            col("event_revisions", "event_id").in_(events),
+        ),
+        "event_foreshadowing_actions": col("event_foreshadowing_actions", "producer_execution_id").in_(executions),
+        "dialogue_records": col("dialogue_records", "dialogue_id").in_(dialogues),
+        "declaration_participants": col("declaration_participants", "declaration_id").in_(declarations),
+        "event_declarations": col("event_declarations", "declaration_id").in_(declarations),
+        "analysis_assessments": or_(
+            col("analysis_assessments", "report_id").in_(reports),
+            col("analysis_assessments", "record_id").in_(annotations),
+            col("analysis_assessments", "scored_entity_id").in_(entities),
+            col("analysis_assessments", "cast_entity_id").in_(entities),
+        ),
+        "agent_tool_calls": col("agent_tool_calls", "call_id").in_(model_calls),
+        "narrative_groups": col("narrative_groups", "group_id").in_(groups),
+        "model_calls": col("model_calls", "call_id").in_(model_calls),
+        "linguistic_arcs": or_(
+            col("linguistic_arcs", "head_span_id").in_(
+                ids("linguistic_spans", "span_id", col("linguistic_spans", "run_id") == run_id)
+            ),
+            col("linguistic_arcs", "dependent_span_id").in_(
+                ids("linguistic_spans", "span_id", col("linguistic_spans", "run_id") == run_id)
+            ),
+        ),
+        "diagnosis_reports": col("diagnosis_reports", "report_id").in_(reports),
+        "complete_events": col("complete_events", "event_id").in_(events),
+        "chapter_annotations": col("chapter_annotations", "record_id").in_(annotations),
+        "work_items": col("work_items", "work_id").in_(work_items),
+        "executions": col("executions", "execution_id").in_(executions),
+        "paragraph_topics": col("paragraph_topics", "run_id") == run_id,
+        "paragraph_metrics": col("paragraph_metrics", "run_id") == run_id,
+        "paragraph_features": col("paragraph_features", "run_id") == run_id,
+        "linguistic_spans": col("linguistic_spans", "run_id") == run_id,
+        "paragraphs": col("paragraphs", "run_id") == run_id,
+        "graph_relations": col("graph_relations", "relation_id").in_(relations),
+        "graph_entities": col("graph_entities", "entity_id").in_(entities),
+        "event_outbox": col("event_outbox", "run_id") == run_id,
+        "chapters": col("chapters", "run_id") == run_id,
+        "analysis_runs": col("analysis_runs", "run_id") == run_id,
+    }
+
+#: 重分析请求载荷中的 force_* 阶段字段，与 analysis_runs 列名一一对应
+_REQUEST_FORCE_FIELDS: tuple[str, ...] = (
+    "force_preprocess",
+    "force_annotate",
+    "force_aggregate",
+    "force_topic_model",
+    "force_diagnose",
+    "force_linguistic",
+)
+
+
+def _request_payload_columns(request_payload: dict[str, Any] | None) -> dict[str, Any]:
+    """把重分析请求载荷拆成 analysis_runs 具名列（无请求该组全空）
+
+    false 是真实提交值（保留），None/缺键才表示未请求该口径。
+    """
+    columns: dict[str, Any] = dict.fromkeys(_REQUEST_FORCE_FIELDS)
+    columns["requested_num_topics"] = None
+    if request_payload is None:
+        return columns
+    for field in _REQUEST_FORCE_FIELDS:
+        raw_value = request_payload.get(field)
+        if raw_value is not None:
+            columns[field] = bool(raw_value)
+    raw_num_topics = request_payload.get("num_topics")
+    if raw_num_topics is not None:
+        columns["requested_num_topics"] = int(raw_num_topics)
+    return columns
+
+
+def _request_payload_from_columns(run: AnalysisRun) -> dict[str, Any] | None:
+    """把 analysis_runs 请求列重建为规范请求字典（无请求返回 None）
+
+    重建键名与 ReanalyzeRequest 字段一致，供 resume/恢复按原语义校验；
+    NULL 表示该口径未提交，不伪造 false。
+    """
+    payload: dict[str, Any] = {}
+    for field in _REQUEST_FORCE_FIELDS:
+        value = getattr(run, field)
+        if value is not None:
+            payload[field] = bool(value)
+    if run.requested_num_topics is not None:
+        payload["num_topics"] = int(run.requested_num_topics)
+    return payload or None
+
 
 def _is_set[T](value: T | object) -> TypeGuard[T]:
     """
@@ -66,36 +305,23 @@ class RunRepository(BaseRepository[dict[str, Any]]):
     从 sqlite3.Connection 迁移到 SQLAlchemy Session
     """
 
-    def _serialize_request_payload(self, request_payload: dict[str, Any] | None) -> str | None:
-        """
-        序列化任务请求载荷
-
-        将重分析请求参数持久化到 analysis_runs.request_payload，供 resume/recovery 恢复原始语义
-        """
-        if request_payload is None:
-            return None
-        return json.dumps(request_payload, ensure_ascii=False, sort_keys=True)
-
     def _to_dict_with_deserialization(self, run: AnalysisRun) -> dict[str, Any]:
         """
-        将 ORM 对象转换为字典并反序列化 request_payload
+        将 ORM 对象转换为字典并重建 request_payload
 
-        2026-08-20 优化：反序列化逻辑内联于此，减少多个端点各1层的函数调用开销
+        2026-10-16 3NF：请求不再存 JSON 列，按 force_*/requested_num_topics
+        列重建与 ReanalyzeRequest 同键的字典（无请求为 None）。
         """
-        # 内联反序列化逻辑，避免额外的函数调用
-        request_payload_dict = None
-        if run.request_payload:
-            try:
-                request_payload_dict = json.loads(run.request_payload)
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to deserialize request_payload: {e}")
+        request_payload_dict = _request_payload_from_columns(run)
 
         return {
             "run_id": run.run_id,
             "novel_id": run.novel_id,
             "source_path": run.source_path,
-            "title": run.title,
-            "author": run.author,
+            "title": run.source_title,
+            "author": run.source_author,
+            "source_title": run.source_title,
+            "source_author": run.source_author,
             "status": run.status,
             "progress": run.progress,
             "stage": run.stage,
@@ -125,7 +351,10 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         task_kind: str = "analysis",
         request_payload: dict[str, Any] | None = None,
     ) -> str:
-        """创建新的分析运行记录。Args: novel_id/source_path/title/author/run_id；Returns: 运行ID。"""
+        """创建新的分析运行记录。Args: novel_id/source_path/title/author/run_id；Returns: 运行ID。
+
+        title/author 形参写入 analysis_runs.source_title/source_author（运行开始时来源观察）。
+        """
         if run_id is None:
             run_id = str(uuid.uuid4())
         now = _naive_utcnow()
@@ -134,13 +363,13 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id=run_id,
             novel_id=novel_id,
             source_path=source_path,
-            title=title,
-            author=author,
+            source_title=title,
+            source_author=author,
             status="pending",
             task_kind=task_kind,
-            request_payload=self._serialize_request_payload(request_payload),
             created_at=now,
             updated_at=now,
+            **_request_payload_columns(request_payload),
         )
         self.session.add(run)
         self.session.commit()
@@ -325,7 +554,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         if _is_set(task_kind):
             run.task_kind = task_kind
         if _is_set(request_payload):
-            run.request_payload = self._serialize_request_payload(request_payload)
+            # 2026-10-16 3NF：请求整组重写为具名列；未提交口径置空
+            for field, value in _request_payload_columns(request_payload).items():
+                setattr(run, field, value)
         if _is_set(cancel_requested):
             run.cancel_requested = cancel_requested
         if _is_set(worker_id):
@@ -355,19 +586,24 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         return self._to_dict_with_deserialization(run)
 
     def delete_run(self, run_id: str) -> bool:
-        """2026-08-05 用于按当前 ORM 外键逆序删除运行数据并由调用方统一提交"""
+        """按运行范围删除全部 run 级数据，由调用方统一提交
+
+        2026-10-16 全库 3NF：35 表里只有 9 张带 run_id 列，其余 run 级表
+        按真实外键链解析归属；删除按 _RUN_PURGE_ORDER 的显式子→父顺序走，
+        保证 RESTRICT 外键（含 book_cases↔case_entries、executions↔work_items
+        两处互相引用）先删依赖方。novels 是全局书目，不属于任何 run，不删。
+        """
         exists_stmt = select(AnalysisRun.run_id).where(AnalysisRun.run_id == run_id)
         if self.session.execute(exists_stmt).scalar_one_or_none() is None:
             return False
 
         existing_table_names = set(inspect(self.session.get_bind()).get_table_names())
-        for table in reversed(Base.metadata.sorted_tables):
-            if table.name not in existing_table_names:
+        predicates = _run_purge_predicates(run_id)
+        for table_name in _RUN_PURGE_ORDER:
+            if table_name not in existing_table_names:
                 continue
-            run_id_column = table.c.get("run_id")
-            if run_id_column is None:
-                continue
-            self.session.execute(delete(table).where(run_id_column == run_id))
+            table = Base.metadata.tables[table_name]
+            self.session.execute(delete(table).where(predicates[table_name]))
         self.session.flush()
         return True
 

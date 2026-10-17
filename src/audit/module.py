@@ -1,7 +1,9 @@
 """统计审计独立接收实际运行事实并保存，不参与 work 业务事务
 
-2026-10-06 表合并：invocation 上下文保存在本模块内存中并随 start_turn 注入回合行；
-跨重启重放的幂等去重由行上的 message_key 唯一列承担（每条审计消息自带唯一 id）。
+2026-10-16 全库 3NF 改造：invocation 的执行事实随 start_invocation 落到
+executions（work 绑定、run/章节/角色由 work 身份取得），跨重启重放的幂等去重
+由 model_calls.message_key / agent_tool_calls.message_key 这两个可空唯一列承担
+（每条审计消息自带唯一 id，重放命中原行）。
 """
 
 from __future__ import annotations
@@ -62,15 +64,15 @@ class AuditModule:
                 self._save_fact(message, recorder)
 
     def _skip_replayed(self, session: Session, message: Message) -> bool:
-        """按 message_key 幂等去重；start_turn 重放需先补回本地回合 id 映射"""
-        from src.storage.models import AgentToolCall, ModelTurn
+        """按审计消息键幂等去重；start_turn 重放需先补回本地调用 id 映射"""
+        from src.storage.models import AgentToolCall, ModelCall
 
-        turn_id = session.execute(
-            select(ModelTurn.id).where(ModelTurn.message_key == message.message_id)
+        call_id = session.execute(
+            select(ModelCall.call_id).where(ModelCall.message_key == message.message_id)
         ).scalar_one_or_none()
-        if turn_id is not None:
+        if call_id is not None:
             if message.payload["method"] == "start_turn":
-                self.identifiers[(message.invocation_id, "turn", message.payload["local_id"])] = int(turn_id)
+                self.identifiers[(message.invocation_id, "turn", message.payload["local_id"])] = int(call_id)
             return True
         tool_id = session.execute(
             select(AgentToolCall.id).where(AgentToolCall.message_key == message.message_id)
@@ -85,7 +87,8 @@ class AuditModule:
         local_id = payload["local_id"]
         execution_id = message.invocation_id
         if method == "start_invocation":
-            # invocation 不落行：上下文由发起方随每条审计调用流动
+            # 执行事实在此登记；run/章节/角色由 work 身份取得，上下文仍随每条审计调用流动
+            recorder.start_invocation(**kwargs)
             self.identifiers[(execution_id, "invocation", local_id)] = local_id
             return local_id
         if method == "start_turn":
