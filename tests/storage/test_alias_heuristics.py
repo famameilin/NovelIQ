@@ -66,8 +66,8 @@ def test_find_heuristic_character_edges_only_character_type() -> None:
     assert edges == [(_sid(1), _sid(2))]
 
 
-def test_build_alias_resolution_merges_heuristic_substring_without_llm_edge() -> None:
-    """无 same_character 关系时，子串启发式仍可合并 贺伯安→伯安。"""
+def test_build_alias_resolution_keeps_substrings_without_formal_identity() -> None:
+    """没有正式身份断言时，名称子串不构成归并依据"""
     entities = [
         _entity(_sid(10), "贺伯安"),
         _entity(_sid(20), "伯安"),
@@ -76,8 +76,9 @@ def test_build_alias_resolution_merges_heuristic_substring_without_llm_edge() ->
     ]
     resolution = build_alias_resolution([], entities=entities)
 
-    # 贺伯安/伯安 应收敛到同一代表
-    assert resolution.resolve_entity_id(_sid(10)) == resolution.resolve_entity_id(_sid(20))
+    # 贺伯安/伯安 各自保留身份
+    assert resolution.resolve_entity_id(_sid(10)) == _sid(10)
+    assert resolution.resolve_entity_id(_sid(20)) == _sid(20)
     # 赵哥/赤甲卫 不得误合并
     assert resolution.resolve_entity_id(_sid(30)) == _sid(30)
     assert resolution.resolve_entity_id(_sid(40)) == _sid(40)

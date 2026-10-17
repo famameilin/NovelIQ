@@ -93,14 +93,15 @@ def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
 
     with patch("src.api.services.results_queries.graph.GraphRepository") as graph_repository:
         graph_repository.return_value.fetch_snapshot.return_value = snapshot
+        graph_repository.return_value.fetch_relation_snapshots.return_value = snapshot.relations
 
         payload = _fetch_graph_snapshot("run-1", annotation_repo)
 
     response = GraphSnapshotResponse.model_validate(payload)
     node_names = {node.name for node in response.nodes}
-    # P11：贺伯安/伯安 子串启发式合并后只保留代表节点；贺重明 仍经 same_character 并入
-    assert node_names == {"伯安"}
+    # 只有正式同一人物断言归并贺重明，名称子串贺伯安保留独立节点
+    assert node_names == {"伯安", "贺伯安"}
     boan = next(node for node in response.nodes if node.name == "伯安")
-    assert sorted(boan.aliases) == ["贺伯安", "贺重明"]
+    assert boan.aliases == ["贺重明"]
     assert all(edge.relation_semantics != "same_character" for edge in response.edges)
-    assert response.edges == []
+    assert [(edge.source_name, edge.target_name) for edge in response.edges] == [("伯安", "贺伯安")]
