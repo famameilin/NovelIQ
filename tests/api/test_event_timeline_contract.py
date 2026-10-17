@@ -20,14 +20,19 @@ def test_character_history_and_source_mapping(api_client, db_session):
         url, params={**params, "through_chapter_id": 3, "source_fact_id": change["source_fact_ids"][0]}
     ).json()
     assert mapped["changes"] == [change]
-    source = api_client.get(
-        f"{url}/changes/{change['progression_change_id']}/source", params={**params, "through_chapter_id": 3}
+    # 来源证据按事实归属读取：人物观测用来源声明的证据，关系事实带自身证据
+    relationship = next(
+        item for item in third["changes"] if item["dimension"] == "relationship" and item["chapter_id"] == 3
     )
-    assert source.status_code == 200
-    assert "结盟" in source.json()["paragraphs"][0]["text"]
+    for with_source in (change, relationship):
+        source = api_client.get(
+            f"{url}/changes/{with_source['plotline_change_id']}/source", params={**params, "through_chapter_id": 3}
+        )
+        assert source.status_code == 200
+        assert source.json()["paragraphs"], "来源章节必须返回真实段落"
     assert (
         api_client.get(
-            f"{url}/changes/{change['progression_change_id']}", params={**params, "through_chapter_id": 1}
+            f"{url}/changes/{change['plotline_change_id']}", params={**params, "through_chapter_id": 1}
         ).status_code
         == 404
     )
@@ -39,6 +44,7 @@ def test_relationship_break_and_window_preserve_history(api_client, db_session):
     params = {"task_id": scenario.task_id, "through_chapter_id": 5, "dimension": "relationship"}
     result = api_client.get(url, params=params).json()
     ally = [item for item in result["changes"] if item["after"]["relation_type"] == "盟友"]
+    # 关系变化值按写面合同原样入库（断裂就是 break，不归一为 retract），读面逐字投影
     assert [item["action"] for item in ally] == ["assert", "break"]
     assert ally[0]["before"] is None
     assert ally[1]["before"]["active"] is True and ally[1]["after"]["active"] is False

@@ -212,8 +212,10 @@ def build_event_timeline_plan(
         character_names: list[str] = []
         seen_chars: set[str] = set()
         for p in participants:
-            name = str(p.get("name") or "").strip()
-            entity_type = str(p.get("entity_type") or "")
+            raw_entity = p.get("entity")
+            entity: dict[str, Any] = raw_entity if isinstance(raw_entity, dict) else {}
+            name = str(entity.get("name") or "").strip()
+            entity_type = str(entity.get("entity_type") or "")
             if not name or name in seen_chars:
                 continue
             if entity_type and entity_type != "character":

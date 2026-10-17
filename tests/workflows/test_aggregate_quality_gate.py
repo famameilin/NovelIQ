@@ -53,7 +53,6 @@ def _create_run_with_paragraph_metrics(
         ParagraphMetricRow(
             paragraph_id=span.paragraph_id,
             token_count=token_counts[index],
-            char_count=span.char_count,
             sentence_count=1,
             sentence_char_sum=10.0,
             sentence_char_sum_sq=100.0,
@@ -68,8 +67,6 @@ def _create_run_with_paragraph_metrics(
             imagery_hit_count=imagery_hit_counts[index],
             metaphor_sentence_count=0,
             body_reaction_hit_count=0,
-            function_word_counts={},
-            semantic_category_counts={},
         )
         for index, span in enumerate(spans)
     ]
@@ -170,7 +167,6 @@ def test_build_quality_gate_report_counts_chapters_without_metric_rows(db_sessio
             ParagraphMetricRow(
                 paragraph_id=span0.paragraph_id,
                 token_count=10,
-                char_count=span0.char_count,
                 sentence_count=1,
                 sentence_char_sum=10.0,
                 sentence_char_sum_sq=100.0,
@@ -185,8 +181,6 @@ def test_build_quality_gate_report_counts_chapters_without_metric_rows(db_sessio
                 imagery_hit_count=0,
                 metaphor_sentence_count=0,
                 body_reaction_hit_count=0,
-                function_word_counts={},
-                semantic_category_counts={},
             )
         ],
     )

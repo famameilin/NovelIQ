@@ -20,6 +20,12 @@ CLI aggregate 模块测试
 任务: M8b 段落化
 修改内容: 聚合阶段不再写入 chunk_curves（曲线事实源为 paragraph_curves），
 测试夹具改为插入段落事实源 + 段落指标 + 段落曲线，断言 global_stats 守恒聚合。
+
+修改时间: 2026-10-16
+任务: 全库第三范式改造收尾
+修改内容: 段落指标行只带 paragraph_metrics 可写列；张力以 paragraph_features 的
+tension_z 观测表达（sigmoid 为读投影）；全书统计改读 analysis_runs 具名列，
+断言保留守恒与 run 隔离行为面。
 """
 
 import sys
@@ -28,11 +34,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.storage.repositories import ChapterRepository, RunRepository
+from src.storage.repositories import ChapterRepository, RunRepository, StatsRepository
+from src.storage.repositories.paragraph import insert_paragraph_tension_observations
 from src.storage.repositories.paragraph_repository import (
     ParagraphCurveRow,
     ParagraphMetricRow,
@@ -47,17 +53,21 @@ from tests.support.chapter_annotation_helpers import confirm_test_work, persist_
 
 def _build_paragraph_rows(
     chunks: list[Chunk],
-) -> tuple[list, list, list]:
-    """按章节构造段落事实源 + 段落指标 + 段落曲线（每章一个段落）。"""
+) -> tuple[list, list, list, list]:
+    """按章节构造段落事实源 + 段落指标 + 曲线平滑样本 + 张力 z 观测（每章一个段落）。
+
+    2026-10-16 3NF：指标行只带 paragraph_metrics 的可写列；表面张力以正式
+    z 观测（paragraph_features.tension_z）表达，sigmoid 展示值由读取投影给出。
+    """
     spans = [replace(span, token_count=10) for span in split_chunk_paragraphs(chunks, max_chars=1500)]
     metric_rows: list[ParagraphMetricRow] = []
     curve_rows: list[ParagraphCurveRow] = []
-    for index, span in enumerate(spans):
+    tension_rows: list[tuple[int, float]] = []
+    for span in spans:
         metric_rows.append(
             ParagraphMetricRow(
                 paragraph_id=span.paragraph_id,
                 token_count=10,
-                char_count=span.char_count,
                 sentence_count=2,
                 sentence_char_sum=40.0,
                 sentence_char_sum_sq=900.0,
@@ -72,24 +82,32 @@ def _build_paragraph_rows(
                 imagery_hit_count=1,
                 metaphor_sentence_count=0,
                 body_reaction_hit_count=0,
-                function_word_counts={},
-                semantic_category_counts={},
-                surface_tension_z=0.0,
-                surface_tension=0.3 + index * 0.1,
             )
         )
         curve_rows.append(
             ParagraphCurveRow(
                 paragraph_id=span.paragraph_id,
-                pos_density=0.1,
-                neg_density=0.05,
-                net_density=0.05,
+                pos_density=None,
+                neg_density=None,
+                net_density=None,
                 smoothed_net_density=0.05,
-                surface_tension=0.3 + index * 0.1,
-                smoothed_surface_tension=0.3 + index * 0.1,
+                surface_tension=None,
+                smoothed_surface_tension=0.5,
             )
         )
-    return spans, metric_rows, curve_rows
+        # z=0 → 任意标准 sigmoid 的中点值 0.5，断言与投影公式细节解耦
+        tension_rows.append((span.paragraph_id, 0.0))
+    return spans, metric_rows, curve_rows, tension_rows
+
+
+def _insert_paragraph_facts(session, run_id: str, chunks: list[Chunk]) -> None:
+    """写入段落事实源、指标、曲线平滑样本与张力 z 观测（各经正式入口，先删后插语义）"""
+    spans, metric_rows, curve_rows, tension_rows = _build_paragraph_rows(chunks)
+    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo.insert_paragraphs(run_id, spans)
+    paragraph_repo.insert_paragraph_metrics(run_id, metric_rows)
+    paragraph_repo.insert_paragraph_curves(run_id, curve_rows)
+    insert_paragraph_tension_observations(session, run_id, tension_rows)
 
 
 class TestAggregate:
@@ -112,11 +130,7 @@ class TestAggregate:
             offset += len(chunk_text)
         chapter_repo.insert_chapter_texts(self.run_id, chunks)
 
-        spans, metric_rows, curve_rows = _build_paragraph_rows(chunks)
-        paragraph_repo = ParagraphRepository(self.db_session)
-        paragraph_repo.insert_paragraphs(self.run_id, spans)
-        paragraph_repo.insert_paragraph_metrics(self.run_id, metric_rows)
-        paragraph_repo.insert_paragraph_curves(self.run_id, curve_rows)
+        _insert_paragraph_facts(self.db_session, self.run_id, chunks)
         confirm_test_work(self.db_session, self.run_id, create_missing=True)
 
     @pytest.mark.asyncio()
@@ -128,11 +142,9 @@ class TestAggregate:
         assert stats_count > 0
         assert reserved == 0
 
-        stats_count = self.db_session.execute(
-            text("SELECT COUNT(*) FROM global_stats WHERE run_id = :run_id"),
-            {"run_id": self.run_id},
-        ).scalar()
-        assert stats_count > 0
+        # 全书统计按运行落在 analysis_runs 具名列（16 项目录内已计算项非空）
+        persisted = StatsRepository(self.db_session).fetch_global_stats_dict(self.run_id)
+        assert persisted
 
     @pytest.mark.asyncio()
     async def test_aggregate_global_stats(self) -> None:
@@ -140,28 +152,17 @@ class TestAggregate:
 
         await run_aggregate(run_id=self.run_id, session=self.db_session)
 
-        stats = self.db_session.execute(
-            text("SELECT stat_name, stat_value FROM global_stats WHERE run_id = :run_id"),
-            {"run_id": self.run_id},
-        ).fetchall()
-        stat_names = [s[0] for s in stats]
-        assert "avg_mtld" in stat_names
-        assert "avg_ttr" in stat_names
-        assert "avg_sent_len" in stat_names
-        assert "emotion_avg" in stat_names
-        assert "emotion_std" in stat_names
-        assert "emotion_max" in stat_names
-        assert "emotion_min" in stat_names
-        assert "rhythm_avg" in stat_names
-        assert "rhythm_std" in stat_names
+        by_name = StatsRepository(self.db_session).fetch_global_stats_dict(self.run_id)
 
-        by_name = dict(stats)
         # §9.1 守恒：全书情绪密度 = (Σpos − Σneg) / Σtoken
         assert by_name["emotion_avg"] == pytest.approx((5 * 1.0 - 5 * 0.5) / (5 * 10))
         # 平均句长 = Σsentence_char_sum / Σsentence_count
         assert by_name["avg_sent_len"] == pytest.approx(40.0 / 2)
-        # 章张力均值 = 段落 surface_tension 均值
-        assert by_name["rhythm_avg"] == pytest.approx(sum(0.3 + i * 0.1 for i in range(5)) / 5)
+        # 章张力均值 = 段落表面张力均值（z=0 经 sigmoid 投影为 0.5）
+        assert by_name["rhythm_avg"] == pytest.approx(0.5)
+        assert by_name["rhythm_std"] == pytest.approx(0.0)
+        assert by_name["rhythm_max"] == pytest.approx(0.5)
+        assert by_name["rhythm_min"] == pytest.approx(0.5)
 
     @pytest.mark.asyncio()
     async def test_aggregate_with_annotations(self) -> None:
@@ -176,11 +177,7 @@ class TestAggregate:
             offset += len(chunk_text)
         chapter_repo.insert_chapter_texts(self.run_id, test_chunks)
 
-        spans, metric_rows, curve_rows = _build_paragraph_rows(test_chunks)
-        paragraph_repo = ParagraphRepository(self.db_session)
-        paragraph_repo.insert_paragraphs(self.run_id, spans)
-        paragraph_repo.insert_paragraph_metrics(self.run_id, metric_rows)
-        paragraph_repo.insert_paragraph_curves(self.run_id, curve_rows)
+        _insert_paragraph_facts(self.db_session, self.run_id, test_chunks)
 
         persist_chapter_annotation(
             self.db_session,
@@ -206,7 +203,7 @@ class TestAggregate:
     @pytest.mark.asyncio()
     async def test_aggregate_metrics_graph_not_ready_degrades_gracefully(self, monkeypatch) -> None:
         """2026-08-13 P2-3 用于验证 aggregate_all_metrics 抛 GraphReadinessError 时
-        保留降级（global_stats 正常写入）且记录 error 级别日志"""
+        保留降级（全书统计正常写入）且记录 error 级别日志"""
         from unittest.mock import patch
 
         from src.api.exceptions import GraphReadinessError
@@ -253,7 +250,7 @@ class TestGlobalStatsRunIsolation:
             run_id,
             [Chunk(index=0, start=0, end=len(chunk_text), text=chunk_text, chapter_id=1)],
         )
-        spans, metric_rows, curve_rows = _build_paragraph_rows(
+        spans, metric_rows, curve_rows, tension_rows = _build_paragraph_rows(
             [Chunk(index=0, start=0, end=len(chunk_text), text=chunk_text, chapter_id=1)]
         )
         metric_rows = [
@@ -268,6 +265,7 @@ class TestGlobalStatsRunIsolation:
         paragraph_repo.insert_paragraphs(run_id, spans)
         paragraph_repo.insert_paragraph_metrics(run_id, metric_rows)
         paragraph_repo.insert_paragraph_curves(run_id, curve_rows)
+        insert_paragraph_tension_observations(self.db_session, run_id, tension_rows)
 
     def test_global_stats_only_aggregates_own_run(self) -> None:
         from src.metrics.queries.global_stats import query_global_stats as compute_global_stats
@@ -281,5 +279,3 @@ class TestGlobalStatsRunIsolation:
         # run_b 的句长统计不得污染 run_a 的均值
         assert stats_a["avg_sent_len"] == pytest.approx(20.0)
         assert stats_b["avg_sent_len"] == pytest.approx(50.0)
-        assert "avg_ttr" in stats_a
-        assert "avg_mtld" in stats_a

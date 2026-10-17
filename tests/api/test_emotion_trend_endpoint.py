@@ -62,7 +62,6 @@ def _insert_100_paragraph_run(db_session) -> tuple[str, str]:
             make_metric_row(
                 paragraph_id,
                 token_count=2,
-                char_count=5,
                 positive_weight_sum=1.0 if paragraph_id % 4 == 0 else 0.0,
                 negative_weight_sum=1.0 if paragraph_id % 4 == 1 else 0.0,
             )
@@ -254,8 +253,8 @@ def test_emotion_trend_skips_paragraphs_without_metrics(api_client: TestClient, 
         db_session,
         run_id,
         [
-            make_metric_row(0, token_count=2, char_count=5, positive_weight_sum=2.0),
-            make_metric_row(2, token_count=4, char_count=4, negative_weight_sum=1.0),
+            make_metric_row(0, token_count=2, positive_weight_sum=2.0),
+            make_metric_row(2, token_count=4, negative_weight_sum=1.0),
         ],
     )
 
