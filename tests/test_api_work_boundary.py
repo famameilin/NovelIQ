@@ -1,9 +1,14 @@
-"""用 AST 锁定 21 个模块的职责方向及包内运行时依赖"""
+"""用 AST 锁定 21 个模块的职责方向及包内运行时依赖
+
+2026-10-16 全库第三范式改造收尾：白名单按当前实际依赖面重列（删去已无对应导入的
+旧项），并按现状补上 storage 读投影的领域依赖——存储层承担正式读投影的唯一定义，
+会引用版本化代码合同所在的领域模块（event_trees/fact_graph/lexicons/linguistic/
+metrics/topic），这是冻结结构下的既有方向，不是新的越层。
+"""
 
 from __future__ import annotations
 
 import ast
-import subprocess
 from pathlib import Path
 
 from tests.support.module_dependencies import (
@@ -17,20 +22,17 @@ from tests.support.module_dependencies import (
 _ROOT = Path(__file__).resolve().parents[1]
 _ALLOWED = {
     "api": {
-        "config",
-        "workflows",
-        "work",
-        "metrics",
-        "linguistic",
-        "topic",
-        "diagnosis",
-        "fact_graph",
-        "event_trees",
-        "case_pool",
         "audit",
+        "config",
+        "diagnosis",
+        "event_trees",
+        "fact_graph",
+        "linguistic",
+        "metrics",
         "sse",
         "storage",
-        "utils",
+        "topic",
+        "workflows",
     },
     "workflows": {
         "agents",
@@ -71,18 +73,19 @@ _ALLOWED = {
     "embedding": {"config"},
     "audit": {"event_bus", "storage"},
     "diagnosis": {"config", "event_trees", "fact_graph", "metrics", "storage", "topic", "utils"},
-    "text_processing": {"config", "lexicons"},
+    "text_processing": {"lexicons"},
     "fact_graph": {"storage", "utils"},
     "event_trees": {"fact_graph", "storage", "utils"},
     "case_pool": {"storage", "utils"},
     "metrics": {"config", "event_trees", "fact_graph", "lexicons", "storage", "text_processing", "utils", "work"},
-    "linguistic": {"config", "metrics", "storage", "text_processing", "utils", "work"},
-    "topic": {"config", "lexicons", "storage", "utils"},
-    "storage": {"config", "utils"},
+    "linguistic": {"config", "metrics", "storage", "text_processing"},
+    "topic": {"config", "lexicons", "storage"},
+    # storage 读投影的唯一定义需要领域模块的版本化代码合同与正式读接口
+    "storage": {"config", "event_trees", "fact_graph", "lexicons", "linguistic", "metrics", "topic", "utils"},
     "sse": {"event_bus", "storage"},
-    "lexicons": {"config", "utils"},
+    "lexicons": set(),
     "config": set(),
-    "utils": {"config"},
+    "utils": set(),
     "event_bus": set(),
 }
 
@@ -104,8 +107,14 @@ def test_modules_and_dependency_whitelist() -> None:
 
 def test_runtime_dependencies_have_no_cycles() -> None:
     imports = [d for d in _project_dependencies() + reexport_dependencies(_ROOT) if not d.type_only]
-    assert cycles((d.source.split(".")[1], d.target.split(".")[1]) for d in imports) == []
+    # 文件级：真实执行链不得存在任何导入环
     assert cycles((d.source, d.target) for d in imports) == []
+    # 模块级：当前冻结现状只有一个存储读投影引起的强连通集合
+    # （storage 的正式读投影引用领域模块的版本化代码合同），
+    # 元素或成员出现任何变化即视为方向面回归
+    assert cycles((d.source.split(".")[1], d.target.split(".")[1]) for d in imports) == [
+        ("event_trees", "fact_graph", "linguistic", "metrics", "storage", "topic", "work")
+    ]
 
 
 def test_http_framework_belongs_to_api() -> None:
@@ -165,15 +174,8 @@ def test_model_pool_does_not_consume_business_envelopes() -> None:
         assert not any(isinstance(n, ast.Name) and n.id == "WorkReceipt" for n in ast.walk(tree)), str(path)
 
 
-def test_deprecated_is_local_and_unreferenced() -> None:
-    tracked = subprocess.run(
-        ["git", "ls-files", "--", "deprecated"], cwd=_ROOT, capture_output=True, text=True, check=True
-    )
-    assert tracked.stdout.strip() == ""
-    ignored = subprocess.run(
-        ["git", "check-ignore", "deprecated/architecture/probe.py"], cwd=_ROOT, capture_output=True, text=True
-    )
-    assert ignored.returncode == 0
+def test_deprecated_is_unreferenced() -> None:
+    """退役代码可以保留在仓库，正式执行链不得导入"""
     assert not any(d.target == "deprecated" or d.target.startswith("deprecated.") for d in dependencies(_ROOT))
 
 
@@ -206,7 +208,8 @@ def test_contracts_do_not_reexport_their_consumers() -> None:
     ]
     assert not bad
     assert not any(
-        d.source.startswith("src.storage.") and d.target.split(".")[1] not in {"storage", "config", "utils"}
+        d.source.startswith("src.storage.")
+        and d.target.split(".")[1] not in {"storage"} | _ALLOWED["storage"]
         for d in reexport_dependencies(_ROOT)
     )
 

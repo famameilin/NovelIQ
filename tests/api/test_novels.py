@@ -18,6 +18,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from src.metrics.queries.annotations import fetch_chapter_annotations_full
 from src.storage.db import get_session_factory
 from src.storage.repositories import ParagraphRepository, RunRepository
 from src.text_processing.models import ParagraphSpan
@@ -44,10 +45,10 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
                 """
                 INSERT INTO chapters
                     (chapter_id, sequence, title, display_title, display_index_label,
-                     level, start_pos, end_pos, text, char_offset, char_end_offset, run_id)
+                     level, start_pos, end_pos, text, char_offset, run_id)
                 VALUES
                     (:chapter_id, 1, '第1章', '第1章', NULL, 'chapter',
-                     0, :len, :text, 0, :len, :run_id)
+                     0, :len, :text, 0, :run_id)
                 """
             ),
             {"chapter_id": 1, "text": "测试分块", "len": 4, "run_id": run_id},
@@ -187,13 +188,9 @@ class TestNovelUpload:
                 text("SELECT COUNT(*) FROM chapters WHERE run_id IN (:run_id_1, :run_id_2) AND text IS NOT NULL"),
                 {"run_id_1": "11111111", "run_id_2": "22222222"},
             ).scalar_one()
-            annotation_count = session.execute(
-                text(
-                    "SELECT COUNT(*) FROM analysis_outputs WHERE kind = 'chapter_annotation' "
-                    "AND run_id IN (:run_id_1, :run_id_2)"
-                ),
-                {"run_id_1": "11111111", "run_id_2": "22222222"},
-            ).scalar_one()
+            annotation_count = sum(
+                len(fetch_chapter_annotations_full(session, run_id)) for run_id in ("11111111", "22222222")
+            )
             graph_count = session.execute(
                 text("SELECT COUNT(*) FROM graph_entities WHERE run_id IN (:run_id_1, :run_id_2)"),
                 {"run_id_1": "11111111", "run_id_2": "22222222"},

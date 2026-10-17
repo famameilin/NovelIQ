@@ -15,11 +15,14 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 
 from src.storage.repositories import RunRepository
 from tests.support.chapter_annotation_helpers import confirm_test_work
-from tests.support.graph_snapshot_helpers import insert_graph_test_novel
+from tests.support.graph_snapshot_helpers import (
+    insert_focus_contract_agent_analysis,
+    insert_graph_test_novel,
+    insert_partial_diagnosis,
+)
 from tests.support.run_records import set_run_status
 
 
@@ -34,7 +37,10 @@ class TestResults:
         run_id = repository.create_run(novel_id=novel_id)
         set_run_status(repository.session, run_id, "completed")
         response = api_client.get(f"/api/novels/{novel_id}/{endpoint}", params={"task_id": run_id[:8]})
+        # 无任何产物的运行不是旧契约；completed 标记也不能替代真实章节图就绪检查
         assert response.status_code == {"results": 409, "graph": 404}[endpoint]
+        if endpoint == "results":
+            assert response.json()["error_type"] == "GraphReadinessError"
 
     def test_get_results_not_found(self, api_client: TestClient):
         """
@@ -92,30 +98,15 @@ class TestResults:
         )
         set_run_status(run_repo.session, run_id, "completed")
         confirm_test_work(db_session, run_id)
-        db_session.execute(
-            text(
-                "INSERT INTO analysis_outputs "
-                "(output_id, run_id, kind, payload, created_at) "
-                "VALUES (:output_id, :run_id, 'agent_analysis', :payload, now())"
-            ),
-            {
-                "output_id": uuid.uuid4().hex,
-                "run_id": run_id,
-                "payload": (
-                    f'{{"novel_id": "{novel_id}", "foreshadow_expectation": 0.42, '
-                    f'"arc_scores": {{"角色0": 8.2, "角色1": 7.4}}, '
-                    f'"diagnosis": "诊断记录只包含当前已有字段"}}'
-                ),
-            },
-        )
-        db_session.commit()
+        # 部分结果 = 只有正文、没有标签/名单/评分的真实报告（正式发布链写入）
+        insert_partial_diagnosis(db_session, run_id=run_id, diagnosis="诊断记录只包含当前已有字段")
 
         response = api_client.get(f"/api/novels/{novel_id}/diagnosis", params={"task_id": run_id[:8]})
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["foreshadow_expectation"] == 0.42
         assert payload["diagnosis"] == "诊断记录只包含当前已有字段"
+        assert payload["arc_scores"] is None
 
     @pytest.mark.parametrize(
         ("path", "expected_status"),
@@ -141,23 +132,13 @@ class TestResults:
         )
         set_run_status(run_repo.session, run_id, "completed")
         confirm_test_work(db_session, run_id)
-        db_session.execute(
-            text(
-                "INSERT INTO analysis_outputs "
-                "(output_id, run_id, kind, payload, created_at) "
-                "VALUES (:output_id, :run_id, 'agent_analysis', :payload, now())"
-            ),
-            {
-                "output_id": uuid.uuid4().hex,
-                "run_id": run_id,
-                "payload": (
-                    f'{{"novel_id": "{novel_id}", "foreshadow_expectation": 0.42, '
-                    f'"arc_scores": {{"角色0": 8.2, "角色1": 7.4}}, '
-                    f'"diagnosis": "诊断记录只包含当前已有字段"}}'
-                ),
-            },
+        # 已存在带焦点名单的正式诊断：图谱族路由不因它而拒绝读取
+        insert_focus_contract_agent_analysis(
+            db_session,
+            novel_id=novel_id,
+            run_id=run_id,
+            focus_characters=["角色0", "角色1"],
         )
-        db_session.commit()
 
         response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
 
