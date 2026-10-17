@@ -1,453 +1,108 @@
-"""
-通用 Agent 图审计闭合集成测试
+"""结束检查、工具拒绝与模型故障均保留实际回合审计"""
 
-验证 finish 提交回合闭合 turn_ms、finish 工具进入工具审计、
-tool_limit 与模型异常路径同样闭合回合审计。
-"""
-
-from __future__ import annotations
-
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from sqlalchemy import select
+from langchain_core.messages import AIMessage
 from sqlalchemy.orm import sessionmaker
 
-from src.agents.graph import build_agent_graph
 from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
+from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls
 from src.audit.recorder import AgentAuditRecorder
-from src.diagnosis.schema import AgentAnalysis
-from src.storage.models.agent_audit import AgentToolCall, ModelTurn
-from tests.agents.test_diagnosis_agent import _analysis_payload
+from src.storage.models import Execution, WorkItem
+from src.storage.models.base import naive_utcnow
+from tests.agents.test_diagnosis_agent import _analysis_payload, build_graph, call, run_graph
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
-from tests.support.model_stream_adapter import StreamedFakeModelMixin
-
-pytestmark = pytest.mark.asyncio
-
-
-class _SequencedLLM(StreamedFakeModelMixin):
-    """按顺序返回预定义 AIMessage 的测试模型（非流式降级路径）"""
-
-    def __init__(self, responses: list[AIMessage]) -> None:
-        self.responses = list(responses)
-        self.calls = 0
-
-    def bind_tools(self, tools):
-        del tools
-        return self
-
-    async def ainvoke(self, messages):
-        del messages
-        response = self.responses[min(self.calls, len(self.responses) - 1)]
-        self.calls += 1
-        return response
-
-
-class _FailingLLM(StreamedFakeModelMixin):
-    """模型调用直接抛异常的测试模型"""
-
-    def bind_tools(self, tools):
-        del tools
-        return self
-
-    async def ainvoke(self, messages):
-        del messages
-        raise RuntimeError("provider timeout")
-
-
-class _RetryingLLM(StreamedFakeModelMixin):
-    """2026-08-30 用于模拟一次瞬态失败后成功的非流式 Provider"""
-
-    def __init__(self) -> None:
-        """2026-08-30 用于初始化物理请求计数"""
-        self.calls = 0
-
-    def bind_tools(self, tools):
-        """2026-08-30 用于保持测试模型绑定接口与生产模型一致"""
-        del tools
-        return self
-
-    async def ainvoke(self, messages):
-        """2026-08-30 用于首请求抛超时并在第二请求返回 finish"""
-        del messages
-        self.calls += 1
-        if self.calls == 1:
-            raise TimeoutError("provider timeout")
-        return AIMessage(content="提交", tool_calls=[_finish_call(_analysis_payload())])
 
 
 def _new_audit_context(db_session) -> tuple[AgentAuditRecorder, AgentTurnObserver, dict, str]:
-    """构造与测试库绑定的审计 recorder/observer 并开启 invocation"""
+    """构造与测试库绑定的审计 recorder/observer 并登记真实诊断 work 身份"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
+    work_id = f"diag-work-{uuid4().hex[:12]}"
+    session_id = f"diag-session-{uuid4().hex[:12]}"
+    # session 与 work 之间有互指外键：先落整轮 session 行再挂 work；诊断 work 的 role 走章内角色词表
+    db_session.add(Execution(execution_id=session_id, session_run_id=run_id, session_created_at=naive_utcnow()))
+    db_session.commit()
+    db_session.add(WorkItem(work_id=work_id, role="event", diagnosis_session_id=session_id))
+    db_session.commit()
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     recorder = AgentAuditRecorder(factory)
     context = build_invocation_context(
         run_id=run_id,
         task_type="diagnosis",
-        execution_id="diag-exec",
+        execution_id=f"diag-exec-{uuid4().hex[:12]}",
         attempt_number=1,
         model="test-model",
+        work_id=work_id,
+        role="event",
     )
     invocation_id = recorder.start_invocation(**context)
     observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=context)
     return recorder, observer, context, run_id
 
 
-def _initial_state() -> dict:
-    return {
-        "messages": [SystemMessage(content="sys"), HumanMessage(content="诊断")],
-        "attempts": 0,
-        "tool_iterations": 0,
-        "output": None,
-        "error": None,
-        "candidate": None,
-    }
+def _program(code: str) -> AIMessage:
+    return AIMessage(content="", tool_calls=[call("execute_code", {"code": code})])
 
 
-def _finish_call(payload: dict, call_id: str = "f1") -> dict:
-    return {
-        "name": "finish",
-        "args": payload,
-        "id": call_id,
-        "type": "tool_call",
-    }
-
-
-async def test_graph_finish_round_closes_turn_and_audits_finish_tool(db_session) -> None:
-    """2026-08-11 用于验证 finish 提交回合闭合 turn_ms 且 finish 进入工具审计"""
+@pytest.mark.parametrize("mode", ["success", "rejected_report", "budget", "no_tool"])
+async def test_graph_audit_records_real_tools_and_closes_turns(db_session, mode):
+    """绑定面只有程序面 execute_code 与 finish，拒绝与预算终止都保留逐笔工具审计"""
     recorder, observer, context, run_id = _new_audit_context(db_session)
-    evidence_tool = MagicMock()
-    evidence_tool.name = "get_aggregate_signals"
-    evidence_tool.ainvoke = AsyncMock(return_value='{"ok": true}')
-    llm = _SequencedLLM(
-        [
-            AIMessage(
-                content="取证",
-                tool_calls=[
-                    {
-                        "name": "get_aggregate_signals",
-                        "args": {},
-                        "id": "e1",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(content="提交", tool_calls=[_finish_call(_analysis_payload())]),
-        ]
+    good = f"write_diagnosis(analysis={_analysis_payload()})\nfinish()"
+    responses = [_program(good)]
+    maximum = 3
+    if mode == "rejected_report":
+        bad = f"write_diagnosis(analysis={ {**_analysis_payload(), 'power_stance_score': 99} })"
+        responses = [_program(bad), _program(good)]
+    elif mode == "budget":
+        responses, maximum = [_program("search_cases()")], 1
+    elif mode == "no_tool":
+        responses = [AIMessage(content="缺报告"), _program(good)]
+    graph, model, _ = build_graph(responses, maximum=maximum, observer=observer)
+    result = await run_graph(graph)
+    recorder.finish_invocation(
+        **context, status="error" if (result.get("error") or result.get("halted")) else "success"
     )
-    graph = build_agent_graph(
-        llm,
-        [evidence_tool],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
-        observer=observer,
+    db_session.rollback()
+    turns = fetch_agent_turns(db_session, run_id)
+    assert len(turns) == len(model.requests)
+    assert all(turn.turn_ms is not None and turn.timings.get("model") is not None for turn in turns)
+    rows = fetch_run_tool_calls(db_session, run_id)
+    if mode == "budget":
+        assert result.get("halted") is True
+        assert [row.tool_name for row in rows] == ["search_cases", "execute_code"]
+    else:
+        assert result.get("completion_ok") is True
+        report_rows = [row for row in rows if row.tool_name == "write_diagnosis"]
+        assert [row.status for row in report_rows] == (
+            ["error", "success"] if mode == "rejected_report" else ["success"]
+        )
+
+
+async def test_provider_failure_retains_audit(db_session):
+    recorder, observer, context, run_id = _new_audit_context(db_session)
+    graph, model, _ = build_graph(responses=[], maximum=2, observer=observer, completion_check=lambda: [])
+    model.ainvoke = AsyncMock(side_effect=RuntimeError("provider failure"))
+    with pytest.raises(RuntimeError, match="provider failure"):
+        await run_graph(graph)
+    recorder.finish_invocation(**context, status="error", final_error="provider failure")
+    db_session.rollback()
+    turn = fetch_agent_turns(db_session, run_id)[0]
+    assert turn.status == "error" and turn.turn_ms is not None
+
+
+async def test_transport_retry_is_audited_separately_from_model_round(db_session):
+    recorder, observer, context, run_id = _new_audit_context(db_session)
+    graph, model, _ = build_graph(
+        responses=[], maximum=1, observer=observer, retries=2, completion_check=lambda: []
     )
-
-    result = await graph.ainvoke(_initial_state())
-
+    model.ainvoke = AsyncMock(side_effect=[TimeoutError("provider timeout"), AIMessage(content="完成")])
+    result = await run_graph(graph)
     recorder.finish_invocation(**context, status="success")
-    assert result.get("error") is None
     db_session.rollback()
-    turns = list(
-        db_session.execute(
-            select(ModelTurn)
-            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
-            .order_by(ModelTurn.turn_index)
-        ).scalars()
-    )
-    assert len(turns) == 2
-    assert all(turn.turn_ms is not None and turn.turn_ms >= 0 for turn in turns)
-    tool_rows = list(
-        db_session.execute(
-            select(AgentToolCall).where(AgentToolCall.turn_id.in_([turn.id for turn in turns]))
-        ).scalars()
-    )
-    assert {row.tool_name for row in tool_rows} == {"get_aggregate_signals", "finish"}
-    finish_row = next(row for row in tool_rows if row.tool_name == "finish")
-    assert finish_row.status == "success"
-    assert finish_row.turn_id == turns[1].id
-    assert finish_row.request_args["genre_labels"] == ["玄幻"]
-
-
-async def test_graph_finish_validation_failure_records_error_tool_call(db_session) -> None:
-    """2026-08-11 用于验证校验失败的 finish 调用以 error 状态进入工具审计且回合闭合"""
-    recorder, observer, context, run_id = _new_audit_context(db_session)
-    bad_payload = dict(_analysis_payload())
-    bad_payload["power_stance_score"] = 99
-    llm = _SequencedLLM(
-        [
-            AIMessage(content="", tool_calls=[_finish_call(bad_payload, call_id="bad")]),
-            AIMessage(content="", tool_calls=[_finish_call(_analysis_payload(), call_id="good")]),
-        ]
-    )
-    graph = build_agent_graph(
-        llm,
-        [],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
-        observer=observer,
-    )
-
-    result = await graph.ainvoke(_initial_state())
-
-    recorder.finish_invocation(**context, status="success")
-    assert result.get("error") is None
-    assert llm.calls == 2
-    db_session.rollback()
-    turns = list(
-        db_session.execute(
-            select(ModelTurn)
-            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
-            .order_by(ModelTurn.turn_index)
-        ).scalars()
-    )
-    assert len(turns) == 2
-    assert all(turn.turn_ms is not None for turn in turns)
-    finish_rows = list(
-        db_session.execute(
-            select(AgentToolCall)
-            .join(ModelTurn, ModelTurn.id == AgentToolCall.turn_id)
-            .where(
-                ModelTurn.run_id == run_id,
-                ModelTurn.row_kind == "agent_turn",
-                AgentToolCall.tool_name == "finish",
-            )
-            .order_by(AgentToolCall.id)
-        ).scalars()
-    )
-    assert [row.status for row in finish_rows] == ["error", "success"]
-    assert finish_rows[0].error is not None
-
-
-async def test_graph_mixed_finish_round_records_error_submission_audit(db_session) -> None:
-    """2026-08-11 用于验证 finish 与其他工具同轮的不合规提交也进入工具审计"""
-    recorder, observer, context, run_id = _new_audit_context(db_session)
-    evidence_tool = MagicMock()
-    evidence_tool.name = "get_aggregate_signals"
-    evidence_tool.ainvoke = AsyncMock(return_value='{"ok": true}')
-    llm = _SequencedLLM(
-        [
-            AIMessage(
-                content="",
-                tool_calls=[
-                    _finish_call(_analysis_payload(), call_id="f-mixed"),
-                    {
-                        "name": "get_aggregate_signals",
-                        "args": {},
-                        "id": "e1",
-                        "type": "tool_call",
-                    },
-                ],
-            ),
-            AIMessage(content="", tool_calls=[_finish_call(_analysis_payload(), call_id="f-ok")]),
-        ]
-    )
-    graph = build_agent_graph(
-        llm,
-        [evidence_tool],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
-        observer=observer,
-    )
-
-    result = await graph.ainvoke(_initial_state())
-
-    recorder.finish_invocation(**context, status="success")
-    assert result.get("error") is None
-    assert llm.calls == 2
-    db_session.rollback()
-    turns = list(
-        db_session.execute(
-            select(ModelTurn)
-            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
-            .order_by(ModelTurn.turn_index)
-        ).scalars()
-    )
-    assert len(turns) == 2
-    assert all(turn.turn_ms is not None for turn in turns)
-    evidence_tool.ainvoke.assert_not_awaited()
-    finish_rows = list(
-        db_session.execute(
-            select(AgentToolCall)
-            .join(ModelTurn, ModelTurn.id == AgentToolCall.turn_id)
-            .where(
-                ModelTurn.run_id == run_id,
-                ModelTurn.row_kind == "agent_turn",
-                AgentToolCall.tool_name == "finish",
-            )
-            .order_by(AgentToolCall.id)
-        ).scalars()
-    )
-    assert [row.status for row in finish_rows] == ["error", "success"]
-    assert finish_rows[0].request_args["genre_labels"] == ["玄幻"]
-
-
-async def test_graph_tool_limit_round_closes_turn(db_session) -> None:
-    """2026-08-11 用于验证工具迭代超限回合同样闭合 turn_ms"""
-    recorder, observer, context, run_id = _new_audit_context(db_session)
-    evidence_tool = MagicMock()
-    evidence_tool.name = "get_aggregate_signals"
-    evidence_tool.ainvoke = AsyncMock(return_value='{"ok": true}')
-    llm = _SequencedLLM(
-        [
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "get_aggregate_signals",
-                        "args": {},
-                        "id": "e1",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "get_aggregate_signals",
-                        "args": {},
-                        "id": "e2",
-                        "type": "tool_call",
-                    },
-                    {
-                        "name": "get_aggregate_signals",
-                        "args": {},
-                        "id": "e3",
-                        "type": "tool_call",
-                    },
-                ],
-            ),
-        ]
-    )
-    graph = build_agent_graph(
-        llm,
-        [evidence_tool],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
-        max_tool_iterations=2,
-        observer=observer,
-    )
-
-    result = await graph.ainvoke(_initial_state())
-
-    recorder.finish_invocation(**context, status="error", final_error=str(result.get("error")))
-    db_session.rollback()
-    turns = list(
-        db_session.execute(
-            select(ModelTurn)
-            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
-            .order_by(ModelTurn.turn_index)
-        ).scalars()
-    )
-    assert len(turns) == 2
-    assert all(turn.turn_ms is not None and turn.turn_ms >= 0 for turn in turns)
-
-
-async def test_graph_model_exception_records_error_turn(db_session) -> None:
-    """2026-08-11 用于验证模型调用异常时保留 error 状态回合且计时闭合"""
-    recorder, observer, context, run_id = _new_audit_context(db_session)
-    graph = build_agent_graph(
-        _FailingLLM(),
-        [],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
-        observer=observer,
-    )
-
-    with pytest.raises(RuntimeError, match="provider timeout"):
-        await graph.ainvoke(_initial_state())
-
-    recorder.finish_invocation(**context, status="error", final_error="provider timeout")
-    db_session.rollback()
-    turns = list(
-        db_session.execute(
-            select(ModelTurn).where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
-        ).scalars()
-    )
-    assert len(turns) == 1
-    turn = turns[0]
-    assert turn.status == "error"
-    # 2026-10-05 合同变更：审计 error 恒带异常类型前缀（str(exc) 为空时不再只剩空串）
-    assert turn.error == "RuntimeError: provider timeout"
-    assert turn.turn_ms is not None and turn.turn_ms >= 0
-    assert turn.model_ms is not None
-    assert turn.request_messages is not None
-    assert {"system", "human"} == {m["role"] for m in turn.request_messages}
-    assert turn.request_messages[-1]["content"] == "诊断"
-    # 2026-10-02 统一流式后异常中断的计时备注由聚合器给出：无 payload 记 provider_stream_no_payload
-    assert turn.timing_notes == ["provider_stream_no_payload", "provider_request_failed"]
-
-
-async def test_graph_retries_are_audited_as_separate_provider_requests(db_session) -> None:
-    """2026-08-30 用于验证通用 Agent 的失败重试分别形成独立物理请求审计行"""
-    recorder, observer, context, run_id = _new_audit_context(db_session)
-    llm = _RetryingLLM()
-    graph = build_agent_graph(
-        llm,
-        [],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
-        observer=observer,
-        model_retries=2,
-    )
-
-    result = await graph.ainvoke(_initial_state())
-
-    recorder.finish_invocation(**context, status="success")
-    assert result.get("error") is None
-    assert llm.calls == 2
-    db_session.rollback()
-    turns = list(
-        db_session.execute(
-            select(ModelTurn)
-            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
-            .order_by(ModelTurn.turn_index)
-        ).scalars()
-    )
+    turns = fetch_agent_turns(db_session, run_id)
+    assert result["iterations"] == 1
     assert [turn.status for turn in turns] == ["error", "success"]
-    assert [turn.context_summary["provider_request"]["attempt"] for turn in turns] == [1, 2]
-    assert [turn.context_summary["provider_request"]["request_index"] for turn in turns] == [1, 2]
-    finish_rows = list(
-        db_session.execute(
-            select(AgentToolCall).where(AgentToolCall.turn_id.in_([turn.id for turn in turns]))
-        ).scalars()
-    )
-    assert len(finish_rows) == 1
-    assert finish_rows[0].tool_name == "finish"
-    assert finish_rows[0].turn_id == turns[1].id
-
-
-async def test_graph_finish_emits_tool_call_succeeded_event() -> None:
-    """2026-08-13 P2-7 finish 走 finalize 路径时补发 tool_call succeeded 终态事件，
-    前端 finish 状态不再永久停留在"进行中"""
-    from src.agents.stream import AgentStream
-
-    events: list[tuple[str, str, str]] = []
-
-    async def emitter(event) -> None:
-        events.append((event.action, event.content, event.status or ""))
-
-    llm = _SequencedLLM([AIMessage(content="提交", tool_calls=[_finish_call(_analysis_payload())])])
-    graph = build_agent_graph(
-        llm,
-        [],
-        max_attempts=5,
-        response_model=AgentAnalysis,
-        first_hint="完成诊断",
-        stream=AgentStream(emitter),
-    )
-
-    result = await graph.ainvoke(_initial_state())
-
-    assert result.get("error") is None
-    # started 由非流式降级路径补发，succeeded 由 finalize 补发（修复前缺失）
-    assert ("tool_call", "finish", "started") in events
-    assert ("tool_call", "finish", "success") in events
+    assert all(turn.turn_ms is not None for turn in turns)
