@@ -138,7 +138,7 @@ export function TimelineEventInspector({
             <h2 className="mt-1 text-lg font-semibold leading-6 text-text">{node.title || node.summary}</h2>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => navigate(buildEventTreeUrl(novelId, taskId, { treeId: node.tree_id, eventId: node.root_event_id }))}>
+            <Button variant="outline" size="sm" onClick={() => navigate(buildEventTreeUrl(novelId, taskId, { eventId: node.root_event_id }))}>
               查看事件树
             </Button>
             <Button variant="outline" size="sm" onClick={handleSelectChapter}>
