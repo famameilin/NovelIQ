@@ -1,10 +1,13 @@
 """主题建模工作流（段落粒度 §11.1 + 分析能力扩展路线图 §5.8-5.10）。
 
 paragraphs 为唯一事实源；训练排除短段，推断覆盖所有有 token 段落。
-结果按三表契约落库：
-- topic_model_runs：模型与管线版本、参数快照、语料摘要、artifact 哈希
-- paragraph_topic_inference：每个段落一行推断状态与 token 分母
+结果按冻结结构落库：
+- analysis_runs.lda_*：模型与管线版本、拆列后的实际 LDA 参数、语料摘要
+  （模型 key/artifact 路径/推断段落数为合同投影，不落列）
+- paragraph_metrics.inference_*：每个段落一行推断状态与 token 分母
 - paragraph_topics：完整 K 维主题分布（top_n 只属于 API 展示裁剪）
+
+2026-10-16 全库 3NF：固定推断说明由固定状态合同投影，工作流只传状态。
 """
 
 from __future__ import annotations
@@ -22,6 +25,8 @@ from src.storage.repositories import ParagraphRepository
 from src.topic import (
     INFERENCE_COMPLETE,
     INFERENCE_EMPTY_AFTER_PREPROCESS,
+    INFERENCE_REASON_TEXTS,
+    TOPIC_MODEL_KEY,
     TOPIC_PIPELINE_VERSION,
 )
 
@@ -58,8 +63,9 @@ async def run_topic_model(
 ) -> tuple[int, int]:
     """执行主题建模（§5.8-5.10），训练用达标段落，推断覆盖所有有 token 段落。
 
-    写库顺序：模型契约 topic_model_runs → 段落推断状态 paragraph_topic_inference
-    → 完整分布 paragraph_topics；同 run 重跑先清本阶段旧行，不允许新旧结果混合。
+    写库顺序：LDA 实际构建列 analysis_runs.lda_* → 段落推断状态
+    paragraph_metrics.inference_* → 完整分布 paragraph_topics；同 run 重跑整体覆盖
+    （推断列全量 upsert、主题行先删后插），不允许新旧结果混合。
     取消在段落推断的批边界生效：LDA 训练与推断是库内调用，不能中途中断
     """
     from src.utils.cancellation import check_cancelled
@@ -78,7 +84,9 @@ async def run_topic_model(
         return 0, 0
 
     if force:
-        paragraph_repo.clear_paragraph_topic_inferences(run_id)
+        # 推断列不做全量清空：清空会产生 complete→NULL 的修改事件，与重跑写入的
+        # 最终主题行在提交时假冲突（延迟约束触发器按修改行当时版本校验，详见
+        # insert_paragraph_topic_inferences docstring）；全量 upsert 本身即覆盖旧值
         paragraph_repo.clear_paragraph_topics(run_id)
         logger.info("cleared existing topic data")
 
@@ -96,15 +104,18 @@ async def run_topic_model(
     tokenized_docs = preprocessor.preprocess_documents([row.text for row in paragraph_rows])
 
     # 训练文档同时使用预处理结果和原始段落 token_count，分别表达可建模性与业务长度阈值
+    # （token_count 是 paragraph_metrics 的指标口径观测；缺失按 0 处理，不参与达标训练）
     min_train_tokens = settings.topic_model.min_paragraph_train_tokens
     filtered_empty = sum(1 for doc in tokenized_docs if not doc)
     filtered_short = sum(
-        1 for doc, row in zip(tokenized_docs, paragraph_rows, strict=True) if doc and row.token_count < min_train_tokens
+        1
+        for doc, row in zip(tokenized_docs, paragraph_rows, strict=True)
+        if doc and int(row.token_count or 0) < min_train_tokens
     )
     valid_docs = [
         doc
         for doc, row in zip(tokenized_docs, paragraph_rows, strict=True)
-        if doc and row.token_count >= min_train_tokens
+        if doc and int(row.token_count or 0) >= min_train_tokens
     ]
     logger.info(
         "训练文档筛选：总段落={}, 预处理后为空={}, 原始 token_count 低于阈值={}, 有效训练文档={}",
@@ -146,6 +157,7 @@ async def run_topic_model(
     logger.info(f"Model trained. Inferring topics for {total_paragraphs} paragraphs...")
 
     # 模型 artifact 落盘后先确定 artifact_key，再写模型契约
+    # （读取侧的 artifact_key 按同一 resolve_model_dir 规则投影，不再落列）
     model_dir = resolve_model_dir(run_id)
     trainer.save_model(topic_model, model_dir)
     artifact_key = str(model_dir.relative_to(resolve_project_root()).as_posix())
@@ -165,7 +177,7 @@ async def run_topic_model(
                     row.token_count,
                     0,
                     INFERENCE_EMPTY_AFTER_PREPROCESS,
-                    "empty_after_preprocess: 预处理后无词元",
+                    INFERENCE_REASON_TEXTS[INFERENCE_EMPTY_AFTER_PREPROCESS],
                     None,
                 )
             )
@@ -197,14 +209,13 @@ async def run_topic_model(
             )
         )
 
+    # filter_extremes=False 与 no_below/no_above=null 是当前算法合同
+    # （train(filter_extremes=False) 已在调用处固定），不再作为参数副本存储
     parameters = dict(config.to_parameters_dict())
-    parameters["filter_extremes"] = False
-    parameters["no_below"] = None
-    parameters["no_above"] = None
 
     paragraph_repo.insert_topic_model_run(
         run_id,
-        model_key="gensim-lda",
+        model_key=TOPIC_MODEL_KEY,
         library_version=_gensim_version(),
         pipeline_version=TOPIC_PIPELINE_VERSION,
         num_topics=topic_model.num_topics,

@@ -14,14 +14,16 @@ from .schema import (
     INFERENCE_EMPTY_AFTER_PREPROCESS,
     INFERENCE_EMPTY_BOW,
     INFERENCE_FAILED,
+    INFERENCE_REASON_TEXTS,
+    TOPIC_MODEL_KEY,
     ParagraphInferenceResult,
     TopicModel,
     TopicResult,
     TopicWord,
 )
 
-#: 主题预处理与推断管线版本（topic_model_runs.pipeline_version，§5.8）
-#: 完整 K 维落库 + 段落推断状态 + 模型契约表的首个版本
+#: 主题预处理与推断管线版本（analysis_runs.lda_pipeline_version，§5.8）
+#: 完整 K 维落库 + 段落推断状态 + 运行级模型构建事实的首个版本
 TOPIC_PIPELINE_VERSION = "1.0"
 
 __all__ = [
@@ -29,6 +31,8 @@ __all__ = [
     "INFERENCE_EMPTY_AFTER_PREPROCESS",
     "INFERENCE_EMPTY_BOW",
     "INFERENCE_FAILED",
+    "INFERENCE_REASON_TEXTS",
+    "TOPIC_MODEL_KEY",
     "ParagraphInferenceResult",
     "TOPIC_PIPELINE_VERSION",
     "LDAConfig",

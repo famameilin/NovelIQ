@@ -9,13 +9,25 @@ INFERENCE_EMPTY_AFTER_PREPROCESS = "empty_after_preprocess"
 INFERENCE_EMPTY_BOW = "empty_bow"
 INFERENCE_FAILED = "failed"
 
+#: 固定 LDA 实现的模型合同标识（LDA 构建事实落 analysis_runs，身份读取投影）
+TOPIC_MODEL_KEY = "gensim-lda"
+
+#: 推断状态 → 固定标准说明（版本化固定状态合同；不镜像成数据库词典表）
+#: 真实异常文字另记 paragraph_metrics.inference_error_text，不与固定说明双存
+INFERENCE_REASON_TEXTS: dict[str, str | None] = {
+    INFERENCE_COMPLETE: None,
+    INFERENCE_EMPTY_AFTER_PREPROCESS: "empty_after_preprocess: 预处理后无词元",
+    INFERENCE_EMPTY_BOW: "empty_bow: 预处理后有词元但词典映射后 BOW 为空",
+    INFERENCE_FAILED: "failed: 段落推断过程发生异常",
+}
+
 
 @dataclass(frozen=True)
 class ParagraphInferenceResult:
     """单个段落的完整主题推断结果。
 
     distribution 为完整 K 维 (topic_id, weight) 列表（仅 complete 状态非空），
-    推断状态与 token 数进入 paragraph_topic_inference，分布进入 paragraph_topics。
+    推断状态与 token 数写 paragraph_metrics.inference_*，分布写 paragraph_topics。
     """
 
     inference_status: str
@@ -95,7 +107,7 @@ class TopicModel:
             return ParagraphInferenceResult(
                 inference_status=INFERENCE_EMPTY_BOW,
                 inference_token_count=0,
-                unavailable_reason="empty_bow: 预处理后有词元但词典映射后 BOW 为空",
+                unavailable_reason=INFERENCE_REASON_TEXTS[INFERENCE_EMPTY_BOW],
             )
         raw_dist = self.lda_model.get_document_topics(bow, minimum_probability=0.0)
         weights: dict[int, float] = dict(raw_dist)

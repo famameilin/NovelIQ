@@ -5,17 +5,17 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.storage.models import (
-    Paragraph,
-    ParagraphTopic,
-    ParagraphTopicInference,
-    TopicModelRun,
-)
+from src.storage.models import Paragraph, ParagraphMetric, ParagraphTopic
+from src.storage.repositories import ParagraphRepository
 
 
 def is_topic_model_complete(session: Session, run_id: str) -> bool:
-    """模型契约、每段终态与完整 K 维分布齐备后，才能在恢复时跳过主题阶段"""
-    model = session.get(TopicModelRun, run_id)
+    """LDA 构建事实、每段终态与完整 K 维分布齐备后，才能在恢复时跳过主题阶段
+
+    inference_paragraph_count 是读取投影（complete 状态的正式聚合），
+    与下面的 complete 计数同源，实际门禁仍在"每段完整 K 维分布"。
+    """
+    model = ParagraphRepository(session).fetch_topic_model_run(run_id)
     if model is None:
         return False
     topic_counts = (
@@ -31,28 +31,28 @@ def is_topic_model_complete(session: Session, run_id: str) -> bool:
         session.execute(
             select(
                 func.count(Paragraph.paragraph_id).label("total"),
-                func.count(ParagraphTopicInference.paragraph_id)
+                func.count(ParagraphMetric.paragraph_id)
                 .filter(
-                    ParagraphTopicInference.inference_status.in_(("complete", "empty_after_preprocess", "empty_bow")),
+                    ParagraphMetric.inference_status.in_(("complete", "empty_after_preprocess", "empty_bow")),
                 )
                 .label("settled"),
-                func.count(ParagraphTopicInference.paragraph_id)
+                func.count(ParagraphMetric.paragraph_id)
                 .filter(
-                    ParagraphTopicInference.inference_status == "complete",
+                    ParagraphMetric.inference_status == "complete",
                 )
                 .label("complete"),
-                func.count(ParagraphTopicInference.paragraph_id)
+                func.count(ParagraphMetric.paragraph_id)
                 .filter(
-                    ParagraphTopicInference.inference_status == "complete",
+                    ParagraphMetric.inference_status == "complete",
                     topic_counts.c.topic_count == model.num_topics,
                 )
                 .label("full_distributions"),
             )
             .select_from(Paragraph)
             .outerjoin(
-                ParagraphTopicInference,
-                (ParagraphTopicInference.run_id == Paragraph.run_id)
-                & (ParagraphTopicInference.paragraph_id == Paragraph.paragraph_id),
+                ParagraphMetric,
+                (ParagraphMetric.run_id == Paragraph.run_id)
+                & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
             )
             .outerjoin(topic_counts, topic_counts.c.paragraph_id == Paragraph.paragraph_id)
             .where(Paragraph.run_id == run_id)
