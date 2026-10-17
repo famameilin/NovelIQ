@@ -1,23 +1,23 @@
 import { useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, LocateFixed } from "lucide-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import type { NarrativeChapter, ProgressionChange, ProgressionDimension, ProgressionTimelineResponse } from "@/api/narrativeTypes";
+import type { NarrativeChapter, PlotlineChange, PlotlineDimension, PlotlineTimelineResponse } from "@/api/narrativeTypes";
 import { getTimeline } from "@/api/results";
 import { FloatingDetail, NarrativeError } from "./NarrativePanels";
 import { control, dimensionLabels, dimensionTones, narrativeLine, narrativeMuted } from "./presentation";
 import { useNarrativeSize } from "./useNarrativeSize";
 
-const allDimensions = Object.keys(dimensionLabels) as ProgressionDimension[];
-export interface ChapterChangesSelection { chapterId: number; chapterOrder: number; dimension: ProgressionDimension }
+const allDimensions = Object.keys(dimensionLabels) as PlotlineDimension[];
+export interface ChapterChangesSelection { chapterId: number; chapterOrder: number; dimension: PlotlineDimension }
 
 /** 固定视口内按章节定位，浏览窗口和阅读截点分别维护，同章记录按完整分布聚合 */
-export function ProgressionField({ chapters, cutoffIndex, changes, distribution, selectedId, dimension = "", windowSize = 4, focusChapterId, onChapter, onSelect, onGroup, onWindowChange }: {
+export function PlotlineField({ chapters, cutoffIndex, changes, distribution, selectedId, dimension = "", windowSize = 4, focusChapterId, onChapter, onSelect, onGroup, onWindowChange }: {
   chapters: NarrativeChapter[];
   cutoffIndex: number;
-  changes: ProgressionChange[];
-  distribution: ProgressionTimelineResponse["distribution"];
+  changes: PlotlineChange[];
+  distribution: PlotlineTimelineResponse["distribution"];
   selectedId: string | null | undefined;
-  dimension?: ProgressionDimension | "";
+  dimension?: PlotlineDimension | "";
   windowSize?: number;
   focusChapterId?: number;
   onChapter: (order: number) => void;
@@ -48,9 +48,9 @@ export function ProgressionField({ chapters, cutoffIndex, changes, distribution,
   const indices = new Map(visible.map((chapter, index) => [chapter.chapter_id, index]));
   const points = distribution.filter(point => indices.has(point.chapter_id));
   const pan = (nextStart: number) => setViewport({ focusId, windowSize, start: Math.max(0, Math.min(lastStart, nextStart)) });
-  const activate = (point: ProgressionTimelineResponse["distribution"][number]) => {
+  const activate = (point: PlotlineTimelineResponse["distribution"][number]) => {
     const change = changes.find(item => item.chapter_id === point.chapter_id && item.dimension === point.dimension);
-    if (point.count === 1 && change) onSelect(change.progression_change_id);
+    if (point.count === 1 && change) onSelect(change.plotline_change_id);
     else onGroup({ chapterId: point.chapter_id, chapterOrder: point.chapter_order, dimension: point.dimension });
   };
   return <div ref={host} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="章节变化轨道">
@@ -92,7 +92,7 @@ export function ProgressionField({ chapters, cutoffIndex, changes, distribution,
             // 标签布局只随窗口与选中态变化，不随截点变化：同一窗口呈现同一张画布
             const priority = (bucket: number) => {
               const group = buckets.get(bucket)!;
-              return changes.some(item => item.progression_change_id === selectedId && item.dimension === lane && group.some(record => record.chapter_id === item.chapter_id)) ? 0 : 1;
+              return changes.some(item => item.plotline_change_id === selectedId && item.dimension === lane && group.some(record => record.chapter_id === item.chapter_id)) ? 0 : 1;
             };
             return priority(a) - priority(b) || b - a;
           });
@@ -118,7 +118,7 @@ export function ProgressionField({ chapters, cutoffIndex, changes, distribution,
               const groupedChapters = bucketSize > 1;
               const title = groupedChapters ? `第 ${visible[first].order}–${visible[last - 1].order} 章` : change?.title ?? `${total} 条变化`;
               const label = groupedChapters ? `细览${title} · ${total} 条变化` : `${String(point.chapter_order).padStart(2, "0")} / ${dimensionLabels[lane]} ${title}${total > 1 ? ` 共 ${total} 条 · 展开` : ""}`;
-              const active = changes.some(item => item.progression_change_id === selectedId && item.dimension === lane && group.some(record => record.chapter_id === item.chapter_id));
+              const active = changes.some(item => item.plotline_change_id === selectedId && item.dimension === lane && group.some(record => record.chapter_id === item.chapter_id));
               const labelLeft = labels.get(bucket);
               return <button key={bucket} data-testid="timeline-change-node" data-count={total} aria-label={label} aria-pressed={active} title={groupedChapters ? `${title} · ${total} 条变化，点击细览` : `${change?.subject_title ?? dimensionLabels[lane]}\n${title}`} onClick={() => {
                   if (groupedChapters && onWindowChange) {
@@ -153,9 +153,9 @@ export function ChapterChanges({ novelId, runId, group, subject, q, onClose, onS
   onClose: () => void; onSelect: (id: string) => void;
 }) {
   const query = useInfiniteQuery({
-    queryKey: ["progression-chapter", novelId, runId, group.chapterId, group.dimension, subject, q],
+    queryKey: ["plotline-chapter", novelId, runId, group.chapterId, group.dimension, subject, q],
     queryFn: ({ pageParam, signal }) => getTimeline(novelId, runId, { throughChapterId: group.chapterId, windowStartChapterId: group.chapterId, dimension: group.dimension, subjectId: subject || undefined, q, cursor: pageParam, signal }),
     initialPageParam: undefined as string | undefined, getNextPageParam: page => page.next_cursor ?? undefined, retry: false,
   });
-  return <FloatingDetail title="本章变化" onClose={onClose}><p className={`text-xs ${narrativeMuted}`}>第 {group.chapterOrder} 章 · {dimensionLabels[group.dimension]} · {query.data?.pages[0]?.total ?? 0} 条</p>{query.isPending && <p>正在读取变化…</p>}{query.isError && <NarrativeError error={query.error} retry={() => void query.refetch()} />}{query.data?.pages.flatMap(page => page.changes).map(change => <button key={change.progression_change_id} className={`mt-4 block w-full border-t pt-4 text-left ${narrativeLine}`} onClick={() => onSelect(change.progression_change_id)}><small className={narrativeMuted}>{change.subject_title}</small><span className="block">{change.title}</span></button>)}{query.hasNextPage && <button className={`${control} mt-4 w-full`} disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>继续加载本章变化</button>}</FloatingDetail>;
+  return <FloatingDetail title="本章变化" onClose={onClose}><p className={`text-xs ${narrativeMuted}`}>第 {group.chapterOrder} 章 · {dimensionLabels[group.dimension]} · {query.data?.pages[0]?.total ?? 0} 条</p>{query.isPending && <p>正在读取变化…</p>}{query.isError && <NarrativeError error={query.error} retry={() => void query.refetch()} />}{query.data?.pages.flatMap(page => page.changes).map(change => <button key={change.plotline_change_id} className={`mt-4 block w-full border-t pt-4 text-left ${narrativeLine}`} onClick={() => onSelect(change.plotline_change_id)}><small className={narrativeMuted}>{change.subject_title}</small><span className="block">{change.title}</span></button>)}{query.hasNextPage && <button className={`${control} mt-4 w-full`} disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>继续加载本章变化</button>}</FloatingDetail>;
 }
