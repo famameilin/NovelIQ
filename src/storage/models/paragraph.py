@@ -5,6 +5,11 @@ paragraphs 是全文唯一的段落事实源（设计文档《章节粒度分析
 段落单元（ParagraphSpan）无条件落库，Embedding、指标、主题、检索等派生数据
 不得自行重新切段。paragraph_id 是 run 内按全文顺序生成的稠密整数（0, 1, 2, ...），
 不随数据库自增推断。
+
+2026-10-16 全库 3NF 改造：段落行只保留身份、来源与不可推导的章内起点；
+local_end_char（= local_start_char + 字符长度）、global 坐标（= 所属正文
+char_offset + 局部边界）、char_count（= 字符长度）均为读取投影；
+原预处理 tokenizer 观测（token 计数与观测时间）合并进 paragraph_metrics。
 """
 
 from __future__ import annotations
@@ -12,7 +17,6 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
-    CheckConstraint,
     DateTime,
     ForeignKeyConstraint,
     Index,
@@ -36,15 +40,20 @@ class Paragraph(Base):
     """
     段落事实源表
 
-    存储 run 内全部段落单元的身份、来源、字符坐标与文本内容：
-    - local_* 坐标相对所属 chunk 的 strip 后文本
-    - global_* 坐标相对 run 级规范化全文（= chunk 全文偏移 + local 偏移）
-    - char_count 恒等于 length(text) 与 global_end_char - global_start_char
+    存储 run 内全部段落单元的身份、来源、章内起点与文本内容：
+    - local_start_char 相对所属 chunk 的 strip 后文本；终点由长度投影
+    - global 坐标相对 run 级规范化全文（= 所属 chapters.char_offset + local 偏移）
+    - 正文长度不再落列，读取时由字符长度表达式得到
     """
 
     __tablename__ = "paragraphs"
     __table_args__ = (
         UniqueConstraint("run_id", "chapter_id", "paragraph_index", name="uq_paragraphs_run_chapter_index"),
+        UniqueConstraint(
+            "run_id", "chapter_id", "source_paragraph_index", "fragment_index",
+            name="uq_paragraphs_run_chapter_source_fragment",
+        ),
+        UniqueConstraint("run_id", "chapter_id", "local_start_char", name="uq_paragraphs_run_chapter_local_start"),
         ForeignKeyConstraint(
             ["chapter_id", "run_id"],
             ["chapters.chapter_id", "chapters.run_id"],
@@ -55,26 +64,15 @@ class Paragraph(Base):
             ["analysis_runs.run_id"],
             ondelete="CASCADE",
         ),
-        CheckConstraint("local_start_char < local_end_char", name="ck_paragraphs_local_order"),
-        CheckConstraint("global_start_char < global_end_char", name="ck_paragraphs_global_order"),
-        CheckConstraint(
-            "char_count = global_end_char - global_start_char",
-            name="ck_paragraphs_char_count_global",
-        ),
-        CheckConstraint("char_count = length(text)", name="ck_paragraphs_char_count_text"),
         Index("idx_paragraphs_run_chapter_index", "run_id", "chapter_id", "paragraph_index"),
-        Index("idx_paragraphs_run_global_start", "run_id", "global_start_char"),
         Index("idx_paragraphs_run_chapter_local_start", "run_id", "chapter_id", "local_start_char"),
-        # 2026-08-14 二期段落化：keyword_ops 直接扫 paragraphs 表的查询是
-        # lower(text) LIKE '%kw%'，索引必须建在同一个表达式上（lower(text) gin_trgm_ops），
-        # 裸 text 列上的 trgm 索引无法被规划器命中，等于死索引（与 chunks 的
-        # idx_chunks_text_trgm 同口径；pg_trgm 扩展由 init_db 按需创建）
+        # keyword 检索按 lower(text) LIKE '%kw%' 定位，索引必须建在同一表达式上
         Index(
             "idx_paragraphs_text_trgm",
             sql_text("lower(text) gin_trgm_ops"),
             postgresql_using="gin",
         ),
-        {"comment": "段落事实源表：全文唯一段落单元的身份、字符坐标与原文，派生数据不得重新切段"},
+        {"comment": "段落事实源表：全文唯一段落单元的身份、章内起点与原文，派生数据不得重新切段"},
     )
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
@@ -87,7 +85,7 @@ class Paragraph(Base):
         Integer, nullable=False,
         comment="章内段落顺序号（0 起，章内唯一连续）",
     )
-    # 来源自然段在 章节 内的序号（0 起）；超长自然段拆出的片段共享该值
+    # 来源自然段在章节内的序号（0 起）；超长自然段拆出的片段共享该值
     source_paragraph_index: Mapped[int] = mapped_column(
         Integer, nullable=False,
         comment="来源自然段章内序号（0 起，拆分片段共享）",
@@ -98,11 +96,6 @@ class Paragraph(Base):
         comment="超长自然段拆分片段序号（0 起，未拆分恒为 0）",
     )
     local_start_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="章内切片局部起始字符偏移")
-    local_end_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="章内切片局部结束字符偏移")
-    global_start_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="run 规范化全文起始字符偏移")
-    global_end_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="run 规范化全文结束字符偏移")
-    char_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="字符数（=length(text)=global 差值）")
-    token_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="token 数")
     text: Mapped[str] = mapped_column(Text, nullable=False, comment="段落原文")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=naive_utcnow, comment="创建时间"

@@ -3,6 +3,10 @@ chunk 关键词检索与原文读取
 
 - search_paragraphs_by_keywords: rg 风格关键词子串精确匹配，直接扫 paragraphs 事实源
 - fetch_chunk_text: 读取指定 chunk 的原文全文（read 工具的数据源）
+
+2026-10-16 全库 3NF 改造（35 表冻结结构）：段落 local_end_char 与 global 坐标
+由 reader 的投影表达式得到（chapters.char_offset + 局部边界）；章节正文文本
+改读 chapters.text（正文与目录同键一对一）。
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from src.storage.models import Chapter, Paragraph
 from src.storage.query_terms import like_pattern, term_matches
+from src.storage.repositories.paragraph.reader import join_chapter_body, paragraph_projection
 
 
 @dataclass(frozen=True)
@@ -46,7 +51,7 @@ def search_paragraphs_by_keywords(
 ) -> list[KeywordMatchRow]:
     """
     2026-08-14 二期段落化：直接扫 paragraphs 事实源（不再扫 chunks + Python 重切段），
-    段落身份与 local/global 坐标一律取 paragraphs 持久化列；
+    段落身份一律取 paragraphs 事实源；local_end/global 坐标由投影表达式得到；
     paragraphs.text 建有 lower(text) gin_trgm_ops 索引（idx_paragraphs_text_trgm）
 
     2026-09-04 词项支持通配符：% 匹配任意长度、_ 匹配单字符（LIKE 原生语义，
@@ -61,26 +66,13 @@ def search_paragraphs_by_keywords(
     # 2026-08-13 P2-6：查询词项已由 extract_query_terms 统一小写，
     # SQL 侧对原文做 lower() 归一，避免 LIKE 大小写敏感导致英文词漏命中
     match_expressions = [func.lower(Paragraph.text).like(like_pattern(keyword)) for keyword in normalized]
-    stmt = (
-        select(
-            Paragraph.paragraph_id,
-            Paragraph.chapter_id,
-            Paragraph.paragraph_index,
-            Paragraph.text,
-            Paragraph.local_start_char,
-            Paragraph.local_end_char,
-            Paragraph.global_start_char,
-            Paragraph.global_end_char,
-        )
-        .join(
-            Chapter,
-            (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id),
-        )
-        .where(
+    # 章节连接由 join_chapter_body 统一提供（global 坐标投影基准）；
+    # 不再重复声明 Chapter 连接，避免同一查询里 chapters 别名重复
+    stmt = join_chapter_body(
+        select(*paragraph_projection()).where(
             Paragraph.run_id == run_id,
             or_(*match_expressions),
         )
-        .order_by(Paragraph.paragraph_id.asc())
     )
     if exclude_paragraph_ids:
         stmt = stmt.where(Paragraph.paragraph_id.not_in(list(exclude_paragraph_ids)))
@@ -92,6 +84,7 @@ def search_paragraphs_by_keywords(
         stmt = stmt.where(Chapter.sequence < before_chapter_sequence)
     if after_chapter_sequence is not None:
         stmt = stmt.where(Chapter.sequence > after_chapter_sequence)
+    stmt = stmt.order_by(Paragraph.paragraph_id.asc())
 
     results: list[KeywordMatchRow] = []
     for row in session.execute(stmt).all():
@@ -125,7 +118,8 @@ def search_paragraphs_by_keywords(
 def fetch_chunk_text(session: Session, run_id: str, chapter_id: int) -> str | None:
     """
     2026-08-02 用于按 run_id 与 chapter_id 读取单个历史章节原文
-    （M9a-2：chunks 表合并进 chapters，正文列迁移后读取 chapters.text）
+    （M9a-2：chunks 表合并进 chapters；2026-10-16 3NF：正文与目录同键一行，
+    章节正文读 chapters.text，空正文章节为空值）
     不存在对应记录时返回 None
     """
     stmt = select(Chapter.text).where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id)
