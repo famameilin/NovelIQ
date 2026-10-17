@@ -3,36 +3,20 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, Literal
+import unicodedata
+from typing import Any, Literal
 
 from langchain_core.tools import tool
-from pydantic import Field, TypeAdapter
+from pydantic import TypeAdapter
 
 from src.event_trees.models import ParticipantArg
-from src.fact_graph.vocabulary import EntityType
+from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
 
-from .search_projection import SHARED_SEARCH_MAX_CHARS
+from .ir_contract import ROLE_NAMESPACE_SEP
+from .ir_validation import namespace_event_el
+from .shared_tools import build_case_tools, build_finish_tool, build_state_read_tools
 from .tool_factories import build_annotation_tools
 from .tools import _forbid_undeclared_args
-
-SearchLimit = Annotated[int, Field(ge=1, le=20)]
-SearchOffset = Annotated[int, Field(ge=0)]
-
-
-def _search_page(values: list[Any], *, offset: int, limit: int, budget: int) -> tuple[list[Any], int | None]:
-    """按整项预算分页，保留返回项的完整引用，下一页从实际未返回的位置继续"""
-    page: list[Any] = []
-    size = 2
-    for value in values[offset : offset + limit]:
-        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-        if size + len(encoded) + 1 > budget:
-            break
-        page.append(value)
-        size += len(encoded) + 1
-    next_offset = offset + len(page)
-    if not page and offset < len(values):
-        raise ValueError("检索单项超过预览预算，请按 ID 读取详情")
-    return page, next_offset if next_offset < len(values) else None
 
 
 def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any]:
@@ -64,26 +48,40 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             }
         ]
 
-    def require_event(identifier: str) -> dict[str, Any]:
-        value = agent.event_trees.read(identifier)
-        if execution.event_reads.get(identifier) != value:
-            raise ValueError(f"event_id={identifier} 尚未读取当前内容，请先 read_event")
+    def declaration_reference_id(identifier: str) -> str:
+        """把模型的声明引用解析成来源 UUID，el 局部键按角色命名空间解析"""
+        value = unicodedata.normalize("NFC", str(identifier)).strip()
+        prefix = f"{ledger.role}{ROLE_NAMESPACE_SEP}"
+        el = value if value.startswith(prefix) else namespace_event_el(ledger.role, value)
+        tree_key, _, node_key = el.partition(EL_PATH_SEP)
+        tree = ledger.event_trees.get(ledger.tree_key_index.get(tree_key.strip()) or "")
+        if tree is not None:
+            node_id = (tree.get("nodes") or {}).get(node_key.strip() or RESERVED_ROOT_KEY)
+            if node_id:
+                return str(node_id)
+        return value
+
+    def require_declaration(identifier: str) -> dict[str, Any]:
+        node_id = declaration_reference_id(identifier)
+        value = agent.event_trees.read(node_id)
+        if execution.event_reads.get(node_id) != value:
+            raise ValueError(f"declaration_id={identifier} 尚未读取当前内容，请先 read_event")
         if (value["work_id"], value["producer_invocation_id"]) != author and not value["saved"]:
-            raise ValueError(f"event_id={identifier} 所属 work 尚未保存")
+            raise ValueError(f"declaration_id={identifier} 所属 work 尚未保存")
         # 允许读取后文上下文不等于允许把后文事件记成本章已经披露的变化
         if query_service.chapter_orders[value["chapter_id"]] > query_service.current_chapter_order:
-            raise ValueError(f"event_id={identifier} 来源章晚于当前章，不能写入本章变化")
+            raise ValueError(f"declaration_id={identifier} 来源章晚于当前章，不能写入本章变化")
         return value
 
     @tool
-    def write_progression(
+    def write_plotline(
         subject_title: str,
         description: str,
         after: str,
         evidence: int,
         before: str | None = None,
         subject_id: str | None = None,
-        event_id: str | None = None,
+        declaration_id: str | None = None,
     ) -> str:
         """记录本章明确的问题推进、目标改变或线索揭示；附真实段号与前后状态，不能把实体登记当推进"""
         from src.utils.identity import stable_uuid
@@ -92,20 +90,24 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             raise ValueError("情节推进需要非空主体、描述和变化后的状态，前后不能相同")
         if ledger.role not in {"solo", "event"}:
             raise ValueError("情节推进由事件角色写入")
-        if event_id:
-            require_event(event_id)
+        # 冻结载荷 event_id 仅为内部来源别名，落库写 source_declaration_id
+        event_node_id = declaration_reference_id(declaration_id) if declaration_id else None
+        if event_node_id:
+            require_declaration(event_node_id)
         known = {
             item["operation"]["subject_id"]
             for owner, contribution in agent.fact_graph.contributions.items()
             if owner == author or owner in agent.fact_graph.saved
-            for item in contribution.get("progression_ops", [])
+            for item in contribution.get("plotline_ops", [])
         }
-        if subject_id and subject_id not in known:
-            raise ValueError(f"subject_id={subject_id} 没有已保存或本执行的推进来源")
-        subject_id = subject_id or stable_uuid(agent.run_id, "progression_subject", subject_title.strip())
+        # 主体键是推进线索的稳定身份：填了本 work 或已保存 work 用过的 id 就沿用，否则（含模型误填
+        # 实体 id）回退到按标题派生，避免同一条线索因乱填 id 而分裂或反复触发结构化拒绝
+        if subject_id not in known:
+            subject_id = None
+        subject_id = subject_id or stable_uuid(agent.run_id, "plotline_subject", subject_title.strip())
         item = {
             "source_operation_id": execution.call_id,
-            "event_id": event_id,
+            "event_id": event_node_id,
             "operation": {
                 "subject_id": subject_id,
                 "subject_title": subject_title.strip(),
@@ -115,38 +117,48 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             },
             "evidence": current_evidence(evidence),
         }
-        operations = agent.fact_graph.contributions[author].setdefault("progression_ops", [])
+        operations = agent.fact_graph.contributions[author].setdefault("plotline_ops", [])
         existing = next((value for value in operations if value["source_operation_id"] == execution.call_id), None)
         if existing and existing != item:
             raise ValueError("同一来源操作的情节推进内容冲突")
         if existing is None:
             operations.append(item)
         return json.dumps(
-            {"status": "written", "record": "progression", "ref": {"subject_id": subject_id}}, ensure_ascii=False
+            {"status": "written", "record": "plotline", "ref": {"subject_id": subject_id}}, ensure_ascii=False
         )
 
     @tool
     def write_foreshadowing_action(
-        root_event_id: str,
+        source_declaration_id: str,
         action_type: Literal["reinforce", "payoff"],
         evidence: int,
-        target_event_id: str | None = None,
+        target_declaration_id: str | None = None,
     ) -> str:
-        """记录明确强化或疑似回收，埋设随伏笔根自动保存；静态照应边不能代替动作，无case也照常记录"""
+        """引用已埋伏笔（is_foreshadow_setup=True 的树根声明）记录强化或疑似回收；
+        action_type 取 'reinforce'（强化）或 'payoff'（疑似回收）英文常量；
+        引用前须先 read_event 读取声明；正式事件身份在诊断发布时绑定"""
         if ledger.role not in {"solo", "event"}:
             raise ValueError("伏笔动作由事件角色写入")
-        root = require_event(root_event_id)
+        root_id = declaration_reference_id(source_declaration_id)
+        root = require_declaration(source_declaration_id)
         if not root["content"]["is_foreshadow_setup"]:
-            raise ValueError(f"root_event_id={root_event_id} 不是伏笔根")
-        if target_event_id:
-            require_event(target_event_id)
+            raise ValueError(
+                f"source_declaration_id={source_declaration_id} 不是伏笔根（is_foreshadow_setup=False）："
+                "伏笔来源只接受 write_event(isforeshadowing=True) 种下的树根，"
+                "普通事件树根不能作伏笔来源；请改用 read_event 回执里"
+                " is_foreshadow_setup=True 的 declaration_id，或跳过本动作"
+            )
+        target_id = declaration_reference_id(target_declaration_id) if target_declaration_id else None
+        if target_declaration_id:
+            require_declaration(target_declaration_id)
         evidence_rows = current_evidence(evidence)
+        # 内部动作容器保留来源别名；正式 event_id 只由诊断发布填入
         identifier = agent.event_trees.write_action(
             author,
             {
                 "source_operation_id": execution.call_id,
-                "root_event_id": root_event_id,
-                "target_event_id": target_event_id,
+                "root_event_id": root_id,
+                "target_event_id": target_id,
                 "action_type": action_type,
                 "chapter_id": ledger.current_chapter_id,
                 "evidence": evidence_rows,
@@ -157,207 +169,67 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             {"status": "written", "record": "foreshadow_action", "ref": {"action_id": identifier}}, ensure_ascii=False
         )
 
-    @tool
-    def push_case(description: str) -> str:
-        """登记非空、100 字以内的普通文字案例，只接受 description"""
-        return json.dumps(agent.case_pool.push(description, author), ensure_ascii=False)
+    def on_claim() -> None:
+        execution.case_connections.clear()
+        execution.case_reads.clear()
 
-    @tool
-    def promise_case(case_id: str) -> str:
-        """原子认领案例列表的真实案例 ID，被占用立即返回 busy"""
-        result = agent.case_pool.promise(case_id, author)
-        if result["status"] == "claimed":
-            execution.case_connections = []
-            execution.case_reads = []
-        return json.dumps(result, ensure_ascii=False)
-
-    @tool
-    def search_cases() -> str:
-        """读取全书案例 ID、说明及当前办理状态"""
-        return json.dumps(agent.case_pool.search(), ensure_ascii=False)
-
-    @tool
-    def search_events(
-        query: str = "",
-        chapter_id: int | None = None,
-        tree_id: str | None = None,
-        limit: SearchLimit = 5,
-        offset: SearchOffset = 0,
-    ) -> str:
-        """分页预览事件，可筛选章/树；events 为本页，next_offset 为续页位置，read_event 读取详情"""
-        identifiers = agent.event_trees.search_ids(query, chapter_id=chapter_id, tree_id=tree_id)
-        reads = [agent.event_trees.read(identifier) for identifier in identifiers[offset : offset + limit]]
-        previews = [
-            {
-                "node_id": value["node_id"],
-                "chapter_id": value["chapter_id"],
-                "saved": value["saved"],
-                "tree_id": value["content"]["tree_id"],
-                "parent_node_id": value["content"]["parent_node_id"],
-                "evidence_paragraph_id": value["content"]["evidence_paragraph_id"],
-                "description": value["content"]["description"][:160],
-            }
-            for value in reads
-        ]
-        page, _ = _search_page(previews, offset=0, limit=limit, budget=SHARED_SEARCH_MAX_CHARS - 600)
-        # 只授权实际返回页，完整快照留在服务端用于生产者与内容新鲜度校验
-        for value in reads[: len(page)]:
-            execution.event_reads[value["node_id"]] = value
-        execution.case_reads.extend(page)
-        next_offset = offset + len(page)
-        return json.dumps(
-            {
-                "events": page,
-                "total": len(identifiers),
-                "next_offset": next_offset if next_offset < len(identifiers) else None,
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-
-    @tool
-    def read_event(node_id: str) -> str:
-        """按实际节点 ID 读取完整事件详情；原文证据仍须 read_text/read_chapter_text 授权"""
-        value = agent.event_trees.read(node_id)
-        execution.event_reads[node_id] = value
-        execution.case_reads.append(value)
-        return json.dumps(value, ensure_ascii=False)
-
-    @tool
-    def search_graph(
-        query: str = "",
-        entity_type: EntityType | None = None,
-        limit: SearchLimit = 5,
-        offset: SearchOffset = 0,
-        relation_offset: SearchOffset = 0,
-    ) -> str:
-        """分页预览实体和命中端点的关系；两组 next_offset 独立续页，read_entity 读取完整属性"""
-        matching = {
-            key
-            for key, name in agent.fact_graph.entity_names.items()
-            if query.casefold() in name.casefold()
-            and (entity_type is None or str(agent.fact_graph.entity_types[key]) == entity_type)
-        }
-        values = [
-            {
-                "id": agent.fact_graph.entity_id(name),
-                "name": name[:160],
-                "entity_type": agent.fact_graph.entity_types[key],
-            }
-            for key, name in sorted(agent.fact_graph.entity_names.items())
-            if key in matching
-        ]
-        relations = [
-            {
-                "source_id": agent.fact_graph.entity_id(left),
-                "target_id": agent.fact_graph.entity_id(right),
-                "relation_type": kind,
-            }
-            for left, right, kind in sorted(agent.fact_graph.active_relations)
-            if left in matching or right in matching
-        ]
-        entities_page, next_offset = _search_page(values, offset=offset, limit=limit, budget=2600)
-        relations_page, next_relation_offset = _search_page(
-            relations,
-            offset=relation_offset,
-            limit=limit,
-            budget=2600,
-        )
-        ledger.shared_entity_ids.update(value["id"] for value in entities_page)
-        ledger.shared_entity_ids.update(
-            value[field] for value in relations_page for field in ("source_id", "target_id")
-        )
-        execution.case_reads.extend([*entities_page, *relations_page])
-        return json.dumps(
-            {
-                "entities": entities_page,
-                "relations": relations_page,
-                "total_entities": len(values),
-                "total_relations": len(relations),
-                "next_offset": next_offset,
-                "next_relation_offset": next_relation_offset,
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-
-    @tool
-    def read_entity(entity_id: str) -> str:
-        """按实体 UUID 读取完整名称、类型和属性，不授权未读过的原文"""
-        name = agent.fact_graph.resolve_entity_id(entity_id, label="entity_id")
-        key = next(key for key, identifier in agent.fact_graph.entity_ids.items() if identifier == entity_id)
-        value = {
-            "id": entity_id,
-            "name": name,
-            "entity_type": agent.fact_graph.entity_types[key],
-            "attributes": agent.fact_graph.entity_attributes.get(key, {}),
-        }
-        ledger.shared_entity_ids.add(entity_id)
-        execution.case_reads.append(value)
-        return json.dumps(value, ensure_ascii=False)
+    shared = build_state_read_tools(
+        agent.fact_graph,
+        agent.event_trees,
+        event_reads=execution.event_reads,
+        entity_ids=ledger.shared_entity_ids,
+        case_reads=execution.case_reads,
+        resolve_event=declaration_reference_id,
+    )
+    shared.extend(build_case_tools(agent.case_pool, author, on_claim=on_claim))
 
     @tool
     def write_event(
-        el: str | None = None,
-        isroot: bool | None = None,
-        description: str | None = None,
-        evidence: int | None = None,
+        el: str,
+        title: str,
+        problem: str,
+        summary: str,
+        event_type: str,
+        status: str,
+        evidence: int,
+        progress: str | None = None,
         isforeshadowing: bool = False,
         confidence: str | None = None,
-        type: str | None = None,
         characters: list[dict[str, Any]] | None = None,
-        parent_ref: str | None = None,
-        node_ref: str | None = None,
     ) -> str:
-        """创建节点或显式连接已读事件；连接已有节点时只填 node_ref/parent_ref/type"""
-        if parent_ref is not None and type not in {"main", "secondary"}:
-            raise ValueError(f"event.type={type!r}，连接父节点须明确 main/secondary")
-        if node_ref is not None:
-            if parent_ref is None or any(
-                value is not None for value in (el, isroot, description, evidence, characters)
-            ):
-                raise ValueError("连接已有节点只填 node_ref、parent_ref、type")
-            node_id = node_ref
-        else:
-            if el is None or isroot is None or description is None:
-                raise ValueError("创建事件须填写 el/isroot/description")
-            create_kind = None if isroot else type
-            ledger.apply_event(
-                el=el,
-                isroot=isroot,
-                description=description,
-                evidence=evidence,
-                isforeshadowing=isforeshadowing,
-                confidence=confidence,
-                node_type=create_kind,
-                characters=(
-                    TypeAdapter(list[ParticipantArg]).validate_python(characters) if characters is not None else None
-                ),
-            )
-            agent.event_trees.sync(author, ledger.current_chapter_id, ledger.bound_payloads.get("events", []))
-            content = ledger.event_content(el=el, isroot=isroot)
-            if content.get("deferred"):
-                if parent_ref is not None:
-                    raise ValueError(f"event/{el} 尚未建根，不能连接 parent_ref={parent_ref}")
-                return json.dumps({"status": "deferred", "record": el, "content": content}, ensure_ascii=False)
-            node_id = content["id"]
-            execution.event_reads[node_id] = agent.event_trees.read(node_id)
-        connection_id = None
-        if parent_ref is not None:
-            authorized = set(ledger.authorized_text_paragraph_ids)
-            authorized.update(ledger.paragraph_info.paragraph_ids)
-            connection_id = agent.event_trees.connect(
-                author, node_id, parent_ref, type, execution.event_reads, authorized
-            )
-            if agent.case_pool.active(author) is not None:
-                execution.case_connections.append(connection_id)
+        """保存本章事件声明，回执只发放声明身份；全书事件由诊断确认后发布"""
+        record = ledger.apply_event(
+            el=el,
+            title=title,
+            problem=problem,
+            summary=summary,
+            event_type=event_type,
+            status=status,
+            evidence=evidence,
+            progress=progress,
+            isforeshadowing=isforeshadowing,
+            confidence=confidence,
+            characters=TypeAdapter(list[ParticipantArg]).validate_python(characters)
+            if characters is not None
+            else None,
+        )
+        agent.event_trees.sync(author, ledger.current_chapter_id, ledger.bound_payloads.get("events", []))
+        content = ledger.event_content(el=el, isroot="/" not in el)
+        declaration_id = content["declaration_id"]
+        read = agent.event_trees.read(declaration_id)
+        execution.event_reads[declaration_id] = read
+        # 2026-10-15 用户裁定「建一个事件进一个池」：声明落地后程序侧立刻把该事件
+        # 登记进全书共享案例池（case_type=event），诊断期按事件并发派工时据此取材
+        agent.case_pool.register_event_case(
+            declaration_id=declaration_id,
+            title=read["content"]["title"],
+            summary=read["content"]["summary"],
+            status=read["content"]["status"],
+            chapter_id=read["chapter_id"],
+            author=author,
+        )
         return json.dumps(
-            {
-                "status": "written",
-                "record": el or node_id,
-                "content": agent.event_trees.read(node_id),
-                "connection_id": connection_id,
-            },
+            {"status": "written", "record": record, "content": read},
             ensure_ascii=False,
         )
 
@@ -365,26 +237,36 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
     def write_link(
         source_id: str,
         target_id: str,
-        kind: Literal["causal", "foreshadowing", "same_entity", "different_entity", "relation_change"],
+        kind: Literal["causal", "foreshadowing", "same_entity", "different_entity", "relation_change", "contains"],
         relation_type: str | None = None,
         change_kind: Literal["assert", "reinforce", "weaken", "refine", "break", "supersede", "retract"] | None = None,
         reason: str | None = None,
+        evidence: int | None = None,
     ) -> str:
         """明确关联已实际读取的事件或实体 ID；伏笔照应不合树，关系变化须明确类型、方向和原因"""
-        if kind in {"causal", "foreshadowing"}:
+        if kind in {"causal", "foreshadowing", "contains"}:
             if relation_type is not None or change_kind is not None:
                 raise ValueError("事件关联不接受 relation_type/change_kind")
-            authorized = set(ledger.authorized_text_paragraph_ids) | set(ledger.paragraph_info.paragraph_ids)
-            identifier = agent.event_trees.connect(
-                author,
-                target_id,
-                source_id,
-                kind,
-                execution.event_reads,
-                authorized,
+            if not reason or not reason.strip() or evidence is None:
+                raise ValueError("声明关联建议必须给原文理由和本章段首evidence")
+            source_node = declaration_reference_id(source_id)
+            target_node = declaration_reference_id(target_id)
+            require_declaration(source_node)
+            require_declaration(target_node)
+            from src.utils.identity import stable_uuid
+
+            identifier = stable_uuid(agent.run_id, execution.work_id, execution.call_id, kind)
+            ledger.events.apply_declaration_relation(
+                ledger,
+                source_kind="declaration",
+                source_id=source_node,
+                target_kind="declaration",
+                target_id=target_node,
+                relation_type=kind,
+                reason=reason,
+                evidence=evidence,
+                source_operation_id=identifier,
             )
-            if agent.case_pool.active(author) is not None:
-                execution.case_connections.append(identifier)
         else:
             from src.fact_graph.vocabulary import RELATION_DEFINITIONS
 
@@ -402,10 +284,13 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
                 raise ValueError("身份关联不接受 relation_type/change_kind")
             definition = RELATION_DEFINITIONS[relation]
             if (
-                agent.fact_graph.entity_type(left) not in definition["from_types"]
-                or agent.fact_graph.entity_type(right) not in definition["to_types"]
+                agent.fact_graph.entity_type_by_key(left) not in definition["from_types"]
+                or agent.fact_graph.entity_type_by_key(right) not in definition["to_types"]
             ):
-                raise ValueError(f"关系类型={relation} 与实体类型不匹配：{left}/{right}")
+                raise ValueError(
+                    f"关系类型={relation} 与实体类型不匹配："
+                    f"{agent.fact_graph.display_name(left)}/{agent.fact_graph.display_name(right)}"
+                )
             op = {
                 "from_entity": left,
                 "to_entity": right,
@@ -423,59 +308,41 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             identifier = f"{source_id}/{relation}/{target_id}"
         return json.dumps({"status": "written", "kind": kind, "connection_id": identifier}, ensure_ascii=False)
 
-    @tool
-    def finish(case_delivery: dict[str, Any] | None = None, complete: bool = True) -> str:
-        """交付当前案例；complete=True 校验并关闭当前角色 work，False 继续当前会话"""
-        if not complete and case_delivery is None:
-            raise ValueError("finish(complete=False) 必须提供 case_delivery")
-        if complete:
-            execution.validate()
-        if case_delivery is not None:
-            agent.case_pool.deliver(
-                case_delivery,
-                author,
-                call_id=execution.call_id,
-                connections=execution.case_connections,
-                reads=execution.case_reads,
-            )
-            execution.case_connections = []
-            execution.case_reads = []
-        elif agent.case_pool.active(author) is not None:
-            raise ValueError(f"finish 当前 active case_id={agent.case_pool.active(author)}，必须明确交付")
-        if complete:
-            execution.finished = True
-            execution.subagent.finished = True
-            ledger.chapter_finished = True
-        return json.dumps(
-            {
-                "status": "written",
-                "record": "finish",
-                "ref": {
-                    "role": ledger.role,
-                    "finished": complete,
-                    "unjudged_candidates": [],
-                    "missing_metric": False,
-                },
-            },
-            ensure_ascii=False,
-        )
+    def request_end() -> dict[str, Any]:
+        """请求结束当前回合；完整性由程序统一检查，caseid 只产生可选 warning"""
+        execution.end_requested = True
+        ledger.end_requested = True
+        body: dict[str, Any] = {
+            "status": "written",
+            "record": "finish",
+            "ref": {"role": ledger.role, "end_requested": True},
+        }
+        return body
 
+    finish = build_finish_tool(request_end)
     tools.extend(
         [
-            write_progression,
+            write_plotline,
             write_foreshadowing_action,
             write_event,
             write_link,
-            push_case,
-            promise_case,
-            search_cases,
-            search_events,
-            search_graph,
-            read_event,
-            read_entity,
+            *shared,
             finish,
         ]
     )
     for candidate in tools:
         _forbid_undeclared_args(candidate)
+        from src.case_pool.tool_binding import bind_caseid
+
+        def associate(*, caseid: Any, tool_name: str, receipt: dict[str, Any]) -> dict[str, Any]:
+            return agent.case_pool.associate(
+                caseid,
+                author,
+                tool_name=tool_name,
+                call_id=execution.call_id,
+                receipt=receipt,
+                is_write=tool_name.startswith("write_"),
+            )
+
+        bind_caseid(candidate, associate)
     return tools

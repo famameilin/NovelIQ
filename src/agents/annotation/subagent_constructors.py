@@ -8,6 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import ValidationError
+
 from src.agents.annotation.ir_validation import (
     _reject,
     _require_enum,
@@ -23,7 +25,6 @@ from src.agents.annotation.subagent_ir import (
     CONFIDENCE_VALUES,
     DIALOGUE_VERDICTS,
     ENTITY_TYPES,
-    EVENT_CHILD_TYPES,
     NARRATIVE_FUNCTIONS,
     RELATION_TYPES,
     RUNTIME_ROLES,
@@ -41,10 +42,10 @@ from src.agents.annotation.subagent_ir import (
 )
 from src.event_trees.vocabulary import (
     _EVENT_ONLY_ROLE_WORDS,
-    EventChildType,
     normalize_event_participant_role,
 )
-from src.fact_graph.schema import EL_PATH_SEP, ENTITY_TAG_MAX_CHARS, ENTITY_TAG_MAX_COUNT, RESERVED_ROOT_KEY, EntityRef
+from src.fact_graph.inputs import EntityNameRef
+from src.fact_graph.schema import EL_PATH_SEP, ENTITY_TAG_MAX_CHARS, ENTITY_TAG_MAX_COUNT
 from src.fact_graph.vocabulary import (
     Confidence,
     DialogueVerdict,
@@ -85,7 +86,7 @@ def _sync_entity_ref(ref: dict[str, Any], production_receipt: Any) -> None:
     """
     if not isinstance(production_receipt, dict):
         return
-    if ref.get("kind") in {"progression", "foreshadow_action"}:
+    if ref.get("kind") in {"plotline", "foreshadow_action", "complete_event"}:
         ref.update(production_receipt.get("ref") or {})
         return
     if ref.get("kind") != "entity":
@@ -159,7 +160,7 @@ def _normalize_el(value: Any, *, record: str) -> str:
 
 
 def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) -> list[SubagentParticipant]:
-    """用于校验参与者清单的形状（entity_id 是本 subagent 已登记 id），并归一角色取值
+    """用于校验参与者清单的形状（名字与大类由运行时解析并自动登记），并归一角色取值
 
     2026-10-04 合同放开：role/narrative_role/emotion 缺省或写偏不再拒绝——role 未知词
     交生产面按实体登记类型给默认，叙事功能近义词归一（未收录收敛为主体），
@@ -171,7 +172,7 @@ def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) ->
             record=record,
             field="participants",
             code="missing_field",
-            expected='[{"entity_id": 本 subagent 实体 id, "role": ..., "narrative_role": ..., '
+            expected='[{"name": 正文名字, "entity_type": 实体大类, "role": ..., "narrative_role": ..., '
             '"action": ..., "emotion": ...}]',
         )
     if not isinstance(raw, (list, tuple)) or not raw:
@@ -180,13 +181,15 @@ def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) ->
             record=record,
             field="participants",
             code="invalid_value",
-            expected='[{"entity_id": 本 subagent 实体 id, "role": ...}]，至少一个参与者',
+            expected='[{"name": 正文名字, "entity_type": 实体大类, "role": ...}]，至少一个参与者',
         )
     normalized: list[SubagentParticipant] = []
     for index, item in enumerate(raw):
         entry = item if isinstance(item, dict) else {}
-        entity_id = _require_known_entity_id(
-            book, entry.get("entity_id"), record=record, field_name=f"participants[{index}].entity_id"
+        ref = _name_ref(
+            {key: value for key, value in entry.items() if key not in {"role", "narrative_role", "action", "emotion"}},
+            record=record,
+            field_name=f"participants[{index}]",
         )
         narrative_role = entry.get("narrative_role")
         if isinstance(narrative_role, str) and narrative_role.strip() in _EVENT_ONLY_ROLE_WORDS:
@@ -200,7 +203,8 @@ def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) ->
             )
         normalized.append(
             SubagentParticipant(
-                entity_id=entity_id,
+                name=ref.name,
+                entity_type=ref.entity_type,
                 role=normalize_event_participant_role(entry.get("role")),
                 narrative_role=normalize_role_function(narrative_role),
                 action=(
@@ -240,7 +244,6 @@ class _ConstructorBook:
     role: str
     paragraph_text_by_id: dict[int, str]
     candidate_total: int
-    shared_entity_ids: Callable[[], set[str]] | None = None
 
 
 def _event_write_args(
@@ -256,41 +259,34 @@ def _event_write_args(
     """
     args: dict[str, Any] = {
         "el": namespace_event_el(book.role, item.el),
-        "isroot": item.isroot,
-        "description": item.description,
+        "title": item.title,
+        "problem": item.problem,
+        "summary": item.summary,
+        "event_type": item.event_type,
+        "status": item.status,
+        "progress": item.progress,
         "evidence": item.evidence[0].paragraph_id,
     }
-    if item.isroot:
-        args["isforeshadowing"] = item.isforeshadowing
-        if item.confidence is not None:
-            args["confidence"] = item.confidence
-    else:
-        args["type"] = item.node_type
+    args["isforeshadowing"] = item.isforeshadowing
+    if item.confidence is not None:
+        args["confidence"] = item.confidence
     if characters is not None:
         args["characters"] = characters
     return args
 
 
-def _require_known_entity_id(book: _ConstructorBook, value: Any, *, record: str, field_name: str) -> str:
-    """用于校验实体引用是"本 subagent 已登记的 id"（未登记即结构化拒绝并列出已知 id）"""
-    if book.shared_entity_ids is not None and value in book.shared_entity_ids():
-        return str(value)
-    normalized = _require_local_key(value, record=record, field_name=field_name)
-    known = book.subagent.entity_ids()
-    if normalized not in known:
-        available = "、".join(known) or "（本 subagent 还没有实体）"
+def _name_ref(value: Any, *, record: str, field_name: str) -> EntityNameRef:
+    """只接正文名字与大类，身份解析交给生产运行时"""
+    try:
+        return EntityNameRef.model_validate(value)
+    except ValidationError as exc:
         raise _reject(
-            f"{field_name} 引用了本 subagent 未登记的实体 id：{normalized}",
+            f"{field_name} 必须写正文名字与大类：{exc}",
             record=record,
             field=field_name,
-            code="unknown_reference",
-            expected=f"先用 entity(id=..., name=...) 在本 subagent 登记它，再用 id 引用；已登记 id：{available}",
-        )
-    return normalized
-
-
-def _entity_ref(book: _ConstructorBook, identifier: str) -> str:
-    return namespace_el(book.role, identifier) if identifier in book.subagent.entity_ids() else identifier
+            code="invalid_value",
+            expected="{name: 正文名字, entity_type: character/item/location/organization}",
+        ) from None
 
 
 def build_subagent_constructors(
@@ -298,7 +294,6 @@ def build_subagent_constructors(
     *,
     paragraph_text_by_id: dict[int, str],
     candidate_total: int,
-    shared_entity_ids: Callable[[], set[str]] | None = None,
 ) -> list[tuple[str, Any, str]]:
     """用于构造 subagent 命名空间里的记录构造器（返回 (名字, 可调用, 一句话说明) 列表）
 
@@ -315,7 +310,6 @@ def build_subagent_constructors(
         role=subagent.role,
         paragraph_text_by_id=paragraph_text_by_id,
         candidate_total=candidate_total,
-        shared_entity_ids=shared_entity_ids,
     )
 
     def entity(
@@ -325,13 +319,16 @@ def build_subagent_constructors(
         evidence: int,
         tags: list[str] | None = None,
         description: str | None = None,
-        attributes: dict[str, Any] | None = None,
+        representative: bool | None = None,
     ) -> _ConstructorCall:
-        """登记本章的一个实体（id 是你自定的本 subagent 引用键，name 照抄正文写法只作展示）
+        """登记本章的一个实体（id 是富登记的局部锚点键，name 照抄正文写法）
 
-        id 形如 a1/a2…，relation/participants/dialogue/pending 都用它引用本实体。
+        id 形如 a1/a2…，仅绑定富登记 el；引用写正文名字与大类，不再写 id。
         entity_type 取闭集 character/item/location/organization（有生命就是 character）。
+        机构名称兼指所在场所时按 organization 登记，只有纯地理场所才用 location。
         evidence 写该名字出现段落的段首号（正文每段开头的 `N：` 里的 N）。同 id 重写=更新语义。
+        representative=True 表示该名字是同一个人物的规范写法（外号/别称登记时不写）；
+        省略=保留现值，False=清除标记。
         """
         record = _record_of(subagent, f"entity/{id}")
         normalized_id = _require_local_key(id, record=record, field_name="id")
@@ -358,20 +355,14 @@ def build_subagent_constructors(
                 code="invalid_value",
                 expected=f"最多 {ENTITY_TAG_MAX_COUNT} 个标签、每个最多 {ENTITY_TAG_MAX_CHARS} 个字",
             )
-        normalized_attributes: dict[str, Any] | None = None
-        if attributes is not None:
-            if not isinstance(attributes, dict):
-                raise _reject(
-                    "attributes 必须是对象（键=属性名，值=属性值）",
-                    record=record,
-                    field="attributes",
-                    code="invalid_value",
-                    expected="{属性名: 值}；不确定就省略",
-                )
-            normalized_attributes = {
-                _require_text(item_key, record=record, field_name="attributes"): item_value
-                for item_key, item_value in attributes.items()
-            }
+        if representative is not None and not isinstance(representative, bool):
+            raise _reject(
+                "representative 必须是布尔值",
+                record=record,
+                field="representative",
+                code="invalid_value",
+                expected="True/False，或省略以保留现值",
+            )
         item = SubagentEntity(
             id=normalized_id,
             name=normalized_name,
@@ -380,7 +371,7 @@ def build_subagent_constructors(
             description=(
                 _require_text(description, record=record, field_name="description") if description is not None else None
             ),
-            attributes=normalized_attributes,
+            representative=representative,
             evidence=normalize_evidence(evidence, record=record, paragraph_text_by_id=book.paragraph_text_by_id),
         )
         args: dict[str, Any] = {
@@ -388,12 +379,12 @@ def build_subagent_constructors(
             "entity_type": item.entity_type,
             "el": namespace_el(book.role, item.id),
         }
-        if item.tags:
+        if tags is not None:
             args["tags"] = list(item.tags)
         if item.description is not None:
             args["description"] = item.description
-        if item.attributes is not None:
-            args["attributes"] = dict(item.attributes)
+        if item.representative is not None:
+            args["representative"] = item.representative
         return _ConstructorCall(
             record=record,
             tool="write_entity",
@@ -403,25 +394,26 @@ def build_subagent_constructors(
         )
 
     def relation(
-        from_id: EntityRef,
-        to_id: EntityRef,
+        from_entity: EntityNameRef,
+        to_entity: EntityNameRef,
         relation_type: RelationType,
         evidence: int | None = None,
     ) -> _ConstructorCall:
-        """写一条闭合关系边（两端写本 subagent 已登记的实体 id，不判身份、不判别名）
+        """写一条闭合关系边（两端写正文名字与大类，运行时解析并自动登记，不判身份、不判别名）
 
         relation_type 取闭合关系类型表；方向与两端类型约束在参数说明里。
         2026-10-02 对齐 0.2.0 写面：本章只确认局部关系（建边），不带 change_kind 关系变化
         ——跨章关系变化由 write_link 关联工具承担。
         正文只说见面/对峙这类没有闭合关系可表达的，宁缺勿滥——用 pending 登记。
         """
-        record = _record_of(subagent, f"relation/{from_id}-{to_id}")
-        source = _require_known_entity_id(book, from_id, record=record, field_name="from_id")
-        target = _require_known_entity_id(book, to_id, record=record, field_name="to_id")
+        record = _record_of(subagent, "relation")
+        source = _name_ref(from_entity, record=record, field_name="from_entity")
+        target = _name_ref(to_entity, record=record, field_name="to_entity")
+        record = _record_of(subagent, f"relation/{source.name}-{target.name}")
         # 建边不消费 evidence（同生产面的口径）：给了也不报错，只不落进这条记录
         item = SubagentRelation(
-            from_id=source,
-            to_id=target,
+            from_entity=source,
+            to_entity=target,
             relation_type=_require_enum(relation_type, RELATION_TYPES, record=record, field_name="relation_type"),
             evidence=(
                 normalize_evidence(evidence, record=record, paragraph_text_by_id=book.paragraph_text_by_id)
@@ -430,8 +422,8 @@ def build_subagent_constructors(
             ),
         )
         args: dict[str, Any] = {
-            "from_entity": _entity_ref(book, item.from_id),
-            "to_entity": _entity_ref(book, item.to_id),
+            "from_entity": item.from_entity.model_dump(mode="json"),
+            "to_entity": item.to_entity.model_dump(mode="json"),
             "relation_type": item.relation_type,
         }
         return _ConstructorCall(
@@ -441,160 +433,80 @@ def build_subagent_constructors(
             ref={
                 "kind": "relation",
                 "type": item.relation_type,
-                "from_id": item.from_id,
-                "to_id": item.to_id,
+                "from_entity": item.from_entity.model_dump(mode="json"),
+                "to_entity": item.to_entity.model_dump(mode="json"),
             },
             commit=lambda: _put_by(
                 subagent.relations,
                 item,
-                key=lambda existing: (existing.from_id, existing.to_id),
+                key=lambda existing: (
+                    existing.from_entity.name,
+                    existing.from_entity.entity_type,
+                    existing.to_entity.name,
+                    existing.to_entity.entity_type,
+                ),
             ),
         )
 
     def event(
-        el: str | None = None,
-        isroot: bool | None = None,
-        description: str | None = None,
-        evidence: int | None = None,
+        el: str,
+        title: str,
+        problem: str,
+        summary: str,
+        event_type: str,
+        status: str,
+        evidence: int,
+        progress: str | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
-        type: EventChildType | None = None,
-        parent_ref: str | None = None,
-        node_ref: str | None = None,
     ) -> _ConstructorCall:
-        """写一个事件节点（el 根=树键 t1、子=树键/节点键 t1/e2；树内先后=调用顺序）
-
-        type=main 顺延主因链 / secondary 挂当时主链尾（子事件必填，根事件不填）。
-        伏笔属性只属于根：isforeshadowing=True 时 confidence 必填（high/medium/low）。
-        参与者用 participants(el=本键, items=[...]) 追加；节点核心内容不允许重复改写。
-        2026-10-02 对齐 0.2.0 写面：伏笔挂树参数（foreshadowing_action/root_event_id 等）
-        已随案例裁决机器退役——跨章伏笔照应由 write_link 关联工具承担。
-        """
-        if node_ref is not None:
-            return _ConstructorCall(
-                record=_record_of(subagent, f"connection/{node_ref}"),
-                tool="write_event",
-                args={"node_ref": node_ref, "parent_ref": parent_ref, "type": type},
-                ref={"node_id": node_ref},
-                commit=lambda: None,
-            )
-        if el is None or isroot is None or description is None:
-            raise ValueError("创建 event 必须填写 el/isroot/description")
-        connection_type = type
-        if parent_ref is not None and isroot:
-            type = None
+        """声明本章一个事件；局部键仅寻址，不以调用顺序推导包含或阶段"""
         record = _record_of(subagent, f"event/{el}")
         normalized_el = _normalize_el(el, record=record)
-        tree_key, _, node_key = normalized_el.partition(EL_PATH_SEP)
-        if not isinstance(isroot, bool):
-            raise _reject(
-                "isroot 必须是 True/False",
-                record=record,
-                field="isroot",
-                code="invalid_value",
-                expected="True 建树根（el=树键）/ False 加子事件（el=树键/节点键）",
-            )
         existing = subagent.event_keys().get(normalized_el)
-        if isroot:
-            if node_key:
-                raise _reject(
-                    f"根事件的 el 必须是树键（不带路径）：{normalized_el}",
-                    record=record,
-                    field="el",
-                    code="bad_el",
-                    expected="根事件 el=树键（如 t1）；子事件才是 树键/节点键（如 t1/e2）",
-                )
-            if type is not None:
-                raise _reject(
-                    "type 只属于子事件（根事件由 isroot=True 表达）",
-                    record=record,
-                    field="type",
-                    code="not_on_root",
-                    expected="根事件不填 type",
-                )
-            if isforeshadowing and confidence is None:
-                raise _reject(
-                    "isforeshadowing=True 时 confidence 必填",
-                    record=record,
-                    field="confidence",
-                    code="missing_field",
-                    expected="high / medium / low（伏笔回收可能性三档）",
-                )
-            normalized_confidence = (
-                _require_enum(confidence, CONFIDENCE_VALUES, record=record, field_name="confidence")
-                if confidence is not None
-                else None
+        if isforeshadowing and confidence is None:
+            raise _reject(
+                "isforeshadowing=True 时 confidence 必填",
+                record=record,
+                field="confidence",
+                code="missing_field",
+                expected="high / medium / low",
             )
-            normalized_type: str | None = None
-        else:
-            if not tree_key or not node_key:
-                raise _reject(
-                    f"子事件的 el 必须是 树键/节点键：{normalized_el}",
-                    record=record,
-                    field="el",
-                    code="bad_el",
-                    expected='形如 t1/e2；建树请用 event(el="t1", isroot=True, ...)',
-                )
-            if node_key == RESERVED_ROOT_KEY:
-                raise _reject(
-                    f"子事件的节点键不得占用 {RESERVED_ROOT_KEY}",
-                    record=record,
-                    field="el",
-                    code="reserved",
-                    expected="换一个节点键（root 固定指根事件）",
-                )
-            if isforeshadowing or confidence is not None:
-                raise _reject(
-                    "伏笔属性（isforeshadowing/confidence）只属于根事件",
-                    record=record,
-                    field="isforeshadowing",
-                    code="not_on_child",
-                    expected="子事件只填 el/type/description",
-                )
-            if type is None:
-                raise _reject(
-                    "子事件必须提供 type",
-                    record=record,
-                    field="type",
-                    code="missing_field",
-                    expected="main（顺延主因链）/ secondary（挂在当时主链尾）",
-                )
-            normalized_type = _require_enum(type, EVENT_CHILD_TYPES, record=record, field_name="type")
-            normalized_confidence = None
         item = SubagentEvent(
             el=normalized_el,
-            isroot=isroot,
-            description=_require_text(description, record=record, field_name="description"),
+            isroot=EL_PATH_SEP not in normalized_el,
+            description=_require_text(summary, record=record, field_name="summary"),
+            title=_require_text(title, record=record, field_name="title"),
+            problem=_require_text(problem, record=record, field_name="problem"),
+            summary=_require_text(summary, record=record, field_name="summary"),
+            event_type=_require_text(event_type, record=record, field_name="event_type"),
+            status=_require_enum(status, ("ongoing", "resolved"), record=record, field_name="status"),
+            progress=_require_text(progress, record=record, field_name="progress") if progress is not None else None,
             isforeshadowing=isforeshadowing,
-            confidence=normalized_confidence,
-            node_type=normalized_type,
+            confidence=_require_enum(confidence, CONFIDENCE_VALUES, record=record, field_name="confidence")
+            if confidence is not None
+            else None,
             participants=list(existing.participants) if existing is not None else [],
             evidence=normalize_evidence(evidence, record=record, paragraph_text_by_id=book.paragraph_text_by_id),
         )
-        ref: dict[str, Any] = {
-            "kind": "event",
-            "el": item.el,
-            "isroot": item.isroot,
-            "participants": len(item.participants),
-        }
+        if existing is not None and existing.to_dict() != item.to_dict():
+            raise ValueError(f"event/{normalized_el} 声明内容不可改写")
         return _ConstructorCall(
             record=record,
             tool="write_event",
-            args={
-                **_event_write_args(book, item),
-                **({"parent_ref": parent_ref, "type": connection_type} if parent_ref is not None else {}),
-            },
-            ref=ref,
+            args=_event_write_args(book, item),
+            ref={"kind": "declaration", "el": item.el},
             commit=lambda: _put_by(subagent.events, item, key=lambda current: current.el),
         )
 
     def participants(el: str, items: list[dict[str, Any]]) -> _ConstructorCall:
         """把一个事件节点的参与者整体设为 items（同一节点重写=整体替换）
 
-        items 每项 {entity_id: 本 subagent 已登记的实体 id, role: 主体/客体/接收者/帮助者/
+        items 每项 {name: 正文名字, entity_type: 大类, role: 主体/客体/接收者/帮助者/
         反对者/见证者/地点, narrative_role: 叙事功能, action: 做了什么, emotion: -2..2 整数}。
         四个描述字段均可省略或写偏：role 缺省按实体登记类型取默认（character→主体、
         location→地点、其余→客体），叙事功能近义词自动归一，emotion 越界按边界收敛。
+        地点角色接受 location 与 organization 型端点（机构兼场所按 organization 登记即可当地点）。
         """
         record = _record_of(subagent, f"participants/{el}")
         normalized_el = _normalize_el(el, record=record)
@@ -612,7 +524,8 @@ def build_subagent_constructors(
         characters: list[dict[str, Any]] = []
         for participant in normalized_participants:
             entry: dict[str, Any] = {
-                "entityid": _entity_ref(book, participant.entity_id),
+                "name": participant.name,
+                "entity_type": participant.entity_type,
                 "role": participant.role,
             }
             if participant.narrative_role is not None:
@@ -641,14 +554,15 @@ def build_subagent_constructors(
         candidate_index: int,
         verdict: DialogueVerdict,
         evidence: int | None = None,
-        speaker_id: EntityRef | None = None,
+        speaker: EntityNameRef | None = None,
         tone: Tone | None = None,
     ) -> _ConstructorCall:
         """判定一条对话候选（candidate_index 取候选表编号）
 
         verdict: dialogue=真实对话 / inner_monologue=内心独白 / not_dialogue=误判候选
         （题字、描写被引号包裹等，此时只填 candidate_index/verdict）。
-        speaker_id 写本 subagent 已登记的实体 id，判不了就省略；tone 取闭集，没有贴合的用「其他」。
+        speaker 写 {name: 正文名字, entity_type: character}，运行时自动登记，判不了就省略。
+        tone 取闭集，没有贴合的用「其他」。
         evidence 是候选所在段落的段首号：not_dialogue 可省略，其余必须给。
         2026-10-02 对齐 0.2.0 写面：candidate_key 订正路径已随订正入口退役。
         """
@@ -666,26 +580,26 @@ def build_subagent_constructors(
                 expected=f"1..{book.candidate_total}（用 <DialogueCandidates> 表里的编号）",
             )
         normalized_verdict = _require_enum(verdict, DIALOGUE_VERDICTS, record=record, field_name="verdict")
-        normalized_speaker: str | None = None
+        normalized_speaker: EntityNameRef | None = None
         normalized_tone: str | None = None
         if normalized_verdict == "not_dialogue":
-            if speaker_id is not None or tone is not None:
+            if speaker is not None or tone is not None:
                 raise _reject(
                     "not_dialogue 候选只提交 candidate_index/verdict",
                     record=record,
                     field="verdict",
                     code="invalid_value",
-                    expected="speaker_id 与 tone 都省略",
+                    expected="speaker 与 tone 都省略",
                 )
         else:
-            if speaker_id is not None:
-                normalized_speaker = _require_known_entity_id(book, speaker_id, record=record, field_name="speaker_id")
+            if speaker is not None:
+                normalized_speaker = _name_ref(speaker, record=record, field_name="speaker")
             if tone is not None:
                 normalized_tone = _require_enum(tone, TONE_VALUES, record=record, field_name="tone")
         item = SubagentDialogue(
             candidate_index=candidate_index,
             verdict=normalized_verdict,
-            speaker_id=normalized_speaker,
+            speaker=normalized_speaker,
             tone=normalized_tone,
             evidence=normalize_evidence(
                 evidence,
@@ -695,8 +609,8 @@ def build_subagent_constructors(
             ),
         )
         args: dict[str, Any] = {"candidate_index": item.candidate_index, "verdict": item.verdict}
-        if item.speaker_id is not None:
-            args["speaker"] = _entity_ref(book, item.speaker_id)
+        if item.speaker is not None:
+            args["speaker"] = item.speaker.model_dump(mode="json")
         if item.tone is not None:
             args["tone"] = item.tone
         return _ConstructorCall(
@@ -771,10 +685,22 @@ def build_subagent_constructors(
             commit=commit,
         )
 
-    def pending(description: str) -> _ConstructorCall:
-        """登记普通文字案例，只有 description，不承载目标或证据参数"""
+    def pending(case_type: str, description: str) -> _ConstructorCall:
+        """登记案例并显式归入人物/关系/对话/事件之一，只有 description 承载文字"""
+        from src.case_pool import CASE_TYPES
+
         record = _record_of(subagent, "pending")
-        item = SubagentPending(description=_require_text(description, record=record, field_name="description"))
+        if case_type not in CASE_TYPES:
+            raise _reject(
+                f"case_type={case_type!r} 不属于案例类型",
+                record=record,
+                field="case_type",
+                code="unknown_case_type",
+                expected=f"{list(CASE_TYPES)} 之一",
+            )
+        item = SubagentPending(
+            case_type=case_type, description=_require_text(description, record=record, field_name="description")
+        )
         if len(item.description) > 100:
             raise _reject(
                 f"description={item.description!r} 超过 100 字",
@@ -786,21 +712,25 @@ def build_subagent_constructors(
         return _ConstructorCall(
             record=record,
             tool="push_case",
-            args={"description": item.description},
+            args={"case_type": item.case_type, "description": item.description},
             ref={"kind": "pending"},
             commit=lambda: subagent.pending.append(item),
         )
 
-    def progression(
+    def plotline(
         subject_title: str,
         description: str,
         after: str,
         evidence: int,
         before: str | None = None,
         subject_id: str | None = None,
-        event_id: str | None = None,
+        declaration_id: str | None = None,
     ) -> _ConstructorCall:
-        """记录有原文依据的问题推进、目标改变或线索揭示，before未知用None；主体ID可沿用既有回执"""
+        """记录有原文依据的问题推进、目标改变或线索揭示
+
+        description 是本次变化的标题（必填）；before/after 是变化前后的状态（不可相同），
+        before 未知填 None；主体 ID 可沿用既有回执的 subject_id。
+        """
         args = {
             "subject_title": subject_title,
             "description": description,
@@ -808,25 +738,28 @@ def build_subagent_constructors(
             "evidence": evidence,
             "before": before,
             "subject_id": subject_id,
-            "event_id": event_id,
+            "declaration_id": declaration_id,
         }
         return _ConstructorCall(
-            record=_record_of(subagent, "progression"),
-            tool="write_progression",
+            record=_record_of(subagent, "plotline"),
+            tool="write_plotline",
             args=args,
-            ref={"kind": "progression"},
-            commit=lambda: subagent.progressions.append(args),
+            ref={"kind": "plotline"},
+            commit=lambda: subagent.plotlines.append(args),
         )
 
     def foreshadow_action(
-        root_event_id: str, action_type: str, evidence: int, target_event_id: str | None = None
+        source_declaration_id: str, action_type: str, evidence: int, target_declaration_id: str | None = None
     ) -> _ConstructorCall:
-        """明确reinforce强化或payoff疑似回收；先read_event读取伏笔根，埋设由伏笔事件自动记录"""
+        """引用已埋伏笔的 declaration_id 记录强化或回收：先 read_event 读取声明；
+        source_declaration_id 须是伏笔树根（isforeshadowing=True 声明的根，
+        read_event 回执 is_foreshadow_setup=True），普通事件树根拒收；action_type 写英文常量
+        'reinforce'（强化）或 'payoff'（疑似回收）；埋设随声明自动记录"""
         args = {
-            "root_event_id": root_event_id,
+            "source_declaration_id": source_declaration_id,
             "action_type": action_type,
             "evidence": evidence,
-            "target_event_id": target_event_id,
+            "target_declaration_id": target_declaration_id,
         }
         return _ConstructorCall(
             record=_record_of(subagent, "foreshadow_action"),
@@ -837,12 +770,12 @@ def build_subagent_constructors(
         )
 
     functions = {
-        "progression": (progression, "保存情节推进及前后状态，evidence为本章段首号"),
+        "plotline": (plotline, "保存情节推进及前后状态，evidence为本章段首号"),
         "foreshadow_action": (foreshadow_action, "保存明确强化或疑似回收，照应边不等于动作"),
-        "entity": (entity, "登记本章的一个实体（id=本 subagent 引用键，name 照抄正文写法仅展示）"),
-        "relation": (relation, "写一条闭合关系边（两端写本 subagent 已登记的实体 id）"),
+        "entity": (entity, "登记本章的一个实体（id=富登记局部锚点键，name=正文名字）"),
+        "relation": (relation, "写一条闭合关系边（两端写正文名字与大类，运行时解析并自动登记）"),
         "event": (event, "写一个事件节点（el 根=树键、子=树键/节点键）"),
-        "participants": (participants, "把一个事件节点的参与者整体设为 items（entity_id 用本 subagent 实体 id）"),
+        "participants": (participants, "把一个事件节点的参与者整体设为 items（名字与大类由运行时解析并自动登记）"),
         "dialogue": (dialogue, "判定一条对话候选（candidate_index+verdict）"),
         "label": (label, "给一个段落打整段情绪标签（段首号）"),
         "metric": (metric, "提交本章摘要与叙事指标（整域一次提交）"),

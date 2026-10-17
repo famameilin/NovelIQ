@@ -117,7 +117,7 @@ def _event_root_stmt(
     """2026-09-19 用于构造 write_event 根事件程序语句"""
     return (
         f'write_event(el="{tree_key}", isroot=True, description="{description}", '
-        'characters=[{"entityid": "顾霜", "role": "主体", "narrative_role": "主体", '
+        'characters=[{"name": "顾霜", "entity_type": "character", "role": "主体", "narrative_role": "主体", '
         f'"action": "{action}", "emotion": {emotion}}}])'
     )
 
@@ -134,7 +134,7 @@ def _event_child_stmt(
     return (
         f'write_event(el="{tree_key}/{child_key}", isroot=False, type="main", '
         f'description="{description}", '
-        'characters=[{"entityid": "顾霜", "role": "主体", "narrative_role": "主体", '
+        'characters=[{"name": "顾霜", "entity_type": "character", "role": "主体", "narrative_role": "主体", '
         f'"action": "{action}", "emotion": {emotion}}}])'
     )
 

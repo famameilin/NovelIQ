@@ -19,7 +19,7 @@ from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.tool_batch import _invoke_tool
 from src.event_trees.models import BoundEvent
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.inputs import ChapterParagraphInfo, EntityDirectoryInput, RelationInput
+from src.fact_graph.inputs import BoundRelationInput, ChapterParagraphInfo, EntityDirectoryInput
 from src.fact_graph.outputs import BoundCharacterObservation
 from src.fact_graph.vocabulary import RelationType
 from tests.support.annotation_work_tools import build_annotation_tools
@@ -103,8 +103,30 @@ def test_duplicate_event_rejection_names_local_node_key() -> None:
     ledger.tree_key_index["t1"] = "tree-1"
     ledger.event_trees["tree-1"] = {"nodes": {"root": "node-root", "e2": "node-2"}}
     ledger.events.bound_payloads["events"] = [
-        BoundEvent(node_id="node-2", tree_id="tree-1", cause_role="main", description="李瑜推门"),
-        BoundEvent(node_id="node-2", tree_id="tree-1", cause_role="main", description="李瑜推门"),
+        BoundEvent(
+            node_id="node-2",
+            tree_id="tree-1",
+            cause_role="main",
+            description="李瑜推门",
+            title="李瑜推门",
+            problem="明确事件问题",
+            summary="李瑜推门",
+            event_type="行动",
+            status="ongoing",
+            declaration_id="node-2",
+        ),
+        BoundEvent(
+            node_id="node-2",
+            tree_id="tree-1",
+            cause_role="main",
+            description="李瑜推门",
+            title="李瑜推门",
+            problem="明确事件问题",
+            summary="李瑜推门",
+            event_type="行动",
+            status="ongoing",
+            declaration_id="node-2",
+        ),
     ]
     with pytest.raises(ValueError) as excinfo:
         ledger._validate_domain_duplicates(_duplicate_payloads(ledger))
@@ -116,7 +138,7 @@ def test_duplicate_event_rejection_names_local_node_key() -> None:
 def test_duplicate_relation_rejection_names_edge_key() -> None:
     """关系判重点名 from-to/类型 边键"""
     ledger = _ledger()
-    edge = RelationInput(from_entity="李瑜", to_entity="钱进", relation_type=RelationType.ALLY)
+    edge = BoundRelationInput(from_entity="李瑜", to_entity="钱进", relation_type=RelationType.ALLY)
     with pytest.raises(ValueError) as excinfo:
         ledger._validate_domain_duplicates({"character_observations": [], "events": [], "relations": [edge, edge]})
     message = str(excinfo.value)
@@ -133,7 +155,7 @@ def test_endpoint_error_names_record_key() -> None:
     ledger.events.domain_payloads["character_observations"] = list(ledger.observation_by_record.values())
     ledger.dialogue.domain_payloads["dialogues"] = []
     ledger.entities.domain_payloads["relations"] = [
-        RelationInput(from_entity="未登记者", to_entity="李瑜", relation_type=RelationType.ALLY)
+        BoundRelationInput(from_entity="未登记者", to_entity="李瑜", relation_type=RelationType.ALLY)
     ]
     with pytest.raises(ValueError) as excinfo:
         ledger.validate_work_endpoints()
@@ -148,22 +170,26 @@ async def test_write_duplicate_rejection_names_both_records_in_program_receipt()
     ledger = _ledger()
     runtime = ProgramRuntime(build_annotation_tools(_QueryService(), ledger), ledger)
     receipt = json.loads(
-        await runtime.execute("""
-write_entity(el="a1", name="顾霜", entity_type="character")
-write_event(el="t1", isroot=True, description="顾霜喝止", characters=[{"entityid": "a1", "action": "喝止"}])
-write_event(el="t2", isroot=True, description="众人退下", characters=[{"entityid": "a1", "action": "喝止"}])
-""")
+        await runtime.execute(
+            "write_entity(el='a1', name='顾霜', entity_type='character')\n"
+            "write_event(el='t1', characters=[{'name': '顾霜', 'entity_type': 'c"
+            "haracter', 'action': '喝止'}], title='顾霜喝止', problem='明确事件问题', summ"
+            "ary='顾霜喝止', event_type='行动', status='ongoing', evidence=1)\n"
+            "write_event(el='t2', characters=[{'name': '顾霜', 'entity_type': 'c"
+            "haracter', 'action': '喝止'}], title='众人退下', problem='明确事件问题', summ"
+            "ary='众人退下', event_type='行动', status='ongoing', evidence=1)"
+        )
     )
     assert receipt["status"] == "partial"
     (failed,) = receipt["failed"]
-    assert failed["record"] == "t2/root/participant/a1"
+    assert failed["record"] == "t2/root/participant/顾霜"
     assert failed["code"] == "duplicate_observation"
-    assert "t1/root/participant/a1(character=顾霜, action=喝止)" in failed["message"]
-    assert "t2/root/participant/a1(character=顾霜, action=喝止)" in failed["message"]
+    assert "t1/root/participant/顾霜(character=顾霜, action=喝止)" in failed["message"]
+    assert "t2/root/participant/顾霜(character=顾霜, action=喝止)" in failed["message"]
     assert "相撞" in failed["message"]
     assert "改写" not in failed["expected"]
     assert set(ledger.tree_key_index) == {"t1"}
-    assert set(ledger.observation_by_record) == {"t1/root/participant/a1"}
+    assert set(ledger.observation_by_record) == {"t1/root/participant/顾霜"}
 
 
 @pytest.mark.asyncio
@@ -176,16 +202,20 @@ async def test_schema_rejection_names_participant_key_and_submitted_value() -> N
             "write_event",
             {
                 "el": "t1",
-                "isroot": True,
-                "description": "顾霜喝止",
-                "characters": [{"entityid": "a1", "emotion": "愤怒"}],
+                "characters": [{"name": "顾霜", "entity_type": "character", "emotion": "愤怒"}],
+                "title": "顾霜喝止",
+                "problem": "明确事件问题",
+                "summary": "顾霜喝止",
+                "event_type": "行动",
+                "status": "ongoing",
+                "evidence": 1,
             },
         )
     receipt = excinfo.value.receipt()
-    assert receipt["record"] == "t1/root"
+    assert receipt["record"] == "t1"
     assert receipt["field"] == "emotion"
     assert "characters.0.emotion='愤怒'" in receipt["message"]
-    assert "t1/root/participant/a1" in receipt["message"]
+    assert "t1/participant/顾霜" in receipt["message"]
     assert not ledger.tree_key_index
 
 
@@ -195,7 +225,13 @@ def test_endpoint_type_rejection_names_record_and_field_value() -> None:
     tools["write_entity"].invoke({"el": "a1", "name": "山门", "entity_type": "location"})
     tools["write_entity"].invoke({"el": "a2", "name": "顾霜", "entity_type": "character"})
     with pytest.raises(AnnotationStageRejection) as excinfo:
-        tools["write_relation"].invoke({"from_entity": "a1", "to_entity": "a2", "relation_type": "盟友"})
+        tools[("write_relation")].invoke(
+            {
+                ("from_entity"): {("name"): ("山门"), ("entity_type"): ("location")},
+                ("to_entity"): {("name"): ("顾霜"), ("entity_type"): ("character")},
+                ("relation_type"): ("盟友"),
+            }
+        )
     receipt = excinfo.value.receipt()
     assert receipt["record"] == "relation/山门-顾霜/盟友"
     assert "relation/山门-顾霜/盟友(from_entity='山门')" in receipt["message"]
@@ -209,7 +245,15 @@ async def test_record_combination_rejection_names_actual_field_values() -> None:
     tools = _tools(ledger)
     await _call(tools, "write_entity", {"el": "a1", "name": "顾霜", "entity_type": "character"})
     with pytest.raises(AnnotationStageRejection) as excinfo:
-        await _call(tools, "write_dialogue", {"candidate_index": 1, "verdict": "not_dialogue", "speaker": "a1"})
+        await _call(
+            tools,
+            ("write_dialogue"),
+            {
+                ("candidate_index"): 1,
+                ("verdict"): ("not_dialogue"),
+                ("speaker"): {("name"): ("顾霜"), ("entity_type"): ("character")},
+            },
+        )
     receipt = excinfo.value.receipt()
     assert receipt["record"] == "dialogue/1"
     assert receipt["code"] == "invalid_combination"
@@ -229,7 +273,11 @@ async def _link_runtime() -> tuple[AnnotationToolLedger, ProgramRuntime, dict[st
         await runtime.execute("""
 write_entity(el="a1", name="顾霜", entity_type="character")
 write_entity(el="a2", name="众人", entity_type="character")
-edge = write_relation(from_entity="a1", to_entity="a2", relation_type="盟友")
+edge = write_relation(
+    from_entity={"name": "顾霜", "entity_type": "character"},
+    to_entity={"name": "众人", "entity_type": "character"},
+    relation_type="盟友",
+)
 local = read_text(paragraph_id=1)
 other = read_text(paragraph_id=20)
 anchor_record(record_id=edge["record"], source_ref=local["source_ref"])

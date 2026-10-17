@@ -29,7 +29,7 @@ import pytest
 from src.agents.annotation.errors import AnnotationStageRejection
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.tool_batch import _invoke_tool
-from src.fact_graph.graph import FactGraph
+from src.fact_graph.graph import FactGraph, entity_key
 from src.fact_graph.inputs import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
@@ -118,6 +118,20 @@ async def _judge_dialogues(tools: dict) -> None:
         await _call(tools, "write_dialogue", {"candidate_index": candidate_index, "verdict": "dialogue"})
 
 
+def _declaration_args(el="e1", summary="顾霜喝止", **overrides):
+    args = {
+        "el": el,
+        "title": summary,
+        "problem": "能否阻止众人",
+        "summary": summary,
+        "event_type": "冲突",
+        "status": "ongoing",
+        "evidence": 1,
+    }
+    args.update(overrides)
+    return args
+
+
 @pytest.mark.asyncio
 async def test_context_facts_cover_all_states_and_survive_restore() -> None:
     """实际写入面产生的四状态事实在审计摘要和恢复后均完整保留"""
@@ -131,12 +145,24 @@ async def test_context_facts_cover_all_states_and_survive_restore() -> None:
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
-            "characters": [{"entityid": "顾霜", "action": "喝止", "emotion": 1}],
+            "characters": [{"name": "顾霜", "entity_type": "character", "action": "喝止", "emotion": 1}],
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
-    await _call(tools, "write_relation", {"from_entity": "顾霜", "to_entity": "众人", "relation_type": "敌对"})
+    await _call(
+        tools,
+        "write_relation",
+        {
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "众人", "entity_type": "organization"},
+            "relation_type": "敌对",
+        },
+    )
     facts = ledger.context_summary()["facts"]
     assert set(facts) == {"entities", "relations", "metrics", "events", "dialogues", "character_observations"}
     assert facts["metrics"]["summary"] == "顾霜喝止众人"
@@ -164,25 +190,41 @@ async def test_character_participation_defaults_partial_state_fields() -> None:
     character 条目缺三态→不产动态状态行（同日补裁决：全空行会撞收尾重复语义，
     参与者仍落账）、role 缺省按登记大类取（character→主体）；
     只给部分三态→原样落账；emotion 越界→按边界钳制；
-    非 character 带三态→observation_on_noncharacter（字段误用仍拒）。
+    非 character 带三态→忽略三态、只保留 entityid/role（2026-10-13 由拒绝改为忽略）。
     """
     ledger = _ledger()
     tools = _tools(ledger)
     numbers = await _register_entities(tools)
-    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
+    await _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
+    )
 
     missing = await _call(
         tools,
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
-            "characters": [{"entityid": numbers["顾霜"]}],
+            "characters": [{"name": "顾霜", "entity_type": "character"}],
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
     assert missing["status"] == "written"
-    assert f"t1/root/participant/{numbers['顾霜']}" not in ledger.observation_by_record
+    assert "t1/root/participant/顾霜" not in ledger.observation_by_record
     (participant,) = ledger.bound_payloads["events"][0].participants
     assert participant.role == "主体"
 
@@ -191,9 +233,15 @@ async def test_character_participation_defaults_partial_state_fields() -> None:
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
-            "characters": [{"entityid": numbers["顾霜"], "role": "主体", "narrative_role": "主体", "emotion": 1}],
+            "characters": [
+                {"name": "顾霜", "entity_type": "character", "role": "主体", "narrative_role": "主体", "emotion": 1}
+            ],
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
     assert partial["status"] == "written"
@@ -203,45 +251,59 @@ async def test_character_participation_defaults_partial_state_fields() -> None:
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": numbers["顾霜"],
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝道",
                     "emotion": 3,
                 }
             ],
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
     assert clamped["status"] == "written"
-    assert ledger.observation_by_record[f"t1/root/participant/{numbers['顾霜']}"].emotion == 2
+    assert ledger.observation_by_record["t1/root/participant/顾霜"].emotion == 2
 
-    not_character = await _rejection(
+    not_character = await _call(
         tools,
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": numbers["众人"],
+                    "name": "众人",
+                    "entity_type": "organization",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "退下",
                     "emotion": 0,
                 }
             ],
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
-    assert (not_character.record, not_character.field, not_character.code) == (
-        f"t1/root/participant/{numbers['众人']}",
-        "narrative_role",
-        "observation_on_noncharacter",
+    assert not_character["status"] == "written"
+    (participant,) = ledger.bound_payloads["events"][0].participants
+    assert (participant.role, participant.narrative_role, participant.action, participant.emotion) == (
+        "主体",
+        None,
+        None,
+        None,
     )
+    assert f"t1/root/participant/{numbers['众人']}" not in ledger.observation_by_record
 
 
 @pytest.mark.asyncio
@@ -253,31 +315,36 @@ async def test_noncharacter_participation_derives_no_observation() -> None:
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    numbers = await _register_entities(tools)
+    await _register_entities(tools)
     await _call(
         tools,
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": numbers["顾霜"],
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝道",
                     "emotion": -1,
                 },
-                {"entityid": numbers["山门"], "role": "地点"},
+                {"name": "山门", "entity_type": "location", "role": "地点"},
             ],
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
 
     observations = list(ledger.bound_payloads["character_observations"])
     assert [(item.character, item.action, item.emotion) for item in observations] == [("顾霜", "喝道", -1)]
     participants = list(ledger.bound_payloads["events"])[0].participants
-    assert [participant.entity for participant in participants] == ["顾霜", "山门"]
+    assert [ledger.graph.display_name(participant.entity) for participant in participants] == ["顾霜", "山门"]
     assert participants[1].narrative_role is None
 
 
@@ -290,25 +357,41 @@ async def test_duplicate_observation_pair_rejected_per_record_at_write() -> None
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    numbers = await _register_entities(tools)
-    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
+    await _register_entities(tools)
+    await _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
+    )
     first = await _call(
         tools,
         "write_event",
         {
             "el": "t1/e1",
-            "isroot": False,
-            "type": "main",
-            "description": "子事件1",
             "characters": [
                 {
-                    "entityid": numbers["顾霜"],
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝道",
                     "emotion": 0,
                 }
             ],
+            "title": "子事件1",
+            "problem": "明确事件问题",
+            "summary": "子事件1",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
     first_content = first.pop("content")
@@ -322,29 +405,35 @@ async def test_duplicate_observation_pair_rejected_per_record_at_write() -> None
         "write_event",
         {
             "el": "t1/e2",
-            "isroot": False,
-            "type": "main",
-            "description": "子事件2",
             "characters": [
                 {
-                    "entityid": numbers["顾霜"],
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝道",
                     "emotion": 0,
                 }
             ],
+            "title": "子事件2",
+            "problem": "明确事件问题",
+            "summary": "子事件2",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
 
-    assert duplicate.record == f"t1/e2/participant/{numbers['顾霜']}"
+    assert duplicate.record == "t1/e2/participant/顾霜"
     assert duplicate.field == "action"
     assert duplicate.code == "duplicate_observation"
     assert "t1/e1/participant" in duplicate.receipt()["message"]
     # 先写的那条与原节点结构都保留，重复记录没有落账
     tree = ledger.event_trees[ledger.tree_key_index["t1"]]
     nodes_by_id = {event.node_id: event for event in ledger.bound_payloads["events"]}
-    assert [participant.entity for participant in nodes_by_id[tree["nodes"]["e1"]].participants] == ["顾霜"]
+    assert [
+        ledger.graph.display_name(participant.entity) for participant in nodes_by_id[tree["nodes"]["e1"]].participants
+    ] == ["顾霜"]
     assert nodes_by_id[tree["nodes"]["e2"]].participants == []
 
     # 改成不同动作后正常落账，两条动态状态都在
@@ -353,231 +442,83 @@ async def test_duplicate_observation_pair_rejected_per_record_at_write() -> None
         "write_event",
         {
             "el": "t1/e2",
-            "isroot": False,
-            "type": "main",
-            "description": "子事件2",
             "characters": [
                 {
-                    "entityid": numbers["顾霜"],
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "退去",
                     "emotion": 0,
                 }
             ],
+            "title": "子事件2",
+            "problem": "明确事件问题",
+            "summary": "子事件2",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
     assert [item.action for item in ledger.bound_payloads["character_observations"]] == ["喝道", "退去"]
 
 
 @pytest.mark.asyncio
-async def test_el_shape_reserved_key_and_unknown_tree_are_rejected_per_record() -> None:
-    """2026-09-14 el 层级键的形态约束：子必填 type、root 是保留节点键、树键必须先建，拒绝只指向该条记录
-
-    order 参数退役（树内先后=调用顺序）后，事件写入点保留的形态校验是：
-    子缺 type→missing；t1/root 占用保留键→reserved；
-    根带路径→bad_el（2026-10-04 起未建树的子事件改为挂起，不再即时拒绝）。任一失败都不得动到同树已写入的根。
-    """
+async def test_local_path_is_not_parent_and_old_type_is_rejected_per_record() -> None:
     ledger = _ledger()
     tools = _tools(ledger)
-    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
-    await _call(
-        tools,
-        "write_event",
-        {"el": "t1/e1", "isroot": False, "type": "main", "description": "顾霜喝道"},
-    )
-
-    missing_type = await _rejection(
-        tools,
-        "write_event",
-        {"el": "t1/e2", "isroot": False, "description": "众人散去"},
-    )
-    assert (missing_type.record, missing_type.field, missing_type.code) == ("t1/e2", "type", "missing")
-    assert "main" in (missing_type.expected or "") and "secondary" in (missing_type.expected or "")
-
-    reserved = await _rejection(
-        tools,
-        "write_event",
-        {"el": "t1/root", "isroot": False, "type": "main", "description": "众人散去"},
-    )
-    assert (reserved.record, reserved.field, reserved.code) == ("t1/root", "el", "reserved")
-
-    bad_el = await _rejection(
-        tools,
-        "write_event",
-        {"el": "t1/e2", "isroot": True, "description": "众人散去"},
-    )
-    assert (bad_el.record, bad_el.field, bad_el.code) == ("t1/e2/root", "el", "bad_el")
-
-    # 四次失败全部只回滚自己：树里仍只有先写入的根与 e1
-    tree = ledger.event_trees[ledger.tree_key_index["t1"]]
-    assert sorted(tree["nodes"]) == ["e1", "root"]
-    assert len(ledger.bound_payloads["events"]) == 2
+    await _call(tools, "write_event", _declaration_args("t1/e1"))
+    assert not ledger.pending_child_events
+    assert ledger.bound_payloads["events"][0].parent_node_id is None
+    rejected = await _rejection(tools, "write_event", _declaration_args("e2", type="main"))
+    assert rejected.field == "type"
+    assert len(ledger.bound_payloads["events"]) == 1
 
 
 @pytest.mark.asyncio
-async def test_child_replay_updates_description_and_participant_replay_updates_state() -> None:
-    """2026-09-14 同键重放按更新语义：子节点只可改述、参与者重写三态不新增记录
-
-    order 退役后结构位唯一不可改的字段是 type（code=immutable）；
-    characters 给出即整节点替换，同条目重写=更新动态状态。
-    """
+async def test_declaration_replay_is_immutable_and_participants_can_be_attached() -> None:
     ledger = _ledger()
     tools = _tools(ledger)
-    numbers = await _register_entities(tools)
-    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
-    await _call(
-        tools,
-        "write_event",
-        {"el": "t1/e1", "isroot": False, "type": "main", "description": "顾霜喝道"},
-    )
-    await _call(
-        tools,
-        "write_event",
-        {"el": "t1/e1", "isroot": False, "type": "main", "description": "顾霜厉声喝道"},
-    )
-
-    immutable = await _rejection(
-        tools,
-        "write_event",
-        {"el": "t1/e1", "isroot": False, "type": "secondary", "description": "众人散去"},
-    )
-    assert (immutable.record, immutable.field, immutable.code) == ("t1/e1", "type", "immutable")
-
-    await _call(
-        tools,
-        "write_event",
-        {
-            "el": "t1/e1",
-            "isroot": False,
-            "type": "main",
-            "description": "顾霜厉声喝道",
-            "characters": [
-                {
-                    "entityid": numbers["顾霜"],
-                    "role": "主体",
-                    "narrative_role": "主体",
-                    "action": "喝道",
-                    "emotion": 2,
-                }
-            ],
-        },
-    )
-    await _call(
-        tools,
-        "write_event",
-        {
-            "el": "t1/e1",
-            "isroot": False,
-            "type": "main",
-            "description": "顾霜厉声喝道",
-            "characters": [
-                {
-                    "entityid": numbers["顾霜"],
-                    "role": "主体",
-                    "narrative_role": "主体",
-                    "action": "喝道",
-                    "emotion": -1,
-                }
-            ],
-        },
-    )
-
-    events = list(ledger.bound_payloads["events"])
-    assert [event.cause_role for event in events] == ["root", "main"]
-    assert events[1].description == "顾霜厉声喝道"
-    assert events[1].participants[0].emotion == -1
+    await _call(tools, "write_event", _declaration_args("t1/e1"))
+    rejected = await _rejection(tools, "write_event", _declaration_args("t1/e1", summary="改写"))
+    assert rejected.code == "immutable"
+    for emotion in (2, -1):
+        await _call(
+            tools,
+            "write_event",
+            _declaration_args(
+                "t1/e1", characters=[{"name": "顾霜", "entity_type": "character", "action": "喝止", "emotion": emotion}]
+            ),
+        )
+    event = ledger.bound_payloads["events"][0]
+    assert event.summary == "顾霜喝止"
+    assert event.parent_node_id is None
+    assert event.participants[0].emotion == -1
     assert len(ledger.observation_by_record) == 1
 
 
 @pytest.mark.asyncio
-async def test_root_foreshadowing_attributes_are_validated_at_write_and_updated_in_place() -> None:
-    """2026-09-14 伏笔属性只属于根、isforeshadowing=true 必填 confidence；根重放按更新语义改写属性
-
-    跨章因果前驱（cause_tree_id）退役后，事件根在写入点强制的属性合同是：
-    根带 isforeshadowing 缺 confidence → missing；子带伏笔属性 → not_on_child；
-    根带 type → not_on_root；同键重放更新描述与伏笔属性（不新增节点），
-    取代旧"一经确定不可改写"的结算期校验。
-    """
+async def test_foreshadowing_properties_require_confidence_and_preserve_source() -> None:
     ledger = _ledger()
     tools = _tools(ledger)
-    await _register_entities(tools)
-
-    missing_confidence = await _rejection(
-        tools,
-        "write_event",
-        {"el": "t1", "isroot": True, "description": "顾霜喝止众人", "isforeshadowing": True},
-    )
-    assert (missing_confidence.record, missing_confidence.field, missing_confidence.code) == (
-        "t1/root",
-        "confidence",
-        "missing",
-    )
-    assert "events" not in ledger.bound_payloads
-
-    await _call(
-        tools,
-        "write_event",
-        {
-            "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
-            "isforeshadowing": True,
-            "confidence": "high",
-        },
-    )
-    root = ledger.bound_payloads["events"][0]
-    assert root.is_foreshadow_setup is True
-    assert str(root.payoff_likelihood) == "high"
-
-    not_on_child = await _rejection(
-        tools,
-        "write_event",
-        {
-            "el": "t1/e1",
-            "isroot": False,
-            "type": "main",
-            "description": "顾霜喝道",
-            "isforeshadowing": True,
-        },
-    )
-    assert (not_on_child.record, not_on_child.field, not_on_child.code) == ("t1/e1", "isforeshadowing", "not_on_child")
-
-    not_on_root = await _rejection(
-        tools,
-        "write_event",
-        {"el": "t1", "isroot": True, "type": "main", "description": "顾霜喝止众人"},
-    )
-    assert (not_on_root.record, not_on_root.field, not_on_root.code) == ("t1/root", "type", "not_on_root")
-
-    # 根重放更新语义：改描述与伏笔属性，不新增节点
-    replay = await _call(
-        tools,
-        "write_event",
-        {"el": "t1", "isroot": True, "description": "顾霜厉声喝止众人", "isforeshadowing": False},
-    )
-    assert replay["record"] == "t1/root"
-    assert len(ledger.bound_payloads["events"]) == 1
-    assert ledger.bound_payloads["events"][0].description == "顾霜厉声喝止众人"
-    assert ledger.bound_payloads["events"][0].payoff_likelihood is None
-    tree = ledger.event_trees[ledger.tree_key_index["t1"]]
-    assert tree["isforeshadowing"] is False
-    assert tree["root_node_id"] == ledger.bound_payloads["events"][0].node_id
+    rejected = await _rejection(tools, "write_event", _declaration_args(isforeshadowing=True))
+    assert rejected.field == "confidence"
+    await _call(tools, "write_event", _declaration_args(isforeshadowing=True, confidence="high"))
+    rejected = await _rejection(tools, "write_event", _declaration_args(isforeshadowing=False))
+    assert rejected.code == "immutable"
+    assert ledger.bound_payloads["events"][0].is_foreshadow_setup
+    assert ledger.bound_payloads["events"][0].payoff_likelihood == "high"
 
 
 @pytest.mark.asyncio
-async def test_second_root_with_same_tree_key_updates_description_in_place() -> None:
-    """2026-09-14 同树键重交按更新语义：只改描述与伏笔属性，不新增节点"""
+async def test_same_local_key_cannot_overwrite_a_declaration() -> None:
     ledger = _ledger()
     tools = _tools(ledger)
-    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
-    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜厉声喝止众人"})
-
+    await _call(tools, "write_event", _declaration_args())
+    await _call(tools, "write_event", _declaration_args())
+    rejected = await _rejection(tools, "write_event", _declaration_args(summary="不同内容"))
+    assert rejected.code == "immutable"
     assert len(ledger.bound_payloads["events"]) == 1
-    assert ledger.bound_payloads["events"][0].description == "顾霜厉声喝止众人"
-    assert len(ledger.event_trees) == 1
-    root_node_id = ledger.event_trees[ledger.tree_key_index["t1"]]["root_node_id"]
-    assert root_node_id == ledger.bound_payloads["events"][0].node_id
 
 
 # ---------------------------------------------------------------------------
@@ -592,7 +533,14 @@ async def test_dialogue_replay_updates_verdict_in_place() -> None:
     tools = _tools(ledger)
     await _register_entities(tools)
     await _call(
-        tools, "write_dialogue", {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": "平静"}
+        tools,
+        "write_dialogue",
+        {
+            "candidate_index": 1,
+            "verdict": "dialogue",
+            "speaker": {"name": "顾霜", "entity_type": "character"},
+            "tone": "平静",
+        },
     )
     await _call(
         tools,
@@ -651,9 +599,9 @@ async def test_dialogue_speaker_nullish_string_is_read_as_unattributed() -> None
     strict = await _rejection(
         tools,
         "write_relation",
-        {"from_entity": "null", "to_entity": "顾霜", "relation_type": "敌对"},
+        {"from_entity": "null", "to_entity": {"name": "顾霜", "entity_type": "character"}, "relation_type": "敌对"},
     )
-    assert (strict.field, strict.code) == ("from_entity", "unknown_entity_id")
+    assert (strict.field, strict.code) == ("from_entity", "model_type")
 
 
 @pytest.mark.asyncio
@@ -671,7 +619,12 @@ async def test_dialogue_receipt_reports_chapter_progress() -> None:
     first = await _call(
         tools,
         "write_dialogue",
-        {"candidate_index": 1, "verdict": "dialogue", "speaker": "顾霜", "tone": "平静"},
+        {
+            "candidate_index": 1,
+            "verdict": "dialogue",
+            "speaker": {"name": "顾霜", "entity_type": "character"},
+            "tone": "平静",
+        },
     )
     assert first["progress"] == {"written": 1, "total": len(ledger.dialogue_candidates)}
 
@@ -696,11 +649,15 @@ async def test_relations_are_flushed_on_write_and_replayed_by_endpoint_pair() ->
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    numbers = await _register_entities(tools)
+    await _register_entities(tools)
     await _call(
         tools,
         "write_relation",
-        {"from_entity": numbers["顾霜"], "to_entity": numbers["众人"], "relation_type": "领导"},
+        {
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "众人", "entity_type": "organization"},
+            "relation_type": "领导",
+        },
     )
     assert len(ledger.graph.active_relations) == 1
     assert len(ledger.graph.relation_assert_ops) == 1
@@ -709,7 +666,11 @@ async def test_relations_are_flushed_on_write_and_replayed_by_endpoint_pair() ->
     await _call(
         tools,
         "write_relation",
-        {"from_entity": numbers["顾霜"], "to_entity": numbers["众人"], "relation_type": "领导"},
+        {
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "众人", "entity_type": "organization"},
+            "relation_type": "领导",
+        },
     )
     assert len(ledger.graph.active_relations) == 1
 
@@ -717,7 +678,11 @@ async def test_relations_are_flushed_on_write_and_replayed_by_endpoint_pair() ->
     await _call(
         tools,
         "write_relation",
-        {"from_entity": numbers["顾霜"], "to_entity": numbers["众人"], "relation_type": "敌对"},
+        {
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "众人", "entity_type": "organization"},
+            "relation_type": "敌对",
+        },
     )
     assert len(ledger.written_relations) == 1
     assert len(ledger.graph.active_relations) == 1
@@ -732,11 +697,13 @@ async def test_relations_are_flushed_on_write_and_replayed_by_endpoint_pair() ->
 
 @pytest.mark.asyncio
 async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> None:
-    """2026-09-14 已登记实体部分更新：未提交字段保留现值、null 删键、tags 空数组清空
+    """2026-09-14 已登记实体部分更新：未提交字段保留现值、tags 空数组清空
 
     旧实现整条替换——模型按 docstring 指引只提交变化字段时其余字段被静默抹掉，
     可见合同与服务端行为相悖（content 回显把该现状显形后修复）。合并语义：
-    省略字段保留；tags 提交空数组=清空；attributes 提交即 JSON Merge Patch。
+    省略字段保留；tags 提交空数组=清空。
+    2026-10-16 3NF：任意键值 attributes 已不是实体可写列（实体只有
+    description/tags/representative），本用例只覆盖仍存在的可写字段。
     """
     ledger = _ledger()
     tools = _tools(ledger)
@@ -749,7 +716,7 @@ async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> Non
             "el": "a",
             "tags": ["冷面"],
             "description": "佩刀女子",
-            "attributes": {"兵器": "刀", "旧痕": "疤"},
+            "representative": True,
         },
     )
     update = await _call(
@@ -760,18 +727,14 @@ async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> Non
             "entity_type": "character",
             "el": "a",
             "description": "护院教头",
-            "attributes": {"旧痕": None, "佩饰": "玉"},
         },
     )
-    assert update["content"] == {
-        "name": "顾霜",
-        "entity_type": "character",
-        "tags": ["冷面"],
-        "description": "护院教头",
-        "attributes": {"兵器": "刀", "佩饰": "玉"},
-        "id": first["id"],
-    }
-    assert ledger.written_entities["顾霜"].tags == ["冷面"]
+    # 未提交字段保留现值：只提交 description 时 tags/representative 不被抹掉
+    assert update["content"]["id"] == first["id"]
+    assert update["content"]["description"] == "护院教头"
+    assert update["content"]["tags"] == ["冷面"]
+    assert update["content"]["representative"] is True
+    assert ledger.written_entities[entity_key("顾霜", "character")].tags == ["冷面"]
 
     cleared = await _call(
         tools,
@@ -785,7 +748,6 @@ async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> Non
     )
     assert cleared["content"]["tags"] == []
     assert cleared["content"]["description"] == "护院教头"
-    assert cleared["content"]["attributes"] == {"兵器": "刀", "佩饰": "玉"}
 
 
 # ---------------------------------------------------------------------------
@@ -804,7 +766,7 @@ async def test_write_entity_no_longer_requires_search_graph_gate() -> None:
     tools = _tools(ledger)
     await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     await _call(tools, "write_entity", {"name": "众人", "entity_type": "organization", "el": "众人"})
-    assert set(ledger.written_entities) == {"顾霜", "众人"}
+    assert set(ledger.written_entities) == {entity_key("顾霜", "character"), entity_key("众人", "organization")}
 
 
 # ---------------------------------------------------------------------------
@@ -851,23 +813,28 @@ async def test_failed_call_keeps_previously_written_records_in_same_round() -> N
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    numbers = await _register_entities(tools)
+    await _register_entities(tools)
     await _call(
         tools,
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": numbers["顾霜"],
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝道",
                     "emotion": 1,
                 }
             ],
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
     snapshot = ledger.snapshot()
@@ -875,31 +842,30 @@ async def test_failed_call_keeps_previously_written_records_in_same_round() -> N
         await tools["write_event"].ainvoke(
             {
                 "el": "t1",
-                "isroot": True,
-                "description": "顾霜喝止众人",
                 "characters": [
                     {
-                        "entityid": numbers["众人"],
-                        "role": "主体",
-                        "narrative_role": "主体",
-                        "action": "退下",
-                        "emotion": 0,
-                    },
-                    {
-                        "entityid": numbers["顾霜"],
+                        "name": "顾霜",
+                        "entity_type": "character",
                         "role": "主体",
                         "narrative_role": "主体",
                         "action": "喝止",
                         "emotion": 1,
                     },
+                    {"name": "未登记人物", "entity_type": "character", "role": "地点"},
                 ],
+                "title": "顾霜喝止众人",
+                "problem": "明确事件问题",
+                "summary": "顾霜喝止众人",
+                "event_type": "行动",
+                "status": "ongoing",
+                "evidence": 1,
             }
         )
     ledger.restore(snapshot)
 
     tree = ledger.event_trees[ledger.tree_key_index["t1"]]
     root = next(event for event in ledger.bound_payloads["events"] if event.node_id == tree["root_node_id"])
-    assert [participant.entity for participant in root.participants] == ["顾霜"]
+    assert [ledger.graph.display_name(participant.entity) for participant in root.participants] == ["顾霜"]
     assert root.participants[0].emotion == 1
     assert [(item.character, item.action, item.emotion) for item in ledger.observation_by_record.values()] == [
         ("顾霜", "喝道", 1)
@@ -953,17 +919,32 @@ async def test_undeclared_argument_is_rejected_per_call_not_dropped() -> None:
     assert extra_entity.code == "unknown_field"
     assert ledger.written_entities == {}
 
-    numbers = await _register_entities(tools)
-    await _call(tools, "write_event", {"el": "t1", "isroot": True, "description": "顾霜喝止众人"})
+    await _register_entities(tools)
+    await _call(
+        tools,
+        "write_event",
+        {
+            "el": "t1",
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
+    )
     extra_child = await _rejection(
         tools,
         "write_event",
         {
             "el": "t1/e1",
-            "isroot": False,
-            "type": "main",
-            "description": "众人散去",
             "order": 1,
+            "title": "众人散去",
+            "problem": "明确事件问题",
+            "summary": "众人散去",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
     assert (extra_child.record, extra_child.field) == ("t1/e1", "order")
@@ -974,18 +955,16 @@ async def test_undeclared_argument_is_rejected_per_call_not_dropped() -> None:
         "write_event",
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
-            "characters": [
-                {
-                    "entityid": numbers["众人"],
-                    "role": "客体",
-                    "aliases": ["众人甲"],
-                }
-            ],
+            "characters": [{"name": "众人", "entity_type": "organization", "role": "客体", "aliases": ["众人甲"]}],
+            "title": "顾霜喝止众人",
+            "problem": "明确事件问题",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         },
     )
-    assert (extra_participation.record, extra_participation.field) == ("t1/root", "aliases")
+    assert (extra_participation.record, extra_participation.field) == ("t1", "aliases")
     assert extra_participation.code == "unknown_field"
     assert ledger.event_trees[ledger.tree_key_index["t1"]]["nodes"] == {
         "root": ledger.event_trees[ledger.tree_key_index["t1"]]["root_node_id"]
@@ -1011,8 +990,9 @@ async def test_writer_program_registers_written_records_for_case_links() -> None
     runtime = ProgramRuntime(list(_tools(ledger).values()), ledger)
     receipt = json.loads(
         await runtime.execute(
-            'write_event(el="t1", isroot=True, description="顾霜喝止众人")\n'
-            'write_entity(name="顾霜", entity_type="character", el="a1")'
+            "write_event(el='t1', title='顾霜喝止众人', problem='明确事件问题', summary='顾"
+            "霜喝止众人', event_type='行动', status='ongoing', evidence=1)\n"
+            "write_entity(name='顾霜', entity_type='character', el='a1')"
         )
     )
 
@@ -1021,23 +1001,20 @@ async def test_writer_program_registers_written_records_for_case_links() -> None
 
 
 @pytest.mark.asyncio
-async def test_unknown_entity_reference_lists_chapter_el_keys() -> None:
-    """2026-09-20 引用写错时回执给出本章的"el=名字"对照，模型照抄即可自纠
-
-    run 54a72932：135 次把实体名称当引用填；此前的回执只给 uuid 示例，名称到 uuid 要
-    跨一层翻译，模型于是照原样重试。判据落在回执文本的数据面（键与登记名的对应）。
-    """
+async def test_name_reference_auto_registers_relation_endpoints() -> None:
     ledger = _ledger()
     tools = _tools(ledger)
-    await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "a1"})
-
-    rejected = await _rejection(
+    receipt = await _call(
         tools,
         "write_relation",
-        {"from_entity": "顾霜", "to_entity": "山门", "relation_type": "位于"},
+        {
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "山门", "entity_type": "location"},
+            "relation_type": "位于",
+        },
     )
-
-    assert "a1=顾霜" in rejected.expected
+    assert receipt["status"] == "written"
+    assert set(ledger.graph.entity_names.values()) == {"顾霜", "山门"}
 
 
 @pytest.mark.asyncio
@@ -1050,14 +1027,14 @@ async def test_relation_rejects_undeclared_evidence_argument() -> None:
     """
     ledger = _ledger()
     tools = _tools(ledger)
-    ids = await _register_entities(tools)
+    await _register_entities(tools)
 
     rejected = await _rejection(
         tools,
         "write_relation",
         {
-            "from_entity": ids["顾霜"],
-            "to_entity": ids["众人"],
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "众人", "entity_type": "organization"},
             "relation_type": "敌对",
             "evidence": "顾霜喝道",
         },

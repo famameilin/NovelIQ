@@ -2,15 +2,14 @@
 
 各角色有独立局部账本和模型会话，共用同一 run 的事实图、事件树及案例池。
 构造器经 Agent 的单条内存事务直接写域，成功后登记自身局部产出。
-跨章 event 引用必须来自当前执行的实际读取；finish 校验自身角色并关闭写面。
-同批迟到写入只登记拒绝审计，不撤销此前成功的 finish。
+跨章 event 引用必须来自当前执行的实际读取；finish 仅提出结束请求。
+同批写入执行完毕后，程序检查最终状态。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from src.agents.annotation.event_submission import SUBMIT_EVENTS_TOOL_NAME
 from src.agents.annotation.program_contract import PROGRAM_TOOL_NAME
 
 from .subagent_ir import SubagentAnnotation
@@ -24,7 +23,7 @@ SUBAGENT_ROLE_LABELS: dict[str, str] = {
 }
 
 # Agent 内部程序面的基础工具目录，共享状态读取和案例认领由当前 work 工具表补入
-# 构造器编译的业务写入直接调用同一 Agent，finish 关闭自身角色，不等待其他角色
+# 构造器编译的业务写入直接调用同一 Agent，程序检查自身角色，不等待其他角色
 SUBAGENT_TOOL_NAMES: tuple[str, ...] = (
     "search_text",
     "read_text",
@@ -34,26 +33,30 @@ SUBAGENT_TOOL_NAMES: tuple[str, ...] = (
     "push_case",
 )
 
-# 三个职责共享程序入口、结构化事件入口和收尾工具
-SUBAGENT_BOUND_TOOL_NAMES: tuple[str, ...] = (PROGRAM_TOOL_NAME, SUBMIT_EVENTS_TOOL_NAME, FINISH_TOOL_NAME)
+# 三个职责共享程序入口和收尾信号；事件事实由既有 event 构造器写入
+SUBAGENT_BOUND_TOOL_NAMES: tuple[str, ...] = (PROGRAM_TOOL_NAME, FINISH_TOOL_NAME)
 
 # 模型可见引用必须来自本 work 登记或实际读取，目录统一描述当前全书共享状态合同
 _SUBAGENT_REFERENCE_SCOPE_TEXT: str = (
     "引用与证据口径：\n"
-    "- 实体引用用本 work 登记的局部 id，或 search_graph 实际读回的实体 UUID；别名分别登记。\n"
+    "- 实体引用写正文名字 + 大类；运行时解析，图里没有就自动登记，不再写 id；别名分别登记。\n"
     "- evidence 与 paragraph_id 使用正文段首可见号；原文跨章全局段号须经 read_text 读取。\n"
-    "- search_graph/search_events 分页返回全书共享状态预览，默认 limit=5、最多20，整页至多6000字符；"
+    "- search_events 按正文顺序返回简洁索引，默认 limit=5、最多20，除末页外返回 limit 条；"
+    "search_graph 预览继续按字符预算分页；"
     "用 next_offset/next_relation_offset 续页，事件可按 chapter_id/tree_id 筛选，实体可按 entity_type 筛选。\n"
     "- read_event(node_id=...) / read_entity(entity_id=...) 读取完整详情；图树读取不替代原文授权。\n"
-    "- event(parent_ref/node_ref) 连接实际读取的节点，明确 main/secondary；其他未保存 work 端点不可连接。\n"
+    "- event(el,title,problem,summary,event_type,status,evidence,progress=None) 写章级事件声明。"
+    "回执 declaration_id 不是正式event_id；包含和因果用 write_link 提交显式建议，不按调用顺序生成。\n"
     "- write_link 使用实际读回的 source_id/target_id；foreshadowing 保持独立照应边，不自动合树。\n"
-    "- pending 和 push_case 只有 description（1..100 字）；promise_case 只有真实 case_id。\n"
-    "- finish(case_delivery={case_id,state,reason}, complete=False) 交付后继续；complete=True 校验并关闭自己的角色。\n"
+    "- pending(case_type,description)/push_case(case_type,description) 显式归入人物/关系/对话/事件之一；"
+    "- promise_case 只填真实 case_id."
+    "所有调用可传 caseid，须先认领；关联失败仅 warning。\n"
+    "- finish(caseid=None) 仅请求结束，同模型本轮不调用工具；程序缺项提示后继续同一会话。\n"
     "- structure/event 不要求指标或对话；solo/evidence 必须提交实际指标并逐条判定全部对话候选。\n\n"
 )
 
 # 八类构造器（§3.1 的目录就是模型知道"能交什么、怎么交"的全部依据）。
-# finish 使用当前 work 工具表，校验局部产出后关闭写入
+# finish 使用当前 work 工具表，仅登记结束请求
 _SUBAGENT_CONSTRUCTOR_ORDER: tuple[str, ...] = (
     "entity",
     "relation",
@@ -63,7 +66,7 @@ _SUBAGENT_CONSTRUCTOR_ORDER: tuple[str, ...] = (
     "label",
     "metric",
     "pending",
-    "progression",
+    "plotline",
     "foreshadow_action",
 )
 

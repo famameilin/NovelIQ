@@ -102,23 +102,38 @@ async def test_participation_role_unknown_word_defaults_to_subject() -> None:
     ledger = _writer_ledger()
     tools = _writer_tools(ledger)
     tools["write_entity"].invoke({"name": "顾霜", "entity_type": "character", "el": "顾霜"})
-    tools["write_event"].invoke({"el": "t1", "isroot": True, "description": "根事件"})
+    tools["write_event"].invoke(
+        {
+            "el": "t1",
+            "title": "根事件",
+            "problem": "明确事件问题",
+            "summary": "根事件",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        }
+    )
 
     receipt = json.loads(
         tools["write_event"].invoke(
             {
                 "el": "t1",
-                "isroot": True,
-                "description": "根事件",
                 "characters": [
                     {
-                        "entityid": "顾霜",
+                        "name": "顾霜",
+                        "entity_type": "character",
                         "role": "发送者",
                         "narrative_role": "主体",
                         "action": "喝止",
                         "emotion": -1,
                     }
                 ],
+                "title": "根事件",
+                "problem": "明确事件问题",
+                "summary": "根事件",
+                "event_type": "行动",
+                "status": "ongoing",
+                "evidence": 1,
             }
         )
     )
@@ -133,18 +148,33 @@ async def test_missing_child_type_receipt_points_at_record_field() -> None:
     """缺 type 的子事件调用返回带记录键与字段名的结构化拒绝（旧 children.0.type 断言替代）"""
     ledger = _writer_ledger()
     tools = _writer_tools(ledger)
-    tools["write_event"].invoke({"el": "t1", "isroot": True, "description": "根事件"})
-
+    tools["write_event"].invoke(
+        {
+            "el": "t1",
+            "title": "根事件",
+            "problem": "明确事件问题",
+            "summary": "根事件",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        }
+    )
     receipt = await _write_rejection(
         tools,
         "write_event",
-        {"el": "t1/e1", "isroot": False, "description": "子事件"},
+        {
+            "el": "t1/e1",
+            "title": "子事件",
+            "problem": "明确事件问题",
+            "summary": "子事件",
+            "status": "ongoing",
+            "evidence": 1,
+        },
     )
-
     assert receipt["record"] == "t1/e1"
-    assert receipt["field"] == "type"
+    assert receipt["field"] == "event_type"
     assert receipt["code"] == "missing"
-    assert '"main"' in receipt["expected"] and '"secondary"' in receipt["expected"]
+    assert receipt["expected"]
     assert set(_tree(ledger, "t1")["nodes"]) == {"root"}
 
 
@@ -159,17 +189,22 @@ async def test_write_tool_schema_layer_failure_translated_via_invoke_tool() -> N
     tools = _writer_tools(ledger)
     call = _write_call(
         "write_event",
-        {"el": "t1/e1", "description": "子事件"},
+        {
+            "el": "t1/e1",
+            "problem": "明确事件问题",
+            "summary": "子事件",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        },
         call_id="call-1",
     )
-
     with pytest.raises(AnnotationStageRejection) as exc_info:
         await _invoke_tool(tools, call)
-
     receipt = exc_info.value.receipt()
     assert "write_event" in str(exc_info.value)
     assert receipt["record"] == "t1/e1"
-    assert receipt["field"] == "isroot"
+    assert receipt["field"] == "title"
     assert receipt["code"] == "missing"
     assert "https://" not in str(exc_info.value)
 
@@ -184,24 +219,48 @@ async def test_failed_record_keeps_prior_written_records_repairable() -> None:
     ledger = _writer_ledger()
     tools = _writer_tools(ledger)
     tools["write_entity"].invoke({"name": "顾霜", "entity_type": "character", "el": "顾霜"})
-    tools["write_event"].invoke({"el": "t1", "isroot": True, "description": "根事件"})
-
+    tools["write_event"].invoke(
+        {
+            "el": "t1",
+            "title": "根事件",
+            "problem": "明确事件问题",
+            "summary": "根事件",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        }
+    )
     with pytest.raises(AnnotationStageRejection):
         await _invoke_tool(
             tools,
             _write_call(
                 "write_event",
-                {"el": "t1/e1", "isroot": False, "type": "invalid", "description": "子事件"},
+                {
+                    "el": "t1/e1",
+                    "title": "子事件",
+                    "problem": "明确事件问题",
+                    "summary": "子事件",
+                    "status": "ongoing",
+                    "evidence": 1,
+                },
                 call_id="call-2",
             ),
         )
-
     tree = _tree(ledger, "t1")
     root_event = next(event for event in ledger.bound_payloads["events"] if event.node_id == tree["root_node_id"])
     assert root_event.description == "根事件"
     assert set(tree["nodes"]) == {"root"}
-
-    tools["write_event"].invoke({"el": "t1/e1", "isroot": False, "type": "main", "description": "子事件"})
+    tools["write_event"].invoke(
+        {
+            "el": "t1/e1",
+            "title": "子事件",
+            "problem": "明确事件问题",
+            "summary": "子事件",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
+        }
+    )
     assert set(_tree(ledger, "t1")["nodes"]) == {"root", "e1"}
 
 

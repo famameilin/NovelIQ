@@ -29,7 +29,7 @@ from src.agents.annotation.program_runtime import RestrictedProgramRuntime
 from src.agents.annotation.search_projection import _call_rejection, build_program_tools
 from src.agents.annotation.tools import FINISH_TOOL_NAME
 
-from .errors import AnnotationInvariantError
+from .errors import AnnotationDependencyError, AnnotationInvariantError
 from .subagent_constructors import (
     _ConstructorCall,
     _receipt_message,
@@ -80,7 +80,6 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
             subagent,
             paragraph_text_by_id=paragraph_text_by_id,
             candidate_total=candidate_total,
-            shared_entity_ids=lambda: ledger.shared_entity_ids,
         )
         if ledger.finish_work is None:
             raise AnnotationInvariantError("work 收尾校验未装配，不能启动程序面")
@@ -91,7 +90,14 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         visible_tools = [by_name[name] for name in SUBAGENT_TOOL_NAMES if name in by_name]
         visible_tools.extend(
             by_name[name]
-            for name in ("promise_case", "search_cases", "search_events", "search_graph", "read_event", "read_entity")
+            for name in (
+                "promise_case",
+                "search_cases",
+                "search_events",
+                "search_graph",
+                "read_event",
+                "read_entity",
+            )
             if name in by_name
         )
         namespace: dict[str, Any] = {str(tool.name): tool for tool in [*visible_tools, self.finish_tool]}
@@ -115,13 +121,25 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         self._constructor_names = frozenset(name for name, _, _ in entries)
         self._paragraph_text_by_id = paragraph_text_by_id
         self._write_lock = write_lock if write_lock is not None else asyncio.Lock()
+        self._caseid_default: Any = None
+
+    async def execute(self, code: str, caseid: Any = None) -> str:
+        """程序显式默认关联只在本次执行有效，内层传 None 可取消"""
+        self._caseid_default = caseid
+        try:
+            return await super().execute(code)
+        finally:
+            self._caseid_default = None
 
     def build_tool(self) -> Any:
         """用于构造 subagent 的对外程序入口 execute_code（构造器与检索/案例/finish 同一份目录）"""
         return build_program_tool(
             self,
             extra_api=_SUBAGENT_REFERENCE_SCOPE_TEXT,
-            call_entries=constructor_call_entries(self.api_entries),
+            call_entries=[
+                (name, [*params, ("caseid", "Any = None")], description)
+                for name, params, description in constructor_call_entries(self.api_entries)
+            ],
         )
 
     def _progress(self) -> dict[str, int]:
@@ -138,14 +156,23 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         note: str | None = None,
     ) -> dict[str, Any]:
         """只回报本次程序的显式收尾，避免上一轮 finish 触发提前结束"""
-        from .subagent_program import subagent_gap
-
         body = super()._receipt(status=status, applied=applied, failed=failed, error=error, note=note)
+        receipts = [
+            op.get("receipt") for op in self.ops if op["program_id"] == self._program_id and op["status"] == "success"
+        ]
+        body["written_refs"] = [
+            {"record": item.get("record"), "ref": item["ref"]}
+            for item in receipts
+            if isinstance(item, dict) and item.get("ref")
+        ]
+        warnings = [warning for item in receipts if isinstance(item, dict) for warning in item.get("warnings", [])]
+        if warnings:
+            body["warnings"] = warnings
         if any(
             op["program_id"] == self._program_id and op["tool_name"] == FINISH_TOOL_NAME and op["status"] == "success"
             for op in self.ops
         ):
-            body["finish"] = subagent_gap(self.subagent, candidate_total=len(self.ledger.dialogue_candidates))
+            body["finish"] = {"end_requested": True}
         return body
 
     async def _dispatch(self, name: str, args: dict[str, Any], *, line: int | None) -> Any:
@@ -175,10 +202,12 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
             )
         # 模型写的那一次调用：op 记录与审计行都记它，执行用构造器编译出的生产入参
         call_args = dict(args)
+        business_args = dict(call_args)
+        caseid = business_args.pop("caseid", self._caseid_default)
         plan: _ConstructorCall | None = None
         if name in self._constructor_names:
             try:
-                plan = self.tools[name](**call_args)
+                plan = self.tools[name](**business_args)
             except AnnotationInvariantError:
                 self._close_turn()
                 raise
@@ -194,25 +223,43 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
                     started_ns=started_ns,
                 )
         target = name if plan is None else plan.tool
-        exec_args = call_args if plan is None else plan.args
+        exec_args = dict(business_args if plan is None else plan.args)
+        if caseid is not None or "caseid" in call_args:
+            exec_args["caseid"] = caseid
         if plan is not None and target is None:
             # 只落产出记录的构造器（label）：标签与章级指标同属一个域，单独一条写不出去
             plan.commit()
             self.ledger.written_record_keys.add(plan.record)
+            receipt: Any = _written_receipt(plan.record, plan.ref)
+            if caseid is not None:
+                warning = {
+                    "status": "warning",
+                    "code": "case_no_independent_artifact",
+                    "caseid": caseid,
+                    "message": "label 随章级指标保存；请在 metric 写入时显式传 caseid 关联",
+                }
+                receipt.update(case_link=warning, warnings=[warning])
             return self._finish_call(
                 name,
                 op_index=op_index,
                 line=line,
                 status="success",
-                receipt=_written_receipt(plan.record, plan.ref),
+                receipt=receipt,
                 call_args=call_args,
                 error=None,
                 started_ns=started_ns,
             )
         try:
             async with self._write_lock:
+                identity = f"{self.ledger.invocation_id}-" if self.ledger.invocation_id else ""
                 entry = await _execute_call(
-                    {"name": target, "args": exec_args, "id": f"{self._program_id}-op{op_index}"},
+                    {
+                        "name": target,
+                        "args": exec_args,
+                        # call_id 是业务事实的全局唯一实际地址：graph_facts/case_entries 的
+                        # business_call_id 唯一键按执行身份限定，只用程序内序号会跨执行撞键
+                        "id": f"{identity}{self._program_id}-op{op_index}",
+                    },
                     tool_map=self.execution_tools,
                     ledger=self.ledger,
                     # 审计行由本面的 _record_audit 统一写（构造器名=模型这一次动作），
@@ -222,6 +269,20 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
                     call_index=self._next_call_index(),
                     record_keys=self.ledger.written_record_keys,
                 )
+        except AnnotationDependencyError as exc:
+            # 内层调用不写审计，程序面必须记录失败的检索及源码行后再上抛
+            self._finish_call(
+                name,
+                op_index=op_index,
+                line=line,
+                status="error",
+                receipt={"status": "error", "code": "dependency_unavailable", "message": str(exc)},
+                call_args=call_args,
+                error=str(exc),
+                started_ns=started_ns,
+            )
+            # 外层 execute_code 仍需写自己的失败审计，回合由外层最后闭合
+            raise
         except AnnotationInvariantError:
             self._close_turn()
             raise
@@ -230,7 +291,6 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
             plan.commit()
             # 构造器记录键与底层写入记录共同授权本次原文锚点
             self.ledger.written_record_keys.add(plan.record)
-        receipt: Any
         if not ok:
             receipt = _refused_receipt(name, None if plan is None else plan.record, entry.get("receipt"))
         elif plan is None:
@@ -242,6 +302,14 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
                     {key: entry["receipt"][key] for key in ("case_id", "description") if key in entry["receipt"]}
                 )
             receipt = _written_receipt(plan.record, plan.ref)
+            actual = entry.get("receipt")
+            if isinstance(actual, dict):
+                for key in ("case_link", "warnings"):
+                    if key in actual:
+                        receipt[key] = actual[key]
+                content = actual.get("content") or {}
+                if plan.tool == "write_event" and content.get("declaration_id"):
+                    receipt["ref"].update(declaration_id=content["declaration_id"])
         return self._finish_call(
             name,
             op_index=op_index,

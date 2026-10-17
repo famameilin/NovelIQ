@@ -18,6 +18,7 @@ from typing import Annotated, Any, Literal, Union, get_args, get_origin
 from src.agents.annotation.program_contract import PROGRAM_MAX_CODE_CHARS, PROGRAM_MAX_OPS
 from src.agents.annotation.validation_errors import _STAGE_FIELD_EXPECTATIONS
 from src.event_trees.vocabulary import EventParticipantRole
+from src.fact_graph.inputs import EntityNameRef
 from src.fact_graph.schema import (
     CLIFFHANGER_DESCRIPTION,
     ENTITY_REF_FIELD_HINT,
@@ -94,6 +95,8 @@ def _type_label(annotation: Any, *, metadata: tuple[Any, ...] = ()) -> str:
         inner = get_args(annotation)
         inner_label = _type_label(inner[0]) if inner else ""
         return f"{inner_label}列表" if inner_label else "对象列表"
+    if annotation is EntityNameRef:
+        return "名字与大类对象"
     if isinstance(annotation, type):
         if issubclass(annotation, StrEnum):
             return f"枚举（{len(list(annotation))} 个取值）"
@@ -226,8 +229,8 @@ def tool_call_entries(
     """用于把工具对象翻成目录条目（说明可被本面覆盖，参数面只取名字与默认值）
 
     2026-09-18 descriptions：按工具名覆盖目录里的说明。工具对象的 docstring 是生产工具的
-    口径，其中"实体引用一律填 run 级 id 或 el 键"这类句子只对原生面成立——程序面的构造器只认
-    本工作 登记的 id，照抄会把模型教错（关系/对话构造器会逐条 unknown_reference 拒绝）。
+    口径。参与者、关系两端、说话人在原生面与构造器面都使用正文名字与大类，
+    构造器覆盖文案只解释本工作局部锚点，不引入另一套实体引用口径。
     未覆盖的工具一律不写第二份文案，仍以工具对象为单一事实源。
     """
     entries: list[tuple[str, list[tuple[str, str]], str]] = []
@@ -262,29 +265,37 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
     "from_entity": f"关系起点{ENTITY_REF_FIELD_HINT}",
     "to_entity": f"关系终点{ENTITY_REF_FIELD_HINT}",
     "speaker": f"说话人{ENTITY_REF_FIELD_HINT}",
-    "el": "本章局部键：实体用 a1，事件根用树键 t1，子事件用 t1/e2",
+    "el": "本章来源局部键：实体用 a1，事件声明用 e1；斜杠仅局部寻址，不表示包含",
     "query": "检索原文的关键词，多词任一命中；% 匹配任意长度，_ 匹配单个字符",
+    "search_events.isforeshadowing": "只看伏笔根声明（True）或只看非伏笔根（False），不填返回全部；"
+    "伏笔根 = write_event(isforeshadowing=True) 种下的树根，伏笔动作的引用来源只在其中",
+    "search_events.compact": "紧凑索引模式：每条只回声明 id、章号、标题、类型、状态、保存态与伏笔标记，"
+    "每页最多 100 条；用于通览全书声明，详情仍用 read_event",
     "evidence": "本章事件所在段落的段首号（整数），不是引文",
     "read_chapter_text.paragraph_id": "本章正文段首可见号，由引擎换算为全局段落号",
     "read_text.paragraph_id": "全局段落号，跨章检索命中时照抄 paragraph_ids 中的值",
-    "write_event.type": '"main" 顺延主因链，"secondary" 挂在主链尾；子事件必填，根事件不填',
-    "event.type": '"main" 顺延主因链，"secondary" 挂在主链尾；子事件必填，根事件不填',
-    "isforeshadowing": "本章原文中的伏笔埋设；为 true 时 confidence 必填",
-    "verdict": _enum_parameter_note(DialogueVerdict),
     "pivot_moment": PIVOT_MOMENT_DESCRIPTION,
     "cliffhanger": CLIFFHANGER_DESCRIPTION,
-    "push_case.description": "待处理疑点的人类可读说明，不超过 100 字",
-    "record_id": "本章写入回执中的 record 原值；没有明确记录可省略",
-    "candidate_index": "候选表的 1 基编号，范围 1..DialogueCandidates.total；total=0 时无候选",
-    "write_link.change_kind": "relation_change 必填，按原文选择变化方向；其它 kind 省略或 None（见 kind 配对表）",
-    "characters": '[{"entityid": 参与者实体引用, "role": 参与角色, "narrative_role": 叙事功能, '
+    "verdict": _enum_parameter_note(DialogueVerdict),
+    "event.title": "本章事件标题，不是逐个动作标签",
+    "event.problem": "本事件围绕的具体问题",
+    "event.summary": "原文支持的事件概要",
+    "event.event_type": "简短事件类型，不是main/secondary",
+    "event.status": "ongoing 或 resolved，章节结束不代表事件解决",
+    "event.progress": "本章明确推进，可空；不得编造结局",
+    "declaration_id": "章级事件声明来源身份，由 event 回执或 kind=declaration 检索获得，不是正式 event_id",
+    "source_declaration_id": "伏笔来源声明身份，只接受伏笔树根：write_event(isforeshadowing=True) 种下的那棵树的根"
+    "（read_event 回执 is_foreshadow_setup=True）；普通事件树根不算，须先读取该声明核对",
+    "action_type": "伏笔动作类型：写英文常量 'reinforce'（强化）或 'payoff'（疑似回收），不写中文词",
+    "target_declaration_id": "强化或回收所指声明身份，可空；填写时须先读取该声明",
+    "characters": '[{"name": 正文名字, "entity_type": 实体大类, "role": 参与角色, "narrative_role": 叙事功能, '
     '"action": 做了什么, "emotion": -2..2 整数}, …]；'
     "role/narrative_role/action/emotion 都可省略或写偏：role 缺省按实体登记类型取"
     "（character→主体、location→地点、其余→客体），叙事功能近义词自动归一，"
-    "emotion 越界按边界收敛；非 character 条目只给 entityid 与 role。"
+    "emotion 越界按边界收敛；非 character 条目只给 name、entity_type 与 role。"
     f"role 取：{'、'.join(member.value for member in EventParticipantRole)}（{EVENT_ROLE_FIELD_HINT}）；"
     f"narrative_role 取：{'、'.join(member.value for member in RoleFunction)}（{PERSON_ROLE_FIELD_HINT}）",
-    "participants.items": '[{"entity_id": 本 subagent 已登记的实体 id, "role": 参与角色, '
+    "participants.items": '[{"name": 正文名字, "entity_type": 实体大类, "role": 参与角色, '
     '"narrative_role": 叙事功能, "action": 一句话动作, "emotion": -2..2 整数}, …]；'
     "四个描述字段都可省略或写偏：role 缺省按实体登记类型取（character→主体、location→地点、"
     "其余→客体），叙事功能近义词自动归一，emotion 越界按边界收敛。"
@@ -299,11 +310,14 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
 # （模型在这个面只有 execute_code 与 finish 两件工具，说明就是它读得到的全部合同）。
 # 2026-10-02 恢复 SUBAGENT_CONTRACT_TEXT：随章内三子代理路径一并加回（0.2.0 重构曾摘除）。
 SUBAGENT_CONTRACT_TEXT: str = (
-    "执行一段 Python 程序，程序里的每次调用立即生效：成功就写入正式记录，失败只作废那一条。\n"
+    "执行一段 Python 程序，每次成功调用写入本次来源或候选记录，失败只作废那一条。"
+    "正式事件仍须诊断统一发布。\n"
     "运行规则：\n"
     "- 对话序号：执行前预检可确定的 candidate_index 范围，越界时本程序不执行；动态返回值仍逐项校验。\n"
-    "- 语法：变量赋值、列表/字典/元组、下标、for 列表循环、if 与 ==/!=/in；调用只写具名参数；"
-    "没有 import、属性访问、函数定义或其他 Python API。常量写 True/False/None（也接受 true/false/null）；\n"
+    "- 语法：变量赋值、字典下标赋值、列表/字典/元组、下标、列表拼接 +、for 与 if、==/!=/in；"
+    "range(stop)/range(start, stop, step) 接受整数位置参数，最多500项；业务工具只写具名参数；"
+    "没有 import、属性访问、函数定义或其他 Python API（没有 len 等内置函数）。"
+    "常量写 True/False/None（也接受 true/false/null）；\n"
     "字典/列表一律写字面量（{…}/[…]）：dict()/list() 等构造器与列表推导不可用，循环一律用 for。\n"
     "- 检索结果自动出现在 reads，无需 print（未开放）。具名调用示例：\n"
     '  events_page = search_events(query="院门", chapter_id=24, limit=5, offset=0)\n'
@@ -311,12 +325,13 @@ SUBAGENT_CONTRACT_TEXT: str = (
     '  for candidate in graph_page["entities"]:\n'
     '      entity_detail = read_entity(entity_id=candidate["id"])\n'
     '  for item in events_page["events"]:\n'
-    '      detail = read_event(node_id=item["node_id"])\n'
+    '      detail = read_event(node_id=item["declaration_id"], kind="declaration")\n'
     "  后续翻页沿用原 query/筛选条件，offset 填上一页 next_offset；None 表示没有下一页。\n"
     "- 变量：程序里赋的变量在本章后续程序里保留；构造器与检索的返回值都能用变量承接。\n"
     "  工具名全部保留，不得作为变量（如 entity/event/metric/finish）；"
     "实体详情用 entity_detail，事件详情用 event_detail，检索页用 graph_page/events_page。\n"
-    "- 失败：业务失败只作废该条调用、后面的语句继续执行；语法或运行错误停止本程序、已成功的调用保留。\n"
+    "- 执行前检查整段语法白名单，禁用语法使本程序不执行；"
+    "业务失败只作废该条调用、后面的语句继续执行；动态运行错误停止本程序、已成功的调用保留。\n"
     f"- 上限：单个程序最多 {PROGRAM_MAX_CODE_CHARS} 字符、{PROGRAM_MAX_OPS} 条调用。\n"
     "回执字段：\n"
     "- status：本次程序的整体结果。\n"

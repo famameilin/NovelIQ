@@ -14,46 +14,17 @@ from .errors import AnnotationAuthorizationError, AnnotationInputError, Annotati
 
 if TYPE_CHECKING:
     from src.agents.annotation.ledger import AnnotationToolLedger
-    from src.agents.annotation.tools import AnnotationQueryService
+    from src.agents.annotation.tools import AnnotationQueryService, TextReadLedger
 
 
-def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationToolLedger) -> list[Any]:
-    """所有写工具只接受本次读回执和本章已写出的对象"""
-
-    def require_open() -> None:
-        if ledger.phase != "chapter_open":
-            raise AnnotationAuthorizationError("章节已收尾，不能追加原文引用或关联")
-
-    def require_record(record_id: str) -> str:
-        require_open()
-        # 2026-10-04 裸树键补全：树键（如 t1）按自然形态当记录键时翻译成根记录再校验，
-        # 原值或翻译值任一在本章写出的记录键集合里即接受，返回统一为生产键
-        resolved = ledger.production_record_key(record_id)
-        if record_id not in ledger.written_record_keys and resolved not in ledger.written_record_keys:
-            raise AnnotationStageRejection(
-                f"{record_id}(record_id={record_id!r})：record_id 必须是本章实际写出的记录键",
-                record=record_id,
-                field="record_id",
-                code="unknown_record",
-                expected="本章已写出的记录键",
-            )
-        return resolved
-
-    def reference(source_ref: str, *, record: str, field: str) -> SourceReference:
-        if source_ref not in ledger.text_references:
-            raise AnnotationStageRejection(
-                f"{record}({field}={source_ref!r})：引用未由本次 read_text 授权",
-                record=record,
-                field=field,
-                code="unauthorized_reference",
-                expected="本次 read_text 已授权的 source_ref",
-            )
-        return ledger.text_references[source_ref]
+def build_text_read_tool(query_service: AnnotationQueryService, ledger: TextReadLedger) -> Any:
+    """标注与诊断共用精确读取和来源绑定，章级锚点另由标注工具提供"""
 
     @tool
     async def read_text(paragraph_id: int, quote: str | None = None, occurrence: int = 1) -> str:
         """读取完整段落或精确原文片段，返回跨章引用能力；不依赖该章标注是否完成"""
-        require_open()
+        if ledger.phase not in {"chapter_open", "diagnosis_open"}:
+            raise AnnotationAuthorizationError("当前执行已收尾，不能读取原文")
         if occurrence < 1:
             raise AnnotationInputError("occurrence 必须从 1 开始")
         paragraph: dict[str, Any] | None = None
@@ -96,6 +67,44 @@ def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationTo
             {**value.model_dump(mode="json"), "content": content[start:end], "source_ref": source_ref},
             ensure_ascii=False,
         )
+
+    return read_text
+
+
+def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationToolLedger) -> list[Any]:
+    """所有写工具只接受本次读回执和本章已写出的对象"""
+
+    def require_open() -> None:
+        if ledger.phase != "chapter_open":
+            raise AnnotationAuthorizationError("章节已收尾，不能追加原文引用或关联")
+
+    def require_record(record_id: str) -> str:
+        require_open()
+        # 2026-10-04 裸树键补全：树键（如 t1）按自然形态当记录键时翻译成根记录再校验，
+        # 原值或翻译值任一在本章写出的记录键集合里即接受，返回统一为生产键
+        resolved = ledger.production_record_key(record_id)
+        if record_id not in ledger.written_record_keys and resolved not in ledger.written_record_keys:
+            raise AnnotationStageRejection(
+                f"{record_id}(record_id={record_id!r})：record_id 必须是本章实际写出的记录键",
+                record=record_id,
+                field="record_id",
+                code="unknown_record",
+                expected="本章已写出的记录键",
+            )
+        return resolved
+
+    def reference(source_ref: str, *, record: str, field: str) -> SourceReference:
+        if source_ref not in ledger.text_references:
+            raise AnnotationStageRejection(
+                f"{record}({field}={source_ref!r})：引用未由本次 read_text 授权",
+                record=record,
+                field=field,
+                code="unauthorized_reference",
+                expected="本次 read_text 已授权的 source_ref",
+            )
+        return ledger.text_references[source_ref]
+
+    read_text = build_text_read_tool(query_service, ledger)
 
     @tool
     async def read_chapter_text(paragraph_id: int, quote: str | None = None, occurrence: int = 1) -> str:

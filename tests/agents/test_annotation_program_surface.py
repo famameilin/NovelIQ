@@ -89,7 +89,7 @@ def test_catalog_is_current_formal_tool_surface() -> None:
         "write_entity",
         "write_metrics",
         "write_event",
-        "write_progression",
+        "write_plotline",
         "write_foreshadowing_action",
         "write_relation",
         "write_dialogue",
@@ -124,6 +124,8 @@ def test_dialogue_candidate_prompts_report_actual_total(empty: bool) -> None:
             paragraph_info=ledger.paragraph_info,
             candidates=candidates,
             role_scope="",
+            chapter_id=ledger.current_chapter_id,
+            chapter_order=ledger.current_chapter_order,
         ),
     ]
     for message in messages:
@@ -146,8 +148,21 @@ def test_link_schema_uses_actual_entity_or_event_ids() -> None:
         "same_entity",
         "different_entity",
         "relation_change",
+        "contains",
     ]
     assert schema["properties"]["change_kind"]["default"] is None
+
+
+def test_source_write_schemas_do_not_expose_formal_event_id_parameters() -> None:
+    """章级写入只引用声明，正式身份仅在诊断发布后存在"""
+    _, program_tool, tools = _surface(_ledger())
+    schemas = {tool.name: tool.args_schema.model_json_schema()["properties"] for tool in tools}
+    assert "declaration_id" in schemas["write_plotline"]
+    assert "event_id" not in schemas["write_plotline"]
+    assert {"source_declaration_id", "target_declaration_id"} <= set(schemas["write_foreshadowing_action"])
+    assert {"root_event_id", "target_event_id"}.isdisjoint(schemas["write_foreshadowing_action"])
+    assert "source_declaration_id" in program_tool.description
+    assert "target_declaration_id" in program_tool.description
 
 
 @pytest.mark.asyncio
@@ -186,8 +201,8 @@ async def test_direct_current_tools_use_same_dispatcher_and_unknown_call_is_isol
     assert receipts[0]["accepted"] is False
     assert receipts[1]["status"] == "written"
     assert receipts[-1]["status"] == "written"
-    assert receipts[-1]["ref"]["finished"] is True
-    assert ledger.chapter_finished
+    assert receipts[-1]["ref"]["end_requested"] is True
+    assert ledger.end_requested and not ledger.chapter_finished
     entity_row = next(row for row in observer.rows if row["tool_name"] == "write_entity")
     assert entity_row["request_args"]["_program"]["direct_fallback"] is True
     assert observer.closed == 1
