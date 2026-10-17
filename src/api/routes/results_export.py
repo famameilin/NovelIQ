@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,7 @@ from src.api.services.results_export_service import (
     fetch_all_results_data,
     write_results_to_file,
 )
+from src.event_trees.read.organization import RunRequiresRebuildError
 from src.storage.repositories import AnnotationRepository, ChapterRepository, StatsRepository
 from src.workflows.novels import NovelService
 
@@ -55,9 +56,12 @@ async def get_results(
     annotation_repo = AnnotationRepository(session)
     chapter_repo = ChapterRepository(session)
 
-    results_data, missing_fields, novel_name = fetch_all_results_data(
-        novel_id, task_id, run_id, stats_repo, annotation_repo, chapter_repo
-    )
+    try:
+        results_data, missing_fields, novel_name = fetch_all_results_data(
+            novel_id, task_id, run_id, stats_repo, annotation_repo, chapter_repo
+        )
+    except RunRequiresRebuildError as error:
+        raise HTTPException(status_code=400, detail={"code": "RUN_REQUIRES_REBUILD", "message": str(error)}) from error
     file_path = write_results_to_file(task_id, results_data)
 
     if missing_fields:

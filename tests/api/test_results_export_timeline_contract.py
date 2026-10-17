@@ -41,7 +41,7 @@ from tests.support.chapter_annotation_helpers import (
 )
 
 
-def test_fetch_timeline_data_reuses_independent_progression_contract(db_session) -> None:
+def test_fetch_timeline_data_reuses_independent_plotline_contract(db_session) -> None:
     """2026-08-20 迁移至事件森林：验证新森林路径（含 nodes/causal_edges/foreshadowing_edges）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -106,7 +106,7 @@ def test_fetch_timeline_data_reuses_independent_progression_contract(db_session)
 
     from sqlalchemy import select
 
-    from src.storage.models import EventEdge
+    from src.storage.models import NarrativeLink
 
     commit_test_event_link(
         db_session,
@@ -122,17 +122,20 @@ def test_fetch_timeline_data_reuses_independent_progression_contract(db_session)
         source_event_id=palace_root,
         target_event_id=strike_root,
     )
-    inactive_edge = db_session.execute(
-        select(EventEdge).where(
-            EventEdge.run_id == run_id,
-            EventEdge.source_event_id == eid2,
-            EventEdge.target_event_id == palace_root,
+    # 跨树链路的活动观察沿用正式列：这里显式置一条为非活动/已过期
+    inactive_link = db_session.execute(
+        select(NarrativeLink).where(
+            NarrativeLink.semantic_source_declaration_id == eid2,
+            NarrativeLink.semantic_target_declaration_id == palace_root,
         )
     ).scalar_one()
-    inactive_edge.is_active = False
-    inactive_edge.expired_at = datetime.now(UTC)
+    inactive_link.is_active = False
+    inactive_link.expired_at = datetime.now(UTC)
     db_session.commit()
 
+    from tests.support.diagnosis_helpers import declaration_event_draft, persist_event_draft
+
+    persist_event_draft(db_session, declaration_event_draft(db_session, run_id))
     chapter_repo = ChapterRepository(db_session)
     stats_repo = StatsRepository(db_session)
 
@@ -143,15 +146,26 @@ def test_fetch_timeline_data_reuses_independent_progression_contract(db_session)
     )
 
     assert timeline_data is not None
-    from src.metrics.queries.progression import ProgressionQuery
+    from src.metrics.queries.plotline import PlotlineQuery
 
-    expected = ProgressionQuery(db_session, run_id).fetch(through_chapter_id=2, limit=500)
+    expected = PlotlineQuery(db_session, run_id).fetch(through_chapter_id=2, limit=500)
     assert timeline_data == expected
     assert timeline_data["through_chapter_id"] == 2
     assert len(timeline_data["chapters"]) == 2
     assert timeline_data["total"] == 1
     assert timeline_data["changes"][0]["action"] == "setup"
-    assert timeline_data["changes"][0]["source_event_ids"] == [eid1]
+    from sqlalchemy import distinct
+
+    from src.storage.models import CompleteEvent, EventRevision
+
+    bound_events = list(
+        db_session.scalars(
+            select(distinct(CompleteEvent.event_id))
+            .join(EventRevision, EventRevision.event_id == CompleteEvent.event_id)
+            .where(EventRevision.declaration_id == eid1)
+        )
+    )
+    assert timeline_data["changes"][0]["source_event_ids"] == bound_events
     assert "causal_edges" not in timeline_data
 
 
@@ -739,28 +753,17 @@ def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeyp
     )
     db_session.commit()
 
-    from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence, save_organization
+    from sqlalchemy import select
 
-    draft = EventOrganizationDraft(db_session, run_id)
-    evidence = [OrganizationEvidence(event_id=eid1)]
-    arc = draft.register_arc(
-        key="gate",
-        kind="main",
-        title="入门立誓",
-        objective="守护山门",
-        role="核心冲突",
-        reason="两次行动推动同一目标",
-        evidence=evidence,
+    from src.event_trees import storage_map as smap
+    from src.storage.models import CompleteEvent
+    from tests.support.diagnosis_helpers import declaration_event_draft, persist_event_draft
+
+    persist_event_draft(db_session, declaration_event_draft(db_session, run_id))
+    event = db_session.scalar(
+        select(CompleteEvent).where(CompleteEvent.producer_execution_id.in_(smap.run_execution_ids(run_id)))
     )
-    draft.assign_events(
-        [eid1, "evt-export-gate-main"], arc_id=arc, role="推动", reason="推进守护目标", evidence=evidence
-    )
-    organization = draft.finish()
-    output = StatsRepository(db_session).insert_agent_analysis(
-        run_id, {"narrative_organization": organization.model_dump()}
-    )
-    save_organization(db_session, run_id, organization, output)
-    db_session.commit()
+    event_id = event.event_id
 
     _stub_export_sibling_loaders(monkeypatch)
 
@@ -773,19 +776,13 @@ def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeyp
         chapter_repo=ChapterRepository(db_session),
     )
 
-    from src.event_trees.read.organization import EventOrganizationQuery
+    from src.event_trees.read.organization import EventTreeQuery
 
     tree = results_data["event_trees"]
-    assert tree == EventOrganizationQuery(db_session, run_id).export()
-    assert tree["total_events"] == 2
-    assert tree["arcs"][0]["arc_id"] == arc
-    assert {node["event_id"] for node in tree["nodes"] if node["kind"] == "event"} == {eid1, "evt-export-gate-main"}
-    assert any(
-        edge["source_id"] == f"event:{eid1}"
-        and edge["target_id"] == "event:evt-export-gate-main"
-        and edge["kind"] == "local_parent"
-        for edge in tree["edges"]
-    )
+    assert tree == EventTreeQuery(db_session, run_id).export()
+    assert tree["counts"]["all_events"] == 2
+    assert tree["counts"]["declarations"] == 2
+    assert event_id in [entry["event_id"] for entry in tree["details"]]
     assert "event_forest" not in results_data
 
 
@@ -810,9 +807,9 @@ def test_fetch_all_results_data_emits_empty_organization_for_no_events(db_sessio
         chapter_repo=ChapterRepository(db_session),
     )
 
-    assert results_data["event_trees"]["total_events"] == 0
+    assert results_data["event_trees"]["counts"]["all_events"] == 0
     assert results_data["event_trees"]["arcs"] == []
-    assert [node["node_id"] for node in results_data["event_trees"]["nodes"]] == ["root"]
+    assert results_data["event_trees"]["events"] == []
 
 
 def patch_export_dependency(monkeypatch, name, value):

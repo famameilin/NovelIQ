@@ -15,7 +15,7 @@ from src.api.services.results_queries.graph import _fetch_character_relations, _
 from src.api.services.results_queries.metadata import _fetch_global_stats, _fetch_token_usage_stats
 from src.api.services.results_queries.paragraphs import _fetch_paragraph_curves
 from src.fact_graph.read import ExportGraphAuthorityView, GraphAuthorityReport, serialize_graph_report_signals
-from src.metrics.queries.progression import ProgressionQuery
+from src.metrics.queries.plotline import PlotlineQuery
 from src.storage.repositories import (
     AnnotationRepository,
     ChapterRepository,
@@ -240,4 +240,4 @@ def _fetch_timeline_data(
     stats_repo: StatsRepository,
 ) -> dict[str, Any] | None:
     """导出与正式页面使用同一独立变化查询，包含全部章节与变化"""
-    return ProgressionQuery(stats_repo.session, run_id).export()
+    return PlotlineQuery(stats_repo.session, run_id).export()

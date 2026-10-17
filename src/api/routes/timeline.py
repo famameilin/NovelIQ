@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db_session, require_readable_run_status, require_run_for_novel, resolve_run_id
 from src.fact_graph.read.source import read_evidence_source
-from src.metrics.queries.progression import ProgressionQuery
+from src.metrics.queries.plotline import PlotlineQuery
 
 router = APIRouter(prefix="/novels", tags=["timeline"])
 SessionDep = Annotated[Session, Depends(get_db_session)]
@@ -43,7 +43,7 @@ async def get_timeline(
 ) -> dict[str, Any]:
     authorize(session, novel_id, run_id)
     try:
-        return ProgressionQuery(session, run_id).fetch(
+        return PlotlineQuery(session, run_id).fetch(
             through_chapter_id=through_chapter_id,
             window_start_chapter_id=window_start_chapter_id,
             window_end_chapter_id=window_end_chapter_id,
@@ -64,7 +64,7 @@ async def get_timeline_change(
 ) -> dict[str, Any]:
     authorize(session, novel_id, run_id)
     try:
-        return ProgressionQuery(session, run_id).detail(change_id, through_chapter_id)
+        return PlotlineQuery(session, run_id).detail(change_id, through_chapter_id)
     except (ValueError, LookupError) as error:
         raise query_error(error) from error
 
@@ -80,7 +80,7 @@ async def get_timeline_source(
 ) -> dict[str, Any]:
     authorize(session, novel_id, run_id)
     try:
-        detail = ProgressionQuery(session, run_id).detail(change_id, through_chapter_id)
+        detail = PlotlineQuery(session, run_id).detail(change_id, through_chapter_id)
         return read_evidence_source(session, run_id, detail["evidence"], chapter_id)
     except (ValueError, LookupError) as error:
         raise query_error(error) from error
