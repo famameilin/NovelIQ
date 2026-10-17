@@ -10,20 +10,28 @@ from src.case_pool import CasePool
 from src.event_bus import EventBus, Message
 from src.fact_graph.read.annotations import fetch_chapter_characters_full
 from src.storage.db import get_session_factory
-from src.storage.models import BookCase, ModelTurn
+from src.storage.models import BookCase
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
 @pytest.mark.parametrize("reference_kind", ["relation", "event", "dialogue"])
 def test_retained_reference_restores_entity_after_source_chapter_discard(db_session, reference_kind):
     """引用自身已保存且有效，丢弃源章不补造实体写入，也不丢引用端点"""
+    from types import SimpleNamespace
     from uuid import uuid4
 
     from src.agents.annotation.output_models import BoundChapterAnnotation
     from src.fact_graph.graph import FactGraph, mention_uuid
     from src.fact_graph.inputs import ChapterMetricsInput
     from src.fact_graph.outputs import BoundDialogue
-    from src.storage.models import AnalysisOutput, AnnotationWork, GraphEntity, GraphFact, Paragraph
+    from src.storage.models import (
+        ChapterAnnotation,
+        Execution,
+        GraphEntity,
+        GraphFact,
+        Paragraph,
+        WorkItem,
+    )
     from src.storage.repositories.annotation import AnnotationRepository
     from tests.support.chapter_annotation_helpers import (
         commit_test_annotation,
@@ -39,7 +47,6 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
         run_id=run_id,
         chapter_id=1,
         relations=[relation_fact(chapter_id=1, from_name="Alice", to_name="Bob", relation_type="敌对")],
-        entity_attributes={(1, "Alice"): {"discarded_attribute": True}},
     )
     output = BoundChapterAnnotation(
         metrics=ChapterMetricsInput(summary="Actual input", emotional_valence=0, narrative_function="铺垫"),
@@ -79,47 +86,93 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
         annotation=output,
         relation_assert_ops=relations,
     )
-    source = db_session.get(AnalysisOutput, source_id)
-    source_work = source.work_id
+    # 2026-10-16 3NF：源章 work 身份沿 记录→真实尝试→work 取得（旧产物/旧 work 表已退场）
+    source = db_session.get(ChapterAnnotation, source_id)
+    source_work = str(db_session.get(Execution, source.execution_id).work_id)
     graph = FactGraph(run_scope=run_id)
     graph.discard_storage(db_session, {source_work})
     db_session.delete(source)
-    db_session.delete(db_session.get(AnnotationWork, source_work))
+    db_session.delete(db_session.get(WorkItem, source_work))
     db_session.flush()
     graph.rebuild_storage(db_session)
-    graph.restore_storage(db_session, [db_session.get(AnalysisOutput, kept_id)])
-    graph.restore_storage(db_session, [db_session.get(AnalysisOutput, kept_id)])
-    assert graph.resolve_entity_id(mention_uuid(run_id, 2, "Alice"), label="source") == "Alice"
+    kept = db_session.get(ChapterAnnotation, kept_id)
+    kept_record = SimpleNamespace(
+        execution_id=kept.execution_id,
+        work_id=str(db_session.get(Execution, kept.execution_id).work_id),
+        chapter_id=2,
+        sequence=2,
+        role="solo",
+    )
+    graph.restore_storage(db_session, [kept_record])
+    graph.restore_storage(db_session, [kept_record])
+    alice = mention_uuid(run_id, 2, "Alice", "character")
+    resolved = graph.resolve_entity_id(alice, label="source")
+    assert graph.display_name(resolved) == "Alice"
+    # 引用恢复不补造实体写入（只有引用支持，没有实体操作）
     assert graph.drain_ops(*next(iter(graph.saved)))["entity_ops"] == []
-    assert db_session.get(GraphEntity, mention_uuid(run_id, 2, "Alice")).attributes == {}
-    assert db_session.query(GraphFact).filter_by(run_id=run_id, fact_type="entity").count() == 0
-    assert db_session.query(GraphFact).filter_by(run_id=run_id, fact_type="entity_reference").count() >= 1
+    assert db_session.get(GraphEntity, alice) is not None
+    assert not list(
+        db_session.scalars(
+            select(GraphFact).where(GraphFact.entity_id == alice, GraphFact.tags_submitted.is_not(False))
+        )
+    )
+    assert list(
+        db_session.scalars(
+            select(GraphFact).where(GraphFact.entity_id == alice, GraphFact.tags_submitted.is_(False))
+        )
+    )
     assert fetch_chapter_characters_full(AnnotationRepository(db_session).session, run_id) == []
 
 
 def test_case_delivery_order_does_not_follow_database_save_order(db_session):
-    _novel, run_id = create_run_with_chunks(db_session, texts=["原文。"])
+    """交付按逆序持久化不能覆盖有效业务事实：采纳由真实交付行决定"""
+    from uuid import uuid4
+
+    _novel, run_id = create_run_with_chunks(db_session, texts=["原文一。", "原文二。"], chapter_ids=[1, 2])
+    from src.storage.models import CaseEntry, Execution, WorkItem
+    from src.storage.models.base import naive_utcnow
+
+    # work 身份在库内全局唯一（work_items 主键即 work_id），用例内自取名避免跨用例碰撞；
+    # 案例支持必须引用真实执行：(run, chapter, role) 唯一，因此两个作者落在两章
+    suffix = uuid4().hex[:8]
+    a, b = (f"a-{suffix}", f"a1-{suffix}"), (f"b-{suffix}", f"b1-{suffix}")
+    for author, chapter_id in ((a, 1), (b, 2)):
+        db_session.add(
+            WorkItem(
+                work_id=author[0], role="solo", annotation_run_id=run_id, annotation_chapter_id=chapter_id
+            )
+        )
+    db_session.flush()
+    for author in (a, b):
+        db_session.add(
+            Execution(
+                execution_id=author[1],
+                work_id=author[0],
+                attempt_number=1,
+                started_at=naive_utcnow(),
+                status="success",
+            )
+        )
+    db_session.flush()
     pool = CasePool(run_id)
-    a, b = ("a", "a1"), ("b", "b1")
     pool.begin(*a)
     pool.begin(*b)
-    case = pool.push("核查实际关联", a)
+    case = pool.push("dialogue", "核查实际关联", a)
     pool.promise(case["case_id"], a)
-    pool.deliver(
-        {"case_id": case["case_id"], "state": "deferred", "reason": "等待更多原文"},
-        a,
-        call_id="first",
-        connections=[],
-        reads=[],
-    )
+    pool.associate(case["case_id"], a, tool_name="read_event", call_id="first", receipt={}, is_write=False)
+    pool.stop(a)
     pool.promise(case["case_id"], b)
-    pool.deliver(
-        {"case_id": case["case_id"], "state": "resolved", "reason": "已核查，无需连接"},
-        b,
-        call_id="second",
-        connections=[],
-        reads=[{"paragraph_id": 0, "content": "原文。"}],
+    pool.associate(case["case_id"], b, tool_name="write_event", call_id="second", receipt={}, is_write=True)
+    # 创建案例本身先保存；两个交付按逆序持久化不能覆盖有效业务事实
+    db_session.add(
+        BookCase(
+            case_id=case["case_id"],
+            registration_run_id=run_id,
+            case_type="dialogue",
+            description="核查实际关联",
+        )
     )
+    db_session.flush()
 
     def execution(author):
         import json
@@ -127,6 +180,7 @@ def test_case_delivery_order_does_not_follow_database_save_order(db_session):
         from src.case_pool.contributions import CaseContribution
 
         snapshot = {
+            "created_case_ids": sorted(pool.created.get(author, set())),
             "registrations": {key: deepcopy(pool.cases[key]) for key in pool.registrations[author]},
             "deliveries": deepcopy(pool.deliveries[author]),
         }
@@ -136,10 +190,21 @@ def test_case_delivery_order_does_not_follow_database_save_order(db_session):
     db_session.commit()
     pool.save_work(db_session, execution(a))
     db_session.commit()
-    assert db_session.get(BookCase, case["case_id"]).state == "resolved"
+    supports = {
+        str(entry.producer_execution_id): entry
+        for entry in db_session.scalars(
+            select(CaseEntry).where(
+                CaseEntry.case_id == case["case_id"], CaseEntry.producer_execution_id.is_not(None)
+            )
+        )
+    }
+    assert supports[b[1]].adopted is True and supports[a[1]].adopted is False
+    loaded = CasePool(run_id)
+    loaded.load_storage(db_session)
+    assert loaded.case_runtime[case["case_id"]]["state"] == "resolved"
     restored = CasePool(run_id)
-    restored.restore_storage(db_session, {"b"})
-    assert restored.search()[0]["state"] == "deferred"
+    restored.restore_storage(db_session, {b[0]})
+    assert restored.search()[0]["state"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -174,9 +239,12 @@ async def test_actual_usage_duplicate_is_durable_and_does_not_double_charge(db_s
     bus.publish(message)
     await audit.close()
     db_session.expire_all()
-    usage = (
-        db_session.execute(select(ModelTurn).where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "usage"))
-        .scalars()
-        .all()
+    from src.storage.models import ModelCall
+
+    # 2026-10-16 3NF：独立调用与用量同列于 model_calls（用量与实报总量是同一行的事实）
+    calls = list(
+        db_session.scalars(select(ModelCall).where(ModelCall.standalone_run_id == run_id))
     )
-    assert len(usage) == 1 and usage[0].total_tokens == 10
+    assert len(calls) == 1
+    assert calls[0].prompt_tokens == 10
+    assert calls[0].reported_total_tokens == 10
