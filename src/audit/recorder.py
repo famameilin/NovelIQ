@@ -1,8 +1,14 @@
 """
 Agent 审计记录器（Annotation 与 Diagnosis 共用）
 
-2026-10-06 表合并：invocation 不再单独落行，其上下文由 AuditModule 保存在内存并随
-start_turn 注入回合行；token 计账列内联在 model_turns 行上。
+2026-10-16 全库 3NF 改造：审计事实全部落到三张宽表——
+- executions 保存每个真实 invocation 的终态（work 尝试形状），run/章节/角色
+  从真实 work_items 身份取得；没有模型请求的派发失败只写执行终态，不伪造 turn=0
+- model_calls 保存每条真实模型请求：Agent 上下文（execution_id+turn_index）或
+  standalone 上下文恰一；用量分项、供应商实报总量、费用、五类计时与四类通信/
+  观察文档都是本表明确列，审计消息键直接落在可空唯一列上
+- agent_tool_calls 保存每次真实外层工具调用：原始参数与实际执行参数分开，
+  耗时与四类观察文档同列保存
 每次审计写入使用独立短事务即时提交，不随候选状态或最终标注事务回滚；
 审计写入失败直接抛出异常终止 Agent，不静默忽略。
 """
@@ -10,14 +16,26 @@ start_turn 注入回合行；token 计账列内联在 model_turns 行上。
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 
-from src.storage.models.agent_audit import AgentToolCall, ModelTurn
+from src.audit.documents import encode_document, encode_text_document
+from src.audit.queries import run_agent_execution_ids
+from src.storage.models import AgentToolCall, Execution, ModelCall, WorkItem
+from src.storage.models.base import naive_utcnow
 
-_ATTEMPT_ERROR_TURN_INDEX = 0
+_PROVIDER_REQUEST_STARTED_NOTE = "provider_request_started"
+_ORPHAN_INTERRUPT_ERROR = "进程重启遗留：回合未正常收口"
+
+#: 审计计时类别 → model_calls 的五类计时列（turn_ms 是 model+tool_wall 的读取投影）
+_TIMING_COLUMNS: dict[str, str] = {
+    "ttft": "ttft_ms",
+    "first_visible": "first_visible_ms",
+    "reasoning": "reasoning_ms",
+    "model": "model_ms",
+}
 
 
 class AgentAuditRecorder:
@@ -30,7 +48,7 @@ class AgentAuditRecorder:
 
     def _utcnow(self) -> datetime:
         """2026-08-30 用于按无时区数据库列合同生成 naive UTC 审计时间"""
-        return datetime.now(UTC).replace(tzinfo=None)
+        return naive_utcnow()
 
     def _commit(self, session: Any) -> None:
         """2026-08-10 用于提交短事务并在任何失败时关闭连接且不吞错"""
@@ -42,11 +60,35 @@ class AgentAuditRecorder:
         finally:
             session.close()
 
-    def start_invocation(self, **_: Any) -> int:
-        """invocation 不再单独落行：上下文随每条审计调用流动并落到回合行。
+    def start_invocation(
+        self,
+        *,
+        execution_id: str | None = None,
+        task_type: str | None = None,
+        attempt_number: int = 1,
+        work_id: str | None = None,
+        **_: Any,
+    ) -> int:
+        """2026-10-16 用于在派发时登记真实执行事实（含未发出请求就失败的尝试）
 
-        保留方法占位使总线适配器与直连注入共用同一调用面；返回值只是本地句柄。
+        invocation 必须绑定已登记的真实 work（失败前 work 必须可引用），
+        run/章节/角色由 work 身份取得；work 未登记即合同违约，直接报错。
+        返回值仍是观察器使用的本地句柄（执行身份以 execution_id 为准）。
         """
+        del task_type
+        if execution_id:
+            session = self._session_factory()
+            try:
+                self._ensure_invocation(
+                    session,
+                    execution_id=execution_id,
+                    work_id=work_id,
+                    attempt_number=attempt_number,
+                )
+            except Exception:
+                session.close()
+                raise
+            self._commit(session)
         return 0
 
     def start_turn(
@@ -67,39 +109,46 @@ class AgentAuditRecorder:
         message_key: str | None = None,
         invocation_id: int | None = None,
     ) -> int:
-        """2026-08-30 用于在物理 Provider 请求发出前创建独立运行中审计行
+        """2026-08-30 用于在物理 Provider 请求发出前创建独立运行中模型调用
 
-        invocation_id 只是观察器经总线适配器传递的本地句柄，行数据以显式上下文为准。
+        run/章节/角色/任务类型只用于补齐执行上下文；调用行（身份、请求消息、
+        审计上下文与起始计时备注）全部落在 model_calls 宽行上，返回 call_id
+        作为后续收口句柄。
         """
-        now = self._utcnow()
+        del run_id, task_type, call_type, chapter_id, role, invocation_id
         session = self._session_factory()
-        turn = ModelTurn(
-            row_kind="agent_turn",
-            run_id=run_id,
-            task_type=task_type,
-            call_type=call_type,
-            model=model,
-            execution_id=execution_id,
-            attempt_number=attempt_number,
-            chapter_id=chapter_id,
-            work_id=work_id,
-            role=role,
-            turn_index=turn_index,
-            status="running",
-            error=None,
-            raw_response={},
-            context_summary=context_summary,
-            request_messages=request_messages,
-            timing_notes=["provider_request_started"],
-            started_at=now,
-            finished_at=None,
-            message_key=message_key,
-        )
-        session.add(turn)
-        session.flush()
-        turn_id = int(turn.id)
+        try:
+            existing = self._message_key_call(session, message_key)
+            if existing is not None:
+                session.close()
+                return existing
+            self._ensure_invocation(
+                session,
+                execution_id=execution_id,
+                work_id=work_id,
+                attempt_number=attempt_number,
+            )
+            call = ModelCall(
+                model=model,
+                status="running",
+                error=None,
+                started_at=self._utcnow(),
+                finished_at=None,
+                message_key=message_key,
+                execution_id=execution_id,
+                turn_index=int(turn_index),
+                request_messages_bytes=encode_document(request_messages),
+                context_observed_bytes=encode_document(context_summary),
+                timing_notes_bytes=encode_document([_PROVIDER_REQUEST_STARTED_NOTE]),
+            )
+            session.add(call)
+            session.flush()
+            call_id = int(call.call_id)
+        except Exception:
+            session.close()
+            raise
         self._commit(session)
-        return turn_id
+        return call_id
 
     def finish_turn(
         self,
@@ -115,35 +164,31 @@ class AgentAuditRecorder:
         """2026-08-30 用于按物理 Provider 请求结束状态补齐响应计时错误与 token 计账"""
         now = self._utcnow()
         session = self._session_factory()
-        turn = session.get(ModelTurn, turn_id)
-        if turn is None:
-            session.close()
-            raise RuntimeError(f"model turn 审计行不存在: {turn_id}")
-        if turn.status != "running":
-            # 审计消息跨模块重放时同一结果会重复收口，按幂等处理；不同结果才是真重复收口
-            if turn.status == status and (turn.error or None) == (error or None):
+        try:
+            call = session.get(ModelCall, turn_id)
+            if call is None:
+                raise RuntimeError(f"model call 审计行不存在: {turn_id}")
+            if call.status != "running":
+                # 审计消息跨模块重放时同一结果会重复收口，按幂等处理；不同结果才是真重复收口
+                if call.status == status and (call.error or None) == (error or None):
+                    session.close()
+                    return
                 session.close()
-                return
+                raise RuntimeError(f"model call 已结束，不能按不同结果重复收口: {turn_id}")
+            call.status = status
+            call.error = error
+            call.finished_at = now
+            call.raw_response_bytes = encode_document(raw_response)
+            call.timing_notes_bytes = encode_document([str(note) for note in timing_notes])
+            for timing_kind, column in _TIMING_COLUMNS.items():
+                elapsed_ms = timing.get(f"{timing_kind}_ms")
+                if elapsed_ms is not None:
+                    setattr(call, column, int(elapsed_ms))
+            if token_usage is not None:
+                self._write_usage(call, token_usage)
+        except Exception:
             session.close()
-            raise RuntimeError(f"model turn 已结束，不能按不同结果重复收口: {turn_id}")
-        turn.status = status
-        turn.error = error
-        turn.raw_response = raw_response
-        turn.timing_notes = timing_notes
-        turn.ttft_ms = timing.get("ttft_ms")
-        turn.first_visible_ms = timing.get("first_visible_ms")
-        turn.reasoning_ms = timing.get("reasoning_ms")
-        turn.model_ms = timing.get("model_ms")
-        turn.turn_ms = timing.get("model_ms")
-        turn.finished_at = now
-        if token_usage is not None:
-            turn.prompt_tokens = int(token_usage.get("prompt_tokens") or 0)
-            turn.completion_tokens = int(token_usage.get("completion_tokens") or 0)
-            turn.total_tokens = int(token_usage.get("total_tokens") or 0)
-            turn.cache_read_tokens = token_usage.get("cache_read_tokens")
-            turn.reasoning_tokens = token_usage.get("reasoning_tokens")
-            turn.cost = token_usage.get("cost")
-            turn.accounting_source = str(token_usage.get("accounting_source") or "reported")
+            raise
         self._commit(session)
 
     def update_turn_timings(
@@ -153,17 +198,25 @@ class AgentAuditRecorder:
         tool_wall_ms: int | None,
         turn_ms: int | None,
     ) -> None:
-        """2026-08-10 用于在工具批处理结束后补写工具墙钟与本回合总耗时"""
+        """2026-08-10 用于在工具批处理结束后补写工具墙钟与本回合总耗时
+
+        turn_ms 是按现有 model_ms + tool_wall_ms 规则的重放投影（读取时计算），
+        这里只登记实际测得的 tool_wall_ms；调用的 finished_at 随工具批处理结束更新。
+        """
+        del turn_ms
         session = self._session_factory()
-        row = session.get(ModelTurn, turn_id)
-        if row is None:
+        try:
+            call = session.get(ModelCall, turn_id)
+            if call is None:
+                raise RuntimeError(f"model call 审计行不存在: {turn_id}")
+            if tool_wall_ms is not None:
+                call.tool_wall_ms = int(tool_wall_ms)
+            # 2026-08-13 P2-10 回合在工具批处理结束后才算真正结束：同步更新
+            # finished_at，避免 finished_at 恒等于插入时刻（模型输出结束时间）
+            call.finished_at = self._utcnow()
+        except Exception:
             session.close()
-            raise RuntimeError(f"model turn 审计行不存在: {turn_id}")
-        row.tool_wall_ms = tool_wall_ms
-        row.turn_ms = turn_ms
-        # 2026-08-13 P2-10 回合在工具批处理结束后才算真正结束：同步更新
-        # finished_at，避免 finished_at 恒等于插入时刻（模型输出结束时间）
-        row.finished_at = self._utcnow()
+            raise
         self._commit(session)
 
     def record_tool_call(
@@ -181,101 +234,200 @@ class AgentAuditRecorder:
         tool_duration_ms: int | None = None,
         message_key: str | None = None,
     ) -> None:
-        """2026-08-11 用于在独立短事务中写入单次工具调用审计（含原始参数片段）"""
+        """2026-08-11 用于在独立短事务中写入单次工具调用审计（含原始参数片段）
+
+        turn_id 即真实模型调用的 call_id；实际执行参数与原始参数字符串分开保存，
+        观察文档与耗时同列落在 agent_tool_calls 宽行上。
+        """
         session = self._session_factory()
-        session.add(
-            AgentToolCall(
-                turn_id=turn_id,
+        try:
+            if self._tool_message_key_call(session, message_key) is not None:
+                session.close()
+                return
+            row = AgentToolCall(
+                call_id=turn_id,
                 tool_name=tool_name,
-                call_index=call_index,
-                request_args=request_args,
-                raw_args=raw_args,
-                response=response,
-                receipt=receipt,
+                call_index=int(call_index),
                 status=status,
                 error=error,
-                tool_duration_ms=tool_duration_ms,
                 started_at=self._utcnow(),
+                tool_duration_ms=None if tool_duration_ms is None else int(tool_duration_ms),
                 message_key=message_key,
+                raw_args_bytes=None if raw_args is None else encode_text_document(raw_args),
+                executed_args_bytes=encode_document(request_args),
+                response_observed_bytes=None if response is None else encode_document(response),
+                receipt_observed_bytes=None if receipt is None else encode_document(receipt),
             )
-        )
+            session.add(row)
+        except Exception:
+            session.close()
+            raise
         self._commit(session)
 
     def finish_invocation(
         self,
         *,
-        run_id: str,
-        task_type: str,
-        call_type: str,
-        model: str,
         execution_id: str,
-        attempt_number: int,
-        chapter_id: int | None,
-        work_id: str | None,
-        role: str | None,
         status: str,
+        task_type: str | None = None,
+        attempt_number: int = 1,
+        work_id: str | None = None,
         final_error: str | None = None,
         message_key: str | None = None,
+        **_: Any,
     ) -> None:
-        """2026-10-06 用于把失败尝试收口为派发失败行（turn_index=0）
+        """2026-10-06 用于把执行收口为真实终态
 
-        成功尝试的全部事实已在回合行上，不再落额外行；失败尝试（含未发出任何
-        模型请求的派发失败）以 attempt_error 行保存执行上下文与最终错误。
+        没有发出任何模型请求的派发失败也只写执行记录（不伪造第 0 个模型回合）；
+        成功尝试同样登记成功终态，模型请求事实仍只在其调用行上。
+        重放幂等由终态相等承担：同状态同错误重复收口不报错，不同结果报错。
         """
-        if status != "error":
-            return
+        del message_key, task_type
         now = self._utcnow()
         session = self._session_factory()
-        session.add(
-            ModelTurn(
-                row_kind="attempt_error",
-                run_id=run_id,
-                task_type=task_type,
-                call_type=call_type,
-                model=model,
-                execution_id=execution_id,
-                attempt_number=attempt_number,
-                chapter_id=chapter_id,
-                work_id=work_id,
-                role=role,
-                turn_index=_ATTEMPT_ERROR_TURN_INDEX,
-                status="error",
-                error=final_error,
-                started_at=now,
-                finished_at=now,
-                message_key=message_key,
-            )
-        )
+        try:
+            execution = session.get(Execution, execution_id)
+            if execution is None:
+                # 未登记执行的收口请求：按真实终态补登记执行事实（work 必须已可引用）
+                self._ensure_invocation(
+                    session,
+                    execution_id=execution_id,
+                    work_id=work_id,
+                    attempt_number=attempt_number,
+                    status=status,
+                    error=final_error,
+                    started_at=now,
+                    finished_at=now,
+                )
+            elif execution.status is None:
+                session.close()
+                raise RuntimeError(f"整轮 session 不能按尝试终态收口: {execution_id}")
+            elif execution.status != "running":
+                if execution.status == status and (execution.error or None) == (final_error or None):
+                    session.close()
+                    return
+                session.close()
+                raise RuntimeError(f"execution 已结束，不能按不同结果重复收口: {execution_id}")
+            else:
+                execution.status = status
+                execution.error = final_error
+                execution.finished_at = now
+        except Exception:
+            session.close()
+            raise
         self._commit(session)
 
     def close_orphaned_turns(self, run_id: str) -> int:
-        """2026-10-03 用于分析环境初始化时收口本 run 遗留的 running 回合行
+        """2026-10-03 用于分析环境初始化时收口本 run 遗留的 running 执行与调用
 
         进程被杀/重启时正在执行的回合没机会走 finish_turn，永远停在
         status='running' 且 finished_at 为空（run 08f9ba42 实证 12 条僵尸行污染
         错误率统计）。每次创建/恢复分析任务时统一收口为 interrupted——审计是事实
-        记录，只补状态不删除。
+        记录，只补状态不删除。返回值是本次收口的调用行与执行行总数。
         """
+        execution_ids = run_agent_execution_ids(run_id)
+        now = self._utcnow()
         session = self._session_factory()
         try:
-            result = session.execute(
-                update(ModelTurn)
+            calls = session.execute(
+                update(ModelCall)
                 .where(
-                    ModelTurn.run_id == run_id,
-                    ModelTurn.row_kind == "agent_turn",
-                    ModelTurn.status == "running",
-                    ModelTurn.finished_at.is_(None),
+                    ModelCall.execution_id.in_(execution_ids),
+                    ModelCall.status == "running",
+                    ModelCall.finished_at.is_(None),
                 )
-                .values(
-                    status="interrupted",
-                    error="进程重启遗留：回合未正常收口",
-                    finished_at=self._utcnow(),
+                .values(status="interrupted", error=_ORPHAN_INTERRUPT_ERROR, finished_at=now)
+            )
+            executions = session.execute(
+                update(Execution)
+                .where(
+                    Execution.execution_id.in_(execution_ids),
+                    Execution.status == "running",
+                    Execution.finished_at.is_(None),
                 )
+                .values(status="interrupted", error=_ORPHAN_INTERRUPT_ERROR, finished_at=now)
             )
             session.commit()
-            return int(result.rowcount or 0)
+            return int(calls.rowcount or 0) + int(executions.rowcount or 0)
         finally:
             session.close()
+
+    # ------------------------------------------------------------------
+    # 执行身份：真实 work 尝试（invocation 形状）
+    # ------------------------------------------------------------------
+
+    def _ensure_invocation(
+        self,
+        session: Any,
+        *,
+        execution_id: str,
+        work_id: str | None,
+        attempt_number: int,
+        status: str = "running",
+        error: str | None = None,
+        started_at: datetime | None = None,
+        finished_at: datetime | None = None,
+    ) -> Execution:
+        """确保真实 invocation 执行行存在；work 未登记时保留合同报错，不伪造工作身份"""
+        existing = session.get(Execution, execution_id)
+        if existing is not None:
+            return existing
+        work = session.get(WorkItem, work_id) if work_id else None
+        if work is None:
+            raise RuntimeError(f"work 身份未登记，不能登记真实 invocation: {work_id!r}")
+        execution = Execution(
+            execution_id=execution_id,
+            work_id=work_id,
+            attempt_number=int(attempt_number or 1),
+            started_at=started_at if started_at is not None else self._utcnow(),
+            finished_at=finished_at,
+            status=status,
+            error=error,
+        )
+        session.add(execution)
+        session.flush()
+        return execution
+
+    # ------------------------------------------------------------------
+    # 宽表写入辅助
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _message_key_call(session: Any, message_key: str | None) -> int | None:
+        """按审计消息键找回已落库的模型调用（重放幂等）"""
+        if not message_key:
+            return None
+        call_id = session.execute(
+            select(ModelCall.call_id).where(ModelCall.message_key == message_key)
+        ).scalar_one_or_none()
+        return int(call_id) if call_id is not None else None
+
+    @staticmethod
+    def _tool_message_key_call(session: Any, message_key: str | None) -> int | None:
+        """按审计消息键找回已落库的工具调用（重放幂等）"""
+        if not message_key:
+            return None
+        tool_call_id = session.execute(
+            select(AgentToolCall.id).where(AgentToolCall.message_key == message_key)
+        ).scalar_one_or_none()
+        return int(tool_call_id) if tool_call_id is not None else None
+
+    @staticmethod
+    def _write_usage(call: ModelCall, token_usage: dict[str, Any]) -> None:
+        """用量分项与供应商实报总量分开：程序 fallback 不伪装实报"""
+        accounting_source = str(token_usage.get("accounting_source") or "reported")
+        call.prompt_tokens = int(token_usage.get("prompt_tokens") or 0)
+        call.completion_tokens = int(token_usage.get("completion_tokens") or 0)
+        call.cache_read_tokens = token_usage.get("cache_read_tokens")
+        call.reasoning_tokens = token_usage.get("reasoning_tokens")
+        call.accounting_source = accounting_source
+        if accounting_source == "reported":
+            total = token_usage.get("total_tokens")
+            if total is not None:
+                call.reported_total_tokens = int(total)
+        cost = token_usage.get("cost")
+        if cost is not None:
+            call.cost = float(cost)
 
 
 __all__ = ["AgentAuditRecorder"]

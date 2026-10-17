@@ -9,9 +9,10 @@ from sqlalchemy.orm import sessionmaker
 
 from src.agents.stream_audit import ModelCallTiming
 from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
+from src.audit.queries import fetch_agent_turns
 from src.audit.recorder import AgentAuditRecorder
 from src.fact_graph.inputs import ChapterParagraphInfo
-from src.storage.models.agent_audit import ModelTurn
+from src.storage.models import WorkItem
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
@@ -171,18 +172,22 @@ def _event_calls(
             "write_event",
             {
                 "el": tree_key,
-                "isroot": True,
-                "description": description,
                 "evidence": 1,
                 "characters": [
                     {
-                        "entityid": "顾霜",
+                        "name": "顾霜",
+                        "entity_type": "character",
                         "role": "主体",
                         "narrative_role": "主体",
                         "action": action,
                         "emotion": -1,
                     }
                 ],
+                "title": description,
+                "problem": "明确事件问题",
+                "summary": description,
+                "event_type": "行动",
+                "status": "ongoing",
             },
             call_id=f"{call_id}-root",
         ),
@@ -190,19 +195,22 @@ def _event_calls(
             "write_event",
             {
                 "el": f"{tree_key}/{child_key}",
-                "isroot": False,
-                "type": "main",
-                "description": child_description,
                 "evidence": 2,
                 "characters": [
                     {
-                        "entityid": "顾霜",
+                        "name": "顾霜",
+                        "entity_type": "character",
                         "role": "主体",
                         "narrative_role": "主体",
                         "action": child_action,
                         "emotion": 0,
                     }
                 ],
+                "title": child_description,
+                "problem": "明确事件问题",
+                "summary": child_description,
+                "event_type": "行动",
+                "status": "ongoing",
             },
             call_id=f"{call_id}-child",
         ),
@@ -212,16 +220,25 @@ def _event_calls(
 @pytest.mark.asyncio
 async def test_observer_records_each_physical_provider_request_separately(db_session) -> None:
     """2026-08-30 用于验证失败重试与成功请求分别保存安全参数指纹计时和 token"""
+    from uuid import uuid4
+
     novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜进入山门"])
+    work_id = f"work-{uuid4().hex[:12]}"
+    db_session.add(
+        WorkItem(work_id=work_id, role="solo", annotation_run_id=run_id, annotation_chapter_id=1)
+    )
+    db_session.commit()
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     recorder = AgentAuditRecorder(factory)
     context = build_invocation_context(
         run_id=run_id,
         task_type="annotation",
-        execution_id="annot-exec",
+        execution_id=f"annot-exec-{uuid4().hex[:12]}",
         attempt_number=1,
         model="test-model",
         chapter_id=1,
+        work_id=work_id,
+        role="solo",
     )
     invocation_id = recorder.start_invocation(**context)
     observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=context)
@@ -271,24 +288,18 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
     )
 
     db_session.rollback()
-    turns = list(
-        db_session.execute(
-            select(ModelTurn)
-            .where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
-            .order_by(ModelTurn.turn_index)
-        ).scalars()
-    )
+    turns = fetch_agent_turns(db_session, run_id)
     assert [turn.status for turn in turns] == ["error", "success"]
+    assert [turn.turn_index for turn in turns] == [1, 2]
     assert [turn.context_summary["provider_request"]["request_index"] for turn in turns] == [1, 2]
     assert turns[0].context_summary["provider_request"]["attempt"] == 1
     assert turns[1].context_summary["provider_request"]["attempt"] == 2
     assert turns[0].context_summary["provider_request"]["config_fingerprint"] == "a" * 64
     assert turns[0].context_summary["provider_request"]["parameters"]["extra_body"] == {"think": True}
     assert "api_key" not in str(turns[0].context_summary["provider_request"])
-    assert turns[0].ttft_ms == 20
-    assert turns[1].ttft_ms == 10
+    assert turns[0].timings["ttft"] == 20
+    assert turns[1].timings["ttft"] == 10
     assert turns[0].raw_response["content"] == "部分输出"
     assert turns[0].raw_response["reasoning_observed"] is False
     assert turns[1].raw_response["reasoning_observed"] is True
-    token_rows = [turn for turn in turns if turn.total_tokens is not None]
-    assert sorted(row.total_tokens for row in token_rows) == [12, 20]
+    assert sorted(turn.total_tokens for turn in turns if turn.total_tokens is not None) == [12, 20]
