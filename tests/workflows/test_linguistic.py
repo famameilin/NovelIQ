@@ -2,6 +2,14 @@
 
 LTP 推理用 FakeLtpSession 替换（真实 LTP 模型只做模块级验证），
 analyze_paragraph 纯函数路径保持真实；短语匹配与 Word2Vec 全真实。
+
+2026-10-16 3NF 冻结结构：逐段事实落 linguistic_spans（词元/NER/短语三类互斥
+区间）与 linguistic_arcs（dep:*/sdp:*），句式五类计数落 paragraph_features；
+完成事实（linguistic_completed_at/phrase_completed_at）与共享句数落
+paragraph_metrics；run 级 LTP/短语/w2v 合同落 analysis_runs。派生量（词长分组、
+POS 分组、依存统计、词典对照、情绪事件）不落库，由读取投影从正式事实重算，
+因此本文件按同一投影断言。固定短语只有一个运行级来源（fixed_phrases 词表），
+不再扫描 draft 词表。
 """
 
 from __future__ import annotations
@@ -9,16 +17,20 @@ from __future__ import annotations
 import asyncio
 import sys
 import uuid
+from collections.abc import Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.engine import Row
+from sqlalchemy import select, text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.linguistic.ltp_client import LtpPipelineOutput
+from src.config.constants.contracts import FIXED_CONTRACT_VERSION, FIXED_PHRASE_METRIC_ENABLED
+from src.lexicons.constants import LEXICON_FILES
+from src.linguistic.ltp_client import LTP_PIPELINE_VERSION, LtpPipelineOutput, ltp_pipeline_contract
 from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
 from src.text_processing.models import Chunk
@@ -27,6 +39,30 @@ from src.workflows.linguistic import run_linguistic
 from tests.support.analysis_factories import insert_test_novel
 
 _TEST_TEXTS = ["江湖快意恩仇，刀光剑影之间英雄辈出。", "他叫汤姆去拿外衣，但是天色已晚。"]
+
+#: 3NF 前的并行事实表必须全部退场（本切片的回归护栏）
+_RETRACTED_TABLES = (
+    "paragraph_linguistic_completions",
+    "paragraph_tokens",
+    "paragraph_dependency_arcs",
+    "paragraph_syntax_observations",
+    "paragraph_emotion_observations",
+    "paragraph_emotion_events",
+    "paragraph_entities",
+    "paragraph_phrase_hits",
+    "phrase_lexicon_contracts",
+    "paragraph_pos_embeddings",
+    "paragraph_embeddings",
+    "linguistic_runs",
+    "ltp_pos_mappings",
+    "ltp_entity_type_mappings",
+    "embedding_model_runs",
+)
+
+
+def _create_run(db_session, novel_id: str) -> str:
+    """创建最小分析运行行（novel 先行；运行创建语义允许不填来源快照）"""
+    return RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Linguistic Test")
 
 
 class FakeLtpSession:
@@ -46,14 +82,81 @@ class FakeLtpSession:
         return LtpPipelineOutput(cws=cws, pos=pos, ner=ner, dep=dep, sdp=[])
 
 
+def _span_count(db_session, run_id: str, branch: str) -> int:
+    """按语言区间分支统计行数（token/ner/phrase 三类互斥区间）"""
+    branch_condition = {
+        "token": "token_index IS NOT NULL",
+        "ner": "raw_entity_type IS NOT NULL",
+        "phrase": "phrase_match_kind IS NOT NULL",
+    }[branch]
+    return int(
+        db_session.execute(
+            text(f"SELECT COUNT(*) FROM linguistic_spans WHERE run_id = :run_id AND {branch_condition}"),
+            {"run_id": run_id},
+        ).scalar()
+        or 0
+    )
+
+
+def _arc_count(db_session, run_id: str, prefix: str) -> int:
+    return int(
+        db_session.execute(
+            text(
+                "SELECT COUNT(*) FROM linguistic_arcs a "
+                "JOIN linguistic_spans s ON s.span_id = a.dependent_span_id "
+                "WHERE s.run_id = :run_id AND a.relation_code LIKE :prefix"
+            ),
+            {"run_id": run_id, "prefix": f"{prefix}%"},
+        ).scalar()
+        or 0
+    )
+
+
+def _metric_count(db_session, run_id: str, column: str) -> int:
+    return int(
+        db_session.execute(
+            text(
+                f"SELECT COUNT(*) FROM paragraph_metrics "
+                f"WHERE run_id = :run_id AND {column} IS NOT NULL"
+            ),
+            {"run_id": run_id},
+        ).scalar()
+        or 0
+    )
+
+
+def _feature_count(db_session, run_id: str, code_prefix: str) -> int:
+    return int(
+        db_session.execute(
+            text(
+                "SELECT COUNT(*) FROM paragraph_features "
+                "WHERE run_id = :run_id AND feature_code LIKE :prefix"
+            ),
+            {"run_id": run_id, "prefix": f"{code_prefix}%"},
+        ).scalar()
+        or 0
+    )
+
+
+def test_retracted_parallel_tables_are_absent(db_session) -> None:
+    """3NF 冻结结构：语言/主题/向量的旧拆分表与旧宽表不得存在于运行库"""
+    rows = db_session.execute(
+        text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = current_schema() AND table_name = ANY(:names)"
+        ),
+        {"names": list(_RETRACTED_TABLES)},
+    ).scalars()
+    assert list(rows) == []
+
+
 class TestRunLinguistic:
     @pytest.fixture(autouse=True)
     def setup(self, db_session, monkeypatch):
         self.db_session = db_session
         self.novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(self.novel_id, session=db_session)
-        run_repo = RunRepository(db_session)
-        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
+        self.run_id = _create_run(db_session, self.novel_id)
 
         chapters = [
             Chunk(index=i, start=i * 100, end=i * 100 + len(text), text=text, chapter_id=i + 1)
@@ -73,55 +176,63 @@ class TestRunLinguistic:
 
         monkeypatch.setattr(_settings.linguistic.word2vec, "enabled", False)
 
-        # draft 审定门验证：draft 文件经 2026-09-07 审定后为空，注入非空 draft
-        # 词条保持"draft 命中不计入正式密度"的门路径始终被测试覆盖
-        from src.lexicons.constants import LEXICON_FILES
-        from src.lexicons.registry import LexiconRegistry
-
-        self._draft_key = LEXICON_FILES["body_reaction_draft"]
-        _orig_reg_get = LexiconRegistry.get
-
-        def _reg_get_with_injected_draft(self_: LexiconRegistry, key: str) -> list[str]:
-            if key == self._draft_key:
-                return ["外衣"]
-            return _orig_reg_get(self_, key)
-
-        monkeypatch.setattr(LexiconRegistry, "get", _reg_get_with_injected_draft)
-
-    def _count(self, table: str) -> int:
-        return int(
-            self.db_session.execute(
-                text(f"SELECT COUNT(*) FROM {table} WHERE run_id = :run_id"),
-                {"run_id": self.run_id},
-            ).scalar()
-            or 0
-        )
-
-    def _feature_rows(self) -> list[Row]:
+    def _feature_rows(self) -> Sequence[Any]:
         return LinguisticRepository(self.db_session).fetch_linguistic_features(self.run_id)
 
     @pytest.mark.asyncio()
-    async def test_runs_all_steps_and_writes_three_tables(self) -> None:
+    async def test_runs_all_steps_and_writes_linguistic_relations(self) -> None:
         paragraphs, features = await run_linguistic(self.run_id, self.db_session)
         assert paragraphs == 2
         assert features == 2
-        assert self._count("paragraph_linguistic_features") == 2
-        assert self._count("paragraph_entities") > 0  # 汤姆 Nh person
-        assert self._count("paragraph_phrase_hits") > 0  # 快意恩仇/刀光剑影命中
 
-        # draft 词表命中与四字候选都不计入正式密度
-        phrase_rows = LinguisticRepository(self.db_session).fetch_phrase_hits(self.run_id)
+        # 完成事实区分"未处理"与"零词元"：两段语言完成、两段短语完成
+        assert _metric_count(self.db_session, self.run_id, "linguistic_completed_at") == 2
+        assert _metric_count(self.db_session, self.run_id, "phrase_completed_at") == 2
+        # 逐段事实：词元区间、依存弧、句式五类计数（每段一行）
+        assert _span_count(self.db_session, self.run_id, "token") > 0
+        assert _arc_count(self.db_session, self.run_id, "dep:") > 0
+        assert _feature_count(self.db_session, self.run_id, "sentence_") == 10
+        # NER 候选（汤姆 Nh → person）与固定短语命中（刀光剑影等）
+        assert _span_count(self.db_session, self.run_id, "ner") > 0
+        assert _span_count(self.db_session, self.run_id, "phrase") > 0
+
+        # run 级合同：LTP 管线/模型 + 唯一固定短语词表来源与计量合同
+        contract = self.db_session.execute(
+            text(
+                "SELECT ltp_pipeline_version, ltp_model_key, fixed_phrase_lexicon_key, "
+                "fixed_phrase_contract_version FROM analysis_runs WHERE run_id = :run_id"
+            ),
+            {"run_id": self.run_id},
+        ).one()
+        assert contract.ltp_pipeline_version == LTP_PIPELINE_VERSION
+        assert contract.ltp_model_key == ltp_pipeline_contract()[1]
+        assert contract.fixed_phrase_lexicon_key == LEXICON_FILES["fixed_phrases"]
+        assert contract.fixed_phrase_contract_version == FIXED_CONTRACT_VERSION
+
+        repo = LinguisticRepository(self.db_session)
+        entity_rows = repo.fetch_entities(self.run_id)
+        assert entity_rows and entity_rows[0].surface_text == "汤姆"
+        assert entity_rows[0].normalized_entity_type == "person"
+
+        # 契约关闭正式短语计量：lexicon 命中与四字候选都不计入正式密度
+        phrase_rows = repo.fetch_phrase_hits(self.run_id)
+        assert phrase_rows
+        assert FIXED_PHRASE_METRIC_ENABLED is False
+        assert all(not row.is_metric_hit for row in phrase_rows)
         lexicon_rows = [row for row in phrase_rows if row.match_kind == "lexicon"]
         assert lexicon_rows and all(not row.is_metric_hit for row in lexicon_rows)
-        # 注入的 draft 词条命中留痕（外衣不在任何正式表，只能来自 draft 门）
-        draft_rows = [row for row in lexicon_rows if row.surface_text == "外衣"]
-        assert draft_rows and all(not row.is_metric_hit for row in draft_rows)
-        candidate_rows = [row for row in phrase_rows if row.match_kind == "four_char_candidate"]
-        assert all(not row.is_metric_hit for row in candidate_rows)
+        # 词面按原文切片投影，命中区间与原文自洽
+        assert all(row.surface_text for row in lexicon_rows)
+        assert all(row.local_end_char - row.local_start_char == len(row.surface_text) for row in lexicon_rows)
 
         rows = self._feature_rows()
         assert len(rows) == 2
         assert all(row.paragraph_id in (0, 1) for row in rows)
+        # 词元总数 / 词长分组 / POS 分组由事实行投影，且与事实行守恒
+        assert sum(row.ltp_token_count for row in rows) == _span_count(self.db_session, self.run_id, "token")
+        for row in rows:
+            assert sum(row.word_length_counts.values()) == row.ltp_token_count
+            assert sum(row.pos_counts.values()) == row.ltp_token_count
 
     @pytest.mark.asyncio()
     async def test_cancel_takes_effect_at_paragraph_batch_boundary(self) -> None:
@@ -137,7 +248,7 @@ class TestRunLinguistic:
 
         # 第一批已放行、第二批边界命中取消：没跑完整卷
         assert checks["count"] >= 2
-        assert self._count("paragraph_linguistic_features") < 2
+        assert _metric_count(self.db_session, self.run_id, "linguistic_completed_at") < 2
 
     @pytest.mark.asyncio()
     async def test_ltp_inference_runs_off_event_loop(self, monkeypatch) -> None:
@@ -218,56 +329,88 @@ class TestRunLinguistic:
         model_run = LinguisticRepository(self.db_session).fetch_word2vec_model_run(self.run_id)
         assert model_run is not None
         assert model_run.embedding_dimension == 4
-        assert model_run.artifact_scope == "run_owned"
-        assert model_run.artifact_key == f"models/word2vec/{self.run_id}/word2vec.model"
+        # 2026-10-16 3NF：训练参数按 analysis_runs.w2v_* 明确列落库
+        assert model_run.window_size == _settings.linguistic.word2vec.window
+        assert model_run.min_count == 1
+        assert model_run.epochs == 1
+        assert model_run.pretrained_vocabulary_size == 4
         assert Path(model_run.source_uri) == kv_path.resolve()
         assert (run_model_dir / "word2vec.model").is_file()
-        assert self._count("paragraph_pos_embeddings") > 0
+        assert _feature_count(self.db_session, self.run_id, "pos_vector:") > 0
+
+        # source_token_count 由正式词元 × 版本 POS 分组投影（分母不落库不漂移）
+        feature_rows = self._feature_rows()
+        expected_noun_total = sum(row.pos_counts.get("noun", 0) for row in feature_rows)
+        coverage = LinguisticRepository(self.db_session).fetch_pos_embedding_coverage(self.run_id)
+        coverage_by_group = {row.pos_group: int(row.source_total) for row in coverage}
+        assert coverage_by_group.get("noun", 0) == expected_noun_total
 
     @pytest.mark.asyncio()
     async def test_rerun_clears_and_reinserts(self) -> None:
         await run_linguistic(self.run_id, self.db_session)
-        first_features = self._count("paragraph_linguistic_features")
-        first_hits = self._count("paragraph_phrase_hits")
+
+        def _tracked() -> dict[str, int]:
+            return {
+                "token_spans": _span_count(self.db_session, self.run_id, "token"),
+                "ner_spans": _span_count(self.db_session, self.run_id, "ner"),
+                "phrase_spans": _span_count(self.db_session, self.run_id, "phrase"),
+                "arcs": _arc_count(self.db_session, self.run_id, "dep:"),
+                "sentence_features": _feature_count(self.db_session, self.run_id, "sentence_"),
+                "linguistic_completed": _metric_count(self.db_session, self.run_id, "linguistic_completed_at"),
+                "phrase_completed": _metric_count(self.db_session, self.run_id, "phrase_completed_at"),
+            }
+
+        first = _tracked()
+        assert first["token_spans"] > 0 and first["linguistic_completed"] == 2
 
         await run_linguistic(self.run_id, self.db_session)
-        assert self._count("paragraph_linguistic_features") == first_features
-        assert self._count("paragraph_phrase_hits") == first_hits
-        assert self._count("paragraph_entities") >= 0
+        assert _tracked() == first
 
     @pytest.mark.asyncio()
     async def test_ltp_disabled_skips_all_linguistic_steps(self, monkeypatch) -> None:
-        """LTP 关闭 → 无词法特征行；短语表依赖词法 FK（§5.5），一并跳过"""
+        """LTP 关闭 → 无完成事实与语言事实行；短语匹配依赖语言完成（同闸门），一并跳过"""
         from src.config import settings as _settings
 
         monkeypatch.setattr(_settings.linguistic.ltp, "enabled", False)
         paragraphs, features = await run_linguistic(self.run_id, self.db_session)
         assert paragraphs == 2
         assert features == 0
-        assert self._count("paragraph_linguistic_features") == 0
-        assert self._count("paragraph_phrase_hits") == 0
+        assert _metric_count(self.db_session, self.run_id, "linguistic_completed_at") == 0
+        assert _metric_count(self.db_session, self.run_id, "phrase_completed_at") == 0
+        assert _span_count(self.db_session, self.run_id, "token") == 0
+        assert _span_count(self.db_session, self.run_id, "phrase") == 0
+        fixed_key = self.db_session.execute(
+            text("SELECT fixed_phrase_lexicon_key FROM analysis_runs WHERE run_id = :run_id"),
+            {"run_id": self.run_id},
+        ).scalar_one()
+        assert fixed_key is None
 
     @pytest.mark.asyncio()
     async def test_batch_size_one_produces_same_rows_as_full_batch(self) -> None:
         """分批落库与一次全量落库结果一致（clear_first 只在首批生效，后续批追加）"""
         await run_linguistic(self.run_id, self.db_session, batch_size=1)
-        batched_features = self._count("paragraph_linguistic_features")
-        batched_entities = self._count("paragraph_entities")
-        batched_phrases = self._count("paragraph_phrase_hits")
+        batched = {
+            "token_spans": _span_count(self.db_session, self.run_id, "token"),
+            "ner_spans": _span_count(self.db_session, self.run_id, "ner"),
+            "phrase_spans": _span_count(self.db_session, self.run_id, "phrase"),
+            "linguistic_completed": _metric_count(self.db_session, self.run_id, "linguistic_completed_at"),
+        }
+        assert batched["linguistic_completed"] == 2
 
         # 清空后按默认大 batch 重跑，验证完全一致
         await run_linguistic(self.run_id, self.db_session)
-        assert self._count("paragraph_linguistic_features") == batched_features
-        assert self._count("paragraph_entities") == batched_entities
-        assert self._count("paragraph_phrase_hits") == batched_phrases
-        assert batched_features == 2
+        assert {
+            "token_spans": _span_count(self.db_session, self.run_id, "token"),
+            "ner_spans": _span_count(self.db_session, self.run_id, "ner"),
+            "phrase_spans": _span_count(self.db_session, self.run_id, "phrase"),
+            "linguistic_completed": _metric_count(self.db_session, self.run_id, "linguistic_completed_at"),
+        } == batched
 
     @pytest.mark.asyncio()
     async def test_empty_run_returns_zero(self) -> None:
-        run_repo = RunRepository(self.db_session)
         novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(novel_id, session=self.db_session)
-        empty_run = run_repo.create_run(novel_id=novel_id, source_path="test", title="Empty")
+        empty_run = _create_run(self.db_session, novel_id)
         paragraphs, features = await run_linguistic(empty_run, self.db_session)
         assert paragraphs == 0
         assert features == 0
@@ -311,8 +454,7 @@ class TestMnegCorrection:
         self.db_session = db_session
         self.novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(self.novel_id, session=db_session)
-        run_repo = RunRepository(db_session)
-        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Mneg Novel")
+        self.run_id = _create_run(db_session, self.novel_id)
 
         text = "他很高兴"
         chapters = [Chunk(index=0, start=0, end=len(text), text=text, chapter_id=1)]
@@ -337,7 +479,6 @@ class TestMnegCorrection:
                 ParagraphMetricRow(
                     paragraph_id=spans[0].paragraph_id,
                     token_count=4,
-                    char_count=spans[0].char_count,
                     sentence_count=1,
                     sentence_char_sum=4.0,
                     sentence_char_sum_sq=16.0,
@@ -352,8 +493,6 @@ class TestMnegCorrection:
                     imagery_hit_count=0,
                     metaphor_sentence_count=0,
                     body_reaction_hit_count=0,
-                    function_word_counts={},
-                    semantic_category_counts={},
                 )
             ],
         )
@@ -379,28 +518,44 @@ class TestMnegCorrection:
         assert float(feature.mneg_neg_count) == 1.0
         assert feature.emotion_event_count == 1
         event = feature.emotion_events[0]
+        # 谓词词面按原文切片投影（弧行只存词元区间与关系码）
         assert event["predicate"] == "高兴"
+        assert event["predicate_token_index"] == 3
         assert event["negated"] is True
         assert event["holder"] is None
-
-        # 曲线按修正分子重算：net_density = (0 - 1) / 4
-        curve_row = self.db_session.execute(
-            text("SELECT net_density FROM paragraph_curves WHERE run_id = :run_id AND paragraph_id = 0"),
+        assert event["degree_words"] == []
+        # 语义依存弧留库（sdp:mNEG 一条），词典/边界观测不进语言事实行
+        assert _arc_count(self.db_session, self.run_id, "sdp:") == 1
+        sdp_code = self.db_session.execute(
+            text(
+                "SELECT a.relation_code FROM linguistic_arcs a "
+                "JOIN linguistic_spans s ON s.span_id = a.dependent_span_id "
+                "WHERE s.run_id = :run_id AND a.relation_code LIKE 'sdp:%'"
+            ),
             {"run_id": self.run_id},
-        ).one()
+        ).scalar_one()
+        assert sdp_code == "sdp:mNEG"
+
+        # 曲线按修正分子重算（净密度由指标分子/分母投影）：net_density = (0 - 1) / 4
+        curve_row = ParagraphRepository(self.db_session).fetch_paragraph_curves(self.run_id)[0]
+        assert int(curve_row.paragraph_id) == 0
         assert float(curve_row.net_density) == -0.25
 
 
 class TestParagraphBoundary:
-    """2026-09-14 段落级监督（按书边界）：自选段标签→段落向量边界→逐段打分回写"""
+    """2026-09-14 段落级监督（按书边界）：自选段标签→段落向量边界→逐段打分回写
+
+    2026-10-16 3NF：标签读 analysis_assessments 的逐段情绪形状（经章节标注产物头
+    关联本 run 的标注 work），段落向量读 paragraph_features 的 semantic_vector 行，
+    打分回写 paragraph_metrics 的 boundary_*_score_sum 列。
+    """
 
     @pytest.fixture(autouse=True)
     def setup(self, db_session, monkeypatch):
         self.db_session = db_session
         self.novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(self.novel_id, session=db_session)
-        run_repo = RunRepository(db_session)
-        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Boundary Novel")
+        self.run_id = _create_run(db_session, self.novel_id)
 
         chapters = [
             Chunk(index=i, start=i * 100, end=i * 100 + len(text), text=text, chapter_id=i + 1)
@@ -408,80 +563,133 @@ class TestParagraphBoundary:
         ]
         ChapterRepository(db_session).insert_chapter_texts(self.run_id, chapters)
         spans = [replace(span, token_count=2) for span in split_chunk_paragraphs(chapters)]
-        ParagraphRepository(db_session).insert_paragraphs(self.run_id, spans)
+        paragraph_repo = ParagraphRepository(db_session)
+        paragraph_repo.insert_paragraphs(self.run_id, spans)
 
-        # paragraph_embeddings 不在 init_db（preprocess 期才建表，列宽按实测维度固化）：
-        # 本类自造向量样本，先按 4 维建表；teardown 恢复原状——ensure 只比对列集合、
-        # 不比对维度，留下窄表会让用 1024 维的其他套件静默插库失败
-        from sqlalchemy import text as sa_text
+        # 边界观测列在 paragraph_metrics 上：先落指标行（真实链由 preprocess 落）
+        from src.storage.repositories.paragraph_repository import ParagraphMetricRow
 
-        from src.storage.vector_schema import _runtime_schema, ensure_paragraph_embeddings_schema
-
-        runtime_schema = _runtime_schema()
-        db_session.execute(sa_text(f"DROP TABLE IF EXISTS {runtime_schema}.paragraph_embeddings CASCADE"))
-        ensure_paragraph_embeddings_schema(db_session, embedding_dim=4)
+        paragraph_repo.insert_paragraph_metrics(
+            self.run_id,
+            [
+                ParagraphMetricRow(
+                    paragraph_id=span.paragraph_id,
+                    token_count=2,
+                    sentence_count=1,
+                    sentence_char_sum=2.0,
+                    sentence_char_sum_sq=4.0,
+                    positive_weight_sum=0.0,
+                    negative_weight_sum=0.0,
+                    fight_weight_sum=0.0,
+                    exclaim_count=0,
+                    question_count=0,
+                    pause_count=0,
+                    dialogue_char_count=0,
+                    sensory_hit_count=0,
+                    imagery_hit_count=0,
+                    metaphor_sentence_count=0,
+                    body_reaction_hit_count=0,
+                )
+                for span in spans
+            ],
+        )
 
         from src.config import settings as _settings
 
         monkeypatch.setattr(_settings.linguistic.word2vec, "enabled", False)
         yield
-        db_session.rollback()
-        db_session.execute(sa_text(f"DROP TABLE IF EXISTS {runtime_schema}.paragraph_embeddings CASCADE"))
-        db_session.commit()
 
-    def _feature_rows(self) -> list:
+    def _feature_rows(self) -> Sequence[Any]:
         return LinguisticRepository(self.db_session).fetch_linguistic_features(self.run_id)
 
-    def _insert_annotation_with_labels(self, labels: list[dict]) -> None:
+    def _insert_labels(self, labels: list[tuple[int, int]]) -> None:
+        """直接落正式条目行：work_items → executions → chapter_annotations → analysis_assessments"""
         from collections import defaultdict
 
-        from sqlalchemy import select
+        from src.storage.models import (
+            AnalysisAssessment,
+            ChapterAnnotation,
+            Execution,
+            Paragraph,
+            WorkItem,
+        )
 
-        from src.agents.annotation.output_models import BoundChapterAnnotation
-        from src.fact_graph.inputs import ChapterMetricsInput
-        from src.fact_graph.outputs import BoundParagraphLabel
-        from src.fact_graph.vocabulary import NarrativeFunction
-        from src.storage.models import Paragraph
-        from tests.support.chapter_annotation_helpers import commit_test_annotation
+        chapter_of = {
+            int(row.paragraph_id): int(row.chapter_id)
+            for row in self.db_session.execute(
+                select(Paragraph.paragraph_id, Paragraph.chapter_id).where(Paragraph.run_id == self.run_id)
+            ).all()
+        }
+        by_chapter: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for paragraph_id, emotion in labels:
+            by_chapter[chapter_of[paragraph_id]].append((paragraph_id, emotion))
 
-        paragraphs = self.db_session.execute(select(Paragraph).where(Paragraph.run_id == self.run_id)).scalars()
-        chapters_by_paragraph = {paragraph.paragraph_id: paragraph.chapter_id for paragraph in paragraphs}
-        labels_by_chapter: dict[int, list[BoundParagraphLabel]] = defaultdict(list)
-        for label in labels:
-            labels_by_chapter[chapters_by_paragraph[label["paragraph_id"]]].append(BoundParagraphLabel(**label))
-        for chapter_id, chapter_labels in labels_by_chapter.items():
-            annotation = BoundChapterAnnotation(
-                metrics=ChapterMetricsInput(
-                    summary="测试",
-                    emotional_valence=0,
-                    narrative_function=NarrativeFunction.SETUP,
-                ),
-                character_observations=[],
-                dialogues=[],
-                events=[],
-                paragraph_labels=chapter_labels,
-            )
-            commit_test_annotation(
-                self.db_session,
-                run_id=self.run_id,
-                chapter_id=chapter_id,
-                annotation=annotation,
-            )
-
-    def _insert_paragraph_embeddings(self, vectors_by_id: dict[int, list[float]]) -> None:
-        from src.storage.models import ParagraphEmbedding
-
-        for paragraph_id, vector in vectors_by_id.items():
+        now = datetime.now(UTC).replace(tzinfo=None)
+        for chapter_id, chapter_labels in by_chapter.items():
+            work_id = f"work-{self.run_id[:8]}-{chapter_id}"[:64]
+            execution_id = uuid.uuid4().hex
+            record_id = str(uuid.uuid4())
             self.db_session.add(
-                ParagraphEmbedding(
-                    run_id=self.run_id,
-                    paragraph_id=paragraph_id,
-                    embedding_vector=vector,
-                    embedding_model_key="test-fake",
-                    embedding_dimension=len(vector),
+                WorkItem(
+                    work_id=work_id,
+                    role="solo",
+                    annotation_run_id=self.run_id,
+                    annotation_chapter_id=chapter_id,
                 )
             )
-        self.db_session.flush()
+            self.db_session.flush()  # 明确顺序：work → execution → annotation 头 → 逐段条目
+            self.db_session.add(
+                Execution(
+                    execution_id=execution_id,
+                    work_id=work_id,
+                    attempt_number=1,
+                    started_at=now,
+                    status="success",
+                )
+            )
+            self.db_session.flush()
+            self.db_session.add(
+                ChapterAnnotation(
+                    record_id=record_id,
+                    execution_id=execution_id,
+                    contract_version="test-contract",
+                    chapter_consolidation_version="test-consolidation",
+                    summary="测试",
+                    emotional_valence=0,
+                    narrative_function="setup",
+                    pivot_moment=False,
+                    cliffhanger=False,
+                    created_at=now,
+                    saved_at=now,
+                )
+            )
+            self.db_session.flush()
+            for paragraph_id, emotion in chapter_labels:
+                self.db_session.add(
+                    AnalysisAssessment(
+                        assessment_id=str(uuid.uuid4()),
+                        record_id=record_id,
+                        paragraph_id=paragraph_id,
+                        emotion=str(emotion),
+                    )
+                )
+        self.db_session.commit()
+
+    def _insert_paragraph_embeddings(self, vectors_by_id: dict[int, list[float]]) -> None:
+        """经正式入口写 paragraph_features 的 semantic_vector 行 + 运行模型合同"""
+        from src.storage.repositories.paragraph.embedding_ops import (
+            ParagraphEmbeddingRow,
+            insert_paragraph_embeddings,
+        )
+
+        dimension = len(next(iter(vectors_by_id.values())))
+        insert_paragraph_embeddings(
+            self.db_session,
+            self.run_id,
+            [ParagraphEmbeddingRow(paragraph_id=pid, embedding_vector=vector) for pid, vector in vectors_by_id.items()],
+            embedding_dimension=dimension,
+        )
+        self.db_session.commit()
 
     @pytest.mark.asyncio()
     async def test_no_labels_keeps_boundary_columns_null(self) -> None:
@@ -503,12 +711,8 @@ class TestParagraphBoundary:
                 negative_id: [-1.0, 0.0, 0.0, 0.0],
             }
         )
-        self._insert_annotation_with_labels(
-            [
-                {"paragraph_id": positive_id, "emotion": 2},
-                {"paragraph_id": negative_id, "emotion": -2},
-            ],
-        )
+        self._insert_labels([(positive_id, 2), (negative_id, -2)])
+
         await run_linguistic(self.run_id, self.db_session)
 
         rows = {row.paragraph_id: row for row in self._feature_rows()}
@@ -524,13 +728,14 @@ class TestParagraphBoundary:
         positive_id = next(i for i, text in enumerate(_TEST_TEXTS) if "江湖" in text)
         negative_id = next(i for i, text in enumerate(_TEST_TEXTS) if "汤姆" in text)
         self._insert_paragraph_embeddings({positive_id: [1.0, 0.0, 0.0, 0.0]})
-        self._insert_annotation_with_labels(
+        self._insert_labels(
             [
-                {"paragraph_id": positive_id, "emotion": 2},
+                (positive_id, 2),
                 # 第二标签指向无向量的段落：fit 只用能对上向量的样本
-                {"paragraph_id": negative_id, "emotion": -2},
-            ],
+                (negative_id, -2),
+            ]
         )
+
         await run_linguistic(self.run_id, self.db_session)
         rows = {row.paragraph_id: row for row in self._feature_rows()}
         # 仅 1 条标签能对上向量（<2）→ 不拟合边界，两列维持 NULL
@@ -547,12 +752,8 @@ class TestParagraphBoundary:
                 negative_id: [-1.0, 0.0, 0.0, 0.0],
             }
         )
-        self._insert_annotation_with_labels(
-            [
-                {"paragraph_id": positive_id, "emotion": 0},
-                {"paragraph_id": negative_id, "emotion": 0},
-            ],
-        )
+        self._insert_labels([(positive_id, 0), (negative_id, 0)])
+
         await run_linguistic(self.run_id, self.db_session)
         rows = self._feature_rows()
         assert all(row.boundary_pos_score_sum is None for row in rows)

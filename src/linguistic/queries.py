@@ -19,7 +19,7 @@ from src.storage.repositories.linguistic_repository import LinguisticRepository
 
 
 def feature_dict(row) -> dict[str, Any]:
-    """ORM 行 → 纯 dict（JSONB 列原样）"""
+    """投影行 → 纯 dict（JSONB 投影列原样；列形状与旧宽表读取一致）"""
     return {
         "paragraph_id": row.paragraph_id,
         "ltp_token_count": row.ltp_token_count,
@@ -86,7 +86,7 @@ def aggregate_linguistic_features(run_id: str, session: Session) -> dict[str, An
             "mneg_net_delta": None,
             "lexicon_net": None,
             "mneg_net": None,
-            "unavailable_reason": "linguistic_unavailable: 无 paragraph_linguistic_features 行（语言阶段未运行）",
+            "unavailable_reason": "linguistic_unavailable: 无语言处理完成行（语言阶段未运行）",
         }
     # 章节归属（paragraphs.chapter_id）
     paragraph_repo = ParagraphRepository(session)
@@ -250,11 +250,15 @@ def fetch_entity_candidates(run_id: str, session: Session) -> dict[str, Any]:
 
 
 def aggregate_phrase_stats(run_id: str, session: Session) -> dict[str, Any]:
-    """固定短语命中统计（§5.11）：正式密度 + 四字候选数量"""
+    """固定短语命中统计（§5.11）：正式密度 + 四字候选数量
+
+    前置完成事实两个都要有：语言阶段完成（language 完成行）与短语阶段完成
+    （phrase_completed_at）；短语未跑与"跑完零命中"由此区分。
+    """
     ling_repo = LinguisticRepository(session)
     paragraph_repo = ParagraphRepository(session)
     total_char_count = sum(int(row.char_count) for row in paragraph_repo.fetch_paragraph_rows(run_id))
-    if not ling_repo.has_linguistic_features(run_id):
+    if not ling_repo.has_linguistic_features(run_id) or not ling_repo.has_phrase_hits(run_id):
         return {
             "run_id": run_id,
             "total_char_count": total_char_count,
@@ -264,7 +268,7 @@ def aggregate_phrase_stats(run_id: str, session: Session) -> dict[str, Any]:
             "fixed_phrase_density": None,
             "four_char_candidate_count": 0,
             "total_hits": 0,
-            "unavailable_reason": "linguistic_unavailable: 无语言特征行，短语匹配未运行",
+            "unavailable_reason": "linguistic_unavailable: 无语言处理完成行，短语匹配未运行",
         }
     rows = ling_repo.fetch_phrase_hits(run_id)
     metric_hits = [row for row in rows if row.is_metric_hit]
@@ -311,7 +315,8 @@ def fetch_word2vec_stats(run_id: str, session: Session) -> dict[str, Any]:
     model_meta = {
         "embedding_dimension": model_run.embedding_dimension,
         "vocabulary_size": model_run.vocabulary_size,
-        "artifact_scope": model_run.artifact_scope,
+        # artifact 归 run 私有是当前词向量合同的固定投影（2026-10-16 3NF 不逐行存常量）
+        "artifact_scope": "run_owned",
     }
     centroids = fetch_pos_centroids(run_id, session)
     return {
@@ -361,14 +366,28 @@ def fetch_pos_centroids(run_id: str, session: Session) -> list[dict[str, Any]]:
 def fetch_paragraph_labels(session: Session, run_id: str) -> list[dict[str, Any]]:
     """2026-09-14 用于读取全书自选段情绪标签（段落级监督按书边界）
 
-    标签随章节标注 payload 落库；句级旧字段（sentence_labels，2026-09-07 口径）
-    已从合同删除，重建库后无历史 payload 兼容问题。写入前的领域校验归标注 agent，
-    这里只按行形态收段落标签，不重跑整章合同、也不构造上层模型。
+    2026-10-16 3NF：逐段情绪标签的唯一落点是 analysis_assessments 的
+    逐段情绪形状（record_id+paragraph_id+emotion），经章节标注产物头关联到
+    本 run 的标注 work；不再从任何 JSON payload 读取。
+    写入前的领域校验归标注 agent，这里只按正式条目行返回。
     """
-    from src.work.queries import chapter_annotations
+    from sqlalchemy import select
 
-    records = chapter_annotations(session, run_id)
-    labels: list[dict[str, Any]] = []
-    for record in records:
-        labels.extend(record.payload.get("paragraph_labels") or [])
-    return labels
+    from src.storage.models import AnalysisAssessment, ChapterAnnotation, Execution, WorkItem
+
+    rows = session.execute(
+        select(AnalysisAssessment.paragraph_id, AnalysisAssessment.emotion)
+        .select_from(AnalysisAssessment)
+        .join(ChapterAnnotation, ChapterAnnotation.record_id == AnalysisAssessment.record_id)
+        .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+        .join(WorkItem, WorkItem.work_id == Execution.work_id)
+        .where(
+            WorkItem.annotation_run_id == run_id,
+            AnalysisAssessment.record_id.is_not(None),
+        )
+        .order_by(AnalysisAssessment.paragraph_id)
+    ).all()
+    return [
+        {"paragraph_id": int(row.paragraph_id), "emotion": int(row.emotion)}
+        for row in rows
+    ]

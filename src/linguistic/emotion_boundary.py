@@ -1,9 +1,9 @@
 """段落级情绪边界（2026-09-07 定稿句级，2026-09-14 改段落级监督，用户定稿）
 
-监督信号 = 标注 agent 逐章自选段的整段情绪标签（write_metrics.labels 随
-chapter_annotations 落库）；边界 = 该书自己的段落向量现算的岭回归线性映射
-（paragraph_embeddings 向量 → 情绪分值），numpy 亚秒级、确定性；
-无标签 run 无边界（上层保留词典/mNEG 口径）。
+监督信号 = 标注 agent 逐章自选段的整段情绪标签（analysis_assessments 的逐段
+情绪条目，经章节标注产物头关联本 run）；边界 = 该书自己的段落向量现算的岭回归
+线性映射（paragraph_features 的 semantic_vector 行 → 情绪分值），numpy 亚秒级、
+确定性；无标签 run 无边界（上层保留词典/mNEG 口径）。
 
 拟合器对"文本向量 → 分值"这一抽象建模（不绑定句/段粒度）：向量源、样本单位
 由上层决定，算法（中心化岭回归闭式解 + 截距）与 09-07 版一致。

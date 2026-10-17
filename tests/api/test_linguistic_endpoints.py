@@ -1,4 +1,8 @@
-"""语言结构基础数据端点测试（§3.3 B/C 赛道 API 契约）"""
+"""语言结构基础数据端点测试（§3.3 B/C 赛道 API 契约）
+
+2026-10-16 3NF：种子数据只写事实列（词元区间、命中区间、候选区间），
+词面/分组/类型/计量全部由读取投影补齐，因此种子坐标必须与原文自洽。
+"""
 
 from __future__ import annotations
 
@@ -8,40 +12,48 @@ from fastapi.testclient import TestClient
 from src.storage.repositories.linguistic_repository import LinguisticRepository
 from tests.support.paragraph_fixtures import create_completed_run, create_run_with_status, insert_spans, make_span
 
+#: 两段原文（第二章段落起点在第 1 段文本 +\n 之后）
+_PARA_TEXTS = ("汤姆刀光剑影。", "风起云涌。")
+#: 段落 0 逐字符 POS（n=名词 6 个、v=动词 4 个、wp=标点 2 个）
+_PARA0_POS = ["n", "n", "v", "v", "v", "v", "wp"]
+_PARA1_POS = ["n", "n", "n", "n", "wp"]
+_CHAPTER_TEXTS = ["\n".join(_PARA_TEXTS)]
 
-def _make_feature_row(
-    paragraph_id: int,
-    *,
-    tokens_count: int,
-    pos_counts: dict[str, int] | None = None,
-) -> dict:
-    """构造 paragraph_linguistic_features 的合法插入行（最小字段集）"""
-    tokens = [
+
+def _tokens_of(text: str, pos_tags: list[str]) -> list[dict]:
+    """按原文逐字符构造词元（索引 1 起、区间闭开、与原文切片自洽）"""
+    return [
         {
-            "token_index": 1,
-            "text": "词",
-            "local_start_char": 0,
-            "local_end_char": 1,
-            "pos_tag": "n",
-            "pos_group": "noun",
+            "token_index": index + 1,
+            "text": char,
+            "local_start_char": index,
+            "local_end_char": index + 1,
+            "pos_tag": pos_tags[index],
         }
-    ] * tokens_count
+        for index, char in enumerate(text)
+    ]
+
+
+def _make_feature_row(paragraph_id: int, *, text: str, pos_tags: list[str]) -> dict:
+    """构造段落语言结构插入行（词元/依存弧/句式/观测的事实列）"""
     return {
-        "run_id": None,
         "paragraph_id": paragraph_id,
-        "ltp_token_count": tokens_count,
-        "tokens": tokens,
-        "word_length_counts": {"1": tokens_count},
-        "pos_counts": pos_counts or {"noun": tokens_count},
+        "ltp_token_count": len(text),
+        "tokens": _tokens_of(text, pos_tags),
+        "word_length_counts": {"1": len(text)},
+        "pos_counts": {},
         "sentence_count": 1,
-        "sentence_pattern_counts": {"short": 1, "medium": 0, "long": 0, "compound": 0, "parallel_candidate": 0},
-        "dependency_arcs": [{"dependent_index": 1, "head_index": 0, "relation": "HED"}],
-        "dependency_node_count": tokens_count,
+        "sentence_pattern_counts": {"short": 1},
+        # 每段两弧：词元 2 挂 1（ATT，深度 1）、词元 1 挂 ROOT（HED，深度 0）
+        "dependency_arcs": [
+            {"dependent_index": 2, "head_index": 1, "relation": "ATT"},
+            {"dependent_index": 1, "head_index": 0, "relation": "HED"},
+        ],
+        "dependency_node_count": 1,
         "dependency_root_count": 1,
-        "dependency_depth_sum": tokens_count - 1,
+        "dependency_depth_sum": 1,
         "dependency_depth_max": 1,
         "dependency_relation_counts": {"HED": 1},
-        # 2026-09-05 B 批：sdp/情绪事件列（测试种子默认空事件）
         "sdp_arcs": [],
         "emotion_events": [],
         "emotion_event_count": 0,
@@ -56,61 +68,69 @@ def _make_feature_row(
 
 def _seed_linguistic(db_session, run_id: str) -> None:
     repo = LinguisticRepository(db_session)
+    # 运行合同先行：归一映射是版本化代码合同（不镜像成数据库表）
+    from src.linguistic import ENTITY_TYPE_MAP, POS_GROUP_MAP, ltp_pipeline_contract
+
+    pipeline_version, model_key = ltp_pipeline_contract()
+    repo.ensure_ltp_contract(
+        run_id,
+        pipeline_version=pipeline_version,
+        model_key=model_key,
+        pos_mappings=POS_GROUP_MAP,
+        entity_type_mappings=ENTITY_TYPE_MAP,
+    )
     rows = [
-        _make_feature_row(0, tokens_count=4, pos_counts={"noun": 2, "verb": 2}),
-        _make_feature_row(1, tokens_count=6, pos_counts={"noun": 3, "verb": 3}),
+        {**_make_feature_row(0, text=_PARA_TEXTS[0], pos_tags=_PARA0_POS), "run_id": run_id},
+        {**_make_feature_row(1, text=_PARA_TEXTS[1], pos_tags=_PARA1_POS), "run_id": run_id},
     ]
-    for row in rows:
-        row["run_id"] = run_id
     repo.insert_linguistic_features(run_id, rows)
+    # 实体候选只存区间与原始类型；词面按原文切片、归一类型按版本映射投影
     repo.insert_entities(
         run_id,
         [
             {
                 "run_id": run_id,
                 "paragraph_id": 0,
-                "surface_text": "汤姆",
                 "raw_entity_type": "Nh",
-                "normalized_entity_type": "person",
-                "local_start_char": 2,
-                "local_end_char": 4,
-                "confidence": None,
-                "source_kind": "ltp",
+                "local_start_char": 0,
+                "local_end_char": 2,
             }
         ],
     )
+    # 词表命中（刀光剑影）与四字候选（风起云涌）各一条；都按原文切片投影词面
     repo.insert_phrase_hits(
         run_id,
         [
             {
                 "run_id": run_id,
                 "paragraph_id": 0,
-                "surface_text": "刀光剑影",
-                "phrase_type": None,
-                "local_start_char": 0,
-                "local_end_char": 4,
+                "local_start_char": 2,
+                "local_end_char": 6,
                 "match_kind": "lexicon",
                 "lexicon_key": "fixed_phrases.txt",
+                "phrase_type": None,
                 "is_metric_hit": False,
             },
             {
                 "run_id": run_id,
                 "paragraph_id": 1,
-                "surface_text": "风起云涌",
-                "phrase_type": None,
                 "local_start_char": 0,
                 "local_end_char": 4,
                 "match_kind": "four_char_candidate",
                 "lexicon_key": None,
+                "phrase_type": None,
                 "is_metric_hit": False,
             },
         ],
     )
+    # 短语阶段完成事实（含零命中段落）：读取侧据此区分「未跑」与「跑完零命中」
+    repo.mark_phrase_completed(run_id, [0, 1])
     db_session.commit()
 
 
 def _create_run_with_paragraphs(db_session) -> tuple[str, str]:
-    novel_id, run_id = create_completed_run(db_session, chapter_texts=["甲。\n乙。"])
+    novel_id, run_id = create_completed_run(db_session, chapter_texts=_CHAPTER_TEXTS)
+    second_start = len(_PARA_TEXTS[0]) + 1  # 第 1 段文本 + "\n"
     insert_spans(
         db_session,
         run_id,
@@ -119,19 +139,19 @@ def _create_run_with_paragraphs(db_session) -> tuple[str, str]:
                 paragraph_id=0,
                 chapter_id=1,
                 paragraph_index=0,
-                text="甲。",
+                text=_PARA_TEXTS[0],
                 local_start=0,
                 chunk_offset=0,
-                token_count=2,
+                token_count=len(_PARA_TEXTS[0]),
             ),
             make_span(
                 paragraph_id=1,
                 chapter_id=1,
                 paragraph_index=1,
-                text="乙。",
-                local_start=3,
+                text=_PARA_TEXTS[1],
+                local_start=second_start,
                 chunk_offset=0,
-                token_count=2,
+                token_count=len(_PARA_TEXTS[1]),
             ),
         ],
     )
@@ -147,12 +167,16 @@ def test_features_endpoint_aggregates_with_conservation(api_client: TestClient, 
     body = response.json()
     assert body["unavailable_reason"] is None
     assert body["paragraph_count"] == 2
-    assert body["token_total"] == 10
-    assert body["pos_ratios"]["noun"] == pytest.approx(0.5, abs=1e-6)
-    assert body["pos_ratios"]["verb"] == pytest.approx(0.5, abs=1e-6)
+    # token_total 由词元行数投影；分组比例分母为有效词元数
+    assert body["token_total"] == 12
+    assert body["pos_ratios"]["noun"] == pytest.approx(6 / 12, abs=1e-6)
+    assert body["pos_ratios"]["verb"] == pytest.approx(4 / 12, abs=1e-6)
     assert sum(body["pos_ratios"].values()) == pytest.approx(1.0, abs=1e-6)
-    assert body["avg_dependency_depth"] == 0.8
+    assert body["word_length_ratios"]["1"] == pytest.approx(1.0, abs=1e-6)
+    # 每段两弧（ROOT 以空 head 表达，不建伪词元行）：深度和 2/节点 4、最大深度 1
+    assert body["avg_dependency_depth"] == pytest.approx(0.5, abs=1e-6)
     assert body["max_dependency_depth"] == 1
+    assert body["dependency_root_count"] == 2
     assert len(body["chapters"]) >= 1
 
 
@@ -178,14 +202,15 @@ def test_entities_endpoint_lists_candidates(api_client: TestClient, db_session) 
     assert entity["normalized_entity_type"] == "person"
 
 
-def test_phrases_endpoint_reports_draft_lexicon_density_zero(api_client: TestClient, db_session) -> None:
+def test_phrases_endpoint_reports_audit_only_lexicon_hits(api_client: TestClient, db_session) -> None:
+    """单一固定短语词表 + 计量合同关闭：命中只做审计留痕，不计入正式密度"""
     novel_id, run_id = _create_run_with_paragraphs(db_session)
     _seed_linguistic(db_session, run_id)
 
     response = api_client.get(f"/api/novels/{novel_id}/linguistic/phrases", params={"task_id": run_id[:8]})
     assert response.status_code == 200
     body = response.json()
-    assert body["metric_hit_count"] == 0  # draft 词表不计入正式密度
+    assert body["metric_hit_count"] == 0  # 计量合同关闭：lexicon 命中不计入正式密度
     assert body["fixed_phrase_density"] == 0.0
     assert body["four_char_candidate_count"] == 1
     assert body["total_hits"] == 2
@@ -212,45 +237,38 @@ def test_word2vec_endpoint_reports_coverage_when_enabled(api_client: TestClient,
             "run_id": run_id,
             "embedding_dimension": 128,
             "vocabulary_size": 100,
-            "parameters": {"vector_size": 128},
+            "window_size": 5,
+            "min_count": 2,
+            "epochs": 5,
+            "pretrained_vocabulary_size": 100,
             "source_uri": None,
             "license_name": None,
             "training_document_count": 2,
             "training_token_count": 10,
-            "artifact_key": f"models/word2vec/{run_id}/word2vec.model",
-            "artifact_scope": "run_owned",
         },
     )
     from sqlalchemy import insert as _insert
 
-    from src.storage.models import ParagraphPosEmbedding as _M
+    from src.storage.models import ParagraphFeature as _M
 
+    # source_token_count 不再是存储列：覆盖率分母由词元行 × 版本 POS 分组投影；
+    # 零可用词元的分组不写行（无向量可写，缺行即零覆盖）
     db_session.execute(
         _insert(_M),
         [
             {
                 "run_id": run_id,
                 "paragraph_id": 0,
-                "pos_group": "noun",
-                "embedding_vector": [0.1] * 128,
-                "source_token_count": 2,
+                "feature_code": "pos_vector:noun",
+                "vector_value": [0.1] * 128,
                 "in_vocabulary_token_count": 1,
             },
             {
                 "run_id": run_id,
                 "paragraph_id": 1,
-                "pos_group": "noun",
-                "embedding_vector": [0.5] * 128,
-                "source_token_count": 4,
+                "feature_code": "pos_vector:noun",
+                "vector_value": [0.5] * 128,
                 "in_vocabulary_token_count": 3,
-            },
-            {
-                "run_id": run_id,
-                "paragraph_id": 0,
-                "pos_group": "verb",
-                "embedding_vector": None,
-                "source_token_count": 2,
-                "in_vocabulary_token_count": 0,
             },
         ],
     )
@@ -279,20 +297,21 @@ def test_word2vec_endpoint_reports_similarity_matrix(api_client: TestClient, db_
             "run_id": run_id,
             "embedding_dimension": 4,
             "vocabulary_size": 100,
-            "parameters": {"vector_size": 4},
+            "window_size": 5,
+            "min_count": 2,
+            "epochs": 5,
+            "pretrained_vocabulary_size": 100,
             "source_uri": None,
             "license_name": None,
             "training_document_count": 2,
             "training_token_count": 10,
-            "artifact_key": f"models/word2vec/{run_id}/word2vec.model",
-            "artifact_scope": "run_owned",
         },
     )
     from math import sqrt
 
     from sqlalchemy import insert as _insert
 
-    from src.storage.models import ParagraphPosEmbedding as _M
+    from src.storage.models import ParagraphFeature as _M
 
     unit_x = [1.0, 0.0, 0.0, 0.0]
     unit_y = [0.0, 1.0, 0.0, 0.0]
@@ -302,9 +321,8 @@ def test_word2vec_endpoint_reports_similarity_matrix(api_client: TestClient, db_
             {
                 "run_id": run_id,
                 "paragraph_id": paragraph_id,
-                "pos_group": pos_group,
-                "embedding_vector": vector,
-                "source_token_count": 2,
+                "feature_code": f"pos_vector:{pos_group}",
+                "vector_value": vector,
                 "in_vocabulary_token_count": 1,
             }
             for paragraph_id, pos_group, vector in [(0, "noun", unit_x), (1, "verb", unit_y)]
