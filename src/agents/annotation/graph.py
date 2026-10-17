@@ -1,13 +1,14 @@
 """当前 work 会话共用的模型节点和工具调用解析
 
 消息链采用 messages + add_messages 累积，每次请求携带完整历史。
-角色独立调用 finish 校验并关闭写入；实际持久化和保存确认由队列执行。
-会话自然结束或达到轮次上限不代表 work 已完成。
+finish 和无工具响应都请求程序检查；通过后由队列执行持久化和保存确认。
+缺项继续同一会话；达到轮次上限明确记为预算耗尽。
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -36,8 +37,11 @@ class AnnotationGraphState(TypedDict):
     phase: AnnotationPhase
     iterations: int
     error: str | None
-    # 达到轮次上限只停止模型循环，未成功 finish 的 work 由队列判败并安排重试
+    # 回合耗尽属于不可重派失败；结束请求的完整性另由 check 节点判定
     halted: NotRequired[bool]
+    completion_ok: NotRequired[bool]
+    missing: NotRequired[list[str]]
+    end_signal: NotRequired[str]
 
 
 def _build_agent_node(
@@ -49,9 +53,19 @@ def _build_agent_node(
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
     retries: int | None = None,
+    thinking_message: Callable[[int], str] | None = None,
 ):
-    """执行当前 work 会话；达到轮次上限只结束模型循环，保存仍要求成功 finish"""
+    """执行当前 work 会话；达到轮次上限终止，只有程序检查通过才能保存
+
+    thinking_message：轮推理提示文案可由调用侧定制（诊断等非章节面复用同一节点），
+    缺省保持章节标注文案不改。
+    """
     advertised = list(tools)
+
+    def _thinking_text(rounds: int) -> str:
+        if thinking_message is not None:
+            return thinking_message(rounds)
+        return f"章节标注推理中（第 {rounds} 轮）..."
 
     async def agent_node(state: AnnotationGraphState) -> dict[str, Any]:
         """2026-08-10 用于执行一次绑定语义工具合同的模型调用"""
@@ -60,7 +74,7 @@ def _build_agent_node(
             return {"halted": True}
         ledger.set_phase(state["phase"])
         if stream is not None:
-            await stream.thinking(f"章节标注推理中（第 {iterations + 1} 轮）...")
+            await stream.thinking(_thinking_text(iterations + 1))
         from src.agents.stream import run_model_call
 
         request_messages = list(state["messages"])

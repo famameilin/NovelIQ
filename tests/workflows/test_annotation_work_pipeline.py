@@ -6,12 +6,26 @@ from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
+from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls, run_agent_execution_ids
 from src.config import settings
-from src.storage.models import AnalysisOutput, AnnotationWork, ModelTurn
-from src.storage.repositories.annotation import AnnotationRepository
-from src.work.queries import is_annotate_complete
+from src.fact_graph.graph import entity_key, entity_uuid
+from src.storage.models import (
+    BookCase,
+    CaseEntry,
+    ChapterAnnotation,
+    DialogueRecord,
+    EventDeclaration,
+    Execution,
+    GraphEntity,
+    GraphFact,
+    GraphRelation,
+    ModelCall,
+    WorkItem,
+)
+from src.work.policy import completed_chapters
+from src.work.queries import chapter_annotations, fetch_annotation_work_states, is_annotate_complete
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
@@ -35,6 +49,39 @@ class ProgramModel(StreamedFakeModelMixin):
         )
 
 
+def _run_execution_ids(run_id: str):
+    """本 run 真实尝试的执行选择器（跨表断言的归属口径）"""
+    return (
+        select(Execution.execution_id)
+        .join(WorkItem, WorkItem.work_id == Execution.work_id)
+        .where(WorkItem.annotation_run_id == run_id)
+    )
+
+
+def _run_products(db_session, run_id: str) -> list[ChapterAnnotation]:
+    """本 run 的正式标注产物行（保存成功的唯一事实）"""
+    return list(
+        db_session.scalars(
+            select(ChapterAnnotation)
+            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+            .join(WorkItem, WorkItem.work_id == Execution.work_id)
+            .where(WorkItem.annotation_run_id == run_id)
+        )
+    )
+
+
+def _agent_execution_count(db_session, run_id: str) -> int:
+    """本 run 真实尝试数（按模型调用行归属的 distinct execution）"""
+    return int(
+        db_session.scalar(
+            select(func.count(func.distinct(ModelCall.execution_id))).where(
+                ModelCall.execution_id.in_(run_agent_execution_ids(run_id))
+            )
+        )
+        or 0
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("start,end", [(10.0, 75.0), (20.0, 55.0)])
 async def test_solo_runs_real_program_and_saves_one_work(db_session, monkeypatch, start, end) -> None:
@@ -42,9 +89,12 @@ async def test_solo_runs_real_program_and_saves_one_work(db_session, monkeypatch
     monkeypatch.setattr(settings.progress.annotate, "end", end)
     novel_id, run_id = create_run_with_chunks(db_session, texts=["张三出门。"], chapter_ids=[1])
     model = ProgramModel(
-        'entity(id="a1", name="张三", entity_type="character", evidence=1)\n'
-        'event(el="t1", isroot=True, description="张三出门", evidence=1)\n'
-        'metric(summary="出门", emotional_valence=0, narrative_function="铺垫")\nfinish()'
+        "entity(id='a1', name='张三', entity_type='chara"  # 同一程序文本
+        "cter', evidence=1)\nevent(el='t1', evidence=1,"  # 同一程序文本
+        " title='张三出门', problem='明确事件问题', summary='张三出"  # 同一程序文本
+        "门', event_type='行动', status='ongoing')\nmetric"  # 同一程序文本
+        "(summary='出门', emotional_valence=0, narrative"  # 同一程序文本
+        "_function='铺垫')\nfinish()"  # 同一程序文本
     )
     events = []
 
@@ -56,48 +106,121 @@ async def test_solo_runs_real_program_and_saves_one_work(db_session, monkeypatch
         assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
     assert model.calls == 1
     db_session.expire_all()
-    assert is_annotate_complete(AnnotationRepository(db_session).session, run_id)
-    records = db_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id)).scalars().all()
-    assert [(item.role, item.state) for item in records] == [("solo", "saved")]
+    assert is_annotate_complete(db_session, run_id)
+    states = fetch_annotation_work_states(db_session, run_id)
+    assert [(item.role, item.state) for item in states] == [("solo", "saved")]
     displayed = [event for event in events if event.action == "work_saved"]
     assert len(displayed) == 1
-    assert displayed[0].work_id == records[0].work_id
-    assert displayed[0].invocation_id == records[0].invocation_id
+    assert displayed[0].work_id == states[0].work_id
+    assert displayed[0].invocation_id == states[0].invocation_id
     progress = [event for event in events if event.action == "progress" and event.current is not None]
     assert progress[-1].current == progress[-1].total == 1
     assert progress[-1].percent == end
     assert progress[-1].sub_percent == 100
-    outputs = (
-        db_session.execute(
-            select(AnalysisOutput).where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation")
-        )
-        .scalars()
-        .all()
+    views = chapter_annotations(db_session, run_id)
+    assert len(views) == 1
+    assert views[0].payload["metrics"]["summary"] == "出门"
+    assert [row.record_id for row in _run_products(db_session, run_id)] == [views[0].output_id]
+
+
+@pytest.mark.asyncio
+async def test_reverse_resubmission_of_bidirectional_relation_keeps_save_confirmed(db_session) -> None:
+    """同一双向关系被两个 work 换向提交不破坏保存核查：方向不参与相等判定
+
+    2026-10-17 复盘（run 52cbb1ac resume 复现）：友情 行 张三→李四 已由先写 work
+    落库后，后写 work 把同一对端点写反成 李四→张三；relation_id 对双向类型已按
+    端点排序归一化，行不重插，核查若按投递方向逐字比对即误判"组件保存结果不一致"。
+    """
+    novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["张三与李四并肩而行于长街。", "李四与张三于校场比试拳脚。"],
+        chapter_ids=[1, 2],
     )
-    assert len(outputs) == 1
-    assert outputs[0].payload["metrics"]["summary"] == "出门"
+    zhang_id = entity_uuid(run_id, entity_key("张三", "character"))
+    li_id = entity_uuid(run_id, entity_key("李四", "character"))
+    first_code = (
+        "entity(id='a1', name='张三', entity_type='character', evidence=1)\n"
+        "entity(id='a2', name='李四', entity_type='character', evidence=1)\n"
+        "relation(from_entity={'name': '张三', 'entity_type': 'character'},"
+        " to_entity={'name': '李四', 'entity_type': 'character'}, relation_type='友情')\n"
+        "event(el='t1', evidence=1, title='同行', problem='明确事件问题',"
+        " summary='同行', event_type='行动', status='ongoing')\n"
+        "metric(summary='同行', emotional_valence=0, narrative_function='铺垫')\n"
+        "finish()"
+    )
+    second_code = (
+        "entity(id='a1', name='张三', entity_type='character', evidence=1)\n"
+        "entity(id='a2', name='李四', entity_type='character', evidence=1)\n"
+        "relation(from_entity={'name': '李四', 'entity_type': 'character'},"
+        " to_entity={'name': '张三', 'entity_type': 'character'}, relation_type='友情')\n"
+        "event(el='t1', evidence=1, title='比试', problem='明确事件问题',"
+        " summary='比试', event_type='行动', status='ongoing')\n"
+        "metric(summary='比试', emotional_valence=0, narrative_function='铺垫')\n"
+        "finish()"
+    )
+
+    class ChapterAwareModel(StreamedFakeModelMixin):
+        model_name = "test_model"
+
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            # 两章并发派发，按章原文判向；先写者落库方向为准，后写者换向提交
+            code = second_code if "比试" in str(messages) else first_code
+            return AIMessage(
+                content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call"}]
+            )
+
+    model = ChapterAwareModel()
+    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (2, 0, 2)
+    db_session.expire_all()
+    states = fetch_annotation_work_states(db_session, run_id)
+    assert [(item.role, item.state) for item in states] == [("solo", "saved"), ("solo", "saved")]
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(GraphRelation)
+            .where(
+                GraphRelation.relation_type == "友情",
+                GraphRelation.from_entity_id.in_([zhang_id, li_id]),
+                GraphRelation.to_entity_id.in_([zhang_id, li_id]),
+            )
+        )
+        == 1
+    )
 
 
 @pytest.mark.asyncio
 async def test_next_provider_turn_persists_all_domain_facts(db_session) -> None:
     """下一模型回合的真实审计记录必须包含上一程序产生的所有领域事实"""
-    novel_id, run_id = create_run_with_chunks(db_session, texts=['“去吧。”张三出门。'])
-    model = ProgramModel([
-        'entity(id="a1", name="张三", entity_type="character", evidence=1)\n'
-        'event(el="t1", isroot=True, description="张三出门", evidence=1)\n'
-        'participants(el="t1", items=[{"entity_id": "a1", "role": "主体", "action": "出门", "emotion": 1}])\n'
-        'dialogue(candidate_index=1, verdict="dialogue", evidence=1, speaker_id="a1")\n'
-        'metric(summary="出门", emotional_valence=0, narrative_function="铺垫")',
-        'finish()',
-    ])
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["“去吧。”张三出门。"])
+    model = ProgramModel(
+        [
+            (
+                "entity(id='a1', name='张三', entity_type='chara"  # 同一程序文本
+                "cter', evidence=1)\nevent(el='t1', evidence=1,"  # 同一程序文本
+                " title='张三出门', problem='明确事件问题', summary='张三出"  # 同一程序文本
+                "门', event_type='行动', status='ongoing')\npartic"  # 同一程序文本
+                "ipants(el='t1', items=[{'name': '张三', 'entity"  # 同一程序文本
+                "_type': 'character', 'role': '主体', 'action': "  # 同一程序文本
+                "'出门', 'emotion': 1}])\ndialogue(candidate_inde"  # 同一程序文本
+                "x=1, verdict='dialogue', evidence=1, speaker="  # 同一程序文本
+                "{'name': '张三', 'entity_type': 'character'})\nm"  # 同一程序文本
+                "etric(summary='出门', emotional_valence=0, narr"  # 同一程序文本
+                "ative_function='铺垫')"  # 同一程序文本
+            ),
+            "finish()",
+        ]
+    )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
-    turns = db_session.execute(
-        select(ModelTurn).where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
-        .order_by(ModelTurn.turn_index)
-    ).scalars().all()
+    turns = fetch_agent_turns(db_session, run_id)
     assert len(turns) == 2
+    assert turns[0].execution_id == turns[1].execution_id
+    assert [turn.turn_index for turn in turns] == [1, 2]
     facts = turns[1].context_summary["facts"]
     assert {"metrics", "events", "dialogues", "character_observations"} <= set(facts)
     assert facts["metrics"]["summary"] == "出门"
@@ -111,23 +234,29 @@ async def test_current_work_validates_serialized_participant_fields_before_save(
     """生产调用经 JSON 变成字典后，参与者仍按当前类型校验并写入真实章产出"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["张三出门。"])
     model = ProgramModel(
-        'entity(id="a1", name="张三", entity_type="character", evidence=1)\n'
-        'event(el="t1", isroot=True, description="张三出门", evidence=1)\n'
-        'participants(el="t1", items=[{"entity_id": "a1", "role": "主体", "action": "出门", "emotion": 1}])\n'
-        'metric(summary="出门", emotional_valence=0, narrative_function="铺垫")\nfinish()'
+        "entity(id='a1', name='张三', entity_type='chara"  # 同一程序文本
+        "cter', evidence=1)\nevent(el='t1', evidence=1,"  # 同一程序文本
+        " title='张三出门', problem='明确事件问题', summary='张三出"  # 同一程序文本
+        "门', event_type='行动', status='ongoing')\npartic"  # 同一程序文本
+        "ipants(el='t1', items=[{'name': '张三', 'entity"  # 同一程序文本
+        "_type': 'character', 'role': '主体', 'action': "  # 同一程序文本
+        "'出门', 'emotion': 1}])\nmetric(summary='出门', em"  # 同一程序文本
+        "otional_valence=0, narrative_function='铺垫')\nf"  # 同一程序文本
+        "inish()"  # 同一程序文本
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
-    output = (
-        db_session.execute(
-            select(AnalysisOutput).where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation")
-        )
-        .scalar_one()
-        .payload
-    )
-    assert output["events"][0]["participants"][0]["entity"] == "张三"
-    assert output["character_observations"][0]["emotion"] == 1
+    payload = chapter_annotations(db_session, run_id)[0].payload
+    entities = {
+        row.entity_id: (row.canonical_name, row.entity_type)
+        for row in db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id))
+    }
+    participant = payload["events"][0]["participants"][0]
+    assert entities[participant["entity_id"]] == ("张三", "character")
+    assert participant["role"] == "主体"
+    assert payload["character_observations"][0]["action"] == "出门"
+    assert payload["character_observations"][0]["emotion"] == 1
 
 
 @pytest.mark.asyncio
@@ -138,17 +267,11 @@ async def test_long_chapter_saves_three_work_without_chapter_finalize(db_session
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
-    work = db_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id)).scalars().all()
-    assert {item.role for item in work} == {"structure", "event", "evidence"}
-    outputs = (
-        db_session.execute(
-            select(AnalysisOutput).where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation")
-        )
-        .scalars()
-        .all()
-    )
-    assert len(outputs) == 3
-    assert is_annotate_complete(AnnotationRepository(db_session).session, run_id)
+    states = fetch_annotation_work_states(db_session, run_id)
+    assert {item.role for item in states} == {"structure", "event", "evidence"}
+    assert all(item.state == "saved" for item in states)
+    assert len(_run_products(db_session, run_id)) == 3
+    assert is_annotate_complete(db_session, run_id)
 
 
 class RoleModel(ProgramModel):
@@ -157,7 +280,11 @@ class RoleModel(ProgramModel):
         if 'role="structure"' in text:
             self.code = 'entity(id="a1", name="张三", entity_type="character", evidence=1)\nfinish()'
         elif 'role="event"' in text:
-            self.code = 'event(el="t1", isroot=True, description="独立事件", evidence=1)\nfinish()'
+            self.code = (
+                "event(el='t1', evidence=1, title='独立事件', prob"  # 同一程序文本
+                "lem='明确事件问题', summary='独立事件', event_type='行动'"  # 同一程序文本
+                ", status='ongoing')\nfinish()"  # 同一程序文本
+            )
         else:
             self.code = 'metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()'
         return await super().ainvoke(messages)
@@ -187,12 +314,8 @@ async def test_later_chapter_saves_while_earlier_model_is_running(db_session, co
             order.append(event.chapter_id)
             if event.chapter_id == 2:
                 with get_session_factory()() as session:
-                    saved = (
-                        session.execute(select(AnnotationWork.chapter_id).where(AnnotationWork.run_id == run_id))
-                        .scalars()
-                        .all()
-                    )
-                    assert saved == [2]
+                    states = fetch_annotation_work_states(session, run_id)
+                    assert completed_chapters(states) == {2}
                     assert any(MODEL_CAPACITY.snapshot().values())
                 later_saved.set()
 
@@ -204,55 +327,47 @@ async def test_later_chapter_saves_while_earlier_model_is_running(db_session, co
 
 @pytest.mark.asyncio
 async def test_recovery_discards_partial_roles_and_keeps_completed_chapter(db_session, monkeypatch):
-    from sqlalchemy import delete
-
-    from src.storage.models import EventNode
-
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 2)
     novel_id, run_id = create_run_with_chunks(db_session, texts=["短", "长章原文。"], chapter_ids=[1, 2])
     model = RoleModel("")
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         await run_annotate(run_id, db_session, novel_id=novel_id)
     db_session.expire_all()
-    saved = db_session.execute(select(AnnotationWork).where(AnnotationWork.run_id == run_id)).scalars().all()
-    complete = next(value for value in saved if value.chapter_id == 1)
+    states = fetch_annotation_work_states(db_session, run_id)
+    complete = next(item for item in states if item.chapter_id == 1)
     retained_invocation = complete.invocation_id
-    partial_event = next(value for value in saved if value.role == "event")
+    partial_event = next(item for item in states if item.role == "event")
     old_event_invocation = partial_event.invocation_id
-    node = db_session.execute(select(EventNode).where(EventNode.author_work_id == partial_event.work_id)).scalar_one()
-    identifier = node.event_id
-    lost = next(value for value in saved if value.role == "evidence")
+    # 模拟整章部分角色产物丢失：只删该说的正式产物与工作身份（真实尝试随工作级联）
+    lost = next(item for item in states if item.role == "evidence")
     db_session.execute(
-        delete(AnalysisOutput).where(
-            AnalysisOutput.work_id == lost.work_id, AnalysisOutput.kind == "chapter_annotation"
-        )
+        delete(ChapterAnnotation).where(ChapterAnnotation.execution_id == lost.invocation_id)
     )
-    db_session.execute(delete(AnnotationWork).where(AnnotationWork.work_id == lost.work_id))
+    db_session.execute(delete(WorkItem).where(WorkItem.work_id == lost.work_id))
     db_session.commit()
     calls = model.calls
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         await run_annotate(run_id, db_session, novel_id=novel_id)
     db_session.expire_all()
     assert model.calls - calls == 3
-    assert db_session.get(AnnotationWork, complete.work_id).invocation_id == retained_invocation
-    current = db_session.get(EventNode, identifier)
-    assert current.producer_invocation_id != old_event_invocation
-    assert (
-        db_session.execute(
-            select(func.count(func.distinct(ModelTurn.execution_id))).where(
-                ModelTurn.run_id == run_id, ModelTurn.row_kind.in_(("agent_turn", "attempt_error"))
-            )
-        ).scalar_one()
-        == 7
+    refreshed = {item.work_id: item for item in fetch_annotation_work_states(db_session, run_id)}
+    assert refreshed[complete.work_id].invocation_id == retained_invocation
+    current_event = refreshed[partial_event.work_id]
+    assert current_event.invocation_id != old_event_invocation
+    record_id = db_session.scalar(
+        select(ChapterAnnotation.record_id).where(ChapterAnnotation.execution_id == current_event.invocation_id)
     )
-    records = (
-        db_session.execute(
-            select(AnalysisOutput).where(AnalysisOutput.run_id == run_id, AnalysisOutput.kind == "chapter_annotation")
-        )
-        .scalars()
-        .all()
-    )
-    assert all(value.payload["metrics"] is None for value in records if value.role in {"structure", "event"})
+    declaration = db_session.scalar(select(EventDeclaration).where(EventDeclaration.record_id == record_id))
+    assert declaration is not None and declaration.title == "独立事件"
+    # 废弃章的旧尝试随 work 级联退场（含其模型调用行），现存执行 = 短章 1 + 重建的 3 条 lane
+    assert _agent_execution_count(db_session, run_id) == 4
+    metric_rows = db_session.execute(
+        select(WorkItem.role, ChapterAnnotation.summary)
+        .join(Execution, Execution.work_id == WorkItem.work_id)
+        .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
+        .where(WorkItem.annotation_run_id == run_id)
+    ).all()
+    assert all(summary is None for role, summary in metric_rows if role in {"structure", "event"})
 
 
 @pytest.mark.asyncio
@@ -260,13 +375,14 @@ async def test_save_failure_rolls_back_all_business_and_releases_case(db_session
     from src.agents.annotation.agent import AnnotationAgent
     from src.case_pool import CasePool
     from src.model_pool.capacity import MODEL_CAPACITY
-    from src.storage.models import BookCase, EventNode, GraphFact
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文。"])
     model = ProgramModel(
-        'pending(description="待核查")\n'
-        'event(el="t1", isroot=True, description="原文事件", evidence=1)\n'
-        'metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()'
+        "pending(case_type='character', description='待核查')\nevent(el='t1', evi"  # 同一程序文本
+        "dence=1, title='原文事件', problem='明确事件问题', summ"  # 同一程序文本
+        "ary='原文事件', event_type='行动', status='ongoing'"  # 同一程序文本
+        ")\nmetric(summary='原文', emotional_valence=0, n"  # 同一程序文本
+        "arrative_function='铺垫')\nfinish()"  # 同一程序文本
     )
     aborted = []
     original_abort = AnnotationAgent.abort
@@ -285,17 +401,40 @@ async def test_save_failure_rolls_back_all_business_and_releases_case(db_session
         with pytest.raises(RuntimeError, match="案例保存故障"):
             await run_annotate(run_id, db_session, novel_id=novel_id)
     db_session.expire_all()
-    for cls in (AnnotationWork, AnalysisOutput, EventNode, GraphFact, BookCase):
-        assert db_session.query(cls).filter(cls.run_id == run_id).count() == 0
-    assert aborted and not any(MODEL_CAPACITY.snapshot().values())
-    assert (
-        db_session.execute(
-            select(func.count(func.distinct(ModelTurn.execution_id))).where(
-                ModelTurn.run_id == run_id, ModelTurn.row_kind.in_(("agent_turn", "attempt_error"))
-            )
-        ).scalar_one()
-        == 1
+    # 失败事务不留下任何业务行：工作身份是派发期事实，正式产物与域数据必须为空
+    assert _run_products(db_session, run_id) == []
+    run_executions = _run_execution_ids(run_id)
+    run_records = select(ChapterAnnotation.record_id).where(
+        ChapterAnnotation.execution_id.in_(run_executions)
     )
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(EventDeclaration).where(EventDeclaration.record_id.in_(run_records))
+        )
+        == 0
+    )
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(GraphFact)
+            .where(GraphFact.direct_producer_execution_id.in_(run_executions))
+        )
+        == 0
+    )
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(BookCase).where(BookCase.registration_run_id == run_id)
+        )
+        == 0
+    )
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(CaseEntry).where(CaseEntry.producer_execution_id.in_(run_executions))
+        )
+        == 0
+    )
+    assert aborted and not any(MODEL_CAPACITY.snapshot().values())
+    assert _agent_execution_count(db_session, run_id) == 1
 
 
 @pytest.mark.asyncio
@@ -312,9 +451,15 @@ async def test_lost_commit_reply_verifies_actual_save_before_confirm(db_session,
         original_commit = session.commit
 
         def commit():
-            owns_work = any(isinstance(row, AnnotationWork) for row in session.identity_map.values())
-            # 队列 flush 后行可能不再由 identity_map 强引用，实际新 work 用查询确认
-            owns_work = owns_work or bool(session.query(AnnotationWork).filter(AnnotationWork.run_id == run_id).count())
+            owns_work = any(isinstance(row, ChapterAnnotation) for row in session.identity_map.values())
+            # 队列 flush 后正式产物可能不再由 identity_map 强引用，实际新产物用查询确认
+            owns_work = owns_work or bool(
+                session.query(ChapterAnnotation)
+                .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+                .join(WorkItem, WorkItem.work_id == Execution.work_id)
+                .filter(WorkItem.annotation_run_id == run_id)
+                .count()
+            )
             original_commit()
             if owns_work and not replies:
                 assert any(MODEL_CAPACITY.snapshot().values())
@@ -349,12 +494,16 @@ async def test_no_eligible_model_ends_without_starting_or_saving_work(db_session
     with pytest.raises(ModelElectionExhausted):
         await run_annotate(run_id, db_session, novel_id=novel_id)
     assert not started
-    assert db_session.query(AnnotationWork).filter(AnnotationWork.run_id == run_id).count() == 0
+    db_session.expire_all()
+    assert _run_products(db_session, run_id) == []
+    states = fetch_annotation_work_states(db_session, run_id)
+    assert all(item.state == "pending" for item in states)
 
 
 @pytest.mark.asyncio
 async def test_program_can_read_shared_nodes_claim_case_and_save_cross_chapter_link(db_session, configured_model_pool):
-    from src.storage.models import BookCase, EventEdge
+    from src.case_pool import CasePool
+    from src.storage.models import NarrativeLink
 
     settings.models.model_pool[0].max_in_flight = 1
     novel_id, run_id = create_run_with_chunks(
@@ -365,66 +514,200 @@ async def test_program_can_read_shared_nodes_claim_case_and_save_cross_chapter_l
         async def ainvoke(self, messages):
             if "拾得" in str(messages[1].content):
                 self.code = (
-                    'pending(description="旧信的用途")\n'
-                    'event(el="t1", isroot=True, description="拾得旧信", evidence=1, '
-                    'isforeshadowing=True, confidence="high")\n'
-                    'metric(summary="拾信", emotional_valence=0, narrative_function="铺垫")\nfinish()'
+                    "pending(case_type='character', description='旧信的用途')\nevent(el='t1', e"  # 同一程序文本
+                    "vidence=1, isforeshadowing=True, confidence='"  # 同一程序文本
+                    "high', title='拾得旧信', problem='明确事件问题', summar"  # 同一程序文本
+                    "y='拾得旧信', event_type='行动', status='ongoing')\n"  # 同一程序文本
+                    "metric(summary='拾信', emotional_valence=0, nar"  # 同一程序文本
+                    "rative_function='铺垫')\nfinish()"  # 同一程序文本
                 )
             else:
-                self.code = (
-                    'cases = search_cases()\npromise_case(case_id=cases[0]["case_id"])\n'
-                    'page = search_events(query="拾得")\nnodes = page["events"]\n'
-                    'read_text(paragraph_id=nodes[0]["evidence_paragraph_id"])\n'
-                    'event(el="t1", isroot=True, description="读懂旧信", evidence=1, '
-                    'type="main", parent_ref=nodes[0]["node_id"])\n'
-                    'metric(summary="读信", emotional_valence=0, narrative_function="铺垫")\n'
-                    'finish(case_delivery={"case_id":cases[0]["case_id"],"state":"resolved","reason":"原文支持旧信导致读信"})'
-                )
+                self.code = """
+cases = search_cases()
+promise_case(case_id=cases[0]["case_id"])
+page = search_events(query="拾得")
+source = page["events"][0]["declaration_id"]
+created = event(el="t1", evidence=1, title="读懂旧信", problem="旧信有何用途",
+                summary="读懂旧信", event_type="发现", status="resolved")
+write_link(source_id=source, target_id=created["ref"]["declaration_id"],
+           kind="foreshadowing", reason="旧信内容得以解释", evidence=1, caseid=cases[0]["case_id"])
+metric(summary="读信", emotional_valence=0, narrative_function="铺垫")
+finish()
+"""
             return await super().ainvoke(messages)
 
     with patch("src.model_pool.llm.build_chat_model", return_value=SharedModel("")):
         assert await run_annotate(run_id, db_session, novel_id=novel_id) == (2, 0, 2)
     db_session.expire_all()
-    resolved = db_session.query(BookCase).filter(BookCase.run_id == run_id, BookCase.state == "resolved").all()
-    assert len(resolved) == 1 and len(resolved[0].contributions) == 2
-    active_edges = db_session.query(EventEdge).filter(EventEdge.run_id == run_id, EventEdge.is_active.is_(True)).all()
-    assert len(active_edges) == 1 and active_edges[0].cause_role == "main"
-    assert db_session.query(EventEdge).filter(EventEdge.run_id == run_id).count() == 1
+    pool = CasePool(run_id)
+    pool.load_storage(db_session)
+    resolved = [record for record in pool.search() if record["state"] == "resolved"]
+    assert len(resolved) == 1
+    adopted = list(
+        db_session.scalars(
+            select(CaseEntry).where(CaseEntry.case_id == resolved[0]["case_id"], CaseEntry.adopted.is_(True))
+        )
+    )
+    assert len(adopted) == 1
+    deliveries = list(
+        db_session.scalars(select(CaseEntry).where(CaseEntry.parent_entry_id == adopted[0].entry_id))
+    )
+    assert [item.tool_name for item in deliveries] == ["write_link"]
+    links = list(db_session.scalars(select(NarrativeLink).where(NarrativeLink.producer_execution_id.in_(
+        select(Execution.execution_id)
+        .join(WorkItem, WorkItem.work_id == Execution.work_id)
+        .where(WorkItem.annotation_run_id == run_id)
+    ))))
+    assert [link.relation_type for link in links] == ["foreshadowing"]
+    # 交付是提交面事实、跨测试会留存：按交付的 run 归属计数（与交付序号唯一性触发器同一推导）
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(CaseEntry)
+            .where(
+                CaseEntry.accepted_order.is_not(None),
+                func.dc_case_entry_support_run(CaseEntry.parent_entry_id) == run_id,
+            )
+        )
+        == 1
+    )
 
 
 @pytest.mark.asyncio
-async def test_late_write_after_finish_is_refused_and_audited_without_reopening(db_session):
-    from src.storage.models import AgentToolCall, BookCase, ModelTurn
+async def test_read_authorization_survives_failed_call_rollback(db_session, configured_model_pool) -> None:
+    """失败调用回滚后，此后读取的授权记录仍必须对现行 work 可见
 
+    2026-10-17 复盘（run 52cbb1ac 第 13 章复现）：第 12 回合一次 write_link 被正确
+    拒收（引用尚未读取的声明）触发调用级回滚；回滚把 execution.event_reads 整体换成
+    快照副本，而读取工具在装配时捕获的是原字典——此后 read_event/search_events 的
+    记录全部写进旧字典，同程序块内"先读后写"也报"尚未读取当前内容"，15 回合预算
+    被耗尽。回滚必须就地恢复容器内容，不能让捕获过的对象失联。
+    """
+    from src.storage.models import NarrativeLink
+
+    settings.models.model_pool[0].max_in_flight = 1
+    novel_id, run_id = create_run_with_chunks(
+        db_session, texts=["张三拾得旧信。", "张三读懂旧信。"], chapter_ids=[1, 2]
+    )
+    first_code = (
+        "event(el='t1', evidence=1, isforeshadowing=True, confidence='"
+        "high', title='拾得旧信', problem='明确事件问题', summary="
+        "'拾得旧信', event_type='行动', status='ongoing')\n"
+        "metric(summary='拾信', emotional_valence=0, narrative_"
+        "function='铺垫')\nfinish()"
+    )
+    second_code = (
+        "rejected = write_link(source_id='00000000-0000-0000-0000-000000000000',"
+        " target_id='00000000-0000-0000-0000-000000000000', kind='causal',"
+        " reason='无效引用制造一次失败回滚', evidence=1)\n"
+        "page = search_events(query='拾得')\n"
+        "source = page['events'][0]['declaration_id']\n"
+        "detail = read_event(node_id=source)\n"
+        "created = event(el='t1', evidence=1, title='读懂旧信', problem='旧信有何用途',"
+        " summary='读懂旧信', event_type='发现', status='resolved')\n"
+        "write_link(source_id=source, target_id=created['ref']['declaration_id'],"
+        " kind='foreshadowing', reason='旧信内容得以解释', evidence=1)\n"
+        "metric(summary='读信', emotional_valence=0, narrative_function='铺垫')\n"
+        "finish()"
+    )
+
+    class ChapterAwareModel(StreamedFakeModelMixin):
+        model_name = "test_model"
+
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            code = second_code if "读懂" in str(messages) else first_code
+            return AIMessage(
+                content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call"}]
+            )
+
+    with patch("src.model_pool.llm.build_chat_model", return_value=ChapterAwareModel()):
+        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (2, 0, 2)
+    db_session.expire_all()
+    links = list(
+        db_session.scalars(
+            select(NarrativeLink).where(NarrativeLink.producer_execution_id.in_(_run_execution_ids(run_id)))
+        )
+    )
+    assert [link.relation_type for link in links] == ["foreshadowing"]
+
+
+@pytest.mark.asyncio
+async def test_same_batch_write_after_finish_is_saved_and_audited(db_session):
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文。"])
     model = ProgramModel(
-        'metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()\npending(description="迟到")'
+        'metric(summary="原文", emotional_valence=0, nar'  # 同一程序文本
+        'rative_function="铺垫")\nfinish()\npending(case_type="dialogue", descri'  # 同一程序文本
+        'ption="迟到")'  # 同一程序文本
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
     assert model.calls == 1
-    assert db_session.query(BookCase).filter(BookCase.run_id == run_id).count() == 0
-    execution = (
-        db_session.execute(
-            select(ModelTurn.execution_id).where(ModelTurn.run_id == run_id, ModelTurn.row_kind == "agent_turn")
+    assert db_session.query(BookCase).filter(BookCase.registration_run_id == run_id).count() == 1
+    turns = fetch_agent_turns(db_session, run_id)
+    assert len(turns) == 1
+    tool_calls = fetch_run_tool_calls(db_session, run_id)
+    by_name = {call.tool_name: call for call in tool_calls if call.call_id == turns[0].call_id}
+    assert by_name["pending"].status == "success"
+    program_call = by_name["execute_code"]
+    assert program_call.status == "success"
+    receipt = program_call.receipt_observed
+    assert receipt["status"] == "applied"
+    assert receipt["applied"] == 3
+
+
+@pytest.mark.asyncio
+async def test_runtime_name_references_auto_register_all_four_surfaces(db_session) -> None:
+    """真实保存链不先富登记，四个引用面会合到同一组正式实体"""
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["“去吧。”张三出门去山门找李四。"])
+    model = ProgramModel(
+        "event(el='t1', evidence=1, title='张三出门', prob"  # 同一程序文本
+        "lem='明确事件问题', summary='张三出门', event_type='行动'"  # 同一程序文本
+        ", status='ongoing')\nparticipants(el='t1', ite"  # 同一程序文本
+        "ms=[{'name': '张三', 'entity_type': 'character'"  # 同一程序文本
+        ", 'role': '主体'}, {'name': '山门', 'entity_type'"  # 同一程序文本
+        ": 'organization', 'role': '地点'}])\nrelation(fr"  # 同一程序文本
+        "om_entity={'name': '张三', 'entity_type': 'char"  # 同一程序文本
+        "acter'}, to_entity={'name': '李四', 'entity_typ"  # 同一程序文本
+        "e': 'character'}, relation_type='盟友')\ndialogu"  # 同一程序文本
+        "e(candidate_index=1, verdict='dialogue', evid"  # 同一程序文本
+        "ence=1, speaker={'name': '张三', 'entity_type':"  # 同一程序文本
+        " 'character'})\nmetric(summary='出门', emotional"  # 同一程序文本
+        "_valence=0, narrative_function='铺垫')\nfinish()"  # 同一程序文本
+    )
+    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+    db_session.expire_all()
+    entities = db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id)).all()
+    assert {(entity.canonical_name, entity.entity_type) for entity in entities} == {
+        ("张三", "character"),
+        ("李四", "character"),
+        ("山门", "organization"),
+    }
+    relations = list(
+        db_session.scalars(
+            select(GraphRelation).where(
+                GraphRelation.relation_id.in_(
+                    select(GraphFact.relation_id).where(
+                        GraphFact.direct_producer_execution_id.in_(_run_execution_ids(run_id)),
+                        GraphFact.relation_id.is_not(None),
+                    )
+                )
+            )
         )
-        .scalars()
-        .one()
     )
-    rejected = (
-        db_session.query(AgentToolCall)
-        .join(ModelTurn, AgentToolCall.turn_id == ModelTurn.id)
-        .filter(ModelTurn.execution_id == execution, AgentToolCall.tool_name == "pending")
-        .one()
+    assert len(relations) == 1
+    dialogues = list(
+        db_session.scalars(
+            select(DialogueRecord)
+            .join(Execution, Execution.execution_id == DialogueRecord.creation_execution_id)
+            .join(WorkItem, WorkItem.work_id == Execution.work_id)
+            .where(WorkItem.annotation_run_id == run_id)
+        )
     )
-    assert rejected.status == "error"
-    program_call = (
-        db_session.query(AgentToolCall)
-        .join(ModelTurn, AgentToolCall.turn_id == ModelTurn.id)
-        .filter(ModelTurn.execution_id == execution, AgentToolCall.tool_name == "execute_code")
-        .one()
-    )
-    assert program_call.status == "error"
-    assert program_call.receipt["execution_status"] == "success"
-    assert program_call.receipt["business_status"] == "partial"
-    assert program_call.receipt["applied"] == 2
+    assert [row.speaker_entity_id for row in dialogues] == [
+        entity.entity_id for entity in entities if entity.canonical_name == "张三"
+    ]
+    assert model.calls == 1
