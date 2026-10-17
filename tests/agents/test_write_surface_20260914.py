@@ -1,13 +1,4 @@
-"""2026-09-14 写入面重构专项合同测试（五工具 + el 双命名空间 + 段落标签 + finish）
-
-与逐轮/审计类测试互补，这里只测新写入面自身的结构性保证：
-- EntityRef（run 级 uuid id ∪ 章内 el 键，2026-09-19 id 纪律后编号已删）在参与者/
-  引用面的同一条解析路径；
-- write_event 单工具按调用顺序建树、characters 整节点替换语义；
-- 伏笔根 confidence 三档（含 low）落进 payoff_likelihood；
-- write_metrics(labels) 的段号归属闸与同段去重；
-- finish 结算（missing_record 硬前提与各域计数）。
-"""
+"""章级声明写入合同：姓名引用、局部寻址、参与者替换、伏笔与段落校验"""
 
 from __future__ import annotations
 
@@ -59,38 +50,40 @@ async def _write_entity(tools: dict, *, name: str, el: str, entity_type: str = "
 
 
 @pytest.mark.asyncio
-async def test_entity_ref_resolves_el_key_and_run_id_on_one_channel() -> None:
-    """el 键与 run 级 uuid id 两种引用形态走同一条解析路径（2026-09-19 id 纪律：编号通道已删）
-
-    write_entity 回执顶层 id 即 run 级 uuid：本章自定的 el 键与该 id 都能
-    在参与者引用面直接解析到同一登记实体。
-    """
+async def test_participants_use_names_and_types_for_independent_declarations() -> None:
+    """参与者以正文名字和类型自动登记，局部路径不形成正式包含"""
     ledger = _ledger()
     tools = _tools(ledger)
-    gushuang = await _write_entity(tools, name="顾霜", el="gushuang")
-    chu = await _write_entity(tools, name="褚大山", el="chudashan")
+    await _write_entity(tools, name="顾霜", el="gushuang")
+    await _write_entity(tools, name="褚大山", el="chudashan")
 
     root = await tools["write_event"].ainvoke(
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": "gushuang",
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝止",
                     "emotion": -1,
                 },
                 {
-                    "entityid": chu["id"],
+                    "name": "褚大山",
+                    "entity_type": "character",
                     "role": "客体",
                     "narrative_role": "反对者",
                     "action": "争执",
                     "emotion": -2,
                 },
             ],
+            "title": "顾霜喝止众人",
+            "problem": "行动目标",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         }
     )
     assert json.loads(root)["status"] == "written"
@@ -98,59 +91,54 @@ async def test_entity_ref_resolves_el_key_and_run_id_on_one_channel() -> None:
     child = await tools["write_event"].ainvoke(
         {
             "el": "t1/e2",
-            "isroot": False,
-            "type": "main",
-            "description": "顾霜收势",
             "characters": [
                 {
-                    "entityid": gushuang["id"],
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "收势",
                     "emotion": 0,
                 }
             ],
+            "title": "顾霜收势",
+            "problem": "行动目标",
+            "summary": "顾霜收势",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         }
     )
     assert json.loads(child)["status"] == "written"
 
     bound = {event.node_id: event for event in ledger.bound_payloads["events"]}
-    root_event = next(event for event in bound.values() if event.cause_role == "root")
-    assert {participant.entity for participant in root_event.participants} == {"顾霜", "褚大山"}
-    child_event = next(event for event in bound.values() if event.cause_role == "main")
-    assert [participant.entity for participant in child_event.participants] == ["顾霜"]
+    root_event = next(event for event in bound.values() if event.title == "顾霜喝止众人")
+    assert {ledger.graph.display_name(participant.entity) for participant in root_event.participants} == {
+        "顾霜",
+        "褚大山",
+    }
+    child_event = next(event for event in bound.values() if event.title == "顾霜收势")
+    assert [ledger.graph.display_name(participant.entity) for participant in child_event.participants] == ["顾霜"]
 
 
 @pytest.mark.asyncio
-async def test_unknown_entity_reference_rejected_with_dual_channel_hint() -> None:
-    """未知实体引用结构化拒绝：code=unknown_entity_id，expected 指向两条合法键空间
+async def test_old_id_reference_is_rejected() -> None:
+    from pydantic import ValidationError
 
-    2026-09-19 id 纪律：引用 = run 级 id 或本章自定的 el 键（运行期编号已删，
-    unknown_el/known_keys 旧文案没有对应物），拒绝引导模型改用回执/检索 id 或 el。
-    """
     tools = _tools(_ledger())
-    await _write_entity(tools, name="顾霜", el="gushuang")
-    with pytest.raises(AnnotationStageRejection) as excinfo:
+    with pytest.raises(ValidationError):
         await tools["write_event"].ainvoke(
             {
                 "el": "t1",
-                "isroot": True,
-                "description": "顾霜喝止",
-                "characters": [
-                    {
-                        "entityid": "miejing",
-                        "role": "主体",
-                        "narrative_role": "主体",
-                        "action": "喝止",
-                        "emotion": -1,
-                    }
-                ],
+                "characters": [{"entityid": "gushuang", "role": "主体"}],
+                "title": "顾霜喝止",
+                "problem": "行动目标",
+                "summary": "顾霜喝止",
+                "event_type": "行动",
+                "status": "ongoing",
+                "evidence": 1,
             }
         )
-    rejection = excinfo.value
-    assert rejection.record == "t1/root/participant/miejing"
-    assert rejection.field == "entityid"
-    assert rejection.code == "unknown_entity_id"
 
 
 @pytest.mark.asyncio
@@ -165,31 +153,26 @@ async def test_duplicate_el_binds_one_to_one_by_rejection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_event_tree_order_is_call_order_and_children_attach_to_trunk_tail() -> None:
-    """树内先后=调用顺序：main 顺延主链，secondary 挂当时主链尾；无 order 参数"""
+async def test_event_declarations_do_not_infer_containment_from_call_order() -> None:
+    """同一局部路径可以先子后根创建，每项声明仍保持独立来源"""
     ledger = _ledger()
     tools = _tools(ledger)
-    await _write_entity(tools, name="顾霜", el="gushuang")
-    for call in (
-        {"el": "t1", "isroot": True, "description": "顾霜喝止众人"},
-        {"el": "t1/e2", "isroot": False, "type": "main", "description": "顾霜逼近"},
-        {"el": "t1/e3", "isroot": False, "type": "secondary", "description": "旁人劝阻"},
-    ):
+    for el, summary in (("t1/e2", "顾霜逼近"), ("t1", "顾霜喝止众人"), ("t1/e3", "旁人劝阻")):
+        call = {
+            "el": el,
+            "title": summary,
+            "problem": "劝阻是否奏效",
+            "summary": summary,
+            "event_type": "冲突",
+            "status": "ongoing",
+            "evidence": 1,
+        }
         assert json.loads(await tools["write_event"].ainvoke(call))["status"] == "written"
-
-    tree = next(iter(ledger.event_trees.values()))
-    assert set(tree["nodes"]) == {"root", "e2", "e3"}
-    bound = {event.node_id: event for event in ledger.bound_payloads["events"]}
-    root_id = tree["nodes"]["root"]
-    assert bound[root_id].cause_role == "root"
-    assert bound[root_id].parent_node_id is None
-    # main 顺延：e2 挂根；secondary 挂当时主链尾（即 e2）
-    assert bound[tree["nodes"]["e2"]].parent_node_id == root_id
-    assert bound[tree["nodes"]["e2"]].cause_role == "main"
-    assert bound[tree["nodes"]["e3"]].parent_node_id == tree["nodes"]["e2"]
-    assert bound[tree["nodes"]["e3"]].cause_role == "secondary"
-    # 链尾已被 main 推进到 e2（secondary 不推进）
-    assert tree["trunk_tail"] == tree["nodes"]["e2"]
+    declarations = ledger.bound_payloads["events"]
+    assert len(declarations) == 3
+    assert len({event.declaration_id for event in declarations}) == 3
+    assert all(event.parent_node_id is None for event in declarations)
+    assert ledger.events.contribution_payloads()["relations"] == {}
 
 
 @pytest.mark.asyncio
@@ -197,52 +180,63 @@ async def test_characters_full_replacement_clears_stale_observations() -> None:
     """characters 给出即整节点替换：被删人物的动态状态同点清除"""
     ledger = _ledger()
     tools = _tools(ledger)
-    gushuang = await _write_entity(tools, name="顾霜", el="gushuang")
+    await _write_entity(tools, name="顾霜", el="gushuang")
     await _write_entity(tools, name="褚大山", el="chudashan")
     await tools["write_event"].ainvoke(
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": "gushuang",
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝止",
                     "emotion": -1,
                 },
                 {
-                    "entityid": "chudashan",
+                    "name": "褚大山",
+                    "entity_type": "character",
                     "role": "客体",
                     "narrative_role": "反对者",
                     "action": "争执",
                     "emotion": -2,
                 },
             ],
+            "title": "顾霜喝止众人",
+            "problem": "行动目标",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         }
     )
     assert len(ledger.observation_by_record) == 2
     await tools["write_event"].ainvoke(
         {
             "el": "t1",
-            "isroot": True,
-            "description": "顾霜喝止众人",
             "characters": [
                 {
-                    "entityid": gushuang["id"],
+                    "name": "顾霜",
+                    "entity_type": "character",
                     "role": "主体",
                     "narrative_role": "主体",
                     "action": "喝止",
                     "emotion": -1,
                 }
             ],
+            "title": "顾霜喝止众人",
+            "problem": "行动目标",
+            "summary": "顾霜喝止众人",
+            "event_type": "行动",
+            "status": "ongoing",
+            "evidence": 1,
         }
     )
     root_event = next(event for event in ledger.bound_payloads["events"] if event.cause_role == "root")
-    assert [participant.entity for participant in root_event.participants] == ["顾霜"]
+    assert [ledger.graph.display_name(participant.entity) for participant in root_event.participants] == ["顾霜"]
     # 参与者记录键按模型提交的引用原样构造（2026-09-19：uuid id 引用即进键）
-    uuid_record = f"t1/root/participant/{gushuang['id']}"
+    uuid_record = "t1/root/participant/顾霜"
     assert list(ledger.observation_by_record) == [uuid_record]
     assert ledger.domain_payloads["character_observations"] == [ledger.observation_by_record[uuid_record]]
 
@@ -258,10 +252,14 @@ async def test_foreshadow_root_low_confidence_written_as_payoff_likelihood() -> 
             await tools["write_event"].ainvoke(
                 {
                     "el": "t1",
-                    "isroot": True,
-                    "description": "顾霜立誓复仇",
                     "isforeshadowing": True,
                     "confidence": "low",
+                    "title": "顾霜立誓复仇",
+                    "problem": "行动目标",
+                    "summary": "顾霜立誓复仇",
+                    "event_type": "行动",
+                    "status": "ongoing",
+                    "evidence": 1,
                 }
             )
         )["status"]
@@ -276,23 +274,39 @@ async def test_foreshadow_root_low_confidence_written_as_payoff_likelihood() -> 
 
     with pytest.raises(AnnotationStageRejection) as excinfo:
         await tools["write_event"].ainvoke(
-            {"el": "t9", "isroot": True, "description": "残缺令牌", "isforeshadowing": True}
+            {
+                "el": "t9",
+                "isforeshadowing": True,
+                "title": "残缺令牌",
+                "problem": "行动目标",
+                "summary": "残缺令牌",
+                "event_type": "行动",
+                "status": "ongoing",
+                "evidence": 1,
+            }
         )
     assert excinfo.value.record == "t9/root"
     assert excinfo.value.field == "confidence"
     assert excinfo.value.code == "missing"
 
-    with pytest.raises(AnnotationStageRejection) as excinfo:
+    receipt = json.loads(
         await tools["write_event"].ainvoke(
             {
                 "el": "t1/e2",
-                "isroot": False,
-                "type": "main",
-                "description": "顾霜离去",
+                "isforeshadowing": True,
                 "confidence": "high",
+                "title": "顾霜离去",
+                "problem": "行动目标",
+                "summary": "顾霜离去",
+                "event_type": "行动",
+                "status": "ongoing",
+                "evidence": 1,
             }
         )
-    assert excinfo.value.code == "not_on_child"
+    )
+    assert receipt["status"] == "written"
+    child = next(item for item in ledger.bound_payloads["events"] if item.description == "顾霜离去")
+    assert child.is_foreshadow_setup and child.payoff_likelihood == "high"
 
 
 @pytest.mark.asyncio

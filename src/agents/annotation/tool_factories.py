@@ -14,18 +14,16 @@ import unicodedata
 from typing import Annotated, Any
 
 from langchain_core.tools import tool
-from pydantic import Field, JsonValue
+from pydantic import Field
 
 from src.event_trees.models import ParticipantArg
-from src.event_trees.vocabulary import EventChildType
-from src.fact_graph.inputs import ChapterMetricsInput, EntityInput, ParagraphLabelInput
+from src.fact_graph.inputs import ChapterMetricsInput, EntityInput, EntityNameRef, ParagraphLabelInput
 from src.fact_graph.schema import (
     CLIFFHANGER_DESCRIPTION,
     ENTITY_TAG_MAX_CHARS,
     ENTITY_TAG_MAX_COUNT,
     ENTITY_TAGS_RULE_TEXT,
     PIVOT_MOMENT_DESCRIPTION,
-    EntityRef,
 )
 from src.fact_graph.vocabulary import (
     Confidence,
@@ -102,20 +100,23 @@ def build_annotation_tools(
             str | None,
             Field(description="一句话简介；省略=保留现值"),
         ] = None,
-        attributes: Annotated[
-            dict[str, JsonValue | None] | None,
-            Field(description="JSON Merge Patch：只写变化的键，值为 null 删除该键；省略=现有属性整体保留"),
+        representative: Annotated[
+            bool | None,
+            Field(
+                description="规范名代表标记：True=把该实体标为同名身份的规范名，"
+                "False=清除该标记，省略=保留现值"
+            ),
         ] = None,
     ) -> str:
         """登记或更新一个实体（一次一个），el 是你自定的章内引用键、绑定即生效
 
         新实体用本章出现的名称；已登记实体用登记名，只提交本次变化的字段
-        （description 一句话简介、tags 见参数说明、attributes 是 JSON Merge Patch）；
+        （description 一句话简介、tags 与 representative 见参数说明）；
         未提交的字段保留现值。
         实体大类一经登记不可变更；同一词条的不同身份用区分性名称
         （如"圣城"是 location、"圣城朝堂"是 organization）。
-        事件/关系/对话的实体引用用 el 键（同轮先登记后引用，不等回执）或
-        回执/检索 id——write_event 的 characters[].entityid 等字段两者都收。
+        事件/关系/对话引用写正文名字与大类，未登记时由运行时自动登记。
+        本入口用于补充 tags/description/representative 与 el 锚点。
         回执 content 回显该实体合并后的生效记录（含 run 级 id）。
         """
         # 2026-09-14 删除"提交 write_entity 前必须先 search_graph"硬闸——
@@ -125,15 +126,15 @@ def build_annotation_tools(
             entity_type=entity_type,
             tags=tags or [],
             description=description,
-            attributes=attributes,
+            representative=representative,
         )
         present = {"name", "entity_type"}
         if tags is not None:
             present.add("tags")
         if description is not None:
             present.add("description")
-        if attributes is not None:
-            present.add("attributes")
+        if representative is not None:
+            present.add("representative")
         entity_id = ledger.apply_entity(entity, el=el, present=present)
         bound_el = unicodedata.normalize("NFC", el).strip()
         return json.dumps(
@@ -151,12 +152,12 @@ def build_annotation_tools(
     def write_dialogue(
         candidate_index: int,
         verdict: DialogueVerdict,
-        speaker: EntityRef | None = None,
+        speaker: EntityNameRef | None = None,
         tone: Tone | None = None,
     ) -> str:
         """登记本章候选的三态判断，不提供既有对话订正入口
 
-        speaker 只能引用本章登记的实体；归属无法确认时留空
+        speaker 写正文名字与 character 大类，运行时自动登记；归属无法确认时留空
         not_dialogue 表示题字或描写等误判候选，只给编号与 verdict
         """
         record = ledger.apply_dialogue(
@@ -177,14 +178,14 @@ def build_annotation_tools(
 
     @tool
     def write_relation(
-        from_entity: EntityRef,
-        to_entity: EntityRef,
+        from_entity: EntityNameRef,
+        to_entity: EntityNameRef,
         relation_type: Annotated[
             RelationType,
             Field(description="闭合关系类型，方向与两端实体类型约束如下：\n" + relation_catalog_text()),
         ],
     ) -> str:
-        """登记本章局部关系，两端只能引用本章实体，不修改既有关系状态"""
+        """登记本章局部关系，两端写正文名字与大类，运行时自动登记"""
         record, outcome, content = ledger.apply_relation(
             from_ref=from_entity,
             to_ref=to_entity,
@@ -198,56 +199,33 @@ def build_annotation_tools(
     @tool
     def write_event(
         el: EventLocalKey,
-        isroot: bool,
-        description: str,
-        evidence: int | None = None,
+        title: str,
+        problem: str,
+        summary: str,
+        event_type: str,
+        status: str,
+        evidence: int,
+        progress: str | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
-        type: EventChildType | None = None,
         characters: list[ParticipantArg] | None = None,
     ) -> str:
-        """写入一个事件节点：isroot=true 建事件树根（el=树键如 t1），false 加子事件（el=t1/e2）
-
-        description 是一句话描述（根事件不超过 30 字）。evidence 是该事件所在段的
-        段首可见号；多段章节新建事件时必填，单段章节可省略。整棵树可以在一轮里按顺序写完：
-        建议先根后子逐个调用，el 由你指定、写入即生效，同轮后面的调用直接可用（不等回执）；
-        子事件先于根提交也可以：会挂起，根建好后按提交顺序自动生效（回执 content 带 deferred 提示）。
-        树内先后=调用顺序，没有序号参数。子事件 type="main" 顺延主因链（成为新的
-        链尾）/"secondary" 挂在当时主链尾；伏笔属性（isforeshadowing/confidence）只属于根：
-        isforeshadowing=true 时 confidence 必填（high/medium/low），整棵树成为伏笔树、
-        根即埋设事件。
-        伏笔建模判据：埋设事件本身就是本章主链事件时，直接给主链根标 isforeshadowing=true，
-        不再另立第二棵树重复同一时刻；仅当要埋的悬念不对应主链某个事件时才独立立伏笔树。
-        同一悬念的建树选择一次定案，后续回合不再依同一证据复议。
-        characters 是该节点的参与者数组（可省）：根节点也直接挂参与者。character 实体的
-        role/narrative_role/action/emotion 建议都给，也允许省略或写偏：role 缺省按实体登记
-        类型取（character→主体、location→地点、其余→客体），叙事功能近义词自动归一，
-        emotion 越界按边界收敛；action 不超过 15 字，同一人物在本章内的动作不得重复。
-        非 character（item/organization/location）条目只填 entityid/role，
-        "地点"角色只用于 location。
-        entityid 填本章的 el 键或 write_entity 回执中的 run 级 id。
-        同 el 重写按更新处理：根改描述/伏笔属性，子改描述（type 不可改写，要改换键）；
-        characters 给出即整体替换该节点参与者列表，省略则保留。
-        回执 content 回显该节点落账记录（节点 id/描述/参与者三态，根带伏笔属性现值、子带 type）。
-        """
+        """声明本章事件；问题、概要、类型、状态及真实证据必填，引用不是正式event_id"""
         record = ledger.apply_event(
             el=el,
-            isroot=isroot,
-            description=description,
+            title=title,
+            problem=problem,
+            summary=summary,
+            event_type=event_type,
+            status=status,
             evidence=evidence,
+            progress=progress,
             isforeshadowing=isforeshadowing,
             confidence=confidence,
-            node_type=type,
             characters=characters,
         )
-        content = ledger.event_content(el=el, isroot=isroot)
-        return json.dumps(
-            {"status": "written", "record": record, "content": content},
-            ensure_ascii=False,
-        )
-
-
-
+        content = ledger.event_content(el=el, isroot="/" not in el)
+        return json.dumps({"status": "written", "record": record, "content": content}, ensure_ascii=False)
 
     from .links import build_link_tools
 

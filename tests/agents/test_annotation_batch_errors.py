@@ -16,7 +16,7 @@ from src.agents.annotation.errors import AnnotationStageRejection
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.event_trees.models import ParticipantArg
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.inputs import EntityInput
+from src.fact_graph.inputs import EntityNameRef
 from src.fact_graph.vocabulary import DialogueVerdict, Tone
 
 
@@ -31,43 +31,20 @@ def _ledger() -> AnnotationToolLedger:
 
 
 def test_relation_endpoint_rejections_are_per_record_and_localized() -> None:
-    """原 test_relation_endpoint_errors_collected_with_indexes：非法关系端点必须逐条可定位
-
-    2026-09-13 变化：旧合同在 write_domain("relations", payload) 结算时按 [0]/[1]
-    一次性收集两条"未登记端点"错误；新合同 apply_relation 一次一条、写入即入图，
-    未登记引用在写入点即被结构化拒绝（record 指向该条边，field 指向出错的端点字段）。
-    2026-09-19 id 纪律：EntityRef 只有 str（run 级 uuid id 或 el 键）；未知 uuid 的
-    拒绝文案带"label 实体 id 未登记"与已登记 id 示例，expected 指向 write_entity /
-    search_graph 回执的 id 来源。等价意图=每条违规关系都拿到指向自己的可自纠错误，
-    且任何一条失败都不产生落账记录。
-    """
     ledger = _ledger()
-    unknown_a = "00000000-0000-0000-0000-000000000001"
-    unknown_b = "00000000-0000-0000-0000-000000000003"
-    rejections: list[AnnotationStageRejection] = []
-    for from_id, to_id, relation_type in (
-        (unknown_a, "00000000-0000-0000-0000-000000000002", "师徒"),
-        (unknown_b, "00000000-0000-0000-0000-000000000004", "敌对"),
-    ):
-        with pytest.raises(AnnotationStageRejection) as excinfo:
+    records = []
+    for name in ("甲", "乙"):
+        with pytest.raises(AnnotationStageRejection) as error:
             ledger.apply_relation(
-                from_ref=from_id,
-                to_ref=to_id,
-                relation_type=relation_type,
+                from_ref=EntityNameRef(name=name, entity_type="location"),
+                to_ref=EntityNameRef(name="丙", entity_type="character"),
+                relation_type="师徒",
             )
-        rejections.append(excinfo.value)
-
-    assert [rejection.record for rejection in rejections] == [
-        f"relation/{unknown_a}-00000000-0000-0000-0000-000000000002/师徒",
-        f"relation/{unknown_b}-00000000-0000-0000-0000-000000000004/敌对",
-    ]
-    for rejection, entity_id in zip(rejections, (unknown_a, unknown_b), strict=True):
-        assert rejection.receipt()["status"] == "rejected"
-        assert rejection.field == "from_entity"
-        assert rejection.code == "unknown_entity_id"
-        assert entity_id in str(rejection)
-        assert ".from_entity" in str(rejection)
-        assert "write_entity" in (rejection.expected or "")
+        records.append(error.value.record)
+        assert error.value.field == "from_entity"
+        assert error.value.code == "endpoint_invalid"
+        assert name in str(error.value)
+    assert records == ["relation/甲-丙/师徒", "relation/乙-丙/师徒"]
     assert ledger.written_relations == {}
 
 
@@ -81,7 +58,7 @@ def test_relation_endpoint_type_rejection_points_at_the_single_record() -> None:
     """
     ledger = _ledger()
     numbers = {
-        name: ledger.apply_entity(EntityInput(name=name, entity_type=entity_type), el=name)
+        name: EntityNameRef(name=name, entity_type=entity_type)
         for name, entity_type in (("甲", "character"), ("乙", "character"), ("丙", "location"))
     }
     with pytest.raises(AnnotationStageRejection) as excinfo:
@@ -99,86 +76,50 @@ def test_relation_endpoint_type_rejection_points_at_the_single_record() -> None:
 
 
 def test_event_participant_rejections_are_per_record_and_localized() -> None:
-    """原 test_event_participant_errors_collected_with_indexes：未登记参与者必须逐条可定位
-
-    2026-09-13 变化：旧合同在一棵 WriteEventInput 组装时收集 participants.0/1 两条
-    未登记错误；新合同参与者随 write_event 逐条调用提交（2026-09-14 characters
-    数组并入 apply_event），未登记引用在写入点即拒绝，
-    record=树/节点/参与者键（entityid 原值）。等价意图=每个非法参与者都有自己的错误，
-    且失败条目不产生半棵脏树（根事件保留、未登记参与者不落进事件树）。
-    """
     ledger = _ledger()
     ledger.apply_event(
-        el="t1",
-        isroot=True,
-        description="甲乙交战",
+        el="t1", title="甲乙交战", problem="明确事件问题", summary="甲乙交战", event_type="行动", status="ongoing"
     )
-
-    unknown_ids = ("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002")
-    records: list[str] = []
-    for entity_id in unknown_ids:
-        with pytest.raises(AnnotationStageRejection) as excinfo:
+    for name in ("甲", "乙"):
+        with pytest.raises(AnnotationStageRejection) as error:
             ledger.apply_event(
                 el="t1",
-                isroot=True,
-                description="甲乙交战",
-                characters=[
-                    ParticipantArg(
-                        entityid=entity_id,
-                        role="主体",
-                        narrative_role="主体",
-                        action="出手救人",
-                        emotion=2,
-                    )
-                ],
+                characters=[ParticipantArg(name=name, entity_type="character", role="地点")],
+                title="甲乙交战",
+                problem="明确事件问题",
+                summary="甲乙交战",
+                event_type="行动",
+                status="ongoing",
             )
-        records.append(excinfo.value.record or "")
-        assert excinfo.value.field == "entityid"
-        assert excinfo.value.code == "unknown_entity_id"
-        assert entity_id in str(excinfo.value)
-    assert records == [
-        f"t1/root/participant/{unknown_ids[0]}",
-        f"t1/root/participant/{unknown_ids[1]}",
-    ]
+        assert error.value.record == f"t1/root/participant/{name}"
+        assert error.value.field == "role"
+        assert error.value.code == "role_type_mismatch"
     assert ledger.bound_payloads["events"][0].participants == []
-    assert ledger.observation_by_record == {}
 
 
 def test_dialogue_speaker_rejection_points_at_the_single_record() -> None:
-    """原 test_dialogue_speaker_error_collected_with_index：未登记说话人必须被拒绝并指向该记录
-
-    2026-09-19 id 纪律：说话人是 EntityRef（run 级 uuid id 或 el 键）；未登记 uuid
-    在写入点结构化拒绝（record=dialogue/<序号>、field=speaker、code=unknown_entity_id）。
-    等价意图=错误定位到唯一可修记录，修正该条后按同序号重交即可，失败条目不产生落账记录。
-    """
     ledger = AnnotationToolLedger(
         run_scope="r",
         current_chapter_id=1,
-        current_chapter_text='他说："今日且走，来日方长。"',
+        current_chapter_text='他说："今日且走。"',
         allow_future_context=False,
         graph=FactGraph(),
     )
-    unknown_id = "00000000-0000-0000-0000-000000000099"
-    with pytest.raises(AnnotationStageRejection) as excinfo:
+    with pytest.raises(AnnotationStageRejection) as error:
         ledger.apply_dialogue(
             candidate_index=1,
             verdict=DialogueVerdict.DIALOGUE,
-            speaker_ref=unknown_id,
+            speaker_ref=EntityNameRef(name="山门", entity_type="location"),
             tone=Tone.CALM,
         )
-
-    rejection = excinfo.value
-    assert rejection.record == "dialogue/1"
-    assert rejection.field == "speaker"
-    assert rejection.code == "unknown_entity_id"
+    assert error.value.record == "dialogue/1"
+    assert error.value.field == "speaker"
+    assert error.value.code == "not_character"
     assert ledger.written_dialogues == {}
-
-    # 修正路径：同一候选序号用已登记 id 重交即写入（失败不封锁该记录的修复）
-    number = ledger.apply_entity(EntityInput(name="甲", entity_type="character"), el="甲")
     ledger.apply_dialogue(
         candidate_index=1,
         verdict=DialogueVerdict.DIALOGUE,
-        speaker_ref=number,
+        speaker_ref=EntityNameRef(name="甲", entity_type="character"),
         tone=Tone.CALM,
     )
     assert ledger.written_dialogues[1].speaker == "甲"

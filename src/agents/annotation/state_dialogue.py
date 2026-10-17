@@ -8,10 +8,11 @@ from typing import Any, Protocol
 from pydantic import ValidationError
 
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.inputs import DialogueCandidate, DialogueInput
+from src.fact_graph.inputs import DialogueCandidate, DialogueInput, EntityNameRef
 from src.fact_graph.outputs import BoundDialogue
 from src.fact_graph.vocabulary import DialogueVerdict, Tone
 
+from .entity_refs import ensure_entity_ref
 from .errors import (
     AnnotationStageRejection,
 )
@@ -23,6 +24,7 @@ class DialogueEvidenceStateContext(Protocol):
 
     def _require_writable(self, record: str) -> None: ...
 
+    current_chapter_id: int
     graph: FactGraph | None
 
     def resolve_entity_ref(self, ref: str, *, record: str, field: str) -> str: ...
@@ -44,7 +46,7 @@ class DialogueEvidenceState:
         *,
         candidate_index: int,
         verdict: DialogueVerdict,
-        speaker_ref: str | None,
+        speaker_ref: EntityNameRef | dict[str, Any] | None,
         tone: Tone | None,
     ) -> str:
         """用于按候选序号写入一条对话三态判断（同序号重写按更新语义）"""
@@ -61,15 +63,21 @@ class DialogueEvidenceState:
             )
         speaker_name: str | None = None
         if speaker_ref is not None:
-            speaker_name = ctx.resolve_entity_ref(speaker_ref, record=record, field="speaker")
-            if ctx.graph is not None and ctx.graph.entity_type(speaker_name) != "character":
+            speaker_ref = EntityNameRef.model_validate(speaker_ref)
+            if ctx.graph is None:
+                raise ValueError("说话人解析需要常驻事实图")
+            speaker_key = ensure_entity_ref(
+                ctx.graph, speaker_ref.name, speaker_ref.entity_type, chapter_id=ctx.current_chapter_id
+            )
+            if ctx.graph is not None and ctx.graph.entity_type_by_key(speaker_key) != "character":
                 raise AnnotationStageRejection(
-                    f"说话人必须是 character: {speaker_name}",
+                    f"说话人必须是 character: {ctx.graph.display_name(speaker_key)}",
                     record=record,
                     field="speaker",
                     code="not_character",
-                    expected="character 类型的实体（run 级 id 或 el 键）",
+                    expected="正文名字 + character 大类",
                 )
+            speaker_name = ctx.graph.display_name(speaker_key) if ctx.graph is not None else speaker_key
         try:
             item = DialogueInput(
                 candidate_index=candidate_index,

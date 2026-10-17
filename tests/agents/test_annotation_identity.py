@@ -38,9 +38,12 @@ def test_event_ids_are_stable_for_same_chapter_and_distinct_for_other_chapters_a
             tools["write_event"].invoke(
                 {
                     "el": "t1",
-                    "isroot": True,
-                    "description": "甲出发",
                     "evidence": 1,
+                    "title": "甲出发",
+                    "problem": "明确事件问题",
+                    "summary": "甲出发",
+                    "event_type": "行动",
+                    "status": "ongoing",
                 }
             )
         )

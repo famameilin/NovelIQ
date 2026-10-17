@@ -4,10 +4,8 @@
 
 - 三个 subagent 各持整章正文、各管一类产出、**互不通信**：结构 subagent 交 entity/relation，
   事件 subagent 交 event/participants，证据 subagent 交 dialogue/label/metric/pending；
-- 引用一律**按 id**：实体由模型分配本 subagent 引用键（如 a1/a2…，name 只作展示字段），
-  relation/participants/dialogue/pending 都写该 id；事件用 el 层级路径（根 t1、子 t1/e2）
-  表达树形与先后，对话用候选号，标签用段首可见号——id 是本 subagent 局部的引用键，
-  构造器把它命名空间化成落库 el（见 namespace_el）后立即写入，不再按名字会合；
+- 实体引用写正文名字与大类，由运行时解析并自动登记，不再写 id；
+  entity 的局部键仅绑定富登记锚点；事件仍用 el 路径，对话仍用候选号
 - 每条记录自带 evidence=段首可见号（正文每段开头的 `N：` 里的 N），构造当场只校验
   "号在本章且存在"（多号/越界结构化拒绝并列出合法号范围），不再逐字比对引文；
 - 闭集词表一律从 schema.py / tools.py 单源引用，本模块不复制任何词表。
@@ -26,6 +24,7 @@ from src.event_trees.vocabulary import (
     EventChildType,
     EventParticipantRole,
 )
+from src.fact_graph.inputs import EntityNameRef
 from src.fact_graph.vocabulary import (
     RELATION_DEFINITIONS,
     Confidence,
@@ -138,14 +137,14 @@ def _evidence_view(evidence: tuple[SubagentEvidence, ...]) -> list[dict[str, Any
 
 @dataclass(slots=True)
 class SubagentEntity:
-    """结构 subagent 登记的一个实体（id=本 subagent 引用键，name 只作展示字段）"""
+    """结构 subagent 登记的一个实体（id=富登记锚点键，name=正文名字）"""
 
     id: str
     name: str
     entity_type: str
     tags: list[str] = field(default_factory=list)
     description: str | None = None
-    attributes: dict[str, Any] | None = None
+    representative: bool | None = None
     evidence: tuple[SubagentEvidence, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -156,29 +155,29 @@ class SubagentEntity:
             "entity_type": self.entity_type,
             "tags": list(self.tags),
             "description": self.description,
-            "attributes": self.attributes,
+            "representative": self.representative,
             "evidence": _evidence_view(self.evidence),
         }
 
 
 @dataclass(slots=True)
 class SubagentRelation:
-    """结构 subagent 写的一条闭合关系边（两端写本 subagent 已登记的实体 id）
+    """结构 subagent 写的一条闭合关系边（两端写正文名字与大类）
 
     2026-10-02 对齐 0.2.0 写面：本章只确认局部关系（建边），不再携带 change_kind
     关系变化——跨章关系变化由 write_link 关联工具承担。
     """
 
-    from_id: str
-    to_id: str
+    from_entity: EntityNameRef
+    to_entity: EntityNameRef
     relation_type: str
     evidence: tuple[SubagentEvidence, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """用于渲染记录明细"""
         return {
-            "from_id": self.from_id,
-            "to_id": self.to_id,
+            "from_entity": self.from_entity.model_dump(mode="json"),
+            "to_entity": self.to_entity.model_dump(mode="json"),
             "relation_type": self.relation_type,
             "evidence": _evidence_view(self.evidence),
         }
@@ -186,13 +185,14 @@ class SubagentRelation:
 
 @dataclass(slots=True)
 class SubagentParticipant:
-    """事件 subagent 挂到一个事件节点上的参与者（entity_id 写本 subagent 已登记的实体 id）
+    """事件 subagent 挂到一个事件节点上的参与者（名字与大类由运行时自动登记）
 
     2026-10-04 合同放开：role/narrative_role/action/emotion 均可缺省——role 未知词与
     缺省由生产面按实体登记大类给默认，叙事功能近义词归一、情绪分值钳制在构造层完成。
     """
 
-    entity_id: str
+    name: str
+    entity_type: str
     role: str | None = None
     narrative_role: str | None = None
     action: str | None = None
@@ -201,7 +201,8 @@ class SubagentParticipant:
     def to_dict(self) -> dict[str, Any]:
         """用于渲染记录明细"""
         return {
-            "entity_id": self.entity_id,
+            "name": self.name,
+            "entity_type": self.entity_type,
             "role": self.role,
             "narrative_role": self.narrative_role,
             "action": self.action,
@@ -216,6 +217,12 @@ class SubagentEvent:
     el: str
     isroot: bool
     description: str
+    title: str
+    problem: str
+    summary: str
+    event_type: str
+    status: str
+    progress: str | None = None
     isforeshadowing: bool = False
     confidence: str | None = None
     node_type: str | None = None
@@ -228,6 +235,12 @@ class SubagentEvent:
             "el": self.el,
             "isroot": self.isroot,
             "description": self.description,
+            "title": self.title,
+            "problem": self.problem,
+            "summary": self.summary,
+            "event_type": self.event_type,
+            "status": self.status,
+            "progress": self.progress,
             "isforeshadowing": self.isforeshadowing,
             "confidence": self.confidence,
             "type": self.node_type,
@@ -238,11 +251,11 @@ class SubagentEvent:
 
 @dataclass(slots=True)
 class SubagentDialogue:
-    """证据 subagent 对一条对话候选的判定（说话人写本 subagent 已登记的实体 id）"""
+    """证据 subagent 对一条对话候选的判定（说话人写正文名字与 character 大类）"""
 
     candidate_index: int
     verdict: str
-    speaker_id: str | None = None
+    speaker: EntityNameRef | None = None
     tone: str | None = None
     evidence: tuple[SubagentEvidence, ...] = ()
 
@@ -251,7 +264,7 @@ class SubagentDialogue:
         return {
             "candidate_index": self.candidate_index,
             "verdict": self.verdict,
-            "speaker_id": self.speaker_id,
+            "speaker": self.speaker.model_dump(mode="json") if self.speaker else None,
             "tone": self.tone,
             "evidence": _evidence_view(self.evidence),
         }
@@ -292,12 +305,13 @@ class SubagentMetric:
 
 @dataclass(slots=True)
 class SubagentPending:
-    """局部待决记录只有普通文字说明"""
+    """局部待决记录：显式归入案例类型 + 普通文字说明"""
 
+    case_type: str
     description: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {"description": self.description}
+        return {"case_type": self.case_type, "description": self.description}
 
 
 @dataclass(slots=True)
@@ -317,7 +331,7 @@ class SubagentAnnotation:
     labels: list[SubagentLabel] = field(default_factory=list)
     metric: SubagentMetric | None = None
     pending: list[SubagentPending] = field(default_factory=list)
-    progressions: list[dict[str, Any]] = field(default_factory=list)
+    plotlines: list[dict[str, Any]] = field(default_factory=list)
     foreshadow_actions: list[dict[str, Any]] = field(default_factory=list)
     coverage: tuple[int, ...] = ()
     finished: bool = False
@@ -340,7 +354,7 @@ class SubagentAnnotation:
             "labels": len(self.labels),
             "metrics": 1 if self.metric is not None else 0,
             "pending": len(self.pending),
-            "progressions": len(self.progressions),
+            "plotlines": len(self.plotlines),
             "foreshadow_actions": len(self.foreshadow_actions),
         }
 
@@ -357,6 +371,6 @@ class SubagentAnnotation:
             "labels": [item.to_dict() for item in self.labels],
             "metric": self.metric.to_dict() if self.metric is not None else None,
             "pending": [item.to_dict() for item in self.pending],
-            "progressions": list(self.progressions),
+            "plotlines": list(self.plotlines),
             "foreshadow_actions": list(self.foreshadow_actions),
         }
