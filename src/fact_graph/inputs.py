@@ -14,7 +14,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from pydantic import Field, JsonValue, model_validator
+from pydantic import Field, model_validator
 
 from .schema import (
     CLIFFHANGER_DESCRIPTION,
@@ -53,9 +53,9 @@ class EntityInput(StrictModel):
         default=None,
         description="实体一句话简介（已登记实体不要重复提交）",
     )
-    attributes: dict[str, JsonValue | None] | None = Field(
+    representative: bool | None = Field(
         default=None,
-        description="JSON Merge Patch：普通值表示设置该属性，null 表示删除该属性；已登记实体只提交本次变化的字段",
+        description="规范名代表标记：True=标记为同名身份的规范名，False=清除该标记，省略=保留现值",
     )
 
     @model_validator(mode="after")
@@ -77,14 +77,27 @@ class EntityInput(StrictModel):
                 self.description,
                 label="entity.description",
             )
-        normalized_attributes: dict[str, JsonValue | None] = {}
-        for key, value in (self.attributes or {}).items():
-            cleaned = unicodedata.normalize("NFC", key).strip()
-            if not cleaned:
-                raise ValueError("entity.attributes 键不能为空")
-            normalized_attributes[cleaned] = value
-        self.attributes = normalized_attributes
         return self
+
+
+class EntityNameRef(StrictModel):
+    """实体引用写正文名字与大类，运行时解析并自动登记；不接受 id"""
+
+    name: str = Field(min_length=1, description="正文中的名字或稳定专指称谓")
+    entity_type: EntityType = Field(description="实体大类：character/item/location/organization")
+
+    @model_validator(mode="after")
+    def normalize_name(self) -> EntityNameRef:
+        self.name = normalize_semantic_text(self.name, label="entity_ref.name")
+        return self
+
+
+class RelationInput(StrictModel):
+    """以正文名字与大类提交关系，两端由运行时解析并自动登记"""
+
+    from_entity: EntityNameRef
+    to_entity: EntityNameRef
+    relation_type: RelationType = Field(description=relation_catalog_text())
 
 
 class EntityDirectoryInput(StrictModel):
@@ -236,7 +249,7 @@ class ChapterParagraphInfo:
         return dict(zip(self.visible_ids(), self.texts, strict=True))
 
 
-class RelationInput(StrictModel):
+class BoundRelationInput(StrictModel):
     """2026-08-12 用于通过实体名称提交本章确认存在的闭合类型关系边（内部系统形态）"""
 
     from_entity: str = Field(min_length=1, description="关系起点实体（图上的登记名称）")
@@ -244,7 +257,7 @@ class RelationInput(StrictModel):
     relation_type: RelationType = Field(description="闭合关系类型，方向与端点约束如下：\n" + relation_catalog_text())
 
     @model_validator(mode="after")
-    def normalize_relation(self) -> RelationInput:
+    def normalize_relation(self) -> BoundRelationInput:
         """2026-08-11 用于规范化关系两端实体名称"""
         self.from_entity = normalize_semantic_text(
             self.from_entity,
