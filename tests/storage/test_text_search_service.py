@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.agents.annotation.errors import AnnotationDependencyError
 from src.agents.annotation.text_search import TextSearchService, extract_query_terms
 from src.embedding import format_query_instruct
 from src.storage.repositories.paragraph.embedding_ops import SimilarParagraphRow
@@ -77,6 +78,17 @@ async def test_search_with_empty_query_returns_empty() -> None:
     """2026-08-12 用于验证空白查询直接返回空结果"""
     service = TextSearchService(MagicMock(), run_id="run-1")
     assert await service.search("   ") == []
+
+
+@pytest.mark.asyncio
+async def test_enabled_semantic_search_requires_embedding_dependency() -> None:
+    """启用语义检索却缺少客户端时明确失败，不能静默退化成关键词结果"""
+    service = TextSearchService(MagicMock(), run_id="run-1", semantic_enabled=True)
+    with (
+        patch("src.agents.annotation.text_search.search_paragraphs_by_keywords", return_value=[]),
+        pytest.raises(AnnotationDependencyError, match="EmbeddingClient 未配置"),
+    ):
+        await service.search("顾霜")
 
 
 @pytest.mark.asyncio

@@ -1,60 +1,64 @@
 """
-章节表 ORM 模型
+章节与正文表 ORM 模型（2026-10-16 全库 3NF 改造）
 
-存储解析出的完整章节目录（含部/卷/番外等层级与空正文条目）。
-
-2026-08-14 M9a-2：chunks 表合并进本表——text/char_offset/char_end_offset
-为正文切片列（trimmed 边界，段落 global 坐标的基准）；"chunk" 概念自此
-只存在于 agent 运行时（章节正文运行时切子块，负 ID 不落库）。
+chapters 保留完整章节身份与章节原始区域（含标题/间隔语义的 start_pos/end_pos），
+正文切片与全文起点为同一章节身份的一对一属性并在本表合并：text 与 char_offset
+同空或同有（空正文章节无正文）；正文终点由 char_offset + 字符长度投影，char_end_offset
+不落列。
 """
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text
-from sqlalchemy import text as sql_text
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy import (
+    text as sql_text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
 
+# 注：sql_text 为 sqlalchemy.text 的别名——本模块存在 Chapter.text 列属性，
+# __table_args__ 直接引用 text 会解析到列对象而非函数（与既有段落表同口径）
+
 
 class Chapter(Base):
-    """章节表：章节结构解析的持久化结果"""
+    """章节表：章节结构解析的持久化结果（目录与正文同键一对一，空正文无切片）"""
 
     __tablename__ = "chapters"
     __table_args__ = (
+        UniqueConstraint("run_id", "sequence", name="uq_chapters_run_sequence"),
+        CheckConstraint("(text IS NULL) = (char_offset IS NULL)", name="ck_chapters_text_offset_pair"),
+        ForeignKeyConstraint(["run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="chapters_run_fkey"),
         Index("idx_chapters_run_id", "run_id"),
-        # 正文检索：keyword 检索与段落边界查询按 trimmed 正文切片定位
+        # 原文检索按 lower(text) LIKE '%kw%' 定位，索引必须建在同一表达式上
         Index(
-            "idx_chapters_run_text_trgm",
+            "idx_chapters_text_trgm",
             sql_text("lower(text) gin_trgm_ops"),
             postgresql_using="gin",
         ),
-        {"comment": "章节表：章节结构解析结果，含部/卷/番外层级与空正文条目；正文切片列承接原 chunks 表"},
+        {"comment": "章节表：章节结构解析结果（目录+正文同键一对一），含部/卷/番外层级与空正文条目"},
     )
 
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
     chapter_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="章节编号（run 内）")
-    sequence: Mapped[int] = mapped_column(Integer, nullable=False, comment="全书顺序号")
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, comment="全书顺序号（run 内唯一）")
     title: Mapped[str] = mapped_column(Text, nullable=False, comment="解析标题")
-    display_title: Mapped[str] = mapped_column(Text, nullable=False, comment="前端展示标题")
+    display_title: Mapped[str] = mapped_column(Text, nullable=False, comment="前端展示标题（解析器实际结果）")
     display_index_label: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="展示用层级编号标签")
     level: Mapped[str] = mapped_column(String(20), nullable=False, comment="章节层级类型")
-    start_pos: Mapped[int] = mapped_column(Integer, nullable=False, comment="全文起始字符位置")
-    end_pos: Mapped[int] = mapped_column(Integer, nullable=False, comment="全文结束字符位置")
-    # ---- 2026-08-14 M9a-2：正文切片列（原 chunks 表列，空正文章节为 NULL）----
-    text: Mapped[str | None] = mapped_column(
-        Text, nullable=True,
-        comment="正文切片文本（trimmed 边界；空正文章节为 NULL）",
-    )
+    start_pos: Mapped[int] = mapped_column(Integer, nullable=False, comment="章节原始区域全文起始字符位置")
+    end_pos: Mapped[int] = mapped_column(Integer, nullable=False, comment="章节原始区域全文结束字符位置")
+    text: Mapped[str | None] = mapped_column(Text, nullable=True, comment="正文切片文本（trimmed 边界；空正文 NULL）")
     char_offset: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, comment="正文切片起始全局字符偏移（段落 global 坐标基准）"
-    )
-    char_end_offset: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="正文切片结束全局字符偏移")
-    run_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
-        nullable=False,
-        primary_key=True,
-        comment="所属分析运行",
+        Integer, nullable=True, comment="正文切片起始全局字符偏移（空正文 NULL）"
     )
 
     def __repr__(self) -> str:
