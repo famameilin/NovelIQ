@@ -4,7 +4,6 @@ from collections.abc import Mapping, Sequence
 
 from src.diagnosis.schema import AgentAnalysis
 from src.storage.models import Novel
-from src.storage.repositories import StatsRepository
 
 
 def insert_graph_test_novel(db_session, novel_id: str) -> None:
@@ -53,27 +52,57 @@ def insert_focus_contract_agent_analysis(
     main_characters: Sequence[str] | None = None,
     core_cast: Sequence[str] | None = None,
     topic_labels: Mapping[str, str] | None = None,
-) -> None:
+    diagnosis: str = "测试用焦点合同 diagnosis",
+) -> str:
     """
-    插入一条最小合法的诊断产物记录，满足 graph/timeline 相关测试的焦点合同 gate
+    用正式诊断发布链写入一条最小合法诊断报告（焦点合同与"诊断存在"事实的数据源）
+
+    名单与评分引用的角色必须先有本 run 的正式 character 实体，否则发布链拒绝；
+    返回正式报告 report_id。
     """
+    from uuid import uuid4
+
+    from src.agents.diagnosis.persistence import save_diagnosis_report
+    from src.event_trees.organization import register_diagnosis_session
+    from tests.support.event_tree_fixtures import ensure_character
+
     focus_names = list(focus_characters)
     main_names = list(main_characters or focus_names)
     core_names = list(core_cast or main_names)
     arc_names = list(dict.fromkeys([*focus_names, *main_names, *core_names]))
     arc_scores = {name: float(9 - index * 0.5) for index, name in enumerate(arc_names)}
 
+    for name in arc_names:
+        ensure_character(db_session, run_id=run_id, name=name)
+
     analysis = AgentAnalysis(
         novel_id=novel_id,
-        foreshadow_expectation=0.42,
         arc_scores=arc_scores,
         genre_labels=["通用"],
         style_labels=["严肃"],
         topic_labels=dict(topic_labels or {"0": "关系命运"}),
-        diagnosis="测试用焦点合同 diagnosis",
+        diagnosis=diagnosis,
         focus_structure="single" if len(focus_names) == 1 else "dual" if len(focus_names) == 2 else "ensemble",
         focus_characters=focus_names,
         main_characters=main_names,
         core_cast=core_names,
     )
-    StatsRepository(db_session).insert_agent_analysis(run_id, analysis.model_dump())
+    session_id = f"diag-session-{uuid4().hex[:12]}"
+    register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
+    report_id = save_diagnosis_report(db_session, run_id, session_id, analysis)
+    db_session.commit()
+    return report_id
+
+
+def insert_partial_diagnosis(db_session, *, run_id: str, diagnosis: str) -> str:
+    """用正式发布链写入只有正文的诊断报告（标签/名单/评分缺失的真实部分结果）"""
+    from uuid import uuid4
+
+    from src.agents.diagnosis.persistence import save_diagnosis_report
+    from src.event_trees.organization import register_diagnosis_session
+
+    session_id = f"diag-session-{uuid4().hex[:12]}"
+    register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
+    report_id = save_diagnosis_report(db_session, run_id, session_id, AgentAnalysis(diagnosis=diagnosis))
+    db_session.commit()
+    return report_id

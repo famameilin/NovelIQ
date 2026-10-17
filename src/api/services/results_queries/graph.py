@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
 from src.fact_graph.read import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
 from src.fact_graph.read.alias import build_alias_resolution
+from src.fact_graph.read.references import EntityReferenceProjection, relation_projection_key
 from src.metrics.aggregate.algorithms import (
     GRAPH_METRICS_VERSION,
     InsufficientGraphNodesError,
@@ -158,13 +159,17 @@ def _fetch_graph_snapshot(
     if snapshot is None:
         raise LookupError("当前 run 尚无匹配的章节图版本")
     boundary = snapshot.chapter_boundary
-    resolution = build_alias_resolution(snapshot.relations, entities=snapshot.entities)
+    resolution = build_alias_resolution(
+        GraphRepository(annotation_repo.session).fetch_relation_snapshots(boundary, active_only=False),
+        entities=snapshot.entities,
+    )
+    projection = EntityReferenceProjection({row.entity_id: row for row in snapshot.entities}, resolution)
     nodes = [
         {
             "entity_id": entity.entity_id,
             "name": entity.name,
             "entity_type": entity.entity_type,
-            "tags": entity.tags,
+            "tags": projection.tags(entity.entity_id),
             "aliases": resolution.aliases_by_representative.get(entity.entity_id, []),
             "first_seen_chapter": entity.first_seen_chapter,
             "last_seen_chapter": entity.last_seen_chapter,
@@ -175,13 +180,28 @@ def _fetch_graph_snapshot(
         if entity.entity_id not in resolution.representative_by_alias
     ]
     edges: list[dict[str, Any]] = []
+    by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
     for relation in snapshot.relations:
         if relation.relation_semantics == "same_character":
             continue
         from_entity_id = resolution.resolve_entity_id(relation.from_entity_id)
         to_entity_id = resolution.resolve_entity_id(relation.to_entity_id)
-        # 别名归并（含 P11 启发式）后两端落到同一代表时丢弃自环
+        from_name = resolution.resolve_entity_name(relation.from_entity_id, relation.from_name)
+        to_name = resolution.resolve_entity_name(relation.to_entity_id, relation.to_name)
+        # 正式身份归并后两端落到同一代表时丢弃自环
         if from_entity_id is not None and from_entity_id == to_entity_id:
+            continue
+        key = relation_projection_key(
+            from_entity_id or "", to_entity_id or "", relation.relation_type, relation.directionality
+        )
+        duplicate = by_key.get(key)
+        if duplicate is not None:
+            duplicate["changes"].extend(relation.changes)
+            attributes = dict(duplicate["attributes"])
+            attributes["support_count"] = int(attributes.get("support_count", 1)) + int(
+                relation.attributes.get("support_count", 1)
+            )
+            duplicate["attributes"] = attributes
             continue
         edges.append(
             {
@@ -189,16 +209,17 @@ def _fetch_graph_snapshot(
                 "state_chapter_id": relation.chapter_id,
                 "source_entity_id": from_entity_id,
                 "target_entity_id": to_entity_id,
-                "source_name": resolution.resolve_name(relation.from_name),
-                "target_name": resolution.resolve_name(relation.to_name),
+                "source_name": from_name,
+                "target_name": to_name,
                 "relation_type": relation.relation_type,
                 "directionality": relation.directionality,
                 "relation_semantics": relation.relation_semantics,
                 "attributes": relation.attributes,
                 "is_active": relation.is_active,
-                "changes": relation.changes,
+                "changes": list(relation.changes),
             }
         )
+        by_key[key] = edges[-1]
     return {
         "chapter_id": boundary.chapter_id,
         "chapter_order": boundary.chapter_order,
