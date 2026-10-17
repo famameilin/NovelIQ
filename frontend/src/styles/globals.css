@@ -48,6 +48,8 @@
 
     --background: 234 25% 97%;
     --surface: 234 20% 99%;
+    --event-card-body: 234 10% 19%;
+    --event-card-body-text: 234 8% 94%;
     --surface-hover: 234 25% 95%;
     --border: 234 20% 88%;
     --border-subtle: 234 15% 93%;
@@ -62,6 +64,9 @@
     --chart-3: 194 79% 55%;
     --chart-4: 314 74% 55%;
     --chart-5: 154 74% 55%;
+    --chart-6: 354 74% 55%;
+    --chart-7: 114 74% 55%;
+    --chart-8: 54 74% 55%;
     --chart-positive: 145 55% 48%;
     --chart-negative: 0 65% 55%;
     --chart-neutral: 234 10% 60%;
@@ -77,6 +82,8 @@
 
     --background: 234 20% 7%;
     --surface: 234 18% 11%;
+    --event-card-body: 234 12% 15%;
+    --event-card-body-text: 234 8% 94%;
     --surface-hover: 234 20% 15%;
     --border: 234 18% 20%;
     --border-subtle: 234 15% 15%;
