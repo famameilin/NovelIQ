@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
-
 from src.fact_graph.read import KnowledgeGraphAuthorityService
-from src.storage.models import GraphRelation
+from src.storage.repositories import GraphRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
+    commit_test_annotation,
     create_run_with_chunks,
     identity_relation_output,
     persist_chapter_annotation,
@@ -24,7 +23,6 @@ def _persist_authority_chapter(
     chapter_id: int,
     characters: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
-    continuity_resolutions: list[Any] | None = None,
 ) -> None:
     """2026-08-19 用于为 authority 视图写入章节图数据"""
     persist_chapter_annotation(
@@ -33,8 +31,56 @@ def _persist_authority_chapter(
         chapter_id=chapter_id,
         characters=characters,
         relations=relations,
-        continuity_resolutions=continuity_resolutions,
     )
+
+
+def _retract_relation(
+    session,
+    *,
+    run_id: str,
+    chapter_id: int,
+    from_name: str,
+    to_name: str,
+    relation_type: str,
+    reason: str,
+) -> None:
+    """2026-10-16 3NF：关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
+    from src.agents.annotation.output_models import BoundChapterAnnotation
+    from src.fact_graph.inputs import ChapterMetricsInput
+
+    commit_test_annotation(
+        session,
+        run_id=run_id,
+        chapter_id=chapter_id,
+        annotation=BoundChapterAnnotation(
+            metrics=ChapterMetricsInput(summary="关系变化", emotional_valence=0, narrative_function="转折"),
+            character_observations=[],
+            dialogues=[],
+            events=[],
+        ),
+        relation_assert_ops=[
+            {
+                "from_entity": from_name,
+                "to_entity": to_name,
+                "relation_type": relation_type,
+                "chapter_id": chapter_id,
+                "change_kind": "retract",
+                "reason": reason,
+            }
+        ],
+    )
+
+
+def _relation_id(session, run_id: str, from_name: str, to_name: str, relation_type: str) -> str:
+    """按正式关系读面定位唯一关系身份（关系行的 run 从端点实体取得）"""
+    rows = [
+        row
+        for row in GraphRepository(session).fetch_latest_relations(run_id, active_only=False)
+        if row.relation_type == relation_type and {str(row.from_name), str(row.to_name)} == {from_name, to_name}
+    ]
+    if len(rows) != 1:
+        raise ValueError(f"测试夹具未唯一定位关系: {from_name}/{to_name}/{relation_type}")
+    return str(rows[0].relation_id)
 
 
 def test_authority_views_project_chapter_history_and_graph_changes(db_session) -> None:
@@ -110,22 +156,15 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
         ],
     )
     db_session.commit()
-    relation_id = db_session.execute(
-        select(GraphRelation.relation_id).where(GraphRelation.run_id == run_id)
-    ).scalar_one()
-    _persist_authority_chapter(
+    relation_id = _relation_id(db_session, run_id, "林渡", "顾霜", "盟友")
+    _retract_relation(
         db_session,
         run_id=run_id,
         chapter_id=2,
-        continuity_resolutions=[
-            {
-                "reason": "分道扬镳",
-                "from_entity": "林渡",
-                "to_entity": "顾霜",
-                "relation_type": "盟友",
-                "change_kind": "break",
-            }
-        ],
+        from_name="林渡",
+        to_name="顾霜",
+        relation_type="盟友",
+        reason="分道扬镳",
     )
     db_session.commit()
 
@@ -138,7 +177,7 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
         (2, relation_id),
         (1, relation_id),
     ]
-    assert relation_changes[0].changes[0]["change_kind"] == "break"
+    assert relation_changes[0].changes[0]["change_kind"] == "retract"
     assert [(row.relation_id, row.is_active) for row in export_view.current_relations] == [(relation_id, False)]
 
 
