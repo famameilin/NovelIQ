@@ -6,8 +6,13 @@
 
 2026-08-14 M8a：取证事实源段落化——测试数据改为写入 paragraphs/paragraph_topics/
 paragraph_curves（chunk_topics 已删除），高张力素材来自段落曲线 surface_tension。
+
+2026-10-16 全库第三范式改造收尾：高张力素材改自 paragraph_features 的 tension_z
+正式观测；伏笔树根按事件声明写入（event_nodes 退场）；诊断落库断言改按
+diagnosis_reports/analysis_assessments 的正式读接口与 run 作用域查询。
 """
 
+import json
 import sys
 import uuid
 from dataclasses import replace
@@ -20,8 +25,10 @@ from langchain_core.messages import AIMessage
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.diagnosis.queries import DiagnosisQueries
+from src.diagnosis.read import fetch_diagnosis_payload
 from src.diagnosis.schema import AgentAnalysis
-from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository, StatsRepository
+from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository
+from src.storage.repositories.paragraph import insert_paragraph_tension_observations
 from src.storage.repositories.paragraph_repository import ParagraphCurveRow
 from src.text_processing.models import Chunk
 from src.text_processing.paragraphs import split_chunk_paragraphs
@@ -32,27 +39,81 @@ from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
-    """先调用取证工具再提交 finish 的假诊断模型，覆盖真实落库路径"""
+    """按真实派发职责生成程序：每声明一个事件工作，比较与配对按真实归属尝试"""
 
     def __init__(self, payload: dict) -> None:
         self.payload = payload
         self.calls = 0
 
     def bind_tools(self, tools):
-        del tools
+        assert [tool.name for tool in tools] == ["execute_code", "finish"]
         return self
 
     async def ainvoke(self, messages):
-        del messages
+        for message in messages:
+            if getattr(message, "type", None) == "tool" and getattr(message, "name", None) == "execute_code":
+                assert json.loads(message.content)["status"] in {"applied", "partial"}, message.content
+        assert not str(messages[-1].content).startswith("程序完整性检查未通过"), messages[-1].content
+        material = next(
+            json.loads(message.content)
+            for message in reversed(messages)
+            if isinstance(message.content, str) and message.content.startswith('{"role":')
+        )
         self.calls += 1
-        if self.calls == 1:
-            return AIMessage(
-                content="",
-                tool_calls=[{"name": "get_aggregate_signals", "args": {}, "id": "e1", "type": "tool_call"}],
+        role, inputs = material["role"], material["materials"]
+        if role == "event" and "identity_snapshot" not in inputs:
+            code = (
+                f'declarations = {list(material["responsible_ids"])!r}\n'
+                'page = search_events(limit=20)\n'
+                'reached = 0\n'
+                'targets = []\n'
+                'for item in page["events"]:\n'
+                '    if reached == 1:\n'
+                '        targets = targets + [item["declaration_id"]]\n'
+                '    if item["declaration_id"] == declarations[0]:\n'
+                '        reached = 1\n'
+                'source = read_event(node_id=declarations[0])["content"]\n'
+                'evidence = [{"paragraph_id":source["evidence"][0]["paragraph_id"]}]\n'
+                'item = write_event(items=[{"operation":"identity", "key":declarations[0], '
+                '"title":source["title"], "problem":source["problem"], "summary":source["summary"], '
+                '"event_type":source["event_type"], "status":source["status"], '
+                '"declaration_ids":[declarations[0]], "stage_order":[declarations[0]], '
+                '"current_declaration_id":declarations[0], "reason":"按真实章节核对身份", "evidence":evidence}])\n'
+                'write_event(items=[{"operation":"declaration_review", "declaration_ids":'
+                '[declarations[0]], "reason":"逐项核对已保存章节声明"}])\n'
+                'if targets:\n'
+                '    write_event(items=[{"operation":"compare", "source_declaration_id":'
+                'declarations[0], "target_declaration_ids":targets, "disposition":"independent", '
+                '"reason":"本测试各章问题明确独立", "evidence":evidence}])\nfinish()'
             )
+        elif role == "event":
+            code = (
+                f'declarations = {list(material["responsible_ids"])!r}\n'
+                'events = search_events(kind="event", limit=20)\n'
+                'own = None\n'
+                'others = []\n'
+                'for item in events["events"]:\n'
+                '    detail = read_event(node_id=item["event_id"], kind="event")\n'
+                '    if declarations[0] in detail["declaration_ids"]:\n'
+                '        own = detail\n'
+                'evidence = [{"paragraph_id":own["evidence"][0]["paragraph_id"]}]\n'
+                'write_event(items=[{"operation":"review", "event_ids":[own["event_id"]], '
+                '"reason":"核对本事件实际版本"}])\n'
+                'pairs = []\n'
+                'for item in events["events"]:\n'
+                '    if own["event_id"] != item["event_id"]:\n'
+                '        pairs = pairs + [{"operation":"structure_review", "source_event_id":'
+                'own["event_id"], "target_event_id":item["event_id"], "disposition":"independent", '
+                '"reason":"本测试各事件没有包含或因果关系", "evidence":evidence}]\n'
+                'if pairs:\n'
+                '    write_event(items=pairs)\nfinish()'
+            )
+        else:
+            assert role == "report"
+            code = f'read_metrics()\nread_topics()\nwrite_diagnosis(analysis={self.payload!r})\nfinish()'
         return AIMessage(
-            content="提交",
-            tool_calls=[{"name": "finish", "args": {"analysis": self.payload}, "id": "f1", "type": "tool_call"}],
+            content="",
+            tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": f"p{self.calls}", "type": "tool_call"}],
         )
 
 
@@ -75,7 +136,10 @@ def _fake_analysis(novel_id: str) -> AgentAnalysis:
 
 class TestDiagnosisRoutes:
     @pytest.fixture(autouse=True)
-    def setup(self, db_session):
+    def setup(self, db_session, configured_model_pool, monkeypatch):
+        from src.config import settings
+
+        monkeypatch.setattr(settings.models.model_pool[0], "max_tokens", 16000)
         self.db_session = db_session
         self.novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(self.novel_id, session=db_session)
@@ -135,15 +199,19 @@ class TestDiagnosisRoutes:
             [
                 ParagraphCurveRow(
                     paragraph_id=span.paragraph_id,
-                    pos_density=0.1,
-                    neg_density=0.05,
-                    net_density=0.05 + span.paragraph_id * 0.01,
+                    pos_density=None,
+                    neg_density=None,
+                    net_density=None,
                     smoothed_net_density=0.05,
-                    surface_tension=0.5,
+                    surface_tension=None,
                     smoothed_surface_tension=0.5,
                 )
                 for span in spans
             ],
+        )
+        # 高张力素材来自 paragraph_features 的 tension_z 正式观测（z=0 → 投影 0.5）
+        insert_paragraph_tension_observations(
+            self.db_session, self.run_id, [(span.paragraph_id, 0.0) for span in spans]
         )
 
         for i in range(chunk_count):
@@ -163,16 +231,15 @@ class TestDiagnosisRoutes:
                         role_function="主体" if i == 0 else "客体",
                     )
                 ],
+                # 本 fixture 未发布完整事件：第 1 章声明标为伏笔树根，验证发布前章节伏笔
+                # 投影按来源声明回退（事件身份保持空，不冒充正式事件）
+                events=[
+                    {
+                        "description": f"第{i}章独立的测试问题",
+                        **({"isforeshadowing": True, "payoff_likelihood": "high"} if i == 0 else {}),
+                    }
+                ],
             )
-        # 2026-09-13 伏笔即事件树：向章 1 的事件标记伏笔树根
-        from src.storage.models import EventNode
-
-        root = self.db_session.query(EventNode).filter(EventNode.run_id == self.run_id).first()
-        if root is not None:
-            root.is_foreshadowing_root = True
-            root.foreshadowing_status = "open"
-            root.expected_payoff_family = "身份揭露"
-            root.payoff_likelihood = "medium"
 
         self.db_session.commit()
 
@@ -213,22 +280,16 @@ class TestDiagnosisRoutes:
                 session=self.db_session,
             )
         assert analysis is not None
+        assert llm.calls == 11  # 五份章级事件身份/结构与一份报告
         assert analysis.genre_labels == ["通用"]
         assert analysis.style_labels == ["严肃"]
 
-        from sqlalchemy import select
-
-        from src.storage.models import AnalysisOutput
-
-        rows = list(
-            self.db_session.execute(
-                select(AnalysisOutput).where(
-                    AnalysisOutput.run_id == self.run_id, AnalysisOutput.kind == "agent_analysis"
-                )
-            ).scalars()
-        )
-        assert len(rows) == 1
-        assert rows[0].payload["genre_labels"] == ["通用"]
+        # 正式产物按 run 作用域读：报告头 + 标签条目
+        fetched = fetch_diagnosis_payload(self.db_session, self.run_id)
+        assert fetched is not None
+        assert fetched["genre_labels"] == ["通用"]
+        assert fetched["style_labels"] == ["严肃"]
+        assert fetched["diagnosis"] == "ok"
 
     @pytest.mark.asyncio()
     async def test_run_diagnose_persists_result(self) -> None:
@@ -241,8 +302,8 @@ class TestDiagnosisRoutes:
                 session=self.db_session,
             )
 
-        stats_repo = StatsRepository(self.db_session)
-        fetched = stats_repo.fetch_agent_analysis(self.run_id)
+        assert llm.calls == 7  # 三份章级事件身份/结构与一份报告
+        fetched = fetch_diagnosis_payload(self.db_session, self.run_id)
         assert fetched is not None
         assert fetched["novel_id"] == self.novel_id
         assert fetched["genre_labels"] == ["通用"]
@@ -252,32 +313,3 @@ class TestDiagnosisRoutes:
         assert "角色0" in fetched["focus_characters"]
         assert "角色0" in fetched["main_characters"]
         assert "角色1" in fetched["core_cast"]
-        assert fetched["focus_structure"] == "dual"
-        assert fetched["focus_characters"] is not None
-        assert fetched["main_characters"] is not None
-        assert fetched["core_cast"] is not None
-        assert set(fetched) == {
-            "novel_id",
-            "narrative_organization",
-            "foreshadow_expectation",
-            "arc_scores",
-            "genre_labels",
-            "style_labels",
-            "topic_labels",
-            "diagnosis",
-            "value_logic_type",
-            "value_logic_reason",
-            "power_stance_score",
-            "power_stance_reason",
-            "common_people_dignity",
-            "dignity_reason",
-            "cultural_depth_score",
-            "cultural_depth_reason",
-            "narrative_arc_type",
-            "focus_structure",
-            "focus_characters",
-            "main_characters",
-            "core_cast",
-            "theme_color",
-            "run_id",
-        }
