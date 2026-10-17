@@ -17,7 +17,13 @@ import pytest
 from sqlalchemy import select
 
 from src.config import settings
-from src.storage.models import ParagraphCurve, ParagraphEmbedding, ParagraphMetric
+from src.storage.models import AnalysisRun, ParagraphFeature, ParagraphMetric
+from src.storage.models.paragraph_features import (
+    FEATURE_LOWESS_NET_DENSITY,
+    FEATURE_LOWESS_SURFACE_TENSION,
+    FEATURE_SEMANTIC_VECTOR,
+    FEATURE_TENSION_Z,
+)
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.text_processing.chapters.preprocess import preprocess_text
@@ -167,7 +173,10 @@ class TestPreprocessParagraphs:
     async def test_preprocess_embeddings_aligned_with_paragraphs(self, db_session, tmp_path) -> None:
         """
         2026-08-14 二期段落化：embedding 从段落事实源读取后按 paragraph_id 严格对齐：
-        paragraph_embeddings 行数与 paragraphs 一致，向量非空、维度与配置一致
+        段落语义向量行数与 paragraphs 一致，向量非空、维度与实测探测一致
+
+        2026-10-16 3NF：向量行落 paragraph_features 的 semantic_vector 行；
+        运行模型合同（模型 key）记在分析运行行，维度由探测实测后校验
         """
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Embedding Align")
@@ -181,23 +190,23 @@ class TestPreprocessParagraphs:
         paragraph_rows = ParagraphRepository(db_session).fetch_paragraph_rows(run_id)
         assert paragraph_rows
 
-        embedding_rows = db_session.execute(
-            select(
-                ParagraphEmbedding.run_id,
-                ParagraphEmbedding.paragraph_id,
-                ParagraphEmbedding.embedding_vector,
-                ParagraphEmbedding.embedding_model_key,
-                ParagraphEmbedding.embedding_dimension,
-            ).where(ParagraphEmbedding.run_id == run_id)
+        feature_rows = db_session.execute(
+            select(ParagraphFeature.paragraph_id, ParagraphFeature.vector_value).where(
+                ParagraphFeature.run_id == run_id,
+                ParagraphFeature.feature_code == FEATURE_SEMANTIC_VECTOR,
+            )
         ).all()
-        embedding_by_id = {row.paragraph_id: row for row in embedding_rows}
+        vector_by_paragraph = {int(row.paragraph_id): row.vector_value for row in feature_rows}
 
-        assert len(embedding_rows) == len(paragraph_rows)
+        assert len(feature_rows) == len(paragraph_rows)
         for paragraph_row in paragraph_rows:
-            embedding_row = embedding_by_id[paragraph_row.paragraph_id]
-            assert embedding_row.embedding_vector is not None
-            assert len(embedding_row.embedding_vector) == 1024
-            assert embedding_row.embedding_dimension == 1024
+            vector = vector_by_paragraph[paragraph_row.paragraph_id]
+            assert vector is not None
+            assert len(vector) == 1024
+
+        run = db_session.get(AnalysisRun, run_id)
+        assert run is not None
+        assert run.embedding_model_key
 
     @pytest.mark.asyncio()
     @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
@@ -230,7 +239,10 @@ class TestPreprocessParagraphs:
     async def test_preprocess_generates_paragraph_metrics(self, db_session, tmp_path) -> None:
         """
         2026-08-14 用于验证段落指标（§5.3）随 preprocess 无条件生成：
-        行数等于段落数、分子/分母字段非空、surface_tension 值域合法
+        行数等于段落数、基础分子/分母字段齐备
+
+        2026-10-16 3NF：张力 z 观测落 paragraph_features 的 tension_z 行，
+        固定功能词/语义类别计数落 paragraph_metrics 明确计数列（缺项补零）
         """
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Metrics Novel")
@@ -248,24 +260,33 @@ class TestPreprocessParagraphs:
         metric_rows = db_session.scalars(select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)).all()
         assert len(metric_rows) == paragraph_count
         for row in metric_rows:
-            assert row.char_count > 0
             assert row.token_count >= 0
             assert row.sentence_count >= 0
-            assert row.surface_tension_z is not None
-            assert row.surface_tension is not None
-            # sigmoid 值域 (0, 1)；z 已被 clip 到 [-3, 3]
-            assert 0.0 < row.surface_tension < 1.0
-            assert -3.0 <= row.surface_tension_z <= 3.0
-            assert row.function_word_counts is not None
-            assert row.semantic_category_counts is not None
+            # 零命中是合法观测（完成但零计数存 0，不留 NULL）
+            assert row.fw_之 == 0
+            assert row.semantic_color == 0
+
+        tension_rows = db_session.scalars(
+            select(ParagraphFeature).where(
+                ParagraphFeature.run_id == run_id,
+                ParagraphFeature.feature_code == FEATURE_TENSION_Z,
+            )
+        ).all()
+        paragraph_ids = {int(row.paragraph_id) for row in metric_rows}
+        assert {int(row.paragraph_id) for row in tension_rows} == paragraph_ids
+        for row in tension_rows:
+            # z 已被 clip 到 [-3, 3]；sigmoid 展示值为读取投影
+            assert row.scalar_value is not None
+            assert -3.0 <= row.scalar_value <= 3.0
 
     @pytest.mark.asyncio()
     @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_paragraph_metrics_counts_conservation(self, db_session, tmp_path) -> None:
         """
         2026-08-14 用于验证段落指标与段落事实源守恒：
-        每行 char_count == len(段落文本)、token_count 与 paragraphs 行一致、
-        sentence 充分统计量与段落文本逐条匹配
+        每行 token_count 与 paragraphs 行一致、sentence 充分统计量与段落文本逐条匹配
+
+        2026-10-16 3NF：char_count 由段落正文长度投影，token_count 为指标行计数并被段落读取投影
         """
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Conservation Novel")
@@ -284,7 +305,7 @@ class TestPreprocessParagraphs:
         assert len(metric_rows) == len(paragraph_rows)
         for paragraph_row in paragraph_rows:
             metric = metric_by_paragraph[paragraph_row.paragraph_id]
-            assert metric.char_count == len(paragraph_row.text)
+            assert paragraph_row.char_count == len(paragraph_row.text)
             assert metric.token_count == paragraph_row.token_count
             # sentence 充分统计量：均值/方差恢复一致（由 count/sum/sum_sq 恢复）
             if metric.sentence_count > 0:
@@ -300,8 +321,10 @@ class TestPreprocessParagraphs:
     async def test_preprocess_generates_paragraph_curves(self, db_session, tmp_path) -> None:
         """
         2026-08-14 用于验证段落曲线（§5.5）随 preprocess 无条件生成：
-        行数等于段落数、net_density 与手工分子/分母一致、smoothed 无 NaN、
-        surface_tension 与 paragraph_metrics 一致
+        每段两条曲线平滑值（净密度/表面张力）、运行级曲线合同、不可计算语义
+
+        2026-10-16 3NF：旧宽表退场，平滑值落 paragraph_features 的两类标量行，
+        LOWESS 参数落 analysis_runs；原始 pos/neg 密度由指标分子÷token_count 投影
         """
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Curves Novel")
@@ -316,25 +339,35 @@ class TestPreprocessParagraphs:
         paragraph_count = paragraph_repo.count_paragraphs(run_id)
         assert paragraph_count > 0
 
-        curve_rows = db_session.scalars(select(ParagraphCurve).where(ParagraphCurve.run_id == run_id)).all()
         metric_rows = db_session.scalars(select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)).all()
-        assert len(curve_rows) == paragraph_count
         metric_by_paragraph = {row.paragraph_id: row for row in metric_rows}
 
-        for row in curve_rows:
-            metric = metric_by_paragraph[row.paragraph_id]
+        run = db_session.get(AnalysisRun, run_id)
+        assert run is not None and run.curve_completed_at is not None
+        assert run.curve_min_points == settings.metrics.lowess_min_points
+        assert run.curve_bandwidth == settings.metrics.lowess_bandwidth
+
+        samples = db_session.scalars(
+            select(ParagraphFeature).where(
+                ParagraphFeature.run_id == run_id,
+                ParagraphFeature.feature_code.in_(
+                    (FEATURE_LOWESS_NET_DENSITY, FEATURE_LOWESS_SURFACE_TENSION)
+                ),
+            )
+        ).all()
+        by_paragraph: dict[int, dict[str, float | None]] = {}
+        for row in samples:
+            by_paragraph.setdefault(int(row.paragraph_id), {})[row.feature_code] = row.scalar_value
+
+        assert set(by_paragraph) == set(metric_by_paragraph)
+        for paragraph_id, kinds in by_paragraph.items():
+            metric = metric_by_paragraph[paragraph_id]
             if metric.token_count > 0:
-                assert row.pos_density == pytest.approx(metric.positive_weight_sum / metric.token_count)
-                assert row.neg_density == pytest.approx(metric.negative_weight_sum / metric.token_count)
-                assert row.net_density == pytest.approx(
-                    metric.positive_weight_sum / metric.token_count - metric.negative_weight_sum / metric.token_count
-                )
-                assert row.smoothed_net_density is not None
-                assert math.isfinite(row.smoothed_net_density)
+                assert set(kinds) == {FEATURE_LOWESS_NET_DENSITY, FEATURE_LOWESS_SURFACE_TENSION}
+                assert kinds[FEATURE_LOWESS_NET_DENSITY] is not None
+                assert math.isfinite(kinds[FEATURE_LOWESS_NET_DENSITY])
             else:
-                assert row.net_density is None
-                assert row.smoothed_net_density is None
-            assert row.surface_tension == pytest.approx(metric.surface_tension)
-            if metric.surface_tension is not None:
-                assert row.smoothed_surface_tension is not None
-                assert math.isfinite(row.smoothed_surface_tension)
+                # 分母为零不伪造：不可计算不落行
+                assert FEATURE_LOWESS_NET_DENSITY not in kinds
+            assert kinds[FEATURE_LOWESS_SURFACE_TENSION] is not None
+            assert math.isfinite(kinds[FEATURE_LOWESS_SURFACE_TENSION])

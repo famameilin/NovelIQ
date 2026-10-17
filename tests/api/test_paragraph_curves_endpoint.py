@@ -20,9 +20,11 @@ from tests.support.paragraph_fixtures import (
     insert_curves,
     insert_metrics,
     insert_spans,
+    insert_tension_observations,
     make_curve_row,
     make_metric_row,
     make_span,
+    tension_z_for_display,
 )
 
 
@@ -71,34 +73,28 @@ def _insert_three_paragraph_run(db_session) -> tuple[str, str]:
         db_session,
         run_id,
         [
-            make_metric_row(0, token_count=2, char_count=5),
-            make_metric_row(1, token_count=3, char_count=6),
-            make_metric_row(2, token_count=4, char_count=4),
+            # 密度由分子÷token_count 投影：段 0 = 0.2/2 与 0.1/2，段 1 = 0.6/3 无负分子，段 2 = 1.2/4 与 0.4/4
+            make_metric_row(0, token_count=2, positive_weight_sum=0.2, negative_weight_sum=0.1),
+            make_metric_row(1, token_count=3, positive_weight_sum=0.6),
+            make_metric_row(2, token_count=4, positive_weight_sum=1.2, negative_weight_sum=0.4),
+        ],
+    )
+    insert_tension_observations(
+        db_session,
+        run_id,
+        [
+            (1, tension_z_for_display(0.6)),
+            (2, tension_z_for_display(0.7)),
         ],
     )
     insert_curves(
         db_session,
         run_id,
         [
-            make_curve_row(0, pos_density=0.1, neg_density=0.05, net_density=0.05),
-            make_curve_row(
-                1,
-                pos_density=0.2,
-                neg_density=None,
-                net_density=None,
-                smoothed_net_density=0.15,
-                surface_tension=0.6,
-                smoothed_surface_tension=0.55,
-            ),
-            make_curve_row(
-                2,
-                pos_density=0.3,
-                neg_density=0.1,
-                net_density=0.2,
-                smoothed_net_density=0.18,
-                surface_tension=0.7,
-                smoothed_surface_tension=0.65,
-            ),
+            # 曲线点的段落集合由真实平滑样本决定：每段至少一类样本
+            make_curve_row(0, smoothed_net_density=0.05),
+            make_curve_row(1, smoothed_surface_tension=0.55),
+            make_curve_row(2, smoothed_net_density=0.18, smoothed_surface_tension=0.65),
         ],
     )
     return novel_id, run_id
@@ -124,22 +120,26 @@ def test_paragraph_curves_contract_fields_and_position(api_client: TestClient, d
     assert first["global_end_char"] == 5
     assert first["char_count"] == 5
     assert first["token_count"] == 2
-    assert first["pos_density"] == 0.1
-    assert first["neg_density"] == 0.05
-    assert first["net_density"] == 0.05
-    assert first["smoothed_net_density"] is None
+    assert first["pos_density"] == pytest.approx(0.1)
+    assert first["neg_density"] == pytest.approx(0.05)
+    assert first["net_density"] == pytest.approx(0.05)
+    assert first["smoothed_net_density"] == pytest.approx(0.05)
+    # 没有张力 z 观测的段落读 None，不伪造 sigmoid(0)
     assert first["surface_tension"] is None
     assert first["smoothed_surface_tension"] is None
     # position = 中点 / 全书总字符数 = 2.5 / 15
     assert first["position"] == pytest.approx(2.5 / 15)
 
     assert second["paragraph_id"] == 1
-    assert second["pos_density"] == 0.2
-    assert second["neg_density"] is None
-    assert second["net_density"] is None
-    assert second["smoothed_net_density"] == 0.15
-    assert second["surface_tension"] == 0.6
-    assert second["smoothed_surface_tension"] == 0.55
+    # 密度是「分子÷同口径 token_count」读投影：无负权重分子的段落读 0 密度
+    assert second["pos_density"] == pytest.approx(0.2)
+    assert second["neg_density"] == pytest.approx(0.0)
+    assert second["net_density"] == pytest.approx(0.2)
+    # 缺该类平滑样本的段落保留 NULL，不补零
+    assert second["smoothed_net_density"] is None
+    # 表面张力是对正式 z 观测的 sigmoid 读投影
+    assert second["surface_tension"] == pytest.approx(0.6, abs=1e-6)
+    assert second["smoothed_surface_tension"] == pytest.approx(0.55)
     assert second["position"] == pytest.approx(8.0 / 15)
 
     assert third["paragraph_id"] == 2
@@ -170,14 +170,24 @@ def _insert_100_paragraph_run(db_session) -> tuple[str, str]:
             )
         )
     insert_spans(db_session, run_id, spans)
-    insert_curves(
+    insert_metrics(
         db_session,
         run_id,
         [
-            # 全局 net_density 峰值在段落 50（其余为 0 或 None）
-            make_curve_row(paragraph_id, net_density=1.0 if paragraph_id == 50 else 0.0)
+            # 净密度由分子÷token_count 投影：段落 50 是全书唯一峰值
+            make_metric_row(
+                paragraph_id,
+                token_count=1,
+                positive_weight_sum=1.0 if paragraph_id == 50 else 0.0,
+            )
             for paragraph_id in range(100)
         ],
+    )
+    insert_curves(
+        db_session,
+        run_id,
+        # 全书每段都有平滑样本行（曲线返回的段落集合由实际样本决定）
+        [make_curve_row(paragraph_id, smoothed_net_density=0.0) for paragraph_id in range(100)],
     )
     return novel_id, run_id
 

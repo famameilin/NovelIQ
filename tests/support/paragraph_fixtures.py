@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import math
 import uuid
 
 from src.agents.annotation.output_models import BoundChapterAnnotation
@@ -85,11 +86,15 @@ def make_span(
     chunk_offset: int,
     token_count: int = 1,
 ) -> ParagraphSpan:
-    """构造坐标自洽的段落（global = chunk_offset + local），text 长度决定坐标跨度"""
+    """构造坐标自洽的段落（global = chunk_offset + local），text 长度决定坐标跨度
+
+    段落身份按「来源自然段 + 片段序号」唯一：默认一个段落就是一个自然段，
+    超长拆分的片段由调用方显式给出相同的来源序号与不同片段序号。
+    """
     local_end = local_start + len(text)
     return ParagraphSpan(
         paragraph_index=paragraph_index,
-        source_paragraph_index=0,
+        source_paragraph_index=paragraph_index,
         fragment_index=0,
         local_start_char=local_start,
         local_end_char=local_end,
@@ -111,7 +116,6 @@ def make_metric_row(
     paragraph_id: int,
     *,
     token_count: int = 0,
-    char_count: int = 0,
     sentence_count: int = 0,
     sentence_char_sum: float = 0.0,
     sentence_char_sum_sq: float = 0.0,
@@ -123,11 +127,14 @@ def make_metric_row(
     pause_count: int = 0,
     dialogue_char_count: int = 0,
 ) -> ParagraphMetricRow:
-    """构造段落指标行（未用到的计数/充分统计量默认 0）"""
+    """构造段落指标行（未用到的计数/充分统计量默认 0）
+
+    char_count 与张力/功能词分类不在此行：前者是正文长度读投影，
+    后两者分别是 paragraph_features 行与 paragraph_metrics 的明确列。
+    """
     return ParagraphMetricRow(
         paragraph_id=paragraph_id,
         token_count=token_count,
-        char_count=char_count,
         sentence_count=sentence_count,
         sentence_char_sum=sentence_char_sum,
         sentence_char_sum_sq=sentence_char_sum_sq,
@@ -142,8 +149,6 @@ def make_metric_row(
         imagery_hit_count=0,
         metaphor_sentence_count=0,
         body_reaction_hit_count=0,
-        function_word_counts={},
-        semantic_category_counts={},
     )
 
 
@@ -176,6 +181,20 @@ def make_curve_row(
 def insert_curves(db_session, run_id: str, rows: list[ParagraphCurveRow]) -> None:
     ParagraphRepository(db_session).insert_paragraph_curves(run_id, rows)
     db_session.commit()
+
+
+def insert_tension_observations(db_session, run_id: str, rows: list[tuple[int, float]]) -> None:
+    """写入段落表面张力 z 观测；展示值是 sigmoid 读投影，不落展示列"""
+    from src.storage.repositories.paragraph.writer import insert_paragraph_tension_observations
+
+    insert_paragraph_tension_observations(db_session, run_id, rows)
+    db_session.commit()
+
+
+def tension_z_for_display(display_value: float) -> float:
+    """展示张力值对应的正式 z 观测（与读面 sigmoid 投影互为逆运算）"""
+    clipped = min(max(display_value, 1e-6), 1 - 1e-6)
+    return math.log(clipped / (1 - clipped))
 
 
 def insert_chapter_annotation(
