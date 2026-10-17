@@ -96,7 +96,9 @@ def _save_user_settings(request: UpdateSettingsRequest) -> SettingsViewResponse:
 
 def _update_model_env(request: ModelEnvUpdateRequest) -> SettingsViewResponse:
     settings_service.update_model_env(
-        model_pool=[entry.model_dump() for entry in request.model_pool] if request.model_pool is not None else None,
+        model_pool=[entry.model_dump() for entry in request.model_pool]
+        if request.model_pool is not None
+        else None,
         diagnosis_model_id=request.diagnosis_model_id,
         diagnosis_model_id_provided="diagnosis_model_id" in request.model_fields_set,
         embedding=request.embedding_model.model_dump() if request.embedding_model is not None else None,

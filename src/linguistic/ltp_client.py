@@ -5,7 +5,9 @@
 - analyze_paragraph 为纯函数：输入 LTP 输出与原文，产出段落级结构数据与
   充分统计量（词长/词性/句式/依存），全部守恒可加；不依赖模型实例，
   测试可直接 mock LtpSession.pipeline
-- 词性分组映射与句式规则阈值以模块常量声明
+- 词性分组映射与句式规则阈值以模块常量声明；映射常量即版本化代码合同
+  （POS_GROUP_MAP / ENTITY_TYPE_MAP，不镜像成数据库映射表），
+  由 ltp_pipeline_contract() 提供 run 级合同 (pipeline_version, model_key)
 """
 
 from __future__ import annotations
@@ -27,8 +29,13 @@ from .schema import (
     ParagraphLinguisticResult,
 )
 
-#: 词性归一组映射
-_POS_GROUP_MAP: dict[str, str] = {
+#: 当前 LTP 管线合同版本：任务集（cws/pos/ner/dep/sdp）与坐标/映射口径的版本标识。
+#: 登记在 analysis_runs.ltp_pipeline_version；任务集或映射常量变化时必须升版本，
+#: 不能在原版本上改映射。
+LTP_PIPELINE_VERSION = "ltp4-cws-pos-ner-dep-sdp-v1"
+
+#: 词性归一组映射（版本化代码合同：reading 投影按本常量归一，不落映射表）
+POS_GROUP_MAP: dict[str, str] = {
     "n": "noun",
     "nh": "noun",
     "ni": "noun",
@@ -59,8 +66,8 @@ _POS_GROUP_MAP: dict[str, str] = {
 }
 _OTHER_POS_GROUP = "other"
 
-#: NER 原始类型到项目归一类型
-_ENTITY_TYPE_MAP: dict[str, str] = {
+#: NER 原始类型到项目归一类型（版本化代码合同：读取投影按本常量归一）
+ENTITY_TYPE_MAP: dict[str, str] = {
     "Nh": "person",
     "Ni": "org",
     "Ns": "location",
@@ -130,11 +137,22 @@ class LtpSession:
 
 
 def _normalize_pos(pos_tag: str) -> str:
-    return _POS_GROUP_MAP.get(pos_tag, _OTHER_POS_GROUP)
+    return POS_GROUP_MAP.get(pos_tag, _OTHER_POS_GROUP)
 
 
 def _normalize_entity_type(raw_type: str) -> str | None:
-    return _ENTITY_TYPE_MAP.get(raw_type)
+    return ENTITY_TYPE_MAP.get(raw_type)
+
+
+def ltp_pipeline_contract() -> tuple[str, str]:
+    """当前 LTP 管线合同 (pipeline_version, model_key)
+
+    model_key 为实际交给 LTP 的模型标识（配置的离线模型目录字符串，与
+    LtpSession 的 model_ref 同源）；未配置目录时记录 unconfigured——生产路径
+    会在加载模型时明确报错，测试替身（Fake session）不依赖真实目录。
+    """
+    model_dir = settings.linguistic.ltp.model_dir
+    return LTP_PIPELINE_VERSION, str(model_dir) if model_dir else "unconfigured"
 
 
 def _classify_sentence_pattern(sentence: str) -> list[str]:

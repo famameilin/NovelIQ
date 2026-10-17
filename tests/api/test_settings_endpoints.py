@@ -73,6 +73,42 @@ def _save_pool(client: TestClient) -> None:
     ).raise_for_status()
 
 
+def test_diagnosis_budget_setting_is_editable_and_used_by_scheduler(isolated_settings, api_client):
+    from unittest.mock import MagicMock
+
+    from src.agents.diagnosis.work_runtime import DiagnosisWorkScheduler
+    from src.config import settings
+    from src.event_bus import EventBus
+
+    schema = api_client.get("/api/settings/schema").json()["fields"]
+    field = next(item for item in schema if item["path"] == ["models", "diagnosis", "max_iterations"])
+    assert field["editable"] is True and field["min_value"] == 1
+    for limit in (3, 20):
+        response = api_client.put(
+            "/api/settings", json={"values": {"models": {"diagnosis": {"max_iterations": limit}}}}
+        )
+        response.raise_for_status()
+        assert settings.models.diagnosis.max_iterations == limit
+        scheduler = DiagnosisWorkScheduler(
+            run_id="test", domain=MagicMock(), bus=EventBus(), model_id="model",
+            llm_factory=MagicMock(), observer_factory=MagicMock(), audit_barrier=MagicMock(),
+        )
+        assert scheduler.max_iterations == limit
+        scheduler.pool.close()
+
+
+def test_pool_has_no_context_window_field_and_rejects_legacy_key(isolated_settings, api_client):
+    """2026-10-15 用户裁定「不要context_window_tokens」：该配置项全栈移除"""
+    schema_paths = [item["path"] for item in api_client.get("/api/settings/schema").json()["fields"]]
+    assert ["models", "model_pool", "context_window_tokens"] not in schema_paths
+    response = api_client.put("/api/settings/env", json={"model_pool": [_entry(context_window_tokens=32768)]})
+    assert response.status_code == 422
+    assert "context_window_tokens" in json.dumps(response.json())
+    response = api_client.put("/api/settings/env", json={"model_pool": [{**_entry(), "context_window_tokens": None}]})
+    assert response.status_code == 422
+    assert api_client.get("/api/settings").json()["values"]["models"]["model_pool"] == []
+
+
 def test_pool_roundtrip_masks_keys_and_preserves_behavior_config(
     isolated_settings: Path,
     api_client: TestClient,
@@ -251,7 +287,7 @@ def test_update_settings_partial_save_and_hot_apply(isolated_settings: Path, api
     response = api_client.put("/api/settings", json={"values": {"models": {"annotation": {"timeout_s": 60}}}})
     assert response.status_code == 200
     saved = json.loads(isolated_settings.read_text(encoding="utf-8"))
-    assert saved["models"]["annotation"] == {"max_iterations": 15, "timeout_s": 60}
+    assert saved["models"]["annotation"] == {"timeout_s": 60}
     assert "topic_model" not in saved
     from src.config import settings
 

@@ -89,8 +89,20 @@ def save_user_settings(values: dict[str, Any]) -> None:
     apply_settings_onto(settings, candidate)
 
 
+def iteration_budget_info(task: str) -> tuple[int, str]:
+    """执行启动时固定预算，并区分文件覆盖、代码默认和当前进程覆盖"""
+    actual = getattr(settings.models, task).max_iterations
+    file_value = load_settings_file().get("models", {}).get(task, {}).get("max_iterations")
+    default = getattr(Settings().models, task).max_iterations
+    source = (
+        "config/settings.json" if file_value == actual else "code_default" if actual == default else "runtime_override"
+    )
+    return actual, source
+
+
 def resolve_task_env_updates(
-    env_group: str, patch: Mapping[str, str | None] | None,
+    env_group: str,
+    patch: Mapping[str, str | None] | None,
 ) -> tuple[dict[str, str | None], dict[str, str | None]]:
     """解析单任务组补丁 → (env 文件更新, 单例终态)
 
@@ -131,9 +143,7 @@ def resolve_task_env_updates(
         final["api_key"] = os.environ.get(keys["api_key"]) or current_env.get(keys["api_key"])
 
     # 完整性：本组已配置过（或本次将写入任一字段）时，三键终态必须齐全
-    group_configured = bool(updates) or any(
-        os.environ.get(key) or current_env.get(key) for key in keys.values()
-    )
+    group_configured = bool(updates) or any(os.environ.get(key) or current_env.get(key) for key in keys.values())
     required = ("base_url", "model", "api_key")
     if group_configured and any(not final[field] for field in required):
         missing = [keys[field] for field in required if not final[field]]
@@ -173,12 +183,19 @@ def _resolve_model_pool(model_pool: list[dict[str, Any]] | None) -> list[Any]:
         api_key = entry.get("api_key") if entry.get("api_key") is not None else saved.api_key if saved else None
         if api_key and api_key.startswith(API_KEY_MASK_PREFIX):
             raise SettingsValidationError("模型 Key 不能使用打码值")
-        entries.append({
-            "model_id": entry["model_id"], "base_url": entry["base_url"], "api_key": api_key,
-            "weight": entry["weight"], "max_in_flight": entry["max_in_flight"],
-            # 2026-10-02 设置迁移：采样参数随模型保存
-            "temperature": entry["temperature"], "top_p": entry["top_p"], "max_tokens": entry["max_tokens"],
-        })
+        entries.append(
+            {
+                "model_id": entry["model_id"],
+                "base_url": entry["base_url"],
+                "api_key": api_key,
+                "weight": entry["weight"],
+                "max_in_flight": entry["max_in_flight"],
+                # 2026-10-02 设置迁移：采样参数随模型保存
+                "temperature": entry["temperature"],
+                "top_p": entry["top_p"],
+                "max_tokens": entry["max_tokens"],
+            }
+        )
     try:
         return _parse_model_pool(entries)
     except ValueError as exc:
