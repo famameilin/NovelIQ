@@ -12,9 +12,11 @@ from typing import TypedDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.embedding import EmbeddingClient, format_query_instruct
+from src.embedding import EmbeddingClient, EmbeddingServiceError, format_query_instruct
 from src.storage.models import Chapter, Paragraph
 from src.storage.repositories.paragraph import search_paragraphs_by_keywords, search_similar_paragraphs
+
+from .errors import AnnotationDependencyError
 
 _WHOLE_QUERY_MAX_CHARS = 20
 _SPLIT_RE = re.compile(r"[\s,，。；;：:、!?！？\"'（）()\[\]{}]+")
@@ -130,8 +132,12 @@ class TextSearchService:
 
         if self._semantic_enabled:
             if self._embedding_client is None:
-                raise ValueError("原文语义检索已启用但 EmbeddingClient 未配置")
-            query_embedding = await self._embedding_client.get_embedding(format_query_instruct(normalized_query))
+                raise AnnotationDependencyError("原文语义检索已启用但 EmbeddingClient 未配置")
+            try:
+                query_embedding = await self._embedding_client.get_embedding(format_query_instruct(normalized_query))
+            except EmbeddingServiceError as exc:
+                # 依赖故障不能伪装成可由模型改参数修复的工具拒绝
+                raise AnnotationDependencyError(str(exc)) from exc
             semantic_rows = search_similar_paragraphs(
                 self._session,
                 self._run_id,
