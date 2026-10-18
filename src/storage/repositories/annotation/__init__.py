@@ -1,8 +1,4 @@
-"""
-标注数据 Repository 包
-
-标注数据仓库模块，包含标注记录查询、work 状态、对话/事实/伏笔读投影
-"""
+"标注数据 Repository 包"
 
 from __future__ import annotations
 
@@ -14,7 +10,7 @@ from .repository import (
     ForeshadowingTreeView,
 )
 from .rows import (
-    AnnotationWorkRow,
+    AnnotationRoleRecord,
     DialogueRecordRow,
     ForeshadowingEdgeRow,
     GraphFactRow,
@@ -23,7 +19,7 @@ from .rows import (
 
 __all__ = [
     "AnnotationRepository",
-    "AnnotationWorkRow",
+    "AnnotationRoleRecord",
     "ChapterAnnotationRow",
     "CharacterFactRow",
     "DialogueFactRow",

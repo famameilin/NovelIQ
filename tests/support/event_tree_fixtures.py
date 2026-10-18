@@ -1,7 +1,7 @@
-"""事件声明/完整事件/叙事组织测试夹具（2026-10-16 全库 3NF 改造，本切片自足）
+"""事件声明/完整事件/叙事组织测试夹具（2026-10-17 六 agent 归属，本切片自足）
 
-只做真实表行的分层写入：标注来源链（work→执行→记录）、章级声明与原文证据、
-诊断会话/work/执行身份，以及沿正式发布入口（EventOrganizationDraft →
+只做真实表行的分层写入：标注来源链（执行→正式记录）、章级声明与原文证据、
+诊断整轮会话与真实尝试身份，以及沿正式发布入口（EventOrganizationDraft →
 报告 → 完整事件 → 叙事组织）一次性发布。夹具不复制旧 payload、不恢复旧行类型。
 """
 
@@ -19,7 +19,6 @@ from src.event_trees.organization import (
     OrganizationEvidence,
     register_diagnosis_execution,
     register_diagnosis_session,
-    register_diagnosis_work,
 )
 from src.storage.models import (
     Chapter,
@@ -31,11 +30,16 @@ from src.storage.models import (
     NarrativeLink,
     Paragraph,
     SourceEvidence,
-    WorkItem,
     naive_utcnow,
 )
+from src.utils.identity import stable_digest
 
 CONTRACT_VERSION = "event-tree-declarations-v1"
+
+
+def report_case_anchor(run_id: str) -> str:
+    """本 run 报告级组织单元的真实案例锚（与生产 report CaseUnit 同源）"""
+    return stable_digest(run_id, "diagnosis_report")
 
 
 def chapter_text(session: Session, run_id: str, chapter_id: int) -> str:
@@ -88,23 +92,15 @@ def add_annotation_source(
     *,
     role: str = "event",
     contract_version: str = CONTRACT_VERSION,
-) -> tuple[str, str, str]:
-    """建立一份真实标注来源链，返回 (record_id, work_id, execution_id)"""
-    work_id = f"work-{uuid4().hex[:12]}"
+) -> tuple[str, str]:
+    """建立一份真实标注来源链（执行行直接带 run/章/角色），返回 (record_id, execution_id)"""
     execution_id = uuid4().hex
-    session.add(
-        WorkItem(
-            work_id=work_id,
-            role=role,
-            annotation_run_id=run_id,
-            annotation_chapter_id=chapter_id,
-        )
-    )
-    session.flush()
     session.add(
         Execution(
             execution_id=execution_id,
-            work_id=work_id,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            role=role,
             attempt_number=1,
             started_at=naive_utcnow(),
             status="success",
@@ -116,12 +112,15 @@ def add_annotation_source(
         ChapterAnnotation(
             record_id=record_id,
             execution_id=execution_id,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            role=role,
             contract_version=contract_version,
             chapter_consolidation_version="v1",
         )
     )
     session.flush()
-    return record_id, work_id, execution_id
+    return record_id, execution_id
 
 
 def add_declaration(
@@ -191,15 +190,26 @@ def add_declaration(
     return declaration_id
 
 
-def add_diagnosis_context(session: Session, run_id: str) -> tuple[str, str, str]:
-    """登记诊断整轮身份/work/真实尝试，返回 (session_id, work_id, execution_id)"""
+def add_diagnosis_context(session: Session, run_id: str) -> tuple[str, str]:
+    """登记诊断整轮会话与报告角色的真实尝试，返回 (session_id, execution_id)
+
+    同一 run 再次登记是本轮的又一次真实尝试（跨轮累计序号），不覆盖既有终态行。
+    """
+    from sqlalchemy import func
+
     session_id = f"diag-session-{uuid4().hex[:12]}"
-    work_id = f"diag-work-{uuid4().hex[:12]}"
     execution_id = uuid4().hex
+    attempt = int(
+        session.scalar(
+            select(func.count()).select_from(Execution).where(Execution.run_id == run_id, Execution.role == "report")
+        )
+        or 0
+    ) + 1
     register_diagnosis_session(session, run_id=run_id, session_id=session_id)
-    register_diagnosis_work(session, session_id=session_id, work_id=work_id, role="report")
-    register_diagnosis_execution(session, work_id=work_id, execution_id=execution_id, attempt_number=1)
-    return session_id, work_id, execution_id
+    register_diagnosis_execution(
+        session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=attempt
+    )
+    return session_id, execution_id
 
 
 def identity_every_declaration(
@@ -207,12 +217,14 @@ def identity_every_declaration(
     run_id: str,
     *,
     groups: list[list[str]] | None = None,
-    context: tuple[str, str, str] | None = None,
+    context: tuple[str, str] | None = None,
 ) -> tuple[EventOrganizationDraft, dict[str, Any]]:
     """按显式分组提交声明核对、身份与全对比较并冻结身份（不发布）"""
-    session_id, _work_id, execution_id = context or add_diagnosis_context(session, run_id)
+    session_id, execution_id = context or add_diagnosis_context(session, run_id)
     draft = EventOrganizationDraft(session, run_id, session_id)
-    draft.work_id = draft.producer_invocation_id = execution_id
+    # 报告级组织单元：案例锚与生产 report 单元同源，调用来源是本次报告角色尝试
+    draft.case_id = report_case_anchor(run_id)
+    draft.producer_invocation_id = execution_id
     rows = list(draft._declarations().values())
     by_id = {row["declaration_id"]: row for row in rows}
     groups = groups if groups is not None else [[row["declaration_id"]] for row in rows]

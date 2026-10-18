@@ -7,7 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from src.agents.annotation.agent import WorkExecution
-from src.agents.annotation.subagent_ir import SubagentAnnotation
+from src.agents.annotation.agent_ir import AgentAnnotation
 from src.agents.annotation.work_tools import build_work_tools
 from src.case_pool import CasePool
 from src.event_trees.trees import EventTrees
@@ -21,12 +21,15 @@ def _work_tools_context(query_service: Any, ledger: Any) -> tuple[Any, Any, Any]
         annotation_work_id(ledger.run_scope, ledger.current_chapter_id, ledger.role), ledger.run_scope, "annotation",
         {"chapter_id": ledger.current_chapter_id, "role": ledger.role},
     )
-    execution = WorkExecution(work, invocation, ledger, SubagentAnnotation(role=ledger.role))
+    execution = WorkExecution(work, invocation, ledger, AgentAnnotation(role=ledger.role))
     cases = CasePool(ledger.run_scope)
     trees = EventTrees(ledger.run_scope)
-    cases.begin(work.work_id, invocation)
-    trees.begin(work.work_id, invocation)
-    agent = SimpleNamespace(case_pool=cases, event_trees=trees, fact_graph=ledger.graph)
+    # 作者身份收敛为单字符串：真实执行号就是三域的贡献作者
+    cases.begin(invocation)
+    trees.begin(invocation)
+    agent = SimpleNamespace(
+        run_id=ledger.run_scope, case_pool=cases, event_trees=trees, fact_graph=ledger.graph
+    )
     ledger.work_id, ledger.invocation_id = work.work_id, invocation
     ledger.finish_work = execution.validate
     return agent, execution, query_service
@@ -53,9 +56,9 @@ def build_annotation_tools(query_service: Any, ledger: Any) -> list[Any]:
 
 def build_program_test_runtime(tools: list[Any], ledger: Any, **kwargs: Any) -> Any:
     """单条领域工具测试复用现行程序解释器；模型可见面由集成测试检查"""
-    from src.agents.annotation.subagent_runtime import SubagentProgramRuntime
+    from src.agents.annotation.agent_runtime import AgentProgramRuntime
 
-    subagent = ledger.finish_work.__self__.subagent
-    runtime = SubagentProgramRuntime({tool.name: tool for tool in tools}, ledger, subagent, **kwargs)
+    agent = ledger.finish_work.__self__.agent
+    runtime = AgentProgramRuntime({tool.name: tool for tool in tools}, ledger, agent, **kwargs)
     runtime.tools.update(runtime.execution_tools)
     return runtime

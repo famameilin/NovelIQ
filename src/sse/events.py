@@ -33,7 +33,6 @@ class StreamMessageType(StrEnum):
 StreamEventAction = Literal[
     "start", "progress", "complete", "output", "thinking", "tool_call", "work_reset", "work_saved", "chapter_reset"
 ]
-"""StreamEvent.action 的合法值"""
 
 
 @dataclass
@@ -56,7 +55,9 @@ class StreamEvent:
     stage: str = ""
     sub_stage: str = ""
     chapter_id: int | None = None
-    work_id: str | None = None
+    # 2026-10-17 六 agent 归属：展示作用域由 work 身份改为实际阶段作用域
+    # （stage:chapter:sub_stage，标注=章+角色、诊断=案例锚），invocation_id 仍是
+    # 判定"当前在编执行"的唯一依据
     invocation_id: str | None = None
     message_id: str | None = None
     stream_id: str | None = None
@@ -78,7 +79,6 @@ class StreamEvent:
             "sub_stage": self.sub_stage,
             "chapter_id": self.chapter_id or 0,
             "stream_id": self.stream_id,
-            "work_id": self.work_id,
             "invocation_id": self.invocation_id,
             "message_id": self.message_id,
             "current": self.current or 0,

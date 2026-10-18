@@ -8,21 +8,23 @@ from src.event_trees.organization import (
     OrganizationEvidence,
     register_diagnosis_execution,
     register_diagnosis_session,
-    register_diagnosis_work,
     save_organization,
 )
+
+from .event_tree_fixtures import report_case_anchor
 
 
 def declaration_event_draft(session, run_id, *, groups=None):
     """夹具显式指定声明身份分组，未指定时各项独立，不按旧树推断"""
     session_id = f"diag-session-{uuid4().hex[:12]}"
-    work_id = f"diag-work-{uuid4().hex[:12]}"
     execution_id = uuid4().hex
     register_diagnosis_session(session, run_id=run_id, session_id=session_id)
-    register_diagnosis_work(session, session_id=session_id, work_id=work_id, role="report")
-    register_diagnosis_execution(session, work_id=work_id, execution_id=execution_id, attempt_number=1)
+    register_diagnosis_execution(
+        session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=1
+    )
     draft = EventOrganizationDraft(session, run_id, session_id)
-    draft.work_id, draft.producer_invocation_id = execution_id, execution_id
+    draft.case_id = report_case_anchor(run_id)
+    draft.producer_invocation_id = execution_id
     declarations = list(draft._declarations().values())
     by_id = {row["declaration_id"]: row for row in declarations}
     # 显式分组之外的同 run 声明各自独立成组：身份候选必须覆盖全部声明才能冻结

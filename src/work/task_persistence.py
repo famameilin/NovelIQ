@@ -12,7 +12,6 @@ from typing import Any
 from loguru import logger
 
 from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
-from src.storage.repositories import RunRepository
 from src.storage.task_status import TaskStatus
 
 
@@ -41,27 +40,16 @@ class TaskRuntimePersistenceService:
         if self._session_factory is None:
             logger.warning(f"DB session factory not set, skipping DB update for task {task_id}")
             return
-
         update_params = self._build_update_params(kwargs)
         if self._should_refresh_worker_heartbeat(update_params):
-            # 只要任务仍由本进程活跃推进，就持续刷新 worker 归属和心跳，
-            # 这样启动恢复才能准确识别“这个进程留下来的孤儿任务”
             update_params.setdefault("worker_id", self._worker_id)
-            # 2026-08-13 P2：heartbeat_at 列为无时区 DateTime，aware UTC 写入会被 PG
-            # 按会话时区转换（UTC+8 错位 8h），统一落 naive UTC 挂钟，比较端按 UTC 补时区
             update_params["heartbeat_at"] = datetime.now(UTC).replace(tzinfo=None)
-
         if not update_params:
             return
-
         session = self._session_factory()
-        # 2026-10-03 运行态写回分级：纯进度/心跳字段是可观测性信号，DB 锁等待/抖动只
-        # 降级为警告跳过——run 4a6c268c 实证 aggregate 完成后的进度更新被下一阶段长
-        # 事务阻塞 2 分钟语句超时，把 27 章标注+聚合全部冤杀成 failed。状态迁移
-        # （status/completed_at/error/cancel_requested）仍是可靠写，失败照旧上抛。
         state_transition = bool({"status", "completed_at", "error", "cancel_requested"} & set(update_params))
         try:
-            run_repo = RunRepository(session)
+            run_repo = session.runs
             run_id = self._resolve_run_id_for_db_write(task_id, session)
             if run_repo.get_run(run_id) is None:
                 raise RuntimeError(f"Run not found for DB update: task_id={task_id}, run_id={run_id}")
@@ -74,7 +62,7 @@ class TaskRuntimePersistenceService:
             logger.warning(f"Skipped task runtime update after DB error (task_id={task_id}): {exc}")
             return
         finally:
-            session.close()
+            pass
 
     def _build_update_params(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """
@@ -105,17 +93,11 @@ class TaskRuntimePersistenceService:
         """
         判断本次写回是否应刷新 worker 归属和心跳
         """
-        active_statuses = {
-            TaskStatus.PENDING.value,
-            TaskStatus.RUNNING.value,
-            TaskStatus.CANCELLING.value,
-        }
+        active_statuses = {TaskStatus.PENDING.value, TaskStatus.RUNNING.value, TaskStatus.CANCELLING.value}
         tracked_runtime_fields = {"progress", "stage", "sub_stage", "current", "total", "message"}
-
         status = update_params.get("status")
         if status in active_statuses:
             return True
-
         return any(field in update_params for field in tracked_runtime_fields)
 
     def _resolve_run_id_for_db_write(self, task_id: str, session) -> str:

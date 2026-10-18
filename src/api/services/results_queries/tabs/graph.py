@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from src.api.models.graph import GraphSnapshotResponse
 from src.api.services.results_queries.characters import _fetch_characters
 from src.api.services.results_queries.diagnosis import _fetch_diagnosis, _has_diagnosis_result
@@ -14,15 +12,14 @@ from src.api.services.results_queries.graph import (
     _fetch_graph_snapshot,
     compute_graph_metrics,
 )
-from src.storage.repositories import AnnotationRepository, StatsRepository
+from src.storage import Storage
 
 
-def build_character_function_tab(run_id: str, novel_id: str, session: Session) -> dict[str, Any]:
+def build_character_function_tab(run_id: str, novel_id: str, session: Storage) -> dict[str, Any]:
     """功能与焦点 tab：角色列表（含焦点对齐）+ 诊断焦点结构切片"""
-    stats_repo = StatsRepository(session)
-    annotation_repo = AnnotationRepository(session)
+    annotation_repo = session
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, session)
     arc_scores: dict[str, float] | None = None
     focus_characters: list[str] | None = None
     main_characters: list[str] | None = None
@@ -42,7 +39,7 @@ def build_character_function_tab(run_id: str, novel_id: str, session: Session) -
     }
 
 
-def build_graph_network_tab(run_id: str, session: Session, chapter_id: int | None = None) -> dict[str, Any]:
+def build_graph_network_tab(run_id: str, session: Storage, chapter_id: int | None = None) -> dict[str, Any]:
     """
     图谱 tab：图快照 + 登场次数 + 图算法指标 + 变化总数
 
@@ -50,7 +47,7 @@ def build_graph_network_tab(run_id: str, session: Session, chapter_id: int | Non
     - 登场次数沿用 /characters 的别名归并口径，仅回 name + appearance_count；
     - 变化总数取 page_info.total（limit=1 的首页查询），不回变化明细。
     """
-    annotation_repo = AnnotationRepository(session)
+    annotation_repo = session
 
     snapshot_reason: str | None = None
     snapshot: GraphSnapshotResponse | None = None

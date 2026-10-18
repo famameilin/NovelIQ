@@ -43,17 +43,17 @@ async def declaration_case(db_session):
     assert not receipt.get("failed"), receipt
     await save_and_confirm(agent, db_session, execution)
     draft = EventOrganizationDraft(db_session, run_id, "program-fixture")
-    draft.work_id, draft.producer_invocation_id = "program-fixture", "program-fixture"
+    draft.case_id, draft.producer_invocation_id = "program-fixture-case", "program-fixture"
     yield draft
     agent.close()
 
 
 def _program_graph(model, runtime, *, observer=None, completion_check=lambda: [], maximum=10):
     """按生产会话图装配（程序面 execute_code + finish），图外不再有派发机制"""
+    from src.agents.annotation.agent_graph import build_agent_graph
+    from src.agents.annotation.agent_ir import AgentAnnotation
     from src.agents.annotation.ledger import AnnotationToolLedger
     from src.agents.annotation.shared_tools import build_finish_tool
-    from src.agents.annotation.subagent_graph import build_subagent_graph
-    from src.agents.annotation.subagent_ir import SubagentAnnotation
     from src.agents.diagnosis.program_runtime import bind_finish_ledger
 
     if "finish" not in runtime.tools:
@@ -63,12 +63,12 @@ def _program_graph(model, runtime, *, observer=None, completion_check=lambda: []
     ledger = AnnotationToolLedger(
         run_scope="run", current_chapter_id=0, current_chapter_text="", allow_future_context=False
     )
-    return build_subagent_graph(
+    return build_agent_graph(
         model,
         runtime.build_tool(),
         bind_finish_ledger(runtime.tools["finish"], ledger),
         ledger=ledger,
-        subagent=SubagentAnnotation(role="event"),
+        agent=AgentAnnotation(role="event"),
         max_iterations=maximum,
         observer=observer,
         completion_check=completion_check,
@@ -220,7 +220,7 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         def tracked():
             missing = check()
             if missing:
-                print(f"GAP {phase} work={work.work_id[:8]} :: {missing}")
+                print(f"GAP {phase} case={work.case_id[:8]} :: {missing}")
             return missing
 
         return DiagnosisWorkContext(context.program, context.initial_messages, tracked)
@@ -247,7 +247,8 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
     assert all(turn.task_type == "diagnosis" for turn in turns)
     assert all(turn.status == "success" and turn.turn_ms is not None for turn in turns)
     operations = fetch_run_tool_calls(draft.session, draft.run_id)
-    allowed_refusals = ("结构写入端点不是本 work", "结构比较不属于本 work", "事件核对端点不是本 work")
+    # 越界写入只被案例范围拒绝，不升级为整轮失败或依赖故障
+    allowed_refusals = ("不属于本案例", "不是本案例")
     assert all(
         operation.status == "success" or any(text in str(operation.error or "") for text in allowed_refusals)
         for operation in operations
@@ -394,9 +395,9 @@ async def test_batch_items_have_distinct_audit_ids_and_rejected_case_has_no_deli
 
     draft = declaration_case
     pool, observer = CasePool(draft.run_id), MagicMock()
-    author = ("diagnosis:batch-audit", "batch-audit")
+    author = "batch-audit"
     runtime = DiagnosisProgramRuntime(build_diagnosis_tools(
-        draft.session, draft.run_id, organization_draft=draft, case_pool=pool, execution_id=author[1]),
+        draft.session, draft.run_id, organization_draft=draft, case_pool=pool, execution_id=author),
         observer=observer)
     program = ('page = search_events(limit=2)\ncase = push_case(case_type="event", description="核对事件身份")\n'
                'promise_case(case_id=case["case_id"])\nresult = write_event(items=[' +

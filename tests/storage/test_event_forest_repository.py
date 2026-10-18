@@ -65,7 +65,7 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
         title="事件森林快照",
     )
     paragraphs = paragraphs_of(db_session, run_id, 1)
-    record_id, _work_id, _execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, _execution_id = add_annotation_source(db_session, run_id, 1)
     first_declaration = add_declaration(
         db_session,
         record_id=record_id,
@@ -124,7 +124,7 @@ def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_sessio
         title="伏笔边不混因果",
     )
     paragraphs = paragraphs_of(db_session, run_id, 1)
-    record_id, _work_id, _execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, _execution_id = add_annotation_source(db_session, run_id, 1)
     root_declaration = add_declaration(
         db_session,
         record_id=record_id,
@@ -175,7 +175,7 @@ def test_source_branch_markers_do_not_infer_formal_structure(db_session) -> None
         title="次因分支聚合",
     )
     paragraphs = paragraphs_of(db_session, run_id, 1)
-    record_id, _work_id, _execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, _execution_id = add_annotation_source(db_session, run_id, 1)
     declarations = [
         add_declaration(
             db_session,
@@ -217,7 +217,7 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
         title="伏笔边快照",
     )
     paragraph = first_paragraph(db_session, run_id)
-    record_id, _work_id, execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, execution_id = add_annotation_source(db_session, run_id, 1)
     declaration_id = add_declaration(
         db_session,
         record_id=record_id,
@@ -253,7 +253,7 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
     """同段声明的来源候选关系不能改写已经发布的正式因果关系"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜入门，随后立誓。"])
     paragraph = first_paragraph(db_session, run_id)
-    record_id, _work_id, execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, execution_id = add_annotation_source(db_session, run_id, 1)
     first_declaration = add_declaration(
         db_session,
         record_id=record_id,
@@ -318,8 +318,8 @@ def test_fetch_snapshot_filters_by_chapter_id(db_session) -> None:
         chapter_ids=[1, 2],
         title="章节边界截断",
     )
-    first_record, _work_id, _execution_id = add_annotation_source(db_session, run_id, 1)
-    second_record, _work_id_2, _execution_id_2 = add_annotation_source(db_session, run_id, 2)
+    first_record, _execution_id = add_annotation_source(db_session, run_id, 1)
+    second_record, _execution_id_2 = add_annotation_source(db_session, run_id, 2)
     add_declaration(
         db_session,
         record_id=first_record,

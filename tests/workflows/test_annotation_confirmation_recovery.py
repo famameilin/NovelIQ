@@ -21,30 +21,21 @@ from src.storage.models import (
     EventForeshadowingAction,
     Execution,
     GraphFact,
-    WorkItem,
 )
 from src.work.annotation_work import annotation_work_id
-from src.work.queries import fetch_annotation_work_states
+from src.work.queries import fetch_annotation_role_records
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.workflows.test_annotation_work_pipeline import ProgramModel
 
 
 def _run_executions(run_id: str):
-    """本 run 真实尝试的执行选择器（跨表断言的归属口径）"""
-    return (
-        select(Execution.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .where(WorkItem.annotation_run_id == run_id)
-    )
+    """本 run 真实尝试的执行选择器（执行行直接携带运行归属）"""
+    return select(Execution.execution_id).where(Execution.run_id == run_id)
 
 
 def _run_products(db_session, run_id: str) -> list[ChapterAnnotation]:
-    return list(
-        db_session.scalars(
-            select(ChapterAnnotation).where(ChapterAnnotation.execution_id.in_(_run_executions(run_id)))
-        )
-    )
+    return list(db_session.scalars(select(ChapterAnnotation).where(ChapterAnnotation.run_id == run_id)))
 
 
 @pytest.mark.asyncio
@@ -70,19 +61,21 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
     )
     original_confirm = CasePool.confirm
     original_recover = AnnotationAgent.recover
-    interrupted: list[tuple[str, str]] = []
+    interrupted: list[str] = []
     recovered: list[str] = []
 
-    def interrupted_confirm(pool: CasePool, work_id: str, invocation_id: str) -> None:
+    def interrupted_confirm(pool: CasePool, author: str) -> None:
         if not interrupted:
-            interrupted.append((work_id, invocation_id))
-            assert next(iter(pool.case_runtime.values()))["owner"] == (work_id, invocation_id)
+            interrupted.append(author)
+            assert next(iter(pool.case_runtime.values()))["owner"] == author
             raise RuntimeError("业务提交后案例内存确认中断")
-        original_confirm(pool, work_id, invocation_id)
+        original_confirm(pool, author)
 
     async def observed_recover(agent: AnnotationAgent, message: Message) -> None:
         if message.work_id:
             recovered.append(message.work_id)
+            # 恢复只覆盖被中断的执行
+            assert agent.executions[message.work_id].invocation_id == interrupted[0]
             # 尚未核清存储前不能释放此前已接受 resolved 交付的占用
             assert next(iter(agent.case_pool.case_runtime.values()))["owner"] == interrupted[0]
         await original_recover(agent, message)
@@ -95,21 +88,21 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
 
     assert model.calls == 1
     assert len(interrupted) == 1
-    assert recovered == [interrupted[0][0]]
+    assert recovered == [annotation_work_id(run_id, 1, "annotation")]
     db_session.expire_all()
-    states = fetch_annotation_work_states(db_session, run_id)
+    states = fetch_annotation_role_records(db_session, run_id)
     products = _run_products(db_session, run_id)
     assert len(states) == len(products) == 1
     assert states[0].state == "saved"
-    assert states[0].invocation_id == interrupted[0][1]
-    assert products[0].execution_id == interrupted[0][1]
+    assert states[0].invocation_id == interrupted[0]
+    assert products[0].execution_id == interrupted[0]
     pool = CasePool(run_id)
     pool.load_storage(db_session)
     records = pool.search()
     # 「建一个事件进一个池」：声明案例随 write_event 自动登记为 event 案例，另有一行待认领
     resolved = [record for record in records if record["state"] == "resolved"]
     assert len(records) == 2 and len(resolved) == 1
-    deliveries = pool.deliveries[(states[0].work_id, states[0].invocation_id)]
+    deliveries = pool.deliveries[states[0].invocation_id]
     assert len(deliveries) == 1
     declaration = db_session.scalar(
         select(EventDeclaration).where(EventDeclaration.record_id == products[0].record_id)
@@ -152,8 +145,8 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
     novel_id, run_id = create_run_with_chunks(
         db_session, texts=["甲章整理记录。", "乙章调查线索。"], chapter_ids=[1, 2]
     )
-    first_work = annotation_work_id(run_id, 1, "solo")
-    other_work = annotation_work_id(run_id, 2, "solo")
+    first_work = annotation_work_id(run_id, 1, "annotation")
+    other_work = annotation_work_id(run_id, 2, "annotation")
     other_ready = asyncio.Event()
     other_release = asyncio.Event()
 
@@ -193,19 +186,20 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
     interrupted = False
     observed: list[str] = []
 
-    def interrupted_confirm(pool: CasePool, work_id: str, invocation_id: str) -> None:
+    def interrupted_confirm(pool: CasePool, author: str) -> None:
         nonlocal interrupted
-        if work_id == first_work and not interrupted:
+        if not interrupted:
+            # 甲章提交后确认中断，乙章仍在执行：乙章确认被 other_release 挡在后
             interrupted = True
             raise RuntimeError("甲章提交后确认中断，乙章仍在执行")
-        original_confirm(pool, work_id, invocation_id)
+        original_confirm(pool, author)
 
     async def observed_recover(agent: AnnotationAgent, message: Message) -> None:
         if message.work_id != first_work:
             await original_recover(agent, message)
             return
         other = agent.executions[other_work]
-        author = (other.work_id, other.invocation_id)
+        author = other.invocation_id
         case = next(iter(agent.case_pool.case_runtime.values()))
         entity_id = agent.fact_graph.entity_id("乙章人物", "character")
         assert case["owner"] == author
@@ -227,7 +221,7 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
     assert model.chapter_calls == {1: 1, 2: 2}
     assert observed == [first_work]
     db_session.expire_all()
-    states = fetch_annotation_work_states(db_session, run_id)
+    states = fetch_annotation_role_records(db_session, run_id)
     assert len(states) == 2
     assert all(item.state == "saved" for item in states)
     pool = CasePool(run_id)
@@ -253,7 +247,7 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
 async def test_resume_threshold_change_clears_discarded_chapter_lanes(
     db_session: Session, monkeypatch: pytest.MonkeyPatch, configured_model_pool: None
 ) -> None:
-    """中断留下的未完成长章按新阈值只重建 solo：恢复先清除旧车道展示再重跑"""
+    """中断留下的未完成长章按新阈值只重建整章标注：恢复先清除旧车道展示再重跑"""
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 2)
     novel_id, run_id = create_run_with_chunks(db_session, texts=["长章原文。"])
     cancelled: list[bool] = []
@@ -275,11 +269,12 @@ async def test_resume_threshold_change_clears_discarded_chapter_lanes(
             )
     assert cancelled
     db_session.expire_all()
-    before = fetch_annotation_work_states(db_session, run_id)
-    assert {item.role for item in before} == {"structure", "event", "evidence"}
-    saved_before = {item.role: item.invocation_id for item in before if item.state == "saved"}
-    assert 0 < len(saved_before) < 3
-    # 阈值放宽后本章只需 solo：整章废弃重建，旧车道展示与旧产物身份都不保留
+    before = fetch_annotation_role_records(db_session, run_id)
+    # 只有已保存产物才有行：中断后长章三工位只留下一部分产物（pending 由缺行表达）
+    assert 0 < len(before) < 3
+    assert {item.role for item in before} <= {"entity", "event", "metric"}
+    saved_before = {item.role: item.invocation_id for item in before}
+    # 阈值放宽后本章只需整章标注：整章废弃重建，旧车道展示与旧产物身份都不保留
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 100)
     shown = []
 
@@ -293,8 +288,8 @@ async def test_resume_threshold_change_clears_discarded_chapter_lanes(
     resets = [event for event in shown if event.action == "chapter_reset"]
     assert [event.chapter_id for event in resets] == [1]
     assert shown.index(resets[0]) < next(index for index, event in enumerate(shown) if event.action == "work_reset")
-    assert [event.sub_stage for event in shown if event.action == "work_reset"] == ["solo"]
+    assert [event.sub_stage for event in shown if event.action == "work_reset"] == ["annotation"]
     db_session.expire_all()
-    after = fetch_annotation_work_states(db_session, run_id)
-    assert [(item.chapter_id, item.role, item.state) for item in after] == [(1, "solo", "saved")]
+    after = fetch_annotation_role_records(db_session, run_id)
+    assert [(item.chapter_id, item.role, item.state) for item in after] == [(1, "annotation", "saved")]
     assert after[0].invocation_id not in set(saved_before.values())

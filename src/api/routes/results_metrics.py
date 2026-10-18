@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_metrics_service
 from src.api.models.responses import GlobalStats
@@ -21,7 +20,7 @@ from src.api.routes.results_common import (
     resolve_run_id,
 )
 from src.api.services.metrics_service import MetricsService
-from src.storage.repositories import ChapterRepository, StatsRepository
+from src.storage import Storage
 
 # 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
@@ -31,7 +30,7 @@ router = APIRouter()
 async def get_narrative_structure(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取叙事结构指标"""
@@ -44,7 +43,7 @@ async def get_narrative_structure(
 async def get_emotion_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取情感统计指标"""
@@ -57,7 +56,7 @@ async def get_emotion_stats(
 async def get_character_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取角色统计指标"""
@@ -70,7 +69,7 @@ async def get_character_stats(
 async def get_style_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取风格统计指标"""
@@ -83,13 +82,13 @@ async def get_style_stats(
 async def get_global_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> GlobalStats:
     """查询详情概览使用的全书波动统计"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    stats_repo = StatsRepository(session)
-    chapter_repo = ChapterRepository(session)
+    stats_repo = session.statistics
+    chapter_repo = session.chapters
     from src.api.services.results_queries.metadata import _fetch_global_stats
 
     stats = _fetch_global_stats(run_id, stats_repo, chapter_repo)

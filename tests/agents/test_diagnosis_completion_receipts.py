@@ -89,7 +89,7 @@ async def three_declarations(db_session):
     assert not receipt.get("failed"), receipt
     await save_and_confirm(agent, db_session, execution)
     draft = EventOrganizationDraft(db_session, run_id, "program-fixture")
-    draft.work_id, draft.producer_invocation_id = "program-fixture", "program-fixture"
+    draft.case_id, draft.producer_invocation_id = "program-fixture-case", "program-fixture"
     yield draft
     agent.close()
 
@@ -130,7 +130,7 @@ async def test_structure_receipt_lists_every_gap_in_one_call(declaration_case):
         structure = domain.build_context(first, "structure", _Observer("receipt-c", 2), None)
         gaps = structure.completion_check()
         own = next(
-            item for item in domain.draft.events.values() if item.source_work_id == first.work_id
+            item for item in domain.draft.events.values() if item.source_case_id == first.case_id
         )
         other = next(item for item in domain.draft.events.values() if item.event_id != own.event_id)
         pair = tuple(sorted((own.event_id, other.event_id)))

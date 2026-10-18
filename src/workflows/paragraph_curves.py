@@ -15,7 +15,7 @@ from typing import Any
 
 from src.config import settings
 from src.metrics.robust_smooth import robust_local_regression
-from src.storage.repositories.paragraph_repository import ParagraphCurveRow
+from src.storage.records.paragraph import ParagraphCurveRow
 
 
 def _smooth_mapped(

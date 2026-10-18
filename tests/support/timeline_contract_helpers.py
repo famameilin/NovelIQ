@@ -1,7 +1,7 @@
 """时间轴与剧情推进场景夹具（2026-10-16 全库 3NF 新写面）
 
 夹具按冻结 35 表的正式关系写入，读取一律走正式读面（plotline/timeline 读面）：
-- 标注来源链：work_items(标注) → executions(真实调用) → chapter_annotations
+- 标注来源链：executions(真实调用，直接带 run/章/角色) → chapter_annotations
 - 章级声明：event_declarations + declaration_participants + source_evidence
 - 图谱事实：graph_facts 的实体/关系/人物动态观测三种形状 + source_evidence
 - 章张力：paragraph_features 的 tension_z 正式观测，展示值由读面 sigmoid 投影
@@ -37,7 +37,6 @@ from src.storage.models import (
     GraphRelation,
     Paragraph,
     SourceEvidence,
-    WorkItem,
 )
 from src.utils.identity import stable_uuid
 from src.work.annotation_work import annotation_work_id
@@ -107,33 +106,24 @@ def create_chapter_annotation_source(
     *,
     run_id: str,
     chapter_id: int,
-    role: str = "solo",
+    role: str = "annotation",
     summary: str | None = None,
     emotional_valence: int | None = None,
     narrative_function: str | None = None,
     pivot_moment: bool | None = None,
     cliffhanger: bool | None = None,
-) -> tuple[str, str, str]:
-    """建立一章的正式标注来源链（work → 真实调用 → 记录），返回三元身份"""
+) -> tuple[str, str]:
+    """建立一章的正式标注来源链（执行行直接带 run/章/角色），返回 (record_id, execution_id)"""
     chapter = session.scalar(select(Chapter).where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id))
     if chapter is None or chapter.text is None:
         raise ValueError(f"章节没有原文: run_id={run_id} chapter_id={chapter_id}")
-    work_id = annotation_work_id(run_id, chapter_id, role)
     execution_id, record_id = str(uuid4()), str(uuid4())
-    if session.get(WorkItem, work_id) is None:
-        session.add(
-            WorkItem(
-                work_id=work_id,
-                role=role,
-                annotation_run_id=run_id,
-                annotation_chapter_id=chapter_id,
-            )
-        )
-        session.flush()
     session.add(
         Execution(
             execution_id=execution_id,
-            work_id=work_id,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            role=role,
             attempt_number=1,
             started_at=_utcnow(),
             status="success",
@@ -144,6 +134,9 @@ def create_chapter_annotation_source(
         ChapterAnnotation(
             record_id=record_id,
             execution_id=execution_id,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            role=role,
             contract_version=CONTRACT_VERSION,
             chapter_consolidation_version=RULE_VERSION,
             summary=summary if summary is not None else f"章节 {chapter_id} 摘要",
@@ -154,7 +147,7 @@ def create_chapter_annotation_source(
         )
     )
     session.flush()
-    return record_id, work_id, execution_id
+    return record_id, execution_id
 
 
 def declaration_id_for_event(run_id: str, work_id: str, node_key: str, *, tree_key: str | None = None) -> str:
@@ -393,7 +386,7 @@ def persist_timeline_chapter(
     关系撤回事实）；events 提供章内事件声明，tree_id/cause_role 等旧结构列在
     新契约里是读投影，不再作为写入输入。
     """
-    record_id, work_id, execution_id = create_chapter_annotation_source(
+    record_id, execution_id = create_chapter_annotation_source(
         session,
         run_id=run_id,
         chapter_id=chapter_id,
@@ -403,6 +396,8 @@ def persist_timeline_chapter(
         pivot_moment=chapter_id in (pivot_chapters or set()),
         cliffhanger=chapter_id in (cliffhanger_chapters or set()),
     )
+    # 队列票据身份只是内存对象（标注声明身份规则沿用票据 id），不落 work_items 行
+    work_id = annotation_work_id(run_id, chapter_id, "annotation")
     paragraphs = _chapter_paragraphs(session, run_id, chapter_id)
     if not paragraphs:
         raise ValueError(f"章节没有段落: run_id={run_id} chapter_id={chapter_id}")

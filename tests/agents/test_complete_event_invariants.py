@@ -9,7 +9,7 @@ from src.event_bus import EventBus
 from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
 from tests.agents.test_complete_event_work import declaration_code, execution_for, save_and_confirm
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
-from tests.support.event_tree_fixtures import add_diagnosis_context
+from tests.support.event_tree_fixtures import add_diagnosis_context, report_case_anchor
 
 
 @pytest.fixture
@@ -20,10 +20,11 @@ async def draft_case(db_session):
     result = json.loads(await runtime.execute(declaration_code("search", "寻路")+"\n"+declaration_code("lamp", "点灯")))
     assert not result.get("failed"), result
     await save_and_confirm(agent, db_session, execution)
-    # 诊断整轮身份/work/真实尝试：草案的 producer 是真实执行，不借用占位串
-    session_id, _work_id, execution_id = add_diagnosis_context(db_session, run_id)
+    # 诊断整轮身份与报告级真实尝试：草案的 producer 是真实执行，不借用占位串
+    session_id, execution_id = add_diagnosis_context(db_session, run_id)
     draft = EventOrganizationDraft(db_session, run_id, session_id)
-    draft.work_id = draft.producer_invocation_id = execution_id
+    draft.case_id = report_case_anchor(run_id)
+    draft.producer_invocation_id = execution_id
     yield draft
     agent.close()
 
@@ -142,17 +143,17 @@ def test_later_relation_keeps_original_review_owner_for_remaining_budget_correct
     first, second = event(draft, "first", [ids[0]]), event(draft, "second", [ids[1]])
     freeze_identities(draft, same=False)
     draft.review_events([first, second], reason="原作者核对当前版本")
-    original = draft.work_id
-    draft.work_id, draft.producer_invocation_id = "later-work", "later-invocation"
+    original = draft.case_id
+    draft.case_id, draft.producer_invocation_id = "later-case", "later-invocation"
     evidence = [OrganizationEvidence(paragraph_id=0)]
     draft.relate_events(key="later", source_kind="event", source_id=first, target_kind="event", target_id=second,
                         relation_type="echoes", reason="后续显式判断", evidence=evidence)
-    assert draft.reviewed_events[first].source_work_id == original
+    assert draft.reviewed_events[first].source_case_id == original
     draft.structure_review(source_event_id=first, target_event_id=second, disposition="related",
                            reason="后续关系已核对", evidence=evidence)
     with pytest.raises(CandidateConflict) as raised:
         draft.freeze_structure()
-    assert raised.value.work_ids == (original,)
+    assert raised.value.case_ids == (original,)
 
 
 def test_frozen_identity_cannot_change_and_stage_values_not_copied_from_model(draft_case):

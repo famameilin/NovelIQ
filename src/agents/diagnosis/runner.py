@@ -10,11 +10,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from src.agents.stream import AgentStream
 from src.diagnosis.schema import AgentAnalysis
 from src.event_trees.organization import EventOrganizationDraft, NarrativeOrganization
+from src.storage import Storage, get_storage_factory
 
 from .evidence import DiagnosisEvidenceLedger
 
@@ -28,17 +27,15 @@ def _model_name(llm: Any) -> str | None:
     return str(getattr(llm, "model_name", None) or getattr(llm, "model", "") or None) or None
 
 
-def _validate_topic_label_ids(
-    analysis: AgentAnalysis,
-    *,
-    expected_ids: set[int],
-) -> None:
+def _validate_topic_label_ids(analysis: AgentAnalysis, *, expected_ids: set[int]) -> None:
     """核对标签键与本轮模型实际 topic_id 完全一致"""
     actual_ids = {int(topic_id) for topic_id in analysis.topic_labels}
     if actual_ids != expected_ids:
         raise ValueError(
-            "topic_labels IDs must match available topic data: "
-            f"expected {sorted(expected_ids)}, got {sorted(actual_ids)}"
+            "topic_labels IDs must match available topic data: expected "
+            f"{sorted(expected_ids)}"
+            ", got "
+            f"{sorted(actual_ids)}"
         )
 
 
@@ -77,7 +74,7 @@ def _validate_diagnosis_submission(
 
 async def _run_diagnosis_agent(
     *,
-    session: Session,
+    session: Storage,
     run_id: str,
     novel_id: str,
     execution_id: str,
@@ -100,17 +97,13 @@ async def _run_diagnosis_agent(
     from .work_runtime import DiagnosisWorkScheduler
 
     active_bus = bus or EventBus()
-    domain_session: Session | None = None
+    domain_session: Storage | None = None
     if domain is None:
         from .domain import create_diagnosis_domain
 
         domain_session = open_diagnosis_session(session)
         domain = create_diagnosis_domain(
-            session=domain_session,
-            run_id=run_id,
-            novel_id=novel_id,
-            execution_id=execution_id,
-            novel_title=novel_title,
+            session=domain_session, run_id=run_id, novel_id=novel_id, execution_id=execution_id, novel_title=novel_title
         )
     model_id = settings.models.diagnosis_model_id
     if not model_id:
@@ -118,20 +111,19 @@ async def _run_diagnosis_agent(
 
     def observer_factory(progress: Any) -> Any:
         recorder = audit_recorder or AuditMessages(
-            active_bus, run_id, progress.work.work_id, progress.execution_id, progress.work.role
+            active_bus, run_id, progress.unit.case_id, progress.execution_id, progress.unit.role
         )
         if hasattr(recorder, "sequence"):
             recorder.sequence = progress.audit_sequence
-        # 审计登记真实 invocation 要求 work 身份已存在：派发时先登记会话与 work
-        domain.register_work_identity(progress.work)
+        domain.register_session_identity()
         context = build_invocation_context(
             run_id=run_id,
             task_type="diagnosis",
             execution_id=progress.execution_id,
             attempt_number=progress.dispatch_attempt,
             model=model_id,
-            work_id=progress.work.work_id,
-            role=progress.work.role,
+            case_anchor=progress.unit.case_id if progress.unit.role == "case" else None,
+            role=progress.unit.role,
         )
         local_id = recorder.start_invocation(**context)
         observer = AgentTurnObserver(recorder, invocation_id=local_id, context=context)
@@ -180,26 +172,17 @@ async def _run_diagnosis_agent(
         if callable(close):
             close()
         if domain_session is not None:
-            domain_session.close()
+            pass
 
 
-def open_diagnosis_session(session: Session) -> Session:
-    """落前序阶段在管线会话上的未提交写入，再开独立诊断会话
-
-    2026-10-17 run 52cbb1ac 实证：诊断阶段共用管线会话时，管线会话会被流式 emitter
-    持续 commit；一次提交中途被打断就把会话留在 PREPARED 中间态，此后诊断的任意一次
-    读取都抛 "session is in 'prepared' state" 并伪装成工具依赖故障。与 annotate 阶段
-    同构：开工先 commit 管线会话（前序阶段写入对独立会话可见，per-work 读会话同权），
-    之后整轮诊断只用独立会话读写与发布，不再受管线会话事务状态影响。
-    """
-    session.commit()
-    bind = session.get_bind()
-    return Session(bind=getattr(bind, "engine", bind))
+def open_diagnosis_session(session: Storage) -> Storage:
+    """复用无活动事务的 Storage 入口，每次完整操作独立获取和释放连接"""
+    return session
 
 
 async def run_diagnosis_agent(
     *,
-    session: Session,
+    session: Storage,
     run_id: str,
     novel_id: str,
     novel_title: str | None = None,
@@ -211,17 +194,15 @@ async def run_diagnosis_agent(
     """正式入口只派发诊断work；旧契约由领域入口拒绝，不回退单会话生产"""
     from src.audit.module import AuditModule
     from src.event_bus import EventBus
-    from src.storage.db import get_session_factory
-    from src.utils.identity import stable_digest
 
     bus = EventBus()
-    audit = AuditModule(bus, run_id, get_session_factory()) if audit_recorder is None else None
+    audit = AuditModule(bus, run_id, get_storage_factory()) if audit_recorder is None else None
     try:
         return await _run_diagnosis_agent(
             session=session,
             run_id=run_id,
             novel_id=novel_id,
-            execution_id=stable_digest("diagnosis_declarations", run_id),
+            execution_id=session.new_id(),
             novel_title=novel_title,
             llm=llm,
             stream=stream,

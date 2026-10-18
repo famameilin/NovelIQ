@@ -428,24 +428,24 @@ describe("streamStore 进度回填章 scope 保护", () => {
 
 
 describe("work 重跑输出", () => {
-  it("整章重建清除全部旧角色，长章改为 solo 后旧lane仍不能恢复展示", () => {
+  it("整章重建清除全部旧角色，长章改为 annotation 后旧lane仍不能恢复展示", () => {
     const store = useStreamStore.getState();
     store.reset();
-    store.resetWorkOutput(createLLMEvent({work_id: "old-event", invocation_id: "old", chapter_id: 2, sub_stage: "event"}));
-    store.appendLLMOutput(createLLMEvent({work_id: "old-event", invocation_id: "old", chapter_id: 2, sub_stage: "event", content: "旧event"}));
-    store.resetWorkOutput(createLLMEvent({work_id: "complete", invocation_id: "saved", chapter_id: 1}));
-    store.appendLLMOutput(createLLMEvent({work_id: "complete", invocation_id: "saved", chapter_id: 1, content: "完成章"}));
+    store.resetWorkOutput(createLLMEvent({invocation_id: "old", chapter_id: 2, sub_stage: "event"}));
+    store.appendLLMOutput(createLLMEvent({invocation_id: "old", chapter_id: 2, sub_stage: "event", content: "旧event"}));
+    store.resetWorkOutput(createLLMEvent({invocation_id: "saved", chapter_id: 1}));
+    store.appendLLMOutput(createLLMEvent({invocation_id: "saved", chapter_id: 1, content: "完成章"}));
     store.resetChapterOutput(createLLMEvent({action: "chapter_reset", chapter_id: 2}));
-    store.resetWorkOutput(createLLMEvent({work_id: "new-solo", invocation_id: "new", chapter_id: 2, sub_stage: "solo"}));
-    store.appendLLMOutput(createLLMEvent({work_id: "new-solo", invocation_id: "new", chapter_id: 2, sub_stage: "solo", content: "新solo"}));
-    store.appendLLMOutput(createLLMEvent({work_id: "old-event", invocation_id: "old", chapter_id: 2, sub_stage: "event", content: "迟到"}));
-    expect([...useStreamStore.getState().llmOutputs.values()].map(group => group.outputText)).toEqual(["完成章", "新solo"]);
+    store.resetWorkOutput(createLLMEvent({invocation_id: "new", chapter_id: 2, sub_stage: "annotation"}));
+    store.appendLLMOutput(createLLMEvent({invocation_id: "new", chapter_id: 2, sub_stage: "annotation", content: "新annotation"}));
+    store.appendLLMOutput(createLLMEvent({invocation_id: "old", chapter_id: 2, sub_stage: "event", content: "迟到"}));
+    expect([...useStreamStore.getState().llmOutputs.values()].map(group => group.outputText)).toEqual(["完成章", "新annotation"]);
   });
 
   it("实际 invocation 分组，reset 后拒绝旧执行输出及旧 reset", () => {
     const store = useStreamStore.getState();
     store.reset();
-    const base = {work_id: "work", chapter_id: 1, sub_stage: "event", stream_id: "same-stream"};
+    const base = {chapter_id: 1, sub_stage: "event", stream_id: "same-stream"};
     store.resetWorkOutput(createLLMEvent({...base, action: "work_reset", invocation_id: "old"}));
     store.appendLLMOutput(createLLMEvent({...base, invocation_id: "old", content: "旧"}));
     store.resetWorkOutput(createLLMEvent({...base, action: "work_reset", invocation_id: "new"}));
@@ -453,20 +453,20 @@ describe("work 重跑输出", () => {
     store.appendLLMOutput(createLLMEvent({...base, invocation_id: "old", content: "迟到旧"}));
     store.resetWorkOutput(createLLMEvent({...base, action: "work_reset", invocation_id: "old"}));
     expect([...useStreamStore.getState().llmOutputs.values()].map(group => group.outputText)).toEqual(["新"]);
-    expect(useStreamStore.getState().currentInvocations.get("work")).toBe("new");
+    expect(useStreamStore.getState().currentInvocations.get("annotate:1:event")).toBe("new");
   });
 
   it("同任务恢复保留完成章和当前已保存角色展示，直到对应 work 真正重跑", () => {
     const store = useStreamStore.getState();
     store.reset();
     store.setTaskId("task");
-    store.resetWorkOutput(createLLMEvent({work_id: "complete", chapter_id: 1, invocation_id: "complete-inv"}));
-    store.appendLLMOutput(createLLMEvent({work_id: "complete", chapter_id: 1, invocation_id: "complete-inv", content: "完成章"}));
-    store.resetWorkOutput(createLLMEvent({work_id: "partial", chapter_id: 2, invocation_id: "partial-inv"}));
-    store.appendLLMOutput(createLLMEvent({work_id: "partial", chapter_id: 2, invocation_id: "partial-inv", content: "已保存角色"}));
+    store.resetWorkOutput(createLLMEvent({chapter_id: 1, invocation_id: "complete-inv"}));
+    store.appendLLMOutput(createLLMEvent({chapter_id: 1, invocation_id: "complete-inv", content: "完成章"}));
+    store.resetWorkOutput(createLLMEvent({chapter_id: 2, invocation_id: "partial-inv"}));
+    store.appendLLMOutput(createLLMEvent({chapter_id: 2, invocation_id: "partial-inv", content: "已保存角色"}));
     store.resetStreamForTask("task");
     expect([...useStreamStore.getState().llmOutputs.values()].map(group => group.outputText)).toEqual(["完成章", "已保存角色"]);
-    store.resetWorkOutput(createLLMEvent({work_id: "partial", chapter_id: 2, invocation_id: "rerun-inv"}));
+    store.resetWorkOutput(createLLMEvent({chapter_id: 2, invocation_id: "rerun-inv"}));
     expect([...useStreamStore.getState().llmOutputs.values()].map(group => group.outputText)).toEqual(["完成章"]);
   });
 

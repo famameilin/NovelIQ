@@ -7,18 +7,11 @@ analysis_runs 具名列；聚合阶段完成事实由 analysis_runs.aggregate_co
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
-from src.storage.models import AnalysisRun, Chapter
+from src.storage import Storage
 
 
-def is_aggregate_complete(session: Session, run_id: str) -> bool:
+def is_aggregate_complete(session: Storage, run_id: str) -> bool:
     """检查聚合阶段是否完成（章节存在且正式聚合完成事实非空）。Args: session/run_id；Returns: 是否完成。"""
-    chapters_count = (
-        session.execute(select(func.count()).select_from(Chapter).where(Chapter.run_id == run_id)).scalar() or 0
-    )
-    aggregate_completed_at = session.scalar(
-        select(AnalysisRun.aggregate_completed_at).where(AnalysisRun.run_id == run_id)
-    )
+    chapters_count = session.reads.metrics_queries_completion_is_aggregate_complete_2(run_id) or 0
+    aggregate_completed_at = session.reads.metrics_queries_completion_is_aggregate_complete_1(run_id)
     return chapters_count > 0 and aggregate_completed_at is not None

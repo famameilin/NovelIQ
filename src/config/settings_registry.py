@@ -116,11 +116,11 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 field_type="boolean",
                 label="允许读取未来文本",
             ),
-            # 2026-10-02 恢复（随章内三子代理路径加回）：超过该字数的章派发三条职责 subagent 并发
+            # 2026-10-02 恢复（随章内多 Agent 路径加回）：超过该字数的章派发三条职责 Agent 并发
             SettingFieldSpec(
                 path=("models", "annotation", "sub_chunk_max_chars"),
                 field_type="integer",
-                label="章内三子代理字数门槛",
+                label="章内三 Agent 字数门槛",
                 min_value=1,
             ),
             # ---- models.diagnosis（诊断任务）----
@@ -136,7 +136,7 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 path=("models", "diagnosis", "max_iterations"),
                 field_type="integer",
                 label="诊断每份工作累计回合上限",
-                description="每个诊断 subagent 继承此上限，身份、结构及恢复累计计数",
+                description="每个诊断 agent 继承此上限，身份、结构及恢复累计计数",
                 min_value=1,
             ),
             SettingFieldSpec(

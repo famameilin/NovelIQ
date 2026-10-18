@@ -1,31 +1,27 @@
 """审计查询：用量统计、覆盖缺口与 Agent 回合读投影；只统计实际请求事实
 
-2026-10-16 全库 3NF 改造：审计事实全在 model_calls / agent_tool_calls 宽表上。
-run 内调用由两条真实归属路径取得——work 尝试执行→标注 work（annotation_run），
-诊断执行→work→整轮 session（session_run）；非 Agent 调用按 standalone_* 上下文列取。
-用量分项与供应商实报总量同列区分，total_tokens 优先实报、缺失才按分项投影；
-五类计时为具名列，turn_ms 是 model_ms + tool_wall_ms 的读取投影。
+2026-10-16 全库 3NF 改造；2026-10-17 六 agent 归属：审计事实全在
+model_calls / agent_tool_calls 宽表上。run 内调用由执行的直接归属取得——
+标注角色（annotation/entity/event/metric）与诊断角色（case/report）都直接
+携带 run；非 Agent 调用按 standalone_* 上下文列取。用量分项与供应商实报总量
+同列区分，total_tokens 优先实报、缺失才按分项投影；五类计时为具名列，
+turn_ms 是 model_ms + tool_wall_ms 的读取投影。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
-
-from sqlalchemy import CompoundSelect, Select, func, literal, select, union_all
-from sqlalchemy.orm import Session, aliased
+from typing import Any
 
 from src.audit.documents import decode_document, decode_text_document
-from src.storage.models import AgentToolCall, Execution, ModelCall, WorkItem
+from src.storage import Storage
+from src.storage.records.models import ModelCallRecord as ModelCall
 
-# Agent 调用的计账桶由 work 身份唯一决定（不再逐行复制 task_type/call_type）
 _AGENT_CALL_BUCKETS: dict[str, tuple[str, str]] = {
     "annotation": ("annotation", "agent"),
     "diagnosis": ("diagnosis", "diagnosis"),
 }
-
-#: model_calls 的五类计时列 → 审计读投影计时类别（turn_ms 由 model+tool_wall 合计）
 _TIMING_READ_COLUMNS: tuple[tuple[str, str], ...] = (
     ("ttft", "ttft_ms"),
     ("first_visible", "first_visible_ms"),
@@ -33,33 +29,6 @@ _TIMING_READ_COLUMNS: tuple[tuple[str, str], ...] = (
     ("model", "model_ms"),
     ("tool_wall", "tool_wall_ms"),
 )
-
-
-def _annotation_execution_ids(run_id: str) -> Select[Any]:
-    """本 run 标注 work 尝试的 execution_id 选择器（work 身份直接带 annotation_run）"""
-    return (
-        select(Execution.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .where(WorkItem.annotation_run_id == run_id)
-    )
-
-
-def _diagnosis_execution_ids(run_id: str) -> Select[Any]:
-    """本 run 诊断 work 尝试的 execution_id 选择器（经 work→整轮 session 归属）"""
-    session_execution = aliased(Execution)
-    return (
-        select(Execution.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .join(session_execution, session_execution.execution_id == WorkItem.diagnosis_session_id)
-        .where(session_execution.session_run_id == run_id)
-    )
-
-
-def run_agent_execution_ids(run_id: str) -> Select[tuple[str]]:
-    """本 run 内 Agent 执行的 execution_id 选择器（标注/诊断两条真实归属路径）"""
-    return cast(
-        "Select[tuple[str]]", _annotation_execution_ids(run_id).union(_diagnosis_execution_ids(run_id))
-    )
 
 
 def project_turn_ms(timings: dict[str, int]) -> int | None:
@@ -86,7 +55,7 @@ def project_total_tokens(
 class AuditedTurn:
     """Agent 回合读投影：model_calls 宽行（身份、用量、计时与四类观察文档同列）"""
 
-    call_id: int
+    call_id: str
     execution_id: str
     turn_index: int
     model: str
@@ -120,8 +89,8 @@ class AuditedTurn:
 class AuditedToolCall:
     """工具调用读投影：agent_tool_calls 宽行（耗时与四类观察文档同列）"""
 
-    tool_call_id: int
-    call_id: int
+    tool_call_id: str
+    call_id: str
     tool_name: str
     call_index: int
     status: str
@@ -134,22 +103,14 @@ class AuditedToolCall:
     receipt_observed: Any
 
 
-def fetch_token_usage_stats(session: Session, run_id: str) -> dict[str, Any]:
+def fetch_token_usage_stats(session: Storage, run_id: str) -> dict[str, Any]:
     """获取模型调用的 token 使用统计。"""
     summary = _fetch_usage_summary(session, run_id)
     by_task = _fetch_usage_by_task(session, run_id)
     by_call_type = _fetch_usage_by_call_type(session, run_id)
     by_model = _fetch_usage_by_model(session, run_id)
     coverage_gaps = _detect_token_coverage_gaps(session, run_id)
-    # 这里的 estimated 表示“整套 token 统计只能作为近似成本信号”，
-    # 并不强制每一条记录都来自本地估算；像 embedding 这类 provider 能稳定返回 usage 的链路，
-    # 仍然优先复用实报值，避免为了统一字面口径反而丢掉更好的原始信息
-    calls = _usage_calls(run_id)
-    sources = set(
-        session.execute(
-            select(calls.c.accounting_source).where(calls.c.accounting_source.is_not(None))
-        ).scalars()
-    )
+    sources = set(session.reads.audit_queries_fetch_token_usage_stats_1(run_id))
     summary["accounting_method"] = "unknown" if not sources else "reported" if sources == {"reported"} else "estimated"
     summary["coverage_scope"] = "实际审计请求及已记录的非 Agent 调用；未记录链路不能推断完整"
     summary["coverage_status"] = "partial" if coverage_gaps else "unknown" if not sources else "recorded_calls"
@@ -162,93 +123,11 @@ def fetch_token_usage_stats(session: Session, run_id: str) -> dict[str, Any]:
     }
 
 
-def _agent_call_columns(task_type: str, call_type: str) -> list[Any]:
-    """Agent 调用的统一列面：调用身份、计账桶与用量/实报投影来源"""
-    return [
-        ModelCall.call_id.label("call_id"),
-        ModelCall.model.label("model"),
-        ModelCall.status.label("status"),
-        literal(task_type).label("task_type"),
-        literal(call_type).label("call_type"),
-        ModelCall.prompt_tokens.label("prompt_tokens"),
-        ModelCall.completion_tokens.label("completion_tokens"),
-        ModelCall.cache_read_tokens.label("cache_read_tokens"),
-        ModelCall.reasoning_tokens.label("reasoning_tokens"),
-        ModelCall.accounting_source.label("accounting_source"),
-        ModelCall.reported_total_tokens.label("reported_total_tokens"),
-    ]
-
-
-def _annotation_calls(run_id: str) -> Select[Any]:
-    """本 run 的标注 Agent 调用（执行→真实 work 的 annotation_run 归属）"""
-    task_type, call_type = _AGENT_CALL_BUCKETS["annotation"]
-    return select(*_agent_call_columns(task_type, call_type)).where(
-        ModelCall.execution_id.in_(_annotation_execution_ids(run_id))
-    )
-
-
-def _diagnosis_calls(run_id: str) -> Select[Any]:
-    """本 run 的诊断 Agent 调用（执行→work→整轮 session 的真实归属）"""
-    task_type, call_type = _AGENT_CALL_BUCKETS["diagnosis"]
-    return select(*_agent_call_columns(task_type, call_type)).where(
-        ModelCall.execution_id.in_(_diagnosis_execution_ids(run_id))
-    )
-
-
-def _agent_calls(run_id: str) -> CompoundSelect:
-    """本 run 的 Agent 模型调用（标注与诊断两条路径各自的真实执行归属）"""
-    return union_all(_annotation_calls(run_id), _diagnosis_calls(run_id))
-
-
-def _standalone_calls(run_id: str) -> Select[Any]:
-    """本 run 的非 Agent 真实模型调用（standalone 上下文列，不伪造工作身份）"""
-    return select(
-        ModelCall.call_id.label("call_id"),
-        ModelCall.model.label("model"),
-        ModelCall.status.label("status"),
-        ModelCall.standalone_task_type.label("task_type"),
-        ModelCall.standalone_call_type.label("call_type"),
-        ModelCall.prompt_tokens.label("prompt_tokens"),
-        ModelCall.completion_tokens.label("completion_tokens"),
-        ModelCall.cache_read_tokens.label("cache_read_tokens"),
-        ModelCall.reasoning_tokens.label("reasoning_tokens"),
-        ModelCall.accounting_source.label("accounting_source"),
-        ModelCall.reported_total_tokens.label("reported_total_tokens"),
-    ).where(ModelCall.standalone_run_id == run_id, ModelCall.execution_id.is_(None))
-
-
-def _usage_calls(run_id: str):
-    """本 run 参与计账的全部真实调用（Agent 调用 + 非 Agent 调用）"""
-    return union_all(_annotation_calls(run_id), _diagnosis_calls(run_id), _standalone_calls(run_id)).subquery(
-        "usage_calls"
-    )
-
-
-def _total_tokens_expression(calls: Any) -> Any:
-    """按分项 fallback 的 total_tokens 表达式；实报总量优先"""
-    return func.coalesce(
-        calls.c.reported_total_tokens,
-        func.coalesce(calls.c.prompt_tokens, 0) + func.coalesce(calls.c.completion_tokens, 0),
-    )
-
-
-def _fetch_usage_summary(session: Session, run_id: str) -> dict[str, Any]:
+def _fetch_usage_summary(session: Storage, run_id: str) -> dict[str, Any]:
     """获取使用量摘要"""
-    calls = _usage_calls(run_id)
-    stmt = select(
-        func.count().label("call_count"),
-        func.sum(calls.c.prompt_tokens).label("total_prompt_tokens"),
-        func.sum(func.coalesce(calls.c.completion_tokens, 0)).label("total_completion_tokens"),
-        func.sum(_total_tokens_expression(calls)).label("total_tokens"),
-    )
-    result = session.execute(stmt).fetchone()
+    result = session.reads.audit_queries_fetch_usage_summary(run_id)
     if result is None:
-        return {
-            "call_count": 0,
-            "total_prompt_tokens": 0,
-            "total_completion_tokens": 0,
-            "total_tokens": 0,
-        }
+        return {"call_count": 0, "total_prompt_tokens": 0, "total_completion_tokens": 0, "total_tokens": 0}
     return {
         "call_count": result.call_count or 0,
         "total_prompt_tokens": result.total_prompt_tokens or 0,
@@ -257,23 +136,12 @@ def _fetch_usage_summary(session: Session, run_id: str) -> dict[str, Any]:
     }
 
 
-def _fetch_usage_by_task(session: Session, run_id: str) -> dict[str, Any]:
+def _fetch_usage_by_task(session: Storage, run_id: str) -> dict[str, Any]:
     """按任务类型获取使用量"""
-    calls = _usage_calls(run_id)
-    stmt = (
-        select(
-            calls.c.task_type,
-            func.count().label("call_count"),
-            func.sum(_total_tokens_expression(calls)).label("total_tokens"),
-        )
-        .group_by(calls.c.task_type)
-    )
-
-    result = session.execute(stmt).fetchall()
+    result = session.reads.audit_queries_fetch_usage_by_task(run_id)
     aggregated: dict[str, dict[str, int]] = {}
     for row in result:
         bucket = aggregated.setdefault(row.task_type, {"call_count": 0, "total_tokens": 0})
-        # 不要再用 `row.count` 这类名字，mypy 会把它当成序列方法而不是 SQL 列
         bucket["call_count"] += int(row.call_count or 0)
         bucket["total_tokens"] += int(row.total_tokens or 0)
     return aggregated
@@ -284,20 +152,9 @@ def _build_call_type_key(task_type: str, call_type: str) -> str:
     return f"{task_type}.{call_type}"
 
 
-def _fetch_usage_by_call_type(session: Session, run_id: str) -> dict[str, Any]:
+def _fetch_usage_by_call_type(session: Storage, run_id: str) -> dict[str, Any]:
     """按 task_type + call_type 获取使用量"""
-    calls = _usage_calls(run_id)
-    stmt = (
-        select(
-            calls.c.task_type,
-            calls.c.call_type,
-            func.count().label("call_count"),
-            func.sum(_total_tokens_expression(calls)).label("total_tokens"),
-        )
-        .group_by(calls.c.task_type, calls.c.call_type)
-    )
-
-    result = session.execute(stmt).fetchall()
+    result = session.reads.audit_queries_fetch_usage_by_call_type(run_id)
     aggregated: dict[str, dict[str, int]] = {}
     for row in result:
         key = _build_call_type_key(row.task_type, row.call_type)
@@ -307,84 +164,49 @@ def _fetch_usage_by_call_type(session: Session, run_id: str) -> dict[str, Any]:
     return aggregated
 
 
-def _fetch_usage_by_model(session: Session, run_id: str) -> dict[str, Any]:
+def _fetch_usage_by_model(session: Storage, run_id: str) -> dict[str, Any]:
     """按模型获取使用量"""
-    calls = _usage_calls(run_id)
-    stmt = (
-        select(
-            calls.c.model,
-            func.count().label("call_count"),
-            func.sum(_total_tokens_expression(calls)).label("total_tokens"),
-        )
-        .group_by(calls.c.model)
-    )
-
-    result = session.execute(stmt).fetchall()
+    result = session.reads.audit_queries_fetch_usage_by_model(run_id)
     return {
-        row.model: {
-            "call_count": int(row.call_count or 0),
-            "total_tokens": int(row.total_tokens or 0),
-        }
+        row.model: {"call_count": int(row.call_count or 0), "total_tokens": int(row.total_tokens or 0)}
         for row in result
     }
 
 
-def _detect_token_coverage_gaps(
-    session: Session,
-    run_id: str,
-) -> list[str]:
+def _detect_token_coverage_gaps(session: Storage, run_id: str) -> list[str]:
     """找出计账口径不完整的 Agent 调用桶
 
     宽表落库后缺口有三类：尚未收口的 running 调用、没有用量分项的行、
     以及只能本地估算（非供应商实报）的行。
     """
-    calls = _agent_calls(run_id).subquery("agent_calls")
     gaps: set[str] = set()
-    statement = select(calls.c.task_type, calls.c.call_type).where(
-        (calls.c.status == "running")
-        | (calls.c.prompt_tokens.is_(None))
-        | (func.coalesce(calls.c.accounting_source, "") != "reported")
-    )
-    for row in session.execute(statement):
+    for row in session.reads.audit_queries_detect_token_coverage_gaps_1(run_id):
         gaps.add(_build_call_type_key(row.task_type, row.call_type))
     return sorted(gaps)
 
 
-def fetch_agent_turns(session: Session, run_id: str) -> list[AuditedTurn]:
+def fetch_agent_turns(session: Storage, run_id: str) -> list[AuditedTurn]:
     """读取本 run 的 Agent 回合视图（按 call_id 先后排序）
 
     model_calls 宽行的 execution_id+turn_index 决定身份与回合序，用量分项/实报/
     费用/五类计时/计时备注/四类文档都取自同一行的具名列；四个 bytes 列缺值表示
     当时没有该观察，不伪造空文档。
     """
-    calls = list(
-        session.execute(
-            select(ModelCall)
-            .where(ModelCall.execution_id.in_(run_agent_execution_ids(run_id)))
-            .order_by(ModelCall.call_id)
-        ).scalars()
-    )
+    calls = list(session.reads.audit_queries_fetch_agent_turns_2(run_id))
     if not calls:
         return []
     execution_ids = {str(call.execution_id) for call in calls}
-    annotation_executions = set(
-        session.execute(
-            select(Execution.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(Execution.execution_id.in_(execution_ids), WorkItem.annotation_run_id.is_not(None))
-        ).scalars()
-    )
+    annotation_executions = set(session.reads.audit_queries_fetch_agent_turns_1(execution_ids))
     turns: list[AuditedTurn] = []
     for call in calls:
         execution_id = str(call.execution_id)
         if call.turn_index is None:
-            # 形状约束保证 Agent 调用必有执行与回合序号；缺序号说明数据异常，不静默投影
             raise RuntimeError(f"Agent 调用缺少回合序号: {call.call_id}")
         bucket = _AGENT_CALL_BUCKETS["annotation" if execution_id in annotation_executions else "diagnosis"]
         timings = _read_timings(call)
         turns.append(
             AuditedTurn(
-                call_id=int(call.call_id),
+                call_id=str(call.call_id),
                 execution_id=execution_id,
                 turn_index=int(call.turn_index),
                 model=str(call.model),
@@ -416,18 +238,16 @@ def fetch_agent_turns(session: Session, run_id: str) -> list[AuditedTurn]:
     return turns
 
 
-def fetch_run_tool_calls(session: Session, run_id: str) -> list[AuditedToolCall]:
+def fetch_run_tool_calls(session: Storage, run_id: str) -> list[AuditedToolCall]:
     """读取本 run 的工具调用视图（按 tool_call_id 先后排序）"""
     call_ids = [turn.call_id for turn in fetch_agent_turns(session, run_id)]
     if not call_ids:
         return []
-    rows = session.execute(
-        select(AgentToolCall).where(AgentToolCall.call_id.in_(call_ids)).order_by(AgentToolCall.id)
-    ).scalars()
+    rows = session.reads.audit_queries_fetch_run_tool_calls_1(call_ids)
     return [
         AuditedToolCall(
-            tool_call_id=int(tool_call.id),
-            call_id=int(tool_call.call_id),
+            tool_call_id=str(tool_call.id),
+            call_id=str(tool_call.call_id),
             tool_name=str(tool_call.tool_name),
             call_index=int(tool_call.call_index),
             status=str(tool_call.status),
@@ -479,5 +299,4 @@ __all__ = [
     "fetch_token_usage_stats",
     "project_total_tokens",
     "project_turn_ms",
-    "run_agent_execution_ids",
 ]

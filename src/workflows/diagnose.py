@@ -10,13 +10,12 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from src.agents.stream import AgentStream
 from src.config.analysis_logger import AnalysisLogger
 from src.diagnosis.schema import AgentAnalysis
 from src.sse.events import StreamEvent
-from src.storage.repositories import RunRepository
+from src.storage import Storage
 from src.work.queries import is_annotate_complete
 
 
@@ -48,7 +47,7 @@ def _log_diagnosis_results(result: AgentAnalysis) -> None:
 
 async def run_diagnose(
     run_id: str,
-    session: Session,
+    session: Storage,
     analysis_logger: AnalysisLogger | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
@@ -70,19 +69,19 @@ async def run_diagnose(
     check_cancelled(is_cancelled)
 
     # 完成状态按成功角色贡献只读聚合，不持有整轮诊断的发布行锁
-    from src.storage.repositories.annotation import AnnotationRepository
+    pass
 
-    if not is_annotate_complete(AnnotationRepository(session).session, run_id):
+    if not is_annotate_complete(session, run_id):
         raise ValueError("必需角色 work 尚未全部成功保存，不能诊断")
 
-    run_repo = RunRepository(session)
+    run_repo = session.runs
     run = run_repo.get_run(run_id)
     if not run:
         raise ValueError(f"run {run_id} not found")
     novel_id = str(run.get("novel_id", "")).strip() or ""
     if not novel_id:
         raise ValueError(f"run {run_id} is missing novel_id, cannot build diagnosis payload")
-    # RunRepository._to_dict 的键是 "title"（非 "novel_title"）
+    # RunStore._to_dict 的键是 "title"（非 "novel_title"）
     novel_title = str(run.get("title", "")).strip() or None
 
     agent_stream = AgentStream(emitter, sub_stage="diagnosis") if emitter is not None else None

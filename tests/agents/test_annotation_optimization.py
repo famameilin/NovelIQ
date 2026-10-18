@@ -11,11 +11,11 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agents.annotation import program_contract
 from src.agents.annotation.agent import WorkExecution
+from src.agents.annotation.agent_graph import build_agent_graph
+from src.agents.annotation.agent_ir import AgentAnnotation
+from src.agents.annotation.agent_runtime import AgentProgramRuntime
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.search_projection import SHARED_SEARCH_MAX_CHARS
-from src.agents.annotation.subagent_graph import build_subagent_graph
-from src.agents.annotation.subagent_ir import SubagentAnnotation
-from src.agents.annotation.subagent_runtime import SubagentProgramRuntime
 from src.agents.annotation.tool_batch import _build_tool_batch_node
 from src.agents.annotation.work_tools import build_work_tools
 from src.case_pool import CasePool
@@ -60,12 +60,12 @@ def _runtime(ledger: AnnotationToolLedger, role: str | None = None, *, observer:
     if role is None:
         return ProgramRuntime(tools, ledger, observer=observer)
     ledger.role = role
-    subagent = SubagentAnnotation(role=role)
-    ledger.finish_work.__self__.subagent = subagent
-    return SubagentProgramRuntime(
+    agent = AgentAnnotation(role=role)
+    ledger.finish_work.__self__.agent = agent
+    return AgentProgramRuntime(
         {tool.name: tool for tool in tools},
         ledger,
-        subagent,
+        agent,
         observer=observer,
     )
 
@@ -93,15 +93,18 @@ def _real_work_runtime(*, role: str = "event", observer: Any = None) -> tuple[An
     ledger = _ledger()
     ledger.role = role
     work = WorkReceipt("work", ledger.run_scope, "annotation", {"chapter_id": 24, "role": role})
-    execution = WorkExecution(work, "invocation", ledger, SubagentAnnotation(role=role))
+    execution = WorkExecution(work, "invocation", ledger, AgentAnnotation(role=role))
     cases, trees = CasePool(ledger.run_scope), EventTrees(ledger.run_scope)
-    cases.begin(execution.work_id, execution.invocation_id)
-    trees.begin(execution.work_id, execution.invocation_id)
-    agent = SimpleNamespace(case_pool=cases, event_trees=trees, fact_graph=ledger.graph)
+    # 作者身份收敛为单字符串：真实执行号就是三域的贡献作者
+    cases.begin(execution.invocation_id)
+    trees.begin(execution.invocation_id)
+    agent = SimpleNamespace(
+        run_id=ledger.run_scope, case_pool=cases, event_trees=trees, fact_graph=ledger.graph
+    )
     ledger.work_id, ledger.invocation_id = execution.work_id, execution.invocation_id
     ledger.finish_work = execution.validate
     tool_map = {tool.name: tool for tool in build_work_tools(agent, execution, _QueryService())}
-    runtime = SubagentProgramRuntime(tool_map, ledger, execution.subagent, observer=observer)
+    runtime = AgentProgramRuntime(tool_map, ledger, execution.agent, observer=observer)
     return runtime, agent, execution
 
 
@@ -109,7 +112,7 @@ def _real_work_runtime(*, role: str = "event", observer: Any = None) -> tuple[An
 async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(monkeypatch) -> None:
     runtime, agent, execution = _real_work_runtime()
     trees = agent.event_trees
-    trees.begin("foreign", "saved")
+    trees.begin("saved")
     nodes = [
         BoundEvent(
             node_id=f"node-{index:04d}",
@@ -127,8 +130,8 @@ async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(mo
         )
         for index in range(247)
     ]
-    trees.sync(("foreign", "saved"), 12, nodes)
-    trees.confirm("foreign", "saved")
+    trees.sync("saved", 12, nodes)
+    trees.confirm("saved")
     calls = []
     original_read = trees.read
 
@@ -169,7 +172,7 @@ async def test_event_search_filters_foreshadow_roots_and_compacts_pages() -> Non
     """
     runtime, agent, execution = _real_work_runtime()
     trees = agent.event_trees
-    trees.begin("foreign", "saved")
+    trees.begin("saved")
     nodes = [
         BoundEvent(
             node_id=f"node-{index:04d}",
@@ -188,8 +191,8 @@ async def test_event_search_filters_foreshadow_roots_and_compacts_pages() -> Non
         )
         for index in range(130)
     ]
-    trees.sync(("foreign", "saved"), 12, nodes)
-    trees.confirm("foreign", "saved")
+    trees.sync("saved", 12, nodes)
+    trees.confirm("saved")
     tool = runtime.tools["search_events"]
     roots = json.loads(await tool.ainvoke({"isforeshadowing": True, "limit": 20}))
     assert roots["total"] == 65
@@ -311,21 +314,21 @@ async def test_failed_declaration_keeps_prior_source_and_does_not_add_node() -> 
 
 
 @pytest.mark.asyncio
-async def test_subagent_dialogue_preflight_rejects_entire_out_of_range_batch() -> None:
+async def test_agent_dialogue_preflight_rejects_entire_out_of_range_batch() -> None:
     ledger = _ledger(["“住手！”顾霜喝道。", "“退下。”众人散去。"])
-    runtime = _runtime(ledger, "dialogue")
+    runtime = _runtime(ledger, "metric")
     body = json.loads(
         await runtime.execute('for index in [1, 99]:\n    dialogue(candidate_index=index, verdict="not_dialogue")')
     )
     assert body["status"] == "rejected", body
     assert body["error"]["type"] == "candidate_index_out_of_range"
     assert "total=2" in body["error"]["message"]
-    assert not ledger.written_dialogues and not runtime.subagent.dialogues
+    assert not ledger.written_dialogues and not runtime.agent.dialogues
     assert runtime.ops == [] and runtime.env == {}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", [None, "dialogue"])
+@pytest.mark.parametrize("role", [None, "metric"])
 async def test_zero_candidate_preflight_reports_empty_range(role: str | None) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger, role)
@@ -410,17 +413,17 @@ def _program_reply(code: str, identifier: str) -> AIMessage:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", ["structure", "event"])
-async def test_clean_subagent_finish_stops_without_another_model_request(role: str) -> None:
+@pytest.mark.parametrize("role", ["entity", "event"])
+async def test_clean_agent_finish_stops_without_another_model_request(role: str) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger, role)
     model = _Replies([_program_reply("finish()", "p1")])
-    graph = build_subagent_graph(
+    graph = build_agent_graph(
         model,
         runtime.build_tool(),
         runtime.finish_tool,
         ledger=ledger,
-        subagent=runtime.subagent,
+        agent=runtime.agent,
         max_iterations=5,
         completion_check=lambda: _complete(runtime),
     )
@@ -454,12 +457,12 @@ async def test_finish_closes_work_after_rejected_optional_event() -> None:
             _program_reply("finish()", "p3"),
         ]
     )
-    graph = build_subagent_graph(
+    graph = build_agent_graph(
         model,
         runtime.build_tool(),
         runtime.finish_tool,
         ledger=ledger,
-        subagent=runtime.subagent,
+        agent=runtime.agent,
         max_iterations=5,
         completion_check=lambda: _complete(runtime),
     )
@@ -472,9 +475,9 @@ async def test_finish_closes_work_after_rejected_optional_event() -> None:
 
 
 @pytest.mark.asyncio
-async def test_evidence_finish_requires_its_own_metric() -> None:
+async def test_metric_finish_requires_its_own_metric() -> None:
     ledger = _ledger()
-    runtime = _runtime(ledger, "evidence")
+    runtime = _runtime(ledger, "metric")
     model = _Replies(
         [
             _program_reply("finish()", "p1"),
@@ -483,12 +486,12 @@ async def test_evidence_finish_requires_its_own_metric() -> None:
             ),
         ]
     )
-    graph = build_subagent_graph(
+    graph = build_agent_graph(
         model,
         runtime.build_tool(),
         runtime.finish_tool,
         ledger=ledger,
-        subagent=runtime.subagent,
+        agent=runtime.agent,
         max_iterations=5,
         completion_check=lambda: _complete(runtime),
     )
@@ -529,12 +532,12 @@ async def test_rejected_call_does_not_reopen_successfully_finished_work(failed_c
             AIMessage(content="完成"),
         ]
     )
-    graph = build_subagent_graph(
+    graph = build_agent_graph(
         model,
         runtime.build_tool(),
         runtime.finish_tool,
         ledger=ledger,
-        subagent=runtime.subagent,
+        agent=runtime.agent,
         max_iterations=5,
         completion_check=lambda: _complete(runtime),
     )
@@ -542,7 +545,7 @@ async def test_rejected_call_does_not_reopen_successfully_finished_work(failed_c
         {"messages": [HumanMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
     )
     assert model.requests == 1
-    assert runtime.subagent.finished is True
+    assert runtime.agent.finished is True
     assert ledger.chapter_finished
 
 
@@ -550,5 +553,5 @@ def _complete(runtime):
     execution = runtime.ledger.finish_work.__self__
     missing = execution.validate()
     if not missing:
-        execution.finished = runtime.subagent.finished = runtime.ledger.chapter_finished = True
+        execution.finished = runtime.agent.finished = runtime.ledger.chapter_finished = True
     return missing

@@ -155,7 +155,7 @@ def _call_rejection(name: str, exc: Exception, *, signature_hint: str) -> dict[s
 
     结构化拒绝（AnnotationStageRejection）带 record/field/code/expected 原样透传；
     其余失败（多为参数名写错）给签名提示，让模型下一轮就能改对。
-    2026-10-02 恢复：随章内三子代理路径一并加回（0.2.0 重构曾摘除）。
+    2026-10-02 恢复：随章内多 Agent 路径一并加回（0.2.0 重构曾摘除）。
     """
     if isinstance(exc, AnnotationStageRejection):
         return exc.receipt()

@@ -449,7 +449,7 @@ class TestStageCompleteChecks:
 
         novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻找山门并点灯。"])
         paragraph = first_paragraph(db_session, run_id)
-        record_id, _work_id, _execution_id = add_annotation_source(db_session, run_id, 1, role="event")
+        record_id, _execution_id = add_annotation_source(db_session, run_id, 1, role="event")
         add_declaration(
             db_session,
             record_id=record_id,
@@ -490,7 +490,7 @@ class TestStageCompleteChecks:
         from tests.support.event_tree_fixtures import add_diagnosis_context
 
         novel_id, run_id = create_run_with_chunks(db_session, texts=["旧 row 缺少焦点合同。"])
-        session_id, _work_id, _execution_id = add_diagnosis_context(db_session, run_id)
+        session_id, _execution_id = add_diagnosis_context(db_session, run_id)
         save_diagnosis_report(
             db_session,
             run_id,

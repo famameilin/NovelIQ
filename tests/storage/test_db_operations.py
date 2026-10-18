@@ -148,7 +148,7 @@ def test_insert_agent_analysis(db_session) -> None:
     for name in ("角色0", "角色1"):
         ensure_character(db_session, run_id=run_id, name=name)
 
-    session_id, _work_id, _execution_id = add_diagnosis_context(db_session, run_id)
+    session_id, _execution_id = add_diagnosis_context(db_session, run_id)
     save_diagnosis_report(
         db_session,
         run_id,
@@ -183,7 +183,7 @@ def test_fetch_agent_analysis_prefers_latest_row_for_same_run(db_session) -> Non
     run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
     ensure_character(db_session, run_id=run_id, name="角色0")
 
-    session_id, _work_id, _execution_id = add_diagnosis_context(db_session, run_id)
+    session_id, _execution_id = add_diagnosis_context(db_session, run_id)
     save_diagnosis_report(
         db_session,
         run_id,
@@ -199,7 +199,7 @@ def test_fetch_agent_analysis_prefers_latest_row_for_same_run(db_session) -> Non
     )
     db_session.commit()
 
-    second_session_id, _work_id2, _execution_id2 = add_diagnosis_context(db_session, run_id)
+    second_session_id, _execution_id2 = add_diagnosis_context(db_session, run_id)
     with pytest.raises(IntegrityError):
         save_diagnosis_report(
             db_session,

@@ -12,7 +12,6 @@ from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
 from src.audit.queries import fetch_agent_turns
 from src.audit.recorder import AgentAuditRecorder
 from src.fact_graph.inputs import ChapterParagraphInfo
-from src.storage.models import WorkItem
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
@@ -223,11 +222,6 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
     from uuid import uuid4
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜进入山门"])
-    work_id = f"work-{uuid4().hex[:12]}"
-    db_session.add(
-        WorkItem(work_id=work_id, role="solo", annotation_run_id=run_id, annotation_chapter_id=1)
-    )
-    db_session.commit()
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     recorder = AgentAuditRecorder(factory)
     context = build_invocation_context(
@@ -237,8 +231,7 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
         attempt_number=1,
         model="test-model",
         chapter_id=1,
-        work_id=work_id,
-        role="solo",
+        role="annotation",
     )
     invocation_id = recorder.start_invocation(**context)
     observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=context)

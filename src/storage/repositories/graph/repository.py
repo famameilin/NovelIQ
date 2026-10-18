@@ -1,21 +1,14 @@
-"""章节图谱查询仓储：实体与关系状态从正式贡献按章序、角色序、操作序折叠
-
-读侧不保留第二份可写缓存：实体当前标签/属性/动态字段、关系活动与支持度、
-逐次变化都由 graph_facts（含事实标签与参与者来源）在查询时折叠；run 与章节
-由真实生产执行取得，章号不参与实体身份。
-"""
+"章节图谱查询仓储：实体与关系状态从正式贡献按章序、角色序、操作序折叠"
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.fact_graph.vocabulary import RELATION_DEFINITIONS
 from src.storage.models import (
     Chapter,
     ChapterAnnotation,
@@ -26,19 +19,19 @@ from src.storage.models import (
     GraphEntity,
     GraphFact,
     GraphRelation,
-    WorkItem,
+)
+from src.storage.records.graph import (
+    ChapterBoundary,
+    EntitySnapshotRow,
+    GraphChangeRow,
+    GraphSnapshotRow,
+    RelationSnapshotRow,
 )
 from src.storage.repositories.base import BaseRepository
 
 
-def _display_relation_change(
-    change: dict[str, Any], *, from_name: str | None, to_name: str | None
-) -> dict[str, Any]:
-    """2026-10-13 关系变化读侧展示：操作日志端点存的是实体身份键，按登记名回显
-
-    复合身份键（规范名+实体大类）只在身份面使用，API 输出必须是人读名称；
-    端点实体已删除（名字缺失）时保留原值，不伪造名字。
-    """
+def _display_relation_change(change: dict[str, Any], *, from_name: str | None, to_name: str | None) -> dict[str, Any]:
+    "关系变化读侧展示：操作日志端点存的是实体身份键，按登记名回显"
     item = dict(change)
     operation = item.get("operation")
     if not isinstance(operation, dict):
@@ -54,137 +47,23 @@ def _display_relation_change(
     return item
 
 
-@dataclass(frozen=True, slots=True)
-class ChapterBoundary:
-    """2026-08-19 用于表示由章节身份派生的图谱边界"""
-
-    run_id: str
-    chapter_id: int
-    chapter_order: int
-    first_chapter_id: int
-    last_chapter_id: int
-    annotation_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class EntitySnapshotRow:
-    """2026-08-19 用于返回目标章节边界的实体身份与完整状态
-
-    2026-09-19 entity_id 随图实体主键改 uuid（String(36)）。
-    """
-
-    entity_id: str
-    name: str
-    entity_type: str
-    tags: list[str]
-    attributes: dict[str, Any]
-    first_seen_chapter: int
-    last_seen_chapter: int
-    state_chapter_id: int | None
-    state: dict[str, Any]
-
-
-@dataclass(frozen=True, slots=True)
-class RelationSnapshotRow:
-    """2026-08-19 用于返回目标章节边界的稳定关系状态"""
-
-    chapter_id: int
-    relation_id: str
-    from_entity_id: str
-    to_entity_id: str
-    from_name: str
-    to_name: str
-    relation_type: str
-    directionality: str
-    relation_semantics: str
-    attributes: dict[str, Any]
-    is_active: bool
-    changes: list[dict[str, Any]]
-    first_seen_chapter: int
-    last_seen_chapter: int
-
-
-@dataclass(frozen=True, slots=True)
-class GraphChangeRow:
-    """2026-08-19 用于返回按章节与事实拆分的实体或关系变化"""
-
-    change_id: str
-    change_kind: Literal["state", "relation"]
-    chapter_id: int
-    chapter_order: int
-    fact_id: str
-    effective_chapter_id: int
-    confidence: str
-    changes: list[dict[str, Any]]
-    entity_id: str | None = None
-    entity_name: str | None = None
-    entity_type: str | None = None
-    relation_id: str | None = None
-    from_entity_id: str | None = None
-    to_entity_id: str | None = None
-    from_name: str | None = None
-    to_name: str | None = None
-    relation_type: str | None = None
-    directionality: str | None = None
-    relation_semantics: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class GraphSnapshotRow:
-    """2026-08-19 用于承载一个章节边界的实体与有效关系"""
-
-    chapter_boundary: ChapterBoundary
-    entities: list[EntitySnapshotRow]
-    relations: list[RelationSnapshotRow]
-
-
-@dataclass(slots=True)
-class _EntityStateBucket:
-    """一次 (章, 实体) 的折叠结果：该点状态与本章贡献的变化条目"""
-
-    state: dict[str, Any] = field(default_factory=dict)
-    changes: list[dict[str, Any]] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class _RelationStateBucket:
-    """一次 (章, 关系) 的折叠结果：活动/支持度/身份判断与本章变化条目"""
-
-    relation_type: str = ""
-    attributes: dict[str, Any] = field(default_factory=dict)
-    is_active: bool = True
-    changes: list[dict[str, Any]] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class _FoldedGraph:
-    """run 内一次折叠的全部读侧投影"""
-
-    order_map: dict[int, int] = field(default_factory=dict)
-    entity_states: dict[tuple[int, str], _EntityStateBucket] = field(default_factory=dict)
-    relation_states: dict[tuple[int, str], _RelationStateBucket] = field(default_factory=dict)
-    entity_spans: dict[str, tuple[int, int]] = field(default_factory=dict)
-    relation_spans: dict[str, tuple[int, int]] = field(default_factory=dict)
-
-
 class GraphRepository(BaseRepository[GraphFact]):
     def __init__(self, session: Session, *, internal: bool = False) -> None:
         super().__init__(session)
         self.internal = internal
 
     def run_exists(self, run_id: str) -> bool:
-        """运行行是否存在；读投影据此把已删除运行按空数据降级"""
         from src.storage.models import AnalysisRun
 
         return self.session.get(AnalysisRun, run_id) is not None
 
     def _require_visible(self, run_id: str) -> None:
-        """只有释放事务内部可绕过最终边界，普通查询不能读未发布的物化状态"""
+        "只有释放事务内部可绕过最终边界，普通查询不能读未发布的物化状态"
         if not self.run_exists(run_id):
             raise ValueError(f"run_id={run_id} 不存在")
 
     def _chapter_rows(self, run_id: str) -> list[Chapter]:
-        """2026-08-19 用于读取当前运行的有正文章节并确定顺序"""
+        "用于读取当前运行的有正文章节并确定顺序"
         self._require_visible(run_id)
         return list(
             self.session.execute(
@@ -195,24 +74,22 @@ class GraphRepository(BaseRepository[GraphFact]):
         )
 
     def _chapter_order_map(self, run_id: str) -> dict[int, int]:
-        """2026-08-19 用于把章节身份映射为历史排序"""
+        "用于把章节身份映射为历史排序"
         return {int(chapter.chapter_id): index for index, chapter in enumerate(self._chapter_rows(run_id), start=1)}
 
     def _records_by_chapter(self, run_id: str) -> dict[int, str]:
-        """2026-08-19 用于读取每章已成功保存的正式标注产物身份（章内多 work 取最后一份）"""
+        "用于读取每章已成功保存的正式标注产物身份（章内多角色取最后一份）"
         records: dict[int, str] = {}
         for chapter_id, record_id in self.session.execute(
-            select(WorkItem.annotation_chapter_id, ChapterAnnotation.record_id)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(WorkItem.annotation_run_id == run_id)
+            select(ChapterAnnotation.chapter_id, ChapterAnnotation.record_id)
+            .where(ChapterAnnotation.run_id == run_id)
+            .order_by(ChapterAnnotation.saved_at, ChapterAnnotation.record_id)
         ):
-            if chapter_id is not None:
-                records[int(chapter_id)] = str(record_id)
+            records[int(chapter_id)] = str(record_id)
         return records
 
     def resolve_chapter_boundary(self, run_id: str, *, chapter_id: int | None = None) -> ChapterBoundary | None:
-        """2026-08-19 用于解析显式章节或当前运行最后章节"""
+        "用于解析显式章节或当前运行最后章节"
         chapters = self._chapter_rows(run_id)
         records = self._records_by_chapter(run_id)
         target = (
@@ -232,7 +109,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         )
 
     def resolve_persisted_boundary(self, run_id: str) -> ChapterBoundary | None:
-        """2026-08-23 用于构造覆盖全部已提交数据的历史边界（不依赖 annotation record）"""
+        "用于构造覆盖全部已提交数据的历史边界（不依赖 annotation record）"
         chapters = self._chapter_rows(run_id)
         if not chapters:
             return None
@@ -246,23 +123,20 @@ class GraphRepository(BaseRepository[GraphFact]):
         )
 
     def _fold_graph(self, run_id: str) -> _FoldedGraph:
-        """按原始贡献序折叠实体与关系状态；事实序 =（章序、角色序、work、列表内序）"""
+        "按原始贡献序折叠实体与关系状态；事实序 =（章序、角色序、执行、列表内序）"
         chapters = self._chapter_rows(run_id)
         order_map = {int(chapter.chapter_id): index for index, chapter in enumerate(chapters, start=1)}
         entities = {
             str(row.entity_id): row
             for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
         }
-        diagnosis_sessions = select(Execution.execution_id).where(Execution.session_run_id == run_id)
         direct_rows = list(
             self.session.execute(
-                select(GraphFact, WorkItem.work_id, WorkItem.annotation_chapter_id, WorkItem.role)
+                select(GraphFact, Execution.execution_id, Execution.chapter_id, Execution.role)
                 .join(Execution, Execution.execution_id == GraphFact.direct_producer_execution_id)
-                .join(WorkItem, WorkItem.work_id == Execution.work_id)
                 .where(
                     GraphFact.direct_producer_execution_id.is_not(None),
-                    (WorkItem.annotation_run_id == run_id)
-                    | WorkItem.diagnosis_session_id.in_(diagnosis_sessions),
+                    Execution.run_id == run_id,
                 )
             )
         )
@@ -274,65 +148,61 @@ class GraphRepository(BaseRepository[GraphFact]):
                     DeclarationParticipant.narrative_role,
                     DeclarationParticipant.action,
                     DeclarationParticipant.emotion,
-                    WorkItem.work_id,
-                    WorkItem.annotation_chapter_id,
-                    WorkItem.role,
+                    Execution.execution_id,
+                    ChapterAnnotation.chapter_id,
+                    Execution.role,
                 )
                 .join(DeclarationParticipant, DeclarationParticipant.participant_id == GraphFact.participant_id)
                 .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
                 .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
                 .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-                .join(WorkItem, WorkItem.work_id == Execution.work_id)
-                .where(GraphFact.participant_id.is_not(None), WorkItem.annotation_run_id == run_id)
+                .where(GraphFact.participant_id.is_not(None), ChapterAnnotation.run_id == run_id)
             )
         )
-        role_order = {"solo": 0, "structure": 0, "event": 1, "evidence": 2}
-        entry: list[tuple[tuple[Any, ...], int, int | None, str, Any]] = []
-        for fact, work_id, work_chapter, role in direct_rows:
-            chapter_id = fact.effective_chapter_id if fact.effective_chapter_id is not None else work_chapter
-            sort_key = (
+        role_order = {"annotation": 0, "entity": 0, "event": 1, "metric": 2, "case": 3, "report": 3}
+        entry: list[tuple[tuple[Any, ...], str, int | None, str, Any]] = []
+        for fact, execution_id, execution_chapter, role in direct_rows:
+            chapter_id = fact.effective_chapter_id if fact.effective_chapter_id is not None else execution_chapter
+            sort_key: tuple[Any, ...] = (
                 order_map.get(int(chapter_id), 10**9) if chapter_id is not None else 10**9,
                 role_order.get(str(role), 3),
-                str(work_id),
+                str(execution_id),
                 0,
                 int(fact.operation_order or 0),
             )
-            entry.append((sort_key, int(fact.graph_fact_id), chapter_id, str(work_id), fact))
-        for fact, entity_id, narrative_role, action, emotion, work_id, work_chapter, role in participant_rows:
+            entry.append((sort_key, str(fact.graph_fact_id), chapter_id, str(execution_id), fact))
+        for fact, entity_id, narrative_role, action, emotion, execution_id, record_chapter, role in participant_rows:
             sort_key = (
-                order_map.get(int(work_chapter), 10**9) if work_chapter is not None else 10**9,
+                order_map.get(int(record_chapter), 10**9) if record_chapter is not None else 10**9,
                 role_order.get(str(role), 3),
-                str(work_id),
+                str(execution_id),
                 1,
-                int(fact.graph_fact_id),
+                str(fact.graph_fact_id),
             )
             entry.append(
                 (
                     sort_key,
-                    int(fact.graph_fact_id),
-                    work_chapter,
-                    str(work_id),
+                    str(fact.graph_fact_id),
+                    record_chapter,
+                    str(execution_id),
                     (fact, str(entity_id), narrative_role, action, emotion),
                 )
             )
         entry.sort(key=lambda item: item[0])
-        tags_by_fact: dict[int, list[str]] = {}
+        tags_by_fact: dict[str, list[str]] = {}
         fact_ids = [item[1] for item in entry]
         if fact_ids:
             for tag in self.session.execute(
                 select(FactEntityTag).where(FactEntityTag.graph_fact_id.in_(fact_ids))
             ).scalars():
-                tags_by_fact.setdefault(int(tag.graph_fact_id), []).append(str(tag.tag))
-        relations = {
-            str(row.relation_id): row
-            for row in self.session.execute(select(GraphRelation)).scalars()
-        }
+                tags_by_fact.setdefault(str(tag.graph_fact_id), []).append(str(tag.tag))
+        relations = {str(row.relation_id): row for row in self.session.execute(select(GraphRelation)).scalars()}
         folded = _FoldedGraph(order_map=order_map)
         entity_values: dict[str, dict[str, Any]] = {}
         tag_sources: dict[tuple[int, str], dict[str, list[str]]] = {}
         support_counts: dict[str, int] = {}
         touched: dict[str, list[int]] = {}
-        for _sort_key, fact_id, chapter_id, work_id, payload in entry:
+        for _sort_key, fact_id, chapter_id, author, payload in entry:
             order = order_map.get(int(chapter_id), 0) if chapter_id is not None else 0
             if isinstance(payload, tuple):
                 fact, entity_id, narrative_role, action, emotion = payload
@@ -365,7 +235,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                         {
                             "fact_id": str(fact_id),
                             "chapter_id": chapter_id,
-                            "author_work_id": work_id,
+                            "author_execution_id": author,
                             "operation": dict(operation),
                             "field": field_name,
                             "before": before,
@@ -401,7 +271,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     {
                         "fact_id": str(fact_id),
                         "chapter_id": chapter_id,
-                        "author_work_id": work_id,
+                        "author_execution_id": author,
                         "operation": {
                             "from_entity": str(from_name.canonical_name) if from_name is not None else "",
                             "to_entity": str(to_name.canonical_name) if to_name is not None else "",
@@ -442,7 +312,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                 {
                     "fact_id": str(fact_id),
                     "chapter_id": chapter_id,
-                    "author_work_id": work_id,
+                    "author_execution_id": author,
                     "operation": {"name": name, "entity_type": entity_type, "chapter_id": chapter_id},
                     "field": "entity_type",
                     "before": before.get("entity_type"),
@@ -455,7 +325,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     {
                         "fact_id": str(fact_id),
                         "chapter_id": chapter_id,
-                        "author_work_id": work_id,
+                        "author_execution_id": author,
                         "operation": operation,
                         "field": "description",
                         "before": before["attributes"].get("description"),
@@ -468,7 +338,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     {
                         "fact_id": str(fact_id),
                         "chapter_id": chapter_id,
-                        "author_work_id": work_id,
+                        "author_execution_id": author,
                         "operation": operation,
                         "field": "description",
                         "before": before["attributes"].get("description"),
@@ -481,7 +351,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     {
                         "fact_id": str(fact_id),
                         "chapter_id": chapter_id,
-                        "author_work_id": work_id,
+                        "author_execution_id": author,
                         "operation": operation,
                         "field": "is_representative",
                         "before": before["attributes"].get("is_representative"),
@@ -494,7 +364,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     {
                         "fact_id": str(fact_id),
                         "chapter_id": chapter_id,
-                        "author_work_id": work_id,
+                        "author_execution_id": author,
                         "operation": operation,
                         "field": "is_representative",
                         "before": before["attributes"].get("is_representative"),
@@ -504,10 +374,8 @@ class GraphRepository(BaseRepository[GraphFact]):
                 current["attributes"].pop("is_representative", None)
             if fact.tags_submitted:
                 sources = tag_sources.setdefault((int(chapter_id or 0), entity_id), {})
-                sources[work_id] = list(tags_by_fact.get(int(fact_id), []))
-                current["tags"] = list(
-                    dict.fromkeys(tag for author in sorted(sources) for tag in sources[author])
-                )
+                sources[author] = list(tags_by_fact.get(str(fact_id), []))
+                current["tags"] = list(dict.fromkeys(tag for author in sorted(sources) for tag in sources[author]))
             bucket = folded.entity_states.setdefault((int(chapter_id or 0), entity_id), _EntityStateBucket())
             bucket.state = deepcopy(current)
             bucket.changes.extend(changes)
@@ -533,13 +401,11 @@ class GraphRepository(BaseRepository[GraphFact]):
         return latest
 
     def fetch_entity_snapshots(self, boundary: ChapterBoundary) -> list[EntitySnapshotRow]:
-        """2026-08-19 用于选择目标章节以前最近状态并继承无变化实体"""
+        "用于选择目标章节以前最近状态并继承无变化实体"
         folded = self._fold_graph(boundary.run_id)
         entities = {
             str(row.entity_id): row
-            for row in self.session.execute(
-                select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)
-            ).scalars()
+            for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)).scalars()
         }
         latest = self._latest_entity_states(folded, boundary)
         result: list[EntitySnapshotRow] = []
@@ -583,18 +449,13 @@ class GraphRepository(BaseRepository[GraphFact]):
     def fetch_relation_snapshots(
         self, boundary: ChapterBoundary, *, active_only: bool = True
     ) -> list[RelationSnapshotRow]:
-        """2026-08-19 用于选择目标章节以前最近关系状态并过滤活动状态"""
+        "用于选择目标章节以前最近关系状态并过滤活动状态"
         folded = self._fold_graph(boundary.run_id)
         entity_names = {
             str(row.entity_id): str(row.canonical_name)
-            for row in self.session.execute(
-                select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)
-            ).scalars()
+            for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)).scalars()
         }
-        relations = {
-            str(row.relation_id): row
-            for row in self.session.execute(select(GraphRelation)).scalars()
-        }
+        relations = {str(row.relation_id): row for row in self.session.execute(select(GraphRelation)).scalars()}
         result: list[RelationSnapshotRow] = []
         for relation_id, (chapter_id, bucket) in self._latest_relation_states(folded, boundary).items():
             if active_only and not bucket.is_active:
@@ -602,7 +463,7 @@ class GraphRepository(BaseRepository[GraphFact]):
             relation = relations.get(relation_id)
             if relation is None:
                 continue
-            definition: Mapping[str, object] = RELATION_DEFINITIONS.get(str(relation.relation_type)) or {}
+
             span = folded.relation_spans.get(relation_id, (chapter_id, chapter_id))
             result.append(
                 RelationSnapshotRow(
@@ -613,8 +474,8 @@ class GraphRepository(BaseRepository[GraphFact]):
                     from_name=entity_names.get(str(relation.from_entity_id), str(relation.from_entity_id)),
                     to_name=entity_names.get(str(relation.to_entity_id), str(relation.to_entity_id)),
                     relation_type=str(relation.relation_type),
-                    directionality=str(definition.get("directionality", "directed")),
-                    relation_semantics=str(definition.get("semantics", "ordinary")),
+                    directionality=None,
+                    relation_semantics=None,
                     attributes=dict(bucket.attributes),
                     is_active=bool(bucket.is_active),
                     changes=[
@@ -632,7 +493,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         return result
 
     def fetch_snapshot(self, run_id: str, *, chapter_id: int | None = None) -> GraphSnapshotRow | None:
-        """2026-08-19 用于返回目标章节边界的实体状态与有效关系"""
+        "用于返回目标章节边界的实体状态与有效关系"
         boundary = self.resolve_chapter_boundary(run_id, chapter_id=chapter_id)
         if boundary is None:
             return None
@@ -650,7 +511,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         offset: int = 0,
         limit: int | None = 200,
     ) -> tuple[list[GraphChangeRow], int]:
-        """2026-08-19 用于按章节倒序分页返回状态和关系变化"""
+        "用于按章节倒序分页返回状态和关系变化"
         if offset < 0:
             raise ValueError("graph changes offset 不能小于 0")
         boundary = self.resolve_chapter_boundary(run_id, chapter_id=chapter_id)
@@ -661,10 +522,7 @@ class GraphRepository(BaseRepository[GraphFact]):
             str(row.entity_id): row
             for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
         }
-        relations = {
-            str(row.relation_id): row
-            for row in self.session.execute(select(GraphRelation)).scalars()
-        }
+        relations = {str(row.relation_id): row for row in self.session.execute(select(GraphRelation)).scalars()}
         entity_names = {key: str(row.canonical_name) for key, row in entities.items()}
         changes: list[GraphChangeRow] = []
         for (state_chapter, entity_id), bucket in folded.entity_states.items():
@@ -702,7 +560,7 @@ class GraphRepository(BaseRepository[GraphFact]):
             relation = relations.get(relation_id)
             if relation is None:
                 continue
-            definition: Mapping[str, object] = RELATION_DEFINITIONS.get(str(relation.relation_type)) or {}
+
             for index, change in enumerate(relation_bucket.changes):
                 fact_id = str(change.get("fact_id", ""))
                 changes.append(
@@ -727,8 +585,8 @@ class GraphRepository(BaseRepository[GraphFact]):
                         from_name=entity_names.get(str(relation.from_entity_id)),
                         to_name=entity_names.get(str(relation.to_entity_id)),
                         relation_type=str(relation.relation_type),
-                        directionality=str(definition.get("directionality", "directed")),
-                        relation_semantics=str(definition.get("semantics", "ordinary")),
+                        directionality=None,
+                        relation_semantics=None,
                     )
                 )
         changes.sort(key=lambda row: (row.chapter_order, row.change_kind, row.change_id), reverse=True)
@@ -737,7 +595,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         return changes[offset:end], total
 
     def fetch_latest_entity_rows(self, run_id: str, *, entity_type: str | None = None) -> list[EntitySnapshotRow]:
-        """2026-08-19 用于读取当前章节边界的实体状态"""
+        "用于读取当前章节边界的实体状态"
         boundary = self.resolve_persisted_boundary(run_id)
         if boundary is None:
             return []
@@ -748,21 +606,18 @@ class GraphRepository(BaseRepository[GraphFact]):
         ]
 
     def fetch_latest_relations(self, run_id: str, *, active_only: bool = True) -> list[RelationSnapshotRow]:
-        """2026-08-19 用于读取当前章节边界的关系状态"""
+        "用于读取当前章节边界的关系状态"
         boundary = self.resolve_persisted_boundary(run_id)
         return [] if boundary is None else self.fetch_relation_snapshots(boundary, active_only=active_only)
 
     def fetch_relation_history(self, run_id: str) -> list[RelationSnapshotRow]:
-        """按章节顺序读取关系历史，共享一次折叠结果，避免逐状态重建全图"""
+        "按章节顺序读取关系历史，共享一次折叠结果，避免逐状态重建全图"
         folded = self._fold_graph(run_id)
         entity_names = {
             str(row.entity_id): str(row.canonical_name)
             for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
         }
-        relations = {
-            str(row.relation_id): row
-            for row in self.session.execute(select(GraphRelation)).scalars()
-        }
+        relations = {str(row.relation_id): row for row in self.session.execute(select(GraphRelation)).scalars()}
         rows: list[RelationSnapshotRow] = []
         for (chapter_id, relation_id), bucket in sorted(
             folded.relation_states.items(), key=lambda item: folded.order_map.get(item[0][0], 0)
@@ -770,7 +625,7 @@ class GraphRepository(BaseRepository[GraphFact]):
             relation = relations.get(relation_id)
             if relation is None:
                 continue
-            definition: Mapping[str, object] = RELATION_DEFINITIONS.get(str(relation.relation_type)) or {}
+
             span = folded.relation_spans.get(relation_id, (chapter_id, chapter_id))
             rows.append(
                 RelationSnapshotRow(
@@ -781,8 +636,8 @@ class GraphRepository(BaseRepository[GraphFact]):
                     from_name=entity_names.get(str(relation.from_entity_id), str(relation.from_entity_id)),
                     to_name=entity_names.get(str(relation.to_entity_id), str(relation.to_entity_id)),
                     relation_type=str(relation.relation_type),
-                    directionality=str(definition.get("directionality", "directed")),
-                    relation_semantics=str(definition.get("semantics", "ordinary")),
+                    directionality=None,
+                    relation_semantics=None,
                     attributes=dict(bucket.attributes),
                     is_active=bool(bucket.is_active),
                     changes=[
@@ -800,11 +655,40 @@ class GraphRepository(BaseRepository[GraphFact]):
         return rows
 
     def fetch_relation_changes(self, run_id: str, *, limit: int | None = None) -> list[GraphChangeRow]:
-        """2026-08-19 用于读取诊断时间轴所需的关系变化事实"""
+        "用于读取诊断时间轴所需的关系变化事实"
         rows, _total = self.fetch_changes(run_id, limit=None)
         relation_rows = [row for row in rows if row.change_kind == "relation"]
         return relation_rows if limit is None else relation_rows[:limit]
 
     def count_chapters(self, run_id: str) -> int:
-        """2026-08-19 用于统计当前运行已提交的章节数量"""
+        "用于统计当前运行已提交的章节数量"
         return len(self._chapter_rows(run_id))
+
+
+@dataclass(slots=True)
+class _EntityStateBucket:
+    "一次 (章, 实体) 的折叠结果：该点状态与本章贡献的变化条目"
+
+    state: dict[str, Any] = field(default_factory=dict)
+    changes: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _RelationStateBucket:
+    "一次 (章, 关系) 的折叠结果：活动/支持度/身份判断与本章变化条目"
+
+    relation_type: str = ""
+    attributes: dict[str, Any] = field(default_factory=dict)
+    is_active: bool = True
+    changes: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _FoldedGraph:
+    "run 内一次折叠的全部读侧投影"
+
+    order_map: dict[int, int] = field(default_factory=dict)
+    entity_states: dict[tuple[int, str], _EntityStateBucket] = field(default_factory=dict)
+    relation_states: dict[tuple[int, str], _RelationStateBucket] = field(default_factory=dict)
+    entity_spans: dict[str, tuple[int, int]] = field(default_factory=dict)
+    relation_spans: dict[str, tuple[int, int]] = field(default_factory=dict)

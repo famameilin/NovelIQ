@@ -215,7 +215,7 @@ def call_api_text(entries: list[tuple[str, list[tuple[str, str]], str]]) -> str:
 def constructor_call_entries(entries: list[tuple[str, Any, str]]) -> list[tuple[str, list[tuple[str, str]], str]]:
     """用于把构造器清单（名字, 可调用, 一句话说明）翻成目录条目
 
-    2026-10-02 恢复：随章内三子代理路径一并加回（0.2.0 重构曾摘除）。
+    2026-10-02 恢复：随章内多 Agent 路径一并加回（0.2.0 重构曾摘除）。
     """
     return [
         (name, _function_parameters(function), inspect.getdoc(function) or summary)
@@ -308,8 +308,8 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
 # 批量纪律与收尾纪律又夹在回执字段定义中间，模型要在几百字里切主题。分三块——运行规则、
 # 回执字段是机制，引用与证据口径是取值面，工作方式是行为合同：**四块都在这一份说明里**
 # （模型在这个面只有 execute_code 与 finish 两件工具，说明就是它读得到的全部合同）。
-# 2026-10-02 恢复 SUBAGENT_CONTRACT_TEXT：随章内三子代理路径一并加回（0.2.0 重构曾摘除）。
-SUBAGENT_CONTRACT_TEXT: str = (
+# 2026-10-02 恢复 AGENT_CONTRACT_TEXT：随章内多 Agent 路径一并加回（0.2.0 重构曾摘除）。
+AGENT_CONTRACT_TEXT: str = (
     "执行一段 Python 程序，每次成功调用写入本次来源或候选记录，失败只作废那一条。"
     "正式事件仍须诊断统一发布。\n"
     "运行规则：\n"
@@ -340,7 +340,7 @@ SUBAGENT_CONTRACT_TEXT: str = (
     "- written：本程序成功的 record 键，直接照抄，不自行拼接。\n"
     "- reads：本程序最近的读结果，正文可截短；references 保留全部 source_ref 与坐标，"
     "variables 给出仍可使用的原文引用变量，reads_omitted 是省略正文回显的实际条数。\n"
-    "- progress：本 subagent 各类已写入记录的条数。\n"
+    "- progress：本 Agent 各类已写入记录的条数。\n"
     "- error：程序在写完之前就失败时的错误详情（type 与 message）。\n"
     "- 单次调用：写类回 status=written 带 record 与 ref（ref 是该次的产出，如 push_case 的案例编号）；"
     "读类直接给数据；被拒一律 status=rejected 带 record/field/code/expected/message。\n"

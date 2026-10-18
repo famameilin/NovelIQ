@@ -1,8 +1,8 @@
 """纯内存故障注入覆盖队列取消、模型重选和 work 保存确认边界
 
-2026-10-16 全库 3NF 适配：内存存储模拟新写面——work 身份与真实尝试在派发期
-登记，正式产物（chapter_annotations）由保存事务写入；保存核查按
-work_items/executions/chapter_annotations 三张真实表判定。
+2026-10-16 全库 3NF 适配：内存存储模拟新写面——真实尝试（executions 的 invocation
+形状）在派发期由审计登记，正式产物（chapter_annotations）由保存事务写入；
+保存核查按 executions/chapter_annotations 两张真实表判定（work 行已退场）。
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ from typing import Any
 import pytest
 
 from src.agents.annotation.agent import AnnotationAgent, WorkExecution
+from src.agents.annotation.agent_ir import AgentAnnotation
 from src.agents.annotation.errors import AnnotationDependencyError
 from src.agents.annotation.ledger import AnnotationToolLedger
-from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.case_pool import CasePool
 from src.config import settings
 from src.event_bus import EventBus, Message
@@ -31,18 +31,15 @@ from src.work.chapter_pool import ChapterWorkerPool, PipelineWorkFailed, WorkSav
 
 
 class _MemorySessions:
-    """模拟业务事务与新连接核查：按 work_items/executions/chapter_annotations 三表存行"""
+    """模拟业务事务与新连接核查：按 executions/chapter_annotations 两表存行"""
 
     def __init__(self) -> None:
-        self.work_items: dict[str, Any] = {}
         self.executions: dict[str, Any] = {}
         self.products: dict[str, str] = {}
         self.attempt: tuple[str, str] | None = None
         self.product_id = "record"
         self.sessions = 0
         self.commits = 0
-        # 派发期登记提交的忽略次数（run() 先登记 work 身份，再派发；故障注入只作用于保存提交）
-        self.registration_commits = 0
         self.fail_commit = 0
         self.fail_after_commit = False
         self.fail_verification = False
@@ -50,12 +47,11 @@ class _MemorySessions:
         self.commit_started: threading.Event | None = None
         self.commit_release: threading.Event | None = None
 
-    def expect_attempt(self, work_id: str, invocation_id: str, *, role: str = "structure") -> None:
-        """模拟派发期已登记的事实：work 身份、真实尝试行，以及保存事务将写入的正式产物"""
-        self.work_items[work_id] = SimpleNamespace(
-            work_id=work_id, annotation_run_id="run", annotation_chapter_id=1, role=role
+    def expect_attempt(self, work_id: str, invocation_id: str, *, role: str = "entity") -> None:
+        """模拟派发期已登记的事实：真实尝试行，以及保存事务将写入的正式产物"""
+        self.executions[invocation_id] = SimpleNamespace(
+            execution_id=invocation_id, run_id="run", chapter_id=1, role=role
         )
-        self.executions[invocation_id] = SimpleNamespace(execution_id=invocation_id, work_id=work_id)
         self.attempt = (work_id, invocation_id)
 
     def __call__(self) -> Any:
@@ -70,8 +66,6 @@ class _MemorySessions:
                 if owner.fail_verification and owner.commits:
                     raise ConnectionError("结果核查连接失败")
                 table = getattr(model, "__tablename__", "")
-                if table == "work_items":
-                    return owner.work_items.get(key)
                 if table == "executions":
                     return owner.executions.get(key)
                 return None
@@ -93,10 +87,6 @@ class _MemorySessions:
                 return owner.products.get(invocation_id)
 
             def commit(self) -> None:
-                if owner.registration_commits > 0:
-                    owner.registration_commits -= 1
-                    self._write_pending()
-                    return
                 owner.commits += 1
                 if owner.commit_started is not None:
                     owner.commit_started.set()
@@ -115,9 +105,7 @@ class _MemorySessions:
             def _write_pending(self) -> None:
                 for row in self.pending:
                     table = getattr(type(row), "__tablename__", "")
-                    if table == "work_items":
-                        owner.work_items[row.work_id] = row
-                    elif table == "executions":
+                    if table == "executions":
                         owner.executions[row.execution_id] = row
                 self.pending = []
 
@@ -138,7 +126,7 @@ class _MemorySessions:
         return Session()
 
 
-def _receipt(role: str = "structure") -> WorkReceipt:
+def _receipt(role: str = "entity") -> WorkReceipt:
     return WorkReceipt(
         "work",
         "run",
@@ -197,7 +185,7 @@ def _agent(bus: EventBus, sessions: Any, monkeypatch: Any) -> AnnotationAgent:
         "src.agents.annotation.queries.DatabaseAnnotationQueryService", lambda *args, **kwargs: object()
     )
     monkeypatch.setattr(
-        "src.agents.annotation.agent.build_subagent_graph",
+        "src.agents.annotation.agent.build_agent_graph",
         lambda model, program, *args, **kwargs: _FinishGraph(program, kwargs["completion_check"]),
     )
     return AnnotationAgent(
@@ -228,7 +216,6 @@ def _save_handlers(bus: EventBus, calls: list[str]) -> None:
 @pytest.mark.asyncio
 async def test_cancel_after_real_finish_before_audit_barrier_never_starts_save(monkeypatch: Any) -> None:
     bus, sessions = EventBus(), _MemorySessions()
-    sessions.registration_commits = 1
     agent = _agent(bus, sessions, monkeypatch)
     _model_pool(monkeypatch)
     waiting, cancelled_message, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
@@ -261,9 +248,8 @@ async def test_cancel_after_real_finish_before_audit_barrier_never_starts_save(m
     release.set()
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, 2)
-    # 派发期已登记 work 身份，但从未写入任何正式产物或取消后补存
-    assert not saved and not sessions.products
-    assert [row.role for row in sessions.work_items.values()] == ["structure"]
+    # 派发期不登记任何 work 行，也从未写入正式产物或取消后补存
+    assert not saved and not sessions.products and not sessions.executions
     assert not agent.fact_graph.contributions and not agent.case_pool.cases
     assert not any(MODEL_CAPACITY.snapshot().values())
 
@@ -281,7 +267,6 @@ async def test_completed_reply_cannot_start_new_save_after_cancel() -> None:
 async def test_cancel_during_commit_retains_original_save_and_confirmation(monkeypatch: Any) -> None:
     bus, sessions, calls = EventBus(), _MemorySessions(), []
     sessions.expect_attempt("work", "inv")
-    sessions.registration_commits = 1
     _model_pool(monkeypatch)
     _save_handlers(bus, calls)
     sessions.commit_started, sessions.commit_release = threading.Event(), threading.Event()
@@ -324,7 +309,7 @@ async def test_provider_timeout_returns_retry_with_own_contributions_removed(mon
         async def ainvoke(self, state: Any, config: Any = None) -> Any:
             raise TimeoutError("供应商请求重试耗尽")
 
-    monkeypatch.setattr("src.agents.annotation.agent.build_subagent_graph", lambda *args, **kwargs: FailedGraph())
+    monkeypatch.setattr("src.agents.annotation.agent.build_agent_graph", lambda *args, **kwargs: FailedGraph())
     result = await agent.execute(
         Message("agent.execute", "queue:run", "agent:run", "run", work_id="work", payload=_receipt())
     )
@@ -338,7 +323,6 @@ async def test_dependency_failure_is_not_model_retry_and_stops_work_pool(monkeyp
     bus = EventBus()
     _model_pool(monkeypatch)
     sessions = _MemorySessions()
-    sessions.registration_commits = 1
     agent = _agent(bus, sessions, monkeypatch)
     for topic, address in (("sse.show", "sse:run"), ("audit.barrier", "audit:run")):
         bus.handle(topic, address, _ignore)
@@ -349,7 +333,7 @@ async def test_dependency_failure_is_not_model_retry_and_stops_work_pool(monkeyp
             attempts.append(1)
             raise AnnotationDependencyError("embedding 服务不可用")
 
-    monkeypatch.setattr("src.agents.annotation.agent.build_subagent_graph", lambda *args, **kwargs: FailedGraph())
+    monkeypatch.setattr("src.agents.annotation.agent.build_agent_graph", lambda *args, **kwargs: FailedGraph())
     with pytest.raises(AnnotationDependencyError, match="embedding 服务不可用"):
         await ChapterWorkerPool().run([_receipt()], bus=bus, session_factory=sessions)
     assert attempts == [1]
@@ -385,7 +369,6 @@ async def test_retry_feedback_preserves_pool_failure_weight_before_reselection(m
     bus.handle("agent.execute", "agent:run", execute)
     bus.handle("agent.cancel", "agent:run", _ignore)
     sessions = _MemorySessions()
-    sessions.registration_commits = 1
     assert (
         await asyncio.wait_for(Pool(poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions), 2) == 1
     )
@@ -398,23 +381,23 @@ async def test_committed_work_confirmation_recovers_current_author_and_retains_o
     bus, sessions, calls = EventBus(), _MemorySessions(), []
     sessions.expect_attempt("work", "inv")
     agent = _agent(bus, sessions, monkeypatch)
-    receipt, author, other = _receipt(), ("work", "inv"), ("other", "other_inv")
+    receipt, author, other = _receipt(), "inv", "other_inv"
     ledger = AnnotationToolLedger(
         run_scope="run",
         current_chapter_id=1,
         current_chapter_text="原文。",
         allow_future_context=False,
         graph=agent.fact_graph,
-        work_id=author[0],
-        invocation_id=author[1],
-        role="structure",
+        work_id="work",
+        invocation_id=author,
+        role="entity",
     )
-    execution = WorkExecution(receipt, "inv", ledger, SubagentAnnotation(role="structure"), finished=True)
+    execution = WorkExecution(receipt, author, ledger, AgentAnnotation(role="entity"), finished=True)
     agent.executions["work"] = execution
     for key, sequence in ((author, 1), (other, 2)):
-        agent.fact_graph.begin(*key, sequence, "structure")
-        agent.event_trees.begin(*key)
-        agent.case_pool.begin(*key)
+        agent.fact_graph.begin(key, sequence, "entity")
+        agent.event_trees.begin(key)
+        agent.case_pool.begin(key)
     case = agent.case_pool.push("character", "已核查案例", author)
     agent.case_pool.promise(case["case_id"], author)
     agent.case_pool.associate(
@@ -431,7 +414,7 @@ async def test_committed_work_confirmation_recovers_current_author_and_retains_o
         {
             "author": author,
             "sequence": 1,
-            "role": "structure",
+            "role": "entity",
             "entity_ops": [],
             "relation_assert_ops": [],
             "entity_references": [],
@@ -454,14 +437,14 @@ async def test_committed_work_confirmation_recovers_current_author_and_retains_o
     original_confirm = agent.fact_graph.confirm
     confirmation_count = 0
 
-    def confirm(domain: FactGraph, work_id: str, invocation_id: str) -> None:
+    def confirm(domain: FactGraph, execution_id: str) -> None:
         nonlocal confirmation_count
         confirmation_count += 1
         calls.append("confirm")
         assert agent.case_pool.case_runtime[case["case_id"]]["owner"] == author
         if confirmation_count == 1:
             raise RuntimeError("内存确认故障")
-        original_confirm(work_id, invocation_id)
+        original_confirm(execution_id)
 
     async def check(message: Message) -> bool:
         return True
@@ -498,9 +481,9 @@ async def test_lost_save_reply_reuses_original_invocation_without_duplicate_comm
 async def test_unknown_commit_or_failed_verification_keeps_contributions_and_capacity(monkeypatch: Any) -> None:
     bus, sessions, calls = EventBus(), _MemorySessions(), []
     sessions.expect_attempt("work", "inv")
-    sessions.registration_commits = 1
     _model_pool(monkeypatch)
     _save_handlers(bus, calls)
+    # 派发期不登记 work 行，这里的提交是唯一一次保存事务
     sessions.fail_commit, sessions.fail_after_commit, sessions.fail_verification = 1, True, True
 
     async def execute(message: Message) -> Any:
@@ -531,19 +514,16 @@ async def test_failed_rollback_and_missing_row_are_not_treated_as_confirmed_unsa
 
 
 @pytest.mark.asyncio
-async def test_existing_immutable_work_conflict_is_not_overwritten_or_aborted() -> None:
+async def test_mismatched_execution_ownership_is_not_overwritten_or_aborted() -> None:
     bus, sessions, calls = EventBus(), _MemorySessions(), []
     _save_handlers(bus, calls)
-    # 派发期身份登记是幂等的；此处模拟同 work_id 落着另一份不可变身份
-    sessions.work_items["work"] = SimpleNamespace(
-        work_id="work", annotation_run_id="other_run", annotation_chapter_id=9, role="event"
-    )
-    sessions.executions["inv"] = SimpleNamespace(execution_id="inv", work_id="work")
-    with pytest.raises(WorkSaveUnconfirmed, match="存储冲突"):
+    # 派发期身份登记是幂等的；此处模拟同执行号落着另一份不可变归属（run/章/角色不同）
+    sessions.executions["inv"] = SimpleNamespace(execution_id="inv", run_id="other_run", chapter_id=9, role="metric")
+    with pytest.raises(WorkSaveUnconfirmed, match="归属与派发单元不一致"):
         await ChapterWorkerPool()._save(bus, "queue:run", _receipt(), "inv", sessions)
     assert "abort" not in calls
-    assert sessions.work_items["work"].role == "event"
-    assert sessions.work_items["work"].annotation_chapter_id == 9
+    assert sessions.executions["inv"].role == "metric"
+    assert sessions.executions["inv"].chapter_id == 9
 
 
 @pytest.mark.asyncio
@@ -574,7 +554,6 @@ async def test_model_pool_exhaustion_never_sends_cancel_after_termination(monkey
     bus.handle("agent.execute", "agent:run", execute)
     bus.handle("agent.cancel", "agent:run", cancel)
     sessions = _MemorySessions()
-    sessions.registration_commits = 1
     with pytest.raises(ModelElectionExhausted):
         await asyncio.wait_for(
             ChapterWorkerPool(max_attempts=1, poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions),
@@ -613,7 +592,6 @@ async def test_any_model_pool_exit_avoids_post_termination_cancel(monkeypatch: A
     bus.handle("agent.execute", "agent:run", execute)
     bus.handle("agent.cancel", "agent:run", cancel)
     sessions = _MemorySessions()
-    sessions.registration_commits = 1
     with pytest.raises(ValueError if exit_mode == "error" else PipelineWorkFailed):
         await asyncio.wait_for(
             ChapterWorkerPool(max_attempts=1, poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions),
@@ -663,7 +641,6 @@ async def test_pool_configuration_fault_waits_for_reserved_work_save_before_exit
     bus.handle("agent.execute", "agent:run", execute)
     bus.handle("agent.cancel", "agent:run", cancel)
     sessions = _MemorySessions()
-    sessions.registration_commits = 1
     task = asyncio.create_task(
         Pool(poll_seconds=0.005).run(
             [_receipt(), replace(_receipt(), work_id="other")], bus=bus, session_factory=sessions

@@ -1,20 +1,4 @@
-"""
-段落曲线区块（§5.5 段落曲线 / §5.2 计算合同与读投影）
-
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分——从 paragraph_repository.py 提取段落曲线
-说明: 纯结构搬移，不改 SQL 与聚合口径；密度列在分母为 0 时为 None
-（合法观测，不伪造为零）。
-
-2026-10-16 全库 3NF 改造（35 表冻结结构）：
-- 旧宽表 paragraph_curves 退场：逐段 LOWESS 平滑结果写 paragraph_features 的
-  lowess_net_density / lowess_surface_tension 两类标量行（NULL 保留不可计算
-  语义）；批次完成事实写 analysis_runs.curve_completed_at
-- 原始 pos/neg 密度与 net_density 不再落列，由指标分子÷同口径 token_count
-  投影；surface_tension 由 paragraph_features 的 tension_z 观测按 sigmoid 投影；
-  写入时的 pos/neg/net/surface_tension 字段一律忽略
-"""
+"段落曲线区块（ 段落曲线 /  计算合同与读投影）"
 
 from __future__ import annotations
 
@@ -28,13 +12,13 @@ from sqlalchemy.orm import Session, aliased
 
 from src.config import settings
 from src.storage.models import AnalysisRun, Chapter, Paragraph, ParagraphFeature, ParagraphMetric
+from src.storage.records.paragraph import ParagraphCurveRow
 from src.storage.repositories.metric_inputs import (
     FEATURE_TENSION_Z,
     density_projection,
     net_density_projection,
     surface_tension_projection,
 )
-from src.storage.repositories.paragraph.rows import ParagraphCurveRow
 
 #: 曲线种类（paragraph_features 封闭 feature_code）
 CURVE_KIND_NET_DENSITY = "lowess_net_density"
@@ -48,13 +32,7 @@ def _utcnow() -> datetime:
 
 
 def insert_paragraph_curves(session: Session, run_id: str, rows: Sequence[ParagraphCurveRow]) -> int:
-    """
-    先删后插写入 run 的段落曲线平滑结果（paragraph_features 两类标量行）
-
-    平滑值按 lowess_net_density / lowess_surface_tension 两个既有序列写入，
-    None 保留 NULL；行本身携带的密度与 surface_tension 是读投影来源，不落库。
-    批次与运行级曲线合同（完成时间与 LOWESS 参数）在 analysis_runs 一并登记。
-    """
+    "先删后插写入 run 的段落曲线平滑结果（paragraph_features 两类标量行）"
     session.execute(
         delete(ParagraphFeature).where(
             ParagraphFeature.run_id == run_id,
@@ -98,11 +76,7 @@ def insert_paragraph_curves(session: Session, run_id: str, rows: Sequence[Paragr
 
 
 def fetch_paragraph_curves(session: Session, run_id: str) -> Sequence[Row]:
-    """读取 run 的全部段落曲线行，按 paragraph_id 升序
-
-    行集合为已有曲线平滑样本的段落（与旧曲线行一致）；pos/neg/net 密度与
-    surface_tension 由指标分子/分母与张力 z 读投影给出，平滑值取特征行。
-    """
+    "读取 run 的全部段落曲线行，按 paragraph_id 升序"
     sample_net = aliased(ParagraphFeature, name="sample_net")
     sample_tension = aliased(ParagraphFeature, name="sample_tension")
     statement = (
@@ -147,13 +121,7 @@ def fetch_paragraph_curves(session: Session, run_id: str) -> Sequence[Row]:
 
 
 def fetch_chapter_tension_scores(session: Session, run_id: str) -> list[tuple[int, float]]:
-    """
-    每章张力 = 章内段落 surface_tension 均值（供 timeline/聚合使用）
-
-    段落表面张力已是 run 内稳健标准化 + sigmoid 后的 [0,1] 值，
-    章节值取段落均值（缺失张力数据的章由调用方兜底）；先投影 sigmoid
-    再求均值，保持原「逐段值平均」口径。
-    """
+    "每章张力 = 章内段落 surface_tension 均值（供 timeline/聚合使用）"
     tension = surface_tension_projection()
     statement = (
         select(
@@ -183,7 +151,7 @@ def fetch_chapter_tension_scores(session: Session, run_id: str) -> list[tuple[in
 
 
 def has_paragraph_curves(session: Session, run_id: str) -> bool:
-    """run 是否存在段落曲线平滑样本行（曲线阶段实际产出过结果）"""
+    "run 是否存在段落曲线平滑样本行（曲线阶段实际产出过结果）"
     statement = (
         select(ParagraphFeature.paragraph_id)
         .where(

@@ -317,7 +317,7 @@ async def test_emit_stage_start_resets_progress_context_and_never_writes_total_z
 
 
 @pytest.mark.asyncio
-async def test_actual_work_identity_and_saved_refresh_are_preserved_through_api_bus():
+async def test_actual_invocation_identity_and_saved_refresh_are_preserved_through_api_bus():
     bus = AnalysisEventBus(task_id="test-task", task_manager=MagicMock())
     with patch("src.sse.manager.event_manager") as manager:
         manager.send = AsyncMock()
@@ -327,7 +327,6 @@ async def test_actual_work_identity_and_saved_refresh_are_preserved_through_api_
                 stage="annotate",
                 sub_stage="event",
                 chapter_id=2,
-                work_id="work",
                 invocation_id="actual-inv",
                 message_id="actual-inv:sse:4",
             )
@@ -335,6 +334,12 @@ async def test_actual_work_identity_and_saved_refresh_are_preserved_through_api_
         kwargs = manager.send.call_args.kwargs
     assert kwargs["event_type"] == "pipeline_progress"
     assert kwargs["data"]["event_type"] == "work_saved"
-    assert kwargs["data"]["work_id"] == "work"
+    # 展示作用域由实际阶段上下文构成（stage:章:角色），invocation 身份按原值透传
+    assert (kwargs["data"]["stage"], kwargs["data"]["chapter_id"], kwargs["data"]["sub_stage"]) == (
+        "annotate",
+        2,
+        "event",
+    )
     assert kwargs["data"]["invocation_id"] == "actual-inv"
     assert kwargs["data"]["message_id"] == "actual-inv:sse:4"
+    assert "work_id" not in kwargs["data"]

@@ -37,14 +37,14 @@ interface SimulatedTask {
 
 const simulatedTasks = new Map<string, SimulatedTask>();
 
-// sub_stage 与后端契约枚举对齐（paragraph_embedding/chapter_agent/diagnosis），
+// sub_stage 与后端契约枚举对齐（paragraph_embedding/标注四角色/诊断案例角色），
 // 使 PHASE_CONFIG 映射链路在 mock 模式下同样被覆盖
 const STAGES = [
   { key: "preprocess", label: "预处理", weight: 0.08, steps: ["paragraph_embedding"] },
-  { key: "annotate", label: "标注分析", weight: 0.55, steps: ["chapter_agent"] },
+  { key: "annotate", label: "标注分析", weight: 0.55, steps: ["annotation", "entity", "event", "metric"] },
   { key: "aggregate", label: "数据聚合", weight: 0.15, steps: ["指标计算", "曲线生成"] },
   { key: "topic-model", label: "主题建模", weight: 0.1, steps: ["LDA训练", "主题提取"] },
-  { key: "diagnose", label: "诊断报告", weight: 0.12, steps: ["diagnosis"] },
+  { key: "diagnose", label: "诊断报告", weight: 0.12, steps: ["case", "report"] },
 ];
 
 const TOTAL_ANALYSIS_MS = 18_000;

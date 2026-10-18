@@ -7,21 +7,20 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
 from src.agents.annotation.agent import AnnotationAgent, WorkExecution
+from src.agents.annotation.agent_ir import AgentAnnotation
+from src.agents.annotation.agent_runtime import AgentProgramRuntime
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.paragraphs import build_chapter_paragraph_info
-from src.agents.annotation.subagent_ir import SubagentAnnotation
-from src.agents.annotation.subagent_runtime import SubagentProgramRuntime
 from src.agents.annotation.work_tools import build_work_tools
 from src.event_bus import EventBus, Message
 from src.storage.models import (
     Chapter,
     Execution,
     Paragraph,
-    WorkItem,
     naive_utcnow,
 )
 from src.work.annotation_work import WorkReceipt, annotation_work_id
@@ -67,12 +66,13 @@ def execution_for(agent, session, chapter_id):
         role="event",
     )
     execution = WorkExecution(
-        WorkReceipt(work_id, agent.run_id, "annotation", payload), invocation, ledger, SubagentAnnotation(role="event")
+        WorkReceipt(work_id, agent.run_id, "annotation", payload), invocation, ledger, AgentAnnotation(role="event")
     )
     agent.executions[work_id] = execution
-    agent.fact_graph.begin(work_id, invocation, chapter.sequence, "event")
-    agent.event_trees.begin(work_id, invocation)
-    agent.case_pool.begin(work_id, invocation)
+    # 作者身份收敛为单字符串：真实执行号就是三域的贡献作者
+    agent.fact_graph.begin(invocation, chapter.sequence, "event")
+    agent.event_trees.begin(invocation)
+    agent.case_pool.begin(invocation)
     query = SimpleNamespace(chapter_orders={1: 1, 2: 2}, current_chapter_order=chapter.sequence)
     tools = {tool.name: tool for tool in build_work_tools(agent, execution, query)}
 
@@ -81,28 +81,37 @@ def execution_for(agent, session, chapter_id):
 
     ledger.invoke_tool = invoke
     ledger.finish_work = execution.validate
-    return execution, SubagentProgramRuntime(tools, ledger, execution.subagent)
+    return execution, AgentProgramRuntime(tools, ledger, execution.agent)
 
 
 async def save_and_confirm(agent, session, execution):
     assert execution.validate() == []
-    execution.finished = execution.subagent.finished = execution.ledger.chapter_finished = True
+    execution.finished = execution.agent.finished = execution.ledger.chapter_finished = True
     agent.freeze(execution)
-    # 无 relationship：work → 真实尝试 → 正式记录按依赖分层 flush
-    session.add(
-        WorkItem(
-            work_id=execution.work_id,
-            role="event",
-            annotation_run_id=agent.run_id,
-            annotation_chapter_id=execution.ledger.current_chapter_id,
+    # 无 relationship：真实尝试 → 正式记录按依赖分层 flush（work 行已退场）
+    payload = execution.receipt.payload
+    attempt = (
+        int(
+            session.scalar(
+                select(func.count())
+                .select_from(Execution)
+                .where(
+                    Execution.run_id == agent.run_id,
+                    Execution.chapter_id == payload["chapter_id"],
+                    Execution.role == payload["role"],
+                )
+            )
+            or 0
         )
+        + 1
     )
-    session.flush()
     session.add(
         Execution(
             execution_id=execution.invocation_id,
-            work_id=execution.work_id,
-            attempt_number=1,
+            run_id=agent.run_id,
+            chapter_id=payload["chapter_id"],
+            role=payload["role"],
+            attempt_number=attempt,
             started_at=naive_utcnow(),
             status="success",
         )

@@ -1,10 +1,10 @@
-"""章节正式标注与数据库图测试夹具（全库 3NF 写面：work_items/executions/chapter_annotations）
+"""章节正式标注与数据库图测试夹具（全库 3NF 写面：executions/chapter_annotations）
 
 写面合同（与 src/agents/annotation/agent.py 的 _save 一致）：
-- work 身份 = work_items 的标注形状（role + annotation_run_id/chapter_id）
-- 真实尝试 = executions 的 invocation 形状（work_id + attempt_number + status）
-- 正式产物 = chapter_annotations 头 + 五组件同事务（事件声明、事实图、对话与
-  逐段情绪、案例）
+- 真实尝试 = executions 的 invocation 形状（run_id/章/角色 + attempt_number + status）
+- 正式产物 = chapter_annotations 头（自带 run/章/角色）+ 五组件同事务（事件声明、
+  事实图、对话与逐段情绪、案例）
+- 队列票据身份（annotation_work_id）只是内存对象，不落 work_items 行
 本模块只用当前正式关系，不读任何已退场关系（analysis_outputs/annotation_work/
 event_nodes/event_edges）。
 """
@@ -16,7 +16,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.agents.annotation.candidates import extract_dialogue_candidates
 from src.agents.annotation.output_models import BoundChapterAnnotation
@@ -31,7 +31,6 @@ from src.storage.models import (
     Execution,
     Novel,
     Paragraph,
-    WorkItem,
 )
 from src.storage.models.base import naive_utcnow
 from src.storage.repositories import ChapterRepository, RunRepository
@@ -43,22 +42,21 @@ from src.work.annotation_work import annotation_work_id
 
 @dataclass(frozen=True, slots=True)
 class _SavedWorkRecord:
-    """已保存标注 work 的复读身份：同时满足事实图（execution/record）与树（invocation/output）两个读面命名"""
+    """已保存标注的真实执行复读身份：执行号与正式产物号同源，供域重建读取"""
 
-    work_id: str
-    invocation_id: str
-    output_id: str
+    execution_id: str
+    record_id: str
     chapter_id: int
     role: str
     sequence: int
 
     @property
-    def execution_id(self) -> str:
-        return self.invocation_id
+    def invocation_id(self) -> str:
+        return self.execution_id
 
     @property
-    def record_id(self) -> str:
-        return self.output_id
+    def output_id(self) -> str:
+        return self.record_id
 
 
 def create_run_with_chunks(
@@ -120,60 +118,66 @@ def create_run_with_chunks(
 
 
 def _saved_work_records(session: Any, run_id: str) -> list[_SavedWorkRecord]:
-    """按正式关系复读本 run 已保存标注 work（章末核对与域重建共用读取身份）"""
+    """按正式关系复读本 run 已保存标注（章末核对与域重建共用读取身份）"""
     rows = session.execute(
         select(
-            WorkItem.work_id,
-            WorkItem.role,
-            WorkItem.annotation_chapter_id,
-            Execution.execution_id,
+            ChapterAnnotation.execution_id,
             ChapterAnnotation.record_id,
+            ChapterAnnotation.chapter_id,
+            ChapterAnnotation.role,
             Chapter.sequence,
         )
-        .join(Execution, Execution.work_id == WorkItem.work_id)
-        .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
+        .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
         .join(
             Chapter,
-            (Chapter.run_id == WorkItem.annotation_run_id)
-            & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+            (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
         )
-        .where(WorkItem.annotation_run_id == run_id)
-        .order_by(Chapter.sequence, WorkItem.role, WorkItem.work_id)
+        .where(ChapterAnnotation.run_id == run_id)
+        .order_by(Chapter.sequence, ChapterAnnotation.role, ChapterAnnotation.record_id)
     ).all()
     return [
         _SavedWorkRecord(
-            work_id=str(work_id),
-            invocation_id=str(execution_id),
-            output_id=str(record_id),
+            execution_id=str(execution_id),
+            record_id=str(record_id),
             chapter_id=int(chapter_id),
             role=str(role),
             sequence=int(sequence),
         )
-        for work_id, role, chapter_id, execution_id, record_id, sequence in rows
+        for execution_id, record_id, chapter_id, role, sequence in rows
     ]
 
 
 def _create_work_identity(
-    session: Any, *, run_id: str, chapter_id: int, role: str = "solo"
+    session: Any, *, run_id: str, chapter_id: int, role: str = "annotation"
 ) -> tuple[str, str]:
-    """登记 work_items 标注形状与 executions 的真实尝试，返回 (work_id, invocation_id)"""
+    """登记 executions 的真实尝试，返回 (队列票据 work_id, invocation_id)
+
+    票据身份只是内存对象：正式产物 record_id 与对话/树记录键都按它铸造，
+    executions 行只落真实归属（run/章/角色）。
+    """
     work_id = annotation_work_id(run_id, chapter_id, role)
-    if session.get(WorkItem, work_id) is None:
-        session.add(
-            WorkItem(
-                work_id=work_id,
-                role=role,
-                annotation_run_id=run_id,
-                annotation_chapter_id=chapter_id,
+    attempt = (
+        int(
+            session.scalar(
+                select(func.count())
+                .select_from(Execution)
+                .where(
+                    Execution.run_id == run_id,
+                    Execution.chapter_id == chapter_id,
+                    Execution.role == role,
+                )
             )
+            or 0
         )
-        session.flush()
-    attempt = int(session.scalar(select(Execution.attempt_number).where(Execution.work_id == work_id)) or 0) + 1
+        + 1
+    )
     invocation = uuid4().hex
     session.add(
         Execution(
             execution_id=invocation,
-            work_id=work_id,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            role=role,
             attempt_number=attempt,
             started_at=naive_utcnow(),
             status="running",
@@ -193,15 +197,15 @@ def _finish_execution(session: Any, invocation: str) -> None:
 
 
 def _work_execution_of_chapter(session: Any, run_id: str, chapter_id: int) -> str:
-    """按章取本 run 已保存标注 work 的真实执行（优先 solo/evidence 的正式产物作者）"""
+    """按章取本 run 已保存标注的真实执行（优先整章 annotation，其次长章三工位）"""
     records = [
         record for record in _saved_work_records(session, run_id) if record.chapter_id == chapter_id
     ]
     if not records:
-        raise ValueError(f"章节没有已保存 work 的真实执行: run_id={run_id} chapter_id={chapter_id}")
-    preference = {"solo": 0, "evidence": 1, "structure": 2, "event": 3}
-    record = min(records, key=lambda item: (preference.get(item.role, 9), item.work_id))
-    return record.invocation_id
+        raise ValueError(f"章节没有已保存标注的真实执行: run_id={run_id} chapter_id={chapter_id}")
+    preference = {"annotation": 0, "metric": 1, "entity": 2, "event": 3}
+    record = min(records, key=lambda item: (preference.get(item.role, 9), item.record_id))
+    return record.execution_id
 
 
 def _entity_spec(
@@ -364,7 +368,7 @@ def persist_chapter_annotation(
     events: list[dict[str, Any]] | None = None,
     foreshadowings: list[dict[str, Any]] | None = None,
 ) -> str:
-    """通过 Agent 与三个域保存一份真实 solo work，供消费端回归读取"""
+    """通过 Agent 与三个域保存一份真实整章标注（annotation 角色），供消费端回归读取"""
     chapter_row = session.execute(
         select(Chapter).where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id)
     ).scalar_one_or_none()
@@ -586,9 +590,9 @@ def commit_test_annotation(
 ) -> str:
     """夹具直接使用 work 和域保存接口，不构造旧冻结、命令或章收尾"""
     from src.agents.annotation.agent import AnnotationAgent, WorkExecution
+    from src.agents.annotation.agent_ir import AgentAnnotation
     from src.agents.annotation.ledger import AnnotationToolLedger
     from src.agents.annotation.paragraphs import build_chapter_paragraph_info
-    from src.agents.annotation.subagent_ir import SubagentAnnotation
     from src.case_pool import CasePool
     from src.event_bus import EventBus
     from src.event_trees.trees import EventTrees
@@ -613,14 +617,14 @@ def commit_test_annotation(
         )
         for row in ParagraphRepository(session).fetch_paragraph_rows_batch(run_id, chapter_id=chapter_id, limit=None)
     ]
-    work_id, invocation = _create_work_identity(session, run_id=run_id, chapter_id=chapter_id, role="solo")
+    work_id, invocation = _create_work_identity(session, run_id=run_id, chapter_id=chapter_id, role="annotation")
     payload = {
         "chapter_id": chapter_id,
         "chapter_sequence": chapter.sequence,
         "chapter_label": str(chapter.sequence),
         "chapter_text": chapter.text,
         "chapter_chars": len(chapter.text),
-        "role": "solo",
+        "role": "annotation",
         "paragraphs": paragraphs,
     }
     graph, trees, cases = FactGraph(run_scope=run_id), EventTrees(run_id), CasePool(run_id)
@@ -636,9 +640,9 @@ def commit_test_annotation(
     records = _saved_work_records(session, run_id)
     graph.restore_storage(session, records)
     trees.restore_storage(session, records)
-    graph.begin(work_id, invocation, chapter.sequence, "solo")
-    graph.contributions[(work_id, invocation)]["entity_ops"] = entity_ops or []
-    graph.contributions[(work_id, invocation)]["relation_assert_ops"] = relation_assert_ops or []
+    graph.begin(invocation, chapter.sequence, "annotation")
+    graph.contributions[invocation]["entity_ops"] = entity_ops or []
+    graph.contributions[invocation]["relation_assert_ops"] = relation_assert_ops or []
     graph._fold()
     # 2026-10-13 身份=规范名+实体大类：夹具的历史操作与参与者以登记名给出，
     # 冻结前按图登记把端点/参与者翻成实体身份键（生产面存的就是复合键）
@@ -647,16 +651,16 @@ def commit_test_annotation(
     def _to_key(name: str) -> str:
         return name_to_key.get(name, name)
 
-    for op in graph.contributions[(work_id, invocation)]["relation_assert_ops"]:
+    for op in graph.contributions[invocation]["relation_assert_ops"]:
         op["from_entity"] = _to_key(str(op["from_entity"]))
         op["to_entity"] = _to_key(str(op["to_entity"]))
     graph._fold()
     for event in annotation.events:
         for participant in event.participants:
             participant.entity = _to_key(participant.entity)
-    trees.begin(work_id, invocation)
-    trees.sync((work_id, invocation), chapter_id, annotation.events)
-    cases.begin(work_id, invocation)
+    trees.begin(invocation)
+    trees.sync(invocation, chapter_id, annotation.events)
+    cases.begin(invocation)
     ledger = AnnotationToolLedger(
         run_scope=run_id,
         current_chapter_id=chapter_id,
@@ -666,7 +670,7 @@ def commit_test_annotation(
         paragraph_info=build_chapter_paragraph_info(paragraphs),
         work_id=work_id,
         invocation_id=invocation,
-        role="solo",
+        role="annotation",
     )
     ledger.metrics_payload = annotation.metrics
     ledger.events.bound_payloads["events"] = annotation.events
@@ -678,7 +682,7 @@ def commit_test_annotation(
         WorkReceipt(work_id, run_id, "annotation_agent", payload),
         invocation,
         ledger,
-        SubagentAnnotation(role="solo"),
+        AgentAnnotation(role="annotation"),
         finished=True,
     )
     agent.freeze(execution)
@@ -855,16 +859,15 @@ def commit_test_event_link(
 
 
 def confirm_test_work(session: Any, run_id: str, *, create_missing: bool = False) -> None:
-    """只读查询夹具显式构造实际保存 work，不再设置发布 hash"""
+    """只读查询夹具显式构造实际保存标注，不再设置发布 hash"""
     from src.storage.models import EventDeclaration, GraphEntity
 
     saved = {
         int(chapter_id)
         for chapter_id in session.execute(
-            select(WorkItem.annotation_chapter_id)
-            .join(Execution, Execution.work_id == WorkItem.work_id)
-            .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
-            .where(WorkItem.annotation_run_id == run_id, WorkItem.annotation_chapter_id.is_not(None))
+            select(ChapterAnnotation.chapter_id)
+            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+            .where(ChapterAnnotation.run_id == run_id)
         ).scalars()
     }
     for chapter in session.execute(select(Chapter).where(Chapter.run_id == run_id)).scalars().all():
@@ -883,9 +886,7 @@ def confirm_test_work(session: Any, run_id: str, *, create_missing: bool = False
             session.execute(
                 select(EventDeclaration.declaration_id)
                 .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-                .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-                .join(WorkItem, WorkItem.work_id == Execution.work_id)
-                .where(WorkItem.annotation_run_id == run_id)
+                .where(ChapterAnnotation.run_id == run_id)
             ).first()
             is not None
         )

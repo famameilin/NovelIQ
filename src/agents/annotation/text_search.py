@@ -9,12 +9,8 @@ import unicodedata
 from dataclasses import dataclass
 from typing import TypedDict
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from src.embedding import EmbeddingClient, EmbeddingServiceError, format_query_instruct
-from src.storage.models import Chapter, Paragraph
-from src.storage.repositories.paragraph import search_paragraphs_by_keywords, search_similar_paragraphs
+from src.storage import Storage
 
 from .errors import AnnotationDependencyError
 
@@ -76,7 +72,7 @@ class TextSearchService:
 
     def __init__(
         self,
-        session: Session,
+        session: Storage,
         *,
         run_id: str,
         embedding_client: EmbeddingClient | None = None,
@@ -108,8 +104,7 @@ class TextSearchService:
         normalized_query = query.strip()
         if not normalized_query:
             return []
-        keyword_rows = search_paragraphs_by_keywords(
-            self._session,
+        keyword_rows = self._session.paragraphs.search_paragraphs_by_keywords(
             self._run_id,
             extract_query_terms(normalized_query),
             top_k=max(limit * 2, 10),
@@ -138,8 +133,7 @@ class TextSearchService:
             except EmbeddingServiceError as exc:
                 # 依赖故障不能伪装成可由模型改参数修复的工具拒绝
                 raise AnnotationDependencyError(str(exc)) from exc
-            semantic_rows = search_similar_paragraphs(
-                self._session,
+            semantic_rows = self._session.paragraphs.search_similar_paragraphs(
                 self._run_id,
                 query_embedding,
                 top_k=max(self._semantic_top_k, limit),
@@ -168,23 +162,11 @@ class TextSearchService:
                     candidate["semantic_score"] = semantic_score
                     candidate["excerpt"] = semantic_row.paragraph_text
 
-        metadata_statement = (
-            select(Paragraph.paragraph_id, Paragraph.chapter_id)
-            .join(
-                Chapter,
-                (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id),
-            )
-            .where(
-                Paragraph.run_id == self._run_id,
-                Paragraph.paragraph_id.in_(list(merged)),
-            )
-        )
-        if before_chapter_sequence is not None:
-            metadata_statement = metadata_statement.where(Chapter.sequence < before_chapter_sequence)
-        if after_chapter_sequence is not None:
-            metadata_statement = metadata_statement.where(Chapter.sequence > after_chapter_sequence)
         chapter_by_paragraph = {
-            int(row.paragraph_id): int(row.chapter_id) for row in self._session.execute(metadata_statement).all()
+            int(row.paragraph_id): int(row.chapter_id)
+            for row in self._session.reads.final_agents_annotation_text_search_search_1(
+                after_chapter_sequence, before_chapter_sequence, merged, self._run_id
+            )
         }
         candidates: list[TextSearchCandidate] = []
         for paragraph_id, payload in merged.items():

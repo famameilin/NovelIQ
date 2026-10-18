@@ -5,18 +5,18 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db_session, require_readable_run_status, require_run_for_novel, resolve_run_id
 from src.fact_graph.read.source import read_evidence_source
 from src.metrics.queries.plotline import PlotlineQuery
+from src.storage import Storage
 
 router = APIRouter(prefix="/novels", tags=["timeline"])
-SessionDep = Annotated[Session, Depends(get_db_session)]
+SessionDep = Annotated[Storage, Depends(get_db_session)]
 RunDep = Annotated[str, Depends(resolve_run_id)]
 
 
-def authorize(session: Session, novel_id: str, run_id: str) -> None:
+def authorize(session: Storage, novel_id: str, run_id: str) -> None:
     require_readable_run_status(require_run_for_novel(session, novel_id, run_id))
 
 

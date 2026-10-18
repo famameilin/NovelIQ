@@ -61,7 +61,7 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
         )
         self.calls += 1
         role, inputs = material["role"], material["materials"]
-        if role == "event" and "identity_snapshot" not in inputs:
+        if role == "case" and "identity_snapshot" not in inputs:
             code = (
                 f'declarations = {list(material["responsible_ids"])!r}\n'
                 'page = search_events(limit=20)\n'
@@ -86,7 +86,7 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
                 'declarations[0], "target_declaration_ids":targets, "disposition":"independent", '
                 '"reason":"本测试各章问题明确独立", "evidence":evidence}])\nfinish()'
             )
-        elif role == "event":
+        elif role == "case":
             code = (
                 f'declarations = {list(material["responsible_ids"])!r}\n'
                 'events = search_events(kind="event", limit=20)\n'

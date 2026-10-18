@@ -19,21 +19,21 @@ from src.event_trees.read.models import (
 )
 from src.event_trees.read.organization import EventTreeQuery
 from src.fact_graph.read.references import EntityReferenceProjection
-from src.storage.repositories.graph import ChapterBoundary
-from src.storage.repositories.graph.event_forest import EventForestRecords
+from src.storage import Storage
+from src.storage.records.graph import ChapterBoundary
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+    pass
 
-    from src.storage.models import Chapter
+    from src.storage.records.models import ChapterRecord as Chapter
 
 
 class EventForestQuery:
     """保留章节阅读截点，节点始终使用已发布的正式 event_id"""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Storage) -> None:
         self.session = session
-        self.records = EventForestRecords(session)
+        self.records = session.forest
 
     def _chapter_rows(self, run_id: str) -> list[Chapter]:
         return self.records.fetch_chapters(run_id)

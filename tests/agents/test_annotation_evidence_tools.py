@@ -21,7 +21,7 @@ from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.text_search import TextSearchCandidate
 from src.agents.annotation.tool_batch import _invoke_tool
 from src.event_trees.models import EventParticipantInput
-from src.fact_graph.graph import FactGraph, entity_key, mention_uuid
+from src.fact_graph.graph import FactGraph, entity_key
 from src.fact_graph.inputs import BoundRelationInput, ChapterParagraphInfo, DialogueInput, EntityInput
 from src.fact_graph.outputs import TextSearchResult
 from tests.support.annotation_work_tools import build_annotation_tools
@@ -81,9 +81,9 @@ def _find_tool(tools: list, name: str):
     return next(candidate for candidate in tools if candidate.name == name)
 
 
-def _entity_id(name: str, entity_type: str = "character") -> str:
-    """按测试章内图的 scope 和 chapter_id 计算提及 ID（2026-10-13 名+大类复合身份）"""
-    return mention_uuid("", 0, name, entity_type)
+def _entity_id(graph: FactGraph, name: str, entity_type: str = "character") -> str | None:
+    """读取图中实际分配并记住的实体身份"""
+    return graph.entity_id(name, entity_type)
 
 
 def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
@@ -714,7 +714,7 @@ def test_write_entity_without_prior_search_graph_is_allowed() -> None:
 
     receipt = _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     assert receipt["status"] == "written"
-    assert receipt["id"] == _entity_id("顾霜")
+    assert receipt["id"] == _entity_id(ledger.graph, "顾霜")
     assert list(ledger.written_entities) == [entity_key("顾霜", "character")]
 
 
@@ -733,11 +733,11 @@ def test_write_entity_same_name_different_type_is_new_entity() -> None:
     receipt = _call(tools, "write_entity", {"name": "顾霜", "entity_type": "item", "el": "顾霜"})
     assert receipt["status"] == "written"
     assert receipt["content"]["entity_type"] == "item"
-    assert receipt["id"] != _entity_id("顾霜", "character")
-    assert receipt["id"] == _entity_id("顾霜", "item")
+    assert receipt["id"] != _entity_id(ledger.graph, "顾霜", "character")
+    assert receipt["id"] == _entity_id(ledger.graph, "顾霜", "item")
     assert set(ledger.written_entities) == {entity_key("顾霜", "item")}
     # 原 character 身份仍在图上、id 不变
-    assert ledger.graph.entity_id("顾霜", "character") == _entity_id("顾霜", "character")
+    assert ledger.graph.entity_id("顾霜", "character") == _entity_id(ledger.graph, "顾霜", "character")
 
 
 def test_write_tools_reject_invalid_enum_at_call_time() -> None:

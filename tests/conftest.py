@@ -86,6 +86,7 @@ def _build_test_engine(database_url: str, schema_name: str):
         connect_args={
             "options": f"-c search_path={safe_schema},public",
         },
+        execution_options={"schema_translate_map": {None: safe_schema}},
     )
 
     @event.listens_for(engine, "connect")
@@ -170,14 +171,10 @@ def setup_test_database(test_database_url: str, test_database_schema: str) -> Ge
     with _test_engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-        conn.execute(text(f"DROP SCHEMA IF EXISTS {safe_schema} CASCADE"))
         conn.execute(text(f"CREATE SCHEMA {safe_schema}"))
         conn.commit()
 
-    # 当前 ORM 元数据仍未声明显式 schema，PostgreSQL dialect 的默认建表目标仍是 public。
-    # 因此测试会话启动时需要把 public 里的 ORM 表整体重建一次，清掉上次运行残留的固定 run_id/task_id 数据，
-    # 否则即便 search_path 指向隔离 schema，未限定表名仍会回落到 public 并撞上旧主键。
-    Base.metadata.drop_all(bind=_test_engine)
+    # 显式翻译无 schema 的元数据，禁止 create_all/drop_all 回落到 public
     _create_all_orm_tables(_test_engine)
 
     yield

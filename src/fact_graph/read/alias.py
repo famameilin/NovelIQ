@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from src.fact_graph.identity_resolution import resolve_identities
-from src.storage.repositories.graph.repository import EntitySnapshotRow, RelationSnapshotRow
+from src.storage.records.graph import EntitySnapshotRow, RelationSnapshotRow
 
 
 @dataclass(slots=True)

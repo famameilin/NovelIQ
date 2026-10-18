@@ -12,11 +12,10 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from sqlalchemy.orm import Session
-
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
 from src.sse.events import StreamEvent
+from src.storage import Storage
 
 CancellationCheck = Callable[[], bool]
 
@@ -28,7 +27,7 @@ class StageExecutor:
         self,
         source_path: Path,
         run_id: str,
-        session: Session,
+        session: Storage,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         is_cancelled: CancellationCheck | None = None,
     ) -> None:
@@ -46,7 +45,7 @@ class StageExecutor:
     async def run_annotate(
         self,
         run_id: str,
-        session: Session,
+        session: Storage,
         novel_id: str,
         analysis_logger: AnalysisLogger | None,
         novel_title: str | None = None,
@@ -69,7 +68,7 @@ class StageExecutor:
     async def run_aggregate(
         self,
         run_id: str,
-        session: Session,
+        session: Storage,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         is_cancelled: CancellationCheck | None = None,
     ) -> None:
@@ -81,7 +80,7 @@ class StageExecutor:
     async def run_linguistic(
         self,
         run_id: str,
-        session: Session,
+        session: Storage,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         is_cancelled: CancellationCheck | None = None,
     ) -> None:
@@ -93,7 +92,7 @@ class StageExecutor:
     async def run_topic_model(
         self,
         run_id: str,
-        session: Session,
+        session: Storage,
         num_topics: int | None = None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         is_cancelled: CancellationCheck | None = None,
@@ -114,7 +113,7 @@ class StageExecutor:
     async def run_diagnose(
         self,
         run_id: str,
-        session: Session,
+        session: Storage,
         analysis_logger: AnalysisLogger | None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         is_cancelled: CancellationCheck | None = None,

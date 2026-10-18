@@ -1,41 +1,16 @@
-"""
-chunk 关键词检索与原文读取
-
-- search_paragraphs_by_keywords: rg 风格关键词子串精确匹配，直接扫 paragraphs 事实源
-- fetch_chunk_text: 读取指定 chunk 的原文全文（read 工具的数据源）
-
-2026-10-16 全库 3NF 改造（35 表冻结结构）：段落 local_end_char 与 global 坐标
-由 reader 的投影表达式得到（chapters.char_offset + 局部边界）；章节正文文本
-改读 chapters.text（正文与目录同键一对一）。
-"""
+"chunk 关键词检索与原文读取"
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from src.storage.models import Chapter, Paragraph
 from src.storage.query_terms import like_pattern, term_matches
+from src.storage.records.keyword_ops import KeywordMatchRow
 from src.storage.repositories.paragraph.reader import join_chapter_body, paragraph_projection
-
-
-@dataclass(frozen=True)
-class KeywordMatchRow:
-    """关键词检索段落 DTO，携带命中的关键词明细与全文定位"""
-
-    paragraph_id: int
-    chapter_id: int
-    paragraph_index: int
-    paragraph_text: str
-    local_start_char: int
-    local_end_char: int
-    global_start_char: int
-    global_end_char: int
-    matched_keywords: tuple[str, ...]
-    match_count: int
 
 
 def search_paragraphs_by_keywords(
@@ -49,21 +24,13 @@ def search_paragraphs_by_keywords(
     before_chapter_sequence: int | None = None,
     after_chapter_sequence: int | None = None,
 ) -> list[KeywordMatchRow]:
-    """
-    2026-08-14 二期段落化：直接扫 paragraphs 事实源（不再扫 chunks + Python 重切段），
-    段落身份一律取 paragraphs 事实源；local_end/global 坐标由投影表达式得到；
-    paragraphs.text 建有 lower(text) gin_trgm_ops 索引（idx_paragraphs_text_trgm）
+    "二期段落化：直接扫 paragraphs 事实源（不再扫 chunks + Python 重切段），"
 
-    2026-09-04 词项支持通配符：% 匹配任意长度、_ 匹配单字符（LIKE 原生语义，
-    不再转义）；多词项任一命中即返回，按命中词项数排序。
-    """
-    # 2026-08-13 P2-6：词项统一小写（与 extract_query_terms 口径一致），
     # SQL 与 Python 两侧都以小写对比，避免英文词大小写不一致漏命中
     normalized = list(dict.fromkeys(kw.strip().lower() for kw in keywords if kw and kw.strip()))
     if not normalized:
         return []
 
-    # 2026-08-13 P2-6：查询词项已由 extract_query_terms 统一小写，
     # SQL 侧对原文做 lower() 归一，避免 LIKE 大小写敏感导致英文词漏命中
     match_expressions = [func.lower(Paragraph.text).like(like_pattern(keyword)) for keyword in normalized]
     # 章节连接由 join_chapter_body 统一提供（global 坐标投影基准）；
@@ -89,8 +56,7 @@ def search_paragraphs_by_keywords(
     results: list[KeywordMatchRow] = []
     for row in session.execute(stmt).all():
         paragraph_text = str(row.text or "")
-        # 2026-08-13 P2-6：与 SQL 侧一致，Python 侧匹配也做 lower 归一；
-        # 2026-09-04：词项按通配符语义匹配，与 SQL LIKE 口径一致
+
         matched = tuple(keyword for keyword in normalized if term_matches(keyword, paragraph_text.lower()))
         if not matched:
             continue
@@ -116,11 +82,6 @@ def search_paragraphs_by_keywords(
 
 
 def fetch_chunk_text(session: Session, run_id: str, chapter_id: int) -> str | None:
-    """
-    2026-08-02 用于按 run_id 与 chapter_id 读取单个历史章节原文
-    （M9a-2：chunks 表合并进 chapters；2026-10-16 3NF：正文与目录同键一行，
-    章节正文读 chapters.text，空正文章节为空值）
-    不存在对应记录时返回 None
-    """
+    "用于按 run_id 与 chapter_id 读取单个历史章节原文"
     stmt = select(Chapter.text).where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id)
     return session.execute(stmt).scalar_one_or_none()

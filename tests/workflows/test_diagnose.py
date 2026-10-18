@@ -44,7 +44,7 @@ def test_main_character_list_is_report_scoped_without_stale_members(db_session) 
             for name in ("旧主角", "新主角")
         ]
     )
-    session_id, _work_id, _execution_id = add_diagnosis_context(db_session, run_id)
+    session_id, _execution_id = add_diagnosis_context(db_session, run_id)
     db_session.flush()
 
     # 正式报告条目写入：新主角上榜，旧主角只在评分里（已下榜）

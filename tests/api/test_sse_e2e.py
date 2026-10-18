@@ -126,8 +126,8 @@ async def test_sse_e2e_tool_call_status_passthrough() -> None:
         StreamEvent(
             action="tool_call",
             stage="annotate",
-            sub_stage="chapter_agent",
-            stream_id="chapter-agent-1",
+            sub_stage="annotation",
+            stream_id="invocation-1",
             content="write_relations",
             status="started",
         )
@@ -136,8 +136,8 @@ async def test_sse_e2e_tool_call_status_passthrough() -> None:
         StreamEvent(
             action="tool_call",
             stage="annotate",
-            sub_stage="chapter_agent",
-            stream_id="chapter-agent-1",
+            sub_stage="annotation",
+            stream_id="invocation-1",
             content="write_relations",
             status="success",
             message="写入 3 条关系",
@@ -155,7 +155,7 @@ async def test_sse_e2e_tool_call_status_passthrough() -> None:
     assert data1["message"] == "写入 3 条关系"
     # 上下文补全：stage/sub_stage 来自总线
     assert data1["stage"] == "annotate"
-    assert data1["sub_stage"] == "chapter_agent"
+    assert data1["sub_stage"] == "annotation"
 
 
 @pytest.mark.asyncio

@@ -1,17 +1,8 @@
-"""
-原文自然段向量存储与检索
-
-2026-10-16 全库 3NF 改造（35 表冻结结构）：段落语义向量写 paragraph_features 的
-semantic_vector 行（键 (run_id, paragraph_id, feature_code)）；本次运行实际使用的
-模型 key 与实测维度按运行合同登记：维度由锁定模型合同解析并校验（不逐行落列），
-模型 key 写 analysis_runs.embedding_model_key。段落 local_end/global 坐标与
-char_count 由 reader 的投影表达式得到。
-"""
+"原文自然段向量存储与检索"
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,33 +12,12 @@ from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.storage.models import AnalysisRun, Chapter, Paragraph, ParagraphFeature
+from src.storage.records.embedding_ops import ParagraphEmbeddingRow, SimilarParagraphRow
 from src.storage.repositories.paragraph.reader import join_chapter_body, paragraph_projection
 from src.storage.vector_schema import hnsw_index_uses_halfvec
 
 #: 语义向量 feature_code（paragraph_features 封闭计算种类）
 FEATURE_SEMANTIC_VECTOR = "semantic_vector"
-
-
-@dataclass(frozen=True)
-class ParagraphEmbeddingRow:
-    """2026-08-14 用于批量写入自然段向量（二期段落化：段落身份 + 向量）"""
-
-    paragraph_id: int
-    embedding_vector: list[float]
-
-
-@dataclass(frozen=True)
-class SimilarParagraphRow:
-    """2026-08-14 用于返回自然段语义定位结果（JOIN paragraphs 取身份与坐标）"""
-
-    paragraph_id: int
-    chapter_id: int
-    paragraph_text: str
-    local_start_char: int
-    local_end_char: int
-    global_start_char: int
-    global_end_char: int
-    similarity: float
 
 
 def insert_paragraph_embeddings(
@@ -56,16 +26,7 @@ def insert_paragraph_embeddings(
     rows: Iterable[ParagraphEmbeddingRow],
     embedding_dimension: int | None = None,
 ) -> int:
-    """2026-08-14 用于重新生成当前 run 的全部自然段向量
-
-    先删后插（同 run 不可重跑前序阶段的语义）；embedding_model_key 从
-    settings.models.paragraph_embedding 读取；embedding_dimension 由调用方
-    传入（preprocess 传探测锁定的实测维度）——维度本身由锁定模型合同解析，
-    不逐行落列，因此缺少实测维度时拒绝写入（无法校验模型合同）。
-
-    2026-10-16 3NF：向量行写 paragraph_features 的 semantic_vector 行，
-    模型 key 写 analysis_runs.embedding_model_key（与向量行同事务）。
-    """
+    "用于重新生成当前 run 的全部自然段向量"
     materialized = list(rows)
     session.execute(
         delete(ParagraphFeature).where(
@@ -73,9 +34,7 @@ def insert_paragraph_embeddings(
             ParagraphFeature.feature_code == FEATURE_SEMANTIC_VECTOR,
         )
     )
-    session.execute(
-        update(AnalysisRun).where(AnalysisRun.run_id == run_id).values(embedding_model_key=None)
-    )
+    session.execute(update(AnalysisRun).where(AnalysisRun.run_id == run_id).values(embedding_model_key=None))
     if not materialized:
         return 0
     if embedding_dimension is None or embedding_dimension <= 0:
@@ -91,11 +50,7 @@ def insert_paragraph_embeddings(
             "paragraph embedding 写入失败：settings.models.paragraph_embedding.model 未配置，"
             f"无法登记运行模型合同 run_id={run_id}"
         )
-    session.execute(
-        update(AnalysisRun)
-        .where(AnalysisRun.run_id == run_id)
-        .values(embedding_model_key=str(model_key))
-    )
+    session.execute(update(AnalysisRun).where(AnalysisRun.run_id == run_id).values(embedding_model_key=str(model_key)))
     created_at = datetime.now(UTC).replace(tzinfo=None)
     session.execute(
         insert(ParagraphFeature),
@@ -125,15 +80,7 @@ def search_similar_paragraphs(
     before_chapter_sequence: int | None = None,
     after_chapter_sequence: int | None = None,
 ) -> list[SimilarParagraphRow]:
-    """2026-08-14 同 run 原文自然段 pgvector 检索（段落边界）。
-
-    2026-08-13 P1-1 裸余弦 ``<=>``（升序）命中 HNSW，阈值 distance<=1-threshold；
-    2026-08-14 二期 JOIN paragraphs（run_id/paragraph_id 对齐），以 paragraphs 为事实源。
-    2026-09-25 维度超 pgvector HNSW 上限（2000）时，距离表达式与建索引同型 cast 成
-    halfvec，否则规划器命中不了 halfvec 表达式索引。
-    2026-10-16 3NF：向量行来自 paragraph_features 的 semantic_vector 行；
-    局部/全文坐标由 chapters.char_offset 与字符长度投影。
-    """
+    "同 run 原文自然段 pgvector 检索（段落边界）"
     dimension = len(query_embedding)
     if hnsw_index_uses_halfvec(dimension):
         distance_expr = cast(ParagraphFeature.vector_value, HALFVEC(dimension)).cosine_distance(query_embedding)
@@ -150,8 +97,7 @@ def search_similar_paragraphs(
         .select_from(ParagraphFeature)
         .join(
             Paragraph,
-            (ParagraphFeature.run_id == Paragraph.run_id)
-            & (ParagraphFeature.paragraph_id == Paragraph.paragraph_id),
+            (ParagraphFeature.run_id == Paragraph.run_id) & (ParagraphFeature.paragraph_id == Paragraph.paragraph_id),
         )
     ).where(
         ParagraphFeature.run_id == run_id,
@@ -180,7 +126,7 @@ def search_similar_paragraphs(
 
 
 def _similar_paragraph_row(row: Any) -> SimilarParagraphRow:
-    """2026-08-14 用于把 SQLAlchemy 结果行转换为自然段语义 DTO"""
+    "用于把 SQLAlchemy 结果行转换为自然段语义 DTO"
     return SimilarParagraphRow(
         paragraph_id=int(row.paragraph_id),
         chapter_id=int(row.chapter_id),
@@ -194,7 +140,7 @@ def _similar_paragraph_row(row: Any) -> SimilarParagraphRow:
 
 
 def has_paragraph_embeddings(session: Session, run_id: str) -> bool:
-    """2026-08-07 用于检查指定 run 是否存在自然段向量"""
+    "用于检查指定 run 是否存在自然段向量"
     statement = (
         select(ParagraphFeature.paragraph_id)
         .where(
@@ -207,16 +153,7 @@ def has_paragraph_embeddings(session: Session, run_id: str) -> bool:
 
 
 def get_incomplete_paragraph_embedding_paragraph_ids(session: Session, run_id: str) -> list[int]:
-    """2026-08-14 用于发现"有段落但无可用向量"的缺口段落 ID 列表
-
-    二期段落化：段落身份以 paragraphs 表为准，不再按 chunk 聚合判定。
-    缺口包含两类：
-    1. 段落存在但没有 semantic_vector 特征行（paragraphs LEFT JOIN paragraph_features）；
-    2. 特征行存在但向量为空（vector_value IS NULL）。
-
-    chunk 级缺口（某 chunk 完全无向量）由上述段落级缺口自然覆盖
-    （该 chunk 的每个段落都会出现在结果中）。返回排序后的段落 ID 列表。
-    """
+    '用于发现"有段落但无可用向量"的缺口段落 ID 列表'
     missing_statement = (
         select(Paragraph.paragraph_id)
         .select_from(Paragraph)

@@ -149,7 +149,6 @@ class AnalysisEventBus:
             chapter_id=resolved_chapter_id,
             # 保留 LLM/工具事件的流标识，确保序列化和前端重连使用同一条流
             stream_id=event.stream_id,
-            work_id=event.work_id,
             invocation_id=event.invocation_id,
             message_id=event.message_id,
             current=resolved_current,

@@ -3,12 +3,12 @@
 统一守门：resolve_run_id + require_run_for_novel + require_readable_run_status；
 切片原则见 src/api/models/tabs.py 模块说明。既有单源端点直接作为所属 tab 的 API。
 """
+
 from __future__ import annotations
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db_session, get_metrics_service, resolve_run_id
 from src.api.dependencies import require_readable_run_status as _require_readable_run_status
@@ -30,6 +30,7 @@ from src.api.services.results_queries.tabs import (
     build_rhythm_tab,
     build_topics_overview,
 )
+from src.storage import Storage
 
 router = APIRouter(prefix="/novels/{novel_id}", tags=["tabs"])
 
@@ -38,7 +39,7 @@ router = APIRouter(prefix="/novels/{novel_id}", tags=["tabs"])
 async def get_dashboard_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> DashboardTabResponse:
     """仪表盘 tab：四组聚合指标 + 章节汇总 + 主题词 + 诊断 + 情绪趋势"""
@@ -51,7 +52,7 @@ async def get_dashboard_tab(
 async def get_rhythm_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
     max_points: Annotated[int | None, Query(gt=0, description="展示降采样点数上限")] = None,
 ) -> RhythmTabResponse:
@@ -65,7 +66,7 @@ async def get_rhythm_tab(
 async def get_character_function_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> CharacterFunctionTabResponse:
     """功能与焦点 tab：角色功能分布 + 诊断焦点结构切片"""
     run = _require_run_for_novel(session, novel_id, run_id)
@@ -77,7 +78,7 @@ async def get_character_function_tab(
 async def get_graph_network_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     chapter_id: Annotated[int | None, Query(gt=0, description="目标章节边界，缺省取最新章节")] = None,
 ) -> GraphNetworkTabResponse:
     """图谱 tab：图快照 + 登场次数 + 图算法指标 + 变化总数"""
@@ -90,7 +91,7 @@ async def get_graph_network_tab(
 async def get_topics_overview_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> TopicsOverviewTabResponse:
     """主题总览 tab：主题词 + 全书/章节完整分布 + TextRank 关键词"""
     run = _require_run_for_novel(session, novel_id, run_id)
@@ -102,7 +103,7 @@ async def get_topics_overview_tab(
 async def get_linguistic_entities_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> LinguisticEntitiesTabResponse:
     """实体与短语 tab：实体类型计数 + 高频实体名 + 固定短语统计（不含 span 明细）"""
     run = _require_run_for_novel(session, novel_id, run_id)

@@ -1,12 +1,12 @@
 """
-章内 subagent IR 校验 helpers：命名空间化、字段校验与结构化拒绝
+章内 agent IR 校验 helpers：命名空间化、字段校验与结构化拒绝
 """
 
 # 创建时间：2026-10-02　创建者：Trae
-# 任务：subagent_ir.py 大文件拆分——校验 helpers 段（namespace_* / truncate_case_description /
+# 任务：agent_ir.py 大文件拆分——校验 helpers 段（namespace_* / truncate_case_description /
 # _reject / _require_*）迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；闭集常量与 IR 数据类保留在 subagent_ir.py，
-# 本模块引用其常量（subagent_ir.py 末尾对本模块符号 re-export，双向均定义先于引用，
+# 说明：纯结构搬移，不改任何运行逻辑与签名；闭集常量与 IR 数据类保留在 agent_ir.py，
+# 本模块引用其常量（agent_ir.py 末尾对本模块符号 re-export，双向均定义先于引用，
 # 任意导入顺序安全）。
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ from .ir_contract import CASE_DESCRIPTION_MAX_CHARS, ROLE_NAMESPACE_SEP
 
 
 def namespace_el(role: str, local_key: str) -> str:
-    """用于把 subagent 局部引用键翻成落库 el 键（`角色:局部键`）
+    """用于把 agent 局部引用键翻成落库 el 键（`角色:局部键`）
 
-    三个 subagent 的引用键互不知情（都会用 a1/t1），而正式写入的 el 索引是全章一张表，
+    三个 agent 的引用键互不知情（都会用 a1/t1），而正式写入的 el 索引是全章一张表，
     所以命名空间化必须发生在写入口（构造器）而不是落库相位：写入即绑定的键在整个
     章内唯一，后面的关系/参与者/说话人引用直接用它。
     """
@@ -46,7 +46,7 @@ def truncate_case_description(text: str) -> str:
 
 
 def _reject(message: str, *, record: str, field: str, code: str, expected: str) -> AnnotationStageRejection:
-    """用于构造 subagent 局部对象的记录级结构化拒绝（模型按 record/field/code 自纠）"""
+    """用于构造 agent 局部对象的记录级结构化拒绝（模型按 record/field/code 自纠）"""
     return AnnotationStageRejection(
         message,
         record=record,
@@ -100,7 +100,7 @@ def _require_score(value: Any, *, record: str, field_name: str) -> int:
 def _require_name(value: Any, *, record: str, field_name: str) -> str:
     """用于校验实体展示名（照抄正文写法，只作展示字段）
 
-    名字不再是引用键：引用一律用模型自定的本 subagent id（见 _require_local_key），
+    名字不再是引用键：引用一律用模型自定的本 agent id（见 _require_local_key），
     name 只用于落库时的实体登记与人类可读展示。
     """
     text = _require_text(value, record=record, field_name=field_name)
@@ -116,7 +116,7 @@ def _require_name(value: Any, *, record: str, field_name: str) -> str:
 
 
 def _require_local_key(value: Any, *, record: str, field_name: str) -> str:
-    """用于校验模型自定的引用键（本 subagent 局部 id：实体 a1/a2…、事件树键 t1）"""
+    """用于校验模型自定的引用键（本 agent 局部 id：实体 a1/a2…、事件树键 t1）"""
     text = _require_text(value, record=record, field_name=field_name)
     if EL_PATH_SEP in text or not all(char.isalnum() or char == "_" for char in text):
         raise _reject(

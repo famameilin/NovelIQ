@@ -1,15 +1,15 @@
 """
-章内 subagent 程序运行时：八类构造器 + 检索/案例 + 收尾的执行面
+章内 agent 程序运行时：八类构造器 + 检索/案例 + 收尾的执行面
 """
 
 # ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入（大文件拆分聚合面）。
 
 # 创建时间：2026-10-02　创建者：Trae
-# 任务：subagent_program.py 大文件拆分——SubagentProgramRuntime 与 SubagentRunOutcome
+# 任务：agent_program.py 大文件拆分——AgentProgramRuntime 与 AgentRunOutcome
 # 迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；构造器在 subagent_constructors.py、
-# SUBAGENT_TOOL_NAMES/_SUBAGENT_REFERENCE_SCOPE_TEXT 保留在 subagent_program.py（本模块
-# 末尾反向引用，双向均定义先于引用，任意导入顺序安全）；subagent_program.py 保留 re-export。
+# 说明：纯结构搬移，不改任何运行逻辑与签名；构造器在 agent_constructors.py、
+# AGENT_TOOL_NAMES/_AGENT_REFERENCE_SCOPE_TEXT 保留在 agent_program.py（本模块
+# 末尾反向引用，双向均定义先于引用，任意导入顺序安全）；agent_program.py 保留 re-export。
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from src.agents.annotation.catalog import (
-    SUBAGENT_CONTRACT_TEXT,
+    AGENT_CONTRACT_TEXT,
     call_parameters,
     constructor_call_entries,
     render_list_signature,
@@ -29,55 +29,55 @@ from src.agents.annotation.program_runtime import RestrictedProgramRuntime
 from src.agents.annotation.search_projection import _call_rejection, build_program_tools
 from src.agents.annotation.tools import FINISH_TOOL_NAME
 
-from .errors import AnnotationDependencyError, AnnotationInvariantError
-from .subagent_constructors import (
+from .agent_constructors import (
     _ConstructorCall,
     _receipt_message,
     _refused_receipt,
     _sync_entity_ref,
     _tool_receipt,
     _written_receipt,
-    build_subagent_constructors,
+    build_agent_constructors,
 )
-from .subagent_ir import SubagentAnnotation
+from .agent_ir import AgentAnnotation
+from .errors import AnnotationDependencyError, AnnotationInvariantError
 from .tool_batch import _execute_call
 
 
-class SubagentProgramRuntime(RestrictedProgramRuntime):
-    """一个 subagent 的程序面：八类构造器 + 检索/案例 + 收尾（绑定面只有 execute_code 与 finish）
+class AgentProgramRuntime(RestrictedProgramRuntime):
+    """一个 agent 的程序面：八类构造器 + 检索/案例 + 收尾（绑定面只有 execute_code 与 finish）
 
-    生命周期：一个 subagent 建一次、跨回合复用（变量与逐 op 记录随之保留）。
-    程序目录三个 subagent 完全相同（SUBAGENT_TOOL_NAMES + finish），域分工只写在职责文案里。
+    生命周期：一个 agent 建一次、跨回合复用（变量与逐 op 记录随之保留）。
+    程序目录三个 agent 完全相同（AGENT_TOOL_NAMES + finish），域分工只写在职责文案里。
     """
 
-    contract_text = SUBAGENT_CONTRACT_TEXT
+    contract_text = AGENT_CONTRACT_TEXT
 
     def __init__(
         self,
         tool_map: dict[str, Any],
         ledger: AnnotationToolLedger,
-        subagent: SubagentAnnotation,
+        agent: AgentAnnotation,
         *,
         write_lock: asyncio.Lock | None = None,
         observer: Any = None,
         stream: Any = None,
     ) -> None:
-        """用于绑定共享章级账本、生产工具表与本 subagent 的产出记录
+        """用于绑定共享章级账本、生产工具表与本 agent 的产出记录
 
         模型可见面（绑定面）= [execute_code, finish]；execute_code 的程序目录 =
-        SUBAGENT_TOOL_NAMES（检索/案例）+ 八类构造器 + finish。执行面（execution_tools）
+        AGENT_TOOL_NAMES（检索/案例）+ 八类构造器 + finish。执行面（execution_tools）
         是完整生产工具表——构造器编译出的那笔写入要经它落地，而正式写入工具不在模型可见面。
 
-        write_lock：三个 subagent 共享一个章级账本与一张事实图，账本快照/按条回滚
+        write_lock：三个 agent 共享一个章级账本与一张事实图，账本快照/按条回滚
         与图写入都假定串行，所以内层调用按锁执行（模型生成期间不占锁）。
         """
         paragraph_info = ledger.paragraph_info
         if paragraph_info is None:
-            raise AnnotationInvariantError("subagent 程序面需要段落坐标映射，paragraph_info 缺失")
+            raise AnnotationInvariantError("agent 程序面需要段落坐标映射，paragraph_info 缺失")
         paragraph_text_by_id = paragraph_info.text_by_visible_id()
         candidate_total = len(ledger.dialogue_candidates)
-        entries = build_subagent_constructors(
-            subagent,
+        entries = build_agent_constructors(
+            agent,
             paragraph_text_by_id=paragraph_text_by_id,
             candidate_total=candidate_total,
         )
@@ -86,8 +86,8 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         self.finish_tool = tool_map[FINISH_TOOL_NAME]
         program_tools = build_program_tools(list(tool_map.values()))
         by_name = {str(tool.name): tool for tool in program_tools}
-        # 可见面按 SUBAGENT_TOOL_NAMES 的顺序取（那是模型目录的排列依据），不跟随工具表顺序
-        visible_tools = [by_name[name] for name in SUBAGENT_TOOL_NAMES if name in by_name]
+        # 可见面按 AGENT_TOOL_NAMES 的顺序取（那是模型目录的排列依据），不跟随工具表顺序
+        visible_tools = [by_name[name] for name in AGENT_TOOL_NAMES if name in by_name]
         visible_tools.extend(
             by_name[name]
             for name in (
@@ -116,7 +116,7 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
             FINISH_TOOL_NAME: self.finish_tool,
         }
         self.ledger = ledger
-        self.subagent = subagent
+        self.agent = agent
         self.api_entries = entries
         self._constructor_names = frozenset(name for name, _, _ in entries)
         self._paragraph_text_by_id = paragraph_text_by_id
@@ -132,10 +132,10 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
             self._caseid_default = None
 
     def build_tool(self) -> Any:
-        """用于构造 subagent 的对外程序入口 execute_code（构造器与检索/案例/finish 同一份目录）"""
+        """用于构造 agent 的对外程序入口 execute_code（构造器与检索/案例/finish 同一份目录）"""
         return build_program_tool(
             self,
-            extra_api=_SUBAGENT_REFERENCE_SCOPE_TEXT,
+            extra_api=_AGENT_REFERENCE_SCOPE_TEXT,
             call_entries=[
                 (name, [*params, ("caseid", "Any = None")], description)
                 for name, params, description in constructor_call_entries(self.api_entries)
@@ -143,8 +143,8 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         )
 
     def _progress(self) -> dict[str, int]:
-        """用于回执 progress（本 subagent 已构造的记录计数）"""
-        return self.subagent.counts()
+        """用于回执 progress（本 agent 已构造的记录计数）"""
+        return self.agent.counts()
 
     def _receipt(
         self,
@@ -189,7 +189,7 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         if self.ledger.chapter_finished:
             from .errors import AnnotationProtocolError
 
-            error = AnnotationProtocolError(f"work_id={self.ledger.work_id} 已 finish，拒绝迟到调用={name}")
+            error = AnnotationProtocolError(f"执行 {self.ledger.invocation_id} 已 finish，拒绝迟到调用={name}")
             return self._finish_call(
                 name,
                 op_index=op_index,
@@ -414,6 +414,6 @@ class SubagentProgramRuntime(RestrictedProgramRuntime):
         )
 
 
-# 工具面常量保留在 subagent_program（本模块仅在构造时读它们）：置于文件末尾引用，
+# 工具面常量保留在 agent_program（本模块仅在构造时读它们）：置于文件末尾引用，
 # 两个方向的首次导入都安全（双方定义先于引用）。
-from .subagent_program import _SUBAGENT_REFERENCE_SCOPE_TEXT, SUBAGENT_TOOL_NAMES  # noqa: E402
+from .agent_program import _AGENT_REFERENCE_SCOPE_TEXT, AGENT_TOOL_NAMES  # noqa: E402

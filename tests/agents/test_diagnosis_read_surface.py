@@ -25,6 +25,7 @@ from tests.support.event_tree_fixtures import (
     first_paragraph,
     identity_every_declaration,
     publish_draft,
+    report_case_anchor,
 )
 
 LONG_SUMMARY = "顾霜寻路并点灯。" * 200
@@ -34,8 +35,8 @@ LONG_SUMMARY = "顾霜寻路并点灯。" * 200
 def declaration_case(db_session):
     """两章级声明的真实来源链与本模块草稿（同章两段声明，各带原文证据）"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻路并点灯。"])
-    session_id, _work_id, execution_id = add_diagnosis_context(db_session, run_id)
-    record_id, _source_work, _source_execution = add_annotation_source(db_session, run_id, 1, role="event")
+    session_id, execution_id = add_diagnosis_context(db_session, run_id)
+    record_id, _source_execution = add_annotation_source(db_session, run_id, 1, role="event")
     paragraph = first_paragraph(db_session, run_id)
     add_declaration(
         db_session,
@@ -61,7 +62,8 @@ def declaration_case(db_session):
     )
     db_session.commit()
     draft = EventOrganizationDraft(db_session, run_id, session_id)
-    draft.work_id = draft.producer_invocation_id = execution_id
+    draft.case_id = report_case_anchor(run_id)
+    draft.producer_invocation_id = execution_id
     return draft
 
 
@@ -136,7 +138,8 @@ def test_saved_nested_event_read_and_rejection_identify_actual_top_level(db_sess
     close_structure(db_session, draft, evidence_paragraph_id=0)
     publish_draft(db_session, case.run_id, draft)
     fresh = EventOrganizationDraft(db_session, case.run_id, case.session_id)
-    fresh.work_id = fresh.producer_invocation_id = case.execution_id
+    fresh.case_id = report_case_anchor(case.run_id)
+    fresh.producer_invocation_id = case.execution_id
     tools = {
         tool.name: tool
         for tool in build_diagnosis_tools(

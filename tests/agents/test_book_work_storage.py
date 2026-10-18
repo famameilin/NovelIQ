@@ -26,11 +26,9 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
     from src.fact_graph.outputs import BoundDialogue
     from src.storage.models import (
         ChapterAnnotation,
-        Execution,
         GraphEntity,
         GraphFact,
         Paragraph,
-        WorkItem,
     )
     from src.storage.repositories.annotation import AnnotationRepository
     from tests.support.chapter_annotation_helpers import (
@@ -86,22 +84,21 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
         annotation=output,
         relation_assert_ops=relations,
     )
-    # 2026-10-16 3NF：源章 work 身份沿 记录→真实尝试→work 取得（旧产物/旧 work 表已退场）
+    # 2026-10-17 六 agent 归属：作者身份就是真实执行号（work 行已退场）
     source = db_session.get(ChapterAnnotation, source_id)
-    source_work = str(db_session.get(Execution, source.execution_id).work_id)
+    source_author = str(source.execution_id)
     graph = FactGraph(run_scope=run_id)
-    graph.discard_storage(db_session, {source_work})
+    graph.discard_storage(db_session, {source_author})
     db_session.delete(source)
-    db_session.delete(db_session.get(WorkItem, source_work))
     db_session.flush()
     graph.rebuild_storage(db_session)
     kept = db_session.get(ChapterAnnotation, kept_id)
     kept_record = SimpleNamespace(
         execution_id=kept.execution_id,
-        work_id=str(db_session.get(Execution, kept.execution_id).work_id),
+        record_id=kept.record_id,
         chapter_id=2,
         sequence=2,
-        role="solo",
+        role="annotation",
     )
     graph.restore_storage(db_session, [kept_record])
     graph.restore_storage(db_session, [kept_record])
@@ -109,7 +106,7 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
     resolved = graph.resolve_entity_id(alice, label="source")
     assert graph.display_name(resolved) == "Alice"
     # 引用恢复不补造实体写入（只有引用支持，没有实体操作）
-    assert graph.drain_ops(*next(iter(graph.saved)))["entity_ops"] == []
+    assert graph.drain_ops(next(iter(graph.saved)))["entity_ops"] == []
     assert db_session.get(GraphEntity, alice) is not None
     assert not list(
         db_session.scalars(
@@ -129,25 +126,20 @@ def test_case_delivery_order_does_not_follow_database_save_order(db_session):
     from uuid import uuid4
 
     _novel, run_id = create_run_with_chunks(db_session, texts=["原文一。", "原文二。"], chapter_ids=[1, 2])
-    from src.storage.models import CaseEntry, Execution, WorkItem
+    from src.storage.models import CaseEntry, Execution
     from src.storage.models.base import naive_utcnow
 
-    # work 身份在库内全局唯一（work_items 主键即 work_id），用例内自取名避免跨用例碰撞；
-    # 案例支持必须引用真实执行：(run, chapter, role) 唯一，因此两个作者落在两章
+    # 作者身份是真实执行号（单一字符串）；案例支持必须引用真实执行：
+    # (run, chapter, role) 唯一，因此两个作者落在两章
     suffix = uuid4().hex[:8]
-    a, b = (f"a-{suffix}", f"a1-{suffix}"), (f"b-{suffix}", f"b1-{suffix}")
+    a, b = f"a1-{suffix}", f"b1-{suffix}"
     for author, chapter_id in ((a, 1), (b, 2)):
         db_session.add(
-            WorkItem(
-                work_id=author[0], role="solo", annotation_run_id=run_id, annotation_chapter_id=chapter_id
-            )
-        )
-    db_session.flush()
-    for author in (a, b):
-        db_session.add(
             Execution(
-                execution_id=author[1],
-                work_id=author[0],
+                execution_id=author,
+                run_id=run_id,
+                chapter_id=chapter_id,
+                role="annotation",
                 attempt_number=1,
                 started_at=naive_utcnow(),
                 status="success",
@@ -155,8 +147,8 @@ def test_case_delivery_order_does_not_follow_database_save_order(db_session):
         )
     db_session.flush()
     pool = CasePool(run_id)
-    pool.begin(*a)
-    pool.begin(*b)
+    pool.begin(a)
+    pool.begin(b)
     case = pool.push("dialogue", "核查实际关联", a)
     pool.promise(case["case_id"], a)
     pool.associate(case["case_id"], a, tool_name="read_event", call_id="first", receipt={}, is_write=False)
@@ -184,7 +176,7 @@ def test_case_delivery_order_does_not_follow_database_save_order(db_session):
             "registrations": {key: deepcopy(pool.cases[key]) for key in pool.registrations[author]},
             "deliveries": deepcopy(pool.deliveries[author]),
         }
-        return CaseContribution(run_id, author[0], author[1], json.dumps(snapshot, ensure_ascii=False))
+        return CaseContribution(run_id, author, json.dumps(snapshot, ensure_ascii=False))
 
     pool.save_work(db_session, execution(b))
     db_session.commit()
@@ -198,12 +190,12 @@ def test_case_delivery_order_does_not_follow_database_save_order(db_session):
             )
         )
     }
-    assert supports[b[1]].adopted is True and supports[a[1]].adopted is False
+    assert supports[b].adopted is True and supports[a].adopted is False
     loaded = CasePool(run_id)
     loaded.load_storage(db_session)
     assert loaded.case_runtime[case["case_id"]]["state"] == "resolved"
     restored = CasePool(run_id)
-    restored.restore_storage(db_session, {b[0]})
+    restored.restore_storage(db_session, {b})
     assert restored.search()[0]["state"] == "pending"
 
 

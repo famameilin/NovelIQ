@@ -25,7 +25,6 @@ _PROTECTED_FIELDS = REFERENCE_FIELDS | {
     "capability",
     "node_id",
     "case_id",
-    "work_id",
     "producer_invocation_id",
 }
 

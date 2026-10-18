@@ -2,7 +2,7 @@
 
 2026-10-16 全库 3NF 改造（35 表冻结结构）：
 - 贡献事实只读 graph_facts 的封闭形状列，旧 content JSON 不再解析
-- 章节、作者 work 与章内角色由真实生产执行→标注 work 投影；独立选章取
+- 章节、作者执行与执行角色由真实生产执行行投影；独立选章取
   effective_chapter_id，不按当前章替代
 - 实体/关系状态按贡献顺序在读取侧折叠（entity_states/relation_states 已退场，
   不写第二份状态缓存；折叠口径与旧 changes 的 field/before/after 一致）
@@ -19,33 +19,15 @@ from collections.abc import Sequence
 from copy import deepcopy
 from typing import Any, cast
 
-from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session, aliased
-
 from src.event_trees.action_order import load_foreshadowing_actions
 from src.event_trees.read.organization import EventTreeQuery
-from src.storage.models import (
-    Chapter,
-    ChapterAnnotation,
-    CompleteEvent,
-    DeclarationParticipant,
-    EventDeclaration,
-    EventRevision,
-    Execution,
-    FactEntityTag,
-    GraphEntity,
-    GraphFact,
-    GraphRelation,
-    Paragraph,
-    SourceEvidence,
-    WorkItem,
-)
+from src.storage import Storage
 from src.utils.identity import stable_uuid, text_digest
 
 DIMENSIONS = ("plot", "character", "relationship", "foreshadowing")
 
-#: 贡献事实的角色顺序（与标注 work 的章内角色合同一致）
-ROLE_ORDER = {"solo": 0, "structure": 0, "event": 1, "evidence": 2}
+#: 贡献事实的角色顺序（六执行角色的章内折叠口径）
+ROLE_ORDER = {"annotation": 0, "entity": 0, "event": 1, "metric": 2, "case": 3, "report": 3}
 
 #: 不构成情节变化的字段（首次登记的类型/支持数/主角与代表标记沿用原口径）
 SKIPPED_DELTA_FIELDS = frozenset({"entity_type", "support_count", "is_main_character", "is_representative"})
@@ -56,17 +38,13 @@ FIRST_TIME_DELTA_FIELDS = frozenset({"action", "emotion", "role_function"})
 class PlotlineQuery:
     """只消费已保存事实，调用方复用整个任务 completed 的访问规则"""
 
-    def __init__(self, session: Session, run_id: str) -> None:
+    def __init__(self, session: Storage, run_id: str) -> None:
         self.session, self.run_id = session, run_id
         event_query = EventTreeQuery(session, run_id)
         event_query.fetch()
         self.events = event_query.events
         self.organization_status = event_query.organization_status
-        rows = session.scalars(
-            select(Chapter)
-            .where(Chapter.run_id == run_id, Chapter.text.is_not(None))
-            .order_by(Chapter.sequence, Chapter.chapter_id)
-        ).all()
+        rows = session.reads.metrics_queries_plotline_init_1(run_id)
         self.chapters: list[dict[str, Any]] = [
             {"chapter_id": row.chapter_id, "order": index + 1, "title": row.display_title or row.title}
             for index, row in enumerate(rows)
@@ -83,72 +61,19 @@ class PlotlineQuery:
 
     def _fetch_declaration_event_bindings(self) -> dict[str, str]:
         """声明绑定的完整事件：由真实版本的声明分支与真实生产执行投影"""
-        statement = (
-            select(EventRevision.declaration_id, CompleteEvent.event_id)
-            .join(CompleteEvent, CompleteEvent.event_id == EventRevision.event_id)
-            .where(
-                EventRevision.declaration_id.is_not(None),
-                CompleteEvent.producer_execution_id.in_(self._run_execution_ids()),
-            )
-        )
         return {
-            str(declaration_id): str(event_id)
-            for declaration_id, event_id in self.session.execute(statement).all()
+            str(row.declaration_id): str(row.event_id)
+            for row in self.session.reads.final_metrics_queries_plotline_bindings(self.run_id)
         }
 
-    def _run_execution_ids(self):
-        """本运行真实执行：标注 work 直接带运行，诊断 work 经整轮会话取得运行"""
-        diagnosis_sessions = select(Execution.execution_id).where(Execution.session_run_id == self.run_id)
-        return (
-            select(Execution.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(
-                or_(
-                    WorkItem.annotation_run_id == self.run_id,
-                    WorkItem.diagnosis_session_id.in_(diagnosis_sessions),
-                )
-            )
-        )
-
-    def _fact_chapter_column(self):
-        """事实所属章节：标注 work 已决定的章节优先，独立选章取 effective_chapter_id"""
-        producer_work_chapter = (
-            select(WorkItem.annotation_chapter_id)
-            .join(Execution, Execution.work_id == WorkItem.work_id)
-            .where(Execution.execution_id == GraphFact.direct_producer_execution_id)
-            .scalar_subquery()
-        )
-        return func.coalesce(producer_work_chapter, GraphFact.effective_chapter_id)
-
-    def _evidence_by_owner(
-        self, owner_column, owner_ids: Sequence[int | str]
-    ) -> dict[str, list[dict[str, Any]]]:
+    def _evidence_by_owner(self, owner_column, owner_ids: Sequence[int | str]) -> dict[str, list[dict[str, Any]]]:
         """按所有者读取有序原文证据；所有者身份是 uuid 或图谱事实流水（BIGINT）"""
         if not owner_ids:
             return {}
-        statement = (
-            select(
-                owner_column.label("owner_id"),
-                SourceEvidence.ordinal,
-                SourceEvidence.paragraph_id,
-                SourceEvidence.start_char,
-                SourceEvidence.end_char,
-                Paragraph.chapter_id,
-                func.substr(
-                    Paragraph.text,
-                    SourceEvidence.start_char + 1,
-                    SourceEvidence.end_char - SourceEvidence.start_char,
-                ).label("quote"),
-            )
-            .join(
-                Paragraph,
-                (Paragraph.run_id == self.run_id) & (Paragraph.paragraph_id == SourceEvidence.paragraph_id),
-            )
-            .where(owner_column.in_(owner_ids))
-            .order_by(owner_column, SourceEvidence.ordinal)
-        )
         evidence: dict[str, list[dict[str, Any]]] = {}
-        for row in self.session.execute(statement).all():
+        for row in self.session.reads.metrics_queries_plotline_evidence_by_owner_1(
+            owner_column, owner_ids, self.run_id
+        ):
             evidence.setdefault(str(row.owner_id), []).append(
                 {
                     "chapter_id": int(row.chapter_id),
@@ -162,102 +87,29 @@ class PlotlineQuery:
 
     def _fetch_facts(self, chapter_ids: list[int]) -> list[dict[str, Any]]:
         """本运行在阅读截点内的贡献事实（实体/关系/人物观测/情节推进四种形状）"""
-        from_entity = aliased(GraphEntity)
-        to_entity = aliased(GraphEntity)
-        chapter_column = self._fact_chapter_column()
-        direct_statement = (
-            select(
-                GraphFact.graph_fact_id,
-                chapter_column.label("chapter_id"),
-                WorkItem.work_id.label("author_work_id"),
-                WorkItem.role.label("role"),
-                GraphFact.operation_order,
-                GraphFact.entity_id,
-                GraphFact.relation_id,
-                GraphFact.declaration_id,
-                GraphFact.plotline_subject_id,
-                GraphFact.plotline_subject_title,
-                GraphFact.plotline_description,
-                GraphFact.plotline_before,
-                GraphFact.plotline_after,
-                GraphFact.description_action,
-                GraphFact.description_value,
-                GraphFact.representative_action,
-                GraphFact.representative_value,
-                GraphFact.tags_submitted,
-                GraphFact.relation_change_kind,
-                GraphFact.identity_kind,
-                GraphFact.reason,
-                GraphEntity.canonical_name.label("entity_name"),
-                GraphRelation.relation_type,
-                from_entity.canonical_name.label("from_entity"),
-                to_entity.canonical_name.label("to_entity"),
-            )
-            .join(Execution, Execution.execution_id == GraphFact.direct_producer_execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .outerjoin(GraphEntity, GraphEntity.entity_id == GraphFact.entity_id)
-            .outerjoin(GraphRelation, GraphRelation.relation_id == GraphFact.relation_id)
-            .outerjoin(from_entity, from_entity.entity_id == GraphRelation.from_entity_id)
-            .outerjoin(to_entity, to_entity.entity_id == GraphRelation.to_entity_id)
-            .where(
-                GraphFact.direct_producer_execution_id.is_not(None),
-                # 章号是 run 内小整数：必须同时按本运行的真实生产执行限定，防跨 run 串读
-                GraphFact.direct_producer_execution_id.in_(self._run_execution_ids()),
-                GraphFact.relation_id.is_not(None) | GraphFact.entity_id.is_not(None)
-                | GraphFact.plotline_subject_id.is_not(None),
-                chapter_column.in_(chapter_ids),
-            )
-        )
-        participant_statement = (
-            select(
-                GraphFact.graph_fact_id,
-                WorkItem.annotation_chapter_id.label("chapter_id"),
-                WorkItem.work_id.label("author_work_id"),
-                WorkItem.role.label("role"),
-                GraphFact.operation_order,
-                GraphFact.declaration_id,
-                GraphFact.participant_id,
-                DeclarationParticipant.entity_id.label("subject_entity_id"),
-                GraphEntity.canonical_name.label("entity_name"),
-                DeclarationParticipant.narrative_role,
-                DeclarationParticipant.action,
-                DeclarationParticipant.emotion,
-            )
-            .join(DeclarationParticipant, DeclarationParticipant.participant_id == GraphFact.participant_id)
-            .join(GraphEntity, GraphEntity.entity_id == DeclarationParticipant.entity_id)
-            .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
-            .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(
-                GraphFact.participant_id.is_not(None),
-                WorkItem.annotation_run_id == self.run_id,
-                WorkItem.annotation_chapter_id.in_(chapter_ids),
-            )
-        )
         facts: list[dict[str, Any]] = []
-        for row in self.session.execute(direct_statement).mappings():
+        for row in self.session.reads.final_metrics_queries_plotline_direct_facts(self.run_id, chapter_ids):
             values = dict(row)
             values["shape"] = self._direct_fact_shape(values)
             facts.append(values)
-        for row in self.session.execute(participant_statement).mappings():
+        for row in self.session.reads.final_metrics_queries_plotline_fetch_facts_1(chapter_ids, self.run_id):
             values = dict(row)
             values["shape"] = "participant"
             values["subject_entity_id"] = values.get("subject_entity_id")
             facts.append(values)
-        fact_ids = [int(fact["graph_fact_id"]) for fact in facts]
-        evidence = self._evidence_by_owner(SourceEvidence.graph_fact_id, fact_ids)
+        fact_ids = [str(fact["graph_fact_id"]) for fact in facts]
+        evidence = self._evidence_by_owner("graph_fact_id", fact_ids)
         tags = self._fetch_fact_tags(fact_ids)
         for fact in facts:
             fact["evidence"] = evidence.get(str(fact["graph_fact_id"]), [])
-            fact["tags"] = tags.get(int(fact["graph_fact_id"]), [])
+            fact["tags"] = tags.get(str(fact["graph_fact_id"]), [])
         facts.sort(
             key=lambda fact: (
                 self.orders[fact["chapter_id"]],
                 ROLE_ORDER.get(str(fact["role"]), 99),
-                str(fact["author_work_id"]),
+                str(fact["author_execution_id"]),
                 int(fact["operation_order"] or 0),
-                int(fact["graph_fact_id"]),
+                str(fact["graph_fact_id"]),
             )
         )
         return facts
@@ -270,20 +122,15 @@ class PlotlineQuery:
             return "plotline"
         return "entity"
 
-    def _fetch_fact_tags(self, fact_ids: list[int]) -> dict[int, list[str]]:
+    def _fetch_fact_tags(self, fact_ids: list[str]) -> dict[str, list[str]]:
         if not fact_ids:
             return {}
-        statement = (
-            select(FactEntityTag.graph_fact_id, FactEntityTag.tag_ordinal, FactEntityTag.tag)
-            .where(FactEntityTag.graph_fact_id.in_(fact_ids))
-            .order_by(FactEntityTag.graph_fact_id, FactEntityTag.tag_ordinal)
-        )
-        tags: dict[int, list[str]] = {}
-        for row in self.session.execute(statement).all():
-            tags.setdefault(int(row.graph_fact_id), []).append(str(row.tag))
+        tags: dict[str, list[str]] = {}
+        for row in self.session.reads.metrics_queries_plotline_fetch_fact_tags_1(fact_ids):
+            tags.setdefault(str(row.graph_fact_id), []).append(str(row.tag))
         return tags
 
-    def _entity_deltas(self, facts: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
+    def _entity_deltas(self, facts: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
         """按贡献顺序折叠实体状态，产出每个事实的字段 before/after（旧状态缓存列的读投影）
 
         - 实体形状：description 与代表标记按 omit/set/clear 三态、标签按 tags_submitted 投影
@@ -292,7 +139,7 @@ class PlotlineQuery:
           （首次登记不是剧情推进；行为/情绪/叙事作用允许以空 before 首次出现）
         """
         state: dict[str, dict[str, Any]] = {}
-        deltas: dict[int, list[dict[str, Any]]] = {}
+        deltas: dict[str, list[dict[str, Any]]] = {}
         for fact in facts:
             shape = fact["shape"]
             if shape == "entity":
@@ -321,7 +168,7 @@ class PlotlineQuery:
                 if before is None and field not in FIRST_TIME_DELTA_FIELDS:
                     continue
                 current[field] = value
-                deltas.setdefault(int(fact["graph_fact_id"]), []).append(
+                deltas.setdefault(str(fact["graph_fact_id"]), []).append(
                     {"field": field, "before": before, "after": value}
                 )
         return deltas
@@ -354,7 +201,7 @@ class PlotlineQuery:
             before: Any = None
             after: Any = None
             if shape in {"entity", "participant"}:
-                fields = deltas.get(int(fact["graph_fact_id"]), [])
+                fields = deltas.get(str(fact["graph_fact_id"]), [])
                 if not fields:
                     continue
                 dimension = "character"

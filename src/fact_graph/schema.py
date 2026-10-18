@@ -30,7 +30,7 @@ EMOTION_SCORE_DESCRIPTION = (
 )
 
 # 2026-09-18 pivot/cliffhanger 说明单源：写者面 write_metrics 签名、ChapterMetricsInput
-# 与 subagent 面 metric 构造器目录共用同一份文本（只陈述字段机制，不裁断与 narrative_function 的分工）
+# 与 agent 面 metric 构造器目录共用同一份文本（只陈述字段机制，不裁断与 narrative_function 的分工）
 # 2026-09-18 说明改为判据口径：原句把"全书按 pivot_moment=true 的章数÷有效章数算
 # chapter_pivot_rate"这类聚合公式写给模型，模型据此判不了任何一段正文；聚合口径属指标文档
 # （src/config/constants/metrics_contracts.py 的 chapter_pivot_rate 条目）。
@@ -40,7 +40,7 @@ PIVOT_MOMENT_DESCRIPTION = (
 )
 CLIFFHANGER_DESCRIPTION = "本章是否以悬念收尾（布尔，追读钩子）。"
 
-# 2026-10-02 wire 常量单源（原 tools 的 _EL_PATH_SEP/_ROOT_NODE_KEY 与 subagent_ir 的
+# 2026-10-02 wire 常量单源（原 tools 的 _EL_PATH_SEP/_ROOT_NODE_KEY 与 agent_ir 的
 # EL_PATH_SEP/RESERVED_ROOT_KEY 双份定义收编于此，包内公共）：局部键路径分隔符与事件
 # 根节点保留键——子事件 el = "<树键>/<节点键>"，根事件 el = 树键，节点键不得占用 root。
 EL_PATH_SEP = "/"

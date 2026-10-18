@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from src.storage.db import get_session_factory
+from src.storage import get_storage_factory
 from src.work.task_manager import TaskManager
 from src.workflows.application import TaskApplicationService
 from src.workflows.service import AnalysisService
@@ -34,7 +34,7 @@ def get_task_manager() -> TaskManager:
     global _task_manager
     if _task_manager is None:
         _task_manager = TaskManager(run_completed_callback=_run_completed_callback)
-        _task_manager.set_db_session_factory(lambda: get_session_factory()())
+        _task_manager.set_db_session_factory(lambda: get_storage_factory()())
     return _task_manager
 
 

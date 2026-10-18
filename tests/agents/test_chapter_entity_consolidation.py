@@ -82,14 +82,7 @@ class _RoleModel(_ProgramModel):
 
 def _annotation_records(db_session, run_id):
     """run 的正式标注产物行（run_annotate 自提交，查询必须按 run 限定）"""
-    return list(
-        db_session.scalars(
-            select(ChapterAnnotation)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(WorkItem.annotation_run_id == run_id)
-        )
-    )
+    return list(db_session.scalars(select(ChapterAnnotation).where(ChapterAnnotation.run_id == run_id)))
 
 
 def _program_works(db_session, run_id):
@@ -135,9 +128,9 @@ def _drop_program_receipt(db_session, run_id) -> None:
 
 def test_rich_contributions_keep_work_updates_and_auto_registration_support() -> None:
     graph = FactGraph(run_scope="source-union")
-    graph.begin("structure", "s", 1, "structure")
-    graph.begin("event", "e", 1, "event")
-    with graph.author("structure", "s"):
+    graph.begin("s", 1, "entity")
+    graph.begin("e", 1, "event")
+    with graph.author("s"):
         for entity in [
             EntityInput(
                 name="张三", entity_type="character", tags=["旧标签"], description="来历一", representative=True
@@ -146,7 +139,7 @@ def test_rich_contributions_keep_work_updates_and_auto_registration_support() ->
         ]:
             graph.register_entities([entity], present={"tags", "description", "representative"})
             graph.record_entity_ops([entity], chapter_id=1, present={"tags", "description", "representative"})
-    with graph.author("event", "e"):
+    with graph.author("e"):
         ensure_entity_ref(graph, "张三", "character", chapter_id=1)
         entity = EntityInput(name="张三", entity_type="character", tags=["事件标签"])
         graph.register_entities([entity], present={"tags"})
@@ -154,7 +147,7 @@ def test_rich_contributions_keep_work_updates_and_auto_registration_support() ->
     key = graph.entity_key("张三", "character")
     assert set(graph.entity_tags[key]) == {"结构标签", "事件标签"}
     assert graph.entity_attributes[key] == {"description": "来历二", "is_representative": True}
-    with graph.author("event", "e"):
+    with graph.author("e"):
         entity = EntityInput(name="张三", entity_type="character", tags=[], representative=False)
         graph.register_entities([entity], present={"tags", "representative"})
         graph.record_entity_ops([entity], chapter_id=1, present={"tags", "representative"})
@@ -165,21 +158,21 @@ def test_rich_contributions_keep_work_updates_and_auto_registration_support() ->
 
 def test_other_lane_rollback_does_not_remove_existing_reference_identity() -> None:
     graph = FactGraph(run_scope="concurrent-reference")
-    graph.begin("structure", "s", 1, "structure")
-    graph.begin("event", "e", 1, "event")
-    with graph.author("structure", "s"):
+    graph.begin("s", 1, "entity")
+    graph.begin("e", 1, "event")
+    with graph.author("s"):
         key = ensure_entity_ref(graph, "张三", "character", chapter_id=1)
-    with graph.author("event", "e"):
+    with graph.author("e"):
         assert ensure_entity_ref(graph, "张三", "character", chapter_id=1) == key
-    graph.rollback("structure", "s")
+    graph.rollback("s")
     assert graph.entity_id_for_key(key) is not None
     assert len(graph.entity_names) == 1
 
 
 def test_runtime_and_reader_keep_conflicting_identity_component() -> None:
     graph = FactGraph(run_scope="formal-identity")
-    graph.begin("work", "invocation", 1, "solo")
-    with graph.author("work", "invocation"):
+    graph.begin("invocation", 1, "annotation")
+    with graph.author("invocation"):
         keys = [ensure_entity_ref(graph, name, "character", chapter_id=1) for name in ["张三", "老张", "张哥"]]
     operations = [
         {"from_entity": keys[0], "to_entity": keys[1], "relation_type": "同一人物", "identity_kind": "same"},
@@ -192,7 +185,7 @@ def test_runtime_and_reader_keep_conflicting_identity_component() -> None:
             "change_kind": "break",
         },
     ]
-    graph.contributions[("work", "invocation")]["relation_link_ops"] = operations
+    graph.contributions["invocation"]["relation_link_ops"] = operations
     graph._fold()
     ids = [graph.entity_id_for_key(key) for key in keys]
     relations = [
@@ -242,7 +235,7 @@ async def test_chapter_transaction_preserves_sources_and_four_reference_projecti
 
     model = _RoleModel(
         {
-            "structure": """
+            "entity": """
 entity(id="a", name="张三", entity_type="character", tags=["结构标签"],
        description="张三的介绍", representative=True, evidence=1)
 relation(from_entity={"name": "张三", "entity_type": "character"},
@@ -258,7 +251,7 @@ relation(from_entity={"name": "老张", "entity_type": "character"},
          to_entity={"name": "李四", "entity_type": "character"}, relation_type="盟友")
 finish()
 """,
-            "evidence": """
+            "metric": """
 dialogue(candidate_index=1, verdict="dialogue", evidence=1, speaker={"name": "老张", "entity_type": "character"})
 metric(summary="出门", emotional_valence=0, narrative_function="铺垫")
 finish()
@@ -381,7 +374,7 @@ async def test_pending_failure_rolls_back_and_resume_retries_only_program(db_ses
                 {"node_id": "a", "name": "张三", "entity_type": "character", "reason": "unreferenced_entity"},
             )
         ],
-        author=(program_work.work_id, program_work.program_invocation_key or "program"),
+        author=program_work.work_id,
     )
     db_session.commit()
     db_session.expire_all()
@@ -580,8 +573,7 @@ async def test_dangling_relation_enters_pending_and_edge_survives(db_session) ->
         await run_annotate(run_id, db_session, novel_id=novel_id)
     db_session.expire_all()
     zhang = db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id)).one()
-    work = db_session.scalars(select(WorkItem).where(WorkItem.annotation_run_id == run_id)).one()
-    execution = db_session.scalars(select(Execution).where(Execution.work_id == work.work_id)).one()
+    execution = db_session.scalars(select(Execution).where(Execution.run_id == run_id)).one()
     # 隔离测试直接构造端点为未登记身份的正式关系事实，验证核对登记案例且关系边原样保留
     db_session.add(
         GraphEntity(
@@ -681,8 +673,8 @@ async def test_agent_restores_case_memory_when_chapter_transaction_fails(db_sess
     agent = AnnotationAgent(EventBus(), run_id, get_session_factory(), novel_id="test")
 
     def fail(session, run_id, chapter_id, cases):
-        cases.begin("program", "invocation")
-        cases.push("event", "模拟登记", ("program", "invocation"))
+        cases.begin("program")
+        cases.push("event", "模拟登记", "program")
         raise RuntimeError("故障")
 
     monkeypatch.setattr("src.agents.annotation.chapter_consolidation.consolidate_chapter", fail)

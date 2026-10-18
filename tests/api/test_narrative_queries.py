@@ -51,11 +51,11 @@ def _fixture(session) -> NarrativeScenario:
     novel, run = create_run_with_chunks(
         session, texts=[f"第{i}章原文" for i in range(1, 9)], chapter_ids=list(range(1, 9))
     )
-    session_id, work_id, execution_id = add_diagnosis_context(session, run)
+    session_id, execution_id = add_diagnosis_context(session, run)
     declarations: dict[int, str] = {}
     executions: dict[int, str] = {}
     for chapter in range(1, 9):
-        record_id, _work, annotation_execution = add_annotation_source(session, run, chapter, role="event")
+        record_id, annotation_execution = add_annotation_source(session, run, chapter, role="event")
         executions[chapter] = annotation_execution
         declarations[chapter] = add_declaration(
             session,
@@ -70,7 +70,7 @@ def _fixture(session) -> NarrativeScenario:
             payoff_likelihood="high" if chapter == 2 else None,
         )
     session.flush()
-    draft, _meta = identity_every_declaration(session, run, context=(session_id, work_id, execution_id))
+    draft, _meta = identity_every_declaration(session, run, context=(session_id, execution_id))
     mapping = {key: item.event_id for item in draft.events.values() for key in item.declaration_ids}
     events = {chapter: mapping[declarations[chapter]] for chapter in range(1, 9)}
     close_structure(session, draft, evidence_paragraph_id=0)
@@ -241,11 +241,11 @@ def _future_action_case(session):
     _novel, run = create_run_with_chunks(
         session, texts=[f"第{i}章原文" for i in range(1, 9)], chapter_ids=list(range(1, 9))
     )
-    sources: dict[int, tuple[str, str, str]] = {}
+    sources: dict[int, tuple[str, str]] = {}
     declarations: dict[int, str] = {}
     for chapter in (1, 5, 8):
-        record_id, work_id, annotation_execution = add_annotation_source(session, run, chapter, role="event")
-        sources[chapter] = (record_id, work_id, annotation_execution)
+        record_id, annotation_execution = add_annotation_source(session, run, chapter, role="event")
+        sources[chapter] = (record_id, annotation_execution)
         declarations[chapter] = add_declaration(
             session,
             record_id=record_id,
@@ -262,7 +262,7 @@ def _future_action_case(session):
 def test_action_save_rejects_future_endpoints(db_session, future_endpoint):
     run, sources, declarations = _future_action_case(db_session)
     chapter = 1 if future_endpoint == "root_event_id" else 5
-    record_id, work_id, annotation_execution = sources[chapter]
+    record_id, annotation_execution = sources[chapter]
     paragraph = first_paragraph(db_session, run, chapter_id=chapter)
     action = {
         "source_operation_id": "invalid-future",
@@ -283,7 +283,6 @@ def test_action_save_rejects_future_endpoints(db_session, future_endpoint):
     }
     frozen = EventContribution(
         run,
-        work_id,
         annotation_execution,
         chapter,
         (EvidenceParagraph(chapter, int(paragraph.paragraph_id), paragraph.text, 0, len(paragraph.text)),),
@@ -303,7 +302,7 @@ def test_action_save_accepts_earlier_saved_work_endpoints(db_session):
     """
     run, sources, declarations = _future_action_case(db_session)
     chapter = 8
-    record_id, work_id, annotation_execution = sources[chapter]
+    record_id, annotation_execution = sources[chapter]
     paragraph = first_paragraph(db_session, run, chapter_id=chapter)
     action = {
         "source_operation_id": "cross-chapter-payoff",
@@ -324,7 +323,6 @@ def test_action_save_accepts_earlier_saved_work_endpoints(db_session):
     }
     frozen = EventContribution(
         run,
-        work_id,
         annotation_execution,
         chapter,
         (EvidenceParagraph(chapter, int(paragraph.paragraph_id), paragraph.text, 0, len(paragraph.text)),),

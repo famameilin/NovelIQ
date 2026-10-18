@@ -210,8 +210,8 @@ def build_state_read_tools(
     return [search_events, read_event, search_graph, read_entity]
 
 
-def build_case_tools(pool: Any, author: tuple[str, str], *, on_claim: Callable[[], None] | None = None) -> list[Any]:
-    """案例池原子认领及类型化登记共用实现，作者是实际执行身份"""
+def build_case_tools(pool: Any, author: str, *, on_claim: Callable[[], None] | None = None) -> list[Any]:
+    """案例池原子认领及类型化登记共用实现，作者是实际执行身份（真实执行号或程序 work 身份）"""
 
     @tool
     def push_case(

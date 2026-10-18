@@ -16,7 +16,7 @@ def _read_prompt_text(filename: str) -> str:
 
 
 ANNOTATION_SCOPE_POLICY = (
-    "\n事件职责（solo/event）：同时记录正文明确的问题推进、目标改变、线索揭示，"
+    "\n事件职责（event）：同时记录正文明确的问题推进、目标改变、线索揭示，"
     "调用 plotline 并提供前后状态与本章段首证据，关联声明填 declaration_id。"
     "伏笔强化或回收先读取声明，再调用 foreshadow_action，填写 source_declaration_id、"
     "target_declaration_id；照应边不能判回收，埋设随声明自动保存。\n"
@@ -32,18 +32,18 @@ ANNOTATION_SCOPE_POLICY = (
 )
 
 
-# solo 与长章角色共用当前系统提示词，正文和职责在每个 work 中单独注入
-SUBAGENT_SYSTEM_PROMPT = _read_prompt_text("sub_agent.txt") + ANNOTATION_SCOPE_POLICY
+# annotation 与长章角色共用当前系统提示词，正文和职责在每个 work 中单独注入
+AGENT_SYSTEM_PROMPT = _read_prompt_text("annotation_agent.txt") + ANNOTATION_SCOPE_POLICY
 
-# 长章角色职责只在文案中分域，工具能力共用；solo 负责整章全部领域
+# 长章角色职责只在文案中分域，工具能力共用；annotation 负责整章全部领域
 # 参数、引用、证据与收尾纪律由 execute_code 的目录说明给出
-SUBAGENT_ROLE_SCOPES: dict[str, str] = {
-    "structure": (
+AGENT_ROLE_SCOPES: dict[str, str] = {
+    "entity": (
         '<RoleScope role="实体与关系">\n'
         "你负责这一章的两个域：\n"
         "- entity：按统一判据登记正文里的人物、地点、物品与组织；\n"
         "- relation：实体之间成立的闭合关系边都写。\n"
-        "事件与参与者、对话判定、段落标签与章级指标都不属于你（由本章其他 subagent 负责）。\n"
+        "事件与参与者、对话判定、段落标签与章级指标都不属于你（由本章其他 Agent 负责）。\n"
         "</RoleScope>"
     ),
     "event": (
@@ -55,7 +55,7 @@ SUBAGENT_ROLE_SCOPES: dict[str, str] = {
         "实体间的关系边、对话判定、段落标签与章级指标都不属于你。\n"
         "</RoleScope>"
     ),
-    "evidence": (
+    "metric": (
         '<RoleScope role="对话与章级证据">\n'
         "你负责这一章的三个域：\n"
         "- dialogue：<DialogueCandidates> 表里的候选逐条判定，一条不落；\n"
@@ -103,7 +103,7 @@ def _render_paragraph_numbered_text(chapter_text: str, paragraph_info: ChapterPa
     return rendered if parts else chapter_text
 
 
-def build_subagent_message(
+def build_agent_message(
     *,
     role: str,
     paragraph_info: ChapterParagraphInfo,
@@ -134,12 +134,12 @@ def build_subagent_message(
 
 
 __all__ = [
-    "SUBAGENT_ROLE_SCOPES",
-    "SUBAGENT_SYSTEM_PROMPT",
-    "build_subagent_message",
+    "AGENT_ROLE_SCOPES",
+    "AGENT_SYSTEM_PROMPT",
+    "build_agent_message",
 ]
 
-SUBAGENT_SYSTEM_PROMPT += (
+AGENT_SYSTEM_PROMPT += (
     "\nevent 写本章事件级声明（标题、问题、概要、类型、推进、状态、证据）。"
     "全书身份、阶段与包含由诊断确认后一次发布；不按动作拆分过程。"
     "标注阶段不要调用完整事件、过程归属或 submit_events 类工具。"

@@ -59,7 +59,7 @@ NEW_TABLES = [
 
 
 class _Fixture:
-    """自足夹具：小说/运行/章节/段落 + 标注来源身份 + 诊断会话/work/执行"""
+    """自足夹具：小说/运行/章节/段落 + 标注来源身份 + 诊断整轮会话与报告执行"""
 
     def __init__(self, session: Session, *, title: str, chapters: int = 1) -> None:
         self.session = session
@@ -124,24 +124,15 @@ class _Fixture:
             self.paragraph_ids.append(paragraph_id)
             offset += len(text)
             paragraph_id += 1
-        # 章节与段落先落库：标注 work 的复合外键不参与 ORM 依赖排序
+        # 章节与段落先落库；标注执行直接携带 run/章/角色，不再有标注 work 身份
         session.flush()
-        # 标注 work/执行/记录：声明的真实来源链
-        self.annotation_work_id = f"annotation-work-{self.novel_id}"
         self.annotation_execution_id = uuid.uuid4().hex
-        session.add(
-            WorkItem(
-                work_id=self.annotation_work_id,
-                role="solo",
-                annotation_run_id=self.run_id,
-                annotation_chapter_id=1,
-            )
-        )
-        session.flush()
         session.add(
             Execution(
                 execution_id=self.annotation_execution_id,
-                work_id=self.annotation_work_id,
+                run_id=self.run_id,
+                chapter_id=1,
+                role="event",
                 attempt_number=1,
                 started_at=naive_utcnow(),
                 status="success",
@@ -153,14 +144,16 @@ class _Fixture:
             ChapterAnnotation(
                 record_id=self.record_id,
                 execution_id=self.annotation_execution_id,
+                run_id=self.run_id,
+                chapter_id=1,
+                role="event",
                 contract_version=CONTRACT,
                 chapter_consolidation_version="v1",
                 created_at=naive_utcnow(),
             )
         )
-        # 诊断会话/work/执行：完整事件与关系的真实生产者
+        # 诊断整轮会话与报告角色真实尝试：完整事件与关系的真实生产者
         self.session_id = f"diagnosis-session-{self.novel_id}"
-        self.work_id = f"diagnosis-work-{self.novel_id}"
         self.execution_id = uuid.uuid4().hex
         session.add(
             Execution(
@@ -170,12 +163,11 @@ class _Fixture:
             )
         )
         session.flush()
-        session.add(WorkItem(work_id=self.work_id, role="report", diagnosis_session_id=self.session_id))
-        session.flush()
         session.add(
             Execution(
                 execution_id=self.execution_id,
-                work_id=self.work_id,
+                run_id=self.run_id,
+                role="report",
                 attempt_number=1,
                 started_at=naive_utcnow(),
                 status="success",
@@ -813,14 +805,15 @@ def test_narrative_group_parent_must_be_line_and_acyclic(db_session: Session) ->
 
 
 def test_execution_shape_is_single_type(db_session: Session) -> None:
-    """同一真实执行不能同时是整轮会话和 work 尝试"""
+    """同一真实执行不能同时是整轮会话和 invocation"""
     fixture = _fixture(db_session, "执行形状")
     db_session.add(
         Execution(
             execution_id=uuid.uuid4().hex,
             session_run_id=fixture.run_id,
             session_created_at=naive_utcnow(),
-            work_id=fixture.work_id,
+            run_id=fixture.run_id,
+            role="report",
             attempt_number=1,
             started_at=naive_utcnow(),
             status="success",
@@ -832,15 +825,25 @@ def test_execution_shape_is_single_type(db_session: Session) -> None:
 
 
 def test_work_item_shape_is_single_kind(db_session: Session) -> None:
-    """work 的四种形状互斥，标注与程序身份不能混填"""
+    """程序回执两种形状互斥：章末核对与诊断失败保留不能混填"""
     fixture = _fixture(db_session, "工作形状")
+    # 诊断失败保留程序形状（diagnosis_session + program_code）本身可保存
+    db_session.add(
+        WorkItem(
+            work_id=f"diagnosis-pending-{fixture.novel_id}",
+            diagnosis_session_id=fixture.session_id,
+            program_code="diagnosis_retain",
+        )
+    )
+    db_session.flush()
     db_session.add(
         WorkItem(
             work_id=f"bad-work-{uuid.uuid4().hex[:8]}",
-            role="event",
-            annotation_run_id=fixture.run_id,
-            annotation_chapter_id=1,
+            diagnosis_session_id=fixture.session_id,
+            program_run_id=fixture.run_id,
+            program_chapter_id=1,
             program_code="chapter_check",
+            program_invocation_key=f"chapter:1:{uuid.uuid4().hex[:8]}",
         )
     )
     with pytest.raises(IntegrityError):

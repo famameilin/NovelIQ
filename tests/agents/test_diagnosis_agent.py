@@ -1,7 +1,7 @@
 """诊断报告写入与结束信号分离，真实回合预算及同会话补齐
 
 2026-10-15 用户裁定「没复用agent，去改」：诊断会话图改用
-annotation/subagent_graph.build_subagent_graph 同一图结构，绑定面只有程序面
+annotation/agent_graph.build_agent_graph 同一图结构，绑定面只有程序面
 execute_code 与 finish；本文件断言的都仍是行为面（报告内容、同会话补齐与预算终止）。
 """
 
@@ -12,9 +12,9 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from src.agents.annotation.agent_graph import build_agent_graph
+from src.agents.annotation.agent_ir import AgentAnnotation
 from src.agents.annotation.ledger import AnnotationToolLedger
-from src.agents.annotation.subagent_graph import build_subagent_graph
-from src.agents.annotation.subagent_ir import SubagentAnnotation
 from src.agents.diagnosis.program_runtime import DiagnosisProgramRuntime, bind_finish_ledger
 from src.agents.diagnosis.runner import _finalize_diagnosis_result, _validate_topic_label_ids
 from src.agents.diagnosis.tools import build_diagnosis_tools
@@ -91,12 +91,12 @@ def build_graph(responses, *, maximum=5, observer=None, stream=None, retries=Non
             return [str(exc)]
         return []
 
-    graph = build_subagent_graph(
+    graph = build_agent_graph(
         model,
         runtime.build_tool(),
         bind_finish_ledger(runtime.tools["finish"], ledger),
         ledger=ledger,
-        subagent=SubagentAnnotation(role="event"),
+        agent=AgentAnnotation(role="event"),
         max_iterations=maximum,
         observer=observer,
         stream=stream,

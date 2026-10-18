@@ -383,7 +383,6 @@ export function useAnalysisStatus(
         case "llm_thinking":
         case "tool_call": {
           const current = executionRef.current.get(buildStreamExecutionScope(eventData));
-          if (eventData.work_id && !current) break;
           if (current && current !== eventData.invocation_id) break;
           const retired = retiredExecutionsRef.current.get(buildStreamExecutionScope(eventData));
           if (retired?.has(eventData.invocation_id ?? "") || retired?.size && !current) break;
@@ -393,7 +392,6 @@ export function useAnalysisStatus(
             sub_stage: eventData.sub_stage,
             chapter_id: eventData.chapter_id,
             stream_id: eventData.stream_id,
-            work_id: eventData.work_id,
             invocation_id: eventData.invocation_id,
             current: eventData.current,
             total: eventData.total,

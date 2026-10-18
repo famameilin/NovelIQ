@@ -22,7 +22,6 @@ from src.case_pool.contributions import CaseContribution
 from src.event_trees.organization import (
     CandidateConflict,
     register_diagnosis_execution,
-    register_diagnosis_work,
 )
 from src.event_trees.storage_map import run_declaration_ids, run_events
 from src.storage.models import BookCase, CaseEntry, DiagnosisReport, Execution
@@ -41,13 +40,24 @@ def domain_for(draft, *, execution_id: str | None = None):
     )
 
 
-def real_author(session, session_id: str) -> tuple[str, str]:
-    """真实诊断执行身份：案例支持条目引用正式 invocation，不伪造执行外键"""
-    work_id, execution_id = f"pending-work-{uuid4().hex[:8]}", uuid4().hex
-    register_diagnosis_work(session, session_id=session_id, work_id=work_id, role="event")
-    register_diagnosis_execution(session, work_id=work_id, execution_id=execution_id, attempt_number=1)
+def real_author(session, run_id: str) -> str:
+    """真实诊断执行身份（报告角色 invocation）：案例支持条目引用正式执行，不伪造执行外键"""
+    from sqlalchemy import func, select
+
+    attempt = int(
+        session.scalar(
+            select(func.count()).select_from(Execution).where(
+                Execution.run_id == run_id, Execution.role == "report"
+            )
+        )
+        or 0
+    ) + 1
+    execution_id = uuid4().hex
+    register_diagnosis_execution(
+        session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=attempt
+    )
     session.commit()
-    return work_id, execution_id
+    return execution_id
 
 
 def _reports(session, run_id: str) -> list[DiagnosisReport]:
@@ -66,8 +76,8 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
 ):
     draft = draft_case
     domain = domain_for(draft)
-    author = real_author(draft.session, domain.execution_id)
-    domain.case_pool.begin(*author)
+    author = real_author(draft.session, draft.run_id)
+    domain.case_pool.begin(author)
     case = domain.case_pool.push("relation", "核对寻路与照明的关联", author)
     domain.case_pool.promise(case["case_id"], author)
     domain.case_pool.associate(
@@ -100,7 +110,7 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
     support = draft.session.scalars(
         select(CaseEntry).where(
             CaseEntry.case_id == case["case_id"],
-            CaseEntry.producer_execution_id == author[1],
+            CaseEntry.producer_execution_id == author,
         )
     ).one()
     # 候选交付未被采用：支持条目 adopted=False，且没有交付子行
@@ -120,10 +130,10 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
 
 def test_unresolved_conflict_keeps_full_node_name_and_source_in_pending_cases(draft_case):
     domain = domain_for(draft_case)
-    domain.draft.work_id, domain.draft.producer_invocation_id = "conflict-work", "conflict-invocation"
+    domain.draft.case_id, domain.draft.producer_invocation_id = "conflict-case", "conflict-invocation"
     title = "寻路与照明" * 30
     identifier = event(domain.draft, title, [next(iter(domain.sources))])
-    conflict = CandidateConflict("结构比较存在矛盾", ["conflict-work"])
+    conflict = CandidateConflict("结构比较存在矛盾", ["conflict-case"])
     with pytest.raises(DiagnosisWorkCorrections) as raised:
         domain._correct("structure", conflict)
     domain.retain_pending_cases(raised.value)
@@ -184,9 +194,9 @@ async def test_retention_failure_reports_both_errors(draft_case, configured_mode
 
 def test_pending_registration_transaction_rolls_back_all_cases_on_storage_failure(draft_case):
     domain = domain_for(draft_case)
-    authors = [real_author(draft_case.session, domain.execution_id) for _ in range(2)]
+    authors = [real_author(draft_case.session, draft_case.run_id) for _ in range(2)]
     for index, author in enumerate(authors):
-        domain.case_pool.begin(*author)
+        domain.case_pool.begin(author)
         domain.case_pool.push("event", f"核查第{index}个节点", author)
     save = domain.case_pool.save_work
     attempts = 0
@@ -212,7 +222,7 @@ def test_pending_registration_transaction_rolls_back_all_cases_on_storage_failur
     )
     assert not list(
         draft_case.session.scalars(
-            select(CaseEntry).where(CaseEntry.producer_execution_id.in_([author[1] for author in authors]))
+            select(CaseEntry).where(CaseEntry.producer_execution_id.in_(authors))
         )
     )
 
@@ -230,8 +240,8 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
     )
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜找回了身份。"])
-    session_id, work_id, execution_id = add_diagnosis_context(db_session, run_id)
-    record_id, _source_work, _source_execution = add_annotation_source(db_session, run_id, 1, role="event")
+    session_id, execution_id = add_diagnosis_context(db_session, run_id)
+    record_id, _source_execution = add_annotation_source(db_session, run_id, 1, role="event")
     paragraph = first_paragraph(db_session, run_id)
     add_declaration(
         db_session,
@@ -245,7 +255,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
     )
     db_session.commit()
     draft, _meta = identity_every_declaration(
-        db_session, run_id, context=(session_id, work_id, execution_id)
+        db_session, run_id, context=(session_id, execution_id)
     )
     close_structure(db_session, draft, evidence_paragraph_id=int(paragraph.paragraph_id))
     publish_draft(db_session, run_id, draft)
@@ -260,10 +270,10 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
         model_id="test-model",
     )
 
-    author = real_author(db_session, session_id)
+    author = real_author(db_session, run_id)
     pool = CasePool(run_id)
     domain.case_pool = pool
-    pool.begin(*author)
+    pool.begin(author)
     case = pool.push("relation", "检查寻路与照明", author)
     pool.promise(case["case_id"], author)
     pool.associate(
@@ -276,7 +286,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
     )
     frozen = CaseContribution(
         run_id,
-        *author,
+        author,
         json.dumps(
             {
                 "created_case_ids": [case["case_id"]],
@@ -293,7 +303,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
     support = db_session.scalars(
         select(CaseEntry).where(
             CaseEntry.case_id == case["case_id"],
-            CaseEntry.producer_execution_id == author[1],
+            CaseEntry.producer_execution_id == author,
         )
     ).one()
     delivery = db_session.scalars(

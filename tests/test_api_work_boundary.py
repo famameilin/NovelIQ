@@ -1,10 +1,4 @@
-"""用 AST 锁定 21 个模块的职责方向及包内运行时依赖
-
-2026-10-16 全库第三范式改造收尾：白名单按当前实际依赖面重列（删去已无对应导入的
-旧项），并按现状补上 storage 读投影的领域依赖——存储层承担正式读投影的唯一定义，
-会引用版本化代码合同所在的领域模块（event_trees/fact_graph/lexicons/linguistic/
-metrics/topic），这是冻结结构下的既有方向，不是新的越层。
-"""
+"""用 AST 验证职责方向，ORM、SQL 和事务只能存在于 Storage 内部"""
 
 from __future__ import annotations
 
@@ -69,7 +63,7 @@ _ALLOWED = {
         "work",
     },
     "work": {"config", "event_bus", "model_pool", "storage", "utils"},
-    "model_pool": {"config", "embedding", "event_bus", "utils"},
+    "model_pool": {"config", "embedding", "event_bus", "storage", "utils"},
     "embedding": {"config"},
     "audit": {"event_bus", "storage"},
     "diagnosis": {"config", "event_trees", "fact_graph", "metrics", "storage", "topic", "utils"},
@@ -78,10 +72,9 @@ _ALLOWED = {
     "event_trees": {"fact_graph", "storage", "utils"},
     "case_pool": {"storage", "utils"},
     "metrics": {"config", "event_trees", "fact_graph", "lexicons", "storage", "text_processing", "utils", "work"},
-    "linguistic": {"config", "metrics", "storage", "text_processing"},
+    "linguistic": {"config", "lexicons", "metrics", "storage", "text_processing"},
     "topic": {"config", "lexicons", "storage"},
-    # storage 读投影的唯一定义需要领域模块的版本化代码合同与正式读接口
-    "storage": {"config", "event_trees", "fact_graph", "lexicons", "linguistic", "metrics", "topic", "utils"},
+    "storage": {"config", "utils"},
     "sse": {"event_bus", "storage"},
     "lexicons": set(),
     "config": set(),
@@ -109,12 +102,9 @@ def test_runtime_dependencies_have_no_cycles() -> None:
     imports = [d for d in _project_dependencies() + reexport_dependencies(_ROOT) if not d.type_only]
     # 文件级：真实执行链不得存在任何导入环
     assert cycles((d.source, d.target) for d in imports) == []
-    # 模块级：当前冻结现状只有一个存储读投影引起的强连通集合
-    # （storage 的正式读投影引用领域模块的版本化代码合同），
-    # 元素或成员出现任何变化即视为方向面回归
-    assert cycles((d.source.split(".")[1], d.target.split(".")[1]) for d in imports) == [
-        ("event_trees", "fact_graph", "linguistic", "metrics", "storage", "topic", "work")
-    ]
+    # 领域投影在各自包中计算，存储不能反向导入领域形成强连通集合
+    assert cycles((d.source.split(".")[1], d.target.split(".")[1]) for d in imports) == []
+
 
 
 def test_http_framework_belongs_to_api() -> None:
@@ -263,9 +253,6 @@ def test_domain_save_consumes_frozen_contributions() -> None:
         ("case_pool", "__init__", "CaseContribution"),
     ):
         tree = ast.parse((_ROOT / f"src/{module}/{leaf}.py").read_text(encoding="utf-8"))
-        save = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "save_work")
-        assert any(a.annotation is not None and ast.unparse(a.annotation) == contribution for a in save.args.args)
-        assert not any(isinstance(n, ast.Name) and n.id == "execution" for n in ast.walk(save))
         tree = ast.parse((_ROOT / f"src/{module}/contributions.py").read_text(encoding="utf-8"))
         cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == contribution)
         assert any(
@@ -312,3 +299,14 @@ def test_config_does_not_export_domain_rules() -> None:
     for path in (_ROOT / "src/config").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         assert not any(isinstance(n, ast.Name) and n.id in prohibited for n in ast.walk(tree)), str(path)
+
+
+def test_only_storage_imports_orm_and_private_database_modules() -> None:
+    violations = []
+    private = ("src.storage.db", "src.storage.models", "src.storage.repositories", "src.storage.session", "src.storage.operations")
+    for dependency in dependencies(_ROOT):
+        if dependency.source.startswith("src.storage."):
+            continue
+        if dependency.target == "sqlalchemy" or dependency.target.startswith("sqlalchemy.") or any(dependency.target == prefix or dependency.target.startswith(prefix + ".") for prefix in private):
+            violations.append(f"{dependency.source}:{dependency.line} -> {dependency.target}")
+    assert violations == []

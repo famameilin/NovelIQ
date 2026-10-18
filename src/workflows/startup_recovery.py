@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.storage.db import get_session
-from src.storage.repositories import RunRepository
+from src.storage import get_storage
 
 if TYPE_CHECKING:
     from src.work.task_manager import TaskManager
@@ -26,11 +25,11 @@ def recover_orphaned_runs() -> tuple[int, int]:
     Returns:
         tuple[int, int]: (failed_count, cancelled_count)
     """
-    with get_session() as session:
-        repo = RunRepository(session)
-        failed_count = repo.mark_running_as_failed()
-        cancelled_count = repo.mark_cancelling_as_cancelled()
-        return failed_count, cancelled_count
+    session = get_storage()
+    repo = session.runs
+    failed_count = repo.mark_running_as_failed()
+    cancelled_count = repo.mark_cancelling_as_cancelled()
+    return (failed_count, cancelled_count)
 
 
 async def resume_pending_tasks(task_service: TaskService, task_manager: TaskManager) -> tuple[int, int]:

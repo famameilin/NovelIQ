@@ -220,8 +220,8 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     """
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+    from src.agents.annotation.agent_graph import build_agent_graph
     from src.agents.annotation.ledger import AnnotationToolLedger
-    from src.agents.annotation.subagent_graph import build_subagent_graph
     from src.fact_graph.graph import FactGraph
     from src.fact_graph.inputs import ChapterParagraphInfo
     from tests.support.annotation_work_tools import build_annotation_tools, build_program_test_runtime
@@ -275,12 +275,12 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
             )
 
     runtime = build_program_test_runtime(tools, ledger)
-    graph = build_subagent_graph(
+    graph = build_agent_graph(
         _SearchThenFinishLLM(),
         runtime.build_tool(),
         runtime.finish_tool,
         ledger=ledger,
-        subagent=runtime.subagent,
+        agent=runtime.agent,
         max_iterations=1,
         completion_check=lambda: [],
     )

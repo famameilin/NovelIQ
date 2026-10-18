@@ -16,23 +16,13 @@ import json
 from dataclasses import dataclass
 from typing import Any, cast
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from src.event_trees import storage_map as smap
 from src.fact_graph.read.references import EntityReferenceProjection
-from src.storage.models import (
-    Chapter,
-    ChapterAnnotation,
-    DiagnosisReport,
-    EventDeclaration,
-    EventRevision,
-    Execution,
-    NarrativeGroup,
-    NarrativeLink,
-    Paragraph,
-    WorkItem,
-)
+from src.storage import Storage
+from src.storage.records.models import ChapterAnnotationRecord as ChapterAnnotation
+from src.storage.records.models import DiagnosisReportRecord as DiagnosisReport
+from src.storage.records.models import EventRevisionRecord as EventRevision
+from src.storage.records.models import NarrativeLinkRecord as NarrativeLink
 from src.utils.identity import text_digest
 
 CONTRACT_VERSION = "event-tree-declarations-v1"
@@ -62,13 +52,12 @@ class EventView:
     current_revision_id: str | None
     first_text_position: int | None
     evidence: list[dict[str, Any]]
-    source_work_id: str | None
     source_execution_id: str | None
 
 
 @dataclass(frozen=True)
 class DeclarationView:
-    """不可变章级声明：来源记录/工作/章节与参与者/证据均为读取投影"""
+    """不可变章级声明：来源记录/章节与参与者/证据均为读取投影"""
 
     declaration_id: str
     record_id: str
@@ -88,7 +77,6 @@ class DeclarationView:
     char_end: int
     chapter_id: int | None
     chapter_order: int | None
-    source_work_id: str | None
     producer_invocation_id: str | None
     contract_version: str
 
@@ -103,7 +91,7 @@ class DeclarationView:
 
     @property
     def payload_path(self) -> str:
-        return f"work/{self.source_work_id}/{self.declaration_id}"
+        return f"declaration/{self.declaration_id}"
 
     @property
     def first_text_position(self) -> int:
@@ -127,7 +115,6 @@ class RevisionView:
     progress: str | None
     participants: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
-    source_work_id: str | None
     producer_invocation_id: str
     source_execution_id: str | None
     source_operation_id: str
@@ -145,7 +132,6 @@ class LinkView:
     relation_type: str
     reason: str
     evidence: list[dict[str, Any]]
-    source_work_id: str | None
     producer_invocation_id: str
     source_operation_id: str | None
 
@@ -199,7 +185,6 @@ class BindingView:
     declaration_id: str
     event_id: str
     revision_id: str
-    source_work_id: str | None
     producer_invocation_id: str
 
 
@@ -226,7 +211,6 @@ class ForeshadowingView:
     target_event_id: str | None
     chapter_id: int | None
     chapter_order: int | None
-    source_work_id: str | None
     source_operation_id: str
     evidence: list[dict[str, Any]]
     operation_order: int = 0
@@ -250,7 +234,7 @@ def _containment_parent_id(row: NarrativeLink) -> str:
 class EventTreeQuery:
     """全书事件树契约查询：fetch 分页顶层大事件，detail 输出同结构事件卡"""
 
-    def __init__(self, session: Session, run_id: str) -> None:
+    def __init__(self, session: Storage, run_id: str) -> None:
         self.session, self.run_id = session, run_id
         self._loaded = False
         self._containment_links: list[NarrativeLink] = []
@@ -262,23 +246,10 @@ class EventTreeQuery:
     # ------------------------------------------------------------------
 
     def _load_annotations(self) -> list[ChapterAnnotation]:
-        stmt = (
-            select(ChapterAnnotation)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(WorkItem.annotation_run_id == self.run_id)
-            .order_by(ChapterAnnotation.created_at, ChapterAnnotation.record_id)
-        )
-        return list(self.session.scalars(stmt))
+        return list(self.session.reads.event_trees_read_organization_load_annotations_1(self.run_id))
 
     def _load_report(self) -> DiagnosisReport | None:
-        return self.session.scalars(
-            select(DiagnosisReport)
-            .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
-            .where(Execution.session_run_id == self.run_id)
-            .order_by(DiagnosisReport.created_at.desc(), DiagnosisReport.report_id.desc())
-            .limit(1)
-        ).first()
+        return self.session.reads.event_trees_read_organization_load_report_1(self.run_id)
 
     def _load(self) -> None:
         if self._loaded:
@@ -295,18 +266,11 @@ class EventTreeQuery:
         # 章节/段落基础投影先于声明与事件：声明章号与证据坐标都依赖它
         self.chapters: list[dict[str, Any]] = [
             {"chapter_id": row.chapter_id, "title": row.display_title or row.title, "chapter_order": index + 1}
-            for index, row in enumerate(
-                self.session.scalars(
-                    select(Chapter)
-                    .where(Chapter.run_id == self.run_id, Chapter.text.is_not(None))
-                    .order_by(Chapter.sequence, Chapter.chapter_id)
-                )
-            )
+            for index, row in enumerate(self.session.reads.event_trees_read_organization_load_2(self.run_id))
         ]
         self.orders: dict[int, int] = {row["chapter_id"]: row["chapter_order"] for row in self.chapters}
         self.paragraphs = {
-            row.paragraph_id: row
-            for row in self.session.scalars(select(Paragraph).where(Paragraph.run_id == self.run_id))
+            row.paragraph_id: row for row in self.session.reads.event_trees_read_organization_load_1(self.run_id)
         }
         self.events = self._load_events()
         self.declarations = self._load_declarations(annotations)
@@ -317,7 +281,6 @@ class EventTreeQuery:
                 declaration_id=row.declaration_id,
                 event_id=row.event_id,
                 revision_id=row.revision_id,
-                source_work_id=self.events[row.event_id].source_work_id,
                 producer_invocation_id=self.events[row.event_id].producer_execution_id,
             )
             for row in self._revision_rows
@@ -345,7 +308,7 @@ class EventTreeQuery:
         for event_id, rows in chains.items():
             if rows:
                 contents[event_id] = smap.revision_contents(self.session, {event_id: [rows[-1]]})[rows[-1].revision_id]
-        evidence = smap.fetch_evidence(self.session, smap.SourceEvidence.complete_event_id, event_ids)
+        evidence = smap.fetch_evidence(self.session, "complete_event_id", event_ids)
         result: dict[str, EventView] = {}
         for event_id, row in event_rows.items():
             payloads = smap.evidence_payloads(self.session, self.run_id, evidence.get(event_id, []))
@@ -355,12 +318,7 @@ class EventTreeQuery:
                 else {}
             )
             content = contents.get(event_id) or {}
-            work_id = smap.work_of_execution(self.session, row.producer_execution_id)
-            session_id = (
-                self.session.scalar(select(WorkItem.diagnosis_session_id).where(WorkItem.work_id == work_id))
-                if work_id is not None
-                else None
-            )
+            session_id = self.session.reads.event_trees_read_organization_load_events_1(self.run_id)
             stages = chains.get(event_id) or []
             result[event_id] = EventView(
                 event_id=event_id,
@@ -375,28 +333,18 @@ class EventTreeQuery:
                 progress=content.get("progress"),
                 current_revision_id=stages[-1].revision_id if stages else None,
                 first_text_position=(
-                    min(positions[item["paragraph_id"]] + item["char_start"] for item in payloads)
-                    if payloads
-                    else None
+                    min(positions[item["paragraph_id"]] + item["char_start"] for item in payloads) if payloads else None
                 ),
                 evidence=payloads,
-                source_work_id=work_id,
                 source_execution_id=session_id,
             )
         return result
 
     def _load_containments(self) -> None:
         self._containment_links = list(
-            self.session.scalars(
-                select(NarrativeLink).where(
-                    NarrativeLink.producer_execution_id.in_(smap.run_execution_ids(self.run_id)),
-                    NarrativeLink.contained_child_id.is_not(None),
-                )
-            )
+            self.session.reads.event_trees_read_organization_load_containments_1(self.run_id)
         )
-        self.parent_of: dict[str, NarrativeLink] = {
-            _containment_child_id(row): row for row in self._containment_links
-        }
+        self.parent_of: dict[str, NarrativeLink] = {_containment_child_id(row): row for row in self._containment_links}
         children_of: dict[str, list[NarrativeLink]] = {}
         for row in self._containment_links:
             children_of.setdefault(_containment_parent_id(row), []).append(row)
@@ -409,25 +357,16 @@ class EventTreeQuery:
         self.children_of = children_of
 
     def _declaration_participants(self, declaration_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
-        from src.storage.models import DeclarationParticipant, GraphEntity
 
         result: dict[str, list[dict[str, Any]]] = {key: [] for key in declaration_ids}
         if not declaration_ids:
             return result
-        rows = list(
-            self.session.scalars(
-                select(DeclarationParticipant)
-                .where(DeclarationParticipant.declaration_id.in_(declaration_ids))
-                .order_by(DeclarationParticipant.declaration_id, DeclarationParticipant.participant_ordinal)
-            )
-        )
+        rows = list(self.session.reads.event_trees_read_organization_declaration_participants_1(declaration_ids))
         names: dict[str, str] = {}
         if rows:
             names = {
                 row.entity_id: row.canonical_name
-                for row in self.session.scalars(
-                    select(GraphEntity).where(GraphEntity.entity_id.in_({row.entity_id for row in rows}))
-                )
+                for row in self.session.reads.event_trees_read_organization_declaration_participants_2(rows)
             }
         for row in rows:
             result[row.declaration_id].append(
@@ -442,27 +381,14 @@ class EventTreeQuery:
         return result
 
     def _load_declarations(self, annotations: list[ChapterAnnotation]) -> dict[str, DeclarationView]:
-        from src.storage.models import SourceEvidence
 
         if not annotations:
             return {}
         records = {row.record_id: row for row in annotations}
         execution_by_record = {row.record_id: row.execution_id for row in annotations}
-        executions = {
-            row.execution_id: row
-            for row in self.session.scalars(
-                select(Execution).where(Execution.execution_id.in_(set(execution_by_record.values())))
-            )
-        }
-        work_ids = {row.work_id for row in executions.values() if row.work_id is not None}
-        works = {
-            row.work_id: row for row in self.session.scalars(select(WorkItem).where(WorkItem.work_id.in_(work_ids)))
-        }
-        declaration_rows = list(
-            self.session.scalars(select(EventDeclaration).where(EventDeclaration.record_id.in_(list(records))))
-        )
+        declaration_rows = list(self.session.reads.event_trees_read_organization_load_declarations_1(records))
         declaration_ids = [row.declaration_id for row in declaration_rows]
-        evidence = smap.fetch_evidence(self.session, SourceEvidence.declaration_id, declaration_ids)
+        evidence = smap.fetch_evidence(self.session, "declaration_id", declaration_ids)
         participants = self._declaration_participants(declaration_ids)
         self._declaration_executions = {
             row.declaration_id: execution_by_record[row.record_id] for row in declaration_rows
@@ -470,13 +396,7 @@ class EventTreeQuery:
         result: dict[str, DeclarationView] = {}
         for row in declaration_rows:
             record = records[row.record_id]
-            work_id = executions[record.execution_id].work_id
-            work = works.get(work_id) if work_id is not None else None
-            chapter_id = (
-                int(work.annotation_chapter_id)
-                if work is not None and work.annotation_chapter_id is not None
-                else None
-            )
+            chapter_id = int(record.chapter_id) if record.chapter_id is not None else None
             bound = smap.evidence_payloads(self.session, self.run_id, evidence.get(row.declaration_id, []))
             if not bound:
                 raise ValueError(f"声明缺少原文证据: {row.declaration_id}")
@@ -499,39 +419,26 @@ class EventTreeQuery:
                 char_end=bound[0]["char_end"],
                 chapter_id=chapter_id,
                 chapter_order=self.orders.get(chapter_id) if chapter_id is not None else None,
-                source_work_id=work.work_id if work is not None else None,
                 producer_invocation_id=record.execution_id,
                 contract_version=record.contract_version,
             )
         return result
 
     def _load_revisions(self) -> dict[str, RevisionView]:
-        from src.storage.models import SourceEvidence
 
         event_ids = list(self.events)
         self._revision_rows = (
-            list(
-                self.session.scalars(
-                    select(EventRevision)
-                    .where(EventRevision.event_id.in_(event_ids))
-                    .order_by(EventRevision.event_id, EventRevision.stage_index)
-                )
-            )
-            if event_ids
-            else []
+            list(self.session.reads.event_trees_read_organization_load_revisions_1(event_ids)) if event_ids else []
         )
         if not self._revision_rows:
             return {}
         contents = smap.revision_contents(
             self.session,
-            {
-                event_id: [row for row in self._revision_rows if row.event_id == event_id]
-                for event_id in event_ids
-            },
+            {event_id: [row for row in self._revision_rows if row.event_id == event_id] for event_id in event_ids},
         )
         declaration_ids = [row.declaration_id for row in self._revision_rows if row.declaration_id is not None]
-        declaration_evidence = smap.fetch_evidence(self.session, SourceEvidence.declaration_id, declaration_ids)
-        event_evidence = smap.fetch_evidence(self.session, SourceEvidence.complete_event_id, event_ids)
+        declaration_evidence = smap.fetch_evidence(self.session, "declaration_id", declaration_ids)
+        event_evidence = smap.fetch_evidence(self.session, "complete_event_id", event_ids)
         grouped: dict[str, list[EventRevision]] = {}
         for row in self._revision_rows:
             grouped.setdefault(row.event_id, []).append(row)
@@ -547,16 +454,12 @@ class EventTreeQuery:
                         self.session, self.run_id, declaration_evidence.get(row.declaration_id, [])
                     )
                     rev_participants = declaration.participants
-                    source_work_id = declaration.source_work_id
                     source_execution_id = self._declaration_executions.get(row.declaration_id)
                     producer_invocation_id = declaration.producer_invocation_id or row.declaration_id
                 else:
                     event = self.events[event_id]
-                    rev_evidence = smap.evidence_payloads(
-                        self.session, self.run_id, event_evidence.get(event_id, [])
-                    )
+                    rev_evidence = smap.evidence_payloads(self.session, self.run_id, event_evidence.get(event_id, []))
                     rev_participants = []
-                    source_work_id = event.source_work_id
                     source_execution_id = event.source_execution_id
                     producer_invocation_id = event.producer_execution_id
                 result[row.revision_id] = RevisionView(
@@ -573,7 +476,6 @@ class EventTreeQuery:
                     progress=content["progress"],
                     participants=rev_participants,
                     evidence=rev_evidence,
-                    source_work_id=source_work_id,
                     producer_invocation_id=str(producer_invocation_id),
                     source_execution_id=source_execution_id,
                     source_operation_id=f"stage/{event_id}/{row.stage_index}",
@@ -581,19 +483,10 @@ class EventTreeQuery:
         return result
 
     def _load_organization(self) -> None:
-        from src.storage.models import SourceEvidence
 
-        producer_executions = smap.run_execution_ids(self.run_id)
-        groups = list(
-            self.session.scalars(
-                select(NarrativeGroup)
-                .where(NarrativeGroup.producer_execution_id.in_(producer_executions))
-                .order_by(NarrativeGroup.group_id)
-            )
-        )
-        group_evidence = smap.fetch_evidence(
-            self.session, SourceEvidence.narrative_group_id, [row.group_id for row in groups]
-        )
+        producer_executions = smap.run_execution_ids(self.session, self.run_id)
+        groups = list(self.session.reads.event_trees_read_organization_load_organization_1(producer_executions))
+        group_evidence = smap.fetch_evidence(self.session, "narrative_group_id", [row.group_id for row in groups])
         self.arcs = {
             row.group_id: GroupView(
                 arc_id=row.group_id,
@@ -621,16 +514,8 @@ class EventTreeQuery:
             for row in groups
             if row.outcome_description is not None
         }
-        links = list(
-            self.session.scalars(
-                select(NarrativeLink)
-                .where(NarrativeLink.producer_execution_id.in_(producer_executions))
-                .order_by(NarrativeLink.link_id)
-            )
-        )
-        link_evidence = smap.fetch_evidence(
-            self.session, SourceEvidence.narrative_link_id, [row.link_id for row in links]
-        )
+        links = list(self.session.reads.event_trees_read_organization_load_organization_2(producer_executions))
+        link_evidence = smap.fetch_evidence(self.session, "narrative_link_id", [row.link_id for row in links])
         self.arc_links: list[ArcLinkView] = []
         self.outcome_links: list[OutcomeLinkView] = []
         self.relations: list[LinkView] = []
@@ -697,7 +582,6 @@ class EventTreeQuery:
             relation_type=row.relation_type or "",
             reason=row.reason,
             evidence=evidence,
-            source_work_id=smap.work_of_execution(self.session, row.producer_execution_id),
             producer_invocation_id=row.producer_execution_id,
             source_operation_id=row.source_operation_local_key,
         )
@@ -706,9 +590,7 @@ class EventTreeQuery:
         if not rows:
             return 0
         payloads = smap.evidence_payloads(self.session, self.run_id, rows)
-        positions = smap.global_positions(
-            self.session, self.run_id, {item["paragraph_id"] for item in payloads}
-        )
+        positions = smap.global_positions(self.session, self.run_id, {item["paragraph_id"] for item in payloads})
         return min(positions[item["paragraph_id"]] + item["char_start"] for item in payloads)
 
     def _load_actions(self):
@@ -727,7 +609,6 @@ class EventTreeQuery:
             target_event_id=row.target_event_id,
             chapter_id=row.chapter_id,
             chapter_order=row.chapter_order,
-            source_work_id=row.source_work_id,
             source_operation_id=row.source_operation_id,
             evidence=row.evidence,
             operation_order=int(row.operation_order),
@@ -764,11 +645,8 @@ class EventTreeQuery:
                 raise ValueError("已保存证据文本校验不一致")
 
     def _containment_evidence_payloads(self) -> list[list[dict[str, Any]]]:
-        from src.storage.models import SourceEvidence
 
-        rows = smap.fetch_evidence(
-            self.session, SourceEvidence.narrative_link_id, [row.link_id for row in self._containment_links]
-        )
+        rows = smap.fetch_evidence(self.session, "narrative_link_id", [row.link_id for row in self._containment_links])
         return [
             smap.evidence_payloads(self.session, self.run_id, rows.get(row.link_id, []))
             for row in self._containment_links
@@ -1008,7 +886,6 @@ class EventTreeQuery:
                     "target_event_id": action.target_event_id,
                     "chapter_id": action.chapter_id,
                     "chapter_order": action.chapter_order,
-                    "source_work_id": action.source_work_id,
                     "source_operation_id": action.source_operation_id,
                     "evidence": action.evidence,
                     "evidence_scope": action.evidence_scope,
@@ -1201,7 +1078,6 @@ class EventTreeQuery:
                 "char_end": declaration.char_end,
                 "chapter_id": declaration.chapter_id,
                 "chapter_order": declaration.chapter_order,
-                "source_work_id": declaration.source_work_id,
                 "producer_invocation_id": declaration.producer_invocation_id,
                 "annotation_id": declaration.record_id,
                 "payload_path": declaration.payload_path,
@@ -1216,7 +1092,6 @@ class EventTreeQuery:
                 "declaration_id": row.declaration_id,
                 "event_id": row.event_id,
                 "revision_id": row.revision_id,
-                "source_work_id": row.source_work_id,
                 "producer_invocation_id": row.producer_invocation_id,
             }
             for row in sorted(self.bindings.values(), key=lambda row: row.declaration_id)
@@ -1229,7 +1104,6 @@ class EventTreeQuery:
                 "relation_type": row.relation_type,
                 "reason": row.reason,
                 "evidence": row.evidence,
-                "source_work_id": row.source_work_id,
                 "producer_invocation_id": row.producer_invocation_id,
                 "source_operation_id": row.source_operation_id,
             }
@@ -1256,7 +1130,6 @@ class EventTreeQuery:
                 "title": row.title,
                 "problem": row.problem,
                 "event_type": row.event_type,
-                "source_work_id": row.source_work_id,
                 "summary": row.summary,
                 "status": row.status,
                 "progress": row.progress,
@@ -1282,7 +1155,6 @@ class EventTreeQuery:
         return result
 
     def _link_evidence_payloads(self, link_id: str) -> list[dict[str, Any]]:
-        from src.storage.models import SourceEvidence
 
-        rows = smap.fetch_evidence(self.session, SourceEvidence.narrative_link_id, [link_id])
+        rows = smap.fetch_evidence(self.session, "narrative_link_id", [link_id])
         return smap.evidence_payloads(self.session, self.run_id, rows.get(link_id, []))

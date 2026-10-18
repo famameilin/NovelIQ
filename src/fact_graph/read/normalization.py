@@ -8,16 +8,16 @@ from loguru import logger
 
 from src.fact_graph.character_reference_policy import decide_character_reference
 from src.fact_graph.read import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
-from src.storage.repositories import AnnotationRepository
+from src.storage import Storage
 
 
 def build_name_resolution(
-    annotation_repo: AnnotationRepository,
+    annotation_repo: Storage,
     run_id: str,
     preferred_names: list[str] | None = None,
 ) -> dict[str, str]:
     """2026-08-09 用于把别名角色名归一到代表角色名"""
-    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo)
     entities = authority_service.build_export_view(run_id).canonical_entities
     preferred = set(preferred_names or [])
     name_resolution: dict[str, str] = {}

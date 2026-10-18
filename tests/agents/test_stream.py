@@ -231,7 +231,7 @@ class _RetryWithUsageLLM:
 @pytest.mark.asyncio
 async def test_agent_stream_emits_thinking_and_output_events() -> None:
     events, emitter = _collect_events()
-    stream = AgentStream(emitter, chapter_id=7, sub_stage="chapter_agent")
+    stream = AgentStream(emitter, chapter_id=7, sub_stage="annotation")
 
     await stream.thinking("正在推理，规划下一步动作...")
     await stream.output("模型说了一句")

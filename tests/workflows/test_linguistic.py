@@ -603,7 +603,11 @@ class TestParagraphBoundary:
         return LinguisticRepository(self.db_session).fetch_linguistic_features(self.run_id)
 
     def _insert_labels(self, labels: list[tuple[int, int]]) -> None:
-        """直接落正式条目行：work_items → executions → chapter_annotations → analysis_assessments"""
+        """直接落正式条目行：executions → chapter_annotations → analysis_assessments
+
+        2026-10-17 六 agent 归属：真实执行（标注角色 + 章 + run）直接携带归属，
+        agent work 行已退场；正式产物头同样落 run/章/角色。
+        """
         from collections import defaultdict
 
         from src.storage.models import (
@@ -611,7 +615,6 @@ class TestParagraphBoundary:
             ChapterAnnotation,
             Execution,
             Paragraph,
-            WorkItem,
         )
 
         chapter_of = {
@@ -626,32 +629,27 @@ class TestParagraphBoundary:
 
         now = datetime.now(UTC).replace(tzinfo=None)
         for chapter_id, chapter_labels in by_chapter.items():
-            work_id = f"work-{self.run_id[:8]}-{chapter_id}"[:64]
             execution_id = uuid.uuid4().hex
             record_id = str(uuid.uuid4())
             self.db_session.add(
-                WorkItem(
-                    work_id=work_id,
-                    role="solo",
-                    annotation_run_id=self.run_id,
-                    annotation_chapter_id=chapter_id,
-                )
-            )
-            self.db_session.flush()  # 明确顺序：work → execution → annotation 头 → 逐段条目
-            self.db_session.add(
                 Execution(
                     execution_id=execution_id,
-                    work_id=work_id,
+                    run_id=self.run_id,
+                    role="annotation",
+                    chapter_id=chapter_id,
                     attempt_number=1,
                     started_at=now,
                     status="success",
                 )
             )
-            self.db_session.flush()
+            self.db_session.flush()  # 明确顺序：execution → annotation 头 → 逐段条目
             self.db_session.add(
                 ChapterAnnotation(
                     record_id=record_id,
                     execution_id=execution_id,
+                    run_id=self.run_id,
+                    chapter_id=chapter_id,
+                    role="annotation",
                     contract_version="test-contract",
                     chapter_consolidation_version="test-consolidation",
                     summary="测试",

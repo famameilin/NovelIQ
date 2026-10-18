@@ -1,20 +1,20 @@
-"""章内三代理并发：单个 subagent 的构造器与程序面合同测试
+"""章内三代理并发：单个 agent 的构造器与程序面合同测试
 
-覆盖 subagent_program 的模型可见面与 2026-09-18"写入生效"口径：
+覆盖 agent_program 的模型可见面与 2026-09-18"写入生效"口径：
 
-- 三个 subagent 的模型可见面逐字相同（绑定面只有 execute_code + finish），程序目录 =
+- 三个 agent 的模型可见面逐字相同（绑定面只有 execute_code + finish），程序目录 =
   search_text + push_case + finish + 八类构造器，五个 write_* 既不在可见面也不在命名空间；
 - 八类构造器写入生效：构造器是纯校验器，运行时把那一笔经生产单条事务边界
   （graph._execute_call）当场落库，**写入成功才**回 `{status:"written", record, ref}`
-  并把记录放进 subagent；共享章级账本（written_entities / entity_el_index /
+  并把记录放进 agent；共享章级账本（written_entities / entity_el_index /
   tree_key_index / written_relations / written_dialogues / metrics_payload /
   pushed_cases）当场可见；
-- el 按角色命名空间化（实体 structure:a1、事件 structure:t1 与 structure:t1/e2），
-  三个 subagent 的同名局部键不互相占用；同名实体由生产写入自己按名会合；
+- el 按角色命名空间化（实体 entity:a1、事件 entity:t1 与 entity:t1/e2），
+  三个 agent 的同名局部键不互相占用；同名实体由生产写入自己按名会合；
 - 失败（构造器校验或生产面拒绝）一律结构化回执 record/field/code/expected，且
-  subagent 的列表与共享账本都不变；
-- 同键重写=更新语义（实体=本 subagent id、事件=el、对话=候选号、标签=段号）；
-- subagent 的 finish 是面上一等工具（不是构造器），subagent_gap 的口径与之一致；
+  agent 的列表与共享账本都不变；
+- 同键重写=更新语义（实体=本 agent id、事件=el、对话=候选号、标签=段号）；
+- agent 的 finish 是面上一等工具（不是构造器），agent_gap 的口径与之一致；
 - 构造器目录与实际命名空间同源：目录里的每个名字都直接调得动，签名与参数说明同轮下发。
 
 2026-10-02 对齐 0.2.0：检索面收成 search_text、案例面只剩 push_case（去 search_pool/
@@ -31,11 +31,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
+from src.agents.annotation.agent_ir import AgentAnnotation
+from src.agents.annotation.agent_program import agent_gap
+from src.agents.annotation.agent_runtime import AgentProgramRuntime
 from src.agents.annotation.errors import AnnotationDependencyError, AnnotationInvariantError
 from src.agents.annotation.ledger import AnnotationToolLedger
-from src.agents.annotation.subagent_ir import SubagentAnnotation
-from src.agents.annotation.subagent_program import subagent_gap
-from src.agents.annotation.subagent_runtime import SubagentProgramRuntime
 from src.agents.annotation.text_search import TextSearchService
 from src.agents.annotation.tool_batch import _execute_call
 from src.agents.turn_observer import AgentTurnObserver
@@ -119,9 +119,9 @@ def _paragraph_info() -> ChapterParagraphInfo:
 
 
 def _ledger() -> AnnotationToolLedger:
-    """用于构造一个 subagent 的共享章级账本（整章正文、三段坐标）"""
+    """用于构造一个 agent 的共享章级账本（整章正文、三段坐标）"""
     return AnnotationToolLedger(
-        run_scope="run-subagent-test",
+        run_scope="run-agent-test",
         current_chapter_id=1,
         current_chapter_text=CHAPTER_TEXT,
         allow_future_context=False,
@@ -137,22 +137,22 @@ def _tools(ledger: AnnotationToolLedger) -> dict[str, Any]:
 
 def _runtime(
     ledger: AnnotationToolLedger,
-    subagent: SubagentAnnotation | None = None,
+    agent: AgentAnnotation | None = None,
     *,
     tool_map: dict[str, Any] | None = None,
     **kwargs: Any,
-) -> SubagentProgramRuntime:
-    """用于按生产装配方式建一个 subagent 的程序面（共享账本 + 生产工具表）"""
-    if subagent is None:
-        subagent = SubagentAnnotation(role="structure")
+) -> AgentProgramRuntime:
+    """用于按生产装配方式建一个 agent 的程序面（共享账本 + 生产工具表）"""
+    if agent is None:
+        agent = AgentAnnotation(role="entity")
     if tool_map is None:
         tool_map = _tools(ledger)
-    ledger.role = subagent.role
-    ledger.finish_work.__self__.subagent = subagent
-    return SubagentProgramRuntime(tool_map, ledger, subagent, **kwargs)
+    ledger.role = agent.role
+    ledger.finish_work.__self__.agent = agent
+    return AgentProgramRuntime(tool_map, ledger, agent, **kwargs)
 
 
-async def _run(runtime: SubagentProgramRuntime, code: str) -> dict[str, Any]:
+async def _run(runtime: AgentProgramRuntime, code: str) -> dict[str, Any]:
     """用于走模型真实路径执行一段程序并解析压缩回执"""
     return json.loads(await runtime.execute(code))
 
@@ -162,7 +162,7 @@ async def _run(runtime: SubagentProgramRuntime, code: str) -> dict[str, Any]:
 async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(failure_type) -> None:
     """真实程序与工具边界：失败检索和 execute_code 都留审计，后续写入和 finish 不执行"""
     client = SimpleNamespace(get_embedding=AsyncMock(side_effect=failure_type("嵌入服务不可用")))
-    search = TextSearchService(MagicMock(), run_id="run-subagent-test", embedding_client=client)
+    search = TextSearchService(MagicMock(), run_id="run-agent-test", embedding_client=client)
 
     class FailingQuery(_QueryService):
         async def search_text(self, query, *, range_name, limit=50):
@@ -198,7 +198,7 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
     assert calls[0]["request_args"]["_program"]["source_line"] == 1
     assert calls[0]["receipt"]["code"] == "dependency_unavailable"
     recorder.update_turn_timings.assert_called_once()
-    assert not runtime.subagent.entities and not ledger.chapter_finished
+    assert not runtime.agent.entities and not ledger.chapter_finished
     assert client.get_embedding.await_count == 1
 
 
@@ -209,7 +209,7 @@ def _failed_entry(receipt: dict[str, Any]) -> dict[str, Any]:
     return failed[0]
 
 
-async def _runtime_rejection(runtime: SubagentProgramRuntime, code: str) -> dict[str, Any]:
+async def _runtime_rejection(runtime: AgentProgramRuntime, code: str) -> dict[str, Any]:
     """用于执行一段程序并断言唯一失败记录带齐模型可见的四个定位字段"""
     entry = _failed_entry(await _run(runtime, code))
     for key in ("record", "field", "code", "expected"):
@@ -226,7 +226,7 @@ async def test_pending_rejects_removed_structured_parameters() -> None:
     assert receipt["code"] == "invalid_call"
     assert "kind" in receipt["message"]
     assert "pending(case_type:" in receipt["expected"]
-    assert runtime.subagent.pending == []
+    assert runtime.agent.pending == []
 
 
 def test_runtime_rejects_missing_work_finish_validation() -> None:
@@ -235,19 +235,19 @@ def test_runtime_rejects_missing_work_finish_validation() -> None:
     tools = _tools(ledger)
     ledger.finish_work = None
     with pytest.raises(AnnotationInvariantError, match="work 收尾校验未装配"):
-        SubagentProgramRuntime(tools, ledger, SubagentAnnotation(role="structure"))
+        AgentProgramRuntime(tools, ledger, AgentAnnotation(role="entity"))
 
 
 # ----------------------------------------------------------------------
-# 二、八类构造器：成功路径（写入生效，subagent 与共享账本同一条事实）
+# 二、八类构造器：成功路径（写入生效，agent 与共享账本同一条事实）
 
 
 @pytest.mark.asyncio
-async def test_eight_constructors_write_records_into_the_subagent_and_shared_ledger() -> None:
-    """八类构造器逐一成功：记录当场进 subagent 与共享章级账本，回执/进度逐域可见"""
+async def test_eight_constructors_write_records_into_the_agent_and_shared_ledger() -> None:
+    """八类构造器逐一成功：记录当场进 agent 与共享章级账本，回执/进度逐域可见"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="structure")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="entity")
+    runtime = _runtime(ledger, agent)
 
     receipt = await _run(runtime, _WRITE_EVERYTHING)
 
@@ -257,7 +257,7 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     assert "failed" not in receipt
     assert (
         receipt["progress"]
-        == subagent.counts()
+        == agent.counts()
         == {
             "entities": 3,
             "relations": 1,
@@ -274,27 +274,27 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     # 逐 op 记录：构造器名 + 角色命名空间化的记录键，全部成功
     records = [op["record"] for op in runtime.ops]
     assert all(op["status"] == "success" for op in runtime.ops)
-    assert records[0] == "structure/entity/a1"
-    assert "structure/relation/沈遥-剑宗" in records
-    assert "structure/event/t1" in records
-    assert "structure/event/t1/e2" in records
-    assert "structure/participants/t1" in records
-    assert "structure/dialogue/1" in records
-    assert "structure/label/1" in records
-    assert "structure/metric" in records
-    assert "structure/pending" in records
+    assert records[0] == "entity/a1"
+    assert "entity/relation/沈遥-剑宗" in records
+    assert "entity/event/t1" in records
+    assert "entity/event/t1/e2" in records
+    assert "entity/participants/t1" in records
+    assert "entity/dialogue/1" in records
+    assert "entity/label/1" in records
+    assert "entity/metric" in records
+    assert "entity/pending" in records
 
-    # subagent 的产出记录
-    assert [item.id for item in subagent.entities] == ["a1", "a2", "a3"]
-    assert [item.name for item in subagent.entities] == ["沈遥", "长刀", "剑宗"]
-    assert len(subagent.relations) == 1
-    assert len(subagent.events) == 2
+    # agent 的产出记录
+    assert [item.id for item in agent.entities] == ["a1", "a2", "a3"]
+    assert [item.name for item in agent.entities] == ["沈遥", "长刀", "剑宗"]
+    assert len(agent.relations) == 1
+    assert len(agent.events) == 2
     assert [event.evidence_paragraph_id for event in ledger.bound_payloads["events"]] == [1, 2]
-    assert subagent.event_keys()["t1"].participants[0].name == "沈遥"
-    assert subagent.dialogues[0].speaker.name == "沈遥"
-    assert [item.paragraph_id for item in subagent.labels] == [1]
-    assert subagent.metric is not None and subagent.metric.summary == "冲突"
-    assert subagent.pending[0].description == "长刀来路不明"
+    assert agent.event_keys()["t1"].participants[0].name == "沈遥"
+    assert agent.dialogues[0].speaker.name == "沈遥"
+    assert [item.paragraph_id for item in agent.labels] == [1]
+    assert agent.metric is not None and agent.metric.summary == "冲突"
+    assert agent.pending[0].description == "长刀来路不明"
 
     # 共享章级账本：实体 el 索引、事件树键索引、关系、对话、指标都当场可见
     assert set(ledger.written_entities) == {
@@ -302,10 +302,10 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
         entity_key("长刀", "item"),
         entity_key("剑宗", "organization"),
     }
-    assert ledger.entity_el_index["structure:a1"] == entity_key("沈遥", "character")
-    assert ledger.entity_el_index["structure:a2"] == entity_key("长刀", "item")
-    assert "structure:t1" in ledger.tree_key_index
-    tree = ledger.event_trees[ledger.tree_key_index["structure:t1"]]
+    assert ledger.entity_el_index["entity:a1"] == entity_key("沈遥", "character")
+    assert ledger.entity_el_index["entity:a2"] == entity_key("长刀", "item")
+    assert "entity:t1" in ledger.tree_key_index
+    tree = ledger.event_trees[ledger.tree_key_index["entity:t1"]]
     assert set(tree["nodes"]) == {"root", "e2"}
     relation = ledger.written_relations[(entity_key("沈遥", "character"), entity_key("剑宗", "organization"))]
     assert relation.relation_type == "敌对"
@@ -319,7 +319,7 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
 
     # 构造器直接调用只产出计划对象（纯校验），不改任何已落账状态
     entity_plan = runtime.tools["entity"](id="a1", name="沈遥", entity_type="character", evidence=E_PERSON)
-    assert entity_plan.record == "structure/entity/a1"
+    assert entity_plan.record == "entity/a1"
     assert entity_plan.ref == {"kind": "entity", "id": "a1", "name": "沈遥", "entity_type": "character"}
     relation_plan = runtime.tools["relation"](
         from_entity={"name": "沈遥", "entity_type": "character"},
@@ -377,25 +377,25 @@ async def test_eight_constructors_write_records_into_the_subagent_and_shared_led
     pending_plan = runtime.tools["pending"](case_type="character", description="长刀来路不明")
     assert pending_plan.ref == {"kind": "pending"}
     # 直接调用没有落账：计数与计划调用前一致
-    assert subagent.counts() == receipt["progress"]
+    assert agent.counts() == receipt["progress"]
 
 
 @pytest.mark.asyncio
 async def test_constructor_call_receipt_is_written_with_record_and_ref() -> None:
     """单条构造器调用成功时的回执 = {status:"written", record, ref}（写入成功才回）"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="structure")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="entity")
+    runtime = _runtime(ledger, agent)
     receipt = await runtime._dispatch(
         "entity",
         {"id": "a1", "name": "沈遥", "entity_type": "character", "evidence": E_PERSON},
         line=None,
     )
     assert receipt["status"] == "written"
-    assert receipt["record"] == "structure/entity/a1"
+    assert receipt["record"] == "entity/a1"
     assert receipt["ref"] == {"kind": "entity", "id": "a1", "name": "沈遥", "entity_type": "character"}
-    assert [item.id for item in subagent.entities] == ["a1"]
-    assert ledger.entity_el_index["structure:a1"] == entity_key("沈遥", "character")
+    assert [item.id for item in agent.entities] == ["a1"]
+    assert ledger.entity_el_index["entity:a1"] == entity_key("沈遥", "character")
 
 
 @pytest.mark.asyncio
@@ -408,8 +408,8 @@ async def test_every_call_returns_one_of_the_three_receipt_shapes() -> None:
     ref}，检索类原样给数据，被拒一律 {status:"rejected", record, ...}。
     """
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="structure")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="entity")
+    runtime = _runtime(ledger, agent)
 
     written = await runtime._dispatch(
         "entity", {"id": "a1", "name": "沈遥", "entity_type": "character", "evidence": E_PERSON}, line=None
@@ -433,28 +433,28 @@ async def test_every_call_returns_one_of_the_three_receipt_shapes() -> None:
 
 
 # ----------------------------------------------------------------------
-# 三、八类构造器：拒绝路径（结构化拒绝且 subagent 与共享账本都不变）
+# 三、八类构造器：拒绝路径（结构化拒绝且 agent 与共享账本都不变）
 
 
 @pytest.mark.asyncio
 async def test_entity_rejects_out_of_range_type_without_writing() -> None:
-    """entity_type 越界：invalid_value/entity_type，subagent 与共享账本里都不留记录"""
+    """entity_type 越界：invalid_value/entity_type，agent 与共享账本里都不留记录"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="structure")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="entity")
+    runtime = _runtime(ledger, agent)
     entry = await _runtime_rejection(runtime, 'entity(id="a1", name="沈遥", entity_type="divinity", evidence=1)')
     assert entry["code"] == "invalid_value"
     assert entry["field"] == "entity_type"
-    assert subagent.entities == []
+    assert agent.entities == []
     assert ledger.written_entities == {} and ledger.entity_el_index == {}
 
 
 @pytest.mark.asyncio
 async def test_entity_rejects_evidence_that_is_not_a_single_in_chapter_id() -> None:
-    """evidence 只收单个段号：多号数组与越界号都结构化拒绝，subagent 里不留记录"""
+    """evidence 只收单个段号：多号数组与越界号都结构化拒绝，agent 里不留记录"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="structure")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="entity")
+    runtime = _runtime(ledger, agent)
     multiple = await _runtime_rejection(
         runtime,
         'entity(id="a1", name="沈遥", entity_type="character", evidence=[{"paragraph_id": 1}, {"paragraph_id": 2}])',
@@ -468,16 +468,16 @@ async def test_entity_rejects_evidence_that_is_not_a_single_in_chapter_id() -> N
     assert out_of_range["code"] == "out_of_range"
     assert out_of_range["field"] == "evidence"
     assert "1..3" in out_of_range["expected"]
-    assert subagent.entities == []
+    assert agent.entities == []
     assert ledger.written_entities == {} and ledger.entity_el_index == {}
 
 
 @pytest.mark.asyncio
 async def test_relation_rejects_out_of_range_type_without_writing() -> None:
-    """relation_type 越界：invalid_value/relation_type，subagent 与共享账本里都不留记录"""
+    """relation_type 越界：invalid_value/relation_type，agent 与共享账本里都不留记录"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="structure")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="entity")
+    runtime = _runtime(ledger, agent)
     await _run(
         runtime,
         'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
@@ -493,7 +493,7 @@ async def test_relation_rejects_out_of_range_type_without_writing() -> None:
     )
     assert entry["code"] == "invalid_value"
     assert entry["field"] == "relation_type"
-    assert subagent.relations == []
+    assert agent.relations == []
     assert ledger.written_relations == {}
 
 
@@ -503,8 +503,8 @@ async def test_relation_rejects_out_of_range_type_without_writing() -> None:
 @pytest.mark.asyncio
 async def test_event_business_fields_are_rejected_without_writing(field: str, value: str) -> None:
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="event")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="event")
+    runtime = _runtime(ledger, agent)
     kwargs = {
         "el": "e1",
         "title": "事件",
@@ -518,7 +518,7 @@ async def test_event_business_fields_are_rejected_without_writing(field: str, va
     args = ", ".join(f"{key}={item!r}" for key, item in kwargs.items())
     entry = await _runtime_rejection(runtime, f"event({args})")
     assert entry["field"] == field
-    assert not subagent.events
+    assert not agent.events
     assert not ledger.bound_payloads.get("events")
 
 
@@ -526,8 +526,8 @@ async def test_event_business_fields_are_rejected_without_writing(field: str, va
 async def test_event_accepts_foreshadowing_property_on_child() -> None:
     """任意有原文依据的实际过程可以埋设，根和子过程都保持准确身份"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="event")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="event")
+    runtime = _runtime(ledger, agent)
     receipt = await _run(
         runtime,
         (
@@ -553,8 +553,8 @@ async def test_participants_rejects_unknown_event_and_lands_partial_three_state(
     在构造层完成，生产面按实体登记大类给 role 缺省。
     """
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="event")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="event")
+    runtime = _runtime(ledger, agent)
     unknown = await _runtime_rejection(
         runtime, 'participants(el="t9", items=[{"name": "沈遥", "entity_type": "character", "role": "主体"}])'
     )
@@ -575,7 +575,7 @@ async def test_participants_rejects_unknown_event_and_lands_partial_three_state(
             'cter", "role": "主体", "narrative_role": "主角", "emotion": 9}])'
         ),
     )
-    (participant,) = subagent.event_keys()["t1"].participants
+    (participant,) = agent.event_keys()["t1"].participants
     assert participant.role == "主体"
     assert participant.narrative_role == "主体"
     assert participant.emotion == 2
@@ -591,8 +591,8 @@ async def test_participants_rejects_unknown_event_and_lands_partial_three_state(
 async def test_dialogue_rejections_do_not_write() -> None:
     """候选号越界、not_dialogue 带说话人、非 not_dialogue 缺引文、说话人键含斜杠都拒绝"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="metric")
+    runtime = _runtime(ledger, agent)
     out_of_range = await _run(runtime, 'dialogue(candidate_index=9, verdict="dialogue", evidence=1)')
     assert out_of_range["status"] == "rejected"
     assert out_of_range["applied"] == 0
@@ -616,41 +616,41 @@ async def test_dialogue_rejections_do_not_write() -> None:
     )
     assert bad_speaker["code"] == "invalid_value"
     assert bad_speaker["field"] == "speaker"
-    assert subagent.dialogues == []
+    assert agent.dialogues == []
     assert ledger.written_dialogues == {}
 
 
 @pytest.mark.asyncio
 async def test_label_rejections_do_not_write() -> None:
-    """段号不属于本章、emotion 越界（如 3）都拒绝，subagent 里不留标签"""
+    """段号不属于本章、emotion 越界（如 3）都拒绝，agent 里不留标签"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="metric")
+    runtime = _runtime(ledger, agent)
     foreign = await _runtime_rejection(runtime, "label(paragraph_id=99, emotion=0)")
     assert foreign["code"] == "out_of_range"
     assert foreign["field"] == "paragraph_id"
     out_of_range = await _runtime_rejection(runtime, "label(paragraph_id=1, emotion=3)")
     assert out_of_range["code"] == "invalid_value"
     assert out_of_range["field"] == "emotion"
-    assert subagent.labels == []
+    assert agent.labels == []
     assert ledger.metrics_payload is None
 
 
 @pytest.mark.asyncio
 async def test_metric_rejects_out_of_range_narrative_function() -> None:
-    """narrative_function 越界：invalid_value/narrative_function，subagent 里不留指标"""
+    """narrative_function 越界：invalid_value/narrative_function，agent 里不留指标"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="metric")
+    runtime = _runtime(ledger, agent)
     entry = await _runtime_rejection(runtime, 'metric(summary="x", emotional_valence=0, narrative_function="高潮")')
     assert entry["code"] == "invalid_value"
     assert entry["field"] == "narrative_function"
-    assert subagent.metric is None
+    assert agent.metric is None
     assert ledger.metrics_payload is None
 
 
 # ----------------------------------------------------------------------
-# 四、生产面拒绝：写入被生产单条事务边界拒下，subagent 与共享账本都不变
+# 四、生产面拒绝：写入被生产单条事务边界拒下，agent 与共享账本都不变
 
 
 @pytest.mark.asyncio
@@ -661,8 +661,8 @@ async def test_event_orphan_defers_until_root_arrives() -> None:
     冲账进正式事件树；根始终不建时由 finish 拒绝收尾，不静默丢数据。
     """
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="event")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="event")
+    runtime = _runtime(ledger, agent)
     await _run(
         runtime,
         (
@@ -672,7 +672,7 @@ async def test_event_orphan_defers_until_root_arrives() -> None:
         ),
     )
 
-    assert "t1/e2" in subagent.event_keys()
+    assert "t1/e2" in agent.event_keys()
     # 构造器 el 经角色命名空间化后才进生产面：挂起键是 event:t1
     assert ledger.pending_child_events == {}
     assert ledger.bound_payloads["events"][0].parent_node_id is None
@@ -694,8 +694,8 @@ async def test_event_orphan_defers_until_root_arrives() -> None:
 async def test_entity_duplicate_el_is_rejected_by_production_without_trace() -> None:
     """同一 el 已绑定另一实体：第二笔写入被生产面以 duplicate_el 拒绝，只保留第一笔"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="structure")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="entity")
+    runtime = _runtime(ledger, agent)
     entry = await _runtime_rejection(
         runtime,
         'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
@@ -703,17 +703,17 @@ async def test_entity_duplicate_el_is_rejected_by_production_without_trace() -> 
     )
     assert entry["code"] == "duplicate_el"
     assert entry["field"] == "el"
-    assert [item.name for item in subagent.entities] == ["沈遥"]
+    assert [item.name for item in agent.entities] == ["沈遥"]
     assert set(ledger.written_entities) == {entity_key("沈遥", "character")}
-    assert ledger.entity_el_index == {"structure:a1": entity_key("沈遥", "character")}
+    assert ledger.entity_el_index == {"entity:a1": entity_key("沈遥", "character")}
 
 
 @pytest.mark.asyncio
 async def test_dialogue_non_character_speaker_is_rejected_by_production() -> None:
     """说话人非 character：构造器放行、生产面以 not_character 拒绝，对话账本不动"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="metric")
+    runtime = _runtime(ledger, agent)
     entry = await _runtime_rejection(
         runtime,
         'entity(id="a2", name="长刀", entity_type="item", evidence=2)\n'
@@ -723,7 +723,7 @@ async def test_dialogue_non_character_speaker_is_rejected_by_production() -> Non
     )
     assert entry["code"] == "not_character"
     assert entry["field"] == "speaker"
-    assert subagent.dialogues == []
+    assert agent.dialogues == []
     assert ledger.written_dialogues == {}
 
 
@@ -731,8 +731,8 @@ async def test_dialogue_non_character_speaker_is_rejected_by_production() -> Non
 async def test_participants_non_character_observation_is_ignored_by_production() -> None:
     """非 character 参与者带三态：生产面忽略三态、保留 entityid/role，不产人物动态状态"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="event")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="event")
+    runtime = _runtime(ledger, agent)
     await _run(
         runtime,
         (
@@ -744,7 +744,7 @@ async def test_participants_non_character_observation_is_ignored_by_production()
             ": -1}])"
         ),
     )
-    (ir_participant,) = subagent.event_keys()["t1"].participants
+    (ir_participant,) = agent.event_keys()["t1"].participants
     assert ir_participant.name == "长刀"
     event = next(value for value in ledger.bound_payloads["events"] if value.description == "喝止")
     (participant,) = event.participants
@@ -754,39 +754,39 @@ async def test_participants_non_character_observation_is_ignored_by_production()
 
 
 # ----------------------------------------------------------------------
-# 五、同 id 不互相占用：三个 subagent 各用局部键，落库按角色命名空间化
+# 五、同 id 不互相占用：三个 agent 各用局部键，落库按角色命名空间化
 
 
 @pytest.mark.asyncio
-async def test_same_local_id_across_subagents_does_not_collide() -> None:
-    """structure 与 event 各自的 a1 是两条实体：落库 el 不同名，互不占用"""
+async def test_same_local_id_across_agents_does_not_collide() -> None:
+    """entity 与 event 各自的 a1 是两条实体：落库 el 不同名，互不占用"""
     ledger = _ledger()
-    structure = SubagentAnnotation(role="structure")
-    event = SubagentAnnotation(role="event")
-    structure_runtime = _runtime(ledger, structure)
+    entity_lane = AgentAnnotation(role="entity")
+    event = AgentAnnotation(role="event")
+    entity_runtime = _runtime(ledger, entity_lane)
     event_runtime = _runtime(ledger, event)
-    await _run(structure_runtime, 'entity(id="a1", name="沈遥", entity_type="character", evidence=1)')
+    await _run(entity_runtime, 'entity(id="a1", name="沈遥", entity_type="character", evidence=1)')
     await _run(event_runtime, 'entity(id="a1", name="长刀", entity_type="item", evidence=2)')
     assert set(ledger.written_entities) == {entity_key("沈遥", "character"), entity_key("长刀", "item")}
     assert ledger.entity_el_index == {
-        "structure:a1": entity_key("沈遥", "character"),
+        "entity:a1": entity_key("沈遥", "character"),
         "event:a1": entity_key("长刀", "item"),
     }
 
 
 @pytest.mark.asyncio
-async def test_same_name_across_subagents_merges_into_one_entity() -> None:
-    """structure 与 event 各自的 a1 同名：生产面按名会合，账本里只有一条实体"""
+async def test_same_name_across_agents_merges_into_one_entity() -> None:
+    """entity 与 event 各自的 a1 同名：生产面按名会合，账本里只有一条实体"""
     ledger = _ledger()
-    structure = SubagentAnnotation(role="structure")
-    event = SubagentAnnotation(role="event")
-    structure_runtime = _runtime(ledger, structure)
+    entity_lane = AgentAnnotation(role="entity")
+    event = AgentAnnotation(role="event")
+    entity_runtime = _runtime(ledger, entity_lane)
     event_runtime = _runtime(ledger, event)
-    await _run(structure_runtime, 'entity(id="a1", name="沈遥", entity_type="character", evidence=1)')
+    await _run(entity_runtime, 'entity(id="a1", name="沈遥", entity_type="character", evidence=1)')
     await _run(event_runtime, 'entity(id="a1", name="沈遥", entity_type="character", evidence=1)')
     assert set(ledger.written_entities) == {entity_key("沈遥", "character")}
     assert ledger.entity_el_index == {
-        "structure:a1": entity_key("沈遥", "character"),
+        "entity:a1": entity_key("沈遥", "character"),
         "event:a1": entity_key("沈遥", "character"),
     }
 
@@ -801,18 +801,18 @@ async def test_same_name_across_subagents_merges_into_one_entity() -> None:
 
 @pytest.mark.asyncio
 async def test_label_only_lands_in_journal_and_metric_hits_ledger() -> None:
-    """label 只落 subagent 的 journal（不单独落库）；metric 当场写 write_metrics（不带 labels）"""
+    """label 只落 agent 的 journal（不单独落库）；metric 当场写 write_metrics（不带 labels）"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="metric")
+    runtime = _runtime(ledger, agent)
     await _run(runtime, "label(paragraph_id=1, emotion=-1)\nlabel(paragraph_id=2, emotion=2)")
-    assert [item.paragraph_id for item in subagent.labels] == [1, 2]
+    assert [item.paragraph_id for item in agent.labels] == [1, 2]
     # 标签与指标同属 write_metrics 一个域：没有指标时标签也不单独落库
     assert ledger.metrics_payload is None
     await _run(runtime, 'metric(summary="冲突", emotional_valence=0, narrative_function="冲突")')
     assert ledger.metrics_payload is not None
     assert ledger.metrics_payload.labels == []
-    assert subagent.metric is not None and subagent.metric.summary == "冲突"
+    assert agent.metric is not None and agent.metric.summary == "冲突"
 
 
 # ----------------------------------------------------------------------
@@ -823,16 +823,16 @@ async def test_label_only_lands_in_journal_and_metric_hits_ledger() -> None:
 async def test_entity_same_id_rewrite_is_update_not_new_entry() -> None:
     """实体同 id 重写只留一条，字段按最后一次为准（name 只是展示字段）"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="structure")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="entity")
+    runtime = _runtime(ledger, agent)
     await _run(
         runtime,
         'entity(id="a1", name="沈遥", entity_type="character", evidence=1)\n'
         'entity(id="a1", name="沈遥", entity_type="character", evidence=1, description="持刀剑客")',
     )
-    assert len(subagent.entities) == 1
-    assert subagent.entities[0].id == "a1"
-    assert subagent.entities[0].description == "持刀剑客"
+    assert len(agent.entities) == 1
+    assert agent.entities[0].id == "a1"
+    assert agent.entities[0].description == "持刀剑客"
     assert set(ledger.written_entities) == {entity_key("沈遥", "character")}
     assert ledger.written_entities[entity_key("沈遥", "character")].description == "持刀剑客"
 
@@ -841,8 +841,8 @@ async def test_entity_same_id_rewrite_is_update_not_new_entry() -> None:
 async def test_event_same_el_rewrite_keeps_participants() -> None:
     """事件同 el 重写保留已挂的参与者（只更新描述与伏笔属性）"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="event")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="event")
+    runtime = _runtime(ledger, agent)
     await _run(
         runtime,
         (
@@ -856,9 +856,9 @@ async def test_event_same_el_rewrite_keeps_participants() -> None:
             "'改述', event_type='行动', status='ongoing')"
         ),
     )
-    assert len(subagent.events) == 1
-    assert subagent.events[0].description == "喝止"
-    assert len(subagent.events[0].participants) == 1
+    assert len(agent.events) == 1
+    assert agent.events[0].description == "喝止"
+    assert len(agent.events[0].participants) == 1
     tree = ledger.event_trees[ledger.tree_key_index["event:t1"]]
     assert set(tree["nodes"]) == {"root"}  # 重写没新建节点
     assert len(ledger.observation_by_record) == 1  # 生产面的参与者动态状态原样保留
@@ -868,8 +868,8 @@ async def test_event_same_el_rewrite_keeps_participants() -> None:
 async def test_dialogue_same_candidate_rewrite_is_update() -> None:
     """对话同候选号重写只留一条，判定按最后一次为准"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="metric")
+    runtime = _runtime(ledger, agent)
     await _run(
         runtime,
         """
@@ -878,9 +878,9 @@ dialogue(candidate_index=1, verdict="not_dialogue")
 dialogue(candidate_index=1, verdict="dialogue", speaker={"name": "沈遥", "entity_type": "character"}, evidence=1)
 """,
     )
-    assert len(subagent.dialogues) == 1
-    assert subagent.dialogues[0].verdict == "dialogue"
-    assert subagent.dialogues[0].speaker.name == "沈遥"
+    assert len(agent.dialogues) == 1
+    assert agent.dialogues[0].verdict == "dialogue"
+    assert agent.dialogues[0].speaker.name == "沈遥"
     assert ledger.written_dialogues[1].speaker == "沈遥"
 
 
@@ -888,36 +888,36 @@ dialogue(candidate_index=1, verdict="dialogue", speaker={"name": "沈遥", "enti
 async def test_label_same_paragraph_rewrite_is_update() -> None:
     """标签同段号重写只留一条，分值按最后一次为准"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role="evidence")
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role="metric")
+    runtime = _runtime(ledger, agent)
     await _run(runtime, "label(paragraph_id=1, emotion=-1)\nlabel(paragraph_id=1, emotion=2)")
-    assert len(subagent.labels) == 1
-    assert subagent.labels[0].emotion == 2
+    assert len(agent.labels) == 1
+    assert agent.labels[0].emotion == 2
 
 
 # ----------------------------------------------------------------------
-# 九、finish 工具与 subagent_gap
+# 九、finish 工具与 agent_gap
 
 
-def test_subagent_gap_for_non_evidence_subagent_only_looks_at_finished() -> None:
-    """非证据 subagent 的缺口只看 finished；候选与指标不属于它的口径"""
-    subagent = SubagentAnnotation(role="structure")
-    gap = subagent_gap(subagent, candidate_total=0)
+def test_agent_gap_for_entity_agent_only_looks_at_finished() -> None:
+    """实体/事件 agent 的缺口只看 finished；候选与指标不属于它的口径"""
+    agent = AgentAnnotation(role="entity")
+    gap = agent_gap(agent, candidate_total=0)
     assert gap == {"finished": False, "missing_candidates": [], "missing_metric": False}
-    subagent.finished = True
-    gap = subagent_gap(subagent, candidate_total=3)
+    agent.finished = True
+    gap = agent_gap(agent, candidate_total=3)
     assert gap == {"finished": True, "missing_candidates": [], "missing_metric": False}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", ["solo", "evidence"])
-async def test_subagent_gap_for_evidence_subagent_also_looks_at_candidates_and_metric(role: str) -> None:
-    """solo 与 evidence 都必须齐备候选判定和指标，不能默认放行"""
+@pytest.mark.parametrize("role", ["annotation", "metric"])
+async def test_agent_gap_for_metric_agent_also_looks_at_candidates_and_metric(role: str) -> None:
+    """整章与指标角色都必须齐备候选判定和指标，不能默认放行"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role=role)
-    runtime = _runtime(ledger, subagent)
-    subagent.finished = True
-    gap = subagent_gap(subagent, candidate_total=3)
+    agent = AgentAnnotation(role=role)
+    runtime = _runtime(ledger, agent)
+    agent.finished = True
+    gap = agent_gap(agent, candidate_total=3)
     assert gap == {"finished": True, "missing_candidates": [1, 2, 3], "missing_metric": True}
 
     await _run(
@@ -926,22 +926,22 @@ async def test_subagent_gap_for_evidence_subagent_also_looks_at_candidates_and_m
         'dialogue(candidate_index=2, verdict="not_dialogue")\n'
         'dialogue(candidate_index=3, verdict="not_dialogue")',
     )
-    gap = subagent_gap(subagent, candidate_total=3)
+    gap = agent_gap(agent, candidate_total=3)
     assert gap["missing_candidates"] == []
     assert gap["missing_metric"] is True
 
     await _run(runtime, 'metric(summary="冲突", emotional_valence=0, narrative_function="冲突")')
-    gap = subagent_gap(subagent, candidate_total=3)
+    gap = agent_gap(agent, candidate_total=3)
     assert gap == {"finished": True, "missing_candidates": [], "missing_metric": False}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", ["solo", "evidence"])
-async def test_subagent_gap_evidence_subagent_is_incomplete_without_finish_declaration(role: str) -> None:
-    """solo 与 evidence 未成功收尾时不能算完成"""
+@pytest.mark.parametrize("role", ["annotation", "metric"])
+async def test_agent_gap_metric_agent_is_incomplete_without_finish_declaration(role: str) -> None:
+    """整章与指标角色未成功收尾时不能算完成"""
     ledger = _ledger()
-    subagent = SubagentAnnotation(role=role)
-    runtime = _runtime(ledger, subagent)
+    agent = AgentAnnotation(role=role)
+    runtime = _runtime(ledger, agent)
     await _run(
         runtime,
         'dialogue(candidate_index=1, verdict="not_dialogue")\n'
@@ -949,7 +949,7 @@ async def test_subagent_gap_evidence_subagent_is_incomplete_without_finish_decla
         'dialogue(candidate_index=3, verdict="not_dialogue")\n'
         'metric(summary="冲突", emotional_valence=0, narrative_function="冲突")',
     )
-    gap = subagent_gap(subagent, candidate_total=3)
+    gap = agent_gap(agent, candidate_total=3)
     assert gap["finished"] is False
     assert gap["missing_candidates"] == []
     assert gap["missing_metric"] is False

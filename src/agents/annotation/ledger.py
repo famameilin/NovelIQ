@@ -100,7 +100,7 @@ class AnnotationToolLedger:
 
     work_id: str = ""
     invocation_id: str = ""
-    role: str = "solo"
+    role: str = "annotation"
     invoke_tool: Any = None
     finish_work: Any = None
     end_requested: bool = False
@@ -421,7 +421,7 @@ class AnnotationToolLedger:
     def production_record_key(self, key: str) -> str:
         """用于把模型面 IR 记录键规范成生产记录键（已是生产键的原样返回）
 
-        2026-09-20 起 subagent 路径的 written_record_keys 混装两种键：构造器 plan 的
+        2026-09-20 起 agent 路径的 written_record_keys 混装两种键：构造器 plan 的
         IR 键（structure/entity/a1、event/t1、evidence/dialogue/3）与生产写入面的
         生产键（entity/{name}、event:t1/root、dialogue/3）。push_case/anchor_record 按
         written 集合校验后原样存进 target_ref/source_anchors，而正式提交的
@@ -449,14 +449,14 @@ class AnnotationToolLedger:
                 return self._production_relation_key(key, role, body)
             return key
         if key.startswith("event/"):
-            # 2026-10-03 修正事件键翻译：子代理事件树落库时树键按角色命名空间化
+            # 2026-10-03 修正事件键翻译：多 Agent 事件树落库时树键按角色命名空间化
             # （namespace_event_el：t1 → event:t1），节点 id 以命名空间树键参与
             # stable_uuid——IR 前缀 "event/" 恰是事件角色自己的前缀（_record_of 去重），
             # 翻译必须保留命名空间。此前翻成 t1/root、t1/e12，提交期 bind_record_target
             # 按无命名空间树键算 node_id 永不匹配，案例指向事件的章必炸"原文锚点的
             # 事件不是本章正式产出"（run 4a6c268c ch21 三连炸实证）。written 集合里的
-            # "event/..." 只来自子代理构造器日志（solo 面 write_event 回执本就是生产键
-            # event:t1/root 或 t1/root 原样登记），无条件翻译不影响 solo 路径。
+            # "event/..." 只来自多 Agent 构造器日志（标注面 write_event 回执本就是生产键
+            # event:t1/root 或 t1/root 原样登记），无条件翻译不影响标注路径。
             el = key.removeprefix("event/")
             namespaced = f"event{ROLE_NAMESPACE_SEP}{el}"
             return namespaced if EL_PATH_SEP in el else f"{namespaced}/{RESERVED_ROOT_KEY}"
@@ -465,7 +465,7 @@ class AnnotationToolLedger:
     def _production_relation_key(self, key: str, role: str, body: str) -> str:
         """用于把 IR 关系键翻译成生产键；消解不了当场拒绝（毒键入库必炸提交期 bind）
 
-        2026-10-03 角色命名空间修复：IR 关系键的端点 el 是 subagent 局部键，落库时按
+        2026-10-03 角色命名空间修复：IR 关系键的端点 el 是 agent 局部键，落库时按
         角色命名空间化（namespace_el → structure:qianjin），解析必须带角色前缀——此前用
         裸 el 查索引永不命中，翻译原样返回 "structure/relation/a-b"，提交期
         bind_record_target 前缀不匹配 entity/relation/dialogue，落进事件分支按

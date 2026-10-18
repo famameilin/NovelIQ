@@ -5,18 +5,18 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db_session, require_readable_run_status, require_run_for_novel, resolve_run_id
 from src.event_trees.read.organization import EventTreeQuery, RunRequiresRebuildError
 from src.fact_graph.read.source import read_evidence_source
+from src.storage import Storage
 
 router = APIRouter(tags=["event-trees"])
-SessionDep = Annotated[Session, Depends(get_db_session)]
+SessionDep = Annotated[Storage, Depends(get_db_session)]
 RunDep = Annotated[str, Depends(resolve_run_id)]
 
 
-def _query(session: Session, novel_id: str, run_id: str) -> EventTreeQuery:
+def _query(session: Storage, novel_id: str, run_id: str) -> EventTreeQuery:
     require_readable_run_status(require_run_for_novel(session, novel_id, run_id))
     return EventTreeQuery(session, run_id)
 

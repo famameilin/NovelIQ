@@ -10,22 +10,13 @@ from sqlalchemy.orm import sessionmaker
 from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
 from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls
 from src.audit.recorder import AgentAuditRecorder
-from src.storage.models import Execution, WorkItem
-from src.storage.models.base import naive_utcnow
 from tests.agents.test_diagnosis_agent import _analysis_payload, build_graph, call, run_graph
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
 
 def _new_audit_context(db_session) -> tuple[AgentAuditRecorder, AgentTurnObserver, dict, str]:
-    """构造与测试库绑定的审计 recorder/observer 并登记真实诊断 work 身份"""
+    """构造与测试库绑定的审计 recorder/observer（案例角色直接携带归属，不再登记 work）"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
-    work_id = f"diag-work-{uuid4().hex[:12]}"
-    session_id = f"diag-session-{uuid4().hex[:12]}"
-    # session 与 work 之间有互指外键：先落整轮 session 行再挂 work；诊断 work 的 role 走章内角色词表
-    db_session.add(Execution(execution_id=session_id, session_run_id=run_id, session_created_at=naive_utcnow()))
-    db_session.commit()
-    db_session.add(WorkItem(work_id=work_id, role="event", diagnosis_session_id=session_id))
-    db_session.commit()
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     recorder = AgentAuditRecorder(factory)
     context = build_invocation_context(
@@ -34,8 +25,8 @@ def _new_audit_context(db_session) -> tuple[AgentAuditRecorder, AgentTurnObserve
         execution_id=f"diag-exec-{uuid4().hex[:12]}",
         attempt_number=1,
         model="test-model",
-        work_id=work_id,
-        role="event",
+        case_anchor=f"case-{uuid4().hex[:12]}",
+        role="case",
     )
     invocation_id = recorder.start_invocation(**context)
     observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=context)

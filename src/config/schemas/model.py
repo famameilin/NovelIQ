@@ -50,7 +50,7 @@ class TaskModelSettings:
     max_iterations: int = 15
     total_attempts: int = 3
     allow_future_context: bool = True
-    # 2026-10-02 恢复（随章内三子代理路径加回）：章正文超过该字数派发三条职责 subagent 并发，
+    # 2026-10-02 恢复（随章内多 Agent 路径加回）：章正文超过该字数派发三条职责 Agent 并发，
     # 不超线走单 agent 路径（派发点在 PipelineAgentExecutor.execute）
     sub_chunk_max_chars: int = 3500
 

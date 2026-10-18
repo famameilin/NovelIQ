@@ -8,7 +8,6 @@ from typing import Annotated, Any
 
 from langchain_core.tools import tool
 from pydantic import Field
-from sqlalchemy.orm import Session
 
 from src.agents.annotation.links import build_text_read_tool
 from src.agents.annotation.shared_tools import build_case_tools, build_finish_tool, build_state_read_tools
@@ -17,6 +16,7 @@ from src.agents.annotation.tools import _forbid_undeclared_args, build_search_to
 from src.diagnosis.patch import AgentAnalysisPatch
 from src.diagnosis.schema import AgentAnalysis
 from src.event_trees.organization import EventOrganizationDraft
+from src.storage import Storage
 
 from .evidence import DiagnosisEvidenceLedger
 from .inputs import ArcWriteItem, ConflictItem, EventWriteItem, OutcomeWriteItem, WriteItem
@@ -29,8 +29,18 @@ from .read_context import (
     graph_signals,
 )
 
-WRITE_NAMES = frozenset({"write_diagnosis", "write_event", "write_arc", "write_outcome", "write_conflict",
-    "write_entity", "write_relation", "write_dialogue"})
+WRITE_NAMES = frozenset(
+    {
+        "write_diagnosis",
+        "write_event",
+        "write_arc",
+        "write_outcome",
+        "write_conflict",
+        "write_entity",
+        "write_relation",
+        "write_dialogue",
+    }
+)
 
 
 def _write_items(items: Sequence[WriteItem], handlers: dict[str, Any]) -> str:
@@ -51,7 +61,7 @@ def _write_items(items: Sequence[WriteItem], handlers: dict[str, Any]) -> str:
 
 
 def build_diagnosis_tools(
-    session: Session,
+    session: Storage,
     run_id: str,
     *,
     evidence_ledger: DiagnosisEvidenceLedger | None = None,
@@ -60,7 +70,7 @@ def build_diagnosis_tools(
     case_pool: Any = None,
     execution_id: str = "",
     text_search: TextSearchService | None = None,
-    work_id: str | None = None,
+    case_id: str | None = None,
     producer_invocation_id: str | None = None,
     case_writes_graph: Any | None = None,
     case_source_chapter: int | None = None,
@@ -76,8 +86,8 @@ def build_diagnosis_tools(
     if case_pool is None:
         case_pool = CasePool(run_id)
         case_pool.load_storage(session)
-    author = (work_id or f"diagnosis:{execution_id}", producer_invocation_id or execution_id)
-    case_pool.begin(*author)
+    author = producer_invocation_id or execution_id
+    case_pool.begin(author)
 
     @tool
     def write_event(items: Annotated[list[EventWriteItem], Field(min_length=1, max_length=300)]) -> str:
@@ -132,12 +142,13 @@ def build_diagnosis_tools(
     def read_metrics() -> str:
         """读真实聚合指标与转折、高张力、伏笔、关系变化、图谱统计素材；不重算指标或吞系统故障"""
         from src.diagnosis.queries import DiagnosisQueries
-        from src.storage.repositories import StatsRepository
+
+        pass
 
         repo = DiagnosisQueries(session)
         ledger.record_tool_call("read_metrics")
         payload = {
-            "aggregate": StatsRepository(session).fetch_global_stats_dict(run_id),
+            "aggregate": session.statistics.fetch_global_stats_dict(run_id),
             "pivots": [
                 {"chapter_id": chapter_id, "text": text[:300], "event_type": event_type}
                 for chapter_id, text, event_type in repo.fetch_pivot_blocks(run_id, limit=20)
@@ -196,9 +207,9 @@ def build_diagnosis_tools(
         *build_case_tools(case_pool, author),
         build_finish_tool(lambda: {"status": "end_requested"}),
     ]
-    if case_writes_graph is not None and case_writer_store is not None and work_id is not None:
+    if case_writes_graph is not None and case_writer_store is not None and case_id is not None:
         # 2026-10-15 用户裁定「复用标注工具」「没权限」：人物/关系/对话案例处置复用
-        # 标注语义写入工具原形；来源章归属本 work 声明章，对话候选来自持久化对话记录
+        # 标注语义写入工具原形；来源章归属本案例责任声明所在章，对话候选来自持久化对话记录
         from src.agents.annotation.ledger import AnnotationToolLedger
         from src.agents.diagnosis.case_write_tools import build_case_write_tools
 
@@ -212,15 +223,15 @@ def build_diagnosis_tools(
         writer.graph = case_writes_graph
         writer.dialogue.dialogue_candidates = list(case_dialogue_candidates or [])
         case_author = author
-        case_writes_graph.begin(*case_author, int(case_source_chapter or 0), "diagnosis")
+        case_writes_graph.begin(case_author, int(case_source_chapter or 0), "case")
         case_tools = build_case_write_tools(query, writer)
-        case_writer_store[work_id] = (writer, case_author)
+        case_writer_store[case_id] = (writer, case_author)
 
         def _bind_case_execution(candidate: Any) -> Any:
             original_func, original_coroutine = candidate.func, candidate.coroutine
 
             def invoke(*args: Any, **kwargs: Any) -> Any:
-                with case_writes_graph.author(*case_author):
+                with case_writes_graph.author(case_author):
                     snapshot = case_writes_graph.snapshot()
                     try:
                         return original_func(*args, **kwargs)
@@ -229,7 +240,7 @@ def build_diagnosis_tools(
                         raise
 
             async def ainvoke(*args: Any, **kwargs: Any) -> Any:
-                with case_writes_graph.author(*case_author):
+                with case_writes_graph.author(case_author):
                     snapshot = case_writes_graph.snapshot()
                     try:
                         return await original_coroutine(*args, **kwargs)

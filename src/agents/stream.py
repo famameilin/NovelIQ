@@ -152,12 +152,6 @@ async def _guard_content_progress(source: Any, timeout_s: float) -> Any:
 
 
 CompletionHintProvider = Callable[[], str | None]
-"""2026-09-08 无工具回复重发前向本次请求注入的提示工厂
-
-返回 None 表示不注入（调用方无上下文可提示）。提示会追加进重发的 messages
-列表（调用方须传自有副本），使重试物理请求的审计 request_messages 与实发一致；
-不写入 LangGraph 状态消息链，与 09-05 轮次预算提醒同构。
-"""
 
 
 def _is_transient_model_error(exc: BaseException) -> bool:

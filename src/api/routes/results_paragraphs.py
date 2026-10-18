@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy.orm import Session
 
 from src.api.models.responses import (
     ChapterAnnotation as ChapterAnnotationResponse,
@@ -39,7 +38,7 @@ from src.api.services.results_queries.paragraphs import (
     _fetch_emotion_trend,
     _fetch_paragraph_curves,
 )
-from src.storage.repositories import AnnotationRepository, ParagraphRepository, StatsRepository
+from src.storage import Storage
 
 # 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
@@ -53,7 +52,7 @@ router = APIRouter()
 async def get_paragraph_curves(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     max_points: Annotated[int | None, Query(gt=0, description="展示降采样点数上限")] = None,
 ) -> list[ParagraphCurvePoint]:
     """
@@ -63,7 +62,7 @@ async def get_paragraph_curves(
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
     return _fetch_paragraph_curves(run_id, paragraph_repo, max_points)
 
 
@@ -76,7 +75,7 @@ async def get_emotion_trend(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     request: Request,
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     position_range: Annotated[
         str | None,
         Query(alias="range", description="position 区间，格式为 start,end，取值 0~1"),
@@ -95,7 +94,7 @@ async def get_emotion_trend(
     _require_readable_run_status(run)
     range_values = request.query_params.getlist("range")
     parsed_range = _parse_emotion_trend_range(",".join(range_values) if len(range_values) > 1 else position_range)
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
     return _fetch_emotion_trend(
         run_id,
         paragraph_repo,
@@ -113,15 +112,15 @@ async def get_emotion_trend(
 async def get_chapter_metrics(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> ChapterMetricsResponse:
     """
     获取由段落充分统计量聚合的章节汇总与全书聚合（分子/分母守恒，禁止等权平均）
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    paragraph_repo = ParagraphRepository(session)
-    annotation_repo = AnnotationRepository(session)
+    paragraph_repo = session.paragraphs
+    annotation_repo = session
     return _fetch_chapter_metrics(run_id, paragraph_repo, annotation_repo, run)
 
 
@@ -132,14 +131,14 @@ async def get_chapter_metrics(
 async def get_chapter_annotations(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> list[ChapterAnnotationResponse]:
     """
     获取分块标注与伏笔详情数据
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    annotation_repo = AnnotationRepository(session)
+    annotation_repo = session
     return _fetch_chapter_annotations(
         run_id,
         annotation_repo,
@@ -150,17 +149,15 @@ async def get_chapter_annotations(
 async def get_characters(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> list:
     """
     获取角色统计数据
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    annotation_repo = AnnotationRepository(session)
-    stats_repo = StatsRepository(session)
-
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
+    annotation_repo = session
+    diagnosis = _fetch_diagnosis(run_id, novel_id, session)
     arc_scores: dict[str, float] | None = None
     focus_characters: list[str] | None = None
     main_characters: list[str] | None = None

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
 
 from src.api.dependencies import (
     get_db_session,
@@ -29,6 +28,7 @@ from src.linguistic.queries import (
     fetch_entity_candidates,
     fetch_word2vec_stats,
 )
+from src.storage import Storage
 
 router = APIRouter(prefix="/novels/{novel_id}", tags=["linguistic"])
 
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/novels/{novel_id}", tags=["linguistic"])
 async def get_linguistic_features(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     level: Literal["book", "chapter"] = Query(default="book", description="聚合层级：book 或 chapter"),
 ) -> LinguisticFeaturesResponse:
     """
@@ -54,7 +54,7 @@ async def get_linguistic_features(
 async def get_linguistic_entities(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> LinguisticEntitiesResponse:
     """LTP 实体候选（§5.4）：候选不代表正式图谱事实，仅供审核对照"""
     run = _require_run_for_novel(session, novel_id, run_id)
@@ -66,7 +66,7 @@ async def get_linguistic_entities(
 async def get_linguistic_phrases(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> LinguisticPhrasesResponse:
     """固定短语命中统计（§5.11）：正式密度与四字候选数量分开报告"""
     run = _require_run_for_novel(session, novel_id, run_id)
@@ -78,7 +78,7 @@ async def get_linguistic_phrases(
 async def get_linguistic_word2vec(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> Word2VecStatsResponse:
     """词向量契约与词性覆盖率/质心（§5.6/§5.11）"""
     run = _require_run_for_novel(session, novel_id, run_id)

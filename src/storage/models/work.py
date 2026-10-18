@@ -1,39 +1,24 @@
-"""
-工作、执行与正式产物 ORM 模型（2026-10-16 全库 3NF 改造）
-
-三张身份合一后各表职责：
-- work_items：标注/诊断 work、章末核对程序与诊断失败程序的业务身份（四种形状互斥）
-- executions：真实整轮 session 与真实 work 尝试（invocation）两类身份，填报字段互斥
-- chapter_annotations：正式章节标注头、具名指标与成功保存事实（五组件同事务）
-- diagnosis_reports：正式全书诊断头与具名评价（一运行一份正式发布）
-- analysis_assessments：逐段情绪、诊断标签/主题名/人物评分/三类名单六种有限条目
-
-推导项不落列：work/run/chapter 从 execution 取，novel/run 从 session 取，
-逐段情绪的 run/chapter 从 record 取，名单顺序与去重由条件唯一约束保证。
-"""
+"工作、执行与正式产物 ORM 模型（2026-10-16 全库 3NF 改造；2026-10-17 六 agent 归属）"
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (
-    CheckConstraint,
-    DateTime,
-    Float,
-    ForeignKey,
-    ForeignKeyConstraint,
-    Index,
-    Integer,
-    String,
-    Text,
-)
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from src.storage.ids import new_id
+from src.storage.uuid_type import Uuid7 as Uuid
+
 from .base import Base, naive_utcnow
 
-#: 工作角色封闭取值（标注章内角色 + 诊断整轮工作的 report 角色）
-WORK_ROLES = ("solo", "structure", "event", "evidence", "report")
+#: 执行角色封闭取值（章内四个标注角色 + 诊断两个角色）
+EXECUTION_ROLES = ("annotation", "entity", "event", "metric", "case", "report")
+#: 章内标注角色封闭取值（executions.chapter_id 必填；chapter_annotations.role 取值域）
+ANNOTATION_ROLES = ("annotation", "entity", "event", "metric")
+#: 诊断角色封闭取值（案例办理与报告收尾）
+DIAGNOSIS_ROLES = ("case", "report")
 #: 执行状态封闭取值
 EXECUTION_STATUSES = ("running", "success", "error", "interrupted")
 #: 诊断重点结构封闭取值
@@ -43,34 +28,15 @@ CAST_ROLES = ("focus", "main", "core")
 
 
 class WorkItem(Base):
-    """
-    工作业务身份表（四种互斥形状）
-
-    - 标注 Agent：role、annotation_run/chapter 必填；(run,chapter,role) 唯一
-    - 诊断 Agent：role、diagnosis_session 必填（session 为 executions 整轮形状）
-    - 章末核对程序：program_run/chapter、program_code、program_invocation_key 为实际程序身份
-    - 诊断失败保留程序：diagnosis_session、program_code 必填（沿用 diagnosis-pending:{session}）
-
-    失败前 work 必须可引用；不新增 work 划分、角色或模型请求。
-    """
+    "工作业务身份表（程序回执两种互斥形状）"
 
     __tablename__ = "work_items"
     __table_args__ = (
         CheckConstraint(
-            "role IS NULL OR role IN ('solo', 'structure', 'event', 'evidence', 'report')",
-            name="ck_work_items_role",
-        ),
-        CheckConstraint(
-            "(role IS NOT NULL AND annotation_run_id IS NOT NULL AND annotation_chapter_id IS NOT NULL"
-            " AND diagnosis_session_id IS NULL AND program_run_id IS NULL AND program_chapter_id IS NULL"
-            " AND program_code IS NULL AND program_invocation_key IS NULL)"
-            " OR (role IS NOT NULL AND annotation_run_id IS NULL AND annotation_chapter_id IS NULL"
-            " AND diagnosis_session_id IS NOT NULL AND program_run_id IS NULL AND program_chapter_id IS NULL"
-            " AND program_code IS NULL AND program_invocation_key IS NULL)"
-            " OR (role IS NULL AND annotation_run_id IS NULL AND annotation_chapter_id IS NULL"
+            "(annotation_run_id IS NULL AND annotation_chapter_id IS NULL AND role IS NULL"
             " AND diagnosis_session_id IS NULL AND program_run_id IS NOT NULL AND program_chapter_id IS NOT NULL"
             " AND program_code IS NOT NULL AND program_invocation_key IS NOT NULL)"
-            " OR (role IS NULL AND annotation_run_id IS NULL AND annotation_chapter_id IS NULL"
+            " OR (annotation_run_id IS NULL AND annotation_chapter_id IS NULL AND role IS NULL"
             " AND diagnosis_session_id IS NOT NULL AND program_run_id IS NULL AND program_chapter_id IS NULL"
             " AND program_code IS NOT NULL AND program_invocation_key IS NULL)",
             name="ck_work_items_shape",
@@ -94,39 +60,41 @@ class WorkItem(Base):
             ["program_run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="work_items_program_run_fkey"
         ),
         Index(
-            "uq_work_items_annotation_role", "annotation_run_id", "annotation_chapter_id", "role",
-            unique=True, postgresql_where=sql_text("annotation_run_id IS NOT NULL"),
+            "uq_work_items_program_invocation_key",
+            "program_invocation_key",
+            unique=True,
+            postgresql_where=sql_text("program_invocation_key IS NOT NULL"),
         ),
         Index(
-            "uq_work_items_program_invocation_key", "program_invocation_key",
-            unique=True, postgresql_where=sql_text("program_invocation_key IS NOT NULL"),
-        ),
-        Index(
-            "uq_work_items_diagnosis_failure", "diagnosis_session_id",
+            "uq_work_items_diagnosis_failure",
+            "diagnosis_session_id",
             unique=True,
             postgresql_where=sql_text("diagnosis_session_id IS NOT NULL AND program_code IS NOT NULL"),
         ),
-        {"comment": "工作表：标注/诊断 work 与两类程序的业务身份（四种互斥形状）"},
+        {"comment": "工作表：两类程序回执的业务身份（章末核对/诊断失败保留，两种互斥形状）"},
     )
 
-    work_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="工作主键（uuid）")
-    role: Mapped[str | None] = mapped_column(
-        String(20), nullable=True, comment="章内角色（solo/structure/event/evidence）"
+    work_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="工作主键（uuid）", default=new_id, autoincrement=False
     )
-    annotation_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, comment="标注所属运行")
-    annotation_chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="标注所属章节编号")
+    role: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="退场列：agent work 已删，程序回执形状恒为空"
+    )
+    annotation_run_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), nullable=True, comment="退场列：agent work 已删，程序回执形状恒为空"
+    )
+    annotation_chapter_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="退场列：agent work 已删，程序回执形状恒为空"
+    )
     diagnosis_session_id: Mapped[str | None] = mapped_column(
-        String(64),
+        Uuid(as_uuid=False),
         ForeignKey(
-            "executions.execution_id",
-            ondelete="RESTRICT",
-            name="work_items_diagnosis_session_fkey",
-            use_alter=True,
+            "executions.execution_id", ondelete="RESTRICT", name="work_items_diagnosis_session_fkey", use_alter=True
         ),
         nullable=True,
         comment="所属诊断整轮会话（executions 的 session 形状）",
     )
-    program_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, comment="程序所属运行")
+    program_run_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True, comment="程序所属运行")
     program_chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="程序所属章节编号")
     program_code: Mapped[str | None] = mapped_column(
         String(50), nullable=True, comment="程序代码（章末核对/诊断失败保留）"
@@ -140,14 +108,7 @@ class WorkItem(Base):
 
 
 class Execution(Base):
-    """
-    执行表（真实 session 与真实 invocation 两类互斥形状）
-
-    - 整轮 session：session_run_id、session_created_at 必填，尝试观测全空
-    - 真实 invocation：work_id/attempt_number/started_at/status 必填，(work,attempt) 唯一
-
-    session 不冒充尝试；模型调用只能引用 invocation。
-    """
+    "执行表（真实 session 与真实 invocation 两类互斥形状）"
 
     __tablename__ = "executions"
     __table_args__ = (
@@ -156,31 +117,77 @@ class Execution(Base):
             name="ck_executions_status",
         ),
         CheckConstraint(
-            "(session_run_id IS NOT NULL AND session_created_at IS NOT NULL AND work_id IS NULL"
-            " AND attempt_number IS NULL AND started_at IS NULL AND finished_at IS NULL"
-            " AND status IS NULL AND error IS NULL)"
-            " OR (session_run_id IS NULL AND session_created_at IS NULL AND work_id IS NOT NULL"
-            " AND attempt_number IS NOT NULL AND started_at IS NOT NULL AND status IS NOT NULL)",
+            "role IS NULL OR role IN ('annotation', 'entity', 'event', 'metric', 'case', 'report')",
+            name="ck_executions_role",
+        ),
+        CheckConstraint(
+            "(session_run_id IS NOT NULL AND session_created_at IS NOT NULL"
+            " AND run_id IS NULL AND role IS NULL AND chapter_id IS NULL AND case_anchor IS NULL"
+            " AND work_id IS NULL AND attempt_number IS NULL AND started_at IS NULL"
+            " AND finished_at IS NULL AND status IS NULL AND error IS NULL)"
+            " OR (session_run_id IS NULL AND session_created_at IS NULL AND run_id IS NOT NULL"
+            " AND role IS NOT NULL AND work_id IS NULL AND attempt_number IS NOT NULL"
+            " AND started_at IS NOT NULL AND status IS NOT NULL"
+            " AND ((role IN ('annotation', 'entity', 'event', 'metric')"
+            " AND chapter_id IS NOT NULL AND case_anchor IS NULL)"
+            " OR (role = 'case' AND chapter_id IS NULL AND case_anchor IS NOT NULL)"
+            " OR (role = 'report' AND chapter_id IS NULL AND case_anchor IS NULL)))",
             name="ck_executions_shape",
         ),
         ForeignKeyConstraint(
             ["session_run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="executions_session_run_fkey"
         ),
+        ForeignKeyConstraint(["run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="executions_run_fkey"),
         Index(
-            "uq_executions_work_attempt", "work_id", "attempt_number",
-            unique=True, postgresql_where=sql_text("work_id IS NOT NULL"),
+            "uq_executions_annotation_attempt",
+            "run_id",
+            "chapter_id",
+            "role",
+            "attempt_number",
+            unique=True,
+            postgresql_where=sql_text("chapter_id IS NOT NULL"),
         ),
-        {"comment": "执行表：真实整轮 session（诊断轮次）与真实 work 尝试两类互斥形状"},
+        Index(
+            "uq_executions_case_attempt",
+            "run_id",
+            "case_anchor",
+            "role",
+            "attempt_number",
+            unique=True,
+            postgresql_where=sql_text("case_anchor IS NOT NULL"),
+        ),
+        {"comment": "执行表：真实整轮 session（诊断轮次）与真实 invocation 两类互斥形状（run 直接落行）"},
     )
 
-    execution_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="执行主键（session/invocation id）")
-    session_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, comment="整轮会话所属运行")
+    execution_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        primary_key=True,
+        comment="执行主键（session/invocation id）",
+        default=new_id,
+        autoincrement=False,
+    )
+    session_run_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True, comment="整轮会话所属运行")
     session_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="整轮会话创建时间")
+    run_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), nullable=True, comment="真实执行所属运行（invocation 形状必填）"
+    )
+    role: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="执行角色（annotation/entity/event/metric/case/report）"
+    )
+    chapter_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="章内标注执行的章节编号（标注角色必填）"
+    )
+    case_anchor: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("book_cases.case_id", ondelete="RESTRICT", name="executions_case_anchor_fkey", use_alter=True),
+        nullable=True,
+        comment="案例办理锚（事件案例 id；案例角色必填）",
+    )
     work_id: Mapped[str | None] = mapped_column(
-        String(64),
+        Uuid(as_uuid=False),
         ForeignKey("work_items.work_id", ondelete="CASCADE", name="executions_work_fkey"),
         nullable=True,
-        comment="所属工作",
+        comment="退场列：新执行不再登记 work（领域约束规则 1 仍读取本列）",
     )
     attempt_number: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="第几次尝试（1 起）")
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="开始时间")
@@ -193,44 +200,46 @@ class Execution(Base):
 
 
 class ChapterAnnotation(Base):
-    """
-    正式章节标注记录表
-
-    execution_id 唯一（每 execution 至多一份产物）；「每 work 至多一个正式成功
-    记录」由领域约束触发器校验（不把推导的 work_id 放回本表）。
-    summary、-2..2 情绪、叙事功能、pivot、cliffhanger 都是独立提交；
-    saved_at 是五组件成功事务的真实回执，失败不造记录。
-    """
+    "正式章节标注记录表"
 
     __tablename__ = "chapter_annotations"
     __table_args__ = (
-        CheckConstraint(
-            "emotional_valence IN (-2, -1, 0, 1, 2)", name="ck_chapter_annotations_valence"
+        CheckConstraint("emotional_valence IN (-2, -1, 0, 1, 2)", name="ck_chapter_annotations_valence"),
+        CheckConstraint("role IN ('annotation', 'entity', 'event', 'metric')", name="ck_chapter_annotations_role"),
+        ForeignKeyConstraint(
+            ["run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="chapter_annotations_run_fkey"
         ),
-        {"comment": "章节标注表：正式产物头、具名指标与成功保存事实（每 execution 至多一份）"},
+        ForeignKeyConstraint(
+            ["run_id", "chapter_id"],
+            ["chapters.run_id", "chapters.chapter_id"],
+            ondelete="CASCADE",
+            name="chapter_annotations_chapter_fkey",
+        ),
+        {"comment": "章节标注表：正式产物头与归属（run/章/角色），成功保存事实（每 execution 至多一份）"},
     )
 
-    record_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="产物主键（原 output uuid）")
+    record_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="产物主键（原 output uuid）", default=new_id, autoincrement=False
+    )
     execution_id: Mapped[str] = mapped_column(
-        String(64),
+        Uuid(as_uuid=False),
         ForeignKey("executions.execution_id", ondelete="RESTRICT", name="chapter_annotations_execution_fkey"),
         nullable=False,
         unique=True,
         comment="产生产物的真实执行",
     )
+    run_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), nullable=False, comment="产出所属运行")
+    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="产出所属章节编号")
+    role: Mapped[str] = mapped_column(String(20), nullable=False, comment="产出角色（annotation/entity/event/metric）")
     contract_version: Mapped[str] = mapped_column(String(64), nullable=False, comment="标注合同版本")
-    chapter_consolidation_version: Mapped[str] = mapped_column(
-        String(64), nullable=False, comment="章末核对规则版本"
-    )
-    # 具名指标独立提交：结构/事件角色 work 没有章级指标时各列为空
+    chapter_consolidation_version: Mapped[str] = mapped_column(String(64), nullable=False, comment="章末核对规则版本")
+    # 具名指标独立提交：实体/事件角色执行没有章级指标时各列为空
     summary: Mapped[str | None] = mapped_column(String, nullable=True, comment="章节摘要")
     emotional_valence: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="情绪效价（-2..2）")
     narrative_function: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="叙事功能")
     pivot_moment: Mapped[bool | None] = mapped_column(nullable=True, comment="是否含关键转折")
     cliffhanger: Mapped[bool | None] = mapped_column(nullable=True, comment="是否悬念收尾")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="创建时间")
     saved_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=naive_utcnow, comment="五组件成功事务落库时间"
     )
@@ -240,12 +249,7 @@ class ChapterAnnotation(Base):
 
 
 class DiagnosisReport(Base):
-    """
-    正式全书诊断表
-
-    一个运行的正式发布唯一性由领域约束触发器校验（不靠列形状表达）；
-    快照为真实冻结承诺，标签/名单/评分分别进入 analysis_assessments。
-    """
+    "正式全书诊断表"
 
     __tablename__ = "diagnosis_reports"
     __table_args__ = (
@@ -272,9 +276,11 @@ class DiagnosisReport(Base):
         {"comment": "诊断报告表：正式诊断正文、评分与冻结核对承诺（一运行正式发布唯一由触发器校验）"},
     )
 
-    report_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="报告主键（原 output uuid）")
+    report_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="报告主键（原 output uuid）", default=new_id, autoincrement=False
+    )
     session_id: Mapped[str] = mapped_column(
-        String(64),
+        Uuid(as_uuid=False),
         ForeignKey("executions.execution_id", ondelete="RESTRICT", name="diagnosis_reports_session_fkey"),
         nullable=False,
         unique=True,
@@ -295,27 +301,14 @@ class DiagnosisReport(Base):
     theme_color: Mapped[str | None] = mapped_column(String(16), nullable=True, comment="主题色（十六进制）")
     identity_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True, comment="身份核对冻结承诺")
     structure_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True, comment="结构核对冻结承诺")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="创建时间")
 
     def __repr__(self) -> str:
         return f"<DiagnosisReport(report_id={self.report_id})>"
 
 
 class AnalysisAssessment(Base):
-    """
-    分析条目表（六类有限条目，恰一形状）
-
-    - 逐段情绪：record_id、paragraph_id、emotion
-    - 题材标签：report_id、ordinal、genre_label
-    - 风格标签：report_id、ordinal、style_label
-    - 主题命名：report_id、topic_id、topic_label
-    - 人物评分：report_id、scored_entity_id、character_score
-    - 人物名单：report_id、cast_role、ordinal、cast_entity_id
-
-    每个分支的条件唯一性决定该分支整行；不存能从形状决定的泛型 kind/value。
-    """
+    "分析条目表（六类有限条目，恰一形状）"
 
     __tablename__ = "analysis_assessments"
     __table_args__ = (
@@ -351,53 +344,84 @@ class AnalysisAssessment(Base):
             name="ck_analysis_assessments_cast_role",
         ),
         Index(
-            "uq_analysis_assessments_emotion", "record_id", "paragraph_id",
-            unique=True, postgresql_where=sql_text("record_id IS NOT NULL"),
+            "uq_analysis_assessments_emotion",
+            "record_id",
+            "paragraph_id",
+            unique=True,
+            postgresql_where=sql_text("record_id IS NOT NULL"),
         ),
         Index(
-            "uq_analysis_assessments_genre_ordinal", "report_id", "ordinal",
-            unique=True, postgresql_where=sql_text("genre_label IS NOT NULL"),
+            "uq_analysis_assessments_genre_ordinal",
+            "report_id",
+            "ordinal",
+            unique=True,
+            postgresql_where=sql_text("genre_label IS NOT NULL"),
         ),
         Index(
-            "uq_analysis_assessments_genre_label", "report_id", "genre_label",
-            unique=True, postgresql_where=sql_text("genre_label IS NOT NULL"),
+            "uq_analysis_assessments_genre_label",
+            "report_id",
+            "genre_label",
+            unique=True,
+            postgresql_where=sql_text("genre_label IS NOT NULL"),
         ),
         Index(
-            "uq_analysis_assessments_style_ordinal", "report_id", "ordinal",
-            unique=True, postgresql_where=sql_text("style_label IS NOT NULL"),
+            "uq_analysis_assessments_style_ordinal",
+            "report_id",
+            "ordinal",
+            unique=True,
+            postgresql_where=sql_text("style_label IS NOT NULL"),
         ),
         Index(
-            "uq_analysis_assessments_style_label", "report_id", "style_label",
-            unique=True, postgresql_where=sql_text("style_label IS NOT NULL"),
+            "uq_analysis_assessments_style_label",
+            "report_id",
+            "style_label",
+            unique=True,
+            postgresql_where=sql_text("style_label IS NOT NULL"),
         ),
         Index(
-            "uq_analysis_assessments_topic", "report_id", "topic_id",
-            unique=True, postgresql_where=sql_text("topic_label IS NOT NULL"),
+            "uq_analysis_assessments_topic",
+            "report_id",
+            "topic_id",
+            unique=True,
+            postgresql_where=sql_text("topic_label IS NOT NULL"),
         ),
         Index(
-            "uq_analysis_assessments_score", "report_id", "scored_entity_id",
-            unique=True, postgresql_where=sql_text("character_score IS NOT NULL"),
+            "uq_analysis_assessments_score",
+            "report_id",
+            "scored_entity_id",
+            unique=True,
+            postgresql_where=sql_text("character_score IS NOT NULL"),
         ),
         Index(
-            "uq_analysis_assessments_cast_ordinal", "report_id", "cast_role", "ordinal",
-            unique=True, postgresql_where=sql_text("cast_entity_id IS NOT NULL"),
+            "uq_analysis_assessments_cast_ordinal",
+            "report_id",
+            "cast_role",
+            "ordinal",
+            unique=True,
+            postgresql_where=sql_text("cast_entity_id IS NOT NULL"),
         ),
         Index(
-            "uq_analysis_assessments_cast_entity", "report_id", "cast_role", "cast_entity_id",
-            unique=True, postgresql_where=sql_text("cast_entity_id IS NOT NULL"),
+            "uq_analysis_assessments_cast_entity",
+            "report_id",
+            "cast_role",
+            "cast_entity_id",
+            unique=True,
+            postgresql_where=sql_text("cast_entity_id IS NOT NULL"),
         ),
         {"comment": "分析条目表：逐段情绪/题材标签/风格标签/主题命名/人物评分/人物名单六种互斥形状"},
     )
 
-    assessment_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="条目主键（uuid）")
+    assessment_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="条目主键（uuid）", default=new_id, autoincrement=False
+    )
     record_id: Mapped[str | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("chapter_annotations.record_id", ondelete="CASCADE", name="analysis_assessments_record_fkey"),
         nullable=True,
         comment="所属章节标注记录（逐段情绪）",
     )
     report_id: Mapped[str | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("diagnosis_reports.report_id", ondelete="CASCADE", name="analysis_assessments_report_fkey"),
         nullable=True,
         comment="所属诊断报告",
@@ -410,7 +434,7 @@ class AnalysisAssessment(Base):
     topic_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="主题 id")
     topic_label: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="主题标签")
     scored_entity_id: Mapped[str | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("graph_entities.entity_id", ondelete="RESTRICT", name="analysis_assessments_score_entity_fkey"),
         nullable=True,
         comment="评分角色实体",
@@ -418,7 +442,7 @@ class AnalysisAssessment(Base):
     character_score: Mapped[float | None] = mapped_column(Float, nullable=True, comment="人物弧线评分")
     cast_role: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="名单角色（focus/main/core）")
     cast_entity_id: Mapped[str | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("graph_entities.entity_id", ondelete="RESTRICT", name="analysis_assessments_cast_entity_fkey"),
         nullable=True,
         comment="名单角色实体",

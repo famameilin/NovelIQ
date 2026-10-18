@@ -1,27 +1,15 @@
-"""
-章节与正文表 ORM 模型（2026-10-16 全库 3NF 改造）
-
-chapters 保留完整章节身份与章节原始区域（含标题/间隔语义的 start_pos/end_pos），
-正文切片与全文起点为同一章节身份的一对一属性并在本表合并：text 与 char_offset
-同空或同有（空正文章节无正文）；正文终点由 char_offset + 字符长度投影，char_end_offset
-不落列。
-"""
+"章节与正文表 ORM 模型（2026-10-16 全库 3NF 改造）"
 
 from __future__ import annotations
 
-from sqlalchemy import (
-    CheckConstraint,
-    ForeignKeyConstraint,
-    Index,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-)
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy import (
     text as sql_text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
+
+from src.storage.ids import new_id
+from src.storage.uuid_type import Uuid7 as Uuid
 
 from .base import Base
 
@@ -30,10 +18,11 @@ from .base import Base
 
 
 class Chapter(Base):
-    """章节表：章节结构解析的持久化结果（目录与正文同键一对一，空正文无切片）"""
+    "章节表：章节结构解析的持久化结果（目录与正文同键一对一，空正文无切片）"
 
     __tablename__ = "chapters"
     __table_args__ = (
+        UniqueConstraint("run_id", "chapter_id", name="uq_chapters_business_key"),
         UniqueConstraint("run_id", "sequence", name="uq_chapters_run_sequence"),
         CheckConstraint("(text IS NULL) = (char_offset IS NULL)", name="ck_chapters_text_offset_pair"),
         ForeignKeyConstraint(["run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="chapters_run_fkey"),
@@ -47,8 +36,11 @@ class Chapter(Base):
         {"comment": "章节表：章节结构解析结果（目录+正文同键一对一），含部/卷/番外层级与空正文条目"},
     )
 
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
-    chapter_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="章节编号（run 内）")
+    id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, default=new_id, autoincrement=False, comment="UUIDv7 独立主键"
+    )
+    run_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), comment="所属分析运行", nullable=False)
+    chapter_id: Mapped[int] = mapped_column(Integer, comment="章节编号（run 内）", nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False, comment="全书顺序号（run 内唯一）")
     title: Mapped[str] = mapped_column(Text, nullable=False, comment="解析标题")
     display_title: Mapped[str] = mapped_column(Text, nullable=False, comment="前端展示标题（解析器实际结果）")

@@ -111,7 +111,7 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
     monkeypatch.setattr(diagnosis_helpers, "uuid4", uuid.uuid4)
     from sqlalchemy import select
 
-    from src.storage.models import ChapterAnnotation, EventDeclaration, Execution, WorkItem
+    from src.storage.models import ChapterAnnotation, EventDeclaration
 
     # 声明身份是铸造 uuid，场景中的 node_id 是本地键；分组按本地键解析到正式声明身份
     declaration_of = {
@@ -119,9 +119,7 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
         for declaration_id, local_key in session.execute(
             select(EventDeclaration.declaration_id, EventDeclaration.local_key)
             .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(WorkItem.annotation_run_id == scenario.run_id)
+            .where(ChapterAnnotation.run_id == scenario.run_id)
         )
     }
     draft = diagnosis_helpers.declaration_event_draft(

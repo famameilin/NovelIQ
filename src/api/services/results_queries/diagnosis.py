@@ -2,13 +2,13 @@
 
 from src.api.models.responses import DiagnosisResult
 from src.diagnosis.read import query_diagnosis
-from src.storage.repositories import StatsRepository
+from src.storage import Storage
 
 
 def _has_diagnosis_result(diagnosis: DiagnosisResult | None) -> bool:
     return diagnosis is not None
 
 
-def _fetch_diagnosis(run_id: str, novel_id: str, stats_repo: StatsRepository) -> DiagnosisResult | None:
-    result = query_diagnosis(run_id, novel_id, stats_repo)
+def _fetch_diagnosis(run_id: str, novel_id: str, storage: Storage) -> DiagnosisResult | None:
+    result = query_diagnosis(run_id, novel_id, storage)
     return DiagnosisResult.model_validate(result.model_dump()) if result is not None else None

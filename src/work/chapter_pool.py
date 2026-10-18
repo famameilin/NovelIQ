@@ -1,11 +1,8 @@
 """角色 work 队列：只按模型池选举结果派发，按 work 成功事务保存
 
-2026-10-16 全库 3NF：旧 annotation_work 退场后按新形状分工
-- work_items 标注形状在派发时登记（work_id + role + annotation_run_id/
-  annotation_chapter_id）；真实 invocation 的执行行由审计记录器在派发时创建
-  （唯一入口），队列不创建、不冒充执行
-- 保存存在性由 agent 同事务写入的 chapter_annotations 行表达（旧
-  state=='saved' 的等价推导，不新增状态列）；失败尝试由审计独立收口
+2026-10-17 六 agent 归属：派发前不再登记 work 行——真实执行由审计记录器在派发时
+创建并直接携带归属（run/章/角色）；保存存在性由 agent 同事务写入的产物行表达，
+核查按执行归属与产物行进行，失败尝试由审计独立收口。
 """
 
 from __future__ import annotations
@@ -16,13 +13,10 @@ from dataclasses import replace
 from typing import Any, Literal
 from uuid import uuid4
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from src.event_bus import EventBus, Message
 from src.model_pool.capacity import ModelElectionPool
 from src.model_pool.contracts import SelectionRequest, SelectionResult
-from src.storage.models import ChapterAnnotation, Execution, WorkItem
+from src.storage import Storage, StorageWriteError
 from src.work.annotation_work import WorkReceipt
 
 AgentStatus = Literal["submitted", "retry", "failed"]
@@ -34,36 +28,6 @@ class PipelineWorkFailed(RuntimeError):
 
 class WorkSaveUnconfirmed(PipelineWorkFailed):
     """存储或内存确认仍不明，保留待保存贡献和当前容量，禁止当作模型失败重派"""
-
-
-def _register_work_rows(session_factory: Callable[[], Session], work: list[WorkReceipt]) -> None:
-    """派发前登记 work_items 标注形状；已存在且同身份时幂等
-
-    真实 invocation 的执行行由审计记录器在派发时创建（要求 work 已登记），
-    队列不创建执行、不冒充尝试。
-    """
-    with session_factory() as session:
-        for receipt in work:
-            chapter_id = receipt.payload["chapter_id"]
-            role = receipt.payload["role"]
-            row = session.get(WorkItem, receipt.work_id)
-            if row is None:
-                session.add(
-                    WorkItem(
-                        work_id=receipt.work_id,
-                        role=role,
-                        annotation_run_id=receipt.run_id,
-                        annotation_chapter_id=chapter_id,
-                    )
-                )
-                continue
-            if (
-                row.annotation_run_id != receipt.run_id
-                or row.annotation_chapter_id != chapter_id
-                or row.role != role
-            ):
-                raise PipelineWorkFailed(f"不可变 work 存储冲突: work_id={receipt.work_id}")
-        session.commit()
 
 
 class ChapterWorkerPool:
@@ -81,7 +45,7 @@ class ChapterWorkerPool:
         work: list[WorkReceipt],
         *,
         bus: EventBus,
-        session_factory: Callable[[], Session],
+        session_factory: Callable[[], Storage],
         is_cancelled: Callable[[], bool] | None = None,
         on_saved: Callable[[WorkReceipt], Any] | None = None,
     ) -> int:
@@ -107,8 +71,6 @@ class ChapterWorkerPool:
             self.invocations[message.work_id] = message.invocation_id
 
         bus.handle("queue.started", address, started)
-        # 派发前先登记 work 身份：审计记录器创建真实 invocation 时要求 work 已存在
-        await asyncio.to_thread(_register_work_rows, session_factory, work)
         for receipt in work:
             self.states[receipt.work_id] = "queued"
             await bus.request(
@@ -280,7 +242,7 @@ class ChapterWorkerPool:
         address: str,
         receipt: WorkReceipt,
         invocation_id: str,
-        session_factory: Callable[[], Session],
+        session_factory: Callable[[], Storage],
         may_start_save: Callable[[], bool] | None = None,
         has_model_ended: Callable[[], bool] | None = None,
     ) -> None:
@@ -300,30 +262,15 @@ class ChapterWorkerPool:
 
         async def stored() -> bool:
             try:
-                with session_factory() as check_session:
-                    work = await asyncio.to_thread(check_session.get, WorkItem, receipt.work_id)
-                    if work is None:
-                        return False
-                    expected = {
-                        "annotation_run_id": receipt.run_id,
-                        "annotation_chapter_id": chapter_id,
-                        "role": role,
-                    }
-                    if any(getattr(work, name) != value for name, value in expected.items()):
-                        raise WorkSaveUnconfirmed(f"不可变 work 存储冲突: work_id={receipt.work_id}")
-                    execution = await asyncio.to_thread(check_session.get, Execution, invocation_id)
-                    if execution is None:
-                        return False
-                    if execution.work_id != receipt.work_id:
-                        raise WorkSaveUnconfirmed(f"invocation 不属于该 work: work_id={receipt.work_id}")
-                    record_id = await asyncio.to_thread(
-                        check_session.scalar,
-                        select(ChapterAnnotation.record_id).where(
-                            ChapterAnnotation.execution_id == invocation_id
-                        ),
-                    )
-                    if record_id is None:
-                        return False
+                receipt_state = await asyncio.to_thread(session_factory().annotations.inspect_saved, invocation_id)
+                execution = receipt_state["execution"]
+                if execution is None:
+                    return False
+                expected = {"run_id": receipt.run_id, "chapter_id": chapter_id, "role": role}
+                if any(getattr(execution, name) != value for name, value in expected.items()):
+                    raise WorkSaveUnconfirmed(f"invocation 执行归属与派发单元不一致: work_id={receipt.work_id}")
+                if receipt_state["record_id"] is None:
+                    return False
                 if not await bus.request(command("agent.check")):
                     raise WorkSaveUnconfirmed(f"组件保存结果不一致: work_id={receipt.work_id}")
                 return True
@@ -341,31 +288,25 @@ class ChapterWorkerPool:
 
         verified = False
         for save_attempt in range(2):
-            session = session_factory()
+            storage = session_factory()
             try:
-                # work 行在派发时已登记；保存事务只写正式产物（agent 幂等，
-                # 已存在产物直接返回，不重复写）
-                await bus.request(command("agent.save", session))
-                await asyncio.to_thread(session.commit)
+                # Storage 已在返回前提交；取消保护仍由调用方等待完整保存结束
+                await bus.request(command("agent.save", storage))
             except Exception as exc:
-                rollback_error: Exception | None = None
-                try:
-                    await asyncio.to_thread(session.rollback)
-                except Exception as rollback_exc:
-                    rollback_error = rollback_exc
                 verified = await stored()
                 if not verified:
-                    if rollback_error is not None:
-                        raise WorkSaveUnconfirmed(
-                            f"提交与回滚结果仍不明: work_id={receipt.work_id}: {rollback_error}"
-                        ) from exc
-                    if save_attempt == 0 and isinstance(exc, (OSError, TimeoutError)):
-                        # 明确未保存才重投原数据，模型与 invocation 都不重新执行
+                    if isinstance(exc, StorageWriteError) and exc.rollback_failed:
+                        raise WorkSaveUnconfirmed(f"提交与回滚结果仍不明: work_id={receipt.work_id}") from exc
+                    retryable = (
+                        isinstance(exc, (OSError, TimeoutError))
+                        or isinstance(exc, StorageWriteError)
+                        and exc.transport_error
+                    )
+                    if save_attempt == 0 and retryable:
+                        # 只重投原冻结数据，模型与 invocation 不重新执行
                         continue
                     await bus.request(command("agent.abort"))
                     raise
-            finally:
-                session.close()
             break
         if not verified and not await stored():
             raise WorkSaveUnconfirmed(f"提交回执与 work 存储不一致: work_id={receipt.work_id}")

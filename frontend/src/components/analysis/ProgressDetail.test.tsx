@@ -9,42 +9,42 @@ describe("ProgressDetail", () => {
     useStreamStore.getState().reset();
   });
 
-  it("应按后端实际 sub_stage（chapter_agent/diagnosis）展示中文标签", () => {
+  it("应按后端实际 sub_stage（标注四角色/诊断案例角色）展示中文标签", () => {
     useStreamStore.getState().updateProgress({
       action: "start",
       stage: "annotate",
-      sub_stage: "chapter_agent",
+      sub_stage: "event",
       chapter_id: 12,
       current: 12,
       total: 100,
       percent: 24,
       sub_percent: 0,
       content: "",
-      message: "章节标注 Agent 开始",
+      message: "事件与参与者 Agent 开始",
     });
 
     const { rerender } = render(<ProgressDetail />);
 
-    expect(screen.getByText("标注分析 - 标注 Agent")).toBeInTheDocument();
-    expect(screen.getByText("标注 Agent")).toBeInTheDocument();
+    expect(screen.getByText("标注分析 - 事件与参与者")).toBeInTheDocument();
+    expect(screen.getByText("事件与参与者")).toBeInTheDocument();
 
     useStreamStore.getState().updateProgress({
       action: "progress",
       stage: "diagnose",
-      sub_stage: "diagnosis",
+      sub_stage: "case",
       chapter_id: 12,
       current: 12,
       total: 100,
       percent: 96,
       sub_percent: 25,
       content: "",
-      message: "诊断进行中",
+      message: "案例办理中",
     });
 
     rerender(<ProgressDetail />);
 
-    expect(screen.getByText("诊断报告 - 诊断")).toBeInTheDocument();
-    expect(screen.getByText("诊断")).toBeInTheDocument();
+    expect(screen.getByText("诊断报告 - 案例")).toBeInTheDocument();
+    expect(screen.getByText("案例")).toBeInTheDocument();
   });
 
   it("应优先使用显式 stage，而不是仅凭 percent 推断当前阶段", () => {

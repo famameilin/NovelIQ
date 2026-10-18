@@ -430,7 +430,7 @@ class TestAnalysis:
                 status="cancelled",
                 progress=45.0,
                 stage="annotate",
-                sub_stage="chapter_agent",
+                sub_stage="annotation",
                 current=3,
                 total=8,
                 message="用户取消",

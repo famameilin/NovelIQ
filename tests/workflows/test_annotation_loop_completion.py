@@ -8,9 +8,9 @@ from sqlalchemy import func, select
 
 from src.audit.queries import fetch_agent_turns
 from src.config import settings
-from src.storage.models import ChapterAnnotation, Execution, WorkItem
+from src.storage.models import ChapterAnnotation, Execution
 from src.work.chapter_pool import PipelineWorkFailed
-from src.work.queries import chapter_annotations, fetch_annotation_work_states
+from src.work.queries import chapter_annotations, fetch_annotation_role_records
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.workflows.test_annotation_work_pipeline import ProgramModel
@@ -80,7 +80,7 @@ async def test_budget_exhaustion_is_not_retried_and_keeps_audit(db_session, monk
         select(func.count())
         .select_from(ChapterAnnotation)
         .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .where(WorkItem.annotation_run_id == run)
+        .where(Execution.run_id == run)
     ) == 0
-    assert all(item.state == "pending" for item in fetch_annotation_work_states(db_session, run))
+    # 预算终局没有任何正式产物：未保存角色由缺行表达
+    assert fetch_annotation_role_records(db_session, run) == []

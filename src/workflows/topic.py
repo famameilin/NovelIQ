@@ -16,12 +16,11 @@ import time
 from collections.abc import Awaitable, Callable
 
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.config.paths import resolve_model_dir, resolve_project_root
 from src.sse.events import StreamEvent
-from src.storage.repositories import ParagraphRepository
+from src.storage import Storage
 from src.topic import (
     INFERENCE_COMPLETE,
     INFERENCE_EMPTY_AFTER_PREPROCESS,
@@ -52,7 +51,7 @@ def resolve_num_topics(
 
 async def run_topic_model(
     run_id: str,
-    session: Session,
+    session: Storage,
     num_topics: int | None = None,
     passes: int | None = None,
     iterations: int | None = None,
@@ -76,19 +75,12 @@ async def run_topic_model(
 
     start_time = time.time()
 
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
 
     paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
     if not paragraph_rows:
         logger.warning(f"no paragraphs found for run_id={run_id}")
         return 0, 0
-
-    if force:
-        # 推断列不做全量清空：清空会产生 complete→NULL 的修改事件，与重跑写入的
-        # 最终主题行在提交时假冲突（延迟约束触发器按修改行当时版本校验，详见
-        # insert_paragraph_topic_inferences docstring）；全量 upsert 本身即覆盖旧值
-        paragraph_repo.clear_paragraph_topics(run_id)
-        logger.info("cleared existing topic data")
 
     total_paragraphs = len(paragraph_rows)
     logger.info(f"loaded {total_paragraphs} paragraphs for topic modeling")
@@ -213,20 +205,22 @@ async def run_topic_model(
     # （train(filter_extremes=False) 已在调用处固定），不再作为参数副本存储
     parameters = dict(config.to_parameters_dict())
 
-    paragraph_repo.insert_topic_model_run(
+    paragraph_repo.save_topics(
         run_id,
-        model_key=TOPIC_MODEL_KEY,
-        library_version=_gensim_version(),
-        pipeline_version=TOPIC_PIPELINE_VERSION,
-        num_topics=topic_model.num_topics,
-        parameters=parameters,
-        dictionary_size=len(topic_model.dictionary),
-        training_document_count=len(valid_docs),
-        inference_paragraph_count=complete_count,
-        artifact_key=artifact_key,
+        model={
+            "model_key": TOPIC_MODEL_KEY,
+            "library_version": _gensim_version(),
+            "pipeline_version": TOPIC_PIPELINE_VERSION,
+            "num_topics": topic_model.num_topics,
+            "parameters": parameters,
+            "dictionary_size": len(topic_model.dictionary),
+            "training_document_count": len(valid_docs),
+            "inference_paragraph_count": complete_count,
+            "artifact_key": artifact_key,
+        },
+        inferences=inference_rows,
+        topics=topic_rows,
     )
-    paragraph_repo.insert_paragraph_topic_inferences(run_id, inference_rows)
-    paragraph_repo.insert_paragraph_topics(run_id, topic_rows)
     logger.info(f"inserted {len(topic_rows)} topic assignments for {complete_count}/{total_paragraphs} paragraphs")
 
     logger.info("\n=== Topic Summary ===")

@@ -12,8 +12,7 @@ from src.fact_graph.evidence import EvidenceParagraph
 @dataclass(frozen=True, slots=True)
 class EventContribution:
     run_id: str
-    work_id: str
-    invocation_id: str
+    execution_id: str
     chapter_order: int
     paragraphs: tuple[EvidenceParagraph, ...]
     snapshot_json: str

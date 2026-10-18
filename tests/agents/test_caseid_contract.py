@@ -10,7 +10,7 @@ from src.agents.annotation.agent import AnnotationAgent
 from src.case_pool import CasePool
 from src.case_pool.contributions import CaseContribution
 from src.event_bus import EventBus
-from src.storage.models import BookCase, CaseEntry, EventDeclaration, WorkItem
+from src.storage.models import BookCase, CaseEntry, EventDeclaration, Execution, WorkItem, naive_utcnow
 from tests.agents.test_complete_event_work import execution_for, save_and_confirm
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
@@ -43,7 +43,7 @@ async def test_program_default_explicit_none_and_unpromised_warning(db_session):
     novel, run = create_run_with_chunks(db_session, texts=["开门点灯。"])
     agent = AnnotationAgent(EventBus(), run, lambda: db_session, novel_id=novel)
     execution, runtime = execution_for(agent, db_session, 1)
-    author = (execution.work_id, execution.invocation_id)
+    author = execution.invocation_id
     caseid = agent.case_pool.push("character", "核查点灯", author)["case_id"]
     try:
         unpromised = json.loads(
@@ -84,24 +84,24 @@ async def test_program_default_explicit_none_and_unpromised_warning(db_session):
 
 def test_read_does_not_resolve_or_overwrite_saved_write():
     pool = CasePool("run")
-    author = ("work", "inv")
-    pool.begin(*author)
+    author = "inv"
+    pool.begin(author)
     caseid = pool.push("dialogue", "核对", author)["case_id"]
     pool.promise(caseid, author)
     pool.associate(caseid, author, tool_name="read_event", call_id="r", receipt={}, is_write=False)
     assert pool.search()[0]["state"] == "pending"
     pool.associate(caseid, author, tool_name="write_event", call_id="w", receipt={}, is_write=True)
     pool.associate(caseid, author, tool_name="read_event", call_id="r2", receipt={}, is_write=False)
-    pool.confirm(*author)
-    pool.begin("other", "i2")
-    pool.rollback("other", "i2")
+    pool.confirm(author)
+    pool.begin("i2")
+    pool.rollback("i2")
     assert pool.search()[0]["state"] == "resolved"
 
 
 def test_same_call_cannot_silently_deliver_another_case():
     pool = CasePool("run")
-    author = ("work", "inv")
-    pool.begin(*author)
+    author = "inv"
+    pool.begin(author)
     first = pool.push("character", "核对第一项", author)["case_id"]
     second = pool.push("character", "核对第二项", author)["case_id"]
     pool.promise(first, author)
@@ -123,7 +123,7 @@ async def test_diagnosis_caseid_uses_actual_call_and_warning_preserves_report(db
     _, run = create_run_with_chunks(db_session, texts=["核对原文。"])
     pool = CasePool(run)
     report = {}
-    author = ("diagnosis:diag", "diag")
+    author = "diag"
     tools = {
         tool.name: tool
         for tool in build_diagnosis_tools(db_session, run, execution_id="diag", case_pool=pool, report_draft=report)
@@ -154,8 +154,8 @@ async def test_diagnosis_caseid_uses_actual_call_and_warning_preserves_report(db
 def test_optional_case_savepoint_failure_preserves_business_output(db_session):
     _, run = create_run_with_chunks(db_session, texts=["原文。"])
     pool = CasePool(run)
-    author = ("work", "inv")
-    pool.begin(*author)
+    author = "inv"
+    pool.begin(author)
     caseid = pool.push("relation", "核查", author)["case_id"]
     db_session.add(
         BookCase(
@@ -165,14 +165,24 @@ def test_optional_case_savepoint_failure_preserves_business_output(db_session):
             description="核查",
         )
     )
-    # 业务行（work 登记）与案例关联相互独立：关联失败不得撤销业务事实
-    db_session.add(WorkItem(work_id="business", role="solo", annotation_run_id=run, annotation_chapter_id=1))
+    # 业务行（真实尝试）与案例关联相互独立：关联失败不得撤销业务事实
+    db_session.add(
+        Execution(
+            execution_id="business",
+            run_id=run,
+            chapter_id=1,
+            role="annotation",
+            attempt_number=1,
+            started_at=naive_utcnow(),
+            status="success",
+        )
+    )
     db_session.flush()
     pool.promise(caseid, author)
     pool.associate(caseid, author, tool_name="event", call_id="real-call", receipt={}, is_write=True)
     frozen = CaseContribution(
         run,
-        *author,
+        author,
         json.dumps(
             {
                 "created_case_ids": [],
@@ -191,9 +201,9 @@ def test_optional_case_savepoint_failure_preserves_business_output(db_session):
     with patch.object(db_session, "get", side_effect=reject_case):
         warnings = pool.save_work(db_session, frozen)
     db_session.commit()
-    pool.confirm(*author)
+    pool.confirm(author)
     assert warnings[0]["code"] == "case_save_failed"
-    assert db_session.get(WorkItem, "business") is not None
+    assert db_session.get(Execution, "business") is not None
     assert pool.search()[0]["state"] == "pending"
     with patch.object(db_session, "get", side_effect=ConnectionError("连接断开")):
         with pytest.raises(ConnectionError):
@@ -204,7 +214,7 @@ async def test_missing_optional_case_does_not_block_work_confirmation(db_session
     novel, run = create_run_with_chunks(db_session, texts=["原文行动。"])
     agent = AnnotationAgent(EventBus(), run, lambda: db_session, novel_id=novel)
     execution, runtime = execution_for(agent, db_session, 1)
-    author = (execution.work_id, execution.invocation_id)
+    author = execution.invocation_id
     caseid = agent.case_pool.push("event", "核查行动", author)["case_id"]
     agent.case_pool.promise(caseid, author)
     original_get = db_session.get
@@ -257,7 +267,7 @@ async def test_declared_event_is_registered_into_book_case_pool(db_session):
         # 幂等：同一事件只登记一次，重复登记不改写案例
         again = agent.case_pool.register_event_case(
             declaration_id=declaration_id, title="行动", summary="行动", status="ongoing", chapter_id=1,
-            author=(execution.work_id, execution.invocation_id),
+            author=execution.invocation_id,
         )
         assert again["case_id"] == record["case_id"]
         assert len(agent.case_pool.search(case_type="event")) == 1
@@ -278,8 +288,8 @@ async def test_typed_cases_cover_four_types_and_required_payloads(db_session):
     """2026-10-15 用户裁定「统一case type 人物，关系，对话，事件」：note 删除、四类归档、程序链各凭定位键"""
     _, run = create_run_with_chunks(db_session, texts=["原文。"])
     pool = CasePool(run)
-    author = ("work", "inv")
-    pool.begin(*author)
+    author = "inv"
+    pool.begin(author)
     ids = [pool.push(t, f"核查{t}案例", author)["case_id"] for t in ("character", "relation", "dialogue", "event")]
     assert len(set(ids)) == 4
     assert all(record["payload"] == {} for record in pool.search())
@@ -309,10 +319,10 @@ async def test_save_pending_persists_payload_and_enforces_required_keys(db_sessi
 
     _, run = create_run_with_chunks(db_session, texts=["原文。"])
     entity_id = ensure_character(db_session, run_id=run, name="张三")
-    author = ("chapter:1:abc", "abc")
+    author = "chapter:1:abc"
     db_session.add(
         WorkItem(
-            work_id=author[0],
+            work_id=author,
             program_run_id=run,
             program_chapter_id=1,
             program_code="chapter_consolidation",
@@ -343,8 +353,8 @@ async def test_save_pending_persists_payload_and_enforces_required_keys(db_sessi
     assert row.registration_reason == "unreferenced_entity" and row.review_state is None
     # 程序登记支持：无模型调用、无伪造交付
     support = db_session.scalar(
-        select(CaseEntry).where(CaseEntry.case_id == case_ids[0], CaseEntry.program_work_id == author[0])
+        select(CaseEntry).where(CaseEntry.case_id == case_ids[0], CaseEntry.program_work_id == author)
     )
     assert support is not None
     with pytest.raises(ValueError):
-        pool.save_pending(db_session, [("character", "缺定位键", {})], author=("chapter", "inv2"))
+        pool.save_pending(db_session, [("character", "缺定位键", {})], author="chapter")

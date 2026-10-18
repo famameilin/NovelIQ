@@ -16,12 +16,8 @@ from src.api.services.results_queries.metadata import _fetch_global_stats, _fetc
 from src.api.services.results_queries.paragraphs import _fetch_paragraph_curves
 from src.fact_graph.read import ExportGraphAuthorityView, GraphAuthorityReport, serialize_graph_report_signals
 from src.metrics.queries.plotline import PlotlineQuery
-from src.storage.repositories import (
-    AnnotationRepository,
-    ChapterRepository,
-    ParagraphRepository,
-    StatsRepository,
-)
+from src.storage import Storage
+from src.storage.contracts.stores import ChapterStore, StatisticsStore
 
 __all__ = [
     "_fetch_timeline_data",
@@ -36,9 +32,9 @@ __all__ = [
 
 def load_core_results(
     run_id: str,
-    stats_repo: StatsRepository,
-    annotation_repo: AnnotationRepository,
-    chapter_repo: ChapterRepository,
+    stats_repo: StatisticsStore,
+    annotation_repo: Storage,
+    chapter_repo: ChapterStore,
 ) -> tuple[list, list[str]]:
     """
     加载核心结果数据：paragraph_curves、缺失字段
@@ -53,7 +49,7 @@ def load_core_results(
 
     missing_fields: list[str] = []
 
-    paragraph_repo = ParagraphRepository(annotation_repo.session)
+    paragraph_repo = annotation_repo.paragraphs
     paragraph_curves = _fetch_paragraph_curves(run_id, paragraph_repo, None)
     if not paragraph_curves:
         missing_fields.append("paragraph_curves")
@@ -64,8 +60,8 @@ def load_core_results(
 def load_character_bundle(
     run_id: str,
     novel_id: str,
-    stats_repo: StatsRepository,
-    annotation_repo: AnnotationRepository,
+    stats_repo: StatisticsStore,
+    annotation_repo: Storage,
     export_graph_view: ExportGraphAuthorityView,
     diagnosis: Any | None = None,
 ) -> tuple[Any, dict[str, float] | None, list[str] | None, set[str], list[str]]:
@@ -79,7 +75,7 @@ def load_character_bundle(
     missing_fields: list[str] = []
 
     if diagnosis is None:
-        diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
+        diagnosis = _fetch_diagnosis(run_id, novel_id, annotation_repo)
     diagnosis_is_available = _has_diagnosis_result(diagnosis)
     if not diagnosis_is_available:
         missing_fields.append("diagnosis")
@@ -97,7 +93,7 @@ def load_character_bundle(
         missing_fields.append("characters")
     valid_character_names = {character.name for character in characters}
     # export 过滤口径必须和同一份 authority view 对齐，避免这里再回退到
-    # GraphRepository 原始查询，导致 dangling 过滤与 export graph payload 分叉
+    # GraphStore 原始查询，导致 dangling 过滤与 export graph payload 分叉
     valid_character_names = valid_character_names | {
         entity.name for entity in export_graph_view.canonical_entities if entity.entity_type == "character"
     }
@@ -107,7 +103,7 @@ def load_character_bundle(
 
 def load_chapter_bundle(
     run_id: str,
-    annotation_repo: AnnotationRepository,
+    annotation_repo: Storage,
     valid_character_names: set[str],
     export_graph_view: ExportGraphAuthorityView,
 ) -> tuple[list, list, list[str]]:
@@ -123,7 +119,7 @@ def load_chapter_bundle(
     missing_fields: list[str] = []
 
     # 2026-08-14 切换段落：主题聚合源改为 paragraph_topics token 加权聚合（§11.1）
-    paragraph_repo = ParagraphRepository(annotation_repo.session)
+    paragraph_repo = annotation_repo.paragraphs
     topics = _fetch_topics(run_id, paragraph_repo)
     # 2026-09-05 A6：artifact 缺失导致聚合被静默清空时，给出显式原因进 missing_fields
     if not topics:
@@ -159,9 +155,9 @@ def load_graph_signal_bundle(
 def load_aggregate_metrics_bundle(
     run_id: str,
     novel_id: str,
-    stats_repo: StatsRepository,
-    annotation_repo: AnnotationRepository,
-    chapter_repo: ChapterRepository,
+    stats_repo: StatisticsStore,
+    annotation_repo: Storage,
+    chapter_repo: ChapterStore,
 ) -> tuple[Any, Any, dict[str, Any]]:
     """
     加载非 graph 的聚合结论
@@ -171,9 +167,9 @@ def load_aggregate_metrics_bundle(
     """
 
     global_stats = _fetch_global_stats(run_id, stats_repo, chapter_repo)
-    token_usage_stats = _fetch_token_usage_stats(run_id, stats_repo)
+    token_usage_stats = _fetch_token_usage_stats(run_id, annotation_repo)
 
-    aggregate_metrics = get_metrics_service().get_aggregate_metrics_contract(run_id, stats_repo.session)
+    aggregate_metrics = get_metrics_service().get_aggregate_metrics_contract(run_id, annotation_repo)
 
     return global_stats, token_usage_stats, aggregate_metrics
 
@@ -181,9 +177,9 @@ def load_aggregate_metrics_bundle(
 def load_export_relation_bundle(
     run_id: str,
     novel_id: str,
-    stats_repo: StatsRepository,
-    annotation_repo: AnnotationRepository,
-    chapter_repo: ChapterRepository,
+    stats_repo: StatisticsStore,
+    annotation_repo: Storage,
+    chapter_repo: ChapterStore,
     valid_character_names: set[str],
     export_graph_view: ExportGraphAuthorityView,
     graph_report: GraphAuthorityReport,
@@ -236,8 +232,8 @@ def load_export_relation_bundle(
 
 def _fetch_timeline_data(
     run_id: str,
-    chapter_repo: ChapterRepository,
-    stats_repo: StatsRepository,
+    chapter_repo: ChapterStore,
+    storage: Storage,
 ) -> dict[str, Any] | None:
     """导出与正式页面使用同一独立变化查询，包含全部章节与变化"""
-    return PlotlineQuery(stats_repo.session, run_id).export()
+    return PlotlineQuery(storage, run_id).export()

@@ -64,7 +64,7 @@ def test_case_write_channel_mounts_annotation_writer_into_store():
     store: dict[str, object] = {}
     tools = {
         item.name: item
-        for item in build_diagnosis_tools(MagicMock(), "run", work_id="work", case_writes_graph=MagicMock(),
+        for item in build_diagnosis_tools(MagicMock(), "run", case_id="case", case_writes_graph=MagicMock(),
                                          case_writer_store=store)
     }
     assert {"write_entity", "write_relation", "write_dialogue"} <= set(tools)
@@ -73,7 +73,7 @@ def test_case_write_channel_mounts_annotation_writer_into_store():
         for name, tool in tools.items()
         if name in set(CASE_WRITE_TOOL_NAMES)
     )
-    assert set(store) == {"work"}
+    assert set(store) == {"case"}
 
 
 def test_read_metrics_keeps_original_signals_and_named_material_fields():

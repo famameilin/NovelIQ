@@ -94,8 +94,7 @@ def test_build_invocation_context_maps_annotation_to_agent_call_type() -> None:
         attempt_number=1,
         model="test-model",
         chapter_id=1,
-        work_id="work-1",
-        role="solo",
+        role="annotation",
     )
     assert annotation["call_type"] == "agent"
     diagnosis = build_invocation_context(
@@ -104,6 +103,8 @@ def test_build_invocation_context_maps_annotation_to_agent_call_type() -> None:
         execution_id="exec-2",
         attempt_number=1,
         model="test-model",
+        role="case",
+        case_anchor="case-1",
     )
     assert diagnosis["call_type"] == "diagnosis"
 

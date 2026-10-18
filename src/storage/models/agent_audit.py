@@ -1,16 +1,4 @@
-"""
-模型与工具调用审计及消息发件箱 ORM 模型（2026-10-16 全库 3NF 改造）
-
-- model_calls：每条真实模型请求及该请求的审计观测（Agent 上下文或 standalone
-  上下文恰一；用量分项/供应商实报总量/费用/五类计时/通信文档均为本表明确列）
-- agent_tool_calls：每次真实外层工具调用及该调用的审计观测（原始参数与实际
-  执行参数分别保存，工具耗时独立测量）
-- event_outbox：实际消息、路由、游标与投递时间（emitted_bytes 原样重放）
-
-审计保持独立短事务；合成总量/合成耗时读取计算（turn_ms = model_ms + tool_wall_ms
-按原规则），供应商实报与程序 fallback 明确区分；bytes 文档仅原样审计/展示，
-不用于正式业务查询/修改。
-"""
+"模型与工具调用审计及消息发件箱 ORM 模型（2026-10-16 全库 3NF 改造）"
 
 from __future__ import annotations
 
@@ -28,21 +16,19 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
+
+from src.storage.ids import new_id
+from src.storage.uuid_type import Uuid7 as Uuid
 
 from .base import Base, naive_utcnow
 
 
 class ModelCall(Base):
-    """
-    模型调用表（每条真实请求一行）
-
-    Agent 调用有 execution+turn（(execution,turn) 唯一，turn 从 1 起）；
-    非 Agent 调用相反（standalone_* 上下文），不伪造 work。调用前失败不生成
-    turn=0 的假请求。
-    """
+    "模型调用表（每条真实请求一行）"
 
     __tablename__ = "model_calls"
     __table_args__ = (
@@ -55,15 +41,20 @@ class ModelCall(Base):
             name="ck_model_calls_shape",
         ),
         Index(
-            "uq_model_calls_execution_turn", "execution_id", "turn_index",
-            unique=True, postgresql_where=sql_text("execution_id IS NOT NULL"),
+            "uq_model_calls_execution_turn",
+            "execution_id",
+            "turn_index",
+            unique=True,
+            postgresql_where=sql_text("execution_id IS NOT NULL"),
         ),
         Index("idx_model_calls_status", "status"),
         Index("idx_model_calls_standalone_run", "standalone_run_id"),
         {"comment": "模型调用表：真实请求的模型/状态/用量/费用/计时/通信文档（Agent 或 standalone 恰一）"},
     )
 
-    call_id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True, comment="调用流水")
+    call_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="调用流水", default=new_id, autoincrement=False
+    )
     model: Mapped[str] = mapped_column(String(100), nullable=False, comment="模型名")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="running", comment="调用状态")
     error: Mapped[str | None] = mapped_column(Text, nullable=True, comment="调用错误信息")
@@ -75,7 +66,7 @@ class ModelCall(Base):
 
     # Agent 上下文（execution+turn 恰一于 standalone 组）
     execution_id: Mapped[str | None] = mapped_column(
-        String(64),
+        Uuid(as_uuid=False),
         ForeignKey("executions.execution_id", ondelete="CASCADE", name="model_calls_execution_fkey"),
         nullable=True,
         comment="所属真实 invocation",
@@ -84,7 +75,7 @@ class ModelCall(Base):
 
     # 非 Agent 独立上下文（不伪造成 work）
     standalone_run_id: Mapped[str | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("analysis_runs.run_id", ondelete="CASCADE", name="model_calls_standalone_run_fkey"),
         nullable=True,
         comment="独立调用所属分析运行",
@@ -114,23 +105,19 @@ class ModelCall(Base):
     tool_wall_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="工具墙钟耗时（毫秒）")
 
     # 真实通信/提示正文/审计观察/计时备注文档（原样审计，仅展示/重放）
-    request_messages_bytes: Mapped[bytes | None] = mapped_column(
-        LargeBinary, nullable=True, comment="实际发送消息文档"
-    )
+    request_messages_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, comment="实际发送消息文档")
     raw_response_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, comment="供应商原始回执文档")
     context_observed_bytes: Mapped[bytes | None] = mapped_column(
         LargeBinary, nullable=True, comment="当时审计上下文文档"
     )
-    timing_notes_bytes: Mapped[bytes | None] = mapped_column(
-        LargeBinary, nullable=True, comment="有序计时诊断备注文档"
-    )
+    timing_notes_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, comment="有序计时诊断备注文档")
 
     def __repr__(self) -> str:
         return f"<ModelCall(call_id={self.call_id}, model={self.model}, status={self.status})>"
 
 
 class AgentToolCall(Base):
-    """工具调用表：每次真实外层工具调用的身份、顺序与观察字节"""
+    "工具调用表：每次真实外层工具调用的身份、顺序与观察字节"
 
     __tablename__ = "agent_tool_calls"
     __table_args__ = (
@@ -138,9 +125,11 @@ class AgentToolCall(Base):
         {"comment": "工具调用审计表：每个工具调用一行（原始参数与实际执行参数分列保存）"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True, comment="工具调用流水")
-    call_id: Mapped[int] = mapped_column(
-        BigInteger,
+    id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="工具调用流水", default=new_id, autoincrement=False
+    )
+    call_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
         ForeignKey("model_calls.call_id", ondelete="CASCADE", name="agent_tool_calls_call_fkey"),
         nullable=False,
         comment="所属模型调用",
@@ -161,31 +150,36 @@ class AgentToolCall(Base):
     response_observed_bytes: Mapped[bytes | None] = mapped_column(
         LargeBinary, nullable=True, comment="原始工具返回文档"
     )
-    receipt_observed_bytes: Mapped[bytes | None] = mapped_column(
-        LargeBinary, nullable=True, comment="原始程序回执文档"
-    )
+    receipt_observed_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, comment="原始程序回执文档")
 
     def __repr__(self) -> str:
         return f"<AgentToolCall(id={self.id}, tool={self.tool_name}, status={self.status})>"
 
 
 class EventOutbox(Base):
-    """SSE 发件箱表：实际展示消息、路由、稳定游标与投递时间"""
+    "SSE 发件箱表：实际展示消息、路由、稳定游标与投递时间"
 
     __tablename__ = "event_outbox"
     __table_args__ = (
+        UniqueConstraint("run_id", "message_key", name="uq_outbox_run_message"),
         Index("idx_event_outbox_created", "created_at"),
         Index("idx_event_outbox_run_type", "run_id", "event_type"),
         {"comment": "SSE 事件发件箱表：消息身份、全局游标、路由与实际投递（emitted_bytes 原样重放）"},
     )
 
-    event_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="消息身份")
+    message_key: Mapped[str] = mapped_column(String(255), nullable=False, comment="实际投递消息幂等键")
+    event_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="消息身份", default=new_id, autoincrement=False
+    )
     stream_id: Mapped[int] = mapped_column(
-        BigInteger, Identity(), nullable=False, unique=True,
+        BigInteger,
+        Identity(),
+        nullable=False,
+        unique=True,
         comment="全局单调游标（产生时分配）",
     )
     run_id: Mapped[str] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("analysis_runs.run_id", ondelete="CASCADE", name="event_outbox_run_fkey"),
         nullable=False,
         comment="真实路由运行",
@@ -193,9 +187,7 @@ class EventOutbox(Base):
     chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="真实路由章节编号（可空）")
     event_type: Mapped[str] = mapped_column(String(60), nullable=False, comment="事件类型")
     emitted_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, comment="实际发出消息字节")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=naive_utcnow, comment="产生时间"
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="产生时间")
     published_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, comment="实际投递时间（未投递为空，不补创建时间）"
     )

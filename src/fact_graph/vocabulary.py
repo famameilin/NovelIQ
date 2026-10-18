@@ -130,7 +130,7 @@ _TONE_CHINESE_WORDS = frozenset(member.value for member in Tone)
 
 
 # 2026-10-04 合同由"缺失/越界即拒"改"缺省归一"（run 08f9ba42 审计：participants 族
-# 拒绝 482 次=全部被拒 53%，且是子代理盲发死循环的唯一燃料）。两条生产路径共用。
+# 拒绝 482 次=全部被拒 53%，且是职责 Agent 盲发死循环的唯一燃料）。两条生产路径共用。
 ROLE_FUNCTION_ALIASES: dict[str, str] = {
     "主角": "主体",
     "发起者": "主体",

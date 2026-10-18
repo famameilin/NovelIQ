@@ -1,16 +1,16 @@
-"""章内三代理并发：单个 subagent 的局部标注（内存对象，零新表零迁移）
+"""章内三代理并发：单个 agent 的局部标注（内存对象，零新表零迁移）
 
 设计（《章内多代理重设计-三代理并发版》§3.1/§4）：
 
-- 三个 subagent 各持整章正文、各管一类产出、**互不通信**：结构 subagent 交 entity/relation，
-  事件 subagent 交 event/participants，证据 subagent 交 dialogue/label/metric/pending；
+- 三个 agent 各持整章正文、各管一类产出、**互不通信**：结构 agent 交 entity/relation，
+  事件 agent 交 event/participants，证据 agent 交 dialogue/label/metric/pending；
 - 实体引用写正文名字与大类，由运行时解析并自动登记，不再写 id；
   entity 的局部键仅绑定富登记锚点；事件仍用 el 路径，对话仍用候选号
 - 每条记录自带 evidence=段首可见号（正文每段开头的 `N：` 里的 N），构造当场只校验
   "号在本章且存在"（多号/越界结构化拒绝并列出合法号范围），不再逐字比对引文；
 - 闭集词表一律从 schema.py / tools.py 单源引用，本模块不复制任何词表。
 
-**本模块的数据类只承载"这个 subagent 已经写成了什么"**：构造器先经生产单条事务边界写入，
+**本模块的数据类只承载"这个 agent 已经写成了什么"**：构造器先经生产单条事务边界写入，
 成功后才把记录落进这里（写入生效）。所以本模块的列表既是进度账本，也是后续引用的
 唯一依据——引用一个没写成功的键，构造器当场结构化拒绝。
 """
@@ -37,11 +37,10 @@ from src.fact_graph.vocabulary import (
 
 from .ir_validation import _reject, _require_paragraph_id
 
-# 章内 subagent 的角色名：多块章开三条职责 subagent 并发（单块章走 runner 的
-# agent 路径，不再有 solo 形态；职责范围文案在 prompts.SUBAGENT_ROLE_SCOPES）
-SUBAGENT_ROLES: tuple[str, ...] = ("structure", "event", "evidence")
+# 章内 agent 的角色名：长章开三条职责 agent 并发（短章走整章 annotation 路径；
+# 职责范围文案在 prompts.AGENT_ROLE_SCOPES）
 
-# 待决项类型：subagent 判不了、要留给案例池/后续章节的事项（§3.1 的 pending）
+# 待决项类型：agent 判不了、要留给案例池/后续章节的事项（§3.1 的 pending）
 PENDING_KINDS: dict[str, str] = {
     "unresolved_reference": "引用无法解析（正文里的人名/称号在本章找不到对应实体）",
     "event_continuation": "事件延续（本章事件像是既有事件树某节点的后继或同一事件的两段）",
@@ -49,7 +48,7 @@ PENDING_KINDS: dict[str, str] = {
     "other": "其他需要统一裁决的事项",
 }
 
-# 闭集词表单源：全部从 schema/tools 的枚举与注册表派生，三个 subagent 的报错文案共用
+# 闭集词表单源：全部从 schema/tools 的枚举与注册表派生，三个 agent 的报错文案共用
 ENTITY_TYPES: tuple[str, ...] = tuple(member.value for member in EntityType)
 DIALOGUE_VERDICTS: tuple[str, ...] = tuple(member.value for member in DialogueVerdict)
 TONE_VALUES: tuple[str, ...] = tuple(member.value for member in Tone)
@@ -62,7 +61,7 @@ RELATION_TYPES: tuple[str, ...] = tuple(RELATION_DEFINITIONS)
 
 # el 层级路径分隔符与根事件保留节点键：权威定义在 schema（与正式写入的事件账本同源：
 # 根=树键、子=树键/节点键；本模块只用于核验落库形态）
-# 角色命名空间分隔符：subagent 的引用键是各自局部的（三个 subagent 都可能用 a1/t1），
+# 角色命名空间分隔符：agent 的引用键是各自局部的（三个 agent 都可能用 a1/t1），
 # 落库 el 一律按 `角色:局部键` 命名空间化，避免同名键互相占用（见 namespace_el）
 
 # 待决项种类 → 案例池 type（案例池的 type 是自由文本，这里是唯一的机械映射处；
@@ -78,7 +77,7 @@ PENDING_CASE_TYPES: dict[str, str] = {
 
 
 @dataclass(frozen=True, slots=True)
-class SubagentEvidence:
+class AgentEvidence:
     """按 id 锚定的一条证据（段首可见号，正文每段开头的 `N：` 里的 N）"""
 
     paragraph_id: int
@@ -95,8 +94,8 @@ def normalize_evidence(
     paragraph_text_by_id: dict[int, str],
     field_name: str = "evidence",
     required: bool = True,
-) -> tuple[SubagentEvidence, ...]:
-    """用于把模型提交的证据归一成按 id 锚定的 SubagentEvidence（不合格即结构化拒绝）
+) -> tuple[AgentEvidence, ...]:
+    """用于把模型提交的证据归一成按 id 锚定的 AgentEvidence（不合格即结构化拒绝）
 
     只按 id 锚定：evidence 是**单个段首可见号整数**，校验只要求"号在本章且存在"
     （服务端按号取段），不再逐字比对引文。给成数组（多号）或号越界时结构化拒绝，
@@ -127,17 +126,17 @@ def normalize_evidence(
         field_name=field_name,
         paragraph_text_by_id=paragraph_text_by_id,
     )
-    return (SubagentEvidence(paragraph_id=raw),)
+    return (AgentEvidence(paragraph_id=raw),)
 
 
-def _evidence_view(evidence: tuple[SubagentEvidence, ...]) -> list[dict[str, Any]]:
+def _evidence_view(evidence: tuple[AgentEvidence, ...]) -> list[dict[str, Any]]:
     """用于渲染证据列表（回执与审计用）"""
     return [entry.to_dict() for entry in evidence]
 
 
 @dataclass(slots=True)
-class SubagentEntity:
-    """结构 subagent 登记的一个实体（id=富登记锚点键，name=正文名字）"""
+class AgentEntity:
+    """结构 agent 登记的一个实体（id=富登记锚点键，name=正文名字）"""
 
     id: str
     name: str
@@ -145,7 +144,7 @@ class SubagentEntity:
     tags: list[str] = field(default_factory=list)
     description: str | None = None
     representative: bool | None = None
-    evidence: tuple[SubagentEvidence, ...] = ()
+    evidence: tuple[AgentEvidence, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """用于渲染记录明细"""
@@ -161,8 +160,8 @@ class SubagentEntity:
 
 
 @dataclass(slots=True)
-class SubagentRelation:
-    """结构 subagent 写的一条闭合关系边（两端写正文名字与大类）
+class AgentRelation:
+    """结构 agent 写的一条闭合关系边（两端写正文名字与大类）
 
     2026-10-02 对齐 0.2.0 写面：本章只确认局部关系（建边），不再携带 change_kind
     关系变化——跨章关系变化由 write_link 关联工具承担。
@@ -171,7 +170,7 @@ class SubagentRelation:
     from_entity: EntityNameRef
     to_entity: EntityNameRef
     relation_type: str
-    evidence: tuple[SubagentEvidence, ...] = ()
+    evidence: tuple[AgentEvidence, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """用于渲染记录明细"""
@@ -184,8 +183,8 @@ class SubagentRelation:
 
 
 @dataclass(slots=True)
-class SubagentParticipant:
-    """事件 subagent 挂到一个事件节点上的参与者（名字与大类由运行时自动登记）
+class AgentParticipant:
+    """事件 agent 挂到一个事件节点上的参与者（名字与大类由运行时自动登记）
 
     2026-10-04 合同放开：role/narrative_role/action/emotion 均可缺省——role 未知词与
     缺省由生产面按实体登记大类给默认，叙事功能近义词归一、情绪分值钳制在构造层完成。
@@ -211,8 +210,8 @@ class SubagentParticipant:
 
 
 @dataclass(slots=True)
-class SubagentEvent:
-    """事件 subagent 写的一个事件节点（el 层级路径表达树形，树内先后=调用顺序）"""
+class AgentEvent:
+    """事件 agent 写的一个事件节点（el 层级路径表达树形，树内先后=调用顺序）"""
 
     el: str
     isroot: bool
@@ -226,8 +225,8 @@ class SubagentEvent:
     isforeshadowing: bool = False
     confidence: str | None = None
     node_type: str | None = None
-    participants: list[SubagentParticipant] = field(default_factory=list)
-    evidence: tuple[SubagentEvidence, ...] = ()
+    participants: list[AgentParticipant] = field(default_factory=list)
+    evidence: tuple[AgentEvidence, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """用于渲染记录明细"""
@@ -250,14 +249,14 @@ class SubagentEvent:
 
 
 @dataclass(slots=True)
-class SubagentDialogue:
-    """证据 subagent 对一条对话候选的判定（说话人写正文名字与 character 大类）"""
+class AgentDialogue:
+    """证据 agent 对一条对话候选的判定（说话人写正文名字与 character 大类）"""
 
     candidate_index: int
     verdict: str
     speaker: EntityNameRef | None = None
     tone: str | None = None
-    evidence: tuple[SubagentEvidence, ...] = ()
+    evidence: tuple[AgentEvidence, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """用于渲染记录明细"""
@@ -271,8 +270,8 @@ class SubagentDialogue:
 
 
 @dataclass(slots=True)
-class SubagentLabel:
-    """证据 subagent 给一个段落打的整段情绪标签（段落号本身就是锚点，无引文）"""
+class AgentLabel:
+    """证据 agent 给一个段落打的整段情绪标签（段落号本身就是锚点，无引文）"""
 
     paragraph_id: int
     emotion: int
@@ -283,8 +282,8 @@ class SubagentLabel:
 
 
 @dataclass(slots=True)
-class SubagentMetric:
-    """证据 subagent 一次性提交的章级指标（整域一次提交，无引文）"""
+class AgentMetric:
+    """证据 agent 一次性提交的章级指标（整域一次提交，无引文）"""
 
     summary: str | None = None
     emotional_valence: int | None = None
@@ -304,7 +303,7 @@ class SubagentMetric:
 
 
 @dataclass(slots=True)
-class SubagentPending:
+class AgentPending:
     """局部待决记录：显式归入案例类型 + 普通文字说明"""
 
     case_type: str
@@ -315,33 +314,33 @@ class SubagentPending:
 
 
 @dataclass(slots=True)
-class SubagentAnnotation:
-    """一个 subagent 的全部产出（构造器写入生效后落在它上面：本 subagent 已写成的记录）
+class AgentAnnotation:
+    """一个 agent 的全部产出（构造器写入生效后落在它上面：本 agent 已写成的记录）
 
-    记录按"自然键"去重（实体=本 subagent id、事件=el、对话=候选号、标签=段首号、指标=整域），
+    记录按"自然键"去重（实体=本 agent id、事件=el、对话=候选号、标签=段首号、指标=整域），
     同键重写=更新语义，与正式写入同口径。
     """
 
     role: str
     chapter_label: str | None = None
-    entities: list[SubagentEntity] = field(default_factory=list)
-    relations: list[SubagentRelation] = field(default_factory=list)
-    events: list[SubagentEvent] = field(default_factory=list)
-    dialogues: list[SubagentDialogue] = field(default_factory=list)
-    labels: list[SubagentLabel] = field(default_factory=list)
-    metric: SubagentMetric | None = None
-    pending: list[SubagentPending] = field(default_factory=list)
+    entities: list[AgentEntity] = field(default_factory=list)
+    relations: list[AgentRelation] = field(default_factory=list)
+    events: list[AgentEvent] = field(default_factory=list)
+    dialogues: list[AgentDialogue] = field(default_factory=list)
+    labels: list[AgentLabel] = field(default_factory=list)
+    metric: AgentMetric | None = None
+    pending: list[AgentPending] = field(default_factory=list)
     plotlines: list[dict[str, Any]] = field(default_factory=list)
     foreshadow_actions: list[dict[str, Any]] = field(default_factory=list)
     coverage: tuple[int, ...] = ()
     finished: bool = False
 
-    def event_keys(self) -> dict[str, SubagentEvent]:
-        """用于取本 subagent 已构造的事件表（participants 引用校验用）"""
+    def event_keys(self) -> dict[str, AgentEvent]:
+        """用于取本 agent 已构造的事件表（participants 引用校验用）"""
         return {item.el: item for item in self.events}
 
-    def entity_ids(self) -> dict[str, SubagentEntity]:
-        """用于取本 subagent 的实体引用表（relation/participants/dialogue/pending 引用校验用）"""
+    def entity_ids(self) -> dict[str, AgentEntity]:
+        """用于取本 agent 的实体引用表（relation/participants/dialogue/pending 引用校验用）"""
         return {item.id: item for item in self.entities}
 
     def counts(self) -> dict[str, int]:
@@ -359,7 +358,7 @@ class SubagentAnnotation:
         }
 
     def index(self) -> dict[str, Any]:
-        """用于渲染本 subagent 产出的紧凑索引（日志与离线对照用）"""
+        """用于渲染本 agent 产出的紧凑索引（日志与离线对照用）"""
         return {
             "role": self.role,
             "finished": self.finished,

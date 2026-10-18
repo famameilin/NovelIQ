@@ -42,6 +42,7 @@ from tests.support.event_tree_fixtures import (
     add_declaration,
     add_diagnosis_context,
     first_paragraph,
+    report_case_anchor,
 )
 
 CONTRACT = "event-tree-declarations-v1"
@@ -61,10 +62,10 @@ class OrganizationCase:
             chapter_ids=list(range(1, chapters + 1)),
             title="组织测试",
         )
-        self.session_id, self.work_id, self.execution_id = add_diagnosis_context(session, self.run_id)
+        self.session_id, self.execution_id = add_diagnosis_context(session, self.run_id)
         self.declarations: list[str] = []
         for chapter_id in range(1, chapters + 1):
-            record_id, _work_id, _execution_id = add_annotation_source(
+            record_id, _execution_id = add_annotation_source(
                 session, self.run_id, chapter_id, role="event"
             )
             phrase = PHRASES[(chapter_id - 1) % len(PHRASES)]
@@ -85,7 +86,8 @@ class OrganizationCase:
 def identity_draft(session, case: OrganizationCase) -> EventOrganizationDraft:
     """逐项提交身份判断、声明核对与来源比较，随后冻结身份"""
     draft = EventOrganizationDraft(session, case.run_id, case.session_id)
-    draft.work_id = draft.producer_invocation_id = case.execution_id
+    draft.case_id = report_case_anchor(case.run_id)
+    draft.producer_invocation_id = case.execution_id
     sources = list(draft._declarations().values())
     for row in sources:
         evidence = [OrganizationEvidence(paragraph_id=row["evidence"][0]["paragraph_id"])]
@@ -442,7 +444,7 @@ def test_old_chapter_contract_cannot_be_promoted_by_diagnosis(db_session, organi
     draft.review_events(event_ids, reason="已核对")
     _freeze_structure(draft)
     stale_run_id = draft.run_id
-    add_annotation_source(db_session, stale_run_id, 1, role="structure", contract_version="old")
+    add_annotation_source(db_session, stale_run_id, 1, role="metric", contract_version="old")
     db_session.flush()
     with pytest.raises(ValueError, match="旧契约.*重建"):
         draft.finish()

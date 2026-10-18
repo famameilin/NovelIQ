@@ -31,24 +31,22 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import cast
 
 from gensim.models import KeyedVectors, Word2Vec
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.lexicons.constants import LEXICON_FILES
 from src.linguistic import TrainResult
 from src.linguistic.queries import fetch_paragraph_labels
 from src.sse.events import StreamEvent
-from src.storage.repositories import ParagraphRepository
-from src.storage.repositories.linguistic_repository import LinguisticRepository
+from src.storage import Storage
+from src.storage.contracts.stores import LinguisticStore, ParagraphStore
 
 
 async def run_linguistic(
     run_id: str,
-    session: Session,
+    session: Storage,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     *,
     batch_size: int = 128,
@@ -62,8 +60,8 @@ async def run_linguistic(
     from src.utils.cancellation import check_cancelled
 
     start_time = time.time()
-    paragraph_repo = ParagraphRepository(session)
-    ling_repo = LinguisticRepository(session)
+    paragraph_repo = session.paragraphs
+    ling_repo = session.linguistic
 
     ltp_settings = settings.linguistic.ltp
     w2v_settings = settings.linguistic.word2vec
@@ -188,8 +186,6 @@ async def run_linguistic(
                 paragraph_tokens[row.paragraph_id] = tokens
                 token_sequences.append([t["text"] for t in tokens])
 
-            ling_repo.insert_linguistic_features(run_id, feature_rows, clear_first=first_batch)
-            ling_repo.insert_entities(run_id, entity_rows, clear_first=first_batch)
             total_feature_paragraphs += len(feature_rows)
             logger.info(f"LTP 事实落库：段落={len(feature_rows)} 实体候选={len(entity_rows)}")
 
@@ -218,9 +214,16 @@ async def run_linguistic(
                             "is_metric_hit": hit.is_metric_hit,
                         }
                     )
-            ling_repo.insert_phrase_hits(run_id, phrase_rows, clear_first=first_batch)
+
             # 短语完成事实覆盖本批全部段落（含零命中：完成≠有命中）
-            ling_repo.mark_phrase_completed(run_id, [int(row.paragraph_id) for row in batch])
+            ling_repo.save_batch(
+                run_id,
+                feature_rows,
+                entity_rows,
+                phrase_rows,
+                [int(row.paragraph_id) for row in batch],
+                clear_first=first_batch,
+            )
             logger.info(f"固定短语落库：{len(phrase_rows)} 行（词表 {fixed_phrase_key}）")
             first_batch = False
 
@@ -240,7 +243,7 @@ async def run_linguistic(
     # paragraph_features 的 semantic_vector 行（preprocess 落库），故挂在
     # ltp 闸门之外；标签不足或类别单一时无边界（两列 NULL），不伪造。
     check_cancelled(is_cancelled)
-    boundary_rows = _apply_paragraph_boundary_scores(run_id, paragraph_repo, ling_repo)
+    boundary_rows = _apply_paragraph_boundary_scores(session, run_id, paragraph_repo, ling_repo)
     if boundary_rows:
         logger.info(f"段落级边界打分回写：{boundary_rows} 段获得分值（样本来自标注 agent 自选段标签）")
 
@@ -291,9 +294,10 @@ async def run_linguistic(
 
 
 def _apply_paragraph_boundary_scores(
+    session: Storage,
     run_id: str,
-    paragraph_repo: ParagraphRepository,
-    ling_repo: LinguisticRepository,
+    paragraph_repo: ParagraphStore,
+    ling_repo: LinguisticStore,
 ) -> int:
     """2026-09-14 段落级监督（按书边界，用户定稿）：全书自选段标签 → 岭回归边界 → 逐段打分
 
@@ -310,7 +314,6 @@ def _apply_paragraph_boundary_scores(
 
     from src.linguistic import fit_emotion_boundary
 
-    session = paragraph_repo.session
     labels = fetch_paragraph_labels(session, run_id)
     if len(labels) < 2:
         logger.info("段落边界跳过：自选段标签不足 2 条（无法拟合边界），两列保持 NULL")
@@ -353,9 +356,9 @@ def _apply_paragraph_boundary_scores(
 
 
 def _apply_mneg_correction(
-    session: Session,
+    session: Storage,
     run_id: str,
-    paragraph_repo: ParagraphRepository,
+    paragraph_repo: ParagraphStore,
     corrections: list[dict[str, float | int]],
 ) -> int:
     """2026-09-05 B 批：mNEG 情绪修正回写（sdp 否定辖域接管窗口规则）
@@ -368,25 +371,9 @@ def _apply_mneg_correction(
     if not corrections:
         return 0
 
-    from sqlalchemy import bindparam, update
-    from sqlalchemy.sql.schema import Table as SaTable
-
-    from src.storage.models import ParagraphMetric
     from src.workflows.paragraph_curves import compute_paragraph_curves
 
     # Core 表对象（绕开 ORM 按主键批量更新拦截）；synchronize_session=False 同理
-    metric_table = cast(SaTable, ParagraphMetric.__table__)
-    statement = (
-        update(metric_table)
-        .where(
-            metric_table.c.run_id == bindparam("b_run_id"),
-            metric_table.c.paragraph_id == bindparam("b_paragraph_id"),
-        )
-        .values(
-            positive_weight_sum=bindparam("b_pos"),
-            negative_weight_sum=bindparam("b_neg"),
-        )
-    )
     params = [
         {
             "b_run_id": run_id,
@@ -396,7 +383,7 @@ def _apply_mneg_correction(
         }
         for row in corrections
     ]
-    session.execute(statement, params, execution_options={"synchronize_session": False})
+    session.linguistic.apply_mneg(params)
 
     paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
     metric_rows = paragraph_repo.fetch_paragraph_metrics(run_id)
@@ -408,7 +395,7 @@ def _apply_mneg_correction(
 
 def _train_and_build(
     run_id: str,
-    ling_repo: LinguisticRepository,
+    ling_repo: LinguisticStore,
     token_sequences: list[list[str]],
     paragraph_tokens: dict[int, list[dict[str, str]]],
     *,

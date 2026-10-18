@@ -11,8 +11,6 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from loguru import logger
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from src.diagnosis.normalization import (
     derive_focus_structure_from_characters,
@@ -25,97 +23,49 @@ from src.diagnosis.normalization import (
 )
 from src.diagnosis.read_models import DiagnosisReadResult
 from src.diagnosis.vocabulary import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
-from src.event_trees.storage_map import run_execution_ids
+from src.storage import Storage
 from src.utils.parsing import parse_int_field, parse_json_field
 
 
-def _declaration_bindings(session: Session, run_id: str) -> dict[str, str]:
+def _declaration_bindings(session: Storage, run_id: str) -> dict[str, str]:
     """正式声明绑定：阶段版本绑定声明，完整事件→声明，供伏笔预期沿绑定取事件身份"""
-    from src.storage.models import CompleteEvent, EventRevision
-
-    stmt = (
-        select(EventRevision.declaration_id, EventRevision.event_id)
-        .join(CompleteEvent, CompleteEvent.event_id == EventRevision.event_id)
-        .where(
-            EventRevision.declaration_id.is_not(None),
-            CompleteEvent.producer_execution_id.in_(run_execution_ids(run_id)),
-        )
-    )
-    return {str(declaration_id): str(event_id) for declaration_id, event_id in session.execute(stmt)}
+    return {
+        str(_stored_row_1.declaration_id): str(_stored_row_1.event_id)
+        for _stored_row_1 in session.reads.final_diagnosis_read_declaration_bindings_1(run_id)
+    }
 
 
-def fetch_diagnosis_payload(session: Session, run_id: str) -> dict[str, Any] | None:
+def fetch_diagnosis_payload(session: Storage, run_id: str) -> dict[str, Any] | None:
     """正式诊断报告的扁平投影；无报告返回 None（与旧产物读取语义一致）"""
-    from src.storage.models import (
-        AnalysisAssessment,
-        AnalysisRun,
-        DiagnosisReport,
-        Execution,
-        GraphEntity,
-    )
-
-    report = session.scalars(
-        select(DiagnosisReport)
-        .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
-        .where(Execution.session_run_id == run_id)
-        .order_by(DiagnosisReport.created_at.desc(), DiagnosisReport.report_id.desc())
-        .limit(1)
-    ).first()
+    report = session.reads.diagnosis_read_fetch_diagnosis_payload_2(run_id)
     if report is None:
         return None
     report_id = report.report_id
 
     def _labels(column: Any) -> list[str]:
-        return list(
-            session.scalars(
-                select(column)
-                .where(AnalysisAssessment.report_id == report_id, column.is_not(None))
-                .order_by(AnalysisAssessment.ordinal)
-            )
-        )
+        return list(session.reads.diagnosis_read_labels_1(column, report_id))
 
     def _members(cast_role: str) -> list[str]:
-        stmt = (
-            select(GraphEntity.canonical_name)
-            .join(AnalysisAssessment, AnalysisAssessment.cast_entity_id == GraphEntity.entity_id)
-            .where(
-                AnalysisAssessment.report_id == report_id,
-                AnalysisAssessment.cast_role == cast_role,
-            )
-            .order_by(AnalysisAssessment.ordinal)
-        )
-        return list(session.scalars(stmt))
+        return list(session.reads.diagnosis_read_members_1(cast_role, report_id))
 
     topic_labels = {
-        str(row.topic_id): row.topic_label
-        for row in session.scalars(
-            select(AnalysisAssessment)
-            .where(AnalysisAssessment.report_id == report_id, AnalysisAssessment.topic_label.is_not(None))
-            .order_by(AnalysisAssessment.topic_id)
-        )
+        str(row.topic_id): row.topic_label for row in session.reads.diagnosis_read_fetch_diagnosis_payload_3(report_id)
     }
     arc_scores = {
-        str(name): float(score)
-        for name, score in session.execute(
-            select(GraphEntity.canonical_name, AnalysisAssessment.character_score)
-            .join(AnalysisAssessment, AnalysisAssessment.scored_entity_id == GraphEntity.entity_id)
-            .where(
-                AnalysisAssessment.report_id == report_id,
-                AnalysisAssessment.character_score.is_not(None),
-            )
-        )
+        str(_stored_row_2.canonical_name): float(_stored_row_2.character_score)
+        for _stored_row_2 in session.reads.diagnosis_read_fetch_diagnosis_payload_4(report_id)
     }
     from src.event_trees.read.foreshadowing import calculate_foreshadow_expectation
 
     payload: dict[str, Any] = {
         "run_id": run_id,
-        "novel_id": session.scalar(select(AnalysisRun.novel_id).where(AnalysisRun.run_id == run_id)),
+        "novel_id": session.reads.diagnosis_read_fetch_diagnosis_payload_1(run_id),
         "foreshadow_expectation": calculate_foreshadow_expectation(
             session, run_id, declaration_bindings=_declaration_bindings(session, run_id)
         ),
         "arc_scores": arc_scores,
-        "genre_labels": _labels(AnalysisAssessment.genre_label),
-        "style_labels": _labels(AnalysisAssessment.style_label),
+        "genre_labels": _labels("genre_label"),
+        "style_labels": _labels("style_label"),
         "topic_labels": topic_labels,
         "diagnosis": report.diagnosis,
         "value_logic_type": report.value_logic_type,
@@ -136,36 +86,26 @@ def fetch_diagnosis_payload(session: Session, run_id: str) -> dict[str, Any] | N
     return payload
 
 
-def query_diagnosis(
-    run_id: str,
-    novel_id: str,
-    stats_repo: Any,
-) -> DiagnosisReadResult | None:
+def query_diagnosis(run_id: str, novel_id: str, session: Storage) -> DiagnosisReadResult | None:
     """
     从数据库获取诊断结果
     """
-    session: Session = stats_repo.session
     data = fetch_diagnosis_payload(session, run_id)
     if not data:
         return None
-    global_stats = stats_repo.fetch_global_stats_dict(run_id)
-
+    global_stats = session.statistics.fetch_global_stats_dict(run_id)
     focus_characters_raw = parse_json_field(data.get("focus_characters")) if data else None
     focus_characters_normalized = (
         normalize_name_list(focus_characters_raw) if isinstance(focus_characters_raw, list) else focus_characters_raw
     )
-
     main_characters_raw = parse_json_field(data.get("main_characters")) if data else None
     main_characters_normalized = (
         normalize_name_list(main_characters_raw) if isinstance(main_characters_raw, list) else main_characters_raw
     )
-
     core_cast_raw = parse_json_field(data.get("core_cast")) if data else None
     core_cast_normalized = normalize_name_list(core_cast_raw) if isinstance(core_cast_raw, list) else core_cast_raw
-
     arc_scores_raw = parse_json_field(data.get("arc_scores")) if data else None
     arc_scores_normalized = filter_global_arc_scores(normalize_arc_scores(arc_scores_raw))
-
     topic_labels_raw = parse_json_field(data.get("topic_labels")) if data else None
     topic_labels_normalized = normalize_topic_labels(topic_labels_raw)
     genre_labels_raw = parse_json_field(data.get("genre_labels")) if data else None
@@ -186,24 +126,23 @@ def query_diagnosis(
         focus_structure = focus_structure_raw
     else:
         focus_structure = None
-
     focus_characters_filtered = filter_character_list_against_arc_scores(
-        focus_characters_normalized if isinstance(focus_characters_normalized, list) else None,
-        arc_scores_normalized,
+        focus_characters_normalized if isinstance(focus_characters_normalized, list) else None, arc_scores_normalized
     )
     main_characters_filtered = filter_character_list_against_arc_scores(
-        main_characters_normalized if isinstance(main_characters_normalized, list) else None,
-        arc_scores_normalized,
+        main_characters_normalized if isinstance(main_characters_normalized, list) else None, arc_scores_normalized
     )
     core_cast_filtered = filter_character_list_against_arc_scores(
-        core_cast_normalized if isinstance(core_cast_normalized, list) else None,
-        arc_scores_normalized,
+        core_cast_normalized if isinstance(core_cast_normalized, list) else None, arc_scores_normalized
     )
     normalized_focus_structure = derive_focus_structure_from_characters(focus_characters_filtered)
     if focus_structure != normalized_focus_structure:
         logger.warning(
-            "diagnosis focus contract changed after graph-name validation: run_id={} novel_id={} raw_structure={} "
-            "normalized_structure={} raw_focus_characters={} normalized_focus_characters={}",
+            (
+                "diagnosis focus contract changed after graph-name validation: run_id={} nove"
+                "l_id={} raw_structure={} normalized_structure={} raw_focus_characters={} nor"
+                "malized_focus_characters={}"
+            ),
             run_id,
             novel_id,
             focus_structure,
@@ -211,7 +150,6 @@ def query_diagnosis(
             focus_characters_normalized,
             focus_characters_filtered,
         )
-
     return DiagnosisReadResult(
         foreshadow_expectation=data.get("foreshadow_expectation") if data else None,
         arc_scores=arc_scores_normalized,
@@ -229,16 +167,14 @@ def query_diagnosis(
         dignity_reason=data.get("dignity_reason") if data else None,
         cultural_depth_score=data.get("cultural_depth_score") if data else None,
         cultural_depth_reason=data.get("cultural_depth_reason") if data else None,
-        narrative_arc_type=(
-            narrative_arc_type_value.strip()
-            if data
-            and isinstance((narrative_arc_type_value := data.get("narrative_arc_type")), str)
-            and narrative_arc_type_value.strip()
-            else None
-        ),
+        narrative_arc_type=narrative_arc_type_value.strip()
+        if data
+        and isinstance((narrative_arc_type_value := data.get("narrative_arc_type")), str)
+        and narrative_arc_type_value.strip()
+        else None,
         focus_structure=normalized_focus_structure,
         focus_characters=focus_characters_filtered,
         main_characters=main_characters_filtered,
         core_cast=core_cast_filtered,
-        theme_color=(theme_color.strip() if (data and (theme_color := data.get("theme_color"))) else None),
+        theme_color=theme_color.strip() if data and (theme_color := data.get("theme_color")) else None,
     )

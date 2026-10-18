@@ -10,8 +10,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from src.api.models.events import (
     EventForestResponse,
@@ -37,8 +35,7 @@ from src.api.services.results_queries import (
 from src.api.services.results_queries.event_projection import build_event_forest_response
 from src.api.services.results_queries.graph import GRAPH_CHANGE_LIMIT, compute_graph_metrics
 from src.metrics.queries.keywords import query_keywords as compute_keywords
-from src.storage.models import Chapter, Paragraph
-from src.storage.repositories import AnnotationRepository
+from src.storage import Storage
 
 if TYPE_CHECKING:
     pass
@@ -51,13 +48,13 @@ router = APIRouter()
 async def get_graph(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     chapter_id: Annotated[int | None, Query(gt=0)] = None,
 ) -> GraphSnapshotResponse:
     """2026-08-07 用于读取指定章节边界或最新章节的动态图快照"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    annotation_repo = AnnotationRepository(session)
+    annotation_repo = session
     try:
         payload = _fetch_graph_snapshot(
             run_id,
@@ -75,7 +72,7 @@ async def get_graph(
 async def get_graph_changes(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     chapter_id: Annotated[int | None, Query(gt=0)] = None,
     changes_cursor: Annotated[str | None, Query(description="章节图变化分页 cursor")] = None,
     changes_limit: Annotated[int, Query(ge=1, le=GRAPH_CHANGE_LIMIT)] = GRAPH_CHANGE_LIMIT,
@@ -83,7 +80,7 @@ async def get_graph_changes(
     """2026-08-07 用于按章节分页读取实体状态与稳定关系变化"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    annotation_repo = AnnotationRepository(session)
+    annotation_repo = session
     try:
         payload = _fetch_graph_changes_page(
             run_id,
@@ -101,7 +98,7 @@ async def get_graph_changes(
 async def get_graph_metrics(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> GraphMetricsResponse:
     """
     人物关系图结构指标（赛道 A1/A2）：PageRank / HITS / Louvain
@@ -118,7 +115,7 @@ async def get_graph_metrics(
 async def get_keywords(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     top_n: int = Query(default=10, ge=1, le=50),
 ) -> KeywordsResponse:
     """
@@ -139,7 +136,7 @@ event_forest_router = APIRouter()
 async def get_event_forest(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     chapter_id: Annotated[int | None, Query(gt=0)] = None,
 ) -> EventForestResponse:
     """查询事件树、树间边、锚点、证据、可见边界和派生顺序"""
@@ -168,21 +165,15 @@ async def get_event_source_chapter(
     novel_id: str,
     chapter_id: int,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> EventSourceChapterResponse:
     """按需读取当前任务的一章原文，供事件树节点核对依据"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    chapter = session.get(Chapter, (run_id, chapter_id))
+    chapter = session.reads.api_routes_results_graph_get_event_source_chapter_1(chapter_id, run_id)
     if chapter is None or chapter.text is None:
         raise HTTPException(status_code=404, detail="当前任务没有该章节原文")
-    paragraphs = list(
-        session.execute(
-            select(Paragraph)
-            .where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id)
-            .order_by(Paragraph.paragraph_index)
-        ).scalars()
-    )
+    paragraphs = list(session.reads.api_routes_results_graph_get_event_source_chapter_2(chapter_id, run_id))
     if not paragraphs:
         raise HTTPException(status_code=404, detail="当前任务没有该章节原文段落")
     return EventSourceChapterResponse(

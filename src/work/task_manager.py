@@ -14,10 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from src.storage import Storage
 from src.work.task_persistence import TaskRuntimePersistenceService
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+    pass
 
 
 @dataclass
@@ -72,7 +73,7 @@ class TaskManager:
         except Exception as exc:
             logger.warning(f"Run completed callback failed for {run_id}: {exc}")
 
-    def set_db_session_factory(self, factory: Callable[[], Session]) -> None:
+    def set_db_session_factory(self, factory: Callable[[], Storage]) -> None:
         """
         设置数据库会话工厂
         """
@@ -98,7 +99,7 @@ class TaskManager:
         """
         return self._runtime_persistence._should_refresh_worker_heartbeat(update_params)
 
-    def _resolve_run_id_for_db_write(self, task_id: str, session: Session) -> str:
+    def _resolve_run_id_for_db_write(self, task_id: str, session: Storage) -> str:
         """
         将任务写回统一解析到真实 run_id
         """

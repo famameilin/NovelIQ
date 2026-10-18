@@ -28,7 +28,7 @@ def _receipt(run_id: str = "run", work_id: str = "work") -> WorkReceipt:
             "chapter_label": "第1章",
             "chapter_text": "原文。",
             "chapter_chars": 3,
-            "role": "solo",
+            "role": "annotation",
             "paragraphs": [
                 SimpleNamespace(chapter_id=1, paragraph_id=1, local_start_char=0, local_end_char=3, text="原文。")
             ],
@@ -125,7 +125,7 @@ async def test_empty_slot_and_unavailable_model_stops_analysis(monkeypatch: Any)
 
 
 def _storage(db_session: Any) -> Any:
-    """业务存储入口：2026-10-16 3NF 起派发前先登记 work 身份，登记之外不得写任何产物"""
+    """业务存储入口：执行行由审计在派发时登记，队列只写正式产物"""
     from sqlalchemy.orm import sessionmaker
 
     return sessionmaker(bind=db_session.get_bind())
@@ -136,11 +136,13 @@ async def test_queue_propagates_election_failure_reason(monkeypatch: Any, db_ses
     """选举失败的真实原因必须传到调用方，且不落任何正式产物"""
     from src.storage.models import ChapterAnnotation
     from src.utils.identity import stable_uuid
+    from src.work.annotation_work import annotation_work_id
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
     monkeypatch.setattr(settings.models, "model_pool", [])
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文。"])
-    receipt = _receipt(run_id=run_id)
+    # 派发单元的稳定票据身份与正式产物 record_id 同一来源
+    receipt = _receipt(run_id=run_id, work_id=annotation_work_id(run_id, 1, "annotation"))
 
     with pytest.raises(ValueError, match="正权重"):
         await asyncio.wait_for(

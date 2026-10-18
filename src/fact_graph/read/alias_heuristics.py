@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from src.storage.repositories.graph.repository import EntitySnapshotRow
+from src.storage.records.graph import EntitySnapshotRow
 
 
 def looks_like_alias_name(left: str, right: str) -> bool:

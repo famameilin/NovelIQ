@@ -12,10 +12,9 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from sqlalchemy.orm import Session
 
-from src.storage.repositories import ParagraphRepository
-from src.storage.repositories.linguistic_repository import LinguisticRepository
+from src.linguistic.ltp_client import POS_GROUP_MAP
+from src.storage import Storage
 
 
 def feature_dict(row) -> dict[str, Any]:
@@ -46,7 +45,7 @@ def feature_dict(row) -> dict[str, Any]:
     }
 
 
-def aggregate_linguistic_features(run_id: str, session: Session) -> dict[str, Any]:
+def aggregate_linguistic_features(run_id: str, session: Storage) -> dict[str, Any]:
     """
     词性/词长/句式/依存比例聚合（书级 + 章节级，§5.11）
 
@@ -55,8 +54,10 @@ def aggregate_linguistic_features(run_id: str, session: Session) -> dict[str, An
     - 平均/最大句法深度、依存关系分布按有效句法节点守恒
     - 空段落返回零值并保留有效词元数（分母不伪造）
     """
-    ling_repo = LinguisticRepository(session)
-    rows = ling_repo.fetch_linguistic_features(run_id)
+    ling_repo = session.linguistic
+    from src.linguistic.storage_projection import project_linguistic_features
+
+    rows = project_linguistic_features(ling_repo.fetch_linguistic_sources(run_id))
     if not rows:
         return {
             "run_id": run_id,
@@ -89,7 +90,7 @@ def aggregate_linguistic_features(run_id: str, session: Session) -> dict[str, An
             "unavailable_reason": "linguistic_unavailable: 无语言处理完成行（语言阶段未运行）",
         }
     # 章节归属（paragraphs.chapter_id）
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
     chapter_of: dict[int, int] = {
         int(row.paragraph_id): int(row.chapter_id) for row in paragraph_repo.fetch_paragraph_rows(run_id)
     }
@@ -213,10 +214,14 @@ def aggregate_emotion_events(
     }
 
 
-def fetch_entity_candidates(run_id: str, session: Session) -> dict[str, Any]:
+def fetch_entity_candidates(run_id: str, session: Storage) -> dict[str, Any]:
     """LTP 实体候选列表（§5.4/§6.1 实体验证面板数据源）"""
-    ling_repo = LinguisticRepository(session)
+    ling_repo = session.linguistic
+    from src.linguistic.ltp_client import ENTITY_TYPE_MAP
+
     rows = ling_repo.fetch_entities(run_id)
+    for row in rows:
+        row.normalized_entity_type = ENTITY_TYPE_MAP.get(str(row.raw_entity_type))
     if not rows:
         return {
             "run_id": run_id,
@@ -249,14 +254,14 @@ def fetch_entity_candidates(run_id: str, session: Session) -> dict[str, Any]:
     }
 
 
-def aggregate_phrase_stats(run_id: str, session: Session) -> dict[str, Any]:
+def aggregate_phrase_stats(run_id: str, session: Storage) -> dict[str, Any]:
     """固定短语命中统计（§5.11）：正式密度 + 四字候选数量
 
     前置完成事实两个都要有：语言阶段完成（language 完成行）与短语阶段完成
     （phrase_completed_at）；短语未跑与"跑完零命中"由此区分。
     """
-    ling_repo = LinguisticRepository(session)
-    paragraph_repo = ParagraphRepository(session)
+    ling_repo = session.linguistic
+    paragraph_repo = session.paragraphs
     total_char_count = sum(int(row.char_count) for row in paragraph_repo.fetch_paragraph_rows(run_id))
     if not ling_repo.has_linguistic_features(run_id) or not ling_repo.has_phrase_hits(run_id):
         return {
@@ -287,9 +292,9 @@ def aggregate_phrase_stats(run_id: str, session: Session) -> dict[str, Any]:
     }
 
 
-def fetch_word2vec_stats(run_id: str, session: Session) -> dict[str, Any]:
+def fetch_word2vec_stats(run_id: str, session: Storage) -> dict[str, Any]:
     """词向量契约 + 词性覆盖率 + POS 质心与组间余弦相似度（§5.6/§5.11）"""
-    ling_repo = LinguisticRepository(session)
+    ling_repo = session.linguistic
     model_run = ling_repo.fetch_word2vec_model_run(run_id)
     if model_run is None:
         return {
@@ -300,7 +305,7 @@ def fetch_word2vec_stats(run_id: str, session: Session) -> dict[str, Any]:
             "pos_similarity_matrix": None,
             "unavailable_reason": "word2vec_unavailable: 该运行未启用 Word2Vec",
         }
-    coverage = ling_repo.fetch_pos_embedding_coverage(run_id)
+    coverage = ling_repo.fetch_pos_embedding_coverage(run_id, POS_GROUP_MAP)
     pos_coverage = [
         {
             "pos_group": row.pos_group,
@@ -315,7 +320,6 @@ def fetch_word2vec_stats(run_id: str, session: Session) -> dict[str, Any]:
     model_meta = {
         "embedding_dimension": model_run.embedding_dimension,
         "vocabulary_size": model_run.vocabulary_size,
-        # artifact 归 run 私有是当前词向量合同的固定投影（2026-10-16 3NF 不逐行存常量）
         "artifact_scope": "run_owned",
     }
     centroids = fetch_pos_centroids(run_id, session)
@@ -347,9 +351,9 @@ def pos_similarity_matrix(centroids: list[dict[str, Any]]) -> list[list[float]] 
     return [[round(float(value), 6) for value in row] for row in matrix]
 
 
-def fetch_pos_centroids(run_id: str, session: Session) -> list[dict[str, Any]]:
+def fetch_pos_centroids(run_id: str, session: Storage) -> list[dict[str, Any]]:
     """全书各词性组的向量质心（按词表内词数加权，§5.11）"""
-    ling_repo = LinguisticRepository(session)
+    ling_repo = session.linguistic
     centroids: list[dict[str, Any]] = []
     for row in ling_repo.fetch_weighted_pos_embeddings(run_id):
         total_weight = int(row.weighted_token_total)
@@ -363,31 +367,14 @@ def fetch_pos_centroids(run_id: str, session: Session) -> list[dict[str, Any]]:
     return centroids
 
 
-def fetch_paragraph_labels(session: Session, run_id: str) -> list[dict[str, Any]]:
+def fetch_paragraph_labels(session: Storage, run_id: str) -> list[dict[str, Any]]:
     """2026-09-14 用于读取全书自选段情绪标签（段落级监督按书边界）
 
     2026-10-16 3NF：逐段情绪标签的唯一落点是 analysis_assessments 的
-    逐段情绪形状（record_id+paragraph_id+emotion），经章节标注产物头关联到
-    本 run 的标注 work；不再从任何 JSON payload 读取。
+    逐段情绪形状（record_id+paragraph_id+emotion），经章节标注产物头取得
+    运行归属（产物行自带 run/章/角色）；不再从任何 JSON payload 读取。
     写入前的领域校验归标注 agent，这里只按正式条目行返回。
     """
-    from sqlalchemy import select
 
-    from src.storage.models import AnalysisAssessment, ChapterAnnotation, Execution, WorkItem
-
-    rows = session.execute(
-        select(AnalysisAssessment.paragraph_id, AnalysisAssessment.emotion)
-        .select_from(AnalysisAssessment)
-        .join(ChapterAnnotation, ChapterAnnotation.record_id == AnalysisAssessment.record_id)
-        .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .where(
-            WorkItem.annotation_run_id == run_id,
-            AnalysisAssessment.record_id.is_not(None),
-        )
-        .order_by(AnalysisAssessment.paragraph_id)
-    ).all()
-    return [
-        {"paragraph_id": int(row.paragraph_id), "emotion": int(row.emotion)}
-        for row in rows
-    ]
+    rows = session.reads.linguistic_queries_fetch_paragraph_labels_1(run_id)
+    return [{"paragraph_id": int(row.paragraph_id), "emotion": int(row.emotion)} for row in rows]

@@ -28,7 +28,6 @@ export interface LLMStreamGroup {
   subStage: string;
   chapterId: number;
   streamId: string;
-  workId?: string | null;
   invocationId?: string | null;
   outputText: string;
   thinkingText: string;
@@ -390,8 +389,7 @@ export const useStreamStore = create<StreamState>()((set) => ({
     const scope = buildLLMOutputScopeKey({stage: data.stage, chapter_id: data.chapter_id ?? 0, sub_stage: data.sub_stage});
     const outputs = new Map(state.llmOutputs);
     for (const [key, group] of outputs) {
-      if (data.work_id ? group.workId === data.work_id
-        : group.stage === data.stage && group.chapterId === (data.chapter_id ?? 0) && group.subStage === data.sub_stage) {
+      if (group.stage === data.stage && group.chapterId === (data.chapter_id ?? 0) && group.subStage === data.sub_stage) {
         outputs.delete(key);
       }
     }
@@ -429,7 +427,6 @@ export const useStreamStore = create<StreamState>()((set) => ({
     set((state) => {
       const executionScope = buildStreamExecutionScope(data);
       const current = state.currentInvocations.get(executionScope);
-      if (data.work_id && !current) return state;
       if (current && current !== data.invocation_id) return state;
       const retired = state.retiredInvocations.get(executionScope);
       if (retired?.has(data.invocation_id ?? "") || retired?.size && !current) return state;
@@ -457,7 +454,6 @@ export const useStreamStore = create<StreamState>()((set) => ({
         subStage: data.sub_stage,
         chapterId: data.chapter_id ?? 0,
         streamId: data.stream_id,
-        workId: data.work_id,
         invocationId: data.invocation_id,
         outputText: existing?.outputText ?? "",
         thinkingText: existing?.thinkingText ?? "",

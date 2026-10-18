@@ -40,6 +40,9 @@ from src.storage.models.paragraph_features import ParagraphFeature
 from src.storage.models.paragraph_metrics import ParagraphMetric
 from src.storage.models.paragraph_topics import ParagraphTopic
 from src.storage.models.work import (
+    ANNOTATION_ROLES,
+    DIAGNOSIS_ROLES,
+    EXECUTION_ROLES,
     AnalysisAssessment,
     ChapterAnnotation,
     DiagnosisReport,
@@ -49,6 +52,7 @@ from src.storage.models.work import (
 
 __all__ = [
     "AgentToolCall",
+    "ANNOTATION_ROLES",
     "AnalysisAssessment",
     "AnalysisRun",
     "Base",
@@ -60,12 +64,14 @@ __all__ = [
     "ConflictClaim",
     "ConflictRecord",
     "DeclarationParticipant",
+    "DIAGNOSIS_ROLES",
     "DiagnosisReport",
     "DialogueRecord",
     "EventDeclaration",
     "EventForeshadowingAction",
     "EventOutbox",
     "EventRevision",
+    "EXECUTION_ROLES",
     "Execution",
     "FactEntityTag",
     "GraphEntity",

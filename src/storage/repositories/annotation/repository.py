@@ -1,21 +1,6 @@
-"""标注、对话与事件原始记录查询，不判定角色完成或解释领域状态
-
-2026-10-16 全库 3NF 改造：本模块只读冻结 35 表，不读任何退场关系
-（analysis_outputs / annotation_work / event_nodes / event_edges / 旧对话列）。
-
-- 正式章节标注 = chapter_annotations 宽表；章号与章内角色由真实执行→work_items
-  的标注分支（annotation_run/chapter/role）投影
-- 标注 work = work_items 的标注形状；saved 由正式标注记录的存在性表达
-- 章节声明 = event_declarations（经来源记录取得运行归属）
-- 伏笔语义链路 = narrative_links 的语义形状（relation_type 表达旧边类型）
-- 对话 = dialogue_records + 由创建执行取得的章号与章节原文切片
-- 图事实 = graph_facts 的封闭形状；旧 content JSON 由事实行具名列与参与者行替代
-"""
+"标注、对话与事件原始记录查询，不判定角色完成或解释领域状态"
 
 from __future__ import annotations
-
-from datetime import datetime
-from typing import cast
 
 from sqlalchemy import Select, func, or_, select
 
@@ -33,15 +18,15 @@ from src.storage.models import (
     SourceEvidence,
     WorkItem,
 )
-from src.storage.repositories.annotation.rows import AnnotationWorkRow as AnnotationWorkRow
-from src.storage.repositories.annotation.rows import ChapterAnnotationRow as ChapterAnnotationRow
-from src.storage.repositories.annotation.rows import CharacterFactRow as CharacterFactRow
-from src.storage.repositories.annotation.rows import DialogueFactRow as DialogueFactRow
-from src.storage.repositories.annotation.rows import DialogueRecordRow as DialogueRecordRow
-from src.storage.repositories.annotation.rows import ForeshadowingEdgeRow as ForeshadowingEdgeRow
-from src.storage.repositories.annotation.rows import ForeshadowingTreeView as ForeshadowingTreeView
-from src.storage.repositories.annotation.rows import GraphFactRow as GraphFactRow
-from src.storage.repositories.annotation.rows import SavedAnnotationRecord as SavedAnnotationRecord
+from src.storage.records.annotation import AnnotationRoleRecord as AnnotationRoleRecord
+from src.storage.records.annotation import ChapterAnnotationRow as ChapterAnnotationRow
+from src.storage.records.annotation import CharacterFactRow as CharacterFactRow
+from src.storage.records.annotation import DialogueFactRow as DialogueFactRow
+from src.storage.records.annotation import DialogueRecordRow as DialogueRecordRow
+from src.storage.records.annotation import ForeshadowingEdgeRow as ForeshadowingEdgeRow
+from src.storage.records.annotation import ForeshadowingTreeView as ForeshadowingTreeView
+from src.storage.records.annotation import GraphFactRow as GraphFactRow
+from src.storage.records.annotation import SavedAnnotationRecord as SavedAnnotationRecord
 from src.storage.repositories.base import BaseRepository
 
 #: graph_facts 封闭形状与旧内容类型的映射（目录穷举，不接受任意类别名）
@@ -63,37 +48,25 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         return set(self.session.scalars(select(Chapter.chapter_id).where(Chapter.run_id == run_id).distinct()))
 
     def run_execution_ids(self, run_id: str) -> Select:
-        """本运行的真实执行：标注 work 直接带运行，诊断 work 经整轮会话取得运行"""
-        diagnosis_sessions = select(Execution.execution_id).where(Execution.session_run_id == run_id)
-        return (
-            select(Execution.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(
-                or_(
-                    WorkItem.annotation_run_id == run_id,
-                    WorkItem.diagnosis_session_id.in_(diagnosis_sessions),
-                )
-            )
-        )
+        "本运行的真实执行：整轮 session 行与直接携带 run 的调用行"
+        return select(Execution.execution_id).where(or_(Execution.run_id == run_id, Execution.session_run_id == run_id))
 
     def fetch_saved_outputs(self, run_id: str) -> list[SavedAnnotationRecord]:
-        """本运行已正式保存的章节标注：行存在即保存事实，章号/角色从标注 work 取得"""
+        "本运行已正式保存的章节标注：行存在即保存事实，章号/角色取记录自身列"
         statement = (
-            select(ChapterAnnotation, WorkItem.annotation_chapter_id, WorkItem.role)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(WorkItem.annotation_run_id == run_id)
-            .order_by(WorkItem.annotation_chapter_id, WorkItem.role, ChapterAnnotation.record_id)
+            select(ChapterAnnotation)
+            .where(ChapterAnnotation.run_id == run_id)
+            .order_by(ChapterAnnotation.chapter_id, ChapterAnnotation.role, ChapterAnnotation.record_id)
         )
         return [
             SavedAnnotationRecord(
                 record_id=str(annotation.record_id),
-                chapter_id=int(chapter_id),
-                role=str(role) if role is not None else None,
+                chapter_id=int(annotation.chapter_id),
+                role=str(annotation.role) if annotation.role is not None else None,
                 execution_id=str(annotation.execution_id),
                 contract_version=str(annotation.contract_version),
                 chapter_consolidation_version=str(annotation.chapter_consolidation_version),
-                # 结构/事件角色 work 没有章级指标时各列为空：按模型可空合同原样投影，不强行转型
+                # 结构/事件角色没有章级指标时各列为空：按模型可空合同原样投影，不强行转型
                 summary=None if annotation.summary is None else str(annotation.summary),
                 emotional_valence=None if annotation.emotional_valence is None else int(annotation.emotional_valence),
                 narrative_function=None
@@ -104,54 +77,27 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
                 created_at=annotation.created_at,
                 saved_at=annotation.saved_at,
             )
-            for annotation, chapter_id, role in self.session.execute(statement).all()
+            for annotation in self.session.scalars(statement)
         ]
 
-    def fetch_work_records(self, run_id: str) -> list[AnnotationWorkRow]:
-        """本运行的标注 work：状态由正式标注记录的存在性表达，尝试取最新一次真实执行"""
-        works = list(
-            self.session.scalars(
-                select(WorkItem)
-                .where(WorkItem.annotation_run_id == run_id, WorkItem.role.is_not(None))
-                .order_by(WorkItem.annotation_chapter_id, WorkItem.role, WorkItem.work_id)
+    def fetch_role_records(self, run_id: str) -> list[AnnotationRoleRecord]:
+        "本运行的章内标注角色：state 由正式标注记录的存在性表达，执行号取产物行自身"
+        rows = self.session.execute(
+            select(ChapterAnnotation)
+            .where(ChapterAnnotation.run_id == run_id, ChapterAnnotation.role.is_not(None))
+            .order_by(ChapterAnnotation.chapter_id, ChapterAnnotation.role, ChapterAnnotation.record_id)
+        ).scalars()
+        return [
+            AnnotationRoleRecord(
+                run_id=run_id,
+                chapter_id=int(row.chapter_id),
+                role=str(row.role),
+                invocation_id=str(row.execution_id),
+                state="saved",
+                saved_at=row.saved_at,
             )
-        )
-        if not works:
-            return []
-        work_ids = [str(work.work_id) for work in works]
-        saved: dict[str, tuple[str, datetime | None]] = {}
-        saved_statement = (
-            select(Execution.work_id, ChapterAnnotation.saved_at, ChapterAnnotation.execution_id)
-            .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
-            .where(Execution.work_id.in_(work_ids))
-        )
-        for work_id, saved_at, execution_id in self.session.execute(saved_statement).all():
-            saved[str(work_id)] = (str(execution_id), saved_at)
-        latest_invocation: dict[str, str] = {}
-        invocation_statement = (
-            select(Execution.work_id, Execution.execution_id, Execution.attempt_number)
-            .where(Execution.work_id.in_(work_ids), Execution.attempt_number.is_not(None))
-            .order_by(Execution.work_id, Execution.attempt_number)
-        )
-        for work_id, execution_id, _attempt in self.session.execute(invocation_statement).all():
-            latest_invocation[str(work_id)] = str(execution_id)
-        rows: list[AnnotationWorkRow] = []
-        for work in works:
-            work_id = str(work.work_id)
-            saved_row = saved.get(work_id)
-            rows.append(
-                AnnotationWorkRow(
-                    work_id=work_id,
-                    run_id=run_id,
-                    # 标注形状 work 必带 annotation_chapter_id（ck_work_items_shape）
-                    chapter_id=cast(int, work.annotation_chapter_id),
-                    role=str(work.role),
-                    invocation_id=latest_invocation.get(work_id),
-                    state="saved" if saved_row is not None else "pending",
-                    saved_at=saved_row[1] if saved_row is not None else None,
-                )
-            )
-        return rows
+            for row in rows
+        ]
 
     def fetch_entities_by_id(self, run_id: str) -> dict[str, GraphEntity]:
         return {
@@ -160,11 +106,10 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         }
 
     def fetch_dialogue_records(self, run_id: str) -> list[DialogueRecordRow]:
-        """本运行对话记录：章号从创建执行→标注 work 取得，内容按章节区间精确切片"""
+        "本运行对话记录：run/章是创建时自落归属，内容按章节区间精确切片"
         statement = (
             select(
                 DialogueRecord,
-                WorkItem.annotation_chapter_id.label("chapter_id"),
                 Chapter.sequence.label("chapter_sequence"),
                 func.substr(
                     Chapter.text,
@@ -172,16 +117,14 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
                     DialogueRecord.end_char - DialogueRecord.start_char,
                 ).label("content"),
             )
-            .join(Execution, Execution.execution_id == DialogueRecord.creation_execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
             .join(
                 Chapter,
-                (Chapter.run_id == WorkItem.annotation_run_id) & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+                (Chapter.run_id == DialogueRecord.run_id) & (Chapter.chapter_id == DialogueRecord.chapter_id),
             )
-            .where(WorkItem.annotation_run_id == run_id)
+            .where(DialogueRecord.run_id == run_id)
             .order_by(
                 Chapter.sequence,
-                WorkItem.annotation_chapter_id,
+                DialogueRecord.chapter_id,
                 DialogueRecord.start_char,
                 DialogueRecord.dialogue_id,
             )
@@ -189,7 +132,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         return [
             DialogueRecordRow(
                 dialogue_id=str(record.dialogue_id),
-                chapter_id=int(chapter_id),
+                chapter_id=int(record.chapter_id),
                 candidate_key=str(record.candidate_key),
                 start_char=int(record.start_char),
                 end_char=int(record.end_char),
@@ -200,17 +143,15 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
                 created_at=record.created_at,
                 updated_at=record.updated_at,
             )
-            for record, chapter_id, _sequence, content in self.session.execute(statement).all()
+            for record, _sequence, content in self.session.execute(statement).all()
         ]
 
     def _declaration_statement(self, run_id: str) -> Select:
-        """本运行的章级声明：记录→标注执行→标注 work 取得运行归属"""
+        "本运行的章级声明：记录自身带运行归属（chapter_annotations.run_id）"
         return (
             select(EventDeclaration)
             .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(WorkItem.annotation_run_id == run_id)
+            .where(ChapterAnnotation.run_id == run_id)
         )
 
     def fetch_foreshadowing_roots(self, run_id: str, *, ordered: bool = False) -> list[EventDeclaration]:
@@ -218,14 +159,14 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         if ordered:
             statement = statement.join(
                 Chapter,
-                (Chapter.run_id == WorkItem.annotation_run_id) & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+                (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
             ).order_by(Chapter.sequence, EventDeclaration.declaration_id)
         else:
             statement = statement.order_by(EventDeclaration.declaration_id)
         return list(self.session.scalars(statement))
 
     def _semantic_foreshadowing_links(self, run_id: str) -> list[NarrativeLink]:
-        """本运行的伏笔语义链路：两端都是完整事件，真实生产者取本运行执行"""
+        "本运行的伏笔语义链路：两端都是完整事件，真实生产者取本运行执行"
         return list(
             self.session.scalars(
                 select(NarrativeLink)
@@ -240,7 +181,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         )
 
     def _event_chapter_ids(self, run_id: str, event_ids: set[str]) -> dict[str, int]:
-        """完整事件的来源章：由该事件自身证据的段落所属章节投影（最早章序为定位章）"""
+        "完整事件的来源章：由该事件自身证据的段落所属章节投影（最早章序为定位章）"
         if not event_ids:
             return {}
         statement = (
@@ -258,7 +199,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         return {event_id: value[1] for event_id, value in best.items()}
 
     def fetch_foreshadowing_edges(self, run_id: str, *, ordered: bool = False) -> list[ForeshadowingEdgeRow]:
-        """伏笔语义链路读投影；ordered 时按目标事件来源章序排序（无证据章的链路排后）"""
+        "伏笔语义链路读投影；ordered 时按目标事件来源章序排序（无证据章的链路排后）"
         links = self._semantic_foreshadowing_links(run_id)
         event_ids = {str(row.semantic_source_event_id) for row in links} | {
             str(row.semantic_target_event_id) for row in links
@@ -311,20 +252,11 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         return {str(row.semantic_source_event_id): int(row.edge_count) for row in self.session.execute(statement)}
 
     def _fact_chapter_projection(self, run_id: str):
-        """事实所属章节：标注 work 已决定的章节优先，独立选章取 effective_chapter_id"""
-        producer_work_chapter = (
-            select(WorkItem.annotation_chapter_id)
-            .join(Execution, Execution.work_id == WorkItem.work_id)
-            .where(Execution.execution_id == GraphFact.direct_producer_execution_id)
-            .scalar_subquery()
-        )
-        return func.coalesce(producer_work_chapter, GraphFact.effective_chapter_id)
+        "事实所属章节：写入时自落的有效章节列（领域读不推导、不回退 AUDIT 表）"
+        return GraphFact.effective_chapter_id
 
     def fetch_graph_facts(self, run_id: str, *, content_kind: str) -> list[GraphFactRow]:
-        """本运行指定形状的正式图贡献事实（旧内容类型名映射到冻结形状列）
-
-        仅接受目录内类型名；事实按所属章节章序、操作顺序与事实流水稳定排序。
-        """
+        "本运行指定形状的正式图贡献事实（旧内容类型名映射到冻结形状列）"
         shape = FACT_SHAPE_BY_CONTENT_KIND.get(content_kind)
         if shape is None:
             raise ValueError(f"未知的图事实内容类型: {content_kind}")
@@ -378,17 +310,15 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         return rows
 
     def _run_declaration_ids(self, run_id: str):
-        """本运行章级声明的 id 选择器（记录→标注执行→标注 work 取得运行归属）"""
+        "本运行章级声明的 id 选择器（记录自身带运行归属）"
         return (
             select(EventDeclaration.declaration_id)
             .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(WorkItem.annotation_run_id == run_id)
+            .where(ChapterAnnotation.run_id == run_id)
         )
 
     def _attach_participant_observations(self, run_id: str, rows: list[GraphFactRow]) -> list[GraphFactRow]:
-        """人物动态观测：实体/角色/动作/情绪从声明的参与者行读取（不复制三态值）"""
+        "人物动态观测：实体/角色/动作/情绪从声明的参与者行读取（不复制三态值）"
         participant_ids = [row.fact.participant_id for row in rows if row.fact.participant_id is not None]
         if not participant_ids:
             return rows
@@ -406,9 +336,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
             .join(GraphEntity, GraphEntity.entity_id == DeclarationParticipant.entity_id)
             .where(DeclarationParticipant.participant_id.in_(participant_ids))
         )
-        participants = {
-            str(row.participant_id): row for row in self.session.execute(participant_statement).all()
-        }
+        participants = {str(row.participant_id): row for row in self.session.execute(participant_statement).all()}
         chapter_by_participant = self._participant_chapter_ids(run_id, set(participants))
         result: list[GraphFactRow] = []
         for row in rows:
@@ -429,26 +357,22 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
                         str(participant.narrative_role) if participant.narrative_role is not None else None
                     ),
                     participant_action=str(participant.action) if participant.action is not None else None,
-                    participant_emotion=(
-                        int(participant.emotion) if participant.emotion is not None else None
-                    ),
+                    participant_emotion=(int(participant.emotion) if participant.emotion is not None else None),
                 )
             )
         return result
 
     def _participant_chapter_ids(self, run_id: str, participant_ids: set[str]) -> dict[str, int]:
-        """参与者所属章节：声明→来源记录→标注执行→标注 work 取得（真实来源，不按当前章替代）"""
+        "参与者所属章节：声明→来源记录（记录自身带运行归属），不按当前章替代"
         if not participant_ids:
             return {}
         statement = (
-            select(DeclarationParticipant.participant_id, WorkItem.annotation_chapter_id)
+            select(DeclarationParticipant.participant_id, ChapterAnnotation.chapter_id)
             .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
             .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
             .where(
                 DeclarationParticipant.participant_id.in_(list(participant_ids)),
-                WorkItem.annotation_run_id == run_id,
+                ChapterAnnotation.run_id == run_id,
             )
         )
         return {

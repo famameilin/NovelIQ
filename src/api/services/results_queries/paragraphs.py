@@ -29,7 +29,8 @@ from src.metrics.aggregate.algorithms import (
 )
 from src.metrics.queries.annotations import fetch_chapter_annotations_full
 from src.metrics.sampling import sample_paragraph_curve_points
-from src.storage.repositories import AnnotationRepository, ParagraphRepository
+from src.storage import Storage
+from src.storage.contracts.stores import ParagraphStore
 
 
 def _apply_emotion_smoothing(windows: list[EmotionTrendWindow]) -> list[EmotionTrendWindow]:
@@ -65,7 +66,7 @@ def _apply_emotion_smoothing(windows: list[EmotionTrendWindow]) -> list[EmotionT
 
 def _fetch_emotion_trend(
     run_id: str,
-    paragraph_repo: ParagraphRepository,
+    paragraph_repo: ParagraphStore,
     range_start: float | None,
     range_end: float | None,
     window_paragraphs: int,
@@ -83,7 +84,7 @@ def _fetch_emotion_trend(
 
 def _fetch_paragraph_curves(
     run_id: str,
-    paragraph_repo: ParagraphRepository,
+    paragraph_repo: ParagraphStore,
     max_points: int | None,
 ) -> list[ParagraphCurvePoint]:
     """
@@ -144,8 +145,8 @@ def _fetch_paragraph_curves(
 
 def _fetch_chapter_metrics(
     run_id: str,
-    paragraph_repo: ParagraphRepository,
-    annotation_repo: AnnotationRepository,
+    paragraph_repo: ParagraphStore,
+    annotation_repo: Storage,
     run: dict[str, Any],
 ) -> ChapterMetricsResponse:
     """
@@ -156,7 +157,7 @@ def _fetch_chapter_metrics(
     """
     del run
     annotations_by_chapter_id = {
-        int(row.chapter_id): row for row in fetch_chapter_annotations_full(annotation_repo.session, run_id)
+        int(row.chapter_id): row for row in fetch_chapter_annotations_full(annotation_repo, run_id)
     }
     payload = aggregate_chapter_metrics(
         paragraph_repo.fetch_paragraph_rows(run_id),

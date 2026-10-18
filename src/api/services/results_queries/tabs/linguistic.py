@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from src.linguistic.queries import aggregate_phrase_stats, fetch_entity_candidates
+from src.storage import Storage
 
 _SURFACE_TOP_LIMIT = 20
 
 
-def build_linguistic_entities_tab(run_id: str, session: Session) -> dict[str, Any]:
+def build_linguistic_entities_tab(run_id: str, session: Storage) -> dict[str, Any]:
     """
     实体与短语 tab：实体类型计数 + 高频实体名 + 固定短语统计
 

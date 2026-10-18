@@ -22,7 +22,6 @@ from src.storage.models import (
     ModelCall,
     Paragraph,
     SourceEvidence,
-    WorkItem,
 )
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -37,12 +36,8 @@ from tests.workflows.test_annotation_work_pipeline import ProgramModel
 
 
 def _run_executions(run_id: str):
-    """本 run 的真实尝试执行（跨表断言的归属口径）"""
-    return (
-        select(Execution.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .where(WorkItem.annotation_run_id == run_id)
-    )
+    """本 run 的真实尝试执行（执行行直接携带运行归属）"""
+    return select(Execution.execution_id).where(Execution.run_id == run_id)
 
 
 def _run_actions(db_session, run_id: str) -> list[EventForeshadowingAction]:
@@ -68,21 +63,19 @@ def _run_plotlines(db_session, run_id: str) -> list[GraphFact]:
 
 
 def _declaration_ids_by_chapter(db_session, run_id: str) -> list[str]:
-    """本 run 全部不可变声明，按章节顺序（章序从真实标注来源链取得）"""
+    """本 run 全部不可变声明，按章节顺序（章序从正式产物行的自身归属取得）"""
     return list(
         db_session.scalars(
             select(EventDeclaration.declaration_id)
             .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
             .join(
                 Chapter,
                 and_(
-                    Chapter.run_id == WorkItem.annotation_run_id,
-                    Chapter.chapter_id == WorkItem.annotation_chapter_id,
+                    Chapter.run_id == ChapterAnnotation.run_id,
+                    Chapter.chapter_id == ChapterAnnotation.chapter_id,
                 ),
             )
-            .where(WorkItem.annotation_run_id == run_id)
+            .where(ChapterAnnotation.run_id == run_id)
             .order_by(Chapter.sequence, EventDeclaration.created_at)
         )
     )

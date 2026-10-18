@@ -9,16 +9,12 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from src.event_trees import storage_map as smap
 from src.event_trees.action_order import ForeshadowingActionRow, action_order, load_foreshadowing_actions
 from src.event_trees.read.organization import EventTreeQuery
-from src.storage.models import CompleteEvent, EventDeclaration, EventRevision, SourceEvidence
-from src.storage.repositories.annotation.rows import (
-    ForeshadowingTreeView,
-)
+from src.storage import Storage
+from src.storage.records.annotation import ForeshadowingTreeView
+from src.storage.records.models import EventDeclarationRecord as EventDeclaration
 
 _EXPECTATION_BASE_SCORE_BY_PAYOFF = {"high": 0.62, "medium": 0.38, "low": 0.14}
 _EXPECTATION_STATUS_BONUS = {"open": -0.07, "reinforced": 0.03, "likely_paid_off": 0.28}
@@ -27,25 +23,16 @@ _EXPECTATION_STATUS_WEIGHT = {"open": 0.75, "reinforced": 1.0, "likely_paid_off"
 _EXPECTATION_STRENGTH_WEIGHT = {"high": 0.05, "medium": 0.0, "low": -0.05}
 
 
-def _foreshadowing_roots(
-    session: Session, run_id: str
-) -> tuple[list[EventDeclaration], dict[str, tuple[int | None, int | None]]]:
+def _foreshadowing_roots(session: Storage, run_id: str) -> tuple[list[EventDeclaration], dict[str, Any]]:
     """本 run 的伏笔根声明及来源章信息，按真实章序与本地地址稳定排序"""
     declarations = smap.run_declaration_ids(session, run_id)
     if not declarations:
         return [], {}
-    rows = list(
-        session.scalars(
-            select(EventDeclaration).where(
-                EventDeclaration.declaration_id.in_(declarations),
-                EventDeclaration.is_foreshadowing_root.is_(True),
-            )
-        )
-    )
+    rows = list(session.reads.event_trees_read_foreshadowing_foreshadowing_roots_1(declarations))
     sources = smap.declaration_sources(session, {row.record_id for row in rows})
     rows.sort(
         key=lambda row: (
-            (sources.get(row.record_id) or (None, None))[1] or 0,
+            sources[row.record_id].chapter_order or 0,
             row.local_key,
             row.declaration_id,
         )
@@ -53,25 +40,18 @@ def _foreshadowing_roots(
     return rows, sources
 
 
-def _bound_events(session: Session, run_id: str, declaration_ids: list[str]) -> dict[str, str]:
+def _bound_events(session: Storage, run_id: str, declaration_ids: list[str]) -> dict[str, str]:
     """伏笔来源声明的正式事件身份绑定（阶段声明绑定 + 完整事件生产者属于本 run）"""
     if not declaration_ids:
         return {}
     return {
         row.declaration_id: row.event_id
-        for row in session.scalars(
-            select(EventRevision)
-            .join(CompleteEvent, CompleteEvent.event_id == EventRevision.event_id)
-            .where(
-                EventRevision.declaration_id.in_(declaration_ids),
-                CompleteEvent.producer_execution_id.in_(smap.run_execution_ids(run_id)),
-            )
-        )
+        for row in session.reads.event_trees_read_foreshadowing_bound_events_1(declaration_ids, run_id)
         if row.declaration_id is not None
     }
 
 
-def foreshadowing_by_chapter(session: Session, run_id: str) -> dict[int, dict[str, Any]]:
+def foreshadowing_by_chapter(session: Storage, run_id: str) -> dict[int, dict[str, Any]]:
     """章节伏笔投影引用已发布事件，不把来源声明作为事件暴露
 
     动作事实携带来源声明列（root/target 事件身份是读投影），章号取动作真实来源章；
@@ -97,7 +77,7 @@ def foreshadowing_by_chapter(session: Session, run_id: str) -> dict[int, dict[st
     return by_chapter
 
 
-def fetch_foreshadowing_trees(session: Session, run_id: str) -> list[ForeshadowingTreeView]:
+def fetch_foreshadowing_trees(session: Storage, run_id: str) -> list[ForeshadowingTreeView]:
     """按正式事件聚合明确伏笔动作；只有来源属性通过声明追索"""
     query = EventTreeQuery(session, run_id)
     query.fetch()
@@ -135,20 +115,18 @@ def fetch_foreshadowing_trees(session: Session, run_id: str) -> list[Foreshadowi
     return result
 
 
-def fetch_foreshadowing_sources(session: Session, run_id: str) -> list[dict[str, Any]]:
+def fetch_foreshadowing_sources(session: Storage, run_id: str) -> list[dict[str, Any]]:
     """诊断发布前读取真实声明及动作材料，来源标识不能冒充正式事件"""
     roots, sources = _foreshadowing_roots(session, run_id)
     actions = sorted(load_foreshadowing_actions(session, run_id), key=action_order)
-    evidence = smap.fetch_evidence(
-        session, SourceEvidence.declaration_id, [row.declaration_id for row in roots]
-    )
+    evidence = smap.fetch_evidence(session, "declaration_id", [row.declaration_id for row in roots])
     return [
         {
             "declaration_id": row.declaration_id,
             "title": row.title,
             "problem": row.problem,
             "summary": row.summary,
-            "chapter_id": (sources.get(row.record_id) or (None, None))[0],
+            "chapter_id": sources[row.record_id].chapter_id,
             "payoff_likelihood": row.payoff_likelihood,
             # strength 是 payoff_likelihood 的读投影，不双存第二份属性
             "strength": row.payoff_likelihood,
@@ -171,7 +149,7 @@ def fetch_foreshadowing_sources(session: Session, run_id: str) -> list[dict[str,
 
 
 def calculate_foreshadow_expectation(
-    session: Session,
+    session: Storage,
     run_id: str,
     *,
     declaration_bindings: dict[str, str] | None = None,
@@ -192,9 +170,9 @@ def calculate_foreshadow_expectation(
         grouped_roots.setdefault(bindings.get(root.declaration_id, root.declaration_id), []).append(root)
     grouped_actions: dict[str, list[ForeshadowingActionRow]] = {}
     for action in sorted(load_foreshadowing_actions(session, run_id), key=action_order):
-        grouped_actions.setdefault(
-            bindings.get(action.source_declaration_id, action.source_declaration_id), []
-        ).append(action)
+        grouped_actions.setdefault(bindings.get(action.source_declaration_id, action.source_declaration_id), []).append(
+            action
+        )
     weighted_total = 0.0
     total_weight = 0.0
     has_evidence = False

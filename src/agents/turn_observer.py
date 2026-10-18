@@ -28,10 +28,10 @@ def build_invocation_context(
     attempt_number: int,
     model: str,
     chapter_id: int | None = None,
-    work_id: str | None = None,
     role: str | None = None,
+    case_anchor: str | None = None,
 ) -> dict[str, Any]:
-    """构造一次尝试的 invocation 上下文，随每条审计调用流动并落到回合行"""
+    """构造一次尝试的 invocation 上下文（含执行归属），随每条审计调用流动并落到回合行"""
     return {
         "run_id": run_id,
         "task_type": task_type,
@@ -40,8 +40,8 @@ def build_invocation_context(
         "execution_id": execution_id,
         "attempt_number": attempt_number,
         "chapter_id": chapter_id,
-        "work_id": work_id,
         "role": role,
+        "case_anchor": case_anchor,
     }
 
 
@@ -130,7 +130,7 @@ class AgentTurnObserver:
     """2026-08-10 用于在 Agent 图节点间传递当前回合审计上下文并逐笔落库
 
     context 是本次尝试的 invocation 上下文（run_id/task_type/call_type/model/
-    execution_id/attempt_number/chapter_id/work_id/role），随每条
+    execution_id/attempt_number/chapter_id/role/case_anchor），随每条
     审计调用流动，落库端不需要额外状态。
     """
 
@@ -140,11 +140,11 @@ class AgentTurnObserver:
         self._invocation_id = invocation_id
         self._context = dict(context)
         self._turn_counter = 0
-        self._active_turn_id: int | None = None
+        self._active_turn_id: str | None = None
         self._active_started_ns: int | None = None
         self._active_tool_first_ns: int | None = None
         self._active_tool_last_ns: int | None = None
-        self._pending_turn_id: int | None = None
+        self._pending_turn_id: str | None = None
         self._pending_started_ns: int | None = None
         self._pending_request_messages: list[Any] = []
 
