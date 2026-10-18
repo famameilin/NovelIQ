@@ -1,4 +1,4 @@
-"从 src/case_pool/__init__.py 分离的具名物理读取"
+"case pool pool 的具名物理读取"
 
 from __future__ import annotations
 

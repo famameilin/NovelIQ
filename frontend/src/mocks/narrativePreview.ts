@@ -4,7 +4,7 @@ import type { PlotlineChange, PlotlineDimension, PlotlineTimelineResponse } from
 export const NARRATIVE_PREVIEW_NOVEL = "narrative-design-demo";
 export const NARRATIVE_PREVIEW_TASK = "narrative-design-task";
 
-// 参考稿《雾港来信》的虚构样本，只在开发 mock 中提供，用于同内容视觉对照
+// 虚构样本，只在开发 mock 中提供，用于同内容视觉对照
 const events = [
         {id:"e1",chapter:1,arc:"main",group:"追查失踪",title:"同伴突然失踪",summary:"同伴没有如约赴港，只留下一封未寄出的信。林舟开始调查。",quote:"桌上的茶已经冷了。那封信写到一半，许沉的名字落在被水洇开的末行。"},
         {id:"e2",chapter:2,arc:"identity",group:"玉佩线索",title:"找到刻纹玉佩",action:"埋设",summary:"旧屋里的一枚玉佩刻着独特纹章。它与失踪案的联系尚不明确。",quote:"玉面上刻着一只衔环的鸟，断开的尾羽正好指向窗外的灯塔。"},

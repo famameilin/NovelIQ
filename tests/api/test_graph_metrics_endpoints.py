@@ -1,4 +1,4 @@
-"""图结构指标与 TextRank 关键词端点测试（赛道 A1/A2/A3）"""
+"""图结构指标与 TextRank 关键词端点测试"""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from tests.support.chapter_annotation_helpers import (
 )
 from tests.support.paragraph_fixtures import create_run_with_status
 from tests.support.run_records import set_run_status
+from tests.support.storage_fixtures import fixture_id, storage_for, task_for_run
 
 
 def _seed_graph(db_session, run_id: str) -> None:
@@ -61,7 +62,9 @@ def test_graph_metrics_returns_pagerank_hits_communities(api_client: TestClient,
     _mark_completed(db_session, run_id)
     assert GraphRepository(db_session).fetch_snapshot(run_id) is not None
 
-    response = api_client.get(f"/api/novels/{novel_id}/graph/metrics", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph/metrics", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["unavailable_reason"] is None
@@ -78,7 +81,7 @@ def test_graph_metrics_returns_pagerank_hits_communities(api_client: TestClient,
 
 
 def test_graph_metrics_accumulates_reverse_relations(monkeypatch) -> None:
-    """2026-08-31 用于验证双向端点进入无向图后累加权重而不是相互覆盖"""
+    """验证双向端点进入无向图后累加权重而不是相互覆盖"""
     snapshot = {
         "nodes": [
             {"name": "甲", "entity_type": "character"},
@@ -94,7 +97,7 @@ def test_graph_metrics_accumulates_reverse_relations(monkeypatch) -> None:
     captured: dict[str, int] = {}
 
     def capture_pagerank(graph, *, weight: str) -> dict[str, float]:
-        """2026-08-31 用于读取 PageRank 收到的规范化无向边权"""
+        """读取 PageRank 收到的规范化无向边权"""
         captured["甲乙"] = int(graph["甲"]["乙"][weight])
         return dict.fromkeys(graph.nodes, 1 / 3)
 
@@ -104,7 +107,7 @@ def test_graph_metrics_accumulates_reverse_relations(monkeypatch) -> None:
     )
     monkeypatch.setattr("src.metrics.aggregate.algorithms.nx.pagerank", capture_pagerank)
 
-    compute_graph_metrics("run-1", MagicMock())
+    compute_graph_metrics(fixture_id(__name__, "run-1"), storage_for(MagicMock()))
 
     assert captured["甲乙"] == 2
 
@@ -126,7 +129,9 @@ def test_graph_metrics_insufficient_nodes(api_client: TestClient, db_session) ->
     _mark_completed(db_session, run_id)
     db_session.commit()
 
-    response = api_client.get(f"/api/novels/{novel_id}/graph/metrics", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph/metrics", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     assert response.json()["unavailable_reason"] is not None
 
@@ -136,7 +141,9 @@ def test_graph_metrics_without_snapshot(api_client: TestClient, db_session) -> N
 
     novel_id, run_id = create_completed_run(db_session, chapter_texts=["没有图数据。"])
 
-    response = api_client.get(f"/api/novels/{novel_id}/graph/metrics", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph/metrics", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     assert response.json()["unavailable_reason"] is not None
 
@@ -154,7 +161,7 @@ def test_keywords_endpoint_returns_tokens(api_client: TestClient, db_session) ->
     )
     _mark_completed(db_session, run_id)
 
-    response = api_client.get(f"/api/novels/{novel_id}/keywords", params={"task_id": run_id[:8]})
+    response = api_client.get(f"/api/novels/{novel_id}/keywords", params={"task_id": task_for_run(run_id, db_session)})
     assert response.status_code == 200
     body = response.json()
     assert body["unavailable_reason"] is None
@@ -168,7 +175,7 @@ def test_keywords_endpoint_returns_tokens(api_client: TestClient, db_session) ->
 def test_keywords_endpoint_empty_paragraphs(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["。"], status="completed")
 
-    response = api_client.get(f"/api/novels/{novel_id}/keywords", params={"task_id": run_id[:8]})
+    response = api_client.get(f"/api/novels/{novel_id}/keywords", params={"task_id": task_for_run(run_id, db_session)})
     assert response.status_code == 200
     body = response.json()
     assert body["unavailable_reason"] is not None or body["keywords"] == []
@@ -177,9 +184,13 @@ def test_keywords_endpoint_empty_paragraphs(api_client: TestClient, db_session) 
 def test_graph_and_keywords_require_completed_run(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["文本。"], status="failed")
 
-    graph_resp = api_client.get(f"/api/novels/{novel_id}/graph/metrics", params={"task_id": run_id[:8]})
+    graph_resp = api_client.get(
+        f"/api/novels/{novel_id}/graph/metrics", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert graph_resp.status_code == 400
-    keyword_resp = api_client.get(f"/api/novels/{novel_id}/keywords", params={"task_id": run_id[:8]})
+    keyword_resp = api_client.get(
+        f"/api/novels/{novel_id}/keywords", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert keyword_resp.status_code == 400
 
 
@@ -203,7 +214,9 @@ def test_graph_tab_keeps_isolated_characters_without_relation_metrics(api_client
     db_session.commit()
 
     for endpoint in ("graph/metrics", "tabs/graph-network"):
-        response = api_client.get(f"/api/novels/{novel_id}/{endpoint}", params={"task_id": run_id[:8]})
+        response = api_client.get(
+            f"/api/novels/{novel_id}/{endpoint}", params={"task_id": task_for_run(run_id, db_session)}
+        )
         assert response.status_code == 200
         body = response.json()
         if endpoint == "tabs/graph-network":

@@ -1,15 +1,13 @@
 """
 文本分割模块（预处理阶段的段落切分）
 
-2026-10-06 自 src/chunking/chunker.py 收归：只做"章节 → 文本块 → 段落单元"的分割，
-行形态（Chunk/ParagraphSpan）在 `src.text_processing.models`。
+只做"章节 → 文本块 → 段落单元"的分割；行形态（Chunk/ParagraphSpan）在
+`src.text_processing.models`。
 
 分章策略：
 1. 优先按章节结构解析（src.chapters）分割：每个章节为一个 chunk，
-   保留 chapter_id，无论多长不再切
+   保留 chapter_id
 2. 无法捕捉原始章节时，章节解析器内部回退到固定字数段落分割（自动分章）
-
-不再使用向量相似度（语义分块）作为分块依据。
 """
 
 from __future__ import annotations
@@ -173,7 +171,7 @@ def split_paragraphs(text: str, max_chars: int = 1500) -> list[ParagraphSpan]:
     """
     将文本按自然段分割为段落单元（ParagraphSpan，strip 后真实局部坐标）
 
-    段落单元是文本分析的最小事实单元（设计文档《章节粒度分析指标重设计》§3）。
+    段落单元是文本分析的最小事实单元。
     段落边界为任意换行（单换行也算段落边界，网文 txt 常以单换行分段），
     连续空行产生的空段自动跳过；超过 max_chars 的超长段落再按句子边界切分，
     保证单段 token 数不超过 embedding 服务物理 batch 上限。
@@ -232,10 +230,10 @@ def split_chunk_paragraphs(
     """
     将多个 chunk（章）的文本切分为带 run 级身份的段落单元
 
-    段落身份不变量（设计文档 §3/§4）：
+    段落身份不变量）：
     - paragraph_id 在 run 内按全文顺序连续（0, 1, 2, ...），不随数据库自增推断
     - global 坐标 = chunk 全文偏移 + local 坐标，与规范化全文坐标一致
-    - chapter_id 直接取自 Chunk 上下文（M9a-2：chunks 表合并后段落身份 = chapter_id）
+    - chapter_id 直接取自 Chunk 上下文
     """
     spans: list[ParagraphSpan] = []
     paragraph_id = 0

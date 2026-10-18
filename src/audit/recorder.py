@@ -1,10 +1,9 @@
 """
 Agent 审计记录器（Annotation 与 Diagnosis 共用）
 
-2026-10-16 全库 3NF 改造；2026-10-17 六 agent 归属：审计事实全部落到三张宽表——
+审计事实全部落到三张宽表：
 - executions 保存每个真实 invocation 的终态并直接携带归属（run、执行角色、
-  标注章或案例锚），run 归属不再经 work 推导；没有模型请求的派发失败只写执行
-  终态，不伪造 turn=0
+  标注章或案例锚）；没有模型请求的派发失败只写执行终态，不伪造 turn=0
 - model_calls 保存每条真实模型请求：Agent 上下文（execution_id+turn_index）或
   standalone 上下文恰一；用量分项、供应商实报总量、费用、五类计时与四类通信/
   观察文档都是本表明确列，审计消息键直接落在可空唯一列上
@@ -20,10 +19,10 @@ from typing import Any
 
 
 class AgentAuditRecorder:
-    """2026-08-10 用于以独立短事务持久化 Agent 审计数据"""
+    """以独立短事务持久化 Agent 审计数据"""
 
     def __init__(self, storage_factory):
-        """2026-08-10 用于绑定每次审计写入的独立 Session 工厂"""
+        """绑定每次审计写入的独立 Session 工厂"""
         self._storage_factory = storage_factory
 
     def start_invocation(
@@ -38,7 +37,7 @@ class AgentAuditRecorder:
         case_anchor: str | None = None,
         **_: Any,
     ) -> int:
-        """2026-10-17 用于在派发时登记真实执行事实（含未发出请求就失败的尝试）
+        """在派发时登记真实执行事实（含未发出请求就失败的尝试）
 
         invocation 必须直接给出归属（run 与执行角色，标注角色再带章、案例角色
         带案例锚）；归属缺失即合同违约，直接报错。返回值仍是观察器使用的本地
@@ -73,7 +72,7 @@ class AgentAuditRecorder:
         message_key: str | None = None,
         invocation_id: int | None = None,
     ) -> str:
-        """2026-08-30 用于在物理 Provider 请求发出前创建独立运行中模型调用
+        """在物理 Provider 请求发出前创建独立运行中模型调用
 
         run/章节/角色只用于在缺登记时补齐执行归属；调用行（身份、请求消息、
         审计上下文与起始计时备注）全部落在 model_calls 宽行上，返回 call_id
@@ -107,7 +106,7 @@ class AgentAuditRecorder:
         timing_notes: list[str],
         token_usage: dict[str, Any] | None,
     ) -> None:
-        """2026-08-30 用于按物理 Provider 请求结束状态补齐响应计时错误与 token 计账"""
+        """按物理 Provider 请求结束状态补齐响应计时错误与 token 计账"""
         return self._storage_factory().audit.finish_turn(
             turn_id,
             raw_response=raw_response,
@@ -119,7 +118,7 @@ class AgentAuditRecorder:
         )
 
     def update_turn_timings(self, turn_id: str, *, tool_wall_ms: int | None, turn_ms: int | None) -> None:
-        """2026-08-10 用于在工具批处理结束后补写工具墙钟与本回合总耗时
+        """在工具批处理结束后补写工具墙钟与本回合总耗时
 
         turn_ms 是按现有 model_ms + tool_wall_ms 规则的重放投影（读取时计算），
         这里只登记实际测得的 tool_wall_ms；调用的 finished_at 随工具批处理结束更新。
@@ -141,7 +140,7 @@ class AgentAuditRecorder:
         tool_duration_ms: int | None = None,
         message_key: str | None = None,
     ) -> None:
-        """2026-08-11 用于在独立短事务中写入单次工具调用审计（含原始参数片段）
+        """在独立短事务中写入单次工具调用审计（含原始参数片段）
 
         turn_id 即真实模型调用的 call_id；实际执行参数与原始参数字符串分开保存，
         观察文档与耗时同列落在 agent_tool_calls 宽行上。
@@ -175,7 +174,7 @@ class AgentAuditRecorder:
         message_key: str | None = None,
         **_: Any,
     ) -> None:
-        """2026-10-06 用于把执行收口为真实终态
+        """把执行收口为真实终态
 
         没有发出任何模型请求的派发失败也只写执行记录（不伪造第 0 个模型回合）；
         成功尝试同样登记成功终态，模型请求事实仍只在其调用行上。
@@ -196,11 +195,10 @@ class AgentAuditRecorder:
         )
 
     def close_orphaned_turns(self, run_id: str) -> int:
-        """2026-10-03 用于分析环境初始化时收口本 run 遗留的 running 执行与调用
+        """分析环境初始化时按落库事实收口本 run 遗留的 running 执行与调用
 
-        进程被杀/重启时正在执行的回合没机会走 finish_turn，永远停在
-        status='running' 且 finished_at 为空（run 08f9ba42 实证 12 条僵尸行污染
-        错误率统计）。每次创建/恢复分析任务时统一收口为 interrupted——审计是事实
-        记录，只补状态不删除。返回值是本次收口的调用行与执行行总数。
+        运行已有正式诊断报告（诊断产物落库）时，其残留诊断会话行按成功收口；
+        其余未落库的回合按未落库收口。审计是事实记录，只补状态不删除。
+        返回值是本次收口的调用行与执行行总数。
         """
         return self._storage_factory().audit.close_orphaned_turns(run_id)

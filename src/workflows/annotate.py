@@ -97,8 +97,7 @@ async def run_annotate(
     try:
         recovery_session = factory()
         try:
-            scope = await asyncio.to_thread(fetch_annotation_role_records, recovery_session, run_id)
-            discard = sorted({state.chapter_id for state in scope if state.chapter_id not in retained})
+            discard = sorted({item.payload["chapter_id"] for item in work})
             await bus.request(
                 Message(
                     topic="agent.recover",
@@ -128,7 +127,7 @@ async def run_annotate(
         finally:
             pass
 
-        async def consolidate(chapter_id: int) -> None:
+        async def consolidate(chapter_id: int, *, recheck: bool = False) -> None:
             await bus.request(Message(topic="audit.barrier", source=agent.address, target=audit.address, run_id=run_id))
             await bus.request(
                 Message(
@@ -136,7 +135,7 @@ async def run_annotate(
                     source=f"queue:{run_id}",
                     target=agent.address,
                     run_id=run_id,
-                    payload={"chapter_id": chapter_id},
+                    payload={"chapter_id": chapter_id, "recheck": recheck},
                 )
             )
 
@@ -182,8 +181,8 @@ async def run_annotate(
         actual = completed_chapters(states)
         if len(actual) != total:
             raise RuntimeError(f"必需角色未全部成功保存: completed={len(actual)} total={total}")
-        for chapter_id in sorted(actual - retained):
-            await consolidate(chapter_id)
+        for chapter_id in sorted(actual):
+            await consolidate(chapter_id, recheck=True)
         logger.info(
             "annotation work completed run_id={} chapters={} elapsed={:.2f}s",
             run_id,

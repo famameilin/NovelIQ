@@ -6,7 +6,7 @@ type AnalysisNotCompleteStateProps = {
   title?: string;
   description: string;
   /**
-   * 2026-08-08 用于区分“仍在分析中”（等待态）与“任务已失败”（失败态），
+   * 用于区分“仍在分析中”（等待态）与“任务已失败”（失败态），
    * 失败态用红色警示视觉，避免用户误以为任务还在正常推进
    */
   failed?: boolean;

@@ -1,24 +1,15 @@
-"""
-测试完整性检查函数
-
-修改时间: 2026-03-15
-任务: storage-layer-decoupling
-修改内容: 使用 SessionFactory 替代 connect_db/create_tables，确保正确关闭连接
-
-修改时间: 2026-03-15
-任务: postgresql-migration-cleanup
-修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
-"""
+"""测试完整性检查函数"""
 
 import sys
-import uuid
 from pathlib import Path
 from unittest.mock import patch
 
 from src.diagnosis.completion import has_diagnosis_data
 from src.metrics.queries.completion import is_aggregate_complete
+from src.storage import new_id
 from src.work.queries import is_annotate_complete
 from src.workflows.preprocess_readiness import is_preprocess_complete
+from tests.support.storage_fixtures import storage_for
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -70,7 +61,7 @@ def _insert_paragraphs(db_session, run_id: str, chunks: list[Chunk]) -> None:
 
 
 def _insert_paragraph_derived_rows(db_session, run_id: str, paragraph_ids: list[int]) -> None:
-    """2026-08-15 M2：补齐 preprocess 完成的指标/曲线前置（最小合法行）"""
+    """补齐 preprocess 完成的指标/曲线前置（最小合法行）"""
     from src.storage.repositories.paragraph_repository import (
         ParagraphCurveRow,
         ParagraphMetricRow,
@@ -81,7 +72,7 @@ def _insert_paragraph_derived_rows(db_session, run_id: str, paragraph_ids: list[
         run_id,
         [
             ParagraphMetricRow(
-                # 2026-10-16 3NF：char_count/词类计数是读取投影，不是 paragraph_metrics 可写列
+                # char_count/词类计数是读取投影，不是 paragraph_metrics 可写列
                 paragraph_id=paragraph_id,
                 token_count=1,
                 sentence_count=1,
@@ -125,7 +116,7 @@ class TestStageCompleteChecks:
     def test_is_preprocess_complete_empty_db(self, db_session):
         """空数据库时preprocess未完成"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -133,12 +124,12 @@ class TestStageCompleteChecks:
             title="Test Novel",
         )
         chapter_repo = ChapterRepository(db_session)
-        assert not is_preprocess_complete(chapter_repo.session, run_id)
+        assert not is_preprocess_complete(storage_for(chapter_repo.session), run_id)
 
     def test_is_preprocess_complete_with_chunks_when_semantic_search_disabled(self, db_session):
-        """2026-08-07 用于验证关闭语义原文定位时 chunks 足以完成预处理"""
+        """验证关闭语义原文定位时 chunks 足以完成预处理"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -150,23 +141,18 @@ class TestStageCompleteChecks:
         chapter_repo.insert_chapter_texts(run_id, chunks)
         # 段落事实源是 preprocess 完成的前置条件（与语义检索开关无关）
         _insert_paragraphs(db_session, run_id, chunks)
-        # 2026-08-15 M2：指标/曲线同为完成前置（段落行落库后分段提交的崩溃窗口）
+        # 指标/曲线同为完成前置（段落行落库后分段提交的崩溃窗口）
         _insert_paragraph_derived_rows(db_session, run_id, [0])
         with patch(
             "src.workflows.preprocess_readiness.settings.models.paragraph_embedding.semantic_enabled",
             False,
         ):
-            assert is_preprocess_complete(chapter_repo.session, run_id)
+            assert is_preprocess_complete(storage_for(chapter_repo.session), run_id)
 
     def test_is_preprocess_complete_false_when_semantic_paragraph_embeddings_missing(self, db_session):
-        """
-        创建时间: 2026-04-24
-        任务: fix-preprocess-completion-level3-contract
-        说明: 当前配置要求 Level3 时，只有 chunks 或只有 chunk embeddings 都不能视为 preprocess 完成。
-              RAG 粒度固定为自然段：只有 paragraph embeddings 才算数。
-        """
+        """RAG 粒度固定为自然段：只有 paragraph embeddings 才算数。"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -182,16 +168,12 @@ class TestStageCompleteChecks:
             "src.workflows.preprocess_readiness.settings.models.paragraph_embedding.semantic_enabled",
             True,
         ):
-            assert not is_preprocess_complete(chapter_repo.session, run_id)
+            assert not is_preprocess_complete(storage_for(chapter_repo.session), run_id)
 
     def test_is_preprocess_complete_true_when_semantic_embeddings_complete(self, db_session):
-        """
-        创建时间: 2026-04-24
-        任务: fix-preprocess-completion-level3-contract
-        说明: 当前配置要求 Level3 时，只有 paragraph embeddings 完整就绪，preprocess 才算完成。
-        """
+        """当前配置要求 Level3 时，只有 paragraph embeddings 完整就绪，preprocess 才算完成。"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -202,10 +184,10 @@ class TestStageCompleteChecks:
         chunks = _create_chunks(2)
         chapter_repo.insert_chapter_texts(run_id, chunks)
         _insert_paragraphs(db_session, run_id, chunks)
-        # 2026-08-15 M2：指标/曲线同为完成前置
+        # 指标/曲线同为完成前置
         _insert_paragraph_derived_rows(db_session, run_id, [0, 1])
         ensure_paragraph_embeddings_schema(db_session, 1024)
-        # 二期段落化：embedding 行按 paragraph_id 对齐段落事实源
+        # embedding 行按 paragraph_id 对齐段落事实源
         # （chunk 0 的段 paragraph_id=0，chunk 1 的段 paragraph_id=1）
         insert_paragraph_embeddings(
             db_session,
@@ -221,12 +203,12 @@ class TestStageCompleteChecks:
             "src.workflows.preprocess_readiness.settings.models.paragraph_embedding.semantic_enabled",
             True,
         ):
-            assert is_preprocess_complete(chapter_repo.session, run_id)
+            assert is_preprocess_complete(storage_for(chapter_repo.session), run_id)
 
     def test_is_preprocess_complete_false_when_paragraph_metrics_missing(self, db_session):
-        """2026-08-15 M2 回归：段落行存在但指标缺失（分段提交崩溃窗口）→ 判定未完成"""
+        """段落行存在但指标缺失（分段提交崩溃窗口）→ 判定未完成"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -242,15 +224,14 @@ class TestStageCompleteChecks:
             "src.workflows.preprocess_readiness.settings.models.paragraph_embedding.semantic_enabled",
             False,
         ):
-            assert not is_preprocess_complete(chapter_repo.session, run_id)
+            assert not is_preprocess_complete(storage_for(chapter_repo.session), run_id)
 
     def test_is_preprocess_complete_false_when_partial_paragraph_embeddings(self, db_session):
-        """
-        2026-08-14 二期段落化：readiness 缺口以段落为粒度——
+        """readiness 缺口以段落为粒度——
         部分段落缺 embedding 行时 preprocess 不得判定完成。
         """
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -274,12 +255,12 @@ class TestStageCompleteChecks:
             "src.workflows.preprocess_readiness.settings.models.paragraph_embedding.semantic_enabled",
             True,
         ):
-            assert not is_preprocess_complete(chapter_repo.session, run_id)
+            assert not is_preprocess_complete(storage_for(chapter_repo.session), run_id)
 
     def test_is_annotate_complete_no_annotations(self, db_session):
         """有chunks但无annotations时annotate未完成"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -290,12 +271,12 @@ class TestStageCompleteChecks:
         ann_repo = AnnotationRepository(db_session)
         chunks = _create_chunks(3)
         chapter_repo.insert_chapter_texts(run_id, chunks)
-        assert not is_annotate_complete(ann_repo.session, run_id)
+        assert not is_annotate_complete(storage_for(ann_repo.session), run_id)
 
     def test_is_annotate_complete_partial_annotations(self, db_session):
         """annotations数量小于chunks数量时annotate未完成"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -306,15 +287,15 @@ class TestStageCompleteChecks:
         ann_repo = AnnotationRepository(db_session)
         chunks = _create_chunks(3)
         chapter_repo.insert_chapter_texts(run_id, chunks)
-        # 2026-08-18 段落事实源：证据派生要求章节存在段落行
+        # 段落事实源：证据派生要求章节存在段落行
         _insert_paragraphs(db_session, run_id, chunks)
         persist_chapter_annotation(db_session, run_id=run_id, chapter_id=1)
-        assert not is_annotate_complete(ann_repo.session, run_id)
+        assert not is_annotate_complete(storage_for(ann_repo.session), run_id)
 
     def test_is_annotate_complete_all_annotations(self, db_session):
-        """2026-08-05 用于验证每个真实章节都有正式标注时 annotate 完成"""
+        """验证每个真实章节都有正式标注时 annotate 完成"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -325,16 +306,16 @@ class TestStageCompleteChecks:
         ann_repo = AnnotationRepository(db_session)
         chunks = _create_chunks(3)
         chapter_repo.insert_chapter_texts(run_id, chunks)
-        # 2026-08-18 段落事实源：证据派生要求章节存在段落行
+        # 段落事实源：证据派生要求章节存在段落行
         _insert_paragraphs(db_session, run_id, chunks)
         for chapter_id in range(1, 4):
             persist_chapter_annotation(db_session, run_id=run_id, chapter_id=chapter_id)
-        assert is_annotate_complete(ann_repo.session, run_id)
+        assert is_annotate_complete(storage_for(ann_repo.session), run_id)
 
     def test_is_aggregate_complete_no_data(self, db_session):
         """无emotion_curve和rhythm_curve时aggregate未完成"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -345,12 +326,12 @@ class TestStageCompleteChecks:
         stats_repo = StatsRepository(db_session)
         chunks = _create_chunks(3)
         chapter_repo.insert_chapter_texts(run_id, chunks)
-        assert not is_aggregate_complete(stats_repo.session, run_id)
+        assert not is_aggregate_complete(storage_for(stats_repo.session), run_id)
 
     def test_is_aggregate_complete_partial_data(self, db_session):
-        """只有chunks、无global_stats时aggregate未完成（M8b 后以 global_stats 为准）"""
+        """只有chunks、无global_stats时aggregate未完成（以 global_stats 为准）"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -361,25 +342,25 @@ class TestStageCompleteChecks:
         stats_repo = StatsRepository(db_session)
         chunks = _create_chunks(3)
         chapter_repo.insert_chapter_texts(run_id, chunks)
-        assert not is_aggregate_complete(stats_repo.session, run_id)
+        assert not is_aggregate_complete(storage_for(stats_repo.session), run_id)
 
     def test_insert_global_stats_registers_aggregate_completion(self, db_session):
-        """写入全书统计即登记聚合阶段完成事实（2026-10-17 run 52cbb1ac）
+        """写入全书统计即登记聚合阶段完成事实
 
         缺写者时序：每次续跑 is_aggregate_complete 恒假，聚合重跑且跳过条件
         连带压住主题与诊断阶段；补齐后一次写入即可判定完成。
         """
         _novel_id, run_id = create_run_with_chunks(db_session, texts=["测试文本" * 100])
-        assert not is_aggregate_complete(db_session, run_id)
+        assert not is_aggregate_complete(storage_for(db_session), run_id)
 
         StatsRepository(db_session).insert_global_stats(run_id, [("avg_mtld", 58.4)])
 
-        assert is_aggregate_complete(db_session, run_id)
+        assert is_aggregate_complete(storage_for(db_session), run_id)
 
     def test_is_topic_model_complete_no_data(self, db_session):
         """无paragraph_topics时topic_model未完成"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -390,9 +371,9 @@ class TestStageCompleteChecks:
         assert not stats_repo.has_topic_data(run_id)
 
     def test_is_topic_model_complete_with_data(self, db_session):
-        """有契约表与段落主题时topic_model完成（§5.8 主题判定改查契约行）"""
+        """有契约表与段落主题时topic_model完成（主题判定改查契约行）"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -424,7 +405,7 @@ class TestStageCompleteChecks:
     def test_is_diagnose_complete_no_data(self, db_session):
         """无诊断产物时diagnose未完成"""
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -432,13 +413,12 @@ class TestStageCompleteChecks:
             title="Test Novel",
         )
         stats_repo = StatsRepository(db_session)
-        assert not has_diagnosis_data(stats_repo.session, run_id)
+        assert not has_diagnosis_data(storage_for(stats_repo.session), run_id)
 
     def test_is_diagnose_complete_with_data(self, db_session):
-        """2026-10-16 3NF：正式报告 + 已发布完整事件 + 焦点结构与名单条目才判定 diagnose 完成"""
-        from src.agents.diagnosis.persistence import save_diagnosis_report
-        from src.event_trees.diagnosis_persistence import save_diagnosis_events
-        from src.event_trees.organization import save_organization
+        """正式报告 + 已保存完整事件 + 焦点结构与名单条目才判定 diagnose 完成"""
+        from src.storage.repositories.diagnosis_event_writes import save_diagnosis_events
+        from src.storage.repositories.organization_writes import save_organization
         from tests.support.event_tree_fixtures import (
             add_annotation_source,
             add_declaration,
@@ -446,6 +426,7 @@ class TestStageCompleteChecks:
             first_paragraph,
             identity_every_declaration,
         )
+        from tests.support.storage_fixtures import insert_report_fixture
 
         novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻找山门并点灯。"])
         paragraph = first_paragraph(db_session, run_id)
@@ -463,7 +444,7 @@ class TestStageCompleteChecks:
         draft, _meta = identity_every_declaration(db_session, run_id)
         close_structure(db_session, draft, evidence_paragraph_id=paragraph.paragraph_id)
         organization = draft.finish()
-        report_id = save_diagnosis_report(
+        report_id = insert_report_fixture(
             db_session,
             run_id,
             str(draft.execution_id),
@@ -482,16 +463,16 @@ class TestStageCompleteChecks:
         db_session.commit()
 
         stats_repo = StatsRepository(db_session)
-        assert has_diagnosis_data(stats_repo.session, run_id)
+        assert has_diagnosis_data(storage_for(stats_repo.session), run_id)
 
     def test_is_diagnose_complete_rejects_incomplete_focus_contract_row(self, db_session):
-        """2026-10-16 3NF：只有正文、缺焦点结构与名单条目的半成品报告行不算 diagnose 完成"""
-        from src.agents.diagnosis.persistence import save_diagnosis_report
+        """只有正文、缺焦点结构与名单条目的半成品报告行不算 diagnose 完成"""
         from tests.support.event_tree_fixtures import add_diagnosis_context
+        from tests.support.storage_fixtures import insert_report_fixture
 
         novel_id, run_id = create_run_with_chunks(db_session, texts=["旧 row 缺少焦点合同。"])
         session_id, _execution_id = add_diagnosis_context(db_session, run_id)
-        save_diagnosis_report(
+        insert_report_fixture(
             db_session,
             run_id,
             session_id,
@@ -500,4 +481,4 @@ class TestStageCompleteChecks:
         db_session.commit()
 
         stats_repo = StatsRepository(db_session)
-        assert not has_diagnosis_data(stats_repo.session, run_id)
+        assert not has_diagnosis_data(storage_for(stats_repo.session), run_id)

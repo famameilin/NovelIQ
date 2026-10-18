@@ -1,4 +1,3 @@
-// 2026-04-23，任务：复杂度与耦合审查 P1
 // 集中管理图谱页和时间轴页的深链 URL 构造，避免页面与 hook 各自拼接参数
 
 export function buildGraphUrl(

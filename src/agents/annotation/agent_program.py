@@ -55,7 +55,7 @@ _AGENT_REFERENCE_SCOPE_TEXT: str = (
     "- entity/event 不要求指标或对话；annotation/metric 必须提交实际指标并逐条判定全部对话候选。\n\n"
 )
 
-# 八类构造器（§3.1 的目录就是模型知道"能交什么、怎么交"的全部依据）。
+# 八类构造器的目录就是模型知道"能交什么、怎么交"的全部依据。
 # finish 使用当前 work 工具表，仅登记结束请求
 _AGENT_CONSTRUCTOR_ORDER: tuple[str, ...] = (
     "entity",

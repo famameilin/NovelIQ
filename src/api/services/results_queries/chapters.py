@@ -1,11 +1,7 @@
-"""
-章节查询组装器
+"""章节查询组装器
 
-说明: 承载章节标注相关查询组装逻辑（M9a-2：chunk 命名下线，
-仅保留章节标注展开，数据源为 chapter_annotations 表）。
-
-角色/关系/对话的引用裁决与按章归组在 `src.metrics.aggregate.normalization`，
-本模块只做取数与响应装配。
+承载章节标注相关查询组装逻辑（数据源为 chapter_annotations 表）；角色/关系/对话的引用裁决
+与按章归组在 `src.metrics.aggregate.normalization`，本模块只做取数与响应装配。
 """
 
 from __future__ import annotations

@@ -8,7 +8,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, cast
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -22,8 +22,8 @@ from src.event_trees.contributions import EventContribution
 from src.event_trees.trees import CONTRIBUTION_KEYS, EventTrees
 from src.fact_graph.contributions import FactContribution
 from src.fact_graph.evidence import EvidenceParagraph
-from src.fact_graph.graph import FactGraph, entity_key
-from src.fact_graph.identity import comparison_relation_pair
+from src.fact_graph.graph import FactGraph
+from src.fact_graph.identity import canonical_relation_key
 from src.storage import Storage, new_id
 from src.storage.records.evidence import EvidenceParagraph as StoredParagraph
 from src.work.annotation_work import WorkReceipt
@@ -167,7 +167,6 @@ class AnnotationAgent:
             ("agent.saved_progress", self.saved_progress),
             ("agent.cancel", self.cancel),
             ("agent.abort", self.abort),
-            ("agent.check", self.check),
             ("agent.recover", self.recover),
             ("agent.consolidate_chapter", self.consolidate_chapter),
         ):
@@ -185,7 +184,13 @@ class AnnotationAgent:
 
                 def save() -> dict[str, Any]:
                     session = self.session_factory()
-                    result = consolidate_chapter(session, self.run_id, message.payload["chapter_id"], self.case_pool)
+                    result = consolidate_chapter(
+                        session,
+                        self.run_id,
+                        message.payload["chapter_id"],
+                        self.case_pool,
+                        recheck=bool(message.payload.get("recheck", False)),
+                    )
                     pass
                     return result
 
@@ -202,7 +207,7 @@ class AnnotationAgent:
                 self.case_pool.save_warnings = warnings
                 raise
             if result["status"] == "saved":
-                self.case_pool.confirm_pending(result["author"], result["case_states"])
+                self.case_pool.confirm_pending(result["author"])
             if cancelled:
                 raise asyncio.CancelledError
             return result
@@ -457,6 +462,7 @@ class AnnotationAgent:
         if call["name"] == "execute_code":
             return str(await tool.ainvoke(call.get("args", {})))
         if call["name"] in {"read_text", "search_text", "read_chapter_text", "anchor_record"}:
+            # 原文 I/O 不持书级锁，结束后仅在锁内登记可选案例关联
             args = dict(call.get("args", {}))
             caseid = args.pop("caseid", None)
             result = await tool.ainvoke(args)
@@ -505,6 +511,8 @@ class AnnotationAgent:
                     self.fact_graph.restore(snapshots[1])
                     self.event_trees.restore(snapshots[2])
                     self.case_pool.restore(snapshots[3])
+                    # 就地恢复：读取工具装配时捕获的是这三个容器对象本身，
+                    # 换成快照副本会让此后读取的记录与工具持有的容器断裂
                     execution.event_reads.clear()
                     execution.event_reads.update(local[0])
                     execution.case_connections[:] = local[1]
@@ -549,8 +557,8 @@ class AnnotationAgent:
         execution = self._execution(message)
         if not execution.saved:
             raise ValueError(f"work_id={execution.work_id} 尚未确认保存，不能展示保存进度")
-        payload, progress = (execution.receipt.payload, message.payload)
-        current, total = (progress["current"], progress["total"])
+        payload, progress = execution.receipt.payload, message.payload
+        current, total = progress["current"], progress["total"]
         for event in (
             StreamEvent(
                 action="work_saved", stage="annotate", sub_stage=payload["role"], chapter_id=payload["chapter_id"]
@@ -625,7 +633,7 @@ class AnnotationAgent:
         for op in facts["relation_assert_ops"]:
             from_id = self.fact_graph.entity_id_for_key(str(op["from_entity"]))
             to_id = self.fact_graph.entity_id_for_key(str(op["to_entity"]))
-            left, right, kind = comparison_relation_pair(from_id, to_id, str(op["relation_type"]))
+            left, right, kind = canonical_relation_key(from_id, to_id, str(op["relation_type"]))
             key = (str(left), str(right), kind)
             if key not in self.fact_graph.relation_ids:
                 self.fact_graph.relation_ids[key] = new_id()
@@ -782,264 +790,10 @@ class AnnotationAgent:
     def _save_dialogues(self, *args):
         raise RuntimeError("对话随完整标注保存")
 
-    async def check(self, message: Message) -> bool:
-        execution = self._execution(message)
-
-        def query() -> bool:
-            from loguru import logger
-
-            def mismatch(label: str, **sides: Any) -> bool:
-                actual, expected = (sides.get("actual"), sides.get("expected"))
-                if isinstance(actual, set) and isinstance(expected, set):
-                    detail = (
-                        "actual_only="
-                        f"{sorted(map(repr, actual - expected))[:15]}"
-                        " expected_only="
-                        f"{sorted(map(repr, expected - actual))[:15]}"
-                    )
-                elif isinstance(actual, list) and isinstance(expected, list):
-                    index = next(
-                        (
-                            position
-                            for position, pair in enumerate(zip(actual, expected, strict=False))
-                            if pair[0] != pair[1]
-                        ),
-                        min(len(actual), len(expected)),
-                    )
-                    left = actual[index] if index < len(actual) else None
-                    right = expected[index] if index < len(expected) else None
-                    detail = (
-                        "first_diff="
-                        f"{index}"
-                        " n_actual="
-                        f"{len(actual)}"
-                        " n_expected="
-                        f"{len(expected)}"
-                        " actual="
-                        f"{left!r}"
-                        " expected="
-                        f"{right!r}"
-                    )
-                else:
-                    detail = " | ".join((f"{key}={value!r}"[:1500] for key, value in sides.items()))
-                logger.warning("work 保存核查不一致 work_id={} label={} {}", message.work_id, label, detail[:4000])
-                return False
-
-            session = self.session_factory()
-            receipt = session.annotations.inspect_saved(execution.invocation_id)
-            if receipt["record_id"] == execution.annotation_id:
-                execution.case_save_warnings = receipt["warnings"]
-                self.case_pool.save_warnings[execution.invocation_id] = deepcopy(receipt["warnings"])
-            execution_row = session.reads.agents_annotation_agent_query_1(execution.invocation_id)
-            expected_execution = {
-                "run_id": self.run_id,
-                "chapter_id": execution.receipt.payload["chapter_id"],
-                "role": execution.receipt.payload["role"],
-            }
-            if execution_row is None or any(
-                (getattr(execution_row, name) != value for name, value in expected_execution.items())
-            ):
-                actual_execution = (
-                    None
-                    if execution_row is None
-                    else {name: getattr(execution_row, name) for name in expected_execution}
-                )
-                return mismatch("execution_row", expected=expected_execution, actual=actual_execution)
-            annotation_id = execution.annotation_id
-            record = session.reads.agents_annotation_agent_query_2(annotation_id)
-            if record is None or record.execution_id != message.invocation_id:
-                return mismatch(
-                    "annotation_record",
-                    expected_execution=message.invocation_id,
-                    actual=None
-                    if record is None
-                    else {"record_id": record.record_id, "execution_id": record.execution_id},
-                )
-            expected = execution.contributions["facts"]
-            detail = self.fact_graph._read_execution_facts(
-                session, execution_id=message.invocation_id, chapter_id=execution.receipt.payload["chapter_id"]
-            )
-            references = sorted(detail["entity_references"], key=lambda value: value["entity_id"])
-            expected_references = sorted(expected["entities"].values(), key=lambda value: value["entity_id"])
-            if references != expected_references:
-                return mismatch("entity_references", actual=references, expected=expected_references)
-            actual_entities = [
-                (op["name"], op["entity_type"], tuple(op["tags"]), tuple(op["fields"]), op.get("description"))
-                for op in detail["entity_ops"]
-            ]
-            expected_entities = [
-                (
-                    op["name"],
-                    op["entity_type"],
-                    tuple(op.get("tags") or []),
-                    tuple(op.get("fields") or []),
-                    op.get("description"),
-                )
-                for op in expected["entity_ops"]
-            ]
-            if actual_entities != expected_entities:
-                return mismatch("entity_ops", actual=actual_entities, expected=expected_entities)
-            expected_relations = {
-                comparison_relation_pair(
-                    self.fact_graph.entity_id_for_key(str(op["from_entity"])),
-                    self.fact_graph.entity_id_for_key(str(op["to_entity"])),
-                    str(op["relation_type"]),
-                )
-                for op in expected["relation_assert_ops"]
-            }
-            actual_relation_ids = set(session.reads.agents_annotation_agent_query_4(message.invocation_id))
-            actual_relations = {
-                comparison_relation_pair(str(row.from_entity_id), str(row.to_entity_id), str(row.relation_type))
-                for row in session.reads.agents_annotation_agent_query_8(actual_relation_ids)
-            }
-            if actual_relations != expected_relations:
-                return mismatch("relations", actual=actual_relations, expected=expected_relations)
-            expected_plotline = [
-                {
-                    "source_operation_id": str(item["source_operation_id"]),
-                    "event_id": item.get("event_id"),
-                    "operation": {
-                        key: item["operation"].get(key)
-                        for key in ("subject_id", "subject_title", "description", "before", "after")
-                    },
-                    "evidence": [
-                        (int(row["paragraph_id"]), int(row["char_start"]), int(row["char_end"]))
-                        for row in item.get("evidence") or []
-                    ],
-                }
-                for item in expected.get("plotline_ops", [])
-            ]
-            actual_plotline = [
-                {
-                    "source_operation_id": op["source_operation_id"],
-                    "event_id": op["event_id"],
-                    "operation": {
-                        key: op["operation"].get(key)
-                        for key in ("subject_id", "subject_title", "description", "before", "after")
-                    },
-                    "evidence": [
-                        (int(row["paragraph_id"]), int(row["char_start"]), int(row["char_end"]))
-                        for row in op.get("evidence") or []
-                    ],
-                }
-                for op in detail["plotline_ops"]
-            ]
-            if actual_plotline != expected_plotline:
-                return mismatch("plotline_ops", actual=actual_plotline, expected=expected_plotline)
-            expected_observations = {
-                (item["character"], item.get("role_function"), item.get("action"), item.get("emotion"))
-                for item in execution.output()["character_observations"]
-            }
-            actual_observations = set()
-            for participant_fact in session.reads.agents_annotation_agent_query_3():
-                participant = session.reads.agents_annotation_agent_query_5(participant_fact)
-                if participant is None:
-                    continue
-                declaration = session.reads.agents_annotation_agent_query_6(participant)
-                if declaration is None or declaration.record_id != annotation_id:
-                    continue
-                entity = session.reads.agents_annotation_agent_query_7(participant)
-                actual_observations.add(
-                    (
-                        str(entity.canonical_name) if entity is not None else "",
-                        participant.narrative_role,
-                        participant.action,
-                        participant.emotion,
-                    )
-                )
-            if actual_observations != expected_observations:
-                return mismatch("character_observations", actual=actual_observations, expected=expected_observations)
-            expected_labels = {
-                (int(item["paragraph_id"]), int(item["emotion"])) for item in execution.output()["paragraph_labels"]
-            }
-            actual_labels = {
-                (cast(int, row.paragraph_id), cast(int, row.emotion))
-                for row in session.reads.agents_annotation_agent_query_9(annotation_id)
-            }
-            if actual_labels != expected_labels:
-                return mismatch("paragraph_labels", actual=actual_labels, expected=expected_labels)
-            expected_actions = execution.contributions["events"]["actions"]
-            actual_actions = {
-                row.action_id: row for row in session.reads.agents_annotation_agent_query_10(message.invocation_id)
-            }
-            if set(actual_actions) != set(expected_actions):
-                return mismatch("actions_keys", actual=sorted(actual_actions), expected=sorted(expected_actions))
-            for identifier, value in expected_actions.items():
-                row = actual_actions[identifier]
-                if (
-                    str(row.action_type) != value["action_type"]
-                    or str(row.source_declaration_id) != value["root_event_id"]
-                    or row.target_declaration_id != value.get("target_event_id")
-                ):
-                    return mismatch(
-                        "action_fields",
-                        identifier=identifier,
-                        actual=(str(row.action_type), str(row.source_declaration_id), row.target_declaration_id),
-                        expected=value,
-                    )
-            from src.event_trees.persistence import check_declaration_contribution
-
-            if execution.event_contribution is None:
-                return mismatch("declaration_contribution", frozen=False)
-            if not check_declaration_contribution(session, execution.event_contribution):
-                return mismatch("declaration_contribution", frozen=True)
-            case_ids = set(execution.contributions["cases"]["registrations"])
-            case_ids.update(item["case_id"] for item in execution.contributions["cases"]["deliveries"])
-            for identifier in case_ids:
-                if identifier in {item["caseid"] for item in execution.case_save_warnings}:
-                    continue
-                if session.reads.agents_annotation_agent_query_11(identifier) is None:
-                    return mismatch("book_case", case_id=identifier)
-            if execution.ledger.role in {"annotation", "metric"}:
-                dialogues = list(session.reads.agents_annotation_agent_query_12(message.invocation_id))
-                if {row.candidate_key for row in dialogues} != {
-                    item["candidate_key"] for item in execution.output()["dialogues"]
-                }:
-                    return mismatch(
-                        "dialogue_keys",
-                        actual=sorted(row.candidate_key for row in dialogues),
-                        expected=sorted(item["candidate_key"] for item in execution.output()["dialogues"]),
-                    )
-                by_key = {row.candidate_key: row for row in dialogues}
-                for content in execution.output()["dialogues"]:
-                    dialogue = by_key[content["candidate_key"]]
-                    speaker = (
-                        self.fact_graph.entity_id_for_key(entity_key(content["speaker"], "character"))
-                        if content["speaker"]
-                        else None
-                    )
-                    if (
-                        dialogue.speaker_entity_id != speaker
-                        or int(dialogue.start_char) != int(content["start"])
-                        or int(dialogue.end_char) != int(content["end"])
-                        or (dialogue.tone != content["tone"])
-                        or (bool(dialogue.is_inner_monologue) != bool(content["is_inner_monologue"]))
-                    ):
-                        return mismatch(
-                            "dialogue_fields",
-                            candidate_key=content["candidate_key"],
-                            actual=(
-                                str(dialogue.speaker_entity_id),
-                                int(dialogue.start_char),
-                                int(dialogue.end_char),
-                                dialogue.tone,
-                                bool(dialogue.is_inner_monologue),
-                            ),
-                            expected=(
-                                str(speaker),
-                                int(content["start"]),
-                                int(content["end"]),
-                                content["tone"],
-                                bool(content["is_inner_monologue"]),
-                            ),
-                        )
-            return True
-
-        return await asyncio.to_thread(query)
-
     async def cancel(self, message: Message) -> None:
         execution = self.executions.get(message.work_id)
-        if execution is not None and (not execution.saved) and (execution.task is not None):
+        # finish 只结束模型写面，尚在等执行回执的成功 work 仍属于保存前取消范围
+        if execution is not None and not execution.saved and execution.task is not None:
             execution.task.cancel()
 
     async def recover(self, message: Message) -> None:
@@ -1067,8 +821,6 @@ class AnnotationAgent:
     async def _recover_saved_work(self, message: Message) -> None:
         """确认故障只重建当前已保存作者，不清理其他 work 或释放其案例占用"""
         execution = self._execution(message)
-        if not await self.check(message):
-            raise ValueError(f"work_id={message.work_id} 保存结果不一致，不能恢复确认")
 
         def load() -> tuple[Any, Any, Any]:
             session = self.session_factory()
@@ -1102,7 +854,6 @@ class AnnotationAgent:
             "agent.saved_progress",
             "agent.cancel",
             "agent.abort",
-            "agent.check",
             "agent.recover",
             "agent.consolidate_chapter",
         ):

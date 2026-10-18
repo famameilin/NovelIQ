@@ -19,7 +19,7 @@ from src.storage.records.evidence import EvidenceParagraph as StoredParagraph
 
 
 def _norm(value: str) -> str:
-    """2026-08-09 用于生成实体名称精确匹配键"""
+    """生成实体名称精确匹配键"""
     return unicodedata.normalize("NFC", value).strip().casefold()
 
 
@@ -27,17 +27,17 @@ _ENTITY_KEY_SEP = "\x1f"
 
 
 def _entity_key(name: str, entity_type: object) -> str:
-    """2026-10-13 用于生成实体身份复合键（规范名 + 实体大类）"""
+    """生成实体身份复合键（规范名 + 实体大类）"""
     return f"{_norm(name)}{_ENTITY_KEY_SEP}{entity_type}"
 
 
 def entity_key(name: str, entity_type: object) -> str:
-    """2026-10-13 用于在标注侧复用实体身份复合键（与 FactGraph 同一编码）"""
+    """在标注侧复用实体身份复合键（与 FactGraph 同一编码）"""
     return _entity_key(name, entity_type)
 
 
 def _stable_relation_key(from_key: str, to_key: str, relation_type: str) -> tuple[str, str, str]:
-    """2026-08-11 用于生成双向归一化的关系稳定键（端点为实体身份复合键）"""
+    """生成双向归一化的关系稳定键（端点为实体身份复合键）"""
     key_a = from_key
     key_b = to_key
     definition = RELATION_DEFINITIONS.get(relation_type)
@@ -115,7 +115,7 @@ class FactGraph:
         """冻结实体身份、字段提交语义和关系方向，Storage 只保存明确记录"""
         import json
 
-        from src.fact_graph.identity import comparison_relation_pair
+        from src.fact_graph.identity import canonical_relation_key
         from src.storage.records.facts import FactSave
 
         facts = frozen.snapshot()
@@ -125,7 +125,7 @@ class FactGraph:
         for op in facts["relation_assert_ops"]:
             left = self.entity_id_for_key(str(op["from_entity"]))
             right = self.entity_id_for_key(str(op["to_entity"]))
-            left, right, kind = comparison_relation_pair(left, right, str(op["relation_type"]))
+            left, right, kind = canonical_relation_key(left, right, str(op["relation_type"]))
             key = (str(left), str(right), kind)
             if key not in self.relation_ids:
                 self.relation_ids[key] = new_id()
@@ -189,10 +189,10 @@ class FactGraph:
         for identifier, (name, kind) in entity_names.items():
             self.entity_ids[entity_key(name, kind)] = identifier
         relations = {str(item.relation_id): item for item in session.reads.fact_graph_graph_read_execution_facts_5()}
-        from src.fact_graph.identity import comparison_relation_pair
+        from src.fact_graph.identity import canonical_relation_key
 
         for relation in relations.values():
-            left, right, kind = comparison_relation_pair(
+            left, right, kind = canonical_relation_key(
                 relation.from_entity_id, relation.to_entity_id, str(relation.relation_type)
             )
             self.relation_ids[(str(left), str(right), kind)] = str(relation.relation_id)
@@ -362,11 +362,11 @@ class FactGraph:
 
     @staticmethod
     def _relation_key(from_name: str, to_name: str, relation_type: str) -> tuple[str, str, str]:
-        """2026-08-09 用于生成双向归一化的关系稳定键"""
+        """生成双向归一化的关系稳定键"""
         return _stable_relation_key(from_name, to_name, relation_type)
 
     def load_registry(self, session: Any) -> None:
-        """2026-10-15 用于诊断期从存储恢复实体登记与活动关系（身份金链不得再造成孪生）"""
+        """诊断期从存储恢复实体登记与活动关系（身份金链不得再造成孪生）"""
         rows = list(session.reads.fact_graph_graph_load_registry_3(self.run_scope))
         id_to_key: dict[str, str] = {}
         for row in rows:
@@ -386,9 +386,9 @@ class FactGraph:
                 relation = session.reads.fact_graph_graph_load_registry_2(fact)
                 if relation is None:
                     continue
-                from src.fact_graph.identity import comparison_relation_pair
+                from src.fact_graph.identity import canonical_relation_key
 
-                left, right, kind = comparison_relation_pair(
+                left, right, kind = canonical_relation_key(
                     relation.from_entity_id, relation.to_entity_id, str(relation.relation_type)
                 )
                 self.relation_ids[(str(left), str(right), kind)] = str(relation.relation_id)
@@ -426,13 +426,13 @@ class FactGraph:
 
     @staticmethod
     def entity_key(name: str, entity_type: object) -> str:
-        """2026-10-13 用于在标注侧复用实体身份复合键（规范名+实体大类）"""
+        """在标注侧复用实体身份复合键（规范名+实体大类）"""
         return _entity_key(name, entity_type)
 
     def register_entities(self, entities: list, *, present: set[str] | None = None) -> list[tuple[str, str]]:
-        """2026-08-11 创建；2026-08-23 改为追加与更新语义（新名注册、同名更新）
+        """登记本批实体注册操作（追加与更新语义：新名注册、同名更新）
 
-        2026-10-13 身份=规范名+实体大类：同名不同类各自登记为独立实体。
+        实体身份=规范名+实体大类：同名不同类各自登记为独立实体。
         返回本批每个实体的 (章内提及 ID, 显示名)，供工具回执把 ID 交给模型。
         """
         assigned: list[tuple[str, str]] = []
@@ -459,7 +459,7 @@ class FactGraph:
         return assigned
 
     def _id_for(self, key: str) -> str:
-        """2026-09-19 用于为实体身份键读取或登记 run 级 uuid id（确定性铸造，重放同值）"""
+        """为实体身份键读取或登记 run 级 uuid id（确定性铸造，重放同值）"""
         existing = self.entity_ids.get(key)
         if existing is not None:
             return existing
@@ -468,28 +468,28 @@ class FactGraph:
         return entity_id
 
     def entity_id(self, name: str, entity_type: object) -> str | None:
-        """2026-10-13 用于按 (规范名, 实体大类) 读取 run 级 uuid id（未登记返回 None）"""
+        """按 (规范名, 实体大类) 读取 run 级 uuid id（未登记返回 None）"""
         key = _entity_key(name, entity_type)
         if key not in self.entity_names:
             return None
         return self._id_for(key)
 
     def entity_id_for_key(self, key: str) -> str | None:
-        """2026-10-13 用于按实体身份键读取 run 级 uuid id（未登记返回 None）"""
+        """按实体身份键读取 run 级 uuid id（未登记返回 None）"""
         if key not in self.entity_names:
             return None
         return self._id_for(key)
 
     def display_name(self, key: str) -> str:
-        """2026-10-13 用于把实体身份键翻成人类可读登记名（回执/观察/审计展示）"""
+        """把实体身份键翻成人类可读登记名（回执/观察/审计展示）"""
         return self.entity_names[key]
 
     def entity_type_by_key(self, key: str) -> EntityType | None:
-        """2026-10-13 用于按实体身份键读取登记大类"""
+        """按实体身份键读取登记大类"""
         return self.entity_types.get(key)
 
     def resolve_entity_id(self, entity_id: str, *, label: str) -> str:
-        """2026-10-13 用于把模型提交的实体 uuid 翻成实体身份键；未登记 id 直接报错自纠
+        """把模型提交的实体 uuid 翻成实体身份键；未登记 id 直接报错自纠
 
         只做 id→身份键翻译，**不做别名归并**：别名解析仍留在各调用点原有的
         resolve_key 位置。id 指向的登记若已被章节回滚撤销，视为未登记——
@@ -501,7 +501,7 @@ class FactGraph:
         return key
 
     def apply_relation(self, item: BoundRelationInput) -> bool:
-        """2026-08-12 用于登记本章确认存在的边（新边 assert，已存在 no-op 不累计支持度）
+        """登记本章确认存在的边（新边 assert，已存在 no-op 不累计支持度）
 
         返回 True 表示新边（assert），False 表示已存在（skipped_existing）。
         跨章关系订正由 continuity 工作处理，本章只确认局部关系
@@ -518,7 +518,7 @@ class FactGraph:
         return True
 
     def _bump_support_count(self, key: tuple[str, str, str]) -> None:
-        """2026-08-11 用于按落库语义累加活动关系支持度"""
+        """按落库语义累加活动关系支持度"""
         attributes = dict(self.relation_attributes.get(key) or {})
         attributes["support_count"] = int(attributes.get("support_count", 0)) + 1
         self.relation_attributes[key] = attributes
@@ -526,7 +526,7 @@ class FactGraph:
     def record_entity_ops(
         self, entities: list, *, chapter_id: int, identity_only: bool = False, present: set[str] | None = None
     ) -> None:
-        """2026-09-04 登记本批实体注册操作（追加语义），供持久化派生实体行与属性事实
+        """登记本批实体注册操作（追加语义），供持久化派生实体行与属性事实
 
         与 register_entities 的终态更新并行：终态供 search_graph 即时可见，
         操作日志供持久化按提交顺序重放（同名合并、属性 before/after 由持久化层
@@ -565,7 +565,7 @@ class FactGraph:
             self._fold()
 
     def record_relation_asserts(self, relations: list, *, chapter_id: int) -> None:
-        """2026-09-04 登记本批关系 assert 操作（完整替换语义：先清空再按本批重填）
+        """登记本批关系 assert 操作（完整替换语义：先清空再按本批重填）
 
         端点名取每次重放前已解析（resolve_name 后）的规范名，与 active_relations
         存储键一致，保证持久化重放与运行时终态同源。
@@ -606,11 +606,10 @@ class FactGraph:
         return drained
 
     def reset_chapter_relations(self) -> None:
-        """2026-08-09 用于在完整替换语义下撤销当章 assert 的关系
+        """在完整替换语义下撤销当章 assert 的关系
 
-        2026-08-13 P2-9：同步回退本章新增边累加的 support_count——同一章节内
-        关系集合每次写入都会先 reset 再重新 apply，若不回退，重新提交
-        已 assert 边会重复 +1（每次替换 +1），落库后支持度虚高。
+        同一章节内关系集合先 reset 再重新 apply，本章新增边累加的 support_count
+        需同步回退，否则重新提交已 assert 边会重复 +1。
         """
         author = self._author.get()
         if author is not None:
@@ -651,7 +650,7 @@ class FactGraph:
         }
 
     def restore(self, snap: dict) -> None:
-        """2026-08-09 用于在章节尝试失败时恢复事实图快照"""
+        """在章节尝试失败时恢复事实图快照"""
         if "author" in snap:
             self.contributions[snap["author"]] = snap["contribution"]
             self._fold()
@@ -662,18 +661,18 @@ class FactGraph:
             setattr(self, field_name, value)
 
     def entity_type_of(self, name: str, entity_type: object) -> EntityType | None:
-        """2026-10-13 用于按 (规范名, 实体大类) 查询实时事实图实体大类"""
+        """按 (规范名, 实体大类) 查询实时事实图实体大类"""
         return self.entity_types.get(_entity_key(name, entity_type))
 
     def resolve_key(self, key: str) -> str:
-        """2026-10-13 用于沿"同一人物"连通分量把别名身份键解析为代表身份键（标记优先）"""
+        """沿"同一人物"连通分量把别名身份键解析为代表身份键（标记优先）"""
         representative_key = self._representative_key(key)
         if representative_key is None:
             return key
         return representative_key
 
     def resolve_name(self, name: str, entity_type: object) -> str:
-        """2026-10-13 用于沿"同一人物"连通分量把 (名, 大类) 解析为规范登记名（标记优先）"""
+        """沿"同一人物"连通分量把 (名, 大类) 解析为规范登记名（标记优先）"""
         key = _entity_key(name, entity_type)
         representative_key = self._representative_key(key)
         if representative_key is None:
@@ -681,11 +680,11 @@ class FactGraph:
         return self.entity_names.get(representative_key, name)
 
     def alias_group(self, key: str) -> list[str]:
-        """2026-10-13 用于取该身份键同一人物连通分量内的其余登记名（不含自身，供进度账本别名列）"""
+        """取该身份键同一人物连通分量内的其余登记名（不含自身，供进度账本别名列）"""
         return [self.entity_names.get(node, node) for node in self._same_person_component(key) if node != key]
 
     def _same_person_component(self, key: str) -> list[str]:
-        """2026-08-11 用于收集同一人物边连通分量中该名字所在分量的全部成员键（不在分量则空）"""
+        """收集同一人物边连通分量中该名字所在分量的全部成员键（不在分量则空）"""
         identifier = self.entity_id_for_key(key)
         if identifier is None:
             return []

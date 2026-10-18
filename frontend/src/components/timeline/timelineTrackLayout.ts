@@ -45,7 +45,7 @@ export const BOTTOM_LABEL_CLEARANCE_PX = 10;
 export const LANE_ORDER = [-2, -1, 2, 1] as const;
 
 /**
- * 2026-08-17，作用：按事件摘要估算时间轴卡片宽度
+ * 按事件摘要估算时间轴卡片宽度
  * 说明：在统一的最小和最大宽度内保留标题与摘要的可读性
  */
 export function estimateLabelWidth(summaryText: string): number {
@@ -54,7 +54,7 @@ export function estimateLabelWidth(summaryText: string): number {
 }
 
 /**
- * 2026-08-17，作用：计算时间轴位置对应的曲线 Y 坐标
+ * 计算时间轴位置对应的曲线 Y 坐标
  * 说明：无张力曲线时回退到固定中线
  */
 function getLayoutAnchorY(
@@ -69,7 +69,7 @@ function getLayoutAnchorY(
 }
 
 /**
- * 2026-08-17，作用：将渲染横坐标转换为时间轴进度
+ * 将渲染横坐标转换为时间轴进度
  * 说明：连接线落点和张力曲线使用同一横坐标（保留导出供外部复用，避免 noUnusedLocals 误报）
  */
 export function getProgressForAnchorX(anchorX: number, canvasWidth: number): number {
@@ -78,7 +78,7 @@ export function getProgressForAnchorX(anchorX: number, canvasWidth: number): num
 }
 
 /**
- * 2026-08-20，作用：按派生顺序均匀分布后仅做最小间距微调
+ * 按派生顺序均匀分布后仅做最小间距微调
  * 说明：调用前已按 orderIndex 单调排序，若已均匀分布则 pack 不再二次压缩，仅保证 TRACK_NODE_SPACING_PX
  */
 function packTimelineAnchors(candidates: TimelineLayoutCandidate[], canvasWidth: number): void {
@@ -121,7 +121,7 @@ export function resolveNodeId(node: TimelineLayoutInputNode): string {
 }
 
 /**
- * 2026-08-20，作用：按 derived_event_order 均匀排布事件节点
+ * 按 derived_event_order 均匀排布事件节点
  * 说明：一棵树=一个节点；anchorX 按 derivedOrder 均匀分布，anchorY 仍按 progress（或 start/end 中值）插值张力曲线
  */
 export function createTimelineLayoutNodes(
@@ -194,7 +194,7 @@ export function createTimelineLayoutNodes(
 }
 
 /**
- * 2026-08-20，作用：计算跨章区间的轨道带宽
+ * 计算跨章区间的轨道带宽
  * 说明：若节点跨章则返回区间宽度，否则返回标签宽度
  */
 export function getEventSpanWidth(
@@ -214,8 +214,7 @@ export function getEventSpanWidth(
 }
 
 /**
- * 2026-08-17，作用：计算容纳事件卡的时间轴最小宽度
- * 说明：每个事件预留最大卡片宽度和横向间距，保证横向滚动后的可读性；2026-08-20 增加 derivedOrder 校验
+ * 计算容纳事件卡的时间轴最小宽度：每个事件预留最大卡片宽度和横向间距，保证横向滚动后的可读性
  */
 export function calculateCanvasMinWidth(nodeCount: number, totalChapters: number): number {
   const safeNodeCount = Math.max(nodeCount, 0);
@@ -232,7 +231,7 @@ export function calculateCanvasMinWidth(nodeCount: number, totalChapters: number
 }
 
 /**
- * 2026-08-17，作用：计算事件卡在指定车道的顶部坐标
+ * 计算事件卡在指定车道的顶部坐标
  * 说明：顶部和底部卡片均保留与时间轴及阶段背景的安全间距
  */
 export function getLabelTopPx(anchorY: number, lane: number): number {
@@ -246,7 +245,7 @@ export function getLabelTopPx(anchorY: number, lane: number): number {
 }
 
 /**
- * 2026-08-17，作用：将卡片左边界限制在可滚动画布内
+ * 将卡片左边界限制在可滚动画布内
  * 说明：保留首尾安全边距，避免卡片被裁切
  */
 export function getClampedLabelLeftPx(anchorX: number, labelWidth: number, canvasWidth: number): number {
@@ -256,7 +255,7 @@ export function getClampedLabelLeftPx(anchorX: number, labelWidth: number, canva
 }
 
 /**
- * 2026-08-17，作用：计算节点的默认时间轴横坐标
+ * 计算节点的默认时间轴横坐标
  * 说明：布局内部使用重排后的横坐标计算连接线落点
  */
 export function calculateNodeAnchorY(

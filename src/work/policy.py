@@ -1,11 +1,10 @@
 """work 行的角色值域与章节完成判定
 
-说明: 角色集合是 executions.role 与 chapter_annotations.role 的取值域（与建表
-CHECK 约束同源）。2026-10-17 六 agent 归属：章内四个执行角色
-annotation/entity/event/metric——短章由 annotation Agent 整章完成，长章由
-entity/event/metric 三个 Agent 并行。完成判定消费的 state 是由「该章是否存在
-该角色的正式 chapter_annotations 产物行」推导出的内存观察（观察值
-saved/pending），只读已登记事实，不写任何东西。
+角色集合是 executions.role 与 chapter_annotations.role 的取值域（与建表
+CHECK 约束同源）：章内四个执行角色 annotation/entity/event/metric——短章由
+annotation Agent 整章完成，长章由 entity/event/metric 三个 Agent 并行。完成判定
+消费的 state 是由「该章是否存在该角色的正式 chapter_annotations 产物行」推导出的
+内存观察（观察值 saved/pending），只读已登记事实，不写任何东西。
 """
 
 from __future__ import annotations

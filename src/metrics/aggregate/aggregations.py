@@ -1,13 +1,10 @@
-"""读侧统计聚合（设计文档《章节粒度分析指标重设计》§8、§13.1、§13.2）
+"""读侧统计聚合
 
-2026-10-06 自 `src/api/services/results_queries/` 收归读侧聚合模块：章节/全书指标、
-情绪趋势窗口、角色榜与叙事焦点评分。全部函数只吃行数据与纯 dict，返回纯 dict 载荷，
-响应模型装配留在 api 读侧。
+章节/全书指标、情绪趋势窗口、角色榜与叙事焦点评分。全部函数只吃行数据与纯 dict，
+返回纯 dict 载荷，响应模型装配留在 api 读侧。
 
-聚合口径（§8）：
-- 比率一律分子/分母聚合，禁止平均段落密度（§8.1）
-- 句长均值/方差从充分统计量（count/sum/sum_sq）恢复（§8.2）
-- TTR/MTLD 等非可加指标在目标文本序列上直接计算（§8.3）
+聚合口径：比率一律分子/分母聚合（禁止平均段落密度）；
+句长均值/方差从充分统计量（count/sum/sum_sq）恢复；TTR/MTLD 等非可加指标在目标文本序列上直接计算。
 """
 
 from __future__ import annotations
@@ -25,7 +22,7 @@ from src.text_processing.tokenize import tokenize
 
 @dataclass
 class ChapterAccumulator:
-    """章节分子/分母与充分统计量累加器（§8.1/8.2）"""
+    """章节分子/分母与充分统计量累加器"""
 
     chapter_id: int
     paragraph_count: int = 0
@@ -50,7 +47,7 @@ def aggregate_chapter_metrics(
     annotations_by_chapter_id: dict[int, Any],
 ) -> dict[str, Any]:
     """
-    章节汇总 + 全书聚合（§13.2）
+    章节汇总 + 全书聚合
 
     - 段落与指标按 paragraph_id 对齐，缺任一侧的段落跳过
     - 章节/全书 TTR、MTLD 在拼接后的章节/全书文本上直接计算一次
@@ -229,13 +226,13 @@ def aggregate_emotion_trend_windows(
     window_paragraphs: int,
 ) -> list[dict[str, Any]]:
     """
-    情绪趋势窗口聚合（§13.1 展示层，缩放自适应窗口）
+    情绪趋势窗口聚合（展示层，缩放自适应窗口）
 
     - 输入为段落充分统计量（paragraphs + paragraph_metrics 对齐），
       命中判定用原始分子（positive_weight_sum/negative_weight_sum > 0），
       请求时无词典/分词开销
     - 每窗段落数 window_paragraphs 作用于 range 过滤后的段落集，服务端钳制到 5~40
-    - 覆盖率为命中段占比；池化密度为分子/分母聚合（§8.1），分母为零返回 None
+    - 覆盖率为命中段占比；池化密度为分子/分母聚合，分母为零返回 None
     - 窗口载荷含 token_total，供调用方做加权展示平滑
     """
     metric_by_paragraph_id = {int(row.paragraph_id): row for row in metric_rows}

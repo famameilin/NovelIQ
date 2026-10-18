@@ -13,9 +13,7 @@ from src.utils.token_counter import count_tokens
 
 
 def test_extract_agent_token_usage_reads_langchain_usage_metadata() -> None:
-    """
-    2026-08-04 用于验证 LangChain 标准 usage_metadata 被解析为统一用量
-    """
+    """验证 LangChain 标准 usage_metadata 被解析为统一用量"""
     message = AIMessage(
         content="完成",
         usage_metadata={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20},
@@ -30,9 +28,7 @@ def test_extract_agent_token_usage_reads_langchain_usage_metadata() -> None:
 
 
 def test_extract_agent_token_usage_reads_deepseek_raw_usage() -> None:
-    """
-    2026-08-10 用于验证 DeepSeek 原始 usage 结构被解析为统一用量
-    """
+    """验证 DeepSeek 原始 usage 结构被解析为统一用量"""
     message = AIMessage(
         content="完成",
         response_metadata={
@@ -56,9 +52,7 @@ def test_extract_agent_token_usage_reads_deepseek_raw_usage() -> None:
 
 
 def test_extract_agent_token_usage_reads_cache_read_aliases() -> None:
-    """
-    2026-08-10 用于验证缓存命中 token 的三种网关字段别名探测顺序
-    """
+    """验证缓存命中 token 的三种网关字段别名探测顺序"""
     langchain_style = AIMessage(
         content="x",
         usage_metadata={
@@ -102,9 +96,7 @@ def test_extract_agent_token_usage_reads_cache_read_aliases() -> None:
 
 
 def test_extract_agent_token_usage_reads_cost() -> None:
-    """
-    2026-08-10 用于验证网关费用字段读取与字符串转 float 行为
-    """
+    """验证网关费用字段读取与字符串转 float 行为"""
     numeric_cost = AIMessage(
         content="x",
         usage_metadata={"input_tokens": 1, "output_tokens": 2, "total_tokens": 3, "cost": 0.5},
@@ -143,9 +135,7 @@ def test_extract_agent_token_usage_reads_cost() -> None:
 
 
 def test_extract_agent_token_usage_reads_reasoning_tokens() -> None:
-    """
-    2026-08-10 用于验证 usage_metadata.output_token_details.reasoning 被读取
-    """
+    """验证 usage_metadata.output_token_details.reasoning 被读取"""
     message = AIMessage(
         content="x",
         usage_metadata={
@@ -160,9 +150,7 @@ def test_extract_agent_token_usage_reads_reasoning_tokens() -> None:
 
 
 def test_estimate_agent_token_usage_returns_estimated_records_per_ai_message() -> None:
-    """
-    2026-08-10 用于验证无 Provider 用量时按消息文本估算每个 AI 响应
-    """
+    """验证无 Provider 用量时按消息文本估算每个 AI 响应"""
     messages = [
         HumanMessage(content="你好，请分析这段内容"),
         AIMessage(content="分析结果"),
@@ -184,16 +172,12 @@ def test_estimate_agent_token_usage_returns_estimated_records_per_ai_message() -
 
 
 def test_estimate_agent_token_usage_returns_empty_without_ai_messages() -> None:
-    """
-    2026-08-10 用于验证没有 AI 响应时估算列表为空
-    """
+    """验证没有 AI 响应时估算列表为空"""
     assert estimate_agent_token_usage([HumanMessage(content="hi")]) == []
 
 
 def test_build_token_usage_callback_records_embedding_usage() -> None:
-    """
-    2026-08-10 用于验证 EmbeddingClient 的 token 用量回调逐笔落入账本
-    """
+    """验证 EmbeddingClient 的 token 用量回调逐笔落入账本"""
     bus = MagicMock()
     callback = build_token_usage_callback(bus=bus, run_id="run-1")
     callback("embedding", "embed-model", 10, 10, None, 7)
@@ -210,9 +194,7 @@ def test_build_token_usage_callback_records_embedding_usage() -> None:
 
 
 def test_turn_usage_records_estimates_missing_usage() -> None:
-    """
-    2026-08-10 用于验证回合观察器在 Provider 无用量时记录本地估算
-    """
+    """验证回合观察器在 Provider 无用量时记录本地估算"""
     from src.agents.turn_observer import _usage_for_turn
 
     request = [AIMessage(content="问")]
@@ -229,9 +211,7 @@ def test_turn_usage_records_estimates_missing_usage() -> None:
 
 
 def test_turn_usage_records_keeps_reported_usage() -> None:
-    """
-    2026-08-10 用于验证回合观察器实报路径保留缓存/费用/推理明细
-    """
+    """验证回合观察器实报路径保留缓存/费用/推理明细"""
     from src.agents.turn_observer import _usage_for_turn
 
     request = [AIMessage(content="问")]

@@ -1,4 +1,4 @@
-"从 src/agents/annotation/chapter_consolidation.py 分离的具名物理读取"
+"agents annotation chapter consolidation 的具名物理读取"
 
 from __future__ import annotations
 

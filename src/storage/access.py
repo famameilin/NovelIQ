@@ -16,6 +16,7 @@ from src.storage.records.annotation import (
     GraphFactRow,
     SavedAnnotationRecord,
 )
+from src.storage.records.cases import CaseSave
 from src.storage.records.embedding_ops import ParagraphEmbeddingRow
 from src.storage.records.graph import (
     ChapterBoundary,
@@ -646,7 +647,7 @@ class GraphAccess:
 
     def run_exists(self, run_id: str) -> bool:
         return self._runner.run(
-            lambda _session: _GraphRepository(_session, internal=self._internal).run_exists(run_id), read_only=False
+            lambda _session: _GraphRepository(_session, internal=self._internal).run_exists(run_id), read_only=True
         )
 
     def resolve_chapter_boundary(self, run_id: str, *, chapter_id: int | None = None) -> ChapterBoundary | None:
@@ -751,6 +752,18 @@ class DiagnosisAccess:
     def __init__(self, runner):
         self._runner = runner
 
+    def save_session(self, request):
+        "案例会话的事件、事实、归因、交付与执行终态一起提交"
+        from src.storage.repositories.diagnosis_publish import save_session
+
+        return self._runner.run(lambda session: save_session(session, request))
+
+    def session_rows(self, run_id: str) -> dict:
+        "恢复诊断草稿所需的具名记录，在同一只读事务中读取"
+        from src.storage.repositories.diagnosis_publish import session_rows
+
+        return self._runner.run(lambda session: session_rows(session, run_id), read_only=True)
+
     def publish(self, request):
         "正式诊断的所有关系由 Storage 保证原子提交"
         from src.storage.repositories.diagnosis_publish import publish
@@ -780,6 +793,7 @@ class DiagnosisAccess:
         role: str,
         attempt_number: int,
         case_anchor: str | None = None,
+        case_registration: CaseSave | None = None,
     ):
         "会话与实际尝试身份一起登记，不向外提供事务对象"
         from src.storage.repositories.organization_writes import (
@@ -789,6 +803,14 @@ class DiagnosisAccess:
 
         def operation(session):
             register_diagnosis_session(session, run_id=run_id, session_id=session_id)
+            if case_registration is not None:
+                from src.storage.repositories.case_writes import CaseWritesRepository
+
+                if case_registration.run_id != run_id:
+                    raise ValueError("案例登记与执行不属于同一运行")
+                warnings = CaseWritesRepository(run_id).save_work(session, case_registration)
+                if warnings:
+                    raise ValueError(f"案例执行登记失败: {warnings}")
             register_diagnosis_execution(
                 session,
                 run_id=run_id,

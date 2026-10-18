@@ -20,10 +20,7 @@ const STAGE_CONFIG: Record<StageKey, StageConfig> = {
   diagnose: { label: "诊断报告", range: [95, 100] },
 };
 
-// 修改时间: 2026-10-17
-// 任务: 六 Agent 命名（sub_stage 合同对齐）
-// 原因: 后端实际下发的子阶段为标注四角色（annotation/entity/event/metric）与
-//       诊断两角色（case/report）；phase1-4 与 chapter_agent 均已不再下发。
+// sub_stage 为标注四角色（annotation/entity/event/metric）与诊断两角色（case/report）
 const PHASE_CONFIG: Record<string, { label: string }> = {
   paragraph_embedding: { label: "段落向量" },
   annotation: { label: "整章标注" },

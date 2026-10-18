@@ -26,9 +26,7 @@ class AgentTokenUsage:
 
 
 def _read_usage_count(payload: Mapping[str, Any], keys: tuple[str, ...]) -> int:
-    """
-    2026-08-04 用于从不同 OpenAI 兼容响应字段稳定读取非负 Token 数
-    """
+    """从不同 OpenAI 兼容响应字段稳定读取非负 Token 数"""
     for key in keys:
         value = payload.get(key)
         if value is None:
@@ -41,9 +39,7 @@ def _read_usage_count(payload: Mapping[str, Any], keys: tuple[str, ...]) -> int:
 
 
 def _read_optional_int(payload: Mapping[str, Any], keys: tuple[str, ...]) -> int | None:
-    """
-    2026-08-10 用于读取可选的非负整数值，缺失或非法时返回 None
-    """
+    """读取可选的非负整数值，缺失或非法时返回 None"""
     for key in keys:
         value = payload.get(key)
         if value is None:
@@ -58,9 +54,7 @@ def _read_optional_int(payload: Mapping[str, Any], keys: tuple[str, ...]) -> int
 
 
 def _read_nested_int(payload: Mapping[str, Any], outer_key: str, inner_key: str) -> int | None:
-    """
-    2026-08-10 用于从嵌套字典读取可选整数值
-    """
+    """从嵌套字典读取可选整数值"""
     nested = payload.get(outer_key)
     if not isinstance(nested, Mapping):
         return None
@@ -68,9 +62,7 @@ def _read_nested_int(payload: Mapping[str, Any], outer_key: str, inner_key: str)
 
 
 def _read_cost(payload: Mapping[str, Any]) -> float | None:
-    """
-    2026-08-10 用于读取网关返回的费用，字符串转 float，失败时返回 None
-    """
+    """读取网关返回的费用，字符串转 float，失败时返回 None"""
     for key in ("cost", "total_cost"):
         value = payload.get(key)
         if value is None:
@@ -83,9 +75,7 @@ def _read_cost(payload: Mapping[str, Any]) -> float | None:
 
 
 def extract_agent_token_usage(message: Any) -> AgentTokenUsage | None:
-    """
-    2026-08-04 用于从 LangChain AIMessage 提取可信的 Provider Token 用量
-    """
+    """从 LangChain AIMessage 提取可信的 Provider Token 用量"""
     payload = getattr(message, "usage_metadata", None)
     if not isinstance(payload, Mapping):
         response_metadata = getattr(message, "response_metadata", None)
@@ -118,8 +108,7 @@ def extract_agent_token_usage(message: Any) -> AgentTokenUsage | None:
 
 
 def estimate_agent_token_usage(messages: list[Any]) -> list[AgentTokenUsage]:
-    """
-    2026-08-10 用于在 Provider 未返回用量时为每个 AI 响应按消息文本估算 Token 数
+    """在 Provider 未返回用量时为每个 AI 响应按消息文本估算 Token 数
 
     估算口径: prompt 用 tiktoken 计数（中文 cl100k_base 按 2 字符/token 兜底），
     completion 按响应文本计数，缓存命中记 0（无缓存证据 = 全量计费），费用留 NULL

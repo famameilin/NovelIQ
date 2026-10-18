@@ -1,6 +1,6 @@
 """诊断受控标签词表
 
-说明: 诊断结果 genre_labels / style_labels 字段的取值域（闭集）。词表随契约走——
+诊断结果 genre_labels / style_labels 字段的取值域（闭集）。词表随契约走——
 agent 侧校验（src/agents/diagnosis/schema.py）与 api 读侧归一
 （src/api/services/results_queries/diagnosis.py）共用这一份，不各写一套。
 """

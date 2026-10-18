@@ -50,7 +50,7 @@ interface StreamState {
   streamSelectionModes: Map<string, "auto" | "manual">;
   stageDurations: Map<string, number>;
   error: string | null;
-  /** 2026-08-14 D5：resume 轮次信号，每次 resetStreamForTask 自增，消费方据此重置内部缓冲 */
+  /** resume 轮次信号，每次 resetStreamForTask 自增，消费方据此重置内部缓冲 */
   resumeEpoch: number;
   currentInvocations: Map<string, string>;
   retiredInvocations: Map<string, Set<string>>;
@@ -58,7 +58,7 @@ interface StreamState {
 
   setConnected: (connected: boolean) => void;
   setTaskId: (taskId: string | null) => void;
-  /** 2026-08-14 D5：无条件重置数据并设置任务（resume 同 task_id 开新轮时使用） */
+  /** 无条件重置数据并设置任务（resume 同 task_id 开新轮时使用） */
   resetStreamForTask: (taskId: string | null) => void;
   updateProgress: (progress: StreamEventData) => void;
   resetWorkOutput: (data: StreamEventData) => void;
@@ -141,10 +141,8 @@ function _appendBoundedLLMOutput(
     const toolStatus: ToolCallStatus =
       status === "success" || status === "failed" ? status : "started";
     const detail = message || "";
-    // 2026-08-12: llm_output 延迟 120ms 批量刷入，started 之后 success/failed 到达时
-    // 末尾块可能已被 output 块占据，started 条目落在更早的 thinking 块；
-    // 因此从末尾向前扫描全部 thinking 块寻找 started 条目并原地更新，
-    // 避免旧 started 行永久滞留"进行中"、同一工具显示两行。
+    // llm_output 延迟 120ms 批量刷入，success/failed 到达时 started 条目可能落在更早的 thinking 块；
+    // 因此从末尾向前扫描全部 thinking 块原地更新，避免同一工具显示两行
     if (toolStatus !== "started") {
       let foundBlockIndex = -1;
       let foundToolIndex = -1;
@@ -362,7 +360,7 @@ export const useStreamStore = create<StreamState>()((set) => ({
           total: progress.total ?? state.progress.total,
           percent: progress.percent ?? state.progress.percent,
           sub_percent: progress.sub_percent ?? state.progress.sub_percent,
-          // 2026-08-15 M5：HTTP 回填不携带真实章节，spread 会把 chapter_id 置为
+          // HTTP 回填不携带真实章节，spread 会把 chapter_id 置为
           // undefined/null 并覆写 annotate 期间的真实章 scope，导致 LLM 输出面板
           // 按章匹配全部落空；此处与 current/total 同口径保留旧值
           chapter_id: progress.chapter_id ?? state.progress.chapter_id,
@@ -477,10 +475,8 @@ export const useStreamStore = create<StreamState>()((set) => ({
         nextSelectionModes.set(scopeKey, "auto");
       }
 
-      // LRU 淘汰：超出上限时按 lastUpdatedAt 找最旧条目删除（O(n) 遍历）。
-      // 2026-08-13 P2-4: 原实现按插入序（Map 首项）删除实为 FIFO，正在持续写入的
-      // 活跃流会因插入早而被误淘汰；按 lastUpdatedAt 淘汰则活跃流每次写入都会
-      // 刷新时间戳，天然不会被误伤。
+      // LRU 淘汰：超出上限时按 lastUpdatedAt 淘汰最旧条目（O(n) 遍历）；
+      // 活跃流每次写入都会刷新时间戳，不会被误淘汰
       while (newOutputs.size > appConfig.maxLLMOutputKeys) {
         let oldestKey: string | null = null;
         let oldestUpdatedAt = Infinity;

@@ -5,8 +5,7 @@ import type { HeroPanelProps } from "./types";
 const HERO_LOGO_SRC = "/novel%20qa%20icon.svg";
 
 /**
- * 2026-05-01: 为“首页左侧模块头部改用用户提供 logo”任务更新 HeroPanel。
- * 原因：左上角模块头部应使用品牌 SVG 替换通用书本图标，同时保留现有模块名称和功能说明。
+ * 首页左侧模块头部使用品牌 SVG 图标，保留现有模块名称和功能说明
  */
 export function HeroPanel({
   total,

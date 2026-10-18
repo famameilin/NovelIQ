@@ -1,18 +1,14 @@
-"""章内三代理并发：单个 agent 的局部标注（内存对象，零新表零迁移）
+"""章内三代理并发：单个 agent 的局部标注
 
-设计（《章内多代理重设计-三代理并发版》§3.1/§4）：
-
-- 三个 agent 各持整章正文、各管一类产出、**互不通信**：结构 agent 交 entity/relation，
-  事件 agent 交 event/participants，证据 agent 交 dialogue/label/metric/pending；
-- 实体引用写正文名字与大类，由运行时解析并自动登记，不再写 id；
-  entity 的局部键仅绑定富登记锚点；事件仍用 el 路径，对话仍用候选号
-- 每条记录自带 evidence=段首可见号（正文每段开头的 `N：` 里的 N），构造当场只校验
-  "号在本章且存在"（多号/越界结构化拒绝并列出合法号范围），不再逐字比对引文；
-- 闭集词表一律从 schema.py / tools.py 单源引用，本模块不复制任何词表。
+三个 agent 各持整章正文、各管一类产出、**互不通信**：结构 agent 交 entity/relation，
+事件 agent 交 event/participants，证据 agent 交 dialogue/label/metric/pending；
+实体引用写正文名字与大类，由运行时解析并自动登记；事件用 el 路径，对话用候选号；
+每条记录自带 evidence=段首可见号，构造当场只校验"号在本章且存在"；
+闭集词表一律从 schema.py / tools.py 单源引用，本模块不复制任何词表。
 
 **本模块的数据类只承载"这个 agent 已经写成了什么"**：构造器先经生产单条事务边界写入，
-成功后才把记录落进这里（写入生效）。所以本模块的列表既是进度账本，也是后续引用的
-唯一依据——引用一个没写成功的键，构造器当场结构化拒绝。
+成功后才把记录落进这里。所以本模块的列表既是进度账本，也是后续引用的唯一依据——
+引用一个没写成功的键，构造器当场结构化拒绝。
 """
 
 from __future__ import annotations
@@ -40,7 +36,7 @@ from .ir_validation import _reject, _require_paragraph_id
 # 章内 agent 的角色名：长章开三条职责 agent 并发（短章走整章 annotation 路径；
 # 职责范围文案在 prompts.AGENT_ROLE_SCOPES）
 
-# 待决项类型：agent 判不了、要留给案例池/后续章节的事项（§3.1 的 pending）
+# 待决项类型：agent 判不了、要留给案例池/后续章节的事项
 PENDING_KINDS: dict[str, str] = {
     "unresolved_reference": "引用无法解析（正文里的人名/称号在本章找不到对应实体）",
     "event_continuation": "事件延续（本章事件像是既有事件树某节点的后继或同一事件的两段）",
@@ -59,10 +55,8 @@ EVENT_CHILD_TYPES: tuple[str, ...] = tuple(member.value for member in EventChild
 CONFIDENCE_VALUES: tuple[str, ...] = tuple(member.value for member in Confidence)
 RELATION_TYPES: tuple[str, ...] = tuple(RELATION_DEFINITIONS)
 
-# el 层级路径分隔符与根事件保留节点键：权威定义在 schema（与正式写入的事件账本同源：
-# 根=树键、子=树键/节点键；本模块只用于核验落库形态）
-# 角色命名空间分隔符：agent 的引用键是各自局部的（三个 agent 都可能用 a1/t1），
-# 落库 el 一律按 `角色:局部键` 命名空间化，避免同名键互相占用（见 namespace_el）
+# el 层级路径与角色命名空间分隔符的权威定义在 schema；落库 el 一律按 `角色:局部键`
+# 命名空间化（见 namespace_el），本模块只用于核验落库形态
 
 # 待决项种类 → 案例池 type（案例池的 type 是自由文本，这里是唯一的机械映射处；
 # 构造器与连接层共用同一份，疑点入池与写法分歧入池口径只有一处）
@@ -98,7 +92,7 @@ def normalize_evidence(
     """用于把模型提交的证据归一成按 id 锚定的 AgentEvidence（不合格即结构化拒绝）
 
     只按 id 锚定：evidence 是**单个段首可见号整数**，校验只要求"号在本章且存在"
-    （服务端按号取段），不再逐字比对引文。给成数组（多号）或号越界时结构化拒绝，
+    （服务端按号取段），不逐字比对引文。给成数组（多号）或号越界时结构化拒绝，
     并在 expected 里列出合法号范围 1..N。
     """
     if raw is None or raw == []:
@@ -163,8 +157,8 @@ class AgentEntity:
 class AgentRelation:
     """结构 agent 写的一条闭合关系边（两端写正文名字与大类）
 
-    2026-10-02 对齐 0.2.0 写面：本章只确认局部关系（建边），不再携带 change_kind
-    关系变化——跨章关系变化由 write_link 关联工具承担。
+    本章只确认局部关系（建边），不携带 change_kind 关系变化——跨章关系变化由
+    write_link 关联工具承担。
     """
 
     from_entity: EntityNameRef
@@ -186,7 +180,7 @@ class AgentRelation:
 class AgentParticipant:
     """事件 agent 挂到一个事件节点上的参与者（名字与大类由运行时自动登记）
 
-    2026-10-04 合同放开：role/narrative_role/action/emotion 均可缺省——role 未知词与
+    role/narrative_role/action/emotion 均可缺省——role 未知词与
     缺省由生产面按实体登记大类给默认，叙事功能近义词归一、情绪分值钳制在构造层完成。
     """
 

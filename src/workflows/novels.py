@@ -64,11 +64,7 @@ class NovelService:
         return self.task_service.get_novel(novel_id, session)
 
     def list_novels(self, session: Storage | None = None) -> list[dict]:
-        """
-        列出所有小说及其信息
-
-        2026-08-20 阶段 3.2：使用 LEFT JOIN 和窗口函数消除 N+1 查询
-        """
+        """列出所有小说及其信息"""
         novels = []
         try:
             for entry in (session or get_storage()).novels.list_with_latest_status():

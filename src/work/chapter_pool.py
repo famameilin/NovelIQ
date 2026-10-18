@@ -1,8 +1,7 @@
 """角色 work 队列：只按模型池选举结果派发，按 work 成功事务保存
 
-2026-10-17 六 agent 归属：派发前不再登记 work 行——真实执行由审计记录器在派发时
-创建并直接携带归属（run/章/角色）；保存存在性由 agent 同事务写入的产物行表达，
-核查按执行归属与产物行进行，失败尝试由审计独立收口。
+派发前不登记 work 行，真实执行由审计记录器在派发时创建并直接携带归属（run/章/角色）；
+保存确认=写事务提交成功，传输类异常按幂等重存一次，失败尝试由审计独立收口。
 """
 
 from __future__ import annotations
@@ -257,28 +256,6 @@ class ChapterWorkerPool:
                 payload=payload,
             )
 
-        chapter_id = receipt.payload["chapter_id"]
-        role = receipt.payload["role"]
-
-        async def stored() -> bool:
-            try:
-                receipt_state = await asyncio.to_thread(session_factory().annotations.inspect_saved, invocation_id)
-                execution = receipt_state["execution"]
-                if execution is None:
-                    return False
-                expected = {"run_id": receipt.run_id, "chapter_id": chapter_id, "role": role}
-                if any(getattr(execution, name) != value for name, value in expected.items()):
-                    raise WorkSaveUnconfirmed(f"invocation 执行归属与派发单元不一致: work_id={receipt.work_id}")
-                if receipt_state["record_id"] is None:
-                    return False
-                if not await bus.request(command("agent.check")):
-                    raise WorkSaveUnconfirmed(f"组件保存结果不一致: work_id={receipt.work_id}")
-                return True
-            except WorkSaveUnconfirmed:
-                raise
-            except Exception as exc:
-                raise WorkSaveUnconfirmed(f"保存结果核查失败: work_id={receipt.work_id}: {exc}") from exc
-
         if has_model_ended is not None and has_model_ended():
             raise asyncio.CancelledError("模型池已结束，不启动业务保存或撤销")
         if may_start_save is not None and not may_start_save():
@@ -286,37 +263,28 @@ class ChapterWorkerPool:
             await bus.request(command("agent.abort"))
             raise asyncio.CancelledError("分析取消，work 保存尚未开始")
 
-        verified = False
         for save_attempt in range(2):
-            storage = session_factory()
+            session = session_factory()
             try:
-                # Storage 已在返回前提交；取消保护仍由调用方等待完整保存结束
-                await bus.request(command("agent.save", storage))
+                # 执行行已在派发时由审计登记；保存事务只写正式产物（agent 幂等，
+                # 已存在产物直接返回，不重复写）
+                await bus.request(command("agent.save", session))
             except Exception as exc:
-                verified = await stored()
-                if not verified:
-                    if isinstance(exc, StorageWriteError) and exc.rollback_failed:
-                        raise WorkSaveUnconfirmed(f"提交与回滚结果仍不明: work_id={receipt.work_id}") from exc
-                    retryable = (
-                        isinstance(exc, (OSError, TimeoutError))
-                        or isinstance(exc, StorageWriteError)
-                        and exc.transport_error
-                    )
-                    if save_attempt == 0 and retryable:
-                        # 只重投原冻结数据，模型与 invocation 不重新执行
+                if isinstance(exc, StorageWriteError):
+                    if exc.rollback_failed:
+                        raise WorkSaveUnconfirmed(f"提交与回滚结果不明: work_id={receipt.work_id}") from exc
+                    if save_attempt == 0 and exc.transport_error:
                         continue
-                    await bus.request(command("agent.abort"))
-                    raise
+                elif save_attempt == 0 and isinstance(exc, (OSError, TimeoutError)):
+                    continue
+                await bus.request(command("agent.abort"))
+                raise
             break
-        if not verified and not await stored():
-            raise WorkSaveUnconfirmed(f"提交回执与 work 存储不一致: work_id={receipt.work_id}")
         try:
             await bus.request(command("agent.confirm"))
         except Exception:
             try:
                 await bus.request(command("agent.recover", {"mode": "saved_work"}))
-                if not await stored():
-                    raise WorkSaveUnconfirmed(f"确认恢复后 work 缺失: work_id={receipt.work_id}")
                 await bus.request(command("agent.confirm"))
             except Exception as exc:
                 raise WorkSaveUnconfirmed(f"已保存 work 内存确认失败: work_id={receipt.work_id}: {exc}") from exc

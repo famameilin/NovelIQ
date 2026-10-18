@@ -135,8 +135,9 @@ class TestAntagonistStrengthGap(unittest.TestCase):
 
 
 class TestRelationChangeFrequency(unittest.TestCase):
-    """2026-08-14 修复（§19.10）：分母从章节数改为全书总字数（每万字频率）；
-    2026-08-14 重命名（§13.3）：change_rate → relation_change_per_10k_chars。"""
+    """分母从章节数改为全书总字数（每万字频率）；
+    change_rate → relation_change_per_10k_chars。
+    """
 
     def test_empty_relations(self) -> None:
         result = compute_relation_change_frequency([], 10000)
@@ -172,8 +173,7 @@ class TestRelationChangeFrequency(unittest.TestCase):
         self.assertEqual(result["relation_change_per_10k_chars"], 2.0)
 
     def test_change_frequency_english_change_kind(self) -> None:
-        """2026-08-13 修复 P1：数据源 change_kind 是英文枚举（assert/reinforce/...），
-        此前用中文键计数导致四个 *_rate 恒为 0。"""
+        """数据源 change_kind 是英文枚举（assert/reinforce/...），必须按英文键计数。"""
         relations = [
             ("A", "B", "盟友", "assert"),
             ("A", "B", "盟友", "reinforce"),

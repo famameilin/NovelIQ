@@ -15,7 +15,7 @@ import {
 import { buildTensionAreaPath, interpolateSeriesValueAtProgress, mapTensionValueToTrackY } from "./timelineTrackPaths";
 
 /**
- * 2026-08-17，作用：构造用于时间轴布局测试的事件节点（兼容新一树一节点合同）
+ * 构造用于时间轴布局测试的事件节点
  */
 function createEventNode(
   treeId: string,
@@ -53,7 +53,6 @@ function createEventNode(
   };
 }
 
-// 兼容旧 helper 保留
 function createNode(chapterId: number, progress: number, summary: string): TimelineEventNode {
   return createEventNode(`plot:${chapterId}`, chapterId, progress, summary);
 }
@@ -229,7 +228,6 @@ describe("timelineTrackLayout", () => {
   });
 
   it.skip("旧 progress 排序已废弃，仅保留均匀分布", () => {
-    // 旧接口按 progress 排序现已被 derivedOrder 取代，此用例标记跳过以记录迁移
     const nodes = [createNode(2, 0.8, "旧排序2"), createNode(1, 0.1, "旧排序1")];
     const derivedOrder: string[] = [];
     const layout = createTimelineLayoutNodes(nodes, derivedOrder, 980);

@@ -31,19 +31,27 @@ def attach_case_link(result: Any, caseid: Any, associate: Callable[..., dict[str
     return json.dumps(body, ensure_ascii=False)
 
 
-def bind_caseid(tool: Any, associate: Callable[..., dict[str, Any]]) -> Any:
-    """caseid 接受任意输入，错误只能在关联阶段变成 warning"""
+def bind_caseid(
+    tool: Any,
+    associate: Callable[..., dict[str, Any]],
+    prepare: Callable[[Any], None] | None = None,
+) -> Any:
+    """caseid 接受任意输入，错误只能在关联阶段变成 warning；prepare 先按 caseid 绑定来源"""
     tool.args_schema = create_model(
         f"{tool.name}CaseArgs",
         __base__=tool.args_schema,
-        caseid=(Any, Field(default=None, description="显式关联已由本执行 promise 的案例；为空不关联")),
+        caseid=(Any, Field(default=None, description="显式关联所办案例的真实 ID；写入必填")),
     )
     original_func, original_coroutine = tool.func, tool.coroutine
 
     def invoke(*, caseid: Any = None, **kwargs: Any) -> Any:
+        if prepare is not None:
+            prepare(caseid)
         return attach_case_link(original_func(**kwargs), caseid, associate, tool.name)
 
     async def ainvoke(*, caseid: Any = None, **kwargs: Any) -> Any:
+        if prepare is not None:
+            prepare(caseid)
         return attach_case_link(await original_coroutine(**kwargs), caseid, associate, tool.name)
 
     if original_func is not None:

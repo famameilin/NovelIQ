@@ -1,4 +1,4 @@
-"从 src/api/main.py 分离的具名物理读取"
+"api main 的具名物理读取"
 
 from __future__ import annotations
 

@@ -1,11 +1,8 @@
 """审计查询：用量统计、覆盖缺口与 Agent 回合读投影；只统计实际请求事实
 
-2026-10-16 全库 3NF 改造；2026-10-17 六 agent 归属：审计事实全在
-model_calls / agent_tool_calls 宽表上。run 内调用由执行的直接归属取得——
-标注角色（annotation/entity/event/metric）与诊断角色（case/report）都直接
-携带 run；非 Agent 调用按 standalone_* 上下文列取。用量分项与供应商实报总量
-同列区分，total_tokens 优先实报、缺失才按分项投影；五类计时为具名列，
-turn_ms 是 model_ms + tool_wall_ms 的读取投影。
+审计事实全在 model_calls / agent_tool_calls 宽表上：run 内调用由执行的直接
+归属取得，非 Agent 调用按 standalone_* 上下文列取。total_tokens 优先供应商
+实报、缺失才按分项投影；turn_ms 是 model_ms + tool_wall_ms 的读取投影。
 """
 
 from __future__ import annotations

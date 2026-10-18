@@ -1,6 +1,6 @@
 """章级声明候选关系的事务保存与核对，不发布正式事件或结构
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：章级声明之间的候选关系进入
+章级声明之间的候选关系进入
 narrative_links 的语义形状（两端都引用 event_declarations），证据进入
 source_evidence 的 narrative_link_id 所有者列。
 """

@@ -48,8 +48,8 @@ def chinese_to_int(text: str) -> int | None:
         if ch in _DIGITS:
             digit = _DIGITS[ch]
             if digit == 0:
-                # 2026-08-13 P1-4 零位链修复：零/〇/○ 是占位符而非可覆盖数字，
-                # 落入低位块并抬高左侧悬空数字的位权（一〇八 = 1×100 + 8）
+                # 零位链：零/〇/○ 是占位符而非可覆盖数字，落入低位块并抬高左侧
+                # 悬空数字的位权（一〇八 = 1×100 + 8）
                 block.append(0)
                 number_scale *= 10
                 continue
@@ -62,13 +62,8 @@ def chinese_to_int(text: str) -> int | None:
         else:
             unit = _UNITS[ch]
             if unit >= 10000:
-                # 2026-08-13 P1 修复：万/亿分支此前只取 (section + number)，
-                # 丢弃了零位链低位块（一百零五万 → 1,000,000 应为 1,050,000）
-                # 也未用 number_scale 抬高悬空数字（一〇八万 → 10,000 应为 1,080,000）。
-                # 级单位按 last_unit 区分三种语义：
-                #   更高一级单位后出现（亿…万）：低位组独立落账（一亿零五万 = 1亿 + 5万）
-                #   同级连用（万万 = 亿）：叠加放大
-                #   常规（万/亿 前无级单位）：当前组 × 级单位
+                # 级单位按 last_unit 区分：更高一级单位后出现（亿…万）低位组独立落账；
+                # 同级连用（万万 = 亿）叠加放大；常规为当前组（含低位块与缩放数字）× 级单位
                 block_value = _block_value(block) if block else 0
                 scaled_number = number * number_scale if number_scale > 1 else number
                 if last_unit > unit:

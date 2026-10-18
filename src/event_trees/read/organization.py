@@ -1,6 +1,5 @@
 """正式事件与阶段的只读投影；章级声明只供追索，不形成第二种业务身份
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：
 - 章级声明 = event_declarations（来源归属从 chapter_annotations → executions → work_items 取得）
 - 完整事件 = complete_events（正文不在事件行，当前内容取显式 stage_index 链尾）
 - 阶段版本 = event_revisions（声明绑定或独立 origin 正文恰一，前驱为 index−1 投影）
@@ -654,8 +653,7 @@ class EventTreeQuery:
 
     def _validate_saved_contract(self) -> None:
         """读取只核验正式对象，不忽略错误端点或用旧字段补救版本"""
-        if self.organization_status == "pending_diagnosis" and (self.events or self.revisions or self.bindings):
-            raise ValueError("诊断尚未发布却存在正式事件或阶段")
+        # 案例会话逐案写正式树、报告最后落库：报告未存不代表树必须为空，按已有对象校验
         if self.organization_status == "ready" and set(self.bindings) != set(self.declarations):
             raise ValueError("已发布事件声明缺少完整的正式身份绑定")
         for binding in self.bindings.values():

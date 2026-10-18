@@ -141,8 +141,7 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         self, task_id: str, novel: dict, task_kind: str, request: ReanalyzeRequest | None, *, resume: bool = False
     ) -> None:
         """
-        2026-08-20 统一调度入口，直接创建执行协程，消除冗余跳转层
-        根据任务类型构建参数后直接调用核心执行逻辑
+        统一调度入口：按任务类型构建参数后直接创建执行协程
         """
         if task_kind == TASK_KIND_ANALYSIS:
 

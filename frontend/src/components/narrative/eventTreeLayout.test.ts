@@ -19,7 +19,7 @@ it("同一输入永远得到同一输出", () => {
 });
 
 it("跨章连续保持正文纵向顺序，不在章边界重置为新列", () => {
-  const book = buildScaleBook({ chapters: 3, eventsPerChapter: 3, arcs: 2, outcomes: 2 });
+  const book = buildScaleBook({ chapters: 3, eventsPerChapter: 3, arcs: 1, outcomes: 1 });
   const layout = eventTreeLayout(book, FRAME.width, FRAME.height);
   const [a, b, c] = ["ev-1-0", "ev-1-1", "ev-1-2"].map(id => layout.positions.get(id)!);
   // 同章同列，正文顺序靠后的在上方（y 更小）
@@ -131,4 +131,60 @@ it("400事件密集关联同一结果时固定点击区域不重叠", () => {
     if (Math.abs(points[index].x - other.x) < 28 && Math.abs(points[index].y - other.y) < 28) overlaps++;
   }
   expect(overlaps).toBe(0);
+});
+
+it("未关联事件完整可见且局部向上阅读，不铺成横纵同步推进的斜坡", () => {
+  const book = buildScaleBook({ chapters: 30, eventsPerChapter: 4, arcs: 0, outcomes: 0 });
+  book.event_arc_links = [];
+  book.event_outcome_links = [];
+  const layout = eventTreeLayout(book, 1352, 755);
+  const points = book.events.map(event => layout.positions.get(event.event_id)!);
+  expect(points).toHaveLength(120);
+  expect(layout.arcAnchors.size).toBe(0);
+  expect(layout.outcomeBoxes.size).toBe(0);
+  expect(points[0].x).toBe(points[1].x);
+  expect(points[0].y).toBeGreaterThan(points[1].y);
+  let upwardResets = 0;
+  for (let index = 1; index < points.length; index++) if (points[index].y > points[index - 1].y) upwardResets++;
+  expect(upwardResets).toBeGreaterThan(2);
+});
+
+it("完整长标题及说明决定上下文案间距和画布范围", () => {
+  const book = buildScaleBook({ chapters: 26, eventsPerChapter: 6, arcs: 8, outcomes: 8 });
+  book.arcs = book.arcs.map(arc => ({ ...arc, title: "圣城六年：人质、太学与兵部暗线", objective: "在圣城站住脚，顺着军报与漕运粮道查明布置，并明确六年等待的目标" }));
+  book.outcomes = book.outcomes.map(outcome => ({ ...outcome, title: "贺家军以‘演习’逼出人质而不担谋反之名", description: "朝廷仍以人质相制。".repeat(8) }));
+  const layout = eventTreeLayout(book, 984, 534);
+  expect(layout.width).toBeGreaterThan(984);
+  const anchors = [...layout.arcAnchors.values()];
+  const outcomes = [...layout.outcomeBoxes.values()];
+  for (let index = 1; index < anchors.length; index++) {
+    expect(anchors[index].x - anchors[index].width / 2 - (anchors[index - 1].x + anchors[index - 1].width / 2)).toBeGreaterThanOrEqual(CONTENT_GAP);
+  }
+  for (let index = 1; index < outcomes.length; index++) {
+    expect(outcomes[index].left - outcomes[index - 1].left - outcomes[index - 1].width).toBeGreaterThanOrEqual(CONTENT_GAP);
+  }
+  for (const box of outcomes) expect(box.top + box.height).toBeLessThanOrEqual(layout.outcomeBandBottom);
+  for (const point of layout.positions.values()) expect(point.y - MARKER_RADIUS).toBeGreaterThanOrEqual(layout.outcomeBandBottom + CONTENT_GAP);
+});
+
+it("宽桌面不拉大文案组间距或稀疏节点的纵向间距", () => {
+  const book = buildScaleBook({ chapters: 3, eventsPerChapter: 3, arcs: 3, outcomes: 3 });
+  const layout = eventTreeLayout(book, 2400, 900);
+  const anchors = [...layout.arcAnchors.values()];
+  const outcomes = [...layout.outcomeBoxes.values()];
+  for (let index = 1; index < anchors.length; index++) {
+    const gap = anchors[index].x - anchors[index].width / 2 - anchors[index - 1].x - anchors[index - 1].width / 2;
+    expect(gap).toBeGreaterThanOrEqual(CONTENT_GAP);
+    expect(gap).toBeLessThanOrEqual(32);
+  }
+  for (let index = 1; index < outcomes.length; index++) {
+    const gap = outcomes[index].left - outcomes[index - 1].left - outcomes[index - 1].width;
+    expect(gap).toBeGreaterThanOrEqual(CONTENT_GAP);
+    expect(gap).toBeLessThanOrEqual(32);
+  }
+  const local = ["ev-1-0", "ev-2-0", "ev-3-0"].map(id => layout.positions.get(id)!);
+  for (let index = 1; index < local.length; index++) {
+    expect(local[index - 1].y - local[index].y).toBeGreaterThanOrEqual(28);
+    expect(local[index - 1].y - local[index].y).toBeLessThanOrEqual(34);
+  }
 });

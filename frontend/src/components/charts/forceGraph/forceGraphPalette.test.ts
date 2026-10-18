@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createForceGraphPalette } from "@/components/charts/forceGraph/forceGraphPalette";
 
 /**
- * 2026-08-12 用于锁住关系类型配色表与后端 RELATION_DEFINITIONS 12 词全表对齐：
+ * 用于锁住关系类型配色表与后端 RELATION_DEFINITIONS 12 词全表对齐：
  * 展示层必须包含「领导」，否则图例/主图对该关系回退到默认配色
  */
 vi.mock("@/lib/theme", () => ({

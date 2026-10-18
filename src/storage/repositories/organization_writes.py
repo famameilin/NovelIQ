@@ -171,3 +171,12 @@ def _write_conflicts(session: Storage, organization: Any) -> None:
             _write_evidence_rows(session, {"claim_id": claim_id}, claim.evidence)
         _write_evidence_rows(session, {"conflict_id": conflict.conflict_id}, conflict.evidence)
     session.flush()
+
+
+def close_diagnosis_execution(session: Storage, *, execution_id: str, status: str = "success") -> None:
+    """登记诊断执行的终态：产物同事务落库即收口，已收口不重复改写"""
+    row = session.get(Execution, execution_id)
+    if row is None or row.status != "running":
+        return
+    row.status = status
+    row.finished_at = naive_utcnow()

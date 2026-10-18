@@ -1,4 +1,4 @@
-"从 src/event_trees/read/organization.py 分离的具名物理读取"
+"event trees read organization 的具名物理读取"
 
 from __future__ import annotations
 

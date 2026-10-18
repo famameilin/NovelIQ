@@ -1,4 +1,14 @@
-"对话记录 ORM 模型（2026-10-16 全库 3NF 改造；2026-10-17 六 agent 归属）"
+"""
+对话记录 ORM 模型
+
+dialogue_records 是对话定位与当前实际归因的唯一落点：
+creation_execution_id 是原标注来源，current_attribution_execution_id 是当前归因
+生产者（诊断可正式改归因，不改写原创建来源）；run/chapter 为创建时的归属事实，
+直接落列（读投影不依赖审计表与 work）；speaker_entity_id 真实 FK→同 run 角色；
+tone/is_inner_monologue 为当前归因具名列。
+
+两个事件引用（声明/完整事件）互斥；声明发布后通过版本绑定取得完整事件，不回填另一个 ID。
+"""
 
 from __future__ import annotations
 

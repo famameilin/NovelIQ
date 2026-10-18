@@ -1,5 +1,4 @@
-"""
-段落级指标原始计数与充分统计量测试（设计《章节粒度分析指标重设计》§5.3）
+"""段落级指标原始计数与充分统计量测试
 
 逐字段断言 compute_paragraph_metric_counts 的 17 个字段：
 构造确定文本，覆盖否定翻转（单重/双重）、充分统计量手工核算、
@@ -181,7 +180,7 @@ def test_semantic_categories_without_hits() -> None:
 
 
 def test_body_reaction_hit_count_independent_of_polarity() -> None:
-    """2026-09-05 C 批：身体反应转喻独立计数，不进 positive/negative 极性"""
+    """身体反应转喻独立计数，不进 positive/negative 极性"""
     counts = compute_paragraph_metric_counts(
         "他皱起眉头，浑身颤抖，牙关紧咬。",
         ["他", "皱起眉头", "，", "浑身", "颤抖", "，", "牙关", "紧咬", "。"],

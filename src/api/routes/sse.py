@@ -88,11 +88,7 @@ def _resolve_last_seq(request: Request) -> int | None:
     """
     从浏览器 Last-Event-ID 头或查询参数 last_seq 解析起始序号
 
-    契约: 2026-08-14 P1-6 改为「头优先」——浏览器原生自动重连每次都会携带
-    Last-Event-ID（始终是最近一条已收事件），而 query 中的 last_seq 是前端
-    重建 EventSource 时冻结的旧值，若 query 优先会永远压过原生重连的头，
-    导致每次原生重连都重复回放已收事件。取首个合法非负 int；
-    两者都缺失或非法时返回 None（回放全部缓冲）
+    头优先；取首个合法非负 int，两者都缺失或非法时返回 None（回放全部缓冲）
     """
     for raw in (request.headers.get("last-event-id"), request.query_params.get("last_seq")):
         if raw is None:

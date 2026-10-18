@@ -76,10 +76,10 @@ class ChapterMetricsState:
         return self.metrics_payload.model_dump(mode="json")
 
     def _paragraph_label_coverage_warnings(self) -> list[str]:
-        """2026-09-07 用于在冻结前确定性登记段落级监督覆盖缺口（仅告警不阻断冻结）
+        """用于在冻结前确定性登记段落级监督覆盖缺口（仅告警不阻断冻结）
 
-        每章 2-3 段为定稿密度（2026-09-14 由句级改段级）；低于 2 段（含空载荷）
-        随章留痕，供 linguistic 阶段边界拟合的样本量判断与报告附录展示。
+        每章 2-3 段为定稿密度；低于 2 段（含空载荷）随章留痕，供 linguistic 阶段
+        边界拟合的样本量判断与报告附录展示。
         """
         labels = self.bound_payloads.get("paragraph_labels") or []
         if len(labels) >= _PARAGRAPH_LABEL_MIN_PER_CHAPTER:

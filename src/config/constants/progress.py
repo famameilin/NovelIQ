@@ -1,4 +1,4 @@
-"""分析流水线阶段进度常量（原 settings.json progress 段，2026-08-28 常量化）"""
+"""分析流水线阶段进度常量"""
 
 from __future__ import annotations
 

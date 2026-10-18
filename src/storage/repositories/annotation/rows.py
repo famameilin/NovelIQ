@@ -1,4 +1,8 @@
-"章节标注读侧行/视图 dataclass"
+"""
+章节标注读侧行/视图 dataclass
+
+供标注读取与 API/results 消费者使用的具名读投影。
+"""
 
 from __future__ import annotations
 
@@ -9,7 +13,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ChapterAnnotationRow:
-    "用于向 章节消费者暴露章节 segment 的具名读模型"
+    """向章节消费者暴露章节 segment 的具名读模型"""
 
     chapter_id: int
     emotional_valence: int
@@ -21,15 +25,15 @@ class ChapterAnnotationRow:
     foreshadowing_desc: str | None = None
     why_unresolved_now: str | None = None
     payoff_likelihood: str | None = None
-
+    # 非埋设章挂树时指向伏笔树根（埋设事件 id）
     foreshadowing_root_event_id: str | None = None
-
+    # 冻结时系统覆盖告警
     coverage_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class CharacterFactRow:
-    "用于向人物与聚合消费者暴露数据库图人物事实"
+    """向人物与聚合消费者暴露数据库图人物事实"""
 
     chapter_id: int
     name: str
@@ -45,7 +49,7 @@ class CharacterFactRow:
 
 @dataclass(frozen=True)
 class DialogueFactRow:
-    "用于向对话与情绪融合消费者暴露数据库图对话事实"
+    """向对话与情绪融合消费者暴露数据库图对话事实"""
 
     chapter_id: int
     speaker: list[str]
@@ -56,7 +60,7 @@ class DialogueFactRow:
 
 @dataclass(frozen=True)
 class ForeshadowingTreeView:
-    "用于向 API 与诊断暴露伏笔树汇总视图（伏笔即事件树）"
+    """向 API 与诊断暴露伏笔树汇总视图（伏笔即事件树）"""
 
     root_event_id: str
     tree_id: str
@@ -74,7 +78,11 @@ class ForeshadowingTreeView:
 
 @dataclass(frozen=True)
 class SavedAnnotationRecord:
-    "已保存的正式章节标注读投影（chapter_annotations 宽表自带章号与角色）"
+    """已保存的正式章节标注读投影（chapter_annotations 宽表自带章号与角色）
+
+    章号/角色是标注记录自身列（写入时归属），段落情绪条目与覆盖告警
+    另从 analysis_assessments 与固定覆盖规则取得。
+    """
 
     record_id: str
     chapter_id: int
@@ -93,7 +101,11 @@ class SavedAnnotationRecord:
 
 @dataclass(frozen=True)
 class AnnotationRoleRecord:
-    "章内标注角色读投影（chapter_annotations 产物行 + 真实执行号）"
+    """章内标注角色读投影（chapter_annotations 产物行 + 真实执行号）
+
+    state：已有正式标注记录为 saved，否则 pending；
+    invocation_id 即产物行的真实执行号，saved_at 是保存时间。
+    """
 
     run_id: str
     chapter_id: int
@@ -105,7 +117,10 @@ class AnnotationRoleRecord:
 
 @dataclass(frozen=True)
 class DialogueRecordRow:
-    "对话记录读投影（dialogue_records + 由创建执行取得的章号与原文切片）"
+    """对话记录读投影（dialogue_records + 由创建执行取得的章号与原文切片）
+
+    content 按章节正文 [start_char, end_char) 精确切片，不从文档字段读取。
+    """
 
     dialogue_id: str
     chapter_id: int
@@ -122,7 +137,12 @@ class DialogueRecordRow:
 
 @dataclass(frozen=True)
 class GraphFactRow:
-    "图贡献事实读投影（graph_facts 行 + 章节与人物动态观测的具名列）"
+    """图贡献事实读投影（graph_facts 行 + 章节与人物动态观测的具名列）
+
+    形状由事实行自身列表达，chapter_id 由真实生产来源投影（标注 work 决定的
+    章节或独立选章的 effective_chapter_id），人物动态观测的实体/角色/动作/情绪
+    从声明的参与者行读取。
+    """
 
     fact: Any
     chapter_id: int | None
@@ -138,7 +158,11 @@ class GraphFactRow:
 
 @dataclass(frozen=True)
 class ForeshadowingEdgeRow:
-    "伏笔语义链路读投影（narrative_links 语义形状 + 端点完整事件的来源章号）"
+    """伏笔语义链路读投影（narrative_links 语义形状 + 端点完整事件的来源章号）
+
+    edge_type 为伏笔边取值，source/target 是完整事件身份；来源章号由该事件
+    自身证据的段落所属章节投影，is_active/expired_at 只承接真实观察。
+    """
 
     edge_id: str
     edge_type: str

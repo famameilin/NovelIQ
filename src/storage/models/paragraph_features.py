@@ -1,4 +1,12 @@
-"段落特征结果表 ORM 模型定义（2026-10-16 全库 3NF 改造）"
+"""
+段落特征结果表 ORM 模型定义
+
+paragraph_features 是封闭种类的段落向量与标量计算结果唯一落点。
+
+feature_code 是封闭数学结果目录，不是任意属性名；三种值列（向量/标量/计数）
+恰一适用，不加可由 feature_code 还原的重复 kind/group 列；模型、维度与曲线
+参数从分析运行的运行级合同取得。
+"""
 
 from __future__ import annotations
 

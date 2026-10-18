@@ -21,7 +21,7 @@ const navigateMock = vi.fn();
 
 let currentGraphSearchParams = "task_id=task-a";
 
-// 2026-08-07 用于在页面测试中消除动画运行时差异
+// 用于在页面测试中消除动画运行时差异
 function motionElement(tagName: string) {
   const Component = (props: {
     children?: ReactNode;
@@ -119,7 +119,7 @@ vi.mock("@/api/novels", () => ({
   getNovel: (...args: unknown[]) => getNovelMock(...args),
 }));
 
-// 2026-08-07 用于构造章节图快照页面测试数据
+// 用于构造章节图快照页面测试数据
 function createGraphData(): GraphData {
   return {
     chapter_id: 3,
@@ -165,7 +165,7 @@ function createGraphData(): GraphData {
   };
 }
 
-// 2026-08-07 用于构造图谱变化分页页面测试数据
+// 用于构造图谱变化分页页面测试数据
 function createGraphChangesPage(): GraphChangesPageResponse {
   return {
     changes: [
@@ -209,7 +209,7 @@ function createGraphChangesPage(): GraphChangesPageResponse {
   };
 }
 
-// 2026-08-07 用于提供隔离的 GraphPage 查询缓存
+// 用于提供隔离的 GraphPage 查询缓存
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

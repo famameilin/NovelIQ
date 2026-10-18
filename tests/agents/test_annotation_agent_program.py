@@ -1,6 +1,6 @@
 """章内三代理并发：单个 agent 的构造器与程序面合同测试
 
-覆盖 agent_program 的模型可见面与 2026-09-18"写入生效"口径：
+覆盖 agent_program 的模型可见面与 "写入生效"口径：
 
 - 三个 agent 的模型可见面逐字相同（绑定面只有 execute_code + finish），程序目录 =
   search_text + push_case + finish + 八类构造器，五个 write_* 既不在可见面也不在命名空间；
@@ -16,9 +16,6 @@
 - 同键重写=更新语义（实体=本 agent id、事件=el、对话=候选号、标签=段号）；
 - agent 的 finish 是面上一等工具（不是构造器），agent_gap 的口径与之一致；
 - 构造器目录与实际命名空间同源：目录里的每个名字都直接调得动，签名与参数说明同轮下发。
-
-2026-10-02 对齐 0.2.0：检索面收成 search_text、案例面只剩 push_case（去 search_pool/
-promise_case/close_case 与 case_id 授权）；relation 去 change_kind、dialogue 去订正路径。
 """
 
 from __future__ import annotations
@@ -43,6 +40,7 @@ from src.embedding import EmbeddingConnectionError, EmbeddingServiceError, Embed
 from src.fact_graph.graph import FactGraph, entity_key
 from src.fact_graph.inputs import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 # 三段正文：¶1/¶2/¶3 各有一个引号对话候选，整章共 3 条候选（对话判定候选号 1..3）；
 # "长刀" 在 ¶2，作为 item 实体与参与者测试的锚点
@@ -53,7 +51,7 @@ PARAGRAPHS: dict[int, str] = {
 }
 CHAPTER_TEXT = "".join(PARAGRAPHS.values())
 
-# 2026-09-18 evidence 只按段号 id 锚定：单个段首可见号整数，不再带逐字引文
+# evidence 只按段号 id 锚定：单个段首可见号整数，不再带逐字引文
 E_PERSON = 1
 E_KNIFE = 2
 E_SHOUT = 1
@@ -162,7 +160,9 @@ async def _run(runtime: AgentProgramRuntime, code: str) -> dict[str, Any]:
 async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(failure_type) -> None:
     """真实程序与工具边界：失败检索和 execute_code 都留审计，后续写入和 finish 不执行"""
     client = SimpleNamespace(get_embedding=AsyncMock(side_effect=failure_type("嵌入服务不可用")))
-    search = TextSearchService(MagicMock(), run_id="run-agent-test", embedding_client=client)
+    search = TextSearchService(
+        storage_for(MagicMock()), run_id=fixture_id(__name__, "run-agent-test"), embedding_client=client
+    )
 
     class FailingQuery(_QueryService):
         async def search_text(self, query, *, range_name, limit=50):
@@ -172,7 +172,7 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
     tools = {tool.name: tool for tool in build_annotation_tools(FailingQuery(), ledger)}
     recorder = MagicMock()
     recorder.start_turn.return_value = 1
-    observer = AgentTurnObserver(recorder, invocation_id=1, context={})
+    observer = AgentTurnObserver(recorder, invocation_id=fixture_id(__name__, "1"), context={})
     observer.begin_provider_turn(context_summary={}, request_messages=[], provider_request={}, started_ns=1)
     observer.complete_provider_turn(
         response_message=AIMessage(content="", tool_calls=[{"name": "execute_code", "args": {}, "id": "code"}]),
@@ -182,7 +182,7 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
     program = runtime.build_tool()
     code = 'search_text(query="沈遥")\nentity(id="late", name="迟到", entity_type="character")\nfinish()'
     with (
-        patch("src.agents.annotation.text_search.search_paragraphs_by_keywords", return_value=[]),
+        patch("src.storage.access.ParagraphAccess.search_paragraphs_by_keywords", return_value=[]),
         pytest.raises(AnnotationDependencyError, match="嵌入服务不可用"),
     ):
         await _execute_call(
@@ -219,7 +219,6 @@ async def _runtime_rejection(runtime: AgentProgramRuntime, code: str) -> dict[st
 
 @pytest.mark.asyncio
 async def test_pending_rejects_removed_structured_parameters() -> None:
-    """旧案例字段不能绕过当前纯文字契约"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = _failed_entry(await _run(runtime, 'pending(kind="case_clue", detail="疑点", evidence=1)'))
@@ -400,13 +399,7 @@ async def test_constructor_call_receipt_is_written_with_record_and_ref() -> None
 
 @pytest.mark.asyncio
 async def test_every_call_returns_one_of_the_three_receipt_shapes() -> None:
-    """构造器与工具走同一条分发：回执只有写成/读到/被拒三种形状
-
-    2026-09-18 之前构造器走 _run_constructor、检索与案例工具走 _run_tool，两边的成功回执
-    各写一遍（构造器自己拼 {status, record, ref}、工具直接漏生产层的 {"accepted": ...}）、
-    失败回执也各一套。现在一个 _dispatch 管所有名字：写类一律 {status:"written", record,
-    ref}，检索类原样给数据，被拒一律 {status:"rejected", record, ...}。
-    """
+    """构造器与工具走同一条分发：回执只有写成/读到/被拒三种形状"""
     ledger = _ledger()
     agent = AgentAnnotation(role="entity")
     runtime = _runtime(ledger, agent)
@@ -547,9 +540,9 @@ async def test_event_accepts_foreshadowing_property_on_child() -> None:
 
 @pytest.mark.asyncio
 async def test_participants_rejects_unknown_event_and_lands_partial_three_state() -> None:
-    """participants 引用不存在的事件 el 仍拒绝；2026-10-04 起三态只给一半照常落账
+    """participants 引用不存在的事件 el 拒绝；三态只给一半照常落账
 
-    未登记实体引用依旧拒绝（引用面不放开）；叙事功能近义词归一、emotion 钳制
+    未登记实体引用一律拒绝（引用面不放开）；叙事功能近义词归一、emotion 钳制
     在构造层完成，生产面按实体登记大类给 role 缺省。
     """
     ledger = _ledger()
@@ -655,7 +648,7 @@ async def test_metric_rejects_out_of_range_narrative_function() -> None:
 
 @pytest.mark.asyncio
 async def test_event_orphan_defers_until_root_arrives() -> None:
-    """子事件先于树根构造：2026-10-04 树键校验下沉，生产面挂起而非拒绝
+    """子事件先于树根构造：树键在生产面校验，挂起而非拒绝
 
     子事件写入即时生效（回执 written、构造器记入 plan），等根建好后按到达顺序
     冲账进正式事件树；根始终不建时由 finish 拒绝收尾，不静默丢数据。

@@ -2,8 +2,7 @@
 
 
 def test_reasoning_content_patch_preserves_delta_reasoning() -> None:
-    """
-    2026-08-14 D9：验证 langchain-openai 私有函数补丁生效——Qwen 系网关
+    """验证 langchain-openai 私有函数补丁生效——Qwen 系网关
     delta.reasoning_content 被合并进 AIMessageChunk.additional_kwargs，
     防止依赖升级后补丁静默失效（思考内容丢失）
     """

@@ -1,10 +1,9 @@
-"""
-单字情绪词融合修复回归（2026-08-16，分词层修复）
+"""单字情绪词融合回归
 
-根因：jieba 将"副词+爽/慌"与"爽/慌+得/到"融合为单 token，token 对齐匹配
-打不中单字表词。修复在 Tokenizer 加载用户词典后 del_word 移除融合词路由
+jieba 将"副词+爽/慌"与"爽/慌+得/到"融合为单 token，token 对齐匹配
+打不中单字表词。Tokenizer 加载用户词典后 del_word 移除融合词路由
 （基础词典词）并注册 force_split（HMM 模型词），详见 src/preprocess/tokenize.py。
-爱 类融合刻意不修（习惯性偏好漂移：最爱说/太爱装）。
+爱 类融合不处理（习惯性偏好漂移：最爱说/太爱装）。
 """
 
 from __future__ import annotations

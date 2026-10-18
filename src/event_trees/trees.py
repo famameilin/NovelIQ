@@ -6,8 +6,28 @@ from copy import deepcopy
 from typing import Any
 
 from src.storage import new_id
+from src.storage.query_terms import query_search_terms, term_matches
 
 CONTRIBUTION_KEYS = ("complete_events", "revisions", "containments", "ownerships", "relations", "conflicts")
+
+
+def _event_search_text(content: dict[str, Any]) -> str:
+    """拼装事件检索的召回文本
+
+    召回面 = 标题/问题/概要/描述 + 参与者实体名与行动（对齐诊断面三字段口径）；
+    词项与通配符语义见 storage.query_terms。
+    """
+    fields = [str(content.get(name) or "") for name in ("title", "problem", "summary", "description")]
+    for item in content.get("participants") or []:
+        if not isinstance(item, dict):
+            continue
+        entity = item.get("entity")
+        if isinstance(entity, dict):
+            fields.append(str(entity.get("name") or ""))
+        else:
+            fields.append(str(entity or ""))
+        fields.append(str(item.get("action") or ""))
+    return "\n".join(value for value in fields if value)
 
 
 class EventTrees:
@@ -172,7 +192,7 @@ class EventTrees:
         for connection in self.connections.values():
             if connection["type"] in {"causal", "foreshadowing"}:
                 continue
-            child, parent = (connection["child"], connection["parent"])
+            child, parent = connection["child"], connection["parent"]
             if child not in self.nodes or parent not in self.nodes:
                 raise ValueError(f"连接端点不存在: {parent}->{child}")
             if child in parents and parents[child] != parent:
@@ -212,20 +232,32 @@ class EventTrees:
         tree_id: str | None = None,
         isforeshadowing: bool | None = None,
     ) -> list[str]:
-        """先筛选稳定节点 ID，分页读取详情时不复制整本书的节点正文；伏笔标记过滤在分页前生效"""
+        """先筛选稳定节点 ID，分页读取详情时不复制整本书的节点正文；伏笔标记过滤在分页前生效
+
+        query 按空白/标点拆分词项、任一命中即召回（% 匹配任意长度、_ 匹配单字符），
+        召回面为标题/问题/概要/描述与参与者；空查询不按词项过滤。
+        """
         parents = self._parents() if tree_id is not None else {}
+        terms = query_search_terms(query)
         values: list[str] = []
+        # 与正式过程读取同按正文排序，段内并列节点用稳定身份打破平局
         ordered = sorted(
             self.nodes.items(),
-            key=lambda item: (item[1]["chapter_id"], item[1]["content"]["evidence_paragraph_id"], item[0]),
+            key=lambda item: (
+                item[1]["chapter_id"],
+                item[1]["content"]["evidence_paragraph_id"],
+                item[0],
+            ),
         )
         for identifier, node in ordered:
             if chapter_id is not None and node["chapter_id"] != chapter_id:
                 continue
             if isforeshadowing is not None and bool(node["content"]["is_foreshadow_setup"]) != isforeshadowing:
                 continue
-            if query.casefold() not in node["content"]["description"].casefold():
-                continue
+            if terms:
+                haystack = _event_search_text(node["content"])
+                if not any(term_matches(term, haystack) for term in terms):
+                    continue
             if tree_id is not None:
                 root = identifier
                 while root in parents:
@@ -313,7 +345,7 @@ class EventTrees:
                 if indegree[child] == 0:
                     ready.append(child)
         if visited != len(indegree):
-            raise ValueError(f"事件连接形成环 node_ids={sorted((key for key, value in indegree.items() if value))}")
+            raise ValueError(f"事件连接形成环 node_ids={sorted(key for key, value in indegree.items() if value)}")
 
     def stop(self, author: str) -> None:
         self.executions.discard(author)
@@ -333,12 +365,13 @@ class EventTrees:
         self.connections = {
             key: value
             for key, value in self.connections.items()
-            if value["author"] != author and (not {value["parent"], value["child"]} & removed)
+            if value["author"] != author and not {value["parent"], value["child"]} & removed
         }
         self.actions = {key: value for key, value in self.actions.items() if value["author"] != author}
         removed_events = {key for key, value in self.complete_events.items() if value["author"] == author}
         for key in CONTRIBUTION_KEYS:
             setattr(self, key, {k: v for k, v in getattr(self, key).items() if v["author"] != author})
+        # 其他 work 的关联不得指向已随回滚消失的事件/过程端点
         self.containments = {
             key: value
             for key, value in self.containments.items()
@@ -417,6 +450,7 @@ class EventTrees:
         ]
 
     def restore_storage(self, session: Any, records: list[Any]) -> None:
+
         self.nodes.clear()
         self.connections.clear()
         self.actions.clear()

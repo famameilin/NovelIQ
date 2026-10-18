@@ -11,23 +11,14 @@ from src.embedding import EmbeddingClient, EmbeddingServiceError
 
 
 def _build_httpx_response(status_code: int) -> httpx.Response:
-    """
-    创建时间: 2026-04-28
-    任务: fix-embedding-transient-502
-    说明: OpenAI SDK 的 APIStatusError 需要携带真实 httpx.Response；
-          测试里统一用这个 helper 生成最小可用响应，避免每个用例重复拼装 request/response。
-    """
+    """测试里统一用这个 helper 生成最小可用响应，避免每个用例重复拼装 request/response。"""
     request = httpx.Request("POST", "http://embedding.test/v1/embeddings")
     return httpx.Response(status_code=status_code, request=request)
 
 
 @pytest.mark.asyncio
 async def test_embed_texts_retries_retryable_502_and_recovers() -> None:
-    """
-    创建时间: 2026-04-28
-    任务: fix-embedding-transient-502
-    说明: 瞬时 502 属于 provider/gateway 常见抖动；batch embedding 应有限重试，而不是首次失败就终止整条 preprocess。
-    """
+    """瞬时 502 属于 provider/gateway 常见抖动；batch embedding 应有限重试，而不是首次失败就终止整条 preprocess。"""
     client = EmbeddingClient(
         base_url="http://localhost:9999/v1",
         model="test-embedding",
@@ -59,11 +50,7 @@ async def test_embed_texts_retries_retryable_502_and_recovers() -> None:
 
 @pytest.mark.asyncio
 async def test_embed_texts_does_not_retry_bad_request() -> None:
-    """
-    创建时间: 2026-04-28
-    任务: fix-embedding-transient-502
-    说明: 4xx 参数错误不属于瞬时故障，必须继续 fail fast，避免无意义重试把真实配置问题掩盖掉。
-    """
+    """4xx 参数错误不属于瞬时故障，必须继续 fail fast，避免无意义重试把真实配置问题掩盖掉。"""
     client = EmbeddingClient(
         base_url="http://localhost:9999/v1",
         model="test-embedding",
@@ -87,7 +74,7 @@ async def test_embed_texts_does_not_retry_bad_request() -> None:
 @pytest.mark.parametrize("method", ["get_embedding", "embed_texts"])
 @pytest.mark.parametrize("timeout", [False, True])
 async def test_embedding_transport_failure_has_dependency_and_builtin_types(method: str, timeout: bool) -> None:
-    """2026-10-16 用户裁定连接级重试：连接及超时批内最多重试 3 次，耗尽仍保留原有异常语义"""
+    """连接级重试：连接及超时批内最多重试 3 次，耗尽仍保留原有异常语义"""
     from src.embedding import EMBEDDING_CONNECTION_MAX_RETRIES
 
     request = httpx.Request("POST", "http://embedding.test/v1/embeddings")

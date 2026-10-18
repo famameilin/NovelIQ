@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import replace
 
 import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
+from src.storage import new_id
 from src.storage.models import Paragraph
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphMetricRow, ParagraphRepository
 from src.text_processing.models import Chunk, ParagraphSpan
 from src.text_processing.paragraphs import split_chunk_paragraphs
 from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
+from tests.support.storage_fixtures import fixture_id
 
 CHUNK_TEXT = "第一段。\n第二段。\n第三段。\n"
 
 
 def _create_run(db_session) -> str:
-    novel_id = uuid.uuid4().hex[:8]
+    novel_id = new_id()
     _insert_test_novel(novel_id, session=db_session)
     return RunRepository(db_session).create_run(
         novel_id=novel_id,
@@ -127,8 +128,8 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
     assert repo.insert_paragraphs(run_id, spans) == 3
     assert repo.count_paragraphs(run_id) == 3
     assert repo.has_paragraphs(run_id)
-    assert repo.count_paragraphs("no-such-run") == 0
-    assert not repo.has_paragraphs("no-such-run")
+    assert repo.count_paragraphs(fixture_id(__name__, "no-such-run")) == 0
+    assert not repo.has_paragraphs(fixture_id(__name__, "no-such-run"))
 
     rows = repo.fetch_paragraph_rows(run_id)
     assert [row.paragraph_id for row in rows] == [0, 1, 2]
@@ -138,7 +139,7 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
         assert row.source_paragraph_index == span.source_paragraph_index
         assert row.fragment_index == span.fragment_index
         assert row.local_start_char == span.local_start_char
-        # 2026-10-16 3NF：local_end_char/global/char_count 是读取投影
+        # local_end_char/global/char_count 是读取投影
         assert row.local_end_char == span.local_end_char
         assert row.global_start_char == span.global_start_char
         assert row.global_end_char == span.global_end_char
@@ -149,7 +150,7 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
 
 
 def test_paragraph_token_count_projection_comes_from_metrics(db_session) -> None:
-    """2026-10-16 3NF：token_count 从 paragraph_metrics 读取投影（预处理与指标同批 token）"""
+    """token_count 从 paragraph_metrics 读取投影（预处理与指标同批 token）"""
     run_id = _create_run(db_session)
     chunks = _single_chunk(CHUNK_TEXT, start=0)
     _insert_chapter_texts(db_session, run_id, chunks)
@@ -192,7 +193,7 @@ def test_chapter_paragraph_batch_filters_in_database(db_session) -> None:
 
     assert len(rows) == 1
     assert rows[0].chapter_id == 2
-    assert any("paragraphs.chapter_id =" in sql for sql in statements if "FROM paragraphs" in sql)
+    assert any("paragraphs.chapter_id =" in sql for sql in statements if "paragraphs" in sql)
 
 
 def test_insert_paragraphs_with_nonzero_chunk_offset(db_session) -> None:
@@ -314,7 +315,7 @@ def test_insert_paragraphs_rejects_inconsistent_global_offset(db_session) -> Non
 def test_db_constraint_rejects_duplicate_local_start_in_chapter(db_session) -> None:
     """绕过 repository 校验直接插入同章重复 local_start_char 时触发 IntegrityError
 
-    2026-10-16 3NF：local_end_char 不再落列，DDL 层不再有 local_start < local_end 检查，
+    local_end_char 不再落列，DDL 层不再有 local_start < local_end 检查，
     同章定位唯一性（uq_paragraphs_run_chapter_local_start）仍是数据库约束。
     """
     run_id = _create_run(db_session)

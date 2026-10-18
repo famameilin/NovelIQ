@@ -1,5 +1,5 @@
 /**
- * TopicEmotionPanel - 主题情绪关联（赛道 D /topics/emotion）
+ * TopicEmotionPanel - 主题情绪关联（/topics/emotion）
  *
  * sum(w*t*net_density)/sum(w*t)，分母为加权入模 token 和；空值段落
  * 双向排除，权重和为零的主题显示为空值。

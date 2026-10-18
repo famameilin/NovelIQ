@@ -1,8 +1,154 @@
-"""将冻结诊断候选一次发布到新关系，源声明保持不可变（2026-10-16 全库 3NF 改造）
+"按当前运行已保存的事件与核对记录恢复诊断草稿"
 
-- 完整事件：complete_events（身份 + 真实生产者 + 同一性理由）
-- 阶段版本：event_revisions 的显式连续 stage_index 链（绑定声明或独立 origin 正文恰一）
-- 包含/关系：narrative_links 的单父包含形状与语义关系形状，证据进 source_evidence
-- 组织核对：organization_checks 的单事件/单声明核对与声明对/结构对判断四类形状
-伏笔 root/target 不在此回填：正式读取经阶段声明绑定投影；情节推进同样经声明引用读取。
-"""
+from __future__ import annotations
+
+from typing import Any
+
+from src.storage import Storage
+
+from . import storage_map as smap
+from .organization import (
+    BoundOrganizationEvidence,
+    CompleteEventDraft,
+    ContainmentDraft,
+    DeclarationComparisonDraft,
+    DeclarationReviewDraft,
+    EventOrganizationDraft,
+    EventReviewDraft,
+    RelationDraft,
+    StructureReviewDraft,
+    _evidence_payloads,
+    _run_event_dicts,
+    _run_events,
+)
+
+
+def _checked_disposition(value: str | None, allowed: tuple[str, ...]) -> Any:
+    """水合核对行时只接受既有对判取值，未知取值直接拒绝"""
+    if value not in allowed:
+        raise ValueError(f"组织核对行的对判取值不受支持: {value!r}")
+    return value
+
+
+def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizationDraft) -> None:
+    """把本 run 已保存的行水合进草稿内存：续跑在既有成果上继续
+
+    行是会话保存留下的正式形状行；保存随后按完整内存状态计算快照。
+    """
+    rows = _run_events(session, run_id)
+    if not rows:
+        return
+    dicts = _run_event_dicts(session, run_id)
+    chains = smap.stage_chain(session, list(rows))
+    declarations = draft._declarations()
+    snapshot = session.diagnosis.session_rows(run_id)
+    anchors = {row.execution_id: row.case_anchor for row in snapshot["executions"] if row.case_anchor is not None}
+    event_evidence = smap.fetch_evidence(session, "complete_event_id", list(rows))
+    for event_id, row in rows.items():
+        data = dicts[event_id]
+        stages = chains.get(event_id) or []
+        stage_order = [item.declaration_id for item in stages if item.declaration_id is not None]
+        payloads = _evidence_payloads(session, run_id, event_evidence.get(event_id, []))
+        draft.events[event_id] = CompleteEventDraft(
+            event_id=event_id,
+            local_key=row.local_key,
+            title=data["title"],
+            problem=data["problem"],
+            summary=data["summary"],
+            event_type=data["event_type"],
+            status=data["status"],
+            progress=data["progress"],
+            declaration_ids=list(stage_order),
+            stage_order=stage_order,
+            current_declaration_id=stage_order[-1] if stage_order else None,
+            reason=row.identity_reason,
+            source_hashes={
+                declaration: declarations[declaration]["source_hash"]
+                for declaration in stage_order
+                if declaration in declarations
+            },
+            first_text_position=data["first_text_position"],
+            evidence=[BoundOrganizationEvidence(**payload) for payload in payloads],
+            source_case_id=anchors.get(row.producer_execution_id, ""),
+            producer_invocation_id=row.producer_execution_id,
+        )
+    link_rows = snapshot["links"]
+    link_evidence = smap.fetch_evidence(session, "narrative_link_id", [row.link_id for row in link_rows])
+    for link in link_rows:
+        bound = [
+            BoundOrganizationEvidence(**payload)
+            for payload in _evidence_payloads(session, run_id, link_evidence.get(link.link_id, []))
+        ]
+        if link.contained_child_id is not None and link.contained_parent_id is not None:
+            draft.containments[(link.contained_parent_id, link.contained_child_id)] = ContainmentDraft(
+                parent_event_id=link.contained_parent_id,
+                child_event_id=link.contained_child_id,
+                reason=link.reason,
+                evidence=bound,
+                source_case_id=anchors.get(link.producer_execution_id, ""),
+                producer_invocation_id=link.producer_execution_id,
+            )
+        elif link.semantic_source_event_id is not None and link.semantic_target_event_id is not None:
+            draft.relations[link.link_id] = RelationDraft(
+                relation_id=link.link_id,
+                source_kind="event",
+                source_id=link.semantic_source_event_id,
+                target_kind="event",
+                target_id=link.semantic_target_event_id,
+                relation_type=link.relation_type or "",
+                reason=link.reason,
+                source_operation_id=link.source_operation_local_key or "",
+                evidence=bound,
+                source_case_id=anchors.get(link.producer_execution_id, ""),
+                producer_invocation_id=link.producer_execution_id,
+            )
+    check_rows = snapshot["checks"]
+    check_evidence = smap.fetch_evidence(session, "check_id", [row.check_id for row in check_rows])
+    for check in check_rows:
+        bound_check = [
+            BoundOrganizationEvidence(**payload)
+            for payload in _evidence_payloads(session, run_id, check_evidence.get(check.check_id, []))
+        ]
+        if check.reviewed_event_id is not None:
+            draft.reviewed_events[check.reviewed_event_id] = EventReviewDraft(
+                event_id=check.reviewed_event_id,
+                reason=check.reason,
+                snapshot_hash=check.snapshot_hash or "",
+                source_case_id=anchors.get(check.producer_execution_id, ""),
+                producer_invocation_id=check.producer_execution_id,
+            )
+        elif check.reviewed_declaration_id is not None:
+            draft.declaration_reviews[check.reviewed_declaration_id] = DeclarationReviewDraft(
+                declaration_id=check.reviewed_declaration_id,
+                source_hash=check.snapshot_hash or "",
+                reason=check.reason,
+                source_case_id=anchors.get(check.producer_execution_id, ""),
+                producer_invocation_id=check.producer_execution_id,
+            )
+        elif check.source_declaration_id is not None and check.target_declaration_id is not None:
+            draft.declaration_comparisons[(check.source_declaration_id, check.target_declaration_id)] = (
+                DeclarationComparisonDraft(
+                    source_declaration_id=check.source_declaration_id,
+                    target_declaration_ids=[check.target_declaration_id],
+                    disposition=_checked_disposition(check.disposition, ("same_event", "independent", "related")),
+                    reason=check.reason,
+                    evidence=bound_check,
+                    source_case_id=anchors.get(check.producer_execution_id, ""),
+                    producer_invocation_id=check.producer_execution_id,
+                )
+            )
+        elif check.source_event_id is not None and check.target_event_id is not None:
+            key = (
+                min(check.source_event_id, check.target_event_id),
+                max(check.source_event_id, check.target_event_id),
+            )
+            draft.structure_reviews[key] = StructureReviewDraft(
+                source_event_id=check.source_event_id,
+                target_event_id=check.target_event_id,
+                disposition=_checked_disposition(check.disposition, ("contains", "part_of", "related", "independent")),
+                reason=check.reason,
+                snapshot_hash=check.snapshot_hash or "",
+                evidence=bound_check,
+                source_case_id=anchors.get(check.producer_execution_id, ""),
+                producer_invocation_id=check.producer_execution_id,
+            )

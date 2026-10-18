@@ -55,8 +55,7 @@ def test_empty_text() -> None:
 
 
 def test_toc_without_blank_line_does_not_swallow_real_chapter_title() -> None:
-    """
-    2026-08-12 用于验证目录与正文之间无空行时：
+    """验证目录与正文之间无空行时：
     正文首个真实章节标题（与目录条目同名）不被吞进目录范围。
     """
     text = "目录\n第一章 起点 1\n第二章 入城 5\n第一章 起点\n林渡走在街头。"
@@ -69,8 +68,7 @@ def test_toc_without_blank_line_does_not_swallow_real_chapter_title() -> None:
 
 
 def test_toc_without_blank_line_keeps_entries_with_page_numbers() -> None:
-    """
-    2026-08-12 用于验证带页码的目录条目去页码归一化后
+    """验证带页码的目录条目去页码归一化后
     与正文同名标题区分：正文标题行作为目录页结束边界。
     """
     text = "目录\n第一章 起点 1\n第二章 入城 5\n第三章 拜师 9\n第一章 起点\n林渡走在街头。"
@@ -82,7 +80,7 @@ def test_toc_without_blank_line_keeps_entries_with_page_numbers() -> None:
 
 
 def test_toc_with_volume_entries_after_number() -> None:
-    """2026-08-12 用于验证「卷一/第2卷」形态的卷条目被目录识别（假章节带页码不进入正文）"""
+    """验证「卷一/第2卷」形态的卷条目被目录识别（假章节带页码不进入正文）"""
     text = "目录\n卷一 风起 1\n卷二 云涌 9\n第三章 入城 1\n\n正文内容。"
     toc = detect_toc_range(text)
     assert toc is not None
@@ -92,13 +90,13 @@ def test_toc_with_volume_entries_after_number() -> None:
 
 
 def test_toc_with_chinese_volume_numerals() -> None:
-    """2026-08-12 用于验证「卷上/卷中」形态的卷条目被目录识别"""
+    """验证「卷上/卷中」形态的卷条目被目录识别"""
     text = "目录\n卷上 少年 1\n卷中 江湖 5\n卷下 风云 9\n\n正文内容。"
     assert detect_toc_range(text) is not None
 
 
 def test_toc_with_english_entries() -> None:
-    """2026-08-12 用于验证 Chapter/Unit/Volume/Part 英文编号条目被目录识别"""
+    """验证 Chapter/Unit/Volume/Part 英文编号条目被目录识别"""
     text = "目录\nChapter 1 起点 1\nChapter 2 入城 5\nUnit 1 风起 1\n\n正文内容。"
     toc = detect_toc_range(text)
     assert toc is not None
@@ -108,10 +106,7 @@ def test_toc_with_english_entries() -> None:
 
 
 def test_toc_with_named_volume_page_number_entries() -> None:
-    """
-    2026-09-09 重明传形态回归：纯名称卷/篇 + 尾页码（"少年篇\t2"）的目录条目。
-    修复前该形态不匹配 _TOC_ENTRY_RE，首行即判非条目导致整体识别失败。
-    """
+    """重明传形态回归：纯名称卷/篇 + 尾页码（"少年篇\t2"）的目录条目"""
     text = "目录\n少年篇\t2\n第一章 起点\t3\n第二章 入城\t5\n青年篇\t122\n\n少年篇\n第一章 起点\n内容。"
     toc = detect_toc_range(text)
     assert toc is not None
@@ -124,8 +119,7 @@ def test_toc_with_named_volume_page_number_entries() -> None:
 
 
 def test_toc_duplicate_entries_with_page_numbers_pass_through() -> None:
-    """
-    2026-09-09 重明传形态回归：目录自身存在同名重复条目（第二十章×2，
+    """重明传形态回归：目录自身存在同名重复条目（第二十章×2，
     页码 74/80）。同名但带尾页码的行是目录内部重复条目，不应触发
     「进入正文」截断，否则目录页被拦腰截断、剩余条目泄漏进正文。
     """

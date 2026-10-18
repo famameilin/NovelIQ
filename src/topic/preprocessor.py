@@ -44,8 +44,7 @@ class TopicPreprocessor:
         self._initialized = True
 
     def _load_stopwords(self) -> None:
-        # 2026-08-15 词表 v3：停用词经 tables 常量加载（registry 一次性读取；
-        # 注册表/文件缺失由 registry 直接报错，不再静默 fallback 为空集合）
+        # 停用词经 tables 常量加载（registry 一次性读取；注册表/文件缺失由 registry 直接报错）
         from src.lexicons.tables import STOPWORDS_TERMS
 
         self._stopwords = set(STOPWORDS_TERMS)

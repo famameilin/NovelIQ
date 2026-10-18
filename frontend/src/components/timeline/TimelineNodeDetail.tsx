@@ -1,8 +1,8 @@
 /**
- * TimelineNodeDetail - 事件森林节点详情（2026-08-20 一树一节点版）
+ * TimelineNodeDetail - 事件森林节点详情
  *
- * 旧合同的 graph_changes / lifecycle_events / plot_flags / score_breakdown 已彻底移除
- * 新详情：summary + participants + chapter 区间 + char 区间 + main_chain + secondary_groups + causal 前因后果 + 证据占位
+ * 展示 summary、participants、章节与 char 区间、main_chain、secondary_groups、
+ * causal 前因后果与证据占位
  */
 
 import { useCallback, useMemo, useState } from "react";

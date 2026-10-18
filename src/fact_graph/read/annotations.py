@@ -9,15 +9,20 @@ from src.storage.records.annotation import CharacterFactRow, DialogueFactRow
 
 
 def fetch_chapter_characters_full(session: Storage, run_id: str) -> list[CharacterFactRow]:
-    """2026-08-05 用于从数据库图人物事实展开 章节人物记录
+    """从数据库图人物事实展开 章节人物记录
 
-    2026-10-16 全库 3NF：旧 content JSON 退场，人物动态观测从事实行的参与者
-    投影列读取（实体名/大类、叙事角色、动作、情绪均为声明参与者的正式列）。
+    读面按观测口径剔除三态全空行（参与者本身不等于人物观测）。
     """
     rows: list[CharacterFactRow] = []
     for fact in session.annotations.fetch_graph_facts(run_id, content_kind="character_observation"):
         name = str(fact.participant_entity_name or "").strip()
         if fact.participant_entity_type != "character" or not is_global_character_surface_name(name):
+            continue
+        if (
+            fact.participant_narrative_role is None
+            and fact.participant_action is None
+            and fact.participant_emotion is None
+        ):
             continue
         if fact.chapter_id is None:
             continue
@@ -39,7 +44,7 @@ def fetch_chapter_characters_full(session: Storage, run_id: str) -> list[Charact
 
 
 def fetch_character_emotion_sequence(session: Storage, run_id: str) -> list[CharacterFactRow]:
-    """2026-08-05 用于按章节顺序读取人物情绪事实序列"""
+    """按章节顺序读取人物情绪事实序列"""
     sequence_map = session.annotations.fetch_chapter_sequence_map(run_id)
     return sorted(
         fetch_chapter_characters_full(session, run_id),
@@ -48,11 +53,10 @@ def fetch_character_emotion_sequence(session: Storage, run_id: str) -> list[Char
 
 
 def fetch_chapter_dialogues_full(session: Storage, run_id: str) -> list[DialogueFactRow]:
-    """2026-08-11 用于从对话记录表展开 章节对话记录
+    """从对话记录表展开 章节对话记录
 
-    2026-09-17 说话人存图实体 id：这里按 id 取实体名（不再按名字形态判断是否存在），
-    并保留两道过滤——实体必须是 character、名字必须是可作全局角色名的形态
-    （代词/泛指/引用位名不算说话人）。
+    说话人按图实体 id 取实体名，并保留两道过滤——实体必须是 character、
+    名字必须是可作全局角色名的形态（代词/泛指/引用位名不算说话人）。
     """
     rows: list[DialogueFactRow] = []
     entities_by_id = session.annotations.fetch_entities_by_id(run_id)

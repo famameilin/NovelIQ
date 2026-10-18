@@ -63,10 +63,8 @@ from .program_contract import _READ_TOOL_NAMES
 def _record_of(agent: AgentAnnotation, field: str) -> str:
     """用于在记录键里带上职责名（三个 agent 的审计行按它分流）
 
-    2026-09-20 去重前缀：事件 agent 的字段本就以 event/ 开头，再套职责名渲染成
-    event/event/t1——跨 lane 引用产出记录时（案例的 result_id/record_id 要"照抄回执里的
-    record"），模型按自然形态 event/t1 猜，13+13 次全被 unknown_record 拒。职责名与域同名
-    时不再叠加（structure/entity/…、evidence/dialogue/… 这类前缀照旧）。
+    职责名与域同名时只保留一层前缀：事件 agent 的字段本就以 event/ 开头，再套职责名
+    会渲染成 event/event/t1。
     """
     prefix = f"{agent.role}/"
     return field if field.startswith(prefix) else f"{prefix}{field}"
@@ -81,8 +79,7 @@ def _sync_entity_ref(ref: dict[str, Any], production_receipt: Any) -> None:
     """用于把实体 ref 的大类对齐生产层的生效记录
 
     同章内另一条 lane 先登记过同名实体时，生产层按部分更新合并保留登记大类、
-    丢弃本次入参的 entity_type；ref 若照抄输入，模型看到的大类与现实不符
-    （run faff5efe ch14 实测：event lane 提交 location、生效 organization）。
+    丢弃本次入参的 entity_type；ref 若照抄输入，模型看到的大类与现实不符。
     """
     if not isinstance(production_receipt, dict):
         return
@@ -101,7 +98,7 @@ def _tool_receipt(name: str, payload: Any) -> Any:
 
     检索类的产出就是数据本身（程序要拿它绑变量、遍历、取长度），套信封会毁掉读的语义，
     所以原样返回；其余工具（案例/finish）统一成 {status, record, ref}——工具自己那套
-    {"accepted": ...} 是生产层的回执，不再漏到程序面。
+    {"accepted": ...} 是生产层的回执，不会漏到程序面。
     """
     if name in _READ_TOOL_NAMES:
         return payload if payload is not None else {}
@@ -162,7 +159,7 @@ def _normalize_el(value: Any, *, record: str) -> str:
 def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) -> list[AgentParticipant]:
     """用于校验参与者清单的形状（名字与大类由运行时解析并自动登记），并归一角色取值
 
-    2026-10-04 合同放开：role/narrative_role/emotion 缺省或写偏不再拒绝——role 未知词
+    role/narrative_role/emotion 缺省或写偏都不拒绝——role 未知词
     交生产面按实体登记类型给默认，叙事功能近义词归一（未收录收敛为主体），
     情绪分值越界按边界钳制；地点等事件专属角色词写进叙事功能仍当场拒（字段误用）。
     """
@@ -222,7 +219,7 @@ def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) ->
 class _ConstructorCall:
     """一次构造器调用的产出：校验好的记录 + 要交给生产边界的那一笔写入
 
-    2026-09-18 写入生效：构造器是纯校验器（当场可拒绝、不碰 journal），运行时拿本对象
+    构造器是纯校验器（当场可拒绝、不碰 journal），运行时拿本对象
     经生产单条事务边界把 `args` 写进正式账本，**写入成功才**调 `commit()` 落 journal。
     因此 agent 的列表恒等于"已经落库的记录"：模型引用一个键，就一定有一条已生效的
     正式记录在它背后。
@@ -299,7 +296,7 @@ def build_agent_constructors(
 
     每个构造器当场校验、当场给出要写的那一笔：成功时运行时立即经生产单条事务边界
     落库（写入生效），失败抛 AnnotationStageRejection（只废这一条，程序继续跑后面的
-    语句）。三个 agent 拿到的是同一份构造器清单（§3），引用键按角色命名空间化
+    语句）。三个 agent 拿到的是同一份构造器清单，引用键按角色命名空间化
     落库（namespace_el），所以三个 agent 的同名局部键互不占用。
     """
     # 聚合模块会反向导入构造器，运行时再读取目录顺序以避免首次导入环
@@ -321,12 +318,12 @@ def build_agent_constructors(
         description: str | None = None,
         representative: bool | None = None,
     ) -> _ConstructorCall:
-        """登记本章的一个实体（id 是富登记的局部锚点键，name 照抄正文写法）
+        """登记本章的一个实体（id 是本章实体的局部键，name 照抄正文写法）
 
-        id 形如 a1/a2…，仅绑定富登记 el；引用写正文名字与大类，不再写 id。
+        id 形如 a1/a2…，在本章内唯一；同 id 重写=更新该实体，引用实体一律写正文名字与大类，不写 id。
         entity_type 取闭集 character/item/location/organization（有生命就是 character）。
         机构名称兼指所在场所时按 organization 登记，只有纯地理场所才用 location。
-        evidence 写该名字出现段落的段首号（正文每段开头的 `N：` 里的 N）。同 id 重写=更新语义。
+        evidence 写该名字出现段落的段首号（正文每段开头的 `N：` 里的 N）。
         representative=True 表示该名字是同一个人物的规范写法（外号/别称登记时不写）；
         省略=保留现值，False=清除标记。
         """
@@ -402,8 +399,8 @@ def build_agent_constructors(
         """写一条闭合关系边（两端写正文名字与大类，运行时解析并自动登记，不判身份、不判别名）
 
         relation_type 取闭合关系类型表；方向与两端类型约束在参数说明里。
-        2026-10-02 对齐 0.2.0 写面：本章只确认局部关系（建边），不带 change_kind 关系变化
-        ——跨章关系变化由 write_link 关联工具承担。
+        本章只确认局部关系（建边），不带 change_kind 关系变化——跨章关系变化由
+        write_link 关联工具承担。
         正文只说见面/对峙这类没有闭合关系可表达的，宁缺勿滥——用 pending 登记。
         """
         record = _record_of(agent, "relation")
@@ -564,7 +561,6 @@ def build_agent_constructors(
         speaker 写 {name: 正文名字, entity_type: character}，运行时自动登记，判不了就省略。
         tone 取闭集，没有贴合的用「其他」。
         evidence 是候选所在段落的段首号：not_dialogue 可省略，其余必须给。
-        2026-10-02 对齐 0.2.0 写面：candidate_key 订正路径已随订正入口退役。
         """
         record = _record_of(agent, f"dialogue/{candidate_index}")
         if (
@@ -772,7 +768,7 @@ def build_agent_constructors(
     functions = {
         "plotline": (plotline, "保存情节推进及前后状态，evidence为本章段首号"),
         "foreshadow_action": (foreshadow_action, "保存明确强化或疑似回收，照应边不等于动作"),
-        "entity": (entity, "登记本章的一个实体（id=富登记局部锚点键，name=正文名字）"),
+        "entity": (entity, "登记本章的一个实体（id 为本章实体局部键，name 照抄正文名字）"),
         "relation": (relation, "写一条闭合关系边（两端写正文名字与大类，运行时解析并自动登记）"),
         "event": (event, "写一个事件节点（el 根=树键、子=树键/节点键）"),
         "participants": (participants, "把一个事件节点的参与者整体设为 items（名字与大类由运行时解析并自动登记）"),

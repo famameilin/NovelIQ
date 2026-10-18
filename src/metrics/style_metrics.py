@@ -36,7 +36,6 @@ def mtld(tokens: Sequence[str], threshold: float | None = None) -> float | None:
             factors += (1.0 - remainder_ttr) / (1.0 - threshold)
 
     if factors == 0:
-        # 全唯一词（或 TTR 从未跌破阈值）时 MTLD 数学上无定义，返回 None
-        # （§19.12 修复：不再退化为 len(tokens)）
+        # 全唯一词（或 TTR 从未跌破阈值）时 MTLD 数学上无定义，返回 None（不退化）
         return None
     return len(tokens) / factors

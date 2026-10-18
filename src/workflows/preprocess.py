@@ -3,11 +3,10 @@
 
 包含文本清洗、分块、写入数据库，以及风格/文化指标计算等功能。
 
-2026-10-16 全库 3NF 改造（原文链）：章节身份写 chapters、正文切片写 chapter_bodies；
-段落身份/原文写 paragraphs、tokenizer 计数写 paragraph_preprocess_observations；
-段落向量写 paragraph_embeddings，运行模型合同（模型 key + 实测维度）写
-embedding_model_runs；表面张力 z、功能词/语义类别计数写各自固定领域表。
-坐标、长度与密度的读取投影见各仓储模块。
+落库结构：章节身份写 chapters、正文切片写 chapter_bodies；段落身份/原文写
+paragraphs、tokenizer 计数写 paragraph_preprocess_observations；段落向量写
+paragraph_embeddings，运行模型合同（模型 key + 实测维度）写 embedding_model_runs；
+表面张力 z、功能词/语义类别计数写各自固定领域表。坐标、长度与密度的读取投影见各仓储模块。
 """
 
 from __future__ import annotations
@@ -100,18 +99,18 @@ def _insert_paragraph_metrics(
     session: Storage, run_id: str, spans: list[ParagraphSpan], tokenized: list[list[str]], lexicons: dict[str, Any]
 ) -> list[ParagraphMetricRow]:
     """
-    计算并落库段落指标（§5.3 原始计数与充分统计量）
+    计算并落库段落指标（原始计数与充分统计量）
 
-    表面张力（§9.2）在 run 内两遍计算：先收集全部段落的 5 个分量原始值，
+    表面张力在 run 内两遍计算：先收集全部段落的 5 个分量原始值，
     再做稳健标准化（median/MAD）得到 z，z 写入 paragraph_tension_observations
     （sigmoid 展示值不落库，由读取投影计算）。
 
-    2026-10-16 3NF：功能词/语义类别计数写入各自固定领域计数表，
-    char_count 由段落正文长度投影，均不再随 paragraph_metrics 行写入。
+    功能词/语义类别计数写入各自固定领域计数表，char_count 由段落正文长度投影，
+    不随 paragraph_metrics 行写入。
 
     Returns:
-        写入的 ParagraphMetricRow 列表（基础计数与充分统计量，便于同一步内
-        日志核对；密度/张力等派生值一律由读取投影给出）
+        写入的 ParagraphMetricRow 列表（基础计数与充分统计量；密度/张力等派生值
+        由读取投影给出）
     """
     from src.metrics.paragraph_metrics import compute_paragraph_metric_counts
     from src.metrics.paragraph_surface_tension import (
@@ -165,18 +164,14 @@ def _insert_paragraph_metrics(
 
 def _insert_paragraph_curves(session: Storage, run_id: str, spans: list[ParagraphSpan]) -> int:
     """
-    计算并落库段落曲线（§5.5 / §9）
+    计算并落库段落曲线
 
     段落坐标与字符权重取段落事实源读取投影（fetch_paragraph_rows：local_end/
     global 坐标/char_count 都不落列）；指标分子/分母取指标读取投影
     （fetch_paragraph_metrics：char_count 为正文长度、surface_tension 为
-    sigmoid(z)、z 取自 paragraph_tension_observations）。两侧都从同一 run 的
-    正式落库结果读取，投影口径与其它消费者一致。total_chars 取段落 span
-    字符数之和；LOWESS 参数默认取 settings.metrics 的 lowess_bandwidth /
-    lowess_min_points（§9.3）。
-
-    2026-10-16 3NF：段落曲线的正式计算结果（计算合同 + 净密度/表面张力平滑
-    样本）由曲线面负责落库。
+    sigmoid(z)、z 取自 paragraph_tension_observations），两侧从同一 run 的正式
+    落库结果读取。total_chars 取段落 span 字符数之和；LOWESS 参数默认取
+    settings.metrics 的 lowess_bandwidth / lowess_min_points。
     """
     from src.workflows.paragraph_curves import compute_paragraph_curves
 

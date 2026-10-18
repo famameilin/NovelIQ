@@ -1,8 +1,7 @@
-"""
-统一展示事件契约
+"""统一展示事件契约
 
-说明: 展示消息由 pipeline 各层（workflows/agents/chunking）产生，
-      API 层只按单向调用接收；SSE 事件名映射与发送入口留在 src/api/models/events.py
+展示消息由 pipeline 各层（workflows/agents/chunking）产生，API 层只按单向调用接收；
+SSE 事件名映射与发送入口留在 src/api/models/events.py
 """
 
 from __future__ import annotations
@@ -33,6 +32,7 @@ class StreamMessageType(StrEnum):
 StreamEventAction = Literal[
     "start", "progress", "complete", "output", "thinking", "tool_call", "work_reset", "work_saved", "chapter_reset"
 ]
+"""StreamEvent.action 的合法值"""
 
 
 @dataclass
@@ -55,9 +55,8 @@ class StreamEvent:
     stage: str = ""
     sub_stage: str = ""
     chapter_id: int | None = None
-    # 2026-10-17 六 agent 归属：展示作用域由 work 身份改为实际阶段作用域
-    # （stage:chapter:sub_stage，标注=章+角色、诊断=案例锚），invocation_id 仍是
-    # 判定"当前在编执行"的唯一依据
+    # 展示作用域取实际阶段作用域（stage:chapter:sub_stage，标注=章+角色、诊断=案例锚），
+    # invocation_id 是判定“当前在编执行”的唯一依据
     invocation_id: str | None = None
     message_id: str | None = None
     stream_id: str | None = None
@@ -70,7 +69,7 @@ class StreamEvent:
     status: str | None = None  # 工具调用状态（tool_call 事件专用: started/success/failed）
 
     def to_dict(self) -> dict[str, Any]:
-        """2026-08-19 用于序列化统一 SSE 事件并要求 LLM 事件携带流标识"""
+        """序列化统一 SSE 事件；LLM 事件必须携带流标识"""
         if self.action in {"output", "thinking", "tool_call"} and not self.stream_id:
             raise ValueError("LLM 流事件缺少 stream_id")
         return {

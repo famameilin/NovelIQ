@@ -1,5 +1,4 @@
-"""
-词表注册中心 v3 约束边界测试（docs/词表体系重设计-修订版实施计划.md M1）
+"""词表注册中心 v3 约束边界测试
 
 覆盖：
   1. 约束边界：加载报错保留（注册词表文件缺失 -> fail-fast，防静默空跑）；
@@ -9,9 +8,6 @@
   4. 双向约束：注册的 key 必须可加载（load 时全量校验文件存在）
   5. 生产加载点（preprocess_helpers）走 tables 常量全部成功
 
-注：count/file_hash 声明校验已按用户要求删除（词表内容可自由迭代）；
-kind/tier/polarity/weight_policy/consumers/status 元数据已于 2026-08-28
-塌缩删除（生产无消费点，词表用/不用由调用方决定）。
 注册关系唯一事实源为 src/lexicons/constants.py 的 LEXICON_FILES；
 测试侧经构造注入 registry_files 或 monkeypatch registry 模块的 LEXICON_FILES。
 """
@@ -100,7 +96,8 @@ class TestLexiconLoading:
 class TestRegistryIsSingleSourceOfTruth:
     def test_all_registered_keys_loadable(self) -> None:
         """注册的 key 必须可加载（生产注册表，load 即全量校验）；
-        draft 审定队列为空=无待审词条，是合法稳态，豁免非空断言"""
+        draft 审定队列为空=无待审词条，是合法稳态，豁免非空断言
+        """
         reg = LexiconRegistry()
         reg.load()
         draft_files = {LEXICON_FILES[k] for k in LEXICON_DRAFT_KEYS}
@@ -121,7 +118,7 @@ class TestRegistryIsSingleSourceOfTruth:
             "neg_terms",
             "semantic_categories",
         }
-        # M3 重建后 L1+L2 合并规模（原表 1061/1007 词收敛，此处断言数量级而非精确值）
+        # L1+L2 合并规模（此处断言数量级而非精确值）
         assert len(lexicons["pos_terms"]) > 50
         assert len(lexicons["neg_terms"]) > 50
         assert len(lexicons["semantic_categories"]) > 5

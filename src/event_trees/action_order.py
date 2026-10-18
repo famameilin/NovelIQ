@@ -1,7 +1,6 @@
 """伏笔动作统一按正文披露位置归并，调用顺序只用于同位置的稳定排列
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：动作事实来自
-event_foreshadowing_actions，证据来自 source_evidence 的动作所有者列；
+动作事实来自 event_foreshadowing_actions，证据来自 source_evidence 的动作所有者列；
 root/target 事件身份按阶段声明绑定投影（未发布为空，不回填冒充）；
 来源章序从真实标注产物行（chapter_annotations 自带章归属）与 chapters 取得。
 """

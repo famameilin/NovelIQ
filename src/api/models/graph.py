@@ -8,10 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class GraphNode(BaseModel):
-    """2026-08-08 用于返回目标章节边界的实体节点
-
-    2026-09-19 entity_id 随图实体主键改 uuid（String(36)）。
-    """
+    """目标章节边界的实体节点（entity_id 为 uuid 字符串）"""
 
     entity_id: str
     name: str
@@ -25,7 +22,7 @@ class GraphNode(BaseModel):
 
 
 class GraphEdge(BaseModel):
-    """2026-08-07 用于返回目标章节边界的稳定关系边"""
+    """目标章节边界的稳定关系边"""
 
     relation_id: str
     state_chapter_id: int = Field(gt=0)
@@ -42,7 +39,7 @@ class GraphEdge(BaseModel):
 
 
 class GraphSnapshotResponse(BaseModel):
-    """2026-08-19 用于返回一个章节边界的实体和有效关系"""
+    """一个章节边界的实体和有效关系"""
 
     chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
@@ -53,7 +50,7 @@ class GraphSnapshotResponse(BaseModel):
 
 
 class GraphChange(BaseModel):
-    """2026-08-19 用于返回由单个章节事实解释的实体或关系变化"""
+    """由单个章节事实解释的实体或关系变化"""
 
     change_id: str
     change_kind: Literal["state", "relation"]
@@ -76,7 +73,7 @@ class GraphChange(BaseModel):
 
 
 class GraphChangesPageInfo(BaseModel):
-    """2026-08-07 用于返回章节图变化分页游标信息"""
+    """章节图变化分页游标信息"""
 
     limit: int = Field(gt=0)
     returned_count: int = Field(ge=0)
@@ -86,14 +83,14 @@ class GraphChangesPageInfo(BaseModel):
 
 
 class GraphChangesResponse(BaseModel):
-    """2026-08-07 用于返回按章节倒序排列的实体和关系变化"""
+    """按章节倒序排列的实体和关系变化"""
 
     changes: list[GraphChange]
     page_info: GraphChangesPageInfo
 
 
 class GraphMetricsResponse(BaseModel):
-    """Agent 关系图结构指标（赛道 A1/A2）：PageRank/HITS/Louvain 查询时计算"""
+    """Agent 关系图结构指标：PageRank/HITS/Louvain 查询时计算"""
 
     run_id: str
     unavailable_reason: str | None = None
@@ -109,7 +106,7 @@ class KeywordItem(BaseModel):
 
 
 class KeywordsResponse(BaseModel):
-    """TextRank 关键词（赛道 A3）：独立词共现图 + PageRank"""
+    """TextRank 关键词：独立词共现图 + PageRank"""
 
     run_id: str
     keywords: list[KeywordItem] = Field(default_factory=list)

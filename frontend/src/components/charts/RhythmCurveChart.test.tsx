@@ -39,7 +39,7 @@ vi.mock("@/lib/theme", () => ({
 }));
 
 /**
- * 2026-08-16 创建节奏曲线测试数据
+ * 创建节奏曲线测试数据
  * 用于验证 value 轴下 tooltip 对 [x, y] 点位的展示
  */
 function createPoint(overrides: Partial<ParagraphCurvePoint> = {}): ParagraphCurvePoint {
@@ -109,7 +109,7 @@ describe("RhythmCurveChart", () => {
   });
 
   it("datazoom 事件应回写共享缩放范围", () => {
-    // 2026-08-31 用于锁定 ECharts 6 实际发出的 datazoom 事件合同
+    // 用于锁定 ECharts 6 实际发出的 datazoom 事件合同
     const onZoomChange = vi.fn();
     render(<RhythmCurveChart data={[createPoint()]} onZoomChange={onZoomChange} />);
 

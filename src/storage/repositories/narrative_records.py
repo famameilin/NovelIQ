@@ -1,4 +1,4 @@
-"event_trees 与冻结 35 表结构之间的读写映射（2026-10-16 全库 3NF 改造）"
+"event_trees 与冻结 35 表结构之间的读写映射（全库 3NF 改造）"
 
 from __future__ import annotations
 

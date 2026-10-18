@@ -1,9 +1,5 @@
-"""
-主题与诊断响应模型
-
-说明: 自 src/api/models/responses.py 拆出主题信息、主题聚合/序列/变化/情感统计、
-诊断结果（DiagnosisResult）、通用错误与结果写盘响应模型（§5.8/§5.11 等），
-字段与语义保持不变。
+"""主题与诊断响应模型：主题信息、主题聚合/序列/变化/情感统计、诊断结果（DiagnosisResult）、
+通用错误与结果写盘响应模型
 """
 
 from typing import Literal
@@ -21,7 +17,7 @@ class TopicInfo(BaseModel):
 
 
 class TopicModelMetaInfo(BaseModel):
-    """topic_model_runs 契约行的 API 元数据视图（§5.8）"""
+    """topic_model_runs 契约行的 API 元数据视图"""
 
     model_key: str
     library_version: str
@@ -36,7 +32,7 @@ class TopicDistributionEntry(BaseModel):
 
 
 class TopicAggregateResponse(BaseModel):
-    """全书主题分布（§5.11 D1）：sum(w*t)/sum(t)，分母每段一行"""
+    """全书主题分布：sum(w*t)/sum(t)，分母每段一行"""
 
     run_id: str
     level: Literal["book"] = "book"
@@ -74,7 +70,7 @@ class TopicSeriesPoint(BaseModel):
 
 
 class TopicSeriesResponse(BaseModel):
-    """段落主题序列（D1）：完整 K 维权重，横轴真实字符位置"""
+    """段落主题序列：完整 K 维权重，横轴真实字符位置"""
 
     run_id: str
     model: TopicModelMetaInfo | None = None
@@ -84,7 +80,7 @@ class TopicSeriesResponse(BaseModel):
 
 
 class TopicShiftConfig(BaseModel):
-    """主题变化候选版本化配置（D2）"""
+    """主题变化候选版本化配置"""
 
     window_size: int
     min_tokens_per_window: int
@@ -101,7 +97,7 @@ class TopicShiftCandidate(BaseModel):
 
 
 class TopicShiftResponse(BaseModel):
-    """主题变化候选点（D2）：topic_shift_score 为以 2 为底、范围 [0,1] 的 JS 散度"""
+    """主题变化候选点：topic_shift_score 为以 2 为底、范围 [0,1] 的 JS 散度"""
 
     candidates: list[TopicShiftCandidate] = Field(default_factory=list)
     config: TopicShiftConfig
@@ -115,7 +111,7 @@ class TopicEmotionEntry(BaseModel):
 
 
 class TopicEmotionResponse(BaseModel):
-    """主题-情感统计（D3）：sum(w*t*net_density)/sum(w*t)，空值段落双向排除"""
+    """主题-情感统计：sum(w*t*net_density)/sum(w*t)，空值段落双向排除"""
 
     run_id: str
     model: TopicModelMetaInfo | None = None

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import uuid
-
 from sqlalchemy import select
 
+from src.storage import new_id
 from src.storage.models import Chapter
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.text_processing.chapters.models import ChapterData, ChapterLevel
 from src.text_processing.models import Chunk
 from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
+from tests.support.storage_fixtures import fixture_id
 
 
 def _make_chapters() -> list[ChapterData]:
@@ -43,7 +43,7 @@ def _make_chapters() -> list[ChapterData]:
 
 
 def _create_run(db_session) -> str:
-    novel_id = uuid.uuid4().hex[:8]
+    novel_id = new_id()
     _insert_test_novel(novel_id, session=db_session)
     return RunRepository(db_session).create_run(
         novel_id=novel_id,
@@ -84,7 +84,7 @@ def test_count_chapters(db_session) -> None:
     run_id = _create_run(db_session)
     repo = ChapterRepository(db_session)
     repo.insert_chapters(run_id, _make_chapters())
-    # M9a-2：count_chapters 只统计有正文的章节（结构行不算）
+    # -2：count_chapters 只统计有正文的章节（结构行不算）
     repo.insert_chapter_texts(
         run_id,
         [
@@ -93,7 +93,7 @@ def test_count_chapters(db_session) -> None:
         ],
     )
     assert repo.count_chapters(run_id) == 2
-    assert repo.count_chapters("no-such-run") == 0
+    assert repo.count_chapters(fixture_id(__name__, "no-such-run")) == 0
 
 
 def test_fetch_chapters_ordered_by_sequence(db_session) -> None:
@@ -109,7 +109,7 @@ def test_fetch_chapters_ordered_by_sequence(db_session) -> None:
 
 
 def test_insert_chapter_texts_writes_text_columns_on_chapters(db_session) -> None:
-    """2026-10-16 3NF：正文切片与全文起点与章节目录同键合并进 chapters（text/char_offset）"""
+    """正文切片与全文起点与章节目录同键合并进 chapters（text/char_offset）"""
     run_id = _create_run(db_session)
     repo = ChapterRepository(db_session)
     repo.insert_chapters(run_id, _make_chapters())
@@ -121,9 +121,7 @@ def test_insert_chapter_texts_writes_text_columns_on_chapters(db_session) -> Non
         ],
     )
 
-    bodies = db_session.scalars(
-        select(Chapter).where(Chapter.run_id == run_id).order_by(Chapter.chapter_id)
-    ).all()
+    bodies = db_session.scalars(select(Chapter).where(Chapter.run_id == run_id).order_by(Chapter.chapter_id)).all()
     assert [(row.chapter_id, row.char_offset, row.text) for row in bodies] == [
         (1, 0, "第一章正文。"),
         (2, 6, "番外正文。"),
@@ -173,8 +171,6 @@ def test_insert_chapter_texts_updates_existing_body(db_session) -> None:
         [Chunk(index=0, text="新正文。", start=7, end=11, chapter_id=1)],
     )
 
-    bodies = db_session.scalars(
-        select(Chapter).where(Chapter.run_id == run_id, Chapter.text.is_not(None))
-    ).all()
+    bodies = db_session.scalars(select(Chapter).where(Chapter.run_id == run_id, Chapter.text.is_not(None))).all()
     assert [(row.chapter_id, row.char_offset, row.text) for row in bodies] == [(1, 7, "新正文。")]
     assert repo.fetch_chapter_texts(run_id) == [(1, "新正文。")]

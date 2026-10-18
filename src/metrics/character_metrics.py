@@ -7,7 +7,7 @@ import networkx as nx
 
 from src.fact_graph.relation_network import summarize_relation_network
 
-# 指标分类保留七项旧口径，与标注写入的动作角色值域各自有明确用途
+# 指标分类保留七项口径，与标注写入的动作角色值域各自有明确用途
 PROPP_FUNCTIONS: set[str] = {
     "主体",
     "客体",
@@ -151,10 +151,8 @@ def compute_antagonist_strength_gap(
     return abs(avg_protagonist - avg_antagonist)
 
 
-# 2026-08-13 修复：数据源 fetch_relation_data 的 change_kind 是英文枚举
-# （assert/reinforce/weaken/break/retract/refine/supersede，见 RelationChangeKind），
-# 此前用中文键（"强化"等）计数导致四个 *_rate 恒为 0。2026-10-02 移除旧中文键兼容：
-# 仅接受英文枚举，旧数据中的中文值不计入四类变化率。
+# change_kind 为英文枚举（assert/reinforce/weaken/break/retract/refine/supersede，
+# 见 RelationChangeKind），仅接受英文枚举：中文等其余值不计入四类变化率。
 _RATE_KEYS = ("新建_rate", "强化_rate", "弱化_rate", "断裂_rate")
 _CHANGE_KIND_TO_RATE_KEY = {
     "assert": "新建_rate",
@@ -171,11 +169,9 @@ def compute_relation_change_frequency(
     total_chars: int,
 ) -> dict[str, float | None]:
     """
-    计算关系变化频率（每万字变化次数，设计 §8.5 relation_change_per_10k_chars）。
+    计算关系变化频率（每万字变化次数，relation_change_per_10k_chars）。
 
-    2026-08-14 修复（§19.10）：分母从章节数改为全书总字数（每万字频率），
-    relation_change_per_10k_chars = len(relations) / total_chars * 10000。
-    2026-08-14 重命名（§13.3）：返回键 change_rate → relation_change_per_10k_chars；
+    relation_change_per_10k_chars = len(relations) / total_chars * 10000；
     total_chars 为 0 时 relation_change_per_10k_chars 为 None。
     """
     if not relations or total_chars == 0:

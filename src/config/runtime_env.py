@@ -38,10 +38,8 @@ _MODEL_FIELD_NAMES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
-#: LTP 语言结构服务环境字段（2026-08-28：离线模型目录）
-_LTP_FIELD_NAMES: tuple[tuple[str, str], ...] = (
-    ("model_dir", "LTP_MODEL_DIR"),
-)
+#: LTP 语言结构服务环境字段（离线模型目录）
+_LTP_FIELD_NAMES: tuple[tuple[str, str], ...] = (("model_dir", "LTP_MODEL_DIR"),)
 
 
 @dataclass(frozen=True)
@@ -150,9 +148,7 @@ def load_model_environment(env_var_name: ModelEnvironmentName) -> ModelEnvironme
         if raw_values[field_name] is None:
             missing_variables.append(environment_name)
     if missing_variables:
-        logger.warning(
-            f"{env_var_name} 环境变量缺失（{', '.join(missing_variables)}），嵌入模型未配置"
-        )
+        logger.warning(f"{env_var_name} 环境变量缺失（{', '.join(missing_variables)}），嵌入模型未配置")
         return None
 
     validated_values = {field_name: value for field_name, value in raw_values.items() if value is not None}
@@ -164,7 +160,7 @@ def load_model_environment(env_var_name: ModelEnvironmentName) -> ModelEnvironme
 
 
 def load_model_pool_environment() -> list[dict[str, Any]]:
-    """模型池只从 MODEL_POOL 读取，不拼装旧的共享连接配置"""
+    """模型池只从 MODEL_POOL 读取"""
     raw = os.environ.get("MODEL_POOL")
     if raw is None:
         return []

@@ -25,6 +25,7 @@ from src.storage.records.diagnosis_save import DiagnosisPublish
 from src.storage.records.events import EventSave
 from src.storage.records.evidence import EvidenceParagraph
 from src.storage.records.facts import FactSave
+from tests.support.storage_fixtures import task_for_run
 
 
 @pytest.fixture(scope="module")
@@ -94,7 +95,7 @@ def test_task_short_id_is_independent_and_run_uuid7(stored_run):
     assert UUID(run_id).version == 7
     run = storage.runs.get_run(run_id)
     assert len(run["task_id"]) == 8
-    assert run["task_id"] != run_id[:8]
+    assert run["task_id"] != task_for_run(run_id)
     assert storage.runs.get_run_by_task_id(run["task_id"])["run_id"] == run_id
     assert storage.runs.get_run_by_task_id("%") is None
 
@@ -392,6 +393,55 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
     assert storage.diagnosis.publish(replace(request, dialogue_updates=()))["report_id"] == report_id
 
 
+def test_case_registration_and_execution_commit_or_roll_back_together(prepared_annotation, isolated_storage):
+    """新案例必须先满足执行外键，执行登记失败时案例和会话也一起撤销"""
+    from src.case_pool import CasePool
+    from src.storage.models import BookCase, Execution
+
+    storage, run_id, request = prepared_annotation
+    storage.annotations.save(request)
+    event_id = next(iter(request.events.snapshot()["nodes"]))
+    _, _, factory, _ = isolated_storage
+    session_id, execution_id = storage.new_id(), storage.new_id()
+    pool = CasePool(run_id)
+    pool.begin(session_id)
+    case = pool.register_case(
+        case_type="event", description="核查事件含义", payload={"event_id": event_id}, author=session_id
+    )
+    case_id = case["case_id"]
+    registration = CaseSave(
+        run_id,
+        session_id,
+        json.dumps({"created_case_ids": [case_id], "registrations": {case_id: case}, "deliveries": []}),
+    )
+    with pytest.raises(ValueError, match="其他归属"):
+        storage.diagnosis.register_attempt(
+            run_id=run_id,
+            session_id=session_id,
+            execution_id=session_id,
+            role="case",
+            attempt_number=1,
+            case_anchor=case_id,
+            case_registration=registration,
+        )
+    with factory() as session:
+        assert session.get(BookCase, case_id) is None
+        assert session.get(Execution, session_id) is None
+    storage.diagnosis.register_attempt(
+        run_id=run_id,
+        session_id=session_id,
+        execution_id=execution_id,
+        role="case",
+        attempt_number=1,
+        case_anchor=case_id,
+        case_registration=registration,
+    )
+    with factory() as session:
+        assert session.get(BookCase, case_id) is not None
+        assert session.get(Execution, session_id).session_run_id == run_id
+        assert session.get(Execution, execution_id).case_anchor == case_id
+
+
 def test_domain_reads_restore_saved_graph_and_declarations(prepared_annotation):
     storage, run_id, request = prepared_annotation
     storage.annotations.save(request)
@@ -479,7 +529,7 @@ def test_annotation_warning_receipt_keeps_failed_case_pending(prepared_annotatio
     agent._save(execution, storage)
     pool.deliveries[author] = [{"case_id": case["case_id"], "is_write": True}]
     pool.confirm(author)
-    assert pool.case_runtime[case["case_id"]]["state"] == "pending"
+    assert pool.case_runtime[case["case_id"]]["promised"] is False
 
 
 def test_result_and_diagnosis_queries_consume_storage_interfaces(prepared_annotation):
@@ -590,7 +640,7 @@ def test_diagnosis_case_warnings_keep_distinct_execution_receipts(stored_run):
         pool.deliveries[author] = [{"case_id": case_id, "is_write": True}]
     save_diagnosis_result(storage, run_id, analysis, case_pool=pool)
     assert pool.save_warnings == result["warnings_by_author"]
-    assert all(row["state"] == "pending" for row in pool.case_runtime.values())
+    assert all(row["promised"] is False for row in pool.case_runtime.values())
 
 
 @pytest.mark.asyncio

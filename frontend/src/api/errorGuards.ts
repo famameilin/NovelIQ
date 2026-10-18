@@ -18,7 +18,7 @@ export function isAnalysisNotCompleteError(error: unknown): boolean {
   return error.response?.status === 400 && error.response?.data?.error_type === "AnalysisNotCompleteError";
 }
 
-/** 旧任务的事件树响应不是 2026-10-12 契约，页面提示重建而不是兼容旧格式 */
+/** 旧任务的事件树响应不是当前契约，页面提示重建 */
 export function isRunRequiresRebuildError(error: unknown): boolean {
   if (!axios.isAxiosError<AxiosErrorPayload>(error)) {
     return false;

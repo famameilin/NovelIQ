@@ -41,7 +41,7 @@ GENERIC_REFERENCE_NAMES: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class CharacterReferenceDecision:
-    """创建时间: 2026-04-29 作用: 保存角色引用准入决策结果"""
+    """保存角色引用准入决策结果"""
 
     surface_name: str
     reference_kind: ReferenceKind
@@ -52,14 +52,14 @@ class CharacterReferenceDecision:
 
 
 def normalize_reference_name(name: str | None) -> str:
-    """创建时间: 2026-04-29 作用: 规范化角色引用名称"""
+    """规范化角色引用名称"""
     if name is None:
         return ""
     return str(name).strip()
 
 
 def classify_reference_kind(surface_name: str | None) -> ReferenceKind:
-    """创建时间: 2026-04-29 作用: 区分全局角色、代词、视角位和泛指引用"""
+    """区分全局角色、代词、视角位和泛指引用"""
     normalized = normalize_reference_name(surface_name)
     if normalized.startswith(POV_SLOT_PREFIX):
         return "pov_slot"
@@ -75,19 +75,19 @@ def classify_reference_kind(surface_name: str | None) -> ReferenceKind:
 
 
 def is_reference_slot_name(name: str | None) -> bool:
-    """创建时间: 2026-04-29 作用: 判断名称是否为局部引用位"""
+    """判断名称是否为局部引用位"""
     normalized = normalize_reference_name(name)
     return normalized.startswith(POV_SLOT_PREFIX) or normalized.startswith(LOCAL_REFERENCE_SLOT_PREFIX)
 
 
 def is_global_character_surface_name(name: str | None) -> bool:
-    """创建时间: 2026-04-29 作用: 判断名称是否可直接作为全局角色名"""
+    """判断名称是否可直接作为全局角色名"""
     normalized = normalize_reference_name(name)
     return bool(normalized) and classify_reference_kind(normalized) == "global_character"
 
 
 def build_reference_slot(surface_name: str | None, *, chapter_id: int | None = None) -> str | None:
-    """创建时间: 2026-04-29 作用: 把未解析引用转换为稳定引用位"""
+    """把未解析引用转换为稳定引用位"""
     normalized = normalize_reference_name(surface_name)
     if is_reference_slot_name(normalized):
         return normalized
@@ -104,7 +104,7 @@ def resolve_global_character_name(
     *,
     resolved_global_name: str | None = None,
 ) -> str | None:
-    """创建时间: 2026-04-29 作用: 解析允许进入主链的全局角色名"""
+    """解析允许进入主链的全局角色名"""
     explicit_resolved = normalize_reference_name(resolved_global_name)
     if explicit_resolved:
         if is_global_character_surface_name(explicit_resolved):
@@ -123,7 +123,7 @@ def decide_character_reference(
     resolved_global_name: str | None = None,
     chapter_id: int | None = None,
 ) -> CharacterReferenceDecision:
-    """创建时间: 2026-04-29 作用: 生成角色引用的统一准入决策"""
+    """生成角色引用的统一准入决策"""
     normalized = normalize_reference_name(surface_name)
     reference_kind = classify_reference_kind(normalized)
     global_name = resolve_global_character_name(
@@ -157,7 +157,7 @@ def decide_character_reference(
 def filter_global_character_names(
     names: list[str] | tuple[str, ...] | set[str] | frozenset[str],
 ) -> list[str]:
-    """创建时间: 2026-04-29 作用: 过滤并去重可进入主链的全局角色名"""
+    """过滤并去重可进入主链的全局角色名"""
     filtered: list[str] = []
     for name in names:
         resolved = resolve_global_character_name(name)

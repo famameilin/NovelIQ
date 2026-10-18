@@ -1,5 +1,4 @@
-"""
-段落级 API 测试夹具（paragraph-curves / chapter-metrics 端点）
+"""段落级 API 测试夹具（paragraph-curves / chapter-metrics 端点）
 
 提供：completed run + 一章一个 chunk 的原文、手工 ParagraphSpan/指标/曲线行、
 以及最小章节标注（agent-semantic-v2 合同）。
@@ -8,11 +7,11 @@
 from __future__ import annotations
 
 import math
-import uuid
 
 from src.agents.annotation.output_models import BoundChapterAnnotation
 from src.fact_graph.inputs import ChapterMetricsInput
 from src.fact_graph.vocabulary import NarrativeFunction
+from src.storage import new_id
 from src.storage.repositories import (
     ChapterRepository,
     ParagraphRepository,
@@ -32,7 +31,7 @@ def create_completed_run(
     title: str = "段落接口测试",
 ) -> tuple[str, str]:
     """创建 completed run 与一章一个 chunk 的原文（chunk.index 从 0 起，chapter_id 从 1 起）"""
-    novel_id = "p" + uuid.uuid4().hex[:7]
+    novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
@@ -64,7 +63,7 @@ def create_run_with_status(
     status: str,
 ) -> tuple[str, str]:
     """创建指定终态/运行态的 run（用于 409/400 门禁测试）"""
-    novel_id = "q" + uuid.uuid4().hex[:7]
+    novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
@@ -207,7 +206,7 @@ def insert_chapter_annotation(
     pivot_moment: bool = False,
     cliffhanger: bool = False,
 ) -> None:
-    """写入单章最小章节标注（agent-semantic-v2 合同；2026-09-19 章即块拍平）"""
+    """写入单章最小章节标注（agent-semantic-v2 合同； 章即块拍平）"""
     annotation = BoundChapterAnnotation(
         metrics=ChapterMetricsInput(
             summary=f"章节 {chapter_id} 摘要",

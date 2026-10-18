@@ -1,12 +1,11 @@
-"""
-Token 计数工具测试
+"""Token 计数工具测试
 
 覆盖 src/utils/token_counter.py：
 - 编码器选择（精确/前缀/默认）
 - count_tokens 正常与异常回退路径
 
-2026-08-12 创建，补齐该模块 38% 的低覆盖率（mock tiktoken 保证离线可跑）。
-2026-08-13 P2-5 移除 count_messages_tokens/estimate_completion_tokens/format_token_count
+创建，补齐该模块 38% 的低覆盖率（mock tiktoken 保证离线可跑）。
+移除 count_messages_tokens/estimate_completion_tokens/format_token_count
 （无调用方死代码）后，同步删除对应测试。
 """
 

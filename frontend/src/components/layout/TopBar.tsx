@@ -1,11 +1,5 @@
 /**
  * 顶部导航栏组件，包含 Logo、面包屑导航和深浅模式切换
- *
- * - 新增面包屑导航功能，支持多级路由显示
- * - 新增小说名称显示，通过 API 获取当前小说信息
- * - 新增加载状态和错误状态处理
- * - 优化数据获取配置，添加缓存和错误重试
- * - 优化面包屑布局，改为左对齐
  */
 import { Moon, Settings as SettingsIcon, Sun } from "lucide-react";
 import { Link, useParams, useLocation } from "react-router-dom";
@@ -19,7 +13,7 @@ import { getNovel } from "@/api/novels";
 const TOPBAR_LOGO_SRC = "/novel%20qa%20icon.svg";
 
 /**
- * 2026-05-01: 为“顶部导航改用用户提供 logo”任务更新 TopBar。
+ * 为“顶部导航改用用户提供 logo”任务更新 TopBar。
  * 原因：保持顶部文案不变，仅将通用书本图标替换为品牌 SVG，统一前端品牌符号。
  */
 export function TopBar() {

@@ -48,7 +48,6 @@ function PagerankList({ metrics }: { metrics: GraphAlgorithmMetrics }) {
   );
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P1
 // 把图谱页顶部指标卡与关系摘要区块拆出，减少 GraphPage 的渲染噪声
 export function GraphOverviewSection({
   graphData,

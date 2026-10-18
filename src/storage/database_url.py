@@ -33,7 +33,7 @@ def resolve_database_url_from_env(
     required: bool = True,
 ) -> str | None:
     """
-    2026-08-08 用于从数据库平铺变量生成完整 SQLAlchemy URL
+    从数据库平铺变量生成完整 SQLAlchemy URL
     """
 
     database_environment = load_database_environment(env_var_name, required=required)

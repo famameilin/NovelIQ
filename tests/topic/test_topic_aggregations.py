@@ -1,4 +1,4 @@
-"""主题聚合查询服务测试（《分析能力扩展路线图》§5.11 / D1-D3）
+"""主题聚合查询服务测试
 
 覆盖：
 - JS 散度（以 2 为底、范围 [0,1]）单元语义
@@ -9,11 +9,13 @@
 from __future__ import annotations
 
 import sys
-import uuid
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+
+from src.storage import new_id
+from tests.support.storage_fixtures import storage_for
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -77,7 +79,7 @@ class TestComputeTopicShiftCandidates:
         ],
     )
     def test_rejects_invalid_overrides(self, overrides: dict[str, int | float], message: str) -> None:
-        """2026-08-31 用于验证直接调用无法绕过主题迁移参数边界"""
+        """验证直接调用无法绕过主题迁移参数边界"""
         parameters: dict[str, int | float] = {
             "window_size": 2,
             "min_tokens_per_window": 1,
@@ -180,12 +182,12 @@ class TestComputeTopicShiftCandidates:
 
 
 class TestTopicAggregations:
-    """三表契约 + 曲线数据的真实 SQL 聚合（§5.11）"""
+    """三表契约 + 曲线数据的真实 SQL 聚合"""
 
     @pytest.fixture(autouse=True)
     def setup(self, db_session):
         self.db_session = db_session
-        self.novel_id = uuid.uuid4().hex[:8]
+        self.novel_id = new_id()
         insert_test_novel(self.novel_id, session=db_session)
         run_repo = RunRepository(db_session)
         self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
@@ -261,7 +263,7 @@ class TestTopicAggregations:
         repo.insert_paragraph_topics(self.run_id, topic_rows)
 
     def test_book_aggregate_normalizes_by_per_paragraph_denominator(self) -> None:
-        result = aggregate_book_topics(self.run_id, self.db_session)
+        result = aggregate_book_topics(self.run_id, storage_for(self.db_session))
         assert result["unavailable_reason"] is None
         assert result["token_total"] == 80
         assert result["model"]["num_topics"] == 2
@@ -271,7 +273,7 @@ class TestTopicAggregations:
         assert sum(entry["weight"] for entry in result["distribution"]) == pytest.approx(1.0, abs=1e-6)
 
     def test_chapter_aggregate_orders_and_normalizes_per_chapter(self) -> None:
-        result = aggregate_chapter_topics(self.run_id, self.db_session)
+        result = aggregate_chapter_topics(self.run_id, storage_for(self.db_session))
         assert result["unavailable_reason"] is None
         chapters = result["chapters"]
         assert [c["chapter_sequence"] for c in chapters] == [1, 2]
@@ -285,7 +287,7 @@ class TestTopicAggregations:
         assert chapters[1]["token_total"] == 40
 
     def test_chapter_aggregate_keeps_chapter_without_topic_rows(self) -> None:
-        """2026-08-31 用于验证空推断章节仍按真实章节顺序返回并使用空分布"""
+        """验证空推断章节仍按真实章节顺序返回并使用空分布"""
         repo = ParagraphRepository(self.db_session)
         repo.insert_paragraph_topic_inferences(
             self.run_id,
@@ -306,14 +308,14 @@ class TestTopicAggregations:
             ],
         )
 
-        chapters = aggregate_chapter_topics(self.run_id, self.db_session)["chapters"]
+        chapters = aggregate_chapter_topics(self.run_id, storage_for(self.db_session))["chapters"]
 
         assert [chapter["chapter_sequence"] for chapter in chapters] == [1, 2]
         assert chapters[1]["token_total"] == 0
         assert chapters[1]["distribution"] is None
 
     def test_paragraph_series_returns_full_k_dimension(self) -> None:
-        result = fetch_paragraph_topic_series(self.run_id, self.db_session)
+        result = fetch_paragraph_topic_series(self.run_id, storage_for(self.db_session))
         assert result["unavailable_reason"] is None
         assert result["num_topics"] == 2
         points = result["points"]
@@ -327,7 +329,7 @@ class TestTopicAggregations:
         assert first["token_count"] == 10
 
     def test_topic_emotion_weighted_and_excludes_null_paragraphs(self) -> None:
-        result = compute_topic_emotion(self.run_id, self.db_session)
+        result = compute_topic_emotion(self.run_id, storage_for(self.db_session))
         assert result["unavailable_reason"] is None
         by_topic = {e["topic_id"]: e for e in result["emotion"]}
         # 主题0：全部有 net_density 段落，均值 0.5
@@ -337,13 +339,13 @@ class TestTopicAggregations:
 
     def test_no_model_contract_returns_unavailable(self) -> None:
         run_repo = RunRepository(self.db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=self.db_session)
         other_run = run_repo.create_run(novel_id=novel_id, source_path="test", title="Other")
-        result = aggregate_book_topics(other_run, self.db_session)
+        result = aggregate_book_topics(other_run, storage_for(self.db_session))
         assert result["unavailable_reason"] is not None
         assert result["distribution"] is None
-        series = fetch_paragraph_topic_series(other_run, self.db_session)
+        series = fetch_paragraph_topic_series(other_run, storage_for(self.db_session))
         assert series["unavailable_reason"] is not None
-        emotion = compute_topic_emotion(other_run, self.db_session)
+        emotion = compute_topic_emotion(other_run, storage_for(self.db_session))
         assert emotion["unavailable_reason"] is not None

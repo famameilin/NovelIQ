@@ -1,4 +1,9 @@
-"工作、执行与正式产物 ORM 模型（2026-10-16 全库 3NF 改造；2026-10-17 六 agent 归属）"
+"""
+工作、执行与正式产物 ORM 模型
+
+推导项不落列：novel/run 从 session 取，逐段情绪的 run/chapter 从 record 取，
+名单顺序与去重由条件唯一约束保证。
+"""
 
 from __future__ import annotations
 
@@ -130,7 +135,7 @@ class Execution(Base):
             " AND started_at IS NOT NULL AND status IS NOT NULL"
             " AND ((role IN ('annotation', 'entity', 'event', 'metric')"
             " AND chapter_id IS NOT NULL AND case_anchor IS NULL)"
-            " OR (role = 'case' AND chapter_id IS NULL AND case_anchor IS NOT NULL)"
+            " OR (role = 'case' AND chapter_id IS NULL)"
             " OR (role = 'report' AND chapter_id IS NULL AND case_anchor IS NULL)))",
             name="ck_executions_shape",
         ),

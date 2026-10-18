@@ -1,4 +1,9 @@
-"章节与正文表 ORM 模型（2026-10-16 全库 3NF 改造）"
+"""
+章节与正文表 ORM 模型
+
+chapters 保留完整章节身份与章节原始区域；正文切片与全文起点一对一合并于本表：
+text 与 char_offset 同空或同有；正文终点由 char_offset + 字符长度投影，char_end_offset 不落列。
+"""
 
 from __future__ import annotations
 

@@ -280,7 +280,7 @@ export function createCharacters(count = 15): Character[] {
 }
 
 /* ------------------------------------------------------------------ */
-/*  情绪曲线（M4：段落粒度，x 坐标统一为 0-1 position 值域）           */
+/*  情绪曲线（段落粒度，x 坐标统一为 0-1 position 值域）               */
 /* ------------------------------------------------------------------ */
 
 // 每章段数（与 createParagraphCurves 的 chapter 切分保持一致）
@@ -315,7 +315,7 @@ export function createParagraphCurves(count = 300): ParagraphCurvePoint[] {
   });
 }
 
-/** 2026-08-15 生成窗口情绪趋势 mock 数据以覆盖窗口粒度与缩放请求 */
+/** 生成窗口情绪趋势 mock 数据以覆盖窗口粒度与缩放请求 */
 export function createEmotionTrendWindows(
   windowParagraphs = 20,
   range: [number, number] | null = null,
@@ -367,7 +367,7 @@ export function createEmotionTrendWindows(
 }
 
 /* ------------------------------------------------------------------ */
-/*  章节指标汇总（M4）                                                 */
+/*  章节指标汇总                                                       */
 /* ------------------------------------------------------------------ */
 
 export function createChapterMetrics(): ChapterMetricsResponse {
@@ -641,7 +641,7 @@ function resolveTimelinePhaseName(chapterId: number): "引入期" | "发展期" 
   return "收束期";
 }
 
-// 2026-08-20 事件森林一树一节点工厂：生成 8-12 棵树，每树含 root+1-2 main +0-1 secondary，derived_event_order 按树序+char_start，causal_edges 2-3 条跨树，tension_curve 120点
+// 事件森林一树一节点工厂：生成 8-12 棵树，每树含 root+1-2 main +0-1 secondary，derived_event_order 按树序+char_start，causal_edges 2-3 条跨树，tension_curve 120点
 export function createEventTimeline(): EventTimelineResponse {
   const treeCount = 9 + Math.floor(Math.random() * 3); // 9-11
   const nodes: TimelineEventNode[] = [];
@@ -861,7 +861,7 @@ export function createNarrativeStructure(): NarrativeStructureMetrics {
     },
     cliffhanger_rate: 0.12,
     climax_count: 4,
-    // M4：climax_positions 与曲线 position 同域（0-1 比例），直接作为高潮 markPoint 的 x 坐标
+    // climax_positions 与曲线 position 同域（0-1 比例），直接作为高潮 markPoint 的 x 坐标
     climax_positions: [0.25, 0.45, 0.65, 0.8],
     climax_heights: [0.7, 0.85, 0.92, 0.88],
     peak_escalation: "递进式",
@@ -910,7 +910,7 @@ export function createStyleStats(): StyleStatsMetrics {
 }
 
 /**
- * 2026-08-16 创建全书统计 mock
+ * 创建全书统计 mock
  * 返回详情概览波动卡使用的情绪与节奏全书聚合字段
  */
 export function createGlobalStats(): GlobalStats {

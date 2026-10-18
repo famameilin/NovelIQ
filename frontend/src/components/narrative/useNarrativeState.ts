@@ -5,7 +5,7 @@ export function useNarrativeState<T extends object>(key: string, initial: T) {
   function read(): T {
     try {
       const persisted = JSON.parse(localStorage.getItem(key) ?? "{}");
-      // 只恢复当前页面声明的字段，已删除的功能状态不再随交互写回
+      // 只恢复当前页面声明的字段，其余功能状态不随交互写回
       return Object.fromEntries(Object.entries(initial).map(([field, fallback]) => [field, Object.hasOwn(persisted, field) ? persisted[field] : fallback])) as T;
     }
     catch { return initial; }

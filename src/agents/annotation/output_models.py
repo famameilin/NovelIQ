@@ -19,5 +19,5 @@ class BoundChapterAnnotation(StrictModel):
     dialogues: list[BoundDialogue]
     events: list[BoundEvent]
     paragraph_labels: list[BoundParagraphLabel] = Field(default_factory=list)
-    # 2026-09-05 冻结时系统确定性覆盖告警（如候选>0但载荷为空），仅留痕不阻断
+    # 冻结时系统确定性覆盖告警（如候选>0但载荷为空），仅留痕不阻断
     coverage_warnings: list[str] = Field(default_factory=list)

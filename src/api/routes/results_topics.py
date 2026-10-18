@@ -51,7 +51,7 @@ async def get_topics(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
 ) -> list:
-    """获取主题分布数据（段落 token 加权聚合，§11.1）"""
+    """获取主题分布数据（段落 token 加权聚合）"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     paragraph_repo = session.paragraphs
@@ -66,7 +66,7 @@ async def get_topic_aggregate(
     level: Literal["book", "chapter"] = Query(default="book", description="聚合层级：book 或 chapter"),
 ) -> TopicAggregateResponse | ChapterTopicAggregateResponse:
     """
-    全书/章节主题分布（§5.11 D1）：token 加权聚合，分母从每段一行推断状态读取
+    全书/章节主题分布：token 加权聚合，分母从每段一行推断状态读取
 
     章节层级按 chapters.sequence 排序；缺失或样本不足返回 unavailable_reason。
     """
@@ -84,7 +84,7 @@ async def get_topic_series(
     session: Annotated[Storage, Depends(get_db_session)],
 ) -> TopicSeriesResponse:
     """
-    段落主题序列（D1）：完整 K 维权重，横轴真实字符位置（global_start_char）
+    段落主题序列：完整 K 维权重，横轴真实字符位置（global_start_char）
 
     top_n 只属于前端展示裁剪，本接口始终返回完整分布。
     """
@@ -106,7 +106,7 @@ async def get_topic_shifts(
     max_candidates: Annotated[int | None, Query(ge=1, description="候选点数量上限，缺省取配置")] = None,
 ) -> TopicShiftResponse:
     """
-    主题变化候选点（D2）：相邻不重叠窗口分布（入模 token 加权）的 JS 散度
+    主题变化候选点：相邻不重叠窗口分布（入模 token 加权）的 JS 散度
 
     topic_shift_score 为以 2 为底、范围 [0,1] 的 JS 散度；窗口大小、最小
     token 数与阈值均为版本化配置（返回在 config 中），本端点允许显式覆盖
@@ -150,7 +150,7 @@ async def get_topic_emotion(
     session: Annotated[Storage, Depends(get_db_session)],
 ) -> TopicEmotionResponse:
     """
-    主题-情感统计（D3）：sum(weight * token * net_density) / sum(weight * token)
+    主题-情感统计：sum(weight * token * net_density) / sum(weight * token)
 
     情感输入使用 paragraph_curves.net_density 原始值；空值段落同时从
     分子分母排除；权重和为零时返回空值与原因。
@@ -186,11 +186,7 @@ async def get_foreshadowing_trees(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
 ) -> list[ForeshadowingTreeResponse]:
-    """
-    获取伏笔树台账（2026-09-13 伏笔即事件树）
-
-    说明: 返回全部伏笔树 + active 状态，供 diagnosis drill-down 与导出复用
-    """
+    """获取伏笔树台账（伏笔即事件树）：返回全部伏笔树 + active 状态，供诊断 drill-down 与导出复用"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = session

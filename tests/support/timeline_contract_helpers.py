@@ -1,4 +1,4 @@
-"""时间轴与剧情推进场景夹具（2026-10-16 全库 3NF 新写面）
+"""时间轴与剧情推进场景夹具
 
 夹具按冻结 35 表的正式关系写入，读取一律走正式读面（plotline/timeline 读面）：
 - 标注来源链：executions(真实调用，直接带 run/章/角色) → chapter_annotations
@@ -17,14 +17,13 @@ import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
 from sqlalchemy import select
 
 from src.agents.annotation.chapter_consolidation import RULE_VERSION
 from src.event_trees.read.organization import CONTRACT_VERSION
-from src.fact_graph.identity import relation_id
 from src.fact_graph.vocabulary import RELATION_DEFINITIONS
+from src.storage import new_id
 from src.storage.models import (
     Chapter,
     ChapterAnnotation,
@@ -38,7 +37,6 @@ from src.storage.models import (
     Paragraph,
     SourceEvidence,
 )
-from src.utils.identity import stable_uuid
 from src.work.annotation_work import annotation_work_id
 from tests.support.chapter_annotation_helpers import (
     character_fact,
@@ -46,6 +44,7 @@ from tests.support.chapter_annotation_helpers import (
     relation_fact,
 )
 from tests.support.run_records import set_run_status
+from tests.support.storage_fixtures import fixture_id, relation_id, task_for_run
 
 __all__ = [
     "TimelineContractScenario",
@@ -78,9 +77,10 @@ def _utcnow() -> datetime:
 
 def entity_id_for(run_id: str, name: str, entity_type: str = "character") -> str:
     """实体身份的正式铸造口径（与图谱写面同一 run+规范名+大类规则）"""
-    from src.fact_graph.graph import entity_key, entity_uuid
+    from src.fact_graph.graph import entity_key
+    from tests.support.storage_fixtures import entity_id
 
-    return entity_uuid(run_id, entity_key(name, entity_type))
+    return entity_id(run_id, entity_key(name, entity_type))
 
 
 def _register_entity(session: Any, run_id: str, name: str, entity_type: str = "character") -> str:
@@ -117,7 +117,7 @@ def create_chapter_annotation_source(
     chapter = session.scalar(select(Chapter).where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id))
     if chapter is None or chapter.text is None:
         raise ValueError(f"章节没有原文: run_id={run_id} chapter_id={chapter_id}")
-    execution_id, record_id = str(uuid4()), str(uuid4())
+    execution_id, record_id = new_id(), new_id()
     session.add(
         Execution(
             execution_id=execution_id,
@@ -152,7 +152,7 @@ def create_chapter_annotation_source(
 
 def declaration_id_for_event(run_id: str, work_id: str, node_key: str, *, tree_key: str | None = None) -> str:
     """事件声明的正式铸造口径（与标注写面的节点身份规则同一编码）"""
-    return stable_uuid(run_id, work_id, "event_node", tree_key or node_key, node_key)
+    return fixture_id(run_id, work_id, "event_node", tree_key or node_key, node_key)
 
 
 def save_event_declaration(
@@ -190,7 +190,7 @@ def save_event_declaration(
     )
     if execution_id is None:
         raise ValueError(f"声明必须引用本 run 已保存的标注记录: record_id={record_id}")
-    identifier = declaration_id or stable_uuid(run_id, record_id, "declaration", local_key)
+    identifier = fixture_id(run_id, record_id, "declaration", declaration_id or local_key)
     session.add(
         EventDeclaration(
             declaration_id=identifier,
@@ -211,7 +211,7 @@ def save_event_declaration(
         name = str(item["name"])
         entity_type = str(item.get("entity_type") or "character")
         entity_id = _register_entity(session, run_id, name, entity_type)
-        participant_id = stable_uuid("declaration_participant", identifier, str(ordinal))
+        participant_id = fixture_id("declaration_participant", identifier, str(ordinal))
         narrative_role = item.get("narrative_role") or item.get("role_function")
         action = item.get("action")
         emotion = item.get("emotion")
@@ -232,7 +232,7 @@ def save_event_declaration(
             fact = GraphFact(participant_id=participant_id)
             session.add(fact)
             session.flush()
-            _write_fact_evidence(session, int(fact.graph_fact_id), paragraph)
+            _write_fact_evidence(session, fact.graph_fact_id, paragraph)
         if entity_id not in registered:
             registered.add(entity_id)
             _write_entity_reference(
@@ -243,7 +243,7 @@ def save_event_declaration(
             )
     session.add(
         SourceEvidence(
-            evidence_id=str(uuid4()),
+            evidence_id=new_id(),
             ordinal=0,
             paragraph_id=paragraph.paragraph_id,
             start_char=0,
@@ -254,7 +254,7 @@ def save_event_declaration(
     if is_foreshadowing_root:
         # 与生产 freeze_actions 同形：伏笔树根在标注保存时即写 setup 动作（证据挂动作所有者列）
         operation = f"setup/{identifier}"
-        action_id = stable_uuid(run_id, execution_id, operation)
+        action_id = fixture_id(run_id, execution_id, operation)
         session.add(
             EventForeshadowingAction(
                 action_id=action_id,
@@ -268,7 +268,7 @@ def save_event_declaration(
         )
         session.add(
             SourceEvidence(
-                evidence_id=str(uuid4()),
+                evidence_id=new_id(),
                 ordinal=0,
                 paragraph_id=paragraph.paragraph_id,
                 start_char=0,
@@ -283,7 +283,7 @@ def save_event_declaration(
 def _write_fact_evidence(session: Any, fact_id: int, paragraph: Paragraph) -> None:
     session.add(
         SourceEvidence(
-            evidence_id=str(uuid4()),
+            evidence_id=new_id(),
             ordinal=0,
             paragraph_id=paragraph.paragraph_id,
             start_char=0,
@@ -318,7 +318,7 @@ def _write_entity_reference(
     )
     session.add(fact)
     session.flush()
-    _write_fact_evidence(session, int(fact.graph_fact_id), paragraph)
+    _write_fact_evidence(session, fact.graph_fact_id, paragraph)
 
 
 def _write_relation_change(
@@ -361,7 +361,7 @@ def _write_relation_change(
     )
     session.add(fact)
     session.flush()
-    _write_fact_evidence(session, int(fact.graph_fact_id), paragraph)
+    _write_fact_evidence(session, fact.graph_fact_id, paragraph)
     return identifier
 
 
@@ -612,7 +612,7 @@ def create_timeline_contract_scenario(
     return TimelineContractScenario(
         novel_id=novel_id,
         run_id=run_id,
-        task_id=run_id[:8],
+        task_id=task_for_run(run_id, db_session),
         hero_name=hero_name,
         rival_name=rival_name,
         organization_name=organization_name,

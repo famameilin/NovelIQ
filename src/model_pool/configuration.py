@@ -43,7 +43,7 @@ def load_task_config(
         api_key=selected.api_key,
         max_in_flight=selected.max_in_flight,
         timeout_s=task_settings.timeout_s,
-        # 2026-10-02 设置迁移：采样参数跟随选中的池内模型而非任务级配置
+        # 采样参数跟随选中的池内模型，而非任务级配置
         temperature=selected.temperature,
         top_p=selected.top_p,
         thinking_enabled=thinking_enabled,

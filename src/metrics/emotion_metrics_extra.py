@@ -75,7 +75,7 @@ def compute_lexical_emotion_trend_detail(
     positions: Sequence[float],
     scores: Sequence[float],
 ) -> dict:
-    """字符坐标版前中后趋势（§10/§19.8）：按字符跨度 [0,1/3)/[1/3,2/3)/[2/3,1] 三等分段内加权均值。
+    """字符坐标版前中后趋势：按字符跨度 [0,1/3)/[1/3,2/3)/[2/3,1] 三等分段内加权均值。
     stdev≥0.003判volatile，否则diff=last-first超±0.002判rising/falling；返回first/middle/last_avg、stdev、trend。"""
     _validate_position_inputs(positions, scores)
     if len(scores) < 3:
@@ -111,7 +111,7 @@ def compute_lexical_emotion_trend_detail(
         return sum(scores[j] * weight for j, weight in zip(indices, weights, strict=True)) / weight_sum
 
     if span <= 0:
-        # 字符跨度为零：按点索引三等分兜底（与旧函数行为一致）。
+        # 字符跨度为零：按点索引三等分兜底。
         third = total // 3
         first_indices = list(range(0, third))
         middle_indices = list(range(third, 2 * third))

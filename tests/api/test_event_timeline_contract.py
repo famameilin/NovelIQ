@@ -1,5 +1,6 @@
 """独立变化接口使用持久化标注事实验证历史状态与来源边界"""
 
+from tests.support.storage_fixtures import fixture_id
 from tests.support.timeline_contract_helpers import create_timeline_contract_scenario
 
 
@@ -53,4 +54,7 @@ def test_relationship_break_and_window_preserve_history(api_client, db_session):
 
 
 def test_retired_forest_route_is_unregistered(api_client):
-    assert api_client.get("/api/novels/any/event-forest", params={"task_id": "any"}).status_code == 404
+    assert (
+        api_client.get(f"/api/novels/{fixture_id(__name__, 'any')}/event-forest", params={"task_id": "any"}).status_code
+        == 404
+    )

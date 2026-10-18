@@ -1,5 +1,5 @@
 /**
- * TopicShiftsPanel - 主题迁移候选点（赛道 D /topics/shifts）
+ * TopicShiftsPanel - 主题迁移候选点（/topics/shifts）
  *
  * 相邻不重叠窗口分布的 JS 散度（以 2 为底、[0,1]）；候选点不直接等同
  * 情节转折，需与事件和人工样本联合验证。展示散点定位 + 配置回显 + 明细表。

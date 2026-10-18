@@ -1,4 +1,4 @@
-"从 src/audit/module.py 分离的具名物理读取"
+"audit module 的具名物理读取"
 
 from __future__ import annotations
 

@@ -11,7 +11,7 @@ vi.mock("@/api/results", () => ({
 }));
 
 /**
- * 2026-08-12 用于锁住章节图变化分页 hook 的首屏加载、load-more 合并去重、
+ * 用于锁住章节图变化分页 hook 的首屏加载、load-more 合并去重、
  * 任务切换清空与快速双击防抖行为
  */
 function createChange(changeId: string, effectiveChapterId: number): GraphChange {

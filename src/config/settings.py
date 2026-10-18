@@ -39,12 +39,11 @@ class Settings:
     paths: PathSettings = field(default_factory=PathSettings)
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     topic_model: TopicModelSettings = field(default_factory=TopicModelSettings)
-    # 2026-08-28：语言结构基础数据阶段（LTP/固定短语/Word2Vec，§3.1 B/C 赛道）
+    # 语言结构基础数据阶段（LTP/固定短语/Word2Vec）
     linguistic: LinguisticSettings = field(default_factory=LinguisticSettings)
     metrics: MetricsSettings = field(default_factory=MetricsSettings)
-    # 2026-08-14：段落事实源配置（max_chars/版本号），见 schemas.analysis.ParagraphSettings
+    # 段落事实源配置（max_chars/版本号），见 schemas.analysis.ParagraphSettings
     paragraphs: ParagraphSettings = field(default_factory=ParagraphSettings)
-    # 2026-08-14 D9：prompts 死配置已移除（旧 phase 合同退役，提示词硬编码于 agents/*/prompts.py）
 
     @classmethod
     def from_json(cls, path: Path | None = None) -> Settings:
@@ -58,7 +57,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         """
-        2026-08-03 用于加载四对象环境契约中的模型配置
+        加载四对象环境契约中的模型配置
         """
 
         base = cls.from_json()
@@ -67,10 +66,9 @@ class Settings:
 
     @classmethod
     def from_config_dict(cls, data: dict[str, Any]) -> Settings:
-        """2026-09-10 从配置字典构建完整 Settings（默认值 + 用户覆盖 + env 凭据叠加）
+        """从配置字典构建完整 Settings（默认值 + 用户覆盖 + env 凭据叠加）
 
-        与 from_env 的唯一差异是配置来源：文件 / 设置页提交的合并字典。
-        供保存链路复用同一套解析校验与环境变量叠加顺序。
+        与 from_env 的差别只在配置来源：文件 / 设置页提交的合并字典。
         """
         instance = cls._parse_from_dict(data)
         cls._apply_runtime_environment(instance)
@@ -78,10 +76,9 @@ class Settings:
 
     @classmethod
     def parse_from_dict(cls, data: dict[str, Any]) -> Settings:
-        """2026-09-10 解析配置字典（不含 env 叠加）
+        """解析配置字典（不含 env 叠加）
 
-        供设置保存链路对"纯文件语义"的实例做稀疏 diff——env 注入值
-        （凭据、LTP_MODEL_DIR）不得经 diff 落进 settings.json。
+        env 注入值（凭据、LTP_MODEL_DIR）不得经稀疏 diff 落进 settings.json。
         """
         return cls._parse_from_dict(data)
 
@@ -113,10 +110,9 @@ settings = Settings.from_env()
 
 
 def serialize_settings(instance: Settings) -> dict[str, Any]:
-    """2026-09-10 Settings → 深层 dict（嵌套 dataclass 全展开），作为默认值/生效值的序列化出口
+    """Settings → 深层 dict（嵌套 dataclass 全展开），作为默认值/生效值的序列化出口
 
-    Path 字段（paths 段）统一转 posix 字符串：asdict 不转换 Path，
-    而 JSON 序列化与 diff 对比都需要 JSON 兼容值。
+    Path 字段（paths 段）统一转 posix 字符串，供 JSON 序列化与 diff 对比。
     """
 
     def _jsonify(node: Any) -> Any:
@@ -132,22 +128,19 @@ def serialize_settings(instance: Settings) -> dict[str, Any]:
 
 
 def apply_settings_onto(target: Settings, source: Settings) -> None:
-    """2026-09-10 把 source 的字段值原地写入 target（保持单例对象身份不变）
+    """把 source 的字段值原地写入 target（保持单例对象身份不变）
 
-    全部消费方以 `from src.config import settings` 持有单例引用，
-    热生效必须原地变更字段而非替换对象。
+    全部消费方持有单例引用，热生效必须原地变更字段而非替换对象。
     """
     for field_info in fields(Settings):
         setattr(target, field_info.name, getattr(source, field_info.name))
 
 
 def diff_user_overrides(effective: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
-    """2026-09-10 计算与默认值的差异（稀疏覆盖集），用于把用户设置写回 settings.json
+    """计算与默认值的差异（稀疏覆盖集），用于把用户设置写回 settings.json
 
-    只保留与 defaults 不同的叶子；嵌套 dict 递归对比；effective 中
-    defaults 不存在的键直接丢弃（settings.json 只承载已知参数）。
-    例外：defaults 侧为空 dict 时视为开放键空间（如 logging.modules 的
-    模块名可增删），此时 effective 的键整体保留而非按"未知键"剔除。
+    只保留与 defaults 不同的叶子；effective 中 defaults 不存在的键丢弃
+    （settings.json 只承载已知参数），但 defaults 侧为空 dict 时视为开放键空间整体保留。
     """
     result: dict[str, Any] = {}
     for key, value in effective.items():

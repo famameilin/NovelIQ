@@ -22,7 +22,7 @@ const CARD_ACCENT_ALIAS: Record<MetricAccent, "primary" | "chart-2"> = {
   "chart-5": "chart-2",
 };
 
-/** 2026-08-16 将所有卡片强调色收敛到两种实际视觉分支 */
+/** 将所有卡片强调色收敛到两种实际视觉分支 */
 export function resolveCardAccent(accent: MetricAccent): "primary" | "chart-2" {
   return CARD_ACCENT_ALIAS[accent];
 }

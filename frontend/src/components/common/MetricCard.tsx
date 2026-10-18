@@ -48,8 +48,7 @@ export interface MetricCardProps {
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：保留原有数值进度逻辑，同时复用共享卡片壳使用的比例计算方式
+ * 复用共享卡片壳使用的比例计算方式
  */
 function barWidth(format: MetricFormat, value: number, maxScore: number): number {
   if (format === "score") return Math.min(value / maxScore, 1) * 100;
@@ -58,8 +57,7 @@ function barWidth(format: MetricFormat, value: number, maxScore: number): number
 }
 
 /**
- * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：统一 MetricCard 和业务卡片的数字格式化逻辑，避免视觉重构时数值展示回归
+ * 统一 MetricCard 和业务卡片的数字格式化逻辑
  */
 function formatValue(raw: number, format: MetricFormat, decimals: number, maxScore: number): string {
   switch (format) {
@@ -80,8 +78,7 @@ function formatValue(raw: number, format: MetricFormat, decimals: number, maxSco
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：保留 MetricCard 数字滚动能力，作为共享视觉原语的一部分继续复用
+ * 数字滚动能力作为共享视觉原语复用
  */
 function AnimatedNumber({
   raw,
@@ -142,8 +139,7 @@ function AnimatedNumber({
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：继续复用 MetricCard 的进度条动画，同时接入共享 accent 色板
+ * 复用 MetricCard 的进度条动画，接入共享 accent 色板
  */
 function AnimatedBar({
   fillPct,
@@ -172,8 +168,7 @@ function AnimatedBar({
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：改为复用共享 accent 原语，确保 MetricCard 与仪表盘业务卡片保持同一套视觉基线
+ * 复用共享 accent 原语，与仪表盘业务卡片保持同一套视觉基线
  */
 export function MetricCard({
   label,

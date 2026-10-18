@@ -45,10 +45,8 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 /**
- * 2026-10-17 六 Agent 命名：标注阶段 sub_stage 为章内四角色（annotation/entity/event/metric）。
- * 该集合仅用于判定标注 Agent 运行期是否启用"同章节回退 + pending 骨架"的稳定化逻辑；
- * chapterFallbackGroups / pendingGroup / displayGroup 回退链兜住"进度先到、流事件后到"
- * 的窗口期，避免阶段切换闪断。
+ * 标注阶段 sub_stage 的章内四角色（annotation/entity/event/metric）；该集合用于判定
+ * 是否启用"同章节回退 + pending 骨架"稳定化逻辑，兜住进度先到、流事件后到的窗口期。
  */
 const ANNOTATION_PHASE_TAB_SUBSTAGES = new Set(["annotation", "entity", "event", "metric"]);
 
@@ -604,9 +602,7 @@ export function StreamOutput({
                 </div>
               </div>
               <div className="min-h-0 p-4">
-                {/* 2026-08-13 P2-8: 与主面板保持一致，Dialog 同样渲染 displayGroup
-                    （章节回退模式下是合并了各流最新内容的聚合组），
-                    避免弹窗与主面板内容不一致 */}
+                {/* 与主面板保持一致，Dialog 同样渲染 displayGroup（章节回退模式下是合并各流最新内容的聚合组） */}
                 <StreamGroupDetail group={displayGroup ?? activeGroup} maxLines={maxLines} className="h-full" />
               </div>            </div>
           </DialogContent>

@@ -1,13 +1,11 @@
-"""LTP sdp 情绪事件抽取（2026-09-05 B 批：与词典情绪对应的模型线）
+"""LTP sdp 情绪事件抽取（与词典情绪对应的模型线）
 
-口径（用户定稿）：
-- 情绪词典只承担谓词极性候选标记（该词是正面还是负面情绪词），不再做任何
-  结构判定；持有者（AGT）/对象（DATV）/否定（mNEG）/程度（mDEPD）全部来自
-  LTP sdp 的模型判定。
-- mNEG 接管词典否定翻转：情绪词命中是否翻转由 sdp 的 mNEG 弧（模型习得的
-  否定辖域）决定，替代 negation.py 的窗口规则（仅在本模块的修正口径内；
-  paragraph_metrics 原值由 linguistic 阶段回写，见 workflows/linguistic.py）。
-- EXP 不作为持有者来源：实测心理谓词的持有者被 LTP 标为 AGT，EXP 不可靠。
+口径：
+- 情绪词典只承担谓词极性候选标记；持有者（AGT）/对象（DATV）/否定（mNEG）/
+  程度（mDEPD）全部来自 LTP sdp 的模型判定。
+- 情绪词命中是否翻转由 sdp 的 mNEG 弧（模型习得的否定辖域）决定：本计数为
+  修正口径，paragraph_metrics 原值由 linguistic 阶段回写（见 workflows/linguistic.py）。
+- EXP 不作为持有者来源（心理谓词的持有者被 LTP 标为 AGT）。
 
 纯函数，不依赖模型实例；测试可直接构造 ParagraphLinguisticResult。
 """
@@ -20,7 +18,7 @@ from src.metrics.lexicon_metrics import get_emotion_spans
 
 from .schema import EmotionEvent, LtpSdpArc, LtpToken, ParagraphLinguisticResult
 
-#: sdp 语义角色标签（首手实测标定，见 docs 09-05 方案）
+#: sdp 语义角色标签
 _SDP_HOLDER_LABEL = "AGT"
 _SDP_TARGET_LABEL = "DATV"
 _SDP_NEGATION_LABEL = "mNEG"
@@ -118,8 +116,8 @@ def mneg_corrected_counts(
 ) -> tuple[float, float]:
     """mNEG 接管否定翻转的词典情绪计数（修正口径）
 
-    命中集与 paragraph_metrics 完全一致（同一 get_emotion_spans 短语匹配），
-    唯一差异是翻转判定：sdp mNEG（模型习得辖域）替代 negation.py 窗口规则。
+    命中集与 paragraph_metrics 一致（同一 get_emotion_spans 短语匹配），
+    差异是翻转判定：sdp mNEG（模型习得辖域）替代 negation.py 窗口规则。
     Returns:
         (修正后的正面命中数, 修正后的负面命中数)
     """

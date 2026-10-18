@@ -52,7 +52,7 @@ class EnvironmentInitializer:
 
         run_id = self._get_or_create_run_id(task_id, novel_id, source_path, novel_title, conn)
 
-        # 2026-10-03 收口进程重启遗留的 running 审计行，避免僵尸行永久污染错误率统计
+        # 收口进程重启遗留的 running 审计行，避免僵尸行永久污染错误率统计
         # （run 08f9ba42 实证 12 条 running 僵尸行）；每次创建/恢复任务都会经过这里
         from src.audit.module import AuditModule
 

@@ -1,4 +1,4 @@
-"""P11 人物别名启发式消歧测试。"""
+"""人物别名启发式消歧测试。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ _GOLD_DIR = Path(__file__).resolve().parents[2] / "data" / "gold_standards" / "d
 
 
 def _sid(entity_id: int) -> str:
-    """2026-09-19 用于构造字典序与序号一致的测试 uuid（实体主键已改 uuid）"""
+    """构造字典序与序号一致的测试 uuid（实体主键已改 uuid）"""
     return f"00000000-0000-0000-0000-{entity_id:012d}"
 
 

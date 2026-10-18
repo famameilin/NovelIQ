@@ -14,6 +14,7 @@ from tests.support.chapter_annotation_helpers import (
     persist_chapter_annotation,
     relation_fact,
 )
+from tests.support.storage_fixtures import storage_for
 
 
 def _persist_authority_chapter(
@@ -24,7 +25,7 @@ def _persist_authority_chapter(
     characters: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
 ) -> None:
-    """2026-08-19 用于为 authority 视图写入章节图数据"""
+    """为 authority 视图写入章节图数据"""
     persist_chapter_annotation(
         session,
         run_id=run_id,
@@ -44,7 +45,7 @@ def _retract_relation(
     relation_type: str,
     reason: str,
 ) -> None:
-    """2026-10-16 3NF：关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
+    """关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
     from src.agents.annotation.output_models import BoundChapterAnnotation
     from src.fact_graph.inputs import ChapterMetricsInput
 
@@ -84,7 +85,7 @@ def _relation_id(session, run_id: str, from_name: str, to_name: str, relation_ty
 
 
 def test_authority_views_project_chapter_history_and_graph_changes(db_session) -> None:
-    """2026-08-07 用于验证 authority 从章节快照输出实体关系和变化合同"""
+    """验证 authority 从章节快照输出实体关系和变化合同"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌"],
@@ -109,7 +110,7 @@ def test_authority_views_project_chapter_history_and_graph_changes(db_session) -
     )
     db_session.commit()
 
-    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    service = KnowledgeGraphAuthorityService.from_session(storage_for(db_session))
     level1 = service.build_level1_snapshot(run_id)
     timeline = service.build_timeline_view(run_id)
     graph_view = service.build_representative_graph_view(run_id)
@@ -117,8 +118,8 @@ def test_authority_views_project_chapter_history_and_graph_changes(db_session) -
     report = service.build_graph_report(run_id)
 
     assert {row.name for row in level1.canonical_entities} == {"林渡", "顾霜"}
-    assert [(row.from_name, row.to_name, row.source) for row in level1.confirmed_relations] == [
-        ("林渡", "顾霜", "relation_states")
+    assert [(frozenset((row.from_name, row.to_name)), row.source) for row in level1.confirmed_relations] == [
+        (frozenset(("林渡", "顾霜")), "relation_states")
     ]
     assert {row.change_kind for row in timeline.graph_changes} == {"state", "relation"}
     assert all(row.fact_id and row.chapter_id == 1 for row in timeline.graph_changes)
@@ -131,7 +132,7 @@ def test_authority_views_project_chapter_history_and_graph_changes(db_session) -
 
 
 def test_authority_keeps_relation_change_history_after_break(db_session) -> None:
-    """2026-08-07 用于验证当前关系消失后 authority 仍保留章节关系变化历史"""
+    """验证当前关系消失后 authority 仍保留章节关系变化历史"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜结盟", "两人分道扬镳"],
@@ -168,8 +169,10 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
     )
     db_session.commit()
 
-    graph_view = KnowledgeGraphAuthorityService.from_session(db_session).build_representative_graph_view(run_id)
-    export_view = KnowledgeGraphAuthorityService.from_session(db_session).build_export_view(run_id)
+    graph_view = KnowledgeGraphAuthorityService.from_session(storage_for(db_session)).build_representative_graph_view(
+        run_id
+    )
+    export_view = KnowledgeGraphAuthorityService.from_session(storage_for(db_session)).build_export_view(run_id)
 
     assert graph_view.confirmed_relations == []
     relation_changes = [row for row in graph_view.graph_changes if row.change_kind == "relation"]
@@ -182,7 +185,7 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
 
 
 def test_authority_merges_same_character_aliases_in_views(db_session) -> None:
-    """2026-08-09 用于验证同一人物关系在 authority 视图中归并别名实体"""
+    """验证同一人物关系在 authority 视图中归并别名实体"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["伯安与猴子同游"],
@@ -211,22 +214,21 @@ def test_authority_merges_same_character_aliases_in_views(db_session) -> None:
     )
     db_session.commit()
 
-    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    service = KnowledgeGraphAuthorityService.from_session(storage_for(db_session))
     level1 = service.build_level1_snapshot(run_id)
     graph_view = service.build_representative_graph_view(run_id)
     representative = service.build_representative_graph_view(run_id)
 
     canonical_rows = level1.canonical_entities
-    # 代表名由 uuid5(entity_id) 字典序选举决定，随 run 随机；representative 视图
-    # 的实体取活跃非身份边的端点（原始名，不按选举折叠）。因此只断言各视图
-    # 的合并语义：两个"同一人物"分量各收敛到一个名字，别名归并完整。
+    # 同一人物分量各收敛到一个代表名，别名集合保持完整
     assert len(canonical_rows) == 2
     for row in canonical_rows:
         assert {row.name, *row.aliases} in ({"伯安", "贺重明"}, {"猴子", "侯飞白"})
     assert [(row.relation_type,) for row in level1.confirmed_relations] == [("友情",)]
     friendship = level1.confirmed_relations[0]
-    assert friendship.from_name in {"伯安", "贺重明"}
-    assert friendship.to_name in {"猴子", "侯飞白"}
+    endpoints = {friendship.from_name, friendship.to_name}
+    assert len(endpoints & {"伯安", "贺重明"}) == 1
+    assert len(endpoints & {"猴子", "侯飞白"}) == 1
     for view_names in (
         {row.name for row in graph_view.participant_states},
         {row.name for row in representative.canonical_entities},

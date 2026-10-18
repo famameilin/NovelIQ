@@ -12,6 +12,7 @@ from src.agents.annotation.queries import DatabaseAnnotationQueryService
 from src.config import settings
 from src.storage.models import (
     Chapter,
+    Paragraph,
 )
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.text_processing.models import Chunk
@@ -21,10 +22,11 @@ from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
 )
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
+from tests.support.storage_fixtures import storage_factory
 
 
 def _factory(session):
-    """2026-09-16 用于把测试会话包成查询工厂（每个查询各开一条新会话，与生产 sessionmaker 同形）
+    """把测试会话包成查询工厂（每个查询各开一条新会话，与生产 sessionmaker 同形）
 
     查询服务按单次工具调用取还连接，所以工厂必须是"可反复调用开新会话"的对象；
     测试数据都已提交，新会话与既有会话同库同 schema、可见同样的行。
@@ -33,10 +35,10 @@ def _factory(session):
 
 
 class _CountedSession:
-    """2026-09-16 用于记账一条查询会话是否被归还（除 execute/close 外全部转发真实会话）"""
+    """记账一条查询会话是否被归还（除 execute/close 外全部转发真实会话）"""
 
     def __init__(self, inner, *, fail_on_execute: bool = False) -> None:
-        """2026-09-16 用于绑定被记账的真实会话"""
+        """绑定被记账的真实会话"""
         self._inner = inner
         self._fail_on_execute = fail_on_execute
         self.closed = False
@@ -55,21 +57,21 @@ class _CountedSession:
 
 
 class _SessionTracker:
-    """2026-09-16 用于统计查询会话开合：live 是当前已开未关的会话数"""
+    """统计查询会话开合：live 是当前已开未关的会话数"""
 
     def __init__(self, session, *, fail_on_execute: bool = False) -> None:
-        """2026-09-16 用于绑定被借用的真实会话"""
+        """绑定被借用的真实会话"""
         self._bind = session.get_bind()
         self._fail_on_execute = fail_on_execute
         self.sessions: list[_CountedSession] = []
 
     @property
     def live(self) -> int:
-        """2026-09-16 用于读取仍未归还的查询会话数"""
+        """读取仍未归还的查询会话数"""
         return sum(1 for session in self.sessions if not session.closed)
 
     def factory(self):
-        """2026-09-16 用于按次开一条被记账的查询会话"""
+        """按次开一条被记账的查询会话"""
         counted = _CountedSession(Session(bind=self._bind), fail_on_execute=self._fail_on_execute)
         self.sessions.append(counted)
         return counted
@@ -81,7 +83,7 @@ def _insert_paragraphs(
     texts: list[str],
     chapter_ids: list[int] | None = None,
 ) -> tuple[int, int]:
-    """2026-08-14 二期段落化：检索边界为段落事实源，测试须先落段落行并返回 min/max"""
+    """检索边界为段落事实源，测试须先落段落行并返回 min/max"""
     resolved_chapter_ids = chapter_ids or [1] * len(texts)
     offset = 0
     chunks = []
@@ -105,7 +107,7 @@ def _insert_paragraphs(
 
 @pytest.mark.asyncio
 async def test_text_search_ranges_use_chapter_sequence_when_ids_are_out_of_order(db_session, monkeypatch) -> None:
-    """2026-08-30 用于验证 previous/future/all 不依赖 chapter_id 或 paragraph_id 排序"""
+    """验证 previous/future/all 不依赖 chapter_id 或 paragraph_id 排序"""
     monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -120,7 +122,7 @@ async def test_text_search_ranges_use_chapter_sequence_when_ids_are_out_of_order
         chapter.sequence = sequence_by_chapter_id[chapter.chapter_id]
     db_session.commit()
     service = DatabaseAnnotationQueryService(
-        _factory(db_session),
+        storage_factory(_factory(db_session)),
         run_id=run_id,
         current_chapter_id=500,
         current_first_paragraph_id=2,
@@ -147,7 +149,7 @@ async def test_search_text_keyword_channel_supports_wildcards_and_multi_terms(
     db_session,
     monkeypatch,
 ) -> None:
-    """2026-09-04 用于验证原文关键词通道按通配符与多词 OR 命中段落"""
+    """验证原文关键词通道按通配符与多词 OR 命中段落"""
     monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -156,7 +158,7 @@ async def test_search_text_keyword_channel_supports_wildcards_and_multi_terms(
         title="原文通配符检索",
     )
     service = DatabaseAnnotationQueryService(
-        _factory(db_session),
+        storage_factory(_factory(db_session)),
         run_id=run_id,
         current_chapter_id=2,
         current_first_paragraph_id=1,
@@ -173,8 +175,34 @@ async def test_search_text_keyword_channel_supports_wildcards_and_multi_terms(
 
 
 @pytest.mark.asyncio
+async def test_read_paragraph_future_gate_closed_and_openable(db_session) -> None:
+    """关闭时拒读未来章节段落，显式开启后放行"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["第一章顾霜入城", "第二章顾霜身份揭晓"],
+        chapter_ids=[1, 2],
+        title="未来原文读取门",
+    )
+    service = DatabaseAnnotationQueryService(
+        storage_factory(_factory(db_session)),
+        run_id=run_id,
+        current_chapter_id=1,
+        current_first_paragraph_id=0,
+        current_last_paragraph_id=0,
+    )
+    future_paragraph = db_session.execute(
+        select(Paragraph.paragraph_id).where(Paragraph.run_id == run_id, Paragraph.chapter_id == 2)
+    ).scalar_one()
+
+    with pytest.raises(ValueError, match="未来章节"):
+        await service.read_paragraph(future_paragraph, allow_future_context=False)
+    read = await service.read_paragraph(future_paragraph, allow_future_context=True)
+    assert read["text"] == "第二章顾霜身份揭晓"
+
+
+@pytest.mark.asyncio
 async def test_query_scope_returns_every_session_even_when_query_fails(db_session, monkeypatch) -> None:
-    """2026-09-16 连接粒度=单次工具调用：查询会话用完即还，抛错路径同样归还
+    """连接粒度=单次工具调用：查询会话用完即还，抛错路径同样归还
 
     每次查询各开一条会话（构造期解析章节序也一样），作用域退出后一律已关闭；
     失败查询不得把连接留给下一次模型生成。
@@ -183,7 +211,7 @@ async def test_query_scope_returns_every_session_even_when_query_fails(db_sessio
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="只读作用域取还连接")
     tracker = _SessionTracker(db_session)
     service = DatabaseAnnotationQueryService(
-        tracker.factory,
+        storage_factory(tracker.factory),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,
@@ -201,7 +229,7 @@ async def test_query_scope_returns_every_session_even_when_query_fails(db_sessio
     failing = _SessionTracker(db_session, fail_on_execute=True)
     with pytest.raises(RuntimeError):
         DatabaseAnnotationQueryService(
-            failing.factory,
+            storage_factory(failing.factory),
             run_id=run_id,
             current_chapter_id=1,
             current_first_paragraph_id=0,
@@ -213,7 +241,7 @@ async def test_query_scope_returns_every_session_even_when_query_fails(db_sessio
 
 @pytest.mark.asyncio
 async def test_graph_round_holds_no_query_connection_while_model_replies(db_session, monkeypatch) -> None:
-    """2026-09-16 模型回话那一刻连接占用为零：检索工具用完即还，live 在每次模型调用时都是 0
+    """模型回话那一刻连接占用为零：检索工具用完即还，live 在每次模型调用时都是 0
 
     计数工厂挂在真实查询服务上，脚本化模型每次回话前现读 live——只要有一轮工具
     调用没归还连接，读数就不为 0。这条是"连接不再横跨模型延迟"的直接证据。
@@ -231,7 +259,7 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="模型回话不占连接")
     tracker = _SessionTracker(db_session)
     service = DatabaseAnnotationQueryService(
-        tracker.factory,
+        storage_factory(tracker.factory),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,
@@ -249,7 +277,7 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     live_at_model_reply: list[int] = []
 
     class _SearchThenFinishLLM(StreamedFakeModelMixin):
-        """2026-09-16 用于把"检索案例池 + 写指标 + 收尾"放进同一个回合的脚本化模型"""
+        """把"检索案例池 + 写指标 + 收尾"放进同一个回合的脚本化模型"""
 
         def bind_tools(self, tools):
             del tools

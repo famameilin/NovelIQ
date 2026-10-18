@@ -1,11 +1,9 @@
 """按正文披露章归并独立变化；窗口和分页只裁剪记录，不裁剪历史状态
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：
-- 贡献事实只读 graph_facts 的封闭形状列，旧 content JSON 不再解析
-- 章节、作者执行与执行角色由真实生产执行行投影；独立选章取
-  effective_chapter_id，不按当前章替代
-- 实体/关系状态按贡献顺序在读取侧折叠（entity_states/relation_states 已退场，
-  不写第二份状态缓存；折叠口径与旧 changes 的 field/before/after 一致）
+- 贡献事实只读 graph_facts 的封闭形状列
+- 章节、作者执行与执行角色由真实生产执行行投影；独立选章取 effective_chapter_id
+- 实体/关系状态按贡献顺序在读取侧折叠（不写第二份状态缓存；折叠口径与
+  field/before/after 一致）
 - 原文证据按 source_evidence 的 owner 序号读取，文本哈希从正式原文切片计算
 - 伏笔动作使用 event_trees.action_order 的正式读投影（声明绑定事件身份）
 """

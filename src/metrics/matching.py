@@ -1,4 +1,4 @@
-"""增强匹配（Enhanced Matching v2）：phrase=子串+token（默认）、fuzzy=phrase+编辑距离容错。
+"""增强匹配（Enhanced Matching）：phrase=子串+token（默认）、fuzzy=phrase+编辑距离容错。
 复用 lexicon_metrics._count_non_overlapping_spans，处理未登录词/分词变体。"""
 
 from __future__ import annotations

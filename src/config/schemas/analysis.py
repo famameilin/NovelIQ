@@ -14,9 +14,7 @@ from src.config.runtime_env import LtpEnvironment
 @dataclass
 class StageProgressRange:
     """
-    阶段进度范围配置
-
-    说明: 定义每个阶段的进度百分比范围 [start, end]
+    阶段进度范围配置：定义每个阶段的进度百分比范围 [start, end]
     """
 
     start: float = 0.0
@@ -34,7 +32,7 @@ def _stage_progress_range(stage: str) -> StageProgressRange:
 @dataclass
 class ProgressSettings:
     """
-    分析进度配置（默认值来自 constants.STAGE_PROGRESS_MILESTONES，不再从 settings.json 读取）
+    分析进度配置（默认值来自 constants.STAGE_PROGRESS_MILESTONES）
     """
 
     preprocess: StageProgressRange = field(default_factory=lambda: _stage_progress_range("preprocess"))
@@ -60,7 +58,7 @@ class LdaSettings:
 
 @dataclass
 class TopicShiftSettings:
-    """主题变化候选计算配置（《分析能力扩展路线图》§5.11/D2）
+    """主题变化候选计算配置
 
     窗口大小、平滑方式和阈值均为版本化配置，不在代码中写死；
     topic_shift_score 定义为以 2 为底、范围 [0, 1] 的 JS 散度。
@@ -74,19 +72,19 @@ class TopicShiftSettings:
 
 @dataclass
 class LtpSettings:
-    """LTP 语言结构服务配置（《分析能力扩展路线图》赛道 C1/C2）"""
+    """LTP 语言结构服务配置"""
 
     enabled: bool = True
     # 离线模型目录（仅由 LTP_MODEL_DIR 环境变量提供，不走 settings.json）；未配置时 LtpSession 加载报错
     model_dir: str | None = None
     max_length: int = 512
-    # 依存坐标系：LTP 用 ROOT=0、词元索引 1 起（文档 §C2 统一坐标系）
+    # 依存坐标系：LTP 用 ROOT=0、词元索引 1 起
     dep_root_index: int = 0
 
 
 @dataclass
 class Word2VecSettings:
-    """词向量能力配置（《分析能力扩展路线图》赛道 C3）
+    """词向量能力配置
 
     单流水线：预训练共享向量初始化 + 本书语料微调（warm-start）。
     默认关闭；开启时 model_dir 必须指向转换后的预训练共享模型目录
@@ -103,7 +101,7 @@ class Word2VecSettings:
 
 @dataclass
 class LinguisticSettings:
-    """语言结构基础数据阶段配置（《分析能力扩展路线图》§3.1 B/C 赛道）"""
+    """语言结构基础数据阶段配置"""
 
     ltp: LtpSettings = field(default_factory=LtpSettings)
     word2vec: Word2VecSettings = field(default_factory=Word2VecSettings)
@@ -116,14 +114,14 @@ class TopicModelSettings:
     num_topics: int = 25
     passes: int = 10
     iterations: int = 500
-    # 段落 LDA 训练排除的短段 token 阈值（设计 §11.1，待标定）
+    # 段落 LDA 训练排除的短段 token 阈值
     min_paragraph_train_tokens: int = 5
-    # 2026-08-16 N2：num_topics 按训练文档数缩放
+    # num_topics 按训练文档数缩放
     num_topics_min: int = 3
     num_topics_max: int = 25
     num_topics_scaling_divisor: int = 30
     lda: LdaSettings = field(default_factory=LdaSettings)
-    # 2026-08-28 主题变化候选配置（《分析能力扩展路线图》§5.11/D2 版本化参数）
+    # 主题变化候选配置（版本化参数）
     topic_shift: TopicShiftSettings = field(default_factory=TopicShiftSettings)
 
 
@@ -135,15 +133,15 @@ class MetricsSettings:
 
     mtld_threshold: float = 0.72
     middle_collapse_min_chunks: int = 10
-    # 2026-08-16 P7/N6：短书不再输出伪精确值；比率/结构指标低于该章数返回 null
+    # 比率/结构指标低于该章数返回 null，不输出伪精确值
     small_sample_min_chapters: int = 10
-    # 2026-08-16 N3：虚字指纹在短文本下是噪声，低于该字符数返回 null
+    # 虚字指纹低于该字符数返回 null
     function_word_min_chars: int = 100_000
     character_max_iter: int = 100
-    # LOWESS 平滑参数（§9.3，默认 2% 带宽/最少 7 点，待真实小说标定）
+    # LOWESS 平滑参数（默认 2% 带宽/最少 7 点）
     lowess_bandwidth: float = 0.02
     lowess_min_points: int = 7
-    # 段落表层张力分量权重（§9.2，初始等权；键：fight/exclaim/question/dialogue/pause）
+    # 段落表层张力分量权重（初始等权；键：fight/exclaim/question/dialogue/pause）
     surface_tension_weights: dict[str, float] = field(
         default_factory=lambda: {
             "fight": 0.2,
@@ -213,7 +211,7 @@ def _parse_ltp_settings(data: dict[str, Any] | None) -> LtpSettings:
 
 
 def _parse_word2vec_settings(data: dict[str, Any] | None) -> Word2VecSettings:
-    """2026-08-30 用于解析词向量配置并提供共享模型目录默认值"""
+    """解析词向量配置并提供共享模型目录默认值"""
     if not data:
         return Word2VecSettings()
     return Word2VecSettings(
@@ -240,7 +238,7 @@ def apply_linguistic_environment(
     ltp_environment: LtpEnvironment | None,
 ) -> None:
     """
-    2026-08-28 用于把 LTP 环境变量映射到语言结构配置；
+    把 LTP 环境变量映射到语言结构配置；
     None 表示该组未配置，model_dir 保持为空（LTP 加载时报错）
     """
 
@@ -274,8 +272,7 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
     surface_tension_weights = data.get("surface_tension_weights")
     lowess_bandwidth = data.get("lowess_bandwidth", 0.02)
     lowess_min_points = data.get("lowess_min_points", 7)
-    # 2026-08-15 M3：非正带宽在平滑入口会快速失败（自适应扩窗 h *= 2.0 恒不变），
-    # 配置层提前校验避免分析中途崩溃；带宽是全文比例，>1 已无窗口意义
+    # 带宽是全文比例，值域 (0, 1]；配置层提前校验以避免分析中途崩溃
     if isinstance(lowess_bandwidth, bool) or not isinstance(lowess_bandwidth, (int, float)):
         raise ValueError(f"lowess_bandwidth 必须是数值，当前值: {lowess_bandwidth!r}")
     if not 0 < lowess_bandwidth <= 1:
@@ -298,9 +295,7 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
 @dataclass
 class ParagraphSettings:
     """
-    段落事实源配置
-
-    说明: paragraphs 是 run 内段落身份的唯一事实源
+    段落事实源配置：paragraphs 是 run 内段落身份的唯一事实源
     """
 
     max_chars: int = 1500

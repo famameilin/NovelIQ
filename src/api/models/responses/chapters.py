@@ -1,9 +1,4 @@
-"""
-章节级响应模型
-
-说明: 自 src/api/models/responses.py 拆出章节指标汇总、章节标注（人物/关系/对话）
-与伏笔树响应模型（设计文档《章节粒度分析指标重设计》§13.2 等），字段与语义保持不变。
-"""
+"""章节级响应模型：章节指标汇总、章节标注（人物/关系/对话）与伏笔树结果视图"""
 
 from typing import Any
 
@@ -30,7 +25,7 @@ class StyleMetricBlock(BaseModel):
 
 
 class ChapterMetricSummary(StyleMetricBlock):
-    """章节汇总（设计文档《章节粒度分析指标重设计》§13.2，由段落充分统计量聚合）"""
+    """章节汇总（由段落充分统计量聚合）"""
 
     chapter_id: int
     paragraph_count: int
@@ -41,7 +36,7 @@ class ChapterMetricSummary(StyleMetricBlock):
 
 
 class BookAggregateStats(StyleMetricBlock):
-    """全书聚合（设计文档《章节粒度分析指标重设计》§13.2）"""
+    """全书聚合"""
 
     total_chapters: int
     total_paragraphs: int
@@ -96,9 +91,7 @@ class ChapterAnnotation(BaseModel):
     cliffhanger: bool | None = None
     has_foreshadowing: bool | None = Field(
         default=None,
-        description=(
-            "本章 是否包含伏笔元素。这是分块级存在性标记，不等于全书伏笔回收预期，更不是严格全文事实回收率。"
-        ),
+        description=("本章 是否包含伏笔元素。这是分块级存在性标记，不等于全书伏笔回收预期，更不是严格全文事实回收率。"),
     )
     is_strong_setup: bool | None = Field(
         default=None,
@@ -107,9 +100,9 @@ class ChapterAnnotation(BaseModel):
     foreshadowing_desc: str | None = None
     why_unresolved_now: str | None = None
     payoff_likelihood: str | None = None
-    # 2026-09-13 伏笔入森林：非埋设章挂树时指向伏笔树根（埋设事件 id）
+    # 非埋设章挂树时指向伏笔树根（埋设事件 id）
     foreshadowing_root_event_id: str | None = None
-    # 2026-09-05 A1：冻结时系统覆盖告警（如对话候选>0但载荷为空），报告附录 B 展示
+    # 冻结时系统覆盖告警（如对话候选>0但载荷为空）
     coverage_warnings: list[str] = []
     characters: list[ChapterCharacter] = []
     relations: list[ChapterRelation] = []
@@ -117,11 +110,7 @@ class ChapterAnnotation(BaseModel):
 
 
 class ForeshadowingTreeResponse(BaseModel):
-    """
-    伏笔树结果视图（2026-09-13 伏笔即事件树）
-
-    说明: 提供伏笔树的稳定 API 响应模型，供诊断 drill-down 和结果导出复用
-    """
+    """伏笔树结果视图（伏笔即事件树），供诊断 drill-down 和结果导出复用"""
 
     root_event_id: str
     tree_id: str

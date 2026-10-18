@@ -1,4 +1,4 @@
-"""2026-09-10 设置模块 API 契约（/api/settings）
+"""设置模块 API 契约（/api/settings）
 
 设置页三条通道：
 - 字段注册表 + 生效值视图（schema 驱动表单）
@@ -27,7 +27,7 @@ class SettingSectionSpecResponse(BaseModel):
 class SettingFieldSpecResponse(BaseModel):
     """单个可调参数声明（path 是 settings.json 中的结构化路径，dict 键可含点不做字符串拼接约定）"""
 
-    path: list[str] = Field(description="结构化路径，如 [\"models\", \"annotation\", \"temperature\"]")
+    path: list[str] = Field(description='结构化路径，如 ["models", "annotation", "temperature"]')
     field_type: SettingFieldType = Field(description="字段类型，驱动前端控件选择")
     label: str = Field(description="展示名")
     description: str = Field(default="", description="字段说明")
@@ -73,10 +73,8 @@ class TaskEnvPatchRequest(BaseModel):
 
 
 class ModelPoolEntryRequest(BaseModel):
-    """池内模型的完整配置；已有模型 Key 缺省时保留，不接收打码值
-
-    2026-10-02 设置迁移：temperature/top_p/max_tokens 随模型保存，
-    不再经参数设置接口按任务配置。
+    """池内模型的完整配置；已有模型 Key 缺省时保留，不接收打码值。
+    采样参数（temperature/top_p/max_tokens）随模型保存。
     """
 
     model_config = ConfigDict(extra="forbid")

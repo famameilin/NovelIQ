@@ -292,7 +292,7 @@ describe("streamStore LRU 淘汰", () => {
     }
   }
 
-  it("淘汰按 lastUpdatedAt 找最旧条目删除，而非插入序首个（活跃流不被淘汰，P2-4 修复）", () => {
+  it("淘汰按 lastUpdatedAt 找最旧条目删除，而非插入序首个（活跃流不被淘汰）", () => {
     vi.useFakeTimers();
     try {
       withSmallCacheSize(3, () => {
@@ -392,7 +392,7 @@ describe("streamStore 进度回填章 scope 保护", () => {
     useStreamStore.getState().reset();
   });
 
-  it("2026-08-15 M5：回填缺 chapter_id 时保留 annotate 期间的真实章 scope", () => {
+  it("回填缺 chapter_id 时保留 annotate 期间的真实章 scope", () => {
     const store = useStreamStore.getState();
     store.updateProgress(
       createLLMEvent({ action: "progress", stage: "annotate", chapter_id: 7, percent: 20 }),
@@ -413,7 +413,7 @@ describe("streamStore 进度回填章 scope 保护", () => {
     expect(useStreamStore.getState().progress?.chapter_id).toBe(7);
   });
 
-  it("2026-08-15 M5：携带真实 chapter_id 的进度事件仍正常覆写", () => {
+  it("携带真实 chapter_id 的进度事件仍正常覆写", () => {
     const store = useStreamStore.getState();
     store.updateProgress(
       createLLMEvent({ action: "progress", stage: "annotate", chapter_id: 7, percent: 20 }),

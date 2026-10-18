@@ -1,7 +1,6 @@
-"""
-自研字符坐标稳健局部回归（LOWESS）测试
+"""自研字符坐标稳健局部回归（LOWESS）测试
 
-覆盖《章节粒度分析指标重设计》§9.3 与任务契约：
+覆盖任务契约：
 常数输入、线性保持、不等距 x、n<min_points 返回原始、窗口自适应扩大、
 样本权重生效、空输入、长度不匹配 ValueError、robust 迭代对离群点不敏感
 """
@@ -26,7 +25,7 @@ class TestRobustLocalRegression:
             robust_local_regression([0.0, 1.0, 2.0], [1.0, 2.0, 3.0], weights=[1.0, 1.0])
 
     def test_fewer_than_min_points_returns_original(self) -> None:
-        """n < min_points 返回原始序列（§9.3 第 4 条，不生成常数线）"""
+        """n < min_points 返回原始序列（不生成常数线）"""
         x = [0.0, 0.5, 1.0]
         y = [3.0, -1.0, 7.0]
         assert robust_local_regression(x, y) == y
@@ -55,9 +54,8 @@ class TestRobustLocalRegression:
             assert fitted == pytest.approx(yi, abs=1e-6)
 
     def test_adaptive_window_expansion_for_sparse_points(self) -> None:
-        """
-        窗口自适应扩大：远离簇的孤立点初始窗口只有自身，
-        点过少时带宽 ×2 直到覆盖足够点（§9.3 第 3 条）
+        """窗口自适应扩大：远离簇的孤立点初始窗口只有自身，
+        点过少时带宽 ×2 直到覆盖足够点
         """
         x = [0.0, 0.49, 0.51, 0.53, 0.55, 0.57, 0.59, 1.0]
         y = [0.0] * 7 + [10.0]
@@ -68,8 +66,7 @@ class TestRobustLocalRegression:
         assert result[7] < 5.0
 
     def test_sample_weights_zero_point_does_not_pull(self) -> None:
-        """
-        样本权重生效：权重为 0 的离群点不拉偏邻域拟合
+        """样本权重生效：权重为 0 的离群点不拉偏邻域拟合
 
         前 10 点 y=0 权重 1，后 10 点 y=10 权重 0：
         x=0.75 处的拟合只由左侧 y=0 的点决定
@@ -86,8 +83,7 @@ class TestRobustLocalRegression:
         assert all(math.isfinite(v) for v in weighted)
 
     def test_robust_iterations_insensitive_to_outlier(self) -> None:
-        """
-        robust 迭代对离群点不敏感：单个离群点不会拉弯整体
+        """robust 迭代对离群点不敏感：单个离群点不会拉弯整体
 
         线性趋势 + 小幅噪声中注入一个 y 离群点；robust_iters=3 时
         该点拟合值应回到趋势线附近（bisquare 残差权重将其剔除）
@@ -112,7 +108,7 @@ class TestRobustLocalRegression:
         assert robust_result[-1] == pytest.approx(3.0, abs=1.0)
 
     def test_zero_bandwidth_raises_instead_of_hanging(self) -> None:
-        """2026-08-15 M3 回归：带宽 ≤ 0 时入口快速失败（此前扩窗 ×2 恒不变会死循环）"""
+        """带宽 ≤ 0 时入口快速失败"""
         x = [float(i) / 9 for i in range(10)]
         y = [float(i) for i in range(10)]
         with pytest.raises(ValueError, match="bandwidth must be positive"):
@@ -121,7 +117,7 @@ class TestRobustLocalRegression:
             robust_local_regression(x, y, bandwidth=-0.02)
 
     def test_min_points_below_one_raises(self) -> None:
-        """2026-08-15 M3 回归：min_points < 1 同样在入口拒绝"""
+        """min_points < 1 同样在入口拒绝"""
         x = [float(i) / 9 for i in range(10)]
         y = [float(i) for i in range(10)]
         with pytest.raises(ValueError, match="min_points"):

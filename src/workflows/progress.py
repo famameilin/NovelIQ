@@ -1,15 +1,10 @@
 """
 分析进度事件总线
 
-说明:
-  - AnalysisEventBus: 持有 stage/sub_stage/chapter_id 上下文，补全事件字段后
-    经展示通道发送，并把阶段进度写回运行状态
-  - SSE 事件名与展示消息契约分别由 src/agents/stream_events.py 与
-    src/agents/event_manager.py 提供
-
-核心设计:
-  所有事件走同一条路径，Event Bus 持有上下文，LLM 输出不再是旁路，
-  自动获得完整上下文后统一发送
+- AnalysisEventBus: 持有 stage/sub_stage/chapter_id 上下文，补全事件字段后
+  经展示通道发送，并把阶段进度写回运行状态
+- SSE 事件名与展示消息契约分别由 src/agents/stream_events.py 与
+  src/agents/event_manager.py 提供
 """
 
 from __future__ import annotations
@@ -38,8 +33,7 @@ _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "work_saved": "pipeline_progress",
 }
 
-# preprocess 的 paragraph embedding 子阶段按 embedding batch 高频发 progress 事件；
-# 若继续落到 INFO，会把控制台刷满并淹没真正有诊断价值的阶段切换日志
+# embedding batch 类高频 progress 事件若落到 INFO 会刷屏并淹没阶段切换日志
 _DEBUG_PROGRESS_SUB_STAGES = {
     "paragraph_embedding",
 }
@@ -72,15 +66,7 @@ def stage_progress_percent(stage: str, current: int, total: int) -> float:
 
 
 class AnalysisEventBus:
-    """
-    分析事件总线
-
-    职责:
-    1. 持有当前 stage/sub_stage/chapter_id 上下文
-    2. 自动补全事件缺失的字段
-    3. 统一发送到 SSE（唯一发送口）
-    4. 同步更新 TaskManager 状态
-    """
+    """分析事件总线：唯一 SSE 发送口，统一补全上下文并同步 TaskManager 状态"""
 
     def __init__(self, task_id: str, task_manager: TaskManager) -> None:
         self.task_id = task_id
@@ -97,14 +83,7 @@ class AnalysisEventBus:
 
     async def emit(self, event: StreamEvent) -> None:
         """
-        发送事件：补全上下文 → 翻译为 SSE → 发送
-
-        子规则:
-        - 如果事件提供了 stage/sub_stage/chapter_id，更新总线上下文
-        - 如果事件缺失这些字段，用总线当前上下文补全
-        - 将 action 翻译为 SSE event type
-        - 调用 event_manager.send() 唯一发送口
-        - 同步更新 TaskManager
+        发送事件：补全上下文 → 翻译为 SSE → 发送，并同步 TaskManager
         """
         # 补全上下文：构建新事件对象，避免修改原始事件
         resolved_stage = event.stage or self._stage
@@ -169,8 +148,8 @@ class AnalysisEventBus:
             )
             sse_event_type = "message"
 
-        # LLM 流式正文/思考片段/工具调用，以及 embedding batch 这类高频 progress，
-        # 都降到 DEBUG，避免 INFO 被细粒度增量日志刷屏；普通阶段开始/完成仍保留 INFO
+        # LLM 流式片段与 embedding batch 类高频 progress 降到 DEBUG，
+        # 普通阶段开始/完成仍保留 INFO
         log_level = (
             logger.debug
             if resolved_event.action in {"output", "thinking", "tool_call"}
@@ -194,28 +173,24 @@ class AnalysisEventBus:
 
         # 同步更新 TaskManager
         if resolved_event.action in ("start", "progress", "complete"):
-            # 这里不能再吞掉异常；如果 DB 写回失败，就必须让任务主链感知并按失败路径收口，
-            # 否则会重新回到“内存继续跑、DB 状态滞后”的双真相源
+            # 不能吞异常：DB 写回失败必须让任务主链感知并按失败路径收口
             task_update_kwargs: dict[str, Any] = {
                 "stage": resolved_event.stage,
                 "sub_stage": resolved_event.sub_stage,
                 "message": resolved_event.message,
             }
-            # EventBus 的 None 表示“当前事件未提供该字段”，不是“把数据库字段清空”
-            # 对非空进度列必须只在确实拿到值时才写回，避免 start 事件把 current=None 落库
+            # None 表示“当前事件未提供该字段”，不是“把数据库字段清空”：
+            # 非空进度列只在确实拿到值时才写回
             if resolved_event.current is not None:
                 task_update_kwargs["current"] = resolved_event.current
-            # 2026-08-13 P2：total=0 是「未提供」的非法值（默认 0 曾把 analysis_runs.total
-            # 从 100 清成 0），只有 >0 才写回数据库
+            # total=0 是「未提供」的非法值，只有 >0 才写回数据库
             if resolved_total is not None and resolved_total > 0:
                 task_update_kwargs["total"] = resolved_total
             if resolved_event.percent is not None:
                 task_update_kwargs["progress"] = resolved_event.percent
 
-            # 2026-10-03 DB 写回移出事件循环：update_task 的同步 UPDATE 一旦撞上行锁
-            # （如 require_released_cutoff 曾把 FOR SHARE 持有整个 diagnose 阶段）会在
-            # 事件循环线程上等满语句超时——整个 API（SSE/health/所有端点）随之冻结。
-            # to_thread 只阻塞本事件处理，异常仍原样上抛给任务主链。
+            # DB 写回移出事件循环：update_task 的同步 UPDATE 撞上行锁会在事件循环线程上
+            # 等满语句超时（整个 API 冻结）；to_thread 只阻塞本事件处理，异常仍上抛任务主链
             import asyncio
 
             await asyncio.to_thread(self.task_manager.update_task, self.task_id, **task_update_kwargs)
@@ -229,15 +204,7 @@ class AnalysisEventBus:
         """
         根据阶段和当前进度计算全局 percent
 
-        说明: 当事件没有提供 percent 时，根据 current/total 和阶段范围自动计算
-
-        各阶段进度范围:
-        - preprocess: 0-10%
-        - annotate: 10-75%
-        - linguistic: 75-80%
-        - aggregate: 80-90%
-        - topic-model: 90-95%
-        - diagnose: 95-100%
+        阶段进度范围取 settings.progress 配置
         """
         return stage_progress_percent(stage, current, total)
 
@@ -255,9 +222,8 @@ class AnalysisEventBus:
         self._sub_stage = ""
         self._chapter_id = 0
         self._sub_percent = 0.0
-        # 2026-08-13 P2：阶段边界作废旧阶段的 current/total/percent 上下文，
-        # 否则新阶段内不带进度字段的事件会沿用旧阶段数值套新阶段区间算错 percent，
-        # 且 complete 事件会把 stale current/total 写回数据库
+        # 阶段边界作废旧阶段的 current/total/percent 上下文，避免新阶段沿用旧数值
+        # 算错 percent，或 complete 事件把 stale current/total 写回数据库
         self._current = None
         self._total = None
         self._percent = percent
@@ -275,8 +241,7 @@ class AnalysisEventBus:
     async def emit_stage_complete(self, stage: str) -> None:
         """发送阶段完成事件"""
         self._sub_percent = 100.0
-        # 2026-08-13 P2：完成事件显式带 percent，旧阶段的 current/total 上下文
-        # 不得随事件写回数据库（complete 事件本身不含进度数值）
+        # 完成事件显式带 percent；旧阶段的 current/total 上下文不得随事件写回数据库
         self._current = None
         self._total = None
         _, stage_end_percent = _stage_percent_range(stage)

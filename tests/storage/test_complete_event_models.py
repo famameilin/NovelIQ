@@ -1,4 +1,4 @@
-"""完整事件存储契约测试（2026-10-16 全库 3NF 改造）
+"""完整事件存储契约测试
 
 覆盖新关系的建表冒烟、候选键/唯一约束与 CheckConstraint/领域触发器在 DB 级的
 生效：complete_events + 真实生产执行、event_revisions 显式连续阶段链与声明绑定、
@@ -8,13 +8,12 @@ narrative_links 单父包含与语义端点的互斥形状、冲突主体/陈述
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from src.storage import new_id
 from src.storage.models import (
     AnalysisRun,
     Base,
@@ -37,6 +36,7 @@ from src.storage.models import (
     WorkItem,
     naive_utcnow,
 )
+from tests.support.storage_fixtures import natural_record
 
 CONTRACT = "event-tree-declarations-v1"
 
@@ -63,8 +63,8 @@ class _Fixture:
 
     def __init__(self, session: Session, *, title: str, chapters: int = 1) -> None:
         self.session = session
-        self.novel_id = uuid.uuid4().hex[:8]
-        self.run_id = str(uuid.uuid4())
+        self.novel_id = new_id()
+        self.run_id = new_id()
         session.add(
             Novel(
                 novel_id=self.novel_id,
@@ -126,7 +126,7 @@ class _Fixture:
             paragraph_id += 1
         # 章节与段落先落库；标注执行直接携带 run/章/角色，不再有标注 work 身份
         session.flush()
-        self.annotation_execution_id = uuid.uuid4().hex
+        self.annotation_execution_id = new_id()
         session.add(
             Execution(
                 execution_id=self.annotation_execution_id,
@@ -139,7 +139,7 @@ class _Fixture:
             )
         )
         session.flush()
-        self.record_id = str(uuid.uuid4())
+        self.record_id = new_id()
         session.add(
             ChapterAnnotation(
                 record_id=self.record_id,
@@ -153,8 +153,8 @@ class _Fixture:
             )
         )
         # 诊断整轮会话与报告角色真实尝试：完整事件与关系的真实生产者
-        self.session_id = f"diagnosis-session-{self.novel_id}"
-        self.execution_id = uuid.uuid4().hex
+        self.session_id = new_id()
+        self.execution_id = new_id()
         session.add(
             Execution(
                 execution_id=self.session_id,
@@ -177,16 +177,16 @@ class _Fixture:
 
     def make_declaration(self, chapter_id: int = 1, *, phrase: str = "顾霜", payoff: str | None = None) -> str:
         """插入不可变声明与原文证据（证据区间由真实原文派生）"""
-        declaration_id = str(uuid.uuid4())
+        declaration_id = new_id()
         paragraph_id = self.paragraph_ids[chapter_id - 1]
-        paragraph = self.session.get(Paragraph, {"run_id": self.run_id, "paragraph_id": paragraph_id})
+        paragraph = natural_record(self.session, Paragraph, {"run_id": self.run_id, "paragraph_id": paragraph_id})
         start = str(paragraph.text).find(phrase)
         assert start >= 0
         self.session.add(
             EventDeclaration(
                 declaration_id=declaration_id,
                 record_id=self.record_id,
-                local_key=f"el-{declaration_id[:8]}",
+                local_key=f"el-{declaration_id}",
                 title=f"入山{chapter_id}",
                 problem="能否进入山门",
                 summary=str(paragraph.text),
@@ -201,7 +201,7 @@ class _Fixture:
         self.session.flush()
         self.session.add(
             SourceEvidence(
-                evidence_id=str(uuid.uuid4()),
+                evidence_id=new_id(),
                 ordinal=0,
                 paragraph_id=paragraph_id,
                 start_char=start,
@@ -214,7 +214,7 @@ class _Fixture:
         return declaration_id
 
     def make_event(self, *, local_key: str | None = None) -> str:
-        event_id = str(uuid.uuid4())
+        event_id = new_id()
         self.session.add(
             CompleteEvent(
                 event_id=event_id,
@@ -227,7 +227,7 @@ class _Fixture:
         return event_id
 
     def make_revision(self, event_id: str, *, stage_index: int = 0, declaration_id: str | None = None) -> str:
-        revision_id = str(uuid.uuid4())
+        revision_id = new_id()
         if declaration_id is None:
             self.session.add(
                 EventRevision(
@@ -261,12 +261,12 @@ class _Fixture:
             fact_type="character",
             subject_entity_id=None,
             direct_producer_execution_id=self.execution_id,
-            source_operation_key=f"op-{uuid.uuid4().hex[:8]}",
+            source_operation_key=f"op-{new_id()}",
             created_at=naive_utcnow(),
         )
         self.session.add(fact)
         self.session.flush()
-        return int(fact.graph_fact_id)
+        return fact.graph_fact_id
 
 
 def _fixture(session: Session, title: str, chapters: int = 1) -> _Fixture:
@@ -316,7 +316,7 @@ def test_containment_single_parent_violates_unique_child(db_session: Session) ->
     child = fixture.make_event(local_key="child")
     db_session.add(
         NarrativeLink(
-            link_id=str(uuid.uuid4()),
+            link_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="首次归属",
             contained_child_id=child,
@@ -326,7 +326,7 @@ def test_containment_single_parent_violates_unique_child(db_session: Session) ->
     db_session.commit()
     db_session.add(
         NarrativeLink(
-            link_id=str(uuid.uuid4()),
+            link_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="重复归属",
             contained_child_id=child,
@@ -344,7 +344,7 @@ def test_containment_self_reference_violates_ck(db_session: Session) -> None:
     event_id = fixture.make_event()
     db_session.add(
         NarrativeLink(
-            link_id=str(uuid.uuid4()),
+            link_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="自含",
             contained_child_id=event_id,
@@ -362,7 +362,7 @@ def test_containment_cycle_is_rejected_by_trigger(db_session: Session) -> None:
     first, second = fixture.make_event(local_key="a"), fixture.make_event(local_key="b")
     db_session.add(
         NarrativeLink(
-            link_id=str(uuid.uuid4()),
+            link_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="首次归属",
             contained_child_id=second,
@@ -372,7 +372,7 @@ def test_containment_cycle_is_rejected_by_trigger(db_session: Session) -> None:
     db_session.commit()
     db_session.add(
         NarrativeLink(
-            link_id=str(uuid.uuid4()),
+            link_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="反向归属成环",
             contained_child_id=first,
@@ -410,7 +410,7 @@ def test_revision_source_shape_is_exclusive(db_session: Session) -> None:
     event_id = fixture.make_event()
     db_session.add(
         EventRevision(
-            revision_id=str(uuid.uuid4()),
+            revision_id=new_id(),
             event_id=event_id,
             stage_index=0,
             declaration_id=declaration,
@@ -449,7 +449,7 @@ def test_semantic_relation_requires_exclusive_endpoint_kinds(db_session: Session
     target = fixture.make_event(local_key="target")
     db_session.add(
         NarrativeLink(
-            link_id=str(uuid.uuid4()),
+            link_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="缺目标端点",
             semantic_source_event_id=source,
@@ -462,7 +462,7 @@ def test_semantic_relation_requires_exclusive_endpoint_kinds(db_session: Session
     db_session.rollback()
     db_session.add(
         NarrativeLink(
-            link_id=str(uuid.uuid4()),
+            link_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="混入包含列",
             semantic_source_event_id=source,
@@ -484,7 +484,7 @@ def test_semantic_relation_operation_is_idempotent(db_session: Session) -> None:
     target = fixture.make_event(local_key="target")
     db_session.add(
         NarrativeLink(
-            link_id=str(uuid.uuid4()),
+            link_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="显式判断",
             semantic_source_event_id=source,
@@ -496,7 +496,7 @@ def test_semantic_relation_operation_is_idempotent(db_session: Session) -> None:
     db_session.commit()
     db_session.add(
         NarrativeLink(
-            link_id=str(uuid.uuid4()),
+            link_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="重复操作",
             semantic_source_event_id=source,
@@ -517,7 +517,7 @@ def test_organization_check_pair_unique_and_direction(db_session: Session) -> No
     target = fixture.make_event(local_key="target")
     db_session.add(
         OrganizationCheck(
-            check_id=str(uuid.uuid4()),
+            check_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="无包含或因果关系",
             source_event_id=source,
@@ -529,7 +529,7 @@ def test_organization_check_pair_unique_and_direction(db_session: Session) -> No
     db_session.commit()
     db_session.add(
         OrganizationCheck(
-            check_id=str(uuid.uuid4()),
+            check_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="重复判断",
             source_event_id=source,
@@ -543,7 +543,7 @@ def test_organization_check_pair_unique_and_direction(db_session: Session) -> No
     db_session.rollback()
     db_session.add(
         OrganizationCheck(
-            check_id=str(uuid.uuid4()),
+            check_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="反向重复",
             source_event_id=target,
@@ -564,7 +564,7 @@ def test_organization_check_declaration_pair_unique(db_session: Session) -> None
     target = fixture.make_declaration(chapter_id=1, phrase="山门")
     db_session.add(
         OrganizationCheck(
-            check_id=str(uuid.uuid4()),
+            check_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="两项声明是独立问题",
             source_declaration_id=source,
@@ -575,7 +575,7 @@ def test_organization_check_declaration_pair_unique(db_session: Session) -> None
     db_session.commit()
     db_session.add(
         OrganizationCheck(
-            check_id=str(uuid.uuid4()),
+            check_id=new_id(),
             producer_execution_id=fixture.execution_id,
             reason="重复判断",
             source_declaration_id=source,
@@ -592,7 +592,7 @@ def test_conflict_requires_two_claims_and_single_subject(db_session: Session) ->
     """冲突至少两条独立陈述（延迟触发器），主体三类恰一"""
     fixture = _fixture(db_session, "冲突主体")
     event_id = fixture.make_event()
-    conflict_id = str(uuid.uuid4())
+    conflict_id = new_id()
     db_session.add(
         ConflictRecord(
             conflict_id=conflict_id,
@@ -604,7 +604,7 @@ def test_conflict_requires_two_claims_and_single_subject(db_session: Session) ->
     db_session.flush()
     db_session.add(
         ConflictClaim(
-            claim_id=str(uuid.uuid4()),
+            claim_id=new_id(),
             conflict_id=conflict_id,
             claim_ordinal=0,
             producer_execution_id=fixture.execution_id,
@@ -615,7 +615,7 @@ def test_conflict_requires_two_claims_and_single_subject(db_session: Session) ->
         db_session.commit()
     db_session.rollback()
 
-    second = str(uuid.uuid4())
+    second = new_id()
     declaration = fixture.make_declaration(chapter_id=1)
     db_session.add(
         ConflictRecord(
@@ -635,7 +635,7 @@ def test_conflict_claims_keep_independent_ordinals(db_session: Session) -> None:
     """各条陈述的序号唯一且各自保留自己的生产者"""
     fixture = _fixture(db_session, "冲突陈述")
     event_id = fixture.make_event()
-    conflict_id = str(uuid.uuid4())
+    conflict_id = new_id()
     declaration = fixture.make_declaration(chapter_id=1)
     db_session.add(
         ConflictRecord(
@@ -649,7 +649,7 @@ def test_conflict_claims_keep_independent_ordinals(db_session: Session) -> None:
     for ordinal, text in enumerate(("等待十年", "等待十四年")):
         db_session.add(
             ConflictClaim(
-                claim_id=str(uuid.uuid4()),
+                claim_id=new_id(),
                 conflict_id=conflict_id,
                 claim_ordinal=ordinal,
                 producer_execution_id=fixture.execution_id,
@@ -665,7 +665,7 @@ def test_conflict_claims_keep_independent_ordinals(db_session: Session) -> None:
     assert [row.claim_text for row in rows] == ["等待十年", "等待十四年"]
     db_session.add(
         ConflictClaim(
-            claim_id=str(uuid.uuid4()),
+            claim_id=new_id(),
             conflict_id=conflict_id,
             claim_ordinal=0,
             producer_execution_id=fixture.execution_id,
@@ -684,7 +684,7 @@ def test_foreshadowing_action_operation_and_type_constraints(db_session: Session
     declaration = fixture.make_declaration(chapter_id=1, payoff="high")
     db_session.add(
         EventForeshadowingAction(
-            action_id=str(uuid.uuid4()),
+            action_id=new_id(),
             producer_execution_id=fixture.execution_id,
             source_operation_local_key="setup-1",
             operation_order=1,
@@ -695,7 +695,7 @@ def test_foreshadowing_action_operation_and_type_constraints(db_session: Session
     db_session.commit()
     db_session.add(
         EventForeshadowingAction(
-            action_id=str(uuid.uuid4()),
+            action_id=new_id(),
             producer_execution_id=fixture.execution_id,
             source_operation_local_key="setup-1",
             operation_order=2,
@@ -708,7 +708,7 @@ def test_foreshadowing_action_operation_and_type_constraints(db_session: Session
     db_session.rollback()
     db_session.add(
         EventForeshadowingAction(
-            action_id=str(uuid.uuid4()),
+            action_id=new_id(),
             producer_execution_id=fixture.execution_id,
             source_operation_local_key="setup-2",
             operation_order=2,
@@ -728,7 +728,7 @@ def test_evidence_char_order_and_single_owner(db_session: Session) -> None:
     declaration = fixture.make_declaration(chapter_id=1)
     db_session.add(
         SourceEvidence(
-            evidence_id=str(uuid.uuid4()),
+            evidence_id=new_id(),
             ordinal=0,
             paragraph_id=0,
             start_char=3,
@@ -741,7 +741,7 @@ def test_evidence_char_order_and_single_owner(db_session: Session) -> None:
     db_session.rollback()
     db_session.add(
         SourceEvidence(
-            evidence_id=str(uuid.uuid4()),
+            evidence_id=new_id(),
             ordinal=0,
             paragraph_id=0,
             start_char=0,
@@ -761,7 +761,7 @@ def test_evidence_paragraph_must_belong_to_owner_run(db_session: Session) -> Non
     event_id = fixture.make_event()
     db_session.add(
         SourceEvidence(
-            evidence_id=str(uuid.uuid4()),
+            evidence_id=new_id(),
             ordinal=0,
             paragraph_id=999,
             start_char=0,
@@ -777,7 +777,7 @@ def test_evidence_paragraph_must_belong_to_owner_run(db_session: Session) -> Non
 def test_narrative_group_parent_must_be_line_and_acyclic(db_session: Session) -> None:
     """父线只能指向线形状节点，父链不得成环"""
     fixture = _fixture(db_session, "叙事线父链")
-    outcome_id = str(uuid.uuid4())
+    outcome_id = new_id()
     db_session.add(
         NarrativeGroup(
             group_id=outcome_id,
@@ -789,7 +789,7 @@ def test_narrative_group_parent_must_be_line_and_acyclic(db_session: Session) ->
     db_session.flush()
     db_session.add(
         NarrativeGroup(
-            group_id=str(uuid.uuid4()),
+            group_id=new_id(),
             producer_execution_id=fixture.execution_id,
             title="身份线",
             arc_kind="main",
@@ -809,7 +809,7 @@ def test_execution_shape_is_single_type(db_session: Session) -> None:
     fixture = _fixture(db_session, "执行形状")
     db_session.add(
         Execution(
-            execution_id=uuid.uuid4().hex,
+            execution_id=new_id(),
             session_run_id=fixture.run_id,
             session_created_at=naive_utcnow(),
             run_id=fixture.run_id,
@@ -830,7 +830,7 @@ def test_work_item_shape_is_single_kind(db_session: Session) -> None:
     # 诊断失败保留程序形状（diagnosis_session + program_code）本身可保存
     db_session.add(
         WorkItem(
-            work_id=f"diagnosis-pending-{fixture.novel_id}",
+            work_id=new_id(),
             diagnosis_session_id=fixture.session_id,
             program_code="diagnosis_retain",
         )
@@ -838,12 +838,12 @@ def test_work_item_shape_is_single_kind(db_session: Session) -> None:
     db_session.flush()
     db_session.add(
         WorkItem(
-            work_id=f"bad-work-{uuid.uuid4().hex[:8]}",
+            work_id=new_id(),
             diagnosis_session_id=fixture.session_id,
             program_run_id=fixture.run_id,
             program_chapter_id=1,
             program_code="chapter_check",
-            program_invocation_key=f"chapter:1:{uuid.uuid4().hex[:8]}",
+            program_invocation_key=f"chapter:1:{new_id()}",
         )
     )
     with pytest.raises(IntegrityError):

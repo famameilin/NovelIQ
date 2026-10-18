@@ -1,4 +1,9 @@
-"事实图谱 ORM 模型（2026-10-16 全库 3NF 改造）"
+"""
+事实图谱 ORM 模型
+
+operation kind 由具体列形状表达，不存由引用决定的重复 operation_code；
+graph 与 plotline 两个列表都从 0 开始，不能用 producer+order 作全表键。
+"""
 
 from __future__ import annotations
 

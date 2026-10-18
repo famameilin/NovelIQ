@@ -39,7 +39,7 @@ def load_core_results(
     """
     加载核心结果数据：paragraph_curves、缺失字段
 
-    2026-08-14 M8a：results export 是复盘/比对用 payload，必须返回段落事实源
+    export 是复盘/比对用 payload，必须返回段落事实源
     持久化原值（fetch_paragraph_rows + fetch_paragraph_curves 按 paragraph_id
     对齐，max_points 不限制），不经过展示层降采样。
 
@@ -110,18 +110,15 @@ def load_chapter_bundle(
     """
     加载分块相关数据
 
-    2026-08-14 M8a：chunk_styles 已从 export 移除（前端 M4 已切换段落端点，
-    风格消费在 M8b 段落化切换后再处理）。
-
     Returns:
         (topics, chapter_annotations, missing_fields)
     """
     missing_fields: list[str] = []
 
-    # 2026-08-14 切换段落：主题聚合源改为 paragraph_topics token 加权聚合（§11.1）
+    # 切换段落：主题聚合源改为 paragraph_topics token 加权聚合
     paragraph_repo = annotation_repo.paragraphs
     topics = _fetch_topics(run_id, paragraph_repo)
-    # 2026-09-05 A6：artifact 缺失导致聚合被静默清空时，给出显式原因进 missing_fields
+    # A6：artifact 缺失导致聚合被静默清空时，给出显式原因进 missing_fields
     if not topics:
         from src.topic.artifacts import describe_topics_unavailability
 

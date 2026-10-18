@@ -13,7 +13,7 @@ from src.storage.records.audit_documents import encode_document, encode_text_doc
 from src.storage.repositories.queries.audit_queries import run_agent_execution_ids
 
 _PROVIDER_REQUEST_STARTED_NOTE = "provider_request_started"
-_ORPHAN_INTERRUPT_ERROR = "进程重启遗留：回合未正常收口"
+_ORPHAN_UNPERSISTED_ERROR = "正常结束前未落库"
 _TIMING_COLUMNS: dict[str, str] = {
     "ttft": "ttft_ms",
     "first_visible": "first_visible_ms",
@@ -262,11 +262,31 @@ class AuditRepository:
         self._commit(session)
 
     def close_orphaned_turns(self, run_id: str) -> int:
-        "用于分析环境初始化时收口本 run 遗留的 running 执行与调用"
+        """分析环境初始化时按落库事实收口本 run 遗留的 running 执行与调用
+
+        运行已有正式诊断报告（诊断产物落库）时，其残留诊断会话行按成功收口；
+        其余未落库的回合按未落库收口。审计是事实记录，只补状态不删除。
+        返回值是本次收口的调用行与执行行总数。
+        """
         execution_ids = run_agent_execution_ids(run_id)
         now = self._utcnow()
         session = self._session
         try:
+            settled = 0
+            if self._run_has_published_diagnosis(session, run_id):
+                from src.storage.models.work import DIAGNOSIS_ROLES
+
+                completed = session.execute(
+                    update(Execution)
+                    .where(
+                        Execution.execution_id.in_(execution_ids),
+                        Execution.role.in_(DIAGNOSIS_ROLES),
+                        Execution.status == "running",
+                        Execution.finished_at.is_(None),
+                    )
+                    .values(status="success", finished_at=now)
+                )
+                settled = int(completed.rowcount or 0)
             calls = session.execute(
                 update(ModelCall)
                 .where(
@@ -274,7 +294,7 @@ class AuditRepository:
                     ModelCall.status == "running",
                     ModelCall.finished_at.is_(None),
                 )
-                .values(status="interrupted", error=_ORPHAN_INTERRUPT_ERROR, finished_at=now)
+                .values(status="error", error=_ORPHAN_UNPERSISTED_ERROR, finished_at=now)
             )
             executions = session.execute(
                 update(Execution)
@@ -283,10 +303,10 @@ class AuditRepository:
                     Execution.status == "running",
                     Execution.finished_at.is_(None),
                 )
-                .values(status="interrupted", error=_ORPHAN_INTERRUPT_ERROR, finished_at=now)
+                .values(status="error", error=_ORPHAN_UNPERSISTED_ERROR, finished_at=now)
             )
             session.flush()
-            return int(calls.rowcount or 0) + int(executions.rowcount or 0)
+            return settled + int(calls.rowcount or 0) + int(executions.rowcount or 0)
         finally:
             pass
 
@@ -364,5 +384,17 @@ class AuditRepository:
         if cost is not None:
             call.cost = float(cost)
 
+    @staticmethod
+    def _run_has_published_diagnosis(session: Any, run_id: str) -> bool:
+        """本 run 的诊断产物落库事实：正式诊断报告存在"""
+        from src.storage.models import DiagnosisReport
 
-__all__ = ["AuditRepository"]
+        return (
+            session.scalar(
+                select(DiagnosisReport.report_id)
+                .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
+                .where(Execution.session_run_id == run_id)
+                .limit(1)
+            )
+            is not None
+        )

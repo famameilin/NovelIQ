@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.api.services.results_queries.metadata import _fetch_token_usage_stats as serialize_token_usage
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 def _fetch_token_usage_stats(run_id, source):
@@ -12,19 +13,14 @@ def _fetch_token_usage_stats(run_id, source):
         "src.api.services.results_queries.metadata.fetch_token_usage_stats",
         side_effect=lambda session, identifier: source.fetch_token_usage_stats(identifier),
     ):
-        return serialize_token_usage(run_id, SimpleNamespace(session=object()))
+        return serialize_token_usage(run_id, storage_for(SimpleNamespace(session=object())))
 
 
 class _StatsRepoStub:
-    """
-    结果页 token_usage fetcher 的最小 repo stub。
-
-    创建时间: 2026-04-22
-    任务: unify-estimated-token-accounting
-    """
+    """结果页 token_usage fetcher 的最小 repo stub。"""
 
     def fetch_token_usage_stats(self, run_id: str) -> dict:
-        assert run_id == "run-1"
+        assert run_id == fixture_id(__name__, "run-1")
         return {
             "summary": {
                 "call_count": 3,
@@ -50,12 +46,8 @@ class _StatsRepoStub:
 
 
 def test_fetch_token_usage_stats_exposes_coverage_fields() -> None:
-    """
-    创建时间: 2026-04-22
-    任务: unify-estimated-token-accounting
-    说明: fetcher 应把新的 accounting / coverage / by_call_type 字段完整暴露给 API。
-    """
-    stats = _fetch_token_usage_stats("run-1", _StatsRepoStub())
+    """fetcher 应把新的 accounting / coverage / by_call_type 字段完整暴露给 API。"""
+    stats = _fetch_token_usage_stats(fixture_id(__name__, "run-1"), _StatsRepoStub())
 
     assert stats.summary.accounting_method == "estimated"
     assert stats.summary.coverage_status == "partial"
@@ -66,18 +58,13 @@ def test_fetch_token_usage_stats_exposes_coverage_fields() -> None:
 
 class _FailingStatsRepoStub:
     def fetch_token_usage_stats(self, run_id: str) -> dict:
-        assert run_id == "run-1"
+        assert run_id == fixture_id(__name__, "run-1")
         raise RuntimeError("boom")
 
 
 def test_fetch_token_usage_stats_marks_partial_when_stats_fetch_fails() -> None:
-    """
-    创建时间: 2026-04-30
-    任务: fix-level3-query-example-review-findings
-    说明: token stats 查询失败时，fetcher 不能假装 coverage complete；
-          至少要把结果标成 partial，并暴露明确的 unavailable gap。
-    """
-    stats = _fetch_token_usage_stats("run-1", _FailingStatsRepoStub())
+    """至少要把结果标成 partial，并暴露明确的 unavailable gap。"""
+    stats = _fetch_token_usage_stats(fixture_id(__name__, "run-1"), _FailingStatsRepoStub())
 
     assert stats.summary.coverage_status == "partial"
     assert stats.coverage_gaps == ["token_usage_stats_unavailable"]
@@ -86,10 +73,12 @@ def test_fetch_token_usage_stats_marks_partial_when_stats_fetch_fails() -> None:
 def test_reported_usage_and_recorded_call_scope_survive_api_serialization() -> None:
     from types import SimpleNamespace
 
-    source = _StatsRepoStub().fetch_token_usage_stats("run-1")
+    source = _StatsRepoStub().fetch_token_usage_stats(fixture_id(__name__, "run-1"))
     source["summary"].update(accounting_method="reported", coverage_status="recorded_calls")
     source["coverage_gaps"] = []
-    result = _fetch_token_usage_stats("run-1", SimpleNamespace(fetch_token_usage_stats=lambda *_: source))
+    result = _fetch_token_usage_stats(
+        fixture_id(__name__, "run-1"), SimpleNamespace(fetch_token_usage_stats=lambda *_: source)
+    )
 
     assert result.summary.total_tokens == 120
     assert result.summary.call_count == 3
@@ -117,7 +106,9 @@ def test_missing_usage_stays_unknown_instead_of_claiming_complete() -> None:
         "by_call_type": {},
         "coverage_gaps": [],
     }
-    result = _fetch_token_usage_stats("run-1", SimpleNamespace(fetch_token_usage_stats=lambda *_: source))
+    result = _fetch_token_usage_stats(
+        fixture_id(__name__, "run-1"), SimpleNamespace(fetch_token_usage_stats=lambda *_: source)
+    )
     assert result.summary.accounting_method == "unknown"
     assert result.summary.coverage_status == "unknown"
     assert result.coverage_gaps == []

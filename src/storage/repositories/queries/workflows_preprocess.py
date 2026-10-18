@@ -1,4 +1,4 @@
-"从 src/workflows/preprocess.py 分离的具名物理读取"
+"workflows preprocess 的具名物理读取"
 
 from __future__ import annotations
 

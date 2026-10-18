@@ -40,8 +40,8 @@ if TYPE_CHECKING:
 def _fetch_chapter_progress_map(session: Storage, run_id: str) -> dict[int, float]:
     """章起点归一化进度：char_offset / max(章正文终点)。缺 offset 的章不入表。
 
-    2026-10-16 全库 3NF 改造：正文终点 = char_offset + 正文精确字符长度（读投影，
-    不再有 char_end_offset 列）；正文与起点同为空（成对约束），空章不参与。
+    正文终点 = char_offset + 正文精确字符长度（读投影）；正文与起点同为空
+    （成对约束），空章不参与。
     """
     total = session.reads.metrics_queries_fetchers_fetch_chapter_progress_map_1(run_id)
     if total is None or int(total) <= 0:
@@ -75,11 +75,7 @@ def _build_aggregate_graph_view(annotation_repo: Storage, run_id: str):
 
 
 def _resolve_aggregate_character_name(*, surface_name: str | None, resolved_global_name: str | None) -> str | None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: aggregate 指标只能消费已准入的全局角色，不能把未解析代词重新混回情绪统计。
-    """
+    """解析角色引用：只消费已准入的全局角色，未解析代词不混回情绪统计。"""
     decision = decide_character_reference(surface_name, resolved_global_name=resolved_global_name)
     return decision.resolved_global_name
 
@@ -101,7 +97,7 @@ def fetch_annotation_data(annotation_repo: Storage, run_id: str) -> AnnotationDa
 
 def fetch_emotion_data(stats_repo: Storage, run_id: str) -> EmotionData:
     """
-    提取每章（chunk）情绪密度（§9.1 守恒聚合，2026-08-14 M8b 段落化）
+    提取每章情绪密度（守恒聚合）
 
     章情绪密度 = 章内段落分子之和 / 分母之和（Σpos/Σtoken、Σneg/Σtoken、
     (Σpos − Σneg)/Σtoken）；token 为 0 的章无有效密度，直接跳过。
@@ -227,7 +223,7 @@ def fetch_text_data(chapter_repo: ChapterStore, run_id: str) -> TextData:
 
 def fetch_tension_data(stats_repo: Storage, run_id: str) -> TensionData:
     """
-    提取每章（chunk）张力（2026-08-14 M8b 段落化）
+    提取每章张力
 
     章张力 = 章内段落 surface_tension 均值（段落值已为 run 内稳健标准化 +
     sigmoid 的 [0,1] 值，直接取均值；无张力数据的章不输出，由调用方兜底）。
@@ -256,7 +252,7 @@ def fetch_dialogue_data(annotation_repo: Storage, run_id: str) -> DialogueData:
 
 def fetch_style_data(chapter_repo: Storage, run_id: str) -> StyleData:
     """
-    提取全书风格指标（§9.1 守恒聚合，2026-08-14 M8b 段落化）
+    提取全书风格指标（守恒聚合）
 
     从段落充分统计量计算全书守恒值：dialogue_ratio = Σdialogue_char_count /
     Σchar_count；avg_sent_len = Σsentence_char_sum / Σsentence_count。

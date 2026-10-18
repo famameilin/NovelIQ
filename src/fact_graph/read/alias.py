@@ -18,7 +18,7 @@ from src.storage.records.graph import EntitySnapshotRow, RelationSnapshotRow
 
 @dataclass(slots=True)
 class AliasResolution:
-    """2026-08-09 用于提供别名实体到代表实体的稳定映射"""
+    """提供别名实体到代表实体的稳定映射"""
 
     representative_by_alias: dict[str, str] = field(default_factory=dict)
     name_to_representative: dict[str, str] = field(default_factory=dict)
@@ -27,13 +27,13 @@ class AliasResolution:
     names_by_entity_id: dict[str, str] = field(default_factory=dict)
 
     def resolve_entity_id(self, entity_id: str | None) -> str | None:
-        """2026-08-09 用于把别名实体 ID 重写为代表实体 ID"""
+        """把别名实体 ID 重写为代表实体 ID"""
         if entity_id is None:
             return None
         return self.representative_by_alias.get(str(entity_id), str(entity_id))
 
     def resolve_name(self, name: str | None) -> str | None:
-        """2026-08-09 用于把别名名称重写为代表名称"""
+        """把别名名称重写为代表名称"""
         if not name:
             return name
         return self.name_to_representative.get(name, name)
@@ -49,8 +49,7 @@ def build_alias_resolution(
     *,
     entities: Sequence[EntitySnapshotRow],
 ) -> AliasResolution:
-    """
-    2026-08-11 用于从 active 的同一人物关系构建别名归并映射
+    """从 active 的同一人物关系构建别名归并映射
 
     代表优先使用实体 is_representative 标记，否则按分量内最小 entity_id 确定
     """

@@ -1,4 +1,4 @@
-"""LTP 语言结构服务（《分析能力扩展路线图》赛道 C1/C2）
+"""LTP 语言结构服务
 
 - LtpSession 懒加载 LTP 模型（必须配置本地离线模型目录，不自动联网下载），
   按句切分后批量 pipeline（cws/pos/ner/dep），对外只暴露段落级调用
@@ -73,9 +73,9 @@ ENTITY_TYPE_MAP: dict[str, str] = {
     "Ns": "location",
 }
 
-#: 复句连词（§B3 版本化阈值）
+#: 复句连词（版本化阈值）
 _COMPOUND_CONJUNCTIONS = ("但是", "虽然", "因为", "如果", "而且", "可是", "然而")
-#: 句式长度阈值（字符数，§B3）
+#: 句式长度阈值（字符数）
 _SHORT_SENT_THRESHOLD = 10
 _LONG_SENT_THRESHOLD = 30
 _SENTENCE_PATTERN_KEYS = ("short", "medium", "long", "compound", "parallel_candidate")
@@ -156,7 +156,7 @@ def ltp_pipeline_contract() -> tuple[str, str]:
 
 
 def _classify_sentence_pattern(sentence: str) -> list[str]:
-    """句式模式（§B3）：长度档 + 复句连词 + 排比候选（相邻三句首字符相同由调用方判定）"""
+    """句式模式：长度档 + 复句连词 + 排比候选（相邻三句首字符相同由调用方判定）"""
     patterns: list[str] = []
     length = len(sentence)
     if length < _SHORT_SENT_THRESHOLD:
@@ -286,7 +286,7 @@ def analyze_paragraph(text: str, output: LtpPipelineOutput) -> ParagraphLinguist
         cursor = sent_start
         sent_arcs = output.dep[sent_idx] if sent_idx < len(output.dep) else None
         # LTP 的 head 是句内坐标（ROOT=0，句内词元 1..n）；dependent_index 是段内全局
-        # 坐标，head 侧必须加本句起始偏移才能与 dependent 落在同一空间（跨句错位修复）。
+        # 坐标，head 侧必须加本句起始偏移才能与 dependent 落在同一空间。
         sent_token_start = token_index
         for word_idx, word in enumerate(words):
             pos_tag = pos_tags[word_idx] if word_idx < len(pos_tags) else "o"
@@ -320,13 +320,13 @@ def analyze_paragraph(text: str, output: LtpPipelineOutput) -> ParagraphLinguist
             token_index += 1
         text_pos = sent_start + len(sentence)
 
-        # 2026-09-05 B 批：sdp 语义弧（句内坐标 → 段内全局 token_index，与 dep 同规则）
+        # sdp 语义弧（句内坐标 → 段内全局 token_index，与 dep 同规则）
         sent_sdp = output.sdp[sent_idx] if sent_idx < len(output.sdp) else None
         if sent_sdp:
             sdp_heads = sent_sdp.get("head") or []
             sdp_labels = sent_sdp.get("label") or []
-            # LTP 4.x 的 sdp 与 dep 一样按词元顺序返回 head/label；旧测试和
-            # 显式弧格式才有 dependent。不能把缺失字段当作空列表，否则全书弧归零。
+            # LTP 4.x 的 sdp 与 dep 一样按词元顺序返回 head/label；只有显式弧格式
+            # 才有 dependent。不能把缺失字段当作空列表，否则全书弧归零。
             explicit_dependents = sent_sdp.get("dependent")
             sdp_dependents = list(range(1, len(words) + 1)) if explicit_dependents is None else explicit_dependents
             if explicit_dependents is None and len(sdp_heads) != len(words):

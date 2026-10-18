@@ -1,13 +1,8 @@
 /**
  * MSW Handler — 分析任务：创建、继续、状态、重新分析、删除
  *
- * 关键设计：
- * - createTask / reanalyze 会创建新任务，并以定时器模拟进度推进
- * - resumeTask 会继续指定任务，并复用同一个 task_id
- * - taskStatus 返回当前进度（由模拟计时器更新）
- * - 任务完成后所有结果 API 可正常返回数据
- *
- * 添加模拟 LLM 输出，支持 HTTP 轮询显示
+ * createTask / reanalyze 创建新任务并以定时器模拟进度推进；resumeTask 复用同一 task_id；
+ * taskStatus 返回由模拟计时器更新的当前进度；任务完成后所有结果 API 返回数据
  */
 import { http, HttpResponse, delay } from "msw";
 import { taskDb, createTask } from "../data";
@@ -250,7 +245,7 @@ export const resumeTaskHandler = http.post(
       return HttpResponse.json({ detail: "任务不存在" }, { status: 404 });
     }
 
-    // 2026-08-14 P2-25：resume 允许 cancelled（与真实后端 analysis_service 一致）
+    // resume 允许 cancelled（与真实后端 analysis_service 一致）
     if (!["pending", "failed", "cancelled"].includes(task.status)) {
       return HttpResponse.json(
         { detail: `仅支持继续 pending/failed/cancelled 任务，当前状态为 ${task.status}` },

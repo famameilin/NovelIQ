@@ -49,6 +49,9 @@ def publish(session, request):
     save_organization(session, request.run_id, organization, report_id)
     for frozen in request.facts:
         FactWriter(request.run_id).save_work(session, frozen, report_id)
+        from src.storage.repositories.organization_writes import close_diagnosis_execution
+
+        close_diagnosis_execution(session, execution_id=frozen.execution_id)
     for change in request.dialogue_updates:
         row = narrative_records.dialogue_record_by_candidate(session, request.run_id, change["candidate_key"])
         if row is None:
@@ -109,3 +112,57 @@ def next_attempt(session, run_id, role, case_anchor):
         )
         + 1
     )
+
+
+def session_rows(session, run_id):
+    from src.storage.models import DIAGNOSIS_ROLES, NarrativeLink, OrganizationCheck
+
+    executions = list(
+        session.scalars(select(Execution).where(Execution.run_id == run_id, Execution.role.in_(DIAGNOSIS_ROLES)))
+    )
+    identifiers = [row.execution_id for row in executions]
+    return {
+        "executions": executions,
+        "links": list(
+            session.scalars(select(NarrativeLink).where(NarrativeLink.producer_execution_id.in_(identifiers)))
+        ),
+        "checks": list(
+            session.scalars(select(OrganizationCheck).where(OrganizationCheck.producer_execution_id.in_(identifiers)))
+        ),
+    }
+
+
+def save_session(session, request):
+    from src.storage.repositories.diagnosis_event_writes import save_case_session_rows
+    from src.storage.repositories.organization_writes import close_diagnosis_execution
+
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": f"fact_graph:{request.run_id}"}
+    )
+    owner = session.get(Execution, request.session_id)
+    if owner is None or owner.run_id != request.run_id or owner.role != "case":
+        raise ValueError("案例会话缺少本运行的真实执行")
+    if narrative_records.run_declaration_ids(session, request.run_id) != set(request.declaration_ids):
+        raise ValueError("案例会话保存期间原始声明清单发生变化")
+    draft = SimpleNamespace(
+        **{
+            name: {key: _record(value) for key, value in items.items()}
+            for name, items in json.loads(request.organization_json).items()
+        }
+    )
+    save_case_session_rows(session, request.run_id, set(request.case_ids), draft)
+    for frozen in request.facts:
+        FactWriter(request.run_id).save_work(session, frozen, "")
+    for change in request.dialogue_updates:
+        row = narrative_records.dialogue_record_by_candidate(session, request.run_id, change["candidate_key"])
+        if row is None:
+            raise ValueError(f"对话候选缺少持久化记录: {change['candidate_key']}")
+        for key in ("current_attribution_execution_id", "speaker_entity_id", "tone", "is_inner_monologue"):
+            setattr(row, key, change[key])
+    for frozen in request.cases:
+        warnings = CaseWritesRepository(request.run_id).save_work(session, frozen)
+        if warnings:
+            raise ValueError(f"案例会话交付未完整保存: {warnings}")
+    for execution_id in request.execution_ids:
+        close_diagnosis_execution(session, execution_id=execution_id)
+    session.flush()

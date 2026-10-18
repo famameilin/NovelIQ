@@ -214,7 +214,7 @@ describe("StreamOutput 区块流展示", () => {
           message: "开始 event",
         }),
       );
-      // 旧合同（phase2）留下的同章节输出：仅用于在 event 契约下验证回退链仍可用
+      // 同章节输出沿用旧 sub_stage：验证 event 契约下的回退链仍可用
       useStreamStore.getState().appendLLMOutput(
         createLLMEvent({
           action: "output",

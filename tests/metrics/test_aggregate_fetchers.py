@@ -5,11 +5,13 @@ import pytest
 
 from src.api.exceptions import GraphReadinessError
 from src.metrics.queries.fetchers import fetch_character_data, fetch_relation_data
+from tests.support.storage_fixtures import fixture_id
 
 
 class _DummyAnnotationRepo:
     def __init__(self, character_rows=None, emotion_rows=None):
-        self.session = SimpleNamespace(owner=self)
+        self.session = self
+        self.owner = self
         self._character_rows = character_rows or [
             SimpleNamespace(
                 name="主角",
@@ -50,10 +52,10 @@ def test_fetch_character_data_uses_level1_canonical_entities_instead_of_graph_pa
         "src.metrics.queries.fetchers.KnowledgeGraphAuthorityService.from_session",
         return_value=mock_service,
     ) as from_session:
-        data = fetch_character_data(annotation_repo, "run-1")
+        data = fetch_character_data(annotation_repo, fixture_id(__name__, "run-1"))
 
     from_session.assert_called_once_with(annotation_repo.session)
-    mock_service.build_level1_snapshot.assert_called_once_with("run-1")
+    mock_service.build_level1_snapshot.assert_called_once_with(fixture_id(__name__, "run-1"))
     assert data.characters == [
         ("主角", "主体", 1),
         ("同伴", "助手", 0),
@@ -101,7 +103,7 @@ def test_fetch_character_data_uses_explicit_resolved_graph_name():
         "src.metrics.queries.fetchers.KnowledgeGraphAuthorityService.from_session",
         return_value=mock_service,
     ):
-        data = fetch_character_data(annotation_repo, "run-alias")
+        data = fetch_character_data(annotation_repo, fixture_id(__name__, "run-alias"))
 
     assert data.characters == [
         ("白芷", "主体", 1),
@@ -147,7 +149,7 @@ def test_fetch_character_data_skips_unresolved_reference_rows() -> None:
         "src.metrics.queries.fetchers.KnowledgeGraphAuthorityService.from_session",
         return_value=mock_service,
     ):
-        data = fetch_character_data(annotation_repo, "run-pronoun")
+        data = fetch_character_data(annotation_repo, fixture_id(__name__, "run-pronoun"))
 
     assert data.characters == [("汪淼", "主体", -1)]
     assert data.char_emotion_scores == [("汪淼", [-1.0])]
@@ -166,15 +168,10 @@ def test_fetch_relation_data_propagates_database_graph_readiness_failure():
 
     with patch("src.metrics.queries.fetchers.KnowledgeGraphAuthorityService.from_session", return_value=mock_service):
         with pytest.raises(GraphReadinessError, match="database graph is unavailable"):
-            fetch_relation_data(annotation_repo, "run-1")
+            fetch_relation_data(annotation_repo, fixture_id(__name__, "run-1"))
 
 
 def test_fetch_relation_data_allows_empty_database_graph():
-    """
-    修改时间: 2026-04-29
-    任务: 修复全量测试阻塞
-    修改原因: GraphAuthorityView 正式合同包含 participant_states，测试 mock 需要补齐该字段。
-    """
 
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
@@ -186,18 +183,13 @@ def test_fetch_relation_data_allows_empty_database_graph():
     )
 
     with patch("src.metrics.queries.fetchers.KnowledgeGraphAuthorityService.from_session", return_value=mock_service):
-        data = fetch_relation_data(annotation_repo, "run-1")
+        data = fetch_relation_data(annotation_repo, fixture_id(__name__, "run-1"))
 
     assert data.relations == []
     assert data.full_relations == []
 
 
 def test_fetch_relation_data_consumes_authority_view():
-    """
-    修改时间: 2026-04-29
-    任务: 修复全量测试阻塞
-    修改原因: GraphAuthorityView 正式合同包含 participant_states，测试 mock 需要补齐该字段。
-    """
 
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
@@ -222,7 +214,7 @@ def test_fetch_relation_data_consumes_authority_view():
                 changes=[{"change_kind": "assert"}],
             ),
         ],
-        # P4：人物网络只消费 character 参与者；mock 需补 entity_type
+        # 人物网络只消费 character 参与者；mock 需补 entity_type
         participant_states=[
             SimpleNamespace(name="主角", entity_type="character"),
             SimpleNamespace(name="反派", entity_type="character"),
@@ -234,10 +226,10 @@ def test_fetch_relation_data_consumes_authority_view():
         "src.metrics.queries.fetchers.KnowledgeGraphAuthorityService.from_session",
         return_value=mock_service,
     ) as from_session:
-        data = fetch_relation_data(annotation_repo, "run-graph")
+        data = fetch_relation_data(annotation_repo, fixture_id(__name__, "run-graph"))
 
     from_session.assert_called_once_with(annotation_repo.session)
-    mock_service.build_representative_graph_view.assert_called_once_with("run-graph")
+    mock_service.build_representative_graph_view.assert_called_once_with(fixture_id(__name__, "run-graph"))
     assert data.relations == [("主角", "反派")]
     assert data.full_relations == [
         ("主角", "反派", "敌对", "reinforce"),
@@ -266,7 +258,7 @@ def test_fetch_relation_data_propagates_graph_failure_before_using_non_empty_vie
 
     with patch("src.metrics.queries.fetchers.KnowledgeGraphAuthorityService.from_session", return_value=mock_service):
         with pytest.raises(GraphReadinessError, match="database graph is unavailable"):
-            fetch_relation_data(annotation_repo, "run-partial")
+            fetch_relation_data(annotation_repo, fixture_id(__name__, "run-partial"))
 
 
 @pytest.fixture(autouse=True)

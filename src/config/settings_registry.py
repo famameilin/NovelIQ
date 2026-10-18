@@ -1,16 +1,14 @@
 """可调设置字段注册表（schema 驱动表单的单一事实源）
 
-2026-09-10 设置模块重设计：所有可通过设置页编辑的参数在此静态声明，
-前端按注册表自动渲染表单，后端按注册表计算来源与写回稀疏文件。
-默认值不在此声明——唯一事实源是 src/config/schemas/ 的 dataclass 默认值，
-经 Settings 序列化在响应中合并输出（tests/config/test_settings_registry.py
-做注册表↔dataclass 双向校验，防止漂移）。
+所有可通过设置页编辑的参数在此静态声明，前端按注册表渲染表单，后端按注册表
+计算来源与写回稀疏文件。默认值不在此声明——唯一事实源是 src/config/schemas/
+的 dataclass 默认值，经 Settings 序列化在响应中合并输出
+（tests/config/test_settings_registry.py 做注册表↔dataclass 双向校验，防止漂移）。
 
 凭据字段（base_url/model/api_key）不在注册表：它们只存 .env，
 由设置页的 .env 编辑器通道单独处理。
 日志（logging）与存储路径（paths）是运营配置而非用户可调参数，
-同样不进注册表：settings.json 中的现存值照常生效，但不在设置页露出
-（2026-09-10 起）。
+同样不进注册表：settings.json 中的现存值照常生效，但不在设置页露出。
 """
 
 from __future__ import annotations
@@ -49,8 +47,7 @@ class SettingFieldSpec:
     step: float | None = None
     enum_values: tuple[str, ...] = ()
     nullable: bool = False
-    # 非可编辑字段（如建库维度类参数）不渲染输入控件也不提供恢复默认；
-    # 当前注册表已无可编辑=False 的字段（embedding_dim 配置链 2026-09-10 删除），
+    # 非可编辑字段（如建库维度类参数）不渲染输入控件也不提供恢复默认，
     # 机制保留作通用能力
     editable: bool = True
 
@@ -88,8 +85,7 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
     _fields(
         [
             # ---- models.annotation（标注任务）----
-            # 2026-10-02 设置迁移：temperature/top_p/max_tokens 移入模型池
-            # （WeightedModelSettings，随模型在设置页"模型池"编辑），不再作为任务级参数
+            # 采样参数（temperature/top_p/max_tokens）随模型在设置页"模型池"编辑，不属任务级参数
             SettingFieldSpec(
                 path=("models", "annotation", "timeout_s"),
                 field_type="number",
@@ -98,7 +94,6 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 nullable=True,
             ),
             SettingFieldSpec(path=("models", "annotation", "thinking"), field_type="boolean", label="标注思考模式"),
-            # 2026-10-02 删除"标注流式输出"设置：LLM 调用固定开启流式（src/agents/llm.py）
             SettingFieldSpec(
                 path=("models", "annotation", "max_iterations"),
                 field_type="integer",
@@ -116,7 +111,7 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 field_type="boolean",
                 label="允许读取未来文本",
             ),
-            # 2026-10-02 恢复（随章内多 Agent 路径加回）：超过该字数的章派发三条职责 Agent 并发
+            # 超过该字数的章派发三条职责 Agent 并发
             SettingFieldSpec(
                 path=("models", "annotation", "sub_chunk_max_chars"),
                 field_type="integer",
@@ -135,8 +130,8 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
             SettingFieldSpec(
                 path=("models", "diagnosis", "max_iterations"),
                 field_type="integer",
-                label="诊断每份工作累计回合上限",
-                description="每个诊断 agent 继承此上限，身份、结构及恢复累计计数",
+                label="诊断报告会话回合上限",
+                description="报告会话独立继承此上限，一个会话完成叙事组织与全书报告，用尽即结束",
                 min_value=1,
             ),
             SettingFieldSpec(
@@ -195,9 +190,7 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
             SettingFieldSpec(
                 path=("topic_model", "lda", "eta"), field_type="string", label="LDA eta", description='"auto" 或数值'
             ),
-            SettingFieldSpec(
-                path=("topic_model", "lda", "random_state"), field_type="integer", label="LDA 随机种子"
-            ),
+            SettingFieldSpec(path=("topic_model", "lda", "random_state"), field_type="integer", label="LDA 随机种子"),
             SettingFieldSpec(
                 path=("topic_model", "lda", "lda_batch_size"), field_type="integer", label="LDA 批大小", min_value=1
             ),

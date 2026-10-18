@@ -1,21 +1,11 @@
-"""
-测试结果 API
-
-修改时间: 2026-03-16
-任务: postgresql-migration-cleanup
-修改内容: 更新测试以匹配当前API行为（返回空数据而非错误）
-
-修改时间: 2026-04-05
-任务: fix-test-data-pollution
-修改内容: 使用 api_client fixture 确保测试使用测试数据库
-"""
+"""测试结果 API"""
 
 import tempfile
-import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 
+from src.storage import new_id
 from src.storage.repositories import RunRepository
 from tests.support.chapter_annotation_helpers import confirm_test_work
 from tests.support.graph_snapshot_helpers import (
@@ -24,6 +14,7 @@ from tests.support.graph_snapshot_helpers import (
     insert_partial_diagnosis,
 )
 from tests.support.run_records import set_run_status
+from tests.support.storage_fixtures import fixture_id, task_for_run
 
 
 class TestResults:
@@ -31,56 +22,56 @@ class TestResults:
 
     @pytest.mark.parametrize("endpoint", ["results", "graph"])
     def test_saved_work_boundary_without_legacy_publication_gate(self, api_client, db_session, endpoint) -> None:
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_graph_test_novel(db_session, novel_id)
         repository = RunRepository(db_session)
         run_id = repository.create_run(novel_id=novel_id)
         set_run_status(repository.session, run_id, "completed")
-        response = api_client.get(f"/api/novels/{novel_id}/{endpoint}", params={"task_id": run_id[:8]})
+        response = api_client.get(
+            f"/api/novels/{novel_id}/{endpoint}", params={"task_id": task_for_run(run_id, db_session)}
+        )
         # 无任何产物的运行不是旧契约；completed 标记也不能替代真实章节图就绪检查
         assert response.status_code == {"results": 409, "graph": 404}[endpoint]
         if endpoint == "results":
             assert response.json()["error_type"] == "GraphReadinessError"
 
     def test_get_results_not_found(self, api_client: TestClient):
+        """测试获取不存在任务的结果
+
+        修改，任务refactor-api-layer-functions
+
+        修改，修复API参数问题
+
+        修改，任务API接口参数统一优化
         """
-        测试获取不存在任务的结果
-
-        2026-03-13: 修改，任务refactor-api-layer-functions
-        修改内容: get_results端点会先检查任务是否存在，不存在返回404
-
-        2026-03-18: 修改，修复API参数问题
-        修改内容: 将task_id改为run_id，使用完整UUID查询
-
-        2026-03-19: 修改，任务API接口参数统一优化
-        修改内容: 将run_id参数改回task_id，使用8位短UUID
-        """
-        response = api_client.get("/api/novels/nonexistent/results?task_id=nonexist")
+        response = api_client.get(f"/api/novels/{fixture_id(__name__, 'nonexistent')}/results?task_id=nonexist")
         assert response.status_code == 404
 
     def test_get_emotion_curve_not_found(self, api_client: TestClient):
         """测试获取不存在任务的情感曲线 - 返回404"""
-        response = api_client.get("/api/novels/nonexistent/emotion-curve?task_id=nonexistent")
+        response = api_client.get(
+            f"/api/novels/{fixture_id(__name__, 'nonexistent')}/emotion-curve?task_id=nonexistent"
+        )
         assert response.status_code == 404
 
     def test_get_rhythm_curve_not_found(self, api_client: TestClient):
         """测试获取不存在任务的节奏曲线 - 返回404"""
-        response = api_client.get("/api/novels/nonexistent/rhythm-curve?task_id=nonexistent")
+        response = api_client.get(f"/api/novels/{fixture_id(__name__, 'nonexistent')}/rhythm-curve?task_id=nonexistent")
         assert response.status_code == 404
 
     def test_get_characters_not_found(self, api_client: TestClient):
         """测试获取不存在任务的人物统计 - 返回404"""
-        response = api_client.get("/api/novels/nonexistent/characters?task_id=nonexistent")
+        response = api_client.get(f"/api/novels/{fixture_id(__name__, 'nonexistent')}/characters?task_id=nonexistent")
         assert response.status_code == 404
 
     def test_get_topics_not_found(self, api_client: TestClient):
         """测试获取不存在任务的主题分布 - 返回404"""
-        response = api_client.get("/api/novels/nonexistent/topics?task_id=nonexistent")
+        response = api_client.get(f"/api/novels/{fixture_id(__name__, 'nonexistent')}/topics?task_id=nonexistent")
         assert response.status_code == 404
 
     def test_get_diagnosis_not_found(self, api_client: TestClient):
         """测试获取不存在任务的诊断结果 - 返回404"""
-        response = api_client.get("/api/novels/nonexistent/diagnosis?task_id=nonexistent")
+        response = api_client.get(f"/api/novels/{fixture_id(__name__, 'nonexistent')}/diagnosis?task_id=nonexistent")
         assert response.status_code == 404
 
     def test_get_diagnosis_returns_available_partial_result(
@@ -88,7 +79,7 @@ class TestResults:
         api_client: TestClient,
         db_session,
     ) -> None:
-        novel_id = "d" + uuid.uuid4().hex[:7]
+        novel_id = new_id()
         insert_graph_test_novel(db_session, novel_id)
         run_repo = RunRepository(db_session)
         run_id = run_repo.create_run(
@@ -101,7 +92,9 @@ class TestResults:
         # 部分结果 = 只有正文、没有标签/名单/评分的真实报告（正式发布链写入）
         insert_partial_diagnosis(db_session, run_id=run_id, diagnosis="诊断记录只包含当前已有字段")
 
-        response = api_client.get(f"/api/novels/{novel_id}/diagnosis", params={"task_id": run_id[:8]})
+        response = api_client.get(
+            f"/api/novels/{novel_id}/diagnosis", params={"task_id": task_for_run(run_id, db_session)}
+        )
 
         assert response.status_code == 200
         payload = response.json()
@@ -122,7 +115,7 @@ class TestResults:
         path: str,
         expected_status: int,
     ) -> None:
-        novel_id = "g" + uuid.uuid4().hex[:7]
+        novel_id = new_id()
         insert_graph_test_novel(db_session, novel_id)
         run_repo = RunRepository(db_session)
         run_id = run_repo.create_run(
@@ -140,7 +133,7 @@ class TestResults:
             focus_characters=["角色0", "角色1"],
         )
 
-        response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
+        response = api_client.get(path.format(novel_id=novel_id), params={"task_id": task_for_run(run_id, db_session)})
 
         assert response.status_code == expected_status
         if expected_status == 200:
@@ -193,7 +186,7 @@ class TestResults:
     ],
 )
 def test_result_routes_reject_non_terminal_run_status(api_client: TestClient, db_session, path: str) -> None:
-    novel_id = "m" + uuid.uuid4().hex[:7]
+    novel_id = new_id()
     insert_graph_test_novel(db_session, novel_id)
     run_repo = RunRepository(db_session)
     run_id = run_repo.create_run(
@@ -203,7 +196,7 @@ def test_result_routes_reject_non_terminal_run_status(api_client: TestClient, db
     )
     set_run_status(run_repo.session, run_id, "running")
 
-    response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
+    response = api_client.get(path.format(novel_id=novel_id), params={"task_id": task_for_run(run_id, db_session)})
 
     assert response.status_code == 400
     assert response.json()["error_type"] == "AnalysisNotCompleteError"
@@ -221,7 +214,7 @@ def test_diagnosis_and_characters_routes_reject_non_terminal_run_status(
     db_session,
     path: str,
 ) -> None:
-    novel_id = "r" + uuid.uuid4().hex[:7]
+    novel_id = new_id()
     insert_graph_test_novel(db_session, novel_id)
     run_repo = RunRepository(db_session)
     run_id = run_repo.create_run(
@@ -231,7 +224,7 @@ def test_diagnosis_and_characters_routes_reject_non_terminal_run_status(
     )
     set_run_status(run_repo.session, run_id, "running")
 
-    response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
+    response = api_client.get(path.format(novel_id=novel_id), params={"task_id": task_for_run(run_id, db_session)})
 
     assert response.status_code == 400
     assert response.json()["error_type"] == "AnalysisNotCompleteError"

@@ -1,4 +1,12 @@
-"段落指标表 ORM 模型定义（2026-10-16 全库 3NF 改造）"
+"""
+段落指标表 ORM 模型定义
+
+paragraph_metrics 是同一段落键下原始计数、阶段完成事实与推断状态的唯一落点。
+
+char_count（读取投影）、密度、张力 z/sigmoid 与 LOWESS 值不在本表；
+句式五个分类计数进 paragraph_features；预处理与指标同批 token 只留 token_count
+一个口径，LTP 词元数从 linguistic_spans 行数取得。
+"""
 
 from __future__ import annotations
 

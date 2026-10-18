@@ -13,18 +13,18 @@ from .settings import settings
 
 
 def _record_belongs_to_third_party(record) -> bool:
-    """2026-08-08 用于识别非本仓库命名空间的第三方日志"""
+    """识别非本仓库命名空间的第三方日志"""
     return not _record_belongs_to_project(record)
 
 
 def _record_belongs_to_project(record) -> bool:
-    """2026-08-08 用于识别本仓库命名空间的日志（src.*）"""
+    """识别本仓库命名空间的日志（src.*）"""
     name = str(record["name"])
     return name == "src" or name.startswith("src.")
 
 
 def _module_filter(module_name: str):
-    """2026-08-08 用于按模块前缀过滤 loguru 记录"""
+    """按模块前缀过滤 loguru 记录"""
 
     def filter(record) -> bool:
         name = str(record["name"])
@@ -34,11 +34,9 @@ def _module_filter(module_name: str):
 
 
 def setup_logging(config: LoggingSettings | None = None) -> None:
-    """
-    2026-08-08 用于按 settings.logging 初始化 loguru：
-    控制台按 console_level，模块按 modules 各自写文件，统一轮转与压缩
-    注意：本函数会先调用 logger.remove() 清除全部现有 handler，
-    仅应在进程启动期调用一次，避免误删其他模块已注册的日志 sink
+    """按 settings.logging 初始化 loguru：控制台按 console_level，模块按 modules 各自写文件，统一轮转与压缩
+
+    注意：本函数会先调用 logger.remove() 清除全部现有 handler，仅应在进程启动期调用一次
     """
     cfg = config or settings.logging
     logger.remove()

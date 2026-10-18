@@ -2,14 +2,7 @@
 章内 agent 程序运行时：八类构造器 + 检索/案例 + 收尾的执行面
 """
 
-# ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入（大文件拆分聚合面）。
-
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：agent_program.py 大文件拆分——AgentProgramRuntime 与 AgentRunOutcome
-# 迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；构造器在 agent_constructors.py、
-# AGENT_TOOL_NAMES/_AGENT_REFERENCE_SCOPE_TEXT 保留在 agent_program.py（本模块
-# 末尾反向引用，双向均定义先于引用，任意导入顺序安全）；agent_program.py 保留 re-export。
+# ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入。
 
 from __future__ import annotations
 
@@ -109,7 +102,7 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
             stream=stream,
         )
         # 执行面是完整生产工具表——构造器编译出的那笔写入要经它落地，而正式写入工具不在
-        # 模型可见面。2026-10-02：0.2.0 基类不再收 execution_tools 参数，本面自带该映射。
+        # 模型可见面。
         self.execution_tools = {
             **{str(tool.name): tool for tool in program_tools},
             # 生产面也有一个同名 finish（章级收尾），本面必须用自己的那个
@@ -414,6 +407,5 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
         )
 
 
-# 工具面常量保留在 agent_program（本模块仅在构造时读它们）：置于文件末尾引用，
-# 两个方向的首次导入都安全（双方定义先于引用）。
+# 工具面常量置于文件末尾引用：两个方向的首次导入都安全（双方定义先于引用）。
 from .agent_program import _AGENT_REFERENCE_SCOPE_TEXT, AGENT_TOOL_NAMES  # noqa: E402

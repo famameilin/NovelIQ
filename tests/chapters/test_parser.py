@@ -103,8 +103,7 @@ def test_body_noise_filtered_by_confidence() -> None:
 
 
 def test_body_sentence_masquerading_as_hui_not_split() -> None:
-    """
-    2026-09-09 重明传形态回归：正文句"第二回合。马骁欺身而上…"不再被切成
+    """重明传形态回归：正文句"第二回合。马骁欺身而上…"不再被切成
     独立回目章（截断后标题退化为"合"），整句并入前一章正文。
     """
     text = (

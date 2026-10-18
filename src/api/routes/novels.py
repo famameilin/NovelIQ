@@ -35,8 +35,6 @@ async def list_novels(
 ):
     """
     列出所有小说
-
-    2026-08-20 阶段 3.2：消除 N+1 查询，list_novels 已优化为单次 JOIN
     """
     if page < 1:
         raise HTTPException(status_code=422, detail="页码必须大于 0")

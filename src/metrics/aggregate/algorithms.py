@@ -1,8 +1,6 @@
-"""读侧算法与数值方法（《分析能力扩展路线图》赛道 A1/A2/A3、§5.11 D2、§13.1）
+"""读侧算法与数值方法：图结构指标、TextRank 关键词、主题分布 JS 散度与变化候选、展示平滑与曲线保点。
 
-从 `src/api/services/results_queries/` 收归的纯计算：图结构指标、TextRank 关键词、
-主题分布 JS 散度与变化候选、展示平滑与曲线保点。全部函数只依赖快照/行数据与
-配置，不依赖 API 响应模型——调用方负责取数与装配。
+全部函数只依赖快照/行数据与配置，不依赖 API 响应模型——调用方负责取数与装配。
 """
 
 from __future__ import annotations
@@ -32,21 +30,21 @@ class InsufficientGraphNodesError(ValueError):
 
 
 def safe_ratio(numerator: float, denominator: float) -> float | None:
-    """分母 <= 0 时返回 None（§15.2：分母为零不伪造数值）"""
+    """分母 <= 0 时返回 None（分母为零不伪造数值）"""
     if denominator <= 0:
         return None
     return numerator / denominator
 
 
 def clamp_coverage(value: float | None) -> float | None:
-    """2026-08-15 将后端平滑覆盖率限制在可解释的 0~1 值域"""
+    """将平滑覆盖率限制在可解释的 0~1 值域"""
     if value is None:
         return None
     return max(0.0, min(1.0, value))
 
 
 def _undirected_edge_key(source: str, target: str) -> tuple[str, str]:
-    """2026-08-31 用于把双向端点规范为同一个无向边键并保留并行关系计数"""
+    """把双向端点规范为同一个无向边键并保留并行关系计数"""
     return (source, target) if source <= target else (target, source)
 
 
@@ -83,7 +81,7 @@ def _hits_scores(graph: nx.Graph) -> tuple[dict[str, float], dict[str, float]]:
 
 
 def compute_graph_structure_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """PageRank / HITS / Louvain 结构指标（赛道 A1/A2）
+    """PageRank / HITS / Louvain 结构指标
 
     输入为代表性格据快照（与 /graph 端点同一视图：别名归并、去 same_character
     与自环），无向 + 边权=关系计数；算法结果只表示结构信号，
@@ -145,7 +143,7 @@ def compute_graph_structure_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
                 name: community_id for community_id, community in enumerate(communities) for name in community
             },
             "modularity": round(float(modularity), 6),
-            # 结构社区不直接等同于故事阵营（§A2 解释边界）
+            # 结构社区不直接等同于故事阵营（解释边界）
             "interpretation": "structural_community_only",
         }
     except ValueError as exc:
@@ -156,10 +154,10 @@ def compute_graph_structure_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 
 def compute_keywords(run_id: str, texts: Sequence[str], top_n: int = 10) -> dict[str, Any]:
-    """段落全文的 TextRank 关键词（Top-N 词 + 权重，赛道 A3）
+    """段落全文的 TextRank 关键词（Top-N 词 + 权重）
 
     在独立词共现图上计算（窗口 5 共现 + PageRank），不与人物关系图混用；
-    停用词来自 Registry v3 的 stopwords.txt。关键词只表示词共现结构信号，
+    停用词来自 registry 的 stopwords.txt。关键词只表示词共现结构信号，
     与 LDA 主题词可对照但口径独立。
     """
     algorithm = {"version": KEYWORD_ALGORITHM_VERSION, "window": WINDOW_SIZE, "top_n": top_n}
@@ -218,12 +216,7 @@ def kl_divergence_log2(p: np.ndarray, q: np.ndarray) -> float:
 
 
 def jensen_shannon_divergence(p: list[float] | np.ndarray, q: list[float] | np.ndarray) -> float:
-    """
-    以 2 为底、范围 [0, 1] 的 JS 散度（§5.11 D2 的 topic_shift_score 定义）
-
-    若调用 SciPy jensenshannon 返回的是距离，需平方一次才是散度；
-    本实现直接按散度定义计算，避免依赖与二次方修正。
-    """
+    """以 2 为底、范围 [0, 1] 的 JS 散度（topic_shift_score 定义）"""
     p_arr = np.asarray(p, dtype=np.float64)
     q_arr = np.asarray(q, dtype=np.float64)
     if p_arr.shape != q_arr.shape or p_arr.size == 0:
@@ -250,7 +243,7 @@ def compute_topic_shift_candidates(
     max_candidates: int | None = None,
 ) -> dict[str, Any]:
     """
-    主题变化候选点（D2）：相邻不重叠窗口的归一化主题分布 JS 散度
+    主题变化候选点：相邻不重叠窗口的归一化主题分布 JS 散度
 
     窗口分布 = 窗口内段落权重的入模 token 加权平均；窗口实际入模 token
     总数低于 min_tokens_per_window 时跳过，避免极短段落制造高噪声尖峰。
@@ -262,7 +255,7 @@ def compute_topic_shift_candidates(
     threshold = score_threshold if score_threshold is not None else shift_settings.score_threshold
     max_candidates = max_candidates if max_candidates is not None else shift_settings.max_candidates
 
-    # 2026-08-31 API 参数虽有 FastAPI 约束，服务函数仍需保护直接调用入口
+    # API 参数虽有 FastAPI 约束，服务函数仍需保护直接调用入口
     if isinstance(window_size, bool) or not isinstance(window_size, int) or window_size < 1:
         raise ValueError(f"window_size 必须是 >=1 的整数，当前值: {window_size!r}")
     if isinstance(min_tokens, bool) or not isinstance(min_tokens, int) or min_tokens < 1:
@@ -324,7 +317,7 @@ def smooth_emotion_series(
     positions: list[float],
     weights: list[float],
 ) -> list[float | None]:
-    """2026-08-15 用于对单条窗口序列执行 LOWESS 展示平滑
+    """对单条窗口序列执行 LOWESS 展示平滑
 
     平滑参数取 settings.metrics（带宽 / 最小点数）；返回与输入等长的序列，
     无法拟合的槽位保持 None。调用方负责保留原始值，避免平滑覆盖可审计数据。
@@ -353,7 +346,7 @@ def must_keep_curve_indices(
 ) -> list[int]:
     """章节边界（每章首个与末个段落）+ net_density 全局峰值索引（None 按 0）
 
-    曲线降采样时这些点必须保留，避免章节切分与峰值在传输层被抹平（§13.1）。
+    曲线降采样时这些点必须保留，避免章节切分与峰值在传输层被抹平。
     """
     keep_set: set[int] = set()
     chapter_first_last: dict[int, list[int]] = {}

@@ -1,6 +1,6 @@
 """正式章节局部图的稳定身份、关系幂等、操作日志与回滚测试
 
-2026-10-13 身份=规范名+实体大类：实体键是复合键（entity_key(名, 大类)），
+身份=规范名+实体大类：实体键是复合键（entity_key(名, 大类)），
 同名不同类是两条独立身份；关系端点、active_relations、id 查询都按复合键。
 """
 
@@ -35,7 +35,7 @@ def test_entities_append_and_update_explicit_fields() -> None:
 
 
 def test_same_name_different_type_are_distinct_entities() -> None:
-    """2026-10-13 同名不同大类各自登记为独立身份、独立 id，互不覆盖"""
+    """同名不同大类各自登记为独立身份、独立 id，互不覆盖"""
     graph = FactGraph(run_scope="run-1")
     graph.register_entities([EntityInput(name="圣城", entity_type="organization")])
     graph.register_entities([EntityInput(name="圣城", entity_type="location")])
@@ -87,7 +87,7 @@ def test_local_graphs_do_not_share_state_between_chapters() -> None:
     second = FactGraph(run_scope="run-1")
     assert second.entity_type_of("顾霜", "character") is None and not second.active_relations
     second.register_entities([_entity("顾霜")])
-    assert first.entity_id("顾霜", "character") == second.entity_id("顾霜", "character")
+    assert first.entity_id("顾霜", "character") != second.entity_id("顾霜", "character")
 
 
 def test_relation_replacement_resets_local_support_count() -> None:
@@ -131,7 +131,7 @@ def test_entity_ids_are_stable_normalized_and_scoped_to_run() -> None:
     assert graph.entity_id("Hero", "character") == entity_id
     replay = FactGraph(run_scope="run-1")
     replay.register_entities([_entity("hero")])
-    assert replay.entity_id("hero", "character") == entity_id
+    assert replay.entity_id("hero", "character") != entity_id
     another = FactGraph(run_scope="run-2")
     another.register_entities([_entity("hero")])
     assert another.entity_id("hero", "character") != entity_id

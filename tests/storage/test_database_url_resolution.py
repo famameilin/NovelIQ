@@ -18,9 +18,7 @@ def _set_database_environment(
 
 
 def test_resolve_database_url_from_flat_variables(monkeypatch) -> None:
-    """
-    2026-08-08 用于验证平铺数据库变量生成完整连接地址
-    """
+    """验证平铺数据库变量生成完整连接地址"""
 
     _set_database_environment(
         monkeypatch,
@@ -36,9 +34,7 @@ def test_resolve_database_url_from_flat_variables(monkeypatch) -> None:
 
 
 def test_resolve_test_database_url_uses_its_own_credentials(monkeypatch) -> None:
-    """
-    2026-08-08 用于验证测试数据库平铺变量不回退开发库凭据
-    """
+    """验证测试数据库平铺变量不回退开发库凭据"""
 
     _set_database_environment(
         monkeypatch,
@@ -54,9 +50,7 @@ def test_resolve_test_database_url_uses_its_own_credentials(monkeypatch) -> None
 
 
 def test_resolve_database_url_encodes_special_characters(monkeypatch) -> None:
-    """
-    2026-08-03 用于验证账号密码特殊字符由 SQLAlchemy URL 语义化编码
-    """
+    """验证账号密码特殊字符由 SQLAlchemy URL 语义化编码"""
 
     _set_database_environment(
         monkeypatch,
@@ -73,9 +67,7 @@ def test_resolve_database_url_encodes_special_characters(monkeypatch) -> None:
 
 
 def test_resolve_database_url_rejects_credentials_inside_url(monkeypatch) -> None:
-    """
-    2026-08-03 用于拒绝数据库 URL 与独立凭据双重配置
-    """
+    """拒绝数据库 URL 与独立凭据双重配置"""
 
     _set_database_environment(
         monkeypatch,
@@ -90,9 +82,7 @@ def test_resolve_database_url_rejects_credentials_inside_url(monkeypatch) -> Non
 
 
 def test_flat_database_variables_satisfy_new_contract(monkeypatch) -> None:
-    """
-    2026-08-08 用于确认平铺数据库变量满足新契约
-    """
+    """确认平铺数据库变量满足新契约"""
 
     _set_database_environment(
         monkeypatch,
@@ -106,9 +96,7 @@ def test_flat_database_variables_satisfy_new_contract(monkeypatch) -> None:
 
 
 def test_json_database_variable_does_not_satisfy_new_contract(monkeypatch) -> None:
-    """
-    2026-08-08 用于确认旧 JSON 数据库变量不能替代平铺变量
-    """
+    """确认旧 JSON 数据库变量不能替代平铺变量"""
 
     for field in ("URL", "USERNAME", "PASSWORD"):
         monkeypatch.delenv(f"DATABASE_{field}", raising=False)
@@ -119,9 +107,7 @@ def test_json_database_variable_does_not_satisfy_new_contract(monkeypatch) -> No
 
 
 def test_resolve_database_url_returns_none_when_optional_and_unset(monkeypatch) -> None:
-    """
-    2026-08-03 用于验证可选测试数据库对象保持空值语义
-    """
+    """验证可选测试数据库对象保持空值语义"""
 
     for field in ("URL", "USERNAME", "PASSWORD"):
         monkeypatch.delenv(f"TEST_DATABASE_{field}", raising=False)

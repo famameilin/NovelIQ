@@ -1,9 +1,4 @@
-"""
-聚合统计响应模型
-
-说明: 自 src/api/models/responses.py 拆出角色统计、叙事结构/情感/风格统计、
-全书波动统计与 token 用量统计响应模型，字段与语义保持不变。
-"""
+"""聚合统计响应模型：角色统计、叙事结构/情感/风格统计、全书波动统计与 token 用量统计"""
 
 from typing import Literal
 
@@ -11,11 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class CharacterStats(BaseModel):
-    """
-    角色统计模型
-
-    说明: 初始模型包含 name, appearance_count, role_function, avg_emotion_score
-    """
+    """角色统计模型"""
 
     name: str
     appearance_count: int
@@ -41,17 +32,12 @@ class GlobalStats(BaseModel):
     rhythm_std: float | None = None
     rhythm_max: float | None = None
     rhythm_min: float | None = None
-    # 2026-09-05 A2：词典情绪零信号段落字符加权占比（lexicon 覆盖缺口审计）
+    # 词典情绪零信号段落字符加权占比（lexicon 覆盖缺口审计）
     lexicon_zero_hit_share: float | None = None
 
 
 class NarrativeStructureStats(BaseModel):
-    """
-    叙事结构统计模型
-
-    2026-08-14 重命名（§13.3）：event_density → chapter_narrative_function_share，
-    值语义不变（章节 Agent 标签占比，不再是“事件密度”）
-    """
+    """叙事结构统计模型（chapter_narrative_function_share 为章节 Agent 标签占比）"""
 
     act1_ratio: float | None = None
     act2_ratio: float | None = None

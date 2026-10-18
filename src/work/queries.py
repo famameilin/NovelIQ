@@ -1,11 +1,9 @@
 """按已保存角色只读聚合章节结果，不生成第二份章级持久化产物
 
-2026-10-17 六 agent 归属：完成判定直接读产物行——chapter_annotations 自带
-run/章/角色与真实执行号，state 由「该章该角色的正式产物行是否存在」表达
-（观察值恒为 saved，不新增列）；章级结果从正式关系投影重组
-（chapter_annotations 正式头与具名指标、analysis_assessments 段落情绪、
-event_declarations/declaration_participants、dialogue_records）；不恢复通用
-payload JSON 列。
+完成判定直接读产物行——chapter_annotations 自带 run/章/角色与真实执行号；章级结果
+从正式关系投影重组（chapter_annotations 正式头与具名指标、analysis_assessments
+段落情绪、event_declarations/declaration_participants、dialogue_records），
+不落通用 payload JSON 列。
 """
 
 from __future__ import annotations
@@ -203,7 +201,7 @@ def chapter_annotations(session: Storage, run_id: str) -> list[ChapterAnnotation
 
 
 def is_annotate_complete(session: Storage, run_id: str) -> bool:
-    """2026-08-05 用于按真实章节集合严格判断标注阶段完成状态"""
+    """按真实章节集合严格判断标注阶段完成状态"""
     expected = session.annotations.fetch_chapter_ids(run_id)
     if not expected:
         return False

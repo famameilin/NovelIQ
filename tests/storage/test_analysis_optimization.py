@@ -16,6 +16,7 @@ from tests.support.chapter_annotation_helpers import (
     persist_chapter_annotation,
     relation_fact,
 )
+from tests.support.storage_fixtures import storage_for
 
 
 def _retract_relation(
@@ -28,7 +29,7 @@ def _retract_relation(
     relation_type: str,
     reason: str,
 ) -> None:
-    """2026-10-16 3NF：关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
+    """关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
     from src.agents.annotation.output_models import BoundChapterAnnotation
     from src.fact_graph.inputs import ChapterMetricsInput
 
@@ -80,8 +81,8 @@ def test_relation_history_reads_states_once_and_preserves_inactive_history(db_se
     db_session.commit()
     history = GraphRepository(db_session).fetch_relation_history(run_id)
     assert [(row.chapter_id, row.is_active) for row in history] == [(1, True), (2, False)]
-    assert history[0].from_name == "阿青" and history[1].to_name == "阿白"
-    repo = DiagnosisQueries(db_session)
+    assert all({row.from_name, row.to_name} == {"阿青", "阿白"} for row in history)
+    repo = DiagnosisQueries(storage_for(db_session))
     all_changes = repo.fetch_relation_changes(run_id)
     assert [chapter_id for chapter_id, _from_name, _to_name, _kind, _change in all_changes] == [1, 2]
     assert repo.fetch_relation_changes(run_id, limit=1) == all_changes[:1]
@@ -89,7 +90,7 @@ def test_relation_history_reads_states_once_and_preserves_inactive_history(db_se
 
 
 def _insert_completion(db_session, run_id: str, paragraph_id: int) -> None:
-    """写入单段语言处理完成标记（2026-10-16 3NF：零词元同样算已完成）
+    """写入单段语言处理完成标记（零词元同样算已完成）
 
     完成行 FK 到 linguistic_runs 与运行合同，映射种子先落库再写完成行。
     """
@@ -128,12 +129,12 @@ def test_partial_linguistic_rows_are_not_a_completed_stage(db_session) -> None:
         ).scalars()
     )
     repo = StatsRepository(db_session)
-    assert not is_linguistic_complete(repo.session, run_id)
+    assert not is_linguistic_complete(storage_for(repo.session), run_id)
     _insert_completion(db_session, run_id, identifiers[0])
     assert repo.has_linguistic_data(run_id)
-    assert not is_linguistic_complete(repo.session, run_id)
+    assert not is_linguistic_complete(storage_for(repo.session), run_id)
     _insert_completion(db_session, run_id, identifiers[1])
-    assert is_linguistic_complete(repo.session, run_id)
+    assert is_linguistic_complete(storage_for(repo.session), run_id)
 
 
 def test_topic_contract_and_partial_inference_or_distribution_cannot_be_reused(db_session) -> None:
@@ -158,21 +159,21 @@ def test_topic_contract_and_partial_inference_or_distribution_cannot_be_reused(d
         artifact_key=f"models/topic/{run_id}",
     )
     assert stats.has_topic_data(run_id)
-    assert not is_topic_model_complete(stats.session, run_id)
+    assert not is_topic_model_complete(storage_for(stats.session), run_id)
     complete = (identifiers[0], 2, 2, "complete", None, 1.0)
     empty = (identifiers[1], 0, 0, "empty_after_preprocess", "无词元", None)
     repo.insert_paragraph_topic_inferences(run_id, [complete])
-    assert not is_topic_model_complete(stats.session, run_id)
+    assert not is_topic_model_complete(storage_for(stats.session), run_id)
     repo.insert_paragraph_topic_inferences(run_id, [complete, empty])
-    assert not is_topic_model_complete(stats.session, run_id)
+    assert not is_topic_model_complete(storage_for(stats.session), run_id)
     repo.insert_paragraph_topics(run_id, [(identifiers[0], 0, 0.7)])
-    assert not is_topic_model_complete(stats.session, run_id)
+    assert not is_topic_model_complete(storage_for(stats.session), run_id)
     repo.insert_paragraph_topics(run_id, [(identifiers[0], 0, 0.7), (identifiers[0], 1, 0.3)])
-    assert is_topic_model_complete(stats.session, run_id)
+    assert is_topic_model_complete(storage_for(stats.session), run_id)
 
 
 def test_topic_rerun_writes_commit_against_deferred_constraints(db_session) -> None:
-    """同 run 主题重跑写入必须可提交：重跑不得踩延迟约束触发器（2026-10-17 run 52cbb1ac）
+    """同 run 主题重跑写入必须可提交：重跑不得踩延迟约束触发器
 
     延迟行为触发器在提交时按每条修改行的当时版本校验，校验里的主题行计数读
     提交时的最终状态：重跑若先做全量"清空推断列"UPDATE，旧 complete 行以
@@ -209,4 +210,4 @@ def test_topic_rerun_writes_commit_against_deferred_constraints(db_session) -> N
     repo.insert_paragraph_topic_inferences(run_id, [complete, empty])
     repo.insert_paragraph_topics(run_id, distribution)
     db_session.commit()
-    assert is_topic_model_complete(db_session, run_id)
+    assert is_topic_model_complete(storage_for(db_session), run_id)

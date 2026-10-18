@@ -1,4 +1,8 @@
-"标注数据 Repository 包"
+"""
+标注数据 Repository 包
+
+标注数据仓库模块，包含标注记录查询、work 状态、对话/事实/伏笔读投影
+"""
 
 from __future__ import annotations
 

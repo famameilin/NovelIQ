@@ -16,33 +16,36 @@ from src.agents.diagnosis.evidence import DiagnosisEvidenceLedger
 from src.agents.diagnosis.program_runtime import DiagnosisProgramDependencyError, DiagnosisProgramRuntime
 from src.agents.diagnosis.runner import _run_diagnosis_agent
 from src.agents.diagnosis.tools import build_diagnosis_tools
-from src.agents.diagnosis.work_runtime import DiagnosisWorkContext
 from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls
 from src.audit.recorder import AgentAuditRecorder
 from src.event_bus import EventBus
-from src.event_trees.organization import EventOrganizationDraft
+from src.event_trees.organization import EventOrganizationDraft, run_declaration_ids
 from src.event_trees.storage_map import run_events
 from src.storage.models import DiagnosisReport, Execution
 from src.utils.cancellation import run_cancellable
 from tests.agents.test_complete_event_work import execution_for, save_and_confirm
 from tests.agents.test_diagnosis_agent import Replies, call, run_graph
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
+from tests.support.storage_fixtures import fixture_id, storage_factory, storage_for
 
 
 @pytest.fixture
 async def declaration_case(db_session):
     novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻路并点灯。"])
-    agent = AnnotationAgent(EventBus(), run_id, lambda: db_session, novel_id=novel_id)
+    agent = AnnotationAgent(EventBus(), run_id, storage_factory(lambda: db_session), novel_id=novel_id)
     execution, program = execution_for(agent, db_session, 1)
-    receipt = json.loads(await program.execute(
-        'event(el="a", title="寻路", problem="能否找到路", summary="顾霜寻路", '
-        'event_type="寻路", status="ongoing", evidence=1)\n'
-        'event(el="b", title="点灯", problem="能否照明", summary="顾霜点灯", '
-        'event_type="照明", status="resolved", evidence=1)'
-    ))
+    receipt = json.loads(
+        await program.execute(
+            'event(el="a", title="寻路", problem="能否找到路", summary="顾霜寻路", '
+            'event_type="寻路", status="ongoing", evidence=1)\n'
+            'event(el="b", title="点灯", problem="能否照明", summary="顾霜点灯", '
+            'event_type="照明", status="resolved", evidence=1)'
+        )
+    )
     assert not receipt.get("failed"), receipt
     await save_and_confirm(agent, db_session, execution)
-    draft = EventOrganizationDraft(db_session, run_id, "program-fixture")
+    draft = EventOrganizationDraft(storage_for(db_session), run_id, "program-fixture")
+    draft.fixture_session = db_session
     draft.case_id, draft.producer_invocation_id = "program-fixture-case", "program-fixture"
     yield draft
     agent.close()
@@ -77,72 +80,74 @@ def _program_graph(model, runtime, *, observer=None, completion_check=lambda: []
 
 def identity_item(key, index, *, invalid=False):
     reference = '"not-declared"' if invalid else f'page["events"][{index}]["declaration_id"]'
-    return ('{"operation":"identity", "key":' + json.dumps(key) + ', "title":' + json.dumps(key) +
-            ', "problem":"能否找到路", "summary":"寻路与点灯", "event_type":"寻路", "status":"ongoing", '
-            '"declaration_ids":[' + reference + '], "stage_order":[' + reference + '], '
-            '"current_declaration_id":' + reference + ', "reason":"依据本章原文声明核对", '
-            '"evidence":[{"paragraph_id":0}]}')
+    return (
+        '{"operation":"identity", "key":'
+        + json.dumps(key)
+        + ', "title":'
+        + json.dumps(key)
+        + ', "problem":"能否找到路", "summary":"寻路与点灯", "event_type":"寻路", "status":"ongoing", '
+        '"declaration_ids":[' + reference + '], "stage_order":[' + reference + "], "
+        '"current_declaration_id":' + reference + ', "reason":"依据本章原文声明核对", '
+        '"evidence":[{"paragraph_id":0}]}'
+    )
 
 
-IDENTITY_CHILD = (
-    'page = search_events(limit=20)\n'
-    'child = write_event(items=[' + identity_item("寻路", 0) + '])\n'
-    'write_event(items=[{"operation":"declaration_review", '
-    '"declaration_ids":[page["events"][0]["declaration_id"]], "reason":"按本章原文逐段核对"}])\n'
-    'write_event(items=[{"operation":"compare", "source_declaration_id":'
-    'page["events"][0]["declaration_id"], "target_declaration_ids":'
-    '[page["events"][1]["declaration_id"]], "disposition":"independent", '
-    '"reason":"寻路和照明各有独立问题", "evidence":[{"paragraph_id":0}]}])\nfinish()'
+def case_identity_item(key, reference):
+    """案例会话的身份项：认领所办案例自身的声明，不引用页面序号"""
+    return (
+        '{"operation":"identity", "key":'
+        + json.dumps(key)
+        + ', "title":'
+        + json.dumps(key)
+        + ', "problem":"能否找到路", "summary":"寻路与点灯", "event_type":"寻路", "status":"ongoing", '
+        '"declaration_ids":[' + reference + '], "stage_order":[' + reference + "], "
+        '"current_declaration_id":' + reference + ', "reason":"依据本章原文声明核对", '
+        '"evidence":[{"paragraph_id":0}]}'
+    )
+
+
+#: 案例会话第一件案例：自取未承诺案例、接手承诺，随后直接写入完成
+FIRST_CASE_PROGRAM = (
+    "cases = search_cases(unresolved_only=True)\n"
+    "case = cases[0]\n"
+    'promise_case(case_id=case["case_id"])\n'
+    'declaration = case["payload"]["event_id"]\n'
+    "page = search_events(limit=20)\n"
+    'write_event(items=[{"operation":"declaration_review", "declaration_ids":[declaration], '
+    '"reason":"按本章原文逐段核对"}], caseid=case["case_id"])\n'
+    "write_event(items=[" + case_identity_item("寻路", "declaration") + '], caseid=case["case_id"])\n'
+    'write_event(items=[{"operation":"compare", "source_declaration_id":page["events"][0]["declaration_id"], '
+    '"target_declaration_ids":[page["events"][1]["declaration_id"]], "disposition":"independent", '
+    '"reason":"寻路和照明各有独立问题", "evidence":[{"paragraph_id":0}]}], caseid=case["case_id"])'
 )
-IDENTITY_PARENT = (
-    'page = search_events(limit=20)\n'
-    'parent = write_event(items=[' + identity_item("寻路与照明", 1) + '])\n'
-    'write_event(items=[{"operation":"declaration_review", '
-    '"declaration_ids":[page["events"][1]["declaration_id"]], "reason":"按本章原文逐段核对"}])\nfinish()'
-)
-STRUCTURE_CHILD = (
-    'page = search_events(limit=20)\n'
-    'events = search_events(kind="event", query="寻路", limit=20)\n'
-    'own = None\n'
-    'parent = None\n'
-    'for item in events["events"]:\n'
-    '    if item["title"] == "寻路":\n'
-    '        own = item\n'
-    'for item in events["events"]:\n'
-    '    if item["title"] == "寻路与照明":\n'
-    '        parent = item\n'
-    'write_event(items=[{"operation":"review", "event_ids":[own["event_id"]], "reason":"核对本事件实际版本"}])\n'
-    'write_event(items=[{"operation":"contain", "parent_event_id":parent["event_id"], '
-    '"child_event_id":own["event_id"], "reason":"寻路与照明行动包含寻路子问题", '
-    '"evidence":[{"paragraph_id":0}]}, {"operation":"structure_review", '
-    '"source_event_id":parent["event_id"], "target_event_id":own["event_id"], '
+#: 案例会话第二件案例：办理后按冻结前的实际版本核对并发起包含
+SECOND_CASE_PROGRAM = (
+    "cases = search_cases(unresolved_only=True)\n"
+    "case = cases[0]\n"
+    'promise_case(case_id=case["case_id"])\n'
+    'declaration = case["payload"]["event_id"]\n'
+    'write_event(items=[{"operation":"declaration_review", "declaration_ids":[declaration], '
+    '"reason":"按本章原文逐段核对"}], caseid=case["case_id"])\n'
+    "own = write_event(items=["
+    + case_identity_item("寻路与照明", "declaration")
+    + '], caseid=case["case_id"])["results"][0]["event_id"]\n'
+    "child = None\n"
+    'for item in search_events(kind="event", limit=20)["events"]:\n'
+    '    if item["event_id"] != own:\n'
+    '        child = item["event_id"]\n'
+    'write_event(items=[{"operation":"review", "event_ids":[own], "reason":"核对本事件实际版本"}], '
+    'caseid=case["case_id"])\n'
+    'write_event(items=[{"operation":"contain", "parent_event_id":own, "child_event_id":child, '
+    '"reason":"寻路与照明行动包含寻路子问题", "evidence":[{"paragraph_id":0}]}, '
+    '{"operation":"structure_review", "source_event_id":own, "target_event_id":child, '
     '"disposition":"contains", "reason":"按原文明确两事件的包含而非同一身份", '
-    '"evidence":[{"paragraph_id":0}]}])\n'
-    'write_event(items=[{"operation":"review", "event_ids":[own["event_id"], parent["event_id"]], '
-    '"reason":"按冻结身份核对包含与原文"}])\nfinish()'
+    '"evidence":[{"paragraph_id":0}]}], caseid=case["case_id"])\n'
+    'write_event(items=[{"operation":"review", "event_ids":[own, child], '
+    '"reason":"按冻结身份核对包含与原文"}], caseid=case["case_id"])'
 )
-STRUCTURE_PARENT = (
-    'page = search_events(limit=20)\n'
-    'events = search_events(kind="event", query="寻路", limit=20)\n'
-    'own = None\n'
-    'child = None\n'
-    'for item in events["events"]:\n'
-    '    if item["title"] == "寻路与照明":\n'
-    '        own = item\n'
-    'for item in events["events"]:\n'
-    '    if item["title"] == "寻路":\n'
-    '        child = item\n'
-    'write_event(items=[{"operation":"review", "event_ids":[own["event_id"]], "reason":"核对本事件实际版本"}])\n'
-    'write_event(items=[{"operation":"contain", "parent_event_id":own["event_id"], '
-    '"child_event_id":child["event_id"], "reason":"寻路与照明行动包含寻路子问题", '
-    '"evidence":[{"paragraph_id":0}]}, {"operation":"structure_review", '
-    '"source_event_id":own["event_id"], "target_event_id":child["event_id"], '
-    '"disposition":"contains", "reason":"按原文明确两事件的包含而非同一身份", '
-    '"evidence":[{"paragraph_id":0}]}])\n'
-    'write_event(items=[{"operation":"review", "event_ids":[own["event_id"], child["event_id"]], '
-    '"reason":"按冻结身份核对包含与原文"}])\nfinish()'
-)
-REPORT_PROGRAM = '''
+#: 案例会话收尾：确认无未承诺案例后结束（承诺即解决，无需再核对完成度）
+CLOSE_PROGRAM = "cases = search_cases(unresolved_only=True)\nfinish()"
+REPORT_PROGRAM = """
 read_topics()
 parents = search_events(kind="event", query="寻路与照明", limit=20)
 case = push_case(case_type="relation", description="核对寻路与照明的关联")
@@ -157,116 +162,196 @@ write_outcome(items=[{"operation":"link", "event_id":parents["events"][0]["event
     "outcome_id":outcome["results"][0], "reason":"寻路中点灯形成照明", "evidence":[{"paragraph_id":0}]}])
 write_diagnosis(analysis={"diagnosis":"寻路与照明相互关联", "topic_labels":{}})
 finish()
-'''
-
-
-IDENTITY_CHILD = (
-    'page = search_events(limit=20)\n'
-    'child = write_event(items=[' + identity_item("寻路", 0) + '])\n'
-    'write_event(items=[{"operation":"declaration_review", '
-    '"declaration_ids":[page["events"][0]["declaration_id"]], "reason":"按本章原文逐段核对"}])\n'
-    'write_event(items=[{"operation":"compare", "source_declaration_id":'
-    'page["events"][0]["declaration_id"], "target_declaration_ids":'
-    '[page["events"][1]["declaration_id"]], "disposition":"independent", '
-    '"reason":"寻路和照明各有独立问题", "evidence":[{"paragraph_id":0}]}])\nfinish()'
-)
-IDENTITY_PARENT = (
-    'page = search_events(limit=20)\n'
-    'parent = write_event(items=[' + identity_item("寻路与照明", 1) + '])\n'
-    'write_event(items=[{"operation":"declaration_review", '
-    '"declaration_ids":[page["events"][1]["declaration_id"]], "reason":"按本章原文逐段核对"}])\nfinish()'
-)
+"""
 
 
 async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_once(
-    declaration_case, configured_model_pool,
+    declaration_case,
+    configured_model_pool,
+    monkeypatch,
 ):
+    from src.case_pool import CasePool
+    from src.config import settings
+    from src.config.schemas.model import WeightedModelSettings
+
     draft = declaration_case
-    recorder = AgentAuditRecorder(sessionmaker(bind=draft.session.get_bind(), expire_on_commit=False))
-    model = Replies([AIMessage(content="", tool_calls=[call("execute_code", {"code": code})])
-                     for code in (IDENTITY_CHILD, IDENTITY_PARENT, STRUCTURE_CHILD, STRUCTURE_PARENT,
-                                  REPORT_PROGRAM)])
-    domain = DiagnosisDomain(session=draft.session, run_id=draft.run_id, novel_id="test-novel",
-        execution_id="diag-program-save", novel_title=None, model_id="test-model")
-    order = {identifier: position for position, identifier in enumerate(domain.sources)}
+    # 案例会话数=池条目并发位；固定为 1 使会话自取顺序确定（同一会话连办两件案例）
+    monkeypatch.setattr(
+        settings.models,
+        "model_pool",
+        [
+            WeightedModelSettings("test-model", "https://test.example/v1", "test-key", max_in_flight=1),
+        ],
+    )
+    recorder = AgentAuditRecorder(
+        storage_factory(sessionmaker(bind=draft.fixture_session.get_bind(), expire_on_commit=False))
+    )
+    model = Replies(
+        [
+            AIMessage(content="", tool_calls=[call("execute_code", {"code": code})])
+            for code in (FIRST_CASE_PROGRAM, SECOND_CASE_PROGRAM, CLOSE_PROGRAM, REPORT_PROGRAM)
+        ]
+    )
+    domain = DiagnosisDomain(
+        session=storage_for(draft.fixture_session),
+        run_id=draft.run_id,
+        novel_id=fixture_id(__name__, "test-novel"),
+        execution_id=fixture_id(__name__, "diag-program-save"),
+        novel_title=None,
+        model_id="test-model",
+    )
+
     async def trace_ainvoke(messages):
-        # 每轮按责任声明序取对应程序段：声明序 == 声明来源序（search_events 同源顺序）
+        # 会话按角色与已发生的模型回合数取程序段：案例会话自取连办两件再收尾，报告会话一次收口
         model.requests.append(list(messages))
         human = next(
-            str(m.content) for m in reversed(messages)
+            str(m.content)
+            for m in reversed(messages)
             if type(m).__name__ == "HumanMessage" and str(m.content).lstrip().startswith("{")
         )
         payload = json.loads(human)
-        # 阶段按角色与结构材料键判别：identity 阶段 material 同样带 catalog，不能按键名猜
-        role = payload["role"]
-        materials = payload.get("materials", {})
-        phase = "report" if role == "report" else ("structure" if "identity_snapshot" in materials else "identity")
-        position = order[payload["responsible_ids"][0]] if phase != "report" else -1
-        if phase == "report":
+        turns = sum(1 for message in messages if isinstance(message, AIMessage))
+        if payload["role"] == "report":
             code = REPORT_PROGRAM
-        elif phase == "identity":
-            code = IDENTITY_CHILD if position == 0 else IDENTITY_PARENT
+        elif turns == 0:
+            code = FIRST_CASE_PROGRAM
+        elif turns == 1:
+            code = SECOND_CASE_PROGRAM
         else:
-            code = STRUCTURE_CHILD if position == 0 else STRUCTURE_PARENT
-        return AIMessage(content="", tool_calls=[{"name": "execute_code", "args": {"code": code},
-                                                  "id": f"c{len(model.requests)}", "type": "tool_call"}])
+            code = CLOSE_PROGRAM
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "execute_code", "args": {"code": code}, "id": f"c{len(model.requests)}", "type": "tool_call"}
+            ],
+        )
+
     model.ainvoke = trace_ainvoke
-    real_build_context = domain.build_context
-
-    def tracked_build(work, phase, observer, corrections):
-        context = real_build_context(work, phase, observer, corrections)
-        check = context.completion_check
-
-        def tracked():
-            missing = check()
-            if missing:
-                print(f"GAP {phase} case={work.case_id[:8]} :: {missing}")
-            return missing
-
-        return DiagnosisWorkContext(context.program, context.initial_messages, tracked)
-
-    domain.build_context = tracked_build
     result = await _run_diagnosis_agent(
-        session=draft.session, run_id=draft.run_id, novel_id="test-novel", execution_id="diag-program-save",
-        llm=model, audit_recorder=recorder, domain=domain,
+        session=storage_for(draft.fixture_session),
+        run_id=draft.run_id,
+        novel_id=fixture_id(__name__, "test-novel"),
+        execution_id=fixture_id(__name__, "diag-program-save"),
+        llm=model,
+        audit_recorder=recorder,
+        domain=domain,
     )
     assert model.bound == ["execute_code", "finish"]
-    assert len(model.requests) == 5
+    assert len(model.requests) == 4
     assert result.diagnosis == "寻路与照明相互关联"
-    assert len(result.narrative_organization.events) == 2
-    report = draft.session.scalars(
+    organization = result.narrative_organization
+    assert len(organization.events) == 2
+    declared = {identifier for event in organization.events for identifier in event.declaration_ids}
+    assert declared == run_declaration_ids(storage_for(draft.fixture_session), draft.run_id)
+    assert len(organization.declaration_reviews) == 2
+    assert len(organization.declaration_comparisons) == 1
+    assert len(organization.reviewed_events) == 2
+    assert len(organization.structure_reviews) == 1
+    edge = organization.containments[0]
+    assert {edge.parent_event_id, edge.child_event_id} == {event.event_id for event in organization.events}
+    report = draft.fixture_session.scalars(
         select(DiagnosisReport)
         .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
         .where(Execution.session_run_id == draft.run_id)
     ).one()
-    assert report.session_id == "diag-program-save"
-    assert len(run_events(draft.session, draft.run_id)) == 2
-    turns = fetch_agent_turns(draft.session, draft.run_id)
-    assert len(turns) == 5
-    assert len({turn.execution_id for turn in turns}) == 3
+    assert report.session_id == fixture_id(__name__, "diag-program-save")
+    assert len(run_events(storage_for(draft.fixture_session), draft.run_id)) == 2
+    # 案例写入按案例登记真实执行；两件事件案例均已接手承诺
+    event_cases = {case["case_id"] for case in domain.case_pool.search() if case["case_type"] == "event"}
+    assert len(event_cases) == 2
+    anchored = set(
+        draft.fixture_session.scalars(
+            select(Execution.case_anchor).where(
+                Execution.run_id == draft.run_id, Execution.role == "case", Execution.case_anchor.is_not(None)
+            )
+        )
+    )
+    assert anchored == event_cases
+    reloaded = CasePool(draft.run_id)
+    reloaded.load_storage(storage_for(draft.fixture_session))
+    assert {case["case_id"] for case in reloaded.search() if case["promised"]} >= event_cases
+    turns = fetch_agent_turns(storage_for(draft.fixture_session), draft.run_id)
+    assert len(turns) == 4
+    assert len({turn.execution_id for turn in turns}) == 2
     assert all(turn.task_type == "diagnosis" for turn in turns)
     assert all(turn.status == "success" and turn.turn_ms is not None for turn in turns)
-    operations = fetch_run_tool_calls(draft.session, draft.run_id)
-    # 越界写入只被案例范围拒绝，不升级为整轮失败或依赖故障
-    allowed_refusals = ("不属于本案例", "不是本案例")
-    assert all(
-        operation.status == "success" or any(text in str(operation.error or "") for text in allowed_refusals)
-        for operation in operations
+    # 成功会话的执行行同样写终态：执行行不能停在 running
+    settled = list(
+        draft.fixture_session.scalars(
+            select(Execution).where(Execution.run_id == draft.run_id, Execution.role.in_(("case", "report")))
+        )
     )
+    assert settled and all(row.status == "success" and row.finished_at is not None for row in settled)
+    operations = fetch_run_tool_calls(storage_for(draft.fixture_session), draft.run_id)
     refused = [operation for operation in operations if operation.status != "success"]
-    assert all(operation.tool_name in {"write_event", "execute_code"} for operation in refused)
-    outer = [str(operation.response_observed.get("result", ""))
-             for operation in operations if operation.tool_name == "execute_code"]
-    assert len(outer) == 5
+    assert refused == [], [(operation.tool_name, operation.error) for operation in refused]
+    outer = [
+        str(operation.response_observed.get("result", ""))
+        for operation in operations
+        if operation.tool_name == "execute_code"
+    ]
+    assert len(outer) == 4
     assert all('"progress"' not in value and '"remaining"' not in value for value in outer)
+
+
+async def test_case_write_tool_lands_in_case_ledger_of_promised_case(declaration_case):
+    """案例处置写入经真实绑定落在所办案例自己的账本与执行贡献上，来源不是账本元组"""
+    from src.agents.diagnosis.domain import DiagnosisDomain
+
+    draft = declaration_case
+    domain = DiagnosisDomain(
+        session=storage_for(draft.fixture_session),
+        run_id=draft.run_id,
+        novel_id=fixture_id(__name__, "test-novel"),
+        execution_id=fixture_id(__name__, "case-ledger-chain"),
+        novel_title=None,
+        model_id="test-model",
+    )
+    context = domain.build_session_context("case", fixture_id(__name__, "case-session-a"), MagicMock())
+    case = domain.case_pool.push("character", "核实顾霜的人物记录", fixture_id(__name__, "case-session-a"))
+    other = domain.case_pool.push("character", "核实他人记录", fixture_id(__name__, "case-session-a"))
+    missing = json.loads(await context.program.execute('write_entity(name="顾霜", entity_type="character", el="p1")'))
+    assert missing["status"] == "partial" and "缺少 caseid" in missing["failed"][0]["message"]
+    unpromised = json.loads(
+        await context.program.execute(
+            f'write_entity(name="顾霜", entity_type="character", el="p1", caseid={other["case_id"]!r})'
+        )
+    )
+    assert unpromised["status"] == "partial" and "尚未 promise" in unpromised["failed"][0]["message"]
+    domain.case_pool.promise(case["case_id"], fixture_id(__name__, "case-session-a"))
+    applied = json.loads(
+        await context.program.execute(
+            f'write_entity(name="顾霜", entity_type="character", el="p1", caseid={case["case_id"]!r})'
+        )
+    )
+    assert applied["status"] == "applied"
+    assert applied["written"][0]["result"]["case_link"]["status"] == "success"
+    ledger, invocation = domain.case_writers[case["case_id"]]
+    assert [op["name"] for op in ledger.graph.contributions[invocation]["entity_ops"]] == ["顾霜"]
+    assert [
+        item["tool_name"]
+        for item in domain.case_pool.deliveries[fixture_id(__name__, "case-session-a")]
+        if item["tool_name"] == "write_entity"
+    ] == ["write_entity"]
 
 
 async def test_partial_program_keeps_success_and_rejected_operation_has_no_candidate(declaration_case):
     draft = declaration_case
-    runtime = DiagnosisProgramRuntime(build_diagnosis_tools(
-        draft.session, draft.run_id, organization_draft=draft, execution_id="partial-program"))
-    first = ('page = search_events(limit=20)\nresult = write_event(items=[' + identity_item("first", 0) + ',' +
-             identity_item("bad", 0, invalid=True) + '])')
+    runtime = DiagnosisProgramRuntime(
+        build_diagnosis_tools(
+            storage_for(draft.fixture_session),
+            draft.run_id,
+            organization_draft=draft,
+            execution_id=fixture_id(__name__, "partial-program"),
+        )
+    )
+    first = (
+        "page = search_events(limit=20)\nresult = write_event(items=["
+        + identity_item("first", 0)
+        + ","
+        + identity_item("bad", 0, invalid=True)
+        + "])"
+    )
     receipt = json.loads(await runtime.execute(first))
     assert receipt["status"] == "partial" and len(receipt["failed"]) == 1
     assert runtime.env["result"]["results"][1] is None and len(draft.events) == 1
@@ -279,14 +364,50 @@ async def test_partial_program_keeps_success_and_rejected_operation_has_no_candi
 
 async def test_case_warning_preserves_original_id_return_type(declaration_case):
     draft = declaration_case
-    runtime = DiagnosisProgramRuntime(build_diagnosis_tools(
-        draft.session, draft.run_id, organization_draft=draft, execution_id="case-warning"))
-    receipt = json.loads(await runtime.execute('arc = write_arc(items=[{"operation":"arc", "key":"journey", '
-        '"kind":"main", "title":"寻路线", "objective":"找到路", "role":"主线", "reason":"围绕寻路", '
-        '"evidence":[{"paragraph_id":0}]}], caseid="not-promised")'))
+    runtime = DiagnosisProgramRuntime(
+        build_diagnosis_tools(
+            storage_for(draft.fixture_session),
+            draft.run_id,
+            role="report",
+            organization_draft=draft,
+            execution_id=fixture_id(__name__, "case-warning"),
+        )
+    )
+    receipt = json.loads(
+        await runtime.execute(
+            'arc = write_arc(items=[{"operation":"arc", "key":"journey", '
+            '"kind":"main", "title":"寻路线", "objective":"找到路", "role":"主线", "reason":"围绕寻路", '
+            '"evidence":[{"paragraph_id":0}]}], caseid="not-promised")'
+        )
+    )
     assert receipt["status"] == "applied" and isinstance(runtime.env["arc"]["results"][0], str)
     assert receipt["written"][0]["result"]["case_link"]["status"] == "warning"
     assert runtime.env["arc"]["results"][0] in draft.arcs
+
+
+async def test_report_event_index_compact_page_allows_one_hundred(declaration_case):
+    """诊断对象索引与声明面同一契约：compact 索引每页可到 100，详情预览仍限 20"""
+    draft = declaration_case
+    runtime = DiagnosisProgramRuntime(
+        build_diagnosis_tools(
+            storage_for(draft.fixture_session),
+            draft.run_id,
+            role="report",
+            organization_draft=draft,
+            execution_id=fixture_id(__name__, "report-index"),
+        )
+    )
+    receipt = json.loads(
+        await runtime.execute(
+            'page = search_events(kind="event", limit=100, compact=True)\n'
+            'plain = search_events(kind="event", limit=100)'
+        )
+    )
+    assert receipt["status"] == "partial"
+    assert [item["message"] for item in receipt["failed"]] == [
+        "limit=100 越界：详情预览每页最多 20 条，紧凑索引请用 compact=True（最多 100 条）"
+    ]
+    assert runtime.env["page"]["total"] == 0 and runtime.env["page"]["events"] == []
 
 
 async def test_partial_program_outer_audit_is_error_and_keeps_full_receipt_in_same_session():
@@ -380,7 +501,7 @@ async def test_interpreter_error_after_finish_does_not_request_premature_complet
     draft = declaration_case
     runtime = DiagnosisProgramRuntime(
         build_diagnosis_tools(
-            draft.session,
+            storage_for(draft.fixture_session),
             draft.run_id,
             organization_draft=draft,
             evidence_ledger=DiagnosisEvidenceLedger(),
@@ -390,27 +511,60 @@ async def test_interpreter_error_after_finish_does_not_request_premature_complet
     assert receipt["status"] == "runtime_error" and runtime.take_end_request() is False
 
 
+async def test_case_program_dialogue_preflight_uses_session_candidate_total():
+    """案例面的候选号预检按会话候选总数，不依赖标注账本"""
+    seen: list[int] = []
+
+    @tool
+    def write_dialogue(candidate_index: int, verdict: str) -> str:
+        """记录一次对话候选判定"""
+        seen.append(candidate_index)
+        return json.dumps({"status": "written", "candidate_index": candidate_index}, ensure_ascii=False)
+
+    runtime = DiagnosisProgramRuntime([write_dialogue], dialogue_total=lambda: 3)
+    receipt = json.loads(await runtime.execute('write_dialogue(candidate_index=2, verdict="dialogue")'))
+    assert receipt["status"] == "applied" and seen == [2]
+    beyond = json.loads(await runtime.execute('write_dialogue(candidate_index=9, verdict="dialogue")'))
+    assert beyond["status"] == "rejected" and beyond["error"]["type"] == "candidate_index_out_of_range"
+    assert seen == [2]
+
+
 async def test_batch_items_have_distinct_audit_ids_and_rejected_case_has_no_delivery(declaration_case):
     from src.case_pool import CasePool
 
     draft = declaration_case
     pool, observer = CasePool(draft.run_id), MagicMock()
-    author = "batch-audit"
-    runtime = DiagnosisProgramRuntime(build_diagnosis_tools(
-        draft.session, draft.run_id, organization_draft=draft, case_pool=pool, execution_id=author),
-        observer=observer)
-    program = ('page = search_events(limit=2)\ncase = push_case(case_type="event", description="核对事件身份")\n'
-               'promise_case(case_id=case["case_id"])\nresult = write_event(items=[' +
-               identity_item("a", 0) + ',' + identity_item("bad", 0, invalid=True) + ',' +
-               identity_item("b", 1) + '], caseid=case["case_id"])')
+    author = fixture_id(__name__, "batch-audit")
+    runtime = DiagnosisProgramRuntime(
+        build_diagnosis_tools(
+            storage_for(draft.fixture_session),
+            draft.run_id,
+            organization_draft=draft,
+            case_pool=pool,
+            execution_id=author,
+        ),
+        observer=observer,
+    )
+    program = (
+        'page = search_events(limit=2)\ncase = push_case(case_type="event", description="核对事件身份")\n'
+        'promise_case(case_id=case["case_id"])\nresult = write_event(items=['
+        + identity_item("a", 0)
+        + ","
+        + identity_item("bad", 0, invalid=True)
+        + ","
+        + identity_item("b", 1)
+        + '], caseid=case["case_id"])'
+    )
     receipt = json.loads(await runtime.execute(program))
     assert receipt["status"] == "partial" and receipt["failed"][0]["item_index"] == 1
-    rows = [item.kwargs for item in observer.record_tool_call.call_args_list
-            if item.kwargs["tool_name"] == "write_event"]
+    rows = [
+        item.kwargs for item in observer.record_tool_call.call_args_list if item.kwargs["tool_name"] == "write_event"
+    ]
     assert [row["status"] for row in rows] == ["success", "error", "success"]
     assert [row["request_args"]["_program"]["item_index"] for row in rows] == [0, 1, 2]
     assert len({row["request_args"]["_tool_call_id"] for row in rows}) == 3
-    assert len(pool.deliveries[author]) == 2
-    assert all(fact["is_write"] for fact in pool.deliveries[author])
+    # 交付=承诺痕迹+两条实际写入；业务拒绝项不产生任何交付
+    assert [fact["is_write"] for fact in pool.deliveries[author]] == [False, True, True]
+    assert [fact["tool_name"] for fact in pool.deliveries[author]] == ["promise_case", "write_event", "write_event"]
     assert rows[1]["receipt"]["case_link"]["code"] == "case_association_failed"
     assert runtime.env["result"]["results"][1] is None

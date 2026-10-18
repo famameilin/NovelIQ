@@ -82,7 +82,7 @@ export interface Character {
   avg_emotion_score?: number | null;
 }
 
-// 段落曲线（M4：从分块粒度迁移到段落粒度，x 坐标统一使用 0-1 position 值域）
+// 段落曲线（x 坐标统一使用 0-1 position 值域）
 
 export interface ParagraphCurvePoint {
   paragraph_id: number;
@@ -126,7 +126,7 @@ export interface EmotionTrendWindow {
   paragraph_total: number;
 }
 
-// 章节指标汇总（M4）
+// 章节指标汇总
 
 export interface ChapterMetricSummary {
   chapter_id: number;
@@ -273,7 +273,7 @@ export interface DiagnosisResult {
   theme_color?: string | null;
 }
 
-// 2026-09-13 伏笔即事件树：伏笔树 = isforeshadowing 根事件 + foreshadowing 挂树边
+// 伏笔即事件树：伏笔树 = isforeshadowing 根事件 + foreshadowing 挂树边
 export interface ForeshadowingTree {
   root_event_id: string;
   tree_id: string;
@@ -292,13 +292,13 @@ export interface ForeshadowingTree {
 // 知识图谱
 
 export interface GraphNode {
-  // 2026-09-19 图实体主键改 uuid（String(36)）
+  // 图实体主键为 uuid（String(36)）
   entity_id: string;
   name: string;
   entity_type: "character" | "location" | "item" | "organization";
   tags?: string[] | null;
   aliases?: string[] | null;
-  // 2026-08-13 P2-5: 后端可能下发 null（生命周期数据缺失），放宽为可空
+  // 后端可能下发 null（生命周期数据缺失），放宽为可空
   first_seen_chapter: number | null;
   last_seen_chapter: number | null;
   state_chapter_id: number | null;
@@ -363,7 +363,7 @@ export interface GraphChangesPageResponse {
   page_info: GraphChangesPageInfo;
 }
 
-// 时间轴 — 2026-08-20 事件森林一树一节点新合同
+// 时间轴：事件森林一树一节点合同
 
 export interface TimelineMeta {
   novel_id: string;
@@ -378,7 +378,7 @@ export interface TimelinePhase {
   ratio: number;
 }
 
-// ── 事件森林新合同（一树一节点）与后端 src/api/models/event_timeline.py 严格对齐 ──
+// ── 事件森林（一树一节点）与后端 src/api/models/event_timeline.py 严格对齐 ──
 
 export interface TimelineEventParticipant {
   name?: string;
@@ -629,7 +629,7 @@ export interface GraphNetworkTabResponse {
   unavailable_reason: string | null;
 }
 
-// 主题全量分布（赛道 D 单源端点：演进/迁移/情绪 tab 数据源）
+// 主题全量分布（演进/迁移/情绪 tab 数据源）
 
 export interface TopicSeriesPoint {
   paragraph_id: number;
@@ -684,7 +684,7 @@ export interface TopicEmotionResponse {
   unavailable_reason: string | null;
 }
 
-// 语言特征（赛道 A/B/C 单源端点：词法句法/词向量 tab 数据源）
+// 语言特征（词法句法/词向量 tab 数据源）
 
 export interface LinguisticGroupStats {
   token_total: number | null;

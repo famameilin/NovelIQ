@@ -1,6 +1,6 @@
-"""章内人物观测的正式写链夹具：观测三态随事件参与者落账（2026-10-16 3NF）
+"""章内人物观测的正式写链夹具：观测三态随事件参与者落账
 
-全库 3NF 后人物动态观测的唯一事实源是「声明的参与者行」（declaration_participants
+后人物动态观测的唯一事实源是「声明的参与者行」（declaration_participants
 三态列 + 参与者观测事实行）。共享的 `persist_chapter_annotation` 不产出带三态的
 事件参与者，`characters=[...]` 只会落成不可读的观测载荷；需要可读人物观测行
 （别名归并、标签页、时间轴人物维度）的测试用本模块的 `persist_observed_characters`
@@ -10,12 +10,12 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
 
 from src.agents.annotation.output_models import BoundChapterAnnotation
 from src.event_trees.models import BoundEvent, EventParticipantInput
 from src.fact_graph.inputs import ChapterMetricsInput
 from src.fact_graph.outputs import BoundCharacterObservation
+from src.storage import new_id
 from tests.support.chapter_annotation_helpers import commit_test_annotation
 from tests.support.event_tree_fixtures import first_paragraph
 
@@ -70,7 +70,7 @@ def persist_observed_characters(
     ]
     events: list[BoundEvent] = []
     for observation in observations:
-        node_id = str(uuid4())
+        node_id = new_id()
         events.append(
             BoundEvent(
                 declaration_id=node_id,

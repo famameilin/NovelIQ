@@ -1,5 +1,4 @@
-"""
-词表注册中心 (LexiconRegistry v3) + 增强匹配 回归测试
+"""词表注册中心 (LexiconRegistry v3) + 增强匹配 回归测试
 
 覆盖:
   1. constants.LEXICON_FILES/LEXICON_DRAFT_FILES 注册加载与 key 解析
@@ -8,13 +7,9 @@
   4. 多模式匹配 (exact / phrase / fuzzy)
   5. 全局单例
 
-v3 变更（2026-08-15）:
-  - 未知 key 直接 raise KeyError（不再返回空列表）
-  - 领域扩展（get_with_domains）/ exclude_borrowed 机制删除
-  - 分层（layers）取消，改为扁平表目 + kind 枚举
-  强约束专项测试见 tests/metrics/test_registry_v3.py
+未知 key 直接 raise KeyError；表目为扁平结构（kind 枚举）。
 
-创建时间: 2026-04-06 | 分支: fix/timeline-multi-peak | 2026-08-15 升级 v3
+强约束专项测试见 tests/metrics/test_registry_v3.py
 """
 
 from __future__ import annotations

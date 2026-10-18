@@ -15,7 +15,6 @@ from src.agents.annotation.agent_graph import build_agent_graph
 from src.agents.annotation.agent_ir import AgentAnnotation
 from src.agents.annotation.agent_runtime import AgentProgramRuntime
 from src.agents.annotation.ledger import AnnotationToolLedger
-from src.agents.annotation.search_projection import SHARED_SEARCH_MAX_CHARS
 from src.agents.annotation.tool_batch import _build_tool_batch_node
 from src.agents.annotation.work_tools import build_work_tools
 from src.case_pool import CasePool
@@ -27,6 +26,7 @@ from src.work.annotation_work import WorkReceipt
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
+from tests.support.storage_fixtures import fixture_id
 
 
 class _QueryService:
@@ -98,9 +98,7 @@ def _real_work_runtime(*, role: str = "event", observer: Any = None) -> tuple[An
     # 作者身份收敛为单字符串：真实执行号就是三域的贡献作者
     cases.begin(execution.invocation_id)
     trees.begin(execution.invocation_id)
-    agent = SimpleNamespace(
-        run_id=ledger.run_scope, case_pool=cases, event_trees=trees, fact_graph=ledger.graph
-    )
+    agent = SimpleNamespace(run_id=ledger.run_scope, case_pool=cases, event_trees=trees, fact_graph=ledger.graph)
     ledger.work_id, ledger.invocation_id = execution.work_id, execution.invocation_id
     ledger.finish_work = execution.validate
     tool_map = {tool.name: tool for tool in build_work_tools(agent, execution, _QueryService())}
@@ -112,7 +110,7 @@ def _real_work_runtime(*, role: str = "event", observer: Any = None) -> tuple[An
 async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(monkeypatch) -> None:
     runtime, agent, execution = _real_work_runtime()
     trees = agent.event_trees
-    trees.begin("saved")
+    trees.begin(fixture_id(__name__, "saved"))
     nodes = [
         BoundEvent(
             node_id=f"node-{index:04d}",
@@ -130,8 +128,8 @@ async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(mo
         )
         for index in range(247)
     ]
-    trees.sync("saved", 12, nodes)
-    trees.confirm("saved")
+    trees.sync(fixture_id(__name__, "saved"), 12, nodes)
+    trees.confirm(fixture_id(__name__, "saved"))
     calls = []
     original_read = trees.read
 
@@ -164,15 +162,10 @@ async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(mo
 
 @pytest.mark.asyncio
 async def test_event_search_filters_foreshadow_roots_and_compacts_pages() -> None:
-    """伏笔根标记可过滤、紧凑索引可 100/页通览：跨章引用发现不再靠全目录翻页
-
-    2026-10-17 复盘（run 52cbb1ac ch16 event 15/15 触顶）：模型原话 "Search for
-    isforeshadowing… Not directly"——检索面既不显示 is_foreshadow_setup 也不能按它过滤，
-    伏笔根只能靠翻遍全书声明目视辨认，event 角色把近半预算烧在发现上。
-    """
+    """伏笔根标记可过滤、紧凑索引可 100/页通览：跨章引用发现不再靠全目录翻页"""
     runtime, agent, execution = _real_work_runtime()
     trees = agent.event_trees
-    trees.begin("saved")
+    trees.begin(fixture_id(__name__, "saved"))
     nodes = [
         BoundEvent(
             node_id=f"node-{index:04d}",
@@ -191,8 +184,8 @@ async def test_event_search_filters_foreshadow_roots_and_compacts_pages() -> Non
         )
         for index in range(130)
     ]
-    trees.sync("saved", 12, nodes)
-    trees.confirm("saved")
+    trees.sync(fixture_id(__name__, "saved"), 12, nodes)
+    trees.confirm(fixture_id(__name__, "saved"))
     tool = runtime.tools["search_events"]
     roots = json.loads(await tool.ainvoke({"isforeshadowing": True, "limit": 20}))
     assert roots["total"] == 65
@@ -228,7 +221,6 @@ async def test_graph_search_filters_relations_pages_and_reads_attributes_on_dema
     tool = runtime.tools["search_graph"]
     page_text = await tool.ainvoke({"query": "角色00", "limit": 20})
     page = json.loads(page_text)
-    assert len(page_text) <= SHARED_SEARCH_MAX_CHARS
     assert page["total_entities"] == 1
     assert page["total_relations"] == 1
     assert "attributes" not in page["entities"][0]
@@ -293,19 +285,15 @@ async def test_failed_declaration_keeps_prior_source_and_does_not_add_node() -> 
     ledger = _ledger()
     runtime = _runtime(ledger, "event")
     await runtime.execute(
-        
-            "event(el='e1', title='进入院门', problem='能否进入', summa"  # 同一程序文本
-            "ry='进入院门', event_type='行动', status='ongoing', evid"  # 同一程序文本
-            "ence=2)"  # 同一程序文本
-        
+        "event(el='e1', title='进入院门', problem='能否进入', summa"  # 同一程序文本
+        "ry='进入院门', event_type='行动', status='ongoing', evid"  # 同一程序文本
+        "ence=2)"  # 同一程序文本
     )
     receipt = json.loads(
         await runtime.execute(
-            
-                "event(el='e2', title='错误', problem='问题', summary='"  # 同一程序文本
-                "另一个声明', event_type='行动', status='ongoing', evidenc"  # 同一程序文本
-                "e=99)"  # 同一程序文本
-            
+            "event(el='e2', title='错误', problem='问题', summary='"  # 同一程序文本
+            "另一个声明', event_type='行动', status='ongoing', evidenc"  # 同一程序文本
+            "e=99)"  # 同一程序文本
         )
     )
     assert receipt["status"] == "partial"
@@ -353,11 +341,11 @@ class _RecordingObserver:
 
 
 @pytest.mark.asyncio
-async def test_compressed_reads_keep_every_reference_and_persistent_variable(monkeypatch) -> None:
-    ledger = _ledger(["阿青" + "原文" * 1000 for _ in range(11)])
+async def test_capped_reads_keep_every_reference_and_persistent_variable(monkeypatch) -> None:
+    texts = ["阿青" + "原文" * 1000 for _ in range(11)]
+    ledger = _ledger(texts)
     runtime = _runtime(ledger)
     monkeypatch.setattr(program_contract, "_READ_ECHO_MAX_ITEMS", 2)
-    monkeypatch.setattr(program_contract, "_READ_ECHO_MAX_CHARS", 80)
     body = json.loads(
         await runtime.execute(
             'person = write_entity(el="a1", name="阿青", entity_type="character")\n'
@@ -374,7 +362,9 @@ async def test_compressed_reads_keep_every_reference_and_persistent_variable(mon
         result = json.loads(read["result"])
         assert len(result["source_ref"]) == 64
         assert result["paragraph_id"] in {210, 211}
-        assert read["truncated_chars"] > 0
+        # 去掉字符预算：回显不再截断，整段正文原样可见
+        assert "truncated_chars" not in read
+        assert result["content"] == texts[result["paragraph_id"] - 201]
     repaired = json.loads(
         await runtime.execute('anchor_record(record_id=person["record"], source_ref=first["source_ref"])')
     )

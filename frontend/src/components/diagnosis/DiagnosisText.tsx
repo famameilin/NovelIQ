@@ -24,7 +24,7 @@ const DIAGNOSIS_TEXT_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
 ];
 
 /**
- * 2026-08-31，作用：将诊断正文中的协议枚举和指标键转换为中文
+ * 将诊断正文中的协议枚举和指标键转换为中文
  * 简要说明：只替换已知技术标记，保留作品名和其他自由文本
  */
 function formatDiagnosisText(text: string): string {
@@ -35,8 +35,7 @@ function formatDiagnosisText(text: string): string {
 }
 
 /**
- * 2026-04-21，任务：多页面卡片风格统一
- * 修改原因：统一诊断报告页文本卡片的容器视觉，和仪表盘卡片维持同一套 accent 语言
+ * 统一诊断报告页文本卡片的容器视觉，和仪表盘卡片维持同一套 accent 语言
  *
  * 长正文根据卡片实际尺寸分页，保留完整文字及桌面单屏边界
  */

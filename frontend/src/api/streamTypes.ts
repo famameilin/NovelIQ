@@ -1,9 +1,5 @@
-// Stream Types (SSE) — 统一事件格式
-// 定义后端 SSE 推送的流式消息类型，用于任务进度实时展示
-// 所有进行中事件共用同一套数据结构
-//   - 所有事件使用同一个 StreamEventData 结构
-//   - 通过 action 字段区分事件类型（start/progress/complete/output/thinking）
-//   - LLM 输出不再使用独立类型，自动获得 stage/sub_stage/chapter_id 上下文
+// Stream Types (SSE) — 后端 SSE 流式消息类型：所有进行中事件共用 StreamEventData，
+// 按 action 区分类型（start/progress/complete/output/thinking）
 
 export type SSEEventType =
   | "stage_start"      // action="start"（开始）

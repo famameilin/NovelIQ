@@ -1,4 +1,4 @@
-"从 src/event_trees/diagnosis_persistence.py 分离的具名物理读取"
+"event trees diagnosis persistence 的具名物理读取"
 
 from __future__ import annotations
 

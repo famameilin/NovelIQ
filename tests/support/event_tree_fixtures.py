@@ -1,25 +1,20 @@
-"""事件声明/完整事件/叙事组织测试夹具（2026-10-17 六 agent 归属，本切片自足）
+"""事件声明/完整事件/叙事组织测试夹具（六 agent 归属，本切片自足）
 
 只做真实表行的分层写入：标注来源链（执行→正式记录）、章级声明与原文证据、
-诊断整轮会话与真实尝试身份，以及沿正式发布入口（EventOrganizationDraft →
-报告 → 完整事件 → 叙事组织）一次性发布。夹具不复制旧 payload、不恢复旧行类型。
+诊断整轮会话与真实尝试身份，以及沿正式保存入口（EventOrganizationDraft →
+报告 → 完整事件 → 叙事组织）保存。夹具不复制旧 payload、不恢复旧行类型。
 """
 
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import (
-    EventOrganizationDraft,
-    OrganizationEvidence,
-    register_diagnosis_execution,
-    register_diagnosis_session,
-)
+from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
+from src.storage import new_id
 from src.storage.models import (
     Chapter,
     ChapterAnnotation,
@@ -32,7 +27,9 @@ from src.storage.models import (
     SourceEvidence,
     naive_utcnow,
 )
+from src.storage.repositories.organization_writes import register_diagnosis_execution, register_diagnosis_session
 from src.utils.identity import stable_digest
+from tests.support.storage_fixtures import natural_record, storage_for
 
 CONTRACT_VERSION = "event-tree-declarations-v1"
 
@@ -43,7 +40,7 @@ def report_case_anchor(run_id: str) -> str:
 
 
 def chapter_text(session: Session, run_id: str, chapter_id: int) -> str:
-    row = session.get(Chapter, {"run_id": run_id, "chapter_id": chapter_id})
+    row = natural_record(session, Chapter, {"run_id": run_id, "chapter_id": chapter_id})
     if row is None or row.text is None:
         raise ValueError(f"章节没有原文: run_id={run_id} chapter_id={chapter_id}")
     return str(row.text)
@@ -77,10 +74,8 @@ def ensure_character(session: Session, *, run_id: str, name: str) -> str:
     )
     if existing is not None:
         return str(existing.entity_id)
-    entity_id = str(uuid4())
-    session.add(
-        GraphEntity(entity_id=entity_id, run_id=run_id, canonical_name=name, entity_type="character")
-    )
+    entity_id = new_id()
+    session.add(GraphEntity(entity_id=entity_id, run_id=run_id, canonical_name=name, entity_type="character"))
     session.flush()
     return entity_id
 
@@ -94,7 +89,7 @@ def add_annotation_source(
     contract_version: str = CONTRACT_VERSION,
 ) -> tuple[str, str]:
     """建立一份真实标注来源链（执行行直接带 run/章/角色），返回 (record_id, execution_id)"""
-    execution_id = uuid4().hex
+    execution_id = new_id()
     session.add(
         Execution(
             execution_id=execution_id,
@@ -107,7 +102,7 @@ def add_annotation_source(
         )
     )
     session.flush()
-    record_id = str(uuid4())
+    record_id = new_id()
     session.add(
         ChapterAnnotation(
             record_id=record_id,
@@ -149,12 +144,12 @@ def add_declaration(
         if start < 0:
             raise ValueError(f"声明引文不在段落原文中: phrase={phrase!r}")
         end = start + len(phrase)
-    declaration_id = str(uuid4())
+    declaration_id = new_id()
     session.add(
         EventDeclaration(
             declaration_id=declaration_id,
             record_id=record_id,
-            local_key=local_key or f"el-{declaration_id[:8]}",
+            local_key=local_key or f"el-{declaration_id}",
             title=title or (phrase or text[:12]),
             problem=problem,
             summary=summary if summary is not None else text,
@@ -168,7 +163,7 @@ def add_declaration(
     session.flush()
     session.add(
         SourceEvidence(
-            evidence_id=str(uuid4()),
+            evidence_id=new_id(),
             ordinal=0,
             paragraph_id=int(paragraph.paragraph_id),
             start_char=start,
@@ -179,7 +174,7 @@ def add_declaration(
     for ordinal, (name, role) in enumerate(participants):
         session.add(
             DeclarationParticipant(
-                participant_id=str(uuid4()),
+                participant_id=new_id(),
                 declaration_id=declaration_id,
                 participant_ordinal=ordinal,
                 entity_id=ensure_character(session, run_id=str(paragraph.run_id), name=name),
@@ -197,14 +192,19 @@ def add_diagnosis_context(session: Session, run_id: str) -> tuple[str, str]:
     """
     from sqlalchemy import func
 
-    session_id = f"diag-session-{uuid4().hex[:12]}"
-    execution_id = uuid4().hex
-    attempt = int(
-        session.scalar(
-            select(func.count()).select_from(Execution).where(Execution.run_id == run_id, Execution.role == "report")
+    session_id = new_id()
+    execution_id = new_id()
+    attempt = (
+        int(
+            session.scalar(
+                select(func.count())
+                .select_from(Execution)
+                .where(Execution.run_id == run_id, Execution.role == "report")
+            )
+            or 0
         )
-        or 0
-    ) + 1
+        + 1
+    )
     register_diagnosis_session(session, run_id=run_id, session_id=session_id)
     register_diagnosis_execution(
         session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=attempt
@@ -219,9 +219,10 @@ def identity_every_declaration(
     groups: list[list[str]] | None = None,
     context: tuple[str, str] | None = None,
 ) -> tuple[EventOrganizationDraft, dict[str, Any]]:
-    """按显式分组提交声明核对、身份与全对比较并冻结身份（不发布）"""
+    """按显式分组提交声明核对、身份与全对比较（不保存）"""
     session_id, execution_id = context or add_diagnosis_context(session, run_id)
-    draft = EventOrganizationDraft(session, run_id, session_id)
+    draft = EventOrganizationDraft(storage_for(session), run_id, session_id)
+    draft.fixture_session = session
     # 报告级组织单元：案例锚与生产 report 单元同源，调用来源是本次报告角色尝试
     draft.case_id = report_case_anchor(run_id)
     draft.producer_invocation_id = execution_id
@@ -258,7 +259,6 @@ def identity_every_declaration(
                 reason="夹具按显式分组核对两项声明身份",
                 evidence=[OrganizationEvidence(paragraph_id=row_evidence(row)[0]["paragraph_id"])],
             )
-    draft.freeze_identity()
     return draft, {"membership": membership, "session_id": session_id, "execution_id": execution_id}
 
 
@@ -272,7 +272,7 @@ def close_structure(
     *,
     evidence_paragraph_id: int,
 ) -> None:
-    """按草稿已提交的包含/关系逐对收口结构判断并核对全部事件（不发布）"""
+    """按草稿已提交的包含/关系逐对收口结构判断并核对全部事件（不保存）"""
     events = sorted(draft.events)
     for index, source in enumerate(events):
         for target in events[index + 1 :]:
@@ -280,9 +280,7 @@ def close_structure(
                 disposition = "contains"
             elif (target, source) in draft.containments:
                 disposition = "part_of"
-            elif any(
-                {item.source_id, item.target_id} == {source, target} for item in draft.relations.values()
-            ):
+            elif any({item.source_id, item.target_id} == {source, target} for item in draft.relations.values()):
                 disposition = "related"
             else:
                 disposition = "independent"
@@ -295,7 +293,6 @@ def close_structure(
             )
     for event_id in events:
         draft.review_events([event_id], reason="夹具已核对正式身份与结构")
-    draft.freeze_structure()
 
 
 def publish_draft(
@@ -305,13 +302,13 @@ def publish_draft(
     *,
     diagnosis: str | None = None,
 ) -> dict[str, str]:
-    """沿正式发布入口保存报告、完整事件与叙事组织，返回声明→事件映射"""
-    from src.agents.diagnosis.persistence import save_diagnosis_report
-    from src.event_trees.diagnosis_persistence import save_diagnosis_events
-    from src.event_trees.organization import save_organization
+    """沿正式保存入口保存报告、完整事件与叙事组织，返回声明→事件映射"""
+    from src.storage.repositories.diagnosis_event_writes import save_diagnosis_events
+    from src.storage.repositories.organization_writes import save_organization
+    from tests.support.storage_fixtures import insert_report_fixture
 
     organization = draft.finish()
-    report_id = save_diagnosis_report(
+    report_id = insert_report_fixture(
         session,
         run_id,
         str(draft.execution_id),
@@ -320,11 +317,7 @@ def publish_draft(
     save_diagnosis_events(session, run_id, organization, report_id)
     save_organization(session, run_id, organization, report_id)
     session.flush()
-    return {
-        declaration_id: item.event_id
-        for item in organization.events
-        for declaration_id in item.declaration_ids
-    }
+    return {declaration_id: item.event_id for item in organization.events for declaration_id in item.declaration_ids}
 
 
 def publish_declarations(
@@ -335,7 +328,7 @@ def publish_declarations(
     evidence_paragraph_id: int | None = None,
     diagnosis: str | None = None,
 ) -> tuple[dict[str, str], EventOrganizationDraft]:
-    """一步发布全部声明的独立/同组身份，返回 (声明→事件, 草稿)"""
+    """一步保存全部声明的独立/同组身份，返回 (声明→事件, 草稿)"""
     draft, _meta = identity_every_declaration(session, run_id, groups=groups)
     paragraph_id = (
         first_paragraph(session, run_id).paragraph_id if evidence_paragraph_id is None else evidence_paragraph_id
@@ -357,7 +350,7 @@ def add_declaration_relation(
     operation_key: str | None = None,
 ) -> str:
     """章级声明之间的候选关系（标注期真实来源形状，带原文证据）"""
-    link_id = str(uuid4())
+    link_id = new_id()
     session.add(
         NarrativeLink(
             link_id=link_id,
@@ -366,13 +359,13 @@ def add_declaration_relation(
             semantic_source_declaration_id=source_declaration_id,
             semantic_target_declaration_id=target_declaration_id,
             relation_type=relation_type,
-            source_operation_local_key=operation_key or f"proposal-{link_id[:8]}",
+            source_operation_local_key=operation_key or f"proposal-{link_id}",
         )
     )
     session.flush()
     session.add(
         SourceEvidence(
-            evidence_id=str(uuid4()),
+            evidence_id=new_id(),
             ordinal=0,
             paragraph_id=int(paragraph.paragraph_id),
             start_char=0,
@@ -398,12 +391,12 @@ def add_foreshadowing_action(
     """真实伏笔动作事实（root/target 事件身份是阶段声明绑定的读投影）"""
     from src.storage.models import EventForeshadowingAction
 
-    action_id = str(uuid4())
+    action_id = new_id()
     session.add(
         EventForeshadowingAction(
             action_id=action_id,
             producer_execution_id=producer_execution_id,
-            source_operation_local_key=operation_key or f"action-{action_id[:8]}",
+            source_operation_local_key=operation_key or f"action-{action_id}",
             operation_order=operation_order,
             action_type=action_type,
             source_declaration_id=source_declaration_id,
@@ -413,7 +406,7 @@ def add_foreshadowing_action(
     session.flush()
     session.add(
         SourceEvidence(
-            evidence_id=str(uuid4()),
+            evidence_id=new_id(),
             ordinal=0,
             paragraph_id=int(paragraph.paragraph_id),
             start_char=0,

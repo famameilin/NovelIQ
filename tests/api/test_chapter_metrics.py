@@ -1,5 +1,4 @@
-"""
-GET /{novel_id}/chapter-metrics 端点测试（设计文档《章节粒度分析指标重设计》§13.2）
+"""GET /{novel_id}/chapter-metrics 端点测试
 
 覆盖：
 - 分子/分母聚合守恒（章节密度 = 段落分子和/分母和，非段落均值）
@@ -27,24 +26,7 @@ from tests.support.paragraph_fixtures import (
     make_metric_row,
     make_span,
 )
-
-# 章节 1（chunk 0）：段落 0 + 段落 1
-# 段落 0："他怒喝一声！"  pos=2.0 neg=0 fight=1.0 exclaim=1 句长充分统计量 (1, 4.0, 16.0)
-# 段落 1："你为何如此？"  neg=1.0 question=1 pause=1 dialogue=6 句长充分统计量 (1, 8.0, 64.0)
-# → 章节 1：tokens=10 chars=12 pos=2.0 neg=1.0 net=1.0 fight=1.0
-#   exclaim/question/pause 各 1；dialogue=6；sentences=2 sum=12 sum_sq=80
-#   avg_sent_len=6.0，var = 80/2 - 36 = 4 → std=2.0
-#
-# 章节 2（chunk 1）段落 2："平静地叙述日常。" pos=0.5 neg=0.5 tokens=7 chars=8
-# → 章节 2：pos=0.5 neg=0.5 net=0.0 fight=0
-#
-# 章节 3（chunk 2）段落 3："此人竟敢叛变！？" neg=2.0 fight=1.0 exclaim=1 question=1
-#   tokens=6 chars=8
-# → 章节 3：pos=0.0 neg=2.0 net=-2.0 fight=1.0
-#
-# 全书：tokens=23 chars=28 pos=2.5 neg=3.5 net=-1.0 fight=2.0
-#   exclaim=2 question=2 pause=1 dialogue=6 sentences=4 sum=28 sum_sq=208
-#   avg_sent_len=7.0，var = 208/4 - 49 = 3 → std=sqrt(3)
+from tests.support.storage_fixtures import task_for_run
 
 
 def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[str, str]:
@@ -176,7 +158,7 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
 def _get_chapter_metrics(api_client, novel_id: str, run_id: str):
     response = api_client.get(
         f"/api/novels/{novel_id}/chapter-metrics",
-        params={"task_id": run_id[:8]},
+        params={"task_id": task_for_run(run_id)},
     )
     assert response.status_code == 200
     return response.json()
@@ -208,7 +190,7 @@ def test_chapter_metrics_aggregates_conserve_numerators_and_denominators(api_cli
     assert second["pos_density"] == pytest.approx(0.5 / 7)
     assert second["neg_density"] == pytest.approx(0.5 / 7)
     assert second["net_density"] == pytest.approx(0.0)
-    # 分母 > 0 时零命中是合法观测（§15.2），返回 0.0 而非 None
+    # 分母 > 0 时零命中是合法观测，返回 0.0 而非 None
     assert second["fight_density"] == pytest.approx(0.0)
     assert second["exclaim_per_100_chars"] == pytest.approx(0.0)
     assert second["dialogue_ratio"] == pytest.approx(0.0)

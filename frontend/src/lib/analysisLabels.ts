@@ -1,5 +1,5 @@
 /**
- * 2026-08-31，作用：集中管理分析结果枚举的用户侧中文显示文案
+ * 集中管理分析结果枚举的用户侧中文显示文案
  * 简要说明：已知枚举返回明确中文，未知值使用中文兜底，原始值交给调用方放入 title
  */
 const LABEL_MAPS = {
@@ -134,7 +134,7 @@ const LABEL_MAPS = {
 export type AnalysisLabelDomain = keyof typeof LABEL_MAPS;
 
 /**
- * 2026-08-31，作用：将分析接口枚举转换为中文显示文案
+ * 将分析接口枚举转换为中文显示文案
  * 简要说明：兼容大小写和下划线，未知英文值统一显示为中文“其他”
  */
 export function formatAnalysisLabel(value: string | null | undefined, domain: AnalysisLabelDomain): string {

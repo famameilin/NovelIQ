@@ -1,4 +1,4 @@
-"""LTP 语言结构输出结构与段落特征结果（《分析能力扩展路线图》§5.3）
+"""LTP 语言结构输出结构与段落特征结果
 
 段落语言特征的最小事实单元是"词元级结构数据 + 可加充分统计量"：
 tokens / dependency_arcs 保存原始结构，word_length_counts / pos_counts /
@@ -35,7 +35,7 @@ class LtpToken:
 
 @dataclass(frozen=True)
 class LtpDependencyArc:
-    """依存边：LTP 坐标系 ROOT=0、词元索引 1 起（文档 §C2）"""
+    """依存边：LTP 坐标系 ROOT=0、词元索引 1 起"""
 
     dependent_index: int
     head_index: int
@@ -62,7 +62,7 @@ class LtpEntityCandidate:
 
 @dataclass(frozen=True)
 class LtpSdpArc:
-    """语义依存弧（sdp，2026-09-05 B 批）：head/dependent 均为段内全局 token_index
+    """语义依存弧（sdp）：head/dependent 均为段内全局 token_index
 
     LTP sdp 输出为逐句 dict {'head','dependent','label'}；head 侧为谓词，
     dependent 侧为论元/修饰（AGT=施事、DATV=对象、mNEG=否定、mDEPD=程度）。
@@ -82,7 +82,7 @@ class LtpSdpArc:
 
 @dataclass(frozen=True)
 class EmotionEvent:
-    """LTP 语义情绪事件（2026-09-05 B 批）
+    """LTP 语义情绪事件
 
     情绪词典只承担谓词极性候选标记；持有者/对象/否定/程度全部来自 sdp 模型判定。
     """
@@ -128,7 +128,7 @@ class ParagraphLinguisticResult:
     dependency_depth_max: int
     dependency_relation_counts: dict[str, int]
     entities: list[LtpEntityCandidate] = field(default_factory=list)
-    # 2026-09-05 B 批：sdp 语义弧与词典情绪事件（sdp 任务关闭时为空）
+    # sdp 语义弧与词典情绪事件（sdp 任务关闭时为空）
     sdp_arcs: list[LtpSdpArc] = field(default_factory=list)
     emotion_events: list[EmotionEvent] = field(default_factory=list)
 

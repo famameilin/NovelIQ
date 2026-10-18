@@ -3,13 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from src.diagnosis.schema import AgentAnalysis
+from src.storage import new_id
 from src.storage.models import Novel
 
 
 def insert_graph_test_novel(db_session, novel_id: str) -> None:
     """为 graph snapshot contract 测试补 novels 主表记录"""
-    if len(novel_id) > 8:
-        raise ValueError(f"graph snapshot test novel_id must be 8 chars or fewer, got: {novel_id}")
 
     db_session.add(
         Novel(
@@ -23,7 +22,7 @@ def insert_graph_test_novel(db_session, novel_id: str) -> None:
 
 
 def insert_graph_test_chunks(db_session, run_id: str, chunk_ids: range) -> None:
-    """为 graph relation event 测试补齐 chapters 外键依赖（M9a-2：chunks 表已合并）"""
+    "为 graph relation event 测试补齐 chapters 外键依赖（-2：chunks 表已合并）"
     from src.storage.repositories import ChapterRepository
     from src.text_processing.models import Chunk
 
@@ -60,11 +59,10 @@ def insert_focus_contract_agent_analysis(
     名单与评分引用的角色必须先有本 run 的正式 character 实体，否则发布链拒绝；
     返回正式报告 report_id。
     """
-    from uuid import uuid4
 
-    from src.agents.diagnosis.persistence import save_diagnosis_report
-    from src.event_trees.organization import register_diagnosis_session
+    from src.storage.repositories.organization_writes import register_diagnosis_session
     from tests.support.event_tree_fixtures import ensure_character
+    from tests.support.storage_fixtures import insert_report_fixture
 
     focus_names = list(focus_characters)
     main_names = list(main_characters or focus_names)
@@ -87,22 +85,21 @@ def insert_focus_contract_agent_analysis(
         main_characters=main_names,
         core_cast=core_names,
     )
-    session_id = f"diag-session-{uuid4().hex[:12]}"
+    session_id = new_id()
     register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
-    report_id = save_diagnosis_report(db_session, run_id, session_id, analysis)
+    report_id = insert_report_fixture(db_session, run_id, session_id, analysis)
     db_session.commit()
     return report_id
 
 
 def insert_partial_diagnosis(db_session, *, run_id: str, diagnosis: str) -> str:
     """用正式发布链写入只有正文的诊断报告（标签/名单/评分缺失的真实部分结果）"""
-    from uuid import uuid4
 
-    from src.agents.diagnosis.persistence import save_diagnosis_report
-    from src.event_trees.organization import register_diagnosis_session
+    from src.storage.repositories.organization_writes import register_diagnosis_session
+    from tests.support.storage_fixtures import insert_report_fixture
 
-    session_id = f"diag-session-{uuid4().hex[:12]}"
+    session_id = new_id()
     register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
-    report_id = save_diagnosis_report(db_session, run_id, session_id, AgentAnalysis(diagnosis=diagnosis))
+    report_id = insert_report_fixture(db_session, run_id, session_id, AgentAnalysis(diagnosis=diagnosis))
     db_session.commit()
     return report_id

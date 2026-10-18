@@ -1,4 +1,4 @@
-"从 src/api/routes/results_graph.py 分离的具名物理读取"
+"api routes results graph 的具名物理读取"
 
 from __future__ import annotations
 

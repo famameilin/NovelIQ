@@ -1,6 +1,6 @@
 """章节截点内的正式事件阶段投影，不把章级声明当作第二种事件
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：阅读截点由 chapters 与已保存
+阅读截点由 chapters 与已保存
 chapter_annotations 决定；事件阶段取 event_revisions 的显式链；因果/伏笔
 边取 narrative_links 的语义形状；伏笔动作取 event_foreshadowing_actions。
 """

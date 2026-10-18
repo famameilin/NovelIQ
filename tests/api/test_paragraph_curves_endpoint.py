@@ -1,5 +1,5 @@
 """
-GET /{novel_id}/paragraph-curves 端点测试（设计文档《章节粒度分析指标重设计》§13.1）
+GET /{novel_id}/paragraph-curves 端点测试
 
 覆盖：
 - 契约字段全集与 position 计算
@@ -26,6 +26,7 @@ from tests.support.paragraph_fixtures import (
     make_span,
     tension_z_for_display,
 )
+from tests.support.storage_fixtures import task_for_run
 
 
 def _insert_three_paragraph_run(db_session) -> tuple[str, str]:
@@ -105,7 +106,7 @@ def test_paragraph_curves_contract_fields_and_position(api_client: TestClient, d
 
     response = api_client.get(
         f"/api/novels/{novel_id}/paragraph-curves",
-        params={"task_id": run_id[:8]},
+        params={"task_id": task_for_run(run_id, db_session)},
     )
 
     assert response.status_code == 200
@@ -197,7 +198,7 @@ def test_paragraph_curves_max_points_keeps_boundaries_and_peak(api_client: TestC
 
     response = api_client.get(
         f"/api/novels/{novel_id}/paragraph-curves",
-        params={"task_id": run_id[:8], "max_points": 10},
+        params={"task_id": task_for_run(run_id, db_session), "max_points": 10},
     )
 
     assert response.status_code == 200
@@ -217,7 +218,7 @@ def test_paragraph_curves_max_points_none_returns_all(api_client: TestClient, db
 
     response = api_client.get(
         f"/api/novels/{novel_id}/paragraph-curves",
-        params={"task_id": run_id[:8]},
+        params={"task_id": task_for_run(run_id, db_session)},
     )
 
     assert response.status_code == 200
@@ -231,7 +232,7 @@ def test_paragraph_curves_max_points_greater_than_count_returns_all(api_client: 
 
     response = api_client.get(
         f"/api/novels/{novel_id}/paragraph-curves",
-        params={"task_id": run_id[:8], "max_points": 500},
+        params={"task_id": task_for_run(run_id, db_session), "max_points": 500},
     )
 
     assert response.status_code == 200
@@ -243,7 +244,7 @@ def test_paragraph_curves_rejects_invalid_max_points(api_client: TestClient, db_
 
     response = api_client.get(
         f"/api/novels/{novel_id}/paragraph-curves",
-        params={"task_id": run_id[:8], "max_points": 0},
+        params={"task_id": task_for_run(run_id, db_session), "max_points": 0},
     )
 
     assert response.status_code == 422
@@ -254,7 +255,7 @@ def test_paragraph_curves_rejects_non_completed_run(api_client: TestClient, db_s
 
     response = api_client.get(
         f"/api/novels/{novel_id}/paragraph-curves",
-        params={"task_id": run_id[:8]},
+        params={"task_id": task_for_run(run_id, db_session)},
     )
 
     assert response.status_code == 400

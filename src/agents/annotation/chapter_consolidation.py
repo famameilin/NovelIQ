@@ -38,7 +38,7 @@ REASONS = {
 def case_description(issue: dict[str, Any]) -> str:
     """完整节点键、原因和主段号优先；超长正文名称明确标示截短，完整证据保存在结论中"""
     paragraphs = sorted({item["paragraph_id"] for item in issue["evidence"] if "paragraph_id" in item})
-    suffix = f"；类={issue['entity_type']}；码={REASONS[issue['reason']]}；段={(paragraphs[0] if paragraphs else '无')}"
+    suffix = f"；类={issue['entity_type']}；码={REASONS[issue['reason']]}；段={paragraphs[0] if paragraphs else '无'}"
     prefix = f"节点={issue['node_id']}；名="
     available = 100 - len(prefix) - len(suffix)
     if available < 2:
@@ -81,14 +81,16 @@ def case_spec(item: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
         payload["chapter_id"], payload["paragraph_id"] = paragraphs[0]
     description = case_description(item)
     if reason == "dangling_relation":
-        return ("relation", description, payload)
+        return "relation", description, payload
     if reason in CHARACTER_REASONS:
-        return ("character", description, payload)
+        return "character", description, payload
     payload["event_id"] = item["node_id"]
-    return ("event", description, payload)
+    return "event", description, payload
 
 
-def consolidate_chapter(session: Storage, run_id: str, chapter_id: int, cases: CasePool) -> dict[str, Any]:
+def consolidate_chapter(
+    session: Storage, run_id: str, chapter_id: int, cases: CasePool, *, recheck: bool = False
+) -> dict[str, Any]:
     """在调用方短事务中保存一次来源绑定的结论；案例、回执和完成凭据一起提交
 
     回执不保存结论 JSON：来源摘要以 program_invocation_key（chapter:{章}:{digest}）
@@ -110,9 +112,10 @@ def consolidate_chapter(session: Storage, run_id: str, chapter_id: int, cases: C
     digest = stable_digest(run_id, chapter_id, RULE_VERSION, sources)
     previous = session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_2(chapter_id, run_id)
     if previous is not None:
-        if previous.program_invocation_key == f"chapter:{chapter_id}:{digest}":
+        if previous.program_invocation_key == f"chapter:{chapter_id}:{digest}" and not recheck:
             return {"status": "existing", "chapter_id": chapter_id, "fact_id": digest}
-        raise ValueError(f"章末凭据与有效来源集合不同，不能覆盖: chapter_id={chapter_id}")
+        if previous.program_invocation_key != f"chapter:{chapter_id}:{digest}":
+            raise ValueError(f"章末凭据与有效来源集合不同，不能覆盖: chapter_id={chapter_id}")
     repo = graph_projection(session.graph)
     boundary = repo.resolve_chapter_boundary(run_id, chapter_id=chapter_id)
     if boundary is None:
@@ -293,6 +296,7 @@ def consolidate_chapter(session: Storage, run_id: str, chapter_id: int, cases: C
     )
     return session.annotations.consolidate(
         {
+            "recheck": recheck,
             "run_id": run_id,
             "chapter_id": chapter_id,
             "sources": sources,

@@ -1,20 +1,16 @@
-"""章节正式标注与数据库图测试夹具（全库 3NF 写面：executions/chapter_annotations）
+"""章节正式标注与数据库图测试夹具
 
 写面合同（与 src/agents/annotation/agent.py 的 _save 一致）：
 - 真实尝试 = executions 的 invocation 形状（run_id/章/角色 + attempt_number + status）
 - 正式产物 = chapter_annotations 头（自带 run/章/角色）+ 五组件同事务（事件声明、
   事实图、对话与逐段情绪、案例）
 - 队列票据身份（annotation_work_id）只是内存对象，不落 work_items 行
-本模块只用当前正式关系，不读任何已退场关系（analysis_outputs/annotation_work/
-event_nodes/event_edges）。
 """
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass, replace
 from typing import Any
-from uuid import uuid4
 
 from sqlalchemy import func, select
 
@@ -24,6 +20,7 @@ from src.event_trees.models import BoundEvent, EventParticipantInput
 from src.fact_graph.inputs import BoundRelationInput, ChapterMetricsInput, EntityInput
 from src.fact_graph.outputs import BoundCharacterObservation, BoundDialogue
 from src.fact_graph.vocabulary import EntityType
+from src.storage import new_id
 from src.storage.db import get_session_factory
 from src.storage.models import (
     Chapter,
@@ -36,8 +33,8 @@ from src.storage.models.base import naive_utcnow
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.text_processing.models import Chunk as ChunkerChunk
 from src.text_processing.paragraphs import split_chunk_paragraphs
-from src.utils.identity import stable_uuid
 from src.work.annotation_work import annotation_work_id
+from tests.support.storage_fixtures import fixture_id, natural_record, storage_factory, storage_for, uuid7
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,9 +63,9 @@ def create_run_with_chunks(
     chapter_ids: list[int] | None = None,
     title: str = "章节事实测试",
 ) -> tuple[str, str]:
-    """2026-08-05 用于创建带真实章节身份的小说运行与原文章节"""
-    novel_id = uuid.uuid4().hex[:8]
-    run_id = str(uuid.uuid4())
+    """创建带真实章节身份的小说运行与原文章节"""
+    novel_id = new_id()
+    run_id = new_id()
     session.add(
         Novel(
             novel_id=novel_id,
@@ -101,11 +98,11 @@ def create_run_with_chunks(
             )
         )
         offset += len(text_value)
-    # M9a-2：chunks 表合并进 chapters——正文切片经 ChapterRepository 落库
+    # -2：chunks 表合并进 chapters——正文切片经 ChapterRepository 落库
     # （缺失章节行以默认结构补建，见 insert_chapter_texts）
     ChapterRepository(session).insert_chapter_texts(run_id, chunks)
     session.commit()
-    # 2026-08-14 二期：annotate 阶段要求段落事实源存在（章节段落边界查询），
+    # 二期：annotate 阶段要求段落事实源存在（章节段落边界查询），
     # helper 同步插入段落行（一次传入全部章节，paragraph_id 全局连续），
     # token_count 用简单切分填充
     from src.storage.repositories import ParagraphRepository
@@ -147,9 +144,7 @@ def _saved_work_records(session: Any, run_id: str) -> list[_SavedWorkRecord]:
     ]
 
 
-def _create_work_identity(
-    session: Any, *, run_id: str, chapter_id: int, role: str = "annotation"
-) -> tuple[str, str]:
+def _create_work_identity(session: Any, *, run_id: str, chapter_id: int, role: str = "annotation") -> tuple[str, str]:
     """登记 executions 的真实尝试，返回 (队列票据 work_id, invocation_id)
 
     票据身份只是内存对象：正式产物 record_id 与对话/树记录键都按它铸造，
@@ -171,7 +166,7 @@ def _create_work_identity(
         )
         + 1
     )
-    invocation = uuid4().hex
+    invocation = new_id()
     session.add(
         Execution(
             execution_id=invocation,
@@ -198,9 +193,7 @@ def _finish_execution(session: Any, invocation: str) -> None:
 
 def _work_execution_of_chapter(session: Any, run_id: str, chapter_id: int) -> str:
     """按章取本 run 已保存标注的真实执行（优先整章 annotation，其次长章三工位）"""
-    records = [
-        record for record in _saved_work_records(session, run_id) if record.chapter_id == chapter_id
-    ]
+    records = [record for record in _saved_work_records(session, run_id) if record.chapter_id == chapter_id]
     if not records:
         raise ValueError(f"章节没有已保存标注的真实执行: run_id={run_id} chapter_id={chapter_id}")
     preference = {"annotation": 0, "metric": 1, "entity": 2, "event": 3}
@@ -213,7 +206,7 @@ def _entity_spec(
     entity_type: EntityType,
     tags: list[str] | None = None,
 ) -> dict[str, str | list[str]]:
-    """2026-08-08 用于声明事实隐含的实体名称、大类与可选标签"""
+    """声明事实隐含的实体名称、大类与可选标签"""
     spec: dict[str, str | list[str]] = {"name": name, "entity_type": entity_type}
     if tags:
         spec["tags"] = tags
@@ -228,7 +221,7 @@ def character_fact(
     role_function: str = "主体",
     emotion: int = 0,
 ) -> dict[str, Any]:
-    """2026-08-11 用于构造章内人物观察输入测试值"""
+    """构造章内人物观察输入测试值"""
     return {
         "chapter_id": chapter_id,
         "character": name,
@@ -248,7 +241,7 @@ def relation_fact(
     from_entity_type: EntityType = "character",
     to_entity_type: EntityType = "character",
 ) -> dict[str, Any]:
-    """2026-08-12 用于构造章内三字段关系边输入测试值（本章确认存在的边）"""
+    """构造章内三字段关系边输入测试值（本章确认存在的边）"""
     return {
         "chapter_id": chapter_id,
         "from_entity": from_name,
@@ -269,7 +262,7 @@ def dialogue_fact(
     tone: str | None = None,
     verdict: str = "dialogue",
 ) -> dict[str, Any]:
-    """2026-08-11 用于构造按系统候选对齐的对话输入测试值"""
+    """构造按系统候选对齐的对话输入测试值"""
     return {
         "candidate_content": content,
         "verdict": verdict,
@@ -286,7 +279,7 @@ def identity_relation_output(
     object_name: str,
     effective_chapter_id: int = 0,
 ) -> dict[str, Any]:
-    """2026-08-07 用于构造同一人物关系的测试标注项"""
+    """构造同一人物关系的测试标注项"""
     return relation_fact(
         chapter_id=effective_chapter_id,
         from_name=subject_name,
@@ -302,7 +295,7 @@ def _register_entity(
     entity_type: EntityType,
     tags: list[str] | None = None,
 ) -> None:
-    """2026-08-11 用于把事实隐含实体注册到当前章实体目录"""
+    """把事实隐含实体注册到当前章实体目录"""
     for existing in directory["entities"]:
         if existing.name == name:
             return
@@ -332,10 +325,10 @@ def make_bound_event(
     progress: str | None = None,
 ) -> BoundEvent:
     """构造带本章段落证据的正式事件"""
-    node_id = node_id or str(uuid4())
+    node_id = node_id or new_id()
     return BoundEvent(
         node_id=node_id,
-        tree_id=tree_id or f"tree-{uuid4()}",
+        tree_id=tree_id or f"tree-{uuid7()}",
         parent_node_id=parent_node_id,
         cause_role=cause_role,
         description=description,
@@ -469,7 +462,7 @@ def persist_chapter_annotation(
     for (chapter_id, entity_name), attributes in (entity_attributes or {}).items():
         if chapter_id not in chapter_text_by_id:
             raise ValueError(f"测试实体属性引用了非本章章节: {chapter_id}")
-        # 2026-10-16 3NF：实体不再存任意属性列，只有 description/representative 是显式字段；
+        # 实体不再存任意属性列，只有 description/representative 是显式字段；
         # 其余测试键不落库（夹具保留形参以维持调用面）
         merged = dict(attributes)
         description = merged.pop("description", None)
@@ -516,13 +509,12 @@ def persist_chapter_annotation(
                 status=event_spec.get("status", "ongoing"),
                 progress=event_spec.get("progress"),
             )
-            # 2026-09-13 伏笔即事件树：isforeshadowing=true 的章内事件即伏笔树根
-            # （2026-09-14 伏笔属性收敛：expected_payoff_family 退役）
+            # 伏笔即事件树：isforeshadowing=true 的章内事件即伏笔树根
             if event_spec.get("isforeshadowing"):
                 bound_event.is_foreshadow_setup = True
                 bound_event.payoff_likelihood = event_spec.get("payoff_likelihood", "medium")
             bound_events.append(bound_event)
-        # 2026-09-13 伏笔即事件树：setup_event_index（1 基）指向的章内事件即伏笔树根
+        # 伏笔即事件树：setup_event_index（1 基）指向的章内事件即伏笔树根
         for fs_spec in foreshadowings or []:
             root_event = bound_events[int(fs_spec["setup_event_index"]) - 1]
             root_event.is_foreshadow_setup = True
@@ -541,7 +533,7 @@ def persist_chapter_annotation(
                 events=bound_events,
             )
         )
-    # 2026-09-04 单一写面：实体/关系不再是章标注字段，改为派生 FactGraph 操作日志
+    # 单一写面：实体/关系不再是章标注字段，改为派生 FactGraph 操作日志
     # （在章循环之后收集，事件参与者登记的实体一并覆盖）
     entity_ops: list[dict[str, Any]] = []
     relation_assert_ops: list[dict[str, Any]] = []
@@ -600,8 +592,8 @@ def commit_test_annotation(
     from src.work.annotation_work import WorkReceipt
 
     # chapters 主键顺序为 (run_id, chapter_id)
-    chapter = session.get(Chapter, (run_id, chapter_id))
-    # 2026-10-16 3NF：local_end_char/global 坐标/char_count 是读取投影，不是段落列；
+    chapter = natural_record(session, Chapter, {"run_id": run_id, "chapter_id": chapter_id})
+    # local_end_char/global 坐标/char_count 是读取投影，不是段落列；
     # 夹具按生产派发口径组装段落事实（与 annotate 的 _load_work 同形）
     from types import SimpleNamespace
 
@@ -631,20 +623,20 @@ def commit_test_annotation(
     agent = AnnotationAgent(
         EventBus(),
         run_id,
-        get_session_factory(),
-        novel_id="fixture",
+        storage_factory(get_session_factory()),
+        novel_id=fixture_id(__name__, "fixture"),
         fact_graph=graph,
         event_trees=trees,
         case_pool=cases,
     )
     records = _saved_work_records(session, run_id)
-    graph.restore_storage(session, records)
-    trees.restore_storage(session, records)
+    graph.restore_storage(storage_for(session), records)
+    trees.restore_storage(storage_for(session), records)
     graph.begin(invocation, chapter.sequence, "annotation")
     graph.contributions[invocation]["entity_ops"] = entity_ops or []
     graph.contributions[invocation]["relation_assert_ops"] = relation_assert_ops or []
     graph._fold()
-    # 2026-10-13 身份=规范名+实体大类：夹具的历史操作与参与者以登记名给出，
+    # 身份=规范名+实体大类：夹具的历史操作与参与者以登记名给出，
     # 冻结前按图登记把端点/参与者翻成实体身份键（生产面存的就是复合键）
     name_to_key = {display: key for key, display in graph.entity_names.items()}
 
@@ -686,7 +678,7 @@ def commit_test_annotation(
         finished=True,
     )
     agent.freeze(execution)
-    result = agent._save(execution, session)
+    result = agent._save(execution, storage_for(session))
     _finish_execution(session, invocation)
     session.commit()
     agent.close()
@@ -755,9 +747,7 @@ def commit_test_resolution(
 
     invocation = _work_execution_of_chapter(session, run_id, chapter_id)
     paragraph = (
-        session.execute(
-            select(Paragraph).where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id)
-        )
+        session.execute(select(Paragraph).where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id))
         .scalars()
         .first()
     )
@@ -766,7 +756,7 @@ def commit_test_resolution(
         link_type = str(resolution["edge_type"])
         source_id = str(resolution["root_event_id"])
         target_id = str(resolution["event_id"])
-        link_id = stable_uuid(run_id, invocation, source_id, target_id, link_type)
+        link_id = fixture_id(run_id, invocation, source_id, target_id, link_type)
         session.add(
             NarrativeLink(
                 link_id=link_id,
@@ -781,7 +771,7 @@ def commit_test_resolution(
         session.flush()
         session.add(
             SourceEvidence(
-                evidence_id=str(uuid4()),
+                evidence_id=new_id(),
                 narrative_link_id=link_id,
                 ordinal=0,
                 paragraph_id=int(paragraph.paragraph_id),
@@ -791,8 +781,8 @@ def commit_test_resolution(
         )
         session.flush()
     elif target["domain"] == "relation":
-        from src.fact_graph.identity import relation_id
         from src.fact_graph.vocabulary import RELATION_DEFINITIONS
+        from tests.support.storage_fixtures import relation_id
 
         left, right = (
             session.get(GraphEntity, target["from_entity_id"]),
@@ -819,7 +809,7 @@ def commit_test_resolution(
         session.flush()
         session.add(
             SourceEvidence(
-                evidence_id=str(uuid4()),
+                evidence_id=new_id(),
                 graph_fact_id=fact.graph_fact_id,
                 ordinal=0,
                 paragraph_id=int(paragraph.paragraph_id),

@@ -1,10 +1,4 @@
-"""
-Metrics 模块测试
-
-修改时间: 2026-04-06
-任务: 移除向后兼容代码
-修改内容: 移除旧版精确匹配函数测试，保留 phrase 模式匹配测试
-"""
+"""Metrics 模块测试"""
 
 import sys
 import unittest
@@ -73,7 +67,7 @@ class TestStyleMetrics(unittest.TestCase):
         self.assertGreater(mtld(tokens), 0)
 
     def test_mtld_factors_zero_returns_none(self) -> None:
-        # §19.12: 全唯一词（TTR 未跌破阈值）时 MTLD 数学上无定义，返回 None
+        # 全唯一词（TTR 未跌破阈值）时 MTLD 数学上无定义，返回 None
         tokens = ["我", "爱", "你"]
         self.assertIsNone(mtld(tokens))
 

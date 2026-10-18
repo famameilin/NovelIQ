@@ -28,7 +28,6 @@ export interface ForceGraphPalette {
   auxColors: AuxColors;
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P1
 // 把图谱配色提取成独立模块，避免 ForceGraph 同时维护生命周期和颜色映射
 function getEntityColorsFromCSS(): EntityColors {
   return {
@@ -42,9 +41,8 @@ function getEntityColorsFromCSS(): EntityColors {
   };
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P1
 // 统一关系类型颜色来源，保证图例和图谱主图后续可以复用同一套调色规则
-// 2026-08-12：补全「领导」关系类型，与 schema.py RELATION_DEFINITIONS 12 词全表对齐
+// 「领导」关系类型与 schema.py RELATION_DEFINITIONS 12 词全表对齐
 function getRelationColorsFromCSS(): RelationColors {
   return {
     家族: getCSSColorVar("--chart-neutral"),
@@ -62,7 +60,6 @@ function getRelationColorsFromCSS(): RelationColors {
   };
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P1
 // 收口辅助色，避免 ForceGraph 在多个闭包里重复读取 CSS 变量
 function getAuxColorsFromCSS(): AuxColors {
   return {
@@ -74,7 +71,6 @@ function getAuxColorsFromCSS(): AuxColors {
   };
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P1
 // 给 G6 生命周期 hook 提供单一 palette 输入，减少跨文件参数噪声
 export function createForceGraphPalette(): ForceGraphPalette {
   return {

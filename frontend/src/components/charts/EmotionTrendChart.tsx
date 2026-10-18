@@ -1,12 +1,8 @@
 /**
  * EmotionTrendChart - 情绪趋势窗口聚合图表组件
  *
- * 展示窗口聚合的正负情绪强度、原始趋势与后端平滑趋势，
- * 保持旧版情绪曲线的折线视觉语义并支持缩放自适应重聚合。
- *
- *   - x 轴为连续 position（值域 [0,1]），dataZoom 区间即聚合作用域
- *   - 平滑由后端请求链路完成，前端只绘制返回值，不重复计算
- *   - 覆盖率字段仍由接口返回用于窗口统计合同，但不作为图表系列展示
+ * 展示窗口聚合的正负情绪强度、原始趋势与后端平滑趋势；
+ * x 轴为连续 position（值域 [0,1]），dataZoom 区间即聚合作用域，平滑值由后端计算
  */
 import { useMemo, forwardRef } from "react";
 import ReactEChartsCore from "echarts-for-react";

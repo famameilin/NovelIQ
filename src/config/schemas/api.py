@@ -34,7 +34,3 @@ def _parse_path_settings(data: dict[str, Any] | None) -> PathSettings:
         log_dir=Path(data.get("log_dir", "logs")),
         lexicons_dir=Path(data.get("lexicons_dir", "data/lexicons")),
     )
-
-
-# 2026-08-14 D9：config/prompts/*.txt 死配置已删除（旧 phase 合同退役）；
-# 新提示词硬编码在 src/agents/*/prompts.py，无配置文件读取

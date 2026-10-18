@@ -1,33 +1,26 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
 
 import pytest
 
-from src.agents.diagnosis.persistence import save_diagnosis_report
 from src.api.exceptions import GraphReadinessError
 from src.api.services.results_queries import _fetch_character_relations, _fetch_diagnosis, _fetch_hierarchical_relations
 from src.diagnosis.normalization import normalize_arc_scores, normalize_name_list
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import register_diagnosis_session
 from src.fact_graph.read import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
 from src.metrics.queries.global_stats import save_global_stats
-from src.storage.repositories import StatsRepository
+from src.storage import new_id
 from src.storage.repositories.annotation import ForeshadowingTreeView
+from src.storage.repositories.organization_writes import register_diagnosis_session
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import ensure_character
 from tests.support.paragraph_fixtures import insert_metrics, make_metric_row
 from tests.support.results_query_stubs import _fetch_chapter_annotations, _fetch_characters, _fetch_foreshadowing_trees
+from tests.support.storage_fixtures import fixture_id, insert_report_fixture, storage_for
 
 
 class _DummyRow:
-    """
-    模拟 SQLAlchemy Row 对象，支持字段名访问
-
-    修改时间: 2026-03-31
-    任务: refactor-hardcoded-index-access
-    修改内容: 新增类，用于测试中模拟 Row 对象
-    """
+    """模拟 SQLAlchemy Row 对象，支持字段名访问"""
 
     __slots__ = ("_fields", "_values")
 
@@ -73,9 +66,9 @@ def _publish_diagnosis(
     if register_names:
         for name in sorted(str(item) for item in names):
             ensure_character(db_session, run_id=run_id, name=name)
-    session_id = f"diag-session-{uuid4().hex[:12]}"
+    session_id = new_id()
     register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
-    report_id = save_diagnosis_report(db_session, run_id, session_id, AgentAnalysis(**fields))
+    report_id = insert_report_fixture(db_session, run_id, session_id, AgentAnalysis(**fields))
     db_session.commit()
     return report_id
 
@@ -89,7 +82,7 @@ def _diagnosis_scenario(db_session, **fields: object) -> tuple[str, str]:
 
 def _diagnosis_result(db_session, novel_id: str, run_id: str):
     """按生产读入口读取诊断：运行统计走正式仓储，不注入假载荷"""
-    return _fetch_diagnosis(run_id=run_id, novel_id=novel_id, stats_repo=StatsRepository(db_session))
+    return _fetch_diagnosis(run_id=run_id, novel_id=novel_id, storage=storage_for(db_session))
 
 
 def test_fetch_diagnosis_preserves_topic_ids_and_precise_emotion_context(db_session) -> None:
@@ -99,7 +92,7 @@ def test_fetch_diagnosis_preserves_topic_ids_and_precise_emotion_context(db_sess
     )
     # 情绪上下文来自本运行的正式充分统计量（分子/分母守恒密度）
     insert_metrics(db_session, run_id, [make_metric_row(0, token_count=2, positive_weight_sum=1.0)])
-    save_global_stats(db_session, run_id)
+    save_global_stats(storage_for(db_session), run_id)
 
     result = _diagnosis_result(db_session, novel_id, run_id)
 
@@ -117,19 +110,19 @@ class _DummyAnnotationRepo:
         self.foreshadow_expectation = None
 
     def fetch_chapter_characters_full(self, run_id):
-        assert run_id == "run-1"
+        assert run_id == fixture_id(__name__, "run-1")
         return self._rows
 
     def fetch_chapter_annotations_full(self, run_id):
-        assert run_id == "run-1"
+        assert run_id == fixture_id(__name__, "run-1")
         return []
 
     def fetch_chapter_dialogues_full(self, run_id):
-        assert run_id == "run-1"
+        assert run_id == fixture_id(__name__, "run-1")
         return []
 
     def calculate_foreshadow_expectation(self, run_id):
-        assert run_id == "run-1"
+        assert run_id == fixture_id(__name__, "run-1")
         return self.foreshadow_expectation
 
 
@@ -178,11 +171,11 @@ def test_fetch_diagnosis_preserves_graph_resolved_character_fields(db_session) -
 
 
 def test_fetch_foreshadowing_trees_preserves_status_field():
-    """2026-09-13 伏笔树视图经 fetchers 透传（伏笔即事件树）"""
+    """伏笔树视图经 fetchers 透传（伏笔即事件树）"""
 
     class DummyRepo:
         def fetch_foreshadowing_trees(self, run_id):
-            assert run_id == "run-1"
+            assert run_id == fixture_id(__name__, "run-1")
             return [
                 ForeshadowingTreeView(
                     root_event_id="evt-root-1",
@@ -200,7 +193,7 @@ def test_fetch_foreshadowing_trees_preserves_status_field():
                 )
             ]
 
-    rows = _fetch_foreshadowing_trees("run-1", DummyRepo())
+    rows = _fetch_foreshadowing_trees(fixture_id(__name__, "run-1"), DummyRepo())
 
     assert len(rows) == 1
     assert rows[0].root_event_id == "evt-root-1"
@@ -340,7 +333,7 @@ def test_fetch_diagnosis_normalizes_controlled_labels_before_returning(db_sessio
 
 
 def test_fetch_diagnosis_blank_narrative_arc_type_is_none(db_session) -> None:
-    """P3 回归：空白 narrative_arc_type 不应透传空串，读取层归一化为 None。"""
+    """空白 narrative_arc_type 不应透传空串，读取层归一化为 None。"""
     novel_id, run_id = _diagnosis_scenario(db_session, narrative_arc_type="  ")
 
     result = _diagnosis_result(db_session, novel_id, run_id)
@@ -350,7 +343,7 @@ def test_fetch_diagnosis_blank_narrative_arc_type_is_none(db_session) -> None:
 
 
 def test_fetch_diagnosis_strips_narrative_arc_type_whitespace(db_session) -> None:
-    """P3 回归：narrative_arc_type 首尾空白应被剥离，不把脏串写入诊断结果。"""
+    """narrative_arc_type 首尾空白应被剥离，不把脏串写入诊断结果。"""
     novel_id, run_id = _diagnosis_scenario(db_session, narrative_arc_type=" 三幕式")
 
     result = _diagnosis_result(db_session, novel_id, run_id)
@@ -443,7 +436,7 @@ def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
 
     with patch("src.api.services.results_queries.characters.build_name_resolution", return_value={}):
         result = _fetch_characters(
-            run_id="run-1",
+            run_id=fixture_id(__name__, "run-1"),
             annotation_repo=annotation_repo,
             arc_scores={"\u7532": 1.0, "\u4e59": 10.0},
             focus_characters=["\u4e59", "\u7532"],
@@ -470,7 +463,7 @@ def test_fetch_characters_returns_all_items_when_limit_is_none():
 
     with patch("src.api.services.results_queries.characters.build_name_resolution", return_value={}):
         result = _fetch_characters(
-            run_id="run-1",
+            run_id=fixture_id(__name__, "run-1"),
             annotation_repo=annotation_repo,
             limit=None,
         )
@@ -479,11 +472,7 @@ def test_fetch_characters_returns_all_items_when_limit_is_none():
 
 
 def test_fetch_characters_filters_unresolved_pronoun_references():
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    说明: 角色榜只展示 global-character 准入后的名字，未解析“我”不能进入聚合结果。
-    """
+    """角色榜只展示 global-character 准入后的名字，未解析“我”不能进入聚合结果。"""
     rows = [
         _DummyRow(surface_name="我", resolved_global_name="我", role_function="主体", emotion_score=0),
         _DummyRow(surface_name="沈砚", resolved_global_name="沈砚", role_function="主体", emotion_score=0),
@@ -493,7 +482,7 @@ def test_fetch_characters_filters_unresolved_pronoun_references():
 
     with patch("src.api.services.results_queries.characters.build_name_resolution", return_value={}):
         result = _fetch_characters(
-            run_id="run-1",
+            run_id=fixture_id(__name__, "run-1"),
             annotation_repo=annotation_repo,
             limit=None,
         )
@@ -529,7 +518,7 @@ def test_fetch_character_relations_deduplicates_across_chunks():
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
-            run_id="run-1",
+            run_id=fixture_id(__name__, "run-1"),
             annotation_repo=annotation_repo,
             export_graph_view=export_graph_view,
         )
@@ -572,7 +561,7 @@ def test_fetch_character_relations_skips_inactive_current_relations():
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
-            run_id="run-1",
+            run_id=fixture_id(__name__, "run-1"),
             annotation_repo=annotation_repo,
             export_graph_view=export_graph_view,
         )
@@ -593,7 +582,7 @@ def test_fetch_character_relations_uses_last_seen_chapter_id():
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
-            run_id="run-1",
+            run_id=fixture_id(__name__, "run-1"),
             annotation_repo=annotation_repo,
             export_graph_view=export_graph_view,
         )
@@ -617,7 +606,7 @@ def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
     ):
         with pytest.raises(GraphReadinessError, match="database graph is still pending"):
             _fetch_character_relations(
-                run_id="run-1",
+                run_id=fixture_id(__name__, "run-1"),
                 annotation_repo=annotation_repo,
                 export_graph_view=ExportGraphAuthorityView(),
             )
@@ -630,7 +619,7 @@ def test_fetch_character_relations_allows_empty_graph_when_no_pending():
         return_value=SimpleNamespace(assert_graph_ready=lambda _run_id: None),
     ):
         result = _fetch_character_relations(
-            run_id="run-1",
+            run_id=fixture_id(__name__, "run-1"),
             annotation_repo=annotation_repo,
             export_graph_view=ExportGraphAuthorityView(),
         )
@@ -642,7 +631,7 @@ def test_fetch_hierarchical_relations_uses_graph_entity_names():
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
             ExportRelationSnapshot(
-                relation_id="relation-1",
+                relation_id=fixture_id(__name__, "relation-1"),
                 from_name="贺铮",
                 to_name="伯安",
                 relation_type="隶属",
@@ -650,7 +639,7 @@ def test_fetch_hierarchical_relations_uses_graph_entity_names():
                 last_seen_chapter=9,
             ),
             ExportRelationSnapshot(
-                relation_id="relation-2",
+                relation_id=fixture_id(__name__, "relation-2"),
                 from_name="贺铮",
                 to_name="伯安",
                 relation_type="家族",
@@ -661,7 +650,7 @@ def test_fetch_hierarchical_relations_uses_graph_entity_names():
     )
 
     result = _fetch_hierarchical_relations(
-        run_id="run-1",
+        run_id=fixture_id(__name__, "run-1"),
         export_graph_view=export_graph_view,
         valid_character_names={"贺铮", "伯安"},
     )
@@ -676,7 +665,7 @@ def test_fetch_hierarchical_relations_filters_unknown_graph_endpoint():
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
             ExportRelationSnapshot(
-                relation_id=10,
+                relation_id=fixture_id(__name__, "10"),
                 from_name="柳婉儿",
                 to_name="陌生人",
                 relation_type="隶属",
@@ -687,7 +676,7 @@ def test_fetch_hierarchical_relations_filters_unknown_graph_endpoint():
     )
 
     result = _fetch_hierarchical_relations(
-        run_id="run-1",
+        run_id=fixture_id(__name__, "run-1"),
         export_graph_view=export_graph_view,
         valid_character_names={"柳婉儿", "贺伯安"},
     )
@@ -699,7 +688,7 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
             ExportRelationSnapshot(
-                relation_id="relation-1",
+                relation_id=fixture_id(__name__, "relation-1"),
                 from_name="老贺",
                 to_name="伯安",
                 relation_type="隶属",
@@ -708,7 +697,7 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
                 is_active=False,
             ),
             ExportRelationSnapshot(
-                relation_id="relation-2",
+                relation_id=fixture_id(__name__, "relation-2"),
                 from_name="老贺",
                 to_name="阿明",
                 relation_type="隶属",
@@ -720,12 +709,14 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
     )
 
     result = _fetch_hierarchical_relations(
-        run_id="run-1",
+        run_id=fixture_id(__name__, "run-1"),
         export_graph_view=export_graph_view,
         valid_character_names={"老贺", "伯安", "阿明"},
     )
 
-    assert [(item.rel_id, item.from_entity, item.to_entity) for item in result] == [("relation-2", "老贺", "阿明")]
+    assert [(item.rel_id, item.from_entity, item.to_entity) for item in result] == [
+        (fixture_id(__name__, "relation-2"), "老贺", "阿明")
+    ]
 
 
 def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
@@ -737,7 +728,7 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
         ],
         current_relations=[
             ExportRelationSnapshot(
-                relation_id="relation-11",
+                relation_id=fixture_id(__name__, "relation-11"),
                 from_name="伯安",
                 to_name="贺家",
                 relation_type="隶属",
@@ -746,7 +737,7 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
                 is_active=True,
             ),
             ExportRelationSnapshot(
-                relation_id="relation-12",
+                relation_id=fixture_id(__name__, "relation-12"),
                 from_name="赵甲卫",
                 to_name="贺家",
                 relation_type="隶属",
@@ -758,14 +749,14 @@ def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
     )
 
     result = _fetch_hierarchical_relations(
-        run_id="run-1",
+        run_id=fixture_id(__name__, "run-1"),
         export_graph_view=export_graph_view,
         valid_character_names={"伯安"},
     )
 
     assert [(item.rel_id, item.rel_type, item.from_entity, item.to_entity) for item in result] == [
-        ("relation-11", "隶属", "伯安", "贺家"),
-        ("relation-12", "隶属", "赵甲卫", "贺家"),
+        (fixture_id(__name__, "relation-11"), "隶属", "伯安", "贺家"),
+        (fixture_id(__name__, "relation-12"), "隶属", "赵甲卫", "贺家"),
     ]
 
 
@@ -812,8 +803,8 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
                         "chunk_id": 3,
                     }
                 ],
-                from_entity_id=1,
-                to_entity_id=2,
+                from_entity_id=fixture_id(__name__, "1"),
+                to_entity_id=fixture_id(__name__, "2"),
                 from_name="贺铮",
                 to_name="伯安",
                 relation_type="父子",
@@ -823,7 +814,7 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
     )
 
     result = _fetch_chapter_annotations(
-        run_id="run-1",
+        run_id=fixture_id(__name__, "run-1"),
         annotation_repo=annotation_repo,
         valid_character_names={"贺铮", "伯安"},
         export_graph_view=export_graph_view,
@@ -832,7 +823,7 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
     assert len(result) == 1
     assert result[0].is_strong_setup is False
     assert result[0].why_unresolved_now is None
-    # 2026-09-14 expected_payoff_family 全链退役（响应模型删字段）；按新合同换算为
+    # expected_payoff_family 无对应响应字段；按新合同换算为
     # 保留字段 payoff_likelihood/foreshadowing_root_event_id 在无伏笔行时同样保持 None
     assert result[0].payoff_likelihood is None
     assert result[0].foreshadowing_root_event_id is None
@@ -844,7 +835,7 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
 
 
 def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
-    """2026-08-05 用于验证 chunk 展开结果只读取显式数据库图视图"""
+    """验证 chunk 展开结果只读取显式数据库图视图"""
 
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
         def fetch_chapter_annotations_full(self, _run_id):
@@ -872,7 +863,7 @@ def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
             return []
 
     result = _fetch_chapter_annotations(
-        run_id="run-1",
+        run_id=fixture_id(__name__, "run-1"),
         annotation_repo=_AnnotationRepoWithChunkRows(),
         export_graph_view=ExportGraphAuthorityView(),
     )
@@ -884,7 +875,7 @@ def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
 
 
 def test_fetch_chapter_annotations_propagates_database_graph_failure(monkeypatch):
-    """2026-08-05 用于验证 chunk 消费者不会在数据库图失败时降级读取"""
+    """验证 chunk 消费者不会在数据库图失败时降级读取"""
 
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
         def fetch_chapter_annotations_full(self, _run_id):
@@ -922,7 +913,7 @@ def test_fetch_chapter_annotations_propagates_database_graph_failure(monkeypatch
 
     with pytest.raises(GraphReadinessError, match="graph participant state is stale"):
         _fetch_chapter_annotations(
-            run_id="run-1",
+            run_id=fixture_id(__name__, "run-1"),
             annotation_repo=annotation_repo,
         )
 
@@ -935,4 +926,4 @@ def test_chapter_results_reject_legacy_or_invalid_emotion_values(emotion: object
     repo.fetch_chapter_characters_full.return_value = []
     repo.fetch_chapter_dialogues_full.return_value = []
     with pytest.raises(ValueError, match="emotion="):
-        _fetch_chapter_annotations("run-1", repo, export_graph_view=ExportGraphAuthorityView())
+        _fetch_chapter_annotations(fixture_id(__name__, "run-1"), repo, export_graph_view=ExportGraphAuthorityView())

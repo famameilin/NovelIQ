@@ -1,4 +1,4 @@
-"从 src/event_trees/trees.py 分离的具名物理读取"
+"event trees trees 的具名物理读取"
 
 from __future__ import annotations
 

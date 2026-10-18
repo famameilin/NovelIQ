@@ -9,20 +9,28 @@ from src.config.schemas import (
 from src.config.schemas.model import _parse_model_pool, apply_model_environment
 
 
-def test_diagnosis_budget_defaults_to_ten_and_inherits_configured_value() -> None:
+def test_diagnosis_budget_defaults_to_fifteen_and_inherits_configured_value() -> None:
     from src.config.schemas.model import ModelsSettings
 
-    assert ModelsSettings().diagnosis.max_iterations == 10
-    assert _parse_models_settings({}).diagnosis.max_iterations == 10
-    assert _parse_models_settings({"diagnosis": {}}).diagnosis.max_iterations == 10
+    assert ModelsSettings().diagnosis.max_iterations == 15
+    assert _parse_models_settings({}).diagnosis.max_iterations == 15
+    assert _parse_models_settings({"diagnosis": {}}).diagnosis.max_iterations == 15
     for value in (3, 8, 20):
         assert _parse_models_settings({"diagnosis": {"max_iterations": value}}).diagnosis.max_iterations == value
 
 
+def test_annotation_future_reads_closed_by_default_and_explicitly_openable() -> None:
+    """标注默认不读未来章节，显式配置仍可开启"""
+    from src.config.schemas.model import ModelsSettings
+
+    assert ModelsSettings().annotation.allow_future_context is False
+    assert _parse_task_model_settings({}).allow_future_context is False
+    assert _parse_task_model_settings({"allow_future_context": False}).allow_future_context is False
+    assert _parse_task_model_settings({"allow_future_context": True}).allow_future_context is True
+
+
 def test_parse_embedding_model_settings_includes_runtime_parameters() -> None:
-    """
-    2026-08-03 用于验证 Embedding 行为参数继续来自 settings JSON
-    """
+    """验证 Embedding 行为参数继续来自 settings JSON"""
 
     settings = _parse_embedding_model_settings(
         {
@@ -42,12 +50,11 @@ def test_parse_embedding_model_settings_includes_runtime_parameters() -> None:
 
 
 def test_parse_task_model_settings_reads_agent_and_behavior_fields() -> None:
-    """
-    2026-08-08 用于验证任务级配置合并 thinking/Agent 参数
+    """验证任务级配置合并 thinking/Agent 参数
 
-    2026-10-02 设置迁移：temperature/top_p/max_tokens 移入模型池配置，
+    temperature/top_p/max_tokens 移入模型池配置，
     任务级解析不再读取这些键（settings.json 中的残留值被静默忽略）。
-    2026-10-02 删除流式输出设置：streaming 键不再解析，流式固定开启。
+    streaming 键不再解析，流式固定开启。
     """
     settings = _parse_task_model_settings(
         {
@@ -82,38 +89,52 @@ def test_parse_task_model_settings_rejects_invalid_agent_limits(field: str, valu
 
 
 def _pool_entry(model_id: str = "a", **overrides: object) -> dict[str, object]:
-    return {"model_id": model_id, "base_url": f"https://{model_id}.example/v1", "api_key": f"key-{model_id}",
-            "weight": 1, "max_in_flight": 2, **overrides}
+    return {
+        "model_id": model_id,
+        "base_url": f"https://{model_id}.example/v1",
+        "api_key": f"key-{model_id}",
+        "weight": 1,
+        "max_in_flight": 2,
+        **overrides,
+    }
 
 
 def test_parse_model_pool_reads_sampling_parameters_per_model() -> None:
-    """
-    2026-10-02 设置迁移：采样参数随模型池条目解析，缺省回退模型级默认
-    """
+    """采样参数随模型池条目解析，缺省回退模型级默认"""
 
-    pool = _parse_model_pool([
-        _pool_entry("a", temperature=0.3, top_p=0.9, max_tokens=2048),
-        _pool_entry("b"),
-    ])
+    pool = _parse_model_pool(
+        [
+            _pool_entry("a", temperature=0.3, top_p=0.9, max_tokens=2048),
+            _pool_entry("b"),
+        ]
+    )
 
     assert (pool[0].temperature, pool[0].top_p, pool[0].max_tokens) == (0.3, 0.9, 2048)
     assert (pool[1].temperature, pool[1].top_p, pool[1].max_tokens) == (0.7, 0.8, 131072)
 
 
-@pytest.mark.parametrize("overrides", [
-    {"temperature": 2.5}, {"temperature": -0.1}, {"temperature": "0.5"}, {"temperature": True},
-    {"top_p": 1.5}, {"top_p": -0.5}, {"max_tokens": 0}, {"max_tokens": True}, {"max_tokens": 1.5},
-    {"unknown_key": 1},
-])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"temperature": 2.5},
+        {"temperature": -0.1},
+        {"temperature": "0.5"},
+        {"temperature": True},
+        {"top_p": 1.5},
+        {"top_p": -0.5},
+        {"max_tokens": 0},
+        {"max_tokens": True},
+        {"max_tokens": 1.5},
+        {"unknown_key": 1},
+    ],
+)
 def test_parse_model_pool_rejects_invalid_sampling_parameters(overrides: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         _parse_model_pool([_pool_entry(**overrides)])
 
 
 def test_old_model_environment_variables_do_not_override_json(monkeypatch) -> None:
-    """
-    2026-08-03 用于确认旧模型变量不再覆盖行为配置
-    """
+    """确认旧模型变量不再覆盖行为配置"""
 
     monkeypatch.setenv("SEMANTIC_CHUNKING_EMBEDDING_DIM", "3072")
     monkeypatch.setenv("SEMANTIC_CHUNKING_BATCH_SIZE", "16")
@@ -128,9 +149,7 @@ def test_old_model_environment_variables_do_not_override_json(monkeypatch) -> No
 
 
 def test_apply_model_environment_loads_pool_and_embedding(monkeypatch) -> None:
-    """
-    文本连接来自统一模型池，任务参数不携带凭据
-    """
+    """文本连接来自统一模型池，任务参数不携带凭据"""
 
     monkeypatch.delenv("DIAGNOSIS_MODEL_ID", raising=False)
     settings = _parse_models_settings(
@@ -143,8 +162,18 @@ def test_apply_model_environment_loads_pool_and_embedding(monkeypatch) -> None:
 
     apply_model_environment(
         settings,
-        [{"model_id": "text-model", "base_url": "https://api.example.com/v1", "api_key": "text-key",
-          "weight": 1, "max_in_flight": 4, "temperature": 0.3, "top_p": 0.9, "max_tokens": 2048}],
+        [
+            {
+                "model_id": "text-model",
+                "base_url": "https://api.example.com/v1",
+                "api_key": "text-key",
+                "weight": 1,
+                "max_in_flight": 4,
+                "temperature": 0.3,
+                "top_p": 0.9,
+                "max_tokens": 2048,
+            }
+        ],
         ModelEnvironment(
             base_url="http://localhost:8080/v1",
             model="embedding-model",
@@ -164,9 +193,7 @@ def test_apply_model_environment_loads_pool_and_embedding(monkeypatch) -> None:
 
 
 def test_apply_model_environment_rewrites_loopback_for_docker(monkeypatch) -> None:
-    """
-    2026-08-03 用于验证 Docker 内模型地址继续转换到宿主机
-    """
+    """验证 Docker 内模型地址继续转换到宿主机"""
 
     monkeypatch.setattr("src.config.schemas.model._is_running_in_docker_container", lambda: True)
     monkeypatch.delenv("DIAGNOSIS_MODEL_ID", raising=False)
@@ -174,8 +201,15 @@ def test_apply_model_environment_rewrites_loopback_for_docker(monkeypatch) -> No
 
     apply_model_environment(
         settings,
-        [{"model_id": "text-model", "base_url": "http://localhost:8111/v1", "api_key": "text-key",
-          "weight": 1, "max_in_flight": 4}],
+        [
+            {
+                "model_id": "text-model",
+                "base_url": "http://localhost:8111/v1",
+                "api_key": "text-key",
+                "weight": 1,
+                "max_in_flight": 4,
+            }
+        ],
         ModelEnvironment(
             base_url="http://127.0.0.1:8080/v1",
             model="embedding-model",
@@ -188,9 +222,7 @@ def test_apply_model_environment_rewrites_loopback_for_docker(monkeypatch) -> No
 
 
 def test_apply_model_environment_keeps_behavior_when_pool_missing(monkeypatch) -> None:
-    """
-    模型池缺失时不生成共享连接，非凭据参数仍然生效
-    """
+    """模型池缺失时不生成共享连接，非凭据参数仍然生效"""
 
     settings = _parse_models_settings({"annotation": {"timeout_s": 180}})
     monkeypatch.delenv("DIAGNOSIS_MODEL_ID", raising=False)
@@ -206,10 +238,7 @@ def test_apply_model_environment_keeps_behavior_when_pool_missing(monkeypatch) -
 
 
 def test_apply_model_environment_embedding_only_still_applies(monkeypatch) -> None:
-    """
-    2026-08-14 用于验证 MODEL_* 缺失时 EMBEDDING_MODEL_* 仍独立生效
-    （此前 model_environment is None 提前 return 会连带跳过 embedding 组）
-    """
+    """验证 MODEL_* 缺失时 EMBEDDING_MODEL_* 仍独立生效"""
 
     settings = _parse_models_settings({})
     monkeypatch.delenv("DIAGNOSIS_MODEL_ID", raising=False)

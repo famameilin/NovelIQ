@@ -28,31 +28,27 @@ from src.fact_graph.read import (
     GraphSharedSummary,
     serialize_graph_report_signals,
 )
-from src.storage.repositories import (
-    AnnotationRepository,
-    ChapterRepository,
-    StatsRepository,
-)
 from tests.support.chapter_annotation_helpers import (
     commit_test_event_link,
     confirm_test_work,
     create_run_with_chunks,
     persist_chapter_annotation,
 )
+from tests.support.storage_fixtures import fixture_id, storage_for, task_for_run
 
 
 def test_fetch_timeline_data_reuses_independent_plotline_contract(db_session) -> None:
-    """2026-08-20 迁移至事件森林：验证新森林路径（含 nodes/causal_edges/foreshadowing_edges）"""
+    """验证新森林路径（含 nodes/causal_edges/foreshadowing_edges）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜进入山门。\n顾霜拔剑。", "宫主现身。"],
         chapter_ids=[1, 2],
         title="事件森林时间轴导出",
     )
-    eid1 = "evt-tl-gate-root"
-    eid2 = "evt-tl-gate-main"
-    palace_root = "evt-tl-palace-root"
-    strike_root = "evt-tl-strike-root"
+    eid1 = fixture_id(__name__, "evt-tl-gate-root")
+    eid2 = fixture_id(__name__, "evt-tl-gate-main")
+    palace_root = fixture_id(__name__, "evt-tl-palace-root")
+    strike_root = fixture_id(__name__, "evt-tl-strike-root")
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -136,19 +132,19 @@ def test_fetch_timeline_data_reuses_independent_plotline_contract(db_session) ->
     from tests.support.diagnosis_helpers import declaration_event_draft, persist_event_draft
 
     persist_event_draft(db_session, declaration_event_draft(db_session, run_id))
-    chapter_repo = ChapterRepository(db_session)
-    stats_repo = StatsRepository(db_session)
+    chapter_repo = storage_for(db_session)
+    stats_repo = storage_for(db_session)
 
     timeline_data = _fetch_timeline_data(
         run_id=run_id,
         chapter_repo=chapter_repo,
-        stats_repo=stats_repo,
+        storage=stats_repo,
     )
 
     assert timeline_data is not None
     from src.metrics.queries.plotline import PlotlineQuery
 
-    expected = PlotlineQuery(db_session, run_id).fetch(through_chapter_id=2, limit=500)
+    expected = PlotlineQuery(storage_for(db_session), run_id).fetch(through_chapter_id=2, limit=500)
     assert timeline_data == expected
     assert timeline_data["through_chapter_id"] == 2
     assert len(timeline_data["chapters"]) == 2
@@ -175,7 +171,7 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
 
     payload = build_export_payload(
         task_id="task-1",
-        novel_id="novel-1",
+        novel_id=fixture_id(__name__, "novel-1"),
         novel_name="Test Novel",
         paragraph_curves=[],
         characters=[],
@@ -203,11 +199,7 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
 
 
 def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    修改时间: 2026-04-29
-    任务: 修复全量测试阻塞
-    修改原因: diagnosis 完整合同已经包含 genre_labels/style_labels，测试桩需要同步提供正式字段。
-    """
+    """diagnosis 完整合同已经包含 genre_labels/style_labels，测试桩需要同步提供正式字段。"""
 
     diagnosis = SimpleNamespace(
         arc_scores={"沈砚": 8.0},
@@ -238,8 +230,8 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
         valid_character_names,
         missing_fields,
     ) = load_character_bundle(
-        run_id="run-export-bundle",
-        novel_id="novel-1",
+        run_id=fixture_id(__name__, "run-export-bundle"),
+        novel_id=fixture_id(__name__, "novel-1"),
         stats_repo=MagicMock(),
         annotation_repo=MagicMock(),
         export_graph_view=export_graph_view,
@@ -279,8 +271,8 @@ def test_load_character_bundle_accepts_partial_diagnosis(
     )
 
     fetched_characters, arc_scores, main_characters, valid_names, missing_fields = load_character_bundle(
-        run_id="run-export-bundle",
-        novel_id="novel-1",
+        run_id=fixture_id(__name__, "run-export-bundle"),
+        novel_id=fixture_id(__name__, "novel-1"),
         stats_repo=MagicMock(),
         annotation_repo=annotation_repo,
         export_graph_view=export_graph_view,
@@ -297,12 +289,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(
     monkeypatch: pytest.MonkeyPatch,
     db_session,
 ) -> None:
-    """
-    创建时间: 2026-04-26
-    任务: fix-diagnosis-followup-review-findings
-    说明: diagnosis 缺失可能在多个 bundle 链路里被检测到；
-    export 返回前必须去重，避免 `missing_fields` 出现重复 diagnosis 条目。
-    """
+    """export 返回前必须去重，避免 `missing_fields` 出现重复 diagnosis 条目。"""
 
     monkeypatch.setattr(
         "src.api.services.results_export_service.load_core_results",
@@ -361,13 +348,17 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["导出测试。"])
     confirm_test_work(db_session, run_id)
+    from tests.support.diagnosis_helpers import declaration_event_draft, persist_event_draft
+
+    persist_event_draft(db_session, declaration_event_draft(db_session, run_id))
+    db_session.commit()
     results_data, missing_fields, novel_name = fetch_all_results_data(
         novel_id=novel_id,
-        task_id=run_id[:8],
+        task_id=task_for_run(run_id, db_session),
         run_id=run_id,
         stats_repo=MagicMock(session=db_session),
-        annotation_repo=MagicMock(),
-        chapter_repo=MagicMock(),
+        annotation_repo=storage_for(db_session),
+        chapter_repo=storage_for(db_session),
     )
 
     assert results_data["diagnosis"] is None
@@ -378,11 +369,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """
-    修改时间: 2026-04-29
-    任务: 修复全量测试阻塞
-    修改原因: diagnosis 完整合同已经包含 genre_labels/style_labels，测试桩需要同步提供正式字段。
-    """
+    """diagnosis 完整合同已经包含 genre_labels/style_labels，测试桩需要同步提供正式字段。"""
 
     diagnosis = SimpleNamespace(
         arc_scores={"沈砚": 8.0},
@@ -413,8 +400,8 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
         valid_character_names,
         _missing_fields,
     ) = load_character_bundle(
-        run_id="run-export-bundle",
-        novel_id="novel-1",
+        run_id=fixture_id(__name__, "run-export-bundle"),
+        novel_id=fixture_id(__name__, "novel-1"),
         stats_repo=MagicMock(),
         annotation_repo=MagicMock(),
         export_graph_view=export_graph_view,
@@ -424,8 +411,9 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
 
 
 def test_load_core_results_keeps_export_on_raw_paragraph_curves(monkeypatch: pytest.MonkeyPatch) -> None:
-    """2026-08-14 M8a：load_core_results 从段落事实源导出原始曲线（不降采样、
-    不复用 chunk 展示层融合曲线），缺失字段语义同步为 paragraph_curves。"""
+    """load_core_results 从段落事实源导出原始曲线（不降采样、
+    不复用 chunk 展示层融合曲线），缺失字段语义同步为 paragraph_curves。
+    """
     paragraph_point = SimpleNamespace(
         paragraph_id=7,
         chapter_id=1,
@@ -446,7 +434,7 @@ def test_load_core_results_keeps_export_on_raw_paragraph_curves(monkeypatch: pyt
     patch_export_dependency(monkeypatch, "_fetch_paragraph_curves", lambda *_args, **_kwargs: [paragraph_point])
 
     paragraph_curves, missing_fields = load_core_results(
-        run_id="run-export-curves",
+        run_id=fixture_id(__name__, "run-export-curves"),
         stats_repo=MagicMock(),
         annotation_repo=MagicMock(session=MagicMock()),
         chapter_repo=MagicMock(),
@@ -485,7 +473,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
             ExportRelationSnapshot(
-                relation_id="relation-22",
+                relation_id=fixture_id(__name__, "relation-22"),
                 from_name="苏镜",
                 to_name="程霜",
                 relation_type="隶属",
@@ -493,7 +481,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 last_seen_chapter=5,
             ),
             ExportRelationSnapshot(
-                relation_id="relation-23",
+                relation_id=fixture_id(__name__, "relation-23"),
                 from_name="苏镜",
                 to_name="旧友",
                 relation_type="家族",
@@ -512,12 +500,12 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 effective_chapter_id=5,
                 confidence="high",
                 changes=[{"change_kind": "assert"}],
-                from_entity_id=1,
-                to_entity_id=2,
+                from_entity_id=fixture_id(__name__, "1"),
+                to_entity_id=fixture_id(__name__, "2"),
                 from_name="苏镜",
                 to_name="程霜",
                 relation_type="家族",
-                relation_id="relation-22",
+                relation_id=fixture_id(__name__, "relation-22"),
                 directionality="directed",
             )
         ],
@@ -536,8 +524,8 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
         graph_summary,
         graph_quality_report,
     ) = load_export_relation_bundle(
-        run_id="run-graph-report",
-        novel_id="novel-1",
+        run_id=fixture_id(__name__, "run-graph-report"),
+        novel_id=fixture_id(__name__, "novel-1"),
         stats_repo=SimpleNamespace(session=object()),
         annotation_repo=MagicMock(),
         chapter_repo=MagicMock(),
@@ -599,8 +587,8 @@ def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monk
     patch_export_dependency(monkeypatch, "get_metrics_service", lambda: metrics_service)
 
     _global_stats, _token_usage_stats, aggregate_metrics = load_aggregate_metrics_bundle(
-        run_id="run-aggregate-only",
-        novel_id="novel-1",
+        run_id=fixture_id(__name__, "run-aggregate-only"),
+        novel_id=fixture_id(__name__, "novel-1"),
         stats_repo=SimpleNamespace(session=object()),
         annotation_repo=MagicMock(),
         chapter_repo=MagicMock(),
@@ -623,7 +611,7 @@ def test_build_export_payload_rejects_graph_fields_inside_aggregate_metrics() ->
     with pytest.raises(ValueError, match="aggregate_metrics must not include graph-owned fields: graph_summary"):
         build_export_payload(
             task_id="task-1",
-            novel_id="novel-1",
+            novel_id=fixture_id(__name__, "novel-1"),
             novel_name="Test Novel",
             paragraph_curves=[],
             characters=[],
@@ -648,7 +636,7 @@ def test_build_export_payload_rejects_graph_fields_inside_aggregate_metrics() ->
 
 
 def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
-    """2026-08-18 用于拦截与 event_forest 无关的兄弟 loader，保留真实 EventForestQuery 读取
+    """拦截与 event_forest 无关的兄弟 loader，保留真实 EventForestQuery 读取
 
     对照组：test_fetch_all_results_data_deduplicates_missing_diagnosis_marker。
     """
@@ -718,13 +706,13 @@ def _stub_export_sibling_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeypatch) -> None:
-    """2026-08-19 用于验证导出 payload 包含事件森林段（树视图/因果边/伏笔边）"""
+    """验证导出 payload 包含事件森林段（树视图/因果边/伏笔边）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜进入山门。\n顾霜立誓。"],
         title="导出事件森林",
     )
-    eid1 = "evt-export-gate-root"
+    eid1 = fixture_id(__name__, "evt-export-gate-root")
     persist_chapter_annotation(
         db_session,
         run_id=run_id,
@@ -744,7 +732,7 @@ def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeyp
                 "description": "顾霜立誓",
                 "participants": ["顾霜"],
                 "evidence_paragraph_id": 1,
-                "node_id": "evt-export-gate-main",
+                "node_id": fixture_id(__name__, "evt-export-gate-main"),
                 "parent_node_id": eid1,
                 "tree_id": "gate",
                 "cause_role": "main",
@@ -761,7 +749,9 @@ def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeyp
 
     persist_event_draft(db_session, declaration_event_draft(db_session, run_id))
     event = db_session.scalar(
-        select(CompleteEvent).where(CompleteEvent.producer_execution_id.in_(smap.run_execution_ids(run_id)))
+        select(CompleteEvent).where(
+            CompleteEvent.producer_execution_id.in_(smap.run_execution_ids(storage_for(db_session), run_id))
+        )
     )
     event_id = event.event_id
 
@@ -769,17 +759,17 @@ def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeyp
 
     results_data, _missing_fields, _novel_name = fetch_all_results_data(
         novel_id=_novel_id,
-        task_id=run_id[:8],
+        task_id=task_for_run(run_id, db_session),
         run_id=run_id,
-        stats_repo=StatsRepository(db_session),
-        annotation_repo=AnnotationRepository(db_session),
-        chapter_repo=ChapterRepository(db_session),
+        stats_repo=storage_for(db_session),
+        annotation_repo=storage_for(db_session),
+        chapter_repo=storage_for(db_session),
     )
 
     from src.event_trees.read.organization import EventTreeQuery
 
     tree = results_data["event_trees"]
-    assert tree == EventTreeQuery(db_session, run_id).export()
+    assert tree == EventTreeQuery(storage_for(db_session), run_id).export()
     assert tree["counts"]["all_events"] == 2
     assert tree["counts"]["declarations"] == 2
     assert event_id in [entry["event_id"] for entry in tree["details"]]
@@ -800,11 +790,11 @@ def test_fetch_all_results_data_emits_empty_organization_for_no_events(db_sessio
 
     results_data, _missing_fields, _novel_name = fetch_all_results_data(
         novel_id=_novel_id,
-        task_id=run_id[:8],
+        task_id=task_for_run(run_id, db_session),
         run_id=run_id,
-        stats_repo=StatsRepository(db_session),
-        annotation_repo=AnnotationRepository(db_session),
-        chapter_repo=ChapterRepository(db_session),
+        stats_repo=storage_for(db_session),
+        annotation_repo=storage_for(db_session),
+        chapter_repo=storage_for(db_session),
     )
 
     assert results_data["event_trees"]["counts"]["all_events"] == 0

@@ -1,0 +1,4989 @@
+{
+  "run_id": "8b768916",
+  "contract_version": "event-tree-declarations-v1",
+  "organization_status": "ready",
+  "chapters": [
+    {
+      "chapter_id": 1,
+      "title": "贺院三尺有顽童",
+      "chapter_order": 1
+    },
+    {
+      "chapter_id": 2,
+      "title": "调皮捣蛋孩子王",
+      "chapter_order": 2
+    },
+    {
+      "chapter_id": 3,
+      "title": "偷鸡不成烧鸡院",
+      "chapter_order": 3
+    },
+    {
+      "chapter_id": 4,
+      "title": "异火现，惊贺府",
+      "chapter_order": 4
+    },
+    {
+      "chapter_id": 5,
+      "title": "三将巧施苦肉计",
+      "chapter_order": 5
+    },
+    {
+      "chapter_id": 6,
+      "title": "重明伏火拜奇师",
+      "chapter_order": 6
+    },
+    {
+      "chapter_id": 7,
+      "title": "慵懒先生施妙法",
+      "chapter_order": 7
+    },
+    {
+      "chapter_id": 8,
+      "title": "天纵离火妙师传",
+      "chapter_order": 8
+    },
+    {
+      "chapter_id": 9,
+      "title": "将门稚子听风雷",
+      "chapter_order": 9
+    },
+    {
+      "chapter_id": 10,
+      "title": "贺帅护犊显军威",
+      "chapter_order": 10
+    },
+    {
+      "chapter_id": 11,
+      "title": "焚叶雕花驯素阳",
+      "chapter_order": 11
+    },
+    {
+      "chapter_id": 12,
+      "title": "送子惊心定江南",
+      "chapter_order": 12
+    },
+    {
+      "chapter_id": 13,
+      "title": "夜辞风雪见苍生",
+      "chapter_order": 13
+    },
+    {
+      "chapter_id": 14,
+      "title": "朱门深闭隔天涯",
+      "chapter_order": 14
+    },
+    {
+      "chapter_id": 15,
+      "title": "同舍各怀心中事",
+      "chapter_order": 15
+    },
+    {
+      "chapter_id": 16,
+      "title": "演武场上有真章",
+      "chapter_order": 16
+    },
+    {
+      "chapter_id": 17,
+      "title": "经义堂中起争辩",
+      "chapter_order": 17
+    },
+    {
+      "chapter_id": 18,
+      "title": "暗算从来不挑时",
+      "chapter_order": 18
+    },
+    {
+      "chapter_id": 19,
+      "title": "西郊猎场暗流涌",
+      "chapter_order": 19
+    },
+    {
+      "chapter_id": 20,
+      "title": "古战场中见真性",
+      "chapter_order": 20
+    },
+    {
+      "chapter_id": 21,
+      "title": "先生布的局更大",
+      "chapter_order": 21
+    },
+    {
+      "chapter_id": 22,
+      "title": "年关雪落圣城寒",
+      "chapter_order": 22
+    },
+    {
+      "chapter_id": 23,
+      "title": "宫宴暗藏鸿门局",
+      "chapter_order": 23
+    },
+    {
+      "chapter_id": 24,
+      "title": "朱雀街前不平事",
+      "chapter_order": 24
+    },
+    {
+      "chapter_id": 25,
+      "title": "兵部暗流淬少年",
+      "chapter_order": 25
+    },
+    {
+      "chapter_id": 26,
+      "title": "此去经年各西东",
+      "chapter_order": 26
+    }
+  ],
+  "counts": {
+    "top_level_events": 156,
+    "child_events": 0,
+    "all_events": 156,
+    "declarations": 156,
+    "outcomes": 8,
+    "event_outcome_links": 17,
+    "arcs": 8,
+    "event_arc_links": 63,
+    "relations": 0,
+    "foreshadowing_actions": 79
+  },
+  "arcs": [
+    {
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "parent_arc_id": null,
+      "kind": "subplot",
+      "title": "宋家与蓟州粮道阵眼",
+      "objective": "摸清宋家在蓟州驿路与漕运粮道上安插的阵眼，找出武选清吏司里漏报军报的人",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1598,
+          "chapter_id": 25,
+          "char_start": 115,
+          "char_end": 127,
+          "text_hash": "be0794e2a04e6e57fecb9fbccb87faf3d6be7987b725056c839bce7271abc788"
+        },
+        {
+          "event_id": null,
+          "paragraph_id": 1623,
+          "chapter_id": 25,
+          "char_start": 21,
+          "char_end": 25,
+          "text_hash": "90623098906cc8d88affb6ba81e7a6dd648e0808e96331a08febb0a42bae566d"
+        }
+      ]
+    },
+    {
+      "arc_id": "3200dedf-0b95-5ded-8116-9af00492a344",
+      "parent_arc_id": null,
+      "kind": "subplot",
+      "title": "沈遥不落明面的留意",
+      "objective": "写沈遥对贺重明的照拂如何始终停在明面之下，并由她的家世牵出铜台堡一线",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1150,
+          "chapter_id": 18,
+          "char_start": 117,
+          "char_end": 127,
+          "text_hash": "ec9aeeb874fdf206838662e61fbcab32998292f4b59ad627ce8e609464636535"
+        },
+        {
+          "event_id": null,
+          "paragraph_id": 1710,
+          "chapter_id": 26,
+          "char_start": 39,
+          "char_end": 50,
+          "text_hash": "aea08593376577d144bc1e7a1855120b72a2366c88c7217e6a3b8433ba75d743"
+        }
+      ]
+    },
+    {
+      "arc_id": "3e6591ce-c749-510b-8731-9d7e67db84a5",
+      "parent_arc_id": null,
+      "kind": "subplot",
+      "title": "白芷授业与素阳金",
+      "objective": "让贺重明学会以槐叶控火、不被素阳金反噬，并在圣城藏住那团火",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 627,
+          "chapter_id": 11,
+          "char_start": 93,
+          "char_end": 100,
+          "text_hash": "f8e8515d341910d209dce4dd458bfb27e4fe151ff623b9bce762a7fed8f717c9"
+        },
+        {
+          "event_id": null,
+          "paragraph_id": 1725,
+          "chapter_id": 26,
+          "char_start": 101,
+          "char_end": 107,
+          "text_hash": "ccf51c6303861fa213f932cf26a7e0340e14f4e0d0b61a5e3a62096592de1604"
+        }
+      ]
+    },
+    {
+      "arc_id": "75d4596c-f75c-53b0-8337-04de3d0db4a7",
+      "parent_arc_id": null,
+      "kind": "subplot",
+      "title": "西院赤羽炽尾鸡与伯安离火",
+      "objective": "交代伯安离火反噬的隐患与三童效忠的由来",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 256,
+          "chapter_id": 5,
+          "char_start": 54,
+          "char_end": 65,
+          "text_hash": "0d343e82fc9b78314f2b5d1ed2d8e390c11787a04baabb440aea5b4bd263c886"
+        },
+        {
+          "event_id": null,
+          "paragraph_id": 259,
+          "chapter_id": 5,
+          "char_start": 3,
+          "char_end": 15,
+          "text_hash": "8ee1ab7a617b9fcb6a49a525bb106098f4e06052a1515ee5a64a11189728e15e"
+        }
+      ]
+    },
+    {
+      "arc_id": "87fbc8a5-ba0a-55ef-87f1-bdd0141e38c2",
+      "parent_arc_id": null,
+      "kind": "subplot",
+      "title": "贺家军与朝廷的周旋",
+      "objective": "在诏书、人质与军报三重压力下保住北境军与贺家满门，不给朝廷落下谋反的口实",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 546,
+          "chapter_id": 10,
+          "char_start": 4,
+          "char_end": 13,
+          "text_hash": "a76a0d74709f45a17a9f5f72f513a7cb492bb4bfd452c2fbcb8a9da23b9a08ca"
+        },
+        {
+          "event_id": null,
+          "paragraph_id": 566,
+          "chapter_id": 10,
+          "char_start": 27,
+          "char_end": 34,
+          "text_hash": "b62eb562120cc6319ba24ab0dd4caaeadd7c86a1320cea8b2542c8277115e061"
+        }
+      ]
+    },
+    {
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "parent_arc_id": null,
+      "kind": "subplot",
+      "title": "猎场禁地与噬灵封禁",
+      "objective": "查清禁碑被挪、厌灵石被取走的做局者，补上三十六道禁碑封禁大阵的缺口",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1180,
+          "chapter_id": 19,
+          "char_start": 152,
+          "char_end": 167,
+          "text_hash": "534d12b29a358e06e360ee04c27d3f99b27c18bd4908569071b23a83dde52b83"
+        },
+        {
+          "event_id": null,
+          "paragraph_id": 1336,
+          "chapter_id": 21,
+          "char_start": 1,
+          "char_end": 13,
+          "text_hash": "efcdceeda396e3d1771dc13916a45fc0960eb745e1d8a4114c6d5aaa3e369085"
+        }
+      ]
+    },
+    {
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "parent_arc_id": null,
+      "kind": "main",
+      "title": "圣城六年：人质、太学与兵部暗线",
+      "objective": "让贺重明以人质之身在圣城站住脚，顺着蓟州军报与漕运粮道摸清宋家的布置，并弄清自己六年等待的究竟是什么",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 811,
+          "chapter_id": 14,
+          "char_start": 33,
+          "char_end": 41,
+          "text_hash": "0306504111edf2a21d45f837ac9416687c02df14c56a93686607e9fb15bc0a6a"
+        },
+        {
+          "event_id": null,
+          "paragraph_id": 1736,
+          "chapter_id": 26,
+          "char_start": 26,
+          "char_end": 37,
+          "text_hash": "6fa44f085b04a9156220628f50675df7d295581842277a6200bbeec9261dbfd8"
+        }
+      ]
+    },
+    {
+      "arc_id": "d0d918f3-dadc-5de0-a332-e718d04dade3",
+      "parent_arc_id": null,
+      "kind": "subplot",
+      "title": "钱瑾与北院的暗斗",
+      "objective": "在不动手的前提下化解钱瑾的挑衅与暗算，守住人质处境下的分寸",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 933,
+          "chapter_id": 15,
+          "char_start": 63,
+          "char_end": 71,
+          "text_hash": "acd5a7c9d50dcf3e708287ff2c021425b4b29a805450620f0f3dbf0c05cea099"
+        },
+        {
+          "event_id": null,
+          "paragraph_id": 1140,
+          "chapter_id": 18,
+          "char_start": 60,
+          "char_end": 81,
+          "text_hash": "56e09819919ace71525225f9d715155ade69268d53d17cc6efdf05f72059ef10"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "event_id": "3c386037-2ca8-5e9b-863a-a28d9d6cb1f6",
+      "title": "伯安打碎瓷瓶被三妈妈追打，撞见母亲赵兰英后认错道歉",
+      "summary": "周凤兰提着玉板追打伯安，佯追使他撞进赵兰英怀中。赵兰英询问缘由，周凤兰抢先告状，赵兰英令伯安道歉，伯安低头认错，周凤兰弹他脑瓜崩后作罢。",
+      "event_type": "家庭纠纷",
+      "status": "resolved",
+      "first_text_position": 454,
+      "chapter_id": 1,
+      "chapter_order": 1
+    },
+    {
+      "event_id": "5d2dc114-71f9-5e82-97e2-ef386ccdbf4f",
+      "title": "柳婉儿端米糕与姐妹分食，子嗣话题触痛心结后被宽慰",
+      "summary": "二妈妈柳婉儿端来亲手做的米糕与赵兰英、周凤兰分食，又喂伯安吃糕。赵兰英谈及子嗣使柳婉儿眼神暗淡，随即与周凤兰合力宽慰，伯安也抱颈发誓护她，柳婉儿终于笑出来。",
+      "event_type": "家庭日常",
+      "status": "resolved",
+      "first_text_position": 1436,
+      "chapter_id": 1,
+      "chapter_order": 1
+    },
+    {
+      "event_id": "344a80e5-0dea-55e6-889c-9f4adb1780b7",
+      "title": "假山聚首议事",
+      "summary": "伯安离开后院到假山，与猴子、柱子、算盘会合；猴子提议去朝天山拔树，算盘以'朝天山上有神仙、会惊扰山神'劝阻，众人一时无主意。",
+      "event_type": "聚会议事",
+      "status": "resolved",
+      "first_text_position": 4175,
+      "chapter_id": 2,
+      "chapter_order": 2
+    },
+    {
+      "event_id": "ac19f3f4-eb28-5067-86a1-fbad14d4ddf8",
+      "title": "伯安设局激将算盘",
+      "summary": "伯安先放话'怕你不敢'引猴子上钩，再抛出赤羽炽尾鸡的消息；算盘拒不肯去并透露布防详情，伯安故意讥讽他'算不明白'，激得算盘当众说出四象锁灵阵的破阵步法与黑铁卫换防盲区，伯安随即以'同谋'与'向铁帅告发'相要挟，林立果被迫入伙。",
+      "event_type": "激将设局",
+      "status": "resolved",
+      "first_text_position": 4669,
+      "chapter_id": 2,
+      "chapter_order": 2
+    },
+    {
+      "event_id": "1de56ef8-673d-59b8-b382-8ec881a67930",
+      "title": "四童潜入西院灵兽棚",
+      "summary": "未时三刻黑铁卫换防，算盘以奇门推演带伯安、柱子、猴子穿过四象锁灵阵，猴子用偷来的精钢发簪撬开玄铁大锁，四人进入灵兽棚。",
+      "event_type": "潜入",
+      "status": "resolved",
+      "first_text_position": 6417,
+      "chapter_id": 3,
+      "chapter_order": 3
+    },
+    {
+      "event_id": "d7883d8e-31ee-592b-91bb-90d60dd811ba",
+      "title": "惊见赤羽炽尾鸡",
+      "summary": "四人进门即被滚烫硫磺气浪与庞然大物震慑，赤羽炽尾鸡睁眼俯视，长鸣威压将四人震得跌坐；随后阵中金链符文将起身的灵兽强行镇压，四人方知有困阵护身。",
+      "event_type": "遭遇",
+      "status": "resolved",
+      "first_text_position": 6995,
+      "chapter_id": 3,
+      "chapter_order": 3
+    },
+    {
+      "event_id": "9c9c82da-d9c4-5484-b94e-eb1c89586ce7",
+      "title": "猴子强拔尾羽激怒灵兽",
+      "summary": "猴子不顾算盘劝阻窜到灵兽身后强薅尾羽，赤羽炽尾鸡受辱暴怒，不顾锁链勒痛疯狂挣扎，将阵法扯得嗡嗡作响。",
+      "event_type": "冲突",
+      "status": "resolved",
+      "first_text_position": 7923,
+      "chapter_id": 3,
+      "chapter_order": 3
+    },
+    {
+      "event_id": "79a54cc0-206a-563d-9e53-09fdaa59f9de",
+      "title": "伯安挡真火昏迷、兽棚起火",
+      "summary": "灵禽冲破一丝桎梏喷出真火，伯安撞开猴子张臂挡在火前被火焰吞噬，体内爆出白金色火焰护体并在两火对抗中占上风，但仍被冲击重创昏迷，兽棚化为火海，禁制已被触发。",
+      "event_type": "危机",
+      "status": "ongoing",
+      "first_text_position": 8319,
+      "chapter_id": 3,
+      "chapter_order": 3
+    },
+    {
+      "event_id": "b155c4d8-991e-5933-b4dc-81baa5389a09",
+      "title": "伯安体内白金色火焰护体",
+      "summary": "伯安被赤色真火吞噬的瞬间，体内爆发堪比真火气息的白金色火焰，护住其身并隐隐在两火对抗中占据上风。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 8422,
+      "chapter_id": 3,
+      "chapter_order": 3
+    },
+    {
+      "event_id": "c151ab80-6c0f-54e2-a103-f40e4cfec4ba",
+      "title": "贺伯安降生，身负白金离火印记",
+      "summary": "六年前贺府产房，贺伯安降生不啼不哭，炭火诡异熄灭，脊椎处透出白金火焰符号；参将林昭指出这是正阳日的离火印记，传出去将惊动圣城老家伙。",
+      "event_type": "异象降生",
+      "status": "ongoing",
+      "first_text_position": 8856,
+      "chapter_id": 4,
+      "chapter_order": 4
+    },
+    {
+      "event_id": "c25c2f4c-62d5-5bf9-8e5b-ca7de234cc87",
+      "title": "贺铮以精血布下阴水封印并为子取名",
+      "summary": "贺铮咬破舌尖，以虚明境界精血在婴孩背上画阵符，化作阴水将白金离火勒回脊椎深处；封印成后婴孩啼哭，赵兰英取字伯安，贺铮定名重明。",
+      "event_type": "封印命名",
+      "status": "resolved",
+      "first_text_position": 9817,
+      "chapter_id": 4,
+      "chapter_order": 4
+    },
+    {
+      "event_id": "6ed309b4-cff7-5886-ab34-7246934d5ba8",
+      "title": "六年后西院大火，伯安离火反噬昏迷",
+      "summary": "六年后贺府西院灵兽棚起火，火中夹杂伯安溢出的离火，井水泼上去反而更旺；猴子、柱子、算盘三个同伴死拖着昏迷的伯安逃出，赵兰英一拳轰塌高墙冲入火海，烫伤双手把四个孩子带出，却压不住离火。",
+      "event_type": "意外灾变",
+      "status": "ongoing",
+      "first_text_position": 10409,
+      "chapter_id": 4,
+      "chapter_order": 4
+    },
+    {
+      "event_id": "08e6b1e5-c7d4-5a9f-9095-bcce440c98d0",
+      "title": "贺铮战场归来强行镇压离火",
+      "summary": "贺铮自战场回府，扯下铁甲手套按在伯安脊椎上，以幽蓝阴水真气灌入其体内与白金离火搏杀，喝令离火缩回，重新化作黯淡火印；他自身却遭反噬吐出黑血。",
+      "event_type": "镇压反噬",
+      "status": "resolved",
+      "first_text_position": 12208,
+      "chapter_id": 4,
+      "chapter_order": 4
+    },
+    {
+      "event_id": "1a14e899-6d0b-5f86-9459-fb5f6b012319",
+      "title": "贺铮问责三家子弟",
+      "summary": "贺铮命人把侯飞白、褚大山、林立果三个小子绑到演武场精钢柱上，并派人去叫侯正德、褚军、林昭，要看看他们是怎么教儿子的。",
+      "event_type": "问责",
+      "status": "ongoing",
+      "first_text_position": 12667,
+      "chapter_id": 4,
+      "chapter_order": 4
+    },
+    {
+      "event_id": "3dd815e7-da90-5dbe-a789-fb80730f61b5",
+      "title": "演武场赤红牛皮战鼓可激战意",
+      "summary": "正文称战鼓乃军中法器，以特定频率擂动时鼓声共振能令周遭天地灵气沸腾，激发将士滔天战意、越战越勇不死不休；章末风吹战鼓发出极轻微的嗡鸣。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 13085,
+      "chapter_id": 5,
+      "chapter_order": 5
+    },
+    {
+      "event_id": "2850355e-09a0-557b-9af3-ff80ee9777d3",
+      "title": "演武场审问三家，老将痛责亲子",
+      "summary": "贺铮在演武场把猴子、柱子、算盘绑上玄铁柱，召褚军、侯正德、林昭入府；三老将跪地请罪后当场抽出腰带、短刃、军棍痛打亲子，三童哭着认错并争相替伯安担责，贺铮端酒冷眼旁观。",
+      "event_type": "审问问责",
+      "status": "ongoing",
+      "first_text_position": 13284,
+      "chapter_id": 5,
+      "chapter_order": 5
+    },
+    {
+      "event_id": "fae8988a-b9bd-5839-bf0a-732e378d674e",
+      "title": "封印险被烧穿，恐引圣城察觉",
+      "summary": "贺铮当面点明西院大火差点烧穿他六年前亲手画的封印，一旦圣城那帮老东西察觉到半点动静，三家九族加贺家满门都得去见阎王；伯安脊梁上刚被重新刻下封印血咒。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 13757,
+      "chapter_id": 5,
+      "chapter_order": 5
+    },
+    {
+      "event_id": "56c4b8bc-ac9f-5d74-b8ff-472cba782cfa",
+      "title": "伯安带伤闯场自认全责",
+      "summary": "赵兰英搀着六岁的伯安走进演武场，伯安推开母亲，当着父亲与三位老将的面宣称主意是他出的、锁是他让猴子撬的、阵法是他逼算盘破的，喝止猴子插话，要求把三人放了。",
+      "event_type": "顶罪",
+      "status": "resolved",
+      "first_text_position": 14613,
+      "chapter_id": 5,
+      "chapter_order": 5
+    },
+    {
+      "event_id": "77ae49c9-0f70-52a0-adfd-fc9391224765",
+      "title": "贺铮举鞭逼问，伯安跪地认罪",
+      "summary": "贺铮抓起倒刺皮鞭假意行刑，赵兰英与三老将跪拦；贺铮推开众人逼问伯安认不认罪，伯安跪地闭眼答我认并只求放人，皮鞭停在半空。",
+      "event_type": "试探",
+      "status": "resolved",
+      "first_text_position": 15295,
+      "chapter_id": 5,
+      "chapter_order": 5
+    },
+    {
+      "event_id": "0df021c1-26ea-52a8-9984-1e18e2aea621",
+      "title": "贺铮掷鞭赦免三家",
+      "summary": "贺铮扔下皮鞭，脸上冰雪消融露出一抹笑意，夸伯安是站着撒尿的带把儿爷们，命人放下三个小兔崽子回去上药，看在少主面子上揭过此事。",
+      "event_type": "赦免",
+      "status": "resolved",
+      "first_text_position": 15651,
+      "chapter_id": 5,
+      "chapter_order": 5
+    },
+    {
+      "event_id": "4708c129-b88f-5817-91fa-229781e33551",
+      "title": "三童跪地立誓效忠伯安",
+      "summary": "猴子自扇耳光、柱子磕头见血、算盘郑重发誓，三人分别以命、以身为盾、以脑子算计相许，从此效忠伯安。",
+      "event_type": "立誓",
+      "status": "resolved",
+      "first_text_position": 15865,
+      "chapter_id": 5,
+      "chapter_order": 5
+    },
+    {
+      "event_id": "415a27f2-6c7e-5629-9725-b71e465244bb",
+      "title": "白芷登门自荐为先生",
+      "summary": "一名灰衫草帽的娇小来人到贺府门口自荐当先生，赤甲卫打量后请其等候并去禀报贺铮；四个少年被引来围观。",
+      "event_type": "应聘登场",
+      "status": "resolved",
+      "first_text_position": 16559,
+      "chapter_id": 6,
+      "chapter_order": 6
+    },
+    {
+      "event_id": "f012195c-8f46-51b6-bd0a-50be3789a9c3",
+      "title": "贺铮试探白芷并阅信行大礼",
+      "summary": "贺铮以肃杀凶气试探，被白芷无形化解；入东院大厅后白芷呈上皱巴巴的书信，贺铮读到信末熟悉印记后神情转为怀念怅然，向白芷深鞠一躬，将重明伯安相托。",
+      "event_type": "试探托付",
+      "status": "resolved",
+      "first_text_position": 17784,
+      "chapter_id": 6,
+      "chapter_order": 6
+    },
+    {
+      "event_id": "41233e8a-5aec-5cdb-a294-9238422db2e9",
+      "title": "贺铮眼底藏起老谋深算的思量",
+      "summary": "贺铮那张如生铁铸就的脸难得松动，死死盯着白芷那抹白发，眼底深处藏起一抹老谋深算的思量，亲自侧身引路。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 18140,
+      "chapter_id": 6,
+      "chapter_order": 6
+    },
+    {
+      "event_id": "450bb7d1-2385-5dab-b0de-1355be509395",
+      "title": "白芷精灵族身份与兄长关系揭示",
+      "summary": "贺铮点出白芷是精灵族；白芷自报姓名，并答白老弟是她哥哥，贺铮感叹'那不奇怪了'。",
+      "event_type": "身份揭示",
+      "status": "resolved",
+      "first_text_position": 18441,
+      "chapter_id": 6,
+      "chapter_order": 6
+    },
+    {
+      "event_id": "e3a2965b-4f52-5191-8aa9-37f8b8c63207",
+      "title": "四少年窥厅决意拜师",
+      "summary": "四个少年叠在窗沿偷看厅内，见贺铮对白芷行大礼，林立果断言白芷来头极大，伯安握拳认定这老师拜定了，猴子则笑他日后练功偷懒逃不过精灵姐姐的眼睛。",
+      "event_type": "拜师决意",
+      "status": "ongoing",
+      "first_text_position": 18945,
+      "chapter_id": 6,
+      "chapter_order": 6
+    },
+    {
+      "event_id": "ddb3cd22-a1ab-5f21-b1e6-f2efd8bc1b1a",
+      "title": "赤甲卫演武场苦训四小只",
+      "summary": "天刚亮四个小家伙被带到演武场练扎马步、负重蛙跳、摸爬滚打，赤甲卫请来贺铮监督，贺铮见动作稍慢便以带倒刺藤条抽脚踝；一上午下来柱子饿、猴子累、算盘无力，伯安也浑身酸痛。",
+      "event_type": "训练",
+      "status": "resolved",
+      "first_text_position": 19201,
+      "chapter_id": 7,
+      "chapter_order": 7
+    },
+    {
+      "event_id": "d773707d-7795-5bcd-864e-2d2db40c2c7b",
+      "title": "东院撞见白芷酣睡，贺重明戳脸被擒",
+      "summary": "四人进东院见白芷在槐树下摇椅上盖着茅草帽睡着，算盘等人借口吃饭跑开；贺重明独自试探呼喊无效，伸手想戳其脸颊，被白芷凭空探手精准钳住手腕当场抓获。",
+      "event_type": "师徒互动",
+      "status": "resolved",
+      "first_text_position": 20564,
+      "chapter_id": 7,
+      "chapter_order": 7
+    },
+    {
+      "event_id": "44473ca3-1c09-5dfe-a53e-35fb107bad7e",
+      "title": "白芷自述精灵族身份与年龄",
+      "summary": "贺重明借蚊子之说岔开话题，问白芷是否精灵族；白芷承认并说明精灵尖耳、亲和动植物、长寿等特征，自称已五十二岁，族中长老近四百岁，并以招落树叶令空气清新甘甜展示手段。",
+      "event_type": "信息揭示",
+      "status": "resolved",
+      "first_text_position": 21020,
+      "chapter_id": 7,
+      "chapter_order": 7
+    },
+    {
+      "event_id": "99714227-7439-5bd7-ab05-60643ee28602",
+      "title": "白芷宣布对贺重明摸底",
+      "summary": "白芷收起慵懒神色，对贺重明宣布要进行一次摸底，四目相对后贺重明一阵晕眩，发现自己身处通体白色的空间。",
+      "event_type": "悬念转折",
+      "status": "ongoing",
+      "first_text_position": 21529,
+      "chapter_id": 7,
+      "chapter_order": 7
+    },
+    {
+      "event_id": "c582a42e-bd9a-5c2f-8e88-90b5d5e28ea1",
+      "title": "识海初识体内离火",
+      "summary": "白芷在识海中现身，解释识海是生灵体内只有意识能进入的空间，引贺重明闭眼感应体内火焰，贺重明当场唤出一团金灿灿的火焰，被白芷赞天赋不错。",
+      "event_type": "修炼引导",
+      "status": "resolved",
+      "first_text_position": 21699,
+      "chapter_id": 8,
+      "chapter_order": 8
+    },
+    {
+      "event_id": "7ed1bc67-0323-5410-8ea2-e9b215645ed8",
+      "title": "素阳金幻象显乱世与黑袍男子",
+      "summary": "贺重明沉心与火焰沟通，看到焦土枯骨、百姓等死的乱世，天火泼洒而下烧尽残骸与战火，火光中心黑袍男子转身嘶哑道‘这天下烂透了’，并有‘救赎之道，就在此身’的声音；画面随即消散。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 22198,
+      "chapter_id": 8,
+      "chapter_order": 8
+    },
+    {
+      "event_id": "172c7c8f-289c-5713-96f6-34157f4762aa",
+      "title": "父亲是乱世豪杰的线索",
+      "summary": "白芷问贺重明知不知道父亲做什么，贺重明答将军，白芷确认其父不属于谁、是自己的将军，是乱世出的豪杰之一，并说以后慢慢讲。",
+      "event_type": "身份线索",
+      "status": "ongoing",
+      "first_text_position": 22937,
+      "chapter_id": 8,
+      "chapter_order": 8
+    },
+    {
+      "event_id": "65695d19-dab6-55e1-926c-8ec762295414",
+      "title": "压制素阳金并夺取一缕火苗",
+      "summary": "白芷以翠绿藤蔓化作灵力牢笼死死勒住素阳金，命贺重明用意识去‘切’，贺重明忍受刀尖灼痛将双手扎进白金流光，硬生生崩下一块火球边缘，一缕白金火苗被攥在掌心。",
+      "event_type": "收服火种",
+      "status": "resolved",
+      "first_text_position": 23577,
+      "chapter_id": 8,
+      "chapter_order": 8
+    },
+    {
+      "event_id": "ec127c51-6741-54fa-be19-e05011eb1e0c",
+      "title": "贺重明扯下一线素阳金火种沉入经脉",
+      "summary": "贺重明从撕裂灵魂的剧痛中醒来，摊开满是冷汗的小手，掌心残留白金异火素阳金的恐怖温度；他在无尽狂暴中硬生生扯下一线火种，沉入自己的经脉深处，向白芷报称做到了。",
+      "event_type": "炼化突破",
+      "status": "resolved",
+      "first_text_position": 24182,
+      "chapter_id": 9,
+      "chapter_order": 9
+    },
+    {
+      "event_id": "dd3aab7c-0894-5a81-a249-11e83230e980",
+      "title": "白芷携贺重明潜听东殿密谈",
+      "summary": "前院传来沉重整齐的甲胄声与战马嘶鸣，白芷称来客气息不讨喜，施展精灵族秘法木叶障裹住两人，掠至东殿外侧廊柱死角，借半掩雕花侧窗窥探殿内贺铮与宋子诚的交锋。",
+      "event_type": "窥探密谈",
+      "status": "resolved",
+      "first_text_position": 24423,
+      "chapter_id": 9,
+      "chapter_order": 9
+    },
+    {
+      "event_id": "f6a3092c-1a66-5184-8817-6deca084562b",
+      "title": "宋子诚持诏书逼贺铮南下江南",
+      "summary": "宋子诚以江南乱党破江淮防线、陛下咳血忧劳为由，先请出金箔诏书，授贺铮为镇北靖边绥远安民讨逆诸军事总领行营行营总制督军、辖东北三州三十万众，又许以山东与津门；贺铮看穿其意在调兵南下，以兵不习水土推托，并质问十年前北胡南下时朝廷何在，最终将宋子诚逐出。",
+      "event_type": "朝廷征调",
+      "status": "ongoing",
+      "first_text_position": 25573,
+      "chapter_id": 9,
+      "chapter_order": 9
+    },
+    {
+      "event_id": "ce246d75-5b71-52bf-ba62-321f40cbb376",
+      "title": "贺铮识破偷听，父子当殿相认",
+      "summary": "贺铮以刀锋般的目光扫向东殿侧窗，点破窗外之人；白芷散去木叶障现身并揽下带人之责，称这孩子迟早要知道；贺重明当殿要替父亲找回场子，贺铮大笑将他捞起揉头，命他好好跟着白先生学本事。",
+      "event_type": "父子相认",
+      "status": "resolved",
+      "first_text_position": 26413,
+      "chapter_id": 9,
+      "chapter_order": 9
+    },
+    {
+      "event_id": "84b1bc08-d84e-52f4-b49a-cea91bc2a052",
+      "title": "宋子诚离府谋算以西北西南情报相逼",
+      "summary": "宋子诚出府后对随从说等两天，等西北和西南的情报传来，贺铮便无法独善其身，随从应声。",
+      "event_type": "谋划后手",
+      "status": "ongoing",
+      "first_text_position": 27177,
+      "chapter_id": 9,
+      "chapter_order": 9
+    },
+    {
+      "event_id": "d7b01d10-3dd8-5549-acc8-cafb9e1d980f",
+      "title": "贺重明集市救人被擒",
+      "summary": "贺重明带猴子、柱子、算盘溜出贺府逛城东集市，撞见钦差侍卫护着宋子诚的马车横冲直撞、鞭打卖豆腐的老汉，贺重明掷砖打落马鞭并挡在老汉身前；四人因战力不敌十几个带刀侍卫被擒，宋子诚下令押回行馆关进柴房。",
+      "event_type": "冲突",
+      "status": "resolved",
+      "first_text_position": 27516,
+      "chapter_id": 10,
+      "chapter_order": 10
+    },
+    {
+      "event_id": "35360813-6835-582c-8a8b-e0620b7c5d56",
+      "title": "贺府震怒，柳婉儿谏阻改围不攻",
+      "summary": "贺铮拍碎书案，欲点赤甲卫踏平行馆杀宋子诚，林昭、褚军、侯正德同仇敌忾；二妈妈柳婉儿赶到，点破动手便是给朝廷递‘纵子行凶、起兵谋反’的折子，劝贺铮不动杀心却要立规矩，贺铮遂改令调黑甲铁卫三千、黄甲骑卫两千围住定远街。",
+      "event_type": "决策",
+      "status": "resolved",
+      "first_text_position": 28200,
+      "chapter_id": 10,
+      "chapter_order": 10
+    },
+    {
+      "event_id": "ef0707e1-4cb6-5012-a987-f8ca32c6a777",
+      "title": "宋子诚寻由头逼贺铮就范，江南兵灾或北引",
+      "summary": "柳婉儿点明宋子诚正等贺铮动手，一旦坐实‘贺铮纵子行凶、起兵谋反’，折子会摆到皇帝案头，江南兵灾将往北引，贺家军也会成众矢之的；此为贺家与朝廷矛盾的隐患伏笔。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 28577,
+      "chapter_id": 10,
+      "chapter_order": 10
+    },
+    {
+      "event_id": "5dad6178-7886-51ce-98aa-6ccc50c3a267",
+      "title": "贺家军围馆演习逼宋子诚放人",
+      "summary": "五千贺家军无声围住钦差行馆所在定远街，贺铮重甲撞开朱漆大门，以‘治安演习’为名当众威胁宋子诚‘犬子少一根汗毛便踏平行馆’；宋子诚汗如雨下、连称误会并放人，四小毫发无损出馆，贺铮撂下狠话后率军退去。",
+      "event_type": "对峙",
+      "status": "resolved",
+      "first_text_position": 29503,
+      "chapter_id": 10,
+      "chapter_order": 10
+    },
+    {
+      "event_id": "fc64bc4a-bbf1-597d-8007-c7f3b1af7933",
+      "title": "贺重明平安归府，三位妈妈护犊子",
+      "summary": "贺铮提贺重明下马进府，周凤兰、赵兰英、柳婉儿三人冲上来搂抱检查、把脉擦脸，哭骂着要贺铮替孩子出气；猴子柱子算盘也被各自爹娘揉搓；贺铮嫌众人嚎哭，被三位夫人齐声吼住，悻悻闭嘴。",
+      "event_type": "归府团聚",
+      "status": "resolved",
+      "first_text_position": 30560,
+      "chapter_id": 11,
+      "chapter_order": 11
+    },
+    {
+      "event_id": "da6dd812-5c4a-5f2d-95d8-dc31dbffdd71",
+      "title": "贺铮托白芷加练，三小只同受罚",
+      "summary": "贺铮当面请白芷给贺重明加点强度，白芷应下并带他走；途中白芷让他先洗净泥腥、喝完二妈妈的汤再来；听到‘加强度’，猴子柱子算盘发怵，被侯正德、褚军、林昭拎出，侯正德宣布明日演武场负重加倍，三小只哀嚎。",
+      "event_type": "安排训练",
+      "status": "resolved",
+      "first_text_position": 31543,
+      "chapter_id": 11,
+      "chapter_order": 11
+    },
+    {
+      "event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
+      "title": "白芷以槐叶授控火，贺重明刻字初成",
+      "summary": "东院老槐树下，白芷将注入精灵族本源木气的槐叶弹给贺重明，令其用素阳金在叶上刻出自己的名字；贺重明第一次直接以火触碰，叶子瞬间化为黑灰，被白芷讥为‘力量的奴隶’；此后他盘坐拉锯压制火种一个时辰，终于在半片残叶叶脉中央刻出一个歪扭的‘贺’字，随后脱力昏睡，白芷以一滴绿色水珠治愈其灼伤。",
+      "event_type": "修炼引导",
+      "status": "ongoing",
+      "first_text_position": 32297,
+      "chapter_id": 11,
+      "chapter_order": 11
+    },
+    {
+      "event_id": "b451db5f-0b99-51cc-bf20-6eccdd98fa6c",
+      "title": "贺重明五日苦练刻名有成",
+      "summary": "五日内贺重明白天随将领在演武场操练、晚上在东院受白芷各种诡异法子折磨，终于能勉强在那片普通槐树叶上刻下完整的‘贺重明’三个字。",
+      "event_type": "修炼进展",
+      "status": "ongoing",
+      "first_text_position": 33961,
+      "chapter_id": 12,
+      "chapter_order": 12
+    },
+    {
+      "event_id": "70a81c08-1a0c-5f19-b716-e143e202658a",
+      "title": "暗桩急报：西北西南二十万大军起兵",
+      "summary": "侯正德将南边暗桩拼死送回的火漆密信拍在案上，报西北‘活阎王’号称十万铁骑已出玉门关、日夜兼程逼近洛水，西南唐邓两家凑十万水陆大军打出‘清君侧、平乱党、保圣驾’旗号顺江开拔；堂内死寂，褚军提议去江南参一脚，林昭点出只剩东北未表态、皇帝那边不好交代，贺铮只丢下一句‘老子能认他李家那个皇帝就不错了’。",
+      "event_type": "军情急报",
+      "status": "resolved",
+      "first_text_position": 34144,
+      "chapter_id": 12,
+      "chapter_order": 12
+    },
+    {
+      "event_id": "3bc6256d-b299-51e5-95cf-e02b6e596b8b",
+      "title": "宋子诚持旨逼兵，贺铮捏碎铁核桃后应旨南下",
+      "summary": "钦差宋子诚换崭新云鹤官服入东殿宣旨，称二十万大军配合五万龙禁卫合围江南乱党，逼问贺铮何时出兵，并抛出山东津门归属与黄金白银晶石赏赐；随后宣布赐贺重明入圣城太学、授‘天子伴读’，贺铮点破这是人质，一掌捏碎百年铁核桃，最终咧嘴应下，传令即日整军、点齐十万黑甲铁骑南下，并放话‘我贺家的狼崽子，牙口锋利得很’。",
+      "event_type": "对峙谈判",
+      "status": "resolved",
+      "first_text_position": 34986,
+      "chapter_id": 12,
+      "chapter_order": 12
+    },
+    {
+      "event_id": "5d94057e-ca58-5446-9b4d-8785a0c5c200",
+      "title": "宋子诚逃出贺府，暗定以人质掌主动权",
+      "summary": "宋子诚强撑不退、留旨后几乎逃一般离开贺府，跨出高门槛被冷风一吹才发觉里衣湿透；钻进全封闭马车后眼神阴鸷，咬牙认定贺铮用十万铁骑南下是反将官家一军，但只要小狼崽子和将门余孽进了圣城，主动权就在朝廷手里，随即下令启程回京复命。",
+      "event_type": "密谋",
+      "status": "ongoing",
+      "first_text_position": 36535,
+      "chapter_id": 12,
+      "chapter_order": 12
+    },
+    {
+      "event_id": "f505cf03-781e-5eb5-bf1e-6ec4d10b6053",
+      "title": "贺铮整军南下，召伯安白芷议圣城之行",
+      "summary": "褚军急得跺脚劝止，贺铮以十万大军镇着、命褚军领兵停驻河北坐山观虎斗，并望着宋子诚离开的方向吩咐把伯安和白芷先生叫到书房，直言温室里的花朵该见识见识外面的世道。",
+      "event_type": "决策",
+      "status": "ongoing",
+      "first_text_position": 36623,
+      "chapter_id": 12,
+      "chapter_order": 12
+    },
+    {
+      "event_id": "9687ce04-a971-5e7b-9d2f-04b2015e0697",
+      "title": "贺府门前送别，四少年南下圣城",
+      "summary": "三百黑甲铁卫在长街列队，三位夫人以梦、平安扣与米糕相送，三位老将各自送子，贺铮按头叮嘱“不惹事，也不怕事”；四少年在铁骑簇拥下踏上朝天城外南行官道。",
+      "event_type": "送别启程",
+      "status": "resolved",
+      "first_text_position": 36792,
+      "chapter_id": 13,
+      "chapter_order": 13
+    },
+    {
+      "event_id": "5269b09c-3b2a-5276-b1b6-6e20115ff3aa",
+      "title": "南行途中见流民，贺重明舍米糕施救",
+      "summary": "南行三日官道荒败、流民成群，算盘念出父亲批注“不可轻易接济”；贺重明遇怀抱三月婴儿的老妇人乞食，仍取出二妈妈所赠米糕全数送出，并与劝阻的算盘起了冲突。",
+      "event_type": "冲突",
+      "status": "ongoing",
+      "first_text_position": 39455,
+      "chapter_id": 13,
+      "chapter_order": 13
+    },
+    {
+      "event_id": "680da11a-5a4f-5fc1-925d-1ef85e28f24c",
+      "title": "夜营中贺重明致歉，算盘道出担忧",
+      "summary": "夜里贺重明主动向算盘认错，算盘释明父亲写的是“不可轻易接济”而非“不可接济”，并道出真正担忧：一包米糕救得了三个，救不了三百个。",
+      "event_type": "和解",
+      "status": "resolved",
+      "first_text_position": 41248,
+      "chapter_id": 13,
+      "chapter_order": 13
+    },
+    {
+      "event_id": "3cc3275b-d22a-594e-aef2-5bb8c731e29f",
+      "title": "车队入河南道，盛世景象引贺重明疑虑",
+      "summary": "越过青州入河南道后流民绝迹、麦苗青翠、行人从容，距圣城不足五百里；猴子感叹盛世，算盘皱眉，贺重明目光越过麦田村庄，合掌攥拳不语。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 41503,
+      "chapter_id": 13,
+      "chapter_order": 13
+    },
+    {
+      "event_id": "c783c28f-e26e-5009-8b4e-a83237ff5172",
+      "title": "车队抵达圣城，白芷道破盛世封锁真相",
+      "summary": "车队行至圣城，见五六丈高青砖城墙、金龙旌旗、金甲卫士与城门车水马龙的富庶景象；猴子问及那逃荒老婆婆能否走到此地，白芷直言各州路关口封路、方圆三百里不许出现流民，棚子里的人只能等死；贺重明在护城河边看着朱漆城门与三百里官道的枯柳破碗，同一片天两个天下。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 41952,
+      "chapter_id": 14,
+      "chapter_order": 14
+    },
+    {
+      "event_id": "4774b956-2ed3-529d-b9d8-27cb1e52e870",
+      "title": "抵达太学，司业孙思验文书安置四少年",
+      "summary": "车队穿过十余条街巷到太学坊，三百黑甲铁卫驻驿馆，二十名赤甲近卫换便装随行；太学正门匾书“天子太学”，司业孙思带素白长衫少年出迎，白芷递上贺铮画押文书，孙思验毕打量四少年，在贺重明脸上停留稍久，随后引四人先安置住处，定明日卯时正式入学。",
+      "event_type": "入学安置",
+      "status": "resolved",
+      "first_text_position": 43550,
+      "chapter_id": 14,
+      "chapter_order": 14
+    },
+    {
+      "event_id": "577b6fb1-1ddb-5486-86a9-b022d9acdcea",
+      "title": "太学门前钱瑾挑衅，贺重明以十万铁骑回击",
+      "summary": "钱瑾乘镶金马车至太学门前，讥讽太学连骡子也收；贺重明按住要动手的柱子，笑着承认北地穷得连铁锅都用不起，却反问“穷得只有十万铁骑，那马蹄声你爹在圣城能不能听得见”，并邀钱瑾亲自走一趟北境；钱瑾手指停在半空、三度欲言又止，最后狼狈甩袖进门。",
+      "event_type": "当众冲突",
+      "status": "resolved",
+      "first_text_position": 44422,
+      "chapter_id": 14,
+      "chapter_order": 14
+    },
+    {
+      "event_id": "3841a711-5e51-5ab9-9af0-8f77ec8760ad",
+      "title": "宋子玉现身，点明贺重明“狼崽子”是皇帝亲口所定",
+      "summary": "脚步声起，青衫学长宋子玉自太学门内步出，眉眼与宋子诚有五六分相似，算盘认出是宋子诚亲侄、钦点太学学长；宋子玉先温和欢迎贺重明入学，随即当着众人纠正钱瑾“不是骡子，是狼崽子——皇帝陛下亲口说的”，并称“狼崽子也有狼崽子的规矩，太学的规矩得慢慢学”，临走留下“别急，日子长着呢”。",
+      "event_type": "身份揭示",
+      "status": "ongoing",
+      "first_text_position": 45603,
+      "chapter_id": 14,
+      "chapter_order": 14
+    },
+    {
+      "event_id": "2cba426e-7d05-5a6d-90c8-d0da72ff108a",
+      "title": "四人抵太学，孙思验牒安置北院",
+      "summary": "孙思在太学门内验过白芷递交的通关文牒，打量四少年时在柱子和贺重明身上分别停顿，贺重明不躲不闪对上去，孙思微笑收回目光，引四人穿过石板道、绕过经义堂，安置在北院最深处的四人合宿房间，并告知明日卯时正式入学。",
+      "event_type": "入学安置",
+      "status": "resolved",
+      "first_text_position": 47114,
+      "chapter_id": 15,
+      "chapter_order": 15
+    },
+    {
+      "event_id": "c19d0de3-95cd-56ba-86e8-68bceeac5bd4",
+      "title": "北院旧舍安顿，四人各藏器物",
+      "summary": "北院旧舍窗棂有蛀痕、漆皮剥落，但尚算干净。猴子把矛针、精钢长针与刀片藏进床板缝隙并计划换锁；算盘给手抄《太学军政调略》抹桐油、枕下放《古阵残篇》上卷与折扇；柱子摆出褚军给的皮质酒囊；贺重明把母亲的平安扣挂上帐钩，把二妈妈的兰花丝帕与白芷所赠槐叶一同压在枕下。",
+      "event_type": "安顿布置",
+      "status": "resolved",
+      "first_text_position": 47595,
+      "chapter_id": 15,
+      "chapter_order": 15
+    },
+    {
+      "event_id": "5e9a772b-9144-5135-b17d-136be04bf741",
+      "title": "陆晨送枣结识，算盘道其来历",
+      "summary": "素白长衫的陆晨以指甲轻刮木门，端半碗干红枣自称北院隔壁住户、替娘送枣；算盘经贺重明点头后接过致谢。陆晨飞快扫视屋内，在柱子的体型和猴子的皮套上各停一秒便低头离去。算盘随后说出陆晨是青州府八品教谕之子、父亲去年考评不合格被贬，靠州学推荐名额入学，在南院眼里连北地都不如。",
+      "event_type": "同窗结识",
+      "status": "ongoing",
+      "first_text_position": 48866,
+      "chapter_id": 15,
+      "chapter_order": 15
+    },
+    {
+      "event_id": "185a00ae-4751-53b7-abb1-b1a5c7d6fccc",
+      "title": "南院食堂遭钱瑾挑衅，猴子盯上玉佩",
+      "summary": "四人端竹编饭盘进南院食堂引来窃语与围观。钱瑾以蜜饯碟讥讽北地胃口，贺重明按住猴子避到角落；猴子临走在钱瑾腰间羊脂玉佩上停了一息，回桌后称玉成色不错，算盘翻学规第十七条警告盗窃同窗财物一律开除，并以朝天城看赤羽鸡尾羽的眼神点破其心思。钱瑾假装滑倒撞向贺重明未成，反被贺重明一句话噎住，却笑着自认没走稳离开。",
+      "event_type": "冲突",
+      "status": "ongoing",
+      "first_text_position": 49649,
+      "chapter_id": 15,
+      "chapter_order": 15
+    },
+    {
+      "event_id": "16c2e808-9026-52d6-92ea-bd636a73f04b",
+      "title": "猴子盯上钱瑾的羊脂玉佩",
+      "summary": "食堂中猴子离开时在钱瑾腰间羊脂玉佩上停了半息，回桌后只说觉得那块玉成色不错，被算盘以学规与朝天城看赤羽鸡尾羽的眼神点破；夜路上猴子仍贼溜溜地转眼，像是已在盘算什么。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 49790,
+      "chapter_id": 15,
+      "chapter_order": 15
+    },
+    {
+      "event_id": "002782b3-3874-57b3-8402-3ee38d301600",
+      "title": "夜路议钱瑾：能藏者不可先动手",
+      "summary": "回北院路上猴子压低声音说钱瑾不好惹，其被噎得脸白仍能笑称没事，比其父那些笑面虎同行还能藏，并提在朝天城其父惯于先下手为强；算盘从《古阵残篇》抬头反驳，指其父先下手有情报头子的资本，而四人如今是寄人篱下的人质，先下手等于先送死，钱瑾越能藏越不能先动手，他正等着四人犯错。猴子没再说话，眼睛却仍在盘算。",
+      "event_type": "谋议",
+      "status": "ongoing",
+      "first_text_position": 50685,
+      "chapter_id": 15,
+      "chapter_order": 15
+    },
+    {
+      "event_id": "d64f9f47-e48f-5955-9ac2-19605b02eb48",
+      "title": "睡前抚槐叶与旧物，念及北地家人",
+      "summary": "睡前贺重明望着帐钩上晃荡的平安扣，从枕下取出夹在兰花丝帕里的槐叶对月翻看，槐叶仍是青的，与太学后院满地白槐花不同——北地槐树五月才开，这里四月就盛了。他放回槐叶，想起母亲挂平安扣时在他颈后打结的触感，想起二妈妈在朝天城北门外挥帕送别，把被角攥紧了些。",
+      "event_type": "心绪",
+      "status": "ongoing",
+      "first_text_position": 51096,
+      "chapter_id": 15,
+      "chapter_order": 15
+    },
+    {
+      "event_id": "41357eb5-d342-57cb-bd06-388e778a32af",
+      "title": "马骁走廊撞蹭挑衅，柱子浑然不觉",
+      "summary": "入学头几天风平浪静，钱瑾不再找麻烦，马骁却在走廊里故意放重脚步、用肩膀往柱子身上蹭；柱子以为走廊太窄，还主动往旁边让。猴子第四天点破“他在撞你”，柱子只当对方有病，说不跟病人计较，猴子无言以对。",
+      "event_type": "摩擦",
+      "status": "resolved",
+      "first_text_position": 51382,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "6ad4357f-3faa-5bff-9386-3b2d904062ff",
+      "title": "经义堂孙思点名，贺重明走神背不出《将威》",
+      "summary": "太学文武分科，经义堂北南院分坐，中间过道被叫“楚河汉界”。第三天孙思讲《六韬》，贺重明因南院端砚与北院瓦砚不同的磨墨声联想到北境军营磨刀、父亲试刃而走神，被孙思点名背《六韬·龙韬》第三篇《将威》。沉默三息后他没能背出，孙思未责骂，只多看了他一拍，南院一名锦衣少年轻笑。散课后贺重明独自在井台洗脸，把抄错“将威之”的竹纸撕成四片扔掉。",
+      "event_type": "授课受挫",
+      "status": "resolved",
+      "first_text_position": 51749,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "2fff4a41-eeb0-599f-ab61-bfe2762d8b58",
+      "title": "拳脚课开课，秦穆立规矩并宣布摸底",
+      "summary": "第四天拳脚课开始，教官秦穆四十出头、面上旧疤从左眉骨斜拉到右下颌，脚步声轻得学生被拍肩才惊觉。他自报姓名来历，立下对练不准记仇、不准打眼睛咽喉裆的规矩，目光扫过全场时在柱子与马骁身上各停一瞬，宣布今天摸底、两人一组南院北院互找。",
+      "event_type": "授课立规",
+      "status": "resolved",
+      "first_text_position": 52324,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "0a322e63-8ee6-502c-a648-2d74df2bf96f",
+      "title": "沈遥现身演武场",
+      "summary": "演武场边多了一个穿灰蓝箭袖短打、肩上搁着白蜡杆枪的女孩，安静地看着场内。算盘告诉贺重明那是沈遥，潼关守将沈震的女儿，入太学两年。整场对练她不鼓掌也不随人交换眼神，枪从右肩换到左肩，目光落在场中却恰是贺重明所站的位置；贺重明愣了半拍，再看时她已转身往井边练功，枪尖在粗砂地上拖出一道浅痕。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 52631,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "557cac90-547e-5e62-a338-5120092bd113",
+      "title": "柱子对马骁，以硬接与抱摔取胜",
+      "summary": "马骁当众请秦穆允许与褚大山切磋，咬重“刚猛”二字挑衅。第一回合他以穿心脚把柱子踢退四五步、撞上兵器架立柱，嘲“北地功夫，就这”；第二回合柱子不躲，用肩膀硬接灵蛇拳，再沉腰合臂抱住马骁的腰发力把人拔起摁在砂地上，秦穆判“褚大山胜”。算盘向贺重明分析：柱子穴道比常人深一指、刚好克马骁，马骁使七成力反把自己手腕震麻，这是克制关系而非实力差距。",
+      "event_type": "对练交锋",
+      "status": "resolved",
+      "first_text_position": 52767,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "1d25d8d6-7ec3-5d02-8e04-17970c1ae5d4",
+      "title": "沈遥暗中留意贺重明",
+      "summary": "对练全程沈遥既不鼓掌也不跟着交换眼神，目光落在场中，方向却恰是贺重明站的位置；贺重明顺着她的视线往回推后愣了半拍，再看时她已转身去井边练功。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 53553,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "a403b138-5a60-5508-ad78-559403e45129",
+      "title": "贺重明一拳击败不会武的南院少年",
+      "summary": "轮到贺重明时南院无人应战，锦衣少年们侧开视线，秦穆点名后排最边上一个脸带婴儿肥的少年。那少年握拳不知该握还是张、鞋后跟外侧磨损，贺重明看出他没握过刀。铜锣响后对方只是把拳直直伸出来，指节发白、手背有墨痕；贺重明想起父亲“敌人太弱”的话，以一记寸拳把他打得脚底离地半指、坐倒在砂地上，秦穆用与念“褚大山胜”一模一样的语气判“贺重明胜”。钱瑾随后低声说“我说什么来着”，身边两三人短笑。",
+      "event_type": "对练交锋",
+      "status": "resolved",
+      "first_text_position": 54020,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "8f02f8e0-ceb5-501c-bc2f-613043b8aba3",
+      "title": "井边沈遥点拨：秦穆故意选对手",
+      "summary": "散课走出演武场，贺重明在井边又遇沈遥。她先指出“你们那个大个子下盘太僵，遇上用腿的人会吃亏”，又点明秦穆以前在潼关带过斥候营，看得出谁有底子谁没有，今天给贺重明选的对手是他故意的。贺重明追问什么意思，她只答“自己想”便拎枪离开，枪尖在石板道上留下一串水印。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 55035,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "60110df9-85ae-52e4-84c2-2278c7507b99",
+      "title": "食堂议论与算盘的对手推演",
+      "summary": "散课后食堂流传对练的第四版说法，最凶的版本称北院的人专挑软的捏；马骁左手虎口贴膏药坐在角落，听到议论贺重明那场时反而往北院看了一眼。算盘对贺重明分析马骁不服只是克制关系，换对手如猴子马骁稳赢；猴子问自己对上谁会赢，算盘答钱瑾——因他不会武却招人恨。贺重明由此想通秦穆看的不只是你能不能打，而是你面对一个不该打的对手时会怎么打。",
+      "event_type": "议论分析",
+      "status": "ongoing",
+      "first_text_position": 55331,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "468c2894-efbe-57e6-8749-fc8e21a5ea69",
+      "title": "夜谈：贺重明不知自己六年等的是什么",
+      "summary": "晚钟从北院后撞响，柱子闻酒囊、算盘读《古阵残篇》、猴子削木楔；贺重明靠在床头摸到枕下的槐叶才回神。他打了一个不该打的人，想到父亲，感觉不是愧疚而是空——等了六年等来的第一个对手连拳头都接不住，教官却用念名字的语气告诉他这六年等的不是拳脚课，而他等的是什么还不知道。闭眼前他最后想到的是钱瑾那句“我说什么来着”，想钱瑾有没有看见那个坐在地上的南院少年。",
+      "event_type": "心绪",
+      "status": "ongoing",
+      "first_text_position": 55852,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "26770a45-a958-51c6-90c8-987a2ecd0173",
+      "title": "贺重明六年等待的目标尚未揭晓",
+      "summary": "贺重明把秦穆念名字的语气与沈遥的话放在一起想，意识到自己这六年等的不是拳脚课上的对手；他等的是什么，还不知道。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 55960,
+      "chapter_id": 16,
+      "chapter_order": 16
+    },
+    {
+      "event_id": "bed23710-e2f1-5f1f-a91c-2eef2483da69",
+      "title": "孙思改讲《武韬·垒虚》，点名钱瑾译文",
+      "summary": "孙思不再踱步空讲，从袖中抽出边角磨亮的旧竹简平摊案上，宣布今天不讲文韬而讲武韬，点出《六韬·武韬》第十二章《垒虚》篇，念完武王问太公一段后要人翻成白话，目光扫过堂下落在钱瑾身上。",
+      "event_type": "授课考问",
+      "status": "resolved",
+      "first_text_position": 56792,
+      "chapter_id": 17,
+      "chapter_order": 17
+    },
+    {
+      "event_id": "bd1da3e3-1589-5932-870f-0f76d8ae3ea8",
+      "title": "钱瑾以贺帅雪原用兵当众发难",
+      "summary": "钱瑾译文完毕后自陈有疑问，先引太公'将必上知天道下知地理中知人事'，再举北地贺帅攻城拔寨不论地势天时、在暴风雪中追胡骑三天三夜、冻死冻伤士卒之事，称有人说这是将在外君命有所不受，也有人说这是劳师远征不恤士卒，随后偏头看向贺重明，请教贺帅用兵究竟是哪一种。满堂屏息。",
+      "event_type": "当众发难",
+      "status": "ongoing",
+      "first_text_position": 57484,
+      "chapter_id": 17,
+      "chapter_order": 17
+    },
+    {
+      "event_id": "6c02f386-0f9a-57f4-9890-2f9abd19cfd5",
+      "title": "贺重明起身应答：以边民之实驳回钱瑾",
+      "summary": "贺重明合简起身，直视钱瑾，先承认暴风雪中追胡骑三天三夜、冻伤士卒属实，再道出那场雪原会战是北胡趁暴风雪南下、一昼夜连拔三座军寨屠两千边民，父亲问参将'等雪停了，北胡会把刀从边民的脖子上拿下来等吗'；他自陈'我不是将，我才七岁'，讲出青州官道边抱着哭不出声婴儿的老妇人，说太公讲的'中知人事'大概也包括这些人。孙思沉默良久只说'坐吧'。",
+      "event_type": "当堂应答",
+      "status": "resolved",
+      "first_text_position": 58439,
+      "chapter_id": 17,
+      "chapter_order": 17
+    },
+    {
+      "event_id": "2aa1bfe9-a7e7-5069-b17a-126a4086bb94",
+      "title": "猴子看见钱瑾提青州时眼角一抽",
+      "summary": "散课后猴子挤到贺重明身边，罕见地不带吊儿郎当，说钱瑾的脸在贺重明提到青州的时候眼角抽了一下，很小的一下，他看见了。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 58825,
+      "chapter_id": 17,
+      "chapter_order": 17
+    },
+    {
+      "event_id": "bdae8373-65c9-598d-b1b4-840c958d843e",
+      "title": "散课后余波：传话预言与寒门无声示好",
+      "summary": "散课后算盘凑过来低声说这段话今晚就会传遍太学，贺重明答'我说的都是实话'；柱子从后面追上轻拍其肩说'干得好'；猴子指出钱瑾在他提青州时眼角抽了一下。四人往食堂走，水渠边刷饭盘的寒门子弟纷纷抬头点头；贺重明发现桌上多了一碟太学食堂不提供的腌萝卜，无人承认。",
+      "event_type": "余波示好",
+      "status": "ongoing",
+      "first_text_position": 58969,
+      "chapter_id": 17,
+      "chapter_order": 17
+    },
+    {
+      "event_id": "ba9f2a0c-13e4-515f-8135-287dfc66ce96",
+      "title": "白芷槐荫巷三点指教",
+      "summary": "贺重明进门不出声，白芷盖着草帽便问'经义堂有人找事了'，听完全过程后给他三点：经义堂之事只是旁枝末节，越显眼底下暗流越不让他清闲；'我不是将我才七岁'的分寸要一直记住，越像大人越被当孩子、越像孩子越不被在乎；道理讲赢了不代表事情结束，传言会添减走样，管不了但心里要有数。",
+      "event_type": "师徒点拨",
+      "status": "resolved",
+      "first_text_position": 59685,
+      "chapter_id": 17,
+      "chapter_order": 17
+    },
+    {
+      "event_id": "709cd26e-2926-5f48-a229-f6fe21deb750",
+      "title": "白芷预警：讲赢了不代表事情结束",
+      "summary": "白芷告诫贺重明，道理讲赢了不代表事情结束，有时事情才刚刚开始；今天经义堂上所有人都在听他说话，过后每个传话的人都会添一点减一点，最后传到某些人耳朵里的版本会跟他今天说的完全不一样，他管不了也不用管，但心里要有数。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 59861,
+      "chapter_id": 17,
+      "chapter_order": 17
+    },
+    {
+      "event_id": "fabbdb98-e765-5756-af8a-072d060bbb99",
+      "title": "沈遥散课后独留翻同一段《六韬》",
+      "summary": "散课时靠窗那排座位上沈遥迟迟没有起身，把《六韬》那页翻过去又翻回来，盯着同一段看了很久，拈起落在竹简上的槐花瓣搁在砚台旁才合上竹简，动作比平时慢了半拍，自己也不知道在想什么，随后从北侧偏门走出，脚步和往常一样。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 60107,
+      "chapter_id": 17,
+      "chapter_order": 17
+    },
+    {
+      "event_id": "4a3e5d99-0461-54cd-8ee2-62d792df773b",
+      "title": "北院夜话：陆晨送瓜与猴子换锁",
+      "summary": "回到北院天已黑，算盘告知陆晨又来了一趟、送了半个用削竹简的小刀切开的西瓜，说是他爹托人从青州捎来的，人已走并说明天还来；猴子已修好窗户插销、换了个比原来铁芯重三成的锁芯，铁片是去朱雀街买菜时顺的。",
+      "event_type": "日常往来",
+      "status": "ongoing",
+      "first_text_position": 60333,
+      "chapter_id": 17,
+      "chapter_order": 17
+    },
+    {
+      "event_id": "d5154560-a327-5e68-bcb2-b9f368c276ea",
+      "title": "贺重明以米糕匿名接济北院寒门子弟",
+      "summary": "入夏后南院有冰鉴与冰镇酸梅汤，北院只有杂粮馒头配白菜炖粉条，四人例银有限：柱子大半寄回家，算盘的钱花在旧书摊，猴子的钱不知去向。贺重明自朱雀街事件后每月多出一笔固定开销——买一包糯米和半斤红枣，托食堂大师傅蒸成米糕，分给北院家境最差的几个寒门子弟；他从不提自己的名字，被柱子问起便说自己娘塞米糕时也没让他记名字。",
+      "event_type": "日常义举",
+      "status": "ongoing",
+      "first_text_position": 60893,
+      "chapter_id": 18,
+      "chapter_order": 18
+    },
+    {
+      "event_id": "61e24007-a674-5705-8c03-cdb773b08d12",
+      "title": "钱瑾暗中连下三手：泼水、撕书、撒沙",
+      "summary": "钱瑾自经义堂争辩后近一个月不再找麻烦，算盘断定他在等机会。机会随后以三件小事到来：猴子的被褥被泼了两天的淘米水，门窗完好，算盘点出管舍老黄头腰上的钥匙可能被借走，猴子当天去朱雀街买铜锁与锉刀，换锁芯并加暗插销；两天后算盘《六韬》被裁纸刀裁掉十几页，算盘从撕口判出是左撇子却拒绝追查，理由是撕书人要的就是四人查错人、授人以柄；三天后柱子的饭里被撒进细河沙，打菜的大师傅说看见一只左手、穿杂役衣服的人。猴子被贺重明一句“坐下”按住，指出撒沙是试探四人敢不敢翻脸，四人把带沙的饭菜吃完，各自不发作。",
+      "event_type": "暗中报复",
+      "status": "ongoing",
+      "first_text_position": 61439,
+      "chapter_id": 18,
+      "chapter_order": 18
+    },
+    {
+      "event_id": "c58f8c59-cd52-5ef3-8cd5-566dfacdb724",
+      "title": "猴子夜探南院，把私账放回钱瑾书桌",
+      "summary": "四人回北院的路上猴子借口消食折向南院，在月亮门后蹲了半个时辰，等二更梆子敲过、廊道仆人退尽。他贴墙摸到钱瑾独间窗外，用最薄的刀片挑出纱窗竹钉，再一根针似的拨开木棂插销，不到十息便把窗从外面打开；他没有翻窗，只把手伸进去，把先前从钱瑾贴身仆人箱中翻出、又被算盘判定“把柄太小掀不翻他”的那本私账放在钱瑾书桌最显眼处，随后原样关窗、塞回竹钉，不留痕迹地返回北院。",
+      "event_type": "夜探反制",
+      "status": "resolved",
+      "first_text_position": 63581,
+      "chapter_id": 18,
+      "chapter_order": 18
+    },
+    {
+      "event_id": "be4eac90-8128-5457-ae18-ac228afc78b0",
+      "title": "贺重明当众归还私账，钱瑾第一次露怯",
+      "summary": "次日中午食堂，贺重明端饭盘经过钱瑾身边时，把那本私账轻轻放在他面前；封皮上多了一行用左手写的丑字：“你的人落的东西，帮你捡回来了。下次叫他小心点，别什么都往箱子里塞。”贺重明没有停步、没有回头，说完便回自己那桌，算盘递筷、柱子递馒头、猴子若无其事喝汤。钱瑾盯着那行字很久，抬头看北院一眼，表情像下棋的人发现对手偷走了一步；他把私账塞进袖子，笑着端蜜饯碟走向另一桌，没甩脸色也没说狠话，但算盘注意到他端碟子的指节是白的。算盘低声说“他怕了”，猴子道破私账里最值钱的不过是溜出太学逛赌坊、抄马骁作业、托人私带御膳房点心这类小把戏，但钱瑾不知道他们还有没有别的。",
+      "event_type": "当众反制",
+      "status": "resolved",
+      "first_text_position": 63744,
+      "chapter_id": 18,
+      "chapter_order": 18
+    },
+    {
+      "event_id": "715afbf2-e022-5518-9e7d-97e8398822a0",
+      "title": "井边沈遥搓衣的节奏顿了一拍",
+      "summary": "回宿舍路上经过井边，沈遥正蹲在井沿搓两件灰蓝色练功服，动作用力、节奏均匀。贺重明从她身后经过时脚步没停，她也没抬头，但搓衣服的节奏顿了一拍，短到只有她自己知道，随即继续。贺重明没注意，埋头翻书的算盘也没注意，只有猴子回头看了一眼她的背影，把嘴里叼的草秆换了个方向。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 64446,
+      "chapter_id": 18,
+      "chapter_order": 18
+    },
+    {
+      "event_id": "1fceb5f8-b7cb-5622-a942-3be9a83e317d",
+      "title": "回程议论：算盘断言钱瑾的蜜饯不再甜",
+      "summary": "吃完饭回宿舍的路上猴子问钱瑾这次能安分多久，没人回答。算盘忽然合书说“夏天还长着呢。冰窖里的冰会化，酸梅汤会喝完。但他的蜜饯碟子，怕是没那么甜了”，被猴子嫌酸，两人为“语言艺术”四个字拌嘴，柱子插一句“俺觉得酸梅汤比蜜饯好吃”，三人一起笑出来，笑声传到月亮门那头，打水的寒门子弟回头看。沈遥拧干练功服抖开，朝笑声那边看了一眼，嘴角动了一下，端着木盆往北院后墙的晾衣绳走去。",
+      "event_type": "余波议论",
+      "status": "ongoing",
+      "first_text_position": 64679,
+      "chapter_id": 18,
+      "chapter_order": 18
+    },
+    {
+      "event_id": "cf462d9f-c106-57f5-9fa8-0ae598cd7e37",
+      "title": "秋猎分组名单公布，第七组北院四人被与钱瑾绑在一组",
+      "summary": "八月十三太学贴出秋猎告示：地点西郊皇家猎场，为期五天，新生老生混合编组，每组六到八人，配一名教官带队，按猎获灵兽数量质量评分，成绩不计入大考但在年末总评占一个“武科实践”优评——对北院学生是少数能与南院同起跑线的机会。当天下午秦穆把分组名单念了一遍，第七组八人：贺重明、钱瑾、马骁、算盘、猴子、柱子，北院四个南院四个。算盘合上小册子，语气平淡得像在说天气：“故意的”，把北院和钱瑾绑在猎场里，出事谁也跑不掉，不出事也能互相牵制，这名单多半不是秦教官定的。名单是谁定的没人说也没人问，贺重明把名单折好塞进袖子，说“五天。熬过去就是了”。",
+      "event_type": "分组布置",
+      "status": "ongoing",
+      "first_text_position": 69352,
+      "chapter_id": 19,
+      "chapter_order": 19
+    },
+    {
+      "event_id": "9f50ea7c-46c3-594b-bd51-fe747eaeb959",
+      "title": "白芷临行再赠槐叶，立“烧叶见烟即来”之约",
+      "summary": "出发前夜贺重明去槐荫巷，白芷正往马背绑药篓——她每年此时出城采一批秋药。她问“明天秋猎？”，提醒西郊猎场林子深、雾气大、容易迷路，随后从袖子里摸出槐叶，以和上次一模一样的动作（两指夹着叶柄随手一递）交给他：“遇到迈不过去的坎，烧了它。看到烟我会来。”贺重明接叶时指尖碰到她凉凉的指尖，这一次没有往回缩；他对着光看叶缘那道极细的焦黄——大概是她在指尖捻了太久，把叶边捻枯了。他问“先生，这片叶子能烧出多少烟？”白芷答“够我看见就行”，翻身上马、草帽压得极低遮住大半张脸，说“走了”。贺重明在院门口目送矮脚灰马走出巷口，才把槐叶用油纸包好贴身藏好；回去路上他反复想那片焦黄——先生的手指在他手心里停住的时间，够不够把一片叶子捻枯？他没有答案。",
+      "event_type": "授物立约",
+      "status": "ongoing",
+      "first_text_position": 70210,
+      "chapter_id": 19,
+      "chapter_order": 19
+    },
+    {
+      "event_id": "ce3f6535-4438-52a8-8181-c2ac697d1969",
+      "title": "猎队开赴西郊猎场，秦穆念“禁碑以南”时停顿审视新生",
+      "summary": "八月十六卯时开城门出发，太学门口人马嘶杂，猎队穿过朱雀大街出西门，一个多时辰到圣城以西三十里的西郊猎场。营地扎在猎场北面高地，三顶大帐成品字形排开，撒驱兽粉、架两堆篝火，秦穆重申纪律：不准单独行动、不准越过禁碑、日落之前必须回营。往年他念“禁碑以南，不准踏入半步”时语调平坦，像念一截早已背熟的套话；今年念到“禁碑以南”四个字时声音忽然顿了一拍，目光在几个新生脸上逐个停了一下才念完后半句。那个停顿短到大部分人不会注意，但贺重明注意到了，算盘也注意到了——他偏头看了贺重明一眼，什么都没说。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 70801,
+      "chapter_id": 19,
+      "chapter_order": 19
+    },
+    {
+      "event_id": "1678e357-ddf2-5c26-805e-31c308d14c90",
+      "title": "头两日围猎顺畅，钱瑾递水套近乎被算盘识破",
+      "summary": "头两天一切正常。第七组配合出乎意料地顺畅：四人在朝天城就跟赤甲卫学过围猎，进太学后又磨合了小半年，柱子正面驱赶、猴子侧翼包抄、算盘在后方判断兽踪、贺重明居中策应，猎获不算最多但每一头都干净利落，第二日傍晚獐子和灵雉已堆成一小堆。同组南院四人中马骁动作还算利索；钱瑾带了两个自家猎场的猎手随行（太学允许学生自带仆人，但不准仆从参与围猎，他的人只能看帐篷），自己跟着跑了几趟，累得气喘吁吁却没叫苦。第二日傍晚柱子扛回一头赤鬃鹿，钱瑾主动递上一碗水，柱子接过喝了点头，钱瑾笑笑转身。猴子问“他转性了？”算盘答“没有。他在套近乎”，并列出旧账：在经义堂跟贺重明吵过架、在食堂骂他们是骡子、派人在他们床上泼脏水、往柱子饭菜里撒沙子——“现在忽然递水——你自己信吗？”",
+      "event_type": "关系试探",
+      "status": "ongoing",
+      "first_text_position": 71292,
+      "chapter_id": 19,
+      "chapter_order": 19
+    },
+    {
+      "event_id": "d217dfbf-8ae0-5cbe-bfcd-f02bf44a2ddf",
+      "title": "第三夜铁背苍狼群袭营，第七组被驱赶深入密林",
+      "summary": "第三天夜里，月亮刚过满月，篝火烧到后半夜只剩两堆暗红炭。值夜的猎犬最早听到动静，却没有叫，它们跑了。贺重明被帐篷布被爪子从中间剖开的声音惊醒，翻身时手已摸到靴筒里的短刀；一匹受惊烈马撞翻营火，马蹄踩塌半边帐篷，他滚出去时左肩撞上帐杆、耳朵嗡响听不见声音。隔着塌下的帆布他与一双绿眼睛对视，那东西的呼吸隔着两层布烫在他颧骨上；他出刀刺穿帆布，又腥又烫的血顺刀柄流了一手，那东西嚎了一声，不是疼，是怒。帆布被整片扯开时他看见它的背——一整排硬如铁板的角质鳞甲泛出冷蓝色反光。秦穆的吼声从营地另一头传来，铜锣响了两声，第三声被狼嚎盖过。算盘光着一只脚爬出倒塌的帐篷，想起《古阵残篇》的记载：铁背苍狼活动半径不超过猎场深处，从不在外围出现，从不——那今晚这些是从哪儿来的？一头狼窜过带翻辎重车，直奔营地西北角、方向正对第七组帐篷。四人被狼群与其他人冲散，贺重明吼“退”；第七组的退路正好是狼群冲击的方向，冲出营地撞进灌木丛后身后火光已看不清。贺重明在跑动中听出狼嚎方向变了——不是在追，更像在两侧迂回，他意识到“它们在赶我们”。猴子回手拽住陷进落叶坑的柱子，柱子拔出的靴底沾着一块碎白色硬物，没时间看。",
+      "event_type": "遭遇袭击",
+      "status": "ongoing",
+      "first_text_position": 71734,
+      "chapter_id": 19,
+      "chapter_order": 19
+    },
+    {
+      "event_id": "537b183d-2a5a-5ec7-9386-41361a1e6cde",
+      "title": "算盘从蹄印与拖痕判断林中“不对”",
+      "summary": "狼嚎忽然停了，四面的树密得像一堵堵墙，树干裹着灰绿色苔藓，空气里有一股更旧的、像是从泥土下面往上渗的血腥气。四人就地靠拢清点：算盘光着一只脚、脚底划了口子冻麻了，柱子的箭壶只剩五支箭，猴子腰上的矛针少了好几根，萤石还在。算盘蹲下时手指撑地，指腹触到的不是枯叶是泥，他拨开落叶，露出一排两瓣状蹄印，边缘深嵌湿泥；他用拇指比了深度，比普通野鹿至少重三倍，蹄印旁还有一道沉重东西被贴着地面拖过去的拖痕。他说“这个不对”——铁背苍狼的领地里不会有鹿，它们会把鹿吃干净，骨头都不剩。林子里的沉默忽然变得更重了。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 73756,
+      "chapter_id": 19,
+      "chapter_order": 19
+    },
+    {
+      "event_id": "41e23323-b855-54e0-a158-ed80d2d79fb7",
+      "title": "四人循蹄印抵达禁碑，被迫踏入猎场禁地",
+      "summary": "贺重明决定循蹄印往前走——后面有狼不知还在不在，左右都是密不透风的灌木，蹄印方向是唯一一条现成的路。算盘的萤石走在最前面，每往前一步，那一小团幽绿色的光就往黑暗中推开尺许。蹄印穿过密林与两棵交缠生长的古槐，树干上出现刀剑斩过的旧疤，树皮里嵌着一截锈成黑色的箭头。蹄印停在一块斜倒在地上的石碑前：青石半截埋土，苔藓泥土糊住大半字迹，一缕月光恰照碑面——“猎场禁地 擅入者死”。贺重明想起秦穆那句“禁碑以南，不准踏入半步”，今年念时还看了他们一眼，像在记住他们的脸；此刻他们正站在禁碑的南面。算盘回望来路：没有火光、没有铜锣、连狼嚎都听不见。猴子说“回头走不认得路”，算盘说“往前是禁地”。贺重明伸手进怀捏了一下油纸包着的槐叶，摸到叶缘焦黄的弧线，然后把手抽出：“先往里走。找地方等天亮。”禁碑往里树木更高更密，月光彻底消失，腥味变浓、从脚底下往上渗；柱子在走了百十步后从靴底抠下一片白色碎块，借萤石光看是一截旧指骨，他用衣摆擦手，把碎骨放在树根上，没说话，跟上队伍。",
+      "event_type": "被迫深入",
+      "status": "ongoing",
+      "first_text_position": 74585,
+      "chapter_id": 19,
+      "chapter_order": 19
+    },
+    {
+      "event_id": "2e88d36a-2840-5ca0-8ee6-dc3af1343dda",
+      "title": "另一块禁碑被无声推偏十五度，堵死四人来路",
+      "summary": "四人没有注意到，在他们身后，那块刻着“猎场禁地”的石碑旁边，另一块一模一样的禁碑正被人慢慢地推进原来的位置——不是原位，是偏了十五度。来路被这一偏完全挡死了：从禁地深处往外面看，来时的方向变成一堵完整的、没有缺口的树墙。一块半埋在土里的青石碑要挪动至少需要两个成年男人合力，但推碑的人没有发出任何声音，没有留下任何脚印，只有碑基在泥土中摩擦了一下——那声沉闷的、湿土被重物挤压的闷响传到了走在最后面的猴子耳朵里。猴子停步握紧刀柄问“什么声音？”，算盘举萤石往后照，只照到树干、落叶、藤蔓，来路黑得像一面墙，柱子说没听见；猴子站了一会儿，没再说什么，转身跟上队伍，手没离开刀柄。",
+      "event_type": "暗中封锁",
+      "status": "ongoing",
+      "first_text_position": 75020,
+      "chapter_id": 19,
+      "chapter_order": 19
+    },
+    {
+      "event_id": "c5c2fe33-bcbe-566d-b069-fc78fc5339b2",
+      "title": "四人深入禁地深处，发现前朝祭坛与厌灵封印",
+      "summary": "四人穿过积叶枯藤行至地势下沉处，见一座前朝军队出征前祭天的坍塌祭坛与十三级石阶；算盘在第七级石阶的青苔下认出古篆“厌灵封印”，据《古阵残篇》说这是以灵石为核、以咒文为界的封禁阵法，并念出“阵眼不可动，动则灵破，灵破则祟出”；祭坛中心青石地面上嵌着一块不生苔藓的黑色晶石，贺重明往前走了一步，被算盘一把拽住袖子不许碰。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 76103,
+      "chapter_id": 20,
+      "chapter_order": 20
+    },
+    {
+      "event_id": "fcbda152-4072-5571-854f-9a15679d08fc",
+      "title": "黑鳞蟒现身，柱子猴子苦战不敌",
+      "summary": "废墟深处传来鳞片刮擦石面声，磨盘大的黑鳞蟒自黑暗中昂起蛇头；算盘报出它的弱点只在鼻孔、眼眶、喉咙内侧与泄殖腔，并判断它是被厌灵封印困在此地、闻到封印气息便先杀活人。柱子一叉直取左眼只溅起火星，被水桶粗的蛇尾拍断叉杆、撞上残柱；猴子翻上残墙甩出四枚矛针，一枚扎进鼻孔，自己落地时扭伤脚踝；算盘退到残柱后以炭条推算距离方位，出声指挥二人闪避与踩针。",
+      "event_type": "遭遇激战",
+      "status": "ongoing",
+      "first_text_position": 77354,
+      "chapter_id": 20,
+      "chapter_order": 20
+    },
+    {
+      "event_id": "8c56cfea-de38-5416-842a-b4deb2536347",
+      "title": "素阳金破体逼退黑鳞蟒",
+      "summary": "黑鳞蟒转向贺重明、缓缓盘身欲作致命一击，他松开压着丹田的手，一道巴掌大的白金色火苗破体而出，在黑暗中炸开一圈灼目的光，祭坛青苔瞬间焦枯、石阶水洼嘶嘶冒白汽；火苗还没碰到它，黑鳞蟒就本能后缩，随后嘶鸣后撤、头也不回退入废墟深处。贺重明单膝跪地，掌心余温从丹田沿脊柱窜上后脑。算盘据《古阵残篇》判断它怕的不是火，而是与厌灵封印同源的灵力在活人身上突然出现。",
+      "event_type": "转折",
+      "status": "resolved",
+      "first_text_position": 78401,
+      "chapter_id": 20,
+      "chapter_order": 20
+    },
+    {
+      "event_id": "59904e4f-b725-5d21-a05a-a65c838824aa",
+      "title": "贺重明取走阵眼晶石，决意挖出做局之人",
+      "summary": "贺重明先扶正柱子的瘸腿、捡回油纸包确认槐叶完好，再走到祭坛中心，把对火光与嘶鸣毫无反应的黑色晶石从石槽里抠出来；晶石入手冰凉却比看起来轻得多，掌心能感到一种极细微的脉动，像握住一颗还在微弱跳动的心脏。他盯着看了几息塞进怀里，认定这块石头就是禁碑旁有人做局的证据，要用它把做局的人挖出来；黑暗中他摸到晶石边缘有一处细微的缺口，像很久以前被什么东西磕掉了一角。",
+      "event_type": "取物立誓",
+      "status": "ongoing",
+      "first_text_position": 79191,
+      "chapter_id": 20,
+      "chapter_order": 20
+    },
+    {
+      "event_id": "ac06988b-8c31-5965-8c10-5e759d678d0e",
+      "title": "四人走出禁地，贺重明向秦穆点明禁碑被人挪位",
+      "summary": "天亮前四人互相搀扶沿原路穿过密林灌木走出禁地边缘的铁丝网，天亮后秦穆找到他们，递过水囊却什么都没问；贺重明喝口水后开口说禁碑被人动过，并说明被狼群冲散时往北跑了不到两百步、天亮回走却发现禁碑被往北挪了至少两里，正好卡在被冲散的方向上——有人把退路上的禁碑移了位置，等于在黑暗中给他们留了一条唯一的“生路”，而那条生路就是禁地。秦穆沉默很久，只让他回城后写一份详细的报告。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 79759,
+      "chapter_id": 20,
+      "chapter_order": 20
+    },
+    {
+      "event_id": "cfca154a-a0b5-5c5d-8f30-9be1e161b4d3",
+      "title": "钱瑾天亮后假意迎接，贺重明看破其眼神",
+      "summary": "第七组其余人天亮后陆续找回，钱瑾在营地东侧竹林边被发现，浑身发抖、袖口被荆棘撕开一道口子、脸上泪痕未干；他看见贺重明时表情极快地变了一瞬，随即堆起笑脸迎上来说太好了你们都活着、我担心了一整夜。那笑脸里没有担心也没有笑意，只有一双还在评估局势的眼睛。贺重明什么都没说，只看了他一眼便越过他走回营地。",
+      "event_type": "关系试探",
+      "status": "ongoing",
+      "first_text_position": 79950,
+      "chapter_id": 20,
+      "chapter_order": 20
+    },
+    {
+      "event_id": "acb4bb18-bf98-587f-af1b-dd02ff1985f9",
+      "title": "沈遥把没吃的干粮递给走出禁地的贺重明",
+      "summary": "搜救队进禁地搜寻失踪学生时沈遥背着白蜡杆枪站在秦穆身后，从头到尾没说一句话；贺重明浑身泥血走出禁地时，她从袖子里掏出一块干粮递过去，只说“没馊”——那是她自己还没吃的那份。贺重明接过咬了一口道谢，她没答话转身走了；秦穆旁边的另一名教官看她握枪的手攥得骨节发白，把要说的话咽了回去。",
+      "event_type": "关系线索",
+      "status": "ongoing",
+      "first_text_position": 80214,
+      "chapter_id": 20,
+      "chapter_order": 20
+    },
+    {
+      "event_id": "410564a5-1bf9-5df7-afd9-3dd12e7bcb67",
+      "title": "猎队归城，孙思在太学门口点名确认北院四童全须全尾",
+      "summary": "八月二十傍晚猎队穿过落雨的朱雀大街回城，孙思撑伞站在太学门口台阶上，目光扫过队伍，数到第七组四个北院少年都在马上才松了半寸伞柄，只对秦穆说“人齐了就好”，转身进门。",
+      "event_type": "归队确认",
+      "status": "resolved",
+      "first_text_position": 80571,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "98e14180-32e8-53f0-a68c-cf5e7263da9d",
+      "title": "四人归舍清点伤损与残物，厌灵石首次摆上松木桌",
+      "summary": "回到北院宿舍天已黑透：柱子把破猎叉靠墙就睡、连靴子没脱；算盘盯着《古阵残篇》某页空白反复摩挲；猴子敷脚踝、数矛针少了四根断了一根，断口齐整是撞石崩断，他把断针塞进皮套最里面没扔；贺重明把厌灵石放在桌上，油灯光被吸进去般不反光，四人围着看了一会儿都没说话，贺重明说“先睡”“明天我去找先生”——他说的先生不是孙思。",
+      "event_type": "归舍清点",
+      "status": "ongoing",
+      "first_text_position": 80667,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "2936d6bc-28cd-5b2f-b7fd-89a819e27064",
+      "title": "贺重明独访槐荫巷，白芷一眼辨出厌灵石",
+      "summary": "次日一早贺重明独自出太学，推开槐荫巷尽头虚掩的木门，白芷正蹲在院里翻晒苦参；他掏出黑色晶石放上石桌，晶石落桌闷响、比同体积石头轻一半。白芷罕见地收起懒散，把晶石举到与视线平齐、偏转角度看不同切面，手指极稳，随后说出“厌灵石”——上古封禁大阵的阵眼，她活这么大只见过两回。",
+      "event_type": "鉴定揭示",
+      "status": "resolved",
+      "first_text_position": 81374,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "661da569-cb29-5ead-af76-1694f04e5b38",
+      "title": "白芷揭示噬灵与三十六道禁碑的封禁大阵",
+      "summary": "白芷以背旧书的平淡语气说明：禁地镇压的邪祟叫噬灵，以灵气为食，修行者灵力、灵兽内丹、灵药药性都能吸干；上古之战末段有人把它封在西郊古战场底下，用厌灵石做阵眼、布三十六道禁碑，每道碑下都嵌一块厌灵石，贺重明拿走一块，大阵就多了一个窟窿，并复述“阵眼不可动，动则灵破，灵破则祟出”。贺重明从头讲述猎场、禁地、祭坛、黑鳞蟒、古篆刻字与被挪动的禁碑，唯独没说素阳金。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 81583,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "cd97c0e7-b71b-5f6a-bebd-f788642a429b",
+      "title": "白芷自述一生只见过两回厌灵石，却拒答第一回",
+      "summary": "白芷把厌灵石放回桌上，说这是上古封禁大阵的阵眼，这东西不常见——她活这么大也才见过两回。贺重明追问“第一回在哪”，她只答“跟你没关系”，把话头拨回贺重明的来处。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 81583,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "2a4809ed-d392-5a60-b5dc-ae468f74f08e",
+      "title": "贺重明推断挪碑者另有其人，钱瑾只是知情者",
+      "summary": "贺重明问“挪碑的人知不知道厌灵石在下面”，白芷挑眉意外他这么快问到点子上，反问“你怀疑不是钱瑾”；贺重明答钱瑾才八岁，没本事在禁地里动手脚，但出发前就知道会出事，或有人告诉他。白芷既未肯定也未否定。",
+      "event_type": "推理推进",
+      "status": "ongoing",
+      "first_text_position": 82188,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "5cada3bd-665b-5ddc-be73-b5305a248a05",
+      "title": "白芷把厌灵石交还贺重明保管，决定亲自处置此事",
+      "summary": "白芷对着光再看一遍晶石后把它放回贺重明手里，说“收好，这东西在你身上比在我身上安全”，因为圣城没人敢动她，但石头若被发现连她也麻烦，“先搁你那儿，天塌了再说”。贺重明提议马上报告太学，被白芷打断——他是人质，说了只会被指北地蛮子妖言惑众；白芷说“这件事我来办”，让几个小孩继续念书。",
+      "event_type": "托付决断",
+      "status": "ongoing",
+      "first_text_position": 82408,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "7a3328ba-0254-5ccd-88ca-b55425c57f8d",
+      "title": "白芷夜赴猎场修复封禁，留下“礼部管”三字",
+      "summary": "当天夜里白芷独自去了一趟西郊猎场；第三天清晨巡官换岗时发现封禁已恢复如初，三十六道禁碑方位被重新校准，各碑厌灵石嵌回原位，唯独被贺重明带走的那块碑下是空的，空缺处被人用朱砂画了一道极细符文作临时补丁；禁碑旁泥地上多了一行木棍划出的潦草字：“礼部管”。",
+      "event_type": "暗中补阵",
+      "status": "resolved",
+      "first_text_position": 82942,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "b9d45a11-9fd1-505c-bf1c-c8c46f139f6b",
+      "title": "禁地被动手脚的消息传遍圣城官场，矛头转向礼部宋家",
+      "summary": "巡官不敢怠慢，当天把消息报到太学，太学又报礼部；三天之内消息在圣城官场传了一圈，所有人的目光最后转向同一个方向——礼部，而礼部尚书宋文渊正是宋子玉的父亲、宋子诚的亲弟弟。",
+      "event_type": "局势发酵",
+      "status": "ongoing",
+      "first_text_position": 83101,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "a8062c25-d09d-5322-9948-1f60e7f45e79",
+      "title": "钱瑾在走廊久立，脸上什么表情都没有",
+      "summary": "消息传开的当天下午，钱瑾靠着主楼廊柱、双手抱胸站了很久，看着院子里落了一地的梧桐叶，脸上什么表情都没有。",
+      "event_type": "心绪",
+      "status": "ongoing",
+      "first_text_position": 83209,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "590a8857-d58c-5461-9744-b100f2a0b95e",
+      "title": "贺重明再访槐荫巷，见白芷归来狼狈而心生动念",
+      "summary": "当晚贺重明独自再去槐荫巷，白芷躺在竹摇椅上草帽扣脸，身上还是出城那件灰衫、袖口蹭着青苔、左颊一道荆棘红痕、草帽破了半边。她告诉他猎场的事“搞定了”，并解释写“礼部管”是搅浑水之计：宋家心虚会露马脚，不心虚就会追查，万一真是钱家干的，两家互相算计就没功夫找麻烦。贺重明站在门口看她这副样子，忽然觉得她比圣城见过的任何人都好看，愣了好几息才低头假装拍裤腿的灰；出门后蹲在墙根搓脸，脸仍发烫，骂了一句“鬼天气”快步回太学。",
+      "event_type": "情愫初生",
+      "status": "ongoing",
+      "first_text_position": 83446,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "16f603e0-15e2-5b82-bf3a-d16dfce6752b",
+      "title": "算盘考据《古阵残篇》，以刑天缺斧喻缺石之阵",
+      "summary": "次日算盘在藏书阁翻了一整天典籍，把厌灵石相关记载整理成三页手抄；他指着页脚小字念出《古阵残篇》下卷“缺一石则阵有隙，祟可撼之，然不可破……石之有缺者，犹刑天之戚，虽残犹锋”，解释三十六块石头少一块，阵法会有缝隙、噬灵能在缝隙里活动但暂时出不来，贺重明怀里那块正是“刑天缺的那把斧子”。",
+      "event_type": "考据推进",
+      "status": "ongoing",
+      "first_text_position": 84219,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "3d29a595-2263-5c35-b698-95102f8e42f4",
+      "title": "沈遥暗送腌萝卜，潼关守将沈震之女的身份被点出",
+      "summary": "沈遥从秦穆口中听说第七组在禁地与黑鳞蟒交手后全须全尾回来，当天中午食堂贺重明那桌多出一碟太学不供应的腌萝卜；算盘尝出是潼关腌法——潼关红土萝卜腌出来才有的回甘，并说沈遥是潼关守将沈震的女儿，查名册时看到过。猴子回头看了一眼食堂方向，什么都没说。",
+      "event_type": "暗中照拂",
+      "status": "ongoing",
+      "first_text_position": 84611,
+      "chapter_id": 21,
+      "chapter_order": 21
+    },
+    {
+      "event_id": "34be663a-33cc-5c3a-81c9-60cbe576ea97",
+      "title": "太学放年假，四小只留圣城过年",
+      "summary": "十一月下旬圣城落雪，太学放年假，南院学生当日散尽，钱瑾乘蓝呢软轿离校、马骁骑马随行；贺重明四人因朝天城太远留在圣城过年，北院留校者仅二十来个，四人自己生火做饭，算盘照古籍方子炖“军营杂烩”；腊月二十三起朱雀大街挂满花灯，四人腊月二十六逛灯市，算盘淘到《古阵残篇》下卷，柱子买泥人将军，猴子买两挂鞭炮被算盘以《圣城坊市管理条例》第四十二条劝阻。",
+      "event_type": "日常铺垫",
+      "status": "resolved",
+      "first_text_position": 85262,
+      "chapter_id": 22,
+      "chapter_order": 22
+    },
+    {
+      "event_id": "fd386cfb-a988-595d-9625-74248d11a384",
+      "title": "贺重明晨练撞见收尸板车，把干粮塞进灶膛",
+      "summary": "除夕前一夜大雪压断北院老槐枝，次日天未亮贺重明沿太学外墙跑至城东坊门，看见老头拉着一辆板车驶出巷子，车上摞着三四具尸体，最上面那具的胳膊滑出车板、手掌在雪地拖出一道沟；他想起白芷“圣城方圆三百里不许出现流民”的话，回宿舍后蹲在灶膛前把剩下的干粮一块一块放到火边烧掉，眼眶发红。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 86546,
+      "chapter_id": 22,
+      "chapter_order": 22
+    },
+    {
+      "event_id": "8ba46567-5fa2-5e07-8838-33c153e3e66e",
+      "title": "除夕宫宴：贺重明初入皇宫，看见皇帝咳血",
+      "summary": "除夕当晚宫宴，马车自太学经朱雀大街在承天门停下，殿内金漆蟠龙、西域织毯、青铜烛台流光溢彩；贺重明坐末席，钱瑾换新袍佩更大的羊脂玉佩坐在钱侍郎旁，马骁在兵部席上小指仍微翘。皇帝李瑜是个比贺重明大不了几岁的少年，比龙袍瘦得多，脸色苍白近乎透明，咳嗽时以手帕捂嘴并攥在手心不让内侍接；贺重明看见手帕上沾了一点红。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 87466,
+      "chapter_id": 22,
+      "chapter_order": 22
+    },
+    {
+      "event_id": "e69647d8-bdbf-5ed5-a040-6cb84cd8de16",
+      "title": "宋子诚当庭逼问异火，贺重明反问朝天城并打军拳",
+      "summary": "酒过三巡，南院有人提议伴读展示才艺，说话前先看钱瑾一眼，靶子是贺重明；宋子诚替皇帝开口，以温和语气请“贺帅长子”展示体内异火。贺重明起身笑着反问“大人比我还清楚，莫非当年在朝天城的时候，大人亲眼见过”，将宋子诚一军——离火封印是贺府绝密，宋子诚无法当众承认在朝天城安插眼线；宋子诚只以“道听途说”作答，右手食指一下一下敲着左膝。贺重明不再追，转向皇帝请耍一套北地军拳，当庭打完直拳、勾拳、肘击、膝撞，全场无人喝彩也无人敢笑，皇帝轻拍手说“不错”。",
+      "event_type": "冲突",
+      "status": "ongoing",
+      "first_text_position": 87749,
+      "chapter_id": 22,
+      "chapter_order": 22
+    },
+    {
+      "event_id": "626c916b-6c28-5733-a73f-ed36af726f73",
+      "title": "散宴归舍：鞭炮收回袖中，槐叶与厌灵石贴身仍在",
+      "summary": "宫宴散时已深夜，朱雀街花灯未熄、雪停，孩子们在雪地里追跑放爆竹；猴子摸出袖子里的两挂鞭炮，看了看车窗外的孩子又塞回去，车厢里没人说话。回宿舍后柱子把泥人将军搁在枕边，算盘把《古阵残篇》下卷压在枕下又摸书脊确认，猴子把鞭炮放在窗台看雪半天不说话；贺重明取出油纸包好的槐叶（叶子还是青的、边缘焦黄仍在）对着月光翻看，又摸了摸衣襟里那块冰凉微跳的厌灵石。宫宴上有个宫女腕上系着洗得发白的旧红绳打了三个结，让他忽然想到先生手腕上从来不戴任何东西，进而想“她穿裙子会是什么样子”，被算盘问脸怎么这么红，只答“热的”。",
+      "event_type": "心绪",
+      "status": "ongoing",
+      "first_text_position": 88748,
+      "chapter_id": 22,
+      "chapter_order": 22
+    },
+    {
+      "event_id": "0bea4a51-735b-5190-a2ba-19b2fc5444c7",
+      "title": "除夕宫宴：宋子诚当众逼贺重明露火",
+      "summary": "永安九年除夕，贺重明第一次进皇宫赴宴。宋子诚替皇帝开口，说听闻贺帅长子天生异禀、体内有异火，不知可否让诸位见识见识。贺重明沉默几息后起身反问“大人比我还清楚，莫非当年在朝天城的时候，大人亲眼见过”，宋子诚以“老夫只是道听途说罢了”揭过。贺重明随即转向皇帝，请求改打一套北地军拳；少年皇帝微微点头，他当庭打完最朴素的一套直拳勾拳肘击膝撞，全场无一人喝彩也无人敢笑，皇帝轻拍手说了句“不错”。",
+      "event_type": "当庭试探",
+      "status": "ongoing",
+      "first_text_position": 90049,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "fec39bbc-5311-518a-b8d5-42c979edc12a",
+      "title": "宫宴归舍：油纸槐叶、厌灵石与没说出口的念头",
+      "summary": "马车驶出承天门，回宿舍后柱子先躺下，算盘把《古阵残篇》下卷压在枕头底下确认还在，猴子把两挂鞭炮放在窗台看雪。贺重明躺在床上摸出油纸包着的槐叶对着月光翻面——叶子还是青的，边缘的焦黄还在——又摸了摸衣襟里冰凉微跳的厌灵石。他想起宴上端茶宫女手腕那条洗得发白、打了三个结的旧红绳，忽然想到先生一年四季灰衫青裤、从不戴任何东西，进而想“她穿裙子会是什么样子”；算盘问他脸怎么这么红，他说热的。",
+      "event_type": "心事暗生",
+      "status": "ongoing",
+      "first_text_position": 90935,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "85eb984a-7694-59d3-9cda-4f935a0de28e",
+      "title": "贺重明判定宋子诚已盯上自己",
+      "summary": "贺重明打完那套军拳就知道自己被人盯上了：不是钱瑾，是宋子诚。宫宴散后这老头没有任何动作，既不再在朝堂上提“异火”，也不派人来太学试探；但“道听途说”四个字满朝文武都听见了，宋子诚没能让他当众露火，反被“大人亲眼见过”戳了一下旧疤。算盘说得更直接：“他不出手，是因为还没摸清你的底。等他摸清了，出手就不会给你留后路。”",
+      "event_type": "局势判断",
+      "status": "ongoing",
+      "first_text_position": 91269,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "9d3c3697-04d3-54f3-8230-80f4ce6b5d8d",
+      "title": "正月初一到十五：北院寒门子弟的蒸饼年",
+      "summary": "正月初一到十五太学空空荡荡，南院连仆人都回家过年，北院二十来个留校寒门子弟凑在一起过年。初一贺重明把演武场上认识的几个寒门子弟请到北院宿舍；算盘照着《古阵残篇》里夹的军粮方子做古法蒸饼——腊肉是食堂大师傅偷偷塞的，干菇是陆晨从青州捎来的年货，黍米是贺重明用最后一点例银买的。第一笼塌了一半，第二笼垫了猴子用叶子牌赢来的干荷叶才成；两笼不到半个时辰被一扫而空，角落里一个少年把剩下半块包好要带给弟弟，算盘把碎渣拢进豁口碗让他也带走。",
+      "event_type": "日常群像",
+      "status": "resolved",
+      "first_text_position": 91618,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "875a5c8c-3e11-5199-a86d-ed1ee7d276a5",
+      "title": "朱雀街扶老农招来户部公文，沈遥为贺重明吵架",
+      "summary": "永安十年开春，护城河冰化尽、槐树抽新芽。贺重明在朱雀街扶起被户部小吏踹翻竹筐的老农，第二天太学收到户部公文，措辞讲究：“太学伴读贺重明当街阻挠坊市执法，念初犯不予追究，下不为例。”他把公文叠好塞进抽屉最底层，说下次我还帮。当晚沈遥在食堂跟南院的人吵了一架，说贺重明做的事没错；贺重明去找她道谢，她在井边洗衣服头也不抬地说了句“我又不是为了你”。",
+      "event_type": "冲突余波",
+      "status": "resolved",
+      "first_text_position": 92184,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "cfa1597a-fe0e-5b96-893a-aef3246f20b2",
+      "title": "蟠龙道第二次交锋：当众逼问宋子玉",
+      "summary": "三月末蟠龙道，贺重明与宋子玉第二次正面交锋。宋子玉以考官身份在阵法上做了手脚，四人组以命相搏通关成功；贺重明在终点前当众逼问：“这个差错，是你出的，还是太学出的？不管哪种，都不是我们的错。”孙思在漫长的沉默后宣布成绩有效。当晚白芷把一片新槐叶塞进他手心，说“等你学会不急着赢的时候”。",
+      "event_type": "正面交锋",
+      "status": "resolved",
+      "first_text_position": 92404,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "42ae0c05-ee60-5cce-ba34-a21e4b4e3620",
+      "title": "密信指向北境军辎调度，宋子诚却只让人继续看着",
+      "summary": "宫宴之后一年多，宋子诚始终没有正面动过贺重明——他在等三件事：等贺重明在太学露出更多底细，等白芷对这个孩子的关注降到最低，等朝堂上贺帅与北境军的关系出现可被利用的裂缝。永安十一年秋，猴子在朱雀街截获一封从圣城发往南边的暗语密信，算盘辨认出部分词汇指向“北境军辎调度”；贺重明抄一份带给白芷，白芷只说“不是冲着你来的，但也别忘了它”。贺重明由此意识到父亲在河北驻军的处境并不像表面那样安稳。密信内容未能破译，但“有人在查军辎密信”这个动作本身传到了宋子诚耳里，他听完没说话，只让兵部安插的人继续看着。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 92688,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "a5635e2f-d1bd-56d7-aec8-db74a8784edc",
+      "title": "宋府密室：宋子诚命宋子玉由“斗”改“看”",
+      "summary": "那年冬天宋子诚第一次单独召见宋子玉，地点在宋府后堂一间没有窗户的密室，墙上挂着“慎独”二字。他点出蟠龙道一局布错两处：不该亲自出手，不该输；并说贺重明今年九岁、太学还有三年，这三年内宋家若再在太学动手，第一个被翻出来的旧账就是蟠龙道。他要求宋子玉今后在太学只看着贺重明——“他的一举一动，他身边的人，他去的地方，他和他那个姓白的先生说过什么话，都要知道”，并已在总书阁安排两个助手定期抄录贺重明的借阅记录。他还点明猎场禁地的事是礼部替宋子玉的弟弟背了黑锅，那条蟒蛇是从禁地深处被引出来的，厌灵石的位置只有户部和礼部的人知道；白芷在猎场查到了礼部的线索却没有证据，只有三个字，够不着更高处却够得着宋子玉，所以这两年什么都不做做得对。",
+      "event_type": "暗中布局",
+      "status": "ongoing",
+      "first_text_position": 93286,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "db6fbaba-247b-5c41-ba82-dc301d7a344e",
+      "title": "总书阁旧档：猎场舆图借阅记录上的涂名",
+      "summary": "那年冬天算盘在总书阁整理旧档时，发现有人调阅过猎场舆图的借阅记录：时间是永安九年秋猎之前三天，借阅者栏目里的名字被墨笔涂掉，但墨迹下面的印痕还能摸出来——三个字，第一个字左边是个“宀”。算盘把这件事告诉贺重明，贺重明想了想，说“先记着”。",
+      "event_type": "线索发现",
+      "status": "ongoing",
+      "first_text_position": 93872,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "3dd507fb-3a81-5ef8-a551-c36d2ea99806",
+      "title": "永安十三年：兵部抄报再现相同暗语",
+      "summary": "永安十三年贺重明十一岁，年初在兵部武选清吏司挂闲职抄写文书，得以读到大量普通人看不到的军报原文。这年冬天，他在一份不起眼的蓟州军报中发现了与两年前猴子截获密信相同的暗语词汇，不动声色记在心里，没有告诉任何人。此时猴子的情报网已从炒栗子摊扩展到三个坊市，算盘的《古阵残篇》从两卷翻到六卷，柱子又长高了整整一寸；四人在太学已待了四年。",
+      "event_type": "线索发现",
+      "status": "ongoing",
+      "first_text_position": 94022,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "43c622b9-784d-5306-bf44-88a2c751807d",
+      "title": "白芷那句话的所指：赢了一场不代表赢了",
+      "summary": "这四年里宋子玉没有再做出格的事，在经义堂照常讲课、演武场照常巡查，走廊里迎面碰上贺重明甚至会微微点头；算盘说此人心机深到骨子里，猴子说他看着像一条冬眠的蛇。贺重明没评价，只是每隔一阵就会想起白芷那句话：“有的人，你赢了他一场，不代表他就输了。在圣城，输赢不在一时一地的胜负，而在谁能站到最后。”他没有忘记这句话——他只是还不知道，白芷说这句话的时候，心里想的不是宋子玉。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 94397,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "97475659-8c03-5410-85fe-91f1790dbcfd",
+      "title": "北境调防公文迟到三个月，白芷只说“压着”",
+      "summary": "永安十四年春，抄了一年军报的贺重明第一次在一份不起眼的调防公文中看到“北境”二字：内容是例行换防、河北驻军三个卫所轮调，但落款日期是三个月前——三个月前的调防公文现在才抄到兵部归档件里。他把公文原文记在心里，当天晚上去了一趟槐荫巷。白芷听完只说两个字：“压着。”贺重明问压多久，白芷说压到你能看懂为止。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 94436,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "c530a1b0-8b40-5711-a7ee-6a33029a6c3e",
+      "title": "宋子玉辞助教、被安插进兵部职方司",
+      "summary": "永安十四年夏天，宋子玉以“回乡丁忧”为由辞去经义堂助教职位，但算盘查吏部告身底档，发现宋家那两年根本没有长辈过世。猴子判断他是被宋子诚召回宋府。宋子玉回宋府后，宋子诚把他安插在兵部职方司——一个掌管舆图、军报、边关地形的衙门，品级不高，但经手的东西件件是机密；宋子诚在给他的信中只写了六个字：“近水楼台，静观。”这一年贺重明在太学第五年，再过一年就要结业，而宋子诚的棋才下到中盘。",
+      "event_type": "暗中布局",
+      "status": "ongoing",
+      "first_text_position": 94728,
+      "chapter_id": 23,
+      "chapter_order": 23
+    },
+    {
+      "event_id": "7b42b354-1d02-57ef-a744-be1dbdd096d1",
+      "title": "蓟州军报再度延误，贺重明断定为人为截看",
+      "summary": "贺重明抄回永安十四年三月初六的蓟州卫军报，发现从落款到归档晚了整三十天；他翻出去年十一月同样晚了近四十天的旧军报并排对照，算盘按小册子情报页念出三次同向记录——十三年九月猴子截获密信暗语指向北境军辎调度、十三年十一月与十四年三月蓟州军报两度延误三十天以上，方向一致，判定有人在半路上看贺重明的军报，并直指宋家。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 100242,
+      "chapter_id": 25,
+      "chapter_order": 25
+    },
+    {
+      "event_id": "10a82a0d-acaf-5d58-871d-8cdc8900e253",
+      "title": "北院查知马骁借阅边防舆图、宋子玉出入兵部职方司",
+      "summary": "猴子查出马骁近来频频去北院藏书阁借《蓟辽边防图志》《河北军镇分布考》等兵科舆图，借阅记录摞了半寸厚；算盘补上宋子玉辞去经义堂助教后一直留在宋府、最近与兵部职方司的人吃酒，而军报须经职方司审核才能归档、审核又比归档快，故贺重明能看到的军报宋子玉也能看到、且更早。贺重明由此推断对方盯的不是他们，而是贺家军。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 100927,
+      "chapter_id": 25,
+      "chapter_order": 25
+    },
+    {
+      "event_id": "3fe7cd7f-936c-521d-bab7-fea0a8ae1281",
+      "title": "槐荫巷留摘抄，炒栗子摊递出“查无此人”的驿丞线报",
+      "summary": "五月中旬贺重明去槐荫巷，白芷出城采药未归，只留字条让他有事找更夫老周；他把两份延误军报的内容摘抄压在茶碗底下留给她。出巷后他到朱雀街猴子常去的炒栗子摊，摊主在锅沿敲三下暗号后随栗子纸包递出一张左手写的纸条：蓟州驿道第三铺月前换了个新驿丞，姓朱，查无此人。贺重明烧掉纸条，意识到宋家在那条驿道上动了一颗阵眼。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 101968,
+      "chapter_id": 25,
+      "chapter_order": 25
+    },
+    {
+      "event_id": "f5da6318-130a-50df-9fc4-94110b72fec5",
+      "title": "换防公文现“沈大有”，白芷查名册称去向不明",
+      "summary": "五月底贺重明在武选清吏司抄蓟州卫第三哨换防公文，在去职老卒名单第二页看到一个普通名字“沈大有”；公文末尾显示换防部队原驻铜台堡，而沈大有的籍贯是潼关、退职时已是正七品把总。他把名字记在心里没告诉任何人，傍晚去槐荫巷。白芷取出《蓟州卫所军官名册》查出：沈大有潼关人，永安三年调入铜台堡任把总，十三年因伤退职，退职后既未回潼关也未留蓟州，去向不明——要么死了，要么被人藏起来了；白芷点出沈遥的父亲是潼关守将、二伯却在贺家军对面守了十一年不是巧合，让他先记住这个人，以后再说。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 102552,
+      "chapter_id": 25,
+      "chapter_order": 25
+    },
+    {
+      "event_id": "66873696-a585-519a-9b6e-f3b6d931a1ed",
+      "title": "掌案康必成被锁定后主动认账，蓟州军报不再延误",
+      "summary": "六月初算盘整理出武选清吏司二十一人中只有四人经手归档，其中掌案康必成五十三岁、蓟州香河县人、在司里待了二十年；猴子查出康必成独子在蓟州卫峒河边防断腿伤退，只领五两安置费，宋子诚的人替他补了十二两——买的不是他的手，是他的眼睛。四人议论康必成可悯却不可谅之后，贺重明把两份军报的延误记录整理成册放进只有康必成能打开的归档架最后一格；第三天册子不见，第四天康必成在掌案房夹道主动找他，说册子他看了、那十二两他会还，随后离去。此后军报再无被翻动迹象，蓟州方向军报再没延误超过十五天。",
+      "event_type": "反制见效",
+      "status": "resolved",
+      "first_text_position": 104030,
+      "chapter_id": 25,
+      "chapter_order": 25
+    },
+    {
+      "event_id": "d5095891-46d0-5862-bbbd-19a2adc10b59",
+      "title": "夹道遇宋子玉，被精准点出“蓟州那份军报”",
+      "summary": "六月中旬贺重明在兵部夹道与宋子玉迎面碰上，两人各点一下头侧身而过；走出三步后宋子玉回头叫住他，说“蓟州那份军报”不该拿回家抄、武选清吏司归档件按条律只能在司内查阅，笑了笑便走。贺重明后背出了一层冷汗——宋子玉没有泛说“军报”，而是精准点出“蓟州那份”，说明他知道贺重明在盯蓟州；他判断此事源头不在宋子玉，武选清吏司里另有一双眼睛，当晚与算盘把线索记为“另有其人”。",
+      "event_type": "对峙试探",
+      "status": "ongoing",
+      "first_text_position": 104664,
+      "chapter_id": 25,
+      "chapter_order": 25
+    },
+    {
+      "event_id": "e3aa79e8-c707-5b08-990a-1c9edddab1f7",
+      "title": "朱驿丞保人粮商歇业三年，线索转向粮道",
+      "summary": "猴子顺着蓟州驿道第三铺往上查两级，查出朱驿丞的保人是通州一个粮商；粮商铺子在通州码头，铺面锁着、门口贴着歇业，邻居说这家粮商三年前就不做了，与那批密信的时间对得上。贺重明由“粮商”想到“粮道”，记起白芷让老周带的口信——不要在军报里查、也不要在驿路上查，查粮草；他推出调兵需要军报、调粮走漕运，两条线路两套文书，改军报不如改漕运单，密信里的“北境军辎调度”也可能是在说调粮。",
+      "event_type": "线索揭示",
+      "status": "ongoing",
+      "first_text_position": 105065,
+      "chapter_id": 25,
+      "chapter_order": 25
+    },
+    {
+      "event_id": "93705a8f-bf28-5416-98f2-1d687ac22acf",
+      "title": "白芷捎口信定下“进兵部再碰粮道”，贺重明封信记下两处阵眼",
+      "summary": "六月底白芷托更夫老周捎来口信：她知道了，粮道的事现在不要碰，等贺重明进了兵部再说。贺重明意识到先生已在替他安排太学结业后正式入职兵部的后路；他把厌灵石收进怀里最深的口袋与沈遥的泥马放在一起，并在永安十四年三月初六那份军报空白处写下“蓟州驿道第三铺，朱。铜台堡，沈大有。两处阵眼，破其一即可”，封好信封只写一个“白”字，准备次日交给更夫老周。",
+      "event_type": "目标设定",
+      "status": "ongoing",
+      "first_text_position": 105891,
+      "chapter_id": 25,
+      "chapter_order": 25
+    },
+    {
+      "event_id": "082b905d-7289-5f11-84a6-fabfd787750d",
+      "title": "太学结业典礼与孙思致辞",
+      "summary": "永安十五年夏末太学结业，典礼在经义堂举行。孙思穿一件洗得发白、袖口磨毛的旧官袍致辞，短到南院学生还没摆好姿势就说完了，只留下一句“太学者，非为养士，而为养人”，并说六年前他站在门口看他们进来，今天仍站在门口看他们出去，“门是同一扇门，人是不同的人”。他目光在北院后排靠墙处多停一瞬，满堂都看见了。堂下南院北院一齐鼓掌，分不清哪边是哪边，靠墙的寒门子弟把手拍红；南院前排中央的钱瑾含笑拍手，他旁边的马骁低头看着被柱子震麻过的小指。",
+      "event_type": "典礼",
+      "status": "resolved",
+      "first_text_position": 106558,
+      "chapter_id": 26,
+      "chapter_order": 26
+    },
+    {
+      "event_id": "ba84dd6f-154a-5842-beb8-47b1ac59b21c",
+      "title": "宋子玉缺席结业典礼，在职方司圈出峒河渡口",
+      "summary": "宋子玉没有出席结业典礼，他坐在兵部职方司公房里，面前摊着一份蓟州方向的驿递舆图，右手食指在图上的峒河渡口位置轻轻画了个圈，随后把舆图卷起塞进标着“永”字的铁皮档案筒。窗外蝉鸣聒噪。",
+      "event_type": "暗中布局",
+      "status": "ongoing",
+      "first_text_position": 107545,
+      "chapter_id": 26,
+      "chapter_order": 26
+    },
+    {
+      "event_id": "0ae23c56-5898-54e6-80d4-7898bf95b236",
+      "title": "散场道别：陆晨赠青州枣干",
+      "summary": "典礼散后学生鱼贯而出，陆晨抱着布包站在经义堂门口的槐树下，把布包塞给贺重明，说是他娘晒的青州枣干、能放半年；贺重明掂了掂挺沉，拍了拍他的肩，陆晨眼眶红了一下便低头转身走了。",
+      "event_type": "送别",
+      "status": "resolved",
+      "first_text_position": 107649,
+      "chapter_id": 26,
+      "chapter_order": 26
+    },
+    {
+      "event_id": "2934f4f0-a175-5819-be9d-6c9ece61fae2",
+      "title": "算盘留校任助理编修，赠猴子暗桩分布手册",
+      "summary": "算盘抱着比人还高的古书从藏书阁出来，腋下夹着太学总书阁铜牌——他留校做助理编修；猴子说你这辈子就住在书堆里了，算盘说书堆里比人堆里干净。算盘从书堆最上面抽出一本薄手抄本塞给猴子，说是他替猴子整理的圣城地下情报网络暗桩分布手册、不保证全对；猴子翻了两页眼眶发热，问什么时候弄的，算盘答在他朱雀街支摊子时自己就在藏书阁翻舆图和坊市册子，猴子最后只说了句“谢了”。",
+      "event_type": "授物",
+      "status": "resolved",
+      "first_text_position": 107785,
+      "chapter_id": 26,
+      "chapter_order": 26
+    },
+    {
+      "event_id": "378b6876-e145-5243-bcdc-d096e2d4fa70",
+      "title": "秦穆赠短刀送柱子入禁军校尉营",
+      "summary": "演武场边，秦穆靠着铜锣架子看柱子穿着营制皮甲走来，见他步子比平时稳了许多——四年摔打把下盘从“太僵”练到“像一棵会走路的树”。秦穆解下腰间那把缠着磨亮旧皮绳的短刀递给柱子，说这是他在北境当兵时用的、跟了他十七年，“禁军校尉营不比太学，那里没人让你三招”；柱子双手接过道“谢教官”，秦穆摆手转身敲了一下铜锣，和四年前第一堂拳脚课上敲的那声一模一样。",
+      "event_type": "赠别",
+      "status": "resolved",
+      "first_text_position": 108030,
+      "chapter_id": 26,
+      "chapter_order": 26
+    },
+    {
+      "event_id": "f4b18c6e-660d-5def-9712-2cef46bb6ea4",
+      "title": "沈遥赠红土泥马",
+      "summary": "贺重明在北院后墙老槐树下看树，沈遥从月亮门走来，肩上已无那杆白蜡杆枪。她从袖中掏出一样东西递给他——一只用潼关红土捏的泥马，马蹄歪、马尾塌，马脖子上刻着一个小小的“遥”字，还带着她掌心的温度。她说“以后在兵部别老让人欺负”，贺重明道谢还没说完她便转身走了，走出两步忽然站住、不回头地站了两三息，才继续往前消失在槐树影里。贺重明把泥马揣进怀里与两片槐叶挨在一起，只觉得“师姐人确实挺好的”。",
+      "event_type": "赠物",
+      "status": "ongoing",
+      "first_text_position": 108648,
+      "chapter_id": 26,
+      "chapter_order": 26
+    },
+    {
+      "event_id": "108e61f0-ed9b-5698-b2f0-d563dc74257e",
+      "title": "槐荫巷告别：白芷赠最后一片槐叶",
+      "summary": "离校前贺重明去槐荫巷，白芷正往马背搭行囊，灰衫洗得发白、草帽扣在头上，和六年前刚来朝天城时一模一样。她说圣城的药材采完了该换个地方，留下三句话：“以后的路自己走”“那棵槐树帮你照看了六年，等你回朝天城，跟你二妈妈说，我偷了她的养花手艺”，以及递出最后一片新鲜槐叶时的“这个是最后一次了”。这一次她递叶时没有马上松手，手指在他掌心里停了一息，手凉凉的，和四年前猎场出发前一样；随后她翻身上马、不打招呼便走。贺重明追到巷口，只看到灰色背影和帽檐下被风吹起的白发，喊不出“先生保重”，只对着远去的背影深深鞠了一躬。",
+      "event_type": "辞别",
+      "status": "resolved",
+      "first_text_position": 109589,
+      "chapter_id": 26,
+      "chapter_order": 26
+    },
+    {
+      "event_id": "f8cf6a9e-0015-5fa9-8e6f-48394c1a3cbe",
+      "title": "贺重明叠起新旧槐叶，走向兵部衙门",
+      "summary": "鞠完躬直起腰，贺重明摸出怀里那片干枯发脆的旧槐叶——永安九年的那一片，叶脉仍清晰、中间褪色的“贺”字还在；他把新叶与旧叶叠在一起，又看了一眼沈遥给的泥马：泥马在阳光下泛着温润的暗红，那个小小的“遥”字安安静静待在马脖子上，像是在等一个永远不会来的回答。他把它们一起包回丝帕、贴着胸口放好，转身朝兵部衙门走去，没有再回头。",
+      "event_type": "目标转向",
+      "status": "ongoing",
+      "first_text_position": 109856,
+      "chapter_id": 26,
+      "chapter_order": 26
+    },
+    {
+      "event_id": "47e19884-cdbb-5452-b598-8f29ada0e268",
+      "title": "结业后第三日，四人在太学门口最后一次碰头",
+      "summary": "结业后第三天午后最热的时候，四人在太学门口石狮旁最后一次碰头：柱子穿禁军校尉营制式皮甲、算盘戴总书阁铜牌夹着古书、猴子换了灰布短褐剪短头发、贺重明穿袖子微长的兵部青色官服，怀里揣着平安扣、丝帕、槐叶、泥马和厌灵石。柱子回头看朱漆大门问“咱以后还能回朝天城吗”，算盘答“能的”，猴子跳上石墩朝北方大喊迟早回去、要在城门挂八串鞭炮炸三天三夜，路过的南院新生认出四个“北地蛮子”绕道。贺重明望着北方攥紧拳头，说“走吧”，四人转身朝四个方向走去，太学朱漆大门在身后缓缓合拢。",
+      "event_type": "分道",
+      "status": "resolved",
+      "first_text_position": 110033,
+      "chapter_id": 26,
+      "chapter_order": 26
+    },
+    {
+      "event_id": "2eff3987-cca6-5017-be55-478d4725f1f8",
+      "title": "四人立誓迟早回朝天城",
+      "summary": "太学门口碰头时柱子回头问“咱以后还能回朝天城吗”，算盘答“能的”；猴子跳上石墩朝北方大喊“朝天城！你猴子爷爷迟早回去！回去了老子在城门上挂八串鞭炮，炸他个三天三夜！谁拦我炸谁！”贺重明没接话，只望着北方攥紧拳头。白芷临行前也留话让他“等你回朝天城，跟你二妈妈说，我偷了她的养花手艺”。四人随后朝四个方向走去，各奔去处。",
+      "event_type": "伏笔",
+      "status": "ongoing",
+      "first_text_position": 110415,
+      "chapter_id": 26,
+      "chapter_order": 26
+    }
+  ],
+  "outcomes": [
+    {
+      "outcome_id": "90ea469a-bc69-5a05-b3e6-b38240a8da94",
+      "title": "西院大火之罪了结，三童以命相许",
+      "description": "伯安带伤闯场自认全责，贺铮掷鞭赦免三家；猴子、柱子、算盘当场立誓以命、以身、以智效忠伯安，贺府四小只的兄弟结构自此定型。",
+      "first_text_position": 15654,
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 259,
+          "chapter_id": 5,
+          "char_start": 3,
+          "char_end": 15,
+          "text_hash": "8ee1ab7a617b9fcb6a49a525bb106098f4e06052a1515ee5a64a11189728e15e"
+        }
+      ]
+    },
+    {
+      "outcome_id": "f87c3131-b3c9-5264-ab13-6d994fc2ce18",
+      "title": "贺家军以‘演习’逼出人质而不担谋反之名",
+      "description": "柳婉儿谏阻后贺铮改围不攻，以治安演习之名围住钦差行馆，当众威胁宋子诚，四小毫发无损出馆；朝廷以人质相制的格局并未解除。",
+      "first_text_position": 29778,
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 566,
+          "chapter_id": 10,
+          "char_start": 27,
+          "char_end": 34,
+          "text_hash": "b62eb562120cc6319ba24ab0dd4caaeadd7c86a1320cea8b2542c8277115e061"
+        }
+      ]
+    },
+    {
+      "outcome_id": "3a6d630e-bd3c-5581-88c8-e99ece449551",
+      "title": "贺重明初步驯服素阳金",
+      "description": "从夺下一缕火种到在槐叶上刻出歪扭的‘贺’字，再到五日后刻下完整姓名，贺重明由‘力量的奴隶’变为能勉强控制这团毁灭之火的人。",
+      "first_text_position": 33005,
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 627,
+          "chapter_id": 11,
+          "char_start": 93,
+          "char_end": 100,
+          "text_hash": "f8e8515d341910d209dce4dd458bfb27e4fe151ff623b9bce762a7fed8f717c9"
+        }
+      ]
+    },
+    {
+      "outcome_id": "c424671f-a872-5dc5-bf5d-114ab0d2a6f9",
+      "title": "私账当众归还，钱瑾第一次露怯",
+      "description": "猴子夜探南院把私账放回钱瑾书桌，贺重明次日当众归还并附言警告，钱瑾此后一段时间不再公然动手；北院以不先动手的方式赢下一局。",
+      "first_text_position": 64038,
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1140,
+          "chapter_id": 18,
+          "char_start": 60,
+          "char_end": 81,
+          "text_hash": "56e09819919ace71525225f9d715155ade69268d53d17cc6efdf05f72059ef10"
+        }
+      ]
+    },
+    {
+      "outcome_id": "5d0fa3de-a5aa-57de-9d95-5b9633b8909e",
+      "title": "猎场封禁被补上，线索指向礼部",
+      "description": "白芷夜赴西郊猎场重新校准三十六道禁碑，唯独被取走厌灵石的那道碑下以朱砂符文临时补缺，并在泥地上留下‘礼部管’三字，把圣城官场的目光引向宋家。",
+      "first_text_position": 82957,
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1356,
+          "chapter_id": 21,
+          "char_start": 15,
+          "char_end": 25,
+          "text_hash": "a2da44d178e12f0bbfa4f1a20fa11b17e2646533a7d256a6c44f75238bc43303"
+        }
+      ]
+    },
+    {
+      "outcome_id": "f5034341-c8cf-525d-9473-f8cdf729f2c0",
+      "title": "蓟州军报漏报的阵眼被拔掉，两处线索入册",
+      "description": "掌案康必成因独子受宋家接济而漏报军报，被锁定后主动认账，蓟州方向军报不再延误；贺重明同时拿到朱驿丞与沈大有两处阵眼，把追查方向由军报驿路转向漕运粮道。",
+      "first_text_position": 104218,
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1656,
+          "chapter_id": 25,
+          "char_start": 41,
+          "char_end": 52,
+          "text_hash": "8d63f9cb739ab752e1c24d927e0f7041dec9ff15fd213ab8d4f0c60ee0f1ba59"
+        },
+        {
+          "event_id": null,
+          "paragraph_id": 1687,
+          "chapter_id": 25,
+          "char_start": 19,
+          "char_end": 29,
+          "text_hash": "7a320e8e9d630e27a551a6049c9bf6f07f8a3b4958994f0ecba420ccdb73e610"
+        }
+      ]
+    },
+    {
+      "outcome_id": "1c934762-1212-50b0-a60e-fc31c3fc8440",
+      "title": "北地四少年在圣城太学站住脚",
+      "description": "四个北地少年以人质身份入太学北院，熬过经义堂考问、南院轻慢与六年清苦，结业时孙思在致辞中把目光在北院后排多停一瞬，六年后四人各奔兵部、禁军校尉营、总书阁与街市。",
+      "first_text_position": 107183,
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1697,
+          "chapter_id": 26,
+          "char_start": 54,
+          "char_end": 73,
+          "text_hash": "80ae5d3e4c2f3f5ff246f091d5e20c39e3cadca610c6bc2c79e07a0edf0ce2b5"
+        },
+        {
+          "event_id": null,
+          "paragraph_id": 1736,
+          "chapter_id": 26,
+          "char_start": 26,
+          "char_end": 37,
+          "text_hash": "6fa44f085b04a9156220628f50675df7d295581842277a6200bbeec9261dbfd8"
+        }
+      ]
+    },
+    {
+      "outcome_id": "51061bd2-e539-51fc-8e3f-0f391c4c32fe",
+      "title": "白芷离城，师徒六年缘分收束",
+      "description": "白芷以‘圣城的药材采完了’为由离开，留下最后一片槐叶与三句话，贺重明叠起新旧槐叶与沈遥的泥马走向兵部；四人立誓迟早回朝天城。",
+      "first_text_position": 109690,
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1725,
+          "chapter_id": 26,
+          "char_start": 101,
+          "char_end": 107,
+          "text_hash": "ccf51c6303861fa213f932cf26a7e0340e14f4e0d0b61a5e3a62096592de1604"
+        }
+      ]
+    }
+  ],
+  "event_arc_links": [
+    {
+      "event_id": "002782b3-3874-57b3-8402-3ee38d301600",
+      "arc_id": "d0d918f3-dadc-5de0-a332-e718d04dade3",
+      "role": "立规",
+      "reason": "算盘定下‘能藏者不可先动手’的应对原则",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 933,
+          "chapter_id": 15,
+          "char_start": 63,
+          "char_end": 71,
+          "text_hash": "acd5a7c9d50dcf3e708287ff2c021425b4b29a805450620f0f3dbf0c05cea099"
+        }
+      ]
+    },
+    {
+      "event_id": "082b905d-7289-5f11-84a6-fabfd787750d",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "收束",
+      "reason": "结业典礼上孙思的目光在北院后排多停一瞬，六年太学生涯收束",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1697,
+          "chapter_id": 26,
+          "char_start": 54,
+          "char_end": 73,
+          "text_hash": "80ae5d3e4c2f3f5ff246f091d5e20c39e3cadca610c6bc2c79e07a0edf0ce2b5"
+        }
+      ]
+    },
+    {
+      "event_id": "0bea4a51-735b-5190-a2ba-19b2fc5444c7",
+      "arc_id": "87fbc8a5-ba0a-55ef-87f1-bdd0141e38c2",
+      "role": "试探",
+      "reason": "宫宴上宋子诚当众逼贺重明露火，意在坐实贺家异火",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1419,
+          "chapter_id": 22,
+          "char_start": 52,
+          "char_end": 62,
+          "text_hash": "150df20c046f33fb665ce3b968f84a4799b1edc911bf9ac4b1be9ec2d5477b93"
+        }
+      ]
+    },
+    {
+      "event_id": "0df021c1-26ea-52a8-9984-1e18e2aea621",
+      "arc_id": "75d4596c-f75c-53b0-8337-04de3d0db4a7",
+      "role": "收束",
+      "reason": "贺铮掷鞭赦免三家，西院大火之罪了结",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 259,
+          "chapter_id": 5,
+          "char_start": 3,
+          "char_end": 15,
+          "text_hash": "8ee1ab7a617b9fcb6a49a525bb106098f4e06052a1515ee5a64a11189728e15e"
+        }
+      ]
+    },
+    {
+      "event_id": "108e61f0-ed9b-5698-b2f0-d563dc74257e",
+      "arc_id": "3e6591ce-c749-510b-8731-9d7e67db84a5",
+      "role": "收束",
+      "reason": "槐荫巷告别，白芷赠最后一片槐叶，师徒六年缘分收束",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1725,
+          "chapter_id": 26,
+          "char_start": 101,
+          "char_end": 107,
+          "text_hash": "ccf51c6303861fa213f932cf26a7e0340e14f4e0d0b61a5e3a62096592de1604"
+        }
+      ]
+    },
+    {
+      "event_id": "10a82a0d-acaf-5d58-871d-8cdc8900e253",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "揭底",
+      "reason": "查知马骁借阅边防舆图、宋子玉与职方司来往，宋家能更早看到军报",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1612,
+          "chapter_id": 25,
+          "char_start": 139,
+          "char_end": 146,
+          "text_hash": "c804ff6e0f3281850e6e34e78eb0029362f2e0cf2b7f66e8483ac58bb23ea7ad"
+        }
+      ]
+    },
+    {
+      "event_id": "16f603e0-15e2-5b82-bf3a-d16dfce6752b",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "推演",
+      "reason": "算盘以《古阵残篇》‘缺一石则阵有隙’说明缺口后果",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1380,
+          "chapter_id": 21,
+          "char_start": 109,
+          "char_end": 116,
+          "text_hash": "6744e111f9b9a6e17d091ede106dbb28feef51515230080fff566f9c22ebbc93"
+        }
+      ]
+    },
+    {
+      "event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
+      "arc_id": "3e6591ce-c749-510b-8731-9d7e67db84a5",
+      "role": "高潮",
+      "reason": "槐叶第一次化为黑灰，白芷讥其为‘力量的奴隶’，控火由此入门",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 627,
+          "chapter_id": 11,
+          "char_start": 93,
+          "char_end": 100,
+          "text_hash": "f8e8515d341910d209dce4dd458bfb27e4fe151ff623b9bce762a7fed8f717c9"
+        }
+      ]
+    },
+    {
+      "event_id": "2936d6bc-28cd-5b2f-b7fd-89a819e27064",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "揭底",
+      "reason": "白芷一眼辨出厌灵石并说出噬灵与三十六道禁碑",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1336,
+          "chapter_id": 21,
+          "char_start": 1,
+          "char_end": 13,
+          "text_hash": "efcdceeda396e3d1771dc13916a45fc0960eb745e1d8a4114c6d5aaa3e369085"
+        }
+      ]
+    },
+    {
+      "event_id": "2eff3987-cca6-5017-be55-478d4725f1f8",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "收束",
+      "reason": "四人立誓迟早回朝天城，主线留下归乡悬念",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1738,
+          "chapter_id": 26,
+          "char_start": 29,
+          "char_end": 38,
+          "text_hash": "87c11144a35ada396ff31d816325f2b9123d953b2a28eb3959881d6890c8e787"
+        }
+      ]
+    },
+    {
+      "event_id": "35360813-6835-582c-8a8b-e0620b7c5d56",
+      "arc_id": "87fbc8a5-ba0a-55ef-87f1-bdd0141e38c2",
+      "role": "转折",
+      "reason": "柳婉儿谏阻使贺铮由直接动兵改为围而不攻",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 546,
+          "chapter_id": 10,
+          "char_start": 4,
+          "char_end": 13,
+          "text_hash": "a76a0d74709f45a17a9f5f72f513a7cb492bb4bfd452c2fbcb8a9da23b9a08ca"
+        }
+      ]
+    },
+    {
+      "event_id": "3bc6256d-b299-51e5-95cf-e02b6e596b8b",
+      "arc_id": "87fbc8a5-ba0a-55ef-87f1-bdd0141e38c2",
+      "role": "起点",
+      "reason": "朝廷以赏赐与‘天子伴读’逼兵并扣押人质，压力线自此成立",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 546,
+          "chapter_id": 10,
+          "char_start": 4,
+          "char_end": 13,
+          "text_hash": "a76a0d74709f45a17a9f5f72f513a7cb492bb4bfd452c2fbcb8a9da23b9a08ca"
+        }
+      ]
+    },
+    {
+      "event_id": "3d29a595-2263-5c35-b698-95102f8e42f4",
+      "arc_id": "3200dedf-0b95-5ded-8116-9af00492a344",
+      "role": "揭底",
+      "reason": "腌萝卜与潼关身份被点出，沈遥的照拂有了来处",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1391,
+          "chapter_id": 21,
+          "char_start": 11,
+          "char_end": 20,
+          "text_hash": "e137aea6ff51c054245a34dd109530b4a863b81bcc3a71a7b2823449d6e05bd5"
+        }
+      ]
+    },
+    {
+      "event_id": "3dd507fb-3a81-5ef8-a551-c36d2ea99806",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "推进",
+      "reason": "蓟州军报再现两年前截获密信的相同暗语",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1493,
+          "chapter_id": 23,
+          "char_start": 87,
+          "char_end": 107,
+          "text_hash": "7b6063c912d1d42fbdd96bbb0ad848c0f851965ca88ead68558ea4459fcf645e"
+        }
+      ]
+    },
+    {
+      "event_id": "3fe7cd7f-936c-521d-bab7-fea0a8ae1281",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "推进",
+      "reason": "炒栗子摊递出‘查无此人’的驿丞线报",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1620,
+          "chapter_id": 25,
+          "char_start": 104,
+          "char_end": 111,
+          "text_hash": "d006ccfd4c71bded505a6088f94b6183c6944f2e961d590f6629c587c616e51d"
+        }
+      ]
+    },
+    {
+      "event_id": "410564a5-1bf9-5df7-afd9-3dd12e7bcb67",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "余波",
+      "reason": "猎队归城，孙思点名确认北院四人全须全尾",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1318,
+          "chapter_id": 21,
+          "char_start": 80,
+          "char_end": 85,
+          "text_hash": "7e11b6fce51a6f1c0dc9db566a498ed7d43a3d8a2ad4f309b560c6f32af00666"
+        }
+      ]
+    },
+    {
+      "event_id": "41e23323-b855-54e0-a158-ed80d2d79fb7",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "开端",
+      "reason": "四人循蹄印被迫踏入猎场禁地",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1249,
+          "chapter_id": 20,
+          "char_start": 0,
+          "char_end": 8,
+          "text_hash": "fd630bb42f84f8b255f294cf9d7661dea58591e19d66214e63cd77ff794a44fd"
+        }
+      ]
+    },
+    {
+      "event_id": "43c622b9-784d-5306-bf44-88a2c751807d",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "余波",
+      "reason": "白芷那句‘赢了一场不代表赢了’所指并非宋子玉，宋家布局仍在更深处",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1496,
+          "chapter_id": 23,
+          "char_start": 27,
+          "char_end": 36,
+          "text_hash": "485b808bc1d22d4070d0fbd2ca2266aa1d4d5addb7bb97c51de51f76da2ff556"
+        }
+      ]
+    },
+    {
+      "event_id": "4708c129-b88f-5817-91fa-229781e33551",
+      "arc_id": "75d4596c-f75c-53b0-8337-04de3d0db4a7",
+      "role": "收束",
+      "reason": "三童跪地立誓效忠伯安，兄弟情分以命相许",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 256,
+          "chapter_id": 5,
+          "char_start": 54,
+          "char_end": 65,
+          "text_hash": "0d343e82fc9b78314f2b5d1ed2d8e390c11787a04baabb440aea5b4bd263c886"
+        }
+      ]
+    },
+    {
+      "event_id": "4774b956-2ed3-529d-b9d8-27cb1e52e870",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "开端",
+      "reason": "孙思验牒安置北院，人质身份正式落进太学",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 811,
+          "chapter_id": 14,
+          "char_start": 33,
+          "char_end": 41,
+          "text_hash": "0306504111edf2a21d45f837ac9416687c02df14c56a93686607e9fb15bc0a6a"
+        }
+      ]
+    },
+    {
+      "event_id": "47e19884-cdbb-5452-b598-8f29ada0e268",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "收束",
+      "reason": "结业后四人最后一次碰头，各奔前程",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1736,
+          "chapter_id": 26,
+          "char_start": 26,
+          "char_end": 37,
+          "text_hash": "6fa44f085b04a9156220628f50675df7d295581842277a6200bbeec9261dbfd8"
+        }
+      ]
+    },
+    {
+      "event_id": "56c4b8bc-ac9f-5d74-b8ff-472cba782cfa",
+      "arc_id": "75d4596c-f75c-53b0-8337-04de3d0db4a7",
+      "role": "推进",
+      "reason": "伯安带伤闯场自认全责，为三童扛下西院大火之罪",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 256,
+          "chapter_id": 5,
+          "char_start": 54,
+          "char_end": 65,
+          "text_hash": "0d343e82fc9b78314f2b5d1ed2d8e390c11787a04baabb440aea5b4bd263c886"
+        }
+      ]
+    },
+    {
+      "event_id": "577b6fb1-1ddb-5486-86a9-b022d9acdcea",
+      "arc_id": "d0d918f3-dadc-5de0-a332-e718d04dade3",
+      "role": "开端",
+      "reason": "太学门前钱瑾当众羞辱北地四少年",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 834,
+          "chapter_id": 14,
+          "char_start": 0,
+          "char_end": 14,
+          "text_hash": "227a7adc31af420df1477a7dd89d9b2857770386325590554c22b0dc08a25610"
+        }
+      ]
+    },
+    {
+      "event_id": "5cada3bd-665b-5ddc-be73-b5305a248a05",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "推进",
+      "reason": "白芷把厌灵石交还贺重明保管并决定亲自处置",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1335,
+          "chapter_id": 21,
+          "char_start": 11,
+          "char_end": 24,
+          "text_hash": "ffdf0c7305356dc46ad7ae256d429aabeca4a53e61d3bc499b064a607738e52b"
+        }
+      ]
+    },
+    {
+      "event_id": "5dad6178-7886-51ce-98aa-6ccc50c3a267",
+      "arc_id": "87fbc8a5-ba0a-55ef-87f1-bdd0141e38c2",
+      "role": "高潮",
+      "reason": "以‘演习’之名围馆逼宋子诚放人，是贺家与朝廷最直接的一次对峙",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 566,
+          "chapter_id": 10,
+          "char_start": 27,
+          "char_end": 34,
+          "text_hash": "b62eb562120cc6319ba24ab0dd4caaeadd7c86a1320cea8b2542c8277115e061"
+        }
+      ]
+    },
+    {
+      "event_id": "61e24007-a674-5705-8c03-cdb773b08d12",
+      "arc_id": "d0d918f3-dadc-5de0-a332-e718d04dade3",
+      "role": "冲突",
+      "reason": "钱瑾泼水、撕书、撒沙连下三手暗算",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1116,
+          "chapter_id": 18,
+          "char_start": 122,
+          "char_end": 130,
+          "text_hash": "5f4de3e5fbaf8ec08dfd7c3b5bbb0b45362183a93c308d0f1d33f4991612611c"
+        }
+      ]
+    },
+    {
+      "event_id": "65695d19-dab6-55e1-926c-8ec762295414",
+      "arc_id": "3e6591ce-c749-510b-8731-9d7e67db84a5",
+      "role": "开端",
+      "reason": "白芷以藤蔓灵力牢笼压制素阳金，让贺重明夺取一缕火苗",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 438,
+          "chapter_id": 8,
+          "char_start": 9,
+          "char_end": 23,
+          "text_hash": "dd04f770af4264af895d9496d800f0f6b5568ffac6401b73379cef066cae276f"
+        }
+      ]
+    },
+    {
+      "event_id": "66873696-a585-519a-9b6e-f3b6d931a1ed",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "收束",
+      "reason": "康必成被锁定后主动认账，武选清吏司的阵眼被拔掉",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1648,
+          "chapter_id": 25,
+          "char_start": 79,
+          "char_end": 89,
+          "text_hash": "48b8f187eb848ba9dec18f39077a8639c80bd0242c81eb664445ff21d20a0332"
+        }
+      ]
+    },
+    {
+      "event_id": "66873696-a585-519a-9b6e-f3b6d931a1ed",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "收束",
+      "reason": "掌案康必成认账，蓟州军报不再延误，主线一处阵眼被拔掉",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1656,
+          "chapter_id": 25,
+          "char_start": 41,
+          "char_end": 52,
+          "text_hash": "8d63f9cb739ab752e1c24d927e0f7041dec9ff15fd213ab8d4f0c60ee0f1ba59"
+        }
+      ]
+    },
+    {
+      "event_id": "6ad4357f-3faa-5bff-9386-3b2d904062ff",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "成长",
+      "reason": "经义堂当堂考问是贺重明在太学最初的不适应",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1035,
+          "chapter_id": 17,
+          "char_start": 145,
+          "char_end": 149,
+          "text_hash": "dea18f185babdbd0094a0500c3f0a36f726b7acee07765ded075b45ab5e42fcf"
+        }
+      ]
+    },
+    {
+      "event_id": "715afbf2-e022-5518-9e7d-97e8398822a0",
+      "arc_id": "3200dedf-0b95-5ded-8116-9af00492a344",
+      "role": "推进",
+      "reason": "井边搓衣节奏顿一拍，无人的日常里露出痕迹",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1150,
+          "chapter_id": 18,
+          "char_start": 117,
+          "char_end": 127,
+          "text_hash": "ec9aeeb874fdf206838662e61fbcab32998292f4b59ad627ce8e609464636535"
+        }
+      ]
+    },
+    {
+      "event_id": "77ae49c9-0f70-52a0-adfd-fc9391224765",
+      "arc_id": "75d4596c-f75c-53b0-8337-04de3d0db4a7",
+      "role": "高潮",
+      "reason": "贺铮举鞭逼问，伯安跪地认罪",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 255,
+          "chapter_id": 5,
+          "char_start": 23,
+          "char_end": 35,
+          "text_hash": "49a2c2cb2e12b2a39e7ae41171ebadb472de95268f50d73e47f25072b4727efb"
+        }
+      ]
+    },
+    {
+      "event_id": "7a3328ba-0254-5ccd-88ca-b55425c57f8d",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "收束",
+      "reason": "白芷夜赴猎场修复封禁并留下‘礼部管’三字",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1356,
+          "chapter_id": 21,
+          "char_start": 15,
+          "char_end": 25,
+          "text_hash": "a2da44d178e12f0bbfa4f1a20fa11b17e2646533a7d256a6c44f75238bc43303"
+        }
+      ]
+    },
+    {
+      "event_id": "7b42b354-1d02-57ef-a744-be1dbdd096d1",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "推进",
+      "reason": "军报再度延误被判定为人为截看，主线追查方向确定",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1604,
+          "chapter_id": 25,
+          "char_start": 92,
+          "char_end": 103,
+          "text_hash": "22e5024baaf73ca4900075f998dfb22a8e41e2aaa0bf495ed232d4aa5cea9b39"
+        }
+      ]
+    },
+    {
+      "event_id": "7ed1bc67-0323-5410-8ea2-e9b215645ed8",
+      "arc_id": "3e6591ce-c749-510b-8731-9d7e67db84a5",
+      "role": "揭底",
+      "reason": "素阳金幻象显出乱世与黑袍男子，为异火来历埋线",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 407,
+          "chapter_id": 8,
+          "char_start": 1,
+          "char_end": 4,
+          "text_hash": "9a906c1252ca3a5243c4664b9d587a79514467533c3b0bd1d8bfd0d020413a94"
+        }
+      ]
+    },
+    {
+      "event_id": "85eb984a-7694-59d3-9cda-4f935a0de28e",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "推进",
+      "reason": "贺重明判定宋子诚已盯上自己，对手不出手是在等摸底",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1466,
+          "chapter_id": 23,
+          "char_start": 11,
+          "char_end": 24,
+          "text_hash": "3d565aa751ba5a3652b24e0a34f96825c66f574b48cf9871e23d47a60331271e"
+        }
+      ]
+    },
+    {
+      "event_id": "8ba46567-5fa2-5e07-8838-33c153e3e66e",
+      "arc_id": "87fbc8a5-ba0a-55ef-87f1-bdd0141e38c2",
+      "role": "铺垫",
+      "reason": "贺重明初入皇宫并看见皇帝咳血，朝廷虚实由此入眼",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1414,
+          "chapter_id": 22,
+          "char_start": 0,
+          "char_end": 9,
+          "text_hash": "359d8474f44cad05f3b2d54db32bc153a75d9bb1094cabffe006bbb7ce8a4654"
+        }
+      ]
+    },
+    {
+      "event_id": "8c56cfea-de38-5416-842a-b4deb2536347",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "高潮",
+      "reason": "贺重明动用素阳金逼退黑鳞蟒，违反白芷的告诫",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1288,
+          "chapter_id": 20,
+          "char_start": 0,
+          "char_end": 10,
+          "text_hash": "07cb337b520704ba1d7891e961d35592a37a87355111976cbb7330c74bf1b41e"
+        }
+      ]
+    },
+    {
+      "event_id": "8f02f8e0-ceb5-501c-bc2f-613043b8aba3",
+      "arc_id": "3200dedf-0b95-5ded-8116-9af00492a344",
+      "role": "开端",
+      "reason": "井边沈遥点破秦穆故意选对手，照拂第一次落到明面之外",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1009,
+          "chapter_id": 16,
+          "char_start": 35,
+          "char_end": 50,
+          "text_hash": "9b55b386a8d3221913e7872c3f16ce9921096c32ed140b3ad7e79daf3cf29a42"
+        }
+      ]
+    },
+    {
+      "event_id": "93705a8f-bf28-5416-98f2-1d687ac22acf",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "推进",
+      "reason": "白芷捎口信定下‘进兵部再碰粮道’，为贺重明标出下一步目标",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1687,
+          "chapter_id": 25,
+          "char_start": 19,
+          "char_end": 29,
+          "text_hash": "7a320e8e9d630e27a551a6049c9bf6f07f8a3b4958994f0ecba420ccdb73e610"
+        }
+      ]
+    },
+    {
+      "event_id": "9687ce04-a971-5e7b-9d2f-04b2015e0697",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "开端",
+      "reason": "四少年奉诏南下圣城，主线由此启程",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 716,
+          "chapter_id": 13,
+          "char_start": 0,
+          "char_end": 8,
+          "text_hash": "5ffb1b7ae41dd70b613d66e176caae29439413854b3eb44175c94d66effd5e5d"
+        }
+      ]
+    },
+    {
+      "event_id": "98e14180-32e8-53f0-a68c-cf5e7263da9d",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "推进",
+      "reason": "厌灵石首次摆上松木桌，猎场之行的残物需要处置",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1320,
+          "chapter_id": 21,
+          "char_start": 0,
+          "char_end": 21,
+          "text_hash": "a13831a932005da48c4e3e20e8ed89b4d821b6fbac7ad46455087b3be7a431d3"
+        }
+      ]
+    },
+    {
+      "event_id": "9f50ea7c-46c3-594b-bd51-fe747eaeb959",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "铺垫",
+      "reason": "白芷临行赠槐叶并立‘烧叶见烟即来’之约",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1172,
+          "chapter_id": 19,
+          "char_start": 21,
+          "char_end": 30,
+          "text_hash": "fb0ce09387109c5b2972b54bc05c957f5480742bb3b3733a682a34fa447110be"
+        }
+      ]
+    },
+    {
+      "event_id": "a5635e2f-d1bd-56d7-aec8-db74a8784edc",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "布局",
+      "reason": "宋子诚在密室命宋子玉由‘斗’改‘看’，并点出蟠龙道旧账",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1485,
+          "chapter_id": 23,
+          "char_start": 34,
+          "char_end": 41,
+          "text_hash": "3e0210e79690efbc4f50cc5c2a32ef2d6bf5053d3085761a1e7ca08f8803f29b"
+        }
+      ]
+    },
+    {
+      "event_id": "a8062c25-d09d-5322-9948-1f60e7f45e79",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "余波",
+      "reason": "禁地风波传出后钱瑾的异常反应",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1359,
+          "chapter_id": 21,
+          "char_start": 10,
+          "char_end": 23,
+          "text_hash": "66ff6916489929f2807813d1cc0c4ad7a3da991e84c790eb068bc423549398cc"
+        }
+      ]
+    },
+    {
+      "event_id": "b451db5f-0b99-51cc-bf20-6eccdd98fa6c",
+      "arc_id": "3e6591ce-c749-510b-8731-9d7e67db84a5",
+      "role": "收束",
+      "reason": "五日苦练后能在槐叶上刻下完整姓名",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 625,
+          "chapter_id": 11,
+          "char_start": 34,
+          "char_end": 50,
+          "text_hash": "ad96227354be6ec745eb8907eacc85fe5591ac1e0a35e57c6b1bbac915a6ab05"
+        }
+      ]
+    },
+    {
+      "event_id": "ba84dd6f-154a-5842-beb8-47b1ac59b21c",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "余波",
+      "reason": "宋子玉缺席结业典礼并在职方司圈出峒河渡口，布局未收手",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1700,
+          "chapter_id": 26,
+          "char_start": 39,
+          "char_end": 55,
+          "text_hash": "cc376dda1bd04cc80c23b1e2f4c5e389d27aee9b2e4c6b6db5ae3c11569ff854"
+        }
+      ]
+    },
+    {
+      "event_id": "bdae8373-65c9-598d-b1b4-840c958d843e",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "成长",
+      "reason": "经义堂应答后的余波带来寒门子弟的无声示好",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1077,
+          "chapter_id": 17,
+          "char_start": 87,
+          "char_end": 100,
+          "text_hash": "994b5bc024d3d6232a696fca7ea2095e4af4e879f423c6c13a1523020562ae7a"
+        }
+      ]
+    },
+    {
+      "event_id": "be4eac90-8128-5457-ae18-ac228afc78b0",
+      "arc_id": "d0d918f3-dadc-5de0-a332-e718d04dade3",
+      "role": "高潮",
+      "reason": "贺重明当众归还私账，钱瑾第一次露怯",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1140,
+          "chapter_id": 18,
+          "char_start": 60,
+          "char_end": 81,
+          "text_hash": "56e09819919ace71525225f9d715155ade69268d53d17cc6efdf05f72059ef10"
+        }
+      ]
+    },
+    {
+      "event_id": "c530a1b0-8b40-5711-a7ee-6a33029a6c3e",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "推进",
+      "reason": "宋子玉辞助教被安插进兵部职方司，宋家棋下到中盘",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1500,
+          "chapter_id": 23,
+          "char_start": 80,
+          "char_end": 87,
+          "text_hash": "5a80f8c27bed5b7d329e361667ec3899ad391b0c0d83f15cc52b5605bfdfe7b7"
+        }
+      ]
+    },
+    {
+      "event_id": "c58f8c59-cd52-5ef3-8cd5-566dfacdb724",
+      "arc_id": "d0d918f3-dadc-5de0-a332-e718d04dade3",
+      "role": "反击",
+      "reason": "猴子夜探南院把私账放回钱瑾书桌",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1133,
+          "chapter_id": 18,
+          "char_start": 66,
+          "char_end": 74,
+          "text_hash": "d0785157e3cae15bd193ff5489faa032e640f7c970139c5e29c80405b1084f5e"
+        }
+      ]
+    },
+    {
+      "event_id": "c5c2fe33-bcbe-566d-b069-fc78fc5339b2",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "推进",
+      "reason": "前朝祭坛与厌灵封印被发现，封禁大阵浮出水面",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1259,
+          "chapter_id": 20,
+          "char_start": 1,
+          "char_end": 5,
+          "text_hash": "a4cf9e8185e7eef28ce2bcb46efc992e524376a4f4abe60516afc6fb2f821403"
+        }
+      ]
+    },
+    {
+      "event_id": "ce3f6535-4438-52a8-8181-c2ac697d1969",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "铺垫",
+      "reason": "秦穆念‘禁碑以南’时异常停顿，禁地隐情第一次露头",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1180,
+          "chapter_id": 19,
+          "char_start": 152,
+          "char_end": 167,
+          "text_hash": "534d12b29a358e06e360ee04c27d3f99b27c18bd4908569071b23a83dde52b83"
+        }
+      ]
+    },
+    {
+      "event_id": "cfa1597a-fe0e-5b96-893a-aef3246f20b2",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "铺垫",
+      "reason": "蟠龙道考官做手脚被当众逼问，成为宋家此后不敢轻动的旧账",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1474,
+          "chapter_id": 23,
+          "char_start": 132,
+          "char_end": 143,
+          "text_hash": "fd6773bcfea1ce5872f8c44339483cbbd8cab63c87f0e255f948a90ca5dfe67f"
+        }
+      ]
+    },
+    {
+      "event_id": "d5095891-46d0-5862-bbbd-19a2adc10b59",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "推进",
+      "reason": "宋子玉精准点出‘蓟州那份军报’，说明他已知贺重明在盯蓟州",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1659,
+          "chapter_id": 25,
+          "char_start": 94,
+          "char_end": 103,
+          "text_hash": "2ee552feab13226327ba6fefc11ccf49de44d95796228ddcbe2ce53a69c3902f"
+        }
+      ]
+    },
+    {
+      "event_id": "e3aa79e8-c707-5b08-990a-1c9edddab1f7",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "转向",
+      "reason": "朱驿丞的保人粮商歇业三年，线索由驿路转向粮道",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1671,
+          "chapter_id": 25,
+          "char_start": 107,
+          "char_end": 123,
+          "text_hash": "d476728720e01e049e17c56b976c1c6dc6f447b12d994936eb4aaa10d3dd3183"
+        }
+      ]
+    },
+    {
+      "event_id": "ec127c51-6741-54fa-be19-e05011eb1e0c",
+      "arc_id": "3e6591ce-c749-510b-8731-9d7e67db84a5",
+      "role": "推进",
+      "reason": "贺重明在狂暴中扯下一线火种沉入经脉",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 454,
+          "chapter_id": 9,
+          "char_start": 69,
+          "char_end": 79,
+          "text_hash": "0024350ee10ef05d2b3ffa9a9f135a42b3027ad9c473b016b8fa35c0a5e965fd"
+        }
+      ]
+    },
+    {
+      "event_id": "f4b18c6e-660d-5def-9712-2cef46bb6ea4",
+      "arc_id": "3200dedf-0b95-5ded-8116-9af00492a344",
+      "role": "收束",
+      "reason": "沈遥赠红土泥马，留意以物件落地而仍未说明",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1713,
+          "chapter_id": 26,
+          "char_start": 176,
+          "char_end": 184,
+          "text_hash": "810b9b93ffde4d26195696391c88db113f75719ff4842cecb8881bfb94b1123a"
+        }
+      ]
+    },
+    {
+      "event_id": "f5da6318-130a-50df-9fc4-94110b72fec5",
+      "arc_id": "08b8bf8e-1859-5758-ab2f-9a91b470c526",
+      "role": "推进",
+      "reason": "换防公文里的沈大有去向不明，另一处阵眼浮出",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1632,
+          "chapter_id": 25,
+          "char_start": 59,
+          "char_end": 63,
+          "text_hash": "b6ac7d0b11a40db45eb8c8f943e65de2311e86b6c8fbb040b423fcabb34feec0"
+        }
+      ]
+    },
+    {
+      "event_id": "f6a3092c-1a66-5184-8817-6deca084562b",
+      "arc_id": "87fbc8a5-ba0a-55ef-87f1-bdd0141e38c2",
+      "role": "压迫",
+      "reason": "宋子诚持诏书以山东津门为饵逼贺铮南下",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 668,
+          "chapter_id": 12,
+          "char_start": 6,
+          "char_end": 20,
+          "text_hash": "361a6b5ec8322882ae20ac0dabb0ab2d030822048bff51bd438342a733544d13"
+        }
+      ]
+    },
+    {
+      "event_id": "f8cf6a9e-0015-5fa9-8e6f-48394c1a3cbe",
+      "arc_id": "cf641653-eba9-5062-bb7f-16c650f4ed27",
+      "role": "转折",
+      "reason": "带着六年信物走向兵部衙门，主线从太学转入兵部",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1729,
+          "chapter_id": 26,
+          "char_start": 106,
+          "char_end": 117,
+          "text_hash": "386da296e9467d64325902437e3940e5445fa3737c8819ddc6b500b18bae9138"
+        }
+      ]
+    },
+    {
+      "event_id": "fabbdb98-e765-5756-af8a-072d060bbb99",
+      "arc_id": "3200dedf-0b95-5ded-8116-9af00492a344",
+      "role": "推进",
+      "reason": "散课后独留翻同一段《六韬》，心事不落言语",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1095,
+          "chapter_id": 17,
+          "char_start": 38,
+          "char_end": 55,
+          "text_hash": "a99335489180ba307794878b7ad6a104e16492cfca290788f1e6147ee649225f"
+        }
+      ]
+    },
+    {
+      "event_id": "fcbda152-4072-5571-854f-9a15679d08fc",
+      "arc_id": "b48dffd1-49e1-5131-881d-bf8df1546ab6",
+      "role": "冲突",
+      "reason": "黑鳞蟒现身苦战，证明封印松动已放出自封之物",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1276,
+          "chapter_id": 20,
+          "char_start": 62,
+          "char_end": 76,
+          "text_hash": "8d0f90eec6fe095e51cc5b43807b773d2bd341a617ec5152d91072232e4722a5"
+        }
+      ]
+    }
+  ],
+  "event_outcome_links": [
+    {
+      "event_id": "082b905d-7289-5f11-84a6-fabfd787750d",
+      "outcome_id": "1c934762-1212-50b0-a60e-fc31c3fc8440",
+      "reason": "结业典礼为六年太学生涯定音",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1697,
+          "chapter_id": 26,
+          "char_start": 54,
+          "char_end": 73,
+          "text_hash": "80ae5d3e4c2f3f5ff246f091d5e20c39e3cadca610c6bc2c79e07a0edf0ce2b5"
+        }
+      ]
+    },
+    {
+      "event_id": "0df021c1-26ea-52a8-9984-1e18e2aea621",
+      "outcome_id": "90ea469a-bc69-5a05-b3e6-b38240a8da94",
+      "reason": "贺铮掷鞭赦免三家，西院之罪了结",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 259,
+          "chapter_id": 5,
+          "char_start": 3,
+          "char_end": 15,
+          "text_hash": "8ee1ab7a617b9fcb6a49a525bb106098f4e06052a1515ee5a64a11189728e15e"
+        }
+      ]
+    },
+    {
+      "event_id": "108e61f0-ed9b-5698-b2f0-d563dc74257e",
+      "outcome_id": "51061bd2-e539-51fc-8e3f-0f391c4c32fe",
+      "reason": "槐荫巷告别，白芷赠最后一片槐叶",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1725,
+          "chapter_id": 26,
+          "char_start": 101,
+          "char_end": 107,
+          "text_hash": "ccf51c6303861fa213f932cf26a7e0340e14f4e0d0b61a5e3a62096592de1604"
+        }
+      ]
+    },
+    {
+      "event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
+      "outcome_id": "3a6d630e-bd3c-5581-88c8-e99ece449551",
+      "reason": "槐叶刻字是驯服素阳金的入门",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 627,
+          "chapter_id": 11,
+          "char_start": 93,
+          "char_end": 100,
+          "text_hash": "f8e8515d341910d209dce4dd458bfb27e4fe151ff623b9bce762a7fed8f717c9"
+        }
+      ]
+    },
+    {
+      "event_id": "2936d6bc-28cd-5b2f-b7fd-89a819e27064",
+      "outcome_id": "5d0fa3de-a5aa-57de-9d95-5b9633b8909e",
+      "reason": "厌灵石被辨明为上古封禁阵眼",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1336,
+          "chapter_id": 21,
+          "char_start": 1,
+          "char_end": 13,
+          "text_hash": "efcdceeda396e3d1771dc13916a45fc0960eb745e1d8a4114c6d5aaa3e369085"
+        }
+      ]
+    },
+    {
+      "event_id": "2eff3987-cca6-5017-be55-478d4725f1f8",
+      "outcome_id": "51061bd2-e539-51fc-8e3f-0f391c4c32fe",
+      "reason": "四人立誓迟早回朝天城，为全书留下归乡悬念",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1738,
+          "chapter_id": 26,
+          "char_start": 29,
+          "char_end": 38,
+          "text_hash": "87c11144a35ada396ff31d816325f2b9123d953b2a28eb3959881d6890c8e787"
+        }
+      ]
+    },
+    {
+      "event_id": "35360813-6835-582c-8a8b-e0620b7c5d56",
+      "outcome_id": "f87c3131-b3c9-5264-ab13-6d994fc2ce18",
+      "reason": "柳婉儿谏阻使围而不攻成为可行方案",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 546,
+          "chapter_id": 10,
+          "char_start": 4,
+          "char_end": 13,
+          "text_hash": "a76a0d74709f45a17a9f5f72f513a7cb492bb4bfd452c2fbcb8a9da23b9a08ca"
+        }
+      ]
+    },
+    {
+      "event_id": "47e19884-cdbb-5452-b598-8f29ada0e268",
+      "outcome_id": "1c934762-1212-50b0-a60e-fc31c3fc8440",
+      "reason": "结业后碰头确认四人各奔何处",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1736,
+          "chapter_id": 26,
+          "char_start": 26,
+          "char_end": 37,
+          "text_hash": "6fa44f085b04a9156220628f50675df7d295581842277a6200bbeec9261dbfd8"
+        }
+      ]
+    },
+    {
+      "event_id": "56c4b8bc-ac9f-5d74-b8ff-472cba782cfa",
+      "outcome_id": "90ea469a-bc69-5a05-b3e6-b38240a8da94",
+      "reason": "伯安带伤认全责换来三家赦免",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 256,
+          "chapter_id": 5,
+          "char_start": 54,
+          "char_end": 65,
+          "text_hash": "0d343e82fc9b78314f2b5d1ed2d8e390c11787a04baabb440aea5b4bd263c886"
+        }
+      ]
+    },
+    {
+      "event_id": "5dad6178-7886-51ce-98aa-6ccc50c3a267",
+      "outcome_id": "f87c3131-b3c9-5264-ab13-6d994fc2ce18",
+      "reason": "围馆演习逼宋子诚放人，贺家不担谋反之名",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 566,
+          "chapter_id": 10,
+          "char_start": 27,
+          "char_end": 34,
+          "text_hash": "b62eb562120cc6319ba24ab0dd4caaeadd7c86a1320cea8b2542c8277115e061"
+        }
+      ]
+    },
+    {
+      "event_id": "66873696-a585-519a-9b6e-f3b6d931a1ed",
+      "outcome_id": "f5034341-c8cf-525d-9473-f8cdf729f2c0",
+      "reason": "康必成认账使蓟州军报不再延误",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1656,
+          "chapter_id": 25,
+          "char_start": 41,
+          "char_end": 52,
+          "text_hash": "8d63f9cb739ab752e1c24d927e0f7041dec9ff15fd213ab8d4f0c60ee0f1ba59"
+        }
+      ]
+    },
+    {
+      "event_id": "7a3328ba-0254-5ccd-88ca-b55425c57f8d",
+      "outcome_id": "5d0fa3de-a5aa-57de-9d95-5b9633b8909e",
+      "reason": "白芷夜补封禁并留下礼部线索",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1356,
+          "chapter_id": 21,
+          "char_start": 15,
+          "char_end": 25,
+          "text_hash": "a2da44d178e12f0bbfa4f1a20fa11b17e2646533a7d256a6c44f75238bc43303"
+        }
+      ]
+    },
+    {
+      "event_id": "93705a8f-bf28-5416-98f2-1d687ac22acf",
+      "outcome_id": "f5034341-c8cf-525d-9473-f8cdf729f2c0",
+      "reason": "白芷口信定下粮道方向，两处阵眼入册",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1687,
+          "chapter_id": 25,
+          "char_start": 19,
+          "char_end": 29,
+          "text_hash": "7a320e8e9d630e27a551a6049c9bf6f07f8a3b4958994f0ecba420ccdb73e610"
+        }
+      ]
+    },
+    {
+      "event_id": "b451db5f-0b99-51cc-bf20-6eccdd98fa6c",
+      "outcome_id": "3a6d630e-bd3c-5581-88c8-e99ece449551",
+      "reason": "五日苦练后刻名有成",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 625,
+          "chapter_id": 11,
+          "char_start": 34,
+          "char_end": 50,
+          "text_hash": "ad96227354be6ec745eb8907eacc85fe5591ac1e0a35e57c6b1bbac915a6ab05"
+        }
+      ]
+    },
+    {
+      "event_id": "be4eac90-8128-5457-ae18-ac228afc78b0",
+      "outcome_id": "c424671f-a872-5dc5-bf5d-114ab0d2a6f9",
+      "reason": "当众归还私账使钱瑾第一次露怯",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1140,
+          "chapter_id": 18,
+          "char_start": 60,
+          "char_end": 81,
+          "text_hash": "56e09819919ace71525225f9d715155ade69268d53d17cc6efdf05f72059ef10"
+        }
+      ]
+    },
+    {
+      "event_id": "c58f8c59-cd52-5ef3-8cd5-566dfacdb724",
+      "outcome_id": "c424671f-a872-5dc5-bf5d-114ab0d2a6f9",
+      "reason": "猴子夜探南院放回私账是这局的前手",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1133,
+          "chapter_id": 18,
+          "char_start": 66,
+          "char_end": 74,
+          "text_hash": "d0785157e3cae15bd193ff5489faa032e640f7c970139c5e29c80405b1084f5e"
+        }
+      ]
+    },
+    {
+      "event_id": "f8cf6a9e-0015-5fa9-8e6f-48394c1a3cbe",
+      "outcome_id": "51061bd2-e539-51fc-8e3f-0f391c4c32fe",
+      "reason": "贺重明带着六年信物走向兵部，师承收束后转入新局",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1729,
+          "chapter_id": 26,
+          "char_start": 106,
+          "char_end": 117,
+          "text_hash": "386da296e9467d64325902437e3940e5445fa3737c8819ddc6b500b18bae9138"
+        }
+      ]
+    }
+  ],
+  "relations": [],
+  "foreshadowing_actions": [
+    {
+      "action_id": "8cf37aa9-3ef1-5fb1-a6bc-0da34fea6906",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "ac19f3f4-eb28-5067-86a1-fbad14d4ddf8",
+      "target_event_id": "ac19f3f4-eb28-5067-86a1-fbad14d4ddf8",
+      "chapter_id": 2,
+      "chapter_order": 2,
+      "source_operation_id": "setup/0d66ab08-11c1-5f2a-93e1-53a04d7f2768",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 61,
+          "chapter_id": 2,
+          "char_start": 0,
+          "char_end": 40,
+          "text_hash": "f6b74409b9fd3139cd5bb87a5abecbb376080a984a025734ad68455f43574eca"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "27b5f9c7-0ec1-5a54-b411-c3e8dae71b63",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "ac19f3f4-eb28-5067-86a1-fbad14d4ddf8",
+      "target_event_id": null,
+      "chapter_id": 2,
+      "chapter_order": 2,
+      "source_operation_id": "c79a0894f6fe4ea893a54a516851c847-p5-op7",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 73,
+          "chapter_id": 2,
+          "char_start": 0,
+          "char_end": 100,
+          "text_hash": "23a786227b29c270de77da11929d34b975690ffdd7b48363f13fd33719d98243"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "ab59d198-f404-5098-8884-7089b1bcff3f",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "b155c4d8-991e-5933-b4dc-81baa5389a09",
+      "target_event_id": "b155c4d8-991e-5933-b4dc-81baa5389a09",
+      "chapter_id": 3,
+      "chapter_order": 3,
+      "source_operation_id": "setup/4be33f33-30e4-5a59-a888-2d3510011e18",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 128,
+          "chapter_id": 3,
+          "char_start": 0,
+          "char_end": 69,
+          "text_hash": "33f5ff3992299deb1f0a691491f8eb7fa0c60c6acef1e1793bdace8d46f45737"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "e9c351e2-c2ad-5013-8345-2fafb194eaf5",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "c151ab80-6c0f-54e2-a103-f40e4cfec4ba",
+      "target_event_id": "c151ab80-6c0f-54e2-a103-f40e4cfec4ba",
+      "chapter_id": 4,
+      "chapter_order": 4,
+      "source_operation_id": "setup/ff6018cb-b65b-5bb6-8332-15e710060487",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 137,
+          "chapter_id": 4,
+          "char_start": 0,
+          "char_end": 101,
+          "text_hash": "eca72ef3179894102add6887260dc23923bde28ba98ffe801d8506b10206efe9"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "5bfdaec4-23ec-5176-9526-530a655bbd52",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "c25c2f4c-62d5-5bf9-8e5b-ca7de234cc87",
+      "target_event_id": "c25c2f4c-62d5-5bf9-8e5b-ca7de234cc87",
+      "chapter_id": 4,
+      "chapter_order": 4,
+      "source_operation_id": "setup/aa107903-456f-58cf-aa96-a9700494fd2f",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 150,
+          "chapter_id": 4,
+          "char_start": 0,
+          "char_end": 54,
+          "text_hash": "67beb88b599f1e2f50451764d79c57ef558a551b33b6f5f7b22c6c1478c518ef"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "88ec6f9b-ca30-54a0-8448-730f4a0a2fbc",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "c151ab80-6c0f-54e2-a103-f40e4cfec4ba",
+      "target_event_id": "6ed309b4-cff7-5886-ab34-7246934d5ba8",
+      "chapter_id": 4,
+      "chapter_order": 4,
+      "source_operation_id": "f9a74357f3224ad38bca373795372ec6-p9-op1",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 195,
+          "chapter_id": 4,
+          "char_start": 0,
+          "char_end": 98,
+          "text_hash": "0de5461ab183486bfc22a03e3dd8b1c8422675fe1e8ded20722eeb34fd13597d"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "7c2bc499-9c78-5e8c-a5a8-eefec91122db",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "c25c2f4c-62d5-5bf9-8e5b-ca7de234cc87",
+      "target_event_id": "08e6b1e5-c7d4-5a9f-9095-bcce440c98d0",
+      "chapter_id": 4,
+      "chapter_order": 4,
+      "source_operation_id": "f9a74357f3224ad38bca373795372ec6-p9-op2",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 202,
+          "chapter_id": 4,
+          "char_start": 0,
+          "char_end": 89,
+          "text_hash": "642faa76aee2f279541800d26847f23b1a26797c9505bd8ab9efe4204c09e1f6"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "701de1a8-4b82-57e1-bacc-3b06083114bc",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "3dd815e7-da90-5dbe-a789-fb80730f61b5",
+      "target_event_id": "3dd815e7-da90-5dbe-a789-fb80730f61b5",
+      "chapter_id": 5,
+      "chapter_order": 5,
+      "source_operation_id": "setup/443ab884-fb13-5b42-aaf8-85cf93c55ff5",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 214,
+          "chapter_id": 5,
+          "char_start": 0,
+          "char_end": 164,
+          "text_hash": "e793da18aea1753ce403fbb1ecb913062b65dbc10e17b23674d2238ea2ab09d6"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "4f559812-e53f-5e5b-8ad8-86b349cb34a1",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "fae8988a-b9bd-5839-bf0a-732e378d674e",
+      "target_event_id": "fae8988a-b9bd-5839-bf0a-732e378d674e",
+      "chapter_id": 5,
+      "chapter_order": 5,
+      "source_operation_id": "setup/d8ea1e26-aa90-5f22-8618-4bda51fd58da",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 223,
+          "chapter_id": 5,
+          "char_start": 0,
+          "char_end": 127,
+          "text_hash": "44dcc398584f64038686b18753ff21f02360f8227ad30ee9488e2dcc204e555e"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "58168467-55b0-5ad0-aa5b-13bb71c2c0d2",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "c25c2f4c-62d5-5bf9-8e5b-ca7de234cc87",
+      "target_event_id": "fae8988a-b9bd-5839-bf0a-732e378d674e",
+      "chapter_id": 5,
+      "chapter_order": 5,
+      "source_operation_id": "33542fa997bb4ef98624e731828f1fc7-p5-op1",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 223,
+          "chapter_id": 5,
+          "char_start": 0,
+          "char_end": 127,
+          "text_hash": "44dcc398584f64038686b18753ff21f02360f8227ad30ee9488e2dcc204e555e"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "b41cd2bb-8e94-5645-9577-a39fb8bd7ef8",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "b155c4d8-991e-5933-b4dc-81baa5389a09",
+      "target_event_id": "fae8988a-b9bd-5839-bf0a-732e378d674e",
+      "chapter_id": 5,
+      "chapter_order": 5,
+      "source_operation_id": "33542fa997bb4ef98624e731828f1fc7-p5-op3",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 266,
+          "chapter_id": 5,
+          "char_start": 0,
+          "char_end": 87,
+          "text_hash": "1c7a8955e80fda02ec2bd57be8600de61675f5dd20d4cb6f122fbd8b7acbc992"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "56d2a037-cbda-59ff-b391-1f986b617053",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "41233e8a-5aec-5cdb-a294-9238422db2e9",
+      "target_event_id": "41233e8a-5aec-5cdb-a294-9238422db2e9",
+      "chapter_id": 6,
+      "chapter_order": 6,
+      "source_operation_id": "setup/3db28388-e9e8-5b5a-99dc-6e71f3c6063b",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 314,
+          "chapter_id": 6,
+          "char_start": 0,
+          "char_end": 79,
+          "text_hash": "8f88cda32b2f05baeeff30765eb62e51429fc38583e56d8c1be04897bc158c78"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "ce6b5e14-e6d4-5682-9ceb-9a39578abb90",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "7ed1bc67-0323-5410-8ea2-e9b215645ed8",
+      "target_event_id": "7ed1bc67-0323-5410-8ea2-e9b215645ed8",
+      "chapter_id": 8,
+      "chapter_order": 8,
+      "source_operation_id": "setup/bab5e654-b8f4-591e-b3c1-376839743e05",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 406,
+          "chapter_id": 8,
+          "char_start": 0,
+          "char_end": 112,
+          "text_hash": "4854838bbc533b00d6b78be5a27d4e3c7c21385f474661c69bd92947b9c64640"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "804ad6cf-ef65-5f3f-ba85-f5372352dd17",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "7ed1bc67-0323-5410-8ea2-e9b215645ed8",
+      "target_event_id": "ec127c51-6741-54fa-be19-e05011eb1e0c",
+      "chapter_id": 9,
+      "chapter_order": 9,
+      "source_operation_id": "27a72dac5f424bb8864fd8b8dbb0d4ea-p7-op5",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 454,
+          "chapter_id": 9,
+          "char_start": 0,
+          "char_end": 91,
+          "text_hash": "24c5daee788c002bdc36ffaee47e38cf8039444598d0020aa001cebd8c167022"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "c3d6863c-ee7c-5276-a065-33c92f55e673",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "b155c4d8-991e-5933-b4dc-81baa5389a09",
+      "target_event_id": "ec127c51-6741-54fa-be19-e05011eb1e0c",
+      "chapter_id": 9,
+      "chapter_order": 9,
+      "source_operation_id": "27a72dac5f424bb8864fd8b8dbb0d4ea-p7-op6",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 504,
+          "chapter_id": 9,
+          "char_start": 0,
+          "char_end": 54,
+          "text_hash": "70a6ff852521b6711bd9ac5791d9fb655b47730fd4d35bc1dce60b3fe631cf82"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "ece02b0f-7e06-5533-b8ae-a47e7acebbc3",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "fae8988a-b9bd-5839-bf0a-732e378d674e",
+      "target_event_id": "ef0707e1-4cb6-5012-a987-f8ca32c6a777",
+      "chapter_id": 10,
+      "chapter_order": 10,
+      "source_operation_id": "1c64dd1256334356b408028767eb3e6f-p5-op4",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 528,
+          "chapter_id": 10,
+          "char_start": 0,
+          "char_end": 44,
+          "text_hash": "8ae6dea13c7d9f27adba4248a9b2fcfbcc378813f37c663efcab28fdf3900793"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "821202ec-04e6-5123-b507-d9218fcef5e8",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "b155c4d8-991e-5933-b4dc-81baa5389a09",
+      "target_event_id": "d7b01d10-3dd8-5549-acc8-cafb9e1d980f",
+      "chapter_id": 10,
+      "chapter_order": 10,
+      "source_operation_id": "1c64dd1256334356b408028767eb3e6f-p6-op1",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 528,
+          "chapter_id": 10,
+          "char_start": 0,
+          "char_end": 44,
+          "text_hash": "8ae6dea13c7d9f27adba4248a9b2fcfbcc378813f37c663efcab28fdf3900793"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "475f5709-e113-509b-92ca-84ae192cb234",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "ef0707e1-4cb6-5012-a987-f8ca32c6a777",
+      "target_event_id": "ef0707e1-4cb6-5012-a987-f8ca32c6a777",
+      "chapter_id": 10,
+      "chapter_order": 10,
+      "source_operation_id": "setup/1715e81d-f08e-571e-adc6-918e1143ab72",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 543,
+          "chapter_id": 10,
+          "char_start": 0,
+          "char_end": 125,
+          "text_hash": "5ee0999b6c97af1aaf8f273eeb68fcaae0745b33f4aae1618b2f9049d3be6437"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "8bfd95ab-00e4-5cf3-90ed-f488e07706cc",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "41233e8a-5aec-5cdb-a294-9238422db2e9",
+      "target_event_id": "5dad6178-7886-51ce-98aa-6ccc50c3a267",
+      "chapter_id": 10,
+      "chapter_order": 10,
+      "source_operation_id": "1c64dd1256334356b408028767eb3e6f-p5-op5",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 551,
+          "chapter_id": 10,
+          "char_start": 0,
+          "char_end": 43,
+          "text_hash": "67947d12b632b0cbdde275928966d6effb18a7f30397d8e4371cc865ae6844e8"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "af9fdc04-973d-5091-bfc1-f09e573cc6ce",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
+      "target_event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
+      "chapter_id": 11,
+      "chapter_order": 11,
+      "source_operation_id": "setup/b42eca1b-d47d-5aba-be7b-7e95ff6db1ee",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 613,
+          "chapter_id": 11,
+          "char_start": 0,
+          "char_end": 36,
+          "text_hash": "bc91c3f4b01167dee1408b3a7cf39bca4e165c6396e9ba4edee5f0cb4f459555"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "b0fc7850-22c4-5189-90ff-3127a6f44541",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "7ed1bc67-0323-5410-8ea2-e9b215645ed8",
+      "target_event_id": null,
+      "chapter_id": 11,
+      "chapter_order": 11,
+      "source_operation_id": "7c22800759b64e0ab47fcfbd5e32d744-p8-op3",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 617,
+          "chapter_id": 11,
+          "char_start": 0,
+          "char_end": 67,
+          "text_hash": "5fea683f2c24e661034592dab0ca889ddfffda9d8b96a2219807970e7c4a6c99"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "c22cedfb-9309-539b-851b-9489bea218e1",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
+      "target_event_id": null,
+      "chapter_id": 12,
+      "chapter_order": 12,
+      "source_operation_id": "253c601346954e7fa5d991aa5ba1b979-p9-op1",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 647,
+          "chapter_id": 12,
+          "char_start": 0,
+          "char_end": 78,
+          "text_hash": "fe74a731bf2c0559af17032bd29ac6b4f51dba9730a8dce880a46bc455019c8d"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "ef9f3706-1b66-534a-bf0f-af97d1448012",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "ef0707e1-4cb6-5012-a987-f8ca32c6a777",
+      "target_event_id": null,
+      "chapter_id": 13,
+      "chapter_order": 13,
+      "source_operation_id": "9d35b3846fdf49198569d1b5b6cef0ad-p6-op6",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 751,
+          "chapter_id": 13,
+          "char_start": 0,
+          "char_end": 130,
+          "text_hash": "6c7bf2fa5cc97354f1a97483ac671ab2ef16e6a579f737ac180212b458d9c2c4"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "4d505e37-e170-5c6e-af3a-ce2e6c494ac1",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "7ed1bc67-0323-5410-8ea2-e9b215645ed8",
+      "target_event_id": null,
+      "chapter_id": 13,
+      "chapter_order": 13,
+      "source_operation_id": "9d35b3846fdf49198569d1b5b6cef0ad-p6-op5",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 754,
+          "chapter_id": 13,
+          "char_start": 0,
+          "char_end": 84,
+          "text_hash": "1ad978673b4e9d8a57b73218f3c6a4b3c26c8c5e736afe4e783fa3c76d121a8f"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "a33ac30a-5a79-5584-b6e6-1a216fb94e1e",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "3cc3275b-d22a-594e-aef2-5bb8c731e29f",
+      "target_event_id": "3cc3275b-d22a-594e-aef2-5bb8c731e29f",
+      "chapter_id": 13,
+      "chapter_order": 13,
+      "source_operation_id": "setup/f611201b-e767-5987-8a42-8359a512f1cb",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 775,
+          "chapter_id": 13,
+          "char_start": 0,
+          "char_end": 174,
+          "text_hash": "ce0b7685eb429ea91a3dcdf1ffc9c494fe980ed5fd0c830a831fee8ea7383c93"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "597d010f-72e9-5b04-8669-d3d6678e63dc",
+      "action_type": "payoff",
+      "endpoint_kind": "event",
+      "root_event_id": "3cc3275b-d22a-594e-aef2-5bb8c731e29f",
+      "target_event_id": "c783c28f-e26e-5009-8b4e-a83237ff5172",
+      "chapter_id": 14,
+      "chapter_order": 14,
+      "source_operation_id": "8e54ecba32c8474d9c12a285edbbd823-p6-op4",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 790,
+          "chapter_id": 14,
+          "char_start": 0,
+          "char_end": 72,
+          "text_hash": "a274eb2c184227c8afece3702a5ef9ce6ad007d4132c9e5372d97a7bc87b3286"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "d99f89e9-6579-5f0d-b679-3e7451496d32",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "3841a711-5e51-5ab9-9af0-8f77ec8760ad",
+      "target_event_id": "3841a711-5e51-5ab9-9af0-8f77ec8760ad",
+      "chapter_id": 14,
+      "chapter_order": 14,
+      "source_operation_id": "setup/a59e0d1b-6564-5aab-a033-1f9902918f05",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 848,
+          "chapter_id": 14,
+          "char_start": 0,
+          "char_end": 22,
+          "text_hash": "a2511558da3bd042449cbf09208d89ca50af2dd9621fcfa45f1a234cdf0079e0"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "6de9ffc3-eebd-5b98-8190-b837ea24deab",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
+      "target_event_id": "d64f9f47-e48f-5955-9ac2-19605b02eb48",
+      "chapter_id": 15,
+      "chapter_order": 15,
+      "source_operation_id": "60ceebc6821749ed875efdc093128d24-p3-op7",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 894,
+          "chapter_id": 15,
+          "char_start": 0,
+          "char_end": 228,
+          "text_hash": "75b66c8519c2179e85999f132a202463604797935bdae5fe8235bbd47c42541b"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "6a56c336-af22-573b-bc6b-99640e7f9dc4",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "16c2e808-9026-52d6-92ea-bd636a73f04b",
+      "target_event_id": "16c2e808-9026-52d6-92ea-bd636a73f04b",
+      "chapter_id": 15,
+      "chapter_order": 15,
+      "source_operation_id": "setup/2bcea49c-0a07-58c9-87aa-240cb33964fd",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 916,
+          "chapter_id": 15,
+          "char_start": 0,
+          "char_end": 85,
+          "text_hash": "1b8afa79f698a226cf82875579b13c585a0956a7fbd901da44aa81dfcd47a18e"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "23a88550-ca91-57be-af66-3506a0e07d1b",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "1d25d8d6-7ec3-5d02-8e04-17970c1ae5d4",
+      "target_event_id": "1d25d8d6-7ec3-5d02-8e04-17970c1ae5d4",
+      "chapter_id": 16,
+      "chapter_order": 16,
+      "source_operation_id": "setup/e5db1a01-3698-5cc4-ac41-5da6441383f1",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 983,
+          "chapter_id": 16,
+          "char_start": 0,
+          "char_end": 142,
+          "text_hash": "6eb209e1bbefb3bb71c8f57bfb549c75ee25fe04ca66cc711bb7365cad1a7e86"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "87d523ac-884e-5bcc-85cc-2aa31995d6a0",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
+      "target_event_id": "26770a45-a958-51c6-90c8-987a2ecd0173",
+      "chapter_id": 16,
+      "chapter_order": 16,
+      "source_operation_id": "50f3b3111ca847a8aa5f778efa6dd0dd-p7-op5",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1027,
+          "chapter_id": 16,
+          "char_start": 0,
+          "char_end": 37,
+          "text_hash": "ee4dd9af8feef81d6b7c50808a2cac9af53570ff306108b0c5ad3b4dda7a208b"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "95d206d1-2586-52e4-ac22-38d98948763a",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "26770a45-a958-51c6-90c8-987a2ecd0173",
+      "target_event_id": "26770a45-a958-51c6-90c8-987a2ecd0173",
+      "chapter_id": 16,
+      "chapter_order": 16,
+      "source_operation_id": "setup/200b98bd-f966-5953-a2ac-8250795805c6",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1028,
+          "chapter_id": 16,
+          "char_start": 0,
+          "char_end": 97,
+          "text_hash": "9ed4d8916b804492dd90708d345be3470b729865e2a2eb8eb1c18aff6a5e20ed"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "a3744c63-b783-59f9-b9c6-f62ac4bafa19",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "2aa1bfe9-a7e7-5069-b17a-126a4086bb94",
+      "target_event_id": "2aa1bfe9-a7e7-5069-b17a-126a4086bb94",
+      "chapter_id": 17,
+      "chapter_order": 17,
+      "source_operation_id": "setup/f3d1cc89-de38-51dd-811a-bdea31d61a7c",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1075,
+          "chapter_id": 17,
+          "char_start": 0,
+          "char_end": 60,
+          "text_hash": "d0713ff8fae66840da770cf10dd5327932ad38c29c3857019bd8f40d15d8c24e"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "250fa9c8-7f7b-5b74-aa26-78a4b6539bb6",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "709cd26e-2926-5f48-a229-f6fe21deb750",
+      "target_event_id": "709cd26e-2926-5f48-a229-f6fe21deb750",
+      "chapter_id": 17,
+      "chapter_order": 17,
+      "source_operation_id": "setup/c20df2c3-49f4-5493-9545-abf2fca985e9",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1091,
+          "chapter_id": 17,
+          "char_start": 0,
+          "char_end": 113,
+          "text_hash": "f95da5cded8c4fc20beabeff5fd3ef62ef7e89578f06d475ec21ee51d0f2ad9a"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "2a3260e6-9484-59c3-ac5e-5728dc3d0a8d",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "1d25d8d6-7ec3-5d02-8e04-17970c1ae5d4",
+      "target_event_id": "fabbdb98-e765-5756-af8a-072d060bbb99",
+      "chapter_id": 17,
+      "chapter_order": 17,
+      "source_operation_id": "69a5a97f2f9242298d0fe3d92fd92169-p4-op5",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1095,
+          "chapter_id": 17,
+          "char_start": 0,
+          "char_end": 224,
+          "text_hash": "eb14b075bec07f747c494344896b5ce8cd15d22d042fda890a36f26d223ec8f3"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "39a97511-6fec-53ec-9b1a-916257eba1f4",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "1d25d8d6-7ec3-5d02-8e04-17970c1ae5d4",
+      "target_event_id": "715afbf2-e022-5518-9e7d-97e8398822a0",
+      "chapter_id": 18,
+      "chapter_order": 18,
+      "source_operation_id": "a88eb16ab1554aa883db78369745bda4-p5-op6",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1150,
+          "chapter_id": 18,
+          "char_start": 0,
+          "char_end": 147,
+          "text_hash": "82712eddf2722b3cbf3a814c00b2a17be9b9f779a55eb2cd5fef8026ffe8f856"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "34d7a093-025c-54a6-a3d8-9f25a72b2987",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "cf462d9f-c106-57f5-9fa8-0ae598cd7e37",
+      "target_event_id": "cf462d9f-c106-57f5-9fa8-0ae598cd7e37",
+      "chapter_id": 19,
+      "chapter_order": 19,
+      "source_operation_id": "setup/0357184a-de1e-51bc-b03e-92b26286ad13",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1161,
+          "chapter_id": 19,
+          "char_start": 0,
+          "char_end": 100,
+          "text_hash": "54f0799f71c8aeb6f87594ac36b543925aacb894038e79bdd65244af8bb065d2"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "32972267-3322-5960-81f7-19acd2dad9e1",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "2aa1bfe9-a7e7-5069-b17a-126a4086bb94",
+      "target_event_id": "cf462d9f-c106-57f5-9fa8-0ae598cd7e37",
+      "chapter_id": 19,
+      "chapter_order": 19,
+      "source_operation_id": "6c8c563f60a540acab0e84fb3081142f-p7-op7",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1161,
+          "chapter_id": 19,
+          "char_start": 0,
+          "char_end": 100,
+          "text_hash": "54f0799f71c8aeb6f87594ac36b543925aacb894038e79bdd65244af8bb065d2"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "d93866f8-3cfc-59ba-ae09-0f6300c1fb2a",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "709cd26e-2926-5f48-a229-f6fe21deb750",
+      "target_event_id": "cf462d9f-c106-57f5-9fa8-0ae598cd7e37",
+      "chapter_id": 19,
+      "chapter_order": 19,
+      "source_operation_id": "6c8c563f60a540acab0e84fb3081142f-p7-op8",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1162,
+          "chapter_id": 19,
+          "char_start": 0,
+          "char_end": 83,
+          "text_hash": "5779cac4df6f8086e8cc87e54f61aa55555d25494877b75c032a9698d2e36af1"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "3f67acef-a084-5996-a18b-852dd7a17c40",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "9f50ea7c-46c3-594b-bd51-fe747eaeb959",
+      "target_event_id": "9f50ea7c-46c3-594b-bd51-fe747eaeb959",
+      "chapter_id": 19,
+      "chapter_order": 19,
+      "source_operation_id": "setup/10440c43-c805-58a9-a32d-0509d17c39ce",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1171,
+          "chapter_id": 19,
+          "char_start": 0,
+          "char_end": 86,
+          "text_hash": "beb1a06f91a99edac545284bf3e7e85e7b1b42918405271c070e57f82b99093c"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "19450f07-cbce-5eb5-9f52-c3813f70c973",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
+      "target_event_id": "9f50ea7c-46c3-594b-bd51-fe747eaeb959",
+      "chapter_id": 19,
+      "chapter_order": 19,
+      "source_operation_id": "6c8c563f60a540acab0e84fb3081142f-p7-op6",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1171,
+          "chapter_id": 19,
+          "char_start": 0,
+          "char_end": 86,
+          "text_hash": "beb1a06f91a99edac545284bf3e7e85e7b1b42918405271c070e57f82b99093c"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "bda5cdc0-d1a2-5035-a02b-a43ab6afa781",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "ce3f6535-4438-52a8-8181-c2ac697d1969",
+      "target_event_id": "ce3f6535-4438-52a8-8181-c2ac697d1969",
+      "chapter_id": 19,
+      "chapter_order": 19,
+      "source_operation_id": "setup/2349244b-c511-53cb-baea-23c23c040c06",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1180,
+          "chapter_id": 19,
+          "char_start": 0,
+          "char_end": 231,
+          "text_hash": "c0f0ecddd70626d3711d52113b6ff94a573e5f3e0c2cbb987e11e9e1478b9a69"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "295ea530-a085-58ba-bb85-0e94f57986a3",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "2e88d36a-2840-5ca0-8ee6-dc3af1343dda",
+      "target_event_id": "2e88d36a-2840-5ca0-8ee6-dc3af1343dda",
+      "chapter_id": 19,
+      "chapter_order": 19,
+      "source_operation_id": "setup/5915b679-1343-533b-aa9a-d0ede0198dee",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1242,
+          "chapter_id": 19,
+          "char_start": 0,
+          "char_end": 112,
+          "text_hash": "1d237e10b922a8d6374a8a7f4375d1ace9552e480cf35c908e57efbfa1be25c7"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "e8d24e73-9165-5129-97ef-b5b5d8185361",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "fae8988a-b9bd-5839-bf0a-732e378d674e",
+      "target_event_id": "8c56cfea-de38-5416-842a-b4deb2536347",
+      "chapter_id": 20,
+      "chapter_order": 20,
+      "source_operation_id": "561031ec28da47cf965b78b39933a3d4-p13-op4",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1288,
+          "chapter_id": 20,
+          "char_start": 0,
+          "char_end": 154,
+          "text_hash": "74674fe6ddd0d505757e6b1bc1f201dd3e3dc730958e91cd3252cfc8358ec4e3"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "9fc36123-ed7e-5028-8ca5-db4f96683d9a",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "59904e4f-b725-5d21-a05a-a65c838824aa",
+      "target_event_id": "59904e4f-b725-5d21-a05a-a65c838824aa",
+      "chapter_id": 20,
+      "chapter_order": 20,
+      "source_operation_id": "setup/145e6917-6d21-5608-b519-b473c5ff575c",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1296,
+          "chapter_id": 20,
+          "char_start": 0,
+          "char_end": 134,
+          "text_hash": "d29b35510136eea8c0ec7e1b3fc3ddd27e341c452b8dae80b222175d882ac5b6"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "19592eee-8831-5177-859a-9c11b20c0a7a",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "2e88d36a-2840-5ca0-8ee6-dc3af1343dda",
+      "target_event_id": "ac06988b-8c31-5965-8c10-5e759d678d0e",
+      "chapter_id": 20,
+      "chapter_order": 20,
+      "source_operation_id": "561031ec28da47cf965b78b39933a3d4-p13-op3",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1305,
+          "chapter_id": 20,
+          "char_start": 0,
+          "char_end": 132,
+          "text_hash": "d782e093f2f5471cec05c2ec420d35a8ece25cef281580ff9405bd998d943e6e"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "e34639c9-4897-50ea-8bdf-b2ab809aefd9",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "cd97c0e7-b71b-5f6a-bebd-f788642a429b",
+      "target_event_id": "cd97c0e7-b71b-5f6a-bebd-f788642a429b",
+      "chapter_id": 21,
+      "chapter_order": 21,
+      "source_operation_id": "setup/fae13037-cfc1-57e3-802f-9a60fedee171",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1331,
+          "chapter_id": 21,
+          "char_start": 0,
+          "char_end": 47,
+          "text_hash": "7e2bb98ed3347f1397af65f9f569b3cf7feadbab01840ad2dc9cdeee46350f36"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "40809ee5-d1e5-56b9-8f9f-bf93a7663f1a",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "2e88d36a-2840-5ca0-8ee6-dc3af1343dda",
+      "target_event_id": null,
+      "chapter_id": 21,
+      "chapter_order": 21,
+      "source_operation_id": "cfe5040fc78f4ce7a7784de9ecef16bf-p12-op6",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1356,
+          "chapter_id": 21,
+          "char_start": 0,
+          "char_end": 151,
+          "text_hash": "f3b6ada41df76cf3451442d4c66edf26046c0e6f8b4cb7fd794609639ba87a41"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "6d0af9ae-2ffd-590c-88f2-d42c8e891e5c",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "2aa1bfe9-a7e7-5069-b17a-126a4086bb94",
+      "target_event_id": null,
+      "chapter_id": 21,
+      "chapter_order": 21,
+      "source_operation_id": "cfe5040fc78f4ce7a7784de9ecef16bf-p12-op7",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1359,
+          "chapter_id": 21,
+          "char_start": 0,
+          "char_end": 59,
+          "text_hash": "bb44987a037564e30d0e1c439c6ae1e03303a4135ca4e468bf34ba5eb330ee1b"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "7d595c53-b0d6-54ba-a3c6-72a6c1aa4761",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "fd386cfb-a988-595d-9625-74248d11a384",
+      "target_event_id": "fd386cfb-a988-595d-9625-74248d11a384",
+      "chapter_id": 22,
+      "chapter_order": 22,
+      "source_operation_id": "setup/6459d887-2c4e-5ad9-a7cd-b99c8a37de5b",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1407,
+          "chapter_id": 22,
+          "char_start": 0,
+          "char_end": 177,
+          "text_hash": "b22f3fbba1febce0acb75b4ae8a9d78793d354fd732eac39245779d30783348a"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "68baec01-9110-57ab-92b8-e902509c0cf0",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "3cc3275b-d22a-594e-aef2-5bb8c731e29f",
+      "target_event_id": "fd386cfb-a988-595d-9625-74248d11a384",
+      "chapter_id": 22,
+      "chapter_order": 22,
+      "source_operation_id": "d5af0639108440d0a69a2335ef93e9d3-p7-op1",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1408,
+          "chapter_id": 22,
+          "char_start": 0,
+          "char_end": 115,
+          "text_hash": "8ea6d0b59014a7bae725725291ebcf611fcaf959e45dc8c5e3065b8f2f614200"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "9f3dc433-bde6-59d7-8469-2f2c5d6d6d32",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "8ba46567-5fa2-5e07-8838-33c153e3e66e",
+      "target_event_id": "8ba46567-5fa2-5e07-8838-33c153e3e66e",
+      "chapter_id": 22,
+      "chapter_order": 22,
+      "source_operation_id": "setup/1c30cb28-697d-514b-9538-de512c9b1132",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1416,
+          "chapter_id": 22,
+          "char_start": 0,
+          "char_end": 146,
+          "text_hash": "1f6daef89358e3500923dda7146d971756d24e1a5bcf71823858224db85d8a3e"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "43729819-e9e9-5388-b2d4-52577ba033ef",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "e69647d8-bdbf-5ed5-a040-6cb84cd8de16",
+      "target_event_id": "e69647d8-bdbf-5ed5-a040-6cb84cd8de16",
+      "chapter_id": 22,
+      "chapter_order": 22,
+      "source_operation_id": "setup/c164ff4b-f2de-5db5-80f7-08aacc1100c1",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1419,
+          "chapter_id": 22,
+          "char_start": 0,
+          "char_end": 82,
+          "text_hash": "cae8e187a730e7f7fe8b04face4cd060d3330172877690caa96fabeac282c3b7"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "177c8217-9f38-58a4-beb4-7efe8ad4aa63",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "fae8988a-b9bd-5839-bf0a-732e378d674e",
+      "target_event_id": null,
+      "chapter_id": 22,
+      "chapter_order": 22,
+      "source_operation_id": "d5af0639108440d0a69a2335ef93e9d3-p6-op4",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1419,
+          "chapter_id": 22,
+          "char_start": 0,
+          "char_end": 82,
+          "text_hash": "cae8e187a730e7f7fe8b04face4cd060d3330172877690caa96fabeac282c3b7"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "0677347e-0a0e-5bd3-9510-ded9f1b5f196",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "9f50ea7c-46c3-594b-bd51-fe747eaeb959",
+      "target_event_id": null,
+      "chapter_id": 22,
+      "chapter_order": 22,
+      "source_operation_id": "d5af0639108440d0a69a2335ef93e9d3-p6-op5",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1433,
+          "chapter_id": 22,
+          "char_start": 0,
+          "char_end": 94,
+          "text_hash": "b6d4562f615c30aaf54a4d29042bfaa68ca3840a3f1f2d06326cdce713f20558"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "ebc3e3a9-2b3d-50d3-9a23-7466d38ee4bb",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "59904e4f-b725-5d21-a05a-a65c838824aa",
+      "target_event_id": null,
+      "chapter_id": 22,
+      "chapter_order": 22,
+      "source_operation_id": "d5af0639108440d0a69a2335ef93e9d3-p6-op6",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1433,
+          "chapter_id": 22,
+          "char_start": 0,
+          "char_end": 94,
+          "text_hash": "b6d4562f615c30aaf54a4d29042bfaa68ca3840a3f1f2d06326cdce713f20558"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "b4ac5dfd-db22-5b96-90b8-d8eb63343cdb",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "fec39bbc-5311-518a-b8d5-42c979edc12a",
+      "target_event_id": "fec39bbc-5311-518a-b8d5-42c979edc12a",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "setup/109903d0-75ae-5110-b8c0-8001b0cbdc3c",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1462,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 94,
+          "text_hash": "b6d4562f615c30aaf54a4d29042bfaa68ca3840a3f1f2d06326cdce713f20558"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "813c9973-e992-5d12-9c2e-9e7f13b6e7c3",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "9f50ea7c-46c3-594b-bd51-fe747eaeb959",
+      "target_event_id": "fec39bbc-5311-518a-b8d5-42c979edc12a",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "b1dd9b33d85748e5a1605537450fe18a-p12-op3",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1462,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 94,
+          "text_hash": "b6d4562f615c30aaf54a4d29042bfaa68ca3840a3f1f2d06326cdce713f20558"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "34cb27e8-52c7-5a79-98c7-5f3185cdc0c2",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "709cd26e-2926-5f48-a229-f6fe21deb750",
+      "target_event_id": "85eb984a-7694-59d3-9cda-4f935a0de28e",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "b1dd9b33d85748e5a1605537450fe18a-p12-op1",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1467,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 235,
+          "text_hash": "436cf31ffecae9cba29906d7d65168419d6ec3373ed83150fcfade24b5326437"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "32c1e0dc-808a-5c26-bbba-8f2ecc3d5bff",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "42ae0c05-ee60-5cce-ba34-a21e4b4e3620",
+      "target_event_id": "42ae0c05-ee60-5cce-ba34-a21e4b4e3620",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "setup/e1335d49-620f-579d-8a75-7ba37f12d343",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1478,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 162,
+          "text_hash": "a0e8c1c1cc379586f3d734a86183325dda77dba303f8ebfdd1c5c4f25efe3f0f"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "b47f7c7f-3fcf-52b5-a63b-6224f17cb992",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "ef0707e1-4cb6-5012-a987-f8ca32c6a777",
+      "target_event_id": "42ae0c05-ee60-5cce-ba34-a21e4b4e3620",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "b1dd9b33d85748e5a1605537450fe18a-p12-op2",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1478,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 162,
+          "text_hash": "a0e8c1c1cc379586f3d734a86183325dda77dba303f8ebfdd1c5c4f25efe3f0f"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "f4c0b695-9a5a-50cf-812f-a221bcf817e0",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "a5635e2f-d1bd-56d7-aec8-db74a8784edc",
+      "target_event_id": "a5635e2f-d1bd-56d7-aec8-db74a8784edc",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "setup/e83fa66c-44e3-524a-9ae7-df931c440cbf",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1485,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 141,
+          "text_hash": "5656cd190b7e919b538933d5e6b95b7c2798f541fe9377e153d018716e7855d7"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "176bc98c-99a3-59fd-8626-bc573b3e0c8b",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "2e88d36a-2840-5ca0-8ee6-dc3af1343dda",
+      "target_event_id": "a5635e2f-d1bd-56d7-aec8-db74a8784edc",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "b1dd9b33d85748e5a1605537450fe18a-p12-op5",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1489,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 213,
+          "text_hash": "d9d30c306b254bb76ac803f8f429dac7e0938128a3016bc7bb80d010e120eaa3"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "0f93b793-dec5-52d3-8ff0-9929c77aabce",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "db6fbaba-247b-5c41-ba82-dc301d7a344e",
+      "target_event_id": "db6fbaba-247b-5c41-ba82-dc301d7a344e",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "setup/7e859f6e-1c23-523f-bb5d-eab91289d71e",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1491,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 133,
+          "text_hash": "f41db8e8c2405eb9bba57f9f900ada3b69e46fce7430b76f3eb0f6806bce838b"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "551604c5-db63-58ed-a7ca-fd36c25413ce",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "59904e4f-b725-5d21-a05a-a65c838824aa",
+      "target_event_id": "db6fbaba-247b-5c41-ba82-dc301d7a344e",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "b1dd9b33d85748e5a1605537450fe18a-p12-op4",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1491,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 133,
+          "text_hash": "f41db8e8c2405eb9bba57f9f900ada3b69e46fce7430b76f3eb0f6806bce838b"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "5e06d225-fdec-54f2-8553-17f4bd35b2c3",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "43c622b9-784d-5306-bf44-88a2c751807d",
+      "target_event_id": "43c622b9-784d-5306-bf44-88a2c751807d",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "setup/dd649a57-7b75-5f5f-a183-716be1909500",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1496,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 37,
+          "text_hash": "1df6a181e4e009cde72943333e8b748d7b685b1778c6ebc187e503b8c8fc8c45"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "c03c74b8-d6d4-59d5-a49b-34809e07fbe0",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "97475659-8c03-5410-85fe-91f1790dbcfd",
+      "target_event_id": "97475659-8c03-5410-85fe-91f1790dbcfd",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "setup/bb72da2e-7c89-5e8a-aed8-91341468bfac",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1497,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 168,
+          "text_hash": "19727238930cb67b827440446eb9c51d76522536e32ba56a0384764d87015394"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "86c41595-8484-5219-9702-5cbf231e6c6f",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "c530a1b0-8b40-5711-a7ee-6a33029a6c3e",
+      "target_event_id": "c530a1b0-8b40-5711-a7ee-6a33029a6c3e",
+      "chapter_id": 23,
+      "chapter_order": 23,
+      "source_operation_id": "setup/76ba92c3-c373-564e-a87a-6d789ee9cecb",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1500,
+          "chapter_id": 23,
+          "char_start": 0,
+          "char_end": 89,
+          "text_hash": "a9d1b15fab5a23d582648436ec3e07f7a636ef20eda56560cebb474b98a91c82"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "3e44b342-6dc1-592f-b3d8-eea5048f0ef2",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "97475659-8c03-5410-85fe-91f1790dbcfd",
+      "target_event_id": "7b42b354-1d02-57ef-a744-be1dbdd096d1",
+      "chapter_id": 25,
+      "chapter_order": 25,
+      "source_operation_id": "4310e81d728b4d2ca85d63d63635c6f1-p10-op5",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1602,
+          "chapter_id": 25,
+          "char_start": 0,
+          "char_end": 116,
+          "text_hash": "e0560f2a81f12d7fa75b36948b6cf32f2a7d2e4ad6345bb05aad295a2f550214"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "13d0432a-9864-50a6-afbb-f33ac4492d12",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "c530a1b0-8b40-5711-a7ee-6a33029a6c3e",
+      "target_event_id": "10a82a0d-acaf-5d58-871d-8cdc8900e253",
+      "chapter_id": 25,
+      "chapter_order": 25,
+      "source_operation_id": "4310e81d728b4d2ca85d63d63635c6f1-p10-op6",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1612,
+          "chapter_id": 25,
+          "char_start": 0,
+          "char_end": 176,
+          "text_hash": "f8b97b3800ac2d6b9c1c90fa404a45c0af1e3eaf48939ea8b108fe97296a8c30"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "b2aa9117-ad0b-5477-8e8b-b3bb7512aa07",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "3fe7cd7f-936c-521d-bab7-fea0a8ae1281",
+      "target_event_id": "3fe7cd7f-936c-521d-bab7-fea0a8ae1281",
+      "chapter_id": 25,
+      "chapter_order": 25,
+      "source_operation_id": "setup/63673571-7481-5200-84f5-5ab85fc22a7c",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1623,
+          "chapter_id": 25,
+          "char_start": 0,
+          "char_end": 27,
+          "text_hash": "ae407e461551de5246820edc9bc627259056423148204324a22a4e34e8980d2e"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "a76887b7-f0cf-5982-bc1f-f2bb71d7f626",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "f5da6318-130a-50df-9fc4-94110b72fec5",
+      "target_event_id": "f5da6318-130a-50df-9fc4-94110b72fec5",
+      "chapter_id": 25,
+      "chapter_order": 25,
+      "source_operation_id": "setup/6640c9a7-261e-5853-be27-98f4aba5362b",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1631,
+          "chapter_id": 25,
+          "char_start": 0,
+          "char_end": 120,
+          "text_hash": "3e552aa9a0b000f2040cfe6f03408fac69926c63d5ed5c77b3f075d832919e7c"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "c0bb2ddf-4ccb-57e5-b231-885c6f4491bb",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "42ae0c05-ee60-5cce-ba34-a21e4b4e3620",
+      "target_event_id": "e3aa79e8-c707-5b08-990a-1c9edddab1f7",
+      "chapter_id": 25,
+      "chapter_order": 25,
+      "source_operation_id": "4310e81d728b4d2ca85d63d63635c6f1-p10-op4",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1674,
+          "chapter_id": 25,
+          "char_start": 0,
+          "char_end": 51,
+          "text_hash": "5e70497a2d1c89c5329d5de73754bda9a81586eb009dda42ddb74106a858fc8d"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "85860787-caa5-529b-924f-542547a8cdda",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "59904e4f-b725-5d21-a05a-a65c838824aa",
+      "target_event_id": "93705a8f-bf28-5416-98f2-1d687ac22acf",
+      "chapter_id": 25,
+      "chapter_order": 25,
+      "source_operation_id": "4310e81d728b4d2ca85d63d63635c6f1-p9-op4",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1680,
+          "chapter_id": 25,
+          "char_start": 0,
+          "char_end": 57,
+          "text_hash": "58809ba3d9aee83b08b082c6375f2eff67abffe342d60795f7bb3f1fe54e4e68"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "f19eb7aa-f688-52e0-9b0e-536760bff743",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "a5635e2f-d1bd-56d7-aec8-db74a8784edc",
+      "target_event_id": "ba84dd6f-154a-5842-beb8-47b1ac59b21c",
+      "chapter_id": 26,
+      "chapter_order": 26,
+      "source_operation_id": "d88eb66b53ac43bcaa6d68b38fc12470-p14-op4",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1700,
+          "chapter_id": 26,
+          "char_start": 0,
+          "char_end": 87,
+          "text_hash": "a89eee4119cafb2a3c3311bfb2e7ce3800524adbf2c84193fff5a196569032ab"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "47c2e406-e303-5eb6-93c4-5b6c13462834",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "1d25d8d6-7ec3-5d02-8e04-17970c1ae5d4",
+      "target_event_id": "f4b18c6e-660d-5def-9712-2cef46bb6ea4",
+      "chapter_id": 26,
+      "chapter_order": 26,
+      "source_operation_id": "d88eb66b53ac43bcaa6d68b38fc12470-p14-op3",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1710,
+          "chapter_id": 26,
+          "char_start": 0,
+          "char_end": 111,
+          "text_hash": "5b089445c29563f4c82e4c823d5a3764b452df6eb5ec9172d06311cd24e54db3"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "2532bd43-0eaf-5862-8c26-10c50ccc33a5",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "9f50ea7c-46c3-594b-bd51-fe747eaeb959",
+      "target_event_id": "108e61f0-ed9b-5698-b2f0-d563dc74257e",
+      "chapter_id": 26,
+      "chapter_order": 26,
+      "source_operation_id": "d88eb66b53ac43bcaa6d68b38fc12470-p14-op1",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1726,
+          "chapter_id": 26,
+          "char_start": 0,
+          "char_end": 15,
+          "text_hash": "2c6e849c20c6b066145560668fa319d3b2318faeaccaff6e8378f08f1c0f5707"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "10799372-c66a-5da0-9e4c-b7c8630e123d",
+      "action_type": "reinforce",
+      "endpoint_kind": "event",
+      "root_event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
+      "target_event_id": "f8cf6a9e-0015-5fa9-8e6f-48394c1a3cbe",
+      "chapter_id": 26,
+      "chapter_order": 26,
+      "source_operation_id": "d88eb66b53ac43bcaa6d68b38fc12470-p14-op2",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1729,
+          "chapter_id": 26,
+          "char_start": 0,
+          "char_end": 133,
+          "text_hash": "ce8ca5da74362f36c53760ca6ab0ad67d465266dccee591ddc565063338a8dcc"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    },
+    {
+      "action_id": "5e02ec24-e3a4-589c-a69a-3f1cd27d2e25",
+      "action_type": "setup",
+      "endpoint_kind": "event",
+      "root_event_id": "2eff3987-cca6-5017-be55-478d4725f1f8",
+      "target_event_id": "2eff3987-cca6-5017-be55-478d4725f1f8",
+      "chapter_id": 26,
+      "chapter_order": 26,
+      "source_operation_id": "setup/bbac7359-9eeb-592f-82ba-89e253d296d1",
+      "evidence": [
+        {
+          "event_id": null,
+          "paragraph_id": 1738,
+          "chapter_id": 26,
+          "char_start": 0,
+          "char_end": 69,
+          "text_hash": "d6fbd3531af6d6577e9f36faf37fd79ddaa4b2322f260cf854b32a7f96e1f0c0"
+        }
+      ],
+      "evidence_scope": "paragraph"
+    }
+  ],
+  "next_cursor": null
+}

@@ -27,14 +27,14 @@ __all__ = [
     "router",
 ]
 
-# 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
+# tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
 
 
 def _parse_emotion_trend_range(
     position_range: str | None,
 ) -> tuple[float, float] | None:
-    """2026-08-15 解析情绪趋势 position 区间并统一校验输入"""
+    """解析情绪趋势 position 区间并统一校验输入"""
     if position_range is None:
         return None
     raw = position_range.strip()

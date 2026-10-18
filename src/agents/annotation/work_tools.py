@@ -230,7 +230,7 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         declaration_id = content["declaration_id"]
         read = agent.event_trees.read(declaration_id)
         execution.event_reads[declaration_id] = read
-        # 2026-10-15 用户裁定「建一个事件进一个池」：声明落地后程序侧立刻把该事件
+
         # 登记进全书共享案例池（case_type=event），诊断期按事件并发派工时据此取材
         agent.case_pool.register_event_case(
             declaration_id=declaration_id,

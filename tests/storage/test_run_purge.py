@@ -16,12 +16,13 @@ from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
     persist_chapter_annotation,
 )
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 def test_purge_order_covers_every_run_scoped_table() -> None:
     """35 表冻结结构：novels 是全局书目，其余每张表都必须有清理顺序与范围谓词"""
     assert set(_RUN_PURGE_ORDER) | {"novels"} == set(Base.metadata.tables)
-    assert set(_run_purge_predicates("lock-probe")) == set(_RUN_PURGE_ORDER)
+    assert set(_run_purge_predicates(fixture_id(__name__, "lock-probe"))) == set(_RUN_PURGE_ORDER)
 
 
 def test_delete_run_only_clears_its_own_run(db_session) -> None:
@@ -44,16 +45,14 @@ def test_delete_run_only_clears_its_own_run(db_session) -> None:
         )
 
     def scoped_count(model, column, run_id: str) -> int:
-        return int(
-            db_session.scalar(select(func.count()).select_from(model).where(column == run_id)) or 0
-        )
+        return int(db_session.scalar(select(func.count()).select_from(model).where(column == run_id)) or 0)
 
     def direct_fact_count(run_id: str) -> int:
         return int(
             db_session.scalar(
                 select(func.count())
                 .select_from(GraphFact)
-                .where(GraphFact.direct_producer_execution_id.in_(run_execution_ids(run_id)))
+                .where(GraphFact.direct_producer_execution_id.in_(run_execution_ids(storage_for(db_session), run_id)))
             )
             or 0
         )

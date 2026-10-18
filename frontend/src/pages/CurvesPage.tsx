@@ -41,8 +41,7 @@ interface VisibleSeriesState {
 }
 
 /**
- * 2026-04-28，任务：分析详情页单屏 Tabs 改造
- * 修改原因：曲线页改为情绪优先的 tab 工作台，避免两张大图上下堆叠超出屏幕高度
+ * 曲线页使用情绪优先的 tab 工作台，避免两张大图上下堆叠超出屏幕高度
  */
 export function CurvesPage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -51,7 +50,7 @@ export function CurvesPage() {
 
   const urlTaskId = searchParams.get("task_id");
 
-  // 2026-08-13 P1-2: 小说作用域任务守卫——跨小说切换后旧小说的任务
+  // 小说作用域任务守卫——跨小说切换后旧小说的任务
   // 不得用于新小说的查询，也不得回写固化成新小说 URL（模式同 GraphPage）
   const { storeTaskId, urlTaskSyncRef } = useNovelScopedTask(novelId, urlTaskId);
 
@@ -68,8 +67,7 @@ export function CurvesPage() {
     rhythm: new Set<RhythmSeriesKey>(["surface_tension", "smoothed_surface_tension"]),
   });
 
-  // M4：zoomRange 语义从"分块索引对"改为"position 数值对"（值域 [0,1]），
-  // 图表内按 zoomRange[0]/1*100 换算 dataZoom 百分比
+  // zoomRange 为 position 数值对（值域 [0,1]），dataZoom 百分比按 zoomRange[0]/1*100 换算
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
 
   // 窗口粒度切换：情绪 tab 以每窗段落数控制展示粒度，默认每窗 20 段
@@ -107,7 +105,7 @@ export function CurvesPage() {
     placeholderData: keepPreviousData,
   });
 
-  // 节奏张力 tab：段落曲线 + 叙事结构高潮参数一次拉取（2026-08-29 tab 级 API 统一）
+  // 节奏张力 tab：段落曲线 + 叙事结构高潮参数一次拉取
   const rhythmQuery = useQuery({
     queryKey: tabQueryKey("rhythm", novelId, storeTaskId),
     queryFn: () => getRhythmTab(novelId!, storeTaskId!, { maxPoints: 800 }),
@@ -145,7 +143,7 @@ export function CurvesPage() {
     setZoomRange(range);
   }, []);
 
-  // 2026-08-15：datazoomend 后防抖提交当前 position 区间
+  // datazoomend 后防抖提交当前 position 区间
   const handleEmotionZoomEnd = useCallback((range: [number, number] | null) => {
     if (trendRangeTimerRef.current !== null) {
       window.clearTimeout(trendRangeTimerRef.current);
@@ -174,10 +172,7 @@ export function CurvesPage() {
     [navigate, novelId, storeTaskId]
   );
 
-  // 2026-08-14 P2-23：缩放/重置必须按 chartType 分流到当前可见图表。
-  // 此前硬编码 emotionChartRef，节奏 tab 的按钮实际作用于隐藏的情绪图，
-  // 可见的节奏图完全无响应（dispatchAction 不会触发 dataZoom 事件，
-  // 共享 zoomRange 状态也不会更新）
+  // 缩放/重置按 chartType 分流到当前可见图表：按可见 tab 选择图表实例
   const _zoomByChartType = useCallback(
     (chartType: "emotion" | "rhythm", factor: number) => {
       const chart =
@@ -273,10 +268,6 @@ export function CurvesPage() {
 
   return (
     <AnalysisWorkspace title={novelTitle}>
-      {/*
-        2026-04-28，任务：分析详情页单屏 Tabs 改造
-        修改原因：曲线页从上下堆叠改为 tab，默认展示最重要的情绪趋势，图表由单屏工作区统一约束。
-      */}
       <div className="flex h-full min-h-0 flex-col gap-2">
       <AnalysisWorkspace.Tabs defaultValue="emotion">
         <AnalysisWorkspace.Tab value="emotion" label="情绪趋势">

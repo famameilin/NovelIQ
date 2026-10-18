@@ -1,13 +1,7 @@
 """
-曲线/统计相关的度量计算（从 preprocess 中拆出）
+曲线/统计相关的度量计算
 
 聚合与预处理都会用到的通用计算放在这里，减少模块间交叉依赖
-
-2026-08-14 M8b：chunk 级曲线计算（compute_emotion_curve / compute_tension_signals /
-compute_rhythm_curve / compute_emotion_curve_weighted）已删除——曲线事实源
-改为 paragraph_curves（预处理阶段落库），聚合侧按章节从段落充分统计量重算。
-2026-08-15 词表 v3：WeightedLexiconSet 随 get_weighted_lexicon_set 删除
-（无生产消费者，benchmark 改用 registry 直接组装）。
 """
 
 from __future__ import annotations
@@ -36,16 +30,16 @@ class GlobalStatRecord(Protocol):
 
 
 def _last_extreme_index(values: list[float], *, want_max: bool) -> int:
-    """§19.14 并列极值取最后出现的索引（rindex 语义）"""
+    """并列极值取最后出现的索引（rindex 语义）"""
     extreme = max(values) if want_max else min(values)
     return len(values) - 1 - values[::-1].index(extreme)
 
 
 def compute_global_stats(rows: Sequence[GlobalStatRecord]) -> list[tuple[str, float | None]]:
     """
-    计算全局统计（§9.1 聚合守恒，2026-08-14 M8b 段落化重写）
+    计算全局统计（聚合守恒）
 
-    数据源从 chunk_style/chunk_curves 切换为段落事实源：
+    数据源为段落事实源：
      - TTR/MTLD 在全文字符序列上直接计算，不再取各章均值
     - avg_sent_len 从句子充分统计量恢复（Σ句长 / Σ句数）
     - emotion_avg 为全书分子/分母守恒密度（Σpos − Σneg）/ Σtoken
@@ -73,7 +67,7 @@ def compute_global_stats(rows: Sequence[GlobalStatRecord]) -> list[tuple[str, fl
     if token_total > 0:
         global_stats.append(("emotion_avg", (pos_total - neg_total) / token_total))
 
-    # 2026-09-05 A2：词典情绪零信号段落的字符加权占比（lexicon 覆盖缺口审计口径）。
+    # 词典情绪零信号段落的字符加权占比（lexicon 覆盖缺口审计口径）。
     # 仅统计有指标行的段落（无指标行=数据缺失，不得冒充零信号）；无指标行时不输出。
     zero_hit_chars = 0
     scored_chars = 0
@@ -98,7 +92,7 @@ def compute_global_stats(rows: Sequence[GlobalStatRecord]) -> list[tuple[str, fl
         max_idx = _last_extreme_index(emotion_values, want_max=True)
         min_idx = _last_extreme_index(emotion_values, want_max=False)
         # 极值下标属于过滤后的 emotion_values，必须经 emotion_indices 映射回未过滤的 rows；
-        # 直接 rows[max_idx] 会在存在 NULL 密度行（0-token 段，§15.2）时定位到错误章节
+        # 直接 rows[max_idx] 会在存在 NULL 密度行（0-token 段）时定位到错误章节
         global_stats.append(("emotion_peak_chapter_id", float(rows[emotion_indices[max_idx]].chapter_id)))
         global_stats.append(("emotion_min_chapter_id", float(rows[emotion_indices[min_idx]].chapter_id)))
 

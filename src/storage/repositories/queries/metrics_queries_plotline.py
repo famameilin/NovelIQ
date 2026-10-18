@@ -1,4 +1,4 @@
-"从 src/metrics/queries/plotline.py 分离的具名物理读取"
+"metrics queries plotline 的具名物理读取"
 
 from __future__ import annotations
 

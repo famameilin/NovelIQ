@@ -1,5 +1,5 @@
 /**
- * 2026-08-29，作用：展示语言特征分析页面
+ * 展示语言特征分析页面
  * 简要说明：表达结构整合词性、句式、词长和依存统计，词汇与语义整合实体、固定表达和词向量聚合
  */
 import { useEffect, useMemo, useState } from "react";
@@ -90,7 +90,7 @@ interface UseQueryResultLike<T> {
 }
 
 /**
- * 2026-08-31，作用：将后端不可用原因转换为用户可读文案
+ * 将后端不可用原因转换为用户可读文案
  * 简要说明：隐藏内部字段名，保留实际原因中的中文说明
  */
 function formatUnavailableReason(reason: string | null | undefined): string | null {
@@ -112,7 +112,7 @@ function pageItems<T>(items: readonly T[], page: number, pageSize: number) {
 }
 
 /**
- * 2026-08-31，作用：展示表达结构视图的章节级语言统计
+ * 展示表达结构视图的章节级语言统计
  * 简要说明：统一承载四类比例分布、六项聚合指标和章节切换
  */
 function ExpressionStructureView({ query }: { query: UseQueryResultLike<LinguisticFeaturesResponse> }) {
@@ -192,7 +192,7 @@ function ExpressionStructureView({ query }: { query: UseQueryResultLike<Linguist
 }
 
 /**
- * 2026-08-31，作用：展示实体与固定表达的聚合指标
+ * 展示实体与固定表达的聚合指标
  * 简要说明：类型和实体名切换展示，长列表分页，保持页签单屏
  */
 function EntityPhraseView({ entitiesQuery }: { entitiesQuery: UseQueryResultLike<LinguisticEntitiesTabResponse> }) {
@@ -262,7 +262,7 @@ function EntityPhraseView({ entitiesQuery }: { entitiesQuery: UseQueryResultLike
 }
 
 /**
- * 2026-08-31，作用：展示词向量覆盖率与词性语义聚合
+ * 展示词向量覆盖率与词性语义聚合
  * 简要说明：模型详情与质心统计保留在独立页签中以避免和实体列表纵向堆叠
  */
 function WordVectorSemanticView({ word2vecQuery }: { word2vecQuery: UseQueryResultLike<Word2VecStatsResponse> }) {

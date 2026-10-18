@@ -5,8 +5,6 @@
 - seq 单调递增、缓冲回放与实时推送衔接
 - 重连增量：last_seq 只回放之后的缓冲
 - 终止类事件（task_complete）直接经 event_manager.send 下发
-
-2026-08-13 创建，补齐此前三层各自单测（EventBus patch send / 路由 patch manager）之间的链路缺口。
 """
 
 from __future__ import annotations
@@ -21,11 +19,12 @@ from src.sse.events import StreamEvent
 from src.sse.manager import event_manager
 from src.work.task_manager import TaskManager
 from src.workflows.progress import AnalysisEventBus
+from tests.support.storage_fixtures import fixture_id
 
 
 @pytest.fixture(autouse=True)
 def _allow_existing_task(monkeypatch):
-    """2026-08-14 P2-11：任务存在性校验默认放行（e2e 使用虚构 task_id）"""
+    """任务存在性校验默认放行（e2e 使用虚构 task_id）"""
 
     monkeypatch.setattr("src.api.routes.sse._task_run_belongs_to_novel", lambda task_id, novel_id: True)
     monkeypatch.setattr(event_manager, "_outbox", None)
@@ -70,7 +69,7 @@ async def test_sse_e2e_eventbus_to_stream_full_chain() -> None:
         )
     )
 
-    response = await sse_endpoint("novel-1", task_id, _make_request(disconnect_after=4))
+    response = await sse_endpoint(fixture_id(__name__, "novel-1"), task_id, _make_request(disconnect_after=4))
     # 连接建立后（缓冲回放 2 条）再实时 emit 2 条
     await bus.emit(
         StreamEvent(
@@ -144,7 +143,7 @@ async def test_sse_e2e_tool_call_status_passthrough() -> None:
         )
     )
 
-    response = await sse_endpoint("novel-1", task_id, _make_request(disconnect_after=2))
+    response = await sse_endpoint(fixture_id(__name__, "novel-1"), task_id, _make_request(disconnect_after=2))
     chunks = await _drain(response, event_count=2)
 
     assert [chunk["event"] for chunk in chunks] == ["tool_call", "tool_call"]
@@ -169,7 +168,7 @@ async def test_sse_e2e_reconnect_replays_incremental_only() -> None:
     await bus.emit(StreamEvent(action="progress", stage="preprocess", current=1, total=10, sub_percent=10.0))
 
     # 第一次连接：last_seq=None → 回放全部（seq 1,2）
-    response1 = await sse_endpoint("novel-1", task_id, _make_request(disconnect_after=2))
+    response1 = await sse_endpoint(fixture_id(__name__, "novel-1"), task_id, _make_request(disconnect_after=2))
     chunks1 = await _drain(response1, event_count=2)
     assert [chunk["id"] for chunk in chunks1] == ["1", "2"]
 
@@ -179,7 +178,7 @@ async def test_sse_e2e_reconnect_replays_incremental_only() -> None:
     # 第二次连接：last_seq=2 → 只回放 seq 3
     request2 = _make_request(disconnect_after=1)
     request2.query_params = {"last_seq": "2"}
-    response2 = await sse_endpoint("novel-1", task_id, request2)
+    response2 = await sse_endpoint(fixture_id(__name__, "novel-1"), task_id, request2)
     chunks2 = await _drain(response2, event_count=1)
     assert [chunk["id"] for chunk in chunks2] == ["3"]
     data = json.loads(chunks2[0]["data"])
@@ -200,7 +199,7 @@ async def test_sse_e2e_last_event_id_header_as_fallback() -> None:
     request = _make_request(disconnect_after=1)
     request.query_params = {}
     request.headers = {"last-event-id": "1"}
-    response = await sse_endpoint("novel-1", task_id, request)
+    response = await sse_endpoint(fixture_id(__name__, "novel-1"), task_id, request)
     chunks = await _drain(response, event_count=1)
 
     assert [chunk["id"] for chunk in chunks] == ["2"]

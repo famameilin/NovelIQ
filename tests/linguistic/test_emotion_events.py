@@ -1,4 +1,4 @@
-"""LTP sdp 情绪事件与 mNEG 修正测试（2026-09-05 B 批，纯函数，不加载模型）"""
+"""LTP sdp 情绪事件与 mNEG 修正测试（纯函数，不加载模型）"""
 
 from __future__ import annotations
 
@@ -94,9 +94,7 @@ class TestMnegCorrectedCounts:
 
     def test_missing_head_token_does_not_flip(self) -> None:
         """mNEG head 指向不存在的词元时不翻转（防御，不冒充否定覆盖）"""
-        token = LtpToken(
-            token_index=1, text="高兴", local_start_char=0, local_end_char=2, pos_tag="a", pos_group="adj"
-        )
+        token = LtpToken(token_index=1, text="高兴", local_start_char=0, local_end_char=2, pos_tag="a", pos_group="adj")
         arcs = [LtpSdpArc(head_index=9, dependent_index=2, label="mNEG")]
         pos, neg = mneg_corrected_counts("高兴", [token], arcs, POS_TERMS, NEG_TERMS)
         assert (pos, neg) == (1.0, 0.0)

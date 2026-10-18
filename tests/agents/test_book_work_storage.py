@@ -9,19 +9,20 @@ from src.audit.module import AuditModule
 from src.case_pool import CasePool
 from src.event_bus import EventBus, Message
 from src.fact_graph.read.annotations import fetch_chapter_characters_full
+from src.storage import new_id
 from src.storage.db import get_session_factory
 from src.storage.models import BookCase
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
+from tests.support.storage_fixtures import fixture_id, storage_factory, storage_for
 
 
 @pytest.mark.parametrize("reference_kind", ["relation", "event", "dialogue"])
 def test_retained_reference_restores_entity_after_source_chapter_discard(db_session, reference_kind):
     """引用自身已保存且有效，丢弃源章不补造实体写入，也不丢引用端点"""
     from types import SimpleNamespace
-    from uuid import uuid4
 
     from src.agents.annotation.output_models import BoundChapterAnnotation
-    from src.fact_graph.graph import FactGraph, mention_uuid
+    from src.fact_graph.graph import FactGraph
     from src.fact_graph.inputs import ChapterMetricsInput
     from src.fact_graph.outputs import BoundDialogue
     from src.storage.models import (
@@ -40,7 +41,7 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
 
     text = 'Alice says: "Go."'
     _, run_id = create_run_with_chunks(db_session, texts=["Alice knows Bob.", text], chapter_ids=[1, 2])
-    source_id = persist_chapter_annotation(
+    persist_chapter_annotation(
         db_session,
         run_id=run_id,
         chapter_id=1,
@@ -60,8 +61,8 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
             make_bound_event(
                 description="Alice speaks",
                 participants=[{"entity": "Alice", "role": "主体"}],
-                node_id=str(uuid4()),
-                tree_id=str(uuid4()),
+                node_id=new_id(),
+                tree_id=new_id(),
             )
         ]
         paragraph = db_session.query(Paragraph).filter_by(run_id=run_id, chapter_id=2).one()
@@ -84,14 +85,10 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
         annotation=output,
         relation_assert_ops=relations,
     )
-    # 2026-10-17 六 agent 归属：作者身份就是真实执行号（work 行已退场）
-    source = db_session.get(ChapterAnnotation, source_id)
-    source_author = str(source.execution_id)
+    # 作者身份就是真实执行号（executions 行携带 run/章/角色）
     graph = FactGraph(run_scope=run_id)
-    graph.discard_storage(db_session, {source_author})
-    db_session.delete(source)
-    db_session.flush()
-    graph.rebuild_storage(db_session)
+    storage_for(db_session).annotations.discard_chapters(run_id, {1})
+    db_session.expire_all()
     kept = db_session.get(ChapterAnnotation, kept_id)
     kept_record = SimpleNamespace(
         execution_id=kept.execution_id,
@@ -100,9 +97,11 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
         sequence=2,
         role="annotation",
     )
-    graph.restore_storage(db_session, [kept_record])
-    graph.restore_storage(db_session, [kept_record])
-    alice = mention_uuid(run_id, 2, "Alice", "character")
+    graph.restore_storage(storage_for(db_session), [kept_record])
+    graph.restore_storage(storage_for(db_session), [kept_record])
+    alice = db_session.scalar(
+        select(GraphEntity.entity_id).where(GraphEntity.run_id == run_id, GraphEntity.canonical_name == "Alice")
+    )
     resolved = graph.resolve_entity_id(alice, label="source")
     assert graph.display_name(resolved) == "Alice"
     # 引用恢复不补造实体写入（只有引用支持，没有实体操作）
@@ -114,16 +113,13 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
         )
     )
     assert list(
-        db_session.scalars(
-            select(GraphFact).where(GraphFact.entity_id == alice, GraphFact.tags_submitted.is_(False))
-        )
+        db_session.scalars(select(GraphFact).where(GraphFact.entity_id == alice, GraphFact.tags_submitted.is_(False)))
     )
-    assert fetch_chapter_characters_full(AnnotationRepository(db_session).session, run_id) == []
+    assert fetch_chapter_characters_full(storage_for(AnnotationRepository(db_session).session), run_id) == []
 
 
-def test_case_delivery_order_does_not_follow_database_save_order(db_session):
-    """交付按逆序持久化不能覆盖有效业务事实：采纳由真实交付行决定"""
-    from uuid import uuid4
+def test_case_delivery_rows_decide_adoption_and_promise_reconstructs(db_session):
+    """采纳由真实交付行决定（写交付=adopted）；承诺随痕迹重建，废弃作者不被恢复"""
 
     _novel, run_id = create_run_with_chunks(db_session, texts=["原文一。", "原文二。"], chapter_ids=[1, 2])
     from src.storage.models import CaseEntry, Execution
@@ -131,8 +127,7 @@ def test_case_delivery_order_does_not_follow_database_save_order(db_session):
 
     # 作者身份是真实执行号（单一字符串）；案例支持必须引用真实执行：
     # (run, chapter, role) 唯一，因此两个作者落在两章
-    suffix = uuid4().hex[:8]
-    a, b = f"a1-{suffix}", f"b1-{suffix}"
+    a, b = new_id(), new_id()
     for author, chapter_id in ((a, 1), (b, 2)):
         db_session.add(
             Execution(
@@ -151,11 +146,26 @@ def test_case_delivery_order_does_not_follow_database_save_order(db_session):
     pool.begin(b)
     case = pool.push("dialogue", "核查实际关联", a)
     pool.promise(case["case_id"], a)
-    pool.associate(case["case_id"], a, tool_name="read_event", call_id="first", receipt={}, is_write=False)
-    pool.stop(a)
-    pool.promise(case["case_id"], b)
-    pool.associate(case["case_id"], b, tool_name="write_event", call_id="second", receipt={}, is_write=True)
-    # 创建案例本身先保存；两个交付按逆序持久化不能覆盖有效业务事实
+    pool.associate(
+        case["case_id"], a, tool_name="read_event", call_id=fixture_id(__name__, "first"), receipt={}, is_write=False
+    )
+    # 同一案例只有承诺者能投递：他执行接手只会得到 taken，投递直接拒收
+    assert pool.promise(case["case_id"], b)["status"] == "taken"
+    assert (
+        pool.associate(
+            case["case_id"],
+            b,
+            tool_name="write_event",
+            call_id=fixture_id(__name__, "second"),
+            receipt={},
+            is_write=True,
+        )["status"]
+        == "warning"
+    )
+    pool.associate(
+        case["case_id"], a, tool_name="write_event", call_id=fixture_id(__name__, "second"), receipt={}, is_write=True
+    )
+    # 案例本身先落行；交付行决定采纳，不依赖保存顺序
     db_session.add(
         BookCase(
             case_id=case["case_id"],
@@ -178,25 +188,24 @@ def test_case_delivery_order_does_not_follow_database_save_order(db_session):
         }
         return CaseContribution(run_id, author, json.dumps(snapshot, ensure_ascii=False))
 
-    pool.save_work(db_session, execution(b))
-    db_session.commit()
-    pool.save_work(db_session, execution(a))
+    pool.save_work(storage_for(db_session), execution(a))
     db_session.commit()
     supports = {
         str(entry.producer_execution_id): entry
         for entry in db_session.scalars(
-            select(CaseEntry).where(
-                CaseEntry.case_id == case["case_id"], CaseEntry.producer_execution_id.is_not(None)
-            )
+            select(CaseEntry).where(CaseEntry.case_id == case["case_id"], CaseEntry.producer_execution_id.is_not(None))
         )
     }
-    assert supports[b].adopted is True and supports[a].adopted is False
+    assert supports[a].adopted is True and b not in supports
     loaded = CasePool(run_id)
-    loaded.load_storage(db_session)
-    assert loaded.case_runtime[case["case_id"]]["state"] == "resolved"
+    loaded.load_storage(storage_for(db_session))
+    assert loaded.case_runtime[case["case_id"]]["promised"] is True
+    calls = [item["call_id"] for item in loaded.deliveries[a] if item["tool_name"] != "promise_case"]
+    assert sorted(calls) == [fixture_id(__name__, "first"), fixture_id(__name__, "second")]
     restored = CasePool(run_id)
-    restored.restore_storage(db_session, {b})
-    assert restored.search()[0]["state"] == "pending"
+    restored.restore_storage(storage_for(db_session), {a})
+    # 无支持的案例随废弃执行整体退场
+    assert restored.search() == []
 
 
 @pytest.mark.asyncio
@@ -208,7 +217,7 @@ async def test_actual_usage_duplicate_is_durable_and_does_not_double_charge(db_s
         source="preprocess",
         target=f"audit:{run_id}",
         run_id=run_id,
-        invocation_id="usage-inv",
+        invocation_id=fixture_id(__name__, "usage-inv"),
         message_id=f"{run_id}:usage:1",
         payload={
             "method": "nonagent_usage",
@@ -223,20 +232,18 @@ async def test_actual_usage_duplicate_is_durable_and_does_not_double_charge(db_s
             },
         },
     )
-    audit = AuditModule(bus, run_id, get_session_factory())
+    audit = AuditModule(bus, run_id, storage_factory(get_session_factory()))
     bus.publish(message)
     bus.publish(message)
     await audit.close()
-    audit = AuditModule(bus, run_id, get_session_factory())
+    audit = AuditModule(bus, run_id, storage_factory(get_session_factory()))
     bus.publish(message)
     await audit.close()
     db_session.expire_all()
     from src.storage.models import ModelCall
 
-    # 2026-10-16 3NF：独立调用与用量同列于 model_calls（用量与实报总量是同一行的事实）
-    calls = list(
-        db_session.scalars(select(ModelCall).where(ModelCall.standalone_run_id == run_id))
-    )
+    # 独立调用与用量同列于 model_calls（用量与实报总量是同一行的事实）
+    calls = list(db_session.scalars(select(ModelCall).where(ModelCall.standalone_run_id == run_id)))
     assert len(calls) == 1
     assert calls[0].prompt_tokens == 10
     assert calls[0].reported_total_tokens == 10

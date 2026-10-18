@@ -1,5 +1,5 @@
 /**
- * TimelineTrack - 叙事时间轴主视图组件（2026-08-20 事件森林版）
+ * TimelineTrack - 叙事时间轴主视图组件
  *
  * - 一棵树=一个节点，按 derived_event_order 均匀排布
  * - anchorX 均匀分布 + 最小间距微调，anchorY 仍按 progress 插值张力曲线

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import uuid
 from itertools import count
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+
+from tests.support.storage_fixtures import storage_for
 
 ENDPOINTS = (
     "tabs/dashboard",
@@ -24,22 +26,28 @@ ENDPOINTS = (
 
 
 def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
-    """身份和模型训练种子固定，前后版本读取同一份提交后的记录与模型产物"""
+    """固定 UUIDv7 时间与随机输入，完整快照保留主键和跨接口引用关系"""
+    from src.storage import ids
+
+    task_sequence = count(1)
+    timestamp_ms = 1_700_000_000_000
+    monkeypatch.setattr(ids, "_last_ms", timestamp_ms)
+    monkeypatch.setattr(ids, "_random", 0)
+    monkeypatch.setattr(ids, "time", SimpleNamespace(time_ns=lambda: timestamp_ms * 1_000_000))
+    monkeypatch.setattr(
+        ids,
+        "secrets",
+        SimpleNamespace(randbits=lambda bits: 0, token_hex=lambda size: f"{next(task_sequence):0{size * 2}x}"),
+    )
     from src.config import settings
     from src.metrics.queries.global_stats import save_global_stats
     from src.workflows.topic import run_topic_model
-    from tests.support import chapter_annotation_helpers, timeline_contract_helpers
     from tests.support.chapter_annotation_helpers import relation_fact
     from tests.support.timeline_contract_helpers import create_timeline_contract_scenario
 
-    sequence = count()
-    monkeypatch.setattr(uuid, "uuid4", lambda: uuid.uuid5(uuid.NAMESPACE_URL, f"module-contract:{next(sequence)}"))
-    monkeypatch.setattr(chapter_annotation_helpers, "uuid4", uuid.uuid4)
-    # 夹具模块各自 from uuid import uuid4 绑定在导入期：逐个改回序列身份，保证捕获可复现
-    monkeypatch.setattr(timeline_contract_helpers, "uuid4", uuid.uuid4)
     scenario = create_timeline_contract_scenario(
         session,
-        # 最终保留三角人物关系，避开旧版本空图故障及二分图 HITS 重根
+        # 最终保留三角人物关系，避免空图与二分图 HITS 重根
         final_relations=[
             relation_fact(chapter_id=5, from_name=left, to_name=right, relation_type="友情")
             for left, right in [("顾承渊", "苏映雪"), ("顾承渊", "陆遥"), ("苏映雪", "陆遥")]
@@ -106,12 +114,10 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
             ],
         },
     )
-    from tests.support import diagnosis_helpers
-
-    monkeypatch.setattr(diagnosis_helpers, "uuid4", uuid.uuid4)
     from sqlalchemy import select
 
     from src.storage.models import ChapterAnnotation, EventDeclaration
+    from tests.support import diagnosis_helpers
 
     # 声明身份是铸造 uuid，场景中的 node_id 是本地键；分组按本地键解析到正式声明身份
     declaration_of = {
@@ -139,8 +145,10 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
     _seed_complete_event_contract(draft, created)
     diagnosis_helpers.persist_event_draft(session, draft)
     monkeypatch.setattr(settings.topic_model, "min_paragraph_train_tokens", 1)
-    asyncio.run(run_topic_model(scenario.run_id, session, num_topics=2, passes=1, iterations=10, force=True))
-    save_global_stats(session, scenario.run_id)
+    asyncio.run(
+        run_topic_model(scenario.run_id, storage_for(session), num_topics=2, passes=1, iterations=10, force=True)
+    )
+    save_global_stats(storage_for(session), scenario.run_id)
     session.commit()
     return scenario
 
@@ -284,6 +292,10 @@ def normalize(value: Any, path: tuple[str, ...] = (), *, stable_collections: boo
         value = _mask_sequence_ids(value)
     if path in {("results", "file_path"), ("export", "generated_at")}:
         return "<runtime>"
+    if path[:2] == ("results", "missing_fields") and isinstance(value, str):
+        marker = "topic_model_artifact_missing: "
+        if marker in value:
+            return value.split(marker, 1)[0] + marker + "<runtime>）"
     if isinstance(value, dict):
         return {
             key: normalize(item, (*path, key), stable_collections=stable_collections) for key, item in value.items()

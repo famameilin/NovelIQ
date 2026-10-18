@@ -1,9 +1,4 @@
-"""
-任务生命周期响应模型
-
-说明: 自 src/api/models/responses.py 拆出任务状态枚举、任务创建/继续/状态查询、
-任务列表与批量删除等任务生命周期响应模型，字段与语义保持不变。
-"""
+"""任务生命周期响应模型：任务状态枚举、任务创建/继续/状态查询、任务列表与批量删除"""
 
 from datetime import datetime
 
@@ -12,7 +7,6 @@ from pydantic import BaseModel, Field
 from src.storage.task_status import TaskStatus
 
 __all__ = ["TaskStatus"]
-
 
 
 class UploadResponse(BaseModel):
@@ -26,7 +20,7 @@ class CreateTaskResponse(BaseModel):
     """
     任务已启动响应（创建/继续/重分析同一形状，message 由端点显式给出）
 
-    说明: 对应 POST /api/novels/{novel_id}/tasks、.../{task_id}/resume、/reanalyze
+    对应 POST /api/novels/{novel_id}/tasks、.../{task_id}/resume、/reanalyze
     """
 
     novel_id: str
@@ -41,8 +35,7 @@ ReanalyzeResponse = CreateTaskResponse
 
 class StatusResponse(BaseModel):
     """
-    说明: 添加 sub_stage, current, total, message, llm_outputs 字段，
-          使 HTTP 轮询也能返回详细进度信息，与 WebSocket 行为一致
+    任务状态响应：HTTP 轮询返回详细进度信息，与 WebSocket 行为一致
     """
 
     novel_id: str

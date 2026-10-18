@@ -1,5 +1,5 @@
 /**
- * TopicsPage - 主题脉络页面（2026-08-31 固定工作区）
+ * TopicsPage - 主题脉络页面
  *
  * 以业务页签保留主题总览、完整分布、主题演进、主题迁移和主题情绪五类指标
  */
@@ -62,7 +62,7 @@ function balancedPageItems<T>(items: readonly T[], page: number, maxPageSize: nu
 }
 
 /**
- * 2026-08-31，作用：展示所选主题的核心分析字段
+ * 展示所选主题的核心分析字段
  * 简要说明：将占比、代表词、净情绪、加权文本量和最高章节放在同一信息面
  */
 function TopicDetailPanel({
@@ -163,7 +163,7 @@ export function TopicsPage() {
 
   const urlTaskId = searchParams.get("task_id");
 
-  // 2026-08-13 P1-2: 小说作用域任务守卫——跨小说切换后旧小说的任务
+  // 小说作用域任务守卫——跨小说切换后旧小说的任务
   // 不得用于新小说的查询，也不得回写固化成新小说 URL（模式同 GraphPage）
   const { storeTaskId, urlTaskSyncRef } = useNovelScopedTask(novelId, urlTaskId);
 

@@ -1,18 +1,18 @@
-"""诊断简洁索引与实际包含端点，不改变原文绑定和业务写入校验（2026-10-16 全库 3NF 改造）
+"""诊断简洁索引与实际包含端点，不改变原文绑定和业务写入校验
 
 夹具自足：真实标注来源链直接写入章级声明（event_declarations + 证据/参与者关系行），
-读取面经 build_diagnosis_tools 的真实工具原形；不依赖其它切片的旧写面夹具。
+读取面经 build_diagnosis_tools 的真实工具原形。
 """
 
 from __future__ import annotations
 
 import json
-from uuid import uuid4
 
 import pytest
 
 from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
+from src.storage import new_id
 from src.storage.models import DeclarationParticipant
 from tests.agents.test_diagnosis_organization import organization_case as organization_case
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -27,6 +27,7 @@ from tests.support.event_tree_fixtures import (
     publish_draft,
     report_case_anchor,
 )
+from tests.support.storage_fixtures import fixture_id, natural_record, storage_for
 
 LONG_SUMMARY = "顾霜寻路并点灯。" * 200
 
@@ -61,7 +62,8 @@ def declaration_case(db_session):
         status="resolved",
     )
     db_session.commit()
-    draft = EventOrganizationDraft(db_session, run_id, session_id)
+    draft = EventOrganizationDraft(storage_for(db_session), run_id, session_id)
+    draft.fixture_session = db_session
     draft.case_id = report_case_anchor(run_id)
     draft.producer_invocation_id = execution_id
     return draft
@@ -70,26 +72,26 @@ def declaration_case(db_session):
 def test_declaration_index_keeps_paragraphs_and_detail_keeps_full_source(declaration_case):
     draft = declaration_case
     identifiers = list(draft._declarations())
-    paragraph_id = first_paragraph(draft.session, draft.run_id).paragraph_id
+    paragraph_id = first_paragraph(draft.fixture_session, draft.run_id).paragraph_id
     # 参与者是正式关系行：索引不携带无界人物列表，详情完整保留全部来源
-    draft.session.add(
+    draft.fixture_session.add(
         DeclarationParticipant(
-            participant_id=str(uuid4()),
+            participant_id=new_id(),
             declaration_id=identifiers[0],
             participant_ordinal=1,
-            entity_id=ensure_character(draft.session, run_id=draft.run_id, name="贺重明"),
+            entity_id=ensure_character(draft.fixture_session, run_id=draft.run_id, name="贺重明"),
             role="旁观",
             action="寻路" * 80,
         )
     )
-    draft.session.flush()
+    draft.fixture_session.flush()
     tools = {
         tool.name: tool
         for tool in build_diagnosis_tools(
-            draft.session,
+            storage_for(draft.fixture_session),
             draft.run_id,
             organization_draft=draft,
-            execution_id="read-surface",
+            execution_id=fixture_id(__name__, "read-surface"),
         )
     }
     first = json.loads(tools["search_events"].invoke({"limit": 1}))
@@ -111,9 +113,7 @@ def test_declaration_index_keeps_paragraphs_and_detail_keeps_full_source(declara
     # 索引段号仍经正式原文绑定，不借简洁读取绕过证据校验
     source_evidence = draft._declarations()[identifiers[0]]["evidence"][0]
     assert indexed["evidence"][0]["paragraph_id"] == source_evidence["paragraph_id"]
-    bound = draft.bind_evidence(
-        [OrganizationEvidence(paragraph_id=source_evidence["paragraph_id"], quote="寻路")]
-    )[0]
+    bound = draft.bind_evidence([OrganizationEvidence(paragraph_id=source_evidence["paragraph_id"], quote="寻路")])[0]
     assert (bound.char_start, bound.char_end, bound.text_hash) == (
         source_evidence["char_start"],
         source_evidence["char_end"],
@@ -137,16 +137,18 @@ def test_saved_nested_event_read_and_rejection_identify_actual_top_level(db_sess
     )
     close_structure(db_session, draft, evidence_paragraph_id=0)
     publish_draft(db_session, case.run_id, draft)
-    fresh = EventOrganizationDraft(db_session, case.run_id, case.session_id)
+    fresh = EventOrganizationDraft(storage_for(db_session), case.run_id, case.session_id)
+    fresh.fixture_session = db_session
     fresh.case_id = report_case_anchor(case.run_id)
     fresh.producer_invocation_id = case.execution_id
     tools = {
         tool.name: tool
         for tool in build_diagnosis_tools(
-            db_session,
+            storage_for(db_session),
             case.run_id,
+            role="report",
             organization_draft=fresh,
-            execution_id="read-hierarchy",
+            execution_id=fixture_id(__name__, "read-hierarchy"),
         )
     }
     detail = json.loads(tools["read_event"].invoke({"node_id": child, "kind": "event"}))
@@ -202,12 +204,16 @@ def test_saved_nested_event_read_and_rejection_identify_actual_top_level(db_sess
 
 def test_draft_parent_change_is_reflected_in_reads_without_rewriting_child(declaration_case):
     draft = declaration_case
-    draft, _meta = identity_every_declaration(draft.session, draft.run_id)
+    draft, _meta = identity_every_declaration(draft.fixture_session, draft.run_id)
     child, parent = list(draft.events)
     assert draft.read_events([child])[0]["is_top_level"] is True
     before = draft.events[child].model_dump(mode="json")
-    draft.contain(parent_event_id=parent, child_event_id=child,
-                  reason="父级问题明确包含子问题", evidence=[OrganizationEvidence(paragraph_id=0)])
+    draft.contain(
+        parent_event_id=parent,
+        child_event_id=child,
+        reason="父级问题明确包含子问题",
+        evidence=[OrganizationEvidence(paragraph_id=0)],
+    )
     detail = draft.read_events([child])[0]
     assert detail["parent_event_id"] == detail["top_level_event_id"] == parent
     assert detail["is_top_level"] is False
@@ -222,15 +228,17 @@ async def test_shared_text_reader_binds_exact_original_and_rejects_unmatched_occ
     from src.utils.identity import text_digest
 
     draft = declaration_case
-    row = draft.session.get(Paragraph, {"run_id": draft.run_id, "paragraph_id": 0})
+    row = natural_record(draft.fixture_session, Paragraph, {"run_id": draft.run_id, "paragraph_id": 0})
     quote = row.text[:2]
     tools = {
         item.name: item
         for item in build_diagnosis_tools(
-            draft.session,
+            storage_for(draft.fixture_session),
             draft.run_id,
             organization_draft=draft,
-            text_search=TextSearchService(draft.session, run_id=draft.run_id, semantic_enabled=False),
+            text_search=TextSearchService(
+                storage_for(draft.fixture_session), run_id=draft.run_id, semantic_enabled=False
+            ),
         )
     }
     result = json.loads(await tools["read_text"].ainvoke({"paragraph_id": 0, "quote": quote}))
@@ -259,10 +267,13 @@ async def test_shared_search_embedding_failure_stops_program_before_later_operat
     observer = MagicMock()
     runtime = DiagnosisProgramRuntime(
         build_diagnosis_tools(
-            draft.session,
+            storage_for(draft.fixture_session),
             draft.run_id,
+            role="report",
             organization_draft=draft,
-            text_search=TextSearchService(draft.session, run_id=draft.run_id, embedding_client=client),
+            text_search=TextSearchService(
+                storage_for(draft.fixture_session), run_id=draft.run_id, embedding_client=client
+            ),
         ),
         observer=observer,
     )
@@ -276,7 +287,9 @@ async def test_shared_text_argument_rejection_remains_repairable_in_same_program
     from src.agents.diagnosis.program_runtime import DiagnosisProgramRuntime
 
     draft = declaration_case
-    runtime = DiagnosisProgramRuntime(build_diagnosis_tools(draft.session, draft.run_id, organization_draft=draft))
+    runtime = DiagnosisProgramRuntime(
+        build_diagnosis_tools(storage_for(draft.fixture_session), draft.run_id, organization_draft=draft)
+    )
     result = json.loads(
         await runtime.execute(
             'bad = read_text(paragraph_id=0, quote="不存在于原文的引文")\ngood = read_text(paragraph_id=0)'
@@ -290,7 +303,7 @@ async def test_shared_text_argument_rejection_remains_repairable_in_same_program
 def test_diagnosis_reads_survive_interrupted_pipeline_commit(declaration_case, monkeypatch):
     """管线会话提交被打断（PREPARED 中间态）时，诊断读取必须照常工作
 
-    2026-10-17 run 52cbb1ac 实证：诊断域曾与管线会话共用；管线会话被流式 emitter
+    诊断域曾与管线会话共用；管线会话被流式 emitter
     持续 commit，一次提交中途被打断留在 PREPARED 后，read_event 的声明读取抛
     "This session is in 'prepared' state" 并被伪装成工具依赖故障。诊断域必须经
     open_diagnosis_session 独立成会话：开工先提交管线会话，此后读写与发布不依赖
@@ -305,19 +318,24 @@ def test_diagnosis_reads_survive_interrupted_pipeline_commit(declaration_case, m
     from src.config.schemas.model import WeightedModelSettings
 
     draft = declaration_case
-    pipeline = draft.session
+    pipeline = draft.fixture_session
     monkeypatch.setattr(
         settings.models,
         "model_pool",
         [WeightedModelSettings("read-surface-model", "https://read.example/v1", "read-key")],
     )
     monkeypatch.setattr(settings.models, "diagnosis_model_id", "read-surface-model")
-    domain_session = open_diagnosis_session(pipeline)
+    from sqlalchemy.orm import sessionmaker
+
+    from src.storage import Storage
+    from src.storage.operations import OperationRunner
+
+    domain_session = open_diagnosis_session(Storage(_runner=OperationRunner(sessionmaker(bind=pipeline.get_bind()))))
     domain = domain_module.create_diagnosis_domain(
-        session=domain_session,
+        session=storage_for(domain_session),
         run_id=draft.run_id,
-        novel_id="test-novel",
-        execution_id="interrupted-pipeline-commit",
+        novel_id=fixture_id(__name__, "test-novel"),
+        execution_id=fixture_id(__name__, "interrupted-pipeline-commit"),
         novel_title=None,
     )
     try:
@@ -335,4 +353,4 @@ def test_diagnosis_reads_survive_interrupted_pipeline_commit(declaration_case, m
             draft.read_declarations([source])
     finally:
         domain.close()
-        domain_session.close()
+        pipeline.rollback()

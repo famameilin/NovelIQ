@@ -108,11 +108,7 @@ async def delete_task(
     """
     删除单个分析任务
 
-    删除顺序:
-        1. DB 状态判断（任务是否存在、是否属于该小说、是否运行中）
-        2. 清理运行态缓存（停止后台协程）
-        3. 删除 DB 记录
-        4. 删除内存缓存
+    删除顺序: DB 状态判断 → 清运行态缓存 → 删 DB 记录 → 删内存缓存
     """
     return await task_application_service.delete_task(novel_id, task_id)
 
@@ -126,7 +122,6 @@ async def get_task_status(
     """
     查询单个任务状态
 
-    2026-08-20 阶段 3.1：消除双查询，使用 task_service.get_task 一次获取完整状态
     数据库是唯一真相源，队列运行期持续写回状态到 DB
     """
     try:
@@ -162,9 +157,7 @@ async def cancel_task(
     task_application_service: TaskApplicationService = Depends(get_task_application_service),
 ):
     """
-    取消正在运行的分析任务
-
-    说明: 立即停止——停止新派发并中断在飞执行；未完成的 work 不保存
+    取消正在运行的分析任务：立即停止——停止新派发并中断在飞执行；未完成的 work 不保存
     """
     return await task_application_service.cancel_task(novel_id, task_id)
 

@@ -1,17 +1,9 @@
 /**
- * 小说作用域任务守卫 Hook（2026-08-13 P1-2）
+ * 小说作用域任务守卫 Hook
  *
- * 提取自 GraphPage/TimelinePage 的既有守卫模式，供其余分析页统一使用：
- *
- * 1. `storeTaskId`：只有 store 的 currentNovelId 与当前路由 novelId 一致时，
- *    currentTaskId 才被视为当前小说的任务。SPA 内跨小说切换后、store 尚未同步
- *    的瞬间，旧小说的 task_id 不得被用于新小说的 SSE/查询（否则 404），
- *    也不得被回写固化成新小说 URL。
- *
- * 2. URL→store 同步：URL 上的 task_id 是 deep-link 权威，必须先同步进 store。
- *    `urlTaskSyncRef` 记录"待同步的 deep-link task_id"，URL 回写前先核对，
- *    防止旧 store 状态抢先 replace 掉合法 deep-link（GraphPage/TimelinePage
- *    同款机制）。
+ * `storeTaskId`：只有 store 的 currentNovelId 与当前路由 novelId 一致时，currentTaskId
+ * 才视为当前小说的任务，否则不得用于 SSE/查询，也不得回写固化成新小说 URL
+ * URL 上的 task_id 是 deep-link 权威，先同步进 store 再回写，避免被旧 store 状态覆盖
  */
 import { useEffect, useRef } from "react";
 import { useNovelStore } from "@/store/novelStore";

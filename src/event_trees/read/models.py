@@ -9,7 +9,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class EventNodeRow:
-    """2026-08-19 用于返回章节事件节点"""
+    """返回章节事件节点"""
 
     event_id: str
     chapter_id: int
@@ -31,7 +31,7 @@ class EventNodeRow:
 
 @dataclass(frozen=True)
 class EventEdgeRow:
-    """2026-08-19 用于返回章节事件因果边"""
+    """返回章节事件因果边"""
 
     edge_id: str
     edge_type: str
@@ -46,7 +46,7 @@ class EventEdgeRow:
 
 @dataclass(frozen=True)
 class ForeshadowingEdgeRow:
-    """2026-09-13 用于返回章节伏笔树视图（伏笔即事件树，一行一棵树）"""
+    """返回章节伏笔树视图（伏笔即事件树，一行一棵树）"""
 
     root_event_id: str
     run_id: str
@@ -61,7 +61,7 @@ class ForeshadowingEdgeRow:
 
 @dataclass(frozen=True)
 class EventSecondaryGroupRow:
-    """2026-08-19 用于返回事件树的次因分支"""
+    """返回事件树的次因分支"""
 
     target_event_id: str
     branch: list[str]
@@ -69,7 +69,7 @@ class EventSecondaryGroupRow:
 
 @dataclass(frozen=True)
 class EventTreeRow:
-    """2026-08-19 用于返回一棵事件树"""
+    """返回一棵事件树"""
 
     tree_id: str
     root_event_id: str
@@ -82,7 +82,7 @@ class EventTreeRow:
 
 @dataclass(frozen=True)
 class EventForestSnapshot:
-    """2026-08-19 用于返回章节边界内的事件森林"""
+    """返回章节边界内的事件森林"""
 
     chapter_id: int
     chapter_order: int

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from src.storage.repositories import StatsRepository
 from tests.support.paragraph_fixtures import create_completed_run, create_run_with_status
+from tests.support.storage_fixtures import task_for_run
 
 
 def _insert_run_with_global_stats(db_session) -> tuple[str, str]:
@@ -32,13 +33,14 @@ def _insert_run_with_global_stats(db_session) -> tuple[str, str]:
             ("rhythm_min", 0.22),
         ],
     )
+    db_session.commit()
     return novel_id, run_id
 
 
 def _get_global_stats(api_client, novel_id: str, run_id: str):
     return api_client.get(
         f"/api/novels/{novel_id}/metrics/global-stats",
-        params={"task_id": run_id[:8]},
+        params={"task_id": task_for_run(run_id)},
     )
 
 

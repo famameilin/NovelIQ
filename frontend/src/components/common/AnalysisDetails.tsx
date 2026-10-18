@@ -13,7 +13,7 @@ interface AnalysisDetailsProps {
 }
 
 /**
- * 2026-08-31，作用：承载分析页中保留的技术口径和次级指标
+ * 承载分析页中保留的技术口径和次级指标
  * 简要说明：主视图保持可读，用户仍可按需展开查看完整分析数据
  */
 export function AnalysisDetails({
@@ -28,7 +28,7 @@ export function AnalysisDetails({
   const [hasOpened, setHasOpened] = useState(defaultOpen);
 
   /**
-   * 2026-08-31，作用：延迟挂载折叠区中的图表内容
+   * 延迟挂载折叠区中的图表内容
    * 简要说明：等待容器展开后再初始化图表，避免零尺寸画布和空白图表
    */
   function handleToggle(event: SyntheticEvent<HTMLDetailsElement>) {

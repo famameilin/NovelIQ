@@ -2,13 +2,6 @@
 章节内 agent 会话图：程序执行、结束请求与程序完整性检查
 """
 
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：graph.py 大文件拆分——agent 图（_route_after_agent_agent /
-# build_agent_graph）迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；agent 节点与批执行核心分别复用
-# graph._build_agent_node 与 tool_batch._build_tool_batch_node，graph.py 保留
-# build_agent_graph 的 re-export，既有导入方零改动。
-
 from __future__ import annotations
 
 from collections.abc import Callable

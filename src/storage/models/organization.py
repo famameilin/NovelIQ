@@ -1,4 +1,8 @@
-"全书叙事组织 ORM 模型（2026-10-16 全库 3NF 改造）"
+"""
+全书叙事组织 ORM 模型
+
+不复制 run/session/work；producer 是该判断的真实作者，不由端点作者替代。
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"从 src/diagnosis/completion.py 分离的具名物理读取"
+"final diagnosis completion 的具名物理读取"
 
 from __future__ import annotations
 

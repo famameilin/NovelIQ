@@ -68,11 +68,7 @@ AGENT_ROLE_SCOPES: dict[str, str] = {
 
 
 def _candidate_views(candidates: list[DialogueCandidate]) -> list[dict]:
-    """2026-09-11 用于渲染对话候选表（读者块切片与写者全章表共用）
-
-    2026-09-19 键名与落库/工具面统一为 candidate_key（原名 id）：这一个键既用来订正记录
-    （dialogue(candidate_key=…)），也是记录行在库里的稳定标识，全链路只有这一个名字。
-    """
+    """用于渲染对话候选表（读者块切片与写者全章表共用）"""
     return [
         {
             "candidate_index": index,
@@ -85,7 +81,7 @@ def _candidate_views(candidates: list[DialogueCandidate]) -> list[dict]:
 
 
 def _render_paragraph_numbered_text(chapter_text: str, paragraph_info: ChapterParagraphInfo | None) -> str:
-    """2026-09-18 用于按段首可见号渲染正文（每段一行，以 `N：` 开头）
+    """用于按段首可见号渲染正文（每段一行，以 `N：` 开头）
 
     N=段首可见号（见 ChapterParagraphInfo.visible_ids：正文自带 `N：` 前缀时沿用该号，
     否则按块内 1 基顺序号）。段落文本本体逐字保留；正文已带前缀时不重复渲染一次号。
@@ -122,8 +118,7 @@ def build_agent_message(
     paragraph_views = _render_paragraph_numbered_text("", paragraph_info)
     order_attr = f' chapter_order="{chapter_order}"' if chapter_order is not None else ""
     sections = [
-        f'<CurrentChapter role="{role}"{order_attr} chapter_id="{chapter_id}">\n'
-        f"{paragraph_views}\n</CurrentChapter>",
+        f'<CurrentChapter role="{role}"{order_attr} chapter_id="{chapter_id}">\n{paragraph_views}\n</CurrentChapter>',
         "<DialogueCandidates>\n"
         f"total: {len(candidates)}\n"
         f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"

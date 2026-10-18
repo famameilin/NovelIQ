@@ -1,14 +1,8 @@
 /**
  * GraphLegend 组件
  *
- * 动态显示关系图谱中节点类型和关系类型的图例，从实际数据派生内容
- *
- *   - 重构为动态生成模式，根据传入的实际 entityTypes/relationTypes 数据渲染图例
- *   - 避免把节点类型和关系类型写死在前端图例里
- *   - 颜色映射与 ForceGraph.tsx 的 ENTITY_TYPE_COLORS / RELATION_TYPE_COLORS 保持一致
- *
- *   - 颜色从硬编码 HSL 改为 CSS 变量（使用 var(--xxx) 内联样式）
- *   - 与 ForceGraph 的"一书一色"主题系统完全同步
+ * 按传入的 entityTypes/relationTypes 动态渲染节点类型与关系类型图例，
+ * 颜色取 CSS 变量，与 ForceGraph 的配色主题同步
  */
 
 import { cn } from "@/lib/cn";

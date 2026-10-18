@@ -113,11 +113,9 @@ function EmptyTaskPrompt({ onAnalyze, isAnalyzing }: {
 }
 
 /**
- * 2026-04-28，任务：分析详情页单屏 Tabs 改造
- * 修改原因：仪表盘页补齐统一单屏工作区，后续模块统一走共享布局边界
+ * 仪表盘页使用共享单屏工作区布局
  *
- * 2026-04-29，任务：仪表盘收口
- * 修改原因：仪表盘不再拆成两个 tab，结构与曲线预览直接并回同一面板，减少无意义切换
+ * 仪表盘不拆 tab，结构与曲线预览放在同一面板
  */
 export function NovelDetailPage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -129,7 +127,7 @@ export function NovelDetailPage() {
 
   const urlTaskId = searchParams.get("task_id");
 
-  // 2026-08-13 P1-2: 小说作用域任务守卫——跨小说切换后 store 中旧小说的任务
+  // 小说作用域任务守卫——跨小说切换后 store 中旧小说的任务
   // 不得用于新小说的 SSE/查询，也不得回写固化成新小说 URL（模式同 GraphPage）
   const { storeTaskId, urlTaskSyncRef } = useNovelScopedTask(novelId, urlTaskId);
 
@@ -155,10 +153,8 @@ export function NovelDetailPage() {
     },
   });
 
-  // 把 store 的当前任务反映到 URL，方便分享与刷新恢复；
-  // 2026-08-13 P1-2: URL 写回同样加小说作用域守卫——跨小说切换瞬间
-  // 旧小说的 task_id 不得固化成新小说 URL；URL 上尚未同步进 store 的
-  // deep-link 也不得被旧 store 状态抢先覆盖（GraphPage/TimelinePage 同款机制）
+  // 把 store 的当前任务反映到 URL；写回前加小说作用域守卫：
+  // 旧小说的 task_id 不得固化进新小说 URL，未同步进 store 的 deep-link 也不得被旧 store 状态覆盖
   useEffect(() => {
     if (!novelId) return;
     if (!storeTaskId) {
@@ -183,9 +179,7 @@ export function NovelDetailPage() {
     queryFn: () => getTaskStatus(novelId!, storeTaskId!),
     enabled,
     staleTime: 5 * 1000,
-    // 2026-08-08 用于让 resume 后的任务自动进入进度态：
-    // taskId 不变时 queryKey 不变化，缓存会停留在旧终态（如 cancelled），
-    // 活跃期每 3 秒轮询一次，终态后停止轮询
+    // 活跃期每 3 秒轮询一次，终态后停止轮询；taskId 不变时靠轮询刷新缓存的终态
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       return status === "pending" || status === "running" || status === "cancelling" ? 3000 : false;
@@ -224,7 +218,7 @@ export function NovelDetailPage() {
       const result = await resumeAnalysisTask(novelId, normalizedTaskId);
       queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
       queryClient.invalidateQueries({ queryKey: ["task-status", novelId, normalizedTaskId] });
-      // 2026-08-14 D5：resume 是同 task_id 开新轮，必须清空旧轮 SSE 数据
+      // resume 是同 task_id 开新轮，必须清空旧轮 SSE 数据
       // （setTask 对同 id 幂等，store 不会自动重置）
       useStreamStore.getState().resetStreamForTask(result.task_id);
       setTask(result.task_id);
@@ -274,7 +268,7 @@ export function NovelDetailPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // 仪表盘 tab：一次拉取全部八段复合数据（2026-08-29 tab 级 API 统一）
+  // 仪表盘 tab：一次拉取全部八段复合数据
   const dashboardQuery = useQuery({
     queryKey: tabQueryKey("dashboard", novelId, storeTaskId),
     queryFn: () => getDashboardTab(novelId!, storeTaskId!),
@@ -313,10 +307,6 @@ export function NovelDetailPage() {
       className="px-5"
       headerClassName="mb-3"
     >
-      {/*
-        2026-04-29，任务：仪表盘收口
-        修改原因：仪表盘仍走 tabs 公共工作区，但只保留一个 tab，统一和其他分析页的边距与面板语义。
-      */}
 
       {/* 未选择任务时，提示开始分析 */}
       {!storeTaskId && (

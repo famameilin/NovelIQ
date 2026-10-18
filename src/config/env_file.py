@@ -1,4 +1,4 @@
-"""2026-09-10 .env 白名单键编辑器（设置页模型凭据通道）
+""".env 白名单键编辑器（设置页模型凭据通道）
 
 .env 是模型凭据的唯一存储（runtime_env.py 单一解析边界）。
 本模块是它的受控编辑器：只允许触碰 MODEL_ENV_KEYS 白名单内的键，
@@ -25,7 +25,7 @@ _ENV_LINE_PATTERN = re.compile(r"^\s*(?:(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)\
 
 
 class EnvFileError(ValueError):
-    """2026-09-10 .env 白名单校验失败（非白名单键或空键名）"""
+    """.env 白名单校验失败（非白名单键或空键名）"""
 
 
 def _validate_whitelist(updates: Mapping[str, str | None]) -> None:

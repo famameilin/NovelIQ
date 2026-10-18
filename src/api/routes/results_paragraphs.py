@@ -83,12 +83,9 @@ async def get_emotion_trend(
     window_paragraphs: Annotated[int, Query(description="目标窗口大小，服务端钳制到 5~40")] = 20,
 ) -> list[EmotionTrendWindow]:
     """
-    2026-08-15 提供按 position 区间和每窗段落数重聚合的情绪趋势数据
-
     获取情绪趋势窗口聚合序列（展示层重采样，不回写数据库）
 
-    每窗段落数作用于 range 过滤后的段落集；窗口大小由服务端钳制到 5~40，
-    深缩放段数不足时最后一个窗口自然退化为实际剩余段落数。
+    每窗段落数作用于 range 过滤后的段落集；窗口大小由服务端钳制到 5~40。
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)

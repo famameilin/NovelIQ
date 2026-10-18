@@ -1,4 +1,4 @@
-"""固定短语匹配器测试（§B2/§5.5）"""
+"""固定短语匹配器测试"""
 
 from __future__ import annotations
 

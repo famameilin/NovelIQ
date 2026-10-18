@@ -1,12 +1,7 @@
-"""
-任务取消检查与 DB 领取状态机
+"""任务取消检查与 DB 领取状态机
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（analysis_service.py → analysis/ 子模块）
-说明: 从 src/api/services/analysis_service.py 拆出取消检查（_is_cancelled）与
-DB 领取状态机（_prepare_task_execution_claim/_claim_pending_run/_is_recent_resume_reset），
-以混入形式提供给 AnalysisService，行为保持不变。
+取消检查（_is_cancelled）与 DB 领取状态机（_prepare_task_execution_claim/
+_claim_pending_run/_is_recent_resume_reset）以混入形式提供给 AnalysisService。
 """
 
 from __future__ import annotations

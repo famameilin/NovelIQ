@@ -1,6 +1,4 @@
-"""
-EventBus.emit 的 sub_percent 透传测试。
-"""
+"""EventBus.emit 的 sub_percent 透传测试。"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -95,17 +93,11 @@ async def test_eventbus_preserves_sub_percent_from_context():
 
 @pytest.mark.asyncio
 async def test_eventbus_progress_message_without_sub_stage_preserves_phase_context():
-    """
-    验证 message-only progress 事件不会改写已有的 phase 级 sub_stage/sub_percent。
+    """验证 message-only progress 事件不会改写已有的 phase 级 sub_stage/sub_percent。
 
-    创建时间: 2026-04-28
-    任务: fix-level3-sse-phase-progress-contract
-    说明: Level3 mention 这类更细粒度节点只应刷新提示文案，EventBus 仍应沿用当前 phase
-          上下文，避免前端下方 sub 进度条从 phase 级跳成内部 mention 级。
+    Level3 mention 这类更细粒度节点只应刷新提示文案，EventBus 仍应沿用当前 phase
 
-    修改时间: 2026-04-28
-    任务: simplify-level3-sse-copy
-    修改说明: 提示文案统一收口成“正在收集证据”，前端不再感知内部步骤名。
+    提示文案统一收口成“正在收集证据”，前端不再感知内部步骤名。
     """
     task_manager = MagicMock()
     task_manager.update_progress = MagicMock()
@@ -149,12 +141,9 @@ async def test_eventbus_progress_message_without_sub_stage_preserves_phase_conte
 
 @pytest.mark.asyncio
 async def test_eventbus_calculates_percent_from_current_total():
-    """
-    验证 EventBus.emit 在事件没有提供 percent 时，根据 current/total 自动计算
+    """验证 EventBus.emit 在事件没有提供 percent 时，根据 current/total 自动计算
 
-    创建时间: 2026-04-11
-    任务: fix-thinking-percent-calculation
-    说明: 测试 thinking 事件没有 percent 字段时，EventBus 应根据 current/total 自动计算
+    测试 thinking 事件没有 percent 字段时，EventBus 应根据 current/total 自动计算
     """
     task_manager = MagicMock()
     task_manager.update_progress = MagicMock()
@@ -198,12 +187,7 @@ async def test_eventbus_calculates_percent_from_current_total():
 
 @pytest.mark.asyncio
 async def test_eventbus_calculates_percent_for_different_stages():
-    """
-    验证 EventBus._calculate_percent_for_stage 对不同阶段的计算
-
-    创建时间: 2026-04-11
-    任务: fix-thinking-percent-calculation
-    """
+    """验证 EventBus._calculate_percent_for_stage 对不同阶段的计算"""
     task_manager = MagicMock()
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
 
@@ -228,13 +212,9 @@ async def test_eventbus_calculates_percent_for_different_stages():
 
 @pytest.mark.asyncio
 async def test_eventbus_start_event_without_current_does_not_write_none_progress_fields():
-    """
-    验证 start 事件缺少 current 时，不会把 None 透传给 TaskManager。
+    """验证 start 事件缺少 current 时，不会把 None 透传给 TaskManager。
 
-    创建时间: 2026-04-20
-    任务: fix-eventbus-null-progress-write
-    说明: workflow 内部的 start 事件通常只有 stage/message，不带 current。
-          这里要求 EventBus 只写回已解析出的字段，避免 DB 非空列收到 None。
+    这里要求 EventBus 只写回已解析出的字段，避免 DB 非空列收到 None。
     """
     task_manager = MagicMock()
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
@@ -256,13 +236,9 @@ async def test_eventbus_start_event_without_current_does_not_write_none_progress
 
 @pytest.mark.asyncio
 async def test_emit_stage_complete_uses_stage_end_percent_instead_of_global_100() -> None:
-    """
-    验证阶段完成事件写回的 percent 使用当前阶段终点，而不是错误地统一写成 100。
+    """验证阶段完成事件写回的 percent 使用当前阶段终点，而不是错误地统一写成 100。
 
-    创建时间: 2026-04-28
-    任务: fix-stage-complete-percent-range
-    说明: 前端和 DB 都按全局 percent 解释阶段进度；
-          preprocess complete 若被写成 100，会污染当前阶段判断与后续 backfill 语义。
+    preprocess complete 若被写成 100，会污染当前阶段判断与后续 backfill 语义。
     """
     task_manager = MagicMock()
     bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
@@ -282,8 +258,7 @@ async def test_emit_stage_complete_uses_stage_end_percent_instead_of_global_100(
 
 @pytest.mark.asyncio
 async def test_emit_stage_start_resets_progress_context_and_never_writes_total_zero() -> None:
-    """
-    2026-08-13 P2: stage_start 是阶段边界，必须作废旧阶段的 current/total/percent
+    """stage_start 是阶段边界，必须作废旧阶段的 current/total/percent
     上下文；新阶段内不带进度字段的事件不得沿用旧阶段数值套新阶段区间算错 percent。
     同时 total 缺省（0）不得写回数据库（曾把 analysis_runs.total 从 100 清成 0）。
     """

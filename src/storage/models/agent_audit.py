@@ -1,4 +1,9 @@
-"模型与工具调用审计及消息发件箱 ORM 模型（2026-10-16 全库 3NF 改造）"
+"""
+模型与工具调用审计及消息发件箱 ORM 模型
+
+审计保持独立短事务；turn_ms = model_ms + tool_wall_ms 为读取计算；
+供应商实报与程序 fallback 明确区分；bytes 文档仅原样审计/展示，不用于业务查询/修改。
+"""
 
 from __future__ import annotations
 

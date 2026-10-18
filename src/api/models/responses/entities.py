@@ -1,8 +1,5 @@
-"""
-实体/短语/词向量响应模型
-
-说明: 自 src/api/models/responses.py 拆出 LTP 实体候选、固定短语命中、词向量契约与
-词性覆盖率/质心、角色/层级实体关系响应模型（§5.4/§5.6/§5.11 等），字段与语义保持不变。
+"""实体/短语/词向量响应模型：LTP 实体候选、固定短语命中、词向量契约与词性覆盖率/质心、
+角色/层级实体关系
 """
 
 from pydantic import BaseModel, Field
@@ -39,7 +36,7 @@ class EntityCandidate(BaseModel):
 
 
 class LinguisticEntitiesResponse(BaseModel):
-    """LTP 实体候选（§5.4/§6.1 审核面数据源）"""
+    """LTP 实体候选（审核面数据源）"""
 
     run_id: str
     source_kind: str = "ltp"
@@ -49,7 +46,7 @@ class LinguisticEntitiesResponse(BaseModel):
 
 
 class LinguisticPhrasesResponse(BaseModel):
-    """固定短语命中统计（§5.11）：正式密度与四字候选分开"""
+    """固定短语命中统计：正式密度与四字候选分开"""
 
     run_id: str
     total_char_count: int = 0
@@ -80,7 +77,7 @@ class PosCentroidEntry(BaseModel):
 
 
 class Word2VecStatsResponse(BaseModel):
-    """词向量契约与词性覆盖率/质心（§5.6/§5.11）
+    """词向量契约与词性覆盖率/质心
 
     pos_similarity_matrix 与 pos_centroids 行序一致（按 pos_group 升序），
     为组间余弦相似度对称矩阵（对角线为 1）；质心少于 2 组时为 null。

@@ -1,16 +1,23 @@
-"""诊断五个 write、两个读取入口及共享工具的生产契约"""
+"""诊断角色裁面（案例面/报告面）与共享工具的生产契约"""
 
 import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.agents.diagnosis.tools import WRITE_NAMES, build_diagnosis_tools
+from src.agents.diagnosis.case_write_tools import CASE_WRITE_TOOL_NAMES
+from src.agents.diagnosis.tools import build_diagnosis_tools
 from tests.agents.test_complete_event_invariants import draft_case as draft_case
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
-def _build_tools(ledger=None):
-    return {item.name: item for item in build_diagnosis_tools(MagicMock(), "run", evidence_ledger=ledger)}
+def _build_tools(ledger=None, role="case", **kwargs):
+    return {
+        item.name: item
+        for item in build_diagnosis_tools(
+            storage_for(MagicMock()), fixture_id(__name__, "run"), role=role, evidence_ledger=ledger, **kwargs
+        )
+    }
 
 
 def _materials():
@@ -24,17 +31,15 @@ def _materials():
     return repo
 
 
-def test_exact_five_writes_two_reads_and_shared_directory_has_no_old_bypass():
-    from src.agents.diagnosis.case_write_tools import CASE_WRITE_TOOL_NAMES
-
-    tools = _build_tools()
-    base_writes = WRITE_NAMES - set(CASE_WRITE_TOOL_NAMES)
-    assert {name for name in tools if name.startswith("write_")} == base_writes
-    assert WRITE_NAMES == base_writes | set(CASE_WRITE_TOOL_NAMES)
-    assert set(tools) == {
-        *base_writes,
-        "read_metrics",
-        "read_topics",
+def test_role_faces_expose_only_their_writes():
+    case_tools = _build_tools()
+    assert {"write_event", "write_conflict"} <= set(case_tools)
+    assert {"write_arc", "write_outcome", "write_diagnosis", "read_metrics", "read_topics"}.isdisjoint(case_tools)
+    report_tools = _build_tools(role="report")
+    assert {"write_arc", "write_outcome", "write_diagnosis", "read_metrics", "read_topics"} <= set(report_tools)
+    assert {"write_event", "write_conflict"}.isdisjoint(report_tools)
+    # 共享目录两个角色都有：搜索/读取、案例工具与 finish
+    shared = {
         "search_text",
         "read_text",
         "search_events",
@@ -42,49 +47,29 @@ def test_exact_five_writes_two_reads_and_shared_directory_has_no_old_bypass():
         "search_graph",
         "read_entity",
         "search_cases",
-        "push_case",
         "promise_case",
         "finish",
     }
-    assert len(tools) == 17  # 外层另有 execute_code，共18个工具名称；案例处置三写入装配 case 通道时才挂载
-    for name in WRITE_NAMES:
-        schema = tools[name].args_schema.model_json_schema() if name in tools else None
-        if schema is None:
-            continue
-        assert schema["additionalProperties"] is False
-    old_names = {"event", "register_narrative_arc", "submit_diagnosis", "get_topic_data", "prepare_diagnosis"}
-    assert old_names.isdisjoint(tools)
+    assert shared <= set(case_tools) and shared <= set(report_tools)
 
 
-def test_case_write_channel_mounts_annotation_writer_into_store():
-    from unittest.mock import MagicMock
-
-    from src.agents.diagnosis.case_write_tools import CASE_WRITE_TOOL_NAMES
-
-    store: dict[str, object] = {}
-    tools = {
-        item.name: item
-        for item in build_diagnosis_tools(MagicMock(), "run", case_id="case", case_writes_graph=MagicMock(),
-                                         case_writer_store=store)
-    }
-    assert {"write_entity", "write_relation", "write_dialogue"} <= set(tools)
-    assert all(
-        "caseid" in tool.args_schema.model_fields
-        for name, tool in tools.items()
-        if name in set(CASE_WRITE_TOOL_NAMES)
-    )
-    assert set(store) == {"case"}
+def test_case_write_channel_mounts_only_with_binding_and_requires_caseid():
+    assert set(CASE_WRITE_TOOL_NAMES).isdisjoint(_build_tools())
+    tools = _build_tools(case_binding=MagicMock(), case_writes_graph=MagicMock())
+    case_tools = {name: tools[name] for name in CASE_WRITE_TOOL_NAMES if name in tools}
+    assert set(case_tools) == set(CASE_WRITE_TOOL_NAMES)
+    assert all("caseid" in tool.args_schema.model_fields for tool in case_tools.values())
 
 
 def test_read_metrics_keeps_original_signals_and_named_material_fields():
     ledger = MagicMock()
     with (
-        patch("src.storage.repositories.StatsRepository") as stats,
+        patch("src.storage.access.StatisticsAccess.fetch_global_stats_dict") as stats,
         patch("src.diagnosis.queries.DiagnosisQueries", return_value=_materials()),
         patch("src.agents.diagnosis.tools.graph_signals", return_value={"nodes": 10}),
     ):
-        stats.return_value.fetch_global_stats_dict.return_value = {"tension": 0.8, "pace": 0.5}
-        data = json.loads(_build_tools(ledger)["read_metrics"].invoke({}))
+        stats.return_value = {"tension": 0.8, "pace": 0.5}
+        data = json.loads(_build_tools(ledger, role="report")["read_metrics"].invoke({}))
     assert data["aggregate"] == {"tension": 0.8, "pace": 0.5}
     assert data["pivots"] == [{"chapter_id": 3, "text": "转折原文", "event_type": "高潮"}]
     assert data["high_tension"][0]["paragraph_id"] == 7
@@ -99,38 +84,38 @@ def test_read_metrics_keeps_foreshadowing_and_does_not_turn_empty_data_into_fail
     repo.fetch_high_tension_chunks.return_value = []
     repo.fetch_foreshadowing_sources.return_value = [{"declaration_id": "actual-id", "summary": "庇护约定"}]
     with (
-        patch("src.storage.repositories.StatsRepository") as stats,
+        patch("src.storage.access.StatisticsAccess.fetch_global_stats_dict") as stats,
         patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo),
         patch("src.agents.diagnosis.tools.graph_signals", return_value={}),
     ):
-        stats.return_value.fetch_global_stats_dict.return_value = {}
-        data = json.loads(_build_tools()["read_metrics"].invoke({}))
+        stats.return_value = {}
+        data = json.loads(_build_tools(role="report")["read_metrics"].invoke({}))
     assert data["aggregate"] == {} and data["pivots"] == []
     assert data["foreshadowing"] == [{"declaration_id": "actual-id", "summary": "庇护约定"}]
 
 
 def test_metric_service_failure_is_raised_without_fake_empty_signals():
     with (
-        patch("src.storage.repositories.StatsRepository") as stats,
+        patch("src.storage.access.StatisticsAccess.fetch_global_stats_dict") as stats,
         patch("src.diagnosis.queries.DiagnosisQueries", return_value=_materials()),
         patch("src.agents.diagnosis.tools.graph_signals", side_effect=ConnectionError("graph dependency unavailable")),
     ):
-        stats.return_value.fetch_global_stats_dict.return_value = {}
+        stats.return_value = {}
         with pytest.raises(ConnectionError, match="dependency unavailable"):
-            _build_tools()["read_metrics"].invoke({})
+            _build_tools(role="report")["read_metrics"].invoke({})
 
 
 def test_topics_keep_actual_ids_weights_words_and_empty_is_literal():
     repo = _materials()
     with patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo):
-        tools = _build_tools()
+        tools = _build_tools(role="report")
         assert json.loads(tools["read_topics"].invoke({})) == {"topics": repo.fetch_topic_words.return_value}
         repo.fetch_topic_words.return_value = []
         assert json.loads(tools["read_topics"].invoke({})) == {"topics": []}
 
 
 def test_report_requires_exactly_one_input_and_failed_patch_preserves_report():
-    tools = _build_tools()
+    tools = _build_tools(role="report")
     tools["write_diagnosis"].invoke({"analysis": {"diagnosis": "有效报告"}})
     tools["write_diagnosis"].invoke({"patch": {"diagnosis": "明确修订"}})
     with pytest.raises(ValueError, match="必须且只能"):
@@ -145,10 +130,10 @@ def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_cas
     tools = {
         item.name: item
         for item in build_diagnosis_tools(
-            draft.session,
+            storage_for(draft.fixture_session),
             draft.run_id,
             organization_draft=draft,
-            execution_id="batch",
+            execution_id=fixture_id(__name__, "batch"),
         )
     }
     ids = list(draft._declarations())

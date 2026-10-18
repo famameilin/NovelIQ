@@ -40,9 +40,7 @@ def _set_model_environment(
 
 
 def test_load_flat_environment_fields(monkeypatch) -> None:
-    """
-    2026-08-08 用于验证四组配置从平铺环境变量映射到内部对象
-    """
+    """验证四组配置从平铺环境变量映射到内部对象"""
 
     _set_database_environment(
         monkeypatch,
@@ -58,10 +56,20 @@ def test_load_flat_environment_fields(monkeypatch) -> None:
         username="tester",
         password="test-secret",
     )
-    monkeypatch.setenv("MODEL_POOL", json.dumps([{
-        "model_id": "text-model", "base_url": "https://api.example.com/v1", "api_key": " text-key ",
-        "weight": 1, "max_in_flight": 3,
-    }]))
+    monkeypatch.setenv(
+        "MODEL_POOL",
+        json.dumps(
+            [
+                {
+                    "model_id": "text-model",
+                    "base_url": "https://api.example.com/v1",
+                    "api_key": " text-key ",
+                    "weight": 1,
+                    "max_in_flight": 3,
+                }
+            ]
+        ),
+    )
     _set_model_environment(
         monkeypatch,
         "EMBEDDING_MODEL",
@@ -87,9 +95,7 @@ def test_load_flat_environment_fields(monkeypatch) -> None:
 
 
 def test_load_model_environment_remains_unconfigured_when_flat_field_missing(monkeypatch) -> None:
-    """
-    嵌入连接字段缺失时保持未配置并记录缺失字段
-    """
+    """嵌入连接字段缺失时保持未配置并记录缺失字段"""
 
     _set_model_environment(
         monkeypatch,
@@ -112,9 +118,7 @@ def test_load_model_environment_remains_unconfigured_when_flat_field_missing(mon
 
 
 def test_load_model_environment_rejects_blank_key(monkeypatch) -> None:
-    """
-    2026-08-08 用于验证空模型密钥被拒绝
-    """
+    """验证空模型密钥被拒绝"""
 
     _set_model_environment(
         monkeypatch,
@@ -144,9 +148,7 @@ def test_model_pool_environment_rejects_non_array_json(monkeypatch, raw: str) ->
 
 
 def test_load_optional_database_environment_returns_none_when_flat_fields_are_absent(monkeypatch) -> None:
-    """
-    2026-08-08 用于验证可选数据库配置忽略旧变量并返回空值
-    """
+    """验证可选数据库配置忽略旧变量并返回空值"""
 
     for field in ("URL", "USERNAME", "PASSWORD"):
         monkeypatch.delenv(f"TEST_DATABASE_{field}", raising=False)
@@ -156,13 +158,11 @@ def test_load_optional_database_environment_returns_none_when_flat_fields_are_ab
 
 
 def test_settings_keeps_behavior_without_model_credentials(monkeypatch, tmp_path: Path) -> None:
-    """
-    凭据未配置时模型池和嵌入连接保持空值，行为参数仍可从文件读取
-    """
+    """凭据未配置时模型池和嵌入连接保持空值，行为参数仍可从文件读取"""
 
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    # 2026-10-02 streaming 字段已删除：settings.json 中的残留键应被静默忽略
+    # streaming 键不再解析：settings.json 中的残留键被静默忽略
     (config_dir / "settings.json").write_text(
         '{"models":{"annotation":{"streaming":true,"timeout_s":180}}}', encoding="utf-8"
     )
@@ -187,9 +187,7 @@ def test_settings_keeps_behavior_without_model_credentials(monkeypatch, tmp_path
 
 
 def test_load_ltp_environment_reads_model_dir(monkeypatch) -> None:
-    """
-    2026-08-28 用于验证 LTP_MODEL_DIR 从平铺环境变量映射到内部对象
-    """
+    """验证 LTP_MODEL_DIR 从平铺环境变量映射到内部对象"""
 
     monkeypatch.setenv("LTP_MODEL_DIR", "models/ltp/small")
 
@@ -200,8 +198,7 @@ def test_load_ltp_environment_reads_model_dir(monkeypatch) -> None:
 
 
 def test_load_ltp_environment_returns_none_when_unset_or_blank(monkeypatch) -> None:
-    """
-    2026-08-28 用于验证 LTP 整组未配置（缺失或空白）时返回 None，
+    """验证 LTP 整组未配置（缺失或空白）时返回 None，
     由装配层降级使用 settings.json 的 model_dir
     """
 
@@ -213,9 +210,7 @@ def test_load_ltp_environment_returns_none_when_unset_or_blank(monkeypatch) -> N
 
 
 def test_settings_from_env_applies_ltp_model_dir(monkeypatch) -> None:
-    """
-    2026-08-28 用于验证 LTP_MODEL_DIR 覆盖 settings.json 的 model_dir
-    """
+    """验证 LTP_MODEL_DIR 覆盖 settings.json 的 model_dir"""
 
     monkeypatch.setenv("LTP_MODEL_DIR", "models/ltp/small")
 
@@ -225,8 +220,7 @@ def test_settings_from_env_applies_ltp_model_dir(monkeypatch) -> None:
 
 
 def test_settings_from_env_leaves_ltp_model_dir_empty_when_env_missing(monkeypatch) -> None:
-    """
-    2026-08-28 用于验证 LTP_MODEL_DIR 缺失时 model_dir 保持为空
+    """验证 LTP_MODEL_DIR 缺失时 model_dir 保持为空
     （LTP 模型目录仅由环境变量提供，不走 settings.json）
     """
 

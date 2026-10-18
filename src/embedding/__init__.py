@@ -1,7 +1,4 @@
-"""嵌入客户端
-
-说明: 文本向量化（本地 llama-server，OpenAI 兼容接口）与查询侧的 instruct 前缀包装。
-"""
+"""嵌入客户端：文本向量化（本地 llama-server，OpenAI 兼容接口）与查询侧的 instruct 前缀包装。"""
 
 from __future__ import annotations
 
@@ -18,15 +15,14 @@ BatchProgressCallback = Callable[[int, int, int], Awaitable[None] | None]
 RETRYABLE_EMBEDDING_STATUS_CODES = {429, 500, 502, 503, 504}
 EMBEDDING_MAX_RETRIES = 2
 EMBEDDING_RETRY_BASE_DELAY_S = 0.5
-# 2026-10-16 用户裁定「加连接级重试」：连接建立失败/超时类错误批内重试最多 3 次、指数退避；
+# 连接建立失败/超时类错误批内重试最多 3 次、指数退避；
 # 状态码路径预算不变；嵌入请求只读幂等，重发无数据副作用
 EMBEDDING_CONNECTION_MAX_RETRIES = 3
 EMBEDDING_CONNECTION_RETRY_DELAY_S = 0.5
 
-# 2026-09-25 用于查询侧嵌入按 Qwen3-Embedding 官方非对称检索配方加 instruct 前缀：
+# 查询侧嵌入按 Qwen3-Embedding 官方非对称检索配方加 instruct 前缀：
 # 检索文档侧（embed_texts）必须直发原文不加前缀，只有查询侧走 format_query_instruct；
-# 指令按官方建议写英文。换成对称嵌入模型（如原 ritrieve BERT 系）时须移除前缀，
-# 否则查询向量分布与文档向量分布偏离、相似度失真。
+# 指令按官方建议写英文；换成对称嵌入模型时须移除前缀，否则相似度失真。
 QUERY_INSTRUCT_TASK = "Given a query about a novel, retrieve original novel passages relevant to the query"
 
 
@@ -43,14 +39,12 @@ class EmbeddingTimeoutError(EmbeddingServiceError, TimeoutError):
 
 
 def format_query_instruct(query: str) -> str:
-    """2026-09-25 用于按模型卡官方模板包装查询文本（Instruct: {task}\nQuery:{query}）"""
+    """按模型卡官方模板包装查询文本（Instruct: {task}\nQuery:{query}）"""
     return f"Instruct: {QUERY_INSTRUCT_TASK}\nQuery:{query}"
 
 
 class EmbeddingClient:
-    """
-    Embedding客户端
-    """
+    """Embedding 客户端"""
 
     def __init__(
         self,
@@ -122,7 +116,7 @@ class EmbeddingClient:
         return self._model
 
     async def _connection_retry(self, error: APIConnectionError, attempt: int) -> None:
-        """2026-10-16 用于记录一次连接级重试并按指数退避等待；APITimeoutError 是其子类同走该路径"""
+        """记录一次连接级重试并按指数退避等待；APITimeoutError 是其子类同走该路径"""
         delay = EMBEDDING_CONNECTION_RETRY_DELAY_S * (2 ** (attempt - 1))
         self._log(
             "warning",
@@ -136,14 +130,16 @@ class EmbeddingClient:
         await asyncio.sleep(delay)
 
     async def _create_embeddings_with_retry(self, text_input: str | list[str]):
-        """连接/超时类错误按裁定在批内重试最多 3 次；状态码路径保持原预算；耗尽后原样抛出保留下游分类"""
+        """连接/超时类错误批内重试最多 3 次；状态码路径保持原预算；耗尽后原样抛出保留下游分类"""
         model_name = self._require_model_name()
         connection_attempts = 0
         status_attempts = 0
         while True:
             try:
                 response = await self._client.embeddings.create(
-                    model=model_name, input=text_input, encoding_format="float",
+                    model=model_name,
+                    input=text_input,
+                    encoding_format="float",
                 )
                 return response
             except APITimeoutError as e:
@@ -197,9 +193,7 @@ class EmbeddingClient:
                 await asyncio.sleep(EMBEDDING_RETRY_BASE_DELAY_S * status_attempts)
 
     async def get_embedding(self, text: str, chunk_id: int | None = None) -> list[float]:
-        """
-        获取文本的embedding向量
-        """
+        """获取文本的 embedding 向量"""
         if not self._model:
             raise ValueError("embedding model is required")
         if not text or not text.strip():
@@ -220,9 +214,7 @@ class EmbeddingClient:
             self._validate_embedding_dimension(embedding)
 
             if self._token_usage_callback and response.usage:
-                # embedding 接口通常能稳定返回 provider usage，
-                # 这里优先保留实报值；汇总层对外仍标 estimated，是因为整条分析链路整体只承诺近似统计，
-                # 而不是要求每一笔都必须退化成本地估算
+                # 优先保留 provider 实报 usage；汇总层对外仍标 estimated（整条链路只承诺近似统计）
                 self._token_usage_callback(
                     "embedding",
                     self._model or "unknown",
@@ -354,15 +346,14 @@ class EmbeddingClient:
                     f"embedding batch result count mismatch: expected {len(batch_items)}, got {len(response_items)}"
                 )
 
-            # 批量接口返回后仍按 index 回填到原始位置，避免上层语义分块逻辑感知到请求模式变化
+            # 按 index 回填到原始位置（调用方无需感知批量请求模式）
             for (original_idx, _), item in zip(batch_items, response_items, strict=True):
                 embedding = item.embedding
                 self._validate_embedding_dimension(embedding)
                 embeddings[original_idx] = embedding
 
             if self._token_usage_callback and response.usage:
-                # 批量 embedding 与单条 embedding 口径一致，
-                # provider 已返回 usage 时直接记实报，避免额外估算把更好的原始数据抹平
+                # provider 已返回 usage 时直接记实报（与单条 embedding 口径一致）
                 self._token_usage_callback(
                     "embedding",
                     self._model or "unknown",

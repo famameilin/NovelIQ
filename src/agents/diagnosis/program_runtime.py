@@ -21,7 +21,7 @@ _INPUT_ERRORS = (ValueError, AnnotationInputError, AnnotationAuthorizationError)
 def bind_finish_ledger(finish_tool: Any, ledger: Any) -> Any:
     """通用 finish 只返回回执；诊断会话按标注三节点族运行时在批结算前登记结束请求
 
-    2026-10-15 会话图复用 annotation 的 route/check 节点，结束信号读 ledger.end_requested：
+    会话图复用 annotation 的 route/check 节点，结束信号读 ledger.end_requested：
     程序面与原生 finish 共用同一工具对象，包一层让两条路径都登记，不改变工具回执与审计。
     finish 是共享工具的同步实现（coroutine=None），同步/异步两条路径分置包装。
     """
@@ -53,12 +53,14 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
     """一个诊断执行复用一份变量环境；所有写入仍由原诊断工具维护内存草稿"""
 
     contract_text = (
-        "使用 execute_code(code=...) 提交受限 Python 程序。只支持赋值、具名工具调用、"
-        "列表/字典、下标、字典下标赋值、列表拼接 +、有界 for 和 if；"
-        "range(stop)/range(start,stop,step) 只接受整数位置参数，最多500项；"
+        "使用 execute_code(code=...) 提交受限 Python 程序。只支持赋值与等长解包、具名工具调用（可 ** 展开）、"
+        "列表/字典/元组（含 * 与 ** 解包）、下标、字典下标赋值、算术与比较、and/or/not、条件表达式、"
+        "有界 for 和 if；"
+        "range(stop)/range(start,stop,step) 与基础函数（len/str/int/float/bool/min/max/abs/sum/sorted/enumerate）"
+        "只接受位置参数，最多500项；"
         "列表拼接结果与字典新增键最多500项；业务工具仍只接受具名参数。"
         "执行前检查整段语法白名单；禁止 import、属性调用、文件/网络访问；"
-        "可调用函数只有目录列出的工具与 range，没有其他内置函数（如 len）。\n"
+        "可调用函数只有目录列出的工具、基础函数与 range。\n"
         "工具返回实际 JSON 对象/列表，ID 工具返回实际 ID 字符串；变量跨程序保留。\n"
         "write_event 的成功身份用 result['results'][0]['event_id'] 读取；"
         "write_arc/write_outcome 的登记身份用 result['results'][0] 读取，完整示例见系统提示词。\n"
@@ -72,18 +74,26 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         "函数赋值接收该函数真实返回值：批量 write 用 results/failed，不存在 written 键。"
         "reads/written 只属于 execute_code 外层回执，不能拿它们索引函数返回值；不支持 print。"
         "review/link 的成功结果也是 None，以 failed 的索引判断失败，不把 None 一律当拒绝。\n"
-        "案例处置写入复用标注语义：write_entity(name,entity_type,el,chapter_id,tags?,description?,"
-        "representative?) 补签实体；"
-        "write_relation(from_entity,to_entity,relation_type,chapter_id) 登记人物关系（同一人物边承载身份归并）；"
-        "write_dialogue(candidate_index,verdict,speaker_ref?,tone?) 按候选号判定说话人；"
-        "候选目录与 case payload 对应，写入须以 caseid 关联所办案例。\n"
+        "案例处置写入复用标注语义：write_entity(name,entity_type,el,tags?,description?,"
+        "representative?) 补签或更新实体；"
+        "write_relation(from_entity,to_entity,relation_type) 登记人物关系（同一人物边承载身份归并）；"
+        "write_dialogue(candidate_index,verdict,speaker?,tone?) 按候选号判定说话人；"
+        "对话案例的候选号直接取 search_cases 返回的 dialogue_index；"
+        "案例写入一律带 caseid=所办案例的真实 ID（先 promise_case 接手）。\n"
         "finish() 可放在程序内，仅请求执行完本程序后的完整性检查；"
         "无工具回复或外层 finish() 也请求同一检查。\n"
     )
 
-    def __init__(self, tools: list[Any], *, observer: Any = None, invocation_id: str = "") -> None:
-        super().__init__(tools, {tool.name: tool for tool in tools}, observer=observer)
-        # 执行身份随 call_id 冻结进业务地址：business_call_id 唯一键是全局的
+    def __init__(
+        self,
+        tools: list[Any],
+        *,
+        observer: Any = None,
+        invocation_id: str = "",
+        dialogue_total: Any = None,
+    ) -> None:
+        super().__init__(tools, {tool.name: tool for tool in tools}, observer=observer, dialogue_total=dialogue_total)
+        # 执行身份随 call_id 固定进业务地址：business_call_id 唯一键是全局的
         self.invocation_id = invocation_id
         self._pending_end = False
         self._end_requested = False

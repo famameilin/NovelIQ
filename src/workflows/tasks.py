@@ -1,8 +1,6 @@
 """分析任务读写与产物清理（work 队列侧）
 
-2026-10-06 自 `src/ingest/novel_service.py` 收归：任务的创建、查询、删除，小说记录的
-读取，以及 logs/outputs 产物清理都属于运行生命周期，归 work 队列；小说源文件的上传与
-登记属于 api 的文本导入（`src/api/services/novel_service.py`）。
+任务的创建、查询、删除，小说记录的读取，以及 logs/outputs 产物清理都属于运行生命周期。
 
 本模块只读写存储与文件系统，不碰 HTTP、不碰 SSE。
 """

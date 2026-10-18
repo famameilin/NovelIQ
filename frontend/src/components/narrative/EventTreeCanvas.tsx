@@ -25,6 +25,7 @@ interface EventTreeCanvasProps {
 export function EventTreeCanvas({ book, layout, x, frameWidth, selected, pinnedIds, onPan, onSelect, hostRef }: EventTreeCanvasProps) {
   const drag = useRef<{ startX: number; viewX: number } | null>(null);
   const curves = useMemo(() => eventTreeCurves(book, layout), [book, layout]);
+  const hasSelectedPath = curves.some(curve => curve.sourceId === selected || curve.targetId === selected);
   // 同结果的纵向真实连接会共享路径，按重合数降低背景透明度，保留每项真实关系与选中高亮
   const outcomeOverlap = useMemo(() => {
     const counts = new Map<string, number>();
@@ -108,7 +109,7 @@ export function EventTreeCanvas({ book, layout, x, frameWidth, selected, pinnedI
             d={curve.d}
             fill="none"
             style={{ stroke: `hsl(var(${tone}))` }}
-            strokeOpacity={highlight ? 0.95 : (selected ? 0.14 : 0.2) / Math.sqrt(overlap)}
+            strokeOpacity={highlight ? 0.95 : (hasSelectedPath ? 0.18 : 0.34) / Math.sqrt(overlap)}
             strokeWidth={highlight ? 1.9 : 1.05}
             strokeLinecap="round" />;
         })}
@@ -116,9 +117,9 @@ export function EventTreeCanvas({ book, layout, x, frameWidth, selected, pinnedI
       {visibleOutcomes.map(outcome => {
         const box = layout.outcomeBoxes.get(outcome.outcome_id)!;
         // 上部结果不可点击：标题与说明只参与构图，不作为任何按钮入口
-        return <div key={outcome.outcome_id} data-outcome-id={outcome.outcome_id} className="absolute" style={{ left: box.left, top: box.top, width: box.width }}>
-          <p className="m-0 truncate text-base font-semibold leading-[22px] text-text" title={outcome.title}>{outcome.title}</p>
-          <p className="m-0 line-clamp-2 text-[13px] leading-[18px] text-text-muted" title={outcome.description}>{outcome.description}</p>
+        return <div key={outcome.outcome_id} data-outcome-id={outcome.outcome_id} className="absolute whitespace-pre-wrap break-all" style={{ left: box.left, top: box.top, width: box.width, lineBreak: "anywhere" }}>
+          <p className="m-0 text-base font-semibold leading-[22px] text-text">{outcome.title}</p>
+          <p className="m-0 mt-1 text-[13px] leading-[18px] text-text-muted">{outcome.description}</p>
         </div>;
       })}
       {visibleEvents.map(event => {
@@ -160,10 +161,10 @@ export function EventTreeCanvas({ book, layout, x, frameWidth, selected, pinnedI
         const arc = book.arcs.find(item => item.arc_id === arcId);
         if (!arc) return null;
         const tone = chartVar(arcColor.get(arcId) ?? 0);
-        return <div key={arcId} data-arc-anchor={arcId} className="absolute flex flex-col items-center" style={{ left: anchor.x - anchor.width / 2, top: anchor.y - 12, width: anchor.width }}>
-          <span data-arc-dot className="rounded-full" style={{ width: 24, height: 24, background: `hsl(var(${tone}))`, boxShadow: `0 0 0 6px color-mix(in srgb, hsl(var(${tone})) 16%, transparent), 0 0 0 2px hsl(var(--background))` }} />
-          <span className="mt-4 text-center text-base font-bold leading-[22px] text-text">{arc.title}</span>
-          <span className="text-center text-[13px] leading-[18px] text-text-muted">{arc.objective}</span>
+        return <div key={arcId} data-arc-anchor={arcId} className="absolute flex flex-col items-center whitespace-pre-wrap break-all" style={{ left: anchor.x - anchor.width / 2, top: anchor.y - 12, width: anchor.width, lineBreak: "anywhere" }}>
+          <span data-arc-dot className="shrink-0 rounded-full" style={{ width: 24, height: 24, background: `hsl(var(${tone}))`, boxShadow: `0 0 0 6px color-mix(in srgb, hsl(var(${tone})) 16%, transparent), 0 0 0 2px hsl(var(--background))` }} />
+          <span className="mt-4 w-full text-center text-base font-bold leading-[22px] text-text">{arc.title}</span>
+          <span className="mt-1 w-full text-center text-[13px] leading-[18px] text-text-muted">{arc.objective}</span>
         </div>;
       })}
     </div>

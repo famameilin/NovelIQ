@@ -1,5 +1,5 @@
 """
-段落表层张力（设计文档《章节粒度分析指标重设计》§9.2）
+段落表层张力
 
 流程：分量原始值 → run 内稳健标准化（median / MAD，clip 到 [-3, 3]）
 → 等权/配置权重加权平均 z → sigmoid 映射到 (0, 1)。
@@ -21,7 +21,7 @@ from statistics import median
 from src.config import settings
 from src.metrics.paragraph_metrics import ParagraphMetricCounts
 
-# 稳健标准化常量（§9.2）：z = clip((value - median) / (1.4826 * MAD + epsilon), -3, 3)
+# 稳健标准化常量：z = clip((value - median) / (1.4826 * MAD + epsilon), -3, 3)
 MAD_SCALE = 1.4826
 MAD_EPSILON = 1e-9
 Z_CLIP = 3.0

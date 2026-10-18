@@ -29,20 +29,20 @@ from src.storage.records.graph import EntitySnapshotRow, GraphChangeRow, Relatio
 
 
 class KnowledgeGraphAuthorityService:
-    """2026-08-07 用于把章节版本 Repository 转换为各后端消费者的受控视图"""
+    """把章节版本 Repository 转换为各后端消费者的受控视图"""
 
     def __init__(self, graph_repo: GraphStore, annotation_repo: AnnotationStore | None = None) -> None:
-        """2026-08-07 用于绑定图版本仓储与章节标注读侧"""
+        """绑定图版本仓储与章节标注读侧"""
         self._graph_repo = graph_projection(graph_repo)
         self._annotation_repo = annotation_repo
 
     @classmethod
     def from_session(cls, session: Any) -> KnowledgeGraphAuthorityService:
-        """2026-08-07 用于从同一数据库 Session 构造章节版本 authority"""
+        """从同一数据库 Session 构造章节版本 authority"""
         return cls(graph_repo=graph_projection(session.graph), annotation_repo=session.annotations)
 
     def build_level1_snapshot(self, run_id: str) -> Level1AuthoritySnapshot:
-        """2026-08-07 用于提供最新章节实体与有效关系的最小只读视图"""
+        """提供最新章节实体与有效关系的最小只读视图"""
         self.assert_graph_ready(run_id)
         entities = fetch_latest_entities(self._graph_repo, run_id)
         relations = self._graph_repo.fetch_latest_relations(run_id, active_only=True)
@@ -60,7 +60,7 @@ class KnowledgeGraphAuthorityService:
         )
 
     def build_timeline_view(self, run_id: str) -> TimelineAuthorityView:
-        """2026-08-07 用于提供章节关系版本变化与角色状态生命周期"""
+        """提供章节关系版本变化与角色状态生命周期"""
         self.assert_graph_ready(run_id)
         characters = fetch_latest_entities(self._graph_repo, run_id, entity_type="character")
         resolution = self._build_alias_resolution(
@@ -103,7 +103,7 @@ class KnowledgeGraphAuthorityService:
         )
 
     def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
-        """2026-08-07 用于向诊断和导出提供章节版本图的聚合信号"""
+        """向诊断和导出提供章节版本图的聚合信号"""
         graph_view = self.build_representative_graph_view(run_id)
         return GraphAuthorityReport(
             summary=build_graph_shared_summary(graph_view.participant_states, graph_view.confirmed_relations),
@@ -111,7 +111,7 @@ class KnowledgeGraphAuthorityService:
         )
 
     def build_export_view(self, run_id: str) -> ExportGraphAuthorityView:
-        """2026-08-07 用于提供导出需要的最新实体关系和章节关系变化"""
+        """提供导出需要的最新实体关系和章节关系变化"""
         self.assert_graph_ready(run_id)
         entities = fetch_latest_entities(self._graph_repo, run_id)
         current_relations = self._graph_repo.fetch_latest_relations(run_id, active_only=False)
@@ -124,7 +124,7 @@ class KnowledgeGraphAuthorityService:
         )
 
     def build_representative_graph_view(self, run_id: str) -> GraphAuthorityView:
-        """2026-08-07 用于向聚合与诊断提供排除 same_character 边的最新图"""
+        """向聚合与诊断提供排除 same_character 边的最新图"""
         self.assert_graph_ready(run_id)
         relations = [
             relation
@@ -154,20 +154,20 @@ class KnowledgeGraphAuthorityService:
         )
 
     def assert_graph_ready(self, run_id: str) -> None:
-        """2026-08-07 用于确认当前 run 至少存在一个成功章节图版本"""
+        """确认当前 run 至少存在一个成功章节图版本"""
         if self._graph_repo.resolve_chapter_boundary(run_id) is None:
             raise GraphReadinessError(f"run 尚无已完成章节图数据: {run_id}")
 
     def _build_alias_resolution(
         self, relations: Iterable[RelationSnapshotRow], entities: Iterable[EntitySnapshotRow]
     ) -> AliasResolution:
-        """2026-08-11 用于从同一人物关系与实体属性构建别名归并映射"""
+        """从同一人物关系与实体属性构建别名归并映射"""
         return build_alias_resolution(list(relations), entities=list(entities))
 
     def _build_canonical_entities(
         self, entities: Iterable[EntitySnapshotRow], resolution: AliasResolution | None = None
     ) -> list[CanonicalEntity]:
-        """2026-08-07 用于把实体状态快照转换为规范实体合同"""
+        """把实体状态快照转换为规范实体合同"""
         rows = sorted(entities, key=lambda row: row.name)
         if resolution is not None:
             rows = [row for row in rows if str(row.entity_id) not in resolution.representative_by_alias]
@@ -196,7 +196,7 @@ class KnowledgeGraphAuthorityService:
     def _build_confirmed_relations(
         self, relations: Iterable[RelationSnapshotRow], resolution: AliasResolution | None = None
     ) -> list[ConfirmedRelation]:
-        """2026-08-07 用于把稳定关系最新版本转换为当前关系合同"""
+        """把稳定关系最新版本转换为当前关系合同"""
         result: list[ConfirmedRelation] = []
         by_key: dict[tuple[str, str, str], ConfirmedRelation] = {}
         for relation in sorted(relations, key=lambda row: (row.from_name, row.to_name, row.relation_type)):
@@ -252,7 +252,7 @@ class KnowledgeGraphAuthorityService:
     def _build_export_relation_snapshots(
         self, relations: Iterable[RelationSnapshotRow], resolution: AliasResolution
     ) -> list[ExportRelationSnapshot]:
-        """2026-08-07 用于把稳定关系最新版本转换为导出关系快照"""
+        """把稳定关系最新版本转换为导出关系快照"""
         return [
             ExportRelationSnapshot(
                 relation_id=relation.relation_id,
@@ -267,7 +267,7 @@ class KnowledgeGraphAuthorityService:
         ]
 
     def _build_graph_changes(self, rows: Iterable[GraphChangeRow]) -> list[GraphChange]:
-        """2026-08-07 用于把 Repository 章节变化转换为共享双源合同"""
+        """把 Repository 章节变化转换为共享双源合同"""
         return [
             GraphChange(
                 change_id=row.change_id,
@@ -296,7 +296,7 @@ class KnowledgeGraphAuthorityService:
     def _build_participant_states(
         self, entities: Iterable[EntitySnapshotRow], resolution: AliasResolution | None = None
     ) -> list[ParticipantState]:
-        """2026-08-07 用于把实体状态快照转换为图参与者合同"""
+        """把实体状态快照转换为图参与者合同"""
         return [
             ParticipantState(
                 entity_id=entity.entity_id,

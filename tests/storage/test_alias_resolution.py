@@ -8,7 +8,7 @@ from src.fact_graph.read.alias import build_alias_resolution
 
 
 def _sid(entity_id: int) -> str:
-    """2026-09-19 用于构造字典序与序号一致的测试 uuid（实体主键已改 uuid）"""
+    """构造字典序与序号一致的测试 uuid（实体主键已改 uuid）"""
     return f"00000000-0000-0000-0000-{entity_id:012d}"
 
 
@@ -19,7 +19,7 @@ def _relation(
     from_entity_id: str,
     to_entity_id: str,
 ) -> SimpleNamespace:
-    """2026-08-09 用于构造 alias 解析所需的稳定关系快照桩"""
+    """构造 alias 解析所需的稳定关系快照桩"""
     return SimpleNamespace(
         relation_semantics=relation_semantics,
         is_active=is_active,
@@ -29,7 +29,7 @@ def _relation(
 
 
 def _entity(entity_id: str, name: str, *, representative: bool = False) -> SimpleNamespace:
-    """2026-08-11 用于构造带 is_representative 属性的实体快照桩"""
+    """构造带 is_representative 属性的实体快照桩"""
     return SimpleNamespace(
         entity_id=entity_id,
         name=name,
@@ -38,7 +38,7 @@ def _entity(entity_id: str, name: str, *, representative: bool = False) -> Simpl
 
 
 def test_build_alias_resolution_merges_direct_aliases() -> None:
-    """2026-08-11 用于验证同一人物关系直接把别名归一到代表实体"""
+    """验证同一人物关系直接把别名归一到代表实体"""
     relations = [
         _relation(from_entity_id=_sid(67), to_entity_id=_sid(97)),
     ]
@@ -60,7 +60,7 @@ def test_build_alias_resolution_merges_direct_aliases() -> None:
 
 
 def test_build_alias_resolution_resolves_transitive_chain() -> None:
-    """2026-08-11 用于验证别名链 A→B、B→C 收敛到同一代表"""
+    """验证别名链 A→B、B→C 收敛到同一代表"""
     relations = [
         _relation(from_entity_id=_sid(80), to_entity_id=_sid(70)),
         _relation(from_entity_id=_sid(90), to_entity_id=_sid(80)),
@@ -81,7 +81,7 @@ def test_build_alias_resolution_resolves_transitive_chain() -> None:
 
 
 def test_build_alias_resolution_ignores_ordinary_and_inactive_relations() -> None:
-    """2026-08-11 用于验证普通关系与非活动同一人物关系不参与归并"""
+    """验证普通关系与非活动同一人物关系不参与归并"""
     relations = [
         _relation(relation_semantics="ordinary", from_entity_id=_sid(10), to_entity_id=_sid(20)),
         _relation(from_entity_id=_sid(30), to_entity_id=_sid(40), is_active=False),
@@ -100,7 +100,7 @@ def test_build_alias_resolution_ignores_ordinary_and_inactive_relations() -> Non
 
 
 def test_build_alias_resolution_falls_back_to_min_entity_id() -> None:
-    """2026-08-11 用于验证缺失代表标记时回退到字典序最小实体 ID（uuid 主键）"""
+    """验证缺失代表标记时回退到字典序最小实体 ID（uuid 主键）"""
     relations = [
         _relation(from_entity_id=_sid(88), to_entity_id=_sid(55)),
     ]
@@ -116,7 +116,7 @@ def test_build_alias_resolution_falls_back_to_min_entity_id() -> None:
 
 
 def test_build_alias_resolution_maps_same_name_alias_to_representative() -> None:
-    """2026-08-12 用于验证别名与代表同名时 name 映射与别名注册不丢失
+    """验证别名与代表同名时 name 映射与别名注册不丢失
 
     别名 id 归并到代表 id 的同时，name 映射必须保留（恒等映射），
     否则边端点的 id 已归并而 name 未归并，造成 id/name 不一致。

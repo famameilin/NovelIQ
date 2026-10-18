@@ -33,7 +33,7 @@ def _tool_batch_protocol_error(
     *,
     allowed_tool_names: frozenset[str],
 ) -> str | None:
-    """2026-08-30 用于校验模型回合只调用本轮开放的工具"""
+    """用于校验模型回合只调用本轮开放的工具"""
     if not calls:
         return "每个模型回合必须调用工具"
     unavailable = [str(call.get("name")) for call in calls if str(call.get("name")) not in allowed_tool_names]
@@ -46,12 +46,11 @@ _NULLISH_ARG_WORDS = frozenset({"null", "none", "nil", ""})
 
 
 def _coerce_nullish_write_args(tool: Any, args: dict[str, Any]) -> dict[str, Any]:
-    """2026-09-14 null 字面串统一容错（run a8c29ec8 实锤：speaker="null" 白烧 3 个调用/回合）
+    """null 字面串统一容错：可空参数按留空读取
 
-    模型惯犯把 JSON null 写成字符串 "null"。写入类工具的参数里，凡 schema 声明可空
-    （Optional）的参数，null 类字面串一律按留空读取；必填参数不改，交给账本校验/类型
-    报错——那里 null 不是合法的"未提供"。转换放在生产调用入口而不是工具签名：
-    @tool 保留真实类型（enum/union）但剥掉 Annotated 的 BeforeValidator（09-14 tone 实测）。
+    写入类工具的参数里，凡 schema 声明可空（Optional）的参数，null 类字面串一律按留空
+    读取；必填参数不改，交给账本校验/类型报错。转换放在生产调用入口而不是工具签名：
+    @tool 保留真实类型（enum/union）但剥掉 Annotated 的 BeforeValidator。
     """
     schema = getattr(tool, "args_schema", None)
     fields = getattr(schema, "model_fields", None) or {}
@@ -67,12 +66,11 @@ def _coerce_nullish_write_args(tool: Any, args: dict[str, Any]) -> dict[str, Any
 
 
 async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
-    """2026-08-07 用于按模型工具调用执行同步或异步 LangChain 工具
+    """用于按模型工具调用执行同步或异步 LangChain 工具
 
-    2026-09-12 参数绑定发生在 langchain 工具 schema 层（先于函数体）；
-    2026-09-13 实时写入后该层的 pydantic 失败统一翻成结构化拒绝回执
-    （record/field/code/expected），只指向出错的那一条记录；
-    2026-09-14 可空参数的 null 字面串在绑定前先按留空归一。
+    参数绑定发生在 langchain 工具 schema 层（先于函数体），该层的 pydantic 失败统一翻成
+    结构化拒绝回执（record/field/code/expected），只指向出错的那一条记录；
+    可空参数的 null 字面串在绑定前先按留空归一。
     """
     name = str(call.get("name"))
     candidate = tool_map.get(name)
@@ -93,8 +91,9 @@ async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
         current_case_call_id.reset(case_binding)
     return str(result)
 
+
 def _truncated_error(name: str) -> str:
-    """2026-08-11 用于构造流截断调用不执行写入时模型可见的独立回执"""
+    """用于构造流截断调用不执行写入时模型可见的独立回执"""
     return (
         f"模型工具 {name} 的参数不完整（流传输截断，参数 JSON 在对象中间被切断），"
         "本次未执行任何写入，请重新提交完整参数。"
@@ -102,7 +101,7 @@ def _truncated_error(name: str) -> str:
 
 
 def _tool_status_emitter(stream: AgentStream | None, observer: AgentTurnObserver | None) -> Any:
-    """2026-09-15 用于构造工具状态事件出口；SSE 推送失败时先闭合回合审计计时再上抛"""
+    """用于构造工具状态事件出口；SSE 推送失败时先闭合回合审计计时再上抛"""
 
     async def emit(name: str, status: str, message: str) -> None:
         if stream is None:
@@ -130,7 +129,7 @@ def _call_entry(
     receipt: Any,
     started_ns: int,
 ) -> dict[str, Any]:
-    """2026-09-15 用于构造批次与程序面共用的调用结果条目"""
+    """用于构造批次与程序面共用的调用结果条目"""
     return {
         "call": call,
         "index": index,
@@ -143,7 +142,7 @@ def _call_entry(
 
 
 def _program_meta(meta: dict[str, Any], receipt: Any) -> dict[str, Any]:
-    """2026-09-15 用于把程序面逐 op 定位字段并进审计行 request_args 的 _program"""
+    """用于把程序面逐 op 定位字段并进审计行 request_args 的 _program"""
     body = dict(meta)
     if isinstance(receipt, dict):
         if receipt.get("record"):
@@ -161,7 +160,7 @@ async def _failed_entry(
     observer: AgentTurnObserver | None = None,
     stream: AgentStream | None = None,
 ) -> dict[str, Any]:
-    """2026-09-15 用于把未执行调用（协议错误/流截断）渲染成独立失败回执与审计行"""
+    """用于把未执行调用（协议错误/流截断）渲染成独立失败回执与审计行"""
     name = str(call.get("name"))
     content = _failed_receipt(name, error_text)
     receipt = json.loads(content)
@@ -314,7 +313,7 @@ def _build_tool_batch_node(
     """
 
     async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-09-13 用于独立串行执行本回合全部小调用并按单次调用边界回滚"""
+        """用于独立串行执行本回合全部小调用并按单次调用边界回滚"""
         calls = _tool_calls(state)
         tool_map = {candidate.name: candidate for candidate in tools}
         allowed_tool_names = frozenset(tool_map)
@@ -336,9 +335,9 @@ def _build_tool_batch_node(
         for call_index, call in enumerate(calls):
             name = str(call.get("name"))
             if program_tool_name is not None and name not in allowed_tool_names:
-                # 程序面绑定的只有程序工具与收尾工具，模型偶尔直发原生工具名（run 54a72932
-                # 实测 25 次）。原生名一律不进写入面，回执只报事实：调用方式属提示词面
-                # （execute_code 的说明 + 系统提示词），不在回执里复述模型自己看得到的工具面。
+                # 程序面绑定的只有程序工具与收尾工具，模型偶尔直发原生工具名。原生名一律
+                # 不进写入面，回执只报事实：调用方式属提示词面（execute_code 的说明 +
+                # 系统提示词），不在回执里复述模型自己看得到的工具面。
                 error_text = f"本轮未开放工具: {[name]}"
                 ledger.errors.append(error_text)
                 rendered.append(

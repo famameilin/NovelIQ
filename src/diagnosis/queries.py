@@ -23,7 +23,7 @@ class DiagnosisQueries:
         self.session = session
 
     def fetch_pivot_blocks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str]]:
-        """2026-08-07 用于从章节标注读取转折点原文素材"""
+        """从章节标注读取转折点原文素材"""
         row_limit = limit if limit is not None else 20
         text_by_chapter = dict(self.session.chapters.fetch_chapter_texts(run_id))
         rows = [
@@ -34,7 +34,7 @@ class DiagnosisQueries:
         return rows[:row_limit]
 
     def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str, str]]:
-        """2026-08-07 用于从章节关系版本逐次变化读取诊断素材"""
+        """从章节关系版本逐次变化读取诊断素材"""
         row_limit = limit if limit is not None else 50
         if row_limit == 0:
             return []
@@ -59,7 +59,7 @@ class DiagnosisQueries:
         return rows[:row_limit]
 
     def fetch_foreshadowing_trees(self, run_id: str) -> list[ForeshadowingTreeView]:
-        """2026-09-13 用于读取伏笔树最新汇总视图"""
+        """读取伏笔树最新汇总视图"""
         return fetch_foreshadowing_trees(self.session, run_id)
 
     def fetch_foreshadowing_sources(self, run_id: str) -> list[dict[str, Any]]:
@@ -69,18 +69,18 @@ class DiagnosisQueries:
     def calculate_foreshadow_expectation(
         self, run_id: str, *, declaration_bindings: dict[str, str] | None = None
     ) -> float | None:
-        """2026-08-05 用于读取伏笔线程生命周期聚合预期"""
+        """读取伏笔线程生命周期聚合预期"""
         return calculate_foreshadow_expectation(self.session, run_id, declaration_bindings=declaration_bindings)
 
     def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[tuple[int, str]]:
-        """2026-08-07 用于读取章节标注中的转折时刻"""
+        """读取章节标注中的转折时刻"""
         return [(chapter_id, text) for chapter_id, text, _event_type in self.fetch_pivot_blocks(run_id, limit=limit)]
 
     def fetch_topic_words(self, run_id: str, top_n: int | None = None) -> list[dict[str, Any]]:
-        """2026-08-11 用于读取按累计权重排序的主题词（含主题词与标签，模型缺失时仅 id/weight）。
+        """读取按累计权重排序的主题词（含主题词与标签，模型缺失时仅 id/weight）。
 
-        2026-08-20 Paragraph-only 主题聚合按原始 token 数加权
-        （SUM(topic_weight * inference_token_count)，§11.1），
+        Paragraph-only 主题聚合按原始 token 数加权
+        （SUM(topic_weight * inference_token_count)），
         与 /topics 端点及 export 的聚合口径一致。
         """
         rows = self.session.diagnosis.fetch_topic_weights(run_id, top_n=top_n)
@@ -95,7 +95,7 @@ class DiagnosisQueries:
         return rows
 
     def fetch_known_characters(self, run_id: str) -> list[str]:
-        """2026-08-09 用于从消歧后的规范人物视图读取诊断人物名单"""
+        """从消歧后的规范人物视图读取诊断人物名单"""
         from src.fact_graph.read import KnowledgeGraphAuthorityService
 
         authority = KnowledgeGraphAuthorityService.from_session(self.session)

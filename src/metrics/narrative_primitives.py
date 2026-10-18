@@ -1,10 +1,9 @@
 """
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分 src/metrics/narrative_metrics.py（数据类与峰值基础段）
-说明: 承接三幕结构数据类 ThreeActBoundaryCandidate/ThreeActStructureDiagnostics
-      与全局峰值/谷值、局部峰值、坐标输入校验等基础工具；供
-      three_act_structure.py、narrative_metrics.py 与 timeline_phase.py 复用。
+三幕结构数据类与峰值基础工具
+
+承接 ThreeActBoundaryCandidate/ThreeActStructureDiagnostics 与全局峰值/谷值、
+局部峰值、坐标输入校验等基础工具；供 three_act_structure.py、
+narrative_metrics.py 与 timeline_phase.py 复用。
 """
 
 from __future__ import annotations
@@ -15,12 +14,7 @@ from dataclasses import dataclass
 
 @dataclass(slots=True)
 class ThreeActBoundaryCandidate:
-    """
-    创建时间: 2026-05-02
-    任务: three-act-structure-v2
-    新建原因: 三幕结构切分需要输出候选边界的关键统计，既供算法选择，
-              也供诊断脚本和回放排查直接复用。
-    """
+    """三幕结构候选边界的关键统计，供算法选择、诊断脚本与回放排查复用。"""
 
     boundary_idx: int
     before_mean_tension: float
@@ -50,12 +44,7 @@ class ThreeActBoundaryCandidate:
 
 @dataclass(slots=True)
 class ThreeActStructureDiagnostics:
-    """
-    创建时间: 2026-05-02
-    任务: three-act-structure-v2
-    新建原因: 三幕比例主链已经升级为“主高潮区 + 结构切分点”，
-              需要一个稳定的内部诊断对象，供 aggregate、脚本和回归测试共享。
-    """
+    """三幕结构诊断对象（主高潮区 + 结构切分点），供 aggregate、脚本与回归测试共享。"""
 
     act1_ratio: float
     act2_ratio: float

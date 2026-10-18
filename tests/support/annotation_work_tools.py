@@ -4,21 +4,23 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
-from uuid import uuid4
 
 from src.agents.annotation.agent import WorkExecution
 from src.agents.annotation.agent_ir import AgentAnnotation
 from src.agents.annotation.work_tools import build_work_tools
 from src.case_pool import CasePool
 from src.event_trees.trees import EventTrees
+from src.storage import new_id
 from src.work.annotation_work import WorkReceipt, annotation_work_id
 
 
 def _work_tools_context(query_service: Any, ledger: Any) -> tuple[Any, Any, Any]:
     """用于按当前 work 协议装配 build_work_tools 所需的 agent/execution 上下文"""
-    invocation = uuid4().hex
+    invocation = new_id()
     work = WorkReceipt(
-        annotation_work_id(ledger.run_scope, ledger.current_chapter_id, ledger.role), ledger.run_scope, "annotation",
+        annotation_work_id(ledger.run_scope, ledger.current_chapter_id, ledger.role),
+        ledger.run_scope,
+        "annotation",
         {"chapter_id": ledger.current_chapter_id, "role": ledger.role},
     )
     execution = WorkExecution(work, invocation, ledger, AgentAnnotation(role=ledger.role))
@@ -27,9 +29,7 @@ def _work_tools_context(query_service: Any, ledger: Any) -> tuple[Any, Any, Any]
     # 作者身份收敛为单字符串：真实执行号就是三域的贡献作者
     cases.begin(invocation)
     trees.begin(invocation)
-    agent = SimpleNamespace(
-        run_id=ledger.run_scope, case_pool=cases, event_trees=trees, fact_graph=ledger.graph
-    )
+    agent = SimpleNamespace(run_id=ledger.run_scope, case_pool=cases, event_trees=trees, fact_graph=ledger.graph)
     ledger.work_id, ledger.invocation_id = work.work_id, invocation
     ledger.finish_work = execution.validate
     return agent, execution, query_service

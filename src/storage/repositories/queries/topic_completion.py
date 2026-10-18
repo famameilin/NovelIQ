@@ -1,4 +1,4 @@
-"从 src/topic/completion.py 分离的具名物理读取"
+"topic completion 的具名物理读取"
 
 from __future__ import annotations
 

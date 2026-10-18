@@ -7,8 +7,7 @@
 
 export const appConfig = {
   /**
-   * 2026-04-30: 双模式 API/SSE 兼容
-   * 改为同源优先，源码开发走 Vite `/api` 代理，Docker/Nginx 部署走同源反代
+   * 同源优先：源码开发走 Vite `/api` 代理，Docker/Nginx 部署走同源反代
    */
   apiBaseUrl: typeof window !== "undefined" ? window.location.origin : "",
 

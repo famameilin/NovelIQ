@@ -106,7 +106,6 @@ def test_runtime_dependencies_have_no_cycles() -> None:
     assert cycles((d.source.split(".")[1], d.target.split(".")[1]) for d in imports) == []
 
 
-
 def test_http_framework_belongs_to_api() -> None:
     bad = [
         f"{d.source}:{d.line} -> {d.target}"
@@ -198,8 +197,7 @@ def test_contracts_do_not_reexport_their_consumers() -> None:
     ]
     assert not bad
     assert not any(
-        d.source.startswith("src.storage.")
-        and d.target.split(".")[1] not in {"storage"} | _ALLOWED["storage"]
+        d.source.startswith("src.storage.") and d.target.split(".")[1] not in {"storage"} | _ALLOWED["storage"]
         for d in reexport_dependencies(_ROOT)
     )
 
@@ -303,10 +301,20 @@ def test_config_does_not_export_domain_rules() -> None:
 
 def test_only_storage_imports_orm_and_private_database_modules() -> None:
     violations = []
-    private = ("src.storage.db", "src.storage.models", "src.storage.repositories", "src.storage.session", "src.storage.operations")
+    private = (
+        "src.storage.db",
+        "src.storage.models",
+        "src.storage.repositories",
+        "src.storage.session",
+        "src.storage.operations",
+    )
     for dependency in dependencies(_ROOT):
         if dependency.source.startswith("src.storage."):
             continue
-        if dependency.target == "sqlalchemy" or dependency.target.startswith("sqlalchemy.") or any(dependency.target == prefix or dependency.target.startswith(prefix + ".") for prefix in private):
+        if (
+            dependency.target == "sqlalchemy"
+            or dependency.target.startswith("sqlalchemy.")
+            or any(dependency.target == prefix or dependency.target.startswith(prefix + ".") for prefix in private)
+        ):
             violations.append(f"{dependency.source}:{dependency.line} -> {dependency.target}")
     assert violations == []

@@ -1,14 +1,4 @@
-"""
-API 小说端点测试
-
-修改时间: 2026-04-05
-任务: fix-test-data-pollution
-修改内容: 使用 api_client fixture 确保测试使用测试数据库
-
-修改时间: 2026-04-22
-任务: fix-novel-task-delete-consistency
-修改内容: 补充小说级联删除与活动任务拦截回归测试
-"""
+"""API 小说端点测试"""
 
 from __future__ import annotations
 
@@ -19,42 +9,40 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from src.metrics.queries.annotations import fetch_chapter_annotations_full
+from src.storage import new_id
 from src.storage.db import get_session_factory
 from src.storage.repositories import ParagraphRepository, RunRepository
 from src.text_processing.models import ParagraphSpan
 from tests.support.chapter_annotation_helpers import character_fact, persist_chapter_annotation
+from tests.support.storage_fixtures import fixture_id, storage_for, task_for_run
 
 
 def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
-    """
-    为测试小说删除补一条已完成任务及其文件产物。
+    """为测试小说删除补一条已完成任务及其文件产物。
 
-    创建时间: 2026-04-22
-    任务: fix-novel-task-delete-consistency
-    说明: 这里构造 chapters/global_context/graph/chapter_annotations 与日志导出文件，
-          用于验证 novel 级删除会不会把 task 侧残留一起清掉。
+    这里构造 chapters/global_context/graph/chapter_annotations 与日志导出文件，
     """
-    task_id = run_id[:8]
+    task_id = task_for_run(run_id)
 
     with get_session_factory()() as session:
         run_repo = RunRepository(session)
-        run_repo.create_run(novel_id=novel_id, run_id=run_id)
+        run_repo.create_run(novel_id=novel_id, run_id=run_id, task_id=task_id)
         run_repo.update_run_task_fields(run_id, status="completed")
         session.execute(
             text(
                 """
                 INSERT INTO chapters
-                    (chapter_id, sequence, title, display_title, display_index_label,
+                    (id, chapter_id, sequence, title, display_title, display_index_label,
                      level, start_pos, end_pos, text, char_offset, run_id)
                 VALUES
-                    (:chapter_id, 1, '第1章', '第1章', NULL, 'chapter',
+                    (:id, :chapter_id, 1, '第1章', '第1章', NULL, 'chapter',
                      0, :len, :text, 0, :run_id)
                 """
             ),
-            {"chapter_id": 1, "text": "测试分块", "len": 4, "run_id": run_id},
+            {"id": new_id(), "chapter_id": 1, "text": "测试分块", "len": 4, "run_id": run_id},
         )
         session.flush()
-        # 2026-08-18 段落事实源：证据派生要求章节存在段落行
+        # 段落事实源：证据派生要求章节存在段落行
         ParagraphRepository(session).insert_paragraphs(
             run_id,
             [
@@ -165,11 +153,12 @@ class TestNovelUpload:
                 .mappings()
                 .one()
             )
+            session.commit()
         novel_file_path = Path(str(novel_row["file_path"]))
 
         task_ids = [
-            _seed_completed_task_with_artifacts(novel_id, "11111111"),
-            _seed_completed_task_with_artifacts(novel_id, "22222222"),
+            _seed_completed_task_with_artifacts(novel_id, fixture_id(__name__, "11111111")),
+            _seed_completed_task_with_artifacts(novel_id, fixture_id(__name__, "22222222")),
         ]
 
         response = api_client.delete(f"/api/novels/{novel_id}")
@@ -186,15 +175,17 @@ class TestNovelUpload:
             ).scalar_one()
             chapter_count = session.execute(
                 text("SELECT COUNT(*) FROM chapters WHERE run_id IN (:run_id_1, :run_id_2) AND text IS NOT NULL"),
-                {"run_id_1": "11111111", "run_id_2": "22222222"},
+                {"run_id_1": fixture_id(__name__, "11111111"), "run_id_2": fixture_id(__name__, "22222222")},
             ).scalar_one()
             annotation_count = sum(
-                len(fetch_chapter_annotations_full(session, run_id)) for run_id in ("11111111", "22222222")
+                len(fetch_chapter_annotations_full(storage_for(session), run_id))
+                for run_id in (fixture_id(__name__, "11111111"), fixture_id(__name__, "22222222"))
             )
             graph_count = session.execute(
                 text("SELECT COUNT(*) FROM graph_entities WHERE run_id IN (:run_id_1, :run_id_2)"),
-                {"run_id_1": "11111111", "run_id_2": "22222222"},
+                {"run_id_1": fixture_id(__name__, "11111111"), "run_id_2": fixture_id(__name__, "22222222")},
             ).scalar_one()
+            session.commit()
 
         assert novel_count == 0
         assert run_count == 0
@@ -239,6 +230,7 @@ class TestNovelUpload:
                 text("SELECT COUNT(*) FROM analysis_runs WHERE novel_id IN (:novel_id_1, :novel_id_2)"),
                 {"novel_id_1": novel_ids[0], "novel_id_2": novel_ids[1]},
             ).scalar_one()
+            session.commit()
 
         assert remaining_novels == 0
         assert remaining_runs == 0
@@ -260,6 +252,7 @@ class TestNovelUpload:
 
         with get_session_factory()() as session:
             task_id = RunRepository(session).create_run(novel_id=novel_id)
+            session.commit()
 
         response = api_client.delete(f"/api/novels/{novel_id}")
         assert response.status_code == 400

@@ -1,9 +1,8 @@
 """统计审计独立接收实际运行事实并保存，不参与 work 业务事务
 
-2026-10-16 全库 3NF 改造；2026-10-17 六 agent 归属：invocation 的执行事实随
-start_invocation 落到 executions 并直接携带归属（run、角色、章或案例锚），
-跨重启重放的幂等去重由 model_calls.message_key / agent_tool_calls.message_key
-这两个可空唯一列承担（每条审计消息自带唯一 id，重放命中原行）。
+invocation 的执行事实随 start_invocation 落到 executions 并直接携带归属
+（run、角色、章或案例锚）；跨重启重放按 model_calls / agent_tool_calls 的
+message_key 可空唯一列幂等去重。
 """
 
 from __future__ import annotations

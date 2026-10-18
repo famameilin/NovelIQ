@@ -17,13 +17,13 @@ def is_preprocess_complete(session: Storage, run_id: str) -> bool:
     if not session.chapters.has_chapters(run_id):
         return False
 
-    # 段落事实源完整性：paragraphs 是 run 内段落身份的唯一事实源（设计文档 §5.1），
+    # 段落事实源完整性：paragraphs 是 run 内段落身份的唯一事实源（设计文档 ），
     # 无段落行的 run 一律视为 preprocess 未完成，避免旧 run 缺段落仍被判定为可跳过
     paragraph_repo = session.paragraphs
     if not paragraph_repo.has_paragraphs(run_id):
         return False
 
-    # 2026-08-15 M2：指标与曲线在 paragraphs 提交之后才分段提交，中间存在纯 CPU 窗口；
+    # 指标与曲线在 paragraphs 提交之后才分段提交，中间存在纯 CPU 窗口；
     # 只查段落行会把"窗口内被杀/崩溃的半成品 run"误判为 preprocess 完成，
     # 导致段落指标/曲线永久缺失。有段落行就必然有指标与曲线行（preprocess 无条件生成），
     # 二者缺一即判定未完成，触发完整重跑补全。

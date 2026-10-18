@@ -30,7 +30,7 @@ from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError
 
-# 2026-09-13 领域写入工具表：正式写入工具集合与失败归因共用同一份声明
+# 领域写入工具表：正式写入工具集合与失败归因共用同一份声明
 _DOMAIN_WRITE_TOOLS: dict[str, tuple[str, ...]] = {
     "entities": ("write_entity",),
     "metrics": ("write_metrics",),
@@ -44,7 +44,7 @@ _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
 )
 # 收尾在同回合写入处理完后统一校验，正式与连续性信封各自实现冻结边界
 FINISH_TOOL_NAME: str = "finish"
-# 2026-09-13 五域固定遍历顺序：工具面排序、缺内容提醒与写入计数共用（无逐域结束声明）
+# 五域固定遍历顺序：工具面排序、缺内容提醒与写入计数共用（无逐域结束声明）
 _DOMAIN_ORDER = ("entities", "metrics", "events", "relations", "dialogues")
 # 事件根节点在章内局部键空间里的固定名字（子事件键不得占用）；权威定义在 schema
 _ROOT_NODE_KEY = RESERVED_ROOT_KEY
@@ -53,14 +53,13 @@ _EL_PATH_SEP = EL_PATH_SEP
 
 
 def _norm_entity_key(name: str, entity_type: object = "") -> str:
-    """2026-10-13 用于生成实体身份键（与 FactGraph 复合键同源：规范名+实体大类）"""
+    """用于生成实体身份键（与 FactGraph 复合键同源：规范名+实体大类）"""
     from src.fact_graph.graph import entity_key
 
     return entity_key(name, entity_type)
 
 
-# 2026-09-14 写入面重构：局部键由模型自行指定、写入即生效——同一轮里先建的键，
-# 后面的调用直接可用，不存在"等回执"或"跨轮才能引用"的约束，参数说明即按此声明。
+# 局部键由模型自行指定、写入即生效——同一轮里先建的键，后面的调用直接可用。
 EntityLocalKey = Annotated[
     str,
     Field(
@@ -85,7 +84,7 @@ EventLocalKey = Annotated[
 
 
 def tool_record_key(tool_name: str, args: dict[str, Any]) -> str | None:
-    """2026-09-13 用于按工具名与原始参数生成稳定记录键（成功回执与拒绝回执共用）
+    """用于按工具名与原始参数生成稳定记录键（成功回执与拒绝回执共用）
 
     参数可能是未过 schema 的原始值，此处只做展示级拼接、不做校验；
     键在 章收尾前保持稳定，重写同键即更新同一条记录。
@@ -128,7 +127,7 @@ class AnnotationQueryService(Protocol):
 
 
 def _normalize_query(query: str, *, tool_name: str) -> str:
-    """2026-08-07 用于统一校验查询工具输入长度与空白"""
+    """用于统一校验查询工具输入长度与空白"""
     normalized = unicodedata.normalize("NFC", query).strip()
     if not normalized or len(normalized) > 2000:
         raise AnnotationInputError(f"{tool_name}.query 必须为 1 至 2000 个 Unicode 字符")
@@ -136,12 +135,12 @@ def _normalize_query(query: str, *, tool_name: str) -> str:
 
 
 def _norm_graph_name(name: str) -> str:
-    """2026-08-11 用于生成与 FactGraph 一致的实体名称精确匹配键"""
+    """用于生成与 FactGraph 一致的实体名称精确匹配键"""
     return unicodedata.normalize("NFC", name).strip().casefold()
 
 
 def _forbid_undeclared_args(tool_candidate: Any) -> None:
-    """2026-09-13 用于让写入类工具拒绝未声明参数
+    """用于让写入类工具拒绝未声明参数
 
     langchain 由函数签名生成的参数模型默认 extra=ignore：模型多写的字段被静默丢弃，
     例如把 isforeshadowing 写到子事件上仍报 staged，语义丢失却看不出错。收紧为整条

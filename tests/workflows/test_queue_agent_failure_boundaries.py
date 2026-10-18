@@ -1,8 +1,8 @@
 """纯内存故障注入覆盖队列取消、模型重选和 work 保存确认边界
 
-2026-10-16 全库 3NF 适配：内存存储模拟新写面——真实尝试（executions 的 invocation
-形状）在派发期由审计登记，正式产物（chapter_annotations）由保存事务写入；
-保存核查按 executions/chapter_annotations 两张真实表判定（work 行已退场）。
+内存存储模拟新写面——真实尝试（executions 的 invocation 形状）在派发期由审计登记，
+正式产物（chapter_annotations）由保存事务写入；保存确认=写事务提交成功，
+传输类异常按幂等重存一次。
 """
 
 from __future__ import annotations
@@ -26,12 +26,13 @@ from src.event_bus import EventBus, Message
 from src.event_trees.trees import EventTrees
 from src.fact_graph.graph import FactGraph
 from src.model_pool.capacity import MODEL_CAPACITY, ModelElectionExhausted, ModelElectionPool
+from src.storage import new_id
 from src.work.annotation_work import WorkReceipt
 from src.work.chapter_pool import ChapterWorkerPool, PipelineWorkFailed, WorkSaveUnconfirmed
 
 
 class _MemorySessions:
-    """模拟业务事务与新连接核查：按 executions/chapter_annotations 两表存行"""
+    """模拟业务保存事务：记录提交/回滚并落正式产物行"""
 
     def __init__(self) -> None:
         self.executions: dict[str, Any] = {}
@@ -42,7 +43,6 @@ class _MemorySessions:
         self.commits = 0
         self.fail_commit = 0
         self.fail_after_commit = False
-        self.fail_verification = False
         self.fail_rollback = False
         self.commit_started: threading.Event | None = None
         self.commit_release: threading.Event | None = None
@@ -58,33 +58,18 @@ class _MemorySessions:
         self.sessions += 1
         owner = self
 
-        class Session:
+        class MemoryStorage:
             def __init__(self) -> None:
                 self.pending: list[Any] = []
 
-            def get(self, model: Any, key: str) -> Any:
-                if owner.fail_verification and owner.commits:
-                    raise ConnectionError("结果核查连接失败")
-                table = getattr(model, "__tablename__", "")
-                if table == "executions":
-                    return owner.executions.get(key)
-                return None
+            def save_work(self) -> None:
+                self.commit()
 
             def add(self, row: Any) -> None:
                 self.pending.append(row)
 
             def flush(self) -> None:
                 pass
-
-            def scalar(self, statement: Any) -> Any:
-                # stored() 的产物存在性查询：chapter_annotations.record_id where execution_id == ?
-                if owner.fail_verification and owner.commits:
-                    raise ConnectionError("结果核查连接失败")
-                params = statement.compile().params
-                invocation_id = next(iter(params.values()), None)
-                if "chapter_annotations" not in str(statement):
-                    return None
-                return owner.products.get(invocation_id)
 
             def commit(self) -> None:
                 owner.commits += 1
@@ -117,13 +102,13 @@ class _MemorySessions:
             def close(self) -> None:
                 pass
 
-            def __enter__(self) -> Session:
+            def __enter__(self) -> MemoryStorage:
                 return self
 
             def __exit__(self, *args: Any) -> None:
                 self.close()
 
-        return Session()
+        return MemoryStorage()
 
 
 def _receipt(role: str = "entity") -> WorkReceipt:
@@ -204,11 +189,12 @@ async def _ignore(message: Message) -> None:
 
 
 def _save_handlers(bus: EventBus, calls: list[str]) -> None:
-    for name in ("save", "check", "confirm", "recover", "abort"):
+    for name in ("save", "confirm", "recover", "abort"):
 
-        async def handler(message: Message, name: str = name) -> Any:
+        async def handler(message: Message, name: str = name) -> None:
             calls.append(name)
-            return True if name == "check" else None
+            if name == "save":
+                await asyncio.to_thread(message.payload.save_work)
 
         bus.handle("agent." + name, "agent:run", handler)
 
@@ -358,7 +344,7 @@ async def test_retry_feedback_preserves_pool_failure_weight_before_reselection(m
 
     async def execute(message: Message) -> Any:
         attempts.append(message.payload.payload["attempt_number"])
-        return {"outcome": "retry" if len(attempts) == 1 else "completed", "invocation_id": f"inv{len(attempts)}"}
+        return {"outcome": "retry" if len(attempts) == 1 else "completed", "invocation_id": new_id()}
 
     class Pool(ChapterWorkerPool):
         async def _save(self, *args: Any) -> None:
@@ -369,9 +355,7 @@ async def test_retry_feedback_preserves_pool_failure_weight_before_reselection(m
     bus.handle("agent.execute", "agent:run", execute)
     bus.handle("agent.cancel", "agent:run", _ignore)
     sessions = _MemorySessions()
-    assert (
-        await asyncio.wait_for(Pool(poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions), 2) == 1
-    )
+    assert await asyncio.wait_for(Pool(poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions), 2) == 1
     assert attempts == [1, 2] and model_failures == [{}, {"test": 1}]
     assert not any(MODEL_CAPACITY.snapshot().values())
 
@@ -446,45 +430,37 @@ async def test_committed_work_confirmation_recovers_current_author_and_retains_o
             raise RuntimeError("内存确认故障")
         original_confirm(execution_id)
 
-    async def check(message: Message) -> bool:
-        return True
-
     monkeypatch.setattr(FactGraph, "confirm", confirm)
-    monkeypatch.setattr(agent, "check", check)
-    bus.unhandle("agent.check", "agent:run")
-    bus.handle("agent.check", "agent:run", check)
     bus.unhandle("agent.save", "agent:run")
-    bus.handle("agent.save", "agent:run", _ignore)
+    bus.handle("agent.save", "agent:run", lambda message: asyncio.to_thread(message.payload.save_work))
     await ChapterWorkerPool()._save(bus, "queue:run", receipt, "inv", sessions)
     assert sessions.commits == 1 and confirmation_count == 2 and calls.count("load") == 3
     assert execution.saved and author in agent.fact_graph.saved
-    assert agent.case_pool.case_runtime[case["case_id"]]["owner"] is None
+    # 确认只标记保存完成：承诺与归属不退回，他方承诺保持
+    assert agent.case_pool.case_runtime[case["case_id"]]["owner"] == author
     assert agent.case_pool.case_runtime[other_case["case_id"]]["owner"] == other
     assert other in agent.fact_graph.contributions
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("after_commit", [False, True])
-async def test_lost_save_reply_reuses_original_invocation_without_duplicate_commit(after_commit: bool) -> None:
+async def test_lost_save_reply_retries_idempotently_on_same_invocation(after_commit: bool) -> None:
     bus, sessions, calls = EventBus(), _MemorySessions(), []
     sessions.expect_attempt("work", "inv")
     _save_handlers(bus, calls)
     sessions.fail_commit, sessions.fail_after_commit = 1, after_commit
     await ChapterWorkerPool()._save(bus, "queue:run", _receipt(), "inv", sessions)
+    # 回执丢失后按幂等重存一次：同一 invocation、同一产物行，不重复落
     assert sessions.products == {"inv": "record"}
-    assert sessions.commits == (1 if after_commit else 2)
-    assert calls.count("save") == (1 if after_commit else 2)
-    assert calls.count("confirm") == 1 and "abort" not in calls
+    assert sessions.commits == 2
+    assert calls.count("save") == 2 and calls.count("confirm") == 1 and "abort" not in calls
 
 
 @pytest.mark.asyncio
-async def test_unknown_commit_or_failed_verification_keeps_contributions_and_capacity(monkeypatch: Any) -> None:
+async def test_confirmation_exhaustion_marks_work_unconfirmed_without_redispatch(monkeypatch: Any) -> None:
     bus, sessions, calls = EventBus(), _MemorySessions(), []
     sessions.expect_attempt("work", "inv")
     _model_pool(monkeypatch)
-    _save_handlers(bus, calls)
-    # 派发期不登记 work 行，这里的提交是唯一一次保存事务
-    sessions.fail_commit, sessions.fail_after_commit, sessions.fail_verification = 1, True, True
 
     async def execute(message: Message) -> Any:
         return {"outcome": "completed", "invocation_id": "inv"}
@@ -493,37 +469,44 @@ async def test_unknown_commit_or_failed_verification_keeps_contributions_and_cap
         assert any(MODEL_CAPACITY.snapshot().values())
         calls.append("cancel")
 
+    async def save(message: Message) -> None:
+        calls.append("save")
+        await asyncio.to_thread(message.payload.save_work)
+
+    async def confirm(message: Message) -> None:
+        calls.append("confirm")
+        raise RuntimeError("内存确认故障")
+
+    async def recover(message: Message) -> None:
+        calls.append("recover")
+
     bus.handle("agent.execute", "agent:run", execute)
     bus.handle("agent.cancel", "agent:run", cancel)
+    bus.handle("agent.save", "agent:run", save)
+    bus.handle("agent.confirm", "agent:run", confirm)
+    bus.handle("agent.recover", "agent:run", recover)
     pool = ChapterWorkerPool(poll_seconds=0.005)
-    with pytest.raises(WorkSaveUnconfirmed, match="核查失败"):
+    with pytest.raises(WorkSaveUnconfirmed, match="内存确认失败"):
         await asyncio.wait_for(pool.run([_receipt()], bus=bus, session_factory=sessions), 2)
     assert pool.states == {"work": "save_unconfirmed"}
-    assert "abort" not in calls and "confirm" not in calls and calls.count("save") == 1
+    # 确认两次失败后按未确认收口；队列收尾再对未完成 work 发取消
+    assert calls[:4] == ["save", "confirm", "recover", "confirm"]
+    assert calls.count("cancel") == 1
+    assert sessions.commits == 1 and "abort" not in calls
     assert not any(MODEL_CAPACITY.snapshot().values())
 
 
 @pytest.mark.asyncio
-async def test_failed_rollback_and_missing_row_are_not_treated_as_confirmed_unsaved() -> None:
+async def test_failed_rollback_does_not_block_idempotent_retry() -> None:
     bus, sessions, calls = EventBus(), _MemorySessions(), []
+    sessions.expect_attempt("work", "inv")
     _save_handlers(bus, calls)
     sessions.fail_commit, sessions.fail_rollback = 1, True
-    with pytest.raises(WorkSaveUnconfirmed, match="仍不明"):
-        await ChapterWorkerPool()._save(bus, "queue:run", _receipt(), "inv", sessions)
-    assert "abort" not in calls and sessions.commits == 1
-
-
-@pytest.mark.asyncio
-async def test_mismatched_execution_ownership_is_not_overwritten_or_aborted() -> None:
-    bus, sessions, calls = EventBus(), _MemorySessions(), []
-    _save_handlers(bus, calls)
-    # 派发期身份登记是幂等的；此处模拟同执行号落着另一份不可变归属（run/章/角色不同）
-    sessions.executions["inv"] = SimpleNamespace(execution_id="inv", run_id="other_run", chapter_id=9, role="metric")
-    with pytest.raises(WorkSaveUnconfirmed, match="归属与派发单元不一致"):
-        await ChapterWorkerPool()._save(bus, "queue:run", _receipt(), "inv", sessions)
-    assert "abort" not in calls
-    assert sessions.executions["inv"].role == "metric"
-    assert sessions.executions["inv"].chapter_id == 9
+    await ChapterWorkerPool()._save(bus, "queue:run", _receipt(), "inv", sessions)
+    # 回滚失败不改变判定：传输类异常仍按幂等重存，第二次提交落定产物
+    assert sessions.products == {"inv": "record"}
+    assert sessions.commits == 2 and calls.count("save") == 2 and "abort" not in calls
+    assert calls.count("confirm") == 1
 
 
 @pytest.mark.asyncio

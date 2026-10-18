@@ -11,6 +11,7 @@ from tests.support.chapter_annotation_helpers import (
     relation_fact,
 )
 from tests.support.character_observation_helpers import persist_observed_characters
+from tests.support.storage_fixtures import storage_for
 
 
 def test_character_emotion_preserves_numeric_graph_fact(db_session) -> None:
@@ -30,13 +31,13 @@ def test_character_emotion_preserves_numeric_graph_fact(db_session) -> None:
     from src.storage.repositories import AnnotationRepository
 
     repo = AnnotationRepository(db_session)
-    assert fetch_chapter_characters_full(repo.session, run_id)[0].emotion_score == -2
-    result = _fetch_characters(run_id=run_id, annotation_repo=repo, limit=None)
+    assert fetch_chapter_characters_full(storage_for(repo.session), run_id)[0].emotion_score == -2
+    result = _fetch_characters(run_id=run_id, annotation_repo=storage_for(repo.session), limit=None)
     assert result[0].avg_emotion_score == -2.0
 
 
 def test_fetch_characters_merges_same_character_aliases(db_session) -> None:
-    """2026-08-09 用于验证角色榜把同一人物别名归一到代表名"""
+    """验证角色榜把同一人物别名归一到代表名"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["伯安与猴子同游"],
@@ -65,11 +66,9 @@ def test_fetch_characters_merges_same_character_aliases(db_session) -> None:
     )
     db_session.commit()
 
-    from src.storage.repositories import AnnotationRepository
-
     result = _fetch_characters(
         run_id=run_id,
-        annotation_repo=AnnotationRepository(db_session),
+        annotation_repo=storage_for(db_session),
         limit=None,
     )
 
@@ -83,7 +82,7 @@ def test_fetch_characters_merges_same_character_aliases(db_session) -> None:
 
 
 def test_fetch_characters_prefers_diagnosis_name_as_representative(db_session) -> None:
-    """2026-08-09 用于验证角色榜代表名优先采用诊断命中名字"""
+    """验证角色榜代表名优先采用诊断命中名字"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["伯安与贺重明同游"],
@@ -103,11 +102,9 @@ def test_fetch_characters_prefers_diagnosis_name_as_representative(db_session) -
     )
     db_session.commit()
 
-    from src.storage.repositories import AnnotationRepository
-
     result = _fetch_characters(
         run_id=run_id,
-        annotation_repo=AnnotationRepository(db_session),
+        annotation_repo=storage_for(db_session),
         limit=None,
         main_characters=["贺重明"],
     )
@@ -116,7 +113,7 @@ def test_fetch_characters_prefers_diagnosis_name_as_representative(db_session) -
 
 
 def test_fetch_characters_normalizes_diagnosis_keys_for_focus_scores(db_session) -> None:
-    """2026-08-09 用于验证诊断别名名归一到代表名后聚焦评分正确匹配"""
+    """验证诊断别名名归一到代表名后聚焦评分正确匹配"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["伯安与贺重明同游"],
@@ -136,11 +133,9 @@ def test_fetch_characters_normalizes_diagnosis_keys_for_focus_scores(db_session)
     )
     db_session.commit()
 
-    from src.storage.repositories import AnnotationRepository
-
     result = _fetch_characters(
         run_id=run_id,
-        annotation_repo=AnnotationRepository(db_session),
+        annotation_repo=storage_for(db_session),
         limit=None,
         arc_scores={"贺重明": 9.0},
         main_characters=["贺重明"],

@@ -1,4 +1,4 @@
-"从 src/agents/diagnosis/domain.py 分离的具名物理读取"
+"agents diagnosis domain 的具名物理读取"
 
 from __future__ import annotations
 

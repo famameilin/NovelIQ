@@ -17,7 +17,7 @@ import { narrativeResponse } from "../narrativeData";
 import { narrativePreviewResponse, NARRATIVE_PREVIEW_NOVEL } from "../narrativePreview";
 
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
-// 2026-08-14 D3：新管线只写 completed，aggregated/diagnosed 为旧合同状态（与后端 READABLE_RUN_STATUSES 对齐）
+// 只写 completed（与后端 READABLE_RUN_STATUSES 对齐）
 const READABLE_TASK_STATUSES = new Set(["completed"]);
 
 /** 检查任务是否已进入可读终态；未完成时模拟真实后端的 AnalysisNotCompleteError */
@@ -121,7 +121,7 @@ export const graphChangesHandler = http.get(
     if (err) return err;
 
     await delay(200);
-    // 2026-08-13 P2 防御：limit 为 0/非数字时钳制到 1，避免空页死循环
+    // 防御：limit 为 0/非数字时钳制到 1，避免空页死循环
     // （createGraphChangesPage 的 next_cursor 与入参相同会无限翻页）
     const limit = Math.max(1, Number(url.searchParams.get("changes_limit")) || 8);
     return HttpResponse.json(
@@ -147,7 +147,7 @@ export const narrativeHandlers = [
   return new HttpResponse(JSON.stringify(response.data), { status: response.status, headers: { "Content-Type": "application/json" } });
 }));
 
-// 主题全量分布 mock（赛道 D）：4 主题 × 60 段，权重和为 1
+// 主题全量分布 mock：4 主题 × 60 段，权重和为 1
 const MOCK_NUM_TOPICS = 4;
 const MOCK_SERIES_POINTS = Array.from({ length: 60 }, (_, index) => {
   const base = index / 60;

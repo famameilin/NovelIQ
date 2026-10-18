@@ -1,6 +1,6 @@
 """0.1.1 → 0.2.0 一次性数据库升级脚本
 
-0.2.0（队列删除定案 2026-10-05）相对 0.1.1 的 schema 变更：
+0.2.0 相对 0.1.1 的 schema 变更：
 1. 新增 13 张流水线表：work_items、semantic_commands、text_evidence、command_outcomes、
    continuity_cases、case_heads、case_claims、analysis_cutoffs、partition_heads、
    cutoff_partitions、source_manifests、formal_artifacts、event_outbox；
@@ -81,13 +81,12 @@ NEW_TABLES = (
     "work_items",
 )
 COUNT_TABLES = ("analysis_runs", "chapter_annotations", "event_nodes", "event_edges", "paragraphs", "cloud_analysis")
-# 已被 0.2.0 ORM 移除的遗留表，随升级 DROP（连数据）；case_resolution_mappings 是子表，放前面
+# 遗留表随升级 DROP（连数据）；case_resolution_mappings 是子表，放前面
 PURGED_TABLES = ("case_resolution_mappings", "case_pool_cases")
 
 
 def _pipeline_tables() -> list[Any]:
-    """2026-10-05 用于从当前 ORM 取 13 张流水线表的 Table 对象（保持 sorted_tables 拓扑序），
-    避免在脚本里手写 CREATE TABLE 与 ORM 漂移"""
+    """从当前 ORM 取流水线表的 Table 对象（保持 sorted_tables 拓扑序），避免手写 CREATE TABLE 与 ORM 漂移"""
     from src.storage.models import Base
 
     wanted = set(NEW_TABLES)
@@ -99,7 +98,7 @@ def _pipeline_tables() -> list[Any]:
 
 
 def _graph_unique_constraint_name(inspector: Any) -> str | None:
-    """2026-10-05 用于找到 graph_entities 上恰好覆盖 (run_id, canonical_name) 的唯一约束"""
+    """找到 graph_entities 上恰好覆盖 (run_id, canonical_name) 的唯一约束"""
     for constraint in inspector.get_unique_constraints(GRAPH_TABLE):
         if set(constraint["column_names"]) == {"run_id", "canonical_name"}:
             return str(constraint["name"])
@@ -107,7 +106,7 @@ def _graph_unique_constraint_name(inspector: Any) -> str | None:
 
 
 def _formal_work_id_unique_missing(inspector: Any) -> bool:
-    """2026-10-05 用于判定 chapter_annotations.formal_work_id 是否已有单列 UNIQUE 约束"""
+    """判定 chapter_annotations.formal_work_id 是否已有单列 UNIQUE 约束"""
     return not any(
         set(constraint["column_names"]) == {"formal_work_id"}
         for constraint in inspector.get_unique_constraints("chapter_annotations")
@@ -115,7 +114,7 @@ def _formal_work_id_unique_missing(inspector: Any) -> bool:
 
 
 def _foreign_keys_into_work_items(connection: Connection) -> list[tuple[str, str]]:
-    """2026-10-05 用于枚举指向 work_items 的全部外键（子表, 约束名）；0.2.0 合同要求为零"""
+    """枚举指向 work_items 的全部外键（子表, 约束名）；0.2.0 合同要求为零"""
     rows = connection.execute(
         text(
             """
@@ -130,7 +129,7 @@ def _foreign_keys_into_work_items(connection: Connection) -> list[tuple[str, str
 
 
 def _collect_state(connection: Connection, schema: str) -> dict[str, Any]:
-    """2026-10-05 用于读取目标库的 0.1.1 基线合同与 0.2.0 差量状态"""
+    """读取目标库的 0.1.1 基线合同与 0.2.0 差量状态"""
     inspector = inspect(connection)
     tables = set(inspector.get_table_names(schema=schema))
     state: dict[str, Any] = {"tables": tables}
@@ -176,7 +175,7 @@ def _collect_state(connection: Connection, schema: str) -> dict[str, Any]:
 
 
 def _pending_changes(state: dict[str, Any]) -> list[str]:
-    """2026-10-05 用于把差量状态渲染成可读的变更计划"""
+    """把差量状态渲染成可读的变更计划"""
     changes: list[str] = []
     if state["missing_tables"]:
         changes.append(f"建表 {len(state['missing_tables'])} 张: {', '.join(state['missing_tables'])}")
@@ -198,7 +197,7 @@ def _pending_changes(state: dict[str, Any]) -> list[str]:
 
 
 def _apply_changes(connection: Connection, state: dict[str, Any]) -> list[str]:
-    """2026-10-05 用于在同一事务内幂等执行 0.2.0 差量 DDL，返回实际执行的变更"""
+    """在同一事务内幂等执行 0.2.0 差量 DDL，返回实际执行的变更"""
     applied: list[str] = []
     if state["missing_tables"]:
         from src.storage.models import Base
@@ -239,7 +238,7 @@ def _apply_changes(connection: Connection, state: dict[str, Any]) -> list[str]:
 
 
 def _ledger_applied(connection: Connection, schema: str) -> bool:
-    """2026-10-05 用于检查目标版本是否已登记升级台账"""
+    """检查目标版本是否已登记升级台账"""
     if LEDGER_TABLE not in inspect(connection).get_table_names(schema=schema):
         return False
     return bool(
@@ -256,7 +255,7 @@ def _count_rows(connection: Connection, tables: tuple[str, ...]) -> dict[str, in
 def migrate(
     *, database_env: DatabaseEnvironmentName, schema: str, apply: bool, expect_database: str | None
 ) -> dict[str, Any]:
-    """2026-10-05 用于执行 0.1.1 → 0.2.0 升级；dry-run 只读，apply 幂等收敛并在台账登记"""
+    """执行 0.1.1 → 0.2.0 升级；dry-run 只读，apply 幂等收敛并在台账登记"""
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
         raise ValueError("schema 名称仅允许字母、数字和下划线")
     if apply and not expect_database:

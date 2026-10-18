@@ -51,7 +51,7 @@ async def get_graph(
     session: Annotated[Storage, Depends(get_db_session)],
     chapter_id: Annotated[int | None, Query(gt=0)] = None,
 ) -> GraphSnapshotResponse:
-    """2026-08-07 用于读取指定章节边界或最新章节的动态图快照"""
+    """读取指定章节边界或最新章节的动态图快照"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = session
@@ -77,7 +77,7 @@ async def get_graph_changes(
     changes_cursor: Annotated[str | None, Query(description="章节图变化分页 cursor")] = None,
     changes_limit: Annotated[int, Query(ge=1, le=GRAPH_CHANGE_LIMIT)] = GRAPH_CHANGE_LIMIT,
 ) -> GraphChangesResponse:
-    """2026-08-07 用于按章节分页读取实体状态与稳定关系变化"""
+    """按章节分页读取实体状态与稳定关系变化"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = session

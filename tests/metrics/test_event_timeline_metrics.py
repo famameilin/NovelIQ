@@ -1,33 +1,29 @@
-"""2026-08-20 事件森林时间轴度量单元测试（一树一节点）
+"""事件森林时间轴度量单元测试（一树一节点）
 
-2026-10-16 全库 3NF 新写面：标注来源链与章级声明由夹具按正式关系写入，完整事件
+标注来源链与章级声明由夹具按正式关系写入，完整事件
 经正式诊断发布链（EventOrganizationDraft → save_diagnosis_result）建立；断言只针对
 时间轴读面的行为与输出，不复制文案或数量形状。
 """
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 import pytest
 from sqlalchemy import select
 
 from src.agents.diagnosis.persistence import save_diagnosis_result
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import (
-    EventOrganizationDraft,
-    OrganizationEvidence,
-    register_diagnosis_execution,
-    register_diagnosis_session,
-)
+from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
 from src.event_trees.read.forest import EventForestQuery
 from src.metrics.event_timeline_metrics import serialize_event_timeline_node
 from src.metrics.queries.timeline import build_event_timeline_plan
+from src.storage import new_id
 from src.storage.models import Paragraph
-from src.storage.repositories import ChapterRepository, StatsRepository
+from src.storage.repositories import ChapterRepository
+from src.storage.repositories.organization_writes import register_diagnosis_execution, register_diagnosis_session
 from src.storage.repositories.paragraph import insert_paragraph_tension_observations
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import report_case_anchor
+from tests.support.storage_fixtures import storage_for
 from tests.support.timeline_contract_helpers import (
     create_chapter_annotation_source,
     save_event_declaration,
@@ -49,13 +45,12 @@ def _publish_one_event_per_declaration(
     character_names: list[str],
 ) -> None:
     """经正式诊断发布链把每条声明收口为一个完整事件（互不包含、互不相同）"""
-    session_id = f"diagnosis-session-{run_id[:12]}"
-    execution_id = uuid4().hex
+    session_id = new_id()
+    execution_id = new_id()
     register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
-    register_diagnosis_execution(
-        db_session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=1
-    )
-    draft = EventOrganizationDraft(db_session, run_id, session_id)
+    register_diagnosis_execution(db_session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=1)
+    draft = EventOrganizationDraft(storage_for(db_session), run_id, session_id)
+    draft.fixture_session = db_session
     draft.case_id, draft.producer_invocation_id = report_case_anchor(run_id), execution_id
     rows = {row["declaration_id"]: row for row in draft.read_declarations(declarations)["items"]}
 
@@ -88,7 +83,6 @@ def _publish_one_event_per_declaration(
                 evidence=source_evidence(source),
             )
     draft.review_declarations(list(declarations), reason="读取夹具已逐项核对不可变声明与原文")
-    draft.freeze_identity()
     events = list(draft.events)
     structure_evidence = [OrganizationEvidence(paragraph_id=evidence_paragraph_id)]
     for index, source in enumerate(events):
@@ -102,10 +96,9 @@ def _publish_one_event_per_declaration(
             )
     for event_id in events:
         draft.review_events([event_id], reason="读取夹具已核对正式身份与结构")
-    draft.freeze_structure()
     organization = draft.finish()
     save_diagnosis_result(
-        db_session,
+        storage_for(db_session),
         run_id,
         AgentAnalysis(
             narrative_organization=organization,
@@ -136,9 +129,7 @@ def _build_forest(
     declarations: list[str] = []
     paragraph_ids: list[int] = []
     for index, chapter_id in enumerate(chapter_ids):
-        record_id, _execution_id = create_chapter_annotation_source(
-            db_session, run_id=run_id, chapter_id=chapter_id
-        )
+        record_id, _execution_id = create_chapter_annotation_source(db_session, run_id=run_id, chapter_id=chapter_id)
         paragraph = db_session.scalar(
             select(Paragraph)
             .where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id)
@@ -183,8 +174,8 @@ def _build_forest_three_trees(db_session, *, tensions: list[float] | None = None
 
 
 def _plan(db_session, run_id: str):
-    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
-    return build_event_timeline_plan(run_id, ChapterRepository(db_session), StatsRepository(db_session), snapshot)
+    snapshot = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
+    return build_event_timeline_plan(run_id, ChapterRepository(db_session), storage_for(db_session), snapshot)
 
 
 def test_level_quantile_66_33(db_session) -> None:
@@ -264,12 +255,12 @@ def test_empty_snapshot_returns_no_nodes_but_phases(db_session) -> None:
     paragraph = db_session.scalar(select(Paragraph).where(Paragraph.run_id == run_id).order_by(Paragraph.paragraph_id))
     insert_paragraph_tension_observations(db_session, run_id, [(paragraph.paragraph_id, 0.6)])
     db_session.commit()
-    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
     assert snapshot is None
     plan = build_event_timeline_plan(
         run_id,
         ChapterRepository(db_session),
-        StatsRepository(db_session),
+        storage_for(db_session),
         snapshot,
     )
     assert plan.nodes == []

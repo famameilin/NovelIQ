@@ -1,5 +1,5 @@
 """
-共享否定层测试（src/metrics/negation，docs/词表体系重设计-修订版实施计划.md M5）
+共享否定层测试（src/metrics/negation）
 
 覆盖：
   1. 分类加载：hard/modal/double 分组解析
@@ -8,7 +8,7 @@
   4. 最近距离约束：否定与情绪词之间 >1 token 不翻转
   5. modal 不翻转（未必/莫非/难以…）
   6. double 双重否定 parity 抵消（不得不…）
-  7. 真实误判回归（2026-08 审计 5 例）
+  7. 真实误判回归（审计 5 例）
 """
 
 from __future__ import annotations

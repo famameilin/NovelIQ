@@ -1,7 +1,8 @@
 {
   "normalization": [
     "results.file_path",
-    "export.generated_at"
+    "export.generated_at",
+    "results.missing_fields.topic_model_artifact_missing.path"
   ],
   "unordered_collections": [
     "graph.edges",
@@ -14,7 +15,7 @@
   "baseline_contract_version": "event-tree-declarations-v1",
   "responses": {
     "tabs/dashboard": {
-      "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+      "run_id": "018bcfe5-6800-7000-8000-000000000002",
       "narrative_structure": {
         "act1_ratio": null,
         "act2_ratio": null,
@@ -47,13 +48,13 @@
         "network_density": null,
         "greimas_coverage": 0.3333333333333333,
         "function_coverage_distribution": {
-          "接收者": 0.0,
-          "发送者": 0.0,
-          "反对者": 0.0,
           "帮助者": 0.5,
-          "其他": 0.0,
+          "接收者": 0.0,
+          "反对者": 0.0,
+          "发送者": 0.0,
+          "主体": 0.5,
           "客体": 0.0,
-          "主体": 0.5
+          "其他": 0.0
         },
         "antagonist_strength_gap": null,
         "relation_change_per_10k_chars": 461.538462,
@@ -142,26 +143,7 @@
       "last_chapter_id": 5,
       "nodes": [
         {
-          "entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
-          "name": "苏映雪",
-          "entity_type": "character",
-          "tags": [],
-          "aliases": [],
-          "first_seen_chapter": 2,
-          "last_seen_chapter": 4,
-          "state_chapter_id": 4,
-          "state": {
-            "attributes": {},
-            "tags": [],
-            "name": "苏映雪",
-            "entity_type": "character",
-            "role_function": "帮助者",
-            "action": "离开",
-            "emotion": -1
-          }
-        },
-        {
-          "entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+          "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
           "name": "顾承渊",
           "entity_type": "character",
           "tags": [],
@@ -178,18 +160,37 @@
             "action": "独行",
             "emotion": -2
           }
+        },
+        {
+          "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
+          "name": "苏映雪",
+          "entity_type": "character",
+          "tags": [],
+          "aliases": [],
+          "first_seen_chapter": 2,
+          "last_seen_chapter": 4,
+          "state_chapter_id": 4,
+          "state": {
+            "attributes": {},
+            "tags": [],
+            "name": "苏映雪",
+            "entity_type": "character",
+            "role_function": "帮助者",
+            "action": "离开",
+            "emotion": -1
+          }
         }
       ],
       "edges": [
         {
-          "relation_id": "8d9b5e26-bd6f-5977-8045-fb5afbab86de",
-          "state_chapter_id": 5,
-          "source_entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
-          "target_entity_id": "3c3ad1c5-cc82-5cc2-9507-70bf11caf076",
-          "source_name": "苏映雪",
-          "target_name": "陆遥",
-          "relation_type": "友情",
-          "directionality": "bidirectional",
+          "relation_id": "018bcfe5-6800-7000-8000-00000000004e",
+          "state_chapter_id": 3,
+          "source_entity_id": "018bcfe5-6800-7000-8000-00000000001a",
+          "target_entity_id": "018bcfe5-6800-7000-8000-00000000004d",
+          "source_name": "顾承渊",
+          "target_name": "天衡宗",
+          "relation_type": "隶属",
+          "directionality": "directed",
           "relation_semantics": "ordinary",
           "attributes": {
             "support_count": 1
@@ -197,14 +198,14 @@
           "is_active": true,
           "changes": [
             {
-              "fact_id": "fact#10",
-              "chapter_id": 5,
-              "author_execution_id": "705d278a-254c-5230-b8c4-40278a9ed51a",
+              "fact_id": "018bcfe5-6800-7000-8000-00000000004f",
+              "chapter_id": 3,
+              "author_execution_id": "018bcfe5-6800-7000-8000-00000000003c",
               "operation": {
-                "from_entity": "苏映雪",
-                "to_entity": "陆遥",
-                "relation_type": "友情",
-                "chapter_id": 5
+                "from_entity": "顾承渊",
+                "to_entity": "天衡宗",
+                "relation_type": "隶属",
+                "chapter_id": 3
               },
               "change_kind": "assert",
               "reason": null
@@ -212,10 +213,10 @@
           ]
         },
         {
-          "relation_id": "65870bad-f7bb-563a-8226-5347f3932e94",
+          "relation_id": "018bcfe5-6800-7000-8000-000000000063",
           "state_chapter_id": 5,
-          "source_entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
-          "target_entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+          "source_entity_id": "018bcfe5-6800-7000-8000-00000000001a",
+          "target_entity_id": "018bcfe5-6800-7000-8000-00000000002f",
           "source_name": "顾承渊",
           "target_name": "苏映雪",
           "relation_type": "友情",
@@ -227,9 +228,9 @@
           "is_active": true,
           "changes": [
             {
-              "fact_id": "fact#8",
+              "fact_id": "018bcfe5-6800-7000-8000-000000000064",
               "chapter_id": 5,
-              "author_execution_id": "705d278a-254c-5230-b8c4-40278a9ed51a",
+              "author_execution_id": "018bcfe5-6800-7000-8000-00000000005a",
               "operation": {
                 "from_entity": "顾承渊",
                 "to_entity": "苏映雪",
@@ -242,10 +243,10 @@
           ]
         },
         {
-          "relation_id": "677851f2-b2d0-55ef-8dc0-c1f71b56fd2c",
+          "relation_id": "018bcfe5-6800-7000-8000-000000000067",
           "state_chapter_id": 5,
-          "source_entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
-          "target_entity_id": "3c3ad1c5-cc82-5cc2-9507-70bf11caf076",
+          "source_entity_id": "018bcfe5-6800-7000-8000-00000000001a",
+          "target_entity_id": "018bcfe5-6800-7000-8000-000000000066",
           "source_name": "顾承渊",
           "target_name": "陆遥",
           "relation_type": "友情",
@@ -257,9 +258,9 @@
           "is_active": true,
           "changes": [
             {
-              "fact_id": "fact#9",
+              "fact_id": "018bcfe5-6800-7000-8000-000000000068",
               "chapter_id": 5,
-              "author_execution_id": "705d278a-254c-5230-b8c4-40278a9ed51a",
+              "author_execution_id": "018bcfe5-6800-7000-8000-00000000005a",
               "operation": {
                 "from_entity": "顾承渊",
                 "to_entity": "陆遥",
@@ -272,14 +273,14 @@
           ]
         },
         {
-          "relation_id": "e9a25d2a-75d5-531b-a0ca-ba35810f2bf7",
-          "state_chapter_id": 3,
-          "source_entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
-          "target_entity_id": "a0f89111-99d1-5d13-89b5-82fa9a7f2f50",
-          "source_name": "顾承渊",
-          "target_name": "天衡宗",
-          "relation_type": "隶属",
-          "directionality": "directed",
+          "relation_id": "018bcfe5-6800-7000-8000-00000000006a",
+          "state_chapter_id": 5,
+          "source_entity_id": "018bcfe5-6800-7000-8000-00000000002f",
+          "target_entity_id": "018bcfe5-6800-7000-8000-000000000066",
+          "source_name": "苏映雪",
+          "target_name": "陆遥",
+          "relation_type": "友情",
+          "directionality": "bidirectional",
           "relation_semantics": "ordinary",
           "attributes": {
             "support_count": 1
@@ -287,14 +288,14 @@
           "is_active": true,
           "changes": [
             {
-              "fact_id": "fact#5",
-              "chapter_id": 3,
-              "author_execution_id": "af7934b7-430c-5d4e-b451-faf44ed96309",
+              "fact_id": "018bcfe5-6800-7000-8000-00000000006b",
+              "chapter_id": 5,
+              "author_execution_id": "018bcfe5-6800-7000-8000-00000000005a",
               "operation": {
-                "from_entity": "顾承渊",
-                "to_entity": "天衡宗",
-                "relation_type": "隶属",
-                "chapter_id": 3
+                "from_entity": "苏映雪",
+                "to_entity": "陆遥",
+                "relation_type": "友情",
+                "chapter_id": 5
               },
               "change_kind": "assert",
               "reason": null
@@ -304,7 +305,7 @@
       ]
     },
     "event-trees": {
-      "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+      "run_id": "018bcfe5-6800-7000-8000-000000000002",
       "contract_version": "event-tree-declarations-v1",
       "organization_status": "ready",
       "chapters": [
@@ -348,24 +349,7 @@
       },
       "arcs": [
         {
-          "arc_id": "86e3eeb5-501e-55aa-967f-57d68c475f4b",
-          "parent_arc_id": null,
-          "kind": "subplot",
-          "title": "石碑之谜",
-          "objective": "解开石碑来历",
-          "evidence": [
-            {
-              "event_id": null,
-              "paragraph_id": 0,
-              "chapter_id": 1,
-              "char_start": 0,
-              "char_end": 8,
-              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-            }
-          ]
-        },
-        {
-          "arc_id": "a01eeb21-8993-54c3-a825-8b1bc51aaeb6",
+          "arc_id": "018bcfe5-6800-7000-8000-00000000007a",
           "parent_arc_id": null,
           "kind": "main",
           "title": "初入江湖",
@@ -380,11 +364,28 @@
               "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
             }
           ]
+        },
+        {
+          "arc_id": "018bcfe5-6800-7000-8000-00000000007b",
+          "parent_arc_id": null,
+          "kind": "subplot",
+          "title": "石碑之谜",
+          "objective": "解开石碑来历",
+          "evidence": [
+            {
+              "event_id": null,
+              "paragraph_id": 0,
+              "chapter_id": 1,
+              "char_start": 0,
+              "char_end": 8,
+              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+            }
+          ]
         }
       ],
       "events": [
         {
-          "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+          "event_id": "018bcfe5-6800-7000-8000-000000000071",
           "title": "踏入江湖",
           "summary": "顾承渊踏入江湖并检查石碑",
           "event_type": "启程",
@@ -394,7 +395,7 @@
           "chapter_order": 1
         },
         {
-          "event_id": "774431af-d215-5dd8-a424-457d216dbd41",
+          "event_id": "018bcfe5-6800-7000-8000-000000000075",
           "title": "第1章人物动态",
           "summary": "顾承渊初入江湖。",
           "event_type": "行动",
@@ -404,7 +405,7 @@
           "chapter_order": 1
         },
         {
-          "event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+          "event_id": "018bcfe5-6800-7000-8000-000000000074",
           "title": "同行启程",
           "summary": "苏映雪现身同行",
           "event_type": "结伴",
@@ -414,7 +415,7 @@
           "chapter_order": 2
         },
         {
-          "event_id": "f1c196b6-ec45-591e-ba25-b29debc21ff0",
+          "event_id": "018bcfe5-6800-7000-8000-000000000076",
           "title": "第2章人物动态",
           "summary": "苏映雪现身与他同行。",
           "event_type": "行动",
@@ -424,7 +425,7 @@
           "chapter_order": 2
         },
         {
-          "event_id": "34301c71-9155-5861-b5f4-305030eef6a0",
+          "event_id": "018bcfe5-6800-7000-8000-000000000077",
           "title": "第3章人物动态",
           "summary": "顾承渊与苏映雪结盟，同时受天衡宗招揽。",
           "event_type": "行动",
@@ -434,7 +435,7 @@
           "chapter_order": 3
         },
         {
-          "event_id": "dd1bcb25-9700-59ec-bf0a-4e545124b039",
+          "event_id": "018bcfe5-6800-7000-8000-000000000078",
           "title": "第4章人物动态",
           "summary": "苏映雪完成使命后离开。",
           "event_type": "行动",
@@ -444,7 +445,7 @@
           "chapter_order": 4
         },
         {
-          "event_id": "583c4247-117e-57c6-bc18-f45e9931c7a6",
+          "event_id": "018bcfe5-6800-7000-8000-000000000079",
           "title": "第5章人物动态",
           "summary": "顾承渊最终与苏映雪决裂，独自前行。",
           "event_type": "行动",
@@ -456,7 +457,7 @@
       ],
       "outcomes": [
         {
-          "outcome_id": "7aeadda5-62a7-53c4-818f-6c5a34ee44e6",
+          "outcome_id": "018bcfe5-6800-7000-8000-00000000007d",
           "title": "石碑秘密未解",
           "description": "石碑来历仍无答案",
           "first_text_position": 0,
@@ -472,7 +473,7 @@
           ]
         },
         {
-          "outcome_id": "9594bd71-c197-5a66-9bb5-4abb675ca6ad",
+          "outcome_id": "018bcfe5-6800-7000-8000-00000000007c",
           "title": "江湖之路开启",
           "description": "顾承渊正式踏上江湖路",
           "first_text_position": 48,
@@ -490,24 +491,8 @@
       ],
       "event_arc_links": [
         {
-          "event_id": "23c6aa6f-f527-5650-a8ef-827156672387",
-          "arc_id": "86e3eeb5-501e-55aa-967f-57d68c475f4b",
-          "role": "支线推进",
-          "reason": "线索推进谜团",
-          "evidence": [
-            {
-              "event_id": null,
-              "paragraph_id": 0,
-              "chapter_id": 1,
-              "char_start": 0,
-              "char_end": 8,
-              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-            }
-          ]
-        },
-        {
-          "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-          "arc_id": "a01eeb21-8993-54c3-a825-8b1bc51aaeb6",
+          "event_id": "018bcfe5-6800-7000-8000-000000000071",
+          "arc_id": "018bcfe5-6800-7000-8000-00000000007a",
           "role": "主线推进",
           "reason": "旅程开端",
           "evidence": [
@@ -522,24 +507,24 @@
           ]
         },
         {
-          "event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-          "arc_id": "a01eeb21-8993-54c3-a825-8b1bc51aaeb6",
-          "role": "主线推进",
-          "reason": "同行加入旅程",
+          "event_id": "018bcfe5-6800-7000-8000-000000000072",
+          "arc_id": "018bcfe5-6800-7000-8000-00000000007b",
+          "role": "支线推进",
+          "reason": "线索推进谜团",
           "evidence": [
             {
               "event_id": null,
-              "paragraph_id": 1,
-              "chapter_id": 2,
+              "paragraph_id": 0,
+              "chapter_id": 1,
               "char_start": 0,
-              "char_end": 10,
-              "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
+              "char_end": 8,
+              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
             }
           ]
         },
         {
-          "event_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
-          "arc_id": "86e3eeb5-501e-55aa-967f-57d68c475f4b",
+          "event_id": "018bcfe5-6800-7000-8000-000000000073",
+          "arc_id": "018bcfe5-6800-7000-8000-00000000007b",
           "role": "支线起点",
           "reason": "石碑谜团出现",
           "evidence": [
@@ -552,27 +537,28 @@
               "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
             }
           ]
+        },
+        {
+          "event_id": "018bcfe5-6800-7000-8000-000000000074",
+          "arc_id": "018bcfe5-6800-7000-8000-00000000007a",
+          "role": "主线推进",
+          "reason": "同行加入旅程",
+          "evidence": [
+            {
+              "event_id": null,
+              "paragraph_id": 1,
+              "chapter_id": 2,
+              "char_start": 0,
+              "char_end": 10,
+              "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
+            }
+          ]
         }
       ],
       "event_outcome_links": [
         {
-          "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-          "outcome_id": "7aeadda5-62a7-53c4-818f-6c5a34ee44e6",
-          "reason": "调查未有结论",
-          "evidence": [
-            {
-              "event_id": null,
-              "paragraph_id": 0,
-              "chapter_id": 1,
-              "char_start": 0,
-              "char_end": 8,
-              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-            }
-          ]
-        },
-        {
-          "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-          "outcome_id": "9594bd71-c197-5a66-9bb5-4abb675ca6ad",
+          "event_id": "018bcfe5-6800-7000-8000-000000000071",
+          "outcome_id": "018bcfe5-6800-7000-8000-00000000007c",
           "reason": "旅程开启之路",
           "evidence": [
             {
@@ -586,8 +572,23 @@
           ]
         },
         {
-          "event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-          "outcome_id": "9594bd71-c197-5a66-9bb5-4abb675ca6ad",
+          "event_id": "018bcfe5-6800-7000-8000-000000000071",
+          "outcome_id": "018bcfe5-6800-7000-8000-00000000007d",
+          "reason": "调查未有结论",
+          "evidence": [
+            {
+              "event_id": null,
+              "paragraph_id": 0,
+              "chapter_id": 1,
+              "char_start": 0,
+              "char_end": 8,
+              "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+            }
+          ]
+        },
+        {
+          "event_id": "018bcfe5-6800-7000-8000-000000000074",
+          "outcome_id": "018bcfe5-6800-7000-8000-00000000007c",
           "reason": "同行促成启程",
           "evidence": [
             {
@@ -603,11 +604,11 @@
       ],
       "relations": [
         {
-          "relation_id": "85c0eb10-ecd1-50ee-833d-59478d4423a2",
+          "relation_id": "018bcfe5-6800-7000-8000-00000000007e",
           "source_kind": "event",
-          "source_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+          "source_id": "018bcfe5-6800-7000-8000-000000000071",
           "target_kind": "event",
-          "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+          "target_id": "018bcfe5-6800-7000-8000-000000000074",
           "relation_type": "causal",
           "reason": "踏入江湖促成同行",
           "evidence": [
@@ -620,24 +621,24 @@
               "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
             }
           ],
-          "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+          "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
           "ancestor_event_ids": [],
           "evidence_position": 8,
           "locator": {
             "target_kind": "event",
-            "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+            "target_id": "018bcfe5-6800-7000-8000-000000000074",
             "title": "同行启程",
-            "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+            "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
             "ancestor_event_ids": [],
             "evidence_position": 8
           }
         },
         {
-          "relation_id": "8cb13322-767d-5eb9-881c-0e0cc7b413fc",
+          "relation_id": "018bcfe5-6800-7000-8000-00000000007f",
           "source_kind": "event",
-          "source_id": "23c6aa6f-f527-5650-a8ef-827156672387",
+          "source_id": "018bcfe5-6800-7000-8000-000000000072",
           "target_kind": "event",
-          "target_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
+          "target_id": "018bcfe5-6800-7000-8000-000000000073",
           "relation_type": "reference",
           "reason": "记录的线索涉及石碑疑云",
           "evidence": [
@@ -650,28 +651,28 @@
               "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
             }
           ],
-          "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+          "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
           "ancestor_event_ids": [
-            "439d4223-bd8f-5b5c-b1ee-61abf678dd45"
+            "018bcfe5-6800-7000-8000-000000000071"
           ],
           "evidence_position": 0,
           "locator": {
             "target_kind": "event",
-            "target_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
+            "target_id": "018bcfe5-6800-7000-8000-000000000073",
             "title": "石碑疑云",
-            "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
             "ancestor_event_ids": [
-              "439d4223-bd8f-5b5c-b1ee-61abf678dd45"
+              "018bcfe5-6800-7000-8000-000000000071"
             ],
             "evidence_position": 0
           }
         },
         {
-          "relation_id": "d693c752-3f30-5367-adeb-3f659bf86dec",
+          "relation_id": "018bcfe5-6800-7000-8000-000000000080",
           "source_kind": "event",
-          "source_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+          "source_id": "018bcfe5-6800-7000-8000-000000000071",
           "target_kind": "event",
-          "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+          "target_id": "018bcfe5-6800-7000-8000-000000000074",
           "relation_type": "foreshadowing",
           "reason": "初入江湖埋设同行伏笔",
           "evidence": [
@@ -684,14 +685,14 @@
               "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
             }
           ],
-          "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+          "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
           "ancestor_event_ids": [],
           "evidence_position": 8,
           "locator": {
             "target_kind": "event",
-            "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+            "target_id": "018bcfe5-6800-7000-8000-000000000074",
             "title": "同行启程",
-            "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+            "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
             "ancestor_event_ids": [],
             "evidence_position": 8
           }
@@ -699,14 +700,14 @@
       ],
       "foreshadowing_actions": [
         {
-          "action_id": "3472a9c6-91e6-54c8-bd40-38a71695fc60",
+          "action_id": "018bcfe5-6800-7000-8000-000000000024",
           "action_type": "setup",
           "endpoint_kind": "event",
-          "root_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-          "target_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+          "root_event_id": "018bcfe5-6800-7000-8000-000000000071",
+          "target_event_id": "018bcfe5-6800-7000-8000-000000000071",
           "chapter_id": 1,
           "chapter_order": 1,
-          "source_operation_id": "setup/030ee0b1-53f6-576c-827c-65aebc8ed50d",
+          "source_operation_id": "setup/018bcfe5-6800-7000-8000-000000000022",
           "evidence": [
             {
               "event_id": null,
@@ -723,7 +724,7 @@
       "next_cursor": null
     },
     "timeline": {
-      "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+      "run_id": "018bcfe5-6800-7000-8000-000000000002",
       "organization_status": "ready",
       "chapters": [
         {
@@ -757,7 +758,7 @@
         {
           "plotline_change_id": "plotline#0",
           "dimension": "foreshadowing",
-          "subject_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+          "subject_id": "018bcfe5-6800-7000-8000-000000000071",
           "subject_title": "踏入江湖",
           "title": "已埋设",
           "chapter_id": 1,
@@ -781,14 +782,14 @@
             0
           ],
           "source_event_ids": [
-            "439d4223-bd8f-5b5c-b1ee-61abf678dd45"
+            "018bcfe5-6800-7000-8000-000000000071"
           ],
           "source_fact_ids": []
         },
         {
           "plotline_change_id": "plotline#1",
           "dimension": "character",
-          "subject_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+          "subject_id": "018bcfe5-6800-7000-8000-00000000001a",
           "subject_title": "顾承渊",
           "title": "初入江湖",
           "chapter_id": 1,
@@ -827,13 +828,13 @@
           "anchor_paragraph_ids": [],
           "source_event_ids": [],
           "source_fact_ids": [
-            "fact#0"
+            "018bcfe5-6800-7000-8000-00000000001c"
           ]
         }
       ],
       "states": [
         {
-          "subject_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+          "subject_id": "018bcfe5-6800-7000-8000-00000000001a",
           "subject_title": "顾承渊",
           "dimension": "character",
           "chapter_id": 1,
@@ -844,7 +845,7 @@
           }
         },
         {
-          "subject_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+          "subject_id": "018bcfe5-6800-7000-8000-000000000071",
           "subject_title": "踏入江湖",
           "dimension": "foreshadowing",
           "chapter_id": 1,
@@ -855,12 +856,12 @@
       "subjects": [
         {
           "dimension": "character",
-          "subject_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+          "subject_id": "018bcfe5-6800-7000-8000-00000000001a",
           "subject_title": "顾承渊"
         },
         {
           "dimension": "foreshadowing",
-          "subject_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+          "subject_id": "018bcfe5-6800-7000-8000-000000000071",
           "subject_title": "踏入江湖"
         }
       ],
@@ -883,7 +884,7 @@
     },
     "topics": [],
     "topics/aggregate": {
-      "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+      "run_id": "018bcfe5-6800-7000-8000-000000000002",
       "level": "book",
       "model": null,
       "token_total": null,
@@ -891,7 +892,7 @@
       "unavailable_reason": "topic_inference_unavailable: 无 LDA 构建事实行（旧 Top-5 运行不进入聚合）"
     },
     "topics/series": {
-      "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+      "run_id": "018bcfe5-6800-7000-8000-000000000002",
       "model": null,
       "num_topics": null,
       "points": [],
@@ -922,7 +923,7 @@
       "lexicon_zero_hit_share": null
     },
     "graph/metrics": {
-      "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+      "run_id": "018bcfe5-6800-7000-8000-000000000002",
       "unavailable_reason": null,
       "algorithm": {
         "version": "graph-metrics-v1",
@@ -962,16 +963,16 @@
       "success": true,
       "message": "分析结果已写入文件",
       "file_path": "<runtime>",
-      "novel_id": "5d76f3fd",
+      "novel_id": "018bcfe5-6800-7000-8000-000000000001",
       "novel_name": "Timeline Contract",
       "missing_fields": [
         "paragraph_curves",
-        "topics"
+        "topics（topic_model_artifact_missing: <runtime>）"
       ]
     },
     "export": {
-      "task_id": "8a43b6d2",
-      "novel_id": "5d76f3fd",
+      "task_id": "00000001",
+      "novel_id": "018bcfe5-6800-7000-8000-000000000001",
       "novel_name": "Timeline Contract",
       "generated_at": "<runtime>",
       "total_chapters": 5,
@@ -1158,8 +1159,8 @@
       ],
       "foreshadowing_trees": [
         {
-          "root_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-          "tree_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+          "root_event_id": "018bcfe5-6800-7000-8000-000000000071",
+          "tree_id": "018bcfe5-6800-7000-8000-000000000071",
           "first_chapter_id": 1,
           "last_chapter_id": 1,
           "anchor_chapter_ids": [
@@ -1226,13 +1227,13 @@
           "network_density": null,
           "greimas_coverage": 0.3333333333333333,
           "function_coverage_distribution": {
-            "接收者": 0.0,
-            "发送者": 0.0,
-            "反对者": 0.0,
             "帮助者": 0.5,
-            "其他": 0.0,
+            "接收者": 0.0,
+            "反对者": 0.0,
+            "发送者": 0.0,
+            "主体": 0.5,
             "客体": 0.0,
-            "主体": 0.5
+            "其他": 0.0
           },
           "antagonist_strength_gap": null,
           "relation_change_per_10k_chars": 461.538462,
@@ -1288,7 +1289,7 @@
         "low_confidence_count": 0
       },
       "timeline": {
-        "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+        "run_id": "018bcfe5-6800-7000-8000-000000000002",
         "organization_status": "ready",
         "chapters": [
           {
@@ -1322,7 +1323,7 @@
           {
             "plotline_change_id": "plotline#0",
             "dimension": "foreshadowing",
-            "subject_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "subject_id": "018bcfe5-6800-7000-8000-000000000071",
             "subject_title": "踏入江湖",
             "title": "已埋设",
             "chapter_id": 1,
@@ -1346,14 +1347,14 @@
               0
             ],
             "source_event_ids": [
-              "439d4223-bd8f-5b5c-b1ee-61abf678dd45"
+              "018bcfe5-6800-7000-8000-000000000071"
             ],
             "source_fact_ids": []
           },
           {
             "plotline_change_id": "plotline#1",
             "dimension": "character",
-            "subject_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000001a",
             "subject_title": "顾承渊",
             "title": "初入江湖",
             "chapter_id": 1,
@@ -1392,13 +1393,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#0"
+              "018bcfe5-6800-7000-8000-00000000001c"
             ]
           },
           {
             "plotline_change_id": "plotline#2",
             "dimension": "character",
-            "subject_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000002f",
             "subject_title": "苏映雪",
             "title": "现身",
             "chapter_id": 2,
@@ -1437,13 +1438,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#1"
+              "018bcfe5-6800-7000-8000-000000000031"
             ]
           },
           {
             "plotline_change_id": "plotline#3",
             "dimension": "character",
-            "subject_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000001a",
             "subject_title": "顾承渊",
             "title": "结盟",
             "chapter_id": 3,
@@ -1482,13 +1483,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#2"
+              "018bcfe5-6800-7000-8000-000000000040"
             ]
           },
           {
             "plotline_change_id": "plotline#4",
             "dimension": "character",
-            "subject_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000002f",
             "subject_title": "苏映雪",
             "title": "回应",
             "chapter_id": 3,
@@ -1520,13 +1521,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#3"
+              "018bcfe5-6800-7000-8000-000000000045"
             ]
           },
           {
             "plotline_change_id": "plotline#5",
             "dimension": "relationship",
-            "subject_id": "47107a5c-b03c-5ad0-b7ac-fac54c192755",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000004a",
             "subject_title": "顾承渊 · 苏映雪",
             "title": "盟友：首次记录",
             "chapter_id": 3,
@@ -1551,13 +1552,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#4"
+              "018bcfe5-6800-7000-8000-00000000004b"
             ]
           },
           {
             "plotline_change_id": "plotline#6",
             "dimension": "relationship",
-            "subject_id": "e9a25d2a-75d5-531b-a0ca-ba35810f2bf7",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000004e",
             "subject_title": "顾承渊 · 天衡宗",
             "title": "隶属：首次记录",
             "chapter_id": 3,
@@ -1582,13 +1583,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#5"
+              "018bcfe5-6800-7000-8000-00000000004f"
             ]
           },
           {
             "plotline_change_id": "plotline#7",
             "dimension": "character",
-            "subject_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000002f",
             "subject_title": "苏映雪",
             "title": "离开",
             "chapter_id": 4,
@@ -1627,13 +1628,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#6"
+              "018bcfe5-6800-7000-8000-000000000055"
             ]
           },
           {
             "plotline_change_id": "plotline#8",
             "dimension": "character",
-            "subject_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000001a",
             "subject_title": "顾承渊",
             "title": "独行",
             "chapter_id": 5,
@@ -1672,13 +1673,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#7"
+              "018bcfe5-6800-7000-8000-00000000005e"
             ]
           },
           {
             "plotline_change_id": "plotline#9",
             "dimension": "relationship",
-            "subject_id": "65870bad-f7bb-563a-8226-5347f3932e94",
+            "subject_id": "018bcfe5-6800-7000-8000-000000000063",
             "subject_title": "顾承渊 · 苏映雪",
             "title": "友情：首次记录",
             "chapter_id": 5,
@@ -1703,13 +1704,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#8"
+              "018bcfe5-6800-7000-8000-000000000064"
             ]
           },
           {
             "plotline_change_id": "plotline#10",
             "dimension": "relationship",
-            "subject_id": "677851f2-b2d0-55ef-8dc0-c1f71b56fd2c",
+            "subject_id": "018bcfe5-6800-7000-8000-000000000067",
             "subject_title": "顾承渊 · 陆遥",
             "title": "友情：首次记录",
             "chapter_id": 5,
@@ -1734,13 +1735,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#9"
+              "018bcfe5-6800-7000-8000-000000000068"
             ]
           },
           {
             "plotline_change_id": "plotline#11",
             "dimension": "relationship",
-            "subject_id": "8d9b5e26-bd6f-5977-8045-fb5afbab86de",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000006a",
             "subject_title": "苏映雪 · 陆遥",
             "title": "友情：首次记录",
             "chapter_id": 5,
@@ -1765,13 +1766,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#10"
+              "018bcfe5-6800-7000-8000-00000000006b"
             ]
           },
           {
             "plotline_change_id": "plotline#12",
             "dimension": "relationship",
-            "subject_id": "47107a5c-b03c-5ad0-b7ac-fac54c192755",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000004a",
             "subject_title": "顾承渊 · 苏映雪",
             "title": "决裂",
             "chapter_id": 5,
@@ -1801,13 +1802,13 @@
             "anchor_paragraph_ids": [],
             "source_event_ids": [],
             "source_fact_ids": [
-              "fact#11"
+              "018bcfe5-6800-7000-8000-00000000006d"
             ]
           }
         ],
         "states": [
           {
-            "subject_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000001a",
             "subject_title": "顾承渊",
             "dimension": "character",
             "chapter_id": 5,
@@ -1819,7 +1820,7 @@
             }
           },
           {
-            "subject_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000002f",
             "subject_title": "苏映雪",
             "dimension": "character",
             "chapter_id": 4,
@@ -1831,7 +1832,7 @@
             }
           },
           {
-            "subject_id": "47107a5c-b03c-5ad0-b7ac-fac54c192755",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000004a",
             "subject_title": "顾承渊 · 苏映雪",
             "dimension": "relationship",
             "chapter_id": 5,
@@ -1844,7 +1845,7 @@
             }
           },
           {
-            "subject_id": "e9a25d2a-75d5-531b-a0ca-ba35810f2bf7",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000004e",
             "subject_title": "顾承渊 · 天衡宗",
             "dimension": "relationship",
             "chapter_id": 3,
@@ -1855,7 +1856,7 @@
             }
           },
           {
-            "subject_id": "65870bad-f7bb-563a-8226-5347f3932e94",
+            "subject_id": "018bcfe5-6800-7000-8000-000000000063",
             "subject_title": "顾承渊 · 苏映雪",
             "dimension": "relationship",
             "chapter_id": 5,
@@ -1866,7 +1867,7 @@
             }
           },
           {
-            "subject_id": "677851f2-b2d0-55ef-8dc0-c1f71b56fd2c",
+            "subject_id": "018bcfe5-6800-7000-8000-000000000067",
             "subject_title": "顾承渊 · 陆遥",
             "dimension": "relationship",
             "chapter_id": 5,
@@ -1877,7 +1878,7 @@
             }
           },
           {
-            "subject_id": "8d9b5e26-bd6f-5977-8045-fb5afbab86de",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000006a",
             "subject_title": "苏映雪 · 陆遥",
             "dimension": "relationship",
             "chapter_id": 5,
@@ -1888,7 +1889,7 @@
             }
           },
           {
-            "subject_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "subject_id": "018bcfe5-6800-7000-8000-000000000071",
             "subject_title": "踏入江湖",
             "dimension": "foreshadowing",
             "chapter_id": 1,
@@ -1899,42 +1900,42 @@
         "subjects": [
           {
             "dimension": "character",
-            "subject_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000001a",
             "subject_title": "顾承渊"
           },
           {
             "dimension": "character",
-            "subject_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000002f",
             "subject_title": "苏映雪"
           },
           {
             "dimension": "relationship",
-            "subject_id": "47107a5c-b03c-5ad0-b7ac-fac54c192755",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000004a",
             "subject_title": "顾承渊 · 苏映雪"
           },
           {
             "dimension": "relationship",
-            "subject_id": "e9a25d2a-75d5-531b-a0ca-ba35810f2bf7",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000004e",
             "subject_title": "顾承渊 · 天衡宗"
           },
           {
             "dimension": "relationship",
-            "subject_id": "65870bad-f7bb-563a-8226-5347f3932e94",
+            "subject_id": "018bcfe5-6800-7000-8000-000000000063",
             "subject_title": "顾承渊 · 苏映雪"
           },
           {
             "dimension": "relationship",
-            "subject_id": "677851f2-b2d0-55ef-8dc0-c1f71b56fd2c",
+            "subject_id": "018bcfe5-6800-7000-8000-000000000067",
             "subject_title": "顾承渊 · 陆遥"
           },
           {
             "dimension": "relationship",
-            "subject_id": "8d9b5e26-bd6f-5977-8045-fb5afbab86de",
+            "subject_id": "018bcfe5-6800-7000-8000-00000000006a",
             "subject_title": "苏映雪 · 陆遥"
           },
           {
             "dimension": "foreshadowing",
-            "subject_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "subject_id": "018bcfe5-6800-7000-8000-000000000071",
             "subject_title": "踏入江湖"
           }
         ],
@@ -1992,7 +1993,7 @@
         ]
       },
       "event_trees": {
-        "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+        "run_id": "018bcfe5-6800-7000-8000-000000000002",
         "contract_version": "event-tree-declarations-v1",
         "organization_status": "ready",
         "chapters": [
@@ -2036,24 +2037,7 @@
         },
         "arcs": [
           {
-            "arc_id": "86e3eeb5-501e-55aa-967f-57d68c475f4b",
-            "parent_arc_id": null,
-            "kind": "subplot",
-            "title": "石碑之谜",
-            "objective": "解开石碑来历",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ]
-          },
-          {
-            "arc_id": "a01eeb21-8993-54c3-a825-8b1bc51aaeb6",
+            "arc_id": "018bcfe5-6800-7000-8000-00000000007a",
             "parent_arc_id": null,
             "kind": "main",
             "title": "初入江湖",
@@ -2068,11 +2052,28 @@
                 "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
               }
             ]
+          },
+          {
+            "arc_id": "018bcfe5-6800-7000-8000-00000000007b",
+            "parent_arc_id": null,
+            "kind": "subplot",
+            "title": "石碑之谜",
+            "objective": "解开石碑来历",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 0,
+                "chapter_id": 1,
+                "char_start": 0,
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+              }
+            ]
           }
         ],
         "events": [
           {
-            "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "event_id": "018bcfe5-6800-7000-8000-000000000071",
             "title": "踏入江湖",
             "summary": "顾承渊踏入江湖并检查石碑",
             "event_type": "启程",
@@ -2082,7 +2083,7 @@
             "chapter_order": 1
           },
           {
-            "event_id": "774431af-d215-5dd8-a424-457d216dbd41",
+            "event_id": "018bcfe5-6800-7000-8000-000000000075",
             "title": "第1章人物动态",
             "summary": "顾承渊初入江湖。",
             "event_type": "行动",
@@ -2092,7 +2093,7 @@
             "chapter_order": 1
           },
           {
-            "event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+            "event_id": "018bcfe5-6800-7000-8000-000000000074",
             "title": "同行启程",
             "summary": "苏映雪现身同行",
             "event_type": "结伴",
@@ -2102,7 +2103,7 @@
             "chapter_order": 2
           },
           {
-            "event_id": "f1c196b6-ec45-591e-ba25-b29debc21ff0",
+            "event_id": "018bcfe5-6800-7000-8000-000000000076",
             "title": "第2章人物动态",
             "summary": "苏映雪现身与他同行。",
             "event_type": "行动",
@@ -2112,7 +2113,7 @@
             "chapter_order": 2
           },
           {
-            "event_id": "34301c71-9155-5861-b5f4-305030eef6a0",
+            "event_id": "018bcfe5-6800-7000-8000-000000000077",
             "title": "第3章人物动态",
             "summary": "顾承渊与苏映雪结盟，同时受天衡宗招揽。",
             "event_type": "行动",
@@ -2122,7 +2123,7 @@
             "chapter_order": 3
           },
           {
-            "event_id": "dd1bcb25-9700-59ec-bf0a-4e545124b039",
+            "event_id": "018bcfe5-6800-7000-8000-000000000078",
             "title": "第4章人物动态",
             "summary": "苏映雪完成使命后离开。",
             "event_type": "行动",
@@ -2132,7 +2133,7 @@
             "chapter_order": 4
           },
           {
-            "event_id": "583c4247-117e-57c6-bc18-f45e9931c7a6",
+            "event_id": "018bcfe5-6800-7000-8000-000000000079",
             "title": "第5章人物动态",
             "summary": "顾承渊最终与苏映雪决裂，独自前行。",
             "event_type": "行动",
@@ -2144,7 +2145,7 @@
         ],
         "outcomes": [
           {
-            "outcome_id": "7aeadda5-62a7-53c4-818f-6c5a34ee44e6",
+            "outcome_id": "018bcfe5-6800-7000-8000-00000000007d",
             "title": "石碑秘密未解",
             "description": "石碑来历仍无答案",
             "first_text_position": 0,
@@ -2160,7 +2161,7 @@
             ]
           },
           {
-            "outcome_id": "9594bd71-c197-5a66-9bb5-4abb675ca6ad",
+            "outcome_id": "018bcfe5-6800-7000-8000-00000000007c",
             "title": "江湖之路开启",
             "description": "顾承渊正式踏上江湖路",
             "first_text_position": 48,
@@ -2178,24 +2179,8 @@
         ],
         "event_arc_links": [
           {
-            "event_id": "23c6aa6f-f527-5650-a8ef-827156672387",
-            "arc_id": "86e3eeb5-501e-55aa-967f-57d68c475f4b",
-            "role": "支线推进",
-            "reason": "线索推进谜团",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ]
-          },
-          {
-            "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-            "arc_id": "a01eeb21-8993-54c3-a825-8b1bc51aaeb6",
+            "event_id": "018bcfe5-6800-7000-8000-000000000071",
+            "arc_id": "018bcfe5-6800-7000-8000-00000000007a",
             "role": "主线推进",
             "reason": "旅程开端",
             "evidence": [
@@ -2210,24 +2195,24 @@
             ]
           },
           {
-            "event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-            "arc_id": "a01eeb21-8993-54c3-a825-8b1bc51aaeb6",
-            "role": "主线推进",
-            "reason": "同行加入旅程",
+            "event_id": "018bcfe5-6800-7000-8000-000000000072",
+            "arc_id": "018bcfe5-6800-7000-8000-00000000007b",
+            "role": "支线推进",
+            "reason": "线索推进谜团",
             "evidence": [
               {
                 "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
+                "paragraph_id": 0,
+                "chapter_id": 1,
                 "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
               }
             ]
           },
           {
-            "event_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
-            "arc_id": "86e3eeb5-501e-55aa-967f-57d68c475f4b",
+            "event_id": "018bcfe5-6800-7000-8000-000000000073",
+            "arc_id": "018bcfe5-6800-7000-8000-00000000007b",
             "role": "支线起点",
             "reason": "石碑谜团出现",
             "evidence": [
@@ -2240,27 +2225,28 @@
                 "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
               }
             ]
+          },
+          {
+            "event_id": "018bcfe5-6800-7000-8000-000000000074",
+            "arc_id": "018bcfe5-6800-7000-8000-00000000007a",
+            "role": "主线推进",
+            "reason": "同行加入旅程",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 1,
+                "chapter_id": 2,
+                "char_start": 0,
+                "char_end": 10,
+                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
+              }
+            ]
           }
         ],
         "event_outcome_links": [
           {
-            "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-            "outcome_id": "7aeadda5-62a7-53c4-818f-6c5a34ee44e6",
-            "reason": "调查未有结论",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ]
-          },
-          {
-            "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-            "outcome_id": "9594bd71-c197-5a66-9bb5-4abb675ca6ad",
+            "event_id": "018bcfe5-6800-7000-8000-000000000071",
+            "outcome_id": "018bcfe5-6800-7000-8000-00000000007c",
             "reason": "旅程开启之路",
             "evidence": [
               {
@@ -2274,8 +2260,23 @@
             ]
           },
           {
-            "event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-            "outcome_id": "9594bd71-c197-5a66-9bb5-4abb675ca6ad",
+            "event_id": "018bcfe5-6800-7000-8000-000000000071",
+            "outcome_id": "018bcfe5-6800-7000-8000-00000000007d",
+            "reason": "调查未有结论",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 0,
+                "chapter_id": 1,
+                "char_start": 0,
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+              }
+            ]
+          },
+          {
+            "event_id": "018bcfe5-6800-7000-8000-000000000074",
+            "outcome_id": "018bcfe5-6800-7000-8000-00000000007c",
             "reason": "同行促成启程",
             "evidence": [
               {
@@ -2291,11 +2292,11 @@
         ],
         "relations": [
           {
-            "relation_id": "85c0eb10-ecd1-50ee-833d-59478d4423a2",
+            "relation_id": "018bcfe5-6800-7000-8000-00000000007e",
             "source_kind": "event",
-            "source_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "source_id": "018bcfe5-6800-7000-8000-000000000071",
             "target_kind": "event",
-            "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+            "target_id": "018bcfe5-6800-7000-8000-000000000074",
             "relation_type": "causal",
             "reason": "踏入江湖促成同行",
             "evidence": [
@@ -2308,24 +2309,24 @@
                 "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
               }
             ],
-            "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+            "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
             "ancestor_event_ids": [],
             "evidence_position": 8,
             "locator": {
               "target_kind": "event",
-              "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+              "target_id": "018bcfe5-6800-7000-8000-000000000074",
               "title": "同行启程",
-              "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+              "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
               "ancestor_event_ids": [],
               "evidence_position": 8
             }
           },
           {
-            "relation_id": "8cb13322-767d-5eb9-881c-0e0cc7b413fc",
+            "relation_id": "018bcfe5-6800-7000-8000-00000000007f",
             "source_kind": "event",
-            "source_id": "23c6aa6f-f527-5650-a8ef-827156672387",
+            "source_id": "018bcfe5-6800-7000-8000-000000000072",
             "target_kind": "event",
-            "target_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
+            "target_id": "018bcfe5-6800-7000-8000-000000000073",
             "relation_type": "reference",
             "reason": "记录的线索涉及石碑疑云",
             "evidence": [
@@ -2338,28 +2339,28 @@
                 "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
               }
             ],
-            "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
             "ancestor_event_ids": [
-              "439d4223-bd8f-5b5c-b1ee-61abf678dd45"
+              "018bcfe5-6800-7000-8000-000000000071"
             ],
             "evidence_position": 0,
             "locator": {
               "target_kind": "event",
-              "target_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
+              "target_id": "018bcfe5-6800-7000-8000-000000000073",
               "title": "石碑疑云",
-              "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+              "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
               "ancestor_event_ids": [
-                "439d4223-bd8f-5b5c-b1ee-61abf678dd45"
+                "018bcfe5-6800-7000-8000-000000000071"
               ],
               "evidence_position": 0
             }
           },
           {
-            "relation_id": "d693c752-3f30-5367-adeb-3f659bf86dec",
+            "relation_id": "018bcfe5-6800-7000-8000-000000000080",
             "source_kind": "event",
-            "source_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "source_id": "018bcfe5-6800-7000-8000-000000000071",
             "target_kind": "event",
-            "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+            "target_id": "018bcfe5-6800-7000-8000-000000000074",
             "relation_type": "foreshadowing",
             "reason": "初入江湖埋设同行伏笔",
             "evidence": [
@@ -2372,14 +2373,14 @@
                 "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
               }
             ],
-            "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+            "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
             "ancestor_event_ids": [],
             "evidence_position": 8,
             "locator": {
               "target_kind": "event",
-              "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+              "target_id": "018bcfe5-6800-7000-8000-000000000074",
               "title": "同行启程",
-              "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+              "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
               "ancestor_event_ids": [],
               "evidence_position": 8
             }
@@ -2387,14 +2388,14 @@
         ],
         "foreshadowing_actions": [
           {
-            "action_id": "3472a9c6-91e6-54c8-bd40-38a71695fc60",
+            "action_id": "018bcfe5-6800-7000-8000-000000000024",
             "action_type": "setup",
             "endpoint_kind": "event",
-            "root_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-            "target_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "root_event_id": "018bcfe5-6800-7000-8000-000000000071",
+            "target_event_id": "018bcfe5-6800-7000-8000-000000000071",
             "chapter_id": 1,
             "chapter_order": 1,
-            "source_operation_id": "setup/030ee0b1-53f6-576c-827c-65aebc8ed50d",
+            "source_operation_id": "setup/018bcfe5-6800-7000-8000-000000000022",
             "evidence": [
               {
                 "event_id": null,
@@ -2412,8 +2413,133 @@
         "details": [
           {
             "kind": "event",
-            "event_id": "23c6aa6f-f527-5650-a8ef-827156672387",
-            "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+            "event_id": "018bcfe5-6800-7000-8000-000000000071",
+            "run_id": "018bcfe5-6800-7000-8000-000000000002",
+            "title": "踏入江湖",
+            "summary": "顾承渊踏入江湖并检查石碑",
+            "progress": "已查看石碑",
+            "event_type": "启程",
+            "status": "resolved",
+            "arcs": [
+              {
+                "arc_id": "018bcfe5-6800-7000-8000-00000000007a",
+                "title": "初入江湖",
+                "kind": "main",
+                "role": "主线推进",
+                "reason": "旅程开端",
+                "evidence": [
+                  {
+                    "event_id": null,
+                    "paragraph_id": 0,
+                    "chapter_id": 1,
+                    "char_start": 0,
+                    "char_end": 8,
+                    "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+                  }
+                ]
+              }
+            ],
+            "characters": [],
+            "direct_children": [
+              {
+                "event_id": "018bcfe5-6800-7000-8000-000000000073",
+                "title": "石碑疑云",
+                "event_type": "调查",
+                "status": "ongoing"
+              }
+            ],
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 0,
+                "chapter_id": 1,
+                "char_start": 0,
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+              },
+              {
+                "event_id": null,
+                "paragraph_id": 1,
+                "chapter_id": 2,
+                "char_start": 0,
+                "char_end": 10,
+                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
+              }
+            ],
+            "evidence_scope": "paragraph",
+            "source_chapters": [
+              1,
+              2
+            ],
+            "ancestry": [],
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008d",
+            "relations": [
+              {
+                "relation_id": "018bcfe5-6800-7000-8000-00000000007e",
+                "source_kind": "event",
+                "source_id": "018bcfe5-6800-7000-8000-000000000071",
+                "target_kind": "event",
+                "target_id": "018bcfe5-6800-7000-8000-000000000074",
+                "relation_type": "causal",
+                "reason": "踏入江湖促成同行",
+                "evidence": [
+                  {
+                    "event_id": null,
+                    "paragraph_id": 1,
+                    "chapter_id": 2,
+                    "char_start": 0,
+                    "char_end": 10,
+                    "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
+                  }
+                ],
+                "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
+                "ancestor_event_ids": [],
+                "evidence_position": 8,
+                "locator": {
+                  "target_kind": "event",
+                  "target_id": "018bcfe5-6800-7000-8000-000000000074",
+                  "title": "同行启程",
+                  "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
+                  "ancestor_event_ids": [],
+                  "evidence_position": 8
+                }
+              },
+              {
+                "relation_id": "018bcfe5-6800-7000-8000-000000000080",
+                "source_kind": "event",
+                "source_id": "018bcfe5-6800-7000-8000-000000000071",
+                "target_kind": "event",
+                "target_id": "018bcfe5-6800-7000-8000-000000000074",
+                "relation_type": "foreshadowing",
+                "reason": "初入江湖埋设同行伏笔",
+                "evidence": [
+                  {
+                    "event_id": null,
+                    "paragraph_id": 0,
+                    "chapter_id": 1,
+                    "char_start": 0,
+                    "char_end": 8,
+                    "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+                  }
+                ],
+                "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
+                "ancestor_event_ids": [],
+                "evidence_position": 8,
+                "locator": {
+                  "target_kind": "event",
+                  "target_id": "018bcfe5-6800-7000-8000-000000000074",
+                  "title": "同行启程",
+                  "top_level_event_id": "018bcfe5-6800-7000-8000-000000000074",
+                  "ancestor_event_ids": [],
+                  "evidence_position": 8
+                }
+              }
+            ]
+          },
+          {
+            "kind": "event",
+            "event_id": "018bcfe5-6800-7000-8000-000000000072",
+            "run_id": "018bcfe5-6800-7000-8000-000000000002",
             "title": "线索记录",
             "summary": "顾承渊记下线索",
             "progress": null,
@@ -2421,7 +2547,7 @@
             "status": "ongoing",
             "arcs": [
               {
-                "arc_id": "86e3eeb5-501e-55aa-967f-57d68c475f4b",
+                "arc_id": "018bcfe5-6800-7000-8000-00000000007b",
                 "title": "石碑之谜",
                 "kind": "subplot",
                 "role": "支线推进",
@@ -2455,17 +2581,17 @@
               1
             ],
             "ancestry": [
-              "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-              "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf"
+              "018bcfe5-6800-7000-8000-000000000071",
+              "018bcfe5-6800-7000-8000-000000000073"
             ],
-            "revision_id": "48329542-789f-5b38-94ad-71a074e82b97",
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008e",
             "relations": [
               {
-                "relation_id": "8cb13322-767d-5eb9-881c-0e0cc7b413fc",
+                "relation_id": "018bcfe5-6800-7000-8000-00000000007f",
                 "source_kind": "event",
-                "source_id": "23c6aa6f-f527-5650-a8ef-827156672387",
+                "source_id": "018bcfe5-6800-7000-8000-000000000072",
                 "target_kind": "event",
-                "target_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
+                "target_id": "018bcfe5-6800-7000-8000-000000000073",
                 "relation_type": "reference",
                 "reason": "记录的线索涉及石碑疑云",
                 "evidence": [
@@ -2478,18 +2604,18 @@
                     "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
                   }
                 ],
-                "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
                 "ancestor_event_ids": [
-                  "439d4223-bd8f-5b5c-b1ee-61abf678dd45"
+                  "018bcfe5-6800-7000-8000-000000000071"
                 ],
                 "evidence_position": 0,
                 "locator": {
                   "target_kind": "event",
-                  "target_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
+                  "target_id": "018bcfe5-6800-7000-8000-000000000073",
                   "title": "石碑疑云",
-                  "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                  "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
                   "ancestor_event_ids": [
-                    "439d4223-bd8f-5b5c-b1ee-61abf678dd45"
+                    "018bcfe5-6800-7000-8000-000000000071"
                   ],
                   "evidence_position": 0
                 }
@@ -2498,169 +2624,8 @@
           },
           {
             "kind": "event",
-            "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-            "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
-            "title": "踏入江湖",
-            "summary": "顾承渊踏入江湖并检查石碑",
-            "progress": "已查看石碑",
-            "event_type": "启程",
-            "status": "resolved",
-            "arcs": [
-              {
-                "arc_id": "a01eeb21-8993-54c3-a825-8b1bc51aaeb6",
-                "title": "初入江湖",
-                "kind": "main",
-                "role": "主线推进",
-                "reason": "旅程开端",
-                "evidence": [
-                  {
-                    "event_id": null,
-                    "paragraph_id": 0,
-                    "chapter_id": 1,
-                    "char_start": 0,
-                    "char_end": 8,
-                    "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-                  }
-                ]
-              }
-            ],
-            "characters": [],
-            "direct_children": [
-              {
-                "event_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
-                "title": "石碑疑云",
-                "event_type": "调查",
-                "status": "ongoing"
-              }
-            ],
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              },
-              {
-                "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
-                "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-              }
-            ],
-            "evidence_scope": "paragraph",
-            "source_chapters": [
-              1,
-              2
-            ],
-            "ancestry": [],
-            "revision_id": "299f687d-852f-5ab3-9231-60d7c2a3c42e",
-            "relations": [
-              {
-                "relation_id": "85c0eb10-ecd1-50ee-833d-59478d4423a2",
-                "source_kind": "event",
-                "source_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-                "target_kind": "event",
-                "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-                "relation_type": "causal",
-                "reason": "踏入江湖促成同行",
-                "evidence": [
-                  {
-                    "event_id": null,
-                    "paragraph_id": 1,
-                    "chapter_id": 2,
-                    "char_start": 0,
-                    "char_end": 10,
-                    "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-                  }
-                ],
-                "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-                "ancestor_event_ids": [],
-                "evidence_position": 8,
-                "locator": {
-                  "target_kind": "event",
-                  "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-                  "title": "同行启程",
-                  "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-                  "ancestor_event_ids": [],
-                  "evidence_position": 8
-                }
-              },
-              {
-                "relation_id": "d693c752-3f30-5367-adeb-3f659bf86dec",
-                "source_kind": "event",
-                "source_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-                "target_kind": "event",
-                "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-                "relation_type": "foreshadowing",
-                "reason": "初入江湖埋设同行伏笔",
-                "evidence": [
-                  {
-                    "event_id": null,
-                    "paragraph_id": 0,
-                    "chapter_id": 1,
-                    "char_start": 0,
-                    "char_end": 8,
-                    "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-                  }
-                ],
-                "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-                "ancestor_event_ids": [],
-                "evidence_position": 8,
-                "locator": {
-                  "target_kind": "event",
-                  "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-                  "title": "同行启程",
-                  "top_level_event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-                  "ancestor_event_ids": [],
-                  "evidence_position": 8
-                }
-              }
-            ]
-          },
-          {
-            "kind": "event",
-            "event_id": "774431af-d215-5dd8-a424-457d216dbd41",
-            "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
-            "title": "第1章人物动态",
-            "summary": "顾承渊初入江湖。",
-            "progress": null,
-            "event_type": "行动",
-            "status": "ongoing",
-            "arcs": [],
-            "characters": [
-              {
-                "entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
-                "name": "顾承渊",
-                "role": "主体"
-              }
-            ],
-            "direct_children": [],
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ],
-            "evidence_scope": "paragraph",
-            "source_chapters": [
-              1
-            ],
-            "ancestry": [],
-            "revision_id": "ff33c705-28bf-583f-8536-af08ce7a19ca",
-            "relations": []
-          },
-          {
-            "kind": "event",
-            "event_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
-            "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+            "event_id": "018bcfe5-6800-7000-8000-000000000073",
+            "run_id": "018bcfe5-6800-7000-8000-000000000002",
             "title": "石碑疑云",
             "summary": "顾承渊检查石碑",
             "progress": null,
@@ -2668,7 +2633,7 @@
             "status": "ongoing",
             "arcs": [
               {
-                "arc_id": "86e3eeb5-501e-55aa-967f-57d68c475f4b",
+                "arc_id": "018bcfe5-6800-7000-8000-00000000007b",
                 "title": "石碑之谜",
                 "kind": "subplot",
                 "role": "支线起点",
@@ -2688,7 +2653,7 @@
             "characters": [],
             "direct_children": [
               {
-                "event_id": "23c6aa6f-f527-5650-a8ef-827156672387",
+                "event_id": "018bcfe5-6800-7000-8000-000000000072",
                 "title": "线索记录",
                 "event_type": "调查",
                 "status": "ongoing"
@@ -2709,16 +2674,16 @@
               1
             ],
             "ancestry": [
-              "439d4223-bd8f-5b5c-b1ee-61abf678dd45"
+              "018bcfe5-6800-7000-8000-000000000071"
             ],
-            "revision_id": "29c1bc0f-aab5-5685-9774-d634e5b79ed8",
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008f",
             "relations": [
               {
-                "relation_id": "8cb13322-767d-5eb9-881c-0e0cc7b413fc",
+                "relation_id": "018bcfe5-6800-7000-8000-00000000007f",
                 "source_kind": "event",
-                "source_id": "23c6aa6f-f527-5650-a8ef-827156672387",
+                "source_id": "018bcfe5-6800-7000-8000-000000000072",
                 "target_kind": "event",
-                "target_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
+                "target_id": "018bcfe5-6800-7000-8000-000000000073",
                 "relation_type": "reference",
                 "reason": "记录的线索涉及石碑疑云",
                 "evidence": [
@@ -2731,20 +2696,20 @@
                     "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
                   }
                 ],
-                "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
                 "ancestor_event_ids": [
-                  "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-                  "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf"
+                  "018bcfe5-6800-7000-8000-000000000071",
+                  "018bcfe5-6800-7000-8000-000000000073"
                 ],
                 "evidence_position": 0,
                 "locator": {
                   "target_kind": "event",
-                  "target_id": "23c6aa6f-f527-5650-a8ef-827156672387",
+                  "target_id": "018bcfe5-6800-7000-8000-000000000072",
                   "title": "线索记录",
-                  "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                  "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
                   "ancestor_event_ids": [
-                    "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-                    "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf"
+                    "018bcfe5-6800-7000-8000-000000000071",
+                    "018bcfe5-6800-7000-8000-000000000073"
                   ],
                   "evidence_position": 0
                 }
@@ -2753,8 +2718,44 @@
           },
           {
             "kind": "event",
-            "event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-            "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+            "event_id": "018bcfe5-6800-7000-8000-000000000075",
+            "run_id": "018bcfe5-6800-7000-8000-000000000002",
+            "title": "第1章人物动态",
+            "summary": "顾承渊初入江湖。",
+            "progress": null,
+            "event_type": "行动",
+            "status": "ongoing",
+            "arcs": [],
+            "characters": [
+              {
+                "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
+                "name": "顾承渊",
+                "role": "主体"
+              }
+            ],
+            "direct_children": [],
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 0,
+                "chapter_id": 1,
+                "char_start": 0,
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+              }
+            ],
+            "evidence_scope": "paragraph",
+            "source_chapters": [
+              1
+            ],
+            "ancestry": [],
+            "revision_id": "018bcfe5-6800-7000-8000-000000000091",
+            "relations": []
+          },
+          {
+            "kind": "event",
+            "event_id": "018bcfe5-6800-7000-8000-000000000074",
+            "run_id": "018bcfe5-6800-7000-8000-000000000002",
             "title": "同行启程",
             "summary": "苏映雪现身同行",
             "progress": null,
@@ -2762,7 +2763,7 @@
             "status": "ongoing",
             "arcs": [
               {
-                "arc_id": "a01eeb21-8993-54c3-a825-8b1bc51aaeb6",
+                "arc_id": "018bcfe5-6800-7000-8000-00000000007a",
                 "title": "初入江湖",
                 "kind": "main",
                 "role": "主线推进",
@@ -2796,14 +2797,14 @@
               2
             ],
             "ancestry": [],
-            "revision_id": "a2138778-8a49-548d-a0ee-8cae4fd0b0b4",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000090",
             "relations": [
               {
-                "relation_id": "85c0eb10-ecd1-50ee-833d-59478d4423a2",
+                "relation_id": "018bcfe5-6800-7000-8000-00000000007e",
                 "source_kind": "event",
-                "source_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                "source_id": "018bcfe5-6800-7000-8000-000000000071",
                 "target_kind": "event",
-                "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+                "target_id": "018bcfe5-6800-7000-8000-000000000074",
                 "relation_type": "causal",
                 "reason": "踏入江湖促成同行",
                 "evidence": [
@@ -2816,24 +2817,24 @@
                     "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
                   }
                 ],
-                "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
                 "ancestor_event_ids": [],
                 "evidence_position": 0,
                 "locator": {
                   "target_kind": "event",
-                  "target_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                  "target_id": "018bcfe5-6800-7000-8000-000000000071",
                   "title": "踏入江湖",
-                  "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                  "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
                   "ancestor_event_ids": [],
                   "evidence_position": 0
                 }
               },
               {
-                "relation_id": "d693c752-3f30-5367-adeb-3f659bf86dec",
+                "relation_id": "018bcfe5-6800-7000-8000-000000000080",
                 "source_kind": "event",
-                "source_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                "source_id": "018bcfe5-6800-7000-8000-000000000071",
                 "target_kind": "event",
-                "target_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+                "target_id": "018bcfe5-6800-7000-8000-000000000074",
                 "relation_type": "foreshadowing",
                 "reason": "初入江湖埋设同行伏笔",
                 "evidence": [
@@ -2846,14 +2847,14 @@
                     "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
                   }
                 ],
-                "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
                 "ancestor_event_ids": [],
                 "evidence_position": 0,
                 "locator": {
                   "target_kind": "event",
-                  "target_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                  "target_id": "018bcfe5-6800-7000-8000-000000000071",
                   "title": "踏入江湖",
-                  "top_level_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+                  "top_level_event_id": "018bcfe5-6800-7000-8000-000000000071",
                   "ancestor_event_ids": [],
                   "evidence_position": 0
                 }
@@ -2862,8 +2863,8 @@
           },
           {
             "kind": "event",
-            "event_id": "f1c196b6-ec45-591e-ba25-b29debc21ff0",
-            "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+            "event_id": "018bcfe5-6800-7000-8000-000000000076",
+            "run_id": "018bcfe5-6800-7000-8000-000000000002",
             "title": "第2章人物动态",
             "summary": "苏映雪现身与他同行。",
             "progress": null,
@@ -2872,7 +2873,7 @@
             "arcs": [],
             "characters": [
               {
-                "entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+                "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
                 "name": "苏映雪",
                 "role": "主体"
               }
@@ -2893,13 +2894,13 @@
               2
             ],
             "ancestry": [],
-            "revision_id": "4362f650-952a-5729-9f8d-60a411795f6f",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000092",
             "relations": []
           },
           {
             "kind": "event",
-            "event_id": "34301c71-9155-5861-b5f4-305030eef6a0",
-            "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+            "event_id": "018bcfe5-6800-7000-8000-000000000077",
+            "run_id": "018bcfe5-6800-7000-8000-000000000002",
             "title": "第3章人物动态",
             "summary": "顾承渊与苏映雪结盟，同时受天衡宗招揽。",
             "progress": null,
@@ -2908,12 +2909,12 @@
             "arcs": [],
             "characters": [
               {
-                "entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+                "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
                 "name": "顾承渊",
                 "role": "主体"
               },
               {
-                "entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+                "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
                 "name": "苏映雪",
                 "role": "主体"
               }
@@ -2934,13 +2935,13 @@
               3
             ],
             "ancestry": [],
-            "revision_id": "db6143af-750c-5e1b-985d-4ca8eed3a2ff",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000093",
             "relations": []
           },
           {
             "kind": "event",
-            "event_id": "dd1bcb25-9700-59ec-bf0a-4e545124b039",
-            "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+            "event_id": "018bcfe5-6800-7000-8000-000000000078",
+            "run_id": "018bcfe5-6800-7000-8000-000000000002",
             "title": "第4章人物动态",
             "summary": "苏映雪完成使命后离开。",
             "progress": null,
@@ -2949,7 +2950,7 @@
             "arcs": [],
             "characters": [
               {
-                "entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+                "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
                 "name": "苏映雪",
                 "role": "主体"
               }
@@ -2970,13 +2971,13 @@
               4
             ],
             "ancestry": [],
-            "revision_id": "4848e145-d807-52e7-bcfb-db0139255f9e",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000094",
             "relations": []
           },
           {
             "kind": "event",
-            "event_id": "583c4247-117e-57c6-bc18-f45e9931c7a6",
-            "run_id": "8a43b6d2-dc21-50bd-9313-dd056086f7b3",
+            "event_id": "018bcfe5-6800-7000-8000-000000000079",
+            "run_id": "018bcfe5-6800-7000-8000-000000000002",
             "title": "第5章人物动态",
             "summary": "顾承渊最终与苏映雪决裂，独自前行。",
             "progress": null,
@@ -2985,7 +2986,7 @@
             "arcs": [],
             "characters": [
               {
-                "entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+                "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
                 "name": "顾承渊",
                 "role": "主体"
               }
@@ -3006,47 +3007,23 @@
               5
             ],
             "ancestry": [],
-            "revision_id": "fecdd8ab-342e-536f-9c5d-4c05e1bf5dd3",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000095",
             "relations": []
           }
         ],
         "event_records": [
           {
-            "event_id": "23c6aa6f-f527-5650-a8ef-827156672387",
-            "title": "线索记录",
-            "problem": "线索记录的问题",
-            "summary": "顾承渊记下线索",
-            "progress": null,
-            "status": "ongoing",
-            "event_type": "调查",
-            "current_revision_id": "48329542-789f-5b38-94ad-71a074e82b97",
-            "source_execution_id": "diag-session-ca08bc45cf24",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
-            "local_key": "e4640c3f-756c-5310-928f-021b5d83d59e",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ],
-            "first_text_position": 0
-          },
-          {
-            "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "event_id": "018bcfe5-6800-7000-8000-000000000071",
             "title": "踏入江湖",
             "problem": "踏入江湖的问题",
             "summary": "顾承渊踏入江湖并检查石碑",
             "progress": "已查看石碑",
             "status": "resolved",
             "event_type": "启程",
-            "current_revision_id": "299f687d-852f-5ab3-9231-60d7c2a3c42e",
-            "source_execution_id": "diag-session-ca08bc45cf24",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
-            "local_key": "030ee0b1-53f6-576c-827c-65aebc8ed50d",
+            "current_revision_id": "018bcfe5-6800-7000-8000-00000000008d",
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "local_key": "018bcfe5-6800-7000-8000-000000000022",
             "evidence": [
               {
                 "event_id": null,
@@ -3060,17 +3037,17 @@
             "first_text_position": 0
           },
           {
-            "event_id": "774431af-d215-5dd8-a424-457d216dbd41",
-            "title": "第1章人物动态",
-            "problem": "第1章人物动态",
-            "summary": "顾承渊初入江湖。",
+            "event_id": "018bcfe5-6800-7000-8000-000000000072",
+            "title": "线索记录",
+            "problem": "线索记录的问题",
+            "summary": "顾承渊记下线索",
             "progress": null,
             "status": "ongoing",
-            "event_type": "行动",
-            "current_revision_id": "ff33c705-28bf-583f-8536-af08ce7a19ca",
-            "source_execution_id": "diag-session-ca08bc45cf24",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
-            "local_key": "32b467d7-3fa3-5066-805d-43f2789b9ef7",
+            "event_type": "调查",
+            "current_revision_id": "018bcfe5-6800-7000-8000-00000000008e",
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "local_key": "018bcfe5-6800-7000-8000-000000000027",
             "evidence": [
               {
                 "event_id": null,
@@ -3084,17 +3061,17 @@
             "first_text_position": 0
           },
           {
-            "event_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
+            "event_id": "018bcfe5-6800-7000-8000-000000000073",
             "title": "石碑疑云",
             "problem": "石碑疑云的问题",
             "summary": "顾承渊检查石碑",
             "progress": null,
             "status": "ongoing",
             "event_type": "调查",
-            "current_revision_id": "29c1bc0f-aab5-5685-9774-d634e5b79ed8",
-            "source_execution_id": "diag-session-ca08bc45cf24",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
-            "local_key": "a5a1ce21-4ba8-5160-b4ed-89ab71b7bebf",
+            "current_revision_id": "018bcfe5-6800-7000-8000-00000000008f",
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "local_key": "018bcfe5-6800-7000-8000-00000000002a",
             "evidence": [
               {
                 "event_id": null,
@@ -3108,17 +3085,41 @@
             "first_text_position": 0
           },
           {
-            "event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
+            "event_id": "018bcfe5-6800-7000-8000-000000000075",
+            "title": "第1章人物动态",
+            "problem": "第1章人物动态",
+            "summary": "顾承渊初入江湖。",
+            "progress": null,
+            "status": "ongoing",
+            "event_type": "行动",
+            "current_revision_id": "018bcfe5-6800-7000-8000-000000000091",
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "local_key": "018bcfe5-6800-7000-8000-000000000019",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 0,
+                "chapter_id": 1,
+                "char_start": 0,
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+              }
+            ],
+            "first_text_position": 0
+          },
+          {
+            "event_id": "018bcfe5-6800-7000-8000-000000000074",
             "title": "同行启程",
             "problem": "同行启程的问题",
             "summary": "苏映雪现身同行",
             "progress": null,
             "status": "ongoing",
             "event_type": "结伴",
-            "current_revision_id": "a2138778-8a49-548d-a0ee-8cae4fd0b0b4",
-            "source_execution_id": "diag-session-ca08bc45cf24",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
-            "local_key": "fc791a6f-c003-5950-a67f-1fc7545bab2c",
+            "current_revision_id": "018bcfe5-6800-7000-8000-000000000090",
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "local_key": "018bcfe5-6800-7000-8000-000000000037",
             "evidence": [
               {
                 "event_id": null,
@@ -3132,17 +3133,17 @@
             "first_text_position": 8
           },
           {
-            "event_id": "f1c196b6-ec45-591e-ba25-b29debc21ff0",
+            "event_id": "018bcfe5-6800-7000-8000-000000000076",
             "title": "第2章人物动态",
             "problem": "第2章人物动态",
             "summary": "苏映雪现身与他同行。",
             "progress": null,
             "status": "ongoing",
             "event_type": "行动",
-            "current_revision_id": "4362f650-952a-5729-9f8d-60a411795f6f",
-            "source_execution_id": "diag-session-ca08bc45cf24",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
-            "local_key": "49f47d43-0d5e-58f0-bab4-7607504f6988",
+            "current_revision_id": "018bcfe5-6800-7000-8000-000000000092",
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "local_key": "018bcfe5-6800-7000-8000-00000000002e",
             "evidence": [
               {
                 "event_id": null,
@@ -3156,17 +3157,17 @@
             "first_text_position": 8
           },
           {
-            "event_id": "34301c71-9155-5861-b5f4-305030eef6a0",
+            "event_id": "018bcfe5-6800-7000-8000-000000000077",
             "title": "第3章人物动态",
             "problem": "第3章人物动态",
             "summary": "顾承渊与苏映雪结盟，同时受天衡宗招揽。",
             "progress": null,
             "status": "ongoing",
             "event_type": "行动",
-            "current_revision_id": "db6143af-750c-5e1b-985d-4ca8eed3a2ff",
-            "source_execution_id": "diag-session-ca08bc45cf24",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
-            "local_key": "6ec71c38-353a-5945-89f4-5f5dd187f624",
+            "current_revision_id": "018bcfe5-6800-7000-8000-000000000093",
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "local_key": "018bcfe5-6800-7000-8000-00000000003e",
             "evidence": [
               {
                 "event_id": null,
@@ -3180,17 +3181,17 @@
             "first_text_position": 18
           },
           {
-            "event_id": "dd1bcb25-9700-59ec-bf0a-4e545124b039",
+            "event_id": "018bcfe5-6800-7000-8000-000000000078",
             "title": "第4章人物动态",
             "problem": "第4章人物动态",
             "summary": "苏映雪完成使命后离开。",
             "progress": null,
             "status": "ongoing",
             "event_type": "行动",
-            "current_revision_id": "4848e145-d807-52e7-bcfb-db0139255f9e",
-            "source_execution_id": "diag-session-ca08bc45cf24",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
-            "local_key": "2861c17b-49b0-5e1d-9a9e-babf9a43b1eb",
+            "current_revision_id": "018bcfe5-6800-7000-8000-000000000094",
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "local_key": "018bcfe5-6800-7000-8000-000000000053",
             "evidence": [
               {
                 "event_id": null,
@@ -3204,17 +3205,17 @@
             "first_text_position": 37
           },
           {
-            "event_id": "583c4247-117e-57c6-bc18-f45e9931c7a6",
+            "event_id": "018bcfe5-6800-7000-8000-000000000079",
             "title": "第5章人物动态",
             "problem": "第5章人物动态",
             "summary": "顾承渊最终与苏映雪决裂，独自前行。",
             "progress": null,
             "status": "ongoing",
             "event_type": "行动",
-            "current_revision_id": "fecdd8ab-342e-536f-9c5d-4c05e1bf5dd3",
-            "source_execution_id": "diag-session-ca08bc45cf24",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
-            "local_key": "1c81264d-9b53-52d4-86bc-407dfc849d0e",
+            "current_revision_id": "018bcfe5-6800-7000-8000-000000000095",
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "local_key": "018bcfe5-6800-7000-8000-00000000005c",
             "evidence": [
               {
                 "event_id": null,
@@ -3230,112 +3231,7 @@
         ],
         "declarations": [
           {
-            "declaration_id": "030ee0b1-53f6-576c-827c-65aebc8ed50d",
-            "title": "踏入江湖",
-            "problem": "踏入江湖的问题",
-            "summary": "顾承渊踏入江湖",
-            "event_type": "启程",
-            "status": "ongoing",
-            "progress": null,
-            "participants": [],
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ],
-            "first_text_position": 0,
-            "char_end": 8,
-            "chapter_id": 1,
-            "chapter_order": 1,
-            "producer_invocation_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "annotation_id": "c992a1cd-4beb-586e-9614-2ab4252516f7",
-            "payload_path": "declaration/030ee0b1-53f6-576c-827c-65aebc8ed50d"
-          },
-          {
-            "declaration_id": "1c81264d-9b53-52d4-86bc-407dfc849d0e",
-            "title": "第5章人物动态",
-            "problem": "第5章人物动态",
-            "summary": "顾承渊最终与苏映雪决裂，独自前行。",
-            "event_type": "行动",
-            "status": "ongoing",
-            "progress": null,
-            "participants": [
-              {
-                "entity": {
-                  "name": "顾承渊",
-                  "entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": "独行",
-                "emotion": null
-              }
-            ],
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 4,
-                "chapter_id": 5,
-                "char_start": 0,
-                "char_end": 17,
-                "text_hash": "5aa9c81bf9abc0e693d5040d60c3dc4ebff9dd2067cc099727b14e5c7a7b4b7e"
-              }
-            ],
-            "first_text_position": 0,
-            "char_end": 17,
-            "chapter_id": 5,
-            "chapter_order": 5,
-            "producer_invocation_id": "705d278a-254c-5230-b8c4-40278a9ed51a",
-            "annotation_id": "00162dc2-eaea-5c05-9d85-4d5ca8ec3c2f",
-            "payload_path": "declaration/1c81264d-9b53-52d4-86bc-407dfc849d0e"
-          },
-          {
-            "declaration_id": "2861c17b-49b0-5e1d-9a9e-babf9a43b1eb",
-            "title": "第4章人物动态",
-            "problem": "第4章人物动态",
-            "summary": "苏映雪完成使命后离开。",
-            "event_type": "行动",
-            "status": "ongoing",
-            "progress": null,
-            "participants": [
-              {
-                "entity": {
-                  "name": "苏映雪",
-                  "entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "帮助者",
-                "action": "离开",
-                "emotion": -1
-              }
-            ],
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 3,
-                "chapter_id": 4,
-                "char_start": 0,
-                "char_end": 11,
-                "text_hash": "d338e70addc4a69ef63558f97dcdf386f9f8cf2144b42fa7c9863773d1b1eaa0"
-              }
-            ],
-            "first_text_position": 0,
-            "char_end": 11,
-            "chapter_id": 4,
-            "chapter_order": 4,
-            "producer_invocation_id": "8993c82f-4244-55d7-bb46-0553b5247cf7",
-            "annotation_id": "3936998c-be4c-53bb-832c-b01e76713b7b",
-            "payload_path": "declaration/2861c17b-49b0-5e1d-9a9e-babf9a43b1eb"
-          },
-          {
-            "declaration_id": "32b467d7-3fa3-5066-805d-43f2789b9ef7",
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000019",
             "title": "第1章人物动态",
             "problem": "第1章人物动态",
             "summary": "顾承渊初入江湖。",
@@ -3346,7 +3242,7 @@
               {
                 "entity": {
                   "name": "顾承渊",
-                  "entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
                   "entity_type": "character"
                 },
                 "role": "主体",
@@ -3369,12 +3265,93 @@
             "char_end": 8,
             "chapter_id": 1,
             "chapter_order": 1,
-            "producer_invocation_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "annotation_id": "c992a1cd-4beb-586e-9614-2ab4252516f7",
-            "payload_path": "declaration/32b467d7-3fa3-5066-805d-43f2789b9ef7"
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "annotation_id": "018bcfe5-6800-7000-8000-000000000018",
+            "payload_path": "declaration/018bcfe5-6800-7000-8000-000000000019"
           },
           {
-            "declaration_id": "49f47d43-0d5e-58f0-bab4-7607504f6988",
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000022",
+            "title": "踏入江湖",
+            "problem": "踏入江湖的问题",
+            "summary": "顾承渊踏入江湖",
+            "event_type": "启程",
+            "status": "ongoing",
+            "progress": null,
+            "participants": [],
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 0,
+                "chapter_id": 1,
+                "char_start": 0,
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+              }
+            ],
+            "first_text_position": 0,
+            "char_end": 8,
+            "chapter_id": 1,
+            "chapter_order": 1,
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "annotation_id": "018bcfe5-6800-7000-8000-000000000018",
+            "payload_path": "declaration/018bcfe5-6800-7000-8000-000000000022"
+          },
+          {
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000027",
+            "title": "线索记录",
+            "problem": "线索记录的问题",
+            "summary": "顾承渊记下线索",
+            "event_type": "调查",
+            "status": "ongoing",
+            "progress": null,
+            "participants": [],
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 0,
+                "chapter_id": 1,
+                "char_start": 0,
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+              }
+            ],
+            "first_text_position": 0,
+            "char_end": 8,
+            "chapter_id": 1,
+            "chapter_order": 1,
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "annotation_id": "018bcfe5-6800-7000-8000-000000000018",
+            "payload_path": "declaration/018bcfe5-6800-7000-8000-000000000027"
+          },
+          {
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000002a",
+            "title": "石碑疑云",
+            "problem": "石碑疑云的问题",
+            "summary": "顾承渊检查石碑",
+            "event_type": "调查",
+            "status": "ongoing",
+            "progress": null,
+            "participants": [],
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 0,
+                "chapter_id": 1,
+                "char_start": 0,
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+              }
+            ],
+            "first_text_position": 0,
+            "char_end": 8,
+            "chapter_id": 1,
+            "chapter_order": 1,
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "annotation_id": "018bcfe5-6800-7000-8000-000000000018",
+            "payload_path": "declaration/018bcfe5-6800-7000-8000-00000000002a"
+          },
+          {
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000002e",
             "title": "第2章人物动态",
             "problem": "第2章人物动态",
             "summary": "苏映雪现身与他同行。",
@@ -3385,7 +3362,7 @@
               {
                 "entity": {
                   "name": "苏映雪",
-                  "entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
                   "entity_type": "character"
                 },
                 "role": "主体",
@@ -3408,12 +3385,66 @@
             "char_end": 10,
             "chapter_id": 2,
             "chapter_order": 2,
-            "producer_invocation_id": "ff2d7277-2b6f-531f-97d0-b1790c184392",
-            "annotation_id": "7893f293-4b16-5dfb-9662-9fa53fc2c7e4",
-            "payload_path": "declaration/49f47d43-0d5e-58f0-bab4-7607504f6988"
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "annotation_id": "018bcfe5-6800-7000-8000-00000000002d",
+            "payload_path": "declaration/018bcfe5-6800-7000-8000-00000000002e"
           },
           {
-            "declaration_id": "6ec71c38-353a-5945-89f4-5f5dd187f624",
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000037",
+            "title": "同行启程",
+            "problem": "同行启程的问题",
+            "summary": "苏映雪现身同行",
+            "event_type": "结伴",
+            "status": "ongoing",
+            "progress": null,
+            "participants": [],
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 1,
+                "chapter_id": 2,
+                "char_start": 0,
+                "char_end": 10,
+                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
+              }
+            ],
+            "first_text_position": 0,
+            "char_end": 10,
+            "chapter_id": 2,
+            "chapter_order": 2,
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "annotation_id": "018bcfe5-6800-7000-8000-00000000002d",
+            "payload_path": "declaration/018bcfe5-6800-7000-8000-000000000037"
+          },
+          {
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000003a",
+            "title": "踏入江湖",
+            "problem": "踏入江湖的问题",
+            "summary": "顾承渊踏入江湖并检查石碑",
+            "event_type": "启程",
+            "status": "resolved",
+            "progress": "已查看石碑",
+            "participants": [],
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 1,
+                "chapter_id": 2,
+                "char_start": 0,
+                "char_end": 10,
+                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
+              }
+            ],
+            "first_text_position": 0,
+            "char_end": 10,
+            "chapter_id": 2,
+            "chapter_order": 2,
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "annotation_id": "018bcfe5-6800-7000-8000-00000000002d",
+            "payload_path": "declaration/018bcfe5-6800-7000-8000-00000000003a"
+          },
+          {
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000003e",
             "title": "第3章人物动态",
             "problem": "第3章人物动态",
             "summary": "顾承渊与苏映雪结盟，同时受天衡宗招揽。",
@@ -3424,7 +3455,7 @@
               {
                 "entity": {
                   "name": "顾承渊",
-                  "entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
                   "entity_type": "character"
                 },
                 "role": "主体",
@@ -3435,7 +3466,7 @@
               {
                 "entity": {
                   "name": "苏映雪",
-                  "entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
                   "entity_type": "character"
                 },
                 "role": "主体",
@@ -3458,186 +3489,156 @@
             "char_end": 19,
             "chapter_id": 3,
             "chapter_order": 3,
-            "producer_invocation_id": "af7934b7-430c-5d4e-b451-faf44ed96309",
-            "annotation_id": "16f265db-738c-5d8c-a89d-81afb0d06566",
-            "payload_path": "declaration/6ec71c38-353a-5945-89f4-5f5dd187f624"
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000003c",
+            "annotation_id": "018bcfe5-6800-7000-8000-00000000003d",
+            "payload_path": "declaration/018bcfe5-6800-7000-8000-00000000003e"
           },
           {
-            "declaration_id": "a5a1ce21-4ba8-5160-b4ed-89ab71b7bebf",
-            "title": "石碑疑云",
-            "problem": "石碑疑云的问题",
-            "summary": "顾承渊检查石碑",
-            "event_type": "调查",
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000053",
+            "title": "第4章人物动态",
+            "problem": "第4章人物动态",
+            "summary": "苏映雪完成使命后离开。",
+            "event_type": "行动",
             "status": "ongoing",
             "progress": null,
-            "participants": [],
+            "participants": [
+              {
+                "entity": {
+                  "name": "苏映雪",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
+                  "entity_type": "character"
+                },
+                "role": "主体",
+                "narrative_role": "帮助者",
+                "action": "离开",
+                "emotion": -1
+              }
+            ],
             "evidence": [
               {
                 "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
+                "paragraph_id": 3,
+                "chapter_id": 4,
                 "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+                "char_end": 11,
+                "text_hash": "d338e70addc4a69ef63558f97dcdf386f9f8cf2144b42fa7c9863773d1b1eaa0"
               }
             ],
             "first_text_position": 0,
-            "char_end": 8,
-            "chapter_id": 1,
-            "chapter_order": 1,
-            "producer_invocation_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "annotation_id": "c992a1cd-4beb-586e-9614-2ab4252516f7",
-            "payload_path": "declaration/a5a1ce21-4ba8-5160-b4ed-89ab71b7bebf"
+            "char_end": 11,
+            "chapter_id": 4,
+            "chapter_order": 4,
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000051",
+            "annotation_id": "018bcfe5-6800-7000-8000-000000000052",
+            "payload_path": "declaration/018bcfe5-6800-7000-8000-000000000053"
           },
           {
-            "declaration_id": "c2763bc1-4578-5e07-be41-4a6bd347c2bc",
-            "title": "踏入江湖",
-            "problem": "踏入江湖的问题",
-            "summary": "顾承渊踏入江湖并检查石碑",
-            "event_type": "启程",
-            "status": "resolved",
-            "progress": "已查看石碑",
-            "participants": [],
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
-                "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-              }
-            ],
-            "first_text_position": 0,
-            "char_end": 10,
-            "chapter_id": 2,
-            "chapter_order": 2,
-            "producer_invocation_id": "ff2d7277-2b6f-531f-97d0-b1790c184392",
-            "annotation_id": "7893f293-4b16-5dfb-9662-9fa53fc2c7e4",
-            "payload_path": "declaration/c2763bc1-4578-5e07-be41-4a6bd347c2bc"
-          },
-          {
-            "declaration_id": "e4640c3f-756c-5310-928f-021b5d83d59e",
-            "title": "线索记录",
-            "problem": "线索记录的问题",
-            "summary": "顾承渊记下线索",
-            "event_type": "调查",
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000005c",
+            "title": "第5章人物动态",
+            "problem": "第5章人物动态",
+            "summary": "顾承渊最终与苏映雪决裂，独自前行。",
+            "event_type": "行动",
             "status": "ongoing",
             "progress": null,
-            "participants": [],
+            "participants": [
+              {
+                "entity": {
+                  "name": "顾承渊",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
+                  "entity_type": "character"
+                },
+                "role": "主体",
+                "narrative_role": "主体",
+                "action": "独行",
+                "emotion": null
+              }
+            ],
             "evidence": [
               {
                 "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
+                "paragraph_id": 4,
+                "chapter_id": 5,
                 "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+                "char_end": 17,
+                "text_hash": "5aa9c81bf9abc0e693d5040d60c3dc4ebff9dd2067cc099727b14e5c7a7b4b7e"
               }
             ],
             "first_text_position": 0,
-            "char_end": 8,
-            "chapter_id": 1,
-            "chapter_order": 1,
-            "producer_invocation_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "annotation_id": "c992a1cd-4beb-586e-9614-2ab4252516f7",
-            "payload_path": "declaration/e4640c3f-756c-5310-928f-021b5d83d59e"
-          },
-          {
-            "declaration_id": "fc791a6f-c003-5950-a67f-1fc7545bab2c",
-            "title": "同行启程",
-            "problem": "同行启程的问题",
-            "summary": "苏映雪现身同行",
-            "event_type": "结伴",
-            "status": "ongoing",
-            "progress": null,
-            "participants": [],
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
-                "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-              }
-            ],
-            "first_text_position": 0,
-            "char_end": 10,
-            "chapter_id": 2,
-            "chapter_order": 2,
-            "producer_invocation_id": "ff2d7277-2b6f-531f-97d0-b1790c184392",
-            "annotation_id": "7893f293-4b16-5dfb-9662-9fa53fc2c7e4",
-            "payload_path": "declaration/fc791a6f-c003-5950-a67f-1fc7545bab2c"
+            "char_end": 17,
+            "chapter_id": 5,
+            "chapter_order": 5,
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000005a",
+            "annotation_id": "018bcfe5-6800-7000-8000-00000000005b",
+            "payload_path": "declaration/018bcfe5-6800-7000-8000-00000000005c"
           }
         ],
         "declaration_bindings": [
           {
-            "declaration_id": "030ee0b1-53f6-576c-827c-65aebc8ed50d",
-            "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-            "revision_id": "f49b7f24-d28f-5705-82ad-7315b1be1051",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107"
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000019",
+            "event_id": "018bcfe5-6800-7000-8000-000000000075",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000091",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
-            "declaration_id": "1c81264d-9b53-52d4-86bc-407dfc849d0e",
-            "event_id": "583c4247-117e-57c6-bc18-f45e9931c7a6",
-            "revision_id": "fecdd8ab-342e-536f-9c5d-4c05e1bf5dd3",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107"
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000022",
+            "event_id": "018bcfe5-6800-7000-8000-000000000071",
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008c",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
-            "declaration_id": "2861c17b-49b0-5e1d-9a9e-babf9a43b1eb",
-            "event_id": "dd1bcb25-9700-59ec-bf0a-4e545124b039",
-            "revision_id": "4848e145-d807-52e7-bcfb-db0139255f9e",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107"
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000027",
+            "event_id": "018bcfe5-6800-7000-8000-000000000072",
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008e",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
-            "declaration_id": "32b467d7-3fa3-5066-805d-43f2789b9ef7",
-            "event_id": "774431af-d215-5dd8-a424-457d216dbd41",
-            "revision_id": "ff33c705-28bf-583f-8536-af08ce7a19ca",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107"
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000002a",
+            "event_id": "018bcfe5-6800-7000-8000-000000000073",
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008f",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
-            "declaration_id": "49f47d43-0d5e-58f0-bab4-7607504f6988",
-            "event_id": "f1c196b6-ec45-591e-ba25-b29debc21ff0",
-            "revision_id": "4362f650-952a-5729-9f8d-60a411795f6f",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107"
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000002e",
+            "event_id": "018bcfe5-6800-7000-8000-000000000076",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000092",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
-            "declaration_id": "6ec71c38-353a-5945-89f4-5f5dd187f624",
-            "event_id": "34301c71-9155-5861-b5f4-305030eef6a0",
-            "revision_id": "db6143af-750c-5e1b-985d-4ca8eed3a2ff",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107"
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000037",
+            "event_id": "018bcfe5-6800-7000-8000-000000000074",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000090",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
-            "declaration_id": "a5a1ce21-4ba8-5160-b4ed-89ab71b7bebf",
-            "event_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
-            "revision_id": "29c1bc0f-aab5-5685-9774-d634e5b79ed8",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107"
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000003a",
+            "event_id": "018bcfe5-6800-7000-8000-000000000071",
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008d",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
-            "declaration_id": "c2763bc1-4578-5e07-be41-4a6bd347c2bc",
-            "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-            "revision_id": "299f687d-852f-5ab3-9231-60d7c2a3c42e",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107"
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000003e",
+            "event_id": "018bcfe5-6800-7000-8000-000000000077",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000093",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
-            "declaration_id": "e4640c3f-756c-5310-928f-021b5d83d59e",
-            "event_id": "23c6aa6f-f527-5650-a8ef-827156672387",
-            "revision_id": "48329542-789f-5b38-94ad-71a074e82b97",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107"
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000053",
+            "event_id": "018bcfe5-6800-7000-8000-000000000078",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000094",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
-            "declaration_id": "fc791a6f-c003-5950-a67f-1fc7545bab2c",
-            "event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-            "revision_id": "a2138778-8a49-548d-a0ee-8cae4fd0b0b4",
-            "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107"
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000005c",
+            "event_id": "018bcfe5-6800-7000-8000-000000000079",
+            "revision_id": "018bcfe5-6800-7000-8000-000000000095",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
           }
         ],
         "declaration_relations": [],
         "containments": [
           {
-            "parent_event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-            "child_event_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
+            "parent_event_id": "018bcfe5-6800-7000-8000-000000000071",
+            "child_event_id": "018bcfe5-6800-7000-8000-000000000073",
             "reason": "明确的事件包含",
             "evidence": [
               {
@@ -3651,8 +3652,8 @@
             ]
           },
           {
-            "parent_event_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
-            "child_event_id": "23c6aa6f-f527-5650-a8ef-827156672387",
+            "parent_event_id": "018bcfe5-6800-7000-8000-000000000073",
+            "child_event_id": "018bcfe5-6800-7000-8000-000000000072",
             "reason": "明确的事件包含",
             "evidence": [
               {
@@ -3668,239 +3669,10 @@
         ],
         "revisions": [
           {
-            "revision_id": "299f687d-852f-5ab3-9231-60d7c2a3c42e",
-            "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-            "previous_revision_id": "f49b7f24-d28f-5705-82ad-7315b1be1051",
-            "declaration_id": "c2763bc1-4578-5e07-be41-4a6bd347c2bc",
-            "participants": [],
-            "title": "踏入江湖",
-            "problem": "踏入江湖的问题",
-            "event_type": "启程",
-            "summary": "顾承渊踏入江湖并检查石碑",
-            "status": "resolved",
-            "progress": "已查看石碑",
-            "source_execution_id": "ff2d7277-2b6f-531f-97d0-b1790c184392",
-            "producer_invocation_id": "ff2d7277-2b6f-531f-97d0-b1790c184392",
-            "source_operation_id": "stage/439d4223-bd8f-5b5c-b1ee-61abf678dd45/1",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
-                "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-              }
-            ]
-          },
-          {
-            "revision_id": "29c1bc0f-aab5-5685-9774-d634e5b79ed8",
-            "event_id": "e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf",
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008c",
+            "event_id": "018bcfe5-6800-7000-8000-000000000071",
             "previous_revision_id": null,
-            "declaration_id": "a5a1ce21-4ba8-5160-b4ed-89ab71b7bebf",
-            "participants": [],
-            "title": "石碑疑云",
-            "problem": "石碑疑云的问题",
-            "event_type": "调查",
-            "summary": "顾承渊检查石碑",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "producer_invocation_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "source_operation_id": "stage/e0dcb11d-3cb1-5b02-b3a8-2b09d89c92bf/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ]
-          },
-          {
-            "revision_id": "4362f650-952a-5729-9f8d-60a411795f6f",
-            "event_id": "f1c196b6-ec45-591e-ba25-b29debc21ff0",
-            "previous_revision_id": null,
-            "declaration_id": "49f47d43-0d5e-58f0-bab4-7607504f6988",
-            "participants": [
-              {
-                "entity": {
-                  "name": "苏映雪",
-                  "entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "帮助者",
-                "action": "现身",
-                "emotion": null
-              }
-            ],
-            "title": "第2章人物动态",
-            "problem": "第2章人物动态",
-            "event_type": "行动",
-            "summary": "苏映雪现身与他同行。",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "ff2d7277-2b6f-531f-97d0-b1790c184392",
-            "producer_invocation_id": "ff2d7277-2b6f-531f-97d0-b1790c184392",
-            "source_operation_id": "stage/f1c196b6-ec45-591e-ba25-b29debc21ff0/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
-                "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-              }
-            ]
-          },
-          {
-            "revision_id": "48329542-789f-5b38-94ad-71a074e82b97",
-            "event_id": "23c6aa6f-f527-5650-a8ef-827156672387",
-            "previous_revision_id": null,
-            "declaration_id": "e4640c3f-756c-5310-928f-021b5d83d59e",
-            "participants": [],
-            "title": "线索记录",
-            "problem": "线索记录的问题",
-            "event_type": "调查",
-            "summary": "顾承渊记下线索",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "producer_invocation_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "source_operation_id": "stage/23c6aa6f-f527-5650-a8ef-827156672387/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ]
-          },
-          {
-            "revision_id": "4848e145-d807-52e7-bcfb-db0139255f9e",
-            "event_id": "dd1bcb25-9700-59ec-bf0a-4e545124b039",
-            "previous_revision_id": null,
-            "declaration_id": "2861c17b-49b0-5e1d-9a9e-babf9a43b1eb",
-            "participants": [
-              {
-                "entity": {
-                  "name": "苏映雪",
-                  "entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "帮助者",
-                "action": "离开",
-                "emotion": -1
-              }
-            ],
-            "title": "第4章人物动态",
-            "problem": "第4章人物动态",
-            "event_type": "行动",
-            "summary": "苏映雪完成使命后离开。",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "8993c82f-4244-55d7-bb46-0553b5247cf7",
-            "producer_invocation_id": "8993c82f-4244-55d7-bb46-0553b5247cf7",
-            "source_operation_id": "stage/dd1bcb25-9700-59ec-bf0a-4e545124b039/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 3,
-                "chapter_id": 4,
-                "char_start": 0,
-                "char_end": 11,
-                "text_hash": "d338e70addc4a69ef63558f97dcdf386f9f8cf2144b42fa7c9863773d1b1eaa0"
-              }
-            ]
-          },
-          {
-            "revision_id": "a2138778-8a49-548d-a0ee-8cae4fd0b0b4",
-            "event_id": "81a4a640-6ba7-56ac-892c-bf5e0808bdba",
-            "previous_revision_id": null,
-            "declaration_id": "fc791a6f-c003-5950-a67f-1fc7545bab2c",
-            "participants": [],
-            "title": "同行启程",
-            "problem": "同行启程的问题",
-            "event_type": "结伴",
-            "summary": "苏映雪现身同行",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "ff2d7277-2b6f-531f-97d0-b1790c184392",
-            "producer_invocation_id": "ff2d7277-2b6f-531f-97d0-b1790c184392",
-            "source_operation_id": "stage/81a4a640-6ba7-56ac-892c-bf5e0808bdba/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
-                "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-              }
-            ]
-          },
-          {
-            "revision_id": "db6143af-750c-5e1b-985d-4ca8eed3a2ff",
-            "event_id": "34301c71-9155-5861-b5f4-305030eef6a0",
-            "previous_revision_id": null,
-            "declaration_id": "6ec71c38-353a-5945-89f4-5f5dd187f624",
-            "participants": [
-              {
-                "entity": {
-                  "name": "顾承渊",
-                  "entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": "结盟",
-                "emotion": -2
-              },
-              {
-                "entity": {
-                  "name": "苏映雪",
-                  "entity_id": "111c10a6-6b8a-5a04-ac29-33559c4ee90d",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "帮助者",
-                "action": "回应",
-                "emotion": null
-              }
-            ],
-            "title": "第3章人物动态",
-            "problem": "第3章人物动态",
-            "event_type": "行动",
-            "summary": "顾承渊与苏映雪结盟，同时受天衡宗招揽。",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "af7934b7-430c-5d4e-b451-faf44ed96309",
-            "producer_invocation_id": "af7934b7-430c-5d4e-b451-faf44ed96309",
-            "source_operation_id": "stage/34301c71-9155-5861-b5f4-305030eef6a0/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 2,
-                "chapter_id": 3,
-                "char_start": 0,
-                "char_end": 19,
-                "text_hash": "0ba5c6c5d29d9193a1d0bf6443996fc00306432bf04119c2f6240a215e43f43b"
-              }
-            ]
-          },
-          {
-            "revision_id": "f49b7f24-d28f-5705-82ad-7315b1be1051",
-            "event_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
-            "previous_revision_id": null,
-            "declaration_id": "030ee0b1-53f6-576c-827c-65aebc8ed50d",
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000022",
             "participants": [],
             "title": "踏入江湖",
             "problem": "踏入江湖的问题",
@@ -3908,9 +3680,9 @@
             "summary": "顾承渊踏入江湖",
             "status": "ongoing",
             "progress": null,
-            "source_execution_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "producer_invocation_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "source_operation_id": "stage/439d4223-bd8f-5b5c-b1ee-61abf678dd45/0",
+            "source_execution_id": "018bcfe5-6800-7000-8000-000000000017",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000071/0",
             "evidence": [
               {
                 "event_id": null,
@@ -3923,53 +3695,119 @@
             ]
           },
           {
-            "revision_id": "fecdd8ab-342e-536f-9c5d-4c05e1bf5dd3",
-            "event_id": "583c4247-117e-57c6-bc18-f45e9931c7a6",
-            "previous_revision_id": null,
-            "declaration_id": "1c81264d-9b53-52d4-86bc-407dfc849d0e",
-            "participants": [
-              {
-                "entity": {
-                  "name": "顾承渊",
-                  "entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": "独行",
-                "emotion": null
-              }
-            ],
-            "title": "第5章人物动态",
-            "problem": "第5章人物动态",
-            "event_type": "行动",
-            "summary": "顾承渊最终与苏映雪决裂，独自前行。",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "705d278a-254c-5230-b8c4-40278a9ed51a",
-            "producer_invocation_id": "705d278a-254c-5230-b8c4-40278a9ed51a",
-            "source_operation_id": "stage/583c4247-117e-57c6-bc18-f45e9931c7a6/0",
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008d",
+            "event_id": "018bcfe5-6800-7000-8000-000000000071",
+            "previous_revision_id": "018bcfe5-6800-7000-8000-00000000008c",
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000003a",
+            "participants": [],
+            "title": "踏入江湖",
+            "problem": "踏入江湖的问题",
+            "event_type": "启程",
+            "summary": "顾承渊踏入江湖并检查石碑",
+            "status": "resolved",
+            "progress": "已查看石碑",
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000071/1",
             "evidence": [
               {
                 "event_id": null,
-                "paragraph_id": 4,
-                "chapter_id": 5,
+                "paragraph_id": 1,
+                "chapter_id": 2,
                 "char_start": 0,
-                "char_end": 17,
-                "text_hash": "5aa9c81bf9abc0e693d5040d60c3dc4ebff9dd2067cc099727b14e5c7a7b4b7e"
+                "char_end": 10,
+                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
               }
             ]
           },
           {
-            "revision_id": "ff33c705-28bf-583f-8536-af08ce7a19ca",
-            "event_id": "774431af-d215-5dd8-a424-457d216dbd41",
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008e",
+            "event_id": "018bcfe5-6800-7000-8000-000000000072",
             "previous_revision_id": null,
-            "declaration_id": "32b467d7-3fa3-5066-805d-43f2789b9ef7",
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000027",
+            "participants": [],
+            "title": "线索记录",
+            "problem": "线索记录的问题",
+            "event_type": "调查",
+            "summary": "顾承渊记下线索",
+            "status": "ongoing",
+            "progress": null,
+            "source_execution_id": "018bcfe5-6800-7000-8000-000000000017",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000072/0",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 0,
+                "chapter_id": 1,
+                "char_start": 0,
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+              }
+            ]
+          },
+          {
+            "revision_id": "018bcfe5-6800-7000-8000-00000000008f",
+            "event_id": "018bcfe5-6800-7000-8000-000000000073",
+            "previous_revision_id": null,
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000002a",
+            "participants": [],
+            "title": "石碑疑云",
+            "problem": "石碑疑云的问题",
+            "event_type": "调查",
+            "summary": "顾承渊检查石碑",
+            "status": "ongoing",
+            "progress": null,
+            "source_execution_id": "018bcfe5-6800-7000-8000-000000000017",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000073/0",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 0,
+                "chapter_id": 1,
+                "char_start": 0,
+                "char_end": 8,
+                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
+              }
+            ]
+          },
+          {
+            "revision_id": "018bcfe5-6800-7000-8000-000000000090",
+            "event_id": "018bcfe5-6800-7000-8000-000000000074",
+            "previous_revision_id": null,
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000037",
+            "participants": [],
+            "title": "同行启程",
+            "problem": "同行启程的问题",
+            "event_type": "结伴",
+            "summary": "苏映雪现身同行",
+            "status": "ongoing",
+            "progress": null,
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000074/0",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 1,
+                "chapter_id": 2,
+                "char_start": 0,
+                "char_end": 10,
+                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
+              }
+            ]
+          },
+          {
+            "revision_id": "018bcfe5-6800-7000-8000-000000000091",
+            "event_id": "018bcfe5-6800-7000-8000-000000000075",
+            "previous_revision_id": null,
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000019",
             "participants": [
               {
                 "entity": {
                   "name": "顾承渊",
-                  "entity_id": "bda9cc25-a88e-5385-8db6-49130e16442b",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
                   "entity_type": "character"
                 },
                 "role": "主体",
@@ -3984,9 +3822,9 @@
             "summary": "顾承渊初入江湖。",
             "status": "ongoing",
             "progress": null,
-            "source_execution_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "producer_invocation_id": "1d9f92ab-2a94-5a67-a51b-5adae2acd5cd",
-            "source_operation_id": "stage/774431af-d215-5dd8-a424-457d216dbd41/0",
+            "source_execution_id": "018bcfe5-6800-7000-8000-000000000017",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000075/0",
             "evidence": [
               {
                 "event_id": null,
@@ -3997,17 +3835,180 @@
                 "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
               }
             ]
+          },
+          {
+            "revision_id": "018bcfe5-6800-7000-8000-000000000092",
+            "event_id": "018bcfe5-6800-7000-8000-000000000076",
+            "previous_revision_id": null,
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000002e",
+            "participants": [
+              {
+                "entity": {
+                  "name": "苏映雪",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
+                  "entity_type": "character"
+                },
+                "role": "主体",
+                "narrative_role": "帮助者",
+                "action": "现身",
+                "emotion": null
+              }
+            ],
+            "title": "第2章人物动态",
+            "problem": "第2章人物动态",
+            "event_type": "行动",
+            "summary": "苏映雪现身与他同行。",
+            "status": "ongoing",
+            "progress": null,
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000076/0",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 1,
+                "chapter_id": 2,
+                "char_start": 0,
+                "char_end": 10,
+                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
+              }
+            ]
+          },
+          {
+            "revision_id": "018bcfe5-6800-7000-8000-000000000093",
+            "event_id": "018bcfe5-6800-7000-8000-000000000077",
+            "previous_revision_id": null,
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000003e",
+            "participants": [
+              {
+                "entity": {
+                  "name": "顾承渊",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
+                  "entity_type": "character"
+                },
+                "role": "主体",
+                "narrative_role": "主体",
+                "action": "结盟",
+                "emotion": -2
+              },
+              {
+                "entity": {
+                  "name": "苏映雪",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
+                  "entity_type": "character"
+                },
+                "role": "主体",
+                "narrative_role": "帮助者",
+                "action": "回应",
+                "emotion": null
+              }
+            ],
+            "title": "第3章人物动态",
+            "problem": "第3章人物动态",
+            "event_type": "行动",
+            "summary": "顾承渊与苏映雪结盟，同时受天衡宗招揽。",
+            "status": "ongoing",
+            "progress": null,
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000003c",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000003c",
+            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000077/0",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 2,
+                "chapter_id": 3,
+                "char_start": 0,
+                "char_end": 19,
+                "text_hash": "0ba5c6c5d29d9193a1d0bf6443996fc00306432bf04119c2f6240a215e43f43b"
+              }
+            ]
+          },
+          {
+            "revision_id": "018bcfe5-6800-7000-8000-000000000094",
+            "event_id": "018bcfe5-6800-7000-8000-000000000078",
+            "previous_revision_id": null,
+            "declaration_id": "018bcfe5-6800-7000-8000-000000000053",
+            "participants": [
+              {
+                "entity": {
+                  "name": "苏映雪",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
+                  "entity_type": "character"
+                },
+                "role": "主体",
+                "narrative_role": "帮助者",
+                "action": "离开",
+                "emotion": -1
+              }
+            ],
+            "title": "第4章人物动态",
+            "problem": "第4章人物动态",
+            "event_type": "行动",
+            "summary": "苏映雪完成使命后离开。",
+            "status": "ongoing",
+            "progress": null,
+            "source_execution_id": "018bcfe5-6800-7000-8000-000000000051",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000051",
+            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000078/0",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 3,
+                "chapter_id": 4,
+                "char_start": 0,
+                "char_end": 11,
+                "text_hash": "d338e70addc4a69ef63558f97dcdf386f9f8cf2144b42fa7c9863773d1b1eaa0"
+              }
+            ]
+          },
+          {
+            "revision_id": "018bcfe5-6800-7000-8000-000000000095",
+            "event_id": "018bcfe5-6800-7000-8000-000000000079",
+            "previous_revision_id": null,
+            "declaration_id": "018bcfe5-6800-7000-8000-00000000005c",
+            "participants": [
+              {
+                "entity": {
+                  "name": "顾承渊",
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
+                  "entity_type": "character"
+                },
+                "role": "主体",
+                "narrative_role": "主体",
+                "action": "独行",
+                "emotion": null
+              }
+            ],
+            "title": "第5章人物动态",
+            "problem": "第5章人物动态",
+            "event_type": "行动",
+            "summary": "顾承渊最终与苏映雪决裂，独自前行。",
+            "status": "ongoing",
+            "progress": null,
+            "source_execution_id": "018bcfe5-6800-7000-8000-00000000005a",
+            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000005a",
+            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000079/0",
+            "evidence": [
+              {
+                "event_id": null,
+                "paragraph_id": 4,
+                "chapter_id": 5,
+                "char_start": 0,
+                "char_end": 17,
+                "text_hash": "5aa9c81bf9abc0e693d5040d60c3dc4ebff9dd2067cc099727b14e5c7a7b4b7e"
+              }
+            ]
           }
         ],
         "conflicts": [
           {
-            "conflict_id": "09d9985e-f89f-5856-932c-153c56189e1b",
+            "conflict_id": "018bcfe5-6800-7000-8000-000000000081",
             "subject_kind": "event",
-            "subject_id": "439d4223-bd8f-5b5c-b1ee-61abf678dd45",
+            "subject_id": "018bcfe5-6800-7000-8000-000000000071",
             "claims": [
               {
                 "claim": "入行十年",
-                "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
+                "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
                 "evidence": [
                   {
                     "event_id": null,
@@ -4021,7 +4022,7 @@
               },
               {
                 "claim": "入行十四年",
-                "producer_invocation_id": "59afab614bb551569a9dfb94a88d3107",
+                "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
                 "evidence": [
                   {
                     "event_id": null,
@@ -4058,5 +4059,6 @@
         ]
       }
     }
-  }
+  },
+  "identity_contract": "Storage generated UUIDv7 with fixed clock and random inputs in the test"
 }

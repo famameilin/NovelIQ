@@ -22,7 +22,7 @@ PRE_RUN_FAULT_CODES = frozenset({"empty_program", "program_too_large", "syntax_e
 
 
 class ProgramFault(Exception):
-    """2026-09-15 用于把程序面内部失败（非法节点/越限/运行错误）收敛成结构化 error"""
+    """用于把程序面内部失败（非法节点/越限/运行错误）收敛成结构化 error"""
 
     def __init__(self, message: str, *, code: str, line: int | None = None) -> None:
         super().__init__(message)
@@ -40,7 +40,7 @@ class ProgramFault(Exception):
 class ProgramRuntimeSurface(Protocol):
     """结构化提交需要的程序面能力面
 
-    说明: 运行时实现（受限解释器）在标注 agent 侧；事件树只声明它要用到的这一小组
+    运行时实现（受限解释器）在标注 agent 侧；事件树只声明它要用到的这一小组
     能力，不反向 import agent 运行时。
     """
 
@@ -88,7 +88,5 @@ _READ_TOOL_NAMES = frozenset(
         "read_chapter_text",
     }
 )
-
-_READ_ECHO_MAX_CHARS = 1600
 
 _READ_ECHO_MAX_ITEMS = 8

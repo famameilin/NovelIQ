@@ -23,15 +23,15 @@ if TYPE_CHECKING:
     from src.agents.stream import AgentStream
     from src.agents.turn_observer import AgentTurnObserver
 
-# 2026-08-14 D1：无 continuity_open 阶段，chapter_open -> completed 两态
+# 阶段取值：chapter_open -> completed
 AnnotationPhase = Literal["chapter_open", "completed"]
 
-# 2026-09-05 剩余轮次（含本轮）进入该窗口即向本次请求追加收尾提醒
+# 剩余轮次（含本轮）进入该窗口即向本次请求追加收尾提醒
 TURN_BUDGET_REMINDER_WINDOW = 3
 
 
 class AnnotationGraphState(TypedDict):
-    """2026-08-10 用于保存逐章 工具循环的累积消息链"""
+    """用于保存逐章 工具循环的累积消息链"""
 
     messages: Annotated[list[BaseMessage], add_messages]
     phase: AnnotationPhase
@@ -68,7 +68,7 @@ def _build_agent_node(
         return f"章节标注推理中（第 {rounds} 轮）..."
 
     async def agent_node(state: AnnotationGraphState) -> dict[str, Any]:
-        """2026-08-10 用于执行一次绑定语义工具合同的模型调用"""
+        """用于执行一次绑定语义工具合同的模型调用"""
         iterations = int(state.get("iterations") or 0)
         if iterations >= max_iterations:
             return {"halted": True}
@@ -79,10 +79,9 @@ def _build_agent_node(
 
         request_messages = list(state["messages"])
         remaining_turns = max_iterations - iterations
-        # 2026-09-20 注入顺序：先【轮次预算】提醒、【进度账本】恒为本请求的最后一条。
-        # 账本每轮现算现挂、从不写进状态消息链，所以"每轮开始前移除上一轮"是构造性的：
-        # 上一轮那份随请求结束消失，本轮请求里只有本轮的新块（run 54a72932 实测 523 个
-        # 请求零重复）。放末位是因为模型生成前最后读到的必须先是本章当前状态。
+        # 注入顺序：先【轮次预算】提醒，【进度账本】恒为本请求的最后一条——
+        # 账本每轮现算现挂、不写进状态消息链；放末位是因为模型生成前最后读到的
+        # 必须先是本章当前状态。
         if remaining_turns <= TURN_BUDGET_REMINDER_WINDOW:
             request_messages.append(
                 HumanMessage(
@@ -99,7 +98,7 @@ def _build_agent_node(
         }
 
         def on_turn_started(provider_request: dict[str, Any], started_ns: int) -> None:
-            """2026-08-30 用于在物理 Provider 请求发送前写入独立审计行"""
+            """用于在物理 Provider 请求发送前写入独立审计行"""
             if observer is None:
                 return
             observer.begin_provider_turn(
@@ -110,13 +109,13 @@ def _build_agent_node(
             )
 
         def on_turn_complete(message: AIMessage, timing: Any) -> None:
-            """2026-08-30 用于收口成功的物理 Provider 请求审计"""
+            """用于收口成功的物理 Provider 请求审计"""
             if observer is None:
                 return
             observer.complete_provider_turn(response_message=message, timing=timing)
 
         def on_turn_failed(error: str, timing: Any, message: AIMessage | None) -> None:
-            """2026-08-30 用于收口断流超时和无工具回复的物理 Provider 请求审计"""
+            """用于收口断流超时和无工具回复的物理 Provider 请求审计"""
             if observer is None:
                 return
             observer.fail_provider_turn(error=error, timing=timing, response_message=message)
@@ -140,7 +139,7 @@ def _build_agent_node(
 
 
 def _tool_calls(state: AnnotationGraphState) -> list[dict[str, Any]]:
-    """2026-08-10 用于读取最后一条模型消息的工具调用列表"""
+    """用于读取最后一条模型消息的工具调用列表"""
     last_message = state["messages"][-1]
     if not isinstance(last_message, AIMessage):
         return []
@@ -148,9 +147,9 @@ def _tool_calls(state: AnnotationGraphState) -> list[dict[str, Any]]:
 
 
 def _failed_receipt(name: str, error: str | BaseException) -> str:
-    """2026-08-10 用于构造单个调用失败时模型可见的独立回执
+    """用于构造单个调用失败时模型可见的独立回执
 
-    2026-09-13：结构化拒绝（AnnotationStageRejection）只回 record/field/code/
+    结构化拒绝（AnnotationStageRejection）只回 record/field/code/
     expected 与可自纠说明，不重复整份合同。
     """
     if isinstance(error, AnnotationStageRejection):

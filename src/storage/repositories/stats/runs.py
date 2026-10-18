@@ -1,9 +1,9 @@
-"""运行级统计存在性查询（2026-10-16 全库 3NF 改造）
+"""运行级统计存在性查询
 
-- 主题模型：旧 topic_model_runs 行退场，本轮实际构建记录改读 analysis_runs 的
-  lda_* 列（实际主题数 K 是唯一正式落点），不靠请求侧 requested_num_topics。
-- 语言结构基础数据：旧 paragraph_linguistic_completions 表退场，完成事实改读
-  paragraph_metrics.linguistic_completed_at（零词元段落同样有完成行）。
+- 主题模型：本轮实际构建记录读 analysis_runs 的 lda_* 列（实际主题数 K 是
+  唯一正式落点），不靠请求侧 requested_num_topics。
+- 语言结构基础数据：完成事实读 paragraph_metrics.linguistic_completed_at
+  （零词元段落同样有完成行）。
 """
 
 from __future__ import annotations

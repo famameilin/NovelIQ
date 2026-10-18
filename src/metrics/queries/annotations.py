@@ -1,7 +1,6 @@
 """本领域的独立只读投影，不返回 HTTP 模型
 
-2026-10-16 全库 3NF 改造：章节标注读侧改为按 chapter_annotations 宽表取具名指标
-（旧通用产物 payload {metrics, chunks, ...} 退场，不解析任何旧载荷）：
+章节标注按 chapter_annotations 宽表取具名指标：
 
 - 章号与章内角色取记录自身归属列
 - 情绪效价/叙事功能/转折/悬念为标注记录的独立具名列
@@ -45,10 +44,10 @@ def _fetch_paragraph_label_counts(session: Storage, record_ids: list[str]) -> di
 
 
 def fetch_chapter_annotations_full(session: Storage, run_id: str) -> list[ChapterAnnotationRow]:
-    """2026-08-07 用于从正式章节标注记录展开完整章节标注
+    """从正式章节标注记录展开完整章节标注
 
     只取角色集合与登记角色一致、且按标注合同完成的章节；具名指标取度量指标角色的
-    正式记录，不做任何旧载荷兼容读取（存量旧载荷不参与，按缺省处理）。
+    正式记录，不做任何载荷兼容读取（未登记记录按缺省处理）。
     """
     foreshadowing_by_chapter = read_foreshadowing(session, run_id)
     repository = session.annotations

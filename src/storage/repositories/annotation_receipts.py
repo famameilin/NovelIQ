@@ -53,12 +53,24 @@ def save_consolidation(session, request):
     if previous is not None:
         if previous.program_invocation_key != request["program_key"]:
             raise ValueError("章末凭据与有效来源集合不同，不能覆盖")
-        return {
-            "status": "existing",
-            "chapter_id": chapter_id,
-            "fact_id": request["digest"],
-            "author": previous.work_id,
-        }
+        expected_cases = request["cases"].snapshot()["registrations"]
+        descriptions = set(
+            session.scalars(
+                select(BookCase.description)
+                .join(CaseEntry, CaseEntry.case_id == BookCase.case_id)
+                .where(CaseEntry.program_work_id == previous.work_id)
+            )
+        )
+        if not request.get("recheck") or descriptions == {item["description"] for item in expected_cases.values()}:
+            return {
+                "status": "existing",
+                "chapter_id": chapter_id,
+                "fact_id": request["digest"],
+                "author": previous.work_id,
+            }
+        from src.storage.repositories.annotation_recovery import discard_chapter_receipts
+
+        discard_chapter_receipts(session, run_id, {chapter_id})
     session.add(
         WorkItem(
             work_id=request["author"],

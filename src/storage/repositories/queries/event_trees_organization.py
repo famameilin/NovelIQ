@@ -1,4 +1,4 @@
-"从 src/event_trees/organization.py 分离的具名物理读取"
+"event trees organization 的具名物理读取"
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def event_trees_organization_run_foreshadowing_actions_1(_session, declarations)
             EventForeshadowingAction.target_declaration_id.in_(declarations),
         )
     )
-    return _session.scalars(stmt.order_by(EventForeshadowingAction.operation_order))
+    return _session.scalars(stmt.order_by(EventForeshadowingAction.operation_order, EventForeshadowingAction.action_id))
 
 
 def event_trees_organization_run_conflict_rows_1(_session, run_id):
@@ -103,7 +103,8 @@ def event_trees_organization_declaration_rows_1(_session, declaration_ids):
 
 def event_trees_organization_declaration_rows_2(_session, declaration_ids, value_1):
     return _session.scalars(
-        select(NarrativeLink).where(
+        select(NarrativeLink)
+        .where(
             NarrativeLink.producer_execution_id.in_(smap.run_execution_ids(value_1)),
             NarrativeLink.semantic_source_declaration_id.is_not(None),
             NarrativeLink.semantic_target_declaration_id.is_not(None),
@@ -112,6 +113,7 @@ def event_trees_organization_declaration_rows_2(_session, declaration_ids, value
                 NarrativeLink.semantic_target_declaration_id.in_(declaration_ids),
             ),
         )
+        .order_by(NarrativeLink.link_id)
     )
 
 

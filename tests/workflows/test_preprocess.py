@@ -1,26 +1,14 @@
-"""
-CLI preprocess 模块测试
-
-创建时间: 2025-03-11
-任务: 测试预处理流程
-
-修改时间: 2026-03-15
-任务: storage-layer-decoupling
-修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning，移除不存在的 split_by_chapter 参数
-
-修改时间: 2026-03-15
-任务: postgresql-migration-cleanup
-修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
-"""
+"""CLI preprocess 模块测试"""
 
 import sys
-import uuid
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from src.storage import new_id
 from src.workflows.preprocess_readiness import is_preprocess_complete
+from tests.support.storage_fixtures import storage_for
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -44,12 +32,7 @@ class MockEmbeddingClient:
         *,
         progress_callback=None,
     ) -> list[list[float]]:
-        """
-        修改时间: 2026-04-27
-        任务: fix-preprocess-progress-callback-tests
-        修改内容: 对齐 EmbeddingClient.embed_texts 的 progress_callback 可选参数，
-        避免 preprocess 新增 SSE 进度透传后测试桩签名落后。
-        """
+
         import random
 
         return [[random.random() for _ in range(1024)] for _ in texts]
@@ -77,12 +60,7 @@ class MockEmbeddingClientPreprocess:
         *,
         progress_callback=None,
     ) -> list[list[float]]:
-        """
-        修改时间: 2026-04-27
-        任务: fix-preprocess-progress-callback-tests
-        修改内容: 对齐 preprocess paragraph embedding 新增的 progress_callback 参数，
-        让 CLI 回归测试继续覆盖真实入口而不是被 mock 签名拦住。
-        """
+
         import random
 
         return [[random.random() for _ in range(1024)] for _ in texts]
@@ -97,7 +75,7 @@ class MockEmbeddingClientPreprocess:
 
 class TestPreprocess:
     def _create_source_file(self, tmp: str, content: str = "测试文本内容。包含多个句子。") -> Path:
-        source_path = Path(tmp) / f"novel_{uuid.uuid4().hex[:8]}.txt"
+        source_path = Path(tmp) / f"novel_{new_id()}.txt"
         source_path.write_text(content, encoding="utf-8")
         return source_path
 
@@ -107,7 +85,7 @@ class TestPreprocess:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
 
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -116,15 +94,13 @@ class TestPreprocess:
         )
 
         chunks_inserted, total_chars, _ = await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
+            source_path=source_path, run_id=run_id, session=storage_for(db_session)
         )
         assert chunks_inserted > 0
         assert total_chars > 0
 
         chapter_repo = ChapterRepository(db_session)
-        assert is_preprocess_complete(chapter_repo.session, run_id)
+        assert is_preprocess_complete(storage_for(chapter_repo.session), run_id)
 
         rows = chapter_repo.fetch_chapter_texts(run_id)
         assert len(rows) == chunks_inserted
@@ -135,7 +111,7 @@ class TestPreprocess:
         source_path = self._create_source_file(str(tmp_path), "")
 
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -144,9 +120,7 @@ class TestPreprocess:
         )
 
         chunks_inserted, total_chars, _ = await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
+            source_path=source_path, run_id=run_id, session=storage_for(db_session)
         )
         assert chunks_inserted == 0
         assert total_chars == 0
@@ -158,7 +132,7 @@ class TestPreprocess:
         source_path = self._create_source_file(str(tmp_path), content)
 
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -167,9 +141,7 @@ class TestPreprocess:
         )
 
         chunks_inserted, total_chars, _ = await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
+            source_path=source_path, run_id=run_id, session=storage_for(db_session)
         )
         assert chunks_inserted > 0
 
@@ -179,7 +151,7 @@ class TestPreprocess:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
 
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = run_repo.create_run(
             novel_id=novel_id,
@@ -187,16 +159,8 @@ class TestPreprocess:
             title="Resume Novel",
         )
 
-        chunks1, _, _ = await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
-        )
+        chunks1, _, _ = await run_preprocess(source_path=source_path, run_id=run_id, session=storage_for(db_session))
         assert chunks1 > 0
 
-        chunks2, _, _ = await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
-        )
+        chunks2, _, _ = await run_preprocess(source_path=source_path, run_id=run_id, session=storage_for(db_session))
         assert chunks2 == 0

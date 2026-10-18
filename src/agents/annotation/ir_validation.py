@@ -2,13 +2,6 @@
 章内 agent IR 校验 helpers：命名空间化、字段校验与结构化拒绝
 """
 
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：agent_ir.py 大文件拆分——校验 helpers 段（namespace_* / truncate_case_description /
-# _reject / _require_*）迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；闭集常量与 IR 数据类保留在 agent_ir.py，
-# 本模块引用其常量（agent_ir.py 末尾对本模块符号 re-export，双向均定义先于引用，
-# 任意导入顺序安全）。
-
 from __future__ import annotations
 
 import unicodedata
@@ -100,7 +93,7 @@ def _require_score(value: Any, *, record: str, field_name: str) -> int:
 def _require_name(value: Any, *, record: str, field_name: str) -> str:
     """用于校验实体展示名（照抄正文写法，只作展示字段）
 
-    名字不再是引用键：引用一律用模型自定的本 agent id（见 _require_local_key），
+    名字只作展示字段，不作引用键：引用一律用模型自定的本 agent id（见 _require_local_key），
     name 只用于落库时的实体登记与人类可读展示。
     """
     text = _require_text(value, record=record, field_name=field_name)

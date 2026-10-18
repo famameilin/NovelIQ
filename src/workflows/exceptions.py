@@ -1,8 +1,7 @@
 """运行编排异常
 
-说明: 编排与队列读写（src/workflows）、api 的运行态判定都会抛出这些异常，
-api 中间件只做 HTTP 映射。2026-10-06 自 src/work/exceptions.py 迁出：编排住在
-workflows，异常跟着编排走；api 只依赖 workflows，不再认识 work 队列包。
+编排与队列读写（src/workflows）、api 的运行态判定都会抛出这些异常，
+api 中间件只做 HTTP 映射。
 """
 
 from __future__ import annotations

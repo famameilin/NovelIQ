@@ -1,4 +1,21 @@
-"语言结构领域仓储（-5.7；2026-10-16 全库 3NF 冻结结构）"
+"""
+语言结构领域仓储
+
+语言面落点：
+- linguistic_spans：词元（token_index/raw_pos）、NER（raw_entity_type）、固定短语
+  （phrase_match_kind）三种互斥区间的唯一事实表；词面按原文切片，POS/NER 归一
+  由版本化代码合同（POS_GROUP_MAP/ENTITY_TYPE_MAP）投影
+- linguistic_arcs：依存（dep:*，单头，ROOT 以 head_span_id 为空表达）与语义依存
+  （sdp:*，多头多标签）的有序弧；source_ordinal 保留各层段落内真实源顺序
+- paragraph_features：句式五类计数与 POS 分组向量（pos_vector:<group>）等封闭计算种类
+- paragraph_metrics：语言完成事实 linguistic_completed_at/phrase_completed_at、
+  共享句数 sentence_count 与边界监督观测（boundary_*_score_sum）
+- analysis_runs：run 级 LTP 合同、固定短语合同与 w2v_* 构建事实
+
+存储的 token_index 为 0 起词元序号（冻结模型合同）；读取投影转回 LTP 原生
+1 起坐标（ROOT=0）。派生量（词长分组、POS 分组计数、依存统计、词典与 mNEG
+对照计数、情绪事件）一律不落库，按正式词元/弧投影（fetch_linguistic_features）。
+"""
 
 from __future__ import annotations
 

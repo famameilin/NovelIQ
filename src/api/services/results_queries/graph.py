@@ -29,13 +29,13 @@ HIERARCHICAL_RELATION_TYPES = {
 
 
 def _encode_graph_changes_cursor(offset: int) -> str:
-    """2026-08-07 用于把图变化分页偏移编码为稳定游标"""
+    """把图变化分页偏移编码为稳定游标"""
     payload = json.dumps({"offset": offset}, separators=(",", ":")).encode("utf-8")
     return urlsafe_b64encode(payload).decode("ascii").rstrip("=")
 
 
 def _decode_graph_changes_cursor(cursor: str | None) -> int:
-    """2026-08-07 用于校验并解析图变化分页游标"""
+    """校验并解析图变化分页游标"""
     if not cursor:
         return 0
     padded_cursor = cursor + ("=" * (-len(cursor) % 4))
@@ -60,7 +60,7 @@ def _build_graph_changes_page_info(
     returned_count: int,
     total: int,
 ) -> dict[str, Any]:
-    """2026-08-07 用于组装图变化分页状态"""
+    """组装图变化分页状态"""
     end = start + returned_count
     next_cursor = _encode_graph_changes_cursor(end) if end < total else None
     return {
@@ -78,7 +78,7 @@ def _fetch_character_relations(
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list[CharacterRelation]:
-    """2026-08-19 用于从当前章节关系状态生成角色关系导出数据"""
+    """从当前章节关系状态生成角色关系导出数据"""
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo)
     authority_service.assert_graph_ready(run_id)
     if export_graph_view is None:
@@ -120,7 +120,7 @@ def _fetch_hierarchical_relations(
     export_graph_view: ExportGraphAuthorityView,
     valid_character_names: set[str] | None = None,
 ) -> list[HierarchicalRelation]:
-    """2026-08-19 用于从当前章节关系状态生成层级关系导出数据"""
+    """从当前章节关系状态生成层级关系导出数据"""
     del run_id
     hierarchical_types = HIERARCHICAL_RELATION_TYPES
     valid_entity_names = {entity.name for entity in export_graph_view.canonical_entities if entity.name}
@@ -154,7 +154,7 @@ def _fetch_graph_snapshot(
     *,
     chapter_id: int | None = None,
 ) -> dict[str, Any]:
-    """2026-08-07 用于直接返回目标章节图版本的实体状态和有效关系"""
+    """直接返回目标章节图版本的实体状态和有效关系"""
     snapshot = graph_projection(annotation_repo.graph).fetch_snapshot(run_id, chapter_id=chapter_id)
     if snapshot is None:
         raise LookupError("当前 run 尚无匹配的章节图版本")
@@ -259,7 +259,7 @@ def _fetch_graph_changes_page(
     changes_cursor: str | None = None,
     changes_limit: int = GRAPH_CHANGE_LIMIT,
 ) -> dict[str, Any]:
-    """2026-08-07 用于按章节倒序分页返回实体与关系版本变化"""
+    """按章节倒序分页返回实体与关系版本变化"""
     start = _decode_graph_changes_cursor(changes_cursor)
     page_limit = max(1, min(changes_limit, GRAPH_CHANGE_LIMIT))
     rows, total = graph_projection(annotation_repo.graph).fetch_changes(

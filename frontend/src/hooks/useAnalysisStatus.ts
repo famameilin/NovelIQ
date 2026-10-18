@@ -38,7 +38,7 @@ function buildBackfillProgress(status: TaskStatusResponse): StreamEventData {
     action: status.status === "pending" ? "start" : "progress",
     stage: fallbackStage,
     sub_stage: status.sub_stage ?? "",
-    // 2026-08-15 M5：HTTP 回填不携带真实章节，不得覆写成 0——
+    // HTTP 回填不携带真实章节，不得覆写成 0——
     // updateProgress 对缺失 chapter_id 保留旧值，避免 annotate 期间面板按章匹配落空
     current: status.current ?? 0,
     total: status.total ?? 0,
@@ -462,8 +462,7 @@ export function useAnalysisStatus(
 
   const { isConnected, disconnect } = useSSEListener(sseUrl, {
     onEvent: (eventType, data) => {
-      // 2026-08-12: 后端 SSE 消息格式为 { type, data }，不含 task_id 字段；
-      // 移除恒为 false 的 task_id 过滤，message 事件直接按内部类型分发
+      // 后端 SSE 消息格式为 { type, data }，不含 task_id 字段；message 事件按内部类型分发
       if (eventType === "message") {
         const message = data as { type: SSEEventType; data: unknown };
         handleMessage(message.type, message.data);
@@ -516,7 +515,7 @@ export function useAnalysisStatus(
       }
       reset();
     }
-    // 2026-08-14 D5：resumeEpoch 变化（同 task_id resume 开新轮）时同样重置
+    // resumeEpoch 变化（同 task_id resume 开新轮）时同样重置
     // 内部缓冲，避免旧轮 LLM 输出/进度状态与新轮混叠
   }, [taskId, novelId, setTaskId, reset, syncTaskStatus, resumeEpoch]);
 

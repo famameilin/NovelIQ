@@ -1,11 +1,11 @@
 """
 词表加载表（tables）
 
-get 读取词表数据 -> 缓存为模块级常量 -> 消费方统一引用常量，不再各自调 registry。
+get 读取词表数据 -> 缓存为模块级常量 -> 消费方统一引用常量。
 
-2026-08-15 词表 v3：生产词表固定于 data/lexicons（registry 为唯一事实源），
-消费方（段落链 / 停用词 / 语义类别）改为引用本模块常量，词表进程内加载一次；
-文件名经 constants.LEXICON_FILES 语义 key 引用（2026-08-28 常量化）。
+生产词表固定于 data/lexicons（registry 为唯一事实源），消费方（段落链 /
+停用词 / 语义类别）引用本模块常量，词表进程内加载一次；文件名经
+constants.LEXICON_FILES 语义 key 引用。
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ COMBAT_TERMS: list[str] = _registry.get(LEXICON_FILES["combat"])
 SENSORY_TERMS: list[str] = _registry.get(LEXICON_FILES["sensory"])
 FUNCTION_WORDS_TERMS: list[str] = _registry.get(LEXICON_FILES["function_words"])
 IMAGERY_TERMS: list[str] = _registry.get(LEXICON_FILES["imagery"])
-# 2026-09-05 C 批：身体反应转喻（独立命中计数，不进正负极性）
+# 身体反应转喻（独立命中计数，不进正负极性）
 BODY_REACTION_TERMS: list[str] = _registry.get(LEXICON_FILES["body_reaction"])
 SEMANTIC_CATEGORY_FILE: Path = _registry.get_file_paths(LEXICON_FILES["semantic_category"])[0]
 SEMANTIC_CATEGORIES: dict[str, list[str]] = parse_semantic_category_lexicon(str(SEMANTIC_CATEGORY_FILE))

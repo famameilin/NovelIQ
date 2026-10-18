@@ -1,27 +1,4 @@
-"""
-测试配置文件
-
-创建时间: 2025-03-11
-任务: 测试配置
-
-修改时间: 2026-03-29
-任务: fix-duplicate-location-appearance
-修改内容: 添加 chunk_locations 表到清理列表
-
-修改时间: 2026-04-05
-任务: fix-test-data-pollution
-修改内容: 添加 api_client fixture，确保 API 测试使用测试数据库
-
-修改时间: 2026-04-20
-任务: fix-test-db-isolation
-修改内容: 将后端测试默认数据库强制切换到 TEST_DATABASE，
-    并在每个测试前后重置 SQLAlchemy 单例，防止直接调用 get_session_factory() 时污染开发库
-
-修改时间: 2026-10-03
-任务: feat-event-driven-scheduling
-修改内容: 新增 autouse 夹具在每个测试后重置模型池容量账本与事件总线单例，
-    防止预留位/订阅队列跨测试泄漏导致全量套件下调度类测试偶发失败
-"""
+"""测试配置文件"""
 
 from __future__ import annotations
 
@@ -45,13 +22,9 @@ _test_engine = None
 
 
 def _build_test_schema_name() -> str:
-    """
-    构造当前 pytest 进程专用的测试 schema 名称。
+    """构造当前 pytest 进程专用的测试 schema 名称。
 
-    创建时间: 2026-04-22
-    任务: fix-test-db-concurrency
-    说明: 不能再让多个 pytest 进程共享 public schema；
-          这里按 worker + pid + 随机后缀生成独立 schema，避免并发 create_all 冲突。
+    这里按 worker + pid + 随机后缀生成独立 schema，避免并发 create_all 冲突。
     """
     worker_id = os.environ.get("PYTEST_XDIST_WORKER", "single")
     safe_worker = re.sub(r"[^A-Za-z0-9_]", "_", worker_id)
@@ -59,12 +32,9 @@ def _build_test_schema_name() -> str:
 
 
 def _validate_schema_name(schema_name: str) -> str:
-    """
-    校验 schema 名称是否可安全用于 SQL 标识符。
+    """校验 schema 名称是否可安全用于 SQL 标识符。
 
-    创建时间: 2026-04-22
-    任务: fix-test-db-concurrency
-    说明: 测试会把 schema 名称插入 DDL，必须先限制成 PostgreSQL 安全标识符。
+    测试会把 schema 名称插入 DDL，必须先限制成 PostgreSQL 安全标识符。
     """
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema_name):
         raise ValueError(f"Invalid test schema name: {schema_name}")
@@ -72,12 +42,9 @@ def _validate_schema_name(schema_name: str) -> str:
 
 
 def _build_test_engine(database_url: str, schema_name: str):
-    """
-    创建绑定到指定测试 schema 的 SQLAlchemy Engine。
+    """创建绑定到指定测试 schema 的 SQLAlchemy Engine。
 
-    创建时间: 2026-04-22
-    任务: fix-test-db-concurrency
-    说明: 所有测试连接都应带固定 search_path，确保 ORM 与原生 SQL 落在同一隔离 schema。
+    所有测试连接都应带固定 search_path，确保 ORM 与原生 SQL 落在同一隔离 schema。
     """
     safe_schema = _validate_schema_name(schema_name)
     engine = create_engine(
@@ -109,12 +76,8 @@ def get_test_database_url() -> str:
 
 
 def _reset_backend_db_singletons() -> None:
-    """
-    重置后端数据库模块中的 Engine / Session 工厂单例。
+    """重置后端数据库模块中的 Engine / Session 工厂单例。
 
-    创建时间: 2026-04-20
-    任务: fix-test-db-isolation
-    说明: 测试中存在直接调用 get_session_factory()() 的路径。
     若不在切换 DATABASE 后立即重置单例，这些调用会继续复用旧连接，导致写入开发库。
     """
     from src.storage import db as db_module
@@ -132,12 +95,9 @@ def test_database_url() -> str:
 
 @pytest.fixture(scope="session")
 def test_database_schema() -> str:
-    """
-    当前 pytest 会话使用的独立 schema。
+    """当前 pytest 会话使用的独立 schema。
 
-    创建时间: 2026-04-22
-    任务: fix-test-db-concurrency
-    说明: schema 隔离要在整个测试会话内保持稳定，避免不同 fixture 指到不同空间。
+    schema 隔离要在整个测试会话内保持稳定，避免不同 fixture 指到不同空间。
     """
     return _build_test_schema_name()
 
@@ -193,17 +153,7 @@ def force_test_database_url(
     test_database_url: str,
     test_database_schema: str,
 ) -> Generator[None, None, None]:
-    """
-    为整个后端测试会话强制注入测试数据库 URL。
-
-    创建时间: 2026-04-20
-    任务: fix-test-db-isolation
-    说明:
-    - 把 DATABASE_* 固定为 TEST_DATABASE_* 的平铺变量
-    - 把 DATABASE_SCHEMA 固定指向当前 pytest 进程独立 schema
-    - 覆盖所有直接调用 get_session_factory()() / get_engine() 的路径
-    - 会话结束后恢复原始环境变量，避免影响开发命令
-    """
+    """为整个后端测试会话强制注入测试数据库 URL。"""
     database_fields = ("DATABASE_URL", "DATABASE_USERNAME", "DATABASE_PASSWORD")
     test_database_fields = ("TEST_DATABASE_URL", "TEST_DATABASE_USERNAME", "TEST_DATABASE_PASSWORD")
     original_database = {field: os.environ.get(field) for field in database_fields}
@@ -235,12 +185,9 @@ def force_test_database_url(
 
 @pytest.fixture(autouse=True)
 def reset_backend_db_singletons_per_test(force_test_database_url: None) -> Generator[None, None, None]:
-    """
-    每个测试前后都重置后端数据库单例。
+    """每个测试前后都重置后端数据库单例。
 
-    创建时间: 2026-04-20
-    任务: fix-test-db-isolation
-    说明: 防止前一个测试缓存的 Engine 持有错误连接串，确保当前测试的数据库绑定始终可预测。
+    防止前一个测试缓存的 Engine 持有错误连接串，确保当前测试的数据库绑定始终可预测。
     """
     _reset_backend_db_singletons()
     try:
@@ -251,14 +198,7 @@ def reset_backend_db_singletons_per_test(force_test_database_url: None) -> Gener
 
 @pytest.fixture(autouse=True)
 def reset_capacity_and_event_bus() -> Generator[None, None, None]:
-    """每个测试后重置模型池容量账本与事件总线单例。
-
-    创建时间: 2026-10-03
-    任务: feat-event-driven-scheduling
-    说明: MODEL_CAPACITY 的预留位（选举即 used+1）与 EVENT_BUS 的订阅队列都是
-        进程内单例状态；不复位会让后续测试的派发选举被残留值扭曲，
-        全量套件下表现为调度类测试偶发超时或断言计数偏差。
-    """
+    """每个测试后重置模型池容量账本与事件总线单例。"""
     from src.event_bus import EVENT_BUS
     from src.model_pool.capacity import MODEL_CAPACITY
 
@@ -288,6 +228,7 @@ def db_session(setup_test_database: None) -> Generator[Session, None, None]:
 
     SessionLocal = sessionmaker(bind=_test_engine)
     session = SessionLocal()
+    session.info["fixture_shared"] = True
     schema_name = _validate_schema_name(os.environ["DATABASE_SCHEMA"])
     session.execute(text(f"SET search_path TO {schema_name}, public"))
 
@@ -304,9 +245,13 @@ def configured_model_pool(monkeypatch) -> None:
     from src.config import settings
     from src.config.schemas.model import WeightedModelSettings
 
-    monkeypatch.setattr(settings.models, "model_pool", [
-        WeightedModelSettings("test-model", "https://test.example/v1", "test-key", max_in_flight=2),
-    ])
+    monkeypatch.setattr(
+        settings.models,
+        "model_pool",
+        [
+            WeightedModelSettings("test-model", "https://test.example/v1", "test-key", max_in_flight=2),
+        ],
+    )
     monkeypatch.setattr(settings.models, "diagnosis_model_id", "test-model")
 
 
@@ -336,16 +281,9 @@ def pipeline_run_cleanup(configured_model_pool: None) -> Generator[None, None, N
 
 @pytest.fixture
 def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
-    """
-    API 测试客户端 fixture
+    """API 测试客户端 fixture
 
-    创建时间: 2026-04-05
-    任务: fix-test-data-pollution
-    说明: 基于全局数据库隔离夹具启动 FastAPI TestClient。
-
-    修改时间: 2026-04-20
-    任务: fix-test-db-isolation
-    修改内容: 删除局部 DATABASE 覆盖逻辑，改为复用全局自动隔离，避免夹具之间出现连接对象切换竞态
+    基于全局数据库隔离夹具启动 FastAPI TestClient。
 
     使用方式:
         def test_something(api_client):
@@ -371,3 +309,12 @@ def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
             get_task_manager().reset_for_testing()
             event_manager.reset_for_testing()
             _reset_backend_db_singletons()
+
+
+@pytest.fixture(autouse=True)
+def reset_fixture_identifiers():
+    "同一测试内的标签共享 UUIDv7，不同测试独立分配"
+    from tests.support.storage_fixtures import _stub_task_id, fixture_id
+
+    fixture_id.cache_clear()
+    _stub_task_id.cache_clear()

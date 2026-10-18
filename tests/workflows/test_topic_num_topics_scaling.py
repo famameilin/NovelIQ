@@ -1,4 +1,4 @@
-"""N2：num_topics 按训练文档数缩放的纯函数测试（无需数据库）。"""
+"""num_topics 按训练文档数缩放的纯函数测试（无需数据库）。"""
 
 from __future__ import annotations
 

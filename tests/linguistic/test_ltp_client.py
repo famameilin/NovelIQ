@@ -1,4 +1,4 @@
-"""LTP 段落特征纯函数测试（§5.3/C1/C2，mock pipeline 输出，不加载模型）"""
+"""LTP 段落特征纯函数测试（mock pipeline 输出，不加载模型）"""
 
 from __future__ import annotations
 
@@ -169,7 +169,7 @@ if __name__ == "__main__":
 
 
 class TestSdpArcParsing:
-    """2026-09-05 B 批：sdp 语义弧解析（句内坐标 → 段内全局 token_index）"""
+    """sdp 语义弧解析（句内坐标 → 段内全局 token_index）"""
 
     def test_real_ltp_sdp_shape_keeps_roles_and_negation(self) -> None:
         output = LtpPipelineOutput(

@@ -1,4 +1,4 @@
-"""字符坐标 LOWESS 平滑（§9.3）：以归一化位置为 x、char_count 为权重，带宽按全文比例自适应；n<min 返原始。"""
+"""字符坐标 LOWESS 平滑：以归一化位置为 x、char_count 为权重，带宽按全文比例自适应；n<min 返原始。"""
 
 from __future__ import annotations
 
@@ -88,8 +88,7 @@ def robust_local_regression(
         raise ValueError("x and y must be one-dimensional sequences")
     if xa.shape[0] != ya.shape[0]:
         raise ValueError(f"x and y length mismatch: len(x)={xa.shape[0]} len(y)={ya.shape[0]}")
-    # 2026-08-15 M3：非正带宽无法定义窗口（且自适应扩窗 h *= 2.0 恒不变会死循环），
-    # 配置错误应在入口快速失败而不是挂死分析进程
+    # 非正带宽无法定义窗口（自适应扩窗 h *= 2.0 恒不变会死循环），入口快速失败
     if bandwidth <= 0:
         raise ValueError(f"bandwidth must be positive, got {bandwidth}")
     if min_points < 1:

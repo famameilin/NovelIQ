@@ -17,7 +17,7 @@ class _TopicAggregationRow(Protocol):
 
 
 def validate_topic_aggregation_row(row: object) -> tuple[int, float]:
-    """2026-08-20 校验主题聚合行并返回语义化字段"""
+    """校验主题聚合行并返回语义化字段"""
     typed_row = cast(_TopicAggregationRow, row)
     try:
         raw_topic_id = typed_row.topic_id
@@ -41,8 +41,8 @@ def load_topic_artifact(
 ) -> tuple[dict[int, list[str]], dict[int, str], str | None]:
     """加载主题词与标签映射
 
-    2026-09-05 A6：artifact 缺失/加载失败不再静默——第三返回值给出显式原因，
-    供导出层把 topics 缺失写进 missing_fields（报告附录 B 可核查）。
+    artifact 缺失/加载失败由第三返回值给出显式原因，供导出层把 topics
+    缺失写进 missing_fields。
     """
     topic_words_map: dict[int, list[str]] = {}
     topic_labels_map: dict[int, str] = {}
@@ -68,7 +68,7 @@ def load_topic_artifact(
 
 
 def describe_topics_unavailability(run_id: str) -> str | None:
-    """2026-09-05 A6 用于在主题聚合为空时探测显式原因（无 artifact 时不再静默消失）"""
+    """在主题聚合为空时探测显式原因"""
     _, _, reason = load_topic_words(run_id)
     return reason
 

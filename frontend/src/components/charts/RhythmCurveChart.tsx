@@ -1,24 +1,8 @@
 /**
  * RhythmCurveChart - 节奏张力曲线图表组件
  *
- * 展示表层张力和平滑张力曲线，支持三幕分界线和高潮标注
- *
- *   - 添加 dataZoom 支持，用于 Brush 缩放同步
- *   - 添加 chartRef 转发，支持外部访问 ECharts 实例
- *
- *   - 将 series 主色显式绑定到 CSS 变量
- *   - 统一图例、tooltip marker、折线颜色来源，避免与默认 ECharts 调色板错位
- *
- *   - 将展示层第一条节奏曲线切换为 surface_tension
- *   - 高潮标记改为绑定平滑张力，避免语义与落点错位
- *
- *   - 当前端检测到表层张力仍是 0-1 而综合张力是 0-10 量级时，仅在显示层对前者做 x10 适配
- *   - 保持后端原始返回值不变，先验证产品显示效果
- *
- *   - M4 段落粒度改造：数据源从 ChunkCurvePoint 换为 ParagraphCurvePoint
- *   - x 轴从分块序号改为连续数值 position（值域 [0,1]），三幕 markLine 与高潮
- *     markPoint 直接用 0-1 比例坐标（act1_ratio / climax_positions 与 position 同域）
- *   - tooltip 改为章节/段落实名，dataZoom 换算改为 position 值域占比
+ * 展示表层张力与平滑张力曲线，支持三幕分界线、高潮标注与 dataZoom 缩放同步
+ * x 轴为连续 position（值域 [0,1]），表层张力仅为综合张力 1/10 量级时在显示层做 x10 适配
  */
 import { useMemo, forwardRef } from "react";
 import ReactEChartsCore from "echarts-for-react";
@@ -253,7 +237,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
             xAxisIndex: 0,
             start: zoomRange ? zoomRange[0] * 100 : 0,
             end: zoomRange ? zoomRange[1] * 100 : 100,
-            // 2026-08-30：悬停底部 slider 区域时滚轮会同时触发 inside 缩放/平移，
+            // 悬停底部 slider 区域时滚轮会同时触发 inside 缩放/平移，
             // 导致视图偏移曲线消失；禁用 inside 的滚轮交互，仅保留 slider 常规拖拽
             zoomOnMouseWheel: false,
             moveOnMouseWheel: false,

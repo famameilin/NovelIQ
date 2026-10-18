@@ -1,4 +1,4 @@
-"从 src/fact_graph/read/source.py 分离的具名物理读取"
+"fact graph read source 的具名物理读取"
 
 from __future__ import annotations
 

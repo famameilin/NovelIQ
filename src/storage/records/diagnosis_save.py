@@ -17,3 +17,16 @@ class DiagnosisPublish:
     facts: tuple[FactSave, ...]
     dialogue_updates: tuple[dict, ...]
     cases: tuple[CaseSave, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosisSessionSave:
+    run_id: str
+    session_id: str
+    case_ids: frozenset[str]
+    organization_json: str
+    declaration_ids: frozenset[str]
+    execution_ids: tuple[str, ...]
+    facts: tuple[FactSave, ...]
+    dialogue_updates: tuple[dict, ...]
+    cases: tuple[CaseSave, ...]

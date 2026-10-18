@@ -1,13 +1,7 @@
 """
 分析错误处理服务
 
-说明: 负责处理分析过程中的成功、失败和取消事件
-
-修改时间: 2026-10-02
-修改者: Trae
-修改内容: 大文件拆分——自 analysis_service.py 并入终态兜底逻辑
-（_check_all_stages_completed/_handle_already_completed/_write_failure_to_db），
-以 TerminalStateFallbackMixin 混入形式提供给 AnalysisService
+负责处理分析过程中的成功、失败和取消事件
 """
 
 from __future__ import annotations
@@ -35,13 +29,10 @@ class AnalysisErrorHandler:
         self.task_manager = task_manager
 
     def _run_still_owned_by_current_worker(self, session: Storage, run_id: str) -> bool:
-        """
-        2026-08-14 P2-13：终态写回前的 worker 归属守卫
+        """终态写回前的 worker 归属守卫
 
-        resume 会把 run 重置为 pending 并被新 worker 领取；旧 worker 的延迟
-        取消/失败写回若直接落终态，会覆写新轮 running 状态。此处比较 run 当前
-        worker_id 与当前 worker：不匹配（已被新轮接管）或 run 已不存在时跳过
-        DB 终态写回与 SSE 终态事件，避免旧轮终态污染新轮。
+        比较 run 当前 worker_id 与当前 worker：不匹配（已被新轮接管）或 run 已
+        不存在时跳过 DB 终态写回与 SSE 终态事件，避免旧轮终态污染新轮。
         """
         run = session.runs.get_run(run_id)
         if run is None:
@@ -195,11 +186,7 @@ class AnalysisErrorHandler:
 
 
 class TerminalStateFallbackMixin:
-    """
-    终态兜底混入（2026-10-02 自 analysis_service.py 并入）
-
-    宿主需提供 task_service/task_manager/session_factory；方法体与原实现保持一致
-    """
+    """终态兜底混入（宿主需提供 task_service/task_manager/session_factory）"""
 
     task_service: TaskService
     task_manager: TaskManager

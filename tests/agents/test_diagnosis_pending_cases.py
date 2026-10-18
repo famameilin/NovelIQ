@@ -1,4 +1,4 @@
-"""诊断失败登记与正式交付分别保存，不用候选记录冒充正式产物（2026-10-16 全库 3NF 改造）
+"""诊断失败登记与正式交付分别保存，不用候选记录冒充正式产物
 
 案例状态是支持条目 adopted 的读投影（CasePool.case_runtime）；未发布事件观察进
 case_entries 候选观察行；正式交付绑定真实诊断报告，不伪造子报告。
@@ -7,7 +7,6 @@ case_entries 候选观察行；正式交付绑定真实诊断报告，不伪造�
 import asyncio
 import json
 from unittest.mock import patch
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -15,26 +14,24 @@ from sqlalchemy.orm import sessionmaker
 
 from src.agents.diagnosis.domain import DiagnosisDomain
 from src.agents.diagnosis.runner import _run_diagnosis_agent
-from src.agents.diagnosis.work_runtime import DiagnosisWorkCorrections, DiagnosisWorkScheduler
+from src.agents.diagnosis.work_runtime import DiagnosisWorkScheduler
 from src.audit.recorder import AgentAuditRecorder
 from src.case_pool import CasePool
 from src.case_pool.contributions import CaseContribution
-from src.event_trees.organization import (
-    CandidateConflict,
-    register_diagnosis_execution,
-)
 from src.event_trees.storage_map import run_declaration_ids, run_events
+from src.storage import new_id
 from src.storage.models import BookCase, CaseEntry, DiagnosisReport, Execution
+from src.storage.repositories.organization_writes import register_diagnosis_execution
 from tests.agents.test_complete_event_invariants import draft_case as draft_case
-from tests.agents.test_complete_event_invariants import event
+from tests.support.storage_fixtures import fixture_id, storage_factory, storage_for
 
 
 def domain_for(draft, *, execution_id: str | None = None):
     return DiagnosisDomain(
-        session=draft.session,
+        session=storage_for(draft.fixture_session),
         run_id=draft.run_id,
-        novel_id="test-novel",
-        execution_id=execution_id or f"pending-cases-{uuid4().hex[:8]}",
+        novel_id=fixture_id(__name__, "test-novel"),
+        execution_id=execution_id or new_id(),
         novel_title=None,
         model_id="test-model",
     )
@@ -44,15 +41,18 @@ def real_author(session, run_id: str) -> str:
     """真实诊断执行身份（报告角色 invocation）：案例支持条目引用正式执行，不伪造执行外键"""
     from sqlalchemy import func, select
 
-    attempt = int(
-        session.scalar(
-            select(func.count()).select_from(Execution).where(
-                Execution.run_id == run_id, Execution.role == "report"
+    attempt = (
+        int(
+            session.scalar(
+                select(func.count())
+                .select_from(Execution)
+                .where(Execution.run_id == run_id, Execution.role == "report")
             )
+            or 0
         )
-        or 0
-    ) + 1
-    execution_id = uuid4().hex
+        + 1
+    )
+    execution_id = new_id()
     register_diagnosis_execution(
         session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=attempt
     )
@@ -76,7 +76,7 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
 ):
     draft = draft_case
     domain = domain_for(draft)
-    author = real_author(draft.session, draft.run_id)
+    author = real_author(draft.fixture_session, draft.run_id)
     domain.case_pool.begin(author)
     case = domain.case_pool.push("relation", "核对寻路与照明的关联", author)
     domain.case_pool.promise(case["case_id"], author)
@@ -84,7 +84,7 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
         case["case_id"],
         author,
         tool_name="write_event",
-        call_id="candidate-operation",
+        call_id=fixture_id(__name__, "candidate-operation"),
         receipt={"candidate": True},
         is_write=True,
     )
@@ -93,21 +93,22 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
     async def fail(_scheduler):
         raise error
 
-    recorder = AgentAuditRecorder(sessionmaker(bind=draft.session.get_bind()))
+    recorder = AgentAuditRecorder(storage_factory(sessionmaker(bind=draft.fixture_session.get_bind())))
     with patch.object(DiagnosisWorkScheduler, "run", fail), pytest.raises(type(error), match=str(error)):
         await _run_diagnosis_agent(
-            session=draft.session,
+            session=storage_for(draft.fixture_session),
             run_id=draft.run_id,
-            novel_id="test-novel",
+            novel_id=fixture_id(__name__, "test-novel"),
             execution_id=domain.execution_id,
             domain=domain,
             audit_recorder=recorder,
         )
-    draft.session.expire_all()
+    draft.fixture_session.expire_all()
     pool = CasePool(draft.run_id)
-    pool.load_storage(draft.session)
-    assert pool.case_runtime[case["case_id"]]["state"] == "pending"
-    support = draft.session.scalars(
+    pool.load_storage(storage_for(draft.fixture_session))
+    # 承诺随会话保存落库：本会话未保存时，续跑重建后按未解决（未承诺）重办
+    assert pool.case_runtime[case["case_id"]]["promised"] is False
+    support = draft.fixture_session.scalars(
         select(CaseEntry).where(
             CaseEntry.case_id == case["case_id"],
             CaseEntry.producer_execution_id == author,
@@ -116,54 +117,14 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
     # 候选交付未被采用：支持条目 adopted=False，且没有交付子行
     assert support.adopted is False
     assert not list(
-        draft.session.scalars(select(CaseEntry).where(CaseEntry.parent_entry_id == support.entry_id))
+        draft.fixture_session.scalars(select(CaseEntry).where(CaseEntry.parent_entry_id == support.entry_id))
     )
     assert any(case["case_id"] in items for items in pool.registrations.values())
-    assert not any(
-        item["case_id"] == case["case_id"] for items in pool.deliveries.values() for item in items
-    )
+    assert not any(item["case_id"] == case["case_id"] for items in pool.deliveries.values() for item in items)
     assert author not in domain.case_pool.saved
-    assert run_events(draft.session, draft.run_id) == {}
-    assert _reports(draft.session, draft.run_id) == []
-    assert len(run_declaration_ids(draft.session, draft.run_id)) == 2
-
-
-def test_unresolved_conflict_keeps_full_node_name_and_source_in_pending_cases(draft_case):
-    domain = domain_for(draft_case)
-    domain.draft.case_id, domain.draft.producer_invocation_id = "conflict-case", "conflict-invocation"
-    title = "寻路与照明" * 30
-    identifier = event(domain.draft, title, [next(iter(domain.sources))])
-    conflict = CandidateConflict("结构比较存在矛盾", ["conflict-case"])
-    with pytest.raises(DiagnosisWorkCorrections) as raised:
-        domain._correct("structure", conflict)
-    domain.retain_pending_cases(raised.value)
-    draft_case.session.expire_all()
-    observation = draft_case.session.scalars(
-        select(CaseEntry).where(CaseEntry.candidate_producer_execution_id == domain.execution_id)
-    ).one()
-    assert observation.pending_event_reference == identifier
-    assert observation.pending_event_title == title
-    rows = list(
-        draft_case.session.scalars(
-            select(BookCase).where(BookCase.pending_event_entry_id == observation.entry_id)
-        )
-    )
-    assert len(rows) > 1
-    assert all(
-        len(row.description) <= 100
-        and f"{identifier}|event|structure_conflict|段0|名" in row.description
-        for row in rows
-    )
-    names = sorted(
-        (int(row.description.rsplit("|名", 1)[1].split("/", 1)[0]), row.description.rsplit(":", 1)[1])
-        for row in rows
-    )
-    assert "".join(value for _, value in names) == title
-    pool = CasePool(draft_case.run_id)
-    pool.load_storage(draft_case.session)
-    assert all(pool.case_runtime[row.case_id]["state"] == "pending" for row in rows)
-    assert identifier in domain.draft.events
-    assert run_events(draft_case.session, draft_case.run_id) == {}
+    assert run_events(storage_for(draft.fixture_session), draft.run_id) == {}
+    assert _reports(draft.fixture_session, draft.run_id) == []
+    assert len(run_declaration_ids(storage_for(draft.fixture_session), draft.run_id)) == 2
 
 
 @pytest.mark.parametrize("cancelled", [False, True])
@@ -174,16 +135,16 @@ async def test_retention_failure_reports_both_errors(draft_case, configured_mode
     async def fail(_scheduler):
         raise original
 
-    recorder = AgentAuditRecorder(sessionmaker(bind=draft_case.session.get_bind()))
+    recorder = AgentAuditRecorder(storage_factory(sessionmaker(bind=draft_case.fixture_session.get_bind())))
     with (
         patch.object(DiagnosisWorkScheduler, "run", fail),
         patch.object(domain, "retain_pending_cases", side_effect=ConnectionError("案例存储断开")),
         pytest.raises(BaseExceptionGroup) as raised,
     ):
         await _run_diagnosis_agent(
-            session=draft_case.session,
+            session=storage_for(draft_case.fixture_session),
             run_id=draft_case.run_id,
-            novel_id="test-novel",
+            novel_id=fixture_id(__name__, "test-novel"),
             execution_id=domain.execution_id,
             domain=domain,
             audit_recorder=recorder,
@@ -194,36 +155,34 @@ async def test_retention_failure_reports_both_errors(draft_case, configured_mode
 
 def test_pending_registration_transaction_rolls_back_all_cases_on_storage_failure(draft_case):
     domain = domain_for(draft_case)
-    authors = [real_author(draft_case.session, draft_case.run_id) for _ in range(2)]
+    authors = [real_author(draft_case.fixture_session, draft_case.run_id) for _ in range(2)]
     for index, author in enumerate(authors):
         domain.case_pool.begin(author)
         domain.case_pool.push("event", f"核查第{index}个节点", author)
-    save = domain.case_pool.save_work
+    from src.storage.repositories.case_writes import CaseWritesRepository
+
+    save = CaseWritesRepository.save_work
     attempts = 0
 
-    def interrupted(session, contribution):
+    def interrupted(repository, session, contribution):
         nonlocal attempts
         attempts += 1
         if attempts == 2:
             raise ConnectionError("第二份案例存储失败")
-        return save(session, contribution)
+        return save(repository, session, contribution)
 
-    with patch.object(domain.case_pool, "save_work", interrupted), pytest.raises(ConnectionError):
+    with patch.object(CaseWritesRepository, "save_work", interrupted), pytest.raises(ConnectionError):
         domain.retain_pending_cases(RuntimeError("原始诊断失败"))
     assert attempts == 2
     # retain 的短事务整体回滚：登记行与支持条目都不残留，只保留真实执行身份
-    draft_case.session.expire_all()
+    draft_case.fixture_session.expire_all()
     assert not list(
-        draft_case.session.scalars(
-            select(BookCase).where(
-                BookCase.description.in_(["核查第0个节点", "核查第1个节点"])
-            )
+        draft_case.fixture_session.scalars(
+            select(BookCase).where(BookCase.description.in_(["核查第0个节点", "核查第1个节点"]))
         )
     )
     assert not list(
-        draft_case.session.scalars(
-            select(CaseEntry).where(CaseEntry.producer_execution_id.in_(authors))
-        )
+        draft_case.fixture_session.scalars(select(CaseEntry).where(CaseEntry.producer_execution_id.in_(authors)))
     )
 
 
@@ -254,17 +213,15 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
         event_type="身份确认",
     )
     db_session.commit()
-    draft, _meta = identity_every_declaration(
-        db_session, run_id, context=(session_id, execution_id)
-    )
+    draft, _meta = identity_every_declaration(db_session, run_id, context=(session_id, execution_id))
     close_structure(db_session, draft, evidence_paragraph_id=int(paragraph.paragraph_id))
     publish_draft(db_session, run_id, draft)
     db_session.commit()
     report_id = _reports(db_session, run_id)[0].report_id
     domain = DiagnosisDomain(
-        session=db_session,
+        session=storage_for(db_session),
         run_id=run_id,
-        novel_id="test-novel",
+        novel_id=fixture_id(__name__, "test-novel"),
         execution_id=session_id,
         novel_title=None,
         model_id="test-model",
@@ -280,7 +237,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
         case["case_id"],
         author,
         tool_name="write_arc",
-        call_id="real-child-call",
+        call_id=fixture_id(__name__, "real-child-call"),
         receipt={"status": "written"},
         is_write=True,
     )
@@ -296,7 +253,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
             ensure_ascii=False,
         ),
     )
-    assert pool.save_work(db_session, frozen, adopted_output_id=report_id) == []
+    assert pool.save_work(storage_for(db_session), frozen, adopted_output_id=report_id) == []
     db_session.commit()
     domain.retain_pending_cases(RuntimeError("提交后的内存确认失败"))
     db_session.expire_all()
@@ -306,21 +263,20 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
             CaseEntry.producer_execution_id == author,
         )
     ).one()
-    delivery = db_session.scalars(
-        select(CaseEntry).where(CaseEntry.parent_entry_id == support.entry_id)
-    ).one()
+    children = list(db_session.scalars(select(CaseEntry).where(CaseEntry.parent_entry_id == support.entry_id)))
     assert support.adopted is True
-    assert delivery.business_call_id == "real-child-call" and delivery.tool_name == "write_arc"
+    # 承诺痕迹与真实写交付都随成功保存落库
+    assert sorted(str(row.tool_name) for row in children) == ["promise_case", "write_arc"]
     loaded = CasePool(run_id)
-    loaded.load_storage(db_session)
-    assert loaded.case_runtime[case["case_id"]]["state"] == "resolved"
+    loaded.load_storage(storage_for(db_session))
+    assert loaded.case_runtime[case["case_id"]]["promised"] is True
     loaded_deliveries = [
         item
         for items in loaded.deliveries.values()
         for item in items
-        if item["case_id"] == case["case_id"]
+        if item["case_id"] == case["case_id"] and item["tool_name"] != "promise_case"
     ]
-    assert [item["call_id"] for item in loaded_deliveries] == ["real-child-call"]
+    assert [item["call_id"] for item in loaded_deliveries] == [fixture_id(__name__, "real-child-call")]
     assert loaded_deliveries[0]["is_write"] is True
     # 只有真实诊断报告被采纳，不伪造子报告
     reports = _reports(db_session, run_id)

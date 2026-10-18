@@ -1,6 +1,5 @@
-"""语言结构基础数据聚合（《分析能力扩展路线图》§5.11）
+"""语言结构基础数据聚合
 
-2026-10-06 自 `src/api/services/results_queries/linguistic.py` 收归读侧聚合模块。
 全部复合指标查询时计算，不落结果表；词性/词长/句式/依存比例的分母为
 LTP 有效词元数或句子数，缺失或无样本时返回空值与不可用原因。
 本模块返回纯 dict 载荷，响应装配留在 api 读侧。
@@ -47,7 +46,7 @@ def feature_dict(row) -> dict[str, Any]:
 
 def aggregate_linguistic_features(run_id: str, session: Storage) -> dict[str, Any]:
     """
-    词性/词长/句式/依存比例聚合（书级 + 章节级，§5.11）
+    词性/词长/句式/依存比例聚合（书级 + 章节级）
 
     - 词性比例、词长分布分母为 ltp_token_count（有效词元数）
     - 句式比例分母为该规则版本下的句子总数
@@ -178,7 +177,7 @@ def aggregate_emotion_events(
     rows: Sequence[Any],
     token_total: int | None,
 ) -> dict[str, Any]:
-    """2026-09-05 B 批：书级情绪事件明细聚合（事件密度 / 持有者 × 事件 / 谓词 Top / net 对照）"""
+    """书级情绪事件明细聚合（事件密度 / 持有者 × 事件 / 谓词 Top / net 对照）"""
     events = [event for row in rows for event in (feature_dict(row)["emotion_events"])]
 
     holders: dict[str, dict[str, int]] = {}
@@ -215,7 +214,7 @@ def aggregate_emotion_events(
 
 
 def fetch_entity_candidates(run_id: str, session: Storage) -> dict[str, Any]:
-    """LTP 实体候选列表（§5.4/§6.1 实体验证面板数据源）"""
+    """LTP 实体候选列表（实体验证面板数据源）"""
     ling_repo = session.linguistic
     from src.linguistic.ltp_client import ENTITY_TYPE_MAP
 
@@ -255,7 +254,7 @@ def fetch_entity_candidates(run_id: str, session: Storage) -> dict[str, Any]:
 
 
 def aggregate_phrase_stats(run_id: str, session: Storage) -> dict[str, Any]:
-    """固定短语命中统计（§5.11）：正式密度 + 四字候选数量
+    """固定短语命中统计：正式密度 + 四字候选数量
 
     前置完成事实两个都要有：语言阶段完成（language 完成行）与短语阶段完成
     （phrase_completed_at）；短语未跑与"跑完零命中"由此区分。
@@ -293,7 +292,7 @@ def aggregate_phrase_stats(run_id: str, session: Storage) -> dict[str, Any]:
 
 
 def fetch_word2vec_stats(run_id: str, session: Storage) -> dict[str, Any]:
-    """词向量契约 + 词性覆盖率 + POS 质心与组间余弦相似度（§5.6/§5.11）"""
+    """词向量契约 + 词性覆盖率 + POS 质心与组间余弦相似度"""
     ling_repo = session.linguistic
     model_run = ling_repo.fetch_word2vec_model_run(run_id)
     if model_run is None:
@@ -352,7 +351,7 @@ def pos_similarity_matrix(centroids: list[dict[str, Any]]) -> list[list[float]] 
 
 
 def fetch_pos_centroids(run_id: str, session: Storage) -> list[dict[str, Any]]:
-    """全书各词性组的向量质心（按词表内词数加权，§5.11）"""
+    """全书各词性组的向量质心（按词表内词数加权）"""
     ling_repo = session.linguistic
     centroids: list[dict[str, Any]] = []
     for row in ling_repo.fetch_weighted_pos_embeddings(run_id):
@@ -368,12 +367,12 @@ def fetch_pos_centroids(run_id: str, session: Storage) -> list[dict[str, Any]]:
 
 
 def fetch_paragraph_labels(session: Storage, run_id: str) -> list[dict[str, Any]]:
-    """2026-09-14 用于读取全书自选段情绪标签（段落级监督按书边界）
+    """读取全书自选段情绪标签（段落级监督按书边界）
 
-    2026-10-16 3NF：逐段情绪标签的唯一落点是 analysis_assessments 的
-    逐段情绪形状（record_id+paragraph_id+emotion），经章节标注产物头取得
-    运行归属（产物行自带 run/章/角色）；不再从任何 JSON payload 读取。
-    写入前的领域校验归标注 agent，这里只按正式条目行返回。
+    逐段情绪标签的唯一落点是 analysis_assessments 的逐段情绪形状
+    （record_id+paragraph_id+emotion），经章节标注产物头取得运行归属
+    （产物行自带 run/章/角色）。写入前的领域校验归标注 agent，这里只按正式
+    条目行返回。
     """
 
     rows = session.reads.linguistic_queries_fetch_paragraph_labels_1(run_id)

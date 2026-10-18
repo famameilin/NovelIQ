@@ -43,6 +43,7 @@ from src.storage.repositories.graph.repository import GraphRepository
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
+from tests.support.storage_fixtures import fixture_id, storage_factory, storage_for
 
 
 class _ProgramModel(StreamedFakeModelMixin):
@@ -128,9 +129,9 @@ def _drop_program_receipt(db_session, run_id) -> None:
 
 def test_rich_contributions_keep_work_updates_and_auto_registration_support() -> None:
     graph = FactGraph(run_scope="source-union")
-    graph.begin("s", 1, "entity")
-    graph.begin("e", 1, "event")
-    with graph.author("s"):
+    graph.begin(fixture_id(__name__, "s"), 1, "entity")
+    graph.begin(fixture_id(__name__, "e"), 1, "event")
+    with graph.author(fixture_id(__name__, "s")):
         for entity in [
             EntityInput(
                 name="张三", entity_type="character", tags=["旧标签"], description="来历一", representative=True
@@ -139,7 +140,7 @@ def test_rich_contributions_keep_work_updates_and_auto_registration_support() ->
         ]:
             graph.register_entities([entity], present={"tags", "description", "representative"})
             graph.record_entity_ops([entity], chapter_id=1, present={"tags", "description", "representative"})
-    with graph.author("e"):
+    with graph.author(fixture_id(__name__, "e")):
         ensure_entity_ref(graph, "张三", "character", chapter_id=1)
         entity = EntityInput(name="张三", entity_type="character", tags=["事件标签"])
         graph.register_entities([entity], present={"tags"})
@@ -147,7 +148,7 @@ def test_rich_contributions_keep_work_updates_and_auto_registration_support() ->
     key = graph.entity_key("张三", "character")
     assert set(graph.entity_tags[key]) == {"结构标签", "事件标签"}
     assert graph.entity_attributes[key] == {"description": "来历二", "is_representative": True}
-    with graph.author("e"):
+    with graph.author(fixture_id(__name__, "e")):
         entity = EntityInput(name="张三", entity_type="character", tags=[], representative=False)
         graph.register_entities([entity], present={"tags", "representative"})
         graph.record_entity_ops([entity], chapter_id=1, present={"tags", "representative"})
@@ -158,21 +159,21 @@ def test_rich_contributions_keep_work_updates_and_auto_registration_support() ->
 
 def test_other_lane_rollback_does_not_remove_existing_reference_identity() -> None:
     graph = FactGraph(run_scope="concurrent-reference")
-    graph.begin("s", 1, "entity")
-    graph.begin("e", 1, "event")
-    with graph.author("s"):
+    graph.begin(fixture_id(__name__, "s"), 1, "entity")
+    graph.begin(fixture_id(__name__, "e"), 1, "event")
+    with graph.author(fixture_id(__name__, "s")):
         key = ensure_entity_ref(graph, "张三", "character", chapter_id=1)
-    with graph.author("e"):
+    with graph.author(fixture_id(__name__, "e")):
         assert ensure_entity_ref(graph, "张三", "character", chapter_id=1) == key
-    graph.rollback("s")
+    graph.rollback(fixture_id(__name__, "s"))
     assert graph.entity_id_for_key(key) is not None
     assert len(graph.entity_names) == 1
 
 
 def test_runtime_and_reader_keep_conflicting_identity_component() -> None:
     graph = FactGraph(run_scope="formal-identity")
-    graph.begin("invocation", 1, "annotation")
-    with graph.author("invocation"):
+    graph.begin(fixture_id(__name__, "invocation"), 1, "annotation")
+    with graph.author(fixture_id(__name__, "invocation")):
         keys = [ensure_entity_ref(graph, name, "character", chapter_id=1) for name in ["张三", "老张", "张哥"]]
     operations = [
         {"from_entity": keys[0], "to_entity": keys[1], "relation_type": "同一人物", "identity_kind": "same"},
@@ -185,7 +186,7 @@ def test_runtime_and_reader_keep_conflicting_identity_component() -> None:
             "change_kind": "break",
         },
     ]
-    graph.contributions["invocation"]["relation_link_ops"] = operations
+    graph.contributions[fixture_id(__name__, "invocation")]["relation_link_ops"] = operations
     graph._fold()
     ids = [graph.entity_id_for_key(key) for key in keys]
     relations = [
@@ -259,8 +260,8 @@ finish()
         }
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     assert model.calls == 3
     db_session.expire_all()
     records = _annotation_records(db_session, run_id)
@@ -276,19 +277,16 @@ finish()
         row.canonical_name: row for row in db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id))
     }
     assert set(entities) == {"张三", "老张", "李四"}
-    projection = EntityReferenceProjection.load(db_session, run_id)
+    projection = EntityReferenceProjection.load(storage_for(db_session), run_id)
     assert projection.resolution.resolve_entity_id(entities["老张"].entity_id) == entities["张三"].entity_id
-    snapshots = {
-        row.name: row
-        for row in GraphRepository(db_session).fetch_latest_entity_rows(run_id)
-    }
+    snapshots = {row.name: row for row in GraphRepository(db_session).fetch_latest_entity_rows(run_id)}
     assert set(snapshots["张三"].tags) == {"结构标签", "事件标签"}
     assert snapshots["张三"].attributes["is_representative"] is True
     assert snapshots["张三"].attributes["description"] == "另一份介绍"
 
-    declaration = db_session.scalars(select(EventDeclaration).where(EventDeclaration.record_id.in_(
-        [record.record_id for record in records]
-    ))).one()
+    declaration = db_session.scalars(
+        select(EventDeclaration).where(EventDeclaration.record_id.in_([record.record_id for record in records]))
+    ).one()
     participants = list(
         db_session.scalars(
             select(DeclarationParticipant).where(DeclarationParticipant.declaration_id == declaration.declaration_id)
@@ -306,7 +304,7 @@ finish()
         ]
     )
     assert projected[0]["entity"]["name"] == "张三"
-    assert fetch_chapter_dialogues_full(db_session, run_id)[0].speaker == ["张三"]
+    assert fetch_chapter_dialogues_full(storage_for(db_session), run_id)[0].speaker == ["张三"]
 
     descriptions = {
         fact.description_value
@@ -334,23 +332,25 @@ async def test_pending_failure_rolls_back_and_resume_retries_only_program(db_ses
         'entity(id="a", name="张三", entity_type="character", evidence=1)\n'
         'metric(summary="出门", emotional_valence=0, narrative_function="铺垫")\nfinish()'
     )
-    original = CasePool.save_pending
+    from src.storage.repositories.annotation_receipts import save_consolidation
 
-    def fail_after_case(self, session, descriptions, *, author):
-        original(self, session, descriptions, author=author)
+    original = save_consolidation
+
+    def fail_after_case(session, request):
+        original(session, request)
         raise RuntimeError("模拟章末事务故障")
 
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         with monkeypatch.context() as context:
-            context.setattr(CasePool, "save_pending", fail_after_case)
+            context.setattr("src.storage.repositories.annotation_receipts.save_consolidation", fail_after_case)
             with pytest.raises(RuntimeError, match="模拟章末事务故障"):
-                await run_annotate(run_id, db_session, novel_id=novel_id)
+                await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
         db_session.expire_all()
         assert len(_annotation_records(db_session, run_id)) == 1
         assert _program_registered_supports(db_session, run_id) == []
         assert _program_works(db_session, run_id) == [] and _receipt_facts(db_session, run_id) == []
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     assert model.calls == 1
     db_session.expire_all()
     issue_cases = _run_issue_cases(db_session, run_id)
@@ -366,12 +366,17 @@ async def test_pending_failure_rolls_back_and_resume_retries_only_program(db_ses
     program_work = _program_works(db_session, run_id)[0]
     pool = CasePool(run_id)
     pool.save_pending(
-        db_session,
+        storage_for(db_session),
         [
             (
                 "character",
                 case.description,
-                {"node_id": "a", "name": "张三", "entity_type": "character", "reason": "unreferenced_entity"},
+                {
+                    "node_id": db_session.scalar(select(GraphEntity.entity_id).where(GraphEntity.run_id == run_id)),
+                    "name": "张三",
+                    "entity_type": "character",
+                    "reason": "unreferenced_entity",
+                },
             )
         ],
         author=program_work.work_id,
@@ -386,12 +391,12 @@ async def test_historical_completed_chapter_has_no_backfill(db_session) -> None:
     novel_id, run_id = create_run_with_chunks(db_session, texts=["张三出门。"])
     model = _ProgramModel('metric(summary="出门", emotional_valence=0, narrative_function="铺垫")\nfinish()')
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
         record = _annotation_records(db_session, run_id)[0]
         record.chapter_consolidation_version = "chapter-entity-consolidation-2000-01-01"
         _drop_program_receipt(db_session, run_id)
         db_session.commit()
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     assert model.calls == 1
     assert _program_works(db_session, run_id) == [] and _receipt_facts(db_session, run_id) == []
 
@@ -399,7 +404,7 @@ async def test_historical_completed_chapter_has_no_backfill(db_session) -> None:
 def test_case_template_retains_location_reason_evidence_and_marks_long_name() -> None:
     description = case_description(
         {
-            "node_id": "00000000-0000-0000-0000-000000000001",
+            "node_id": fixture_id(__name__, "00000000-0000-0000-0000-000000000001"),
             "name": "长名字" * 100,
             "entity_type": "character",
             "reason": "unreferenced_entity",
@@ -413,7 +418,7 @@ def test_case_template_retains_location_reason_evidence_and_marks_long_name() ->
 def test_required_lane_must_be_saved_before_consolidation(db_session) -> None:
     _, run_id = create_run_with_chunks(db_session, texts=["原文。"])
     with pytest.raises(ValueError, match="必需角色"):
-        consolidate_chapter(db_session, run_id, 1, CasePool(run_id))
+        consolidate_chapter(storage_for(db_session), run_id, 1, CasePool(run_id))
 
 
 def test_ambiguous_representatives_and_participant_variants_are_preserved() -> None:
@@ -449,6 +454,9 @@ def test_ambiguous_representatives_and_participant_variants_are_preserved() -> N
 
 @pytest.mark.asyncio
 async def test_preceding_saved_reference_prevents_false_orphan(db_session, monkeypatch) -> None:
+    """前序已保存引用挡住误报：固定反序完成（第 2 章先跑完），收尾重算必须清掉早跑误报"""
+    import asyncio
+
     novel_id, run_id = create_run_with_chunks(
         db_session, texts=["张三首次出门。", "张三再次出门。"], chapter_ids=[1, 2]
     )
@@ -470,12 +478,16 @@ async def test_preceding_saved_reference_prevents_false_orphan(db_session, monke
 
     async def ainvoke(messages):
         text = str(messages[1].content)
-        model.code = model.codes["首次"] if "首次" in text else model.codes["再次"]
+        key = "首次" if "首次" in text else "再次"
+        if key == "首次":
+            # 固定乱序：第 1 章晚交程序，第 2 章整条链路先保存并先触发核对
+            await asyncio.sleep(1.0)
+        model.code = model.codes[key]
         return await _ProgramModel.ainvoke(model, messages)
 
     model.ainvoke = ainvoke  # type: ignore[method-assign]
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     assert len(_program_works(db_session, run_id)) == 2
     assert _program_registered_supports(db_session, run_id) == []
@@ -494,8 +506,8 @@ async def test_last_saved_agent_triggers_before_whole_book_pool_returns(
     loop = asyncio.get_running_loop()
     original = chapter_consolidation.consolidate_chapter
 
-    def observed(session, run_id, chapter_id, cases):
-        result = original(session, run_id, chapter_id, cases)
+    def observed(session, run_id, chapter_id, cases, **kwargs):
+        result = original(session, run_id, chapter_id, cases, **kwargs)
         if chapter_id == 2 and result["status"] == "saved":
             loop.call_soon_threadsafe(later_consolidated.set)
         return result
@@ -509,7 +521,7 @@ async def test_last_saved_agent_triggers_before_whole_book_pool_returns(
     monkeypatch.setattr(chapter_consolidation, "consolidate_chapter", observed)
     model = OrderedModel('metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()')
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     assert later_consolidated.is_set() and model.calls == 2
 
 
@@ -524,7 +536,7 @@ async def test_unregistered_participant_stays_and_enters_pending(db_session) -> 
         "sh()"
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     declaration = db_session.scalars(
         select(EventDeclaration).where(
@@ -534,7 +546,7 @@ async def test_unregistered_participant_stays_and_enters_pending(db_session) -> 
     # 隔离测试直接构造未登记身份的参与者来源，验证核对登记案例且原样保留
     db_session.add(
         GraphEntity(
-            entity_id="00000000-0000-0000-0000-0000000000cc",
+            entity_id=fixture_id(__name__, "00000000-0000-0000-0000-0000000000cc"),
             run_id=run_id,
             canonical_name="失联人物",
             entity_type="character",
@@ -543,23 +555,23 @@ async def test_unregistered_participant_stays_and_enters_pending(db_session) -> 
     db_session.flush()
     db_session.add(
         DeclarationParticipant(
-            participant_id="00000000-0000-0000-0000-0000000000dd",
+            participant_id=fixture_id(__name__, "00000000-0000-0000-0000-0000000000dd"),
             declaration_id=declaration.declaration_id,
             participant_ordinal=0,
-            entity_id="00000000-0000-0000-0000-0000000000cc",
+            entity_id=fixture_id(__name__, "00000000-0000-0000-0000-0000000000cc"),
             role="主体",
         )
     )
     _drop_program_receipt(db_session, run_id)
     db_session.commit()
-    result = consolidate_chapter(db_session, run_id, 1, CasePool(run_id))
+    result = consolidate_chapter(storage_for(db_session), run_id, 1, CasePool(run_id))
     db_session.commit()
     assert result["status"] == "saved" and result["issues"] == 1
     descriptions = [case.description for case in _run_issue_cases(db_session, run_id)]
     assert any("码=参与者未登记" in description for description in descriptions)
     assert not any("码=过程无根" in description for description in descriptions)
-    kept = db_session.get(DeclarationParticipant, "00000000-0000-0000-0000-0000000000dd")
-    assert kept is not None and kept.entity_id == "00000000-0000-0000-0000-0000000000cc"
+    kept = db_session.get(DeclarationParticipant, fixture_id(__name__, "00000000-0000-0000-0000-0000000000dd"))
+    assert kept is not None and kept.entity_id == fixture_id(__name__, "00000000-0000-0000-0000-0000000000cc")
 
 
 @pytest.mark.asyncio
@@ -570,14 +582,14 @@ async def test_dangling_relation_enters_pending_and_edge_survives(db_session) ->
         'metric(summary="出门", emotional_valence=0, narrative_function="铺垫")\nfinish()'
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     zhang = db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id)).one()
     execution = db_session.scalars(select(Execution).where(Execution.run_id == run_id)).one()
     # 隔离测试直接构造端点为未登记身份的正式关系事实，验证核对登记案例且关系边原样保留
     db_session.add(
         GraphEntity(
-            entity_id="00000000-0000-0000-0000-0000000000ee",
+            entity_id=fixture_id(__name__, "00000000-0000-0000-0000-0000000000ee"),
             run_id=run_id,
             canonical_name="失联人物",
             entity_type="character",
@@ -585,9 +597,9 @@ async def test_dangling_relation_enters_pending_and_edge_survives(db_session) ->
     )
     db_session.add(
         GraphRelation(
-            relation_id="00000000-0000-0000-0000-0000000000ff",
+            relation_id=fixture_id(__name__, "00000000-0000-0000-0000-0000000000ff"),
             from_entity_id=zhang.entity_id,
-            to_entity_id="00000000-0000-0000-0000-0000000000ee",
+            to_entity_id=fixture_id(__name__, "00000000-0000-0000-0000-0000000000ee"),
             relation_type="盟友",
         )
     )
@@ -599,20 +611,22 @@ async def test_dangling_relation_enters_pending_and_edge_survives(db_session) ->
     db_session.add(
         GraphFact(
             direct_producer_execution_id=execution.execution_id,
-            relation_id="00000000-0000-0000-0000-0000000000ff",
+            relation_id=fixture_id(__name__, "00000000-0000-0000-0000-0000000000ff"),
             relation_change_kind="assert",
             operation_order=(highest if highest is not None else -1) + 1,
         )
     )
     _drop_program_receipt(db_session, run_id)
     db_session.commit()
-    result = consolidate_chapter(db_session, run_id, 1, CasePool(run_id))
+    result = consolidate_chapter(storage_for(db_session), run_id, 1, CasePool(run_id))
     db_session.commit()
     assert result["status"] == "saved" and result["issues"] == 1
     descriptions = [case.description for case in _run_issue_cases(db_session, run_id)]
     assert any("码=关系悬空" in description for description in descriptions)
-    survived = db_session.get(GraphRelation, "00000000-0000-0000-0000-0000000000ff")
-    assert survived is not None and survived.to_entity_id == "00000000-0000-0000-0000-0000000000ee"
+    survived = db_session.get(GraphRelation, fixture_id(__name__, "00000000-0000-0000-0000-0000000000ff"))
+    assert survived is not None and survived.to_entity_id == fixture_id(
+        __name__, "00000000-0000-0000-0000-0000000000ee"
+    )
 
 
 @pytest.mark.asyncio
@@ -634,14 +648,14 @@ async def test_checkpoint_save_failure_rolls_back_cases_and_retries_without_mode
     try:
         with patch("src.model_pool.llm.build_chat_model", return_value=model):
             with pytest.raises(RuntimeError, match="模拟凭据写入故障"):
-                await run_annotate(run_id, db_session, novel_id=novel_id)
+                await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     finally:
         event.remove(Session, "before_flush", reject_checkpoint)
     db_session.expire_all()
     assert _program_registered_supports(db_session, run_id) == []
     assert _program_works(db_session, run_id) == []
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     assert model.calls == 1
     assert len(_program_works(db_session, run_id)) == 1
 
@@ -658,23 +672,25 @@ metric(summary="称谓", emotional_valence=0, narrative_function="铺垫")
 finish()
 """)
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     descriptions = [case.description for case in _run_issue_cases(db_session, run_id)]
     assert len(descriptions) == 2 and all("码=代表判不定" in description for description in descriptions)
     assert len(list(db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id)))) == 2
-    projection = EntityReferenceProjection.load(db_session, run_id)
+    projection = EntityReferenceProjection.load(storage_for(db_session), run_id)
     assert projection.resolution.representative_by_alias == {}
 
 
 @pytest.mark.asyncio
 async def test_agent_restores_case_memory_when_chapter_transaction_fails(db_session, monkeypatch) -> None:
     _, run_id = create_run_with_chunks(db_session, texts=["原文。"])
-    agent = AnnotationAgent(EventBus(), run_id, get_session_factory(), novel_id="test")
+    agent = AnnotationAgent(
+        EventBus(), run_id, storage_factory(get_session_factory()), novel_id=fixture_id(__name__, "test")
+    )
 
-    def fail(session, run_id, chapter_id, cases):
-        cases.begin("program")
-        cases.push("event", "模拟登记", "program")
+    def fail(session, run_id, chapter_id, cases, **kwargs):
+        cases.begin(fixture_id(__name__, "program"))
+        cases.push("event", "模拟登记", fixture_id(__name__, "program"))
         raise RuntimeError("故障")
 
     monkeypatch.setattr("src.agents.annotation.chapter_consolidation.consolidate_chapter", fail)
