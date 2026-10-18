@@ -12,11 +12,10 @@ from dataclasses import replace
 from typing import Any, Literal
 from uuid import uuid4
 
-from sqlalchemy.orm import Session
-
 from src.event_bus import EventBus, Message
 from src.model_pool.capacity import ModelElectionPool
 from src.model_pool.contracts import SelectionRequest, SelectionResult
+from src.storage import Storage, StorageWriteError
 from src.work.annotation_work import WorkReceipt
 
 AgentStatus = Literal["submitted", "retry", "failed"]
@@ -45,7 +44,7 @@ class ChapterWorkerPool:
         work: list[WorkReceipt],
         *,
         bus: EventBus,
-        session_factory: Callable[[], Session],
+        session_factory: Callable[[], Storage],
         is_cancelled: Callable[[], bool] | None = None,
         on_saved: Callable[[WorkReceipt], Any] | None = None,
     ) -> int:
@@ -242,7 +241,7 @@ class ChapterWorkerPool:
         address: str,
         receipt: WorkReceipt,
         invocation_id: str,
-        session_factory: Callable[[], Session],
+        session_factory: Callable[[], Storage],
         may_start_save: Callable[[], bool] | None = None,
         has_model_ended: Callable[[], bool] | None = None,
     ) -> None:
@@ -270,20 +269,16 @@ class ChapterWorkerPool:
                 # 执行行已在派发时由审计登记；保存事务只写正式产物（agent 幂等，
                 # 已存在产物直接返回，不重复写）
                 await bus.request(command("agent.save", session))
-                await asyncio.to_thread(session.commit)
             except Exception as exc:
-                try:
-                    await asyncio.to_thread(session.rollback)
-                except Exception:
-                    # 回滚失败不追加新语义：原异常照常上抛，由调用方按失败收口
-                    pass
-                if save_attempt == 0 and isinstance(exc, (OSError, TimeoutError)):
-                    # 传输类异常按幂等重存一次（agent.save 对已存在产物直接返回）
+                if isinstance(exc, StorageWriteError):
+                    if exc.rollback_failed:
+                        raise WorkSaveUnconfirmed(f"提交与回滚结果不明: work_id={receipt.work_id}") from exc
+                    if save_attempt == 0 and exc.transport_error:
+                        continue
+                elif save_attempt == 0 and isinstance(exc, (OSError, TimeoutError)):
                     continue
                 await bus.request(command("agent.abort"))
                 raise
-            finally:
-                session.close()
             break
         try:
             await bus.request(command("agent.confirm"))

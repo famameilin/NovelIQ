@@ -10,12 +10,12 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
 
 from src.agents.annotation.output_models import BoundChapterAnnotation
 from src.event_trees.models import BoundEvent, EventParticipantInput
 from src.fact_graph.inputs import ChapterMetricsInput
 from src.fact_graph.outputs import BoundCharacterObservation
+from src.storage import new_id
 from tests.support.chapter_annotation_helpers import commit_test_annotation
 from tests.support.event_tree_fixtures import first_paragraph
 
@@ -70,7 +70,7 @@ def persist_observed_characters(
     ]
     events: list[BoundEvent] = []
     for observation in observations:
-        node_id = str(uuid4())
+        node_id = new_id()
         events.append(
             BoundEvent(
                 declaration_id=node_id,

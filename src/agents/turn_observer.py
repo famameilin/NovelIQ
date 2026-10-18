@@ -1,7 +1,7 @@
 """
 Agent 回合审计观察器
 
-图节点在模型请求与工具执行的关键点调用观察器，
+说明: 图节点在模型请求与工具执行的关键点调用观察器，
 观察器把完整回合与工具审计写入 AgentAuditRecorder（独立短事务）。
 """
 
@@ -140,11 +140,11 @@ class AgentTurnObserver:
         self._invocation_id = invocation_id
         self._context = dict(context)
         self._turn_counter = 0
-        self._active_turn_id: int | None = None
+        self._active_turn_id: str | None = None
         self._active_started_ns: int | None = None
         self._active_tool_first_ns: int | None = None
         self._active_tool_last_ns: int | None = None
-        self._pending_turn_id: int | None = None
+        self._pending_turn_id: str | None = None
         self._pending_started_ns: int | None = None
         self._pending_request_messages: list[Any] = []
 

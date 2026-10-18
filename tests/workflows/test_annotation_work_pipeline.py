@@ -6,11 +6,11 @@ from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
-from sqlalchemy import delete, func, select
+from sqlalchemy import Uuid, cast, delete, func, select
 
-from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls, run_agent_execution_ids
+from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls
 from src.config import settings
-from src.fact_graph.graph import entity_key, entity_uuid
+from src.fact_graph.graph import entity_key
 from src.storage.models import (
     BookCase,
     CaseEntry,
@@ -23,11 +23,13 @@ from src.storage.models import (
     GraphRelation,
     ModelCall,
 )
+from src.storage.repositories.queries.audit_queries import run_agent_execution_ids
 from src.work.policy import completed_chapters
 from src.work.queries import chapter_annotations, fetch_annotation_role_records, is_annotate_complete
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
+from tests.support.storage_fixtures import entity_id, storage_for
 
 
 class ProgramModel(StreamedFakeModelMixin):
@@ -90,12 +92,12 @@ async def test_annotation_role_runs_real_program_and_saves_one_product(db_sessio
         events.append(event)
 
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id, emitter=emit) == (1, 0, 1)
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id, emitter=emit) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     assert model.calls == 1
     db_session.expire_all()
-    assert is_annotate_complete(db_session, run_id)
-    states = fetch_annotation_role_records(db_session, run_id)
+    assert is_annotate_complete(storage_for(db_session), run_id)
+    states = fetch_annotation_role_records(storage_for(db_session), run_id)
     assert [(item.role, item.state) for item in states] == [("annotation", "saved")]
     displayed = [event for event in events if event.action == "work_saved"]
     assert len(displayed) == 1
@@ -104,7 +106,7 @@ async def test_annotation_role_runs_real_program_and_saves_one_product(db_sessio
     assert progress[-1].current == progress[-1].total == 1
     assert progress[-1].percent == end
     assert progress[-1].sub_percent == 100
-    views = chapter_annotations(db_session, run_id)
+    views = chapter_annotations(storage_for(db_session), run_id)
     assert len(views) == 1
     assert views[0].payload["metrics"]["summary"] == "出门"
     assert [row.record_id for row in _run_products(db_session, run_id)] == [views[0].output_id]
@@ -118,8 +120,8 @@ async def test_reverse_resubmission_of_bidirectional_relation_keeps_save_confirm
         texts=["张三与李四并肩而行于长街。", "李四与张三于校场比试拳脚。"],
         chapter_ids=[1, 2],
     )
-    zhang_id = entity_uuid(run_id, entity_key("张三", "character"))
-    li_id = entity_uuid(run_id, entity_key("李四", "character"))
+    zhang_id = entity_id(run_id, entity_key("张三", "character"))
+    li_id = entity_id(run_id, entity_key("李四", "character"))
     first_code = (
         "entity(id='a1', name='张三', entity_type='character', evidence=1)\n"
         "entity(id='a2', name='李四', entity_type='character', evidence=1)\n"
@@ -150,15 +152,19 @@ async def test_reverse_resubmission_of_bidirectional_relation_keeps_save_confirm
         async def ainvoke(self, messages):
             # 两章并发派发，按章原文判向；先写者落库方向为准，后写者换向提交
             code = second_code if "比试" in str(messages) else first_code
-            return AIMessage(
-                content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call"}]
-            )
+            return AIMessage(content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call"}])
 
     model = ChapterAwareModel()
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (2, 0, 2)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     db_session.expire_all()
-    states = fetch_annotation_role_records(db_session, run_id)
+    zhang_id = db_session.scalar(
+        select(GraphEntity.entity_id).where(GraphEntity.run_id == run_id, GraphEntity.canonical_name == "张三")
+    )
+    li_id = db_session.scalar(
+        select(GraphEntity.entity_id).where(GraphEntity.run_id == run_id, GraphEntity.canonical_name == "李四")
+    )
+    states = fetch_annotation_role_records(storage_for(db_session), run_id)
     assert [(item.role, item.state) for item in states] == [("annotation", "saved"), ("annotation", "saved")]
     assert (
         db_session.scalar(
@@ -197,9 +203,9 @@ async def test_next_provider_turn_persists_all_domain_facts(db_session) -> None:
         ]
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
-    turns = fetch_agent_turns(db_session, run_id)
+    turns = fetch_agent_turns(storage_for(db_session), run_id)
     assert len(turns) == 2
     assert turns[0].execution_id == turns[1].execution_id
     assert [turn.turn_index for turn in turns] == [1, 2]
@@ -227,9 +233,9 @@ async def test_current_work_validates_serialized_participant_fields_before_save(
         "inish()"  # 同一程序文本
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
-    payload = chapter_annotations(db_session, run_id)[0].payload
+    payload = chapter_annotations(storage_for(db_session), run_id)[0].payload
     entities = {
         row.entity_id: (row.canonical_name, row.entity_type)
         for row in db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id))
@@ -247,13 +253,13 @@ async def test_long_chapter_saves_three_lanes_without_chapter_finalize(db_sessio
     novel_id, run_id = create_run_with_chunks(db_session, texts=["章中原文。"], chapter_ids=[1])
     model = ProgramModel('metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()')
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
-    states = fetch_annotation_role_records(db_session, run_id)
+    states = fetch_annotation_role_records(storage_for(db_session), run_id)
     assert {item.role for item in states} == {"entity", "event", "metric"}
     assert all(item.state == "saved" for item in states)
     assert len(_run_products(db_session, run_id)) == 3
-    assert is_annotate_complete(db_session, run_id)
+    assert is_annotate_complete(storage_for(db_session), run_id)
 
 
 class RoleModel(ProgramModel):
@@ -296,13 +302,13 @@ async def test_later_chapter_saves_while_earlier_model_is_running(db_session, co
             order.append(event.chapter_id)
             if event.chapter_id == 2:
                 with get_session_factory()() as session:
-                    states = fetch_annotation_role_records(session, run_id)
+                    states = fetch_annotation_role_records(storage_for(session), run_id)
                     assert completed_chapters(states) == {2}
                     assert any(MODEL_CAPACITY.snapshot().values())
                 later_saved.set()
 
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id, emitter=emit) == (2, 0, 2)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id, emitter=emit) == (2, 0, 2)
     assert order == [2, 1]
     assert not any(MODEL_CAPACITY.snapshot().values())
 
@@ -313,26 +319,26 @@ async def test_recovery_discards_partial_roles_and_keeps_completed_chapter(db_se
     novel_id, run_id = create_run_with_chunks(db_session, texts=["短", "长章原文。"], chapter_ids=[1, 2])
     model = RoleModel("")
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
-    states = fetch_annotation_role_records(db_session, run_id)
+    states = fetch_annotation_role_records(storage_for(db_session), run_id)
     complete = next(item for item in states if item.chapter_id == 1)
     retained_invocation = complete.invocation_id
     partial_event = next(item for item in states if item.role == "event")
     old_event_invocation = partial_event.invocation_id
     # 模拟整章部分角色产物丢失：只删该角色的正式产物（真实尝试由整章废弃清理）
     lost = next(item for item in states if item.role == "metric")
-    db_session.execute(
-        delete(ChapterAnnotation).where(ChapterAnnotation.execution_id == lost.invocation_id)
-    )
+    db_session.execute(delete(ChapterAnnotation).where(ChapterAnnotation.execution_id == lost.invocation_id))
     db_session.commit()
     calls = model.calls
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     assert model.calls - calls == 3
     # 章×角色才是稳定身份：重建后执行号必须换、身份键不变
-    refreshed = {(item.chapter_id, item.role): item for item in fetch_annotation_role_records(db_session, run_id)}
+    refreshed = {
+        (item.chapter_id, item.role): item for item in fetch_annotation_role_records(storage_for(db_session), run_id)
+    }
     assert refreshed[(complete.chapter_id, complete.role)].invocation_id == retained_invocation
     current_event = refreshed[(partial_event.chapter_id, partial_event.role)]
     assert current_event.invocation_id != old_event_invocation
@@ -363,7 +369,7 @@ async def test_recovery_discards_chapter_with_only_executions(db_session, monkey
 
     with patch("src.model_pool.llm.build_chat_model", return_value=FailingModel("")):
         with pytest.raises(RuntimeError, match="模拟失败轮次"):
-            await run_annotate(run_id, db_session, novel_id=novel_id)
+            await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     # 失败轮次留下真实执行行，长章一行产物都没有
     stale = db_session.scalar(
@@ -372,19 +378,18 @@ async def test_recovery_discards_chapter_with_only_executions(db_session, monkey
         .where(Execution.run_id == run_id, Execution.chapter_id == 2, Execution.attempt_number == 1)
     )
     assert stale >= 1
-    assert not [item for item in fetch_annotation_role_records(db_session, run_id) if item.chapter_id == 2]
+    assert not [item for item in fetch_annotation_role_records(storage_for(db_session), run_id) if item.chapter_id == 2]
     # 旧枚举按产物行取章，长章不在废弃集 → 重派撞 uq_executions_annotation_attempt
     model = RoleModel("")
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
-    assert completed_chapters(fetch_annotation_role_records(db_session, run_id)) == {1, 2}
+    assert completed_chapters(fetch_annotation_role_records(storage_for(db_session), run_id)) == {1, 2}
 
 
 @pytest.mark.asyncio
 async def test_save_failure_rolls_back_all_business_and_releases_case(db_session, monkeypatch):
     from src.agents.annotation.agent import AnnotationAgent
-    from src.case_pool import CasePool
     from src.model_pool.capacity import MODEL_CAPACITY
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文。"])
@@ -407,17 +412,15 @@ async def test_save_failure_rolls_back_all_business_and_releases_case(db_session
         raise RuntimeError("案例保存故障")
 
     monkeypatch.setattr(AnnotationAgent, "abort", abort)
-    monkeypatch.setattr(CasePool, "save_work", fail_save)
+    monkeypatch.setattr("src.storage.repositories.case_writes.CaseWritesRepository.save_work", fail_save)
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         with pytest.raises(RuntimeError, match="案例保存故障"):
-            await run_annotate(run_id, db_session, novel_id=novel_id)
+            await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     # 失败事务不留下任何业务行：工作身份是派发期事实，正式产物与域数据必须为空
     assert _run_products(db_session, run_id) == []
     run_executions = _run_execution_ids(run_id)
-    run_records = select(ChapterAnnotation.record_id).where(
-        ChapterAnnotation.execution_id.in_(run_executions)
-    )
+    run_records = select(ChapterAnnotation.record_id).where(ChapterAnnotation.execution_id.in_(run_executions))
     assert (
         db_session.scalar(
             select(func.count()).select_from(EventDeclaration).where(EventDeclaration.record_id.in_(run_records))
@@ -433,10 +436,7 @@ async def test_save_failure_rolls_back_all_business_and_releases_case(db_session
         == 0
     )
     assert (
-        db_session.scalar(
-            select(func.count()).select_from(BookCase).where(BookCase.registration_run_id == run_id)
-        )
-        == 0
+        db_session.scalar(select(func.count()).select_from(BookCase).where(BookCase.registration_run_id == run_id)) == 0
     )
     assert (
         db_session.scalar(
@@ -479,10 +479,15 @@ async def test_lost_commit_reply_verifies_actual_save_before_confirm(db_session,
         session.commit = commit
         return session
 
-    monkeypatch.setattr("src.workflows.annotate.get_session_factory", lambda: factory)
+    from src.storage import Storage
+    from src.storage.operations import OperationRunner
+
+    monkeypatch.setattr(
+        "src.workflows.annotate.get_storage_factory", lambda: lambda: Storage(_runner=OperationRunner(factory))
+    )
     model = ProgramModel('metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()')
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     assert replies == ["lost"] and model.calls == 1
     assert not any(MODEL_CAPACITY.snapshot().values())
 
@@ -502,12 +507,12 @@ async def test_no_eligible_model_ends_without_starting_or_saving_work(db_session
     monkeypatch.setattr(AnnotationAgent, "execute", unexpected)
     monkeypatch.setattr("src.model_pool.selection.select_annotation_model", lambda *args, **kwargs: None)
     with pytest.raises(ModelElectionExhausted):
-        await run_annotate(run_id, db_session, novel_id=novel_id)
+        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     assert not started
     db_session.expire_all()
     assert _run_products(db_session, run_id) == []
     # 未保存的角色没有产物行：pending 由缺行表达
-    assert fetch_annotation_role_records(db_session, run_id) == []
+    assert fetch_annotation_role_records(storage_for(db_session), run_id) == []
 
 
 @pytest.mark.asyncio
@@ -547,10 +552,10 @@ finish()
             return await super().ainvoke(messages)
 
     with patch("src.model_pool.llm.build_chat_model", return_value=SharedModel("")):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (2, 0, 2)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     db_session.expire_all()
     pool = CasePool(run_id)
-    pool.load_storage(db_session)
+    pool.load_storage(storage_for(db_session))
     resolved = [record for record in pool.search() if record["promised"]]
     assert len(resolved) == 1
     adopted = list(
@@ -559,20 +564,24 @@ finish()
         )
     )
     assert len(adopted) == 1
-    deliveries = list(
-        db_session.scalars(select(CaseEntry).where(CaseEntry.parent_entry_id == adopted[0].entry_id))
-    )
+    deliveries = list(db_session.scalars(select(CaseEntry).where(CaseEntry.parent_entry_id == adopted[0].entry_id)))
     assert sorted(item.tool_name for item in deliveries) == ["promise_case", "write_link"]
-    links = list(db_session.scalars(select(NarrativeLink).where(NarrativeLink.producer_execution_id.in_(
-        select(Execution.execution_id).where(Execution.run_id == run_id)
-    ))))
+    links = list(
+        db_session.scalars(
+            select(NarrativeLink).where(
+                NarrativeLink.producer_execution_id.in_(
+                    select(Execution.execution_id).where(Execution.run_id == run_id)
+                )
+            )
+        )
+    )
     assert [link.relation_type for link in links] == ["foreshadowing"]
     # 交付是提交面事实、跨测试会留存：按交付的 run 归属计数（与交付序号唯一性触发器同一推导）
     assert sorted(
         db_session.scalars(
             select(CaseEntry.tool_name).where(
                 CaseEntry.accepted_order.is_not(None),
-                func.dc_case_entry_support_run(CaseEntry.parent_entry_id) == run_id,
+                func.dc_case_entry_support_run(CaseEntry.parent_entry_id) == cast(run_id, Uuid(as_uuid=False)),
             )
         )
     ) == ["promise_case", "write_link"]
@@ -617,12 +626,10 @@ async def test_read_authorization_survives_failed_call_rollback(db_session, conf
 
         async def ainvoke(self, messages):
             code = second_code if "读懂" in str(messages) else first_code
-            return AIMessage(
-                content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call"}]
-            )
+            return AIMessage(content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call"}])
 
     with patch("src.model_pool.llm.build_chat_model", return_value=ChapterAwareModel()):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (2, 0, 2)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     db_session.expire_all()
     links = list(
         db_session.scalars(
@@ -641,12 +648,12 @@ async def test_same_batch_write_after_finish_is_saved_and_audited(db_session):
         'ption="迟到")'  # 同一程序文本
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     assert model.calls == 1
     assert db_session.query(BookCase).filter(BookCase.registration_run_id == run_id).count() == 1
-    turns = fetch_agent_turns(db_session, run_id)
+    turns = fetch_agent_turns(storage_for(db_session), run_id)
     assert len(turns) == 1
-    tool_calls = fetch_run_tool_calls(db_session, run_id)
+    tool_calls = fetch_run_tool_calls(storage_for(db_session), run_id)
     by_name = {call.tool_name: call for call in tool_calls if call.call_id == turns[0].call_id}
     assert by_name["pending"].status == "success"
     program_call = by_name["execute_code"]
@@ -676,7 +683,7 @@ async def test_runtime_name_references_auto_register_all_four_surfaces(db_sessio
         "_valence=0, narrative_function='铺垫')\nfinish()"  # 同一程序文本
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
     entities = db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id)).all()
     assert {(entity.canonical_name, entity.entity_type) for entity in entities} == {

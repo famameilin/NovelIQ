@@ -56,10 +56,20 @@ def test_load_flat_environment_fields(monkeypatch) -> None:
         username="tester",
         password="test-secret",
     )
-    monkeypatch.setenv("MODEL_POOL", json.dumps([{
-        "model_id": "text-model", "base_url": "https://api.example.com/v1", "api_key": " text-key ",
-        "weight": 1, "max_in_flight": 3,
-    }]))
+    monkeypatch.setenv(
+        "MODEL_POOL",
+        json.dumps(
+            [
+                {
+                    "model_id": "text-model",
+                    "base_url": "https://api.example.com/v1",
+                    "api_key": " text-key ",
+                    "weight": 1,
+                    "max_in_flight": 3,
+                }
+            ]
+        ),
+    )
     _set_model_environment(
         monkeypatch,
         "EMBEDDING_MODEL",

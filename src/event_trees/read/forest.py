@@ -19,21 +19,21 @@ from src.event_trees.read.models import (
 )
 from src.event_trees.read.organization import EventTreeQuery
 from src.fact_graph.read.references import EntityReferenceProjection
-from src.storage.repositories.graph import ChapterBoundary
-from src.storage.repositories.graph.event_forest import EventForestRecords
+from src.storage import Storage
+from src.storage.records.graph import ChapterBoundary
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+    pass
 
-    from src.storage.models import Chapter
+    from src.storage.records.models import ChapterRecord as Chapter
 
 
 class EventForestQuery:
     """保留章节阅读截点，节点始终使用已发布的正式 event_id"""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Storage) -> None:
         self.session = session
-        self.records = EventForestRecords(session)
+        self.records = session.forest
 
     def _chapter_rows(self, run_id: str) -> list[Chapter]:
         return self.records.fetch_chapters(run_id)
@@ -87,7 +87,7 @@ class EventForestQuery:
             chapter_id = min((item["chapter_id"] for item in evidence), key=query.orders.__getitem__)
             positions = [item["char_start"] for item in evidence if item.get("char_start") is not None]
             ends = [item["char_end"] for item in evidence if item.get("char_end") is not None]
-            # 节点承载每个正式事件本身，包含和因果不能由 main/secondary 捏造
+            # 历史 DTO 承载每个正式事件本身，包含和因果不能由 main/secondary 捏造
             nodes.append(
                 EventNodeRow(
                     event_id=event.event_id,

@@ -10,11 +10,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from src.agents.stream import AgentStream
 from src.diagnosis.schema import AgentAnalysis
 from src.event_trees.organization import EventOrganizationDraft, NarrativeOrganization
+from src.storage import Storage, get_storage_factory
 
 from .evidence import DiagnosisEvidenceLedger
 
@@ -73,7 +72,7 @@ def _validate_diagnosis_submission(
 
 async def _run_diagnosis_agent(
     *,
-    session: Session,
+    session: Storage,
     run_id: str,
     novel_id: str,
     execution_id: str,
@@ -96,7 +95,7 @@ async def _run_diagnosis_agent(
     from .work_runtime import DiagnosisWorkScheduler
 
     active_bus = bus or EventBus()
-    domain_session: Session | None = None
+    domain_session: Storage | None = None
     if domain is None:
         from .domain import create_diagnosis_domain
 
@@ -111,7 +110,6 @@ async def _run_diagnosis_agent(
             )
         except BaseException:
             # 构造中途失败也要交还连接：会话挂在 idle in transaction 会拖住后续建表与清库
-            domain_session.close()
             domain_session = None
             raise
     model_id = settings.models.diagnosis_model_id
@@ -181,26 +179,16 @@ async def _run_diagnosis_agent(
         close = getattr(domain, "close", None)
         if callable(close):
             close()
-        if domain_session is not None:
-            domain_session.close()
 
 
-def open_diagnosis_session(session: Session) -> Session:
-    """落前序阶段在管线会话上的未提交写入，再开独立诊断会话
-
-    诊断阶段若共用管线会话，管线会话会被流式 emitter 持续 commit；一次提交中途被打断
-    就把会话留在 PREPARED 中间态，此后诊断的任意一次读取都抛 "session is in 'prepared'
-    state" 并伪装成工具依赖故障。开工先 commit 管线会话（前序阶段写入对独立会话可见，
-    per-work 读会话同权），之后整轮诊断只用独立会话读写与保存，不受管线会话事务状态影响。
-    """
-    session.commit()
-    bind = session.get_bind()
-    return Session(bind=getattr(bind, "engine", bind))
+def open_diagnosis_session(session: Storage) -> Storage:
+    """复用无活动事务的 Storage 入口，每次完整操作独立获取和释放连接"""
+    return session
 
 
 async def run_diagnosis_agent(
     *,
-    session: Session,
+    session: Storage,
     run_id: str,
     novel_id: str,
     novel_title: str | None = None,
@@ -212,17 +200,15 @@ async def run_diagnosis_agent(
     """正式入口只派发诊断work；旧契约由领域入口拒绝，不回退单会话生产"""
     from src.audit.module import AuditModule
     from src.event_bus import EventBus
-    from src.storage.db import get_session_factory
-    from src.utils.identity import stable_digest
 
     bus = EventBus()
-    audit = AuditModule(bus, run_id, get_session_factory()) if audit_recorder is None else None
+    audit = AuditModule(bus, run_id, get_storage_factory()) if audit_recorder is None else None
     try:
         return await _run_diagnosis_agent(
             session=session,
             run_id=run_id,
             novel_id=novel_id,
-            execution_id=stable_digest("diagnosis_declarations", run_id),
+            execution_id=session.new_id(),
             novel_title=novel_title,
             llm=llm,
             stream=stream,

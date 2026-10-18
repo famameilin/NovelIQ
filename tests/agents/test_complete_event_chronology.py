@@ -13,6 +13,7 @@ from src.storage.models import EventRevision
 from tests.agents.test_complete_event_invariants import draft_case as draft_case
 from tests.agents.test_complete_event_invariants import event, submit_identities
 from tests.support.event_tree_fixtures import close_structure
+from tests.support.storage_fixtures import storage_for
 
 
 def _publish(session, draft) -> str:
@@ -33,12 +34,10 @@ def test_stage_order_keeps_actual_source_values_and_rejects_incomplete_order(dra
     chosen_order = list(reversed(ids))
     event(draft, "journey", ids, stage_order=chosen_order, current_declaration_id=chosen_order[-1])
     submit_identities(draft, same=True)
-    event_id = _publish(draft.session, draft)
+    event_id = _publish(draft.fixture_session, draft)
     stages = list(
-        draft.session.scalars(
-            select(EventRevision)
-            .where(EventRevision.event_id == event_id)
-            .order_by(EventRevision.stage_index)
+        draft.fixture_session.scalars(
+            select(EventRevision).where(EventRevision.event_id == event_id).order_by(EventRevision.stage_index)
         )
     )
     by_source = {stage.declaration_id: stage for stage in stages}
@@ -46,7 +45,7 @@ def test_stage_order_keeps_actual_source_values_and_rejects_incomplete_order(dra
     assert by_source[chosen_order[0]].stage_index == 0
     assert by_source[chosen_order[1]].stage_index == 1
     # 阶段链从 0 连续，前驱与正文/参与者都是读取投影
-    query = EventTreeQuery(draft.session, draft.run_id)
+    query = EventTreeQuery(storage_for(draft.fixture_session), draft.run_id)
     query.fetch()
     first = query.revisions[by_source[chosen_order[0]].revision_id]
     second = query.revisions[by_source[chosen_order[1]].revision_id]
@@ -57,7 +56,12 @@ def test_stage_order_keeps_actual_source_values_and_rejects_incomplete_order(dra
         assert stage.summary == source["summary"]
         assert stage.participants == source["participants"]
         assert stage.event_type == source["event_type"]
-    assert draft.session.scalar(
-        select(EventRevision.declaration_id).where(EventRevision.revision_id == first.revision_id)
-    ) == chosen_order[0]
-    assert smap.stage_chain(draft.session, [event_id])[event_id][-1].revision_id == second.revision_id
+    assert (
+        draft.fixture_session.scalar(
+            select(EventRevision.declaration_id).where(EventRevision.revision_id == first.revision_id)
+        )
+        == chosen_order[0]
+    )
+    assert (
+        smap.stage_chain(storage_for(draft.fixture_session), [event_id])[event_id][-1].revision_id == second.revision_id
+    )

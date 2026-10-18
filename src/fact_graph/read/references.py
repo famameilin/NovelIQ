@@ -6,23 +6,17 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from src.fact_graph.read.alias import AliasResolution, build_alias_resolution
-from src.storage.repositories.graph.repository import (
-    ChapterBoundary,
-    EntitySnapshotRow,
-    GraphRepository,
-)
+from src.fact_graph.read.storage_projection import graph_projection
+from src.storage import Storage
+from src.storage.records.graph import ChapterBoundary, EntitySnapshotRow
 
 
-def relation_projection_key(
-    left: str, right: str, relation_type: str, directionality: str
-) -> tuple[str, str, str]:
+def relation_projection_key(left: str, right: str, relation_type: str, directionality: str) -> tuple[str, str, str]:
     """引用去重沿用正式双向规则，只归一比较键，不改变已有边的展示方向"""
     if directionality == "bidirectional":
         left, right = sorted((left, right))
-    return left, right, relation_type
+    return (left, right, relation_type)
 
 
 @dataclass(frozen=True)
@@ -32,13 +26,13 @@ class EntityReferenceProjection:
 
     @classmethod
     def load(
-        cls, session: Session, run_id: str, *, boundary: ChapterBoundary | None = None
+        cls, session: Storage, run_id: str, *, boundary: ChapterBoundary | None = None
     ) -> EntityReferenceProjection:
         """明确章节边界时不使用后章身份断言；全书查询使用最新已保存边界
 
         已删除/不存在的运行与尚无已保存边界同样按空投影处理，读口不为已删运行报错。
         """
-        repository = GraphRepository(session)
+        repository = graph_projection(session.graph)
         if boundary is None and repository.run_exists(run_id):
             boundary = repository.resolve_chapter_boundary(run_id)
         entities = repository.fetch_entity_snapshots(boundary) if boundary else []
@@ -69,9 +63,11 @@ class EntityReferenceProjection:
         representative = self.resolution.resolve_entity_id(entity_id)
         return list(
             dict.fromkeys(
-                tag
-                for identifier, entity in sorted(self.entities.items())
-                if self.resolution.resolve_entity_id(identifier) == representative
-                for tag in entity.tags
+                (
+                    tag
+                    for identifier, entity in sorted(self.entities.items())
+                    if self.resolution.resolve_entity_id(identifier) == representative
+                    for tag in entity.tags
+                )
             )
         )

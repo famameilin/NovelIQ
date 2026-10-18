@@ -13,20 +13,17 @@ from collections.abc import Callable
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from sqlalchemy.orm import Session
 
 from src.case_pool import CasePool
 from src.diagnosis.queries import DiagnosisQueries
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.diagnosis_persistence import hydrate_draft_from_run, save_case_session_rows
+from src.event_trees.diagnosis_persistence import hydrate_draft_from_run
 from src.event_trees.organization import (
     EventOrganizationDraft,
-    close_diagnosis_execution,
     record_payloads,
-    register_diagnosis_execution,
-    register_diagnosis_session,
     snapshot_digest,
 )
+from src.storage import Storage, new_id
 from src.utils.identity import stable_digest
 
 from .evidence import DiagnosisEvidenceLedger
@@ -77,7 +74,7 @@ class DiagnosisDomain:
     def __init__(
         self,
         *,
-        session: Session,
+        session: Storage,
         run_id: str,
         novel_id: str,
         execution_id: str,
@@ -87,7 +84,7 @@ class DiagnosisDomain:
         self.session, self.run_id, self.novel_id, self.execution_id = session, run_id, novel_id, execution_id
         self.novel_title, self.model_id = novel_title, model_id
         self.lock = threading.RLock()
-        self.read_sessions: dict[str, Session] = {}
+        self.read_sessions: dict[str, Storage] = {}
         self.ledgers: dict[str, DiagnosisEvidenceLedger] = {}
         self.draft = EventOrganizationDraft(session, run_id, execution_id)
         self.sources = self.draft._declarations()
@@ -107,120 +104,78 @@ class DiagnosisDomain:
         self._case_graph_value: Any | None = None
         self._case_dialogue_value: list[Any] | None = None
         # 诊断整轮身份先短事务登记：失败轮次同样保留审计身份，不写任何 checkpoint
-        self._short_transaction(
-            lambda short: register_diagnosis_session(short, run_id=run_id, session_id=execution_id)
-        )
-
-    def _short_transaction(self, action: Any) -> Any:
-        """领域短事务：登记会话/执行身份后再由正式事务保存业务产物"""
-        bind = self.session.get_bind()
-        with Session(bind=getattr(bind, "engine", bind)) as short, short.begin():
-            return action(short)
+        self.register_session_identity()
 
     def register_session_identity(self) -> None:
-        """派发前先短事务登记整轮会话身份：执行事实引用会话前会话必须已存在"""
-        self._short_transaction(
-            lambda short: register_diagnosis_session(short, run_id=self.run_id, session_id=self.execution_id)
-        )
+        "登记整轮身份，连接与事务由 Storage 管理"
+        self.session.diagnosis.register_session(run_id=self.run_id, session_id=self.execution_id)
 
     def save_session_progress(self, author: str, role: str) -> None:
-        """会话做完保存一次：案例会话存案例产物，报告会话存叙事组织与报告
+        "会话产物冻结后交给 Storage 原子保存，提交完成后确认内存"
+        from src.storage.records.cases import CaseSave
+        from src.storage.records.diagnosis_save import DiagnosisSessionSave
 
-        复用标注保存链：案例行与报告保存同键同形，重复保存只补缺不改写；
-        本会话未承诺的案例不受影响，续跑草稿水合后可跳过已办完案例。
-        """
+        from .persistence import _save_case_writes
+
         with self.lock:
             if author in self.session_saved:
                 return
             if role == "report":
                 self._save_report_progress(author)
                 return
-            cases = {
-                caseid
-                for caseid, runtime in self.case_pool.case_runtime.items()
-                if runtime.get("owner") == author
-            }
-            writers = [
-                (caseid, writer)
-                for caseid, (writer, invocation) in sorted(self.case_writers.items())
-                if invocation == author
-            ]
+            cases = {key for key, runtime in self.case_pool.case_runtime.items() if runtime.get("owner") == author}
+            writers = {key: value for key, value in self.case_writers.items() if key in cases}
             graph = self._case_graph()
-            if not cases and not writers:
-                self.session_saved.add(author)
-                return
-            from src.case_pool.contributions import CaseContribution
-            from src.event_trees import storage_map as smap
-            from src.fact_graph.contributions import FactContribution
-
-            candidates = self._case_dialogue_candidates()
-            bind = self.session.get_bind()
-            with Session(bind=getattr(bind, "engine", bind)) as session, session.begin():
-                if cases:
-                    save_case_session_rows(session, self.run_id, cases, self.draft)
-                    # 案例产物随本次保存落库：所办案例的真实执行行同事务收口
-                    for caseid in sorted(cases):
-                        producer = self._case_executions.get(caseid)
-                        if producer is not None:
-                            close_diagnosis_execution(session, execution_id=producer)
-                for _caseid, writer in writers:
-                    facts = graph.drain_ops(author)
-                    keys: set[str] = set()
-                    for op in facts["entity_ops"]:
-                        keys.add(graph.entity_key(op["name"], op["entity_type"]))
-                    for op in facts["relation_assert_ops"]:
-                        keys.update((str(op["from_entity"]), str(op["to_entity"])))
-                    for item in writer.dialogue.written_dialogues.values():
-                        if item.speaker:
-                            keys.add(graph.entity_key(item.speaker, "character"))
-                    facts["entities"] = {
-                        graph.entity_id_for_key(key): {
-                            "entity_id": graph.entity_id_for_key(key),
-                            "name": graph.display_name(key),
-                            "entity_type": str(graph.entity_type_by_key(key)),
-                        }
-                        for key in sorted(keys)
-                    }
-                    graph.reference_entities(author, list(facts["entities"].values()))
-                    frozen = FactContribution(
-                        self.run_id,
-                        author,
-                        int(writer.current_chapter_id),
-                        (),
-                        json.dumps(facts, ensure_ascii=False),
-                        "[]",
-                    )
-                    graph.save_work(session, frozen, "")
-                    for index, item in sorted(writer.dialogue.written_dialogues.items()):
-                        candidate = candidates[index - 1] if 0 < index <= len(candidates) else None
-                        if candidate is None:
-                            raise ValueError(f"write_dialogue candidate_index={index} 超出候选目录")
-                        row = smap.dialogue_record_by_candidate(session, self.run_id, candidate.candidate_key)
-                        if row is None:
-                            raise ValueError(f"对话候选缺少持久化记录: {candidate.candidate_key}")
-                        row.current_attribution_execution_id = author
-                        row.speaker_entity_id = (
-                            graph.entity_id(item.speaker, "character") if item.speaker else None
-                        )
-                        row.tone = str(item.tone) if item.tone else None
-                        row.is_inner_monologue = item.verdict == "inner_monologue"
-                contribution = CaseContribution(
+            facts, updates = _save_case_writes(
+                self.session, self.run_id, "", graph=graph, writers=writers, candidates=self._case_dialogue_candidates()
+            )
+            contribution = CaseSave(
+                self.run_id,
+                author,
+                json.dumps(
+                    {
+                        "created_case_ids": sorted(self.case_pool.created.get(author, set())),
+                        "registrations": {
+                            key: self.case_pool.cases[key]
+                            for key in sorted(self.case_pool.registrations.get(author, set()))
+                        },
+                        "deliveries": self.case_pool.deliveries.get(author, []),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            organization = {
+                name: {
+                    str(index): item.model_dump(mode="json")
+                    for index, item in enumerate(getattr(self.draft, name).values())
+                }
+                for name in (
+                    "events",
+                    "containments",
+                    "relations",
+                    "reviewed_events",
+                    "declaration_reviews",
+                    "declaration_comparisons",
+                    "structure_reviews",
+                )
+            }
+            self.session.diagnosis.save_session(
+                DiagnosisSessionSave(
                     self.run_id,
                     author,
-                    json.dumps(
-                        {
-                            "created_case_ids": sorted(self.case_pool.created.get(author, set())),
-                            "registrations": {
-                                key: self.case_pool.cases[key]
-                                for key in sorted(self.case_pool.registrations.get(author, set()))
-                            },
-                            "deliveries": self.case_pool.deliveries.get(author, []),
-                        },
-                        ensure_ascii=False,
-                    ),
+                    frozenset(cases),
+                    json.dumps(organization, ensure_ascii=False),
+                    frozenset(self.sources),
+                    tuple(self._case_executions[key] for key in sorted(cases) if key in self._case_executions),
+                    facts,
+                    updates,
+                    (contribution,),
                 )
-                self.case_pool.save_work(session, contribution)
+            )
             self.case_pool.confirm(author)
+            for key, (_writer, invocation) in writers.items():
+                graph.confirm(invocation)
+                self.case_writers.pop(key, None)
             self.session_saved.add(author)
 
     def _save_report_progress(self, author: str) -> None:
@@ -229,9 +184,7 @@ class DiagnosisDomain:
         报告写入时绑定叙事快照，保存时快照必须仍然一致；报告未提交即本轮失败。
         案例交付与正式报告绑定走既有保存链，重投只核验不改写已保存结果。
         """
-        reports = [
-            (anchor, data["analysis"]) for anchor, data in self.reports.items() if "analysis" in data
-        ]
+        reports = [(anchor, data["analysis"]) for anchor, data in self.reports.items() if "analysis" in data]
         if len(reports) != 1:
             raise ValueError("报告会话结束但没有提交报告：write_diagnosis 必须提交且只能提交一次")
         anchor, payload = reports[0]
@@ -246,8 +199,11 @@ class DiagnosisDomain:
                 "novel_id": self.novel_id,
                 "foreshadow_expectation": DiagnosisQueries(self.session).calculate_foreshadow_expectation(
                     self.run_id,
-                    declaration_bindings={declaration: event.event_id for event in self.draft.events.values()
-                                          for declaration in event.declaration_ids},
+                    declaration_bindings={
+                        declaration: event.event_id
+                        for event in self.draft.events.values()
+                        for declaration in event.declaration_ids
+                    },
                 ),
                 "narrative_organization": organization.model_dump(mode="json"),
             }
@@ -271,34 +227,34 @@ class DiagnosisDomain:
         return self._analysis
 
     def _ensure_case_execution(self, caseid: str) -> str:
-        """案例写入的真实执行行：每 (运行, 案例) 一行，续跑重办推进真实尝试序号"""
+        "登记案例真实尝试，身份由 Storage 分配"
         existing = self._case_executions.get(caseid)
         if existing is not None:
             return existing
-        from sqlalchemy import func, select
+        attempt_number = self.session.diagnosis.next_attempt(self.run_id, "case", caseid)
+        execution_id = new_id()
+        from src.storage.records.cases import CaseSave
 
-        from src.storage.models import Execution
-
-        attempt_number = int(
-            self.session.scalar(
-                select(func.count()).select_from(Execution).where(
-                    Execution.run_id == self.run_id,
-                    Execution.role == "case",
-                    Execution.case_anchor == caseid,
-                )
-            )
-            or 0
-        ) + 1
-        execution_id = stable_digest("diagnosis_case_execution", self.execution_id, caseid, str(attempt_number))
-        self._short_transaction(
-            lambda short: register_diagnosis_execution(
-                short,
-                run_id=self.run_id,
-                execution_id=execution_id,
-                role="case",
-                attempt_number=attempt_number,
-                case_anchor=caseid,
-            )
+        registration = CaseSave(
+            self.run_id,
+            self.execution_id,
+            json.dumps(
+                {
+                    "created_case_ids": [caseid],
+                    "registrations": {caseid: self.case_pool.cases[caseid]},
+                    "deliveries": [],
+                },
+                ensure_ascii=False,
+            ),
+        )
+        self.session.diagnosis.register_attempt(
+            run_id=self.run_id,
+            session_id=self.execution_id,
+            execution_id=execution_id,
+            role="case",
+            attempt_number=attempt_number,
+            case_anchor=caseid,
+            case_registration=registration,
         )
         self._case_executions[caseid] = execution_id
         return execution_id
@@ -317,17 +273,13 @@ class DiagnosisDomain:
         return self._case_writer(caseid, invocation), invocation
 
     def _case_chapter(self, caseid: str) -> int:
-        """案例写入的归属章：案例 payload 来源章，缺省取本 run 章序最前章"""
+        "按案例来源章定位写入范围，缺省使用运行内首章"
         case = self.case_pool.cases.get(caseid) or {}
         chapter = (case.get("payload") or {}).get("chapter_id")
         if chapter is not None:
             return int(chapter)
-        from sqlalchemy import func, select
-
-        from src.storage.models import Chapter
-
-        first = self.session.scalar(select(func.min(Chapter.chapter_id)).where(Chapter.run_id == self.run_id))
-        return int(first or 0)
+        rows = self.session.chapters.fetch_chapter_texts(self.run_id)
+        return min((int(chapter_id) for chapter_id, _text in rows), default=0)
 
     def _case_writer(self, caseid: str, invocation: str) -> Any:
         """案例处置账本：按案例惰性建立（标注语义写入原形，阶段=诊断）
@@ -341,7 +293,9 @@ class DiagnosisDomain:
 
         chapter = self._case_chapter(caseid)
         ledger = AnnotationToolLedger(
-            run_scope=self.run_id, current_chapter_id=chapter, current_chapter_text="",
+            run_scope=self.run_id,
+            current_chapter_id=chapter,
+            current_chapter_text="",
             allow_future_context=False,
         )
         ledger.phase = "diagnosis_open"
@@ -419,8 +373,7 @@ class DiagnosisDomain:
         ledger = DiagnosisEvidenceLedger()
         self.ledgers[invocation] = ledger
         if invocation not in self.read_sessions:
-            bind = self.session.get_bind()
-            self.read_sessions[invocation] = Session(bind=getattr(bind, "engine", bind))
+            self.read_sessions[invocation] = self.session
         case_binding: CaseWriteBinding | None = None
         report: dict[str, Any] = {}
         if role == "report":
@@ -468,12 +421,16 @@ class DiagnosisDomain:
         for tool in tools:
             original_function = tool.func
             if original_function is not None:
+
                 def locked_tool(*args: Any, _function: Any = original_function, **kwargs: Any) -> Any:
                     with self.lock:
                         return _function(*args, **kwargs)
+
                 tool.func = locked_tool
         program = DiagnosisProgramRuntime(
-            tools, observer=observer, invocation_id=invocation,
+            tools,
+            observer=observer,
+            invocation_id=invocation,
             dialogue_total=lambda: len(self._case_dialogue_candidates()),
         )
 
@@ -503,10 +460,8 @@ class DiagnosisDomain:
             return check()
 
     def close(self) -> None:
-        """关闭每份会话独立的取证会话，不提交任何领域事务"""
+        "释放领域持有的无连接读取入口"
         with self.lock:
-            for session in self.read_sessions.values():
-                session.close()
             self.read_sessions.clear()
 
     def retain_pending_cases(self, error: BaseException) -> None:
@@ -515,10 +470,7 @@ class DiagnosisDomain:
         会话完成的保存已经落库、不再回退；未保存会话只保留案例登记（不落承诺与
         交付），其案例按未解决留给续跑的会话重办。
         """
-        from sqlalchemy import select
-
         from src.case_pool.contributions import CaseContribution
-        from src.storage.models import DiagnosisReport
 
         with self.lock:
             contributions = [
@@ -542,17 +494,7 @@ class DiagnosisDomain:
             ]
             if not contributions:
                 return
-            bind = self.session.get_bind()
-            with Session(bind=getattr(bind, "engine", bind)) as session, session.begin():
-                # 正式事务已经提交后仅内存确认失败时，不得把已采用交付改写为空登记
-                if session.scalar(select(DiagnosisReport.report_id).where(
-                    DiagnosisReport.session_id == self.execution_id,
-                )) is not None:
-                    return
-                for contribution in contributions:
-                    warnings = self.case_pool.save_work(session, contribution)
-                    if warnings:
-                        raise RuntimeError(f"诊断失败案例未完整保存: {warnings}")
+            self.session.diagnosis.retain_pending(self.run_id, self.execution_id, tuple(contributions))
 
     def _narrative_snapshot(self) -> str:
         return snapshot_digest(
@@ -568,16 +510,14 @@ class DiagnosisDomain:
 
 
 def create_diagnosis_domain(
-    *, session: Session, run_id: str, novel_id: str, execution_id: str, novel_title: str | None = None
+    *, session: Storage, run_id: str, novel_id: str, execution_id: str, novel_title: str | None = None
 ) -> DiagnosisDomain:
     """诊断只解析 diagnosis_model_id 对应的池条目并要求其存在（model_id 仅作审计/计数
     标识），不读取任何窗口或容量数字。"""
     from src.config import settings
 
     model_id = settings.models.diagnosis_model_id
-    entry = next(
-        (item for item in settings.models.model_pool if item.model_id == model_id), None
-    )
+    entry = next((item for item in settings.models.model_pool if item.model_id == model_id), None)
     if model_id is None or entry is None:
         raise ValueError("诊断模型不在模型池中")
     return DiagnosisDomain(

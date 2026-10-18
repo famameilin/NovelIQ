@@ -90,8 +90,13 @@ def test_diagnosis_budget_setting_is_editable_and_used_by_scheduler(isolated_set
         response.raise_for_status()
         assert settings.models.diagnosis.max_iterations == limit
         scheduler = DiagnosisWorkScheduler(
-            run_id="test", domain=MagicMock(), bus=EventBus(), model_id="model",
-            llm_factory=MagicMock(), observer_factory=MagicMock(), audit_barrier=MagicMock(),
+            run_id="test",
+            domain=MagicMock(),
+            bus=EventBus(),
+            model_id="model",
+            llm_factory=MagicMock(),
+            observer_factory=MagicMock(),
+            audit_barrier=MagicMock(),
         )
         assert scheduler.report_max_rounds == limit
         scheduler.pool.close()

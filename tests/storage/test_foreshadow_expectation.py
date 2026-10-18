@@ -18,6 +18,7 @@ from tests.support.event_tree_fixtures import (
     add_declaration,
     first_paragraph,
 )
+from tests.support.storage_fixtures import storage_for
 
 
 def _create_foreshadow_root(
@@ -47,7 +48,7 @@ def test_calculate_expectation_accepts_all_strength_levels(db_session) -> None:
         _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"])
         _create_foreshadow_root(db_session, run_id=run_id, payoff_likelihood=likelihood)
         db_session.commit()
-        result = calculate_foreshadow_expectation(db_session, run_id)
+        result = calculate_foreshadow_expectation(storage_for(db_session), run_id)
         assert result is not None
         assert 0.0 <= result <= 1.0
 
@@ -59,7 +60,7 @@ def test_calculate_expectation_low_scores_below_medium(db_session) -> None:
         _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"])
         _create_foreshadow_root(db_session, run_id=run_id, payoff_likelihood=likelihood)
         db_session.commit()
-        result = calculate_foreshadow_expectation(db_session, run_id)
+        result = calculate_foreshadow_expectation(storage_for(db_session), run_id)
         assert result is not None
         results[likelihood] = result
 
@@ -92,14 +93,14 @@ def test_calculate_expectation_returns_none_when_all_evidence_missing(db_session
     _create_foreshadow_root(db_session, run_id=run_id, payoff_likelihood=None)
     db_session.commit()
 
-    result = calculate_foreshadow_expectation(db_session, run_id)
+    result = calculate_foreshadow_expectation(storage_for(db_session), run_id)
     assert result is None
 
 
 def test_calculate_expectation_returns_none_without_threads(db_session) -> None:
     """无伏笔根声明时返回 None。"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"])
-    result = calculate_foreshadow_expectation(db_session, run_id)
+    result = calculate_foreshadow_expectation(storage_for(db_session), run_id)
     assert result is None
 
 
@@ -113,4 +114,4 @@ def test_non_foreshadowing_declaration_does_not_score(db_session) -> None:
         is_foreshadowing_root=False,
     )
     db_session.commit()
-    assert calculate_foreshadow_expectation(db_session, run_id) is None
+    assert calculate_foreshadow_expectation(storage_for(db_session), run_id) is None

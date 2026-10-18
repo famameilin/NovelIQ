@@ -19,6 +19,7 @@ from src.event_trees.organization import (
 )
 from tests.agents.test_diagnosis_organization import OrganizationCase
 from tests.support.event_tree_fixtures import report_case_anchor
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 @pytest.mark.parametrize("text_type,limit", [(NarrativeTitle, 6), (NarrativeDescription, 20)])
@@ -74,7 +75,9 @@ def test_formal_draft_models_reject_over_limit_fields(model, text_field):
 def test_real_tool_schema_and_prompt_expose_semantic_limits():
     tools = {
         item.name: item
-        for item in build_diagnosis_tools(MagicMock(), "run", role="report", case_pool=MagicMock())
+        for item in build_diagnosis_tools(
+            storage_for(MagicMock()), fixture_id(__name__, "run"), role="report", case_pool=MagicMock()
+        )
     }
     for tool_name, model_name, text_field in (
         ("write_arc", "ArcItem", "objective"),
@@ -95,7 +98,8 @@ def test_real_tool_schema_and_prompt_expose_semantic_limits():
 @pytest.fixture
 def text_limit_draft(db_session):
     case = OrganizationCase(db_session, chapters=1)
-    draft = EventOrganizationDraft(db_session, case.run_id, case.session_id)
+    draft = EventOrganizationDraft(storage_for(db_session), case.run_id, case.session_id)
+    draft.fixture_session = db_session
     draft.case_id = report_case_anchor(case.run_id)
     draft.producer_invocation_id = case.execution_id
     return draft
@@ -115,7 +119,11 @@ def test_rejected_registration_and_tool_call_preserve_valid_draft(text_limit_dra
     tools = {
         item.name: item
         for item in build_diagnosis_tools(
-            draft.session, draft.run_id, role="report", organization_draft=draft, case_pool=MagicMock()
+            storage_for(draft.fixture_session),
+            draft.run_id,
+            role="report",
+            organization_draft=draft,
+            case_pool=MagicMock(),
         )
     }
     for field, limit in (("title", 6), (text_field, 20)):
@@ -129,8 +137,6 @@ def test_rejected_registration_and_tool_call_preserve_valid_draft(text_limit_dra
         current = draft.arcs if kind == "arc" else draft.outcomes
         assert {key: value.model_dump() for key, value in current.items()} == before
     accepted = json.loads(
-        tools[f"write_{kind}"].invoke(
-            {"items": [{**payload, "operation": kind, "evidence": [{"paragraph_id": 0}]}]}
-        )
+        tools[f"write_{kind}"].invoke({"items": [{**payload, "operation": kind, "evidence": [{"paragraph_id": 0}]}]})
     )
     assert accepted["status"] == "written"

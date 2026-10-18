@@ -14,7 +14,6 @@ from typing import Annotated, Any
 
 from langchain_core.tools import tool
 from pydantic import Field
-from sqlalchemy.orm import Session
 
 from src.agents.annotation.links import build_text_read_tool
 from src.agents.annotation.shared_tools import build_case_tools, build_finish_tool, build_state_read_tools
@@ -23,6 +22,7 @@ from src.agents.annotation.tools import _forbid_undeclared_args, build_search_to
 from src.diagnosis.patch import AgentAnalysisPatch
 from src.diagnosis.schema import AgentAnalysis
 from src.event_trees.organization import EventOrganizationDraft
+from src.storage import Storage
 
 from .evidence import DiagnosisEvidenceLedger
 from .inputs import ArcWriteItem, ConflictItem, EventWriteItem, OutcomeWriteItem, WriteItem
@@ -35,12 +35,23 @@ from .read_context import (
     graph_signals,
 )
 
-WRITE_NAMES = frozenset({"write_diagnosis", "write_event", "write_arc", "write_outcome", "write_conflict",
-    "write_entity", "write_relation", "write_dialogue"})
+WRITE_NAMES = frozenset(
+    {
+        "write_diagnosis",
+        "write_event",
+        "write_arc",
+        "write_outcome",
+        "write_conflict",
+        "write_entity",
+        "write_relation",
+        "write_dialogue",
+    }
+)
 
 #: 需要按调用 caseid 绑定本次来源的写入面；读取面只做关联，不改来源
-CASE_WRITE_NAMES = frozenset({"write_event", "write_arc", "write_outcome", "write_conflict",
-    "write_entity", "write_relation", "write_dialogue"})
+CASE_WRITE_NAMES = frozenset(
+    {"write_event", "write_arc", "write_outcome", "write_conflict", "write_entity", "write_relation", "write_dialogue"}
+)
 
 
 def _write_items(items: Sequence[WriteItem], handlers: dict[str, Any]) -> str:
@@ -99,7 +110,7 @@ def _case_write_tools(query: Any, binding: Any, graph: Any) -> list[Any]:
 
 
 def build_diagnosis_tools(
-    session: Session,
+    session: Storage,
     run_id: str,
     *,
     role: str = "case",
@@ -184,12 +195,11 @@ def build_diagnosis_tools(
     def read_metrics() -> str:
         """读真实聚合指标与转折、高张力、伏笔、关系变化、图谱统计素材；不重算指标或吞系统故障"""
         from src.diagnosis.queries import DiagnosisQueries
-        from src.storage.repositories import StatsRepository
 
         repo = DiagnosisQueries(session)
         ledger.record_tool_call("read_metrics")
         payload = {
-            "aggregate": StatsRepository(session).fetch_global_stats_dict(run_id),
+            "aggregate": session.statistics.fetch_global_stats_dict(run_id),
             "pivots": [
                 {"chapter_id": chapter_id, "text": text[:300], "event_type": event_type}
                 for chapter_id, text, event_type in repo.fetch_pivot_blocks(run_id, limit=20)

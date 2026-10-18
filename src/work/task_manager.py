@@ -14,10 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from src.storage import Storage
 from src.work.task_persistence import TaskRuntimePersistenceService
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+    pass
 
 
 @dataclass
@@ -63,7 +64,7 @@ class TaskManager:
         """
         上报 run 成功收口，供读侧失效自身缓存
 
-        读侧缓存归读侧所有，执行层只上报事实，不感知其实现
+        说明: 读侧缓存归读侧所有，执行层只上报事实，不感知其实现
         """
         if self._run_completed_callback is None:
             return
@@ -72,7 +73,7 @@ class TaskManager:
         except Exception as exc:
             logger.warning(f"Run completed callback failed for {run_id}: {exc}")
 
-    def set_db_session_factory(self, factory: Callable[[], Session]) -> None:
+    def set_db_session_factory(self, factory: Callable[[], Storage]) -> None:
         """
         设置数据库会话工厂
         """
@@ -86,7 +87,9 @@ class TaskManager:
 
     def _update_db(self, task_id: str, **kwargs) -> None:
         """
-        可靠地更新数据库中的任务状态（DB 为唯一业务真相）
+        可靠地更新数据库中的任务状态
+
+        说明: 移除静默失败，确保状态变更可靠持久化。DB 为唯一业务真相
         """
         self._runtime_persistence.update_task_runtime(task_id, **kwargs)
 
@@ -96,7 +99,7 @@ class TaskManager:
         """
         return self._runtime_persistence._should_refresh_worker_heartbeat(update_params)
 
-    def _resolve_run_id_for_db_write(self, task_id: str, session: Session) -> str:
+    def _resolve_run_id_for_db_write(self, task_id: str, session: Storage) -> str:
         """
         将任务写回统一解析到真实 run_id
         """
@@ -117,8 +120,8 @@ class TaskManager:
         """
         查询当前进程是否持有该任务的执行缓存
 
-        仅回答"当前进程是否有该任务的执行缓存"，不回答"系统是否存在该任务"；
-        服务重启后返回 None 是正常行为，调用方应从 DB 查询业务状态
+        说明: 仅回答"当前进程是否有该任务的执行缓存"，不回答"系统是否存在该任务"
+              服务重启后返回 None 是正常行为，调用方应从 DB 查询业务状态
 
         Returns:
             TaskInfo 对象（如果进程持有缓存），否则返回 None
@@ -174,7 +177,7 @@ class TaskManager:
         """
         设置取消信号（纯执行层操作）
 
-        本方法仅负责设置 cancel_event，不做"是否允许取消"的业务判断
+        说明: 本方法仅负责设置 cancel_event，不做"是否允许取消"的业务判断
 
         Returns:
             True 表示 cancel_event 已设置，False 表示任务不在内存中
@@ -224,7 +227,7 @@ class TaskManager:
         """
         为当前运行任务启动独立心跳协程
 
-        心跳与阶段进度写回解耦，保证长阶段静默执行时也能持续刷新 heartbeat_at
+        说明: 心跳与阶段进度写回解耦，保证长阶段静默执行时也能持续刷新 heartbeat_at
         """
         task_info = self._tasks.get(task_id)
         if task_info is None:
@@ -246,7 +249,7 @@ class TaskManager:
         """
         停止任务心跳协程
 
-        在任务成功/失败/取消/删除时及时停止 heartbeat，避免终态后继续刷新 liveness
+        说明: 在任务成功/失败/取消/删除时及时停止 heartbeat，避免终态后继续刷新 liveness
         """
         task_info = self._tasks.get(task_id)
         if task_info is None:
@@ -261,7 +264,7 @@ class TaskManager:
         """
         周期性刷新活跃任务的 worker 心跳
 
-        即使阶段内部长时间没有 progress 事件，也要持续写回 heartbeat_at
+        说明: 即使阶段内部长时间没有 progress 事件，也要持续写回 heartbeat_at
         """
         while not stop_event.is_set():
             try:
@@ -293,7 +296,7 @@ class TaskManager:
         """
         收尾 heartbeat 协程并记录异常
 
-        避免 heartbeat 后台任务异常结束后只留下未观察到的 Task exception
+        说明: 避免 heartbeat 后台任务异常结束后只留下未观察到的 Task exception
         """
         task_info = self._tasks.get(task_id)
         if task_info and task_info.heartbeat_task is heartbeat_task:

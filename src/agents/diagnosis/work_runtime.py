@@ -12,11 +12,11 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
-from uuid import uuid4
 
 from src.event_bus import EventBus, Message
 from src.model_pool.capacity import ModelElectionPool
 from src.model_pool.contracts import SelectionRequest, SelectionResult
+from src.storage import new_id
 
 #: 案例会话连续办理的回合上限：会话自行连续办理多个案例，用尽即结束
 CASE_SESSION_MAX_ROUNDS = 200
@@ -61,10 +61,19 @@ class DiagnosisWorkScheduler:
     """案例会话并发自取办理；容量沿用模型池既有选举，不另立并发闸"""
 
     def __init__(
-        self, *, run_id: str, domain: DiagnosisWorkDomain, bus: EventBus, model_id: str,
-        llm_factory: Callable[[str], Any], observer_factory: Callable[[SessionProgress], Any],
-        audit_barrier: Callable[[], Any], is_cancelled: Callable[[], bool] | None = None,
-        stream: Any = None, model_retries: int = 1, case_sessions: int | None = None,
+        self,
+        *,
+        run_id: str,
+        domain: DiagnosisWorkDomain,
+        bus: EventBus,
+        model_id: str,
+        llm_factory: Callable[[str], Any],
+        observer_factory: Callable[[SessionProgress], Any],
+        audit_barrier: Callable[[], Any],
+        is_cancelled: Callable[[], bool] | None = None,
+        stream: Any = None,
+        model_retries: int = 1,
+        case_sessions: int | None = None,
     ) -> None:
         self.run_id, self.domain, self.bus = run_id, domain, bus
         self.llm_factory, self.observer_factory = llm_factory, observer_factory
@@ -93,15 +102,22 @@ class DiagnosisWorkScheduler:
             if future is not None and future.cancelled():
                 # 会话失败会取消仍在排队的兄弟，归还已经派发但尚未领取的容量
                 self._waiting.pop(selected.work_id, None)
-                await self.bus.request(Message(
-                    topic="pool.feedback", source=f"queue:{self.run_id}", target=self.pool.address,
-                    run_id=self.run_id, work_id=selected.work_id,
-                    payload={"reservation_id": selected.reservation_id, "outcome": "released"},
-                ))
+                await self.bus.request(
+                    Message(
+                        topic="pool.feedback",
+                        source=f"queue:{self.run_id}",
+                        target=self.pool.address,
+                        run_id=self.run_id,
+                        work_id=selected.work_id,
+                        payload={"reservation_id": selected.reservation_id, "outcome": "released"},
+                    )
+                )
                 continue
             if future is None or future.done():
-                raise ValueError(f"诊断容量派发没有可接收会话: key={selected.work_id} "
-                                 f"waiting={list(self._waiting)} future_done={future.done() if future else None}")
+                raise ValueError(
+                    f"诊断容量派发没有可接收会话: key={selected.work_id} "
+                    f"waiting={list(self._waiting)} future_done={future.done() if future else None}"
+                )
             future.set_result(selected)
 
     async def _session(self, key: str, role: str) -> None:
@@ -109,14 +125,19 @@ class DiagnosisWorkScheduler:
             raise asyncio.CancelledError("诊断已取消")
         future: asyncio.Future[SelectionResult] = asyncio.get_running_loop().create_future()
         self._waiting[key] = future
-        await self.bus.request(Message(
-            topic="pool.enqueue", source=f"queue:{self.run_id}", target=self.pool.address,
-            run_id=self.run_id, work_id=key,
-            payload=SelectionRequest(self.run_id, key),
-        ))
+        await self.bus.request(
+            Message(
+                topic="pool.enqueue",
+                source=f"queue:{self.run_id}",
+                target=self.pool.address,
+                run_id=self.run_id,
+                work_id=key,
+                payload=SelectionRequest(self.run_id, key),
+            )
+        )
         selected = await future
         self._waiting.pop(key, None)
-        progress = SessionProgress(key=key, role=role, execution_id=uuid4().hex)
+        progress = SessionProgress(key=key, role=role, execution_id=new_id())
         observer = self.observer_factory(progress)
         release_capacity = False
         try:
@@ -172,6 +193,7 @@ class DiagnosisWorkScheduler:
             if final_state.get("error"):
                 raise RuntimeError(str(final_state["error"]))
             # 会话做完保存一次：案例与报告产物随各自会话落库，失败轮次不重做已保存内容
+            await self.audit_barrier()
             await asyncio.to_thread(self.domain.save_session_progress, progress.execution_id, role)
             # 成功出口同样登记执行终态：执行行不能停在 running 等孤儿清扫反推
             audit_context = getattr(observer, "_context", None)
@@ -194,11 +216,17 @@ class DiagnosisWorkScheduler:
         finally:
             # 只有会话正常结束归还容量；失败与取消由池退出一次性归还
             if release_capacity:
-                await self.bus.request(Message(
-                    topic="pool.feedback", source=f"queue:{self.run_id}", target=self.pool.address,
-                    run_id=self.run_id, work_id=key, invocation_id=progress.execution_id,
-                    payload={"reservation_id": selected.reservation_id, "outcome": "released"},
-                ))
+                await self.bus.request(
+                    Message(
+                        topic="pool.feedback",
+                        source=f"queue:{self.run_id}",
+                        target=self.pool.address,
+                        run_id=self.run_id,
+                        work_id=key,
+                        invocation_id=progress.execution_id,
+                        payload={"reservation_id": selected.reservation_id, "outcome": "released"},
+                    )
+                )
 
     async def _wave(self, sessions: list[tuple[str, str]]) -> None:
         tasks = [asyncio.create_task(self._session(key, role)) for key, role in sessions]

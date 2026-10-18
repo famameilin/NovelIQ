@@ -89,27 +89,45 @@ def test_parse_task_model_settings_rejects_invalid_agent_limits(field: str, valu
 
 
 def _pool_entry(model_id: str = "a", **overrides: object) -> dict[str, object]:
-    return {"model_id": model_id, "base_url": f"https://{model_id}.example/v1", "api_key": f"key-{model_id}",
-            "weight": 1, "max_in_flight": 2, **overrides}
+    return {
+        "model_id": model_id,
+        "base_url": f"https://{model_id}.example/v1",
+        "api_key": f"key-{model_id}",
+        "weight": 1,
+        "max_in_flight": 2,
+        **overrides,
+    }
 
 
 def test_parse_model_pool_reads_sampling_parameters_per_model() -> None:
     """采样参数随模型池条目解析，缺省回退模型级默认"""
 
-    pool = _parse_model_pool([
-        _pool_entry("a", temperature=0.3, top_p=0.9, max_tokens=2048),
-        _pool_entry("b"),
-    ])
+    pool = _parse_model_pool(
+        [
+            _pool_entry("a", temperature=0.3, top_p=0.9, max_tokens=2048),
+            _pool_entry("b"),
+        ]
+    )
 
     assert (pool[0].temperature, pool[0].top_p, pool[0].max_tokens) == (0.3, 0.9, 2048)
     assert (pool[1].temperature, pool[1].top_p, pool[1].max_tokens) == (0.7, 0.8, 131072)
 
 
-@pytest.mark.parametrize("overrides", [
-    {"temperature": 2.5}, {"temperature": -0.1}, {"temperature": "0.5"}, {"temperature": True},
-    {"top_p": 1.5}, {"top_p": -0.5}, {"max_tokens": 0}, {"max_tokens": True}, {"max_tokens": 1.5},
-    {"unknown_key": 1},
-])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"temperature": 2.5},
+        {"temperature": -0.1},
+        {"temperature": "0.5"},
+        {"temperature": True},
+        {"top_p": 1.5},
+        {"top_p": -0.5},
+        {"max_tokens": 0},
+        {"max_tokens": True},
+        {"max_tokens": 1.5},
+        {"unknown_key": 1},
+    ],
+)
 def test_parse_model_pool_rejects_invalid_sampling_parameters(overrides: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         _parse_model_pool([_pool_entry(**overrides)])
@@ -144,8 +162,18 @@ def test_apply_model_environment_loads_pool_and_embedding(monkeypatch) -> None:
 
     apply_model_environment(
         settings,
-        [{"model_id": "text-model", "base_url": "https://api.example.com/v1", "api_key": "text-key",
-          "weight": 1, "max_in_flight": 4, "temperature": 0.3, "top_p": 0.9, "max_tokens": 2048}],
+        [
+            {
+                "model_id": "text-model",
+                "base_url": "https://api.example.com/v1",
+                "api_key": "text-key",
+                "weight": 1,
+                "max_in_flight": 4,
+                "temperature": 0.3,
+                "top_p": 0.9,
+                "max_tokens": 2048,
+            }
+        ],
         ModelEnvironment(
             base_url="http://localhost:8080/v1",
             model="embedding-model",
@@ -173,8 +201,15 @@ def test_apply_model_environment_rewrites_loopback_for_docker(monkeypatch) -> No
 
     apply_model_environment(
         settings,
-        [{"model_id": "text-model", "base_url": "http://localhost:8111/v1", "api_key": "text-key",
-          "weight": 1, "max_in_flight": 4}],
+        [
+            {
+                "model_id": "text-model",
+                "base_url": "http://localhost:8111/v1",
+                "api_key": "text-key",
+                "weight": 1,
+                "max_in_flight": 4,
+            }
+        ],
         ModelEnvironment(
             base_url="http://127.0.0.1:8080/v1",
             model="embedding-model",

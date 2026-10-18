@@ -3,14 +3,13 @@
 from typing import Protocol
 
 from loguru import logger
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session
 
 from src.event_trees.read.models import EventForestSnapshot
 from src.metrics.event_timeline_metrics import EventTimelinePlanBuildResult
 from src.metrics.event_timeline_metrics import build_event_timeline_plan as compute_timeline_plan
 from src.metrics.queries.fetchers import _fetch_chapter_progress_map
-from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.storage import Storage
+from src.storage import StorageError as DBAPIError
 
 
 class ChapterRepositoryProtocol(Protocol):
@@ -19,13 +18,13 @@ class ChapterRepositoryProtocol(Protocol):
 
 class StatsRepositoryProtocol(Protocol):
     @property
-    def session(self) -> Session: ...
+    def session(self) -> Storage: ...
 
 
 def build_event_timeline_plan(
     run_id: str,
     chapter_repo: ChapterRepositoryProtocol,
-    stats_repo: StatsRepositoryProtocol,
+    stats_repo: Storage,
     forest_snapshot: EventForestSnapshot | None,
 ) -> EventTimelinePlanBuildResult:
     try:
@@ -34,9 +33,9 @@ def build_event_timeline_plan(
         logger.warning("build_event_timeline_plan fetch_chapter_texts fallback for run {}: {}", run_id, exc)
         chapter_texts = []
     try:
-        rows = ParagraphRepository(stats_repo.session).fetch_chapter_tension_scores(run_id)
+        rows = stats_repo.paragraphs.fetch_chapter_tension_scores(run_id)
         tension_by_chapter = {int(cid): float(value) for cid, value in rows}
-        progress_map = _fetch_chapter_progress_map(stats_repo.session, run_id)
+        progress_map = _fetch_chapter_progress_map(stats_repo, run_id)
         tension_available = True
     except (DBAPIError, ValueError, KeyError) as exc:
         logger.warning("build_event_timeline_plan tension fallback for run {}: {}", run_id, exc)

@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import func, select
 
 from src.config import settings
+from src.storage import new_id
 from src.storage.models import AnalysisRun, ParagraphFeature
 from src.storage.repositories.paragraph.embedding_ops import (
     FEATURE_SEMANTIC_VECTOR,
@@ -27,15 +28,15 @@ from src.text_processing.models import Chunk
 from src.text_processing.paragraphs import split_chunk_paragraphs
 from src.text_processing.tokenize import tokenize
 from tests.support.analysis_factories import insert_test_novel
+from tests.support.storage_fixtures import fixture_id
 
 
 def _create_run_with_paragraph(db_session, text_of_paragraph: str) -> str:
     """最小 run：novel + 一章正文 + 一个段落（本文件用不到标注）"""
-    import uuid
 
     from src.storage.repositories import ChapterRepository, RunRepository
 
-    novel_id = uuid.uuid4().hex[:8]
+    novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
     run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Embedding Test")
     chunks = [Chunk(index=0, text=text_of_paragraph, start=0, end=len(text_of_paragraph), chapter_id=1)]
@@ -67,7 +68,7 @@ def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
 
     results = search_similar_paragraphs(
         session,
-        run_id="run-1",
+        run_id=fixture_id(__name__, "run-1"),
         query_embedding=[0.1] * 1024,
         top_k=5,
         similarity_threshold=0.7,
@@ -103,7 +104,7 @@ def test_search_similar_paragraphs_compiles_halfvec_cast_beyond_hnsw_dim_limit()
 
     search_similar_paragraphs(
         session,
-        run_id="run-1",
+        run_id=fixture_id(__name__, "run-1"),
         query_embedding=[0.1] * 2560,
         top_k=5,
         similarity_threshold=0.7,
@@ -198,7 +199,7 @@ def test_get_incomplete_paragraph_embedding_paragraph_ids_combines_missing_and_n
         MagicMock(all=MagicMock(return_value=[SimpleNamespace(paragraph_id=7)])),
     ]
 
-    results = get_incomplete_paragraph_embedding_paragraph_ids(session, run_id="run-1")
+    results = get_incomplete_paragraph_embedding_paragraph_ids(session, run_id=fixture_id(__name__, "run-1"))
 
     assert results == [2, 5, 7]
     missing_statement = session.execute.call_args_list[0].args[0]
@@ -218,6 +219,6 @@ def test_get_incomplete_paragraph_embedding_paragraph_ids_returns_empty_when_com
         MagicMock(all=MagicMock(return_value=[])),
     ]
 
-    results = get_incomplete_paragraph_embedding_paragraph_ids(session, run_id="run-1")
+    results = get_incomplete_paragraph_embedding_paragraph_ids(session, run_id=fixture_id(__name__, "run-1"))
 
     assert results == []

@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import math
-import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,6 +15,7 @@ import pytest
 from sqlalchemy import select
 
 from src.config import settings
+from src.storage import new_id
 from src.storage.models import AnalysisRun, ParagraphFeature, ParagraphMetric
 from src.storage.models.paragraph_features import (
     FEATURE_LOWESS_NET_DENSITY,
@@ -30,6 +30,7 @@ from src.text_processing.preprocess import normalize_text
 from src.workflows.preprocess import run_preprocess
 from src.workflows.preprocess_readiness import is_preprocess_complete
 from tests.support.analysis_factories import insert_test_novel
+from tests.support.storage_fixtures import storage_for
 
 
 class MockEmbeddingClientPreprocess:
@@ -65,13 +66,13 @@ _NOVEL_CONTENT = "第一章 测试\n第一段内容。\n第二段内容。\n第�
 
 class TestPreprocessParagraphs:
     def _create_source_file(self, tmp: str, content: str = _NOVEL_CONTENT) -> Path:
-        source_path = Path(tmp) / f"novel_{uuid.uuid4().hex[:8]}.txt"
+        source_path = Path(tmp) / f"novel_{new_id()}.txt"
         source_path.write_text(content, encoding="utf-8")
         return source_path
 
     def _create_run(self, db_session, source_path: Path, title: str) -> str:
         run_repo = RunRepository(db_session)
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         return run_repo.create_run(
             novel_id=novel_id,
@@ -90,9 +91,7 @@ class TestPreprocessParagraphs:
         run_id = self._create_run(db_session, source_path, "Paragraphs Novel")
 
         chunks_inserted, _, _ = await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
+            source_path=source_path, run_id=run_id, session=storage_for(db_session)
         )
         assert chunks_inserted > 0
 
@@ -133,19 +132,11 @@ class TestPreprocessParagraphs:
         source_path = self._create_source_file(str(tmp_path))
 
         run_id_semantic = self._create_run(db_session, source_path, "Semantic On")
-        await run_preprocess(
-            source_path=source_path,
-            run_id=run_id_semantic,
-            session=db_session,
-        )
+        await run_preprocess(source_path=source_path, run_id=run_id_semantic, session=storage_for(db_session))
 
         monkeypatch.setattr(settings.models.paragraph_embedding, "semantic_enabled", False)
         run_id_plain = self._create_run(db_session, source_path, "Semantic Off")
-        await run_preprocess(
-            source_path=source_path,
-            run_id=run_id_plain,
-            session=db_session,
-        )
+        await run_preprocess(source_path=source_path, run_id=run_id_plain, session=storage_for(db_session))
 
         paragraph_repo = ParagraphRepository(db_session)
         rows_semantic = paragraph_repo.fetch_paragraph_rows(run_id_semantic)
@@ -177,11 +168,7 @@ class TestPreprocessParagraphs:
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Embedding Align")
 
-        await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
-        )
+        await run_preprocess(source_path=source_path, run_id=run_id, session=storage_for(db_session))
 
         paragraph_rows = ParagraphRepository(db_session).fetch_paragraph_rows(run_id)
         assert paragraph_rows
@@ -213,19 +200,13 @@ class TestPreprocessParagraphs:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
         run_id = self._create_run(db_session, source_path, "Resume Novel")
 
-        chunks1, _, _ = await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
-        )
+        chunks1, _, _ = await run_preprocess(source_path=source_path, run_id=run_id, session=storage_for(db_session))
         assert chunks1 > 0
         assert ParagraphRepository(db_session).count_paragraphs(run_id) > 0
-        assert is_preprocess_complete(ChapterRepository(db_session).session, run_id)
+        assert is_preprocess_complete(storage_for(ChapterRepository(db_session).session), run_id)
 
         chunks2, chars2, elapsed2 = await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
+            source_path=source_path, run_id=run_id, session=storage_for(db_session)
         )
         assert (chunks2, chars2, elapsed2) == (0, 0, 0.0)
 
@@ -241,11 +222,7 @@ class TestPreprocessParagraphs:
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Metrics Novel")
 
-        await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
-        )
+        await run_preprocess(source_path=source_path, run_id=run_id, session=storage_for(db_session))
 
         paragraph_repo = ParagraphRepository(db_session)
         paragraph_count = paragraph_repo.count_paragraphs(run_id)
@@ -284,11 +261,7 @@ class TestPreprocessParagraphs:
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Conservation Novel")
 
-        await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
-        )
+        await run_preprocess(source_path=source_path, run_id=run_id, session=storage_for(db_session))
 
         paragraph_repo = ParagraphRepository(db_session)
         paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
@@ -321,11 +294,7 @@ class TestPreprocessParagraphs:
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Curves Novel")
 
-        await run_preprocess(
-            source_path=source_path,
-            run_id=run_id,
-            session=db_session,
-        )
+        await run_preprocess(source_path=source_path, run_id=run_id, session=storage_for(db_session))
 
         paragraph_repo = ParagraphRepository(db_session)
         paragraph_count = paragraph_repo.count_paragraphs(run_id)
@@ -342,9 +311,7 @@ class TestPreprocessParagraphs:
         samples = db_session.scalars(
             select(ParagraphFeature).where(
                 ParagraphFeature.run_id == run_id,
-                ParagraphFeature.feature_code.in_(
-                    (FEATURE_LOWESS_NET_DENSITY, FEATURE_LOWESS_SURFACE_TENSION)
-                ),
+                ParagraphFeature.feature_code.in_((FEATURE_LOWESS_NET_DENSITY, FEATURE_LOWESS_SURFACE_TENSION)),
             )
         ).all()
         by_paragraph: dict[int, dict[str, float | None]] = {}

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from src.fact_graph.character_reference_policy import is_global_character_surface_name
-from src.storage.repositories.graph.repository import EntitySnapshotRow, GraphRepository
+from src.storage.contracts.stores import GraphStore
+from src.storage.records.graph import EntitySnapshotRow
 
 
 def fetch_latest_entities(
-    repository: GraphRepository, run_id: str, *, entity_type: str | None = None
+    repository: GraphStore, run_id: str, *, entity_type: str | None = None
 ) -> list[EntitySnapshotRow]:
     return [
         row

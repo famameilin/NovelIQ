@@ -9,13 +9,15 @@
 
 import json
 import sys
-import uuid
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
+
+from src.storage import new_id
+from tests.support.storage_fixtures import storage_for
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -59,12 +61,12 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
         if role == "case":
             # 案例会话自取未承诺案例：接手承诺后直接写入完成；无未承诺案例即结束
             code = (
-                'cases = search_cases(unresolved_only=True)\n'
-                'if cases:\n'
-                '    case = cases[0]\n'
+                "cases = search_cases(unresolved_only=True)\n"
+                "if cases:\n"
+                "    case = cases[0]\n"
                 '    promise_case(case_id=case["case_id"])\n'
                 '    declaration = case["payload"]["event_id"]\n'
-                '    page = search_events(limit=20)\n'
+                "    page = search_events(limit=20)\n"
                 '    source = read_event(node_id=declaration)["content"]\n'
                 '    evidence = [{"paragraph_id":source["evidence"][0]["paragraph_id"]}]\n'
                 '    own = write_event(items=[{"operation":"identity", "key":declaration, '
@@ -75,28 +77,28 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
                 'caseid=case["case_id"])["results"][0]["event_id"]\n'
                 '    write_event(items=[{"operation":"declaration_review", "declaration_ids":[declaration], '
                 '"reason":"逐项核对已保存章节声明"}], caseid=case["case_id"])\n'
-                '    targets = []\n'
+                "    targets = []\n"
                 '    for item in page["events"]:\n'
                 '        if item["chapter_id"] > source["chapter_id"]:\n'
                 '            targets = targets + [item["declaration_id"]]\n'
-                '    if targets:\n'
+                "    if targets:\n"
                 '        write_event(items=[{"operation":"compare", "source_declaration_id":declaration, '
                 '"target_declaration_ids":targets, "disposition":"independent", '
                 '"reason":"本测试各章问题明确独立", "evidence":evidence}], caseid=case["case_id"])\n'
-                '    pairs = []\n'
+                "    pairs = []\n"
                 '    for item in search_events(kind="event", limit=20)["events"]:\n'
                 '        if item["event_id"] != own:\n'
                 '            pairs = pairs + [{"operation":"structure_review", "source_event_id":own, '
                 '"target_event_id":item["event_id"], "disposition":"independent", '
                 '"reason":"本测试各事件没有包含或因果关系", "evidence":evidence}]\n'
-                '    if pairs:\n'
+                "    if pairs:\n"
                 '        write_event(items=pairs, caseid=case["case_id"])\n'
-                'else:\n'
-                '    finish()'
+                "else:\n"
+                "    finish()"
             )
         else:
             assert role == "report"
-            code = f'read_metrics()\nread_topics()\nwrite_diagnosis(analysis={self.payload!r})\nfinish()'
+            code = f"read_metrics()\nread_topics()\nwrite_diagnosis(analysis={self.payload!r})\nfinish()"
         return AIMessage(
             content="",
             tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": f"p{self.calls}", "type": "tool_call"}],
@@ -129,7 +131,7 @@ class TestDiagnosisRoutes:
         # 案例会话数=池条目并发位；固定为 1 使自取顺序确定
         monkeypatch.setattr(settings.models.model_pool[0], "max_in_flight", 1)
         self.db_session = db_session
-        self.novel_id = uuid.uuid4().hex[:8]
+        self.novel_id = new_id()
         insert_test_novel(self.novel_id, session=db_session)
 
         run_repo = RunRepository(db_session)
@@ -137,7 +139,7 @@ class TestDiagnosisRoutes:
 
     def _create_full_data(self, chunk_count: int = 5) -> None:
         chapter_repo = ChapterRepository(self.db_session)
-        # M9a-2：每章一个运行时 chunk（chunk_id == chapter_id），
+        # -2：每章一个运行时 chunk（chunk_id == chapter_id），
         # 段落坐标校验要求 global 坐标严格单调不重叠：偏移随章节序号递增
         chunks = [
             Chunk(
@@ -241,9 +243,7 @@ class TestDiagnosisRoutes:
         from src.storage.models import ChapterAnnotation, EventDeclaration
         from tests.support.chapter_annotation_helpers import _create_work_identity
 
-        _work_id, author = _create_work_identity(
-            self.db_session, run_id=self.run_id, chapter_id=1, role="event"
-        )
+        _work_id, author = _create_work_identity(self.db_session, run_id=self.run_id, chapter_id=1, role="event")
         pool = CasePool(self.run_id)
         pool.begin(author)
         rows = self.db_session.execute(
@@ -266,29 +266,32 @@ class TestDiagnosisRoutes:
                 chapter_id=int(chapter_id),
                 author=author,
             )
-        assert pool.save_work(
-            self.db_session,
-            CaseContribution(
-                self.run_id,
-                author,
-                json.dumps(
-                    {
-                        "created_case_ids": sorted(pool.created.get(author, set())),
-                        "registrations": {
-                            key: pool.cases[key] for key in sorted(pool.registrations.get(author, set()))
+        assert (
+            pool.save_work(
+                storage_for(self.db_session),
+                CaseContribution(
+                    self.run_id,
+                    author,
+                    json.dumps(
+                        {
+                            "created_case_ids": sorted(pool.created.get(author, set())),
+                            "registrations": {
+                                key: pool.cases[key] for key in sorted(pool.registrations.get(author, set()))
+                            },
+                            "deliveries": [],
                         },
-                        "deliveries": [],
-                    },
-                    ensure_ascii=False,
+                        ensure_ascii=False,
+                    ),
                 ),
-            ),
-        ) == []
+            )
+            == []
+        )
         self.db_session.commit()
 
     def test_fetch_pivot_blocks(self) -> None:
         self._create_full_data(5)
 
-        diag_repo = DiagnosisQueries(self.db_session)
+        diag_repo = DiagnosisQueries(storage_for(self.db_session))
         blocks = diag_repo.fetch_pivot_blocks(self.run_id)
         assert len(blocks) > 0
         for block in blocks:
@@ -297,7 +300,7 @@ class TestDiagnosisRoutes:
     def test_fetch_high_tension_chunks(self) -> None:
         self._create_full_data(5)
 
-        diag_repo = DiagnosisQueries(self.db_session)
+        diag_repo = DiagnosisQueries(storage_for(self.db_session))
         chunks = diag_repo.fetch_high_tension_chunks(self.run_id, limit=3)
         assert len(chunks) > 0
         for chunk in chunks:
@@ -306,7 +309,7 @@ class TestDiagnosisRoutes:
     def test_fetch_pivot_moments(self) -> None:
         self._create_full_data(5)
 
-        diag_repo = DiagnosisQueries(self.db_session)
+        diag_repo = DiagnosisQueries(storage_for(self.db_session))
         moments = diag_repo.fetch_pivot_moments(self.run_id)
         assert len(moments) > 0
 
@@ -317,17 +320,14 @@ class TestDiagnosisRoutes:
 
         llm = _EvidenceThenFinishLLM(_fake_analysis(self.novel_id).model_dump())
         with patch("src.model_pool.llm.build_chat_model", return_value=llm):
-            analysis = await run_diagnose(
-                run_id=self.run_id,
-                session=self.db_session,
-            )
+            analysis = await run_diagnose(run_id=self.run_id, session=storage_for(self.db_session))
         assert analysis is not None
         assert llm.calls == 7  # 五件事件案例逐件办理与一次收尾，加一份报告
         assert analysis.genre_labels == ["通用"]
         assert analysis.style_labels == ["严肃"]
 
         # 正式产物按 run 作用域读：报告头 + 标签条目
-        fetched = fetch_diagnosis_payload(self.db_session, self.run_id)
+        fetched = fetch_diagnosis_payload(storage_for(self.db_session), self.run_id)
         assert fetched is not None
         assert fetched["genre_labels"] == ["通用"]
         assert fetched["style_labels"] == ["严肃"]
@@ -347,22 +347,22 @@ class TestDiagnosisRoutes:
                 side_effect=RuntimeError("模拟报告保存失败"),
             ):
                 with pytest.raises(RuntimeError, match="模拟报告保存失败"):
-                    await run_diagnose(run_id=self.run_id, session=self.db_session)
+                    await run_diagnose(run_id=self.run_id, session=storage_for(self.db_session))
 
-        saved_event_ids = set(run_events(self.db_session, self.run_id))
+        saved_event_ids = set(run_events(storage_for(self.db_session), self.run_id))
         assert saved_event_ids
         pool = CasePool(self.run_id)
-        pool.load_storage(self.db_session)
+        pool.load_storage(storage_for(self.db_session))
         promised = [item for item in pool.search() if item["promised"]]
         assert len(promised) == len(saved_event_ids)
 
         with patch("src.model_pool.llm.build_chat_model", return_value=llm):
-            analysis = await run_diagnose(run_id=self.run_id, session=self.db_session)
+            analysis = await run_diagnose(run_id=self.run_id, session=storage_for(self.db_session))
         assert analysis is not None
         # 续跑：案例会话对空池一次 finish、报告会话一次收尾，不重复办理既有案例
         assert llm.calls == 5 + 2
-        assert set(run_events(self.db_session, self.run_id)) == saved_event_ids
-        fetched = fetch_diagnosis_payload(self.db_session, self.run_id)
+        assert set(run_events(storage_for(self.db_session), self.run_id)) == saved_event_ids
+        fetched = fetch_diagnosis_payload(storage_for(self.db_session), self.run_id)
         assert fetched is not None and fetched["diagnosis"] == "ok"
 
     @pytest.mark.asyncio()
@@ -371,13 +371,10 @@ class TestDiagnosisRoutes:
 
         llm = _EvidenceThenFinishLLM(_fake_analysis(self.novel_id).model_dump())
         with patch("src.model_pool.llm.build_chat_model", return_value=llm):
-            await run_diagnose(
-                run_id=self.run_id,
-                session=self.db_session,
-            )
+            await run_diagnose(run_id=self.run_id, session=storage_for(self.db_session))
 
         assert llm.calls == 5  # 三件事件案例逐件办理与一次收尾，加一份报告
-        fetched = fetch_diagnosis_payload(self.db_session, self.run_id)
+        fetched = fetch_diagnosis_payload(storage_for(self.db_session), self.run_id)
         assert fetched is not None
         assert fetched["novel_id"] == self.novel_id
         assert fetched["genre_labels"] == ["通用"]

@@ -6,13 +6,10 @@ import asyncio
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
-
 from src.agents.annotation.text_search import TextSearchCandidate, TextSearchService
 from src.config import settings
 from src.embedding import EmbeddingClient
-from src.storage.models import Chapter, Paragraph
+from src.storage import Storage
 
 
 class DatabaseAnnotationQueryService:
@@ -20,7 +17,7 @@ class DatabaseAnnotationQueryService:
 
     def __init__(
         self,
-        session_factory: Callable[[], Session],
+        session_factory: Callable[[], Storage],
         run_id: str,
         current_chapter_id: int,
         current_first_paragraph_id: int,
@@ -41,46 +38,20 @@ class DatabaseAnnotationQueryService:
         self.current_first_paragraph_id = current_first_paragraph_id
         self.current_last_paragraph_id = current_last_paragraph_id
         with self._read_scope() as session:
-            current_chapter_sequence = session.execute(
-                select(Chapter.sequence).where(
-                    Chapter.run_id == run_id,
-                    Chapter.chapter_id == current_chapter_id,
-                )
-            ).scalar_one_or_none()
+            current_chapter_sequence = session.reads.agents_annotation_queries_init_1(current_chapter_id, run_id)
             if current_chapter_sequence is None:
                 raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
             self.current_chapter_sequence = int(current_chapter_sequence)
-            chapter_ids = list(
-                session.execute(
-                    select(Chapter.chapter_id)
-                    .where(Chapter.run_id == run_id)
-                    .order_by(Chapter.sequence, Chapter.chapter_id)
-                ).scalars()
-            )
+            chapter_ids = list(session.reads.agents_annotation_queries_init_2(run_id))
             if current_chapter_id not in chapter_ids:
                 raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
             self.current_chapter_order = chapter_ids.index(current_chapter_id) + 1
             self.chapter_orders = {chapter_id: index + 1 for index, chapter_id in enumerate(chapter_ids)}
 
     @contextmanager
-    def _read_scope(self) -> Iterator[Session]:
-        """用于把连接占用收敛到单次工具调用：开只读会话，返回前归还
-
-        守卫（PostgreSQL 显式只读）集中在这里一处；
-        SQLite 等方言没有该语句，非 PostgreSQL 绑定跳过。作用域退出时无论
-        正常返回还是抛错都回滚并关闭，异常路径不泄漏连接。
-        """
-        session = self._session_factory()
-        try:
-            bind = session.get_bind()
-            if bind is not None and bind.dialect.name == "postgresql":
-                session.execute(text("SET TRANSACTION READ ONLY"))
-            yield session
-        finally:
-            try:
-                session.rollback()
-            finally:
-                session.close()
+    def _read_scope(self) -> Iterator[Storage]:
+        """提供本次工具调用使用的 Storage 入口，连接与只读事务由各读取操作管理"""
+        yield self._session_factory()
 
     async def search_text(
         self,
@@ -123,13 +94,7 @@ class DatabaseAnnotationQueryService:
 
         def read() -> dict:
             with self._read_scope() as session:
-                row = session.execute(
-                    select(Paragraph, Chapter.sequence)
-                    .join(
-                        Chapter, ((Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id))
-                    )
-                    .where(Paragraph.run_id == self.run_id, Paragraph.paragraph_id == paragraph_id)
-                ).one_or_none()
+                row = session.reads.agents_annotation_queries_read_1(paragraph_id, self.run_id)
                 if row is None:
                     raise ValueError("原文段落不属于当前分析")
                 if not allow_future_context and row.sequence > self.current_chapter_sequence:

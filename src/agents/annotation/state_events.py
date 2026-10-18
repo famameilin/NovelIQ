@@ -21,7 +21,7 @@ from src.fact_graph.inputs import ChapterParagraphInfo
 from src.fact_graph.outputs import BoundCharacterObservation
 from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
 from src.fact_graph.vocabulary import Confidence, EntityType
-from src.utils.identity import stable_uuid
+from src.storage import new_id
 
 from .entity_refs import ensure_entity_ref
 from .errors import (
@@ -48,7 +48,7 @@ class EventBindingStateContext(Protocol):
     run_scope: str
     work_id: str
 
-    # 事件树索引：work 开始时从本 run 已确认（confirm）状态装载，
+    # 事件树重做：work 开始时从本 run 已确认（confirm）状态装载的索引，
     # 跨章引用只接受这里的已确认身份，不接受迟到 invocation 或未确认内容
     text_references: dict[str, Any]
     confirmed_complete_event_index: dict[str, dict[str, Any]]
@@ -58,6 +58,14 @@ class EventBindingStateContext(Protocol):
 
 @dataclass(slots=True)
 class EventBindingState:
+    identifiers: dict[tuple, str] = field(default_factory=dict)
+
+    def _identifier(self, *key) -> str:
+        """同一局部键复用已分配的 UUIDv7，身份不是局部键的编码"""
+        if key not in self.identifiers:
+            self.identifiers[key] = new_id()
+        return self.identifiers[key]
+
     authorized_event_ids: set[str] = field(default_factory=set)
     event_trees: dict[str, dict[str, Any]] = field(default_factory=dict)
     tree_key_index: dict[str, str] = field(default_factory=dict)
@@ -76,11 +84,11 @@ class EventBindingState:
 
     def _tree_id(self, ctx: EventBindingStateContext, tree_key: str) -> str:
         """树身份绑定章与局部键，重试和乱序执行都得到同一 id"""
-        return stable_uuid(ctx.run_scope, ctx.work_id or ctx.current_chapter_id, "event_tree", tree_key)
+        return self._identifier(ctx.run_scope, ctx.work_id or ctx.current_chapter_id, "event_tree", tree_key)
 
     def _node_id(self, ctx: EventBindingStateContext, tree_key: str, node_key: str) -> str:
         """节点身份绑定局部键，避免重投递产生另一组事件 id"""
-        return stable_uuid(ctx.run_scope, ctx.work_id or ctx.current_chapter_id, "event_node", tree_key, node_key)
+        return self._identifier(ctx.run_scope, ctx.work_id or ctx.current_chapter_id, "event_node", tree_key, node_key)
 
     def _tree_by_key(self, tree_key: str, record: str) -> dict[str, Any]:
         """用于按章内局部键读取已落账的事件树，未建树时给出可自纠报错"""
@@ -325,8 +333,8 @@ class EventBindingState:
                 if actual_type == EntityType.CHARACTER.value
                 else EventParticipantRole.OBJECT
             )
-            # 机构兼指场所按 organization 登记（见 ANNOTATION_SCOPE_POLICY），
-            # 故"地点"角色接受 location 与 organization 两类端点，不要求必须是 location
+            # 口径统一：机构兼指场所按 organization 登记（见 ANNOTATION_SCOPE_POLICY），
+            # 故"地点"角色接受 location 与 organization 两类端点，不再要求必须是 location
             if effective_role == EventParticipantRole.LOCATION and actual_type not in {
                 EntityType.LOCATION.value,
                 EntityType.ORGANIZATION.value,
@@ -340,11 +348,11 @@ class EventBindingState:
                 )
             has_observation = any(value is not None for value in (arg.narrative_role, arg.action, arg.emotion))
             if actual_type == EntityType.CHARACTER.value:
-                # 三态字段可空落账，缺省由消费方按空处理
+                # 合同放开：三态字段可空落账（不再要求必填），缺省由消费方按空处理
                 if arg.action is not None:
                     self._reject_duplicate_observation(participant_record, entity_name, arg.action)
-                # 三态全空不产动态状态行：同一人物在多个事件上无动作参与是正常形态，
-                # 全空行既无信息量又会在收尾校验撞 (character, action=None) 重复语义；
+                # 三态全空不产动态状态行：同一人物在多个事件上无动作参与是放开后的
+                # 正常形态，全空行既无信息量又会在收尾校验撞 (character, action=None) 重复语义；
                 # 参与者本身仍随事件落账，只是不进 character_observations
                 if has_observation:
                     self.observation_by_record[participant_record] = BoundCharacterObservation(
@@ -357,7 +365,7 @@ class EventBindingState:
             else:
                 # 三态只服务人物动态状态，item/organization/location 无消费者；模型常给
                 # 非角色实体补动作，硬拒会连带丢掉整组参与者（含同组合法 character 条目）并烧尽回合，
-                # 故忽略三态、保留名字、大类与 role
+                # 故改为忽略三态、保留名字、大类与 role
                 narrative_role, action, emotion = None, None, None
             try:
                 participants.append(
@@ -495,7 +503,7 @@ class EventBindingState:
                     )
                 return record
         evidence_paragraph_id = self._event_evidence_paragraph_id(ctx, evidence, record=record)
-        relation_id = stable_uuid(
+        relation_id = self._identifier(
             ctx.run_scope, ctx.work_id or ctx.current_chapter_id, "event_relation", source_operation_id
         )
         self.relations.append(
@@ -535,7 +543,7 @@ class EventBindingState:
         tree = self.event_trees.get(self.tree_key_index.get(tree_key_clean, ""))
         if tree is None:
             if tree_key_clean in self.pending_child_events:
-                # 树键校验：暂挂子事件的回显即挂起状态本身
+                # 树键校验下沉：暂挂子事件的回显即挂起状态本身
                 return {
                     "deferred": True,
                     "note": f"树 {tree_key_clean} 尚未建根：该子事件已挂起，根建好后自动生效",

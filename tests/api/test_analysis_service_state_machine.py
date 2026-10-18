@@ -18,6 +18,7 @@ from src.storage.session import DatabaseSession
 from src.work.task_manager import TaskManager
 from src.workflows.analysis.environment_initializer import EnvironmentInitializer
 from src.workflows.service import AnalysisService
+from tests.support.storage_fixtures import fixture_id, storage_factory, storage_for, task_for_run
 
 
 class _StaticSessionFactory:
@@ -52,7 +53,7 @@ def _make_service(db_session, *, worker_id: str = "worker-state-machine") -> Ana
     return AnalysisService(
         task_service=MagicMock(),
         task_manager=TaskManager(worker_id=worker_id),
-        session_factory=_StaticSessionFactory(db_session),
+        session_factory=lambda: storage_for(db_session),
     )
 
 
@@ -74,10 +75,10 @@ async def test_execute_stages_runs_linguistic_before_aggregate(db_session, monke
 
     await service._execute_analysis_stages(
         bus=bus,
-        session=db_session,
-        run_id="run-1",
+        session=storage_for(db_session),
+        run_id=fixture_id(__name__, "run-1"),
         source_path=Path("novel.txt"),
-        novel_id="novel-1",
+        novel_id=fixture_id(__name__, "novel-1"),
         novel_title="测试小说",
         analysis_logger=None,
         skip_stages={
@@ -106,7 +107,7 @@ def test_disabled_ltp_is_complete_in_resume_chain(monkeypatch) -> None:
     """关闭 LTP 时恢复链仍能复用后续已完成阶段"""
     from src.workflows.analysis import environment_initializer as module
 
-    initializer = EnvironmentInitializer(MagicMock())
+    initializer = EnvironmentInitializer(storage_factory(MagicMock()))
     queries = {
         name: MagicMock(return_value=True)
         for name in (
@@ -121,7 +122,7 @@ def test_disabled_ltp_is_complete_in_resume_chain(monkeypatch) -> None:
     for name, query in queries.items():
         monkeypatch.setattr(module, name, query)
     monkeypatch.setattr(settings.linguistic.ltp, "enabled", False)
-    result = initializer.check_stage_completion_status(MagicMock(), "run-1")
+    result = initializer.check_stage_completion_status(MagicMock(), fixture_id(__name__, "run-1"))
     assert result == {
         "skip_preprocess": True,
         "skip_annotate": True,
@@ -135,12 +136,12 @@ def test_disabled_ltp_is_complete_in_resume_chain(monkeypatch) -> None:
 
 def test_prepare_task_execution_claim_claims_pending_run(db_session) -> None:
     """pending 任务应被当前 worker 原子认领为 running。"""
-    _insert_novel(db_session, "svcclaim")
+    _insert_novel(db_session, fixture_id(__name__, "svcclaim"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcclaim")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcclaim"))
     service = _make_service(db_session, worker_id="worker-a")
 
-    result = service._prepare_task_execution_claim(run_id[:8])
+    result = service._prepare_task_execution_claim(task_for_run(run_id, db_session))
     refreshed = run_repo.get_run(run_id)
 
     assert result == "claimed"
@@ -153,12 +154,12 @@ def test_prepare_task_execution_claim_claims_pending_run(db_session) -> None:
 
 def test_get_run_exposes_started_at_after_claim(db_session) -> None:
     """任务被 worker 认领后，get_run 应能读到 started_at。"""
-    _insert_novel(db_session, "svcstart")
+    _insert_novel(db_session, fixture_id(__name__, "svcstart"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcstart")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcstart"))
     service = _make_service(db_session, worker_id="worker-b")
 
-    service._prepare_task_execution_claim(run_id[:8])
+    service._prepare_task_execution_claim(task_for_run(run_id, db_session))
     refreshed = run_repo.get_run(run_id)
 
     assert refreshed is not None
@@ -168,13 +169,13 @@ def test_get_run_exposes_started_at_after_claim(db_session) -> None:
 
 def test_prepare_task_execution_claim_cancels_unclaimed_pending_run(db_session) -> None:
     """已请求取消的 pending 任务应在执行前直接收口为 cancelled。"""
-    _insert_novel(db_session, "svccncl")
+    _insert_novel(db_session, fixture_id(__name__, "svccncl"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svccncl")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svccncl"))
     run_repo.update_run_task_fields(run_id, cancel_requested=True)
     service = _make_service(db_session)
 
-    result = service._prepare_task_execution_claim(run_id[:8])
+    result = service._prepare_task_execution_claim(task_for_run(run_id, db_session))
     refreshed = run_repo.get_run(run_id)
 
     assert result == "cancelled"
@@ -186,13 +187,13 @@ def test_prepare_task_execution_claim_cancels_unclaimed_pending_run(db_session) 
 
 def test_prepare_task_execution_claim_skips_already_running_run(db_session) -> None:
     """running 任务不应被当前 worker 重复认领。"""
-    _insert_novel(db_session, "svcskip1")
+    _insert_novel(db_session, fixture_id(__name__, "svcskip1"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcskip1")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcskip1"))
     run_repo.update_run_task_fields(run_id, status="running", worker_id="other-worker")
     service = _make_service(db_session)
 
-    result = service._prepare_task_execution_claim(run_id[:8])
+    result = service._prepare_task_execution_claim(task_for_run(run_id, db_session))
     refreshed = run_repo.get_run(run_id)
 
     assert result == "skipped"
@@ -206,12 +207,12 @@ async def test_run_analysis_core_skipped_claim_cleans_memory_task(db_session) ->
     _run_analysis_core 必须清理本进程的内存执行缓存（停心跳），
     防止残留 TaskInfo 的心跳写回覆盖真实 owner 的 worker_id/heartbeat_at。
     """
-    _insert_novel(db_session, "svcskip2")
+    _insert_novel(db_session, fixture_id(__name__, "svcskip2"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcskip2")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcskip2"))
     run_repo.update_run_task_fields(run_id, status="running", worker_id="other-worker")
     service = _make_service(db_session)
-    service.task_manager.create_task(run_id[:8], "svcskip2")
+    service.task_manager.create_task(task_for_run(run_id, db_session), "svcskip2")
     service.env_initializer.init_analysis_environment = MagicMock()
 
     with patch.object(
@@ -220,13 +221,13 @@ async def test_run_analysis_core_skipped_claim_cleans_memory_task(db_session) ->
         wraps=service.task_manager.cancel_completed_task,
     ) as mock_cleanup:
         await service._run_analysis_core(
-            task_id=run_id[:8],
-            novel={"novel_id": "svcskip2"},
+            task_id=task_for_run(run_id, db_session),
+            novel={"novel_id": fixture_id(__name__, "svcskip2")},
             skip_stages_builder=MagicMock(),
             num_topics=25,
         )
 
-    mock_cleanup.assert_called_once_with(run_id[:8])
+    mock_cleanup.assert_called_once_with(task_for_run(run_id, db_session))
     service.env_initializer.init_analysis_environment.assert_not_called()
     refreshed = run_repo.get_run(run_id)
     assert refreshed is not None
@@ -236,12 +237,12 @@ async def test_run_analysis_core_skipped_claim_cleans_memory_task(db_session) ->
 
 def test_write_failure_to_db_persists_failed_terminal_state(db_session) -> None:
     """环境初始化前失败时，兜底写库应把任务持久化为 failed。"""
-    _insert_novel(db_session, "svcfail1")
+    _insert_novel(db_session, fixture_id(__name__, "svcfail1"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcfail1")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcfail1"))
     service = _make_service(db_session)
 
-    service._write_failure_to_db(run_id[:8], "初始化失败")
+    service._write_failure_to_db(task_for_run(run_id, db_session), "初始化失败")
     refreshed = run_repo.get_run(run_id)
 
     assert refreshed is not None
@@ -254,9 +255,9 @@ def test_claim_pending_run_closes_cancelling_window_to_cancelled(db_session) -> 
     """取消信号落在「worker 读 pending」与「原子 claim」之间时，
     claim 的 UPDATE 不命中且状态已变 cancelling；必须直接收口为 cancelled 终态。
     """
-    _insert_novel(db_session, "svccnc2")
+    _insert_novel(db_session, fixture_id(__name__, "svccnc2"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svccnc2")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svccnc2"))
     # 模拟用户 cancel 原子地把 pending -> cancelling（无 worker 归属）
     run_repo.request_task_cancellation(run_id)
     service = _make_service(db_session)
@@ -274,9 +275,9 @@ def test_claim_pending_run_closes_cancelling_window_to_cancelled(db_session) -> 
 
 def test_claim_pending_run_skips_cancelling_with_owner(db_session) -> None:
     """有 worker 归属的 cancelling 由该 worker 收尾，其他 worker 应跳过而非收口。"""
-    _insert_novel(db_session, "svccnc3")
+    _insert_novel(db_session, fixture_id(__name__, "svccnc3"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svccnc3")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svccnc3"))
     run_repo.request_task_cancellation(run_id)
     run_repo.update_run_task_fields(run_id, worker_id="owner-worker")
     service = _make_service(db_session)
@@ -296,9 +297,9 @@ async def test_run_analysis_core_persists_db_terminal_state_when_env_init_fails(
     必须通过兜底路径把 failed + error 写入 DB（不能只改内存任务状态）。
     """
 
-    _insert_novel(db_session, "svcfail3")
+    _insert_novel(db_session, fixture_id(__name__, "svcfail3"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcfail3")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcfail3"))
     service = _make_service(db_session)
 
     # 注意：不预先 claim——_run_analysis_core 内部会自行领取（首次 claim 必成功）；
@@ -306,8 +307,8 @@ async def test_run_analysis_core_persists_db_terminal_state_when_env_init_fails(
     service.env_initializer.init_analysis_environment = MagicMock(side_effect=RuntimeError("db 连接失败"))
 
     await service._run_analysis_core(
-        task_id=run_id[:8],
-        novel={"novel_id": "svcfail3"},
+        task_id=task_for_run(run_id, db_session),
+        novel={"novel_id": fixture_id(__name__, "svcfail3")},
         skip_stages_builder=MagicMock(),
         num_topics=25,
     )
@@ -322,13 +323,13 @@ async def test_run_analysis_core_persists_db_terminal_state_when_env_init_fails(
 @pytest.mark.asyncio
 async def test_recover_pending_tasks_schedules_pending_and_cancels_requested(db_session) -> None:
     """启动恢复应调度普通 pending，并直接取消已带 cancel_requested 的 pending。"""
-    _insert_novel(db_session, "svcrecov")
+    _insert_novel(db_session, fixture_id(__name__, "svcrecov"))
     run_repo = RunRepository(db_session)
-    scheduled_run_id = run_repo.create_run(novel_id="svcrecov")
-    cancelled_run_id = run_repo.create_run(novel_id="svcrecov")
+    scheduled_run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcrecov"))
+    cancelled_run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcrecov"))
     run_repo.update_run_task_fields(cancelled_run_id, cancel_requested=True)
     service = _make_service(db_session)
-    service.resume_task = AsyncMock(return_value=scheduled_run_id[:8])
+    service.resume_task = AsyncMock(return_value=task_for_run(scheduled_run_id, db_session))
 
     pending_runs = [run_repo.get_run(scheduled_run_id), run_repo.get_run(cancelled_run_id)]
     pending_runs = [run for run in pending_runs if run is not None]
@@ -341,7 +342,9 @@ async def test_recover_pending_tasks_schedules_pending_and_cancels_requested(db_
 
     assert scheduled_count == 1
     assert cancelled_count == 1
-    service.resume_task.assert_awaited_once_with("svcrecov", scheduled_run_id[:8])
+    service.resume_task.assert_awaited_once_with(
+        fixture_id(__name__, "svcrecov"), task_for_run(scheduled_run_id, db_session)
+    )
     assert refreshed_cancelled is not None
     assert refreshed_cancelled["status"] == "cancelled"
     assert refreshed_cancelled["cancel_requested"] is False
@@ -351,15 +354,15 @@ async def test_recover_pending_tasks_schedules_pending_and_cancels_requested(db_
 async def test_recover_pending_tasks_continues_after_unexpected_resume_failure(db_session) -> None:
     """单个 pending 恢复时报错时，后续 pending 仍应继续恢复。"""
 
-    _insert_novel(db_session, "svcrcv02")
+    _insert_novel(db_session, fixture_id(__name__, "svcrcv02"))
     run_repo = RunRepository(db_session)
-    first_run_id = run_repo.create_run(novel_id="svcrcv02")
-    failing_run_id = run_repo.create_run(novel_id="svcrcv02")
-    third_run_id = run_repo.create_run(novel_id="svcrcv02")
+    first_run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcrcv02"))
+    failing_run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcrcv02"))
+    third_run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcrcv02"))
     service = _make_service(db_session)
 
     async def _resume_task(_novel_id: str, task_id: str) -> str:
-        if task_id == failing_run_id[:8]:
+        if task_id == task_for_run(failing_run_id, db_session):
             raise RuntimeError("resume boom")
         return task_id
 
@@ -386,9 +389,9 @@ def test_is_recent_resume_reset_compares_heartbeat_in_utc(db_session) -> None:
 
     from src.workflows.service import _RESUME_RESET_WINDOW_SECONDS
 
-    _insert_novel(db_session, "svchb01")
+    _insert_novel(db_session, fixture_id(__name__, "svchb01"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svchb01")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svchb01"))
     service = _make_service(db_session)
     fresh_utc = datetime.now(UTC) - timedelta(seconds=_RESUME_RESET_WINDOW_SECONDS - 5)
 
@@ -424,12 +427,12 @@ async def test_run_analysis_core_emits_cancelled_event_when_claim_cancelled(db_s
     """claim 前取消必须补发 SSE task_cancelled 终态事件，
     否则已连接的客户端永远等不到取消信号
     """
-    _insert_novel(db_session, "svcevt1")
+    _insert_novel(db_session, fixture_id(__name__, "svcevt1"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcevt1")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcevt1"))
     run_repo.update_run_task_fields(run_id, cancel_requested=True)
     service = _make_service(db_session, worker_id="worker-evt1")
-    service.task_manager.create_task(run_id[:8], "svcevt1")
+    service.task_manager.create_task(task_for_run(run_id, db_session), "svcevt1")
 
     sent: list[tuple[str, str, dict]] = []
 
@@ -439,13 +442,15 @@ async def test_run_analysis_core_emits_cancelled_event_when_claim_cancelled(db_s
     monkeypatch.setattr("src.workflows.service.event_manager.send", fake_send)
 
     await service._run_analysis_core(
-        task_id=run_id[:8],
-        novel={"novel_id": "svcevt1"},
+        task_id=task_for_run(run_id, db_session),
+        novel={"novel_id": fixture_id(__name__, "svcevt1")},
         skip_stages_builder=MagicMock(),
         num_topics=25,
     )
 
-    assert sent == [(run_id[:8], "task_cancelled", {"stage": "cancelled", "message": "任务已取消"})]
+    assert sent == [
+        (task_for_run(run_id, db_session), "task_cancelled", {"stage": "cancelled", "message": "任务已取消"})
+    ]
     refreshed = run_repo.get_run(run_id)
     assert refreshed is not None
     assert refreshed["status"] == "cancelled"
@@ -458,11 +463,11 @@ async def test_run_analysis_core_cancel_after_stages_persists_cancelled(db_sessi
     """
     from src.workflows.analysis.error_handler import AnalysisErrorHandler
 
-    _insert_novel(db_session, "svcevt2")
+    _insert_novel(db_session, fixture_id(__name__, "svcevt2"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcevt2")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcevt2"))
     service = _make_service(db_session, worker_id="worker-evt2")
-    service.task_manager.create_task(run_id[:8], "svcevt2")
+    service.task_manager.create_task(task_for_run(run_id, db_session), "svcevt2")
     service.error_handler = AnalysisErrorHandler(
         task_service=service.task_service,
         task_manager=service.task_manager,
@@ -473,7 +478,7 @@ async def test_run_analysis_core_cancel_after_stages_persists_cancelled(db_sessi
     monkeypatch.setattr(
         service.env_initializer,
         "init_analysis_environment",
-        lambda task_id, novel: ("svcevt2", None, None, db_session, None, run_id),
+        lambda task_id, novel: ("svcevt2", None, None, storage_for(db_session), None, run_id),
     )
 
     async def _noop(*args, **kwargs) -> None:
@@ -482,8 +487,8 @@ async def test_run_analysis_core_cancel_after_stages_persists_cancelled(db_sessi
     monkeypatch.setattr(service, "_execute_analysis_stages", _noop)
 
     await service._run_analysis_core(
-        task_id=run_id[:8],
-        novel={"novel_id": "svcevt2"},
+        task_id=task_for_run(run_id, db_session),
+        novel={"novel_id": fixture_id(__name__, "svcevt2")},
         skip_stages_builder=MagicMock(),
         num_topics=25,
     )
@@ -504,9 +509,9 @@ async def test_error_handler_skips_terminal_write_when_run_reclaimed(db_session)
 
     from src.workflows.analysis.error_handler import AnalysisErrorHandler
 
-    _insert_novel(db_session, "svcgrd1")
+    _insert_novel(db_session, fixture_id(__name__, "svcgrd1"))
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="svcgrd1")
+    run_id = run_repo.create_run(novel_id=fixture_id(__name__, "svcgrd1"))
     # 模拟 resume 后新 worker 已接管
     run_repo.update_run_task_fields(
         run_id,
@@ -520,9 +525,9 @@ async def test_error_handler_skips_terminal_write_when_run_reclaimed(db_session)
     )
 
     await handler.handle_cancel(
-        task_id=run_id[:8],
-        novel_id="svcgrd1",
-        session=db_session,
+        task_id=task_for_run(run_id, db_session),
+        novel_id=fixture_id(__name__, "svcgrd1"),
+        session=storage_for(db_session),
         run_id=run_id,
         analysis_logger=None,
         bus=None,

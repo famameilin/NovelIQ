@@ -1,4 +1,8 @@
-"""SSE 路由：任务进度与 LLM 输出的推送端点"""
+"""
+SSE 路由
+
+说明: SSE 端点用于获取任务进度和 LLM 输出
+"""
 
 from __future__ import annotations
 
@@ -10,8 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse
 
 from src.sse.manager import event_manager
-from src.storage.db import get_session_factory
-from src.storage.repositories import RunRepository
+from src.storage import get_storage_factory
 
 router = APIRouter()
 
@@ -20,13 +23,14 @@ def _task_run_belongs_to_novel(task_id: str, novel_id: str) -> bool:
     """
     校验 SSE 目标任务存在且属于当前小说
 
-    按 run_id 前缀解析（与 /status 等路由同口径）；不存在或不属于该小说返回 404
+    按 run_id 前缀解析（与 /status 等路由同口径），防止对任意/编造的 task_id
+    建立 SSE 订阅并产生 event_manager 条目；任务不存在或不属于该小说直接 404。
     """
     try:
-        session_factory = get_session_factory()
-        with session_factory() as session:
-            run = RunRepository(session).get_run_by_run_id_prefix(task_id)
-            return run is not None and run.get("novel_id") == novel_id
+        session_factory = get_storage_factory()
+        session = session_factory()
+        run = session.runs.get_run_by_task_id(task_id)
+        return run is not None and run.get("novel_id") == novel_id
     except Exception:
         return False
 
@@ -35,10 +39,7 @@ def _task_run_belongs_to_novel(task_id: str, novel_id: str) -> bool:
 async def sse_endpoint(novel_id: str, task_id: str, request: Request) -> EventSourceResponse:
     """SSE 端点：获取任务进度和 LLM 输出"""
     if not _task_run_belongs_to_novel(task_id, novel_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任务不存在或不属于该小说",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在或不属于该小说")
     last_seq = _resolve_last_seq(request)
     queue = await event_manager.connect(task_id, last_seq=last_seq)
 
@@ -74,12 +75,7 @@ async def sse_endpoint(novel_id: str, task_id: str, request: Request) -> EventSo
                 event_type = message.get("type", "message")
                 data = message.get("data", {})
                 seq = message.get("seq", 0)
-
-                yield {
-                    "event": event_type,
-                    "id": str(seq),
-                    "data": json.dumps(data, ensure_ascii=False),
-                }
+                yield {"event": event_type, "id": str(seq), "data": json.dumps(data, ensure_ascii=False)}
         except asyncio.CancelledError:
             raise
         finally:
@@ -94,10 +90,7 @@ def _resolve_last_seq(request: Request) -> int | None:
 
     头优先；取首个合法非负 int，两者都缺失或非法时返回 None（回放全部缓冲）
     """
-    for raw in (
-        request.headers.get("last-event-id"),
-        request.query_params.get("last_seq"),
-    ):
+    for raw in (request.headers.get("last-event-id"), request.query_params.get("last_seq")):
         if raw is None:
             continue
         try:

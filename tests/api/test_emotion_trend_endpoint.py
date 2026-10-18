@@ -23,6 +23,7 @@ from tests.support.paragraph_fixtures import (
     make_metric_row,
     make_span,
 )
+from tests.support.storage_fixtures import task_for_run
 
 
 def _insert_100_paragraph_run(db_session) -> tuple[str, str]:
@@ -76,7 +77,7 @@ def test_emotion_trend_contract_fields_and_window_math(api_client: TestClient, d
 
     response = api_client.get(
         f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8], "window_paragraphs": 5},
+        params={"task_id": task_for_run(run_id, db_session), "window_paragraphs": 5},
     )
 
     assert response.status_code == 200
@@ -115,7 +116,7 @@ def test_emotion_trend_full_range_by_default(api_client: TestClient, db_session)
 
     response = api_client.get(
         f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8]},
+        params={"task_id": task_for_run(run_id, db_session)},
     )
 
     assert response.status_code == 200
@@ -132,7 +133,7 @@ def test_emotion_trend_range_rebuckets_within_selection(api_client: TestClient, 
     # position 0.4~0.6 → 中点 200~300 → 段 40..59，共 20 段
     response = api_client.get(
         f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8], "range": "0.4,0.6", "window_paragraphs": 5},
+        params={"task_id": task_for_run(run_id, db_session), "range": "0.4,0.6", "window_paragraphs": 5},
     )
 
     assert response.status_code == 200
@@ -153,7 +154,7 @@ def test_emotion_trend_deep_zoom_returns_partial_window(api_client: TestClient, 
     # 段 10..12 的中点分别为 52.5 / 57.5 / 62.5（/500）
     response = api_client.get(
         f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8], "range": "0.10,0.13", "window_paragraphs": 20},
+        params={"task_id": task_for_run(run_id, db_session), "range": "0.10,0.13", "window_paragraphs": 20},
     )
 
     assert response.status_code == 200
@@ -170,11 +171,11 @@ def test_emotion_trend_clamps_window_paragraphs(api_client: TestClient, db_sessi
 
     low_response = api_client.get(
         f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8], "window_paragraphs": 1},
+        params={"task_id": task_for_run(run_id, db_session), "window_paragraphs": 1},
     )
     high_response = api_client.get(
         f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8], "window_paragraphs": 41},
+        params={"task_id": task_for_run(run_id, db_session), "window_paragraphs": 41},
     )
     assert low_response.status_code == 200
     assert high_response.status_code == 200
@@ -187,13 +188,13 @@ def test_emotion_trend_rejects_invalid_range(api_client: TestClient, db_session)
 
     one_sided = api_client.get(
         f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8], "range": "0.4"},
+        params={"task_id": task_for_run(run_id, db_session), "range": "0.4"},
     )
     assert one_sided.status_code == 422
 
     inverted = api_client.get(
         f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8], "range": "0.6,0.4"},
+        params={"task_id": task_for_run(run_id, db_session), "range": "0.6,0.4"},
     )
     assert inverted.status_code == 422
 
@@ -203,7 +204,7 @@ def test_emotion_trend_rejects_non_completed_run(api_client: TestClient, db_sess
 
     response = api_client.get(
         f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8]},
+        params={"task_id": task_for_run(run_id, db_session)},
     )
 
     assert response.status_code == 400
@@ -260,7 +261,7 @@ def test_emotion_trend_skips_paragraphs_without_metrics(api_client: TestClient, 
 
     response = api_client.get(
         f"/api/novels/{novel_id}/emotion-trend",
-        params={"task_id": run_id[:8], "window_paragraphs": 5},
+        params={"task_id": task_for_run(run_id, db_session), "window_paragraphs": 5},
     )
 
     assert response.status_code == 200

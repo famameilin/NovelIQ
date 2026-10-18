@@ -4,6 +4,8 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from tests.support.storage_fixtures import fixture_id
+
 
 class TestErrorHandling:
     """测试错误处理"""
@@ -13,7 +15,7 @@ class TestErrorHandling:
 
         NovelNotFoundError 应返回 404（资源不存在），而非 400
         """
-        response = api_client.get("/api/novels/nonexistent/results?task_id=nonexist")
+        response = api_client.get(f"/api/novels/{fixture_id(__name__, 'nonexistent')}/results?task_id=nonexist")
         assert response.status_code == 404
         data = response.json()
         assert "detail" in data
@@ -36,7 +38,7 @@ class TestErrorHandling:
         错误详情只写日志，对外返回通用文案。
         """
         with patch(
-            "src.storage.db.get_session",
+            "src.storage.read_access.ReadAccess.api_main_health_check_1",
             side_effect=RuntimeError("connection refused: postgres://user:secret@internal-host:5432/db"),
         ):
             response = api_client.get("/health")
@@ -53,7 +55,7 @@ class TestErrorHandling:
         """统一错误 body 契约：路由内 HTTPException（404/409 等）与自定义异常处理器
         统一为三字段格式 {detail, error_type, status_code}。
         """
-        response = api_client.get("/api/novels/not-exist-novel-abc")
+        response = api_client.get(f"/api/novels/{fixture_id(__name__, 'not-exist-novel-abc')}")
         assert response.status_code == 404
         body = response.json()
         assert set(body.keys()) == {"detail", "error_type", "status_code"}
@@ -66,7 +68,7 @@ class TestErrorHandling:
         detail 为可读字符串而非 FastAPI 默认的 [{loc,msg,type}] 列表。
         """
         # timeline 缺 task_id 查询参数 → 确定性 422
-        response = api_client.get("/api/novels/not-exist-novel-abc/timeline")
+        response = api_client.get(f"/api/novels/{fixture_id(__name__, 'not-exist-novel-abc')}/timeline")
         assert response.status_code == 422
         body = response.json()
         assert set(body.keys()) == {"detail", "error_type", "status_code"}

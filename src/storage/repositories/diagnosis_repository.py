@@ -32,9 +32,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def _text_by_chapter_id(self, run_id: str) -> dict[int, str]:
         """构建诊断素材的章节原文映射（正文切片与章节目录同键）"""
-        stmt = select(Chapter.chapter_id, Chapter.text).where(
-            Chapter.run_id == run_id, Chapter.text.is_not(None)
-        )
+        stmt = select(Chapter.chapter_id, Chapter.text).where(Chapter.run_id == run_id, Chapter.text.is_not(None))
         return {int(row.chapter_id): str(row.text) for row in self.session.execute(stmt).all()}
 
     def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, float]]:

@@ -1,8 +1,11 @@
-"""结果导出服务：负责结果导出的数据获取和组装
+"""
+结果导出服务
+
+说明: 从 results.py 提取的结果导出逻辑，负责数据获取和组装
 
 本模块保留 build_export_payload/fetch_all_results_data，并 re-export 全部装载函数与
-结果获取依赖；装载函数按调用期经本模块命名空间解析同名依赖（tests 会对本模块命名空间
-中的 _fetch_* 与 get_metrics_service 打补丁）。
+结果获取依赖（tests 会对本模块命名空间中的 _fetch_* 与 get_metrics_service 打补丁，
+装载函数亦按调用期经本模块命名空间解析同名依赖，语义保持不变）。
 """
 
 from __future__ import annotations
@@ -39,11 +42,8 @@ from src.api.services.results_queries import (
 from src.api.services.results_queries.diagnosis import _has_diagnosis_result
 from src.config import settings
 from src.fact_graph.read import KnowledgeGraphAuthorityService
-from src.storage.repositories import (
-    AnnotationRepository,
-    ChapterRepository,
-    StatsRepository,
-)
+from src.storage import Storage
+from src.storage.contracts.stores import ChapterStore, StatisticsStore
 
 __all__ = [
     "_fetch_character_relations",
@@ -124,9 +124,9 @@ def fetch_all_results_data(
     novel_id: str,
     task_id: str,
     run_id: str,
-    stats_repo: StatsRepository,
-    annotation_repo: AnnotationRepository,
-    chapter_repo: ChapterRepository,
+    stats_repo: StatisticsStore,
+    annotation_repo: Storage,
+    chapter_repo: ChapterStore,
 ) -> tuple[dict[str, Any], list[str], str | None]:
     """
     获取所有分析结果数据
@@ -134,9 +134,9 @@ def fetch_all_results_data(
     from src.event_trees.read.organization import EventTreeQuery
 
     # 全结果包含正式事件树，先检查版本，避免历史运行落入其他装配错误后变成 500
-    event_tree_data = EventTreeQuery(stats_repo.session, run_id).export()
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
-    graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
+    event_tree_data = EventTreeQuery(annotation_repo, run_id).export()
+    diagnosis = _fetch_diagnosis(run_id, novel_id, annotation_repo)
+    graph_authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo)
     graph_authority_service.assert_graph_ready(run_id)
     export_graph_view = graph_authority_service.build_export_view(run_id)
     graph_report = graph_authority_service.build_graph_report(run_id)
@@ -184,7 +184,7 @@ def fetch_all_results_data(
     timeline_data = _fetch_timeline_data(
         run_id=run_id,
         chapter_repo=chapter_repo,
-        stats_repo=stats_repo,
+        storage=annotation_repo,
     )
     if not timeline_data:
         missing_fields.append("timeline")

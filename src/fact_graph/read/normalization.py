@@ -8,16 +8,16 @@ from loguru import logger
 
 from src.fact_graph.character_reference_policy import decide_character_reference
 from src.fact_graph.read import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
-from src.storage.repositories import AnnotationRepository
+from src.storage import Storage
 
 
 def build_name_resolution(
-    annotation_repo: AnnotationRepository,
+    annotation_repo: Storage,
     run_id: str,
     preferred_names: list[str] | None = None,
 ) -> dict[str, str]:
     """把别名角色名归一到代表角色名"""
-    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo)
     entities = authority_service.build_export_view(run_id).canonical_entities
     preferred = set(preferred_names or [])
     name_resolution: dict[str, str] = {}
@@ -105,7 +105,7 @@ def partition_chapter_relations(
                 "resolved_to_global_name": to_char,
                 "reference_skip_reason": None,
                 "type": graph_change.relation_type or "",
-                # changes 为空时兜底，避免 IndexError
+                # changes 为空时兜底，避免隐式不变量破坏后 IndexError
                 "change": str(graph_change.changes[0].get("change_kind") or "refine")
                 if graph_change.changes
                 else "refine",

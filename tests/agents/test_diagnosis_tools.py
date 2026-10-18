@@ -8,13 +8,14 @@ import pytest
 from src.agents.diagnosis.case_write_tools import CASE_WRITE_TOOL_NAMES
 from src.agents.diagnosis.tools import build_diagnosis_tools
 from tests.agents.test_complete_event_invariants import draft_case as draft_case
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 def _build_tools(ledger=None, role="case", **kwargs):
     return {
         item.name: item
         for item in build_diagnosis_tools(
-            MagicMock(), "run", role=role, evidence_ledger=ledger, **kwargs
+            storage_for(MagicMock()), fixture_id(__name__, "run"), role=role, evidence_ledger=ledger, **kwargs
         )
     }
 
@@ -63,11 +64,11 @@ def test_case_write_channel_mounts_only_with_binding_and_requires_caseid():
 def test_read_metrics_keeps_original_signals_and_named_material_fields():
     ledger = MagicMock()
     with (
-        patch("src.storage.repositories.StatsRepository") as stats,
+        patch("src.storage.access.StatisticsAccess.fetch_global_stats_dict") as stats,
         patch("src.diagnosis.queries.DiagnosisQueries", return_value=_materials()),
         patch("src.agents.diagnosis.tools.graph_signals", return_value={"nodes": 10}),
     ):
-        stats.return_value.fetch_global_stats_dict.return_value = {"tension": 0.8, "pace": 0.5}
+        stats.return_value = {"tension": 0.8, "pace": 0.5}
         data = json.loads(_build_tools(ledger, role="report")["read_metrics"].invoke({}))
     assert data["aggregate"] == {"tension": 0.8, "pace": 0.5}
     assert data["pivots"] == [{"chapter_id": 3, "text": "转折原文", "event_type": "高潮"}]
@@ -83,11 +84,11 @@ def test_read_metrics_keeps_foreshadowing_and_does_not_turn_empty_data_into_fail
     repo.fetch_high_tension_chunks.return_value = []
     repo.fetch_foreshadowing_sources.return_value = [{"declaration_id": "actual-id", "summary": "庇护约定"}]
     with (
-        patch("src.storage.repositories.StatsRepository") as stats,
+        patch("src.storage.access.StatisticsAccess.fetch_global_stats_dict") as stats,
         patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo),
         patch("src.agents.diagnosis.tools.graph_signals", return_value={}),
     ):
-        stats.return_value.fetch_global_stats_dict.return_value = {}
+        stats.return_value = {}
         data = json.loads(_build_tools(role="report")["read_metrics"].invoke({}))
     assert data["aggregate"] == {} and data["pivots"] == []
     assert data["foreshadowing"] == [{"declaration_id": "actual-id", "summary": "庇护约定"}]
@@ -95,11 +96,11 @@ def test_read_metrics_keeps_foreshadowing_and_does_not_turn_empty_data_into_fail
 
 def test_metric_service_failure_is_raised_without_fake_empty_signals():
     with (
-        patch("src.storage.repositories.StatsRepository") as stats,
+        patch("src.storage.access.StatisticsAccess.fetch_global_stats_dict") as stats,
         patch("src.diagnosis.queries.DiagnosisQueries", return_value=_materials()),
         patch("src.agents.diagnosis.tools.graph_signals", side_effect=ConnectionError("graph dependency unavailable")),
     ):
-        stats.return_value.fetch_global_stats_dict.return_value = {}
+        stats.return_value = {}
         with pytest.raises(ConnectionError, match="dependency unavailable"):
             _build_tools(role="report")["read_metrics"].invoke({})
 
@@ -129,10 +130,10 @@ def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_cas
     tools = {
         item.name: item
         for item in build_diagnosis_tools(
-            draft.session,
+            storage_for(draft.fixture_session),
             draft.run_id,
             organization_draft=draft,
-            execution_id="batch",
+            execution_id=fixture_id(__name__, "batch"),
         )
     }
     ids = list(draft._declarations())

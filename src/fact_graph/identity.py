@@ -1,19 +1,23 @@
-"""事实图关系稳定身份，领域规则不由数据库仓储解释"""
+"关系业务键的端点归一化"
 
-from __future__ import annotations
+from typing import Any
 
-from uuid import NAMESPACE_URL, uuid5
+from src.fact_graph.vocabulary import RELATION_DEFINITIONS
 
 
-def relation_id(
-    run_id: str,
-    from_entity_id: str,
-    to_entity_id: str,
+def canonical_relation_key(
+    from_entity_id: Any,
+    to_entity_id: Any,
     relation_type: str,
-    directionality: str,
-) -> str:
-    """双向关系按端点排序生成身份，与投递或物化顺序无关"""
-    left_id, right_id = from_entity_id, to_entity_id
-    if directionality == "bidirectional" and left_id > right_id:
-        left_id, right_id = right_id, left_id
-    return str(uuid5(NAMESPACE_URL, f"noveliq:relation:{run_id}:{left_id}:{right_id}:{relation_type}:{directionality}"))
+) -> tuple[Any, Any, str]:
+    "双向关系按端点排序，定向关系保留端点顺序"
+    definition = RELATION_DEFINITIONS.get(relation_type)
+    if (
+        definition is not None
+        and definition["directionality"] == "bidirectional"
+        and from_entity_id is not None
+        and to_entity_id is not None
+        and str(from_entity_id) > str(to_entity_id)
+    ):
+        return to_entity_id, from_entity_id, relation_type
+    return from_entity_id, to_entity_id, relation_type

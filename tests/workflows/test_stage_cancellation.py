@@ -39,9 +39,7 @@ async def test_run_cancellable_interrupts_long_wait() -> None:
             interrupted.set()
 
     signal = {"cancelled": False}
-    task = asyncio.create_task(
-        run_cancellable(long_running(), lambda: signal["cancelled"], poll_seconds=0.01)
-    )
+    task = asyncio.create_task(run_cancellable(long_running(), lambda: signal["cancelled"], poll_seconds=0.01))
     await asyncio.sleep(0.05)
     signal["cancelled"] = True
 

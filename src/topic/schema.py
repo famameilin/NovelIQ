@@ -111,9 +111,7 @@ class TopicModel:
             )
         raw_dist = self.lda_model.get_document_topics(bow, minimum_probability=0.0)
         weights: dict[int, float] = dict(raw_dist)
-        distribution = tuple(
-            (topic_id, float(weights.get(topic_id, 0.0))) for topic_id in range(self.num_topics)
-        )
+        distribution = tuple((topic_id, float(weights.get(topic_id, 0.0))) for topic_id in range(self.num_topics))
         distribution_sum = float(sum(weight for _, weight in distribution))
         return ParagraphInferenceResult(
             inference_status=INFERENCE_COMPLETE,

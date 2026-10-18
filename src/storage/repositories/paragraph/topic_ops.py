@@ -1,20 +1,8 @@
-"""
-主题链路（LDA 构建事实 / inference / paragraph_topics）
-
-paragraph_topics 只保存完整 K 维主题权重（分母不在此表重复保存）。
-
-- LDA 实际构建写 analysis_runs 的 lda_* 具名列；model_key 按固定实现合同投影、
-  artifact_key 按 resolve_model_dir 投影、inference_paragraph_count 由正式推断
-  状态聚合，三者不落列
-- 段落推断状态写 paragraph_metrics 的 inference_* 列；固定原因说明由固定状态
-  合同投影，不建原因词典表
-- 主题建模完成事实写 analysis_runs.topic_completed_at
-"""
+"主题链路（ LDA 构建事实 /  inference /  paragraph_topics）"
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -32,6 +20,7 @@ from src.storage.models import (
     ParagraphMetric,
     ParagraphTopic,
 )
+from src.storage.records.topic import TopicModelRunContract
 from src.storage.repositories.metric_inputs import (
     global_start_char_projection,
     net_density_projection,
@@ -53,52 +42,13 @@ def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-@dataclass(frozen=True)
-class TopicModelRunContract:
-    """主题模型读取模型（属性面取自 analysis_runs.lda_*）
-
-    保持属性面（含 model_key / artifact_key / inference_paragraph_count），
-    三个投影值不落库，由实现合同、artifact 解析器与正式推断状态聚合得到。
-    """
-
-    run_id: str
-    library_version: str
-    pipeline_version: str
-    num_topics: int
-    passes: int
-    iterations: int
-    alpha: float
-    eta: float
-    random_state: int
-    lda_batch_size: int
-    minimum_probability: float
-    dictionary_size: int
-    training_document_count: int
-    inference_paragraph_count: int
-    model_key: str
-    artifact_key: str
-    created_at: datetime | None = None
-
-
-def project_topic_model_key() -> str:
-    """model_key 读投影：当前固定 LDA 实现的模型合同标识（src.topic.schema）"""
-    from src.topic.schema import TOPIC_MODEL_KEY
-
-    return TOPIC_MODEL_KEY
-
-
 def project_topic_artifact_key(run_id: str) -> str:
-    """artifact_key 读投影：按当前 resolve_model_dir 与项目根规则解析"""
+    "artifact_key 读投影：按当前 resolve_model_dir 与项目根规则解析"
     return str(resolve_model_dir(run_id).relative_to(resolve_project_root()).as_posix())
 
 
 def _prior_scalar(raw: object, *, num_topics: int, field_name: str) -> float:
-    """LDA 先验拆列：数值直接取；字符串选择器按 gensim 合同取对称先验 1/K
-
-    当前算法合同允许 alpha/eta 传 "auto"/"symmetric"（settings 默认 auto）：
-    symmetric 的合同值即 1/K；auto 表示训练时从语料学习非对称先验，学习
-    结果是 K 维向量，当前合同列只保存标量，按初始化值 1/K 记录。
-    """
+    "LDA 先验拆列：数值直接取；字符串选择器按 gensim 合同取对称先验 1/K"
     if isinstance(raw, str):
         if raw not in {"auto", "symmetric"}:
             raise ValueError(f"analysis_runs.lda_{field_name} 无法用标量表达的先验选择器: {raw!r}")
@@ -111,7 +61,7 @@ def _prior_scalar(raw: object, *, num_topics: int, field_name: str) -> float:
 
 
 def _lda_parameter_columns(parameters: Mapping[str, Any], *, num_topics: int) -> dict[str, Any]:
-    """parameters 拆分列：缺失键按当前算法合同（settings）补齐；K 只在 lda_num_topics 列"""
+    "parameters 拆分列：缺失键按当前算法合同（settings）补齐；K 只在 lda_num_topics 列"
     return {
         "lda_passes": int(parameters.get("passes") or settings.topic_model.passes),
         "lda_iterations": int(parameters.get("iterations") or settings.topic_model.iterations),
@@ -143,18 +93,7 @@ def insert_topic_model_run(
     inference_paragraph_count: int,
     artifact_key: str,
 ) -> None:
-    """写入 run 的 LDA 实际构建事实（analysis_runs.lda_* 具名列）
-
-    model_key/artifact_key/inference_paragraph_count 为合同投影，不落列
-    （inference_paragraph_count 由推断状态聚合、artifact 由解析器投影）。
-    model_key 与固定实现不一致时报错，避免静默写错模型身份。
-    写入同时登记主题阶段真实完成事实 topic_completed_at。
-    """
-    expected_model_key = project_topic_model_key()
-    if model_key != expected_model_key:
-        raise ValueError(
-            f"LDA 模型身份是固定实现合同投影，当前仅支持 {expected_model_key!r}，收到 {model_key!r}"
-        )
+    "写入 run 的 LDA 实际构建事实（analysis_runs.lda_* 具名列）"
     session.execute(
         update(AnalysisRun)
         .where(AnalysisRun.run_id == run_id)
@@ -172,7 +111,7 @@ def insert_topic_model_run(
 
 
 def fetch_complete_inference_count(session: Session, run_id: str) -> int:
-    """inference_paragraph_count 读投影：正式推断状态为 complete 的段落数"""
+    "inference_paragraph_count 读投影：正式推断状态为 complete 的段落数"
     count = session.execute(
         select(func.count())
         .select_from(ParagraphMetric)
@@ -185,7 +124,7 @@ def fetch_complete_inference_count(session: Session, run_id: str) -> int:
 
 
 def fetch_topic_model_run(session: Session, run_id: str) -> TopicModelRunContract | None:
-    """读取 run 的 LDA 实际构建行（含 model_key/artifact_key/推断段落数投影）"""
+    "读取 run 的 LDA 实际构建行（含 model_key/artifact_key/推断段落数投影）"
     row = session.execute(
         select(
             AnalysisRun.lda_library_version,
@@ -220,7 +159,6 @@ def fetch_topic_model_run(session: Session, run_id: str) -> TopicModelRunContrac
         dictionary_size=int(row.lda_dictionary_size or 0),
         training_document_count=int(row.lda_training_document_count or 0),
         inference_paragraph_count=fetch_complete_inference_count(session, run_id),
-        model_key=project_topic_model_key(),
         artifact_key=project_topic_artifact_key(run_id),
         created_at=row.lda_created_at,
     )
@@ -231,24 +169,7 @@ def insert_paragraph_topic_inferences(
     run_id: str,
     rows: Sequence[tuple[int, int, int, str, str | None, float | None]],
 ) -> int:
-    """
-    全量 upsert 写入 run 的段落推断事实（paragraph_metrics.inference_* 列）
-
-    rows: (paragraph_id, source_token_count, inference_token_count,
-           inference_status, unavailable_reason, distribution_sum)
-
-    只写正式事实（推断 token 数与状态）：source_token_count 从
-    paragraph_metrics.token_count 读、固定说明由固定状态合同投影、
-    distribution_sum 由正式 K 维权重聚合，三者写入时一律忽略。
-    真实异常文字（error_text）只在状态为 failed 且有实际消息时写入。
-
-    重跑语义：rows 覆盖本 run 全部段落（调用方按 fetch_paragraph_rows 全量构造），
-    逐行覆盖旧推断事实即完成重新计算。禁止在 upsert 前做全量"清空推断列"的
-    UPDATE：paragraph_metrics 上的延迟约束触发器
-    trg_dc_paragraph_metric_inference_rows 在提交时按每条修改行的当时版本校验
-    （计数读提交时的最终主题行）——清空会把旧 complete 行记成 status=<NULL>
-    修改事件，与重跑写入的最终主题行形成假冲突，同 run 重跑会在提交时被拒。
-    """
+    "全量 upsert 写入 run 的段落推断事实（paragraph_metrics.inference_* 列）"
     inference_rows = [
         {
             "run_id": run_id,
@@ -285,26 +206,21 @@ def insert_paragraph_topic_inferences(
 
 
 def clear_paragraph_topic_inferences(session: Session, run_id: str) -> None:
-    """清空 run 的段落推断状态列（纯清理场景专用）
-
-    禁止把它当作"重跑先清"步骤：全量清空会产生 complete→NULL 修改事件，
-    与随后重跑写入的最终主题行在提交时假冲突（延迟约束触发器按修改行当时
-    版本校验）；重跑覆盖统一走 insert_paragraph_topic_inferences 的全量 upsert。
-    """
+    "清空 run 的段落推断状态列（纯清理场景专用）"
     session.execute(
         update(ParagraphMetric).where(ParagraphMetric.run_id == run_id).values(**dict.fromkeys(_INFERENCE_COLUMNS))
     )
 
 
 def fetch_topic_inference_total(session: Session, run_id: str) -> int | None:
-    """全书主题推断分母：所有段落的 inference_token_count 之和"""
+    "全书主题推断分母：所有段落的 inference_token_count 之和"
     return session.execute(
         select(func.sum(ParagraphMetric.inference_token_count)).where(ParagraphMetric.run_id == run_id)
     ).scalar_one_or_none()
 
 
 def fetch_chapter_inference_totals(session: Session, run_id: str) -> Sequence[Row]:
-    """按章节返回推断 token 分母（每段一格，章节聚合分母）"""
+    "按章节返回推断 token 分母（每段一格， 章节聚合分母）"
     stmt = (
         select(
             Chapter.chapter_id,
@@ -316,8 +232,7 @@ def fetch_chapter_inference_totals(session: Session, run_id: str) -> Sequence[Ro
         .join(Paragraph, (Paragraph.run_id == Chapter.run_id) & (Paragraph.chapter_id == Chapter.chapter_id))
         .join(
             ParagraphMetric,
-            (ParagraphMetric.run_id == Paragraph.run_id)
-            & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
+            (ParagraphMetric.run_id == Paragraph.run_id) & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
         )
         .where(Paragraph.run_id == run_id)
         .group_by(Chapter.chapter_id, Chapter.sequence, Chapter.title)
@@ -327,22 +242,15 @@ def fetch_chapter_inference_totals(session: Session, run_id: str) -> Sequence[Ro
 
 
 def fetch_topic_emotion_aggregates(session: Session, run_id: str) -> Sequence[Row]:
-    """主题-情感分子分母：净密度为 NULL 的段落在 SQL 层同时排除
-
-    净密度由指标分子/分母的读投影给出（token_count=0 或指标行缺失即 NULL）。
-    """
+    "主题-情感分子分母：净密度为 NULL 的段落在 SQL 层同时排除"
     net_density = net_density_projection()
     stmt = (
         select(
             ParagraphTopic.topic_id,
-            func.sum(
-                ParagraphTopic.topic_weight
-                * ParagraphMetric.inference_token_count
-                * net_density
-            ).label("emotion_total"),
-            func.sum(ParagraphTopic.topic_weight * ParagraphMetric.inference_token_count).label(
-                "weighted_token_total"
+            func.sum(ParagraphTopic.topic_weight * ParagraphMetric.inference_token_count * net_density).label(
+                "emotion_total"
             ),
+            func.sum(ParagraphTopic.topic_weight * ParagraphMetric.inference_token_count).label("weighted_token_total"),
         )
         .select_from(ParagraphTopic)
         .join(
@@ -365,12 +273,7 @@ def insert_paragraph_topics(
     run_id: str,
     rows: Sequence[tuple[int, int, float]],
 ) -> int:
-    """
-    先清后插写入 run 的段落主题行（同 run 重跑语义是"重新计算"）
-
-    rows: (paragraph_id, topic_id, topic_weight)；完整 K 维分布由调用方保证，
-    token 分母不在此表重复保存
-    """
+    '先清后插写入 run 的段落主题行（同 run 重跑语义是"重新计算"）'
     topic_rows = [
         {
             "run_id": run_id,
@@ -389,24 +292,16 @@ def insert_paragraph_topics(
 
 
 def clear_paragraph_topics(session: Session, run_id: str) -> None:
-    """清空 run 的段落主题行"""
+    "清空 run 的段落主题行"
     session.execute(delete(ParagraphTopic).where(ParagraphTopic.run_id == run_id))
 
 
 def fetch_paragraph_topics_agg(session: Session, run_id: str) -> Sequence[Row]:
-    """
-    全书主题分子：按主题返回 token 加权和
-
-    分母为全书所有段落的 inference_token_count 之和，
-    由 fetch_topic_inference_total 提供；归一化在调用方完成。
-    禁止对段落等权求和。
-    """
+    "全书主题分子：按主题返回 token 加权和"
     stmt = (
         select(
             ParagraphTopic.topic_id,
-            func.sum(ParagraphTopic.topic_weight * ParagraphMetric.inference_token_count).label(
-                "weighted_total"
-            ),
+            func.sum(ParagraphTopic.topic_weight * ParagraphMetric.inference_token_count).label("weighted_total"),
         )
         .select_from(ParagraphTopic)
         .join(
@@ -421,33 +316,24 @@ def fetch_paragraph_topics_agg(session: Session, run_id: str) -> Sequence[Row]:
 
 
 def fetch_chapter_topic_aggregates(session: Session, run_id: str) -> Sequence[Row]:
-    """
-    章节主题分子：按章节返回主题 token 加权和
-
-    章节边界用 paragraphs.chapter_id 关联 chapters 并按 chapters.sequence
-    排序，不使用段落列表下标推断章节；分母与归一化在调用方完成。
-    """
+    "章节主题分子：按章节返回主题 token 加权和"
     stmt = (
         select(
             Chapter.chapter_id,
             Chapter.sequence,
             Chapter.title,
             ParagraphTopic.topic_id,
-            func.sum(ParagraphTopic.topic_weight * ParagraphMetric.inference_token_count).label(
-                "weighted_total"
-            ),
+            func.sum(ParagraphTopic.topic_weight * ParagraphMetric.inference_token_count).label("weighted_total"),
         )
         .select_from(Chapter)
         .join(Paragraph, (Paragraph.run_id == Chapter.run_id) & (Paragraph.chapter_id == Chapter.chapter_id))
         .join(
             ParagraphMetric,
-            (ParagraphMetric.run_id == Paragraph.run_id)
-            & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
+            (ParagraphMetric.run_id == Paragraph.run_id) & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
         )
         .join(
             ParagraphTopic,
-            (ParagraphTopic.run_id == Paragraph.run_id)
-            & (ParagraphTopic.paragraph_id == Paragraph.paragraph_id),
+            (ParagraphTopic.run_id == Paragraph.run_id) & (ParagraphTopic.paragraph_id == Paragraph.paragraph_id),
         )
         .where(Paragraph.run_id == run_id)
         .group_by(Chapter.chapter_id, Chapter.sequence, Chapter.title, ParagraphTopic.topic_id)
@@ -457,13 +343,7 @@ def fetch_chapter_topic_aggregates(session: Session, run_id: str) -> Sequence[Ro
 
 
 def fetch_paragraph_topic_rows(session: Session, run_id: str) -> Sequence[Row]:
-    """
-    段落主题序列数据：段落真实字符位置、章节序列与推断 token 数齐备
-
-    全文起点由 chapters.char_offset + 段落章内起点投影；
-    返回: (paragraph_id, chapter_id, chapter_sequence, global_start_char,
-           inference_token_count, topic_id, topic_weight)
-    """
+    "段落主题序列数据：段落真实字符位置、章节序列与"
     global_start_char = global_start_char_projection()
     stmt = (
         select(
@@ -479,13 +359,11 @@ def fetch_paragraph_topic_rows(session: Session, run_id: str) -> Sequence[Row]:
         .join(Chapter, (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id))
         .join(
             ParagraphMetric,
-            (ParagraphMetric.run_id == Paragraph.run_id)
-            & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
+            (ParagraphMetric.run_id == Paragraph.run_id) & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
         )
         .join(
             ParagraphTopic,
-            (ParagraphTopic.run_id == Paragraph.run_id)
-            & (ParagraphTopic.paragraph_id == Paragraph.paragraph_id),
+            (ParagraphTopic.run_id == Paragraph.run_id) & (ParagraphTopic.paragraph_id == Paragraph.paragraph_id),
         )
         .where(Paragraph.run_id == run_id)
         .order_by(global_start_char, ParagraphTopic.topic_id)

@@ -884,9 +884,7 @@ class RestrictedProgramRuntime:
                 try:
                     return int(target) if name == "int" else float(target)
                 except ValueError:
-                    raise ProgramFault(
-                        f"{name} 不能转换该字符串", code="runtime_error", line=line
-                    ) from None
+                    raise ProgramFault(f"{name} 不能转换该字符串", code="runtime_error", line=line) from None
             if isinstance(target, (int, float)):
                 return int(target) if name == "int" else float(target)
             raise ProgramFault(f"{name} 只接受数字或数字字符串", code="runtime_error", line=line)
@@ -906,9 +904,7 @@ class RestrictedProgramRuntime:
             except ValueError:
                 raise ProgramFault(f"{name} 不能用于空序列", code="runtime_error", line=line) from None
             except TypeError:
-                raise ProgramFault(
-                    f"{name} 的元素类型不一致，无法比较", code="runtime_error", line=line
-                ) from None
+                raise ProgramFault(f"{name} 的元素类型不一致，无法比较", code="runtime_error", line=line) from None
         if name == "abs":
             if len(values) != 1 or type(values[0]) not in (int, float):
                 raise ProgramFault("abs 只接受 1 个数字", code="runtime_error", line=line)
@@ -926,9 +922,7 @@ class RestrictedProgramRuntime:
             try:
                 return sorted(values[0])
             except TypeError:
-                raise ProgramFault(
-                    "sorted 的元素类型不一致，无法排序", code="runtime_error", line=line
-                ) from None
+                raise ProgramFault("sorted 的元素类型不一致，无法排序", code="runtime_error", line=line) from None
         if name == "enumerate":
             if not 1 <= len(values) <= 2 or not isinstance(values[0], (list, tuple)):
                 raise ProgramFault("enumerate 接受一个列表/元组与可选起始值", code="bad_call", line=line)

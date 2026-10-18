@@ -12,8 +12,10 @@ from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
 from src.audit.queries import fetch_agent_turns
 from src.audit.recorder import AgentAuditRecorder
 from src.fact_graph.inputs import ChapterParagraphInfo
+from src.storage import new_id
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
+from tests.support.storage_fixtures import storage_factory, storage_for
 
 
 def _chunk_paragraph_info(text: str) -> ChapterParagraphInfo:
@@ -186,7 +188,7 @@ def _event_calls(
                 "event_type": "行动",
                 "status": "ongoing",
             },
-            call_id=f"{call_id}-root",
+            call_id=new_id(),
         ),
         _write_call(
             "write_event",
@@ -209,7 +211,7 @@ def _event_calls(
                 "event_type": "行动",
                 "status": "ongoing",
             },
-            call_id=f"{call_id}-child",
+            call_id=new_id(),
         ),
     ]
 
@@ -217,15 +219,14 @@ def _event_calls(
 @pytest.mark.asyncio
 async def test_observer_records_each_physical_provider_request_separately(db_session) -> None:
     """验证失败重试与成功请求分别保存安全参数指纹计时和 token"""
-    from uuid import uuid4
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜进入山门"])
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    recorder = AgentAuditRecorder(factory)
+    recorder = AgentAuditRecorder(storage_factory(factory))
     context = build_invocation_context(
         run_id=run_id,
         task_type="annotation",
-        execution_id=f"annot-exec-{uuid4().hex[:12]}",
+        execution_id=new_id(),
         attempt_number=1,
         model="test-model",
         chapter_id=1,
@@ -279,7 +280,7 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
     )
 
     db_session.rollback()
-    turns = fetch_agent_turns(db_session, run_id)
+    turns = fetch_agent_turns(storage_for(db_session), run_id)
     assert [turn.status for turn in turns] == ["error", "success"]
     assert [turn.turn_index for turn in turns] == [1, 2]
     assert [turn.context_summary["provider_request"]["request_index"] for turn in turns] == [1, 2]

@@ -1,11 +1,15 @@
-"""主题与诊断结果查询路由"""
+"""
+主题与诊断结果查询路由
+
+说明: 从 src/api/routes/results.py 拆出主题族路由（topics/aggregate/series/shifts/emotion）
+与诊断、伏笔树路由（diagnosis/foreshadowing-trees），行为保持不变。
+"""
 
 from __future__ import annotations
 
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
 
 from src.api.models.responses import (
     ChapterTopicAggregateResponse,
@@ -29,7 +33,7 @@ from src.api.services.results_queries import (
     _fetch_topics,
 )
 from src.metrics.aggregate.algorithms import compute_topic_shift_candidates
-from src.storage.repositories import AnnotationRepository, ParagraphRepository, StatsRepository
+from src.storage import Storage
 from src.topic.queries import (
     aggregate_book_topics,
     aggregate_chapter_topics,
@@ -37,7 +41,7 @@ from src.topic.queries import (
     fetch_paragraph_topic_series,
 )
 
-# tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
+# 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
 
 
@@ -45,12 +49,12 @@ router = APIRouter()
 async def get_topics(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> list:
     """获取主题分布数据（段落 token 加权聚合）"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
     return _fetch_topics(run_id, paragraph_repo)
 
 
@@ -58,7 +62,7 @@ async def get_topics(
 async def get_topic_aggregate(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     level: Literal["book", "chapter"] = Query(default="book", description="聚合层级：book 或 chapter"),
 ) -> TopicAggregateResponse | ChapterTopicAggregateResponse:
     """
@@ -77,7 +81,7 @@ async def get_topic_aggregate(
 async def get_topic_series(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> TopicSeriesResponse:
     """
     段落主题序列：完整 K 维权重，横轴真实字符位置（global_start_char）
@@ -93,7 +97,7 @@ async def get_topic_series(
 async def get_topic_shifts(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     window_size: Annotated[int | None, Query(ge=1, description="窗口段落数，缺省取 topic_shift 配置")] = None,
     min_tokens_per_window: Annotated[
         int | None, Query(ge=1, description="窗口最小实际入模 token 数，缺省取配置")
@@ -143,7 +147,7 @@ async def get_topic_shifts(
 async def get_topic_emotion(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> TopicEmotionResponse:
     """
     主题-情感统计：sum(weight * token * net_density) / sum(weight * token)
@@ -160,7 +164,7 @@ async def get_topic_emotion(
 async def get_diagnosis(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> DiagnosisResult:
     """
     获取诊断数据
@@ -169,8 +173,7 @@ async def get_diagnosis(
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    stats_repo = StatsRepository(session)
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, session)
     return diagnosis or DiagnosisResult()
 
 
@@ -181,10 +184,10 @@ async def get_diagnosis(
 async def get_foreshadowing_trees(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
 ) -> list[ForeshadowingTreeResponse]:
     """获取伏笔树台账（伏笔即事件树）：返回全部伏笔树 + active 状态，供诊断 drill-down 与导出复用"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    annotation_repo = AnnotationRepository(session)
+    annotation_repo = session
     return _fetch_foreshadowing_trees(run_id, annotation_repo)

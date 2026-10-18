@@ -13,16 +13,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import (
-    CheckConstraint,
-    DateTime,
-    Float,
-    ForeignKeyConstraint,
-    Index,
-    Integer,
-    String,
-)
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
+
+from src.storage.ids import new_id
+from src.storage.uuid_type import Uuid7 as Uuid
 
 from .base import Base, naive_utcnow
 
@@ -47,10 +42,11 @@ FEATURE_SENTENCE_CODES = (
 
 
 class ParagraphFeature(Base):
-    """段落特征结果表（每段落、每封闭计算种类一行）"""
+    "段落特征结果表（每段落、每封闭计算种类一行）"
 
     __tablename__ = "paragraph_features"
     __table_args__ = (
+        UniqueConstraint("run_id", "paragraph_id", "feature_code", name="uq_paragraph_features_business_key"),
         CheckConstraint(
             "(vector_value IS NOT NULL)::int + (scalar_value IS NOT NULL)::int "
             "+ (count_value IS NOT NULL)::int = 1"
@@ -73,9 +69,12 @@ class ParagraphFeature(Base):
         {"comment": "段落特征结果表：封闭计算种类（语义/POS 向量、张力 z、LOWESS 平滑、句式计数）"},
     )
 
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
-    paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="所属段落编号")
-    feature_code: Mapped[str] = mapped_column(String(64), primary_key=True, comment="封闭计算种类代码")
+    id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, default=new_id, autoincrement=False, comment="UUIDv7 独立主键"
+    )
+    run_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), comment="所属分析运行", nullable=False)
+    paragraph_id: Mapped[int] = mapped_column(Integer, comment="所属段落编号", nullable=False)
+    feature_code: Mapped[str] = mapped_column(String(64), comment="封闭计算种类代码", nullable=False)
     vector_value: Mapped[list[float] | None] = mapped_column(
         Vector(), nullable=True, comment="向量值（语义/POS 向量；列宽按运行模型合同解析）"
     )
@@ -89,7 +88,4 @@ class ParagraphFeature(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<ParagraphFeature(run_id={self.run_id}, paragraph_id={self.paragraph_id}, "
-            f"code={self.feature_code})>"
-        )
+        return f"<ParagraphFeature(run_id={self.run_id}, paragraph_id={self.paragraph_id}, code={self.feature_code})>"

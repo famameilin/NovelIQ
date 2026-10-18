@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from src.api.models.graph import GraphSnapshotResponse
 from src.api.services.results_queries.graph import _fetch_graph_snapshot
+from tests.support.storage_fixtures import fixture_id
 
 
 def _entity(entity_id: str, name: str, *, representative: bool = False) -> SimpleNamespace:
@@ -66,15 +67,15 @@ def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
     snapshot = SimpleNamespace(
         chapter_boundary=boundary,
         entities=[
-            _entity("00000000-0000-0000-0000-000000000067", "伯安", representative=True),
-            _entity("00000000-0000-0000-0000-000000000097", "贺重明"),
-            _entity("00000000-0000-0000-0000-000000000038", "贺伯安"),
+            _entity(fixture_id(__name__, "00000000-0000-0000-0000-000000000067"), "伯安", representative=True),
+            _entity(fixture_id(__name__, "00000000-0000-0000-0000-000000000097"), "贺重明"),
+            _entity(fixture_id(__name__, "00000000-0000-0000-0000-000000000038"), "贺伯安"),
         ],
         relations=[
             _relation(
                 relation_id="r-1",
-                from_entity_id="00000000-0000-0000-0000-000000000067",
-                to_entity_id="00000000-0000-0000-0000-000000000097",
+                from_entity_id=fixture_id(__name__, "00000000-0000-0000-0000-000000000067"),
+                to_entity_id=fixture_id(__name__, "00000000-0000-0000-0000-000000000097"),
                 from_name="伯安",
                 to_name="贺重明",
                 relation_type="同一人物",
@@ -82,20 +83,20 @@ def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
             ),
             _relation(
                 relation_id="r-2",
-                from_entity_id="00000000-0000-0000-0000-000000000067",
-                to_entity_id="00000000-0000-0000-0000-000000000038",
+                from_entity_id=fixture_id(__name__, "00000000-0000-0000-0000-000000000067"),
+                to_entity_id=fixture_id(__name__, "00000000-0000-0000-0000-000000000038"),
                 from_name="伯安",
                 to_name="贺伯安",
             ),
         ],
     )
-    annotation_repo = SimpleNamespace(session=object())
+    annotation_repo = SimpleNamespace(graph=object())
 
-    with patch("src.api.services.results_queries.graph.GraphRepository") as graph_repository:
+    with patch("src.api.services.results_queries.graph.graph_projection") as graph_repository:
         graph_repository.return_value.fetch_snapshot.return_value = snapshot
         graph_repository.return_value.fetch_relation_snapshots.return_value = snapshot.relations
 
-        payload = _fetch_graph_snapshot("run-1", annotation_repo)
+        payload = _fetch_graph_snapshot(fixture_id(__name__, "run-1"), annotation_repo)
 
     response = GraphSnapshotResponse.model_validate(payload)
     node_names = {node.name for node in response.nodes}

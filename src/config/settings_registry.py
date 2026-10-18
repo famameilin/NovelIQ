@@ -190,9 +190,7 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
             SettingFieldSpec(
                 path=("topic_model", "lda", "eta"), field_type="string", label="LDA eta", description='"auto" 或数值'
             ),
-            SettingFieldSpec(
-                path=("topic_model", "lda", "random_state"), field_type="integer", label="LDA 随机种子"
-            ),
+            SettingFieldSpec(path=("topic_model", "lda", "random_state"), field_type="integer", label="LDA 随机种子"),
             SettingFieldSpec(
                 path=("topic_model", "lda", "lda_batch_size"), field_type="integer", label="LDA 批大小", min_value=1
             ),

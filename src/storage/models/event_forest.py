@@ -9,17 +9,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (
-    CheckConstraint,
-    DateTime,
-    ForeignKey,
-    Index,
-    Integer,
-    String,
-    UniqueConstraint,
-)
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
+
+from src.storage.ids import new_id
+from src.storage.uuid_type import Uuid7 as Uuid
 
 from .base import Base, naive_utcnow
 
@@ -30,13 +25,7 @@ PAYOFF_LIKELIHOODS = ("high", "medium", "low")
 
 
 class EventDeclaration(Base):
-    """
-    章级事件声明表（不可变）
-
-    is_foreshadowing_root 区分非伏笔与未给 likelihood 的伏笔；
-    payoff_likelihood 仅伏笔声明非空（当前 strength=likelihood 为读投影，
-    后续状态从实际动作投影）。
-    """
+    "章级事件声明表（不可变）"
 
     __tablename__ = "event_declarations"
     __table_args__ = (
@@ -49,9 +38,11 @@ class EventDeclaration(Base):
         {"comment": "事件声明表：不可变章级声明及伏笔属性（来源归属从标注记录取得）"},
     )
 
-    declaration_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="声明主键（uuid）")
+    declaration_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="声明主键（uuid）", default=new_id, autoincrement=False
+    )
     record_id: Mapped[str] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("chapter_annotations.record_id", ondelete="RESTRICT", name="event_declarations_record_fkey"),
         nullable=False,
         comment="来源标注记录",
@@ -69,16 +60,14 @@ class EventDeclaration(Base):
     payoff_likelihood: Mapped[str | None] = mapped_column(
         String(20), nullable=True, comment="兑现可能性（high/medium/low，仅伏笔声明非空）"
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="创建时间")
 
     def __repr__(self) -> str:
         return f"<EventDeclaration(declaration_id={self.declaration_id}, title={self.title})>"
 
 
 class DeclarationParticipant(Base):
-    """声明参与者：实体引用与事件中角色（名字/类型读实体，不复制）"""
+    "声明参与者：实体引用与事件中角色（名字/类型读实体，不复制）"
 
     __tablename__ = "declaration_participants"
     __table_args__ = (
@@ -87,20 +76,20 @@ class DeclarationParticipant(Base):
         {"comment": "声明参与者表：参与实体与叙事角色/动作/情绪（动态观测只关联本行）"},
     )
 
-    participant_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="参与者主键（uuid）")
+    participant_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="参与者主键（uuid）", default=new_id, autoincrement=False
+    )
     declaration_id: Mapped[str] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey(
-            "event_declarations.declaration_id",
-            ondelete="CASCADE",
-            name="declaration_participants_declaration_fkey",
+            "event_declarations.declaration_id", ondelete="CASCADE", name="declaration_participants_declaration_fkey"
         ),
         nullable=False,
         comment="所属声明",
     )
     participant_ordinal: Mapped[int] = mapped_column(Integer, nullable=False, comment="参与者序号（0 起）")
     entity_id: Mapped[str] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("graph_entities.entity_id", ondelete="RESTRICT", name="declaration_participants_entity_fkey"),
         nullable=False,
         comment="参与实体",
@@ -115,7 +104,7 @@ class DeclarationParticipant(Base):
 
 
 class CompleteEvent(Base):
-    """完整事件表：身份、真实生产者与同一性理由（source_work 从 producer 推导）"""
+    "完整事件表：身份、真实生产者与同一性理由（source_work 从 producer 推导）"
 
     __tablename__ = "complete_events"
     __table_args__ = (
@@ -124,9 +113,11 @@ class CompleteEvent(Base):
         {"comment": "完整事件表：正式身份（真实成功生产尝试 + 本地稳定键）与同一性理由"},
     )
 
-    event_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="事件主键（uuid）")
+    event_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="事件主键（uuid）", default=new_id, autoincrement=False
+    )
     producer_execution_id: Mapped[str] = mapped_column(
-        String(64),
+        Uuid(as_uuid=False),
         ForeignKey("executions.execution_id", ondelete="RESTRICT", name="complete_events_producer_fkey"),
         nullable=False,
         comment="真实成功生产尝试（整轮 session 从 producer→work→session 推导）",
@@ -139,13 +130,7 @@ class CompleteEvent(Base):
 
 
 class EventRevision(Base):
-    """
-    事件阶段版本表
-
-    stage_index 是模型显式 stage_order 的连续序号；来源恰一：绑定声明
-    （origin 组全空）或独立 origin 正文（声明为空）。声明正文/原生产者/
-    参与者/证据从声明读，origin 生产者从完整事件读，不复制源事实。
-    """
+    "事件阶段版本表"
 
     __tablename__ = "event_revisions"
     __table_args__ = (
@@ -163,23 +148,27 @@ class EventRevision(Base):
             name="ck_event_revisions_source_shape",
         ),
         Index(
-            "uq_event_revisions_declaration", "declaration_id",
-            unique=True, postgresql_where=sql_text("declaration_id IS NOT NULL"),
+            "uq_event_revisions_declaration",
+            "declaration_id",
+            unique=True,
+            postgresql_where=sql_text("declaration_id IS NOT NULL"),
         ),
         Index("idx_event_revisions_event", "event_id"),
         {"comment": "事件版本表：显式连续阶段链（声明绑定与独立 origin 正文互斥）"},
     )
 
-    revision_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="版本主键（uuid）")
+    revision_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="版本主键（uuid）", default=new_id, autoincrement=False
+    )
     event_id: Mapped[str] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("complete_events.event_id", ondelete="CASCADE", name="event_revisions_event_fkey"),
         nullable=False,
         comment="所属完整事件",
     )
     stage_index: Mapped[int] = mapped_column(Integer, nullable=False, comment="阶段序号（模型显式顺序，连续）")
     declaration_id: Mapped[str | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("event_declarations.declaration_id", ondelete="RESTRICT", name="event_revisions_declaration_fkey"),
         nullable=True,
         comment="绑定声明（声明分支，唯一）",

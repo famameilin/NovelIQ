@@ -9,6 +9,7 @@ from src.fact_graph.read.alias import AliasResolution, build_alias_resolution
 from src.fact_graph.read.entities import fetch_latest_entities
 from src.fact_graph.read.graph_outputs import build_graph_quality_report, build_graph_shared_summary
 from src.fact_graph.read.references import relation_projection_key
+from src.fact_graph.read.storage_projection import graph_projection
 from src.fact_graph.read.types import (
     CanonicalEntity,
     ConfirmedRelation,
@@ -23,22 +24,22 @@ from src.fact_graph.read.types import (
     ParticipantState,
     TimelineAuthorityView,
 )
-from src.storage.repositories import AnnotationRepository, GraphRepository
-from src.storage.repositories.graph import EntitySnapshotRow, GraphChangeRow, RelationSnapshotRow
+from src.storage.contracts.stores import AnnotationStore, GraphStore
+from src.storage.records.graph import EntitySnapshotRow, GraphChangeRow, RelationSnapshotRow
 
 
 class KnowledgeGraphAuthorityService:
     """把章节版本 Repository 转换为各后端消费者的受控视图"""
 
-    def __init__(self, graph_repo: GraphRepository, annotation_repo: AnnotationRepository | None = None) -> None:
+    def __init__(self, graph_repo: GraphStore, annotation_repo: AnnotationStore | None = None) -> None:
         """绑定图版本仓储与章节标注读侧"""
-        self._graph_repo = graph_repo
-        self._annotation_repo = annotation_repo or AnnotationRepository(graph_repo.session)
+        self._graph_repo = graph_projection(graph_repo)
+        self._annotation_repo = annotation_repo
 
     @classmethod
     def from_session(cls, session: Any) -> KnowledgeGraphAuthorityService:
         """从同一数据库 Session 构造章节版本 authority"""
-        return cls(graph_repo=GraphRepository(session), annotation_repo=AnnotationRepository(session))
+        return cls(graph_repo=graph_projection(session.graph), annotation_repo=session.annotations)
 
     def build_level1_snapshot(self, run_id: str) -> Level1AuthoritySnapshot:
         """提供最新章节实体与有效关系的最小只读视图"""
@@ -74,12 +75,13 @@ class KnowledgeGraphAuthorityService:
         graph_changes = [
             change
             for change in changes
-            if (change.change_kind == "state" and change.entity_id in character_ids)
+            if change.change_kind == "state"
+            and change.entity_id in character_ids
             or (
                 change.change_kind == "relation"
                 and change.from_entity_id in character_ids
-                and change.to_entity_id in character_ids
-                and change.relation_semantics != "same_character"
+                and (change.to_entity_id in character_ids)
+                and (change.relation_semantics != "same_character")
             )
         ]
         canonical_entities = self._build_canonical_entities(characters, resolution=resolution)
@@ -104,14 +106,8 @@ class KnowledgeGraphAuthorityService:
         """向诊断和导出提供章节版本图的聚合信号"""
         graph_view = self.build_representative_graph_view(run_id)
         return GraphAuthorityReport(
-            summary=build_graph_shared_summary(
-                graph_view.participant_states,
-                graph_view.confirmed_relations,
-            ),
-            quality=build_graph_quality_report(
-                graph_view.confirmed_relations,
-                graph_view.graph_changes,
-            ),
+            summary=build_graph_shared_summary(graph_view.participant_states, graph_view.confirmed_relations),
+            quality=build_graph_quality_report(graph_view.confirmed_relations, graph_view.graph_changes),
         )
 
     def build_export_view(self, run_id: str) -> ExportGraphAuthorityView:
@@ -163,17 +159,13 @@ class KnowledgeGraphAuthorityService:
             raise GraphReadinessError(f"run 尚无已完成章节图数据: {run_id}")
 
     def _build_alias_resolution(
-        self,
-        relations: Iterable[RelationSnapshotRow],
-        entities: Iterable[EntitySnapshotRow],
+        self, relations: Iterable[RelationSnapshotRow], entities: Iterable[EntitySnapshotRow]
     ) -> AliasResolution:
         """从同一人物关系与实体属性构建别名归并映射"""
         return build_alias_resolution(list(relations), entities=list(entities))
 
     def _build_canonical_entities(
-        self,
-        entities: Iterable[EntitySnapshotRow],
-        resolution: AliasResolution | None = None,
+        self, entities: Iterable[EntitySnapshotRow], resolution: AliasResolution | None = None
     ) -> list[CanonicalEntity]:
         """把实体状态快照转换为规范实体合同"""
         rows = sorted(entities, key=lambda row: row.name)
@@ -202,17 +194,12 @@ class KnowledgeGraphAuthorityService:
         return result
 
     def _build_confirmed_relations(
-        self,
-        relations: Iterable[RelationSnapshotRow],
-        resolution: AliasResolution | None = None,
+        self, relations: Iterable[RelationSnapshotRow], resolution: AliasResolution | None = None
     ) -> list[ConfirmedRelation]:
         """把稳定关系最新版本转换为当前关系合同"""
         result: list[ConfirmedRelation] = []
         by_key: dict[tuple[str, str, str], ConfirmedRelation] = {}
-        for relation in sorted(
-            relations,
-            key=lambda row: (row.from_name, row.to_name, row.relation_type),
-        ):
+        for relation in sorted(relations, key=lambda row: (row.from_name, row.to_name, row.relation_type)):
             if relation.relation_semantics == "same_character":
                 continue
             from_name = (
@@ -233,6 +220,7 @@ class KnowledgeGraphAuthorityService:
             to_entity_id = (
                 resolution.resolve_entity_id(relation.to_entity_id) if resolution is not None else relation.to_entity_id
             )
+            assert relation.directionality is not None
             key = relation_projection_key(
                 from_entity_id or "", to_entity_id or "", relation.relation_type, relation.directionality
             )
@@ -262,9 +250,7 @@ class KnowledgeGraphAuthorityService:
         return result
 
     def _build_export_relation_snapshots(
-        self,
-        relations: Iterable[RelationSnapshotRow],
-        resolution: AliasResolution,
+        self, relations: Iterable[RelationSnapshotRow], resolution: AliasResolution
     ) -> list[ExportRelationSnapshot]:
         """把稳定关系最新版本转换为导出关系快照"""
         return [
@@ -280,10 +266,7 @@ class KnowledgeGraphAuthorityService:
             for relation in relations
         ]
 
-    def _build_graph_changes(
-        self,
-        rows: Iterable[GraphChangeRow],
-    ) -> list[GraphChange]:
+    def _build_graph_changes(self, rows: Iterable[GraphChangeRow]) -> list[GraphChange]:
         """把 Repository 章节变化转换为共享双源合同"""
         return [
             GraphChange(
@@ -311,9 +294,7 @@ class KnowledgeGraphAuthorityService:
         ]
 
     def _build_participant_states(
-        self,
-        entities: Iterable[EntitySnapshotRow],
-        resolution: AliasResolution | None = None,
+        self, entities: Iterable[EntitySnapshotRow], resolution: AliasResolution | None = None
     ) -> list[ParticipantState]:
         """把实体状态快照转换为图参与者合同"""
         return [
@@ -326,9 +307,7 @@ class KnowledgeGraphAuthorityService:
                 first_seen_chapter=entity.first_seen_chapter,
                 last_seen_chapter=entity.last_seen_chapter,
                 source_confidence=None,
-                is_representative=(
-                    resolution is None or str(entity.entity_id) not in resolution.representative_by_alias
-                ),
+                is_representative=resolution is None or str(entity.entity_id) not in resolution.representative_by_alias,
             )
             for entity in entities
             if is_global_character_surface_name(entity.name)

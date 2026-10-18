@@ -21,22 +21,22 @@ from src.fact_graph.read.normalization import (
 )
 from src.metrics.queries.annotations import fetch_chapter_annotations_full
 from src.metrics.values import read_emotion_score
-from src.storage.repositories import AnnotationRepository
+from src.storage import Storage
 
 
 def _fetch_chapter_annotations(
     run_id: str,
-    annotation_repo: AnnotationRepository,
+    annotation_repo: Storage,
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
     """组装章节标注并过滤未解析的局部角色引用"""
-    annotations_raw = fetch_chapter_annotations_full(annotation_repo.session, run_id)
-    characters_raw = fetch_chapter_characters_full(annotation_repo.session, run_id)
-    dialogues_raw = fetch_chapter_dialogues_full(annotation_repo.session, run_id)
+    annotations_raw = fetch_chapter_annotations_full(annotation_repo, run_id)
+    characters_raw = fetch_chapter_characters_full(annotation_repo, run_id)
+    dialogues_raw = fetch_chapter_dialogues_full(annotation_repo, run_id)
 
     if export_graph_view is None:
-        authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+        authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo)
         export_graph_view = authority_service.build_export_view(run_id)
 
     characters_by_chunk = partition_chapter_characters(

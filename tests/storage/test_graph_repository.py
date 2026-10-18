@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.storage import new_id
 from src.storage.repositories import GraphRepository, ParagraphRepository
 from tests.support.chapter_annotation_helpers import (
     character_fact,
@@ -12,6 +13,7 @@ from tests.support.chapter_annotation_helpers import (
     persist_chapter_annotation,
     relation_fact,
 )
+from tests.support.storage_fixtures import uuid7
 
 
 def _relation_id(session, run_id: str, from_name: str, to_name: str, relation_type: str) -> str:
@@ -83,8 +85,6 @@ def _retract_relation(
         )
     events = []
     if participants:
-        from uuid import uuid4
-
         from src.event_trees.models import BoundEvent
 
         paragraph_id = min(
@@ -93,12 +93,12 @@ def _retract_relation(
                 run_id, chapter_id=chapter_id, limit=None
             )
         )
-        node_id = str(uuid4())
+        node_id = new_id()
         events.append(
             BoundEvent(
                 declaration_id=node_id,
                 node_id=node_id,
-                tree_id=f"tree-{uuid4()}",
+                tree_id=f"tree-{uuid7()}",
                 parent_node_id=None,
                 cause_role="root",
                 title="本章人物动态",
@@ -185,7 +185,9 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
 
     assert first_snapshot is not None
     assert second_snapshot is not None
-    assert [(row.from_name, row.to_name, row.is_active) for row in first_snapshot.relations] == [("林渡", "顾霜", True)]
+    assert [(frozenset((row.from_name, row.to_name)), row.is_active) for row in first_snapshot.relations] == [
+        (frozenset(("林渡", "顾霜")), True)
+    ]
     assert second_snapshot.relations == []
     assert {(entity.name, entity.state_chapter_id) for entity in second_snapshot.entities} == {
         ("林渡", 1),
@@ -289,38 +291,48 @@ def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> Non
         for row in state_changes
         for change in row.changes
     )
-    assert any(
-        change.get("change_kind") == "retract"
-        for row in relation_changes
-        for change in row.changes
-    )
+    assert any(change.get("change_kind") == "retract" for row in relation_changes for change in row.changes)
     assert total == len(changes) == len(state_changes) + len(relation_changes)
     assert all(row.chapter_id == 2 for row in changes)
 
 
 @pytest.mark.parametrize("reverse_endpoints", [False, True])
 def test_graph_repository_break_targets_relation_created_after_first_chapter(
-    db_session, reverse_endpoints: bool,
+    db_session,
+    reverse_endpoints: bool,
 ) -> None:
     """同名的第一章提及不能替代第二章实际建立关系的端点"""
     _novel_id, run_id = create_run_with_chunks(
-        db_session, texts=["林渡与顾霜初遇", "林渡与顾霜结盟", "两人分道扬镳"],
-        chapter_ids=[1, 2, 3], title="关系端点来源",
+        db_session,
+        texts=["林渡与顾霜初遇", "林渡与顾霜结盟", "两人分道扬镳"],
+        chapter_ids=[1, 2, 3],
+        title="关系端点来源",
     )
     persist_chapter_annotation(
-        db_session, run_id=run_id, chapter_id=1,
-        characters=[character_fact(chapter_id=1, name="林渡", action="初遇"),
-                    character_fact(chapter_id=1, name="顾霜", action="初遇")],
+        db_session,
+        run_id=run_id,
+        chapter_id=1,
+        characters=[
+            character_fact(chapter_id=1, name="林渡", action="初遇"),
+            character_fact(chapter_id=1, name="顾霜", action="初遇"),
+        ],
     )
     persist_chapter_annotation(
-        db_session, run_id=run_id, chapter_id=2,
+        db_session,
+        run_id=run_id,
+        chapter_id=2,
         relations=[relation_fact(chapter_id=2, from_name="林渡", to_name="顾霜", relation_type="盟友")],
     )
     relation_id = _relation_id(db_session, run_id, "林渡", "顾霜", "盟友")
     from_name, to_name = ("顾霜", "林渡") if reverse_endpoints else ("林渡", "顾霜")
     _retract_relation(
-        db_session, run_id=run_id, chapter_id=3,
-        from_name=from_name, to_name=to_name, relation_type="盟友", reason="分道扬镳",
+        db_session,
+        run_id=run_id,
+        chapter_id=3,
+        from_name=from_name,
+        to_name=to_name,
+        relation_type="盟友",
+        reason="分道扬镳",
     )
 
     repository = GraphRepository(db_session)

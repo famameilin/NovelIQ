@@ -1,5 +1,4 @@
-"""嵌入客户端：文本向量化（本地 llama-server，OpenAI 兼容接口）与查询侧的 instruct 前缀包装。
-"""
+"""嵌入客户端：文本向量化（本地 llama-server，OpenAI 兼容接口）与查询侧的 instruct 前缀包装。"""
 
 from __future__ import annotations
 
@@ -138,7 +137,9 @@ class EmbeddingClient:
         while True:
             try:
                 response = await self._client.embeddings.create(
-                    model=model_name, input=text_input, encoding_format="float",
+                    model=model_name,
+                    input=text_input,
+                    encoding_format="float",
                 )
                 return response
             except APITimeoutError as e:

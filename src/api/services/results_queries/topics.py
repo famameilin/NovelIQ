@@ -1,7 +1,7 @@
 """
 主题查询组装器
 
-承载 topics 相关取数与响应装配；权重归一在
+说明: 承载 topics 相关取数与响应装配；权重归一在
 `src.topic.queries.normalize_topic_weights`。
 
 Paragraph 粒度主题结果使用 paragraph_topics 的原始 token 加权聚合
@@ -11,12 +11,12 @@ Paragraph 粒度主题结果使用 paragraph_topics 的原始 token 加权聚合
 from __future__ import annotations
 
 from src.api.models.responses import TopicInfo
-from src.storage.repositories import ParagraphRepository
+from src.storage.contracts.stores import ParagraphStore
 from src.topic.artifacts import load_topic_words
 from src.topic.queries import normalize_topic_weights
 
 
-def _fetch_topics(run_id: str, paragraph_repo: ParagraphRepository) -> list:
+def _fetch_topics(run_id: str, paragraph_repo: ParagraphStore) -> list:
     """主题权重只使用实际段落推断 token 总量归一化"""
     book_total = paragraph_repo.fetch_topic_inference_total(run_id)
     if not book_total:

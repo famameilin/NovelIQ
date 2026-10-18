@@ -137,11 +137,10 @@ def estimate_agent_token_usage(messages: list[Any]) -> list[AgentTokenUsage]:
 
 def build_token_usage_callback(*, bus: Any, run_id: str) -> TokenUsageCallback:
     """非 Agent 调用只发送实际 usage，由统计审计模块独立保存"""
-    from uuid import uuid4
-
     from src.event_bus import Message
+    from src.storage import new_id
 
-    execution_id = uuid4().hex
+    execution_id = new_id()
     sequence = 0
 
     def callback(

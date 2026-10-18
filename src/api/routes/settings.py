@@ -3,6 +3,7 @@
 只承担 HTTP 契约：字段注册表与生效值视图（默认值 ← settings.json ← env 凭据）、设置保存、
 凭据受控编辑与连接测试。写盘与热生效逻辑在 src/config/settings_service.py。
 """
+
 from __future__ import annotations
 
 import time
@@ -96,9 +97,7 @@ def _save_user_settings(request: UpdateSettingsRequest) -> SettingsViewResponse:
 
 def _update_model_env(request: ModelEnvUpdateRequest) -> SettingsViewResponse:
     settings_service.update_model_env(
-        model_pool=[entry.model_dump() for entry in request.model_pool]
-        if request.model_pool is not None
-        else None,
+        model_pool=[entry.model_dump() for entry in request.model_pool] if request.model_pool is not None else None,
         diagnosis_model_id=request.diagnosis_model_id,
         diagnosis_model_id_provided="diagnosis_model_id" in request.model_fields_set,
         embedding=request.embedding_model.model_dump() if request.embedding_model is not None else None,
@@ -160,8 +159,9 @@ def test_agent_model(task: str, request: AgentModelTestRequest | None = None) ->
     if task == "embedding":
         saved = settings.models.paragraph_embedding
     else:
-        saved = next((entry for entry in settings.models.model_pool
-                      if request and entry.model_id == request.model_id), None)
+        saved = next(
+            (entry for entry in settings.models.model_pool if request and entry.model_id == request.model_id), None
+        )
     credentials = {"base_url": saved.base_url if saved else None, "api_key": saved.api_key if saved else None}
     base_url = (request.base_url if request and request.base_url else credentials["base_url"]) or ""
     api_key = (request.api_key if request and request.api_key else credentials["api_key"]) or ""

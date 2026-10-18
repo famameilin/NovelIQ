@@ -40,6 +40,7 @@ from src.embedding import EmbeddingConnectionError, EmbeddingServiceError, Embed
 from src.fact_graph.graph import FactGraph, entity_key
 from src.fact_graph.inputs import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 # 三段正文：¶1/¶2/¶3 各有一个引号对话候选，整章共 3 条候选（对话判定候选号 1..3）；
 # "长刀" 在 ¶2，作为 item 实体与参与者测试的锚点
@@ -159,7 +160,9 @@ async def _run(runtime: AgentProgramRuntime, code: str) -> dict[str, Any]:
 async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(failure_type) -> None:
     """真实程序与工具边界：失败检索和 execute_code 都留审计，后续写入和 finish 不执行"""
     client = SimpleNamespace(get_embedding=AsyncMock(side_effect=failure_type("嵌入服务不可用")))
-    search = TextSearchService(MagicMock(), run_id="run-agent-test", embedding_client=client)
+    search = TextSearchService(
+        storage_for(MagicMock()), run_id=fixture_id(__name__, "run-agent-test"), embedding_client=client
+    )
 
     class FailingQuery(_QueryService):
         async def search_text(self, query, *, range_name, limit=50):
@@ -169,7 +172,7 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
     tools = {tool.name: tool for tool in build_annotation_tools(FailingQuery(), ledger)}
     recorder = MagicMock()
     recorder.start_turn.return_value = 1
-    observer = AgentTurnObserver(recorder, invocation_id=1, context={})
+    observer = AgentTurnObserver(recorder, invocation_id=fixture_id(__name__, "1"), context={})
     observer.begin_provider_turn(context_summary={}, request_messages=[], provider_request={}, started_ns=1)
     observer.complete_provider_turn(
         response_message=AIMessage(content="", tool_calls=[{"name": "execute_code", "args": {}, "id": "code"}]),
@@ -179,7 +182,7 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
     program = runtime.build_tool()
     code = 'search_text(query="沈遥")\nentity(id="late", name="迟到", entity_type="character")\nfinish()'
     with (
-        patch("src.agents.annotation.text_search.search_paragraphs_by_keywords", return_value=[]),
+        patch("src.storage.access.ParagraphAccess.search_paragraphs_by_keywords", return_value=[]),
         pytest.raises(AnnotationDependencyError, match="嵌入服务不可用"),
     ):
         await _execute_call(

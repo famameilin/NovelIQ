@@ -16,6 +16,7 @@ from src.linguistic import (
     resolve_shared_pretrained_path,
     train_book_model,
 )
+from tests.support.storage_fixtures import fixture_id
 
 _SENTENCES = [
     ["江湖", "恩怨", "快意", "恩仇"],
@@ -52,14 +53,14 @@ class TestTrainBookModel(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             pretrained = _load_vectors(tmp_path)
-            run_model_dir = tmp_path / "test-run"
+            run_model_dir = tmp_path / fixture_id(__name__, "test-run")
             with patch(
                 "src.config.paths.resolve_run_model_dir",
                 return_value=run_model_dir,
             ) as resolve_dir:
                 train_result = train_book_model(
                     _SENTENCES,
-                    "test-run",
+                    fixture_id(__name__, "test-run"),
                     pretrained_vectors=pretrained,
                     min_count=1,
                     epochs=1,
@@ -70,16 +71,18 @@ class TestTrainBookModel(unittest.TestCase):
             self.assertEqual(train_result.training_document_count, 5)
             total = sum(len(sentence) for sentence in _SENTENCES)
             self.assertEqual(train_result.training_token_count, total)
-            self.assertEqual(train_result.artifact_key, "models/word2vec/test-run/word2vec.model")
+            self.assertEqual(
+                train_result.artifact_key, f"models/word2vec/{fixture_id(__name__, 'test-run')}/word2vec.model"
+            )
             self.assertTrue((run_model_dir / "word2vec.model").exists())
-            resolve_dir.assert_called_once_with("test-run", "word2vec")
+            resolve_dir.assert_called_once_with(fixture_id(__name__, "test-run"), "word2vec")
 
     def test_empty_corpus_raises(self) -> None:
         """验证空语料在创建 run 模型目录前明确失败"""
         with tempfile.TemporaryDirectory() as tmp:
             pretrained = _load_vectors(Path(tmp))
             with self.assertRaises(ValueError):
-                train_book_model([[], []], "test-run", pretrained_vectors=pretrained)
+                train_book_model([[], []], fixture_id(__name__, "test-run"), pretrained_vectors=pretrained)
 
 
 class TestBuildPosEmbeddings(unittest.TestCase):
@@ -88,11 +91,11 @@ class TestBuildPosEmbeddings(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         tmp_path = Path(self._tmp.name)
         pretrained = _load_vectors(tmp_path)
-        run_model_dir = tmp_path / "pos-test"
+        run_model_dir = tmp_path / fixture_id(__name__, "pos-test")
         with patch("src.config.paths.resolve_run_model_dir", return_value=run_model_dir):
             train_book_model(
                 _SENTENCES,
-                "pos-test",
+                fixture_id(__name__, "pos-test"),
                 pretrained_vectors=pretrained,
                 min_count=1,
                 epochs=1,

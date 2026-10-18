@@ -9,10 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy.orm import Session
-
-from src.storage.repositories import ParagraphRepository
+from src.storage import Storage
 from src.topic.artifacts import validate_topic_aggregation_row
+from src.topic.schema import TOPIC_MODEL_KEY
 
 
 def model_meta(dict_row: Any | None) -> dict[str, Any] | None:
@@ -20,7 +19,7 @@ def model_meta(dict_row: Any | None) -> dict[str, Any] | None:
     if dict_row is None:
         return None
     return {
-        "model_key": dict_row.model_key,
+        "model_key": TOPIC_MODEL_KEY,
         "library_version": dict_row.library_version,
         "pipeline_version": dict_row.pipeline_version,
         "num_topics": dict_row.num_topics,
@@ -34,14 +33,14 @@ def model_unavailable_reason(model_row: Any | None) -> str | None:
     return None
 
 
-def aggregate_book_topics(run_id: str, session: Session) -> dict[str, Any]:
+def aggregate_book_topics(run_id: str, session: Storage) -> dict[str, Any]:
     """
     全书主题分布：sum(topic_weight * inference_token_count) / sum(inference_token_count)
 
     分母从每段一行的推断状态读取，不因 K 条主题行重复放大；分布补零至
     模型契约的 num_topics 维度。
     """
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
     model_row = paragraph_repo.fetch_topic_model_run(run_id)
     unavailable_reason = model_unavailable_reason(model_row)
     token_total = paragraph_repo.fetch_topic_inference_total(run_id)
@@ -70,14 +69,14 @@ def aggregate_book_topics(run_id: str, session: Session) -> dict[str, Any]:
     return result
 
 
-def aggregate_chapter_topics(run_id: str, session: Session) -> dict[str, Any]:
+def aggregate_chapter_topics(run_id: str, session: Storage) -> dict[str, Any]:
     """
     章节主题分布：每章 sum(w * t) / 该章段落推断 token 和
 
     章节边界用 paragraphs.chapter_id 关联 chapters 并按 chapters.sequence
     排序，不使用段落列表下标推断章节。
     """
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
     model_row = paragraph_repo.fetch_topic_model_run(run_id)
     unavailable_reason = model_unavailable_reason(model_row)
     if unavailable_reason:
@@ -144,14 +143,14 @@ def aggregate_chapter_topics(run_id: str, session: Session) -> dict[str, Any]:
     }
 
 
-def fetch_paragraph_topic_series(run_id: str, session: Session) -> dict[str, Any]:
+def fetch_paragraph_topic_series(run_id: str, session: Storage) -> dict[str, Any]:
     """
     段落主题序列：按真实字符位置输出完整 K 维主题权重
 
     横轴使用 global_start_char / global_end_char；top_n 只属于前端展示裁剪，
     本接口始终返回完整分布。
     """
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
     model_row = paragraph_repo.fetch_topic_model_run(run_id)
     unavailable_reason = model_unavailable_reason(model_row)
     if unavailable_reason:
@@ -192,7 +191,7 @@ def fetch_paragraph_topic_series(run_id: str, session: Session) -> dict[str, Any
     }
 
 
-def compute_topic_emotion(run_id: str, session: Session) -> dict[str, Any]:
+def compute_topic_emotion(run_id: str, session: Storage) -> dict[str, Any]:
     """
     主题-情感统计：sum(weight * token * net_density) / sum(weight * token)
 
@@ -200,7 +199,7 @@ def compute_topic_emotion(run_id: str, session: Session) -> dict[str, Any]:
     净密度为空的段落（token=0 或指标缺失）在 SQL 层同时从分子分母排除；
     权重和为零时返回空值并记录原因。
     """
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
     model_row = paragraph_repo.fetch_topic_model_run(run_id)
     unavailable_reason = model_unavailable_reason(model_row)
     if unavailable_reason:

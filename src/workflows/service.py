@@ -1,7 +1,7 @@
 """
 分析服务类
 
-编排的公开入口——建任务、跑阶段、恢复、重分析。阶段编排、取消检查、终态兜底
+说明: 编排的公开入口——建任务、跑阶段、恢复、重分析。阶段编排、取消检查、终态兜底
 分别在 src/workflows/analysis/ 下，队列运行时由 src/work 提供（本层向下调用）。
 """
 
@@ -12,22 +12,18 @@ import time
 from collections.abc import Callable
 
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
 from src.sse.manager import event_manager
-from src.storage.session import SessionFactory
+from src.storage import Storage, get_storage_factory
 from src.storage.task_status import TaskStatus
 from src.work.task_manager import TaskManager
 from src.workflows.analysis.environment_initializer import EnvironmentInitializer
 from src.workflows.analysis.error_handler import AnalysisErrorHandler, TerminalStateFallbackMixin
 from src.workflows.analysis.stage_executor import StageExecutor
 from src.workflows.analysis.stage_orchestrator import StageOrchestratorMixin
-from src.workflows.analysis.task_claim import (
-    _RESUME_RESET_WINDOW_SECONDS,
-    CancellationStateCheckError,
-)
+from src.workflows.analysis.task_claim import _RESUME_RESET_WINDOW_SECONDS, CancellationStateCheckError
 from src.workflows.exceptions import NovelNotFoundError
 from src.workflows.progress import AnalysisEventBus, StreamMessageType
 from src.workflows.schemas import ReanalyzeRequest
@@ -40,28 +36,20 @@ __all__ = [
     "CancellationStateCheckError",
     "_RESUME_RESET_WINDOW_SECONDS",
 ]
-
 TASK_KIND_ANALYSIS = "analysis"
 TASK_KIND_REANALYSIS = "reanalysis"
 
 
-# 说明: TaskClaimMixin 经由 StageOrchestratorMixin 继承链一并混入
 class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
     def __init__(
-        self,
-        task_service: TaskService,
-        task_manager: TaskManager,
-        session_factory: SessionFactory | None = None,
+        self, task_service: TaskService, task_manager: TaskManager, session_factory: Callable[[], Storage] | None = None
     ):
         self.task_service = task_service
         self.task_manager = task_manager
-        self.session_factory = session_factory or SessionFactory()
+        self.session_factory = session_factory or get_storage_factory()
         self.env_initializer = EnvironmentInitializer(self.session_factory)
         self.stage_executor = StageExecutor()
-        self.error_handler = AnalysisErrorHandler(
-            task_service=task_service,
-            task_manager=task_manager,
-        )
+        self.error_handler = AnalysisErrorHandler(task_service=task_service, task_manager=task_manager)
 
     def _build_reanalysis_skip_stages(self, request: ReanalyzeRequest | None) -> dict[str, bool]:
         if request is None:
@@ -75,11 +63,11 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
             }
         all_force_false = (
             not request.force_preprocess
-            and not request.force_annotate
-            and not request.force_aggregate
-            and not request.force_topic_model
-            and not request.force_diagnose
-            and not request.force_linguistic
+            and (not request.force_annotate)
+            and (not request.force_aggregate)
+            and (not request.force_topic_model)
+            and (not request.force_diagnose)
+            and (not request.force_linguistic)
         )
         if all_force_false:
             return {
@@ -113,39 +101,31 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         """
         task_kind = task["task_kind"]
         if task_kind == TASK_KIND_ANALYSIS:
-            return task_kind, None
+            return (task_kind, None)
         if task_kind == TASK_KIND_REANALYSIS:
             request_payload = task.get("request_payload")
             if request_payload is None:
-                return task_kind, None
-            return task_kind, ReanalyzeRequest.model_validate(request_payload)
+                return (task_kind, None)
+            return (task_kind, ReanalyzeRequest.model_validate(request_payload))
         raise ValueError(f"任务 {task['task_id']} 的 task_kind 非法: {task_kind}")
 
     async def recover_pending_tasks(self) -> tuple[int, int]:
         """启动时恢复 pending 任务并隔离单任务失败，返回已调度和已取消数量"""
-        from src.storage.repositories import RunRepository
-
+        pass
         scheduled_count = 0
         cancelled_count = 0
-        db_session = self.session_factory.get_session()
+        db_session = self.session_factory()
         try:
-            with db_session:
-                run_repo = RunRepository(db_session.connection)
-                pending_runs = run_repo.get_pending_tasks()
-
+            run_repo = db_session.runs
+            pending_runs = run_repo.get_pending_tasks()
             for run in pending_runs:
-                task_id = run["run_id"][:8] if len(run["run_id"]) >= 8 else run["run_id"]
+                task_id = run["task_id"]
                 try:
                     if run.get("cancel_requested", False):
-                        db_session = self.session_factory.get_session()
-                        with db_session:
-                            RunRepository(db_session.connection).cancel_unclaimed_pending_run(
-                                run["run_id"],
-                                message="任务在启动恢复前已取消",
-                            )
+                        db_session = self.session_factory()
+                        db_session.runs.cancel_unclaimed_pending_run(run["run_id"], message="任务在启动恢复前已取消")
                         cancelled_count += 1
                         continue
-
                     await self.resume_task(run["novel_id"], task_id)
                     scheduled_count += 1
                 except (ValueError, NovelNotFoundError) as exc:
@@ -155,25 +135,17 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         except Exception as exc:
             logger.error(f"Failed to recover pending tasks on startup: {exc}")
             raise
-
-        return scheduled_count, cancelled_count
+        return (scheduled_count, cancelled_count)
 
     def _schedule_task_execution(
-        self,
-        task_id: str,
-        novel: dict,
-        task_kind: str,
-        request: ReanalyzeRequest | None,
-        *,
-        resume: bool = False,
+        self, task_id: str, novel: dict, task_kind: str, request: ReanalyzeRequest | None, *, resume: bool = False
     ) -> None:
         """
         统一调度入口：按任务类型构建参数后直接创建执行协程
         """
-        # 根据任务类型构建执行参数
         if task_kind == TASK_KIND_ANALYSIS:
-            # 分析任务：检查阶段完成状态，支持断点续传
-            def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
+
+            def skip_stages_builder(session: Storage, run_id: str) -> dict[str, bool]:
                 return self.env_initializer.check_stage_completion_status(session, run_id)
 
             def pre_execute_hook(novel_id: str, skip_stages: dict[str, bool]) -> bool:
@@ -185,27 +157,21 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
             num_topics = settings.topic_model.num_topics
             log_prefix = "Analysis"
             hook = pre_execute_hook
-
         elif task_kind == TASK_KIND_REANALYSIS:
-            # 重分析任务：根据请求参数决定重跑哪些阶段
             skip_stages = self._build_reanalysis_skip_stages(request)
             logger.info(f"Reanalysis skip_stages: {skip_stages}")
 
-            def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
+            def skip_stages_builder(session: Storage, run_id: str) -> dict[str, bool]:
                 if not resume:
                     return dict(skip_stages)
-                # force 决定新任务的重跑范围，继续同一任务时复用已完成的依赖链
                 completed = self.env_initializer.check_stage_completion_status(session, run_id)
                 return {name: skip or completed[name] for name, skip in skip_stages.items()}
 
             num_topics = request.num_topics if request else settings.topic_model.num_topics
             log_prefix = "Reanalysis"
             hook = None
-
         else:
             raise ValueError(f"任务 {task_id} 的 task_kind 非法: {task_kind}")
-
-        # 直接创建并调度执行协程
         task = asyncio.create_task(
             self._run_analysis_core(
                 task_id=task_id,
@@ -220,7 +186,9 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
 
     async def create_task_and_start(self, novel_id: str) -> str:
         """
-        创建新任务并立即启动分析（只负责创建+启动，不复用已有任务）
+        创建新任务并立即启动分析
+
+        说明: 只负责“创建+启动”，不做复用/猜测行为
         """
         novel = self.task_service.get_novel(novel_id)
         task_id = self.task_service.create_task(novel_id, task_kind=TASK_KIND_ANALYSIS)
@@ -230,26 +198,22 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
         """
-        继续执行 pending/failed/cancelled 任务（不创建新任务）
+        继续执行 pending/failed/cancelled 任务
+
+        说明: 只负责“继续已有任务”，不创建新任务
         """
         novel = self.task_service.get_novel(novel_id)
         task = self.task_service.get_task(task_id)
-
         if task.get("novel_id") != novel_id:
             raise ValueError(f"任务 {task_id} 不属于小说 {novel_id}")
-
         status = task.get("status", "")
         if status not in ("pending", "failed", "cancelled"):
             raise ValueError(f"仅支持继续 pending/failed/cancelled 任务，当前状态为 {status}")
-
         task_info = self.task_manager.get_task(task_id)
-        if task_info and task_info.asyncio_task and not task_info.asyncio_task.done():
+        if task_info and task_info.asyncio_task and (not task_info.asyncio_task.done()):
             raise ValueError(f"任务 {task_id} 正在运行，不能重复继续")
-
         if task_info is None:
             self.task_manager.create_task(task_id, novel_id)
-
-        # 重置内存态与 DB 运行态，避免 DB-only 状态接口短暂暴露上一轮失败残留
         self.task_manager.update_task(
             task_id,
             status=TaskStatus.PENDING,
@@ -266,38 +230,33 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
             llm_outputs=[],
             completed_at=None,
         )
-
-        # SSE 独立保存本次恢复事实，持久重放同样屏蔽旧终态，保留已完成 work 的展示
         await event_manager.restart_display(task_id)
-
         task_kind, execution_request = self._restore_execution_request(task)
         self._schedule_task_execution(task_id, novel, task_kind, execution_request, resume=True)
         return task_id
 
     async def start_reanalysis(self, novel_id: str, request: ReanalyzeRequest | None = None) -> str:
         novel = self.task_service.get_novel(novel_id)
-
         task_id = self.task_service.create_task(
-            novel_id,
-            task_kind=TASK_KIND_REANALYSIS,
-            request_payload=self._build_reanalysis_request_payload(request),
+            novel_id, task_kind=TASK_KIND_REANALYSIS, request_payload=self._build_reanalysis_request_payload(request)
         )
         self.task_manager.create_task(task_id, novel_id)
         self._schedule_task_execution(task_id, novel, TASK_KIND_REANALYSIS, request)
-
         return task_id
 
     async def _run_analysis_core(
         self,
         task_id: str,
         novel: dict,
-        skip_stages_builder: Callable[[Session, str], dict[str, bool]],
+        skip_stages_builder: Callable[[Storage, str], dict[str, bool]],
         num_topics: int,
         log_prefix: str = "Analysis",
         pre_execute_hook: Callable[[str, dict[str, bool]], bool] | None = None,
     ) -> None:
         """
         统一的分析执行核心逻辑
+
+        说明: 封装 _run_analysis 和 _run_reanalysis 的公共逻辑
 
         Args:
             task_id: 任务ID
@@ -309,18 +268,15 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         """
         start_time = time.time()
         analysis_logger: AnalysisLogger | None = None
-        session: Session | None = None
+        session: Storage | None = None
         run_id: str | None = None
         bus: AnalysisEventBus | None = None
-
         try:
             self.task_manager.update_task(task_id, cancel_event=asyncio.Event())
-
             claim_result = self._prepare_task_execution_claim(task_id)
             if claim_result == "cancelled":
                 self.task_manager.cancel_completed_task(task_id, error="用户取消")
                 logger.info(f"Task {task_id} was cancelled before execution claim completed")
-                # 领取前取消也要发送 SSE 终态，避免客户端只能轮询状态
                 await event_manager.send(
                     task_id=task_id,
                     event_type=StreamMessageType.task_cancelled.value,
@@ -329,28 +285,16 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
                 return
             if claim_result == "skipped":
                 logger.info(f"Task {task_id} execution claim skipped because another state transition won the DB truth")
-                # 跳过执行时清除本进程缓存，避免残留心跳覆盖真实 owner
                 self.task_manager.cancel_completed_task(task_id)
                 return
-
-            (
-                novel_id,
-                source_path,
-                novel_title,
-                session,
-                analysis_logger,
-                run_id,
-            ) = self.env_initializer.init_analysis_environment(task_id, novel)
-
+            novel_id, source_path, novel_title, session, analysis_logger, run_id = (
+                self.env_initializer.init_analysis_environment(task_id, novel)
+            )
             skip_stages = skip_stages_builder(session, run_id)
-
             if pre_execute_hook and pre_execute_hook(novel_id, skip_stages):
                 return
-
             self.task_manager.update_task(task_id, status=TaskStatus.RUNNING, stage="preprocess", progress=0)
-
             bus = AnalysisEventBus(task_id, self.task_manager)
-
             await self._execute_analysis_stages(
                 bus=bus,
                 session=session,
@@ -362,20 +306,16 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
                 skip_stages=skip_stages,
                 num_topics=num_topics,
             )
-
             if self._is_cancelled(task_id):
-                # 成功收口前收到取消时仍需落 DB 终态并发送事件
                 if session and run_id:
                     await self.error_handler.handle_cancel(
                         task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
                     )
                 return
-
             elapsed = time.time() - start_time
             await self.error_handler.handle_success(
                 task_id, novel_id, elapsed, analysis_logger, session, run_id, bus=bus, log_prefix=log_prefix
             )
-
         except asyncio.CancelledError:
             logger.info(f"Task {task_id} was cancelled via asyncio.Task.cancel()")
             if session and run_id:
@@ -401,14 +341,11 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
                     self.task_manager.complete_task(task_id, success=False, error=str(e))
                     self._write_failure_to_db(task_id, str(e))
                 return
-
             cancelled = False
             try:
                 cancelled = self._is_cancelled(task_id)
             except CancellationStateCheckError as cancel_check_error:
-                # 原始异常已经存在时，取消状态检查失败不应覆盖原始失败，只记录并按失败路径收口
                 logger.error(f"Failed to re-check cancellation state for task {task_id}: {cancel_check_error}")
-
             if cancelled and session and run_id:
                 await self.error_handler.handle_cancel(
                     task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
@@ -426,11 +363,10 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
                     log_prefix=log_prefix,
                 )
             else:
-                # 环境初始化失败时也要写入 DB 失败终态
                 self.task_manager.complete_task(task_id, success=False, error=str(e))
                 self._write_failure_to_db(task_id, str(e))
         finally:
             if analysis_logger:
                 analysis_logger.close()
             if session:
-                session.close()
+                pass

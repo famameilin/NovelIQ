@@ -22,6 +22,7 @@ from tests.support.paragraph_fixtures import (
     make_metric_row,
     make_span,
 )
+from tests.support.storage_fixtures import task_for_run
 
 # 章1 全主题0、章2 全主题1；inference_token_count 加权验证；段5 情感空值
 _TOKENS = [10, 10, 20, 10, 10, 20]
@@ -60,10 +61,7 @@ def _insert_topic_fixture(db_session, run_id: str) -> None:
     )
     repo.insert_paragraph_topic_inferences(
         run_id,
-        [
-            (paragraph_id, 2, _TOKENS[paragraph_id], "complete", None, 1.0)
-            for paragraph_id in range(6)
-        ],
+        [(paragraph_id, 2, _TOKENS[paragraph_id], "complete", None, 1.0) for paragraph_id in range(6)],
     )
     repo.insert_paragraph_topics(
         run_id,
@@ -81,9 +79,7 @@ def _create_fixture_run(db_session) -> tuple[str, str]:
     novel_id, run_id = create_completed_run(db_session, chapter_texts=["甲。\n乙。\n丙。", "丁。\n戊。\n己。"])
     texts = ["甲。", "乙。", "丙。", "丁。", "戊。", "己。"]
     spans = []
-    for paragraph_id, (chapter_id, paragraph_index) in enumerate(
-        [(1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2)]
-    ):
+    for paragraph_id, (chapter_id, paragraph_index) in enumerate([(1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2)]):
         spans.append(
             make_span(
                 paragraph_id=paragraph_id,
@@ -104,7 +100,8 @@ def test_book_aggregate_endpoint_contract(api_client: TestClient, db_session) ->
     novel_id, run_id = _create_fixture_run(db_session)
 
     response = api_client.get(
-        f"/api/novels/{novel_id}/topics/aggregate", params={"level": "book", "task_id": run_id[:8]}
+        f"/api/novels/{novel_id}/topics/aggregate",
+        params={"level": "book", "task_id": task_for_run(run_id, db_session)},
     )
     assert response.status_code == 200
     body = response.json()
@@ -121,7 +118,8 @@ def test_chapter_aggregate_endpoint_orders_by_sequence(api_client: TestClient, d
     novel_id, run_id = _create_fixture_run(db_session)
 
     response = api_client.get(
-        f"/api/novels/{novel_id}/topics/aggregate", params={"level": "chapter", "task_id": run_id[:8]}
+        f"/api/novels/{novel_id}/topics/aggregate",
+        params={"level": "chapter", "task_id": task_for_run(run_id, db_session)},
     )
     assert response.status_code == 200
     body = response.json()
@@ -134,7 +132,9 @@ def test_chapter_aggregate_endpoint_orders_by_sequence(api_client: TestClient, d
 def test_series_endpoint_returns_full_k_dimension(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_fixture_run(db_session)
 
-    response = api_client.get(f"/api/novels/{novel_id}/topics/series", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/topics/series", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["num_topics"] == 2
@@ -150,7 +150,7 @@ def test_shifts_endpoint_detects_abrupt_change(api_client: TestClient, db_sessio
 
     response = api_client.get(
         f"/api/novels/{novel_id}/topics/shifts",
-        params={"task_id": run_id[:8], "window_size": 3, "min_tokens_per_window": 10},
+        params={"task_id": task_for_run(run_id, db_session), "window_size": 3, "min_tokens_per_window": 10},
     )
     assert response.status_code == 200
     body = response.json()
@@ -184,7 +184,7 @@ def test_shifts_endpoint_rejects_invalid_overrides(
 
     response = api_client.get(
         f"/api/novels/{novel_id}/topics/shifts",
-        params={"task_id": run_id[:8], parameter: value},
+        params={"task_id": task_for_run(run_id, db_session), parameter: value},
     )
 
     assert response.status_code == 422
@@ -193,7 +193,9 @@ def test_shifts_endpoint_rejects_invalid_overrides(
 def test_emotion_endpoint_excludes_null_curves(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_fixture_run(db_session)
 
-    response = api_client.get(f"/api/novels/{novel_id}/topics/emotion", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/topics/emotion", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     by_topic = {entry["topic_id"]: entry for entry in body["emotion"]}
@@ -205,28 +207,32 @@ def test_new_endpoints_unavailable_without_model_contract(api_client: TestClient
     novel_id, run_id = create_completed_run(db_session, chapter_texts=["甲。\n乙。"])
 
     aggregate = api_client.get(
-        f"/api/novels/{novel_id}/topics/aggregate", params={"task_id": run_id[:8]}
+        f"/api/novels/{novel_id}/topics/aggregate", params={"task_id": task_for_run(run_id, db_session)}
     )
     assert aggregate.status_code == 200
     assert aggregate.json()["unavailable_reason"] is not None
     assert aggregate.json()["distribution"] is None
 
-    series = api_client.get(f"/api/novels/{novel_id}/topics/series", params={"task_id": run_id[:8]})
+    series = api_client.get(
+        f"/api/novels/{novel_id}/topics/series", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert series.status_code == 200
     assert series.json()["unavailable_reason"] is not None
 
-    shifts = api_client.get(f"/api/novels/{novel_id}/topics/shifts", params={"task_id": run_id[:8]})
+    shifts = api_client.get(
+        f"/api/novels/{novel_id}/topics/shifts", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert shifts.status_code == 200
     assert shifts.json()["unavailable_reason"] is not None
 
-    emotion = api_client.get(f"/api/novels/{novel_id}/topics/emotion", params={"task_id": run_id[:8]})
+    emotion = api_client.get(
+        f"/api/novels/{novel_id}/topics/emotion", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert emotion.status_code == 200
     assert emotion.json()["unavailable_reason"] is not None
 
 
-def test_legacy_topics_endpoint_keeps_working(
-    api_client: TestClient, db_session, monkeypatch
-) -> None:
+def test_legacy_topics_endpoint_keeps_working(api_client: TestClient, db_session, monkeypatch) -> None:
     """/topics 在新契约下按全书分母归一化，响应形状不变"""
     novel_id, run_id = _create_fixture_run(db_session)
     from types import SimpleNamespace
@@ -244,7 +250,7 @@ def test_legacy_topics_endpoint_keeps_working(
     monkeypatch.setattr("src.topic.LDATrainer", lambda config: trainer)
     monkeypatch.setattr("pathlib.Path.exists", lambda self: True)
 
-    response = api_client.get(f"/api/novels/{novel_id}/topics", params={"task_id": run_id[:8]})
+    response = api_client.get(f"/api/novels/{novel_id}/topics", params={"task_id": task_for_run(run_id, db_session)})
     assert response.status_code == 200
     body = response.json()
     assert isinstance(body, list)
@@ -259,6 +265,6 @@ def test_topic_endpoints_require_completed_run(api_client: TestClient, db_sessio
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["甲。\n乙。"], status="failed")
 
     response = api_client.get(
-        f"/api/novels/{novel_id}/topics/aggregate", params={"task_id": run_id[:8]}
+        f"/api/novels/{novel_id}/topics/aggregate", params={"task_id": task_for_run(run_id, db_session)}
     )
     assert response.status_code == 400

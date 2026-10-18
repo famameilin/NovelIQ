@@ -9,7 +9,6 @@ from src.storage.task_status import TaskStatus
 __all__ = ["TaskStatus"]
 
 
-
 class UploadResponse(BaseModel):
     novel_id: str
     filename: str

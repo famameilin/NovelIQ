@@ -20,11 +20,12 @@ from src.agents.diagnosis.runner import _finalize_diagnosis_result, _validate_to
 from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.diagnosis.schema import AgentAnalysis
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 def _analysis_payload() -> dict:
     return {
-        "novel_id": "n1",
+        "novel_id": fixture_id(__name__, "n1"),
         "foreshadow_expectation": 0.35,
         "arc_scores": {"开局": 6.0, "发展": 7.5, "高潮": 8.0, "结局": 7.0, "顾霜": 8.0, "贺重明": 6.5},
         "genre_labels": ["玄幻"],
@@ -76,10 +77,17 @@ def build_graph(responses, *, maximum=5, observer=None, stream=None, retries=Non
     """按生产会话图装配（程序面 execute_code + finish），finish 与无工具响应共用检查"""
     report = {}
     session = MagicMock()
-    tools = build_diagnosis_tools(session, "run", role="report", report_draft=report, execution_id="diagnosis")
+    tools = build_diagnosis_tools(
+        storage_for(session),
+        fixture_id(__name__, "run"),
+        role="report",
+        report_draft=report,
+        execution_id=fixture_id(__name__, "diagnosis"),
+    )
     model = Replies(responses)
-    ledger = AnnotationToolLedger(run_scope="run", current_chapter_id=0, current_chapter_text="",
-                                  allow_future_context=False)
+    ledger = AnnotationToolLedger(
+        run_scope=fixture_id(__name__, "run"), current_chapter_id=0, current_chapter_text="", allow_future_context=False
+    )
     runtime = DiagnosisProgramRuntime(tools, observer=observer)
 
     def check():
@@ -119,10 +127,12 @@ async def run_graph(graph):
 
 
 async def test_report_then_both_end_signals_produce_same_result():
-    graph, model, report = build_graph([
-        AIMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
-        AIMessage(content="完成"),
-    ])
+    graph, model, report = build_graph(
+        [
+            AIMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
+            AIMessage(content="完成"),
+        ]
+    )
     result = await run_graph(graph)
     assert result.get("halted") is None and result["completion_ok"] is True
     assert report["analysis"]["diagnosis"] == "结构完整，节奏张弛有度"
@@ -175,8 +185,11 @@ async def test_topic_gap_can_be_repaired_after_no_tool_response():
             AIMessage(content="", tool_calls=[call("execute_code", {"code": _report_code(payload)})]),
             AIMessage(
                 content="",
-                tool_calls=[call("execute_code", {"code": "write_diagnosis(patch={'topic_labels': "
-                                                        "{'0': '成长', '1': '复仇'}})"})],
+                tool_calls=[
+                    call(
+                        "execute_code", {"code": "write_diagnosis(patch={'topic_labels': {'0': '成长', '1': '复仇'}})"}
+                    )
+                ],
             ),
             AIMessage(content="完成"),
         ]
@@ -219,9 +232,9 @@ def test_finalize_diagnosis_result_overrides_model_owned_runtime_fields() -> Non
 
     finalized = _finalize_diagnosis_result(
         AgentAnalysis.model_validate(payload),
-        novel_id="novel-real",
+        novel_id=fixture_id(__name__, "novel-real"),
         foreshadow_expectation=0.41,
     )
 
-    assert finalized.novel_id == "novel-real"
+    assert finalized.novel_id == fixture_id(__name__, "novel-real")
     assert finalized.foreshadow_expectation == 0.41

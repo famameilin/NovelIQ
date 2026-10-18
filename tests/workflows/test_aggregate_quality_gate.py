@@ -5,14 +5,14 @@ chunk_style 链下线后，imagery 完整性按章节从段落指标充分统计
 zero 密度口径质量门（_build_lexical_curve_quality_report）已移除。
 """
 
-import uuid
-
 import pytest
 
 from src.metrics.aggregate import AggregateResult
+from src.storage import new_id
 from src.storage.repositories import RunRepository
 from src.workflows.aggregate import _build_quality_gate_report
 from tests.support.analysis_factories import insert_test_novel
+from tests.support.storage_fixtures import storage_for
 
 
 def _create_run_with_paragraph_metrics(
@@ -35,7 +35,7 @@ def _create_run_with_paragraph_metrics(
     if imagery_hit_counts is None:
         imagery_hit_counts = [0] * len(token_counts)
 
-    novel_id = uuid.uuid4().hex[:8]
+    novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
     run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
 
@@ -83,7 +83,7 @@ def test_build_quality_gate_report_flags_null_chunk_cultures(db_session) -> None
         language_style={"tone_distribution": {"neutral": 1.0}},
     )
 
-    report = _build_quality_gate_report(run_id, agg_result, db_session)
+    report = _build_quality_gate_report(run_id, agg_result, storage_for(db_session))
 
     assert report["tone_distribution_non_empty_rate"] == 1.0
     assert report["imagery_density_non_null_rate"] == 1.0
@@ -98,7 +98,7 @@ def test_build_quality_gate_report_does_not_flag_zero_density_chunks(db_session)
         language_style={"tone_distribution": {"neutral": 1.0}},
     )
 
-    report = _build_quality_gate_report(run_id, agg_result, db_session)
+    report = _build_quality_gate_report(run_id, agg_result, storage_for(db_session))
 
     assert report["imagery_density_non_null_rate"] == 0.0
     assert report["imagery_lexicon_null_chapter_ratio"] == 0.0
@@ -107,26 +107,26 @@ def test_build_quality_gate_report_does_not_flag_zero_density_chunks(db_session)
 
 def test_build_quality_gate_report_no_rows_is_not_a_pass(db_session) -> None:
     """无段落指标数据时质量门不通过（保守：缺数据=缺陷）"""
-    novel_id = uuid.uuid4().hex[:8]
+    novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
     run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
     agg_result = AggregateResult(
         language_style={"tone_distribution": {"neutral": 1.0}},
     )
 
-    report = _build_quality_gate_report(run_id, agg_result, db_session)
+    report = _build_quality_gate_report(run_id, agg_result, storage_for(db_session))
 
     assert report["imagery_lexicon_null_chapter_ratio"] == 1.0
     assert report["imagery_lexicon_null_chapter_ids"] == []
 
 
 def test_build_quality_gate_report_handles_missing_fields(db_session) -> None:
-    novel_id = uuid.uuid4().hex[:8]
+    novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
     run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
     agg_result = AggregateResult(language_style={})
 
-    report = _build_quality_gate_report(run_id, agg_result, db_session)
+    report = _build_quality_gate_report(run_id, agg_result, storage_for(db_session))
 
     assert report["tone_distribution_non_empty_rate"] == 0.0
     assert report["imagery_density_non_null_rate"] == 0.0
@@ -147,7 +147,7 @@ def test_build_quality_gate_report_counts_chapters_without_metric_rows(db_sessio
     from src.text_processing.models import Chunk
     from src.text_processing.paragraphs import split_chunk_paragraphs
 
-    novel_id = uuid.uuid4().hex[:8]
+    novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
     run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
     chunks = [
@@ -188,7 +188,7 @@ def test_build_quality_gate_report_counts_chapters_without_metric_rows(db_sessio
     agg_result = AggregateResult(
         language_style={"tone_distribution": {"neutral": 1.0}},
     )
-    report = _build_quality_gate_report(run_id, agg_result, db_session)
+    report = _build_quality_gate_report(run_id, agg_result, storage_for(db_session))
 
     assert report["imagery_lexicon_null_chapter_ratio"] == pytest.approx(0.5)
     assert report["imagery_lexicon_null_chapter_ids"] == [2]

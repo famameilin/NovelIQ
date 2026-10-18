@@ -1,16 +1,19 @@
-"""聚合指标服务类：封装聚合结果的获取和缓存逻辑"""
+"""
+聚合指标服务类
+
+说明: 封装聚合结果的获取和缓存逻辑，消除重复计算和代码重复
+"""
 
 from __future__ import annotations
 
 from typing import Any
-
-from sqlalchemy.orm import Session
 
 from src.api.services.results_contracts import (
     _convert_aggregate_result,
     build_aggregate_metrics_contract_from_models,
 )
 from src.metrics.queries.aggregate import MetricsQueryService
+from src.storage import Storage
 
 
 class MetricsService:
@@ -22,30 +25,30 @@ class MetricsService:
     def invalidate_cache(self, run_id: str) -> None:
         self.query.invalidate_cache(run_id)
 
-    def get_aggregate_result(self, run_id: str, session: Session) -> tuple[Any, Any, Any, Any]:
+    def get_aggregate_result(self, run_id: str, session: Storage) -> tuple[Any, Any, Any, Any]:
         return _convert_aggregate_result(self.query.get_aggregate_result(run_id, session))
 
-    def get_narrative_structure(self, run_id: str, session: Session) -> Any:
+    def get_narrative_structure(self, run_id: str, session: Storage) -> Any:
         """获取叙事结构指标"""
         narrative_structure, _, _, _ = self.get_aggregate_result(run_id, session)
         return narrative_structure
 
-    def get_emotion_stats(self, run_id: str, session: Session) -> Any:
+    def get_emotion_stats(self, run_id: str, session: Storage) -> Any:
         """获取情感统计指标"""
         _, emotion_stats, _, _ = self.get_aggregate_result(run_id, session)
         return emotion_stats
 
-    def get_character_stats(self, run_id: str, session: Session) -> Any:
+    def get_character_stats(self, run_id: str, session: Storage) -> Any:
         """获取角色统计指标"""
         _, _, character_stats, _ = self.get_aggregate_result(run_id, session)
         return character_stats
 
-    def get_style_stats(self, run_id: str, session: Session) -> Any:
+    def get_style_stats(self, run_id: str, session: Storage) -> Any:
         """获取风格统计指标"""
         _, _, _, style_stats = self.get_aggregate_result(run_id, session)
         return style_stats
 
-    def get_aggregate_metrics_contract(self, run_id: str, session: Session) -> dict[str, Any]:
+    def get_aggregate_metrics_contract(self, run_id: str, session: Storage) -> dict[str, Any]:
         """获取稳定的 aggregate metrics contract，并复用聚合缓存"""
         narrative_structure, emotion_stats, character_stats, style_stats = self.get_aggregate_result(run_id, session)
         return build_aggregate_metrics_contract_from_models(

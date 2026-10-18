@@ -16,13 +16,11 @@ from src.agents.diagnosis.persistence import save_diagnosis_result
 from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.diagnosis.read import fetch_diagnosis_payload
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.diagnosis_persistence import save_diagnosis_events
 from src.event_trees.organization import (
     ConflictClaim,
     EventOrganizationDraft,
     NarrativeOrganization,
     OrganizationEvidence,
-    save_organization,
     validate_organization,
 )
 from src.storage.models import (
@@ -36,6 +34,8 @@ from src.storage.models import (
     NarrativeGroup,
     NarrativeLink,
 )
+from src.storage.repositories.diagnosis_event_writes import save_diagnosis_events
+from src.storage.repositories.organization_writes import save_organization
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import (
     add_annotation_source,
@@ -44,6 +44,7 @@ from tests.support.event_tree_fixtures import (
     first_paragraph,
     report_case_anchor,
 )
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 CONTRACT = "event-tree-declarations-v1"
 TEXTS = ["顾霜找回了身份。贺重明证实身份。", "他说等待了十年。她说等待了十四年。"]
@@ -65,9 +66,7 @@ class OrganizationCase:
         self.session_id, self.execution_id = add_diagnosis_context(session, self.run_id)
         self.declarations: list[str] = []
         for chapter_id in range(1, chapters + 1):
-            record_id, _execution_id = add_annotation_source(
-                session, self.run_id, chapter_id, role="event"
-            )
+            record_id, _execution_id = add_annotation_source(session, self.run_id, chapter_id, role="event")
             phrase = PHRASES[(chapter_id - 1) % len(PHRASES)]
             declaration_id = add_declaration(
                 session,
@@ -85,7 +84,8 @@ class OrganizationCase:
 
 def identity_draft(session, case: OrganizationCase) -> EventOrganizationDraft:
     """逐项提交身份判断、声明核对与来源比较"""
-    draft = EventOrganizationDraft(session, case.run_id, case.session_id)
+    draft = EventOrganizationDraft(storage_for(session), case.run_id, case.session_id)
+    draft.fixture_session = session
     draft.case_id = report_case_anchor(case.run_id)
     draft.producer_invocation_id = case.execution_id
     sources = list(draft._declarations().values())
@@ -195,9 +195,9 @@ def _organized(draft, event_ids):
 
 def _publish(session, run_id, organization):
     """与正式发布同序：先报告与完整事件，再叙事组织"""
-    from src.agents.diagnosis.persistence import save_diagnosis_report
+    from tests.support.storage_fixtures import insert_report_fixture
 
-    report_id = save_diagnosis_report(
+    report_id = insert_report_fixture(
         session, run_id, organization.source_execution_id, AgentAnalysis(narrative_organization=organization)
     )
     save_diagnosis_events(session, run_id, organization, report_id)
@@ -223,22 +223,14 @@ def test_complete_event_current_content_comes_from_bound_declaration(db_session,
     case, event_ids, draft = organization_case
     organization = _organized(draft, event_ids)
     report_id = _publish(db_session, case.run_id, organization)
-    assert len(
-        [row for row in db_session.scalars(select(NarrativeLink)) if row.arc_group_id is not None]
-    ) == 2
-    outcomes = [
-        row for row in db_session.scalars(select(NarrativeGroup)) if row.outcome_description is not None
-    ]
+    assert len([row for row in db_session.scalars(select(NarrativeLink)) if row.arc_group_id is not None]) == 2
+    outcomes = [row for row in db_session.scalars(select(NarrativeGroup)) if row.outcome_description is not None]
     assert len(outcomes) == 1
-    assert len(
-        [row for row in db_session.scalars(select(NarrativeLink)) if row.outcome_group_id is not None]
-    ) == 2
+    assert len([row for row in db_session.scalars(select(NarrativeLink)) if row.outcome_group_id is not None]) == 2
     # 当前内容从声明绑定读取；绑定声明是显式阶段链尾
     stages = list(
         db_session.scalars(
-            select(EventRevision)
-            .where(EventRevision.event_id == event_ids[0])
-            .order_by(EventRevision.stage_index)
+            select(EventRevision).where(EventRevision.event_id == event_ids[0]).order_by(EventRevision.stage_index)
         )
     )
     current = stages[-1]
@@ -248,7 +240,7 @@ def test_complete_event_current_content_comes_from_bound_declaration(db_session,
 
     db_session.expire_all()
     source = draft._declarations()[current.declaration_id]
-    projected = _run_event_dicts(db_session, case.run_id)[event_ids[0]]
+    projected = _run_event_dicts(storage_for(db_session), case.run_id)[event_ids[0]]
     assert projected["summary"] == source["summary"]
     assert projected["event_type"] == source["event_type"]
     assert projected["current_revision_id"] == current.revision_id
@@ -288,7 +280,7 @@ def test_save_revalidates_bound_source_hash(db_session, organization_case):
     payload = organization.model_dump()
     payload["event_arc_links"][0]["evidence"][0]["text_hash"] = "invented"
     with pytest.raises(ValueError, match="哈希"):
-        validate_organization(db_session, case.run_id, NarrativeOrganization.model_validate(payload))
+        validate_organization(storage_for(db_session), case.run_id, NarrativeOrganization.model_validate(payload))
 
 
 def test_outcome_has_independent_identity_and_requires_each_relation(organization_case):
@@ -325,7 +317,7 @@ def test_cross_run_complete_event_is_rejected(db_session, organization_case):
     other = OrganizationCase(db_session, chapters=1)
     db_session.flush()
     with pytest.raises(ValueError, match="本任务事件不存在"):
-        EventOrganizationDraft(db_session, other.run_id).read_events([event_ids[0]])
+        EventOrganizationDraft(storage_for(db_session), other.run_id).read_events([event_ids[0]])
 
 
 def test_conflict_preserves_each_claim_and_only_unresolved(db_session, organization_case):
@@ -374,7 +366,7 @@ def _finalized_submission(session, case, draft, event_ids, *, diagnosis):
     organization = _organized(draft, event_ids)
     return AgentAnalysis(
         novel_id=case.novel_id,
-        foreshadow_expectation=DiagnosisQueries(session).calculate_foreshadow_expectation(
+        foreshadow_expectation=DiagnosisQueries(storage_for(session)).calculate_foreshadow_expectation(
             case.run_id, declaration_bindings=bindings
         ),
         narrative_organization=organization,
@@ -385,7 +377,7 @@ def _finalized_submission(session, case, draft, event_ids, *, diagnosis):
 def test_same_frozen_publication_replay_keeps_report_and_case_warnings(db_session, organization_case):
     case, event_ids, draft = organization_case
     analysis = _finalized_submission(db_session, case, draft, event_ids, diagnosis="完整已核对结果")
-    save_diagnosis_result(db_session, case.run_id, analysis)
+    save_diagnosis_result(storage_for(db_session), case.run_id, analysis)
     report = _report_for(db_session, case.run_id)
     assert report is not None
     report_id = report.report_id
@@ -393,20 +385,23 @@ def test_same_frozen_publication_replay_keeps_report_and_case_warnings(db_sessio
 
     db_session.add(
         CaseEntry(
-            entry_id="warning-entry-0",
+            entry_id=fixture_id(__name__, "warning-entry-0"),
             warning_report_id=report_id,
+            producer_execution_id=case.execution_id,
             warning_ordinal=0,
             attempted_case_reference="case-x",
             warning_message="案例保存失败",
         )
     )
     db_session.commit()
-    save_diagnosis_result(db_session, case.run_id, analysis)
+    save_diagnosis_result(storage_for(db_session), case.run_id, analysis)
     assert db_session.get(DiagnosisReport, report_id) is not None
-    assert fetch_diagnosis_payload(db_session, case.run_id)["diagnosis"] == "完整已核对结果"
+    assert fetch_diagnosis_payload(storage_for(db_session), case.run_id)["diagnosis"] == "完整已核对结果"
     assert _report_for(db_session, case.run_id).report_id == report_id
     with pytest.raises(ValueError, match="不一致"):
-        save_diagnosis_result(db_session, case.run_id, analysis.model_copy(update={"diagnosis": "不同结果"}))
+        save_diagnosis_result(
+            storage_for(db_session), case.run_id, analysis.model_copy(update={"diagnosis": "不同结果"})
+        )
 
 
 def _report_for(session, run_id: str) -> DiagnosisReport | None:
@@ -439,13 +434,13 @@ def test_save_failure_rolls_back_report_and_organization(db_session):
         assert session.scalars(select(NarrativeGroup)).all()
         raise ValueError("保存失败")
 
-    with patch("src.agents.diagnosis.persistence.save_organization", side_effect=save_then_fail):
+    with patch("src.storage.repositories.diagnosis_publish.save_organization", side_effect=save_then_fail):
         with pytest.raises(ValueError, match="保存失败"):
-            save_diagnosis_result(db_session, case.run_id, analysis)
+            save_diagnosis_result(storage_for(db_session), case.run_id, analysis)
     assert _report_for(db_session, case.run_id) is None
     from src.event_trees.storage_map import run_events
 
-    assert run_events(db_session, case.run_id) == {}
+    assert run_events(storage_for(db_session), case.run_id) == {}
 
 
 def test_old_chapter_contract_cannot_be_promoted_by_diagnosis(db_session, organization_case):
@@ -465,11 +460,16 @@ def test_tools_expose_complete_events_and_remove_unique_primary_api(organization
     tools = {
         item.name: item
         for item in build_diagnosis_tools(
-            draft.session, draft.run_id, role="report", organization_draft=draft
+            storage_for(draft.fixture_session), draft.run_id, role="report", organization_draft=draft
         )
     }
     tools.update(
-        {item.name: item for item in build_diagnosis_tools(draft.session, draft.run_id, organization_draft=draft)}
+        {
+            item.name: item
+            for item in build_diagnosis_tools(
+                storage_for(draft.fixture_session), draft.run_id, organization_draft=draft
+            )
+        }
     )
     assert {
         "write_diagnosis",

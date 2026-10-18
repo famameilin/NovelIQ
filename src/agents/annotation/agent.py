@@ -9,10 +9,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
-from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from sqlalchemy.orm import Session
 
 from src.agents.stream import AgentStream
 from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
@@ -25,13 +23,15 @@ from src.event_trees.trees import CONTRIBUTION_KEYS, EventTrees
 from src.fact_graph.contributions import FactContribution
 from src.fact_graph.evidence import EvidenceParagraph
 from src.fact_graph.graph import FactGraph
-from src.utils.identity import stable_uuid
+from src.fact_graph.identity import canonical_relation_key
+from src.storage import Storage, new_id
+from src.storage.records.evidence import EvidenceParagraph as StoredParagraph
 from src.work.annotation_work import WorkReceipt
 
 from .agent_graph import build_agent_graph
 from .agent_ir import AgentAnnotation
 from .agent_runtime import AgentProgramRuntime
-from .errors import AnnotationDependencyError, AnnotationInputError, AnnotationInvariantError
+from .errors import AnnotationDependencyError, AnnotationInputError
 from .ledger import AnnotationToolLedger
 from .paragraphs import build_chapter_paragraph_info
 from .work_tools import build_work_tools
@@ -50,11 +50,21 @@ class WorkExecution:
     fact_contribution: FactContribution | None = None
     event_contribution: EventContribution | None = None
     case_contribution: CaseContribution | None = None
+    annotation_id: str = field(default_factory=new_id)
+    persistence: Any = None
     call_id: str = ""
     event_reads: dict[str, dict[str, Any]] = field(default_factory=dict)
     case_connections: list[str] = field(default_factory=list)
     case_reads: list[dict[str, Any]] = field(default_factory=list)
     case_save_warnings: list[dict[str, Any]] = field(default_factory=list)
+
+    identifiers: dict[tuple, str] = field(default_factory=dict)
+
+    def identifier(self, *key) -> str:
+        """同一冻结执行的业务键复用身份，首次分配交给 Storage"""
+        if key not in self.identifiers:
+            self.identifiers[key] = new_id()
+        return self.identifiers[key]
 
     @property
     def work_id(self) -> str:
@@ -113,9 +123,7 @@ class WorkExecution:
             "contract_version": "event-tree-declarations-v1",
             "chapter_consolidation_version": RULE_VERSION,
             "declaration_contributions": {
-                key: value
-                for key, value in ledger.events.contribution_payloads().items()
-                if key == "relations"
+                key: value for key, value in ledger.events.contribution_payloads().items() if key == "relations"
             },
             "metrics": ledger.metrics_payload.model_dump(mode="json") if ledger.metrics_payload else None,
             "events": [value.model_dump(mode="json") for value in ledger.bound_payloads.get("events", [])],
@@ -138,16 +146,15 @@ class AnnotationAgent:
         self,
         bus: EventBus,
         run_id: str,
-        session_factory: Callable[[], Session],
+        session_factory: Callable[[], Storage],
         *,
         novel_id: str,
         fact_graph: FactGraph | None = None,
         event_trees: EventTrees | None = None,
         case_pool: CasePool | None = None,
     ) -> None:
-        self.bus, self.run_id, self.session_factory, self.novel_id = bus, run_id, session_factory, novel_id
+        self.bus, self.run_id, self.session_factory, self.novel_id = (bus, run_id, session_factory, novel_id)
         self.address = f"agent:{run_id}"
-        # 三个域引擎由 agent 自建：编排层只派发 work，不持有事实图、事件树与案例池
         self.fact_graph = fact_graph if fact_graph is not None else FactGraph(run_scope=run_id)
         self.event_trees = event_trees if event_trees is not None else EventTrees(run_id)
         self.case_pool = case_pool if case_pool is not None else CasePool(run_id)
@@ -176,18 +183,17 @@ class AnnotationAgent:
             try:
 
                 def save() -> dict[str, Any]:
-                    with self.session_factory() as session:
-                        result = consolidate_chapter(
-                            session,
-                            self.run_id,
-                            message.payload["chapter_id"],
-                            self.case_pool,
-                            recheck=bool(message.payload.get("recheck", False)),
-                        )
-                        session.commit()
-                        return result
+                    session = self.session_factory()
+                    result = consolidate_chapter(
+                        session,
+                        self.run_id,
+                        message.payload["chapter_id"],
+                        self.case_pool,
+                        recheck=bool(message.payload.get("recheck", False)),
+                    )
+                    pass
+                    return result
 
-                # 取消协程不能让后台事务继续写、前台却提前回滚内存并释放共享锁
                 transaction = asyncio.create_task(asyncio.to_thread(save))
                 cancelled = False
                 try:
@@ -214,7 +220,7 @@ class AnnotationAgent:
         from src.model_pool.llm import build_chat_model
 
         receipt = message.payload
-        invocation_id = uuid4().hex
+        invocation_id = new_id()
         payload = receipt.payload
         paragraph_info = build_chapter_paragraph_info(payload["paragraphs"])
         embedding = EmbeddingClient(novel_id=self.novel_id)
@@ -227,7 +233,6 @@ class AnnotationAgent:
             embedding_client=embedding,
         )
         if not str(payload["chapter_text"]).strip():
-            # 章文本非空是标注 work 的前置事实（诊断会话复用账本后才允许空），这里只拦标注面
             raise AnnotationInputError("标注 work 的章正文不能为空")
         ledger = AnnotationToolLedger(
             run_scope=self.run_id,
@@ -264,7 +269,6 @@ class AnnotationAgent:
         audit_id: int | None = None
         try:
             model = build_chat_model("annotation", config=load_task_config("annotation", model_id=payload["model_id"]))
-
             model_name = str(getattr(model, "model_name", None) or getattr(model, "model", "unknown"))
             audit_context = build_invocation_context(
                 run_id=self.run_id,
@@ -353,10 +357,12 @@ class AnnotationAgent:
                     {
                         "messages": [
                             SystemMessage(
-                                content=AGENT_SYSTEM_PROMPT + "\n全书图树案例共享；finish 只完成自己的标注。"
-                                "push_case(case_type,description) 归入人物/关系/对话/事件，"
-                                "promise_case 只填真实 case_id。"
-                                "跨章连接用 write_link 引用已实际读取且已保存的声明；未保存端点不能连接。"
+                                content=AGENT_SYSTEM_PROMPT
+                                + (
+                                    "\n全书图树案例共享；finish 只完成自己的标注。push_case(case_type,description)"
+                                    " 归入人物/关系/对话/事件，promise_case 只填真实 case_id。跨章连接用 write_li"
+                                    "nk 引用已实际读取且已保存的声明；未保存端点不能连接。"
+                                )
                             ),
                             HumanMessage(
                                 content=build_agent_message(
@@ -376,7 +382,6 @@ class AnnotationAgent:
                     config={"recursion_limit": 4 * max_iterations + 10},
                 )
             except AnnotationDependencyError:
-                # 外部依赖失败不得进入文本模型的瞬态重派通道
                 raise
             except Exception as exc:
                 from src.agents.stream import _is_transient_model_error
@@ -399,11 +404,11 @@ class AnnotationAgent:
                 from .errors import AnnotationBudgetExhaustedError
 
                 raise AnnotationBudgetExhaustedError(
-                    f"budget_exhausted work_id={receipt.work_id} invocation_id={invocation_id} "
-                    f"iterations_used={state.get('iterations', 0)} "
-                    f"iterations_limit={max_iterations} "
-                    f"end_signal={state.get('end_signal', 'none')} missing={execution.validate()} "
-                    f"error={state.get('error')} failed_calls={failed}"
+                    f"budget_exhausted work_id={receipt.work_id} invocation_id={invocation_id} iterations_used={
+                        state.get('iterations', 0)
+                    } iterations_limit={max_iterations} end_signal={state.get('end_signal', ('none'))} missing={
+                        execution.validate()
+                    } error={state.get('error')} failed_calls={failed}"
                 )
             async with self.lock:
                 self.freeze(execution)
@@ -441,12 +446,10 @@ class AnnotationAgent:
             )
             if isinstance(exc, asyncio.CancelledError):
                 raise
-
             from .errors import AnnotationBudgetExhaustedError, AnnotationRetryableError
 
             if isinstance(exc, AnnotationBudgetExhaustedError):
                 return {"outcome": "budget_exhausted", "invocation_id": invocation_id, "error": str(exc)}
-
             if not isinstance(exc, AnnotationRetryableError):
                 raise
             return {"outcome": "retry", "invocation_id": invocation_id, "error": str(exc)}
@@ -527,72 +530,17 @@ class AnnotationAgent:
         execution = self._execution(message)
         return await asyncio.to_thread(self._save, execution, message.payload)
 
-    def _save(self, execution: WorkExecution, session: Session) -> str:
-        from src.storage.models import ChapterAnnotation
+    def _save(self, execution: WorkExecution, storage: Storage) -> str:
+        if not execution.finished or execution.persistence is None:
+            raise ValueError("只有完成完整性检查并冻结的 work 可以保存")
+        result = storage.annotations.save(execution.persistence)
+        execution.case_save_warnings = result["warnings"]
+        self.case_pool.save_warnings[execution.invocation_id] = deepcopy(result["warnings"])
+        return result["annotation_id"]
 
-        from .chapter_consolidation import RULE_VERSION
-
-        if not execution.finished:
-            raise ValueError("只有通过程序完整性检查的 work 可以保存")
-        payload = execution.receipt.payload
-        annotation_id = stable_uuid(self.run_id, execution.work_id)
-        existing = session.get(ChapterAnnotation, annotation_id)
-        if existing is not None:
-            if existing.execution_id != execution.invocation_id:
-                raise ValueError(f"chapter={payload['chapter_id']} role={payload['role']} 已有另一份不可变结果")
-            return annotation_id
-        output = execution.output()
-        metrics = output["metrics"]
-        session.add(
-            ChapterAnnotation(
-                record_id=annotation_id,
-                execution_id=execution.invocation_id,
-                run_id=self.run_id,
-                chapter_id=int(payload["chapter_id"]),
-                role=str(payload["role"]),
-                # 记录合同版本取本次产出的内容合同：事件域读写按该值判定记录形状
-                contract_version=str(output["contract_version"]),
-                chapter_consolidation_version=RULE_VERSION,
-                summary=metrics["summary"] if metrics else None,
-                emotional_valence=metrics["emotional_valence"] if metrics else None,
-                narrative_function=metrics["narrative_function"] if metrics else None,
-                pivot_moment=metrics["pivot_moment"] if metrics else None,
-                cliffhanger=metrics["cliffhanger"] if metrics else None,
-            )
-        )
-        session.flush()
-        assert execution.event_contribution is not None
-        assert execution.fact_contribution is not None
-        assert execution.case_contribution is not None
-        # 实体身份行先落：事件参与者与关系事实都按同一批确定性身份建外键
-        self.fact_graph.ensure_entity_rows(session, execution.fact_contribution)
-        self.event_trees.save_work(session, execution.event_contribution, annotation_id)
-        self.fact_graph.save_work(session, execution.fact_contribution, annotation_id)
-        self._save_dialogues(session, execution)
-        self._save_paragraph_labels(session, execution, annotation_id)
-        execution.case_save_warnings = self.case_pool.save_work(session, execution.case_contribution)
-        saved = session.get(ChapterAnnotation, annotation_id)
-        if saved is None:
-            raise AnnotationInvariantError("标注正式产物写入后不可读取")
-        session.flush()
-        return annotation_id
-
-    def _save_paragraph_labels(self, session: Session, execution: WorkExecution, annotation_id: str) -> None:
+    def _save_paragraph_labels(self, *args):
         """逐段情绪标签随正式记录落入分析条目；段号是章内映射后的全局 paragraph_id"""
-        from src.storage.models import AnalysisAssessment
-
-        for label in execution.output()["paragraph_labels"]:
-            session.add(
-                AnalysisAssessment(
-                    assessment_id=stable_uuid(
-                        self.run_id, annotation_id, "paragraph_emotion", str(label["paragraph_id"])
-                    ),
-                    record_id=annotation_id,
-                    paragraph_id=int(label["paragraph_id"]),
-                    emotion=int(label["emotion"]),
-                )
-            )
-        session.flush()
+        raise RuntimeError("标签随完整标注保存")
 
     async def confirm(self, message: Message) -> None:
         execution = self._execution(message)
@@ -675,6 +623,21 @@ class AnnotationAgent:
             for key in keys
         }
         self.fact_graph.reference_entities(author, list(facts["entities"].values()))
+        from src.fact_graph.entity_operations import operation_fields
+
+        for op in facts["entity_ops"]:
+            op["entity_id"] = self.fact_graph.entity_id_for_key(
+                self.fact_graph.entity_key(op["name"], op["entity_type"])
+            )
+            op["submitted_fields"] = sorted(operation_fields(op))
+        for op in facts["relation_assert_ops"]:
+            from_id = self.fact_graph.entity_id_for_key(str(op["from_entity"]))
+            to_id = self.fact_graph.entity_id_for_key(str(op["to_entity"]))
+            left, right, kind = canonical_relation_key(from_id, to_id, str(op["relation_type"]))
+            key = (str(left), str(right), kind)
+            if key not in self.fact_graph.relation_ids:
+                self.fact_graph.relation_ids[key] = new_id()
+            op.update(from_entity_id=left, to_entity_id=right, relation_id=self.fact_graph.relation_ids[key])
         contributions = {
             "facts": facts,
             "events": {
@@ -719,7 +682,9 @@ class AnnotationAgent:
                 "deliveries": deepcopy(self.case_pool.deliveries.get(author, [])),
             },
         }
-
+        for node in contributions["events"]["nodes"].values():
+            for participant in node["content"]["participants"]:
+                participant["entity"] = self.fact_graph.entity_id_for_key(str(participant["entity"]))
         payload = execution.receipt.payload
         paragraphs = tuple(
             EvidenceParagraph(row.chapter_id, row.paragraph_id, row.text, row.local_start_char, row.local_end_char)
@@ -742,38 +707,88 @@ class AnnotationAgent:
             json.dumps(facts["entities"], ensure_ascii=False),
         )
         execution.case_contribution = CaseContribution(
-            self.run_id,
-            execution.invocation_id,
-            json.dumps(contributions["cases"], ensure_ascii=False),
+            self.run_id, execution.invocation_id, json.dumps(contributions["cases"], ensure_ascii=False)
+        )
+        from src.storage.records.annotation_save import AnnotationSave
+        from src.storage.records.cases import CaseSave
+        from src.storage.records.events import EventSave
+        from src.storage.records.facts import FactSave
+
+        from .chapter_consolidation import RULE_VERSION
+
+        metrics = output["metrics"]
+        record = {
+            "record_id": execution.annotation_id,
+            "execution_id": author,
+            "run_id": self.run_id,
+            "chapter_id": int(payload["chapter_id"]),
+            "role": str(payload["role"]),
+            "contract_version": str(output["contract_version"]),
+            "chapter_consolidation_version": RULE_VERSION,
+            **{
+                key: metrics[key] if metrics else None
+                for key in ("summary", "emotional_valence", "narrative_function", "pivot_moment", "cliffhanger")
+            },
+        }
+        dialogues = (
+            tuple(
+                {
+                    "dialogue_id": new_id(),
+                    "run_id": self.run_id,
+                    "chapter_id": int(payload["chapter_id"]),
+                    "creation_execution_id": author,
+                    "candidate_key": item["candidate_key"],
+                    "start_char": int(item["start"]),
+                    "end_char": int(item["end"]),
+                    "speaker_entity_id": self.fact_graph.entity_id(item["speaker"], "character")
+                    if item["speaker"]
+                    else None,
+                    "tone": item["tone"],
+                    "is_inner_monologue": bool(item["is_inner_monologue"]),
+                }
+                for item in output["dialogues"]
+            )
+            if execution.ledger.role in {"annotation", "metric"}
+            else ()
+        )
+        labels = tuple(
+            {
+                "assessment_id": new_id(),
+                "record_id": execution.annotation_id,
+                "paragraph_id": int(item["paragraph_id"]),
+                "emotion": int(item["emotion"]),
+            }
+            for item in output["paragraph_labels"]
+        )
+        stored_paragraphs = tuple(
+            StoredParagraph(row.chapter_id, row.paragraph_id, row.text, row.local_start_char, row.local_end_char)
+            for row in paragraphs
+        )
+        execution.persistence = AnnotationSave(
+            record,
+            FactSave(
+                self.run_id,
+                author,
+                int(payload["chapter_id"]),
+                stored_paragraphs,
+                execution.fact_contribution.snapshot_json,
+                execution.fact_contribution.observations_json,
+            ),
+            EventSave(
+                self.run_id,
+                author,
+                int(payload["chapter_sequence"]),
+                stored_paragraphs,
+                execution.event_contribution.snapshot_json,
+                execution.event_contribution.entities_json,
+            ),
+            CaseSave(self.run_id, author, execution.case_contribution.snapshot_json),
+            dialogues,
+            labels,
         )
 
-    def _save_dialogues(self, session: Session, execution: WorkExecution) -> None:
-        from src.fact_graph.graph import mention_uuid
-        from src.storage.models import DialogueRecord
-
-        if execution.ledger.role not in {"annotation", "metric"}:
-            return
-        for content in execution.output()["dialogues"]:
-            identifier = stable_uuid(self.run_id, execution.work_id, content["candidate_key"])
-            session.add(
-                DialogueRecord(
-                    dialogue_id=identifier,
-                    run_id=self.run_id,
-                    chapter_id=execution.ledger.current_chapter_id,
-                    creation_execution_id=execution.invocation_id,
-                    candidate_key=content["candidate_key"],
-                    start_char=int(content["start"]),
-                    end_char=int(content["end"]),
-                    speaker_entity_id=mention_uuid(
-                        self.run_id, execution.ledger.current_chapter_id, content["speaker"], "character"
-                    )
-                    if content["speaker"]
-                    else None,
-                    tone=content["tone"],
-                    is_inner_monologue=bool(content["is_inner_monologue"]),
-                )
-            )
-        session.flush()
+    def _save_dialogues(self, *args):
+        raise RuntimeError("对话随完整标注保存")
 
     async def cancel(self, message: Message) -> None:
         execution = self.executions.get(message.work_id)
@@ -808,17 +823,13 @@ class AnnotationAgent:
         execution = self._execution(message)
 
         def load() -> tuple[Any, Any, Any]:
-            with self.session_factory() as session:
-                args = (
-                    session,
-                    execution.invocation_id,
-                    stable_uuid(self.run_id, execution.work_id),
-                )
-                return (
-                    self.fact_graph.load_saved_work(*args),
-                    self.event_trees.load_saved_work(*args),
-                    self.case_pool.load_saved_work(*args),
-                )
+            session = self.session_factory()
+            args = (session, execution.invocation_id, execution.annotation_id)
+            return (
+                self.fact_graph.load_saved_work(*args),
+                self.event_trees.load_saved_work(*args),
+                self.case_pool.load_saved_work(*args),
+            )
 
         snapshots = await asyncio.to_thread(load)
         async with self.lock:
@@ -829,77 +840,11 @@ class AnnotationAgent:
 
     def _recover(self, data: dict[str, Any]) -> None:
         """整章废弃按产物行与执行归属清理：产物、域事实与真实尝试一起退场"""
-        from sqlalchemy import delete, select
-
-        from src.storage.models import (
-            BookCase,
-            Chapter,
-            ChapterAnnotation,
-            DialogueRecord,
-            EventDeclaration,
-            Execution,
-        )
-
-        session = data["session"]
-        chapter_ids = {int(chapter) for chapter in data["chapter_ids"]}
-        ordered_chapters = sorted(chapter_ids)
-        executions = select(Execution.execution_id).where(
-            Execution.run_id == self.run_id, Execution.chapter_id.in_(ordered_chapters)
-        )
-        discarded_records = select(ChapterAnnotation.record_id).where(
-            ChapterAnnotation.run_id == self.run_id, ChapterAnnotation.chapter_id.in_(ordered_chapters)
-        )
-        discarded_declarations = select(EventDeclaration.declaration_id).where(
-            EventDeclaration.record_id.in_(discarded_records)
-        )
-        discarded_dialogues = select(DialogueRecord.dialogue_id).where(
-            DialogueRecord.creation_execution_id.in_(executions)
-        )
-        # 案例的正式目标（声明/对话）随整章废弃退场：先在目标外键（RESTRICT）之前清案例行
-        session.execute(
-            delete(BookCase).where(
-                BookCase.automatic_declaration_id.in_(discarded_declarations)
-                | BookCase.declaration_target_id.in_(discarded_declarations)
-                | BookCase.dialogue_target_id.in_(discarded_dialogues)
-            )
-        )
-        # 本章章末核对凭据的来源集合已失效：撤销凭据，重建不受旧回执阻挡
-        from src.agents.annotation.chapter_consolidation import discard_chapter_receipts
-
-        discard_chapter_receipts(session, self.run_id, chapter_ids)
-        execution_ids = set(session.scalars(executions))
-        self.fact_graph.discard_storage(session, execution_ids)
-        self.event_trees.discard_storage(session, execution_ids)
-        session.execute(delete(DialogueRecord).where(DialogueRecord.creation_execution_id.in_(executions)))
-        session.execute(delete(ChapterAnnotation).where(ChapterAnnotation.record_id.in_(discarded_records)))
-        session.flush()
-        records = list(
-            session.execute(
-                select(
-                    ChapterAnnotation.record_id,
-                    ChapterAnnotation.execution_id,
-                    ChapterAnnotation.role,
-                    ChapterAnnotation.chapter_id,
-                    Chapter.sequence,
-                )
-                .join(
-                    Chapter,
-                    (Chapter.run_id == ChapterAnnotation.run_id)
-                    & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
-                )
-                .where(ChapterAnnotation.run_id == self.run_id)
-            )
-        )
-        self.fact_graph.rebuild_storage(session)
-        self.event_trees.rebuild_storage(session)
-        self.fact_graph.restore_storage(session, records)
-        self.event_trees.restore_storage(session, records)
-        self.case_pool.restore_storage(session, execution_ids)
-        # 产物、域事实与案例支持都已退场，正式尝试行随整章废弃退出（模型调用行由外键级联）
-        session.execute(
-            delete(Execution).where(Execution.run_id == self.run_id, Execution.chapter_id.in_(ordered_chapters))
-        )
-        session.flush()
+        storage = data["session"]
+        result = storage.annotations.discard_chapters(self.run_id, {int(chapter) for chapter in data["chapter_ids"]})
+        self.fact_graph.restore_storage(storage, result["records"])
+        self.event_trees.restore_storage(storage, result["records"])
+        self.case_pool.restore_storage(storage, result["execution_ids"])
 
     def close(self) -> None:
         for topic in (

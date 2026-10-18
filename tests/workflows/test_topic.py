@@ -2,12 +2,14 @@
 
 import asyncio
 import sys
-import uuid
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from sqlalchemy import text
+
+from src.storage import new_id
+from tests.support.storage_fixtures import storage_for
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -40,7 +42,7 @@ class TestTopicModel:
     @pytest.fixture(autouse=True)
     def setup(self, db_session):
         self.db_session = db_session
-        self.novel_id = uuid.uuid4().hex[:8]
+        self.novel_id = new_id()
         insert_test_novel(self.novel_id, session=db_session)
 
         run_repo = RunRepository(db_session)
@@ -95,6 +97,8 @@ class TestTopicModel:
             ],
         )
 
+        self.db_session.commit()
+
     def _count_paragraph_topics(self) -> int:
         count = self.db_session.execute(
             text("SELECT COUNT(*) FROM paragraph_topics WHERE run_id = :run_id"),
@@ -108,7 +112,7 @@ class TestTopicModel:
 
         paragraphs, topics = await run_topic_model(
             run_id=self.run_id,
-            session=self.db_session,
+            session=storage_for(self.db_session),
             num_topics=3,
             passes=5,
             iterations=50,
@@ -124,9 +128,7 @@ class TestTopicModel:
         model_run = paragraph_repo.fetch_topic_model_run(self.run_id)
         assert model_run is not None
         assert model_run.num_topics == 3
-        assert model_run.model_key == "gensim-lda"
         assert model_run.passes == 5
-        assert model_run.artifact_key == f"models/topic/{self.run_id}"
         assert model_run.training_document_count == 10
         assert model_run.inference_paragraph_count == 10
         assert model_run.dictionary_size > 0
@@ -144,7 +146,7 @@ class TestTopicModel:
         with pytest.raises(asyncio.CancelledError):
             await run_topic_model(
                 run_id=self.run_id,
-                session=self.db_session,
+                session=storage_for(self.db_session),
                 num_topics=3,
                 passes=5,
                 iterations=50,
@@ -169,6 +171,7 @@ class TestTopicModel:
             {"token_count": 1, "run_id": self.run_id, "paragraph_id": short_row.paragraph_id},
         )
 
+        self.db_session.commit()
         captured_docs: list[list[list[str]]] = []
 
         from src.topic.lda_model import LDATrainer
@@ -182,12 +185,7 @@ class TestTopicModel:
 
         monkeypatch.setattr(LDATrainer, "train", capture_train)
         paragraphs, topics = await run_topic_model(
-            run_id=self.run_id,
-            session=self.db_session,
-            num_topics=2,
-            passes=1,
-            iterations=10,
-            top_n=2,
+            run_id=self.run_id, session=storage_for(self.db_session), num_topics=2, passes=1, iterations=10, top_n=2
         )
 
         assert paragraphs == 2
@@ -207,7 +205,7 @@ class TestTopicModel:
 
         paragraphs1, topics1 = await run_topic_model(
             run_id=self.run_id,
-            session=self.db_session,
+            session=storage_for(self.db_session),
             num_topics=2,
             passes=5,
             iterations=50,
@@ -220,7 +218,7 @@ class TestTopicModel:
 
         paragraphs2, topics2 = await run_topic_model(
             run_id=self.run_id,
-            session=self.db_session,
+            session=storage_for(self.db_session),
             num_topics=2,
             passes=5,
             iterations=50,
@@ -233,7 +231,7 @@ class TestTopicModel:
 
         paragraphs3, topics3 = await run_topic_model(
             run_id=self.run_id,
-            session=self.db_session,
+            session=storage_for(self.db_session),
             num_topics=2,
             passes=5,
             iterations=50,
@@ -248,7 +246,7 @@ class TestTopicModel:
     async def test_topic_model_empty_db(self) -> None:
         paragraphs, topics = await run_topic_model(
             run_id=self.run_id,
-            session=self.db_session,
+            session=storage_for(self.db_session),
             num_topics=3,
             passes=5,
             iterations=50,

@@ -13,7 +13,7 @@ from typing import Any
 
 from src.config import settings
 from src.metrics.robust_smooth import robust_local_regression
-from src.storage.repositories.paragraph_repository import ParagraphCurveRow
+from src.storage.records.paragraph import ParagraphCurveRow
 
 
 def _smooth_mapped(
@@ -81,7 +81,7 @@ def compute_paragraph_curves(
             neg_density = float(metric.negative_weight_sum or 0.0) / token_count
             net_density = pos_density - neg_density
         else:
-            # 分母为零不伪造
+            #  分母为零不伪造
             pos_density = None
             neg_density = None
             net_density = None

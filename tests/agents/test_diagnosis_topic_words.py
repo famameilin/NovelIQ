@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.topic.artifacts import load_topic_artifact
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 def test_topic_words_load_with_words(monkeypatch) -> None:
@@ -27,7 +28,7 @@ def test_topic_words_load_with_words(monkeypatch) -> None:
     monkeypatch.setattr("src.topic.LDATrainer.load_model", fake_load)
     from src.config.paths import resolve_model_dir
 
-    result = load_topic_artifact(resolve_model_dir("r1"))
+    result = load_topic_artifact(resolve_model_dir(fixture_id(__name__, "r1")))
     assert result == ({0: ["修炼"], 1: []}, {0: "修行", 1: "战斗"}, None)
 
 
@@ -44,7 +45,10 @@ def test_read_topics_with_words() -> None:
     ]
     with patch("src.diagnosis.queries.DiagnosisQueries") as repo:
         repo.return_value.fetch_topic_words.return_value = rows
-        tools = {item.name: item for item in build_diagnosis_tools(MagicMock(), "run", role="report")}
+        tools = {
+            item.name: item
+            for item in build_diagnosis_tools(storage_for(MagicMock()), fixture_id(__name__, "run"), role="report")
+        }
         result = json.loads(tools["read_topics"].invoke({}))
     assert result == {"topics": rows}
     assert [item["topic_id"] for item in result["topics"]] == [23, 7]

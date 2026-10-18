@@ -1,7 +1,7 @@
 """
 分析结果导出路由
 
-完整分析结果导出到 outputs/*.json（复盘与测试用）；数据装配在
+说明: 完整分析结果导出到 outputs/*.json（复盘与测试用）；数据装配在
 src/api/services/results_export_service.py，本模块只做依赖注入与响应组装。
 """
 
@@ -11,7 +11,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_novel_service
 from src.api.models.responses import ResultsWriteResponse
@@ -27,10 +26,10 @@ from src.api.services.results_export_service import (
     write_results_to_file,
 )
 from src.event_trees.read.organization import RunRequiresRebuildError
-from src.storage.repositories import AnnotationRepository, ChapterRepository, StatsRepository
+from src.storage import Storage
 from src.workflows.novels import NovelService
 
-# tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
+# 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
 
 
@@ -45,16 +44,16 @@ async def get_results(
     novel_id: str,
     task_id: Annotated[str, Query(..., description="分析任务ID")],
     run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
+    session: Annotated[Storage, Depends(get_db_session)],
     novel_service: Annotated[NovelService, Depends(get_novel_service)],
 ) -> ResultsWriteResponse:
     run = _require_run_for_novel(session, novel_id, run_id)
 
     _require_readable_run_status(run)
 
-    stats_repo = StatsRepository(session)
-    annotation_repo = AnnotationRepository(session)
-    chapter_repo = ChapterRepository(session)
+    stats_repo = session.statistics
+    annotation_repo = session
+    chapter_repo = session.chapters
 
     try:
         results_data, missing_fields, novel_name = fetch_all_results_data(

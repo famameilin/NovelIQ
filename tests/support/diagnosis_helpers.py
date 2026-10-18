@@ -1,28 +1,26 @@
 """读取夹具显式提交声明身份判断，沿正式保存链建立新结果"""
 
-from uuid import uuid4
-
-from src.event_trees.diagnosis_persistence import save_diagnosis_events
-from src.event_trees.organization import (
-    EventOrganizationDraft,
-    OrganizationEvidence,
+from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
+from src.storage import new_id
+from src.storage.repositories.diagnosis_event_writes import save_diagnosis_events
+from src.storage.repositories.organization_writes import (
     register_diagnosis_execution,
     register_diagnosis_session,
     save_organization,
 )
+from tests.support.storage_fixtures import storage_for
 
 from .event_tree_fixtures import report_case_anchor
 
 
 def declaration_event_draft(session, run_id, *, groups=None):
     """夹具显式指定声明身份分组，未指定时各项独立，不按旧树推断"""
-    session_id = f"diag-session-{uuid4().hex[:12]}"
-    execution_id = uuid4().hex
+    session_id = new_id()
+    execution_id = new_id()
     register_diagnosis_session(session, run_id=run_id, session_id=session_id)
-    register_diagnosis_execution(
-        session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=1
-    )
-    draft = EventOrganizationDraft(session, run_id, session_id)
+    register_diagnosis_execution(session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=1)
+    draft = EventOrganizationDraft(storage_for(session), run_id, session_id)
+    draft.fixture_session = session
     draft.case_id = report_case_anchor(run_id)
     draft.producer_invocation_id = execution_id
     declarations = list(draft._declarations().values())
@@ -91,10 +89,10 @@ def persist_event_draft(session, draft, report_id=None):
         draft.review_events([event_id], reason="读取夹具已核对正式身份与结构")
     organization = draft.finish()
     if report_id is None:
-        from src.agents.diagnosis.persistence import save_diagnosis_report
         from src.diagnosis.schema import AgentAnalysis
+        from tests.support.storage_fixtures import insert_report_fixture
 
-        report_id = save_diagnosis_report(
+        report_id = insert_report_fixture(
             session,
             draft.run_id,
             str(draft.execution_id),

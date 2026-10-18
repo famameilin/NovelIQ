@@ -1,7 +1,7 @@
 """
 结果元数据查询组装器
 
-承载 global_stats、token_usage、novel_name 等辅助查询逻辑
+说明: 承载 global_stats、token_usage、novel_name 等辅助查询逻辑
 """
 
 from __future__ import annotations
@@ -16,12 +16,11 @@ from src.api.models.responses import (
     TokenUsageSummary,
 )
 from src.audit.queries import fetch_token_usage_stats
-from src.storage.repositories import ChapterRepository, StatsRepository
+from src.storage import Storage
+from src.storage.contracts.stores import ChapterStore, StatisticsStore
 
 
-def _fetch_global_stats(
-    run_id: str, stats_repo: StatsRepository, chapter_repo: ChapterRepository
-) -> GlobalStats | None:
+def _fetch_global_stats(run_id: str, stats_repo: StatisticsStore, chapter_repo: ChapterStore) -> GlobalStats | None:
     """获取全局统计数据"""
     stats = stats_repo.fetch_global_stats_dict(run_id)
     total_chapters, total_chars = chapter_repo.fetch_chapter_counts(run_id)
@@ -46,15 +45,15 @@ def _fetch_global_stats(
     )
 
 
-def _fetch_novel_name(novel_id: str, stats_repo: StatsRepository) -> str | None:
+def _fetch_novel_name(novel_id: str, stats_repo: StatisticsStore) -> str | None:
     """获取小说名称"""
     return stats_repo.fetch_novel_title(novel_id)
 
 
-def _fetch_token_usage_stats(run_id: str, stats_repo: StatsRepository) -> TokenUsageStats:
+def _fetch_token_usage_stats(run_id: str, storage: Storage) -> TokenUsageStats:
     """获取 token 使用统计"""
     try:
-        stats = fetch_token_usage_stats(stats_repo.session, run_id)
+        stats = fetch_token_usage_stats(storage, run_id)
         summary = TokenUsageSummary(
             call_count=stats["summary"]["call_count"],
             total_prompt_tokens=stats["summary"]["total_prompt_tokens"],

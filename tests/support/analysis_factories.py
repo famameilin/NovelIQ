@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy import text
 
 from src.storage.db import get_session_factory
@@ -7,8 +9,8 @@ from src.storage.db import get_session_factory
 
 def insert_test_novel(novel_id: str, *, session=None, title: str | None = None) -> None:
     """为直接造 run 的 API 测试补 novels 主表记录"""
-    if len(novel_id) > 8:
-        raise ValueError(f"test novel_id must be 8 chars or fewer, got: {novel_id}")
+    if UUID(novel_id).version != 7:
+        raise ValueError("测试小说身份必须是 UUIDv7")
 
     statement = text(
         """

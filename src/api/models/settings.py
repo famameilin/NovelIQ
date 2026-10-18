@@ -27,7 +27,7 @@ class SettingSectionSpecResponse(BaseModel):
 class SettingFieldSpecResponse(BaseModel):
     """单个可调参数声明（path 是 settings.json 中的结构化路径，dict 键可含点不做字符串拼接约定）"""
 
-    path: list[str] = Field(description="结构化路径，如 [\"models\", \"annotation\", \"temperature\"]")
+    path: list[str] = Field(description='结构化路径，如 ["models", "annotation", "temperature"]')
     field_type: SettingFieldType = Field(description="字段类型，驱动前端控件选择")
     label: str = Field(description="展示名")
     description: str = Field(default="", description="字段说明")

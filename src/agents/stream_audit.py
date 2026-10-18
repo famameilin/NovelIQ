@@ -101,9 +101,7 @@ def _provider_request_metadata(model: Any, *, attempt: int) -> dict[str, Any]:
     tool_names, tool_contract_fingerprint = _safe_tool_contract(tools)
     thinking = bool(extra_body.get("think")) if isinstance(extra_body, Mapping) else False
     parameters: dict[str, Any] = {
-        "model": str(
-            getattr(bound_model, "model_name", None) or getattr(bound_model, "model", "") or "unknown"
-        ),
+        "model": str(getattr(bound_model, "model_name", None) or getattr(bound_model, "model", "") or "unknown"),
         "base_url": _safe_base_url(
             getattr(bound_model, "base_url", None) or getattr(bound_model, "openai_api_base", None)
         ),

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from typing import Any
-from uuid import uuid4
 
 import pytest
 
@@ -13,8 +12,10 @@ from src.config import settings
 from src.event_bus import EventBus, Message
 from src.model_pool.capacity import MODEL_CAPACITY, ModelElectionExhausted, ModelElectionPool
 from src.model_pool.contracts import SelectionRequest, SelectionResult
+from src.storage import new_id
 from src.work.annotation_work import WorkReceipt
 from src.work.chapter_pool import ChapterWorkerPool
+from tests.support.storage_fixtures import fixture_id
 
 
 def _receipt(run_id: str = "run", work_id: str = "work") -> WorkReceipt:
@@ -46,9 +47,9 @@ async def _enqueue(bus: EventBus, pool: ModelElectionPool) -> None:
             topic="pool.enqueue",
             source="queue:run",
             target=pool.address,
-            run_id="run",
+            run_id=fixture_id(__name__, "run"),
             work_id="work",
-            payload=SelectionRequest("run", "work"),
+            payload=SelectionRequest(fixture_id(__name__, "run"), "work"),
         )
     )
 
@@ -72,7 +73,7 @@ def test_ledger_counts_and_returns_reservations() -> None:
 def test_close_returns_every_reservation_booked_under_pool_ownership() -> None:
     """池子退出按归属归还：即使预留没进池子自己的账，也不会留在全局账本上"""
     bus = EventBus()
-    pool = ModelElectionPool(bus, "run", max_attempts=1)
+    pool = ModelElectionPool(bus, fixture_id(__name__, "run"), max_attempts=1)
     MODEL_CAPACITY.reserve(pool.address, "booked-directly", "test")
     assert any(MODEL_CAPACITY.snapshot().values())
 
@@ -88,7 +89,7 @@ async def test_live_pool_occupancy_keeps_election_waiting(monkeypatch: Any) -> N
     bus = EventBus()
     other = ModelElectionPool(bus, "other", max_attempts=1, poll_seconds=0.001)
     MODEL_CAPACITY.reserve(other.address, "busy", "test")
-    pool = ModelElectionPool(bus, "run", max_attempts=1, poll_seconds=0.001)
+    pool = ModelElectionPool(bus, fixture_id(__name__, "run"), max_attempts=1, poll_seconds=0.001)
     assignments = bus.subscribe(pool.assignment_topic)
     await _enqueue(bus, pool)
 
@@ -115,7 +116,7 @@ async def test_empty_slot_and_unavailable_model_stops_analysis(monkeypatch: Any)
     _single_slot_pool(monkeypatch)
     bus = EventBus()
     monkeypatch.setattr("src.model_pool.selection.select_annotation_model", lambda *args, **kwargs: None)
-    pool = ModelElectionPool(bus, "run", max_attempts=1, poll_seconds=0.001)
+    pool = ModelElectionPool(bus, fixture_id(__name__, "run"), max_attempts=1, poll_seconds=0.001)
     await _enqueue(bus, pool)
 
     with pytest.raises(ModelElectionExhausted):
@@ -135,9 +136,9 @@ def _storage(db_session: Any) -> Any:
 async def test_queue_propagates_election_failure_reason(monkeypatch: Any, db_session: Any) -> None:
     """选举失败的真实原因必须传到调用方，且不落任何正式产物"""
     from src.storage.models import ChapterAnnotation
-    from src.utils.identity import stable_uuid
     from src.work.annotation_work import annotation_work_id
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
+    from tests.support.storage_fixtures import fixture_id
 
     monkeypatch.setattr(settings.models, "model_pool", [])
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文。"])
@@ -154,13 +155,11 @@ async def test_queue_propagates_election_failure_reason(monkeypatch: Any, db_ses
 
     assert not any(MODEL_CAPACITY.snapshot().values())
     # 没有任何正式产物：模型池结束分析时 work 未保存
-    assert db_session.get(ChapterAnnotation, stable_uuid(run_id, receipt.work_id)) is None
+    assert db_session.get(ChapterAnnotation, fixture_id(run_id, receipt.work_id)) is None
 
 
 @pytest.mark.asyncio
-async def test_queue_appends_no_stop_message_when_pool_ends_analysis(
-    monkeypatch: Any, db_session: Any
-) -> None:
+async def test_queue_appends_no_stop_message_when_pool_ends_analysis(monkeypatch: Any, db_session: Any) -> None:
     """模型池直接结束分析时不追加队列停止消息，也没有在飞 work 可停"""
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
@@ -177,7 +176,7 @@ async def test_queue_appends_no_stop_message_when_pool_ends_analysis(
     with pytest.raises(ValueError, match="正权重"):
         await asyncio.wait_for(
             ChapterWorkerPool(max_attempts=1, poll_seconds=0.001).run(
-                [_receipt(run_id=run_id, work_id=f"work-{uuid4().hex[:8]}")],
+                [_receipt(run_id=run_id, work_id=f"work-{new_id()}")],
                 bus=bus,
                 session_factory=_storage(db_session),
             ),
@@ -190,7 +189,7 @@ async def test_queue_appends_no_stop_message_when_pool_ends_analysis(
 @pytest.mark.asyncio
 async def test_pool_rejects_business_envelope_and_mismatched_identity() -> None:
     bus = EventBus()
-    pool = ModelElectionPool(bus, "run", max_attempts=1)
+    pool = ModelElectionPool(bus, fixture_id(__name__, "run"), max_attempts=1)
     try:
         with pytest.raises(TypeError, match="SelectionRequest"):
             await pool.enqueue(
@@ -198,7 +197,7 @@ async def test_pool_rejects_business_envelope_and_mismatched_identity() -> None:
                     topic="pool.enqueue",
                     source="queue:run",
                     target=pool.address,
-                    run_id="run",
+                    run_id=fixture_id(__name__, "run"),
                     work_id="work",
                     payload=_receipt(),
                 )
@@ -209,9 +208,9 @@ async def test_pool_rejects_business_envelope_and_mismatched_identity() -> None:
                     topic="pool.enqueue",
                     source="queue:run",
                     target=pool.address,
-                    run_id="run",
+                    run_id=fixture_id(__name__, "run"),
                     work_id="other",
-                    payload=SelectionRequest("run", "work"),
+                    payload=SelectionRequest(fixture_id(__name__, "run"), "work"),
                 )
             )
         assert not pool.pending

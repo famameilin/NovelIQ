@@ -26,6 +26,7 @@ from tests.support.event_tree_fixtures import (
     publish_draft,
 )
 from tests.support.run_records import set_run_status
+from tests.support.storage_fixtures import storage_for, task_for_run
 
 TEXTS = ["开始营救", "继续营救", "成功营救"]
 
@@ -80,7 +81,7 @@ def _fixture(session, *, published=True):
 
 def test_unpublished_declarations_are_sources_without_formal_event_identity(db_session):
     _, run_id, declarations, _, _ = _fixture(db_session, published=False)
-    query = EventTreeQuery(db_session, run_id)
+    query = EventTreeQuery(storage_for(db_session), run_id)
     result = query.fetch()
     assert result["organization_status"] == "pending_diagnosis" and result["events"] == []
     assert result["counts"]["declarations"] == 3
@@ -106,7 +107,7 @@ def test_chapter_relation_proposals_stay_audit_sources_before_publication(db_ses
         paragraph=first_paragraph(db_session, run_id, chapter_id=1),
     )
     db_session.flush()
-    query = EventTreeQuery(db_session, run_id)
+    query = EventTreeQuery(storage_for(db_session), run_id)
     assert query.fetch()["relations"] == []
     exported = query.export()
     assert exported["organization_status"] == "pending_diagnosis"
@@ -115,15 +116,17 @@ def test_chapter_relation_proposals_stay_audit_sources_before_publication(db_ses
 
 def test_one_formal_event_retains_three_stages_and_participants(db_session):
     _, run_id, declarations, event_id, _ = _fixture(db_session)
-    query = EventTreeQuery(db_session, run_id)
+    query = EventTreeQuery(storage_for(db_session), run_id)
     assert [row["event_id"] for row in query.fetch()["events"]] == [event_id]
     detail = query.detail(event_id)
     assert detail["summary"] == "成功营救" and detail["status"] == "resolved"
     assert detail["source_chapters"] == [1, 2, 3]
     exported = query.export()
-    assert {
-        item["entity"]["name"] for row in exported["revisions"] for item in row["participants"]
-    } == {"营救者1", "营救者2", "营救者3"}
+    assert {item["entity"]["name"] for row in exported["revisions"] for item in row["participants"]} == {
+        "营救者1",
+        "营救者2",
+        "营救者3",
+    }
     assert "processes" not in exported and "process_structures" not in exported
     assert {row["declaration_id"] for row in exported["declaration_bindings"]} == set(declarations)
     assert len(exported["revisions"]) == 3
@@ -132,26 +135,28 @@ def test_one_formal_event_retains_three_stages_and_participants(db_session):
 
 def test_forest_and_timeline_use_formal_event_and_preserve_reading_cutoff(db_session):
     _, run_id, declarations, event_id, _ = _fixture(db_session)
-    forest = EventForestQuery(db_session)
+    forest = EventForestQuery(storage_for(db_session))
     first = forest.fetch_snapshot(run_id, chapter_id=1)
     last = forest.fetch_snapshot(run_id, chapter_id=3)
     assert [row.event_id for row in first.event_nodes] == [event_id]
     assert first.event_nodes[0].description == "开始营救"
     assert last.event_nodes[0].description == "成功营救"
     assert declarations[0] not in first.derived_event_order
-    changes = PlotlineQuery(db_session, run_id).fetch(through_chapter_id=1)["changes"]
+    changes = PlotlineQuery(storage_for(db_session), run_id).fetch(through_chapter_id=1)["changes"]
     assert changes[0]["source_event_ids"] == [event_id]
 
 
 def test_declaration_source_api_does_not_offer_process_owner_navigation(db_session, api_client):
     novel_id, run_id, declarations, event_id, _ = _fixture(db_session)
     url = f"/api/novels/{novel_id}/event-trees/nodes/{declarations[0]}/source"
-    response = api_client.get(url, params={"task_id": run_id, "kind": "declaration"})
+    response = api_client.get(url, params={"task_id": task_for_run(run_id), "kind": "declaration"})
     assert response.status_code == 200
     assert response.json()["locator"]["target_kind"] == "declaration"
     assert "owner_event_id" not in response.json()["locator"]
-    assert api_client.get(url, params={"task_id": run_id, "kind": "process"}).status_code == 422
-    event = api_client.get(f"/api/novels/{novel_id}/event-trees/nodes/{event_id}", params={"task_id": run_id})
+    assert api_client.get(url, params={"task_id": task_for_run(run_id), "kind": "process"}).status_code == 422
+    event = api_client.get(
+        f"/api/novels/{novel_id}/event-trees/nodes/{event_id}", params={"task_id": task_for_run(run_id)}
+    )
     assert event.status_code == 200 and event.json()["event_id"] == event_id
 
 
@@ -168,12 +173,12 @@ def test_missing_binding_and_mixed_source_contract_are_rejected(db_session):
     )
     db_session.flush()
     with pytest.raises(ValueError, match="身份绑定"):
-        EventTreeQuery(db_session, run_id).fetch()
+        EventTreeQuery(storage_for(db_session), run_id).fetch()
     # 混用旧契约标记的运行必须从原文重建，不接受读取层转换
     db_session.get(ChapterAnnotation, record_id).contract_version = "event-tree-2026-10-13"
     db_session.flush()
     with pytest.raises(RunRequiresRebuildError):
-        EventTreeQuery(db_session, run_id).fetch()
+        EventTreeQuery(storage_for(db_session), run_id).fetch()
     assert orphan not in declarations
 
 
@@ -190,4 +195,4 @@ def test_old_publication_contract_marker_is_rejected(db_session):
     report.contract_version = "event-tree-2026-10-13"
     db_session.flush()
     with pytest.raises(RunRequiresRebuildError):
-        EventTreeQuery(db_session, run_id).fetch()
+        EventTreeQuery(storage_for(db_session), run_id).fetch()

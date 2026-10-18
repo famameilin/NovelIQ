@@ -84,9 +84,7 @@ def build_state_read_tools(
             )
         if not compact and limit > 20:
             raise ValueError(f"limit={limit} 越界：详情预览每页最多 20 条，精简一页请用 compact=True（最多 100 条）")
-        identifiers = events.search_ids(
-            query, chapter_id=chapter_id, tree_id=tree_id, isforeshadowing=isforeshadowing
-        )
+        identifiers = events.search_ids(query, chapter_id=chapter_id, tree_id=tree_id, isforeshadowing=isforeshadowing)
         reads = [events.read(identifier) for identifier in identifiers[offset : offset + limit]]
         if compact:
             previews = [

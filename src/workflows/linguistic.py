@@ -30,24 +30,22 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import cast
 
 from gensim.models import KeyedVectors, Word2Vec
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.lexicons.constants import LEXICON_FILES
 from src.linguistic import TrainResult
 from src.linguistic.queries import fetch_paragraph_labels
 from src.sse.events import StreamEvent
-from src.storage.repositories import ParagraphRepository
-from src.storage.repositories.linguistic_repository import LinguisticRepository
+from src.storage import Storage
+from src.storage.contracts.stores import LinguisticStore, ParagraphStore
 
 
 async def run_linguistic(
     run_id: str,
-    session: Session,
+    session: Storage,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     *,
     batch_size: int = 128,
@@ -61,8 +59,8 @@ async def run_linguistic(
     from src.utils.cancellation import check_cancelled
 
     start_time = time.time()
-    paragraph_repo = ParagraphRepository(session)
-    ling_repo = LinguisticRepository(session)
+    paragraph_repo = session.paragraphs
+    ling_repo = session.linguistic
 
     ltp_settings = settings.linguistic.ltp
     w2v_settings = settings.linguistic.word2vec
@@ -93,8 +91,8 @@ async def run_linguistic(
         registry = LexiconRegistry()
         terms = registry.get(LEXICON_FILES["fixed_phrases"])
 
-        # 先落 run 级 LTP 管线/模型合同（归一映射是版本化代码合同，不镜像成
-        # 数据库表；读取侧按 pipeline_version 投影 pos_group/类型）
+        # 3NF：先落 run 级 LTP 管线/模型合同（归一映射是版本化代码
+        # 合同，不镜像成数据库表；读取侧按 pipeline_version 投影 pos_group/类型）
         pipeline_version, model_key = ltp_pipeline_contract()
         ling_repo.ensure_ltp_contract(
             run_id,
@@ -104,7 +102,7 @@ async def run_linguistic(
             entity_type_mappings=ENTITY_TYPE_MAP,
         )
 
-        # 词典情绪计数对照基线（命中集与 preprocess 同源，
+        # B 批：词典情绪计数对照基线（命中集与 preprocess 同源，
         # 读 paragraph_metrics 现值作为窗口规则口径）
         lexicon_counts = {
             int(metric_row.paragraph_id): (
@@ -126,15 +124,17 @@ async def run_linguistic(
             last_id = batch[-1].paragraph_id
 
             logger.info(f"LTP 分析 {len(batch)} 个段落（游标 after={last_id}）...")
-            # LTP 批推理在事件循环外执行：128 段/批的 cws/pos/ner/dep/sdp 是重 CPU
-            # 同步调用，直接在事件循环上跑会冻结整个 API；批间 await 串行化模型访问
+            # LTP 批推理移出事件循环（run 08f9ba42 实证 30s API 尖峰）：
+            # 128 段/批的 cws/pos/ner/dep/sdp 是重 CPU 同步调用，直接在事件循环上
+            # 跑会冻结整个 API（状态端点/SSE 全部无响应）。批间 await 串行化模型
+            # 访问，无并发推理风险。
             results = await asyncio.to_thread(analyze_paragraph_batch, [row.text for row in batch])
 
             feature_rows: list[dict] = []
             entity_rows: list[dict] = []
             for row, result in zip(batch, results, strict=True):
                 data = result.to_dict()
-                # 词典极性候选标记 × sdp 结构 → 情绪事件 + mNEG 修正计数
+                # B 批：词典极性候选标记 × sdp 结构 → 情绪事件 + mNEG 修正计数
                 events = extract_emotion_events(result, POSITIVE_TERMS, NEGATIVE_TERMS)
                 mneg_pos, mneg_neg = mneg_corrected_counts(
                     row.text,
@@ -185,8 +185,6 @@ async def run_linguistic(
                 paragraph_tokens[row.paragraph_id] = tokens
                 token_sequences.append([t["text"] for t in tokens])
 
-            ling_repo.insert_linguistic_features(run_id, feature_rows, clear_first=first_batch)
-            ling_repo.insert_entities(run_id, entity_rows, clear_first=first_batch)
             total_feature_paragraphs += len(feature_rows)
             logger.info(f"LTP 事实落库：段落={len(feature_rows)} 实体候选={len(entity_rows)}")
 
@@ -215,16 +213,23 @@ async def run_linguistic(
                             "is_metric_hit": hit.is_metric_hit,
                         }
                     )
-            ling_repo.insert_phrase_hits(run_id, phrase_rows, clear_first=first_batch)
+
             # 短语完成事实覆盖本批全部段落（含零命中：完成≠有命中）
-            ling_repo.mark_phrase_completed(run_id, [int(row.paragraph_id) for row in batch])
+            ling_repo.save_batch(
+                run_id,
+                feature_rows,
+                entity_rows,
+                phrase_rows,
+                [int(row.paragraph_id) for row in batch],
+                clear_first=first_batch,
+            )
             logger.info(f"固定短语落库：{len(phrase_rows)} 行（词表 {fixed_phrase_key}）")
             first_batch = False
 
         logger.info(f"LTP 全库完成：段落={total_paragraphs} 词法特征段落={total_feature_paragraphs}")
 
-        # mNEG 接管词典否定翻转：回写 paragraph_metrics 情绪计数并按新分子整卷
-        # 重算段落曲线（聚合/曲线/零信号占比随之切换口径）
+        # B 批：mNEG 接管词典否定翻转——回写 paragraph_metrics 情绪
+        # 计数并按新分子整卷重算段落曲线（聚合/曲线/零信号占比随之切换口径）
         corrected = _apply_mneg_correction(session, run_id, paragraph_repo, mneg_corrections)
         if corrected:
             logger.info(f"mNEG 情绪修正回写：{corrected} 段（sdp 否定辖域替代窗口规则），段落曲线已重算")
@@ -232,10 +237,12 @@ async def run_linguistic(
         logger.info("linguistic.ltp.enabled=false，跳过词法/句法/实体与固定短语")
 
     # ------------------------------------------------------------------
-    # 段落级监督（按书边界）：全书自选段标签现算该书线性边界，逐段打分回写
-    # paragraph_metrics 的两列边界观测；不依赖 LTP（向量源是 preprocess 落的 semantic_vector 行）
+    # 段落级监督（按书边界）：全书自选段标签现算该书线性边界，
+    # 逐段打分回写 paragraph_metrics 的两列边界观测。不依赖 LTP——向量源是
+    # paragraph_features 的 semantic_vector 行（preprocess 落库），故挂在
+    # ltp 闸门之外；标签不足或类别单一时无边界（两列 NULL），不伪造。
     check_cancelled(is_cancelled)
-    boundary_rows = _apply_paragraph_boundary_scores(run_id, paragraph_repo, ling_repo)
+    boundary_rows = _apply_paragraph_boundary_scores(session, run_id, paragraph_repo, ling_repo)
     if boundary_rows:
         logger.info(f"段落级边界打分回写：{boundary_rows} 段获得分值（样本来自标注 agent 自选段标签）")
 
@@ -286,9 +293,10 @@ async def run_linguistic(
 
 
 def _apply_paragraph_boundary_scores(
+    session: Storage,
     run_id: str,
-    paragraph_repo: ParagraphRepository,
-    ling_repo: LinguisticRepository,
+    paragraph_repo: ParagraphStore,
+    ling_repo: LinguisticStore,
 ) -> int:
     """段落级监督（按书边界）：全书自选段标签 → 岭回归边界 → 逐段打分
 
@@ -303,7 +311,6 @@ def _apply_paragraph_boundary_scores(
 
     from src.linguistic import fit_emotion_boundary
 
-    session = paragraph_repo.session
     labels = fetch_paragraph_labels(session, run_id)
     if len(labels) < 2:
         logger.info("段落边界跳过：自选段标签不足 2 条（无法拟合边界），两列保持 NULL")
@@ -334,7 +341,7 @@ def _apply_paragraph_boundary_scores(
         paragraph_id = int(row.paragraph_id)
         vector = vectors_by_id.get(paragraph_id)
         if vector is None or vector.shape[0] != expected_dim:
-            # 无向量段落按 0 贡献（两侧皆零），不写 NULL 之外的伪造值
+            # 与旧口径一致：无向量段落按 0 贡献（两侧皆零），不写 NULL 之外的伪造值
             pos_sum = neg_sum = 0.0
         else:
             score = boundary.score(vector)
@@ -346,9 +353,9 @@ def _apply_paragraph_boundary_scores(
 
 
 def _apply_mneg_correction(
-    session: Session,
+    session: Storage,
     run_id: str,
-    paragraph_repo: ParagraphRepository,
+    paragraph_repo: ParagraphStore,
     corrections: list[dict[str, float | int]],
 ) -> int:
     """mNEG 情绪修正回写（sdp 否定辖域接管窗口规则）
@@ -360,25 +367,9 @@ def _apply_mneg_correction(
     if not corrections:
         return 0
 
-    from sqlalchemy import bindparam, update
-    from sqlalchemy.sql.schema import Table as SaTable
-
-    from src.storage.models import ParagraphMetric
     from src.workflows.paragraph_curves import compute_paragraph_curves
 
     # Core 表对象（绕开 ORM 按主键批量更新拦截）；synchronize_session=False 同理
-    metric_table = cast(SaTable, ParagraphMetric.__table__)
-    statement = (
-        update(metric_table)
-        .where(
-            metric_table.c.run_id == bindparam("b_run_id"),
-            metric_table.c.paragraph_id == bindparam("b_paragraph_id"),
-        )
-        .values(
-            positive_weight_sum=bindparam("b_pos"),
-            negative_weight_sum=bindparam("b_neg"),
-        )
-    )
     params = [
         {
             "b_run_id": run_id,
@@ -388,7 +379,7 @@ def _apply_mneg_correction(
         }
         for row in corrections
     ]
-    session.execute(statement, params, execution_options={"synchronize_session": False})
+    session.linguistic.apply_mneg(params)
 
     paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
     metric_rows = paragraph_repo.fetch_paragraph_metrics(run_id)
@@ -400,7 +391,7 @@ def _apply_mneg_correction(
 
 def _train_and_build(
     run_id: str,
-    ling_repo: LinguisticRepository,
+    ling_repo: LinguisticStore,
     token_sequences: list[list[str]],
     paragraph_tokens: dict[int, list[dict[str, str]]],
     *,
@@ -441,7 +432,7 @@ def _train_and_build(
             vectors,
             paragraph_id=paragraph_id,
         ):
-            # source_token_count 不是存储列：读取侧由正式词元 + 版本分组投影
+            # source_token_count 不再是存储列：读取侧由正式词元 + 版本分组投影
             pos_rows.append(
                 {
                     "run_id": run_id,

@@ -13,23 +13,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from src.storage.models import (
-    AnalysisAssessment,
-    DeclarationParticipant,
-    DialogueRecord,
-    EventDeclaration,
-)
-from src.storage.repositories.annotation import AnnotationRepository
-from src.storage.repositories.annotation.rows import AnnotationRoleRecord
+from src.storage import Storage
+from src.storage.records.annotation import AnnotationRoleRecord
 from src.work.policy import completed_chapters
 
 _ROLE_ORDER = {"annotation": 0, "entity": 0, "event": 1, "metric": 2}
-#: 章级具名指标所在的角色（短章整章与长章指标角色）
 METRIC_ROLES = ("annotation", "metric")
-#: 每章段落级情绪标签软下限（与标注合同固定覆盖规则同口径，低于此值随章留痕）
 _PARAGRAPH_LABEL_MIN_PER_CHAPTER = 2
 
 
@@ -47,41 +36,30 @@ class ChapterAnnotationView:
     kind: str = "chapter_annotation"
 
 
-def fetch_annotation_role_records(session: Session, run_id: str) -> list[AnnotationRoleRecord]:
+def fetch_annotation_role_records(session: Storage, run_id: str) -> list[AnnotationRoleRecord]:
     """章内标注角色完成判定视图：saved 由正式产物行存在性表达（repository 冻结读面）"""
-    return AnnotationRepository(session).fetch_role_records(run_id)
+    return session.annotations.fetch_role_records(run_id)
 
 
-def _paragraph_labels(session: Session, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+def _paragraph_labels(session: Storage, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     """段落情绪标签：正式落点为 analysis_assessments 的逐段情绪分支（按段号定序投影）"""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for record_id, paragraph_id, emotion in session.execute(
-        select(AnalysisAssessment.record_id, AnalysisAssessment.paragraph_id, AnalysisAssessment.emotion)
-        .where(AnalysisAssessment.record_id.in_(record_ids))
-        .order_by(AnalysisAssessment.record_id, AnalysisAssessment.paragraph_id)
-    ):
+    for _stored_row_1 in session.reads.work_queries_paragraph_labels_1(record_ids):
+        record_id = _stored_row_1.record_id
+        paragraph_id = _stored_row_1.paragraph_id
+        emotion = _stored_row_1.emotion
         grouped[str(record_id)].append({"paragraph_id": int(paragraph_id), "emotion": emotion})
     return grouped
 
 
-def _declaration_projections(session: Session, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+def _declaration_projections(session: Storage, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     """章级事件：不可变声明正文 + 参与者（实体名字/类型从实体行读取，不复制）"""
-    declarations = list(
-        session.scalars(
-            select(EventDeclaration)
-            .where(EventDeclaration.record_id.in_(record_ids))
-            .order_by(EventDeclaration.created_at, EventDeclaration.declaration_id)
-        )
-    )
+    declarations = list(session.reads.work_queries_declaration_projections_2(record_ids))
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     if not declarations:
         return grouped
     participants: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in session.scalars(
-        select(DeclarationParticipant)
-        .where(DeclarationParticipant.declaration_id.in_([item.declaration_id for item in declarations]))
-        .order_by(DeclarationParticipant.declaration_id, DeclarationParticipant.participant_ordinal)
-    ):
+    for row in session.reads.work_queries_declaration_projections_1(declarations):
         participants[row.declaration_id].append(
             {
                 "entity_id": row.entity_id,
@@ -110,14 +88,10 @@ def _declaration_projections(session: Session, record_ids: list[str]) -> dict[st
     return grouped
 
 
-def _dialogue_projections(session: Session, execution_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+def _dialogue_projections(session: Storage, execution_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     """对话：正式定位与当前归因（原文从章节区间读取，不复制正文）"""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in session.scalars(
-        select(DialogueRecord)
-        .where(DialogueRecord.creation_execution_id.in_(execution_ids))
-        .order_by(DialogueRecord.creation_execution_id, DialogueRecord.start_char, DialogueRecord.candidate_key)
-    ):
+    for row in session.reads.work_queries_dialogue_projections_1(execution_ids):
         grouped[row.creation_execution_id].append(
             {
                 "dialogue_id": row.dialogue_id,
@@ -132,23 +106,15 @@ def _dialogue_projections(session: Session, execution_ids: list[str]) -> dict[st
     return grouped
 
 
-def _character_observations(session: Session, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+def _character_observations(session: Storage, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     """人物动态观测：只关联原声明参与者（三态至少一项非空即承载一次观测）"""
-    declarations = session.execute(
-        select(EventDeclaration.declaration_id, EventDeclaration.record_id).where(
-            EventDeclaration.record_id.in_(record_ids)
-        )
-    ).all()
+    declarations = session.reads.work_queries_character_observations_2(record_ids)
     if not declarations:
         return {}
     record_by_declaration = {row.declaration_id: row.record_id for row in declarations}
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in session.scalars(
-        select(DeclarationParticipant)
-        .where(DeclarationParticipant.declaration_id.in_(list(record_by_declaration)))
-        .order_by(DeclarationParticipant.declaration_id, DeclarationParticipant.participant_ordinal)
-    ):
-        if row.narrative_role is None and row.action is None and row.emotion is None:
+    for row in session.reads.work_queries_character_observations_1(record_by_declaration):
+        if row.narrative_role is None and row.action is None and (row.emotion is None):
             continue
         grouped[record_by_declaration[row.declaration_id]].append(
             {
@@ -171,9 +137,9 @@ def _coverage_warnings(label_count: int) -> list[str]:
     return [f"情绪标签覆盖: 仅标注 {label_count} 段（每章应自选 2-3 段）"]
 
 
-def chapter_annotations(session: Session, run_id: str) -> list[ChapterAnnotationView]:
+def chapter_annotations(session: Storage, run_id: str) -> list[ChapterAnnotationView]:
     """按已保存角色聚合章节结果；只读取正式关系，不写任何行"""
-    repository = AnnotationRepository(session)
+    repository = session.annotations
     records = repository.fetch_saved_outputs(run_id)
     roles = repository.fetch_role_records(run_id)
     complete = completed_chapters(roles)
@@ -194,9 +160,7 @@ def chapter_annotations(session: Session, run_id: str) -> list[ChapterAnnotation
         expected = {record.role for record in roles if record.chapter_id == chapter_id}
         if {record.role for record in sources} != expected:
             continue
-        metric_index = next(
-            (index for index, record in enumerate(sources) if record.role in METRIC_ROLES), None
-        )
+        metric_index = next((index for index, record in enumerate(sources) if record.role in METRIC_ROLES), None)
         if metric_index is None:
             continue
         ordered = sorted(sources, key=lambda record: _ROLE_ORDER.get(record.role or "", 99))
@@ -211,9 +175,7 @@ def chapter_annotations(session: Session, run_id: str) -> list[ChapterAnnotation
                 "labels": labels_by_record.get(metric.record_id, []),
             }
         }
-        payload["events"] = [
-            value for record in ordered for value in declarations_by_record.get(record.record_id, [])
-        ]
+        payload["events"] = [value for record in ordered for value in declarations_by_record.get(record.record_id, [])]
         payload["dialogues"] = [
             value for record in ordered for value in dialogues_by_execution.get(record.execution_id, [])
         ]
@@ -238,9 +200,9 @@ def chapter_annotations(session: Session, run_id: str) -> list[ChapterAnnotation
     return results
 
 
-def is_annotate_complete(session: Session, run_id: str) -> bool:
+def is_annotate_complete(session: Storage, run_id: str) -> bool:
     """按真实章节集合严格判断标注阶段完成状态"""
-    expected = AnnotationRepository(session).fetch_chapter_ids(run_id)
+    expected = session.annotations.fetch_chapter_ids(run_id)
     if not expected:
         return False
     actual = {record.chapter_id for record in chapter_annotations(session, run_id)}

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
@@ -17,6 +16,7 @@ from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.paragraphs import build_chapter_paragraph_info
 from src.agents.annotation.work_tools import build_work_tools
 from src.event_bus import EventBus, Message
+from src.storage import new_id
 from src.storage.models import (
     Chapter,
     Execution,
@@ -25,10 +25,11 @@ from src.storage.models import (
 )
 from src.work.annotation_work import WorkReceipt, annotation_work_id
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
+from tests.support.storage_fixtures import natural_record, storage_factory, storage_for
 
 
 def execution_for(agent, session, chapter_id):
-    chapter = session.get(Chapter, {"run_id": agent.run_id, "chapter_id": chapter_id})
+    chapter = natural_record(session, Chapter, {"run_id": agent.run_id, "chapter_id": chapter_id})
     # 段落终点是读取投影：与生产派发同口径投影出 local_end_char
     paragraphs = [
         SimpleNamespace(
@@ -44,7 +45,7 @@ def execution_for(agent, session, chapter_id):
             .order_by(Paragraph.paragraph_index)
         )
     ]
-    invocation = uuid4().hex
+    invocation = new_id()
     work_id = annotation_work_id(agent.run_id, chapter_id, "event")
     payload = {
         "chapter_id": chapter_id,
@@ -117,7 +118,7 @@ async def save_and_confirm(agent, session, execution):
         )
     )
     session.flush()
-    identifier = agent._save(execution, session)
+    identifier = agent._save(execution, storage_for(session))
     session.commit()
     await agent.confirm(
         Message(
@@ -133,15 +134,28 @@ async def save_and_confirm(agent, session, execution):
 
 
 def declaration_code(key, summary):
-    return "event(" + ", ".join(f"{name}={value!r}" for name, value in {
-        "el": key, "title": summary, "problem": summary + "能否完成", "summary": summary,
-        "event_type": "行动", "status": "ongoing", "evidence": 1}.items()) + ")"
+    return (
+        "event("
+        + ", ".join(
+            f"{name}={value!r}"
+            for name, value in {
+                "el": key,
+                "title": summary,
+                "problem": summary + "能否完成",
+                "summary": summary,
+                "event_type": "行动",
+                "status": "ongoing",
+                "evidence": 1,
+            }.items()
+        )
+        + ")"
+    )
 
 
 @pytest.mark.parametrize("reverse", [False, True])
 async def test_same_fact_cannot_be_recreated_as_second_declaration(db_session, reverse):
     novel, run = create_run_with_chunks(db_session, texts=["入门后挡火。"])
-    agent = AnnotationAgent(EventBus(), run, lambda: db_session, novel_id=novel)
+    agent = AnnotationAgent(EventBus(), run, storage_factory(lambda: db_session), novel_id=novel)
     execution, runtime = execution_for(agent, db_session, 1)
     try:
         calls = [declaration_code("a", "入门"), declaration_code("b", "挡火")]
@@ -164,25 +178,30 @@ async def test_annotation_declarations_then_diagnosis_once_publication(db_sessio
     from tests.support.event_tree_fixtures import close_structure, identity_every_declaration, publish_draft
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻找山门，点燃一盏灯。"])
-    agent = AnnotationAgent(EventBus(), run_id, sessionmaker(bind=db_session.get_bind()), novel_id=novel_id)
+    agent = AnnotationAgent(
+        EventBus(), run_id, storage_factory(sessionmaker(bind=db_session.get_bind())), novel_id=novel_id
+    )
     execution, runtime = execution_for(agent, db_session, 1)
     try:
-        result = json.loads(await runtime.execute(declaration_code("search", "顾霜寻找山门") + "\n"
-                                                 + declaration_code("lamp", "顾霜点灯") + "\nfinish()"))
+        result = json.loads(
+            await runtime.execute(
+                declaration_code("search", "顾霜寻找山门") + "\n" + declaration_code("lamp", "顾霜点灯") + "\nfinish()"
+            )
+        )
         assert not result.get("failed"), result
         assert result["written_refs"][0]["ref"]["declaration_id"]
         await save_and_confirm(agent, db_session, execution)
-        assert run_events(db_session, run_id) == {}
-        assert EventTreeQuery(db_session, run_id).fetch()["organization_status"] == "pending_diagnosis"
+        assert run_events(storage_for(db_session), run_id) == {}
+        assert EventTreeQuery(storage_for(db_session), run_id).fetch()["organization_status"] == "pending_diagnosis"
         draft, _meta = identity_every_declaration(db_session, run_id)
         close_structure(db_session, draft, evidence_paragraph_id=0)
         publish_draft(db_session, run_id, draft)
-        assert len(run_events(db_session, run_id)) == 2
+        assert len(run_events(storage_for(db_session), run_id)) == 2
         # 阶段链读取面：本运行的每个正式事件各有且仅有 1 个绑定声明的版本
-        chains = stage_chain(db_session, list(run_events(db_session, run_id)))
+        chains = stage_chain(storage_for(db_session), list(run_events(storage_for(db_session), run_id)))
         bound = [row for rows in chains.values() for row in rows if row.declaration_id is not None]
         assert len(bound) == 2
-        assert len(run_declaration_ids(db_session, run_id)) == 2
-        assert EventTreeQuery(db_session, run_id).fetch()["organization_status"] == "ready"
+        assert len(run_declaration_ids(storage_for(db_session), run_id)) == 2
+        assert EventTreeQuery(storage_for(db_session), run_id).fetch()["organization_status"] == "ready"
     finally:
         agent.close()

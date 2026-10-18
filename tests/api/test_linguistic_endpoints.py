@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from src.storage.repositories.linguistic_repository import LinguisticRepository
 from tests.support.paragraph_fixtures import create_completed_run, create_run_with_status, insert_spans, make_span
+from tests.support.storage_fixtures import task_for_run
 
 #: 两段原文（第二章段落起点在第 1 段文本 +\n 之后）
 _PARA_TEXTS = ("汤姆刀光剑影。", "风起云涌。")
@@ -162,7 +163,9 @@ def test_features_endpoint_aggregates_with_conservation(api_client: TestClient, 
     novel_id, run_id = _create_run_with_paragraphs(db_session)
     _seed_linguistic(db_session, run_id)
 
-    response = api_client.get(f"/api/novels/{novel_id}/linguistic/features", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/linguistic/features", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["unavailable_reason"] is None
@@ -183,7 +186,9 @@ def test_features_endpoint_aggregates_with_conservation(api_client: TestClient, 
 def test_features_endpoint_unavailable_without_data(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_run_with_paragraphs(db_session)
 
-    response = api_client.get(f"/api/novels/{novel_id}/linguistic/features", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/linguistic/features", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     assert response.json()["unavailable_reason"] is not None
 
@@ -192,7 +197,9 @@ def test_entities_endpoint_lists_candidates(api_client: TestClient, db_session) 
     novel_id, run_id = _create_run_with_paragraphs(db_session)
     _seed_linguistic(db_session, run_id)
 
-    response = api_client.get(f"/api/novels/{novel_id}/linguistic/entities", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/linguistic/entities", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["source_kind"] == "ltp"
@@ -207,7 +214,9 @@ def test_phrases_endpoint_reports_audit_only_lexicon_hits(api_client: TestClient
     novel_id, run_id = _create_run_with_paragraphs(db_session)
     _seed_linguistic(db_session, run_id)
 
-    response = api_client.get(f"/api/novels/{novel_id}/linguistic/phrases", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/linguistic/phrases", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["metric_hit_count"] == 0  # 计量合同关闭：lexicon 命中不计入正式密度
@@ -220,7 +229,9 @@ def test_word2vec_endpoint_unavailable_when_disabled(api_client: TestClient, db_
     novel_id, run_id = _create_run_with_paragraphs(db_session)
     _seed_linguistic(db_session, run_id)
 
-    response = api_client.get(f"/api/novels/{novel_id}/linguistic/word2vec", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/linguistic/word2vec", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["unavailable_reason"] is not None
@@ -274,7 +285,9 @@ def test_word2vec_endpoint_reports_coverage_when_enabled(api_client: TestClient,
     )
     db_session.commit()
 
-    response = api_client.get(f"/api/novels/{novel_id}/linguistic/word2vec", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/linguistic/word2vec", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["unavailable_reason"] is None
@@ -330,7 +343,9 @@ def test_word2vec_endpoint_reports_similarity_matrix(api_client: TestClient, db_
     )
     db_session.commit()
 
-    response = api_client.get(f"/api/novels/{novel_id}/linguistic/word2vec", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/linguistic/word2vec", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     matrix = body["pos_similarity_matrix"]
@@ -348,5 +363,7 @@ def test_word2vec_endpoint_reports_similarity_matrix(api_client: TestClient, db_
 def test_linguistic_endpoints_require_completed_run(api_client: TestClient, db_session) -> None:
 
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["甲。\n乙。"], status="failed")
-    response = api_client.get(f"/api/novels/{novel_id}/linguistic/features", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/linguistic/features", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 400

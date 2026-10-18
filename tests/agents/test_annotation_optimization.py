@@ -26,6 +26,7 @@ from src.work.annotation_work import WorkReceipt
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
+from tests.support.storage_fixtures import fixture_id
 
 
 class _QueryService:
@@ -97,9 +98,7 @@ def _real_work_runtime(*, role: str = "event", observer: Any = None) -> tuple[An
     # 作者身份收敛为单字符串：真实执行号就是三域的贡献作者
     cases.begin(execution.invocation_id)
     trees.begin(execution.invocation_id)
-    agent = SimpleNamespace(
-        run_id=ledger.run_scope, case_pool=cases, event_trees=trees, fact_graph=ledger.graph
-    )
+    agent = SimpleNamespace(run_id=ledger.run_scope, case_pool=cases, event_trees=trees, fact_graph=ledger.graph)
     ledger.work_id, ledger.invocation_id = execution.work_id, execution.invocation_id
     ledger.finish_work = execution.validate
     tool_map = {tool.name: tool for tool in build_work_tools(agent, execution, _QueryService())}
@@ -111,7 +110,7 @@ def _real_work_runtime(*, role: str = "event", observer: Any = None) -> tuple[An
 async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(monkeypatch) -> None:
     runtime, agent, execution = _real_work_runtime()
     trees = agent.event_trees
-    trees.begin("saved")
+    trees.begin(fixture_id(__name__, "saved"))
     nodes = [
         BoundEvent(
             node_id=f"node-{index:04d}",
@@ -129,8 +128,8 @@ async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(mo
         )
         for index in range(247)
     ]
-    trees.sync("saved", 12, nodes)
-    trees.confirm("saved")
+    trees.sync(fixture_id(__name__, "saved"), 12, nodes)
+    trees.confirm(fixture_id(__name__, "saved"))
     calls = []
     original_read = trees.read
 
@@ -166,7 +165,7 @@ async def test_event_search_filters_foreshadow_roots_and_compacts_pages() -> Non
     """伏笔根标记可过滤、紧凑索引可 100/页通览：跨章引用发现不再靠全目录翻页"""
     runtime, agent, execution = _real_work_runtime()
     trees = agent.event_trees
-    trees.begin("saved")
+    trees.begin(fixture_id(__name__, "saved"))
     nodes = [
         BoundEvent(
             node_id=f"node-{index:04d}",
@@ -185,8 +184,8 @@ async def test_event_search_filters_foreshadow_roots_and_compacts_pages() -> Non
         )
         for index in range(130)
     ]
-    trees.sync("saved", 12, nodes)
-    trees.confirm("saved")
+    trees.sync(fixture_id(__name__, "saved"), 12, nodes)
+    trees.confirm(fixture_id(__name__, "saved"))
     tool = runtime.tools["search_events"]
     roots = json.loads(await tool.ainvoke({"isforeshadowing": True, "limit": 20}))
     assert roots["total"] == 65
@@ -286,19 +285,15 @@ async def test_failed_declaration_keeps_prior_source_and_does_not_add_node() -> 
     ledger = _ledger()
     runtime = _runtime(ledger, "event")
     await runtime.execute(
-        
-            "event(el='e1', title='进入院门', problem='能否进入', summa"  # 同一程序文本
-            "ry='进入院门', event_type='行动', status='ongoing', evid"  # 同一程序文本
-            "ence=2)"  # 同一程序文本
-        
+        "event(el='e1', title='进入院门', problem='能否进入', summa"  # 同一程序文本
+        "ry='进入院门', event_type='行动', status='ongoing', evid"  # 同一程序文本
+        "ence=2)"  # 同一程序文本
     )
     receipt = json.loads(
         await runtime.execute(
-            
-                "event(el='e2', title='错误', problem='问题', summary='"  # 同一程序文本
-                "另一个声明', event_type='行动', status='ongoing', evidenc"  # 同一程序文本
-                "e=99)"  # 同一程序文本
-            
+            "event(el='e2', title='错误', problem='问题', summary='"  # 同一程序文本
+            "另一个声明', event_type='行动', status='ongoing', evidenc"  # 同一程序文本
+            "e=99)"  # 同一程序文本
         )
     )
     assert receipt["status"] == "partial"

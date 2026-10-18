@@ -240,8 +240,8 @@ class StreamChunkAggregator:
 
         usage_metadata = getattr(chunk, "usage_metadata", None)
         if isinstance(usage_metadata, Mapping):
-        # 防御：同一 chunk 同时携带标准 usage_metadata 与 provider 原始 usage 时双源
-        # 累加会把用量翻倍；以标准字段为准，原始字段仅作标准字段缺失时的回退。
+            # 防御：同一 chunk 同时携带标准 usage_metadata 与 provider 原始 usage 时双源
+            # 累加会把用量翻倍；以标准字段为准，原始字段仅作标准字段缺失时的回退。
             has_usage_metadata = True
             _accumulate_usage_metadata(self._usage_metadata, usage_metadata)
         else:

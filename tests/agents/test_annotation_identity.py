@@ -30,7 +30,7 @@ def _tools(chapter_id: int, *, run_scope: str = "run-1") -> tuple[AnnotationTool
     return ledger, {item.name: item for item in build_annotation_tools(MagicMock(), ledger)}
 
 
-def test_event_ids_are_stable_for_same_chapter_and_distinct_for_other_chapters_and_runs() -> None:
+def test_fresh_event_drafts_allocate_distinct_uuid7_identities() -> None:
     ids: list[tuple[str, str]] = []
     for run_scope, chapter_id in (("run-1", 1), ("run-1", 1), ("run-1", 2), ("run-2", 1)):
         ledger, tools = _tools(chapter_id, run_scope=run_scope)
@@ -50,8 +50,10 @@ def test_event_ids_are_stable_for_same_chapter_and_distinct_for_other_chapters_a
         assert receipt["status"] == "written"
         tree = next(iter(ledger.event_trees.values()))
         ids.append((tree["tree_id"], tree["root_node_id"]))
-    assert ids[0] == ids[1]
-    assert len({ids[0], ids[2], ids[3]}) == 3
+    from uuid import UUID
+
+    assert len(set(ids)) == 4
+    assert all(UUID(identifier).version == 7 for pair in ids for identifier in pair)
 
 
 def test_original_text_and_formal_payload_hash_preserve_whitespace_and_unicode() -> None:

@@ -5,11 +5,13 @@ run_diagnose 已 agent 化，测试通过 patch run_diagnosis_agent 注入假诊
 """
 
 import sys
-import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+from src.storage import new_id
+from tests.support.storage_fixtures import storage_for
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -41,7 +43,7 @@ class TestCli:
     def setup(self, db_session, tmp_path):
         self.db_session = db_session
         self.tmp_path = tmp_path
-        self.novel_id = uuid.uuid4().hex[:8]
+        self.novel_id = new_id()
         insert_test_novel(self.novel_id, session=db_session)
 
         run_repo = RunRepository(db_session)
@@ -56,9 +58,7 @@ class TestCli:
         fake = AsyncMock(return_value=_fake_analysis(self.novel_id))
         with patch("src.agents.diagnosis.runner.run_diagnosis_agent", new=fake):
             analysis = await run_diagnose(
-                run_id=self.run_id,
-                session=self.db_session,
-                analysis_logger=None,
+                run_id=self.run_id, session=storage_for(self.db_session), analysis_logger=None
             )
 
         assert analysis.genre_labels == ["通用"]

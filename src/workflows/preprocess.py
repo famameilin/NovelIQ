@@ -18,21 +18,11 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.sse.events import StreamEvent
-from src.storage.repositories import (
-    ChapterRepository,
-)
-from src.storage.repositories.paragraph_repository import (
-    ParagraphMetricRow,
-    ParagraphRepository,
-)
-from src.storage.vector_schema import (
-    ensure_paragraph_embeddings_schema,
-)
+from src.storage import Storage, get_storage_factory
+from src.storage.records.paragraph import ParagraphMetricRow
 from src.text_processing.models import ParagraphSpan
 from src.text_processing.paragraphs import chunk_documents_with_chapters, split_chunk_paragraphs
 from src.text_processing.preprocess import normalize_text
@@ -44,7 +34,7 @@ from src.workflows.preprocess_readiness import is_preprocess_complete
 async def run_preprocess(
     source_path: Path,
     run_id: str,
-    session: Session,
+    session: Storage,
     metadata_path: Path | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
@@ -54,104 +44,59 @@ async def run_preprocess(
     from src.workflows.preprocess_helpers import _load_all_lexicons_for_preprocess
 
     start_time = time.time()
-
     if emitter:
         await emitter(StreamEvent(action="start", stage="preprocess", message="开始预处理", sub_percent=0.0))
-
-    chapter_repo = ChapterRepository(session)
-    if is_preprocess_complete(chapter_repo.session, run_id):
+    chapter_repo = session.chapters
+    if is_preprocess_complete(session, run_id):
         logger.info(f"preprocess already complete for run_id={run_id}, skipping")
-        return 0, 0, 0.0
-
+        return (0, 0, 0.0)
     check_cancelled(is_cancelled)
-
     docs = ingest_path(source_path, metadata_path)
     if not docs:
         logger.warning(f"no documents found source={source_path}")
-        return 0, 0, 0.0
+        return (0, 0, 0.0)
     logger.info(f"loaded {len(docs)} documents from {source_path}")
-
     lexicons = _load_all_lexicons_for_preprocess()
-
     normalized_texts: list[str] = []
     for doc in docs:
         normalized = normalize_text(doc.text)
         normalized_texts.append(normalized)
-
-    all_chunks, all_chapters = await chunk_documents_with_chapters(
-        normalized_texts,
-    )
-
+    all_chunks, all_chapters = await chunk_documents_with_chapters(normalized_texts)
     total_chapters = len(all_chunks)
     total_chars = sum(len(chunk.text) for chunk in all_chunks)
     logger.info(f"chunked {total_chapters} chunks total_chars={total_chars}")
-
-    chapter_repo = ChapterRepository(session)
+    chapter_repo = session.chapters
     chapter_repo.insert_chapters(run_id, all_chapters)
-    _commit_preprocess_writes(session, step="insert_chapters")
     logger.info(f"inserted {len(all_chapters)} chapters into db (run_id={run_id})")
-
     chapter_repo.insert_chapter_texts(run_id, all_chunks)
-    _commit_preprocess_writes(session, step="insert_chapter_texts")
     logger.info(f"inserted {total_chapters} chunks into db (run_id={run_id})")
-
-    # 章节正文切片（chapter_bodies）落库后无条件生成段落行（语义检索开关不影响
-    # paragraphs 的生成和内容）；段落身份以 paragraphs 表为准，
-    # embedding/检索/指标均从该表读取
     spans = split_chunk_paragraphs(all_chunks, max_chars=settings.paragraphs.max_chars)
     tokenized: list[list[str]] = [tokenize(span.text) for span in spans]
     spans = [replace(span, token_count=len(tokens)) for span, tokens in zip(spans, tokenized, strict=True)]
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
     paragraph_repo.insert_paragraphs(run_id, spans)
-    _commit_preprocess_writes(session, step="insert_paragraphs")
     logger.info(f"inserted {len(spans)} paragraphs into db (run_id={run_id})")
-
-    # 段落指标：原始计数与充分统计量；表面张力 z 在 run 内稳健标准化后
-    # 写入 paragraph_tension_observations（sigmoid 展示值读取投影）
     if spans:
         _insert_paragraph_metrics(session, run_id, spans, tokenized, lexicons)
         _insert_paragraph_curves(session, run_id, spans)
-
-    # 风格指标以 paragraph_metrics 的充分统计量
-    # （sentence_count/sum/sum_sq、dialogue_char_count 等）为事实源
     if settings.models.paragraph_embedding.semantic_enabled:
         logger.info("generating paragraph embeddings for semantic text retrieval")
         await _generate_paragraph_embeddings(session, run_id, emitter=emitter, is_cancelled=is_cancelled)
-
     elapsed = time.time() - start_time
     logger.info(f"preprocess completed chunks={total_chapters} chars={total_chars} time={elapsed:.2f}s")
     logger.info("\n=== Preprocess Statistics ===")
     logger.info(f"Total chunks: {total_chapters}")
     logger.info(f"Total characters: {total_chars}")
     logger.info(f"Processing time: {elapsed:.2f}s")
-
     if emitter:
         await emitter(
             StreamEvent(action="complete", stage="preprocess", current=1, total=1, percent=100.0, sub_percent=100.0)
         )
-
-    return total_chapters, total_chars, elapsed
-
-
-def _commit_preprocess_writes(session: Session, *, step: str) -> None:
-    """
-    提交 preprocess 阶段的分段写入，及时释放事务锁
-
-    preprocess 连续写 chapters、paragraphs、paragraph_metrics/paragraph_curves 与
-    paragraph_embeddings，这些表都外键关联 analysis_runs；若共用长事务，EventBus
-    另一条连接更新 analysis_runs 时可能被阻塞到 statement timeout，故在关键批量写入后立即提交
-    """
-    # commit 目标是缩短锁持有时间，不改变业务原子性边界
-    session.commit()
-    logger.debug(f"Committed preprocess writes after step={step}")
+    return (total_chapters, total_chars, elapsed)
 
 
 def _insert_paragraph_metrics(
-    session: Session,
-    run_id: str,
-    spans: list[ParagraphSpan],
-    tokenized: list[list[str]],
-    lexicons: dict[str, Any],
+    session: Storage, run_id: str, spans: list[ParagraphSpan], tokenized: list[list[str]], lexicons: dict[str, Any]
 ) -> list[ParagraphMetricRow]:
     """
     计算并落库段落指标（原始计数与充分统计量）
@@ -173,11 +118,6 @@ def _insert_paragraph_metrics(
         surface_tension_components,
         surface_tension_z_value,
     )
-    from src.storage.repositories.paragraph import (
-        insert_paragraph_function_word_counts,
-        insert_paragraph_semantic_category_counts,
-        insert_paragraph_tension_observations,
-    )
 
     counts_list = [
         compute_paragraph_metric_counts(span.text, tokens, lexicons)
@@ -185,7 +125,6 @@ def _insert_paragraph_metrics(
     ]
     z_components = robust_standardize_components([surface_tension_components(counts) for counts in counts_list])
     weights = settings.metrics.surface_tension_weights
-
     rows: list[ParagraphMetricRow] = []
     tension_rows: list[tuple[int, float]] = []
     function_word_rows: list[tuple[int, dict[str, int]]] = []
@@ -193,7 +132,6 @@ def _insert_paragraph_metrics(
     for span, counts, z_comp in zip(spans, counts_list, z_components, strict=True):
         paragraph_id = span.paragraph_id
         if paragraph_id is None:
-            # insert_paragraphs 已校验段落身份完整，此处仅为类型收窄
             raise ValueError(f"段落指标写入失败：paragraph_id 未分配，paragraph_index={span.paragraph_index}")
         rows.append(
             ParagraphMetricRow(
@@ -218,23 +156,13 @@ def _insert_paragraph_metrics(
         tension_rows.append((paragraph_id, surface_tension_z_value(z_comp, weights)))
         function_word_rows.append((paragraph_id, counts.function_word_counts))
         semantic_category_rows.append((paragraph_id, counts.semantic_category_counts))
-
-    paragraph_repo = ParagraphRepository(session)
-    paragraph_repo.insert_paragraph_metrics(run_id, rows)
-    # 同族观测外键引用 paragraph_metrics 行：指标行落库后再写张力/分类计数
-    insert_paragraph_tension_observations(session, run_id, tension_rows)
-    insert_paragraph_function_word_counts(session, run_id, function_word_rows)
-    insert_paragraph_semantic_category_counts(session, run_id, semantic_category_rows)
-    _commit_preprocess_writes(session, step="insert_paragraph_metrics")
+    paragraph_repo = session.paragraphs
+    paragraph_repo.save_metrics(run_id, rows, tension_rows, function_word_rows, semantic_category_rows)
     logger.info(f"inserted {len(rows)} paragraph metrics into db (run_id={run_id})")
     return rows
 
 
-def _insert_paragraph_curves(
-    session: Session,
-    run_id: str,
-    spans: list[ParagraphSpan],
-) -> int:
+def _insert_paragraph_curves(session: Storage, run_id: str, spans: list[ParagraphSpan]) -> int:
     """
     计算并落库段落曲线
 
@@ -247,23 +175,20 @@ def _insert_paragraph_curves(
     """
     from src.workflows.paragraph_curves import compute_paragraph_curves
 
-    paragraph_repo = ParagraphRepository(session)
+    paragraph_repo = session.paragraphs
     paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
     metric_projection_rows = paragraph_repo.fetch_paragraph_metrics(run_id)
     total_chars = sum(span.char_count for span in spans)
     curve_rows = compute_paragraph_curves(
-        paragraphs=paragraph_rows,
-        metric_rows=metric_projection_rows,
-        total_chars=total_chars,
+        paragraphs=paragraph_rows, metric_rows=metric_projection_rows, total_chars=total_chars
     )
     paragraph_repo.insert_paragraph_curves(run_id, curve_rows)
-    _commit_preprocess_writes(session, step="insert_paragraph_curves")
     logger.info(f"inserted {len(curve_rows)} paragraph curves into db (run_id={run_id})")
     return len(curve_rows)
 
 
 async def _generate_paragraph_embeddings(
-    session: Session,
+    session: Storage,
     run_id: str,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
@@ -273,73 +198,43 @@ async def _generate_paragraph_embeddings(
     """
     from src.embedding import EmbeddingClient
     from src.model_pool.usage import build_token_usage_callback
-    from src.storage.models import AnalysisRun
-    from src.storage.repositories.paragraph import (
-        ParagraphEmbeddingRow,
-        insert_paragraph_embeddings,
-    )
+    from src.storage.records.embedding_ops import ParagraphEmbeddingRow
 
-    paragraph_refs = ParagraphRepository(session).fetch_paragraph_rows(run_id)
+    paragraph_refs = session.paragraphs.fetch_paragraph_rows(run_id)
     if not paragraph_refs:
         logger.info("no paragraphs found for run_id={}, skip paragraph embeddings", run_id)
         return 0
-
     from src.audit.module import AuditModule
     from src.event_bus import EventBus
-    from src.storage.db import get_session_factory
 
+    pass
     audit_bus = EventBus()
-    audit = AuditModule(audit_bus, run_id, get_session_factory())
+    audit = AuditModule(audit_bus, run_id, get_storage_factory())
     try:
         try:
-            novel_id = session.execute(
-                select(AnalysisRun.novel_id).where(AnalysisRun.run_id == run_id)
-            ).scalar_one_or_none()
+            novel_id = session.reads.workflows_preprocess_generate_paragraph_embeddings_1(run_id)
             embedding_client = EmbeddingClient(
                 novel_id=novel_id if isinstance(novel_id, str) and novel_id else "unknown",
                 token_usage_callback=build_token_usage_callback(bus=audit_bus, run_id=run_id),
             )
         except ValueError as e:
             raise RuntimeError(
-                "embedding client initialization failed during preprocess: "
-                f"semantic text retrieval requires paragraph embeddings, error={e}"
+                "embedding client initialization failed during preprocess: semantic text retr"
+                "ieval requires paragraph embeddings, error="
+                f"{e}"
             ) from e
-
-        # 维度以嵌入服务实测输出为准：探针锁定客户端校验基准，建表列宽按探测值
-        # 固化；换模型维度变化时 ensure 的列类型校验快速失败
         embedding_dim = await embedding_client.detect_embedding_dimension()
-
-        ensure_paragraph_embeddings_schema(session, embedding_dim)
-        _commit_preprocess_writes(session, step="ensure_embedding_schemas")
-
+        session.prepare_paragraph_vectors(embedding_dim)
         paragraph_rows = await _generate_paragraph_embedding_rows(
-            embedding_client,
-            run_id,
-            ParagraphEmbeddingRow,
-            emitter=emitter,
-            is_cancelled=is_cancelled,
+            embedding_client, run_id, ParagraphEmbeddingRow, emitter=emitter, is_cancelled=is_cancelled
         )
         if paragraph_rows:
-            # 向量行只存 (run_id,paragraph_id)/向量/时间，运行模型合同（模型 key +
-            # 实测维度）由本调用同事务写入 embedding_model_runs
-            insert_paragraph_embeddings(session, run_id, paragraph_rows, embedding_dimension=embedding_dim)
-            _commit_preprocess_writes(session, step="insert_embedding_rows")
-            logger.info(
-                "inserted {} paragraph embeddings into db (run_id={})",
-                len(paragraph_rows),
-                run_id,
-            )
-
+            session.paragraphs.insert_paragraph_embeddings(run_id, paragraph_rows, embedding_dimension=embedding_dim)
+            logger.info("inserted {} paragraph embeddings into db (run_id={})", len(paragraph_rows), run_id)
         if emitter:
             await emitter(
-                StreamEvent(
-                    action="complete",
-                    stage="preprocess",
-                    message="向量嵌入生成完成",
-                    sub_percent=100.0,
-                )
+                StreamEvent(action="complete", stage="preprocess", message="向量嵌入生成完成", sub_percent=100.0)
             )
-
         return len(paragraph_rows)
     finally:
         await audit.close()
@@ -355,43 +250,37 @@ async def _generate_paragraph_embedding_rows(
     """生成 paragraph embedding 写入 DTO — 段落源 paragraphs(不重切，仅 paragraph_id+向量)，
     坐标从 paragraphs 读；批量 embed_texts 防单条退化。缺失 fail fast(防 readiness 假成功)，progress_callback 发 SSE。
     """
-    from src.storage.db import get_session_factory
-    from src.storage.repositories.paragraph_repository import ParagraphRepository
+    pass
+    pass
     from src.utils.cancellation import check_cancelled
 
-    with get_session_factory()() as session:
-        paragraph_refs: list[tuple[int, int, int, int, int, int, int, str]] = []
-        for row in ParagraphRepository(session).fetch_paragraph_rows(run_id):
-            paragraph_refs.append(
-                (
-                    row.paragraph_id,
-                    row.chapter_id,
-                    row.paragraph_index,
-                    row.local_start_char,
-                    row.local_end_char,
-                    row.global_start_char,
-                    row.global_end_char,
-                    row.text,
-                )
+    session = get_storage_factory()()
+    paragraph_refs: list[tuple[int, int, int, int, int, int, int, str]] = []
+    for row in session.paragraphs.fetch_paragraph_rows(run_id):
+        paragraph_refs.append(
+            (
+                row.paragraph_id,
+                row.chapter_id,
+                row.paragraph_index,
+                row.local_start_char,
+                row.local_end_char,
+                row.global_start_char,
+                row.global_end_char,
+                row.text,
             )
-
+        )
     if not paragraph_refs:
         return []
 
-    async def _emit_paragraph_embedding_progress(
-        completed_batches: int,
-        total_batches: int,
-        total_items: int,
-    ) -> None:
-        """发射 preprocess 阶段 paragraph embedding 的批次进度"""
-        # 批间是取消的安全边界：在飞的 embedding 请求不受取消影响，先让本批收尾
+    async def _emit_paragraph_embedding_progress(completed_batches: int, total_batches: int, total_items: int) -> None:
+        """
+        发射 preprocess 阶段 paragraph embedding 的批次进度
+
+        """
         check_cancelled(is_cancelled)
         if emitter is None or total_batches <= 0:
             return
-
-        sub_percent = (completed_batches / total_batches) * 100
-        # current/total 在这里表达的是“已完成批次/总批次”，
-        # message 再补充总 paragraph 数，避免和 章节 级 current/total 语义混淆
+        sub_percent = completed_batches / total_batches * 100
         await emitter(
             StreamEvent(
                 action="progress",
@@ -400,21 +289,21 @@ async def _generate_paragraph_embedding_rows(
                 current=completed_batches,
                 total=total_batches,
                 sub_percent=sub_percent,
-                message=(f"段落向量落库准备 {completed_batches}/{total_batches} 批（共 {total_items} 段）"),
+                message=f"段落向量落库准备 {completed_batches}/{total_batches} 批（共 {total_items} 段）",
             )
         )
 
     paragraph_texts = [paragraph_text for _, _, _, _, _, _, _, paragraph_text in paragraph_refs]
     paragraph_embeddings = await embedding_client.embed_texts(
-        paragraph_texts,
-        progress_callback=_emit_paragraph_embedding_progress,
+        paragraph_texts, progress_callback=_emit_paragraph_embedding_progress
     )
     if len(paragraph_embeddings) != len(paragraph_refs):
         raise RuntimeError(
-            "paragraph embedding result count mismatch: "
-            f"expected {len(paragraph_refs)}, got {len(paragraph_embeddings)}"
+            "paragraph embedding result count mismatch: expected "
+            f"{len(paragraph_refs)}"
+            ", got "
+            f"{len(paragraph_embeddings)}"
         )
-
     rows = []
     missing_refs: list[tuple[int, int]] = []
     for (
@@ -426,11 +315,7 @@ async def _generate_paragraph_embedding_rows(
         _global_start_char,
         _global_end_char,
         _paragraph_text,
-    ), embedding in zip(
-        paragraph_refs,
-        paragraph_embeddings,
-        strict=True,
-    ):
+    ), embedding in zip(paragraph_refs, paragraph_embeddings, strict=True):
         if not embedding:
             logger.error(
                 "empty paragraph embedding detected: run_id={} chapter_id={} paragraph_index={}",
@@ -440,16 +325,17 @@ async def _generate_paragraph_embedding_rows(
             )
             missing_refs.append((chapter_id, paragraph_index))
             continue
-        rows.append(
-            row_factory(
-                paragraph_id=paragraph_id,
-                embedding_vector=embedding,
-            )
-        )
+        rows.append(row_factory(paragraph_id=paragraph_id, embedding_vector=embedding))
     if missing_refs:
-        preview_refs = ", ".join(f"{chapter_id}:{paragraph_index}" for chapter_id, paragraph_index in missing_refs[:10])
+        preview_refs = ", ".join(
+            (f"{chapter_id}:{paragraph_index}" for chapter_id, paragraph_index in missing_refs[:10])
+        )
         raise RuntimeError(
-            "paragraph embeddings incomplete during preprocess: "
-            f"run_id={run_id}, missing={preview_refs}, total={len(missing_refs)}"
+            "paragraph embeddings incomplete during preprocess: run_id="
+            f"{run_id}"
+            ", missing="
+            f"{preview_refs}"
+            ", total="
+            f"{len(missing_refs)}"
         )
     return rows

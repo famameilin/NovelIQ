@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import uuid
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -25,6 +24,12 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select, text
+
+from src.linguistic import ltp_client
+from src.linguistic.queries import fetch_entity_candidates
+from src.linguistic.storage_projection import project_linguistic_features
+from src.storage import new_id
+from tests.support.storage_fixtures import storage_for
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -115,10 +120,7 @@ def _arc_count(db_session, run_id: str, prefix: str) -> int:
 def _metric_count(db_session, run_id: str, column: str) -> int:
     return int(
         db_session.execute(
-            text(
-                f"SELECT COUNT(*) FROM paragraph_metrics "
-                f"WHERE run_id = :run_id AND {column} IS NOT NULL"
-            ),
+            text(f"SELECT COUNT(*) FROM paragraph_metrics WHERE run_id = :run_id AND {column} IS NOT NULL"),
             {"run_id": run_id},
         ).scalar()
         or 0
@@ -128,10 +130,7 @@ def _metric_count(db_session, run_id: str, column: str) -> int:
 def _feature_count(db_session, run_id: str, code_prefix: str) -> int:
     return int(
         db_session.execute(
-            text(
-                "SELECT COUNT(*) FROM paragraph_features "
-                "WHERE run_id = :run_id AND feature_code LIKE :prefix"
-            ),
+            text("SELECT COUNT(*) FROM paragraph_features WHERE run_id = :run_id AND feature_code LIKE :prefix"),
             {"run_id": run_id, "prefix": f"{code_prefix}%"},
         ).scalar()
         or 0
@@ -154,7 +153,7 @@ class TestRunLinguistic:
     @pytest.fixture(autouse=True)
     def setup(self, db_session, monkeypatch):
         self.db_session = db_session
-        self.novel_id = uuid.uuid4().hex[:8]
+        self.novel_id = new_id()
         insert_test_novel(self.novel_id, session=db_session)
         self.run_id = _create_run(db_session, self.novel_id)
 
@@ -177,11 +176,11 @@ class TestRunLinguistic:
         monkeypatch.setattr(_settings.linguistic.word2vec, "enabled", False)
 
     def _feature_rows(self) -> Sequence[Any]:
-        return LinguisticRepository(self.db_session).fetch_linguistic_features(self.run_id)
+        return project_linguistic_features(LinguisticRepository(self.db_session).fetch_linguistic_sources(self.run_id))
 
     @pytest.mark.asyncio()
     async def test_runs_all_steps_and_writes_linguistic_relations(self) -> None:
-        paragraphs, features = await run_linguistic(self.run_id, self.db_session)
+        paragraphs, features = await run_linguistic(self.run_id, storage_for(self.db_session))
         assert paragraphs == 2
         assert features == 2
 
@@ -212,7 +211,10 @@ class TestRunLinguistic:
         repo = LinguisticRepository(self.db_session)
         entity_rows = repo.fetch_entities(self.run_id)
         assert entity_rows and entity_rows[0].surface_text == "汤姆"
-        assert entity_rows[0].normalized_entity_type == "person"
+        assert (
+            fetch_entity_candidates(self.run_id, storage_for(self.db_session))["entities"][0]["normalized_entity_type"]
+            == "person"
+        )
 
         # 契约关闭正式短语计量：lexicon 命中与四字候选都不计入正式密度
         phrase_rows = repo.fetch_phrase_hits(self.run_id)
@@ -244,7 +246,7 @@ class TestRunLinguistic:
             return checks["count"] > 1
 
         with pytest.raises(asyncio.CancelledError):
-            await run_linguistic(self.run_id, self.db_session, batch_size=1, is_cancelled=is_cancelled)
+            await run_linguistic(self.run_id, storage_for(self.db_session), batch_size=1, is_cancelled=is_cancelled)
 
         # 第一批已放行、第二批边界命中取消：没跑完整卷
         assert checks["count"] >= 2
@@ -271,7 +273,7 @@ class TestRunLinguistic:
         monkeypatch.setattr(linguistic_module, "analyze_paragraph_batch", _spy)
 
         event_loop_thread = threading.get_ident()
-        paragraphs, features = await run_linguistic(self.run_id, self.db_session)
+        paragraphs, features = await run_linguistic(self.run_id, storage_for(self.db_session))
 
         assert paragraphs == 2
         assert observed_threads, "LTP 批推理未被执行"
@@ -319,7 +321,7 @@ class TestRunLinguistic:
         )
 
         try:
-            paragraphs, features = await run_linguistic(self.run_id, self.db_session)
+            paragraphs, features = await run_linguistic(self.run_id, storage_for(self.db_session))
         finally:
             reset_pretrained_cache()
         assert paragraphs == 2
@@ -340,13 +342,15 @@ class TestRunLinguistic:
         # source_token_count 由正式词元 × 版本 POS 分组投影（分母不落库不漂移）
         feature_rows = self._feature_rows()
         expected_noun_total = sum(row.pos_counts.get("noun", 0) for row in feature_rows)
-        coverage = LinguisticRepository(self.db_session).fetch_pos_embedding_coverage(self.run_id)
+        coverage = LinguisticRepository(self.db_session).fetch_pos_embedding_coverage(
+            self.run_id, ltp_client.POS_GROUP_MAP
+        )
         coverage_by_group = {row.pos_group: int(row.source_total) for row in coverage}
         assert coverage_by_group.get("noun", 0) == expected_noun_total
 
     @pytest.mark.asyncio()
     async def test_rerun_clears_and_reinserts(self) -> None:
-        await run_linguistic(self.run_id, self.db_session)
+        await run_linguistic(self.run_id, storage_for(self.db_session))
 
         def _tracked() -> dict[str, int]:
             return {
@@ -362,7 +366,7 @@ class TestRunLinguistic:
         first = _tracked()
         assert first["token_spans"] > 0 and first["linguistic_completed"] == 2
 
-        await run_linguistic(self.run_id, self.db_session)
+        await run_linguistic(self.run_id, storage_for(self.db_session))
         assert _tracked() == first
 
     @pytest.mark.asyncio()
@@ -371,7 +375,7 @@ class TestRunLinguistic:
         from src.config import settings as _settings
 
         monkeypatch.setattr(_settings.linguistic.ltp, "enabled", False)
-        paragraphs, features = await run_linguistic(self.run_id, self.db_session)
+        paragraphs, features = await run_linguistic(self.run_id, storage_for(self.db_session))
         assert paragraphs == 2
         assert features == 0
         assert _metric_count(self.db_session, self.run_id, "linguistic_completed_at") == 0
@@ -387,7 +391,7 @@ class TestRunLinguistic:
     @pytest.mark.asyncio()
     async def test_batch_size_one_produces_same_rows_as_full_batch(self) -> None:
         """分批落库与一次全量落库结果一致（clear_first 只在首批生效，后续批追加）"""
-        await run_linguistic(self.run_id, self.db_session, batch_size=1)
+        await run_linguistic(self.run_id, storage_for(self.db_session), batch_size=1)
         batched = {
             "token_spans": _span_count(self.db_session, self.run_id, "token"),
             "ner_spans": _span_count(self.db_session, self.run_id, "ner"),
@@ -397,7 +401,7 @@ class TestRunLinguistic:
         assert batched["linguistic_completed"] == 2
 
         # 清空后按默认大 batch 重跑，验证完全一致
-        await run_linguistic(self.run_id, self.db_session)
+        await run_linguistic(self.run_id, storage_for(self.db_session))
         assert {
             "token_spans": _span_count(self.db_session, self.run_id, "token"),
             "ner_spans": _span_count(self.db_session, self.run_id, "ner"),
@@ -407,10 +411,10 @@ class TestRunLinguistic:
 
     @pytest.mark.asyncio()
     async def test_empty_run_returns_zero(self) -> None:
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=self.db_session)
         empty_run = _create_run(self.db_session, novel_id)
-        paragraphs, features = await run_linguistic(empty_run, self.db_session)
+        paragraphs, features = await run_linguistic(empty_run, storage_for(self.db_session))
         assert paragraphs == 0
         assert features == 0
 
@@ -451,7 +455,7 @@ class TestMnegCorrection:
     @pytest.fixture(autouse=True)
     def setup(self, db_session, monkeypatch):
         self.db_session = db_session
-        self.novel_id = uuid.uuid4().hex[:8]
+        self.novel_id = new_id()
         insert_test_novel(self.novel_id, session=db_session)
         self.run_id = _create_run(db_session, self.novel_id)
 
@@ -498,7 +502,7 @@ class TestMnegCorrection:
 
     @pytest.mark.asyncio()
     async def test_mneg_flip_rewrites_metrics_and_stores_comparison(self) -> None:
-        paragraphs, features = await run_linguistic(self.run_id, self.db_session)
+        paragraphs, features = await run_linguistic(self.run_id, storage_for(self.db_session))
         assert (paragraphs, features) == (1, 1)
 
         metric_row = self.db_session.execute(
@@ -512,7 +516,9 @@ class TestMnegCorrection:
         assert float(metric_row.positive_weight_sum) == 0.0
         assert float(metric_row.negative_weight_sum) == 1.0
 
-        feature = LinguisticRepository(self.db_session).fetch_linguistic_features(self.run_id)[0]
+        feature = project_linguistic_features(
+            LinguisticRepository(self.db_session).fetch_linguistic_sources(self.run_id)
+        )[0]
         assert float(feature.lexicon_pos_count) == 1.0
         assert float(feature.mneg_neg_count) == 1.0
         assert feature.emotion_event_count == 1
@@ -552,7 +558,7 @@ class TestParagraphBoundary:
     @pytest.fixture(autouse=True)
     def setup(self, db_session, monkeypatch):
         self.db_session = db_session
-        self.novel_id = uuid.uuid4().hex[:8]
+        self.novel_id = new_id()
         insert_test_novel(self.novel_id, session=db_session)
         self.run_id = _create_run(db_session, self.novel_id)
 
@@ -594,12 +600,14 @@ class TestParagraphBoundary:
         )
 
         from src.config import settings as _settings
+        from src.linguistic import ltp_client
 
+        monkeypatch.setattr(ltp_client.LtpSession, "get_instance", lambda: FakeLtpSession())
         monkeypatch.setattr(_settings.linguistic.word2vec, "enabled", False)
         yield
 
     def _feature_rows(self) -> Sequence[Any]:
-        return LinguisticRepository(self.db_session).fetch_linguistic_features(self.run_id)
+        return project_linguistic_features(LinguisticRepository(self.db_session).fetch_linguistic_sources(self.run_id))
 
     def _insert_labels(self, labels: list[tuple[int, int]]) -> None:
         """直接落正式条目行：executions → chapter_annotations → analysis_assessments
@@ -627,8 +635,8 @@ class TestParagraphBoundary:
 
         now = datetime.now(UTC).replace(tzinfo=None)
         for chapter_id, chapter_labels in by_chapter.items():
-            execution_id = uuid.uuid4().hex
-            record_id = str(uuid.uuid4())
+            execution_id = new_id()
+            record_id = new_id()
             self.db_session.add(
                 Execution(
                     execution_id=execution_id,
@@ -663,7 +671,7 @@ class TestParagraphBoundary:
             for paragraph_id, emotion in chapter_labels:
                 self.db_session.add(
                     AnalysisAssessment(
-                        assessment_id=str(uuid.uuid4()),
+                        assessment_id=new_id(),
                         record_id=record_id,
                         paragraph_id=paragraph_id,
                         emotion=str(emotion),
@@ -690,7 +698,7 @@ class TestParagraphBoundary:
     @pytest.mark.asyncio()
     async def test_no_labels_keeps_boundary_columns_null(self) -> None:
         """无标签 run：两列 NULL，段落曲线维持 mNEG 口径"""
-        await run_linguistic(self.run_id, self.db_session)
+        await run_linguistic(self.run_id, storage_for(self.db_session))
         rows = self._feature_rows()
         assert len(rows) == 2
         assert all(row.boundary_pos_score_sum is None for row in rows)
@@ -709,7 +717,7 @@ class TestParagraphBoundary:
         )
         self._insert_labels([(positive_id, 2), (negative_id, -2)])
 
-        await run_linguistic(self.run_id, self.db_session)
+        await run_linguistic(self.run_id, storage_for(self.db_session))
 
         rows = {row.paragraph_id: row for row in self._feature_rows()}
         assert set(rows) == {0, 1}
@@ -732,7 +740,7 @@ class TestParagraphBoundary:
             ]
         )
 
-        await run_linguistic(self.run_id, self.db_session)
+        await run_linguistic(self.run_id, storage_for(self.db_session))
         rows = {row.paragraph_id: row for row in self._feature_rows()}
         # 仅 1 条标签能对上向量（<2）→ 不拟合边界，两列维持 NULL
         assert all(row.boundary_pos_score_sum is None for row in rows.values())
@@ -750,6 +758,6 @@ class TestParagraphBoundary:
         )
         self._insert_labels([(positive_id, 0), (negative_id, 0)])
 
-        await run_linguistic(self.run_id, self.db_session)
+        await run_linguistic(self.run_id, storage_for(self.db_session))
         rows = self._feature_rows()
         assert all(row.boundary_pos_score_sum is None for row in rows)

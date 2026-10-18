@@ -1,11 +1,11 @@
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
 
 import pytest
 
 from src.sse.events import StreamEvent
+from src.storage import new_id
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph_repository import ParagraphRepository
 from src.text_processing.models import Chunk
@@ -16,6 +16,7 @@ from src.workflows.preprocess import (
     _generate_paragraph_embeddings,
 )
 from tests.support.analysis_factories import insert_test_novel
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 def _insert_chapter_texts_and_paragraphs(session, chunks: list[Chunk]) -> tuple[str, str]:
@@ -26,8 +27,8 @@ def _insert_chapter_texts_and_paragraphs(session, chunks: list[Chunk]) -> tuple[
     Returns:
         (run_id, novel_id)：每次调用生成唯一 run_id，避免同会话内用例串数据
     """
-    novel_id = uuid4().hex[:8]
-    run_id = uuid4().hex
+    novel_id = new_id()
+    run_id = new_id()
     insert_test_novel(novel_id, session=session)
     RunRepository(session).create_run(
         novel_id=novel_id,
@@ -57,13 +58,10 @@ async def test_generate_paragraph_embeddings_uses_probed_dimension_for_schema_an
 
     with (
         patch("src.embedding.EmbeddingClient", return_value=mock_client) as mock_client_factory,
-        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
-        patch("src.storage.repositories.paragraph.insert_paragraph_embeddings") as mock_insert_paragraph_embeddings,
+        patch("src.storage.service.Storage.prepare_paragraph_vectors") as mock_ensure_paragraph_schema,
+        patch("src.storage.access.ParagraphAccess.insert_paragraph_embeddings") as mock_insert_paragraph_embeddings,
     ):
-        inserted = await _generate_paragraph_embeddings(
-            session=db_session,
-            run_id=run_id,
-        )
+        inserted = await _generate_paragraph_embeddings(session=storage_for(db_session), run_id=run_id)
 
     assert inserted == 2
     mock_client_factory.assert_called_once()
@@ -73,9 +71,9 @@ async def test_generate_paragraph_embeddings_uses_probed_dimension_for_schema_an
     mock_client.detect_embedding_dimension.assert_awaited_once()
     # 建表列宽 = 探测值
     mock_ensure_paragraph_schema.assert_called_once()
-    assert mock_ensure_paragraph_schema.call_args.args[1] == 1024
+    assert mock_ensure_paragraph_schema.call_args.args[0] == 1024
     # embedding 行只携带 paragraph_id + 向量（身份以 paragraphs 表为准）
-    paragraph_rows = mock_insert_paragraph_embeddings.call_args.args[2]
+    paragraph_rows = mock_insert_paragraph_embeddings.call_args.args[1]
     assert [row.paragraph_id for row in paragraph_rows] == [0, 1]
     assert [row.embedding_vector for row in paragraph_rows] == [[0.5, 0.6], [0.7, 0.8]]
     # 行溯源维度 = 探测值
@@ -91,11 +89,10 @@ async def test_generate_paragraph_embeddings_skips_when_no_paragraphs(db_session
 
     with (
         patch("src.embedding.EmbeddingClient", return_value=mock_client) as mock_client_factory,
-        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
+        patch("src.storage.service.Storage.prepare_paragraph_vectors") as mock_ensure_paragraph_schema,
     ):
         inserted = await _generate_paragraph_embeddings(
-            session=db_session,
-            run_id="run-empty",
+            session=storage_for(db_session), run_id=fixture_id(__name__, "run-empty")
         )
 
     assert inserted == 0
@@ -112,13 +109,10 @@ async def test_generate_paragraph_embeddings_fails_fast_when_embedding_client_in
 
     with (
         patch("src.embedding.EmbeddingClient", side_effect=ValueError("missing embedding config")),
-        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
+        patch("src.storage.service.Storage.prepare_paragraph_vectors") as mock_ensure_paragraph_schema,
     ):
         with pytest.raises(RuntimeError, match="embedding client initialization failed"):
-            await _generate_paragraph_embeddings(
-                session=db_session,
-                run_id=run_id,
-            )
+            await _generate_paragraph_embeddings(session=storage_for(db_session), run_id=run_id)
 
     mock_ensure_paragraph_schema.assert_not_called()
 

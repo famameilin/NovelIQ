@@ -1,7 +1,7 @@
 """
 角色查询组装器
 
-承载 characters 相关取数与响应装配；出现量归并、焦点评分与别名归一
+说明: 承载 characters 相关取数与响应装配；出现量归并、焦点评分与别名归一
 分别在 `src.metrics.aggregate.aggregations` 与 `normalization`。
 """
 
@@ -14,19 +14,19 @@ from src.metrics.aggregate.aggregations import (
     merge_character_appearances,
     rank_character_appearances,
 )
-from src.storage.repositories import AnnotationRepository
+from src.storage import Storage
 
 
 def _fetch_characters(
     run_id: str,
-    annotation_repo: AnnotationRepository,
+    annotation_repo: Storage,
     arc_scores: dict[str, float] | None = None,
     focus_characters: list[str] | None = None,
     main_characters: list[str] | None = None,
     limit: int | None = 50,
 ) -> list:
     """组装角色榜，过滤局部引用、归并别名并对齐诊断名单"""
-    rows = fetch_chapter_characters_full(annotation_repo.session, run_id)
+    rows = fetch_chapter_characters_full(annotation_repo, run_id)
     name_resolution = build_name_resolution(
         annotation_repo,
         run_id,

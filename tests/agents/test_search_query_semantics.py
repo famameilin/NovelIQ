@@ -13,6 +13,7 @@ from src.event_trees.models import BoundEvent, EventParticipantInput
 from src.event_trees.trees import EventTrees
 from src.fact_graph.graph import FactGraph
 from src.fact_graph.inputs import EntityInput
+from tests.support.storage_fixtures import fixture_id
 
 
 def _event(
@@ -45,8 +46,8 @@ def _event(
 
 def _trees(*events: BoundEvent) -> EventTrees:
     trees = EventTrees("run-search")
-    trees.begin("exec-1")
-    trees.sync("exec-1", 8, list(events))
+    trees.begin(fixture_id(__name__, "exec-1"))
+    trees.sync(fixture_id(__name__, "exec-1"), 8, list(events))
     return trees
 
 

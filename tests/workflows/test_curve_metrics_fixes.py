@@ -11,12 +11,11 @@
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 
 from src.metrics.paragraph_surface_tension import surface_tension_sigmoid
 from src.metrics.queries.global_stats import query_global_stats as compute_global_stats
+from src.storage import new_id
 from src.storage.repositories import ChapterRepository, RunRepository
 from src.storage.repositories.paragraph import insert_paragraph_tension_observations
 from src.storage.repositories.paragraph_repository import (
@@ -24,6 +23,7 @@ from src.storage.repositories.paragraph_repository import (
     ParagraphRepository,
 )
 from tests.support.analysis_factories import insert_test_novel
+from tests.support.storage_fixtures import storage_for
 
 
 def _insert_paragraph_metrics(
@@ -43,7 +43,7 @@ def _insert_paragraph_metrics(
     from src.text_processing.models import Chunk
     from src.text_processing.paragraphs import split_chunk_paragraphs
 
-    novel_id = uuid.uuid4().hex[:8]
+    novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
     run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Global Stats")
 
@@ -115,7 +115,7 @@ class TestGlobalStatsExtremes:
             surface_tension_zs=[None, None, None, None],
         )
 
-        stats = dict(compute_global_stats(db_session, run_id))
+        stats = dict(compute_global_stats(storage_for(db_session), run_id))
 
         assert stats["emotion_max"] == 5.0
         # 极值字段：emotion_max_chunk → emotion_peak_chapter_id
@@ -130,7 +130,7 @@ class TestGlobalStatsExtremes:
             surface_tension_zs=[None, None, None, None],
         )
 
-        stats = dict(compute_global_stats(db_session, run_id))
+        stats = dict(compute_global_stats(storage_for(db_session), run_id))
 
         assert stats["emotion_min"] == 0.0
         assert stats["emotion_min_chapter_id"] == 2.0
@@ -144,7 +144,7 @@ class TestGlobalStatsExtremes:
             surface_tension_zs=[2.0, 2.0, 4.0, 4.0],
         )
 
-        stats = dict(compute_global_stats(db_session, run_id))
+        stats = dict(compute_global_stats(storage_for(db_session), run_id))
 
         # 存储 z、读取 sigmoid：极值比较仍是同一单调口径
         assert stats["rhythm_max"] == pytest.approx(surface_tension_sigmoid(4.0))
@@ -154,11 +154,11 @@ class TestGlobalStatsExtremes:
 
     def test_rhythm_extremes_guarded_when_no_curve_rows(self, db_session) -> None:
         """无段落曲线数据时输出张力分布统计，也不伪造极值定位"""
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Global Stats")
 
-        stats = dict(compute_global_stats(db_session, run_id))
+        stats = dict(compute_global_stats(storage_for(db_session), run_id))
 
         assert "rhythm_max" not in stats
         assert "rhythm_peak_chapter_id" not in stats
@@ -172,7 +172,7 @@ class TestGlobalStatsExtremes:
             surface_tension_zs=[None, None, None, None],
         )
 
-        stats = dict(compute_global_stats(db_session, run_id))
+        stats = dict(compute_global_stats(storage_for(db_session), run_id))
 
         assert stats["emotion_max"] == 5.0
         assert stats["emotion_peak_chapter_id"] == 3.0
@@ -188,7 +188,7 @@ class TestGlobalStatsExtremes:
             surface_tension_zs=[4.0, None, 2.0, 2.0],
         )
 
-        stats = dict(compute_global_stats(db_session, run_id))
+        stats = dict(compute_global_stats(storage_for(db_session), run_id))
 
         assert stats["rhythm_max"] == pytest.approx(surface_tension_sigmoid(4.0))
         assert stats["rhythm_peak_chapter_id"] == 1.0
@@ -208,7 +208,7 @@ class TestLexiconZeroHitShare:
             positive_sums=[4.0, 0.0, 0.0, 0.0],
         )
 
-        stats = dict(compute_global_stats(db_session, run_id))
+        stats = dict(compute_global_stats(storage_for(db_session), run_id))
 
         assert stats["lexicon_zero_hit_share"] == 6 / 8
 
@@ -219,16 +219,16 @@ class TestLexiconZeroHitShare:
             surface_tension_zs=[None, None, None, None],
         )
 
-        stats = dict(compute_global_stats(db_session, run_id))
+        stats = dict(compute_global_stats(storage_for(db_session), run_id))
 
         assert stats["lexicon_zero_hit_share"] == 1.0
 
     def test_not_emitted_when_no_metric_rows(self, db_session) -> None:
         """无指标行=数据缺失，不得冒充零信号（不输出该统计）"""
-        novel_id = uuid.uuid4().hex[:8]
+        novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
         run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="No Metrics")
 
-        stats = dict(compute_global_stats(db_session, run_id))
+        stats = dict(compute_global_stats(storage_for(db_session), run_id))
 
         assert "lexicon_zero_hit_share" not in stats

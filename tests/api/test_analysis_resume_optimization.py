@@ -9,12 +9,13 @@ import pytest
 from src.config import settings
 from src.workflows.schemas import ReanalyzeRequest
 from src.workflows.service import TASK_KIND_REANALYSIS, AnalysisService
+from tests.support.storage_fixtures import fixture_id, storage_factory
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("resume", [False, True])
 async def test_force_is_applied_once_per_task_and_completion_chain_is_reused_on_resume(resume: bool) -> None:
-    service = AnalysisService(MagicMock(), MagicMock(), session_factory=MagicMock())
+    service = AnalysisService(MagicMock(), MagicMock(), session_factory=storage_factory(MagicMock()))
     service._run_analysis_core = AsyncMock()
     complete = {
         "skip_preprocess": True,
@@ -40,7 +41,7 @@ async def test_force_is_applied_once_per_task_and_completion_chain_is_reused_on_
     await task
     kwargs = service._run_analysis_core.call_args.kwargs
     builder = kwargs["skip_stages_builder"]
-    result = builder(MagicMock(), "run")
+    result = builder(MagicMock(), fixture_id(__name__, "run"))
 
     assert kwargs["num_topics"] == 7
     assert request.model_dump() == original
@@ -55,7 +56,7 @@ async def test_force_is_applied_once_per_task_and_completion_chain_is_reused_on_
 def test_partial_upstream_stage_prevents_reusing_downstream_results(monkeypatch) -> None:
     from src.workflows.analysis import environment_initializer as module
 
-    service = AnalysisService(MagicMock(), MagicMock(), session_factory=MagicMock())
+    service = AnalysisService(MagicMock(), MagicMock(), session_factory=storage_factory(MagicMock()))
     monkeypatch.setattr(settings.linguistic.ltp, "enabled", True)
     queries = {
         name: MagicMock(return_value=value)
@@ -70,7 +71,7 @@ def test_partial_upstream_stage_prevents_reusing_downstream_results(monkeypatch)
     }
     for name, query in queries.items():
         monkeypatch.setattr(module, name, query)
-    result = service.env_initializer.check_stage_completion_status(MagicMock(), "run")
+    result = service.env_initializer.check_stage_completion_status(MagicMock(), fixture_id(__name__, "run"))
     assert result["skip_preprocess"] and result["skip_annotate"]
     assert not any(result[key] for key in ("skip_linguistic", "skip_aggregate", "skip_topic_model", "skip_diagnose"))
     queries["is_linguistic_complete"].assert_called_once()

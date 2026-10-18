@@ -1,22 +1,4 @@
-"""领域约束触发器：标准 PK/FK/UNIQUE/CHECK 表达不了的跨表规则在数据库层落地
-
-安装入口 install_domain_constraints(engine)：init_db 与测试夹具在建表后调用；
-全部语句可重复执行（CREATE OR REPLACE FUNCTION + DROP TRIGGER IF EXISTS + CREATE）。
-
-规则清单（与冻结模型注释一一对应）：
-1. chapter_annotations：每 work 至多一份正式成功记录（经 execution→work 推导）
-2. diagnosis_reports：每 run 至多一份正式发布（经 session→run 推导）
-3. paragraph_topics / paragraph_metrics：只有推断状态 complete 的段落可写主题行；
-   主题行必须是完整 0..K-1 覆盖且权重和为 1；complete 与主题行数互相一致
-4. conflict_records：每条冲突至少两条独立陈述
-5. organization_checks：结构对无序唯一（不得反向重复）
-6. event_revisions：阶段序号从 0 连续
-7. narrative_links 包含关系无环；narrative_groups 父链无环且父线只能是线
-8. source_evidence：段号属于所有者所在 run 的段落且区间合法
-9. case_entries：交付的接受序号在 run 内唯一
-10. 跨表同 run：关系端点、声明参与者、对话说话人、评估条目、伏笔动作、
-    冲突陈述、事件版本、叙事链路、组织核对、图谱事实引用
-"""
+"领域约束触发器：标准 PK/FK/UNIQUE/CHECK 表达不了的跨表规则在数据库层落地"
 
 from __future__ import annotations
 
@@ -25,14 +7,16 @@ from typing import Any
 
 from sqlalchemy import text
 
-# 公共推导函数：run 直接读执行行自身的归属（invocation 的 run_id 或 session 的 session_run_id），
-# 不经 work 链；work 支路只在程序回执的身份上求值
+# ---------------------------------------------------------------------------
+# 公共推导函数：run 直接读执行行自身的归属（invocation 的 run_id 或 session 的
+# session_run_id），不经 work 链；work 支路只在程序回执的身份上求值
+# ---------------------------------------------------------------------------
 
 _HELPER_FUNCTIONS = (
     """
-CREATE OR REPLACE FUNCTION dc_execution_run_id(p_execution_id text) RETURNS text AS $dc$
+CREATE OR REPLACE FUNCTION dc_execution_run_id(p_execution_id uuid) RETURNS uuid AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     SELECT COALESCE(run_id, session_run_id)
       INTO v_run
@@ -43,9 +27,9 @@ END
 $dc$ LANGUAGE plpgsql
 """,
     """
-CREATE OR REPLACE FUNCTION dc_work_run_id(p_work_id text) RETURNS text AS $dc$
+CREATE OR REPLACE FUNCTION dc_work_run_id(p_work_id uuid) RETURNS uuid AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     SELECT COALESCE(w.annotation_run_id, w.program_run_id,
                     (SELECT se.session_run_id FROM executions se
@@ -58,9 +42,9 @@ END
 $dc$ LANGUAGE plpgsql
 """,
     """
-CREATE OR REPLACE FUNCTION dc_entity_run_id(p_entity_id text) RETURNS text AS $dc$
+CREATE OR REPLACE FUNCTION dc_entity_run_id(p_entity_id uuid) RETURNS uuid AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     SELECT run_id INTO v_run FROM graph_entities WHERE entity_id = p_entity_id;
     RETURN v_run;
@@ -68,9 +52,9 @@ END
 $dc$ LANGUAGE plpgsql
 """,
     """
-CREATE OR REPLACE FUNCTION dc_declaration_run_id(p_declaration_id text) RETURNS text AS $dc$
+CREATE OR REPLACE FUNCTION dc_declaration_run_id(p_declaration_id uuid) RETURNS uuid AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     SELECT dc_execution_run_id(ca.execution_id) INTO v_run
       FROM event_declarations d
@@ -81,9 +65,9 @@ END
 $dc$ LANGUAGE plpgsql
 """,
     """
-CREATE OR REPLACE FUNCTION dc_complete_event_run_id(p_event_id text) RETURNS text AS $dc$
+CREATE OR REPLACE FUNCTION dc_complete_event_run_id(p_event_id uuid) RETURNS uuid AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     SELECT dc_execution_run_id(ce.producer_execution_id) INTO v_run
       FROM complete_events ce
@@ -93,9 +77,9 @@ END
 $dc$ LANGUAGE plpgsql
 """,
     """
-CREATE OR REPLACE FUNCTION dc_group_run_id(p_group_id text) RETURNS text AS $dc$
+CREATE OR REPLACE FUNCTION dc_group_run_id(p_group_id uuid) RETURNS uuid AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     SELECT dc_execution_run_id(g.producer_execution_id) INTO v_run
       FROM narrative_groups g
@@ -105,7 +89,7 @@ END
 $dc$ LANGUAGE plpgsql
 """,
     """
-CREATE OR REPLACE FUNCTION dc_require_same_run(p_expected text, p_actual text, p_label text) RETURNS void AS $dc$
+CREATE OR REPLACE FUNCTION dc_require_same_run(p_expected uuid, p_actual uuid, p_label text) RETURNS void AS $dc$
 BEGIN
     IF p_expected IS NOT NULL AND p_actual IS NOT NULL AND p_expected <> p_actual THEN
         RAISE EXCEPTION '跨运行引用: % 属于 run=%，所属生产链 run=%', p_label, p_actual, p_expected
@@ -124,7 +108,7 @@ _CHAPTER_ANNOTATION_PER_WORK = (
     """
 CREATE OR REPLACE FUNCTION dc_chapter_annotation_per_work() RETURNS trigger AS $dc$
 DECLARE
-    v_work text;
+    v_work uuid;
     v_count integer;
 BEGIN
     SELECT e.work_id INTO v_work FROM executions e WHERE e.execution_id = NEW.execution_id;
@@ -160,7 +144,7 @@ _DIAGNOSIS_REPORT_PER_RUN = (
     """
 CREATE OR REPLACE FUNCTION dc_diagnosis_report_per_run() RETURNS trigger AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
     v_count integer;
 BEGIN
     v_run := dc_execution_run_id(NEW.session_id);
@@ -231,7 +215,7 @@ _PARAGRAPH_TOPIC_COMPLETE_DISTRIBUTION = (
     """
 CREATE OR REPLACE FUNCTION dc_paragraph_topic_complete_distribution() RETURNS trigger AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
     v_paragraph integer;
     v_k integer;
     v_count integer;
@@ -321,7 +305,7 @@ _CONFLICT_MIN_CLAIMS = (
     """
 CREATE OR REPLACE FUNCTION dc_conflict_min_claims() RETURNS trigger AS $dc$
 DECLARE
-    v_conflict text;
+    v_conflict uuid;
     v_records integer;
     v_claims integer;
 BEGIN
@@ -401,7 +385,7 @@ _EVENT_REVISION_STAGE_CHAIN = (
     """
 CREATE OR REPLACE FUNCTION dc_event_revision_stage_chain() RETURNS trigger AS $dc$
 DECLARE
-    v_event text;
+    v_event uuid;
     v_count integer;
     v_min integer;
     v_max integer;
@@ -439,7 +423,7 @@ _NARRATIVE_LINK_NO_CONTAINMENT_CYCLE = (
     """
 CREATE OR REPLACE FUNCTION dc_narrative_link_no_containment_cycle() RETURNS trigger AS $dc$
 DECLARE
-    v_found text;
+    v_found uuid;
 BEGIN
     IF NEW.contained_child_id IS NULL THEN
         RETURN NULL;
@@ -473,7 +457,7 @@ _NARRATIVE_GROUP_PARENT_CHAIN = (
     """
 CREATE OR REPLACE FUNCTION dc_narrative_group_parent_chain() RETURNS trigger AS $dc$
 DECLARE
-    v_found text;
+    v_found uuid;
 BEGIN
     IF NEW.parent_arc_id IS NULL THEN
         RETURN NULL;
@@ -522,11 +506,11 @@ CREATE TRIGGER trg_dc_narrative_group_parent_chain
 _SOURCE_EVIDENCE_OWNER_RUN = (
     """
 CREATE OR REPLACE FUNCTION dc_source_evidence_owner_run(
-    p_graph_fact_id bigint, p_declaration_id text, p_complete_event_id text, p_narrative_group_id text,
-    p_narrative_link_id text, p_foreshadow_action_id text, p_conflict_id text, p_claim_id text, p_check_id text
-) RETURNS text AS $dc$
+    p_graph_fact_id uuid, p_declaration_id uuid, p_complete_event_id uuid, p_narrative_group_id uuid,
+    p_narrative_link_id uuid, p_foreshadow_action_id uuid, p_conflict_id uuid, p_claim_id uuid, p_check_id uuid
+) RETURNS uuid AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     IF p_graph_fact_id IS NOT NULL THEN
         SELECT COALESCE(dc_execution_run_id(gf.direct_producer_execution_id), dc_work_run_id(gf.program_work_id))
@@ -562,7 +546,7 @@ $dc$ LANGUAGE plpgsql
     """
 CREATE OR REPLACE FUNCTION dc_source_evidence_same_run() RETURNS trigger AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
     v_len integer;
 BEGIN
     v_run := dc_source_evidence_owner_run(
@@ -601,9 +585,9 @@ CREATE TRIGGER trg_dc_source_evidence_same_run
 
 _CASE_ENTRY_RUN_ORDER = (
     """
-CREATE OR REPLACE FUNCTION dc_case_entry_support_run(p_entry_id text) RETURNS text AS $dc$
+CREATE OR REPLACE FUNCTION dc_case_entry_support_run(p_entry_id uuid) RETURNS uuid AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     SELECT CASE
              WHEN s.producer_execution_id IS NOT NULL THEN dc_execution_run_id(s.producer_execution_id)
@@ -621,8 +605,8 @@ $dc$ LANGUAGE plpgsql
     """
 CREATE OR REPLACE FUNCTION dc_case_entry_run_order() RETURNS trigger AS $dc$
 DECLARE
-    v_run text;
-    v_dup text;
+    v_run uuid;
+    v_dup uuid;
 BEGIN
     IF NEW.accepted_order IS NULL OR NEW.parent_entry_id IS NULL THEN
         RETURN NULL;
@@ -696,7 +680,7 @@ CREATE TRIGGER trg_dc_declaration_participant_same_run
         """
 CREATE OR REPLACE FUNCTION dc_dialogue_same_run() RETURNS trigger AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     v_run := dc_execution_run_id(NEW.creation_execution_id);
     PERFORM dc_require_same_run(v_run, dc_entity_run_id(NEW.speaker_entity_id), '对话说话人');
@@ -717,7 +701,7 @@ CREATE TRIGGER trg_dc_dialogue_same_run
         """
 CREATE OR REPLACE FUNCTION dc_analysis_assessment_same_run() RETURNS trigger AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
     v_len integer;
 BEGIN
     IF NEW.record_id IS NOT NULL THEN
@@ -752,7 +736,7 @@ CREATE TRIGGER trg_dc_analysis_assessment_same_run
         """
 CREATE OR REPLACE FUNCTION dc_foreshadow_action_same_run() RETURNS trigger AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     v_run := dc_execution_run_id(NEW.producer_execution_id);
     PERFORM dc_require_same_run(v_run, dc_declaration_run_id(NEW.source_declaration_id), '伏笔来源声明');
@@ -772,8 +756,8 @@ CREATE TRIGGER trg_dc_foreshadow_action_same_run
         """
 CREATE OR REPLACE FUNCTION dc_conflict_claim_same_run() RETURNS trigger AS $dc$
 DECLARE
-    v_conflict text;
-    v_expected text;
+    v_conflict uuid;
+    v_expected uuid;
 BEGIN
     v_conflict := COALESCE(NEW.conflict_id, OLD.conflict_id);
     SELECT dc_execution_run_id(c.producer_execution_id) INTO v_expected
@@ -811,7 +795,7 @@ CREATE TRIGGER trg_dc_event_revision_same_run
         """
 CREATE OR REPLACE FUNCTION dc_narrative_link_same_run() RETURNS trigger AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     v_run := dc_execution_run_id(NEW.producer_execution_id);
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.semantic_source_event_id), '链路源端事件');
@@ -838,7 +822,7 @@ CREATE TRIGGER trg_dc_narrative_link_same_run
         """
 CREATE OR REPLACE FUNCTION dc_organization_check_same_run() RETURNS trigger AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     v_run := dc_execution_run_id(NEW.producer_execution_id);
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.reviewed_event_id), '核对事件');
@@ -862,7 +846,7 @@ CREATE TRIGGER trg_dc_organization_check_same_run
         """
 CREATE OR REPLACE FUNCTION dc_graph_fact_same_run() RETURNS trigger AS $dc$
 DECLARE
-    v_run text;
+    v_run uuid;
 BEGIN
     v_run := COALESCE(
         dc_execution_run_id(NEW.direct_producer_execution_id),
@@ -889,7 +873,7 @@ CREATE TRIGGER trg_dc_graph_fact_same_run
 
 
 def domain_constraint_statements() -> Iterable[str]:
-    """按依赖顺序返回全部领域约束 DDL 语句（每条独立执行）"""
+    "按依赖顺序返回全部领域约束 DDL 语句（每条独立执行）"
     groups: list[tuple[str, ...]] = [
         _HELPER_FUNCTIONS,
         _CHAPTER_ANNOTATION_PER_WORK,
@@ -911,7 +895,7 @@ def domain_constraint_statements() -> Iterable[str]:
 
 
 def install_domain_constraints(engine: Any) -> None:
-    """在目标库安装全部领域约束触发器；可重复执行，非 PostgreSQL 方言直接跳过"""
+    "在目标库安装全部领域约束触发器；可重复执行，非 PostgreSQL 方言直接跳过"
     if getattr(getattr(engine, "dialect", None), "name", "") != "postgresql":
         return
     with engine.begin() as connection:

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -16,10 +15,11 @@ from sqlalchemy import select
 from src.event_trees.contributions import EventContribution
 from src.event_trees.organization import OrganizationEvidence
 from src.event_trees.read.organization import EventTreeQuery
-from src.event_trees.trees import EventTrees
 from src.fact_graph.evidence import EvidenceParagraph
 from src.metrics.queries.plotline import PlotlineQuery
+from src.storage import new_id
 from src.storage.models import EventForeshadowingAction
+from src.storage.repositories.event_writes import EventWriter
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import (
     add_annotation_source,
@@ -32,6 +32,7 @@ from tests.support.event_tree_fixtures import (
     publish_draft,
 )
 from tests.support.run_records import set_run_status
+from tests.support.storage_fixtures import storage_for, task_for_run
 
 
 @dataclass(frozen=True)
@@ -118,7 +119,7 @@ def _fixture(session) -> NarrativeScenario:
     return NarrativeScenario(
         novel_id=novel,
         run_id=run,
-        task_id=run[:8],
+        task_id=task_for_run(run, session),
         session_id=session_id,
         execution_id=execution_id,
         declarations=declarations,
@@ -131,7 +132,7 @@ def _fixture(session) -> NarrativeScenario:
 def test_cutoff_windows_pagination_and_future_detail(db_session, api_client):
     scenario = _fixture(db_session)
     run = scenario.run_id
-    query = PlotlineQuery(db_session, run)
+    query = PlotlineQuery(storage_for(db_session), run)
     first = api_client.get(f"/api/novels/{scenario.novel_id}/timeline", params={"task_id": scenario.task_id}).json()
     assert first["through_chapter_id"] == 1
     assert first["total"] == 0
@@ -168,7 +169,7 @@ def test_cutoff_windows_pagination_and_future_detail(db_session, api_client):
 
 def test_tree_reads_complete_event_without_process_or_search_projection(db_session):
     scenario = _fixture(db_session)
-    query = EventTreeQuery(db_session, scenario.run_id)
+    query = EventTreeQuery(storage_for(db_session), scenario.run_id)
     overview = query.fetch()
     assert overview["counts"]["all_events"] == 8
     assert overview["counts"]["declarations"] == 8
@@ -189,7 +190,7 @@ def test_tree_reads_complete_event_without_process_or_search_projection(db_sessi
 
 def test_tree_pages_top_events_and_keeps_all_relation_evidence(db_session, api_client):
     scenario = _fixture(db_session)
-    query = EventTreeQuery(db_session, scenario.run_id)
+    query = EventTreeQuery(storage_for(db_session), scenario.run_id)
     cursor = None
     events, links = {}, set()
     while True:
@@ -203,9 +204,7 @@ def test_tree_pages_top_events_and_keeps_all_relation_evidence(db_session, api_c
             break
     assert set(events) == set(query.events)
     assert len(links) == 8
-    response = api_client.get(
-        f"/api/novels/{scenario.novel_id}/event-trees", params={"task_id": scenario.task_id}
-    )
+    response = api_client.get(f"/api/novels/{scenario.novel_id}/event-trees", params={"task_id": scenario.task_id})
     assert response.status_code == 200
     assert len(response.json()["events"]) == len(query.events)
     assert response.json()["next_cursor"] is None
@@ -215,7 +214,7 @@ def test_tree_pages_top_events_and_keeps_all_relation_evidence(db_session, api_c
 
 def test_complete_event_evidence_and_process_source_keep_actual_identity(db_session, api_client):
     scenario = _fixture(db_session)
-    query = EventTreeQuery(db_session, scenario.run_id)
+    query = EventTreeQuery(storage_for(db_session), scenario.run_id)
     owner = scenario.events[5]
     detail = query.detail(owner)
     assert detail["source_chapters"] == [5]
@@ -286,12 +285,12 @@ def test_action_save_rejects_future_endpoints(db_session, future_endpoint):
         annotation_execution,
         chapter,
         (EvidenceParagraph(chapter, int(paragraph.paragraph_id), paragraph.text, 0, len(paragraph.text)),),
-        json.dumps({"nodes": {}, "connections": {}, "actions": {str(uuid4()): action}}),
+        json.dumps({"nodes": {}, "connections": {}, "actions": {new_id(): action}}),
         "{}",
     )
     source_field = "source_declaration_id" if future_endpoint == "root_event_id" else "target_declaration_id"
     with pytest.raises(ValueError, match=source_field + ".*来源章晚于"):
-        EventTrees(run).save_work(db_session, frozen, record_id)
+        EventWriter(run).save_work(db_session, frozen, record_id)
 
 
 def test_action_save_accepts_earlier_saved_work_endpoints(db_session):
@@ -326,10 +325,10 @@ def test_action_save_accepts_earlier_saved_work_endpoints(db_session):
         annotation_execution,
         chapter,
         (EvidenceParagraph(chapter, int(paragraph.paragraph_id), paragraph.text, 0, len(paragraph.text)),),
-        json.dumps({"nodes": {}, "connections": {}, "actions": {str(uuid4()): action}}),
+        json.dumps({"nodes": {}, "connections": {}, "actions": {new_id(): action}}),
         "{}",
     )
-    EventTrees(run).save_work(db_session, frozen, record_id)
+    EventWriter(run).save_work(db_session, frozen, record_id)
     stored = list(
         db_session.scalars(
             select(EventForeshadowingAction).where(
@@ -356,4 +355,4 @@ def test_source_rejects_mismatched_text_hash(db_session):
         }
     ]
     with pytest.raises(ValueError, match="证据文本校验不一致"):
-        read_evidence_source(db_session, scenario.run_id, evidence)
+        read_evidence_source(storage_for(db_session), scenario.run_id, evidence)

@@ -1,23 +1,17 @@
-"""事件森林原始记录读取，不组装事件树、排序或解释伏笔状态
-
-- 章节原文与章节目录同键（chapters.text）
-- 已保存产物 = chapter_annotations 行（存在即成功事实，行自带运行/章/角色归属）
-- 章级声明 = event_declarations，经来源记录取得运行归属
-- 因果/伏笔边 = narrative_links 的语义形状（relation_type 表达类型）
-"""
+"事件森林原始记录读取，不组装事件树、排序或解释伏笔状态"
 
 from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.event_trees.storage_map import run_execution_ids
 from src.storage.models import (
     Chapter,
     ChapterAnnotation,
     EventDeclaration,
     NarrativeLink,
 )
+from src.storage.repositories.narrative_records import run_execution_ids
 
 
 class EventForestRecords:
@@ -34,7 +28,7 @@ class EventForestRecords:
         )
 
     def fetch_saved_outputs(self, run_id: str):
-        """本 run 已正式保存的章节标注：行存在即保存事实，章号从产物行取得"""
+        "本 run 已正式保存的章节标注：行存在即保存事实，章号从产物行取得"
         stmt = (
             select(
                 ChapterAnnotation.record_id.label("output_id"),
@@ -48,7 +42,7 @@ class EventForestRecords:
         return list(self.session.execute(stmt).all())
 
     def fetch_nodes(self, run_id: str, max_chapter_order: int):
-        """本 run 在阅读截点内的章级声明，按章序与声明身份稳定排序"""
+        "本 run 在阅读截点内的章级声明，按章序与声明身份稳定排序"
         stmt = (
             select(
                 EventDeclaration.declaration_id.label("event_id"),
@@ -91,7 +85,7 @@ class EventForestRecords:
         )
 
     def _event_chapters(self, run_id: str, event_ids: set[str]) -> dict[str, set[int]]:
-        """完整事件的来源章：由其自身证据的段落所属章节投影，不按当前章替代"""
+        "完整事件的来源章：由其自身证据的段落所属章节投影，不按当前章替代"
         from src.storage.models import Paragraph, SourceEvidence
 
         result: dict[str, set[int]] = {event_id: set() for event_id in event_ids}
@@ -107,7 +101,7 @@ class EventForestRecords:
         return result
 
     def _semantic_links(self, run_id: str, *, relation_type: str):
-        """本 run 的正式语义链路：两端都必须是完整事件，按链路身份稳定排序"""
+        "本 run 的正式语义链路：两端都必须是完整事件，按链路身份稳定排序"
         return list(
             self.session.execute(
                 select(NarrativeLink)
@@ -125,9 +119,7 @@ class EventForestRecords:
         links = self._semantic_links(run_id, relation_type="causal")
         if not include_inactive:
             links = [row for row in links if row.is_active is not False]
-        event_ids = {row.semantic_source_event_id for row in links} | {
-            row.semantic_target_event_id for row in links
-        }
+        event_ids = {row.semantic_source_event_id for row in links} | {row.semantic_target_event_id for row in links}
         chapters = self._event_chapters(run_id, {item for item in event_ids if item is not None})
         return [
             row
@@ -143,8 +135,7 @@ class EventForestRecords:
                 .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
                 .join(
                     Chapter,
-                    (Chapter.run_id == ChapterAnnotation.run_id)
-                    & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
+                    (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
                 )
                 .where(
                     ChapterAnnotation.run_id == run_id,
@@ -163,5 +154,5 @@ class EventForestRecords:
         )
 
     def fetch_foreshadow_edges(self, run_id: str):
-        """伏笔语义链路：来源/目标都必须是完整事件，声明身份不回填冒充"""
+        "伏笔语义链路：来源/目标都必须是完整事件，声明身份不回填冒充"
         return self._semantic_links(run_id, relation_type="foreshadowing")

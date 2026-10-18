@@ -70,8 +70,16 @@ class ModelElectionExhausted(RuntimeError):
 class ModelElectionPool:
     """本轮模型池只发布选举结果，预算、失败权重和退避仅保留在内存"""
 
-    def __init__(self, bus: EventBus, run_id: str, *, max_attempts: int, poll_seconds: float = 0.1,
-                 allowed_model_ids: frozenset[str] | None = None, fixed_model_id: str | None = None) -> None:
+    def __init__(
+        self,
+        bus: EventBus,
+        run_id: str,
+        *,
+        max_attempts: int,
+        poll_seconds: float = 0.1,
+        allowed_model_ids: frozenset[str] | None = None,
+        fixed_model_id: str | None = None,
+    ) -> None:
         self.bus = bus
         self.run_id = run_id
         # 池子地址同时是容量预留的归属：close() 按它归还
@@ -100,8 +108,11 @@ class ModelElectionPool:
         if receipt.resume_attempt is not None and not 1 <= receipt.resume_attempt <= self.max_attempts:
             raise ValueError("恢复租约必须引用原有效尝试，不得重开预算")
         previous_attempt = self.attempts.get(receipt.work_id)
-        if (receipt.resume_attempt is not None and previous_attempt is not None
-                and receipt.resume_attempt != previous_attempt):
+        if (
+            receipt.resume_attempt is not None
+            and previous_attempt is not None
+            and receipt.resume_attempt != previous_attempt
+        ):
             raise ValueError("恢复租约尝试号与原work不一致，禁止回退选举预算")
         if any(item.work_id == receipt.work_id for item in self.pending):
             return
@@ -149,8 +160,10 @@ class ModelElectionPool:
                     try:
                         # 空位过滤读配置的 max_in_flight：容量热更新无需另立登记
                         if self.fixed_model_id is not None:
-                            selected = next((item for item in settings.models.model_pool
-                                             if item.model_id == self.fixed_model_id), None)
+                            selected = next(
+                                (item for item in settings.models.model_pool if item.model_id == self.fixed_model_id),
+                                None,
+                            )
                             if selected is None:
                                 raise ValueError("指定诊断模型不在模型池中")
                             # 诊断显式选模不受标注权重影响，仍共用同一容量账本
@@ -159,8 +172,11 @@ class ModelElectionPool:
                         else:
                             model_id = select_annotation_model(
                                 stable_digest(receipt.work_id, attempts),
-                                [item for item in settings.models.model_pool
-                                 if self.allowed_model_ids is None or item.model_id in self.allowed_model_ids],
+                                [
+                                    item
+                                    for item in settings.models.model_pool
+                                    if self.allowed_model_ids is None or item.model_id in self.allowed_model_ids
+                                ],
                                 in_flight=MODEL_CAPACITY.snapshot(),
                                 failures=self.failures.get(receipt.work_id, {}),
                             )

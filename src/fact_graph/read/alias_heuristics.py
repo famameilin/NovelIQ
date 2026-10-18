@@ -1,18 +1,10 @@
-"""
-P11 人物别名启发式消歧（高精度子串/姓氏片段规则）
-
-依据：data/gold_standards/disambiguation/ 金标中“贺伯安→伯安”这类可被子串规则
-捕获的别名；对“赵哥→赤甲卫”“灵禽→赤羽炽尾鸡”等 false_merge 不应触发。
-
-当前只做高精度规则，昵称类（如猴子→侯飞白）仍依赖 LLM same_character 声明；
-缺失时保留双节点，由离线金标评估持续度量召回缺口。
-"""
+"人物别名启发式消歧（高精度子串/姓氏片段规则）"
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from src.storage.repositories.graph.repository import EntitySnapshotRow
+from src.storage.records.graph import EntitySnapshotRow
 
 
 def looks_like_alias_name(left: str, right: str) -> bool:

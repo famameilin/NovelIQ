@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.diagnosis.queries import DiagnosisQueries
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 def test_fetch_known_characters_falls_back_when_graph_missing() -> None:
@@ -11,13 +12,13 @@ def test_fetch_known_characters_falls_back_when_graph_missing() -> None:
         authority_service.from_session.return_value.build_export_view.side_effect = ValueError(
             "run 尚无已完成章节图版本"
         )
-        with patch("src.diagnosis.queries.GraphRepository") as graph_repository:
+        with patch("src.diagnosis.queries.graph_projection") as graph_repository:
             graph_repository.return_value.fetch_latest_entity_rows.return_value = [
                 SimpleNamespace(name="顾霜", entity_type="character"),
                 SimpleNamespace(name="司夜", entity_type="character"),
             ]
 
-            known = DiagnosisQueries(session).fetch_known_characters("run-1")
+            known = DiagnosisQueries(storage_for(session)).fetch_known_characters(fixture_id(__name__, "run-1"))
 
     assert known == ["司夜", "顾霜"]
 
@@ -45,6 +46,6 @@ def test_fetch_known_characters_uses_canonical_view_with_aliases() -> None:
         view.canonical_entities = [canonical_entity, null_entity, location_entity]
         authority_service.from_session.return_value.build_export_view.return_value = view
 
-        known = DiagnosisQueries(session).fetch_known_characters("run-1")
+        known = DiagnosisQueries(storage_for(session)).fetch_known_characters(fixture_id(__name__, "run-1"))
 
     assert known == ["贺伯安（别名：贺重明、伯安）"]

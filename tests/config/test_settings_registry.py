@@ -75,7 +75,8 @@ class TestEnvFile:
     def test_named_credentials_roundtrip_and_duplicate_removal(self, tmp_path: Path) -> None:
         path = tmp_path / ".env"
         path.write_text(
-            "EMBEDDING_MODEL_KEY=old\nEMBEDDING_MODEL_KEY=duplicate\n# end", encoding="utf-8",
+            "EMBEDDING_MODEL_KEY=old\nEMBEDDING_MODEL_KEY=duplicate\n# end",
+            encoding="utf-8",
         )
         secret = "quoted 'key' # ${MODEL_KEY} \\ literal"
         update_env_file(path, {"EMBEDDING_MODEL_KEY": secret, "EMBEDDING_MODEL_ID": "model"})
@@ -85,9 +86,14 @@ class TestEnvFile:
         update_env_file(path, {"EMBEDDING_MODEL_KEY": None})
         assert "EMBEDDING_MODEL_KEY" not in read_env_file(path)
 
-    @pytest.mark.parametrize("key", [
-        "MODEL_PROVIDER_DEFAULT_KEY", "MODEL_PROVIDER_X_PASSWORD", "MODEL_PROVIDER_1X_KEY",
-    ])
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "MODEL_PROVIDER_DEFAULT_KEY",
+            "MODEL_PROVIDER_X_PASSWORD",
+            "MODEL_PROVIDER_1X_KEY",
+        ],
+    )
     def test_rejects_invalid_provider_env_key(self, tmp_path: Path, key: str) -> None:
         with pytest.raises(EnvFileError):
             update_env_file(tmp_path / ".env", {key: "value"})

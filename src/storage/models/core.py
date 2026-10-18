@@ -17,17 +17,14 @@ from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, 
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.config.constants.contracts import FIXED_CONTRACT_VERSION
+from src.storage.ids import new_id, new_task_id
+from src.storage.uuid_type import Uuid7 as Uuid
 
 from .base import Base
 
 
 class AnalysisRun(Base):
-    """
-    分析运行记录表
-
-    记录每次分析任务的运行信息，作为所有数据的隔离主键与运行态唯一真相源；
-    全书统计由正式聚合阶段写一次，只存具名结果，不存分子/分母。
-    """
+    "分析运行记录表"
 
     __tablename__ = "analysis_runs"
     __table_args__ = (
@@ -36,12 +33,17 @@ class AnalysisRun(Base):
         {"comment": "分析运行表：运行身份/调度/来源观察/合同/模型构建/阶段完成与具名全书统计"},
     )
 
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="运行主键（uuid）")
+    run_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="运行主键（uuid）", default=new_id, autoincrement=False
+    )
     novel_id: Mapped[str] = mapped_column(
-        String(255),
+        Uuid(as_uuid=False),
         ForeignKey("novels.novel_id", ondelete="RESTRICT", name="analysis_runs_novel_id_fkey"),
         nullable=False,
         comment="所属小说",
+    )
+    task_id: Mapped[str] = mapped_column(
+        String(8), nullable=False, unique=True, default=new_task_id, comment="独立的 8 位任务短 ID"
     )
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", comment="运行状态")
     progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="总进度（0~1）")
@@ -58,7 +60,9 @@ class AnalysisRun(Base):
     worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None, comment="执行者标识")
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="心跳时间")
     started_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True, default=None,
+        DateTime,
+        nullable=True,
+        default=None,
         comment="实际开始执行时间",
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="完成时间")
@@ -83,7 +87,9 @@ class AnalysisRun(Base):
 
     # 运行级正式合同（固定合同版本与各实际来源观察）
     contract_version: Mapped[str] = mapped_column(
-        String(100), nullable=False, default=FIXED_CONTRACT_VERSION,
+        String(100),
+        nullable=False,
+        default=FIXED_CONTRACT_VERSION,
         comment="运行级固定合同版本（实体关系/短语规则/主题状态/归一映射）",
     )
     embedding_model_key: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="实际嵌入模型 key")
@@ -108,9 +114,7 @@ class AnalysisRun(Base):
     w2v_window_size: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="训练窗口大小")
     w2v_min_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="最低词频")
     w2v_epochs: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="训练轮数")
-    w2v_pretrained_vocabulary_size: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, comment="预训练词表规模"
-    )
+    w2v_pretrained_vocabulary_size: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="预训练词表规模")
     w2v_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="词向量构建时间")
 
     # LDA 实际构建（实际 K 不与请求 K 混淆）
@@ -135,17 +139,16 @@ class AnalysisRun(Base):
     linguistic_completed_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, comment="语言结构真实完成时间"
     )
-    curve_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True, comment="曲线计算真实完成时间"
-    )
+    curve_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="曲线计算真实完成时间")
     aggregate_completed_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, comment="全书聚合真实完成时间"
     )
-    topic_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True, comment="主题建模真实完成时间"
-    )
+    topic_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="主题建模真实完成时间")
     guard_generation: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, default=0, server_default="0",
+        BigInteger,
+        nullable=False,
+        default=0,
+        server_default="0",
         comment="并发栅栏代次（受约束写入事务内递增取锁）",
     )
 

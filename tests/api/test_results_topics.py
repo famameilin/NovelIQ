@@ -21,6 +21,7 @@ import pytest
 
 from src.api.services.results_queries.topics import _fetch_topics
 from src.topic.artifacts import describe_topics_unavailability, validate_topic_aggregation_row
+from tests.support.storage_fixtures import fixture_id
 
 
 def _make_row(topic_id: int, weighted_total: float) -> SimpleNamespace:
@@ -52,7 +53,7 @@ def _make_trainer_with_model() -> MagicMock:
 def test_fetch_topics_without_model_dir_returns_empty() -> None:
     repo = _make_repo([_make_row(0, 100.0)])
     # models/topic/{run_id} 目录不存在（默认行为）
-    result = _fetch_topics("run-no-model", repo)
+    result = _fetch_topics(fixture_id(__name__, "run-no-model"), repo)
     assert result == []
 
 
@@ -64,7 +65,7 @@ def test_fetch_topics_with_model_fills_words_labels_and_normalizes() -> None:
         patch.object(Path, "exists", return_value=True),
         patch("src.topic.LDATrainer", return_value=trainer),
     ):
-        result = _fetch_topics("run-1", repo)
+        result = _fetch_topics(fixture_id(__name__, "run-1"), repo)
 
     assert len(result) == 2
     first, second = result
@@ -87,7 +88,7 @@ def test_fetch_topics_rejects_rows_without_current_inference(book_total: float |
         patch.object(Path, "exists", return_value=True),
         patch("src.topic.LDATrainer", return_value=trainer),
     ):
-        result = _fetch_topics("run-legacy", repo)
+        result = _fetch_topics(fixture_id(__name__, "run-legacy"), repo)
 
     assert result == []
     repo.fetch_paragraph_topics_agg.assert_not_called()
@@ -103,7 +104,7 @@ def test_fetch_topics_model_load_failure_degrades() -> None:
         patch.object(Path, "exists", return_value=True),
         patch("src.topic.LDATrainer", return_value=trainer),
     ):
-        result = _fetch_topics("run-broken", repo)
+        result = _fetch_topics(fixture_id(__name__, "run-broken"), repo)
 
     # 加载失败 → words 为空 → 该主题被过滤
     assert result == []
@@ -111,7 +112,7 @@ def test_fetch_topics_model_load_failure_degrades() -> None:
 
 def test_fetch_topics_empty_rows_returns_empty() -> None:
     repo = _make_repo([])
-    assert _fetch_topics("run-empty", repo) == []
+    assert _fetch_topics(fixture_id(__name__, "run-empty"), repo) == []
 
 
 def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
@@ -127,11 +128,11 @@ def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
         patch.object(Path, "exists", return_value=True),
         patch("src.topic.LDATrainer", return_value=trainer),
     ):
-        result = _fetch_topics("run-anchored", repo)
+        result = _fetch_topics(fixture_id(__name__, "run-anchored"), repo)
 
     assert len(result) == 1
     loaded_dir = trainer.load_model.call_args.args[0]
-    assert loaded_dir == resolve_model_dir("run-anchored")
+    assert loaded_dir == resolve_model_dir(fixture_id(__name__, "run-anchored"))
 
 
 def test_validate_agg_row_rejects_missing_fields() -> None:
@@ -149,10 +150,10 @@ def test_validate_agg_row_rejects_invalid_weight(weighted_total: float) -> None:
 
 def test_describe_topics_unavailability_reports_missing_artifact() -> None:
     """模型 artifact 缺失给出显式原因（不再静默过滤聚合行）"""
-    reason = describe_topics_unavailability("run-no-model")
+    reason = describe_topics_unavailability(fixture_id(__name__, "run-no-model"))
     assert reason is not None
     assert reason.startswith("topic_model_artifact_missing:")
-    assert "run-no-model" in reason
+    assert fixture_id(__name__, "run-no-model") in reason
 
 
 def test_describe_topics_unavailability_reports_load_failure() -> None:
@@ -163,7 +164,7 @@ def test_describe_topics_unavailability_reports_load_failure() -> None:
         patch.object(Path, "exists", return_value=True),
         patch("src.topic.LDATrainer", return_value=trainer),
     ):
-        reason = describe_topics_unavailability("run-broken")
+        reason = describe_topics_unavailability(fixture_id(__name__, "run-broken"))
 
     assert reason is not None
     assert reason.startswith("topic_model_load_failed:")
@@ -176,6 +177,6 @@ def test_describe_topics_unavailability_none_when_model_loads() -> None:
         patch.object(Path, "exists", return_value=True),
         patch("src.topic.LDATrainer", return_value=trainer),
     ):
-        reason = describe_topics_unavailability("run-1")
+        reason = describe_topics_unavailability(fixture_id(__name__, "run-1"))
 
     assert reason is None

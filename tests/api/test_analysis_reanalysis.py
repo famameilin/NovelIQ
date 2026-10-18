@@ -9,6 +9,7 @@ from src.api.routes import analysis as analysis_mod
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
 from src.workflows.schemas import ReanalyzeRequest
+from tests.support.storage_fixtures import fixture_id
 
 
 class TestReanalysis:
@@ -16,7 +17,7 @@ class TestReanalysis:
 
     def test_reanalyze_not_found(self, api_client: TestClient):
         """测试重新分析不存在的小说"""
-        response = api_client.post("/api/novels/nonexistent/reanalyze", json={})
+        response = api_client.post(f"/api/novels/{fixture_id(__name__, 'nonexistent')}/reanalyze", json={})
         assert response.status_code == 404
 
     def test_reanalyze_creates_new_task(self, api_client: TestClient):
@@ -68,7 +69,8 @@ class TestReanalysis:
         task_id = reanalyze_response.json()["task_id"]
 
         with get_session_factory()() as session:
-            run = RunRepository(session).get_run(task_id)
+            run = RunRepository(session).get_run_by_task_id(task_id)
+            session.commit()
 
         assert run is not None
         assert run["task_kind"] == "reanalysis"
@@ -114,7 +116,8 @@ class TestReanalysis:
         task_id = reanalyze_response.json()["task_id"]
 
         with get_session_factory()() as session:
-            run = RunRepository(session).get_run(task_id)
+            run = RunRepository(session).get_run_by_task_id(task_id)
+            session.commit()
 
         assert run is not None
         assert run["request_payload"] is not None
@@ -145,7 +148,10 @@ class TestReanalysis:
         )
 
         with get_session_factory()() as session:
-            RunRepository(session).update_run_task_fields(task_id, status="failed")
+            RunRepository(session).update_run_task_fields(
+                RunRepository(session).get_run_by_task_id(task_id)["run_id"], status="failed"
+            )
+            session.commit()
 
         scheduled: dict[str, object] = {}
 

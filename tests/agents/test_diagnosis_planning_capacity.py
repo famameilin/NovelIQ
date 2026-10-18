@@ -9,23 +9,42 @@ import pytest
 from src.agents.diagnosis.domain import DiagnosisDomain
 from src.agents.diagnosis.work_runtime import DiagnosisWorkScheduler
 from src.event_bus import EventBus
+from src.storage import new_id
 from tests.agents.test_diagnosis_program import declaration_case as declaration_case  # noqa: F401
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 @pytest.fixture
 def domain(declaration_case):
     draft = declaration_case
-    result = DiagnosisDomain(session=draft.session, run_id=draft.run_id, novel_id="test-novel",
-                             execution_id=f"structure-{draft.run_id[:8]}", novel_title=None,
-                             model_id="test-model")
+    result = DiagnosisDomain(
+        session=storage_for(draft.fixture_session),
+        run_id=draft.run_id,
+        novel_id=fixture_id(__name__, "test-novel"),
+        execution_id=new_id(),
+        novel_title=None,
+        model_id="test-model",
+    )
     yield result
     result.close()
 
 
 def test_no_planning_or_dispatch_machinery_remains(domain):
-    for name in ("_measure", "_fits_work", "_pack_work", "_partition", "_request_size", "_check_messages",
-                 "input_limit", "output_limit", "tool_overhead",
-                 "initial_work", "finishing_work", "next_dispatch_attempt", "units"):
+    for name in (
+        "_measure",
+        "_fits_work",
+        "_pack_work",
+        "_partition",
+        "_request_size",
+        "_check_messages",
+        "input_limit",
+        "output_limit",
+        "tool_overhead",
+        "initial_work",
+        "finishing_work",
+        "next_dispatch_attempt",
+        "units",
+    ):
         assert not hasattr(domain, name)
     # 不存在第二套切分/计量入口
     import importlib.util
@@ -39,22 +58,29 @@ def test_create_diagnosis_domain_only_resolves_pool_entry(declaration_case, monk
     from src.config.schemas.model import WeightedModelSettings
 
     draft = declaration_case
-    session_id = f"capacity-entry-{draft.run_id[:8]}"
+    session_id = new_id()
     monkeypatch.setattr(settings.models, "diagnosis_model_id", "not-in-pool-model")
     with pytest.raises(ValueError, match="诊断模型不在模型池中"):
         domain_module.create_diagnosis_domain(
-            session=draft.session, run_id=draft.run_id, novel_id="test-novel",
-            execution_id=session_id, novel_title=None,
+            session=storage_for(draft.fixture_session),
+            run_id=draft.run_id,
+            novel_id=fixture_id(__name__, "test-novel"),
+            execution_id=session_id,
+            novel_title=None,
         )
     # 存在条目时以声明 model_id 建域，不读取任何窗口/容量数字
     monkeypatch.setattr(
-        settings.models, "model_pool",
+        settings.models,
+        "model_pool",
         [WeightedModelSettings("cap-model", "https://cap.example/v1", "cap-key")],
     )
     monkeypatch.setattr(settings.models, "diagnosis_model_id", "cap-model")
     created = domain_module.create_diagnosis_domain(
-        session=draft.session, run_id=draft.run_id, novel_id="test-novel",
-        execution_id=session_id, novel_title=None,
+        session=storage_for(draft.fixture_session),
+        run_id=draft.run_id,
+        novel_id=fixture_id(__name__, "test-novel"),
+        execution_id=session_id,
+        novel_title=None,
     )
     assert created.model_id == "cap-model"
     assert not hasattr(created, "input_limit") and not hasattr(created, "output_limit")
@@ -66,13 +92,14 @@ def test_case_session_count_follows_model_in_flight(monkeypatch):
     from src.config.schemas.model import WeightedModelSettings
 
     monkeypatch.setattr(
-        settings.models, "model_pool",
+        settings.models,
+        "model_pool",
         [WeightedModelSettings("diag-model", "https://x.example/v1", "k", max_in_flight=3)],
     )
 
     def build(**overrides):
         params = {
-            "run_id": "run",
+            "run_id": fixture_id(__name__, "run"),
             "domain": None,
             "bus": EventBus(),
             "model_id": "diag-model",
@@ -97,9 +124,14 @@ async def test_run_work_orders_case_wave_before_report_wave(monkeypatch):
             return "diagnosis-result"
 
     scheduler = DiagnosisWorkScheduler(
-        run_id="run", domain=Domain(), bus=EventBus(), model_id="m",
-        llm_factory=lambda _model_id: None, observer_factory=lambda _progress: None,
-        audit_barrier=lambda: None, case_sessions=2,
+        run_id=fixture_id(__name__, "run"),
+        domain=Domain(),
+        bus=EventBus(),
+        model_id="m",
+        llm_factory=lambda _model_id: None,
+        observer_factory=lambda _progress: None,
+        audit_barrier=lambda: None,
+        case_sessions=2,
     )
 
     async def fake_wave(sessions):

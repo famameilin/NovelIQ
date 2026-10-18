@@ -16,6 +16,7 @@ from src.text_processing.models import Chunk
 from src.text_processing.paragraphs import split_chunk_paragraphs
 from src.text_processing.tokenize import tokenize
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 def _insert_paragraphs(db_session, run_id: str, texts: list[str]) -> None:
@@ -76,16 +77,16 @@ def test_extract_query_terms_empty_or_blank() -> None:
 @pytest.mark.asyncio
 async def test_search_with_empty_query_returns_empty() -> None:
     """验证空白查询直接返回空结果"""
-    service = TextSearchService(MagicMock(), run_id="run-1")
+    service = TextSearchService(storage_for(MagicMock()), run_id=fixture_id(__name__, "run-1"))
     assert await service.search("   ") == []
 
 
 @pytest.mark.asyncio
 async def test_enabled_semantic_search_requires_embedding_dependency() -> None:
     """启用语义检索却缺少客户端时明确失败，不能静默退化成关键词结果"""
-    service = TextSearchService(MagicMock(), run_id="run-1", semantic_enabled=True)
+    service = TextSearchService(storage_for(MagicMock()), run_id=fixture_id(__name__, "run-1"), semantic_enabled=True)
     with (
-        patch("src.agents.annotation.text_search.search_paragraphs_by_keywords", return_value=[]),
+        patch("src.storage.access.ParagraphAccess.search_paragraphs_by_keywords", return_value=[]),
         pytest.raises(AnnotationDependencyError, match="EmbeddingClient 未配置"),
     ):
         await service.search("顾霜")
@@ -102,7 +103,7 @@ async def test_search_returns_separate_candidates_for_paragraphs_in_same_chapter
         title="段落候选不合并",
     )
     _insert_paragraphs(db_session, run_id, ["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"])
-    service = TextSearchService(db_session, run_id=run_id, semantic_enabled=False)
+    service = TextSearchService(storage_for(db_session), run_id=run_id, semantic_enabled=False)
 
     result = await service.search("林渡 顾霜")
 
@@ -131,7 +132,7 @@ async def test_search_merges_keyword_and_semantic_scores_per_paragraph(db_sessio
         title="段落双分合并",
     )
     _insert_paragraphs(db_session, run_id, ["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"])
-    service = TextSearchService(db_session, run_id=run_id, semantic_enabled=True)
+    service = TextSearchService(storage_for(db_session), run_id=run_id, semantic_enabled=True)
     service._embedding_client = AsyncMock()
     semantic_rows = [
         SimilarParagraphRow(
@@ -146,7 +147,7 @@ async def test_search_merges_keyword_and_semantic_scores_per_paragraph(db_sessio
         )
     ]
     with patch(
-        "src.agents.annotation.text_search.search_similar_paragraphs",
+        "src.storage.access.ParagraphAccess.search_similar_paragraphs",
         return_value=semantic_rows,
     ):
         result = await service.search("林渡 顾霜")
@@ -172,10 +173,10 @@ async def test_search_wraps_query_with_instruct_prefix(db_session) -> None:
         title="查询instruct前缀",
     )
     _insert_paragraphs(db_session, run_id, ["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"])
-    service = TextSearchService(db_session, run_id=run_id, semantic_enabled=True)
+    service = TextSearchService(storage_for(db_session), run_id=run_id, semantic_enabled=True)
     service._embedding_client = AsyncMock()
     with patch(
-        "src.agents.annotation.text_search.search_similar_paragraphs",
+        "src.storage.access.ParagraphAccess.search_similar_paragraphs",
         return_value=[],
     ):
         await service.search("林渡 顾霜")
@@ -195,7 +196,7 @@ async def test_search_respects_paragraph_bounds(db_session) -> None:
         title="段落边界",
     )
     _insert_paragraphs(db_session, run_id, ["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"])
-    service = TextSearchService(db_session, run_id=run_id, semantic_enabled=False)
+    service = TextSearchService(storage_for(db_session), run_id=run_id, semantic_enabled=False)
 
     result = await service.search("顾霜", min_paragraph_id=1)
 
@@ -207,8 +208,8 @@ async def test_search_respects_paragraph_bounds(db_session) -> None:
 async def test_search_with_missing_paragraph_meta_skips_candidate(db_session) -> None:
     """候选段落元数据（章节/chunk）查不到时跳过该候选"""
     session = MagicMock()
-    session.execute.return_value.all.return_value = []
-    service = TextSearchService(session, run_id="run-1", semantic_enabled=False)
+    session.reads.final_agents_annotation_text_search_search_1.return_value = []
+    service = TextSearchService(session, run_id=fixture_id(__name__, "run-1"), semantic_enabled=False)
     keyword_row = MagicMock(
         paragraph_id=7,
         paragraph_text="顾霜入城。",
@@ -219,7 +220,7 @@ async def test_search_with_missing_paragraph_meta_skips_candidate(db_session) ->
         global_end_char=5,
     )
     with patch(
-        "src.agents.annotation.text_search.search_paragraphs_by_keywords",
+        "src.storage.access.ParagraphAccess.search_paragraphs_by_keywords",
         return_value=[keyword_row],
     ):
         result = await service.search("顾霜")

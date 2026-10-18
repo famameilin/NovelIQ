@@ -26,6 +26,7 @@ from src.event_bus import EventBus, Message
 from src.event_trees.trees import EventTrees
 from src.fact_graph.graph import FactGraph
 from src.model_pool.capacity import MODEL_CAPACITY, ModelElectionExhausted, ModelElectionPool
+from src.storage import new_id
 from src.work.annotation_work import WorkReceipt
 from src.work.chapter_pool import ChapterWorkerPool, PipelineWorkFailed, WorkSaveUnconfirmed
 
@@ -57,9 +58,12 @@ class _MemorySessions:
         self.sessions += 1
         owner = self
 
-        class Session:
+        class MemoryStorage:
             def __init__(self) -> None:
                 self.pending: list[Any] = []
+
+            def save_work(self) -> None:
+                self.commit()
 
             def add(self, row: Any) -> None:
                 self.pending.append(row)
@@ -98,13 +102,13 @@ class _MemorySessions:
             def close(self) -> None:
                 pass
 
-            def __enter__(self) -> Session:
+            def __enter__(self) -> MemoryStorage:
                 return self
 
             def __exit__(self, *args: Any) -> None:
                 self.close()
 
-        return Session()
+        return MemoryStorage()
 
 
 def _receipt(role: str = "entity") -> WorkReceipt:
@@ -189,6 +193,8 @@ def _save_handlers(bus: EventBus, calls: list[str]) -> None:
 
         async def handler(message: Message, name: str = name) -> None:
             calls.append(name)
+            if name == "save":
+                await asyncio.to_thread(message.payload.save_work)
 
         bus.handle("agent." + name, "agent:run", handler)
 
@@ -338,7 +344,7 @@ async def test_retry_feedback_preserves_pool_failure_weight_before_reselection(m
 
     async def execute(message: Message) -> Any:
         attempts.append(message.payload.payload["attempt_number"])
-        return {"outcome": "retry" if len(attempts) == 1 else "completed", "invocation_id": f"inv{len(attempts)}"}
+        return {"outcome": "retry" if len(attempts) == 1 else "completed", "invocation_id": new_id()}
 
     class Pool(ChapterWorkerPool):
         async def _save(self, *args: Any) -> None:
@@ -349,9 +355,7 @@ async def test_retry_feedback_preserves_pool_failure_weight_before_reselection(m
     bus.handle("agent.execute", "agent:run", execute)
     bus.handle("agent.cancel", "agent:run", _ignore)
     sessions = _MemorySessions()
-    assert (
-        await asyncio.wait_for(Pool(poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions), 2) == 1
-    )
+    assert await asyncio.wait_for(Pool(poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions), 2) == 1
     assert attempts == [1, 2] and model_failures == [{}, {"test": 1}]
     assert not any(MODEL_CAPACITY.snapshot().values())
 
@@ -428,7 +432,7 @@ async def test_committed_work_confirmation_recovers_current_author_and_retains_o
 
     monkeypatch.setattr(FactGraph, "confirm", confirm)
     bus.unhandle("agent.save", "agent:run")
-    bus.handle("agent.save", "agent:run", _ignore)
+    bus.handle("agent.save", "agent:run", lambda message: asyncio.to_thread(message.payload.save_work))
     await ChapterWorkerPool()._save(bus, "queue:run", receipt, "inv", sessions)
     assert sessions.commits == 1 and confirmation_count == 2 and calls.count("load") == 3
     assert execution.saved and author in agent.fact_graph.saved
@@ -467,6 +471,7 @@ async def test_confirmation_exhaustion_marks_work_unconfirmed_without_redispatch
 
     async def save(message: Message) -> None:
         calls.append("save")
+        await asyncio.to_thread(message.payload.save_work)
 
     async def confirm(message: Message) -> None:
         calls.append("confirm")

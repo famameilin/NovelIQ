@@ -23,8 +23,7 @@ class StrictModel(BaseModel):
 
 # emotion 合同：五档整数分值 -2..2（模型直接输出数字）
 EMOTION_SCORE_DESCRIPTION = (
-    "情绪方向与强度分值，整数 -2..2"
-    "（-2 强烈负面 / -1 轻微负面 / 0 中性 / 1 轻微正面 / 2 强烈正面）"
+    "情绪方向与强度分值，整数 -2..2（-2 强烈负面 / -1 轻微负面 / 0 中性 / 1 轻微正面 / 2 强烈正面）"
 )
 
 # pivot/cliffhanger 说明单源：写者面 write_metrics 签名、ChapterMetricsInput

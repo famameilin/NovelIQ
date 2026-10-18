@@ -18,6 +18,7 @@ import pytest
 from fastapi import HTTPException
 
 from src.api.routes.sse import _resolve_last_seq, sse_endpoint
+from tests.support.storage_fixtures import fixture_id
 
 
 @pytest.fixture(autouse=True)
@@ -49,7 +50,7 @@ async def test_sse_streams_events_with_type_and_data() -> None:
 
     request = _make_request([False, False, True])
     with patch("src.api.routes.sse.event_manager", mock_em):
-        response = await sse_endpoint("novel-1", "task-1", request)
+        response = await sse_endpoint(fixture_id(__name__, "novel-1"), "task-1", request)
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert [chunk["event"] for chunk in chunks] == ["progress", "complete"]
@@ -72,7 +73,7 @@ async def test_sse_defaults_when_message_lacks_type_and_data() -> None:
 
     request = _make_request([False, True])
     with patch("src.api.routes.sse.event_manager", mock_em):
-        response = await sse_endpoint("novel-1", "task-1", request)
+        response = await sse_endpoint(fixture_id(__name__, "novel-1"), "task-1", request)
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert chunks[0]["event"] == "message"
@@ -92,7 +93,7 @@ async def test_sse_disconnects_cleanly_when_client_disconnects() -> None:
 
     request = _make_request([True])
     with patch("src.api.routes.sse.event_manager", mock_em):
-        response = await sse_endpoint("novel-1", "task-1", request)
+        response = await sse_endpoint(fixture_id(__name__, "novel-1"), "task-1", request)
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert chunks == []
@@ -113,7 +114,7 @@ async def test_sse_prefers_last_event_id_header_over_query_param() -> None:
     request.query_params = {"last_seq": "7"}
     request.headers = {"last-event-id": "3"}
     with patch("src.api.routes.sse.event_manager", mock_em):
-        response = await sse_endpoint("novel-1", "task-1", request)
+        response = await sse_endpoint(fixture_id(__name__, "novel-1"), "task-1", request)
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert chunks == []
@@ -134,7 +135,7 @@ async def test_sse_uses_query_param_when_header_missing() -> None:
     request = _make_request([True])
     request.query_params = {"last_seq": "7"}
     with patch("src.api.routes.sse.event_manager", mock_em):
-        response = await sse_endpoint("novel-1", "task-1", request)
+        response = await sse_endpoint(fixture_id(__name__, "novel-1"), "task-1", request)
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert chunks == []
@@ -168,7 +169,7 @@ async def test_sse_returns_404_for_unknown_task() -> None:
         patch("src.api.routes.sse.event_manager") as mock_em,
     ):
         with pytest.raises(HTTPException) as exc_info:
-            await sse_endpoint("novel-1", "deadbeef", request)
+            await sse_endpoint(fixture_id(__name__, "novel-1"), "deadbeef", request)
 
     assert exc_info.value.status_code == 404
     mock_em.connect.assert_not_called()
@@ -184,7 +185,7 @@ async def test_sse_returns_404_when_task_belongs_to_another_novel() -> None:
         patch("src.api.routes.sse.event_manager") as mock_em,
     ):
         with pytest.raises(HTTPException) as exc_info:
-            await sse_endpoint("novel-other", "task-1", request)
+            await sse_endpoint(fixture_id(__name__, "novel-other"), "task-1", request)
 
     assert exc_info.value.status_code == 404
     mock_em.connect.assert_not_called()

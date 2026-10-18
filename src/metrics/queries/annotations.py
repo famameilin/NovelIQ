@@ -13,16 +13,9 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import cast
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
 from src.event_trees.read.foreshadowing import foreshadowing_by_chapter as read_foreshadowing
-from src.storage.models import AnalysisAssessment
-from src.storage.repositories.annotation.repository import AnnotationRepository
-from src.storage.repositories.annotation.rows import (
-    ChapterAnnotationRow,
-    SavedAnnotationRecord,
-)
+from src.storage import Storage
+from src.storage.records.annotation import ChapterAnnotationRow, SavedAnnotationRecord
 from src.work.policy import completed_chapters
 
 #: 每章段落情绪标签最低覆盖段数（与标注冻结合同 src/agents/annotation/state_metrics.py 同源）
@@ -40,29 +33,24 @@ def paragraph_label_coverage_warnings(label_count: int) -> list[str]:
     return [PARAGRAPH_LABEL_WARNING_TEMPLATE.format(count=label_count)]
 
 
-def _fetch_paragraph_label_counts(session: Session, record_ids: list[str]) -> dict[str, int]:
+def _fetch_paragraph_label_counts(session: Storage, record_ids: list[str]) -> dict[str, int]:
     """按标注记录统计逐段情绪条目数（analysis_assessments 的情绪形状）"""
     if not record_ids:
         return {}
-    statement = (
-        select(AnalysisAssessment.record_id, func.count().label("label_count"))
-        .where(
-            AnalysisAssessment.record_id.in_(record_ids),
-            AnalysisAssessment.emotion.is_not(None),
-        )
-        .group_by(AnalysisAssessment.record_id)
-    )
-    return {str(row.record_id): int(row.label_count) for row in session.execute(statement)}
+    return {
+        str(row.record_id): int(row.label_count)
+        for row in session.reads.metrics_queries_annotations_fetch_paragraph_label_counts_1(record_ids)
+    }
 
 
-def fetch_chapter_annotations_full(session: Session, run_id: str) -> list[ChapterAnnotationRow]:
+def fetch_chapter_annotations_full(session: Storage, run_id: str) -> list[ChapterAnnotationRow]:
     """从正式章节标注记录展开完整章节标注
 
     只取角色集合与登记角色一致、且按标注合同完成的章节；具名指标取度量指标角色的
     正式记录，不做任何载荷兼容读取（未登记记录按缺省处理）。
     """
     foreshadowing_by_chapter = read_foreshadowing(session, run_id)
-    repository = AnnotationRepository(session)
+    repository = session.annotations
     saved_records = repository.fetch_saved_outputs(run_id)
     roles = repository.fetch_role_records(run_id)
     complete_chapters = completed_chapters(roles)
@@ -85,8 +73,9 @@ def fetch_chapter_annotations_full(session: Session, run_id: str) -> list[Chapte
         rows.append(
             ChapterAnnotationRow(
                 chapter_id=chapter_id,
-                # 该角色已保存记录的具名指标由产出完整性保证非空：
-                # annotation/metric 检查要求 metrics 整域存在（agents/annotation/agent.py validate）。
+                # 度量指标角色的具名指标由真实产出保证非空：annotation/metric 的完整性
+                # 检查要求 metrics 整域存在（agents/annotation/agent.py validate），且只
+                # 保存通过该检查的 work；列本身可空但不覆盖该角色的已保存记录。
                 emotional_valence=cast(int, metric.emotional_valence),
                 event_type=cast(str, metric.narrative_function),
                 pivot_moment=cast(bool, metric.pivot_moment),

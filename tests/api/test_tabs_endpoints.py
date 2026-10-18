@@ -26,6 +26,7 @@ from tests.support.paragraph_fixtures import (
     make_span,
 )
 from tests.support.run_records import set_run_status
+from tests.support.storage_fixtures import task_for_run
 
 # 与 test_topics_endpoints 相同的两章六段主题三表 fixture
 _TOKENS = [10, 10, 20, 10, 10, 20]
@@ -120,7 +121,9 @@ def test_topics_overview_tab_composites_all_sections(api_client: TestClient, db_
     novel_id, run_id = _create_topic_fixture_run(db_session)
     _mock_lda_model(monkeypatch)
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/topics-overview", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/topics-overview", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
 
@@ -146,7 +149,9 @@ def test_topics_overview_tab_composites_all_sections(api_client: TestClient, db_
 def test_topics_overview_tab_unavailable_without_model_contract(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_completed_run(db_session, chapter_texts=["甲。\n乙。"])
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/topics-overview", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/topics-overview", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["unavailable_reason"] is not None
@@ -159,7 +164,9 @@ def test_topics_overview_tab_unavailable_without_model_contract(api_client: Test
 def test_linguistic_entities_tab_aggregates_without_spans(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_linguistic_fixture_run(db_session)
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/linguistic-entities", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/linguistic-entities", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
 
@@ -179,7 +186,9 @@ def test_linguistic_entities_tab_aggregates_without_spans(api_client: TestClient
 def test_linguistic_entities_tab_unavailable_without_data(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_linguistic_fixture_run(db_session, seed=False)
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/linguistic-entities", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/linguistic-entities", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["count_by_type"] == {}
@@ -205,7 +214,9 @@ def test_linguistic_entities_tab_reports_real_zero_when_features_have_no_hits(
     ling_repo.mark_phrase_completed(run_id, [0, 1])
     db_session.commit()
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/linguistic-entities", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/linguistic-entities", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["count_by_type"] == {}
@@ -219,11 +230,13 @@ def test_linguistic_entities_tab_reports_real_zero_when_features_have_no_hits(
 def test_tabs_require_completed_run(api_client: TestClient, db_session) -> None:
     novel_id, run_id = create_run_with_status(db_session, chapter_texts=["甲。\n乙。"], status="failed")
 
-    topics_response = api_client.get(f"/api/novels/{novel_id}/tabs/topics-overview", params={"task_id": run_id[:8]})
+    topics_response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/topics-overview", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert topics_response.status_code == 400
 
     linguistic_response = api_client.get(
-        f"/api/novels/{novel_id}/tabs/linguistic-entities", params={"task_id": run_id[:8]}
+        f"/api/novels/{novel_id}/tabs/linguistic-entities", params={"task_id": task_for_run(run_id, db_session)}
     )
     assert linguistic_response.status_code == 400
 
@@ -470,7 +483,9 @@ def test_dashboard_tab_bundles_eight_sections(api_client: TestClient, db_session
     novel_id, run_id = _create_metrics_fixture_run(db_session)
     _mock_lda_model(monkeypatch)
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/dashboard", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/dashboard", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
 
@@ -484,7 +499,9 @@ def test_dashboard_tab_bundles_eight_sections(api_client: TestClient, db_session
 def test_rhythm_tab_returns_curves_with_max_points(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_metrics_fixture_run(db_session)
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/rhythm", params={"task_id": run_id[:8], "max_points": 5})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/rhythm", params={"task_id": task_for_run(run_id, db_session), "max_points": 5}
+    )
     assert response.status_code == 200
     body = response.json()
     # 每章两段时全部 6 点均为章节边界强制保留点，max_points 不得裁掉边界
@@ -495,7 +512,9 @@ def test_rhythm_tab_returns_curves_with_max_points(api_client: TestClient, db_se
 def test_character_function_tab_without_diagnosis(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_graph_fixture_run(db_session)
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/character-function", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/character-function", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     names = {character["name"] for character in body["characters"]}
@@ -519,7 +538,9 @@ def test_character_function_tab_slices_focus_fields(api_client: TestClient, db_s
         "src.api.services.results_queries.tabs.graph._fetch_diagnosis", lambda *args, **kwargs: diagnosis
     )
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/character-function", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/character-function", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["focus_structure"] == "dual"
@@ -530,7 +551,9 @@ def test_character_function_tab_slices_focus_fields(api_client: TestClient, db_s
 def test_graph_network_tab_bundles_snapshot_metrics_and_change_total(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_graph_fixture_run(db_session)
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/graph-network", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/graph-network", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["unavailable_reason"] is None
@@ -549,5 +572,7 @@ def test_graph_network_tab_requires_graph_data(api_client: TestClient, db_sessio
 
     confirm_test_work(db_session, run_id)
 
-    response = api_client.get(f"/api/novels/{novel_id}/tabs/graph-network", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/tabs/graph-network", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 409

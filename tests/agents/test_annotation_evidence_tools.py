@@ -21,10 +21,11 @@ from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.text_search import TextSearchCandidate
 from src.agents.annotation.tool_batch import _invoke_tool
 from src.event_trees.models import EventParticipantInput
-from src.fact_graph.graph import FactGraph, entity_key, mention_uuid
+from src.fact_graph.graph import FactGraph, entity_key
 from src.fact_graph.inputs import BoundRelationInput, ChapterParagraphInfo, DialogueInput, EntityInput
 from src.fact_graph.outputs import TextSearchResult
 from tests.support.annotation_work_tools import build_annotation_tools
+from tests.support.storage_fixtures import fixture_id
 
 
 class _QueryService:
@@ -81,9 +82,9 @@ def _find_tool(tools: list, name: str):
     return next(candidate for candidate in tools if candidate.name == name)
 
 
-def _entity_id(name: str, entity_type: str = "character") -> str:
-    """按测试章内图的 scope 和 chapter_id 计算提及 ID（名+大类复合身份）"""
-    return mention_uuid("", 0, name, entity_type)
+def _entity_id(graph: FactGraph, name: str, entity_type: str = "character") -> str | None:
+    """读取图中实际分配并记住的实体身份"""
+    return graph.entity_id(name, entity_type)
 
 
 def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
@@ -537,7 +538,7 @@ def test_fact_endpoint_validation_moves_to_write_time() -> None:
         },
     )
     # 山门是本用例唯一登记实体，运行期编号为 1
-    # 非 character 条目带三态不再拒绝，改为忽略三态、保留 entityid/role
+    # ：非 character 条目带三态不再拒绝，改为忽略三态、保留 entityid/role
     ignored = _call(
         tools,
         "write_event",
@@ -701,7 +702,7 @@ def test_write_entity_without_prior_search_graph_is_allowed() -> None:
 
     receipt = _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     assert receipt["status"] == "written"
-    assert receipt["id"] == _entity_id("顾霜")
+    assert receipt["id"] == _entity_id(ledger.graph, "顾霜")
     assert list(ledger.written_entities) == [entity_key("顾霜", "character")]
 
 
@@ -716,11 +717,11 @@ def test_write_entity_same_name_different_type_is_new_entity() -> None:
     receipt = _call(tools, "write_entity", {"name": "顾霜", "entity_type": "item", "el": "顾霜"})
     assert receipt["status"] == "written"
     assert receipt["content"]["entity_type"] == "item"
-    assert receipt["id"] != _entity_id("顾霜", "character")
-    assert receipt["id"] == _entity_id("顾霜", "item")
+    assert receipt["id"] != _entity_id(ledger.graph, "顾霜", "character")
+    assert receipt["id"] == _entity_id(ledger.graph, "顾霜", "item")
     assert set(ledger.written_entities) == {entity_key("顾霜", "item")}
     # 原 character 身份仍在图上、id 不变
-    assert ledger.graph.entity_id("顾霜", "character") == _entity_id("顾霜", "character")
+    assert ledger.graph.entity_id("顾霜", "character") == _entity_id(ledger.graph, "顾霜", "character")
 
 
 def test_write_tools_reject_invalid_enum_at_call_time() -> None:
@@ -919,17 +920,22 @@ def test_write_relation_rejects_unregistered_entity_reference() -> None:
         ledger,
         "write_relation",
         {
-            "from_entity": "00000000-0000-0000-0000-000000000987",
-            "to_entity": "00000000-0000-0000-0000-000000000002",
+            "from_entity": fixture_id(__name__, "00000000-0000-0000-0000-000000000987"),
+            "to_entity": fixture_id(__name__, "00000000-0000-0000-0000-000000000002"),
             "relation_type": "同一人物",
         },
     )
     assert receipt["status"] == "rejected"
-    unknown_pair = "00000000-0000-0000-0000-000000000987-00000000-0000-0000-0000-000000000002"
+    unknown_pair = "-".join(
+        (
+            fixture_id(__name__, "00000000-0000-0000-0000-000000000987"),
+            fixture_id(__name__, "00000000-0000-0000-0000-000000000002"),
+        )
+    )
     assert receipt["record"] == f"relation/{unknown_pair}/同一人物"
     assert receipt["field"] == "from_entity"
     assert receipt["code"] == "model_type"
-    assert "00000000-0000-0000-0000-000000000987" in receipt["message"]
+    assert fixture_id(__name__, "00000000-0000-0000-0000-000000000987") in receipt["message"]
     assert ledger.written_relations == {}
     assert ledger.graph.relation_assert_ops == []
 
@@ -1269,7 +1275,7 @@ def test_paragraph_labels_reject_foreign_paragraph_and_dedup_on_replay() -> None
     labels = ledger.bound_payloads["paragraph_labels"]
     assert len(labels) == 1
     assert labels[0].emotion == -1
-    # 标签并入指标整域：提交即落账
+    # 旧"句标签不触碰指标域"随域合并退役：标签并入指标整域，提交即落账
     assert ledger.metrics_payload is not None
 
 

@@ -62,8 +62,7 @@ def join_paragraph_metrics(statement: Select) -> Select:
     """
     return statement.outerjoin(
         ParagraphMetric,
-        (ParagraphMetric.run_id == Paragraph.run_id)
-        & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
+        (ParagraphMetric.run_id == Paragraph.run_id) & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
     )
 
 

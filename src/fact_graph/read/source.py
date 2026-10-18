@@ -4,31 +4,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from src.storage.models import Chapter, Paragraph
+from src.storage import Storage
 from src.utils.identity import text_digest
 
 
 def read_evidence_source(
-    session: Session, run_id: str, evidence: list[dict[str, Any]], chapter_id: int | None = None
+    session: Storage, run_id: str, evidence: list[dict[str, Any]], chapter_id: int | None = None
 ) -> dict[str, Any]:
     allowed = {item["chapter_id"] for item in evidence if "chapter_id" in item}
     if chapter_id is None:
         chapter_id = next((item["chapter_id"] for item in evidence if "chapter_id" in item), None)
     if chapter_id not in allowed:
         raise LookupError("SOURCE_NOT_FOUND")
-    chapter = session.get(Chapter, (run_id, chapter_id))
+    chapter = session.reads.fact_graph_read_source_read_evidence_source_1(chapter_id, run_id)
     if chapter is None:
         raise LookupError("SOURCE_NOT_FOUND")
-    paragraphs = list(
-        session.scalars(
-            select(Paragraph)
-            .where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id)
-            .order_by(Paragraph.paragraph_index)
-        )
-    )
+    paragraphs = list(session.reads.fact_graph_read_source_read_evidence_source_2(chapter_id, run_id))
     by_id = {paragraph.paragraph_id: paragraph for paragraph in paragraphs}
     for item in evidence:
         if item.get("chapter_id") != chapter_id or "paragraph_id" not in item:

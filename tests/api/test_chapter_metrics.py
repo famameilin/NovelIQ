@@ -26,6 +26,7 @@ from tests.support.paragraph_fixtures import (
     make_metric_row,
     make_span,
 )
+from tests.support.storage_fixtures import task_for_run
 
 
 def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[str, str]:
@@ -157,7 +158,7 @@ def _insert_three_chapter_run(db_session, *, annotated: bool = True) -> tuple[st
 def _get_chapter_metrics(api_client, novel_id: str, run_id: str):
     response = api_client.get(
         f"/api/novels/{novel_id}/chapter-metrics",
-        params={"task_id": run_id[:8]},
+        params={"task_id": task_for_run(run_id)},
     )
     assert response.status_code == 200
     return response.json()

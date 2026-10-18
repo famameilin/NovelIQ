@@ -8,18 +8,18 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Any
 
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
 from src.fact_graph.read import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
 from src.fact_graph.read.alias import build_alias_resolution
 from src.fact_graph.read.references import EntityReferenceProjection, relation_projection_key
+from src.fact_graph.read.storage_projection import graph_projection
 from src.metrics.aggregate.algorithms import (
     GRAPH_METRICS_VERSION,
     InsufficientGraphNodesError,
     compute_graph_structure_metrics,
 )
-from src.storage.repositories import AnnotationRepository, GraphRepository
+from src.storage import Storage
 
 GRAPH_CHANGE_LIMIT = 200
 
@@ -44,7 +44,8 @@ def _decode_graph_changes_cursor(cursor: str | None) -> int:
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
         raise ValueError("invalid graph changes cursor") from exc
     if type(payload) is not dict:
-        # 非 dict JSON（list/str/int 等）调用 .get 会抛 AttributeError，统一按非法游标处理（→400）
+        # 非 dict JSON（list/str/int 等）调用 .get 会抛 AttributeError（→500），
+        # 这里统一按非法游标处理（→400）
         raise ValueError("invalid graph changes cursor")
     offset = payload.get("offset")
     if type(offset) is not int or offset < 0:
@@ -73,12 +74,12 @@ def _build_graph_changes_page_info(
 
 def _fetch_character_relations(
     run_id: str,
-    annotation_repo: AnnotationRepository,
+    annotation_repo: Storage,
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list[CharacterRelation]:
     """从当前章节关系状态生成角色关系导出数据"""
-    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo)
     authority_service.assert_graph_ready(run_id)
     if export_graph_view is None:
         export_graph_view = authority_service.build_export_view(run_id)
@@ -149,17 +150,17 @@ def _fetch_hierarchical_relations(
 
 def _fetch_graph_snapshot(
     run_id: str,
-    annotation_repo: AnnotationRepository,
+    annotation_repo: Storage,
     *,
     chapter_id: int | None = None,
 ) -> dict[str, Any]:
     """直接返回目标章节图版本的实体状态和有效关系"""
-    snapshot = GraphRepository(annotation_repo.session).fetch_snapshot(run_id, chapter_id=chapter_id)
+    snapshot = graph_projection(annotation_repo.graph).fetch_snapshot(run_id, chapter_id=chapter_id)
     if snapshot is None:
         raise LookupError("当前 run 尚无匹配的章节图版本")
     boundary = snapshot.chapter_boundary
     resolution = build_alias_resolution(
-        GraphRepository(annotation_repo.session).fetch_relation_snapshots(boundary, active_only=False),
+        graph_projection(annotation_repo.graph).fetch_relation_snapshots(boundary, active_only=False),
         entities=snapshot.entities,
     )
     projection = EntityReferenceProjection({row.entity_id: row for row in snapshot.entities}, resolution)
@@ -229,10 +230,10 @@ def _fetch_graph_snapshot(
     }
 
 
-def compute_graph_metrics(run_id: str, session: Session) -> dict[str, Any]:
+def compute_graph_metrics(run_id: str, session: Storage) -> dict[str, Any]:
     """图结构指标读取入口：取 /graph 同一快照，算法在 src.metrics.aggregate.algorithms"""
     try:
-        snapshot = _fetch_graph_snapshot(run_id, AnnotationRepository(session))
+        snapshot = _fetch_graph_snapshot(run_id, session)
     except LookupError as exc:
         return _graph_metrics_unavailable(run_id, f"graph_snapshot_unavailable: {exc}")
     try:
@@ -252,7 +253,7 @@ def _graph_metrics_unavailable(run_id: str, reason: str) -> dict[str, Any]:
 
 def _fetch_graph_changes_page(
     run_id: str,
-    annotation_repo: AnnotationRepository,
+    annotation_repo: Storage,
     *,
     chapter_id: int | None = None,
     changes_cursor: str | None = None,
@@ -261,7 +262,7 @@ def _fetch_graph_changes_page(
     """按章节倒序分页返回实体与关系版本变化"""
     start = _decode_graph_changes_cursor(changes_cursor)
     page_limit = max(1, min(changes_limit, GRAPH_CHANGE_LIMIT))
-    rows, total = GraphRepository(annotation_repo.session).fetch_changes(
+    rows, total = graph_projection(annotation_repo.graph).fetch_changes(
         run_id,
         chapter_id=chapter_id,
         offset=start,

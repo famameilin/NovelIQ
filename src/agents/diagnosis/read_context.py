@@ -5,13 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from src.agents.annotation.shared_tools import ObjectKind
 from src.agents.annotation.text_search import TextSearchService
 from src.event_trees.organization import EventOrganizationDraft
 from src.fact_graph.outputs import SourceReference
-from src.storage.models import Paragraph
+from src.fact_graph.read.storage_projection import graph_projection
+from src.storage import Storage
 
 
 @dataclass
@@ -34,8 +33,8 @@ class DiagnosisTextAccess:
 class DiagnosisTextQuery:
     """复用标注原文搜索服务，并把读取限定在当前 run"""
 
-    def __init__(self, session: Session, run_id: str, search: TextSearchService | None) -> None:
-        self.session, self.run_id, self.search = session, run_id, search
+    def __init__(self, session: Storage, run_id: str, search: TextSearchService | None) -> None:
+        self.session, self.run_id, self.search = (session, run_id, search)
 
     async def search_text(self, query: str, *, range_name: str, limit: int = 50) -> Any:
         if self.search is not None:
@@ -59,7 +58,7 @@ class DiagnosisTextQuery:
                 await client.aclose()
 
     async def read_paragraph(self, paragraph_id: int, *, allow_future_context: bool) -> dict[str, Any]:
-        row = self.session.get(Paragraph, {"run_id": self.run_id, "paragraph_id": paragraph_id})
+        row = self.session.reads.work_queries_paragraph_record(self.run_id, paragraph_id)
         if row is None:
             raise ValueError(f"paragraph_id={paragraph_id} 不属于本 run")
         return {"chapter_id": row.chapter_id, "paragraph_id": row.paragraph_id, "text": row.text}
@@ -72,12 +71,7 @@ class DiagnosisDeclarationSource:
         self.draft = draft
 
     def search_ids(
-        self,
-        query: str,
-        *,
-        chapter_id: int | None,
-        tree_id: str | None,
-        isforeshadowing: bool | None = None,
+        self, query: str, *, chapter_id: int | None, tree_id: str | None, isforeshadowing: bool | None = None
     ) -> list[str]:
         if tree_id is not None:
             raise ValueError("声明没有正式事件树身份，请按 chapter_id 或正文词检索")
@@ -86,7 +80,7 @@ class DiagnosisDeclarationSource:
             for key, item in self.draft._declarations().items()
             if (chapter_id is None or item["chapter_id"] == chapter_id)
             and (isforeshadowing is None or bool(item["is_foreshadow_setup"]) == isforeshadowing)
-            and query.casefold() in " ".join(str(item[field]) for field in ("title", "problem", "summary")).casefold()
+            and (query.casefold() in " ".join(str(item[field]) for field in ("title", "problem", "summary")).casefold())
         ]
 
     def read(self, declaration_id: str) -> dict[str, Any]:
@@ -136,12 +130,7 @@ class DiagnosisOrganizationSource:
         raise ValueError(f"无诊断对象 kind={kind}")
 
     def search(
-        self,
-        kind: ObjectKind,
-        query: str,
-        *,
-        chapter_id: int | None,
-        tree_id: str | None,
+        self, kind: ObjectKind, query: str, *, chapter_id: int | None, tree_id: str | None
     ) -> list[dict[str, Any]]:
         if tree_id is not None:
             raise ValueError("声明和正式事件不接受旧 tree_id；请明确 kind")
@@ -208,8 +197,8 @@ class DiagnosisOrganizationSource:
 class DiagnosisGraphSource:
     """正式身份视图的只读适配，延迟读取以保留取证故障的真实调用审计"""
 
-    def __init__(self, session: Session, run_id: str) -> None:
-        self.session, self.run_id = session, run_id
+    def __init__(self, session: Storage, run_id: str) -> None:
+        self.session, self.run_id = (session, run_id)
         self._view: Any = None
 
     def _load(self) -> Any:
@@ -230,9 +219,9 @@ class DiagnosisGraphSource:
     @property
     def entity_attributes(self) -> dict[str, Any]:
         from src.fact_graph.read.entities import fetch_latest_entities
-        from src.storage.repositories.graph import GraphRepository
 
-        rows = fetch_latest_entities(GraphRepository(self.session), self.run_id)
+        pass
+        rows = fetch_latest_entities(graph_projection(self.session.graph), self.run_id)
         by_id = {str(item.entity_id): item.state for item in rows}
         return {
             item.entity_id: {**by_id.get(item.entity_id, {}), "aliases": item.aliases}
@@ -260,7 +249,7 @@ class DiagnosisGraphSource:
         return self.entity_names[key]
 
 
-def graph_signals(session: Session, run_id: str) -> dict[str, Any]:
+def graph_signals(session: Storage, run_id: str) -> dict[str, Any]:
     """原图谱统计随指标读取提供，实际故障向外传播，不伪装空数据"""
     from src.fact_graph.read import KnowledgeGraphAuthorityService, serialize_graph_report_signals
 

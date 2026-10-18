@@ -91,6 +91,7 @@ async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
         current_case_call_id.reset(case_binding)
     return str(result)
 
+
 def _truncated_error(name: str) -> str:
     """用于构造流截断调用不执行写入时模型可见的独立回执"""
     return (

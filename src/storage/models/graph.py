@@ -9,21 +9,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (
-    BigInteger,
-    Boolean,
-    CheckConstraint,
-    DateTime,
-    ForeignKey,
-    Identity,
-    Index,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-)
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
+
+from src.storage.ids import new_id
+from src.storage.uuid_type import Uuid7 as Uuid
 
 from .base import Base, naive_utcnow
 
@@ -34,7 +25,7 @@ FIELD_ACTIONS = ("omit", "set", "clear")
 
 
 class GraphEntity(Base):
-    """图实体表：run 内稳定实体身份（uuid5 按 run+规范名+大类确定性铸造）"""
+    "图实体表：run 内稳定实体身份（UUIDv7 独立主键，按 run+规范名+大类保持业务唯一）"
 
     __tablename__ = "graph_entities"
     __table_args__ = (
@@ -44,24 +35,27 @@ class GraphEntity(Base):
         {"comment": "图实体表：run 内稳定实体身份（名称比较须与 NFC/strip/casefold 身份规则一致）"},
     )
 
-    entity_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="实体主键（uuid）")
+    entity_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="实体主键（uuid）", default=new_id, autoincrement=False
+    )
     run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, comment="所属分析运行"
+        Uuid(as_uuid=False),
+        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="所属分析运行",
     )
     canonical_name: Mapped[str] = mapped_column(String(255), nullable=False, comment="实体规范名")
     entity_type: Mapped[str] = mapped_column(
         String(50), nullable=False, comment="实体类型（character/location/item/organization）"
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="创建时间")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=naive_utcnow, onupdate=naive_utcnow, comment="更新时间"
     )
 
 
 class GraphRelation(Base):
-    """图关系表：稳定关系身份及真实端点；run 从端点取得（两端必须同 run）"""
+    "图关系表：稳定关系身份及真实端点；run 从端点取得（两端必须同 run）"
 
     __tablename__ = "graph_relations"
     __table_args__ = (
@@ -72,26 +66,27 @@ class GraphRelation(Base):
         {"comment": "图关系表：稳定关系身份及实体端点（类型决定方向与语义，不逐行保存）"},
     )
 
-    relation_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="关系主键（uuid）")
+    relation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="关系主键（uuid）", default=new_id, autoincrement=False
+    )
     from_entity_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), nullable=False, comment="起点实体"
+        Uuid(as_uuid=False),
+        ForeignKey("graph_entities.entity_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="起点实体",
     )
     to_entity_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), nullable=False, comment="终点实体"
+        Uuid(as_uuid=False),
+        ForeignKey("graph_entities.entity_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="终点实体",
     )
     relation_type: Mapped[str] = mapped_column(String(100), nullable=False, comment="关系类型（版本化关系合同）")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="创建时间")
 
 
 class GraphFact(Base):
-    """
-    图事实表（五种互斥形状）
-
-    五种形状由 ck_graph_facts_shape 约束互斥；run 从真实生产来源取得；
-    effective_chapter_id 仅真实独立选章时保存。
-    """
+    "图事实表（五种互斥形状）"
 
     __tablename__ = "graph_facts"
     __table_args__ = (
@@ -115,7 +110,8 @@ class GraphFact(Base):
             name="ck_graph_facts_representative_value_pair",
         ),
         CheckConstraint(
-            # 关系变化的取值就是写面合同的七类（不把 break 归一为 retract，值原样入事实行）
+            # 关系变化的取值就是写面合同的七类（不把 break 归一为 retract：
+            # 旧读面对断裂与撤回各有展示标签，值原样入事实行）
             "relation_change_kind IS NULL OR relation_change_kind IN"
             " ('assert', 'reinforce', 'weaken', 'retract', 'refine', 'supersede', 'break')",
             name="ck_graph_facts_relation_change_kind",
@@ -172,39 +168,47 @@ class GraphFact(Base):
             name="ck_graph_facts_shape",
         ),
         Index(
-            "uq_graph_facts_producer_order", "direct_producer_execution_id", "operation_order",
+            "uq_graph_facts_producer_order",
+            "direct_producer_execution_id",
+            "operation_order",
             unique=True,
-            postgresql_where=sql_text(
-                "direct_producer_execution_id IS NOT NULL AND business_call_id IS NULL"
-            ),
+            postgresql_where=sql_text("direct_producer_execution_id IS NOT NULL AND business_call_id IS NULL"),
         ),
         Index(
-            "uq_graph_facts_business_call", "business_call_id",
-            unique=True, postgresql_where=sql_text("business_call_id IS NOT NULL"),
+            "uq_graph_facts_business_call",
+            "business_call_id",
+            unique=True,
+            postgresql_where=sql_text("business_call_id IS NOT NULL"),
         ),
         Index(
-            "uq_graph_facts_participant", "participant_id",
-            unique=True, postgresql_where=sql_text("participant_id IS NOT NULL"),
+            "uq_graph_facts_participant",
+            "participant_id",
+            unique=True,
+            postgresql_where=sql_text("participant_id IS NOT NULL"),
         ),
         Index(
-            "uq_graph_facts_program_work", "program_work_id",
-            unique=True, postgresql_where=sql_text("program_work_id IS NOT NULL"),
+            "uq_graph_facts_program_work",
+            "program_work_id",
+            unique=True,
+            postgresql_where=sql_text("program_work_id IS NOT NULL"),
         ),
         Index("idx_graph_facts_producer_execution", "direct_producer_execution_id"),
         {"comment": "图事实表：实体/关系/参与者/情节推进/程序核对五种互斥形状（运行从生产来源取得）"},
     )
 
-    graph_fact_id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True, comment="事实流水")
+    graph_fact_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, comment="事实流水", default=new_id, autoincrement=False
+    )
     # 真实生产执行（实体/关系/情节推进形状必填；人物观测从参与者来源取，不填）
     direct_producer_execution_id: Mapped[str | None] = mapped_column(
-        String(64),
+        Uuid(as_uuid=False),
         ForeignKey("executions.execution_id", ondelete="RESTRICT", name="graph_facts_producer_fkey"),
         nullable=True,
         comment="直接生产执行（实体/关系/情节推进）",
     )
     # 章末程序核对回执来源
     program_work_id: Mapped[str | None] = mapped_column(
-        String(64),
+        Uuid(as_uuid=False),
         ForeignKey("work_items.work_id", ondelete="RESTRICT", name="graph_facts_program_work_fkey"),
         nullable=True,
         comment="章末核对程序 work（回执形状）",
@@ -215,27 +219,25 @@ class GraphFact(Base):
         Integer, nullable=True, comment="真实独立选章时的有效章节编号"
     )
     entity_id: Mapped[str | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("graph_entities.entity_id", ondelete="RESTRICT", name="graph_facts_entity_fkey"),
         nullable=True,
         comment="实体目标",
     )
     relation_id: Mapped[str | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("graph_relations.relation_id", ondelete="RESTRICT", name="graph_facts_relation_fkey"),
         nullable=True,
         comment="关系目标",
     )
     participant_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey(
-            "declaration_participants.participant_id", ondelete="RESTRICT", name="graph_facts_participant_fkey"
-        ),
+        Uuid(as_uuid=False),
+        ForeignKey("declaration_participants.participant_id", ondelete="RESTRICT", name="graph_facts_participant_fkey"),
         nullable=True,
         comment="人物动态观测的源参与者（唯一）",
     )
     declaration_id: Mapped[str | None] = mapped_column(
-        String(36),
+        Uuid(as_uuid=False),
         ForeignKey("event_declarations.declaration_id", ondelete="RESTRICT", name="graph_facts_declaration_fkey"),
         nullable=True,
         comment="情节推进的可选来源声明",
@@ -263,30 +265,32 @@ class GraphFact(Base):
     plotline_description: Mapped[str | None] = mapped_column(Text, nullable=True, comment="本次推进描述")
     plotline_before: Mapped[str | None] = mapped_column(Text, nullable=True, comment="推进前状态")
     plotline_after: Mapped[str | None] = mapped_column(Text, nullable=True, comment="推进后状态")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=naive_utcnow, comment="创建时间"
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="创建时间")
 
     def __repr__(self) -> str:
         return f"<GraphFact(graph_fact_id={self.graph_fact_id})>"
 
 
 class FactEntityTag(Base):
-    """标签成员：去重且保留顺序（父事实 tags_submitted=true 且零行表示清空）"""
+    "标签成员：去重且保留顺序（父事实 tags_submitted=true 且零行表示清空）"
 
     __tablename__ = "fact_entity_tags"
     __table_args__ = (
+        UniqueConstraint("graph_fact_id", "tag_ordinal", name="uq_fact_entity_tags_business_key"),
         UniqueConstraint("graph_fact_id", "tag", name="uq_fact_entity_tags_tag"),
         {"comment": "事实标签表：标签集合的具名成员（有序、去重，不复制 entity/producer）"},
     )
 
-    graph_fact_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("graph_facts.graph_fact_id", ondelete="CASCADE", name="fact_entity_tags_fact_fkey"),
-        primary_key=True,
-        comment="事实流水",
+    id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, default=new_id, autoincrement=False, comment="UUIDv7 独立主键"
     )
-    tag_ordinal: Mapped[int] = mapped_column(Integer, primary_key=True, comment="标签序号（0 起）")
+    graph_fact_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("graph_facts.graph_fact_id", ondelete="CASCADE", name="fact_entity_tags_fact_fkey"),
+        comment="事实流水",
+        nullable=False,
+    )
+    tag_ordinal: Mapped[int] = mapped_column(Integer, comment="标签序号（0 起）", nullable=False)
     tag: Mapped[str] = mapped_column(String(100), nullable=False, comment="标签文本")
 
     def __repr__(self) -> str:

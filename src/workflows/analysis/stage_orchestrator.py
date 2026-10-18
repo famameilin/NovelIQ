@@ -1,21 +1,16 @@
-"""分析阶段编排
-
-阶段 emitter 构造（_make_stage_emitter）与阶段编排执行（_execute_analysis_stages）
-以混入形式提供给 AnalysisService；取消检查经 TaskClaimMixin 继承链访问。
-"""
+"""编排分析阶段并为阶段事件补全上下文"""
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.sse.events import StreamEvent
+from src.storage import Storage
 from src.workflows.analysis.task_claim import TaskClaimMixin
 from src.workflows.progress import AnalysisEventBus
 
@@ -33,27 +28,12 @@ class StageOrchestratorMixin(TaskClaimMixin):
 
     @staticmethod
     def _make_stage_emitter(
-        bus: AnalysisEventBus,
-        stage: str,
-        session: Session,
+        bus: AnalysisEventBus, stage: str, session: Storage
     ) -> Callable[[StreamEvent], Awaitable[None]]:
-        """创建阶段 emitter：自动补全 stage 上下文，并在发事件前提交编排器 session
-
-        编排器 session 的事务跨阶段存活，其行锁会被 emit 路径 to_thread 的 UPDATE
-        analysis_runs 阻塞（自锁死锁），故先 commit 再 emit；expire_on_commit=False。
-        """
+        """为缺少阶段标识的事件补全上下文，再交给事件总线"""
 
         async def emitter(event: StreamEvent) -> None:
-            try:
-                session.commit()
-            except BaseException:
-                # 提交中途被打断会把会话留在 PREPARED 中间态，之后任意 SQL 都报错；
-                # 先回滚把会话救回健康态再原样上抛，不允许毒化会话流入下游
-                with contextlib.suppress(Exception):
-                    session.rollback()
-                raise
             if not event.stage:
-                # 用 dataclass replace 补全 stage，避免手动重建丢失字段
                 from dataclasses import replace
 
                 event = replace(event, stage=stage)
@@ -64,7 +44,7 @@ class StageOrchestratorMixin(TaskClaimMixin):
     async def _execute_analysis_stages(
         self,
         bus: AnalysisEventBus,
-        session: Session,
+        session: Storage,
         run_id: str,
         source_path: Path,
         novel_id: str,
@@ -84,11 +64,8 @@ class StageOrchestratorMixin(TaskClaimMixin):
         if self._is_cancelled(task_id):
             await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
-
-        # ── 预处理 ──
         if not skip_stages["skip_preprocess"]:
             await bus.emit_stage_start("preprocess", message="开始预处理", percent=settings.progress.preprocess.start)
-
             await self.stage_executor.run_preprocess(
                 source_path,
                 run_id,
@@ -97,36 +74,28 @@ class StageOrchestratorMixin(TaskClaimMixin):
                 is_cancelled=is_cancelled,
             )
             await bus.emit_stage_complete("preprocess")
-
         if self._is_cancelled(task_id):
             await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
-
-        # ── 标注 ──
         if not skip_stages["skip_annotate"]:
-            # 查询 章节 总数，让前端知道进度规模
             total_chapters = 0
             try:
-                from src.storage.repositories import ChapterRepository
-
-                chapter_repo = ChapterRepository(session)
+                pass
+                chapter_repo = session.chapters
                 total_chapters = chapter_repo.count_chapters(run_id)
             except Exception as exc:
                 logger.warning(
-                    "Failed to count chapters before annotate stage, "
-                    "falling back to total=0: task_id={} run_id={} error={}",
+                    (
+                        "Failed to count chapters before annotate stage, falling back to total=0: tas"
+                        "k_id={} run_id={} error={}"
+                    ),
                     task_id,
                     run_id,
                     exc,
                 )
-
             await bus.emit_stage_start(
-                "annotate",
-                message="开始标注分析",
-                percent=settings.progress.annotate.start,
-                total=total_chapters,
+                "annotate", message="开始标注分析", percent=settings.progress.annotate.start, total=total_chapters
             )
-
             await self.stage_executor.run_annotate(
                 run_id,
                 session,
@@ -137,45 +106,33 @@ class StageOrchestratorMixin(TaskClaimMixin):
                 is_cancelled=is_cancelled,
             )
             await bus.emit_stage_complete("annotate")
-
         if self._is_cancelled(task_id):
             await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
-
-        # ── 语言结构基础数据 ──
         if not skip_stages["skip_linguistic"]:
             await bus.emit_stage_start(
                 "linguistic", message="开始语言结构分析", percent=settings.progress.linguistic.start
             )
-
             await self.stage_executor.run_linguistic(
                 run_id, session, self._make_stage_emitter(bus, "linguistic", session), is_cancelled=is_cancelled
             )
             await bus.emit_stage_complete("linguistic")
-
         if self._is_cancelled(task_id):
             await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
-
-        # ── 聚合 ──
         if not skip_stages["skip_aggregate"]:
             await bus.emit_stage_start("aggregate", message="开始数据聚合", percent=settings.progress.aggregate.start)
-
             await self.stage_executor.run_aggregate(
                 run_id, session, self._make_stage_emitter(bus, "aggregate", session), is_cancelled=is_cancelled
             )
             await bus.emit_stage_complete("aggregate")
-
         if self._is_cancelled(task_id):
             await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
-
-        # ── 主题建模 ──
         if not skip_stages["skip_topic_model"]:
             await bus.emit_stage_start(
                 "topic-model", message="开始主题建模", percent=settings.progress.topic_model.start
             )
-
             await self.stage_executor.run_topic_model(
                 run_id,
                 session,
@@ -184,12 +141,9 @@ class StageOrchestratorMixin(TaskClaimMixin):
                 is_cancelled=is_cancelled,
             )
             await bus.emit_stage_complete("topic-model")
-
         if self._is_cancelled(task_id):
             await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
-
-        # ── 诊断 ──
         if not skip_stages["skip_diagnose"]:
             await bus.emit_stage_start("diagnose", message="开始诊断报告", percent=settings.progress.diagnose.start)
             await self.stage_executor.run_diagnose(

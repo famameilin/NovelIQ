@@ -87,7 +87,7 @@ def test_local_graphs_do_not_share_state_between_chapters() -> None:
     second = FactGraph(run_scope="run-1")
     assert second.entity_type_of("顾霜", "character") is None and not second.active_relations
     second.register_entities([_entity("顾霜")])
-    assert first.entity_id("顾霜", "character") == second.entity_id("顾霜", "character")
+    assert first.entity_id("顾霜", "character") != second.entity_id("顾霜", "character")
 
 
 def test_relation_replacement_resets_local_support_count() -> None:
@@ -131,7 +131,7 @@ def test_entity_ids_are_stable_normalized_and_scoped_to_run() -> None:
     assert graph.entity_id("Hero", "character") == entity_id
     replay = FactGraph(run_scope="run-1")
     replay.register_entities([_entity("hero")])
-    assert replay.entity_id("hero", "character") == entity_id
+    assert replay.entity_id("hero", "character") != entity_id
     another = FactGraph(run_scope="run-2")
     another.register_entities([_entity("hero")])
     assert another.entity_id("hero", "character") != entity_id

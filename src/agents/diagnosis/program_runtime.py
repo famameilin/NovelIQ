@@ -85,11 +85,14 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
     )
 
     def __init__(
-        self, tools: list[Any], *, observer: Any = None, invocation_id: str = "",
+        self,
+        tools: list[Any],
+        *,
+        observer: Any = None,
+        invocation_id: str = "",
         dialogue_total: Any = None,
     ) -> None:
-        super().__init__(tools, {tool.name: tool for tool in tools}, observer=observer,
-                         dialogue_total=dialogue_total)
+        super().__init__(tools, {tool.name: tool for tool in tools}, observer=observer, dialogue_total=dialogue_total)
         # 执行身份随 call_id 固定进业务地址：business_call_id 唯一键是全局的
         self.invocation_id = invocation_id
         self._pending_end = False

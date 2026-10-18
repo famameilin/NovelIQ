@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from src.config.paths import resolve_model_dir
 from src.event_trees.read.foreshadowing import (
     calculate_foreshadow_expectation,
@@ -13,24 +11,24 @@ from src.event_trees.read.foreshadowing import (
     fetch_foreshadowing_trees,
 )
 from src.fact_graph.read.entities import fetch_latest_entities
+from src.fact_graph.read.storage_projection import graph_projection
 from src.metrics.queries.annotations import fetch_chapter_annotations_full
-from src.storage.repositories.annotation import AnnotationRepository, ForeshadowingTreeView
-from src.storage.repositories.diagnosis_repository import DiagnosisRepository
-from src.storage.repositories.graph import GraphRepository
+from src.storage import Storage
+from src.storage.records.annotation import ForeshadowingTreeView
 from src.topic.artifacts import load_topic_artifact
 
 
 class DiagnosisQueries:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Storage) -> None:
         self.session = session
 
     def fetch_pivot_blocks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str]]:
         """从章节标注读取转折点原文素材"""
         row_limit = limit if limit is not None else 20
-        text_by_chapter = DiagnosisRepository(self.session)._text_by_chapter_id(run_id)
+        text_by_chapter = dict(self.session.chapters.fetch_chapter_texts(run_id))
         rows = [
             (row.chapter_id, text_by_chapter.get(row.chapter_id, ""), row.event_type)
-            for row in fetch_chapter_annotations_full(AnnotationRepository(self.session).session, run_id)
+            for row in fetch_chapter_annotations_full(self.session, run_id)
             if row.pivot_moment
         ]
         return rows[:row_limit]
@@ -41,7 +39,7 @@ class DiagnosisQueries:
         if row_limit == 0:
             return []
         rows: list[tuple[int, str, str, str, str]] = []
-        for relation in GraphRepository(self.session).fetch_relation_history(run_id):
+        for relation in graph_projection(self.session.graph).fetch_relation_history(run_id):
             if relation.relation_semantics == "same_character":
                 continue
             for change in relation.changes:
@@ -62,22 +60,17 @@ class DiagnosisQueries:
 
     def fetch_foreshadowing_trees(self, run_id: str) -> list[ForeshadowingTreeView]:
         """读取伏笔树最新汇总视图"""
-        return fetch_foreshadowing_trees(AnnotationRepository(self.session).session, run_id)
+        return fetch_foreshadowing_trees(self.session, run_id)
 
     def fetch_foreshadowing_sources(self, run_id: str) -> list[dict[str, Any]]:
         """读取诊断尚未发布时的来源声明与明确动作，不借正式树伪造事件身份"""
         return fetch_foreshadowing_sources(self.session, run_id)
 
     def calculate_foreshadow_expectation(
-        self,
-        run_id: str,
-        *,
-        declaration_bindings: dict[str, str] | None = None,
+        self, run_id: str, *, declaration_bindings: dict[str, str] | None = None
     ) -> float | None:
         """读取伏笔线程生命周期聚合预期"""
-        return calculate_foreshadow_expectation(
-            AnnotationRepository(self.session).session, run_id, declaration_bindings=declaration_bindings
-        )
+        return calculate_foreshadow_expectation(self.session, run_id, declaration_bindings=declaration_bindings)
 
     def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[tuple[int, str]]:
         """读取章节标注中的转折时刻"""
@@ -90,7 +83,7 @@ class DiagnosisQueries:
         （SUM(topic_weight * inference_token_count)），
         与 /topics 端点及 export 的聚合口径一致。
         """
-        rows = DiagnosisRepository(self.session).fetch_topic_weights(run_id, top_n=top_n)
+        rows = self.session.diagnosis.fetch_topic_weights(run_id, top_n=top_n)
         artifact_words, artifact_labels, _reason = load_topic_artifact(resolve_model_dir(run_id))
         words_by_topic = {
             identifier: (values, artifact_labels.get(identifier)) for identifier, values in artifact_words.items()
@@ -109,7 +102,7 @@ class DiagnosisQueries:
         try:
             view = authority.build_export_view(run_id)
         except ValueError:
-            graph_repo = GraphRepository(self.session)
+            graph_repo = graph_projection(self.session.graph)
             return sorted(entity.name for entity in fetch_latest_entities(graph_repo, run_id, entity_type="character"))
         rows: list[str] = []
         for entity in view.canonical_entities:
@@ -124,4 +117,4 @@ class DiagnosisQueries:
         return rows
 
     def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, float]]:
-        return DiagnosisRepository(self.session).fetch_high_tension_chunks(run_id, limit=limit)
+        return self.session.diagnosis.fetch_high_tension_chunks(run_id, limit=limit)

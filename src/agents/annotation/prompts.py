@@ -118,8 +118,7 @@ def build_agent_message(
     paragraph_views = _render_paragraph_numbered_text("", paragraph_info)
     order_attr = f' chapter_order="{chapter_order}"' if chapter_order is not None else ""
     sections = [
-        f'<CurrentChapter role="{role}"{order_attr} chapter_id="{chapter_id}">\n'
-        f"{paragraph_views}\n</CurrentChapter>",
+        f'<CurrentChapter role="{role}"{order_attr} chapter_id="{chapter_id}">\n{paragraph_views}\n</CurrentChapter>',
         "<DialogueCandidates>\n"
         f"total: {len(candidates)}\n"
         f"{json.dumps(_candidate_views(candidates), ensure_ascii=False, indent=2)}\n"

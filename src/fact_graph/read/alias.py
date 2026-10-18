@@ -1,7 +1,7 @@
 """
 同 run 人物别名消歧解析
 
-依据"同一人物"关系（relation_semantics=same_character）与实体节点属性
+说明: 依据"同一人物"关系（relation_semantics=same_character）与实体节点属性
 is_representative 标记，把别名实体归一到代表实体。所有读侧消费者（图谱快照、
 角色榜、时间轴、聚合、诊断、导出）统一复用本模块，避免各自重复实现合并语义。
 代表按当前实体标记或分量内稳定身份确定
@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from src.fact_graph.identity_resolution import resolve_identities
-from src.storage.repositories.graph.repository import EntitySnapshotRow, RelationSnapshotRow
+from src.storage.records.graph import EntitySnapshotRow, RelationSnapshotRow
 
 
 @dataclass(slots=True)

@@ -15,13 +15,11 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from src.fact_graph.errors import GraphReadinessError
 from src.metrics.queries.aggregate import query_aggregate_metrics
 from src.sse.events import StreamEvent
-from src.storage.repositories import ChapterRepository, StatsRepository
-from src.storage.repositories.paragraph_repository import ParagraphRepository
+from src.storage import Storage
 from src.work.queries import is_annotate_complete
 
 QUALITY_TARGETS = {
@@ -32,7 +30,11 @@ QUALITY_TARGETS = {
 
 
 def _log_aggregate_results(agg_result) -> None:
-    """输出聚合指标日志"""
+    """
+    输出聚合结果日志
+
+    在 run_aggregate 中调用，负责输出聚合指标日志
+    """
     logger.info("\n=== Aggregate Metrics ===")
 
     if agg_result.narrative_structure:
@@ -71,7 +73,7 @@ def _log_aggregate_results(agg_result) -> None:
                     logger.info(f"  {key}: {value}")
 
 
-def _build_quality_gate_report(run_id: str, agg_result, session: Session) -> dict[str, Any]:
+def _build_quality_gate_report(run_id: str, agg_result, session: Storage) -> dict[str, Any]:
     """构建聚合质量门报告
 
     imagery 完整性按章节从段落指标充分统计量聚合判定：
@@ -84,13 +86,14 @@ def _build_quality_gate_report(run_id: str, agg_result, session: Session) -> dic
     tone_distribution = language_style.get("tone_distribution")
     tone_non_empty = isinstance(tone_distribution, dict) and len(tone_distribution) > 0
 
-    aggregates = ParagraphRepository(session).fetch_chapter_metric_aggregates(run_id)
+    aggregates = session.paragraphs.fetch_chapter_metric_aggregates(run_id)
     totals_by_chapter = dict(aggregates)
     imagery_total = sum(float(totals.get("imagery_hit_count", 0.0)) for _chapter_id, totals in aggregates)
     imagery_non_null = imagery_total > 0
-    # 分母为"有正文的全部章节"：aggregates 从 ParagraphMetric 内连接出发，
-    # 无指标行的章不出现在其中，按 token 0（缺失）计入不通过
-    chapter_ids_with_text = [chapter_id for chapter_id, _ in ChapterRepository(session).fetch_chapter_texts(run_id)]
+    # 质量门分母修复：aggregates 从 ParagraphMetric 内连接出发，完全没有
+    # 指标行的章（空正文/段落指标缺失）不出现，此前被静默排除在分母之外导致空章漏检。
+    # 分母改为"有正文的全部章节"：无指标行的章按 token 0（缺失）计入不通过。
+    chapter_ids_with_text = [chapter_id for chapter_id, _ in session.chapters.fetch_chapter_texts(run_id)]
     null_chapter_ids: list[int] = []
     for chapter_id in chapter_ids_with_text:
         totals = totals_by_chapter.get(chapter_id)
@@ -101,7 +104,8 @@ def _build_quality_gate_report(run_id: str, agg_result, session: Session) -> dic
     if chapter_ids_with_text:
         null_ratio = len(null_chapter_ids) / len(chapter_ids_with_text)
     else:
-        # 无正文章节数据时按"不通过"处理：0/0 不等于达标，避免"无数据=通过质量门"
+        # 无正文章节数据时按"不通过"处理（保守方案）：
+        # 0/0 不等于达标，聚合缺数据本身是质量缺陷，避免"无数据=通过质量门"。
         null_ratio = 1.0
 
     return {
@@ -139,7 +143,7 @@ def _log_quality_gate_report(run_id: str, report: dict[str, Any]) -> None:
 
 async def run_aggregate(
     run_id: str,
-    session: Session,
+    session: Storage,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, int, int]:
@@ -150,16 +154,15 @@ async def run_aggregate(
     from src.utils.cancellation import check_cancelled
 
     start_time = time.time()
-    # 编排器 session 是长活事务，边界检查必须用短事务版
-    # （详见 require_released_cutoff_short docstring）
-    from src.storage.repositories.annotation import AnnotationRepository
+    # 改短事务版边界检查：编排器 session 是长活事务，在其上取 FOR SHARE
+    # 会把 analysis_runs 行锁持有整个阶段，饿死任务心跳的 UPDATE（详见
+    # require_released_cutoff_short docstring）
+    pass
 
-    if not is_annotate_complete(AnnotationRepository(session).session, run_id):
+    if not is_annotate_complete(session, run_id):
         raise ValueError("必需角色 work 尚未全部成功保存，不能聚合")
 
-    chapter_repo = ChapterRepository(session)
-    stats_repo = StatsRepository(session)
-    ann_repo = AnnotationRepository(session)
+    chapter_repo = session.chapters
 
     chunk_texts = chapter_repo.fetch_chapter_texts(run_id)
 
@@ -178,8 +181,9 @@ async def run_aggregate(
 
     logger.info("Computing aggregate metrics...")
     try:
-        # 指标聚合移出事件循环：全书章节/图事实的 CPU 聚合同为重活
-        agg_result = await asyncio.to_thread(query_aggregate_metrics, run_id, ann_repo, chapter_repo, stats_repo)
+        # 指标聚合移出事件循环（run 08f9ba42 实证单次 7s API 冻结）：
+        # 全书章节/图事实的 CPU 聚合同为重活，与 linguistic 同待遇
+        agg_result = await asyncio.to_thread(query_aggregate_metrics, run_id, session)
         # 聚合是单次线程内调用，无法中途中断：返回后立刻兑现取消
         check_cancelled(is_cancelled)
         _log_aggregate_results(agg_result)

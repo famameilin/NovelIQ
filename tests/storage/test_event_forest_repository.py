@@ -25,15 +25,14 @@ from tests.support.event_tree_fixtures import (
     publish_declarations,
     publish_draft,
 )
+from tests.support.storage_fixtures import fixture_id, storage_for
 
 pytestmark = pytest.mark.usefixtures("pipeline_run_cleanup")
 
 
 def _event_map(draft) -> dict[str, str]:
     return {
-        declaration_id: event_id
-        for event_id, event in draft.events.items()
-        for declaration_id in event.declaration_ids
+        declaration_id: event_id for event_id, event in draft.events.items() for declaration_id in event.declaration_ids
     }
 
 
@@ -84,7 +83,7 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
 
     mapping = _publish(db_session, run_id, [(first_declaration, second_declaration, "causal")])
     first_event, second_event = mapping[first_declaration], mapping[second_declaration]
-    repo = EventForestQuery(db_session)
+    repo = EventForestQuery(storage_for(db_session))
     snapshot = repo.fetch_snapshot(run_id)
     assert snapshot is not None
     assert snapshot.chapter_order == 1
@@ -144,7 +143,7 @@ def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_sessio
     db_session.commit()
 
     _publish(db_session, run_id, [(root_declaration, bind_declaration, "foreshadowing")])
-    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
     assert snapshot is not None
     assert snapshot.causal_edges == []
     assert repo_foreshadow_edges(db_session, run_id) == 1
@@ -159,7 +158,7 @@ def repo_foreshadow_edges(session, run_id: str) -> int:
             select(func.count())
             .select_from(NarrativeLink)
             .where(
-                NarrativeLink.producer_execution_id.in_(smap.run_execution_ids(run_id)),
+                NarrativeLink.producer_execution_id.in_(smap.run_execution_ids(storage_for(session), run_id)),
                 NarrativeLink.relation_type == "foreshadowing",
             )
         ).scalar_one()
@@ -192,17 +191,14 @@ def test_source_branch_markers_do_not_infer_formal_structure(db_session) -> None
     db_session.commit()
 
     mapping, _draft = publish_declarations(db_session, run_id)
-    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
     assert snapshot is not None
     # 来源的旧树标记不能替代诊断对正式身份与包含关系的判断
     assert len(snapshot.event_trees) == 4
     assert {tree.root_event_id for tree in snapshot.event_trees} == {
         mapping[declaration] for declaration in declarations
     }
-    assert all(
-        tree.main_chain == [tree.root_event_id] and tree.secondary_groups == []
-        for tree in snapshot.event_trees
-    )
+    assert all(tree.main_chain == [tree.root_event_id] and tree.secondary_groups == [] for tree in snapshot.event_trees)
     assert snapshot.causal_edges == []
     nodes = {node.event_id: node for node in snapshot.event_nodes}
     assert all(node.parent_event_id is None for node in nodes.values())
@@ -237,7 +233,7 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     db_session.commit()
 
     mapping, _draft = publish_declarations(db_session, run_id)
-    repo = EventForestQuery(db_session)
+    repo = EventForestQuery(storage_for(db_session))
     snapshot = repo.fetch_snapshot(run_id)
     assert snapshot is not None
     assert len(snapshot.foreshadowing_edges) == 1
@@ -280,10 +276,13 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
     db_session.commit()
 
     mapping = _publish(db_session, run_id, [(first_declaration, second_declaration, "causal")])
-    snapshot = EventForestQuery(db_session).fetch_snapshot(run_id)
+    snapshot = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
     assert snapshot is not None
     assert set(snapshot.derived_event_order) == {mapping[first_declaration], mapping[second_declaration]}
-    assert snapshot.derived_event_order == EventForestQuery(db_session).fetch_snapshot(run_id).derived_event_order
+    assert (
+        snapshot.derived_event_order
+        == EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id).derived_event_order
+    )
     assert len(snapshot.causal_edges) == 1
     # 节点坐标来自各声明自身的原文证据，不由来源候选关系重新绑定
     assert snapshot.event_nodes[0].char_start == 0
@@ -297,7 +296,7 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
         paragraph=paragraph,
     )
     db_session.commit()
-    refreshed = EventForestQuery(db_session).fetch_snapshot(run_id)
+    refreshed = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
     assert [(edge.source_event_id, edge.target_event_id) for edge in refreshed.causal_edges] == [
         (mapping[first_declaration], mapping[second_declaration])
     ]
@@ -305,8 +304,8 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
 
 def test_fetch_snapshot_returns_none_for_missing_run(db_session) -> None:
     """验证不存在的 run 查询返回 None"""
-    repo = EventForestQuery(db_session)
-    snapshot = repo.fetch_snapshot("nonexistent-run-id")
+    repo = EventForestQuery(storage_for(db_session))
+    snapshot = repo.fetch_snapshot(fixture_id(__name__, "nonexistent-run-id"))
     assert snapshot is None
 
 
@@ -337,7 +336,7 @@ def test_fetch_snapshot_filters_by_chapter_id(db_session) -> None:
     db_session.commit()
 
     publish_declarations(db_session, run_id)
-    repo = EventForestQuery(db_session)
+    repo = EventForestQuery(storage_for(db_session))
     # 只取第 1 章：只有 1 个事件节点
     snapshot_ch1 = repo.fetch_snapshot(run_id, chapter_id=1)
     assert snapshot_ch1 is not None

@@ -104,9 +104,7 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
         {"table_name": table_regclass},
     ).scalar_one()
     if table_exists is None:
-        raise ValueError(
-            "paragraph_features table does not exist: 语义向量依赖新库初始化的段落特征表"
-        )
+        raise ValueError("paragraph_features table does not exist: 语义向量依赖新库初始化的段落特征表")
     existing_columns = _get_table_columns(session, "paragraph_features")
     missing = _REQUIRED_FEATURE_COLUMNS - existing_columns
     if missing:
@@ -118,17 +116,13 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
     vector_type = _get_column_format_type(session, "paragraph_features", "vector_value")
     if vector_type is None or not vector_type.startswith("vector"):
         raise ValueError(
-            "paragraph_features.vector_value type mismatch: "
-            f"expected vector, got {vector_type or 'unknown'}"
+            f"paragraph_features.vector_value type mismatch: expected vector, got {vector_type or 'unknown'}"
         )
 
     # 固定维度表达式 + 覆盖该维度的部分索引谓词：
     # 只索引 semantic_vector 行且维度等于本维度，其它维度/POS 向量行不受影响
     index_name = _semantic_hnsw_index_name(embedding_dim)
-    predicate = (
-        f"feature_code = '{_FEATURE_SEMANTIC_VECTOR}' "
-        f"AND vector_dims(vector_value) = {embedding_dim}"
-    )
+    predicate = f"feature_code = '{_FEATURE_SEMANTIC_VECTOR}' AND vector_dims(vector_value) = {embedding_dim}"
     if hnsw_index_uses_halfvec(embedding_dim):
         index_sql = (
             f"CREATE INDEX IF NOT EXISTS {index_name} "

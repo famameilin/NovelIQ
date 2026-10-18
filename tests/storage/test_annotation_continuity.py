@@ -22,6 +22,7 @@ from tests.support.chapter_annotation_helpers import (
     create_run_with_chunks,
 )
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
+from tests.support.storage_fixtures import storage_factory
 
 
 def _factory(session):
@@ -121,7 +122,7 @@ async def test_text_search_ranges_use_chapter_sequence_when_ids_are_out_of_order
         chapter.sequence = sequence_by_chapter_id[chapter.chapter_id]
     db_session.commit()
     service = DatabaseAnnotationQueryService(
-        _factory(db_session),
+        storage_factory(_factory(db_session)),
         run_id=run_id,
         current_chapter_id=500,
         current_first_paragraph_id=2,
@@ -157,7 +158,7 @@ async def test_search_text_keyword_channel_supports_wildcards_and_multi_terms(
         title="原文通配符检索",
     )
     service = DatabaseAnnotationQueryService(
-        _factory(db_session),
+        storage_factory(_factory(db_session)),
         run_id=run_id,
         current_chapter_id=2,
         current_first_paragraph_id=1,
@@ -183,7 +184,7 @@ async def test_read_paragraph_future_gate_closed_and_openable(db_session) -> Non
         title="未来原文读取门",
     )
     service = DatabaseAnnotationQueryService(
-        _factory(db_session),
+        storage_factory(_factory(db_session)),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,
@@ -210,7 +211,7 @@ async def test_query_scope_returns_every_session_even_when_query_fails(db_sessio
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="只读作用域取还连接")
     tracker = _SessionTracker(db_session)
     service = DatabaseAnnotationQueryService(
-        tracker.factory,
+        storage_factory(tracker.factory),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,
@@ -228,7 +229,7 @@ async def test_query_scope_returns_every_session_even_when_query_fails(db_sessio
     failing = _SessionTracker(db_session, fail_on_execute=True)
     with pytest.raises(RuntimeError):
         DatabaseAnnotationQueryService(
-            failing.factory,
+            storage_factory(failing.factory),
             run_id=run_id,
             current_chapter_id=1,
             current_first_paragraph_id=0,
@@ -258,7 +259,7 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"], title="模型回话不占连接")
     tracker = _SessionTracker(db_session)
     service = DatabaseAnnotationQueryService(
-        tracker.factory,
+        storage_factory(tracker.factory),
         run_id=run_id,
         current_chapter_id=1,
         current_first_paragraph_id=0,

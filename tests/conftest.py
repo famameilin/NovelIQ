@@ -53,6 +53,7 @@ def _build_test_engine(database_url: str, schema_name: str):
         connect_args={
             "options": f"-c search_path={safe_schema},public",
         },
+        execution_options={"schema_translate_map": {None: safe_schema}},
     )
 
     @event.listens_for(engine, "connect")
@@ -111,7 +112,8 @@ def _create_all_orm_tables(engine) -> None:
 
 @pytest.fixture(scope="session")
 def setup_test_database(test_database_url: str, test_database_schema: str) -> Generator[None, None, None]:
-    """会话级别的测试数据库设置
+    """
+    会话级别的测试数据库设置
 
     在测试会话开始时：
     1. 安装 pgvector 扩展
@@ -129,14 +131,10 @@ def setup_test_database(test_database_url: str, test_database_schema: str) -> Ge
     with _test_engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-        conn.execute(text(f"DROP SCHEMA IF EXISTS {safe_schema} CASCADE"))
         conn.execute(text(f"CREATE SCHEMA {safe_schema}"))
         conn.commit()
 
-    # 当前 ORM 元数据仍未声明显式 schema，PostgreSQL dialect 的默认建表目标仍是 public。
-    # 因此测试会话启动时需要把 public 里的 ORM 表整体重建一次，清掉上次运行残留的固定 run_id/task_id 数据，
-    # 否则即便 search_path 指向隔离 schema，未限定表名仍会回落到 public 并撞上旧主键。
-    Base.metadata.drop_all(bind=_test_engine)
+    # 显式翻译无 schema 的元数据，禁止 create_all/drop_all 回落到 public
     _create_all_orm_tables(_test_engine)
 
     yield
@@ -215,7 +213,8 @@ def reset_capacity_and_event_bus() -> Generator[None, None, None]:
 
 @pytest.fixture
 def db_session(setup_test_database: None) -> Generator[Session, None, None]:
-    """数据库会话 fixture
+    """
+    数据库会话 fixture
 
     每个测试使用独立的事务，测试结束后回滚
     """
@@ -229,6 +228,7 @@ def db_session(setup_test_database: None) -> Generator[Session, None, None]:
 
     SessionLocal = sessionmaker(bind=_test_engine)
     session = SessionLocal()
+    session.info["fixture_shared"] = True
     schema_name = _validate_schema_name(os.environ["DATABASE_SCHEMA"])
     session.execute(text(f"SET search_path TO {schema_name}, public"))
 
@@ -245,9 +245,13 @@ def configured_model_pool(monkeypatch) -> None:
     from src.config import settings
     from src.config.schemas.model import WeightedModelSettings
 
-    monkeypatch.setattr(settings.models, "model_pool", [
-        WeightedModelSettings("test-model", "https://test.example/v1", "test-key", max_in_flight=2),
-    ])
+    monkeypatch.setattr(
+        settings.models,
+        "model_pool",
+        [
+            WeightedModelSettings("test-model", "https://test.example/v1", "test-key", max_in_flight=2),
+        ],
+    )
     monkeypatch.setattr(settings.models, "diagnosis_model_id", "test-model")
 
 
@@ -305,3 +309,12 @@ def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
             get_task_manager().reset_for_testing()
             event_manager.reset_for_testing()
             _reset_backend_db_singletons()
+
+
+@pytest.fixture(autouse=True)
+def reset_fixture_identifiers():
+    "同一测试内的标签共享 UUIDv7，不同测试独立分配"
+    from tests.support.storage_fixtures import _stub_task_id, fixture_id
+
+    fixture_id.cache_clear()
+    _stub_task_id.cache_clear()

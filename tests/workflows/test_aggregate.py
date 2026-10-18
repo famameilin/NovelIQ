@@ -1,11 +1,13 @@
 """CLI aggregate 模块测试"""
 
 import sys
-import uuid
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+
+from src.storage import new_id
+from tests.support.storage_fixtures import storage_for
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -86,7 +88,7 @@ class TestAggregate:
     @pytest.fixture(autouse=True)
     def setup(self, db_session):
         self.db_session = db_session
-        self.novel_id = uuid.uuid4().hex[:8]
+        self.novel_id = new_id()
         insert_test_novel(self.novel_id, session=db_session)
 
         run_repo = RunRepository(db_session)
@@ -109,7 +111,7 @@ class TestAggregate:
     async def test_aggregate_basic(self) -> None:
         self._create_chunks_with_paragraphs(5)
 
-        chunks, stats_count, reserved = await run_aggregate(run_id=self.run_id, session=self.db_session)
+        chunks, stats_count, reserved = await run_aggregate(run_id=self.run_id, session=storage_for(self.db_session))
         assert chunks == 5
         assert stats_count > 0
         assert reserved == 0
@@ -122,7 +124,7 @@ class TestAggregate:
     async def test_aggregate_global_stats(self) -> None:
         self._create_chunks_with_paragraphs(5)
 
-        await run_aggregate(run_id=self.run_id, session=self.db_session)
+        await run_aggregate(run_id=self.run_id, session=storage_for(self.db_session))
 
         by_name = StatsRepository(self.db_session).fetch_global_stats_dict(self.run_id)
 
@@ -162,7 +164,7 @@ class TestAggregate:
         )
 
         confirm_test_work(self.db_session, self.run_id, create_missing=True)
-        chunks, stats_count, _ = await run_aggregate(run_id=self.run_id, session=self.db_session)
+        chunks, stats_count, _ = await run_aggregate(run_id=self.run_id, session=storage_for(self.db_session))
         assert chunks == 3
         assert stats_count > 0
 
@@ -170,7 +172,7 @@ class TestAggregate:
     async def test_aggregate_empty_db(self) -> None:
         confirm_test_work(self.db_session, self.run_id, create_missing=True)
         with pytest.raises(ValueError, match="必需角色 work"):
-            await run_aggregate(run_id=self.run_id, session=self.db_session)
+            await run_aggregate(run_id=self.run_id, session=storage_for(self.db_session))
 
     @pytest.mark.asyncio()
     async def test_aggregate_metrics_graph_not_ready_degrades_gracefully(self, monkeypatch) -> None:
@@ -192,10 +194,7 @@ class TestAggregate:
             "src.workflows.aggregate.query_aggregate_metrics",
             side_effect=GraphReadinessError("graph not ready yet"),
         ):
-            chunks, stats_count, _ = await run_aggregate(
-                run_id=self.run_id,
-                session=self.db_session,
-            )
+            chunks, stats_count, _ = await run_aggregate(run_id=self.run_id, session=storage_for(self.db_session))
 
         assert chunks == 3
         assert stats_count > 0
@@ -210,7 +209,7 @@ class TestGlobalStatsRunIsolation:
     @pytest.fixture(autouse=True)
     def setup(self, db_session):
         self.db_session = db_session
-        self.novel_id = uuid.uuid4().hex[:8]
+        self.novel_id = new_id()
         insert_test_novel(self.novel_id, session=db_session)
         run_repo = RunRepository(db_session)
         self.run_a = run_repo.create_run(novel_id=self.novel_id)
@@ -247,8 +246,8 @@ class TestGlobalStatsRunIsolation:
         self._insert_metrics_for_run(self.run_a, sentence_sum=20.0, sentence_count=1)
         self._insert_metrics_for_run(self.run_b, sentence_sum=100.0, sentence_count=2)
 
-        stats_a = dict(compute_global_stats(self.db_session, self.run_a))
-        stats_b = dict(compute_global_stats(self.db_session, self.run_b))
+        stats_a = dict(compute_global_stats(storage_for(self.db_session), self.run_a))
+        stats_b = dict(compute_global_stats(storage_for(self.db_session), self.run_b))
 
         # run_b 的句长统计不得污染 run_a 的均值
         assert stats_a["avg_sent_len"] == pytest.approx(20.0)

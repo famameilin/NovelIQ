@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import json
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +16,7 @@ import pytest
 from sqlalchemy import select
 
 from src.event_trees.read.organization import CONTRACT_VERSION, EventTreeQuery, RunRequiresRebuildError
+from src.storage import new_id
 from src.storage.models import (
     DiagnosisReport,
     EventRevision,
@@ -36,6 +36,7 @@ from tests.support.event_tree_fixtures import (
     publish_draft,
 )
 from tests.support.run_records import set_run_status
+from tests.support.storage_fixtures import storage_for, task_for_run, uuid7
 
 TEXTS = ["第一章正文。\n第一章非证据段落。", "第二章正文。", "第三章正文。\n第三章余波。"]
 
@@ -69,9 +70,7 @@ def _identity_evidence():
 
 
 def _seed_scenario(session: Any) -> EventTreeScenario:
-    novel_id, run_id = create_run_with_chunks(
-        session, texts=TEXTS, chapter_ids=[1, 2, 3], title="Event Tree Contract"
-    )
+    novel_id, run_id = create_run_with_chunks(session, texts=TEXTS, chapter_ids=[1, 2, 3], title="Event Tree Contract")
     set_run_status(session, run_id, "completed")
     paragraphs = _paragraphs(session, run_id)
     session_id, execution_id = add_diagnosis_context(session, run_id)
@@ -102,17 +101,47 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
             .order_by(Paragraph.paragraph_index)
         )
     )[1]
-    declare(1, "p1", "第一章正文", title="踏入江湖", summary="概要第一版", status="ongoing",
-            participants=(("顾承渊", "主体"),))
-    declare(2, "p4", "第二章正文", title="踏入江湖", summary="概要第二版", status="resolved",
-            progress="已确认新版进展", participants=(("顾承渊", "主体"),))
-    declare(2, "p2", "第二章", title="石碑疑云", problem="石碑是什么", summary="石碑疑云的初始概要",
-            status="ongoing", participants=(("苏映雪", "主体"),))
-    declare(2, "p5", "正文", title="线索记录", problem="线索是否可靠", summary="线索记录的初始概要",
-            status="resolved")
+    declare(
+        1,
+        "p1",
+        "第一章正文",
+        title="踏入江湖",
+        summary="概要第一版",
+        status="ongoing",
+        participants=(("顾承渊", "主体"),),
+    )
+    declare(
+        2,
+        "p4",
+        "第二章正文",
+        title="踏入江湖",
+        summary="概要第二版",
+        status="resolved",
+        progress="已确认新版进展",
+        participants=(("顾承渊", "主体"),),
+    )
+    declare(
+        2,
+        "p2",
+        "第二章",
+        title="石碑疑云",
+        problem="石碑是什么",
+        summary="石碑疑云的初始概要",
+        status="ongoing",
+        participants=(("苏映雪", "主体"),),
+    )
+    declare(2, "p5", "正文", title="线索记录", problem="线索是否可靠", summary="线索记录的初始概要", status="resolved")
     declare(3, "p3", "第三章", title="同行启程", problem="能否同行", summary="同行启程的初始概要", status="ongoing")
-    declare(3, "p6", "第三章余波", paragraph=third_chapter_second, title="城外余波", problem="余波如何",
-            summary="城外余波的初始概要", status="ongoing")
+    declare(
+        3,
+        "p6",
+        "第三章余波",
+        paragraph=third_chapter_second,
+        title="城外余波",
+        problem="余波如何",
+        summary="城外余波的初始概要",
+        status="ongoing",
+    )
     session.flush()
     draft, _meta = identity_every_declaration(
         session,
@@ -176,21 +205,35 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
     close_structure(session, draft, evidence_paragraph_id=int(paragraphs[1].paragraph_id))
     arcs = {
         "a1": draft.register_arc(
-            key="journey", kind="main", title="主线旅程", objective="完成旅程", role="核心问题",
-            reason="主线", evidence=_identity_evidence(),
+            key="journey",
+            kind="main",
+            title="主线旅程",
+            objective="完成旅程",
+            role="核心问题",
+            reason="主线",
+            evidence=_identity_evidence(),
         ),
         "a2": draft.register_arc(
-            key="stele", kind="subplot", title="石碑之谜", objective="解开石碑", role="支线",
-            reason="支线", evidence=_identity_evidence(),
+            key="stele",
+            kind="subplot",
+            title="石碑之谜",
+            objective="解开石碑",
+            role="支线",
+            reason="支线",
+            evidence=_identity_evidence(),
         ),
     }
     outcomes = {
         "o1": draft.register_outcome(
-            key="journey-open", title="江湖之路开启", description="正式踏上江湖路",
+            key="journey-open",
+            title="江湖之路开启",
+            description="正式踏上江湖路",
             evidence=_identity_evidence(),
         ),
         "o2": draft.register_outcome(
-            key="stele-open", title="石碑秘密未解", description="调查未有结论",
+            key="stele-open",
+            title="石碑秘密未解",
+            description="调查未有结论",
             evidence=_identity_evidence(),
         ),
     }
@@ -201,7 +244,10 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
         ("e4", "a1", "主线推进", "同行加入"),
     ):
         draft.link_event_arc(
-            event_id=events[event_key], arc_id=arcs[arc_key], role=role, reason=reason,
+            event_id=events[event_key],
+            arc_id=arcs[arc_key],
+            role=role,
+            reason=reason,
             evidence=_identity_evidence(),
         )
     for event_key, outcome_key, reason in (
@@ -210,15 +256,15 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
         ("e1", "o2", "调查无果"),
     ):
         draft.link_event_outcome(
-            event_id=events[event_key], outcome_id=outcomes[outcome_key], reason=reason,
+            event_id=events[event_key],
+            outcome_id=outcomes[outcome_key],
+            reason=reason,
             evidence=_identity_evidence(),
         )
     publish_draft(session, run_id, draft)
     revisions = {
         row.declaration_id: row.revision_id
-        for row in session.scalars(
-            select(EventRevision).where(EventRevision.event_id.in_(list(events.values())))
-        )
+        for row in session.scalars(select(EventRevision).where(EventRevision.event_id.in_(list(events.values()))))
     }
     actions = {
         "f1": add_foreshadowing_action(
@@ -243,7 +289,7 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
     return EventTreeScenario(
         novel_id=novel_id,
         run_id=run_id,
-        task_id=run_id[:8],
+        task_id=task_for_run(run_id, session),
         session_id=session_id,
         execution_id=execution_id,
         events=events,
@@ -354,10 +400,7 @@ def test_list_payload_fields_counts_and_top_level_pagination(api_client, db_sess
 
 def test_multi_page_cursor_consumes_all_pages(api_client, db_session):
     scenario = _seed_scenario(db_session)
-    expected = [
-        row["event_id"]
-        for row in api_client.get(_url(scenario), params=_params(scenario)).json()["events"]
-    ]
+    expected = [row["event_id"] for row in api_client.get(_url(scenario), params=_params(scenario)).json()["events"]]
     assert expected == [scenario.events["e1"], scenario.events["e4"], scenario.events["e5"]]
     first = api_client.get(_url(scenario), params=_params(scenario, limit=2)).json()
     assert [row["event_id"] for row in first["events"]] == expected[:2]
@@ -376,14 +419,14 @@ def test_current_annotation_does_not_hide_old_diagnosis_contract(db_session):
     add_annotation_source(db_session, run_id, 1, role="event")
     db_session.add(
         DiagnosisReport(
-            report_id=str(uuid.uuid4()),
+            report_id=new_id(),
             session_id=session_id,
             contract_version="event-tree-2026-10-13",
         )
     )
     db_session.flush()
     with pytest.raises(RunRequiresRebuildError):
-        EventTreeQuery(db_session, run_id).fetch()
+        EventTreeQuery(storage_for(db_session), run_id).fetch()
 
 
 def test_cursor_rejects_other_run_and_tampered_context(api_client, db_session):
@@ -446,12 +489,10 @@ def test_detail_same_shape_dto_children_characters_arcs_ancestry_revision(api_cl
 
 def test_detail_unknown_node_is_404(api_client, db_session):
     scenario = _seed_scenario(db_session)
-    assert api_client.get(f"{_url(scenario)}/nodes/{uuid.uuid4()}", params=_params(scenario)).status_code == 404
+    assert api_client.get(f"{_url(scenario)}/nodes/{uuid7()}", params=_params(scenario)).status_code == 404
     # 声明身份不能当完整事件详情读取
     assert (
-        api_client.get(
-            f"{_url(scenario)}/nodes/{scenario.declarations['p1']}", params=_params(scenario)
-        ).status_code
+        api_client.get(f"{_url(scenario)}/nodes/{scenario.declarations['p1']}", params=_params(scenario)).status_code
         == 404
     )
 
@@ -503,7 +544,7 @@ def test_source_endpoint_event_and_declaration_paths(api_client, db_session):
     assert declaration_source.status_code == 200
     assert "第一章正文" in declaration_source.json()["paragraphs"][0]["text"]
     assert len(declaration_source.json()["paragraphs"]) == 2
-    expected_evidence = EventTreeQuery(db_session, scenario.run_id).declaration_source(
+    expected_evidence = EventTreeQuery(storage_for(db_session), scenario.run_id).declaration_source(
         scenario.declarations["p1"]
     )
     assert declaration_source.json()["evidence"] == expected_evidence
@@ -542,7 +583,7 @@ def test_source_rejects_declaration_from_other_run(api_client, db_session):
 def test_legacy_run_requires_rebuild_on_all_endpoints(api_client, db_session):
     scenario = _seed_scenario(db_session)
     novel_id, run_id = _seed_legacy_run(db_session)
-    params = {"task_id": run_id[:8]}
+    params = {"task_id": task_for_run(run_id, db_session)}
     for url in (
         f"/api/novels/{novel_id}/event-trees",
         f"/api/novels/{novel_id}/event-trees/nodes/{scenario.events['e1']}",
@@ -568,7 +609,9 @@ def test_list_has_no_search_contract(api_client, db_session):
 
 def test_saved_contract_allows_zero_events(api_client, db_session):
     novel_id, run_id = _seed_empty_contract_run(db_session)
-    response = api_client.get(f"/api/novels/{novel_id}/event-trees", params={"task_id": run_id[:8]})
+    response = api_client.get(
+        f"/api/novels/{novel_id}/event-trees", params={"task_id": task_for_run(run_id, db_session)}
+    )
     assert response.status_code == 200
     assert set(response.json()["counts"].values()) == {0}
     assert response.json()["events"] == [] and response.json()["next_cursor"] is None
@@ -594,15 +637,11 @@ def test_corrupt_saved_contract_is_rejected_without_get_repair(api_client, db_se
                 NarrativeLink.semantic_target_event_id == scenario.events["e4"],
             )
         ).one()
-        for row in db_session.scalars(
-            select(SourceEvidence).where(SourceEvidence.narrative_link_id == link_id)
-        ):
+        for row in db_session.scalars(select(SourceEvidence).where(SourceEvidence.narrative_link_id == link_id)):
             db_session.delete(row)
     else:
         orphan = scenario.declarations["p2"]
-        for row in db_session.scalars(
-            select(SourceEvidence).where(SourceEvidence.declaration_id == orphan)
-        ):
+        for row in db_session.scalars(select(SourceEvidence).where(SourceEvidence.declaration_id == orphan)):
             db_session.delete(row)
     db_session.commit()
     response = api_client.get(_url(scenario), params=_params(scenario))
@@ -612,22 +651,18 @@ def test_corrupt_saved_contract_is_rejected_without_get_repair(api_client, db_se
     if invalid == "missing_binding":
         assert db_session.get(EventRevision, scenario.revisions["p2"]) is not None
     elif invalid == "missing_link_evidence":
-        assert not list(
-            db_session.scalars(select(SourceEvidence).where(SourceEvidence.narrative_link_id == link_id))
-        )
+        assert not list(db_session.scalars(select(SourceEvidence).where(SourceEvidence.narrative_link_id == link_id)))
     else:
-        assert not list(
-            db_session.scalars(select(SourceEvidence).where(SourceEvidence.declaration_id == orphan))
-        )
+        assert not list(db_session.scalars(select(SourceEvidence).where(SourceEvidence.declaration_id == orphan)))
 
 
 def test_declaration_source_and_export_also_reject_legacy_run(api_client, db_session):
     novel_id, run_id = _seed_legacy_run(db_session)
-    params = {"task_id": run_id[:8], "kind": "declaration"}
+    params = {"task_id": task_for_run(run_id, db_session), "kind": "declaration"}
     response = api_client.get(f"/api/novels/{novel_id}/event-trees/nodes/missing/source", params=params)
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "RUN_REQUIRES_REBUILD"
-    exported = api_client.get(f"/api/novels/{novel_id}/results", params={"task_id": run_id[:8]})
+    exported = api_client.get(f"/api/novels/{novel_id}/results", params={"task_id": task_for_run(run_id, db_session)})
     assert exported.status_code == 400
     assert exported.json()["detail"]["code"] == "RUN_REQUIRES_REBUILD"
 
@@ -656,7 +691,7 @@ def test_cross_chapter_source_keeps_prior_revision_evidence(api_client, db_sessi
 
 def test_export_preserves_formal_events_declarations_and_version_sources(db_session):
     scenario = _seed_scenario(db_session)
-    exported = EventTreeQuery(db_session, scenario.run_id).export()
+    exported = EventTreeQuery(storage_for(db_session), scenario.run_id).export()
     assert {row["event_id"] for row in exported["event_records"]} == set(scenario.events.values())
     assert all(row["problem"] and row["current_revision_id"] for row in exported["event_records"])
     assert {row["declaration_id"] for row in exported["declarations"]} == set(scenario.declarations.values())

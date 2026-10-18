@@ -97,10 +97,7 @@ def build_annotation_tools(
         ] = None,
         representative: Annotated[
             bool | None,
-            Field(
-                description="规范名代表标记：True=把该实体标为同名身份的规范名，"
-                "False=清除该标记，省略=保留现值"
-            ),
+            Field(description="规范名代表标记：True=把该实体标为同名身份的规范名，False=清除该标记，省略=保留现值"),
         ] = None,
     ) -> str:
         """登记或更新一个实体（一次一个），el 是你自定的章内引用键、绑定即生效

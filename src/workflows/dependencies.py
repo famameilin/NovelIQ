@@ -1,15 +1,15 @@
 """workflows 侧的运行时装配
 
-队列运行时（TaskManager）与任务读写/编排/应用服务在本层装配，api 只取服务实例，
-不直接认识 work 队列的运行态类型。「run 收口」回调由 api 在装配时登记——缓存归读侧
-所有，执行层只负责上报。
+说明: 队列运行时（TaskManager）与任务读写/编排/应用服务在本层装配，api 只取服务实例，
+      不直接认识 work 队列的运行态类型。「run 收口」回调由 api 在装配时登记——缓存归读侧
+      所有，执行层只负责上报。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from src.storage.db import get_session_factory
+from src.storage import get_storage_factory
 from src.work.task_manager import TaskManager
 from src.workflows.application import TaskApplicationService
 from src.workflows.service import AnalysisService
@@ -34,7 +34,7 @@ def get_task_manager() -> TaskManager:
     global _task_manager
     if _task_manager is None:
         _task_manager = TaskManager(run_completed_callback=_run_completed_callback)
-        _task_manager.set_db_session_factory(lambda: get_session_factory()())
+        _task_manager.set_db_session_factory(lambda: get_storage_factory()())
     return _task_manager
 
 
