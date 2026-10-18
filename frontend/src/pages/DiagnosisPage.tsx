@@ -42,7 +42,7 @@ function getThreadStatusMeta(status: string) {
 }
 
 /**
- * 2026-08-31，作用：将强度、置信度和回收可能性转换为中文
+ * 将强度、置信度和回收可能性转换为中文
  * 简要说明：未知英文枚举使用待确认兜底，中文原值直接保留
  */
 function getLevelLabel(value: string | null): string {
@@ -136,7 +136,7 @@ function ForeshadowingTreesErrorCard(props: { onRetry: () => void }) {
 }
 
 /**
- * 2026-04-29，作用：展示独立于综合诊断正文的伏笔追踪结果
+ * 展示独立于综合诊断正文的伏笔追踪结果
  * 简要说明：诊断正文为空时仍保留可用线索，并在文档流中展示筛选、轨迹和详情
  */
 function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTree[] }) {
@@ -231,7 +231,7 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
 }
 
 /**
- * 修改原因: 诊断页新增空态与台账错误分支后，仍保留独立 skeleton 以避免首屏闪烁
+ * 诊断页独立 skeleton：空态与台账错误分支下都避免首屏闪烁
  */
 function SkeletonGrid() {
   return (
@@ -288,7 +288,7 @@ function SkeletonGrid() {
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-04-27，作用：展示作品综合诊断和伏笔追踪
+ * 展示作品综合诊断和伏笔追踪
  * 简要说明：综合诊断承载作品定位、价值表达和角色阵容，伏笔追踪承载线索状态与章节依据
  */
 export function DiagnosisPage() {
@@ -297,7 +297,7 @@ export function DiagnosisPage() {
 
   const urlTaskId = searchParams.get("task_id");
 
-  // 2026-08-13 P1-2: 小说作用域任务守卫——跨小说切换后旧小说的任务
+  // 小说作用域任务守卫——跨小说切换后旧小说的任务
   // 不得用于新小说的查询/SSE（模式同 GraphPage）
   const { storeTaskId } = useNovelScopedTask(novelId, urlTaskId);
 

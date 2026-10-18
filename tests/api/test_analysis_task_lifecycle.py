@@ -1,10 +1,4 @@
-"""
-API 分析任务列表、删除、运行态写回测试
-
-创建时间: 2026-04-23
-任务: 复杂度与耦合审查 P2 - 测试工程化
-说明: 从 test_analysis.py 拆出任务生命周期与运行态持久化场景。
-"""
+"""API 分析任务列表、删除、运行态写回测试"""
 
 import asyncio
 import tempfile
@@ -309,7 +303,7 @@ class TestExecutionClaimResumeRace:
         task_id = run_id[:8]
 
         # 模拟 resume 重置 pending：worker_id=None + heartbeat_at=now（pending 写回自动刷新心跳）
-        # 2026-08-13 P2：heartbeat_at 列无时区，落库值统一为 naive UTC 挂钟
+        # heartbeat_at 列无时区，落库值统一为 naive UTC 挂钟
         run_repo.update_run_task_fields(
             run_id,
             status="pending",
@@ -357,7 +351,7 @@ class TestExecutionClaimResumeRace:
         run_id = run_repo.create_run(novel_id="claimr3")
         task_id = run_id[:8]
 
-        # 2026-08-13 P2：heartbeat_at 列无时区，落库值统一为 naive UTC 挂钟
+        # heartbeat_at 列无时区，落库值统一为 naive UTC 挂钟
         stale = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
         run_repo.update_run_task_fields(
             run_id,
@@ -415,8 +409,7 @@ class TestAnalysisErrorHandler:
 
     @pytest.mark.asyncio
     async def test_handle_failure_persists_error_message_in_db(self, db_session) -> None:
-        """
-        2026-08-13 修复 P1：失败路径必须把异常信息持久化到 error 列，
+        """失败路径必须把异常信息持久化到 error 列，
         DB 中 failed 任务 error 恒为 NULL 会让 /status 接口 error 永远 None。
         """
         _insert_test_novel("novel001", session=db_session)
@@ -506,8 +499,7 @@ class TestAnalysisErrorHandler:
 
     @pytest.mark.asyncio
     async def test_handle_success_persists_progress_100_and_completed_at(self, db_session):
-        """
-        2026-08-13 P2：成功收口必须把 progress 归一为 100.0 并落 completed_at，
+        """成功收口必须把 progress 归一为 100.0 并落 completed_at，
         避免完成任务的进度停留在最后阶段区间（如 95.x）而 /status 误报未完成。
         """
         _insert_test_novel("novel001", session=db_session)

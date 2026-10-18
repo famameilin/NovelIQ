@@ -22,7 +22,7 @@ from .schema import (
     TopicWord,
 )
 
-#: 主题预处理与推断管线版本（analysis_runs.lda_pipeline_version，§5.8）
+#: 主题预处理与推断管线版本（analysis_runs.lda_pipeline_version）
 #: 完整 K 维落库 + 段落推断状态 + 运行级模型构建事实的首个版本
 TOPIC_PIPELINE_VERSION = "1.0"
 

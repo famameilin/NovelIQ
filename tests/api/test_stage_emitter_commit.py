@@ -1,12 +1,4 @@
-"""阶段 emitter 提交语义测试：发事件前必须先提交编排器 session
-
-创建时间: 2026-10-03
-创建者: Trae
-任务: 验证 2026-10-03 死锁修复（run 08f9ba42）
-说明: 编排器 session 事务跨阶段存活时，阶段内写入对 analysis_runs 行持有的锁
-（外键 FOR KEY SHARE / 显式 FOR SHARE）会与 emit 路径 to_thread 的 UPDATE
-行锁互斥，编排器 await 自己堵住的 UPDATE 即永久死锁。emitter 先 commit 再 emit。
-"""
+"""阶段 emitter 提交语义测试：发事件前必须先提交编排器 session"""
 
 from __future__ import annotations
 
@@ -29,7 +21,7 @@ pytestmark = pytest.mark.asyncio
 async def test_stage_emitter_rolls_back_and_reraises_when_commit_fails(monkeypatch) -> None:
     """提交失败必须回滚救回会话再原样上抛：不允许中间态毒化会话流入下游
 
-    2026-10-17 run 52cbb1ac 实证：管线会话一次提交中途被打断留在 PREPARED 后，
+    管线会话一次提交中途被打断留在 PREPARED 后，
     任意后续 SQL 都抛 "session is in 'prepared' state"；诊断工具读取被伪装成
     "依赖故障"，真实原因与失败点全部丢失。emitter 是管线会话的提交闸门，
     失败时先 rollback（PREPARED 态允许回滚）再上抛，失败当场可归因。

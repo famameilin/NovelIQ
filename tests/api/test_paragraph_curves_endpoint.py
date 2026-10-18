@@ -1,5 +1,5 @@
 """
-GET /{novel_id}/paragraph-curves 端点测试（设计文档《章节粒度分析指标重设计》§13.1）
+GET /{novel_id}/paragraph-curves 端点测试
 
 覆盖：
 - 契约字段全集与 position 计算

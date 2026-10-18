@@ -1,9 +1,8 @@
 """本领域的独立只读投影，不返回 HTTP 模型
 
-2026-10-16 全库 3NF 改造：章节标注读侧改为按 chapter_annotations 宽表取具名指标
-（旧通用产物 payload {metrics, chunks, ...} 退场，不解析任何旧载荷）：
+章节标注按 chapter_annotations 宽表取具名指标：
 
-- 章号与章内角色由真实执行→work_items 的标注分支投影
+- 章号与章内角色取记录自身归属列
 - 情绪效价/叙事功能/转折/悬念为标注记录的独立具名列
 - coverage_warnings 按固定覆盖规则对 analysis_assessments 的逐段情绪条目投影
 - 章节完成与角色集合沿用 src.work.policy 的完成判定（saved 由正式记录存在性表达）
@@ -31,7 +30,7 @@ PARAGRAPH_LABEL_MIN_PER_CHAPTER = 2
 #: 段落情绪标签覆盖缺口告警文案（固定覆盖规则的确定性投影）
 PARAGRAPH_LABEL_WARNING_TEMPLATE = "情绪标签覆盖: 仅标注 {count} 段（每章应自选 2-3 段）"
 #: 度量指标角色（章级具名指标取该角色的正式记录）
-METRIC_ROLES = ("solo", "evidence")
+METRIC_ROLES = ("annotation", "metric")
 
 
 def paragraph_label_coverage_warnings(label_count: int) -> list[str]:
@@ -57,19 +56,19 @@ def _fetch_paragraph_label_counts(session: Session, record_ids: list[str]) -> di
 
 
 def fetch_chapter_annotations_full(session: Session, run_id: str) -> list[ChapterAnnotationRow]:
-    """2026-08-07 用于从正式章节标注记录展开完整章节标注
+    """从正式章节标注记录展开完整章节标注
 
     只取角色集合与登记角色一致、且按标注合同完成的章节；具名指标取度量指标角色的
-    正式记录，不做任何旧载荷兼容读取（存量旧载荷不参与，按缺省处理）。
+    正式记录，不做任何载荷兼容读取（未登记记录按缺省处理）。
     """
     foreshadowing_by_chapter = read_foreshadowing(session, run_id)
     repository = AnnotationRepository(session)
     saved_records = repository.fetch_saved_outputs(run_id)
-    works = repository.fetch_work_records(run_id)
-    complete_chapters = completed_chapters(works)
+    roles = repository.fetch_role_records(run_id)
+    complete_chapters = completed_chapters(roles)
     expected_roles: dict[int, set[str]] = defaultdict(set)
-    for work in works:
-        expected_roles[work.chapter_id].add(work.role)
+    for role_record in roles:
+        expected_roles[role_record.chapter_id].add(role_record.role)
     records_by_chapter: dict[int, list[SavedAnnotationRecord]] = defaultdict(list)
     for record in saved_records:
         records_by_chapter[record.chapter_id].append(record)
@@ -77,8 +76,8 @@ def fetch_chapter_annotations_full(session: Session, run_id: str) -> list[Chapte
     label_counts = _fetch_paragraph_label_counts(session, [record.record_id for record in saved_records])
     rows: list[ChapterAnnotationRow] = []
     for chapter_id, records in records_by_chapter.items():
-        roles = {record.role for record in records if record.role is not None}
-        if chapter_id not in complete_chapters or roles != expected_roles.get(chapter_id, set()):
+        saved_roles = {record.role for record in records if record.role is not None}
+        if chapter_id not in complete_chapters or saved_roles != expected_roles.get(chapter_id, set()):
             continue
         metric = next((record for record in records if record.role in METRIC_ROLES), None)
         if metric is None:
@@ -86,9 +85,8 @@ def fetch_chapter_annotations_full(session: Session, run_id: str) -> list[Chapte
         rows.append(
             ChapterAnnotationRow(
                 chapter_id=chapter_id,
-                # 度量指标角色的具名指标由真实产出保证非空：solo/evidence 的完整性检查
-                # 要求 metrics 整域存在（agents/annotation/agent.py validate），且只保存
-                # 通过该检查的 work；列本身可空但不覆盖该角色的已保存记录。
+                # 该角色已保存记录的具名指标由产出完整性保证非空：
+                # annotation/metric 检查要求 metrics 整域存在（agents/annotation/agent.py validate）。
                 emotional_valence=cast(int, metric.emotional_valence),
                 event_type=cast(str, metric.narrative_function),
                 pivot_moment=cast(bool, metric.pivot_moment),

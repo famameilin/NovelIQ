@@ -1,4 +1,4 @@
-"""段落级原始计数与充分统计量（§5.3，分子/分母口径不算密度）。
+"""段落级原始计数与充分统计量（分子/分母口径不算密度）。
 对应 ParagraphMetricRow（缺 paragraph_id/surface_tension）。"""
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ _PAUSE_PATTERN = re.compile(r"[，、；,;]")
 
 @dataclass(frozen=True)
 class ParagraphMetricCounts:
-    """段落级原始计数与充分统计量（§5.3，全部为分子/分母口径，非密度）"""
+    """段落级原始计数与充分统计量（全部为分子/分母口径，非密度）"""
 
     token_count: int
     char_count: int
@@ -38,7 +38,7 @@ class ParagraphMetricCounts:
     sensory_hit_count: int
     imagery_hit_count: int
     metaphor_sentence_count: int
-    # 2026-09-05 C 批：身体反应转喻命中（情绪信号独立计数，不进正负极性）
+    # 身体反应转喻命中（情绪信号独立计数，不进正负极性）
     body_reaction_hit_count: int
     function_word_counts: dict[str, int]
     semantic_category_counts: dict[str, int]
@@ -49,7 +49,7 @@ def compute_paragraph_metric_counts(
     tokens: list[str],
     lexicons: dict[str, Any],
 ) -> ParagraphMetricCounts:
-    """段落级原始计数与充分统计量（分子/分母口径，2026-08-16 M3/M4：权重弃用统一1.0计命中数）。
+    """段落级原始计数与充分统计量（分子/分母口径：权重弃用，统一 1.0 计命中数）。
     lexicons缺失按空处理；情绪计数经negation共享层翻转，空文本/空词表不触发表读取。"""
     token_count = len(tokens)
     char_count = len(text)
@@ -67,7 +67,7 @@ def compute_paragraph_metric_counts(
     pos_spans = get_emotion_spans(text, tokens, pos_terms.keys())
     neg_spans = get_emotion_spans(text, tokens, neg_terms.keys())
     if pos_spans or neg_spans:
-        # 2026-08-16 M5：否定判定改走共享层 negation.is_flipped
+        # 否定判定走共享层 negation.is_flipped
         # （句边界 + longest-match 去重 + token 级距离约束 + hard/modal/double 分类）
         spec = load_negation_spec()
         for start, _end, _term in pos_spans:
@@ -94,7 +94,7 @@ def compute_paragraph_metric_counts(
     imagery = lexicons.get("imagery") or []
     sensory_hit_count = count_mixed_hits(text, tokens, sensory)
     imagery_hit_count = count_mixed_hits(text, tokens, imagery)
-    # 2026-09-05 C 批：身体反应转喻（皱眉/颤抖等，情绪的体态信号；独立计数
+    # 身体反应转喻（皱眉/颤抖等，情绪的体态信号；独立计数
     # 不进 positive/negative——体态词极性中立，只作情绪信号覆盖率口径）
     body_reaction = lexicons.get("body_reaction") or []
     body_reaction_hit_count = count_mixed_hits(text, tokens, body_reaction)

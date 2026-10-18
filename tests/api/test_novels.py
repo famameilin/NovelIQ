@@ -1,14 +1,4 @@
-"""
-API 小说端点测试
-
-修改时间: 2026-04-05
-任务: fix-test-data-pollution
-修改内容: 使用 api_client fixture 确保测试使用测试数据库
-
-修改时间: 2026-04-22
-任务: fix-novel-task-delete-consistency
-修改内容: 补充小说级联删除与活动任务拦截回归测试
-"""
+"""API 小说端点测试"""
 
 from __future__ import annotations
 
@@ -26,13 +16,9 @@ from tests.support.chapter_annotation_helpers import character_fact, persist_cha
 
 
 def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
-    """
-    为测试小说删除补一条已完成任务及其文件产物。
+    """为测试小说删除补一条已完成任务及其文件产物。
 
-    创建时间: 2026-04-22
-    任务: fix-novel-task-delete-consistency
-    说明: 这里构造 chapters/global_context/graph/chapter_annotations 与日志导出文件，
-          用于验证 novel 级删除会不会把 task 侧残留一起清掉。
+    这里构造 chapters/global_context/graph/chapter_annotations 与日志导出文件，
     """
     task_id = run_id[:8]
 
@@ -54,7 +40,7 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
             {"chapter_id": 1, "text": "测试分块", "len": 4, "run_id": run_id},
         )
         session.flush()
-        # 2026-08-18 段落事实源：证据派生要求章节存在段落行
+        # 段落事实源：证据派生要求章节存在段落行
         ParagraphRepository(session).insert_paragraphs(
             run_id,
             [

@@ -1,7 +1,7 @@
-"""诊断简洁索引与实际包含端点，不改变原文绑定和业务写入校验（2026-10-16 全库 3NF 改造）
+"""诊断简洁索引与实际包含端点，不改变原文绑定和业务写入校验
 
 夹具自足：真实标注来源链直接写入章级声明（event_declarations + 证据/参与者关系行），
-读取面经 build_diagnosis_tools 的真实工具原形；不依赖其它切片的旧写面夹具。
+读取面经 build_diagnosis_tools 的真实工具原形。
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from tests.support.event_tree_fixtures import (
     first_paragraph,
     identity_every_declaration,
     publish_draft,
+    report_case_anchor,
 )
 
 LONG_SUMMARY = "顾霜寻路并点灯。" * 200
@@ -34,8 +35,8 @@ LONG_SUMMARY = "顾霜寻路并点灯。" * 200
 def declaration_case(db_session):
     """两章级声明的真实来源链与本模块草稿（同章两段声明，各带原文证据）"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻路并点灯。"])
-    session_id, _work_id, execution_id = add_diagnosis_context(db_session, run_id)
-    record_id, _source_work, _source_execution = add_annotation_source(db_session, run_id, 1, role="event")
+    session_id, execution_id = add_diagnosis_context(db_session, run_id)
+    record_id, _source_execution = add_annotation_source(db_session, run_id, 1, role="event")
     paragraph = first_paragraph(db_session, run_id)
     add_declaration(
         db_session,
@@ -61,7 +62,8 @@ def declaration_case(db_session):
     )
     db_session.commit()
     draft = EventOrganizationDraft(db_session, run_id, session_id)
-    draft.work_id = draft.producer_invocation_id = execution_id
+    draft.case_id = report_case_anchor(run_id)
+    draft.producer_invocation_id = execution_id
     return draft
 
 
@@ -136,12 +138,14 @@ def test_saved_nested_event_read_and_rejection_identify_actual_top_level(db_sess
     close_structure(db_session, draft, evidence_paragraph_id=0)
     publish_draft(db_session, case.run_id, draft)
     fresh = EventOrganizationDraft(db_session, case.run_id, case.session_id)
-    fresh.work_id = fresh.producer_invocation_id = case.execution_id
+    fresh.case_id = report_case_anchor(case.run_id)
+    fresh.producer_invocation_id = case.execution_id
     tools = {
         tool.name: tool
         for tool in build_diagnosis_tools(
             db_session,
             case.run_id,
+            role="report",
             organization_draft=fresh,
             execution_id="read-hierarchy",
         )
@@ -258,6 +262,7 @@ async def test_shared_search_embedding_failure_stops_program_before_later_operat
         build_diagnosis_tools(
             draft.session,
             draft.run_id,
+            role="report",
             organization_draft=draft,
             text_search=TextSearchService(draft.session, run_id=draft.run_id, embedding_client=client),
         ),
@@ -287,7 +292,7 @@ async def test_shared_text_argument_rejection_remains_repairable_in_same_program
 def test_diagnosis_reads_survive_interrupted_pipeline_commit(declaration_case, monkeypatch):
     """管线会话提交被打断（PREPARED 中间态）时，诊断读取必须照常工作
 
-    2026-10-17 run 52cbb1ac 实证：诊断域曾与管线会话共用；管线会话被流式 emitter
+    诊断域曾与管线会话共用；管线会话被流式 emitter
     持续 commit，一次提交中途被打断留在 PREPARED 后，read_event 的声明读取抛
     "This session is in 'prepared' state" 并被伪装成工具依赖故障。诊断域必须经
     open_diagnosis_session 独立成会话：开工先提交管线会话，此后读写与发布不依赖

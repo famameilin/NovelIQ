@@ -157,7 +157,7 @@ describe("useAnalysisStatus", () => {
     render(<HookHarness novelId="novel-1" taskId="task-late" />);
     await waitFor(() => expect(getTaskStatusMock).toHaveBeenCalled());
     vi.useFakeTimers();
-    const base = {stage: "annotate", chapter_id: 1, sub_stage: "event", work_id: "work", stream_id: "same"};
+    const base = {stage: "annotate", chapter_id: 1, sub_stage: "event", stream_id: "same"};
     emitSSEEvent("work_reset", {...base, invocation_id: "old"});
     emitSSEEvent("work_reset", {...base, invocation_id: "new"});
     streamStoreState.resetWorkOutput.mockClear();

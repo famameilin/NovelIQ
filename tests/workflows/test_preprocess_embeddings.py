@@ -19,11 +19,8 @@ from tests.support.analysis_factories import insert_test_novel
 
 
 def _insert_chapter_texts_and_paragraphs(session, chunks: list[Chunk]) -> tuple[str, str]:
-    """
-    创建 run 并写入 chunks 与段落事实源
+    """创建 run 并写入 chunks 与段落事实源
 
-    修改说明: 2026-08-14 段落事实源改造后 embedding 从 paragraphs 表读取，
-    单测必须先落段落行（split_chunk_paragraphs 生成），再调用 embedding 生成函数；
     chunks 外键关联 analysis_runs，需要先建 run 记录
 
     Returns:
@@ -48,7 +45,7 @@ def _insert_chapter_texts_and_paragraphs(session, chunks: list[Chunk]) -> tuple[
 
 @pytest.mark.asyncio
 async def test_generate_paragraph_embeddings_uses_probed_dimension_for_schema_and_insert(db_session) -> None:
-    """2026-09-10 维度不再是配置：建表列宽与行溯源都取探针锁定的实测值"""
+    """维度不再是配置：建表列宽与行溯源都取探针锁定的实测值"""
     chunks = [
         Chunk(index=7, text="第一段文本\n\n第二段文本", start=0, end=11, chapter_id=1),
     ]
@@ -77,7 +74,7 @@ async def test_generate_paragraph_embeddings_uses_probed_dimension_for_schema_an
     # 建表列宽 = 探测值
     mock_ensure_paragraph_schema.assert_called_once()
     assert mock_ensure_paragraph_schema.call_args.args[1] == 1024
-    # 二期段落化：embedding 行只携带 paragraph_id + 向量（身份以 paragraphs 表为准）
+    # embedding 行只携带 paragraph_id + 向量（身份以 paragraphs 表为准）
     paragraph_rows = mock_insert_paragraph_embeddings.call_args.args[2]
     assert [row.paragraph_id for row in paragraph_rows] == [0, 1]
     assert [row.embedding_vector for row in paragraph_rows] == [[0.5, 0.6], [0.7, 0.8]]
@@ -87,8 +84,7 @@ async def test_generate_paragraph_embeddings_uses_probed_dimension_for_schema_an
 
 @pytest.mark.asyncio
 async def test_generate_paragraph_embeddings_skips_when_no_paragraphs(db_session) -> None:
-    """
-    2026-08-14 用于验证段落事实源为空时直接跳过 embedding 生成，
+    """验证段落事实源为空时直接跳过 embedding 生成，
     不初始化 embedding client
     """
     mock_client = MagicMock()
@@ -179,11 +175,9 @@ async def test_generate_paragraph_embedding_rows_emits_batch_progress(db_session
 
 
 def test_split_paragraphs_returns_chunk_local_offsets() -> None:
-    """
-    自然段按空行切分，不再按单行切分
+    """自然段按空行切分，不再按单行切分
 
-    修改说明: 2026-08-14 split_paragraphs 返回 ParagraphSpan（不再是 (start, end, text) 三元组），
-    断言改为属性访问
+    split_paragraphs 返回 ParagraphSpan（不再是 (start, end, text) 三元组），
     """
     chunk = Chunk(index=1, text=" 第一段。\n\n第二段。  ", start=100, end=120, chapter_id=1)
 
@@ -196,7 +190,7 @@ def test_split_paragraphs_returns_chunk_local_offsets() -> None:
 
 
 def test_split_paragraphs_single_newline_is_paragraph_boundary() -> None:
-    """2026-08-08 用于验证单换行也算段落边界，每行一个自然段"""
+    """验证单换行也算段落边界，每行一个自然段"""
     paragraphs = split_paragraphs("第一段。\n第二段。")
     assert [(p.local_start_char, p.local_end_char, p.text) for p in paragraphs] == [
         (0, 4, "第一段。"),
@@ -215,8 +209,7 @@ def test_split_paragraphs_blank_lines_do_not_produce_empty_paragraphs() -> None:
 
 
 def test_split_paragraphs_splits_oversized_paragraph_at_sentence_boundaries() -> None:
-    """
-    2026-08-08 用于验证无空行分隔的超长章节按句子边界切分，
+    """验证无空行分隔的超长章节按句子边界切分，
     单段不超过 embedding 服务物理 batch 上限
     """
     text = ("第一句。" * 500) + "第二句。" * 200
@@ -230,7 +223,7 @@ def test_split_paragraphs_splits_oversized_paragraph_at_sentence_boundaries() ->
 
 
 def test_split_paragraphs_oversized_without_sentence_boundaries_falls_back_hard_cut() -> None:
-    """2026-08-08 用于验证无句子边界可用的超长段落退化为固定字数硬切"""
+    """验证无句子边界可用的超长段落退化为固定字数硬切"""
     text = "字" * 4000
     paragraphs = split_paragraphs(text)
 

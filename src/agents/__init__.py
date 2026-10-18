@@ -25,7 +25,7 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
-    """2026-08-05 用于按需加载 Agent 公共出口并避免存储层导入形成环"""
+    """用于按需加载 Agent 公共出口并避免存储层导入形成环"""
     if name in _ANNOTATION_EXPORTS:
         return getattr(import_module("src.agents.annotation"), name)
     if name in _DIAGNOSIS_EXPORTS:

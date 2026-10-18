@@ -1,14 +1,4 @@
-"""
-测试结果 API
-
-修改时间: 2026-03-16
-任务: postgresql-migration-cleanup
-修改内容: 更新测试以匹配当前API行为（返回空数据而非错误）
-
-修改时间: 2026-04-05
-任务: fix-test-data-pollution
-修改内容: 使用 api_client fixture 确保测试使用测试数据库
-"""
+"""测试结果 API"""
 
 import tempfile
 import uuid
@@ -43,17 +33,13 @@ class TestResults:
             assert response.json()["error_type"] == "GraphReadinessError"
 
     def test_get_results_not_found(self, api_client: TestClient):
-        """
-        测试获取不存在任务的结果
+        """测试获取不存在任务的结果
 
-        2026-03-13: 修改，任务refactor-api-layer-functions
-        修改内容: get_results端点会先检查任务是否存在，不存在返回404
+        修改，任务refactor-api-layer-functions
 
-        2026-03-18: 修改，修复API参数问题
-        修改内容: 将task_id改为run_id，使用完整UUID查询
+        修改，修复API参数问题
 
-        2026-03-19: 修改，任务API接口参数统一优化
-        修改内容: 将run_id参数改回task_id，使用8位短UUID
+        修改，任务API接口参数统一优化
         """
         response = api_client.get("/api/novels/nonexistent/results?task_id=nonexist")
         assert response.status_code == 404

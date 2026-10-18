@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.event_trees.organization import ConflictClaim, OrganizationEvidence
+from src.event_trees.organization import ConflictClaim, NarrativeDescription, NarrativeTitle, OrganizationEvidence
 
 
 class WriteItem(BaseModel):
@@ -107,8 +107,8 @@ class ArcItem(WriteItem):
     operation: Literal["arc"]
     key: str
     kind: Literal["main", "subplot"]
-    title: str
-    objective: str
+    title: NarrativeTitle
+    objective: NarrativeDescription
     role: str
     reason: str
     evidence: list[OrganizationEvidence]
@@ -127,8 +127,8 @@ class ArcLinkItem(WriteItem):
 class OutcomeItem(WriteItem):
     operation: Literal["outcome"]
     key: str
-    title: str
-    description: str
+    title: NarrativeTitle
+    description: NarrativeDescription
     evidence: list[OrganizationEvidence]
 
 

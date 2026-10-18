@@ -1,9 +1,8 @@
-"""
-聚合质量门测试（2026-08-14 M8b 段落化重写）
+"""聚合质量门测试（段落化重写）
 
 chunk_style 链下线后，imagery 完整性按章节从段落指标充分统计量聚合判定：
-章 token 为 0 视为缺失（不通过），零命中的章不算质量错误（§15.5）。
-zero 密度口径质量门（_build_lexical_curve_quality_report）按 §15.5 移除。
+章 token 为 0 视为缺失（不通过），零命中的章不算质量错误。
+zero 密度口径质量门（_build_lexical_curve_quality_report）已移除。
 """
 
 import uuid
@@ -93,7 +92,7 @@ def test_build_quality_gate_report_flags_null_chunk_cultures(db_session) -> None
 
 
 def test_build_quality_gate_report_does_not_flag_zero_density_chunks(db_session) -> None:
-    """零命中的章属于有效观测，不算质量错误（§15.5）；全书无 imagery 数据则存在性检查不通过"""
+    """零命中的章属于有效观测，不算质量错误；全书无 imagery 数据则存在性检查不通过"""
     run_id = _create_run_with_paragraph_metrics(db_session, token_counts=[10, 10])
     agg_result = AggregateResult(
         language_style={"tone_distribution": {"neutral": 1.0}},
@@ -107,7 +106,7 @@ def test_build_quality_gate_report_does_not_flag_zero_density_chunks(db_session)
 
 
 def test_build_quality_gate_report_no_rows_is_not_a_pass(db_session) -> None:
-    """2026-08-13 P2-3 无段落指标数据时质量门不通过（保守：缺数据=缺陷）"""
+    """无段落指标数据时质量门不通过（保守：缺数据=缺陷）"""
     novel_id = uuid.uuid4().hex[:8]
     insert_test_novel(novel_id, session=db_session)
     run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
@@ -131,13 +130,13 @@ def test_build_quality_gate_report_handles_missing_fields(db_session) -> None:
 
     assert report["tone_distribution_non_empty_rate"] == 0.0
     assert report["imagery_density_non_null_rate"] == 0.0
-    # 2026-08-13 P2-3 无 imagery 数据按"不通过"处理（保守）：0/0 不等于达标
+    # 无 imagery 数据按"不通过"处理（保守）：0/0 不等于达标
     assert report["imagery_lexicon_null_chapter_ratio"] == 1.0
     assert report["imagery_lexicon_null_chapter_ids"] == []
 
 
 def test_build_quality_gate_report_counts_chapters_without_metric_rows(db_session) -> None:
-    """2026-08-15 漏检修复：完全没有指标行的章必须进入分母并计为缺失"""
+    """完全没有指标行的章必须进入分母并计为缺失"""
     from dataclasses import replace
 
     from src.storage.repositories import ChapterRepository

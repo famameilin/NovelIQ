@@ -13,9 +13,7 @@ from src.model_pool.configuration import load_task_config
 
 class TestTaskModelConfigFromEnv(unittest.TestCase):
     def test_from_env_with_all_values(self) -> None:
-        """
-        2026-08-08 用于验证 Settings 从平铺模型变量加载连接信息
-        """
+        """验证 Settings 从平铺模型变量加载连接信息"""
 
         env_vars = {
             "MODEL_POOL": json.dumps(

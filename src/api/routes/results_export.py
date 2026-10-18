@@ -1,7 +1,7 @@
 """
 分析结果导出路由
 
-说明: 完整分析结果导出到 outputs/*.json（复盘与测试用）；数据装配在
+完整分析结果导出到 outputs/*.json（复盘与测试用）；数据装配在
 src/api/services/results_export_service.py，本模块只做依赖注入与响应组装。
 """
 
@@ -30,7 +30,7 @@ from src.event_trees.read.organization import RunRequiresRebuildError
 from src.storage.repositories import AnnotationRepository, ChapterRepository, StatsRepository
 from src.workflows.novels import NovelService
 
-# 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
+# tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
 
 

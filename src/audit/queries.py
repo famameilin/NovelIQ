@@ -1,10 +1,8 @@
 """审计查询：用量统计、覆盖缺口与 Agent 回合读投影；只统计实际请求事实
 
-2026-10-16 全库 3NF 改造：审计事实全在 model_calls / agent_tool_calls 宽表上。
-run 内调用由两条真实归属路径取得——work 尝试执行→标注 work（annotation_run），
-诊断执行→work→整轮 session（session_run）；非 Agent 调用按 standalone_* 上下文列取。
-用量分项与供应商实报总量同列区分，total_tokens 优先实报、缺失才按分项投影；
-五类计时为具名列，turn_ms 是 model_ms + tool_wall_ms 的读取投影。
+审计事实全在 model_calls / agent_tool_calls 宽表上：run 内调用由执行的直接
+归属取得，非 Agent 调用按 standalone_* 上下文列取。total_tokens 优先供应商
+实报、缺失才按分项投影；turn_ms 是 model_ms + tool_wall_ms 的读取投影。
 """
 
 from __future__ import annotations
@@ -14,12 +12,13 @@ from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import CompoundSelect, Select, func, literal, select, union_all
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from src.audit.documents import decode_document, decode_text_document
-from src.storage.models import AgentToolCall, Execution, ModelCall, WorkItem
+from src.storage.models import AgentToolCall, Execution, ModelCall
+from src.storage.models.work import ANNOTATION_ROLES, DIAGNOSIS_ROLES
 
-# Agent 调用的计账桶由 work 身份唯一决定（不再逐行复制 task_type/call_type）
+# Agent 调用的计账桶由执行角色唯一决定（执行行直接携带归属）
 _AGENT_CALL_BUCKETS: dict[str, tuple[str, str]] = {
     "annotation": ("annotation", "agent"),
     "diagnosis": ("diagnosis", "diagnosis"),
@@ -36,27 +35,21 @@ _TIMING_READ_COLUMNS: tuple[tuple[str, str], ...] = (
 
 
 def _annotation_execution_ids(run_id: str) -> Select[Any]:
-    """本 run 标注 work 尝试的 execution_id 选择器（work 身份直接带 annotation_run）"""
-    return (
-        select(Execution.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .where(WorkItem.annotation_run_id == run_id)
+    """本 run 章内标注执行的 execution_id 选择器（执行行直接带 run 与标注角色）"""
+    return select(Execution.execution_id).where(
+        Execution.run_id == run_id, Execution.role.in_(ANNOTATION_ROLES)
     )
 
 
 def _diagnosis_execution_ids(run_id: str) -> Select[Any]:
-    """本 run 诊断 work 尝试的 execution_id 选择器（经 work→整轮 session 归属）"""
-    session_execution = aliased(Execution)
-    return (
-        select(Execution.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .join(session_execution, session_execution.execution_id == WorkItem.diagnosis_session_id)
-        .where(session_execution.session_run_id == run_id)
+    """本 run 诊断执行（案例/报告角色）的 execution_id 选择器（执行行直接带 run）"""
+    return select(Execution.execution_id).where(
+        Execution.run_id == run_id, Execution.role.in_(DIAGNOSIS_ROLES)
     )
 
 
 def run_agent_execution_ids(run_id: str) -> Select[tuple[str]]:
-    """本 run 内 Agent 执行的 execution_id 选择器（标注/诊断两条真实归属路径）"""
+    """本 run 内 Agent 执行的 execution_id 选择器（两类执行归属的直接并集）"""
     return cast(
         "Select[tuple[str]]", _annotation_execution_ids(run_id).union(_diagnosis_execution_ids(run_id))
     )
@@ -141,9 +134,7 @@ def fetch_token_usage_stats(session: Session, run_id: str) -> dict[str, Any]:
     by_call_type = _fetch_usage_by_call_type(session, run_id)
     by_model = _fetch_usage_by_model(session, run_id)
     coverage_gaps = _detect_token_coverage_gaps(session, run_id)
-    # 这里的 estimated 表示“整套 token 统计只能作为近似成本信号”，
-    # 并不强制每一条记录都来自本地估算；像 embedding 这类 provider 能稳定返回 usage 的链路，
-    # 仍然优先复用实报值，避免为了统一字面口径反而丢掉更好的原始信息
+    # estimated 表示整套 token 统计只作近似成本信号，单条记录仍优先复用 provider 实报值
     calls = _usage_calls(run_id)
     sources = set(
         session.execute(
@@ -180,7 +171,7 @@ def _agent_call_columns(task_type: str, call_type: str) -> list[Any]:
 
 
 def _annotation_calls(run_id: str) -> Select[Any]:
-    """本 run 的标注 Agent 调用（执行→真实 work 的 annotation_run 归属）"""
+    """本 run 的标注 Agent 调用（执行行直接带 run 与标注角色）"""
     task_type, call_type = _AGENT_CALL_BUCKETS["annotation"]
     return select(*_agent_call_columns(task_type, call_type)).where(
         ModelCall.execution_id.in_(_annotation_execution_ids(run_id))
@@ -188,7 +179,7 @@ def _annotation_calls(run_id: str) -> Select[Any]:
 
 
 def _diagnosis_calls(run_id: str) -> Select[Any]:
-    """本 run 的诊断 Agent 调用（执行→work→整轮 session 的真实归属）"""
+    """本 run 的诊断 Agent 调用（执行行直接带 run 与诊断角色）"""
     task_type, call_type = _AGENT_CALL_BUCKETS["diagnosis"]
     return select(*_agent_call_columns(task_type, call_type)).where(
         ModelCall.execution_id.in_(_diagnosis_execution_ids(run_id))
@@ -196,7 +187,7 @@ def _diagnosis_calls(run_id: str) -> Select[Any]:
 
 
 def _agent_calls(run_id: str) -> CompoundSelect:
-    """本 run 的 Agent 模型调用（标注与诊断两条路径各自的真实执行归属）"""
+    """本 run 的 Agent 模型调用（标注与诊断两类执行角色各自的直接归属）"""
     return union_all(_annotation_calls(run_id), _diagnosis_calls(run_id))
 
 
@@ -273,7 +264,7 @@ def _fetch_usage_by_task(session: Session, run_id: str) -> dict[str, Any]:
     aggregated: dict[str, dict[str, int]] = {}
     for row in result:
         bucket = aggregated.setdefault(row.task_type, {"call_count": 0, "total_tokens": 0})
-        # 不要再用 `row.count` 这类名字，mypy 会把它当成序列方法而不是 SQL 列
+        # 列名不能用 count：mypy 会把它当成序列方法而不是 SQL 列
         bucket["call_count"] += int(row.call_count or 0)
         bucket["total_tokens"] += int(row.total_tokens or 0)
     return aggregated
@@ -335,8 +326,7 @@ def _detect_token_coverage_gaps(
 ) -> list[str]:
     """找出计账口径不完整的 Agent 调用桶
 
-    宽表落库后缺口有三类：尚未收口的 running 调用、没有用量分项的行、
-    以及只能本地估算（非供应商实报）的行。
+    缺口三类：尚未收口的 running 调用、没有用量分项的行、只能本地估算的行。
     """
     calls = _agent_calls(run_id).subquery("agent_calls")
     gaps: set[str] = set()
@@ -368,11 +358,11 @@ def fetch_agent_turns(session: Session, run_id: str) -> list[AuditedTurn]:
         return []
     execution_ids = {str(call.execution_id) for call in calls}
     annotation_executions = set(
-        session.execute(
-            select(Execution.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(Execution.execution_id.in_(execution_ids), WorkItem.annotation_run_id.is_not(None))
-        ).scalars()
+        session.scalars(
+            select(Execution.execution_id).where(
+                Execution.execution_id.in_(execution_ids), Execution.role.in_(ANNOTATION_ROLES)
+            )
+        )
     )
     turns: list[AuditedTurn] = []
     for call in calls:

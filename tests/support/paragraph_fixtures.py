@@ -1,5 +1,4 @@
-"""
-段落级 API 测试夹具（paragraph-curves / chapter-metrics 端点）
+"""段落级 API 测试夹具（paragraph-curves / chapter-metrics 端点）
 
 提供：completed run + 一章一个 chunk 的原文、手工 ParagraphSpan/指标/曲线行、
 以及最小章节标注（agent-semantic-v2 合同）。
@@ -207,7 +206,7 @@ def insert_chapter_annotation(
     pivot_moment: bool = False,
     cliffhanger: bool = False,
 ) -> None:
-    """写入单章最小章节标注（agent-semantic-v2 合同；2026-09-19 章即块拍平）"""
+    """写入单章最小章节标注（agent-semantic-v2 合同； 章即块拍平）"""
     annotation = BoundChapterAnnotation(
         metrics=ChapterMetricsInput(
             summary=f"章节 {chapter_id} 摘要",

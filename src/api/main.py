@@ -33,8 +33,7 @@ from src.workflows.startup_recovery import recover_orphaned_runs, resume_pending
 async def lifespan(app: FastAPI):
     logger.info("FastAPI application starting up...")
 
-    # 当前仓库以最新 schema 为唯一真相，启动时只初始化缺失表，
-    # 其中 schema guard 失败必须直接阻断启动，不能被误记成“僵尸任务清理失败”
+    # 启动只初始化缺失表；schema guard 失败必须直接阻断启动
     from src.storage.db import init_db
 
     init_db()
@@ -44,8 +43,7 @@ async def lifespan(app: FastAPI):
 
     event_manager.configure_outbox(SseMessageRepository(lambda: get_session_factory()()))
 
-    # 真正允许降级的只有重启遗留任务收口链路；
-    # 即便这里失败，也不应掩盖数据库初始化阶段的结构性错误
+    # 只有重启遗留任务收口链路允许降级失败
     try:
         from src.api.dependencies import get_task_manager, get_task_service
 
@@ -73,9 +71,8 @@ async def lifespan(app: FastAPI):
         try:
             from src.sse.manager import event_manager
 
-            # 正常应用 shutdown 不能把仍在运行的分析任务收口成“用户取消”
-            # TaskManager 的运行态缓存仅供当前进程使用，生产停服时由进程退出自然结束；
-            # 测试里的单例清理由 fixture 显式调用 reset_for_testing() 处理
+            # 应用 shutdown 不把仍在运行的分析任务收口成“用户取消”
+            # TaskManager 运行态缓存仅供当前进程使用；测试单例由 fixture 显式调用 reset_for_testing() 清理
             await event_manager.shutdown()
         except Exception as exc:
             logger.warning(f"Failed to cleanly shut down runtime singletons: {exc}")
@@ -104,11 +101,7 @@ register_middlewares(app)
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """
-    健康检查端点
-
-    说明: 检查数据库连接状态，异常时返回 503
-    """
+    """健康检查端点：检查数据库连接状态，异常时返回 503"""
     from src.storage.db import get_pool_status, get_session
 
     logger.debug("Health check endpoint called")
@@ -125,8 +118,7 @@ async def health_check():
             "pool": pool_status,
         }
     except Exception as e:
-        # 2026-08-13 P2：503 body 不得透传内部异常原文（可能包含连接串/堆栈细节），
-        # 错误详情只写日志，对外返回通用文案
+        # 503 body 不得透传内部异常原文（可能含连接串/堆栈细节），错误详情只写日志，对外返回通用文案
         logger.error(f"Health check failed: {e}")
         return JSONResponse(
             status_code=503,

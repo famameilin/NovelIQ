@@ -22,7 +22,7 @@ def parse_lexicon_term(line: str) -> str:
     """
     从纯文本或加权词表行解析词条
 
-    说明: 统一处理空行、整行/行内注释和 "词条	权重" 格式，供 lexicons 与 metrics 共用
+    统一处理空行、整行/行内注释和 "词条	权重" 格式，供 lexicons 与 metrics 共用
     """
     cleaned = line.strip()
     if not cleaned or cleaned.startswith("#"):
@@ -33,8 +33,6 @@ def parse_lexicon_term(line: str) -> str:
 def load_lexicon_terms(path: Path) -> list[str]:
     """
     加载词表文件中的去重词条
-
-    说明: 抽出纯文本词表加载逻辑，避免 registry 与 loader 各自维护解析细节
     """
     items: list[str] = []
     seen: set[str] = set()
@@ -49,8 +47,7 @@ def load_lexicon_terms(path: Path) -> list[str]:
 def parse_semantic_category_lexicon(file_path: str) -> dict[str, list[str]]:
     """解析语义类别词表：分节标题给类别、标题后每行一个词条
 
-    说明: 与加权词表解析同族，从 metrics 下沉到公共层，切断 lexicons -> metrics 的
-    反向依赖；类别名经 config.constants 的映射表翻译成内部 key。
+    类别名经 config.constants 的映射表翻译成内部 key。
     """
     categories: dict[str, list[str]] = {}
     current_category: str | None = None

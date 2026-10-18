@@ -2,12 +2,6 @@
 章节标注 Agent 语义词表：枚举、Literal 取值域、实体类型组与闭合关系目录
 """
 
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：schema.py 大文件拆分——原枚举/Literal/关系目录段迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；schema.py 对全部符号保留 re-export，
-# 既有导入方零改动。依赖方向：vocabulary ← inputs ← outputs，本模块不反向依赖。
-# 模型可见文案约定沿用 schema 模块头：类 docstring 会进模型可见面，一律按"说明"写。
-
 from __future__ import annotations
 
 import unicodedata
@@ -27,9 +21,8 @@ class NarrativeFunction(StrEnum):
     TURNING_POINT = "转折"
 
 
-# 2026-09-14 写入面重构：本枚举取代旧 PayoffLikelihood，成为伏笔唯一的可能性词表——
-# 根事件的 confidence 与伏笔树根的 strength 共用同一取值域
-# （落库列名 payoff_likelihood 不变，值域从二值扩为三档）。
+# 伏笔唯一的可能性词表：根事件的 confidence 与伏笔树根的 strength 共用同一取值域
+# （落库列名 payoff_likelihood）。
 class Confidence(StrEnum):
     """伏笔的可能性档位
 
@@ -42,8 +35,6 @@ class Confidence(StrEnum):
     LOW = "low"
 
 
-# 2026-09-11 并入"见证者"：模型在 narrative_role 槽位写"见证者"的实测失败 10 次，
-# 旁观/见证类参与者确有人物功能语义，堵在枚举外只产生解码返工。
 class RoleFunction(StrEnum):
     """人物在当前叙事动作里承担的功能
 
@@ -74,11 +65,6 @@ class DialogueVerdict(StrEnum):
     NOT_DIALOGUE = "not_dialogue"
 
 
-# 2026-09-11 扩表：run e84339d1 实测 13 次 tone 失败全部是模型自造词，8 值词表与自然表达
-# 系统性错配；按实测高频词并入并加「其他」兜底。
-# 2026-09-14 二次扩表：恭敬×4（师徒/拜谒高频，22 值无敬档）、戏谑/调侃（嘲讽只覆盖贬义讥讽、
-# 缺亲昵玩笑反差档）为真词表缺口；其余拒词（苦涩/痛苦/低沉→悲伤、无赖/憨厚→人设非语气、
-# 坚定/郑重→平静）归既有词或「其他」，不并入以免词表通胀。
 class Tone(StrEnum):
     """说话人当下的语气，闭合词表，没有贴合的用「其他」
 
@@ -112,25 +98,16 @@ class Tone(StrEnum):
 
 
 def tone_catalog_text() -> str:
-    """2026-09-11 用于渲染 Agent 可见的语气闭合枚举全表（工具描述与报错同源）"""
+    """渲染 Agent 可见的语气闭合枚举全表（工具描述与报错同源）"""
     return "/".join(member.value for member in Tone)
 
 
-# 2026-09-11 语气词整表：emotion 分值字段拒绝语气词时按本表给出纠错信息
+# 语气词整表：emotion 分值字段拒绝语气词时按本表给出纠错信息
 _TONE_CHINESE_WORDS = frozenset(member.value for member in Tone)
 
 
-# 2026-09-13 tone 严格口径：枚举外的值一律拒绝、不映射不放行；枚举含「其他」兜底，
-# 没有贴合词时用它。run 431a66d8 实测 10 次 tone 拒绝（委屈/严厉/平和/调侃/温柔/激动）
-# 全部是模型自然表达，被拒后逐条补写约多花 2 轮——这是闭合词表的既有代价，
+# tone 严格口径：枚举外的值一律拒绝、不映射不放行；枚举含「其他」兜底，
 # 拒绝回执必须给出全词表与「其他」指引，让模型一次就能自纠。
-# 2026-09-14 写者侧 tone 恢复真 enum 参数（Tone | None）：闭合词表以 enum 进工具 schema，
-# 模型看得到取值域（预防面），越界值由 schema 层拒绝、记录级转换器翻成
-# record/field/code/expected 回执（含全词表与「其他」指引），与别的枚举参数同一条路径。
-
-
-# 2026-10-04 合同由"缺失/越界即拒"改"缺省归一"（run 08f9ba42 审计：participants 族
-# 拒绝 482 次=全部被拒 53%，且是子代理盲发死循环的唯一燃料）。两条生产路径共用。
 ROLE_FUNCTION_ALIASES: dict[str, str] = {
     "主角": "主体",
     "发起者": "主体",
@@ -187,7 +164,7 @@ def clamp_emotion_score(value: object) -> int | None:
 
 
 class RelationChangeKind(StrEnum):
-    """2026-08-07 用于约束关系事实的生命周期变化（系统内部、持久化与 API 使用的英文值域）"""
+    """约束关系事实的生命周期变化（系统内部、持久化与 API 使用的英文值域）"""
 
     ASSERT = "assert"
     REINFORCE = "reinforce"
@@ -250,7 +227,7 @@ _POSITIONED_ENTITY_TYPES: tuple[EntityType, ...] = (
 
 
 class RelationDefinition(TypedDict):
-    """2026-08-07 用于集中定义关系方向端点类型和关系语义"""
+    """集中定义关系方向端点类型和关系语义"""
 
     directionality: Directionality
     semantics: RelationSemantics
@@ -338,7 +315,7 @@ _DIRECTION_LABEL: dict[str, str] = {"directed": "单向", "bidirectional": "双�
 
 
 def relation_catalog_text() -> str:
-    """2026-08-11 用于渲染 Agent 可见的闭合关系目录（方向/语义/端点类型）"""
+    """渲染 Agent 可见的闭合关系目录（方向/语义/端点类型）"""
     lines: list[str] = []
     for relation_type, definition in RELATION_DEFINITIONS.items():
         direction = _DIRECTION_LABEL[definition["directionality"]]

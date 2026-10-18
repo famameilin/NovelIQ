@@ -1,15 +1,10 @@
-"""
-段落曲线响应模型
-
-说明: 自 src/api/models/responses.py 拆出段落曲线与情绪趋势窗口响应模型
-（设计文档《章节粒度分析指标重设计》§13.1 展示层），字段与语义保持不变。
-"""
+"""段落曲线与情绪趋势窗口响应模型"""
 
 from pydantic import BaseModel
 
 
 class ParagraphCurvePoint(BaseModel):
-    """段落曲线点（设计文档《章节粒度分析指标重设计》§13.1）"""
+    """段落曲线点"""
 
     paragraph_id: int
     chapter_id: int
@@ -28,10 +23,10 @@ class ParagraphCurvePoint(BaseModel):
 
 
 class EmotionTrendWindow(BaseModel):
-    """情绪趋势窗口（§13.1 展示层：缩放自适应窗口聚合，由段落充分统计量计算）
+    """情绪趋势窗口（展示层：缩放自适应窗口聚合，由段落充分统计量计算）
 
     - 覆盖率为窗内命中段占比，值域 [0,1]，不受段长稀释
-    - 池化密度为窗内分子/分母聚合（§8.1），禁止等权平均段落密度
+    - 池化密度为窗内分子/分母聚合，禁止等权平均段落密度
     - position 语义与 ParagraphCurvePoint 一致（段落中点 / 全书字符数）
     """
 

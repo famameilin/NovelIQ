@@ -1,13 +1,6 @@
 """
-章节内 subagent 会话图：程序执行、结束请求与程序完整性检查
+章节内 agent 会话图：程序执行、结束请求与程序完整性检查
 """
-
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：graph.py 大文件拆分——subagent 图（_route_after_subagent_agent /
-# build_subagent_graph）迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；agent 节点与批执行核心分别复用
-# graph._build_agent_node 与 tool_batch._build_tool_batch_node，graph.py 保留
-# build_subagent_graph 的 re-export，既有导入方零改动。
 
 from __future__ import annotations
 
@@ -26,10 +19,10 @@ if TYPE_CHECKING:
     from src.agents.stream import AgentStream
     from src.agents.turn_observer import AgentTurnObserver
 
-    from .subagent_ir import SubagentAnnotation
+    from .agent_ir import AgentAnnotation
 
 
-def _route_after_subagent_agent(state: AnnotationGraphState) -> str:
+def _route_after_agent_agent(state: AnnotationGraphState) -> str:
     """无工具响应也是结束请求，交给程序完整性检查"""
     if state.get("error") or state.get("halted"):
         return "end"
@@ -43,13 +36,13 @@ def _route_after_check(state: AnnotationGraphState) -> str:
     return "end" if state.get("completion_ok") or state.get("error") else "agent"
 
 
-def build_subagent_graph(
+def build_agent_graph(
     llm: Any,
     program_tool: Any,
     finish_tool: Any,
     *,
     ledger: AnnotationToolLedger,
-    subagent: SubagentAnnotation,
+    agent: AgentAnnotation,
     max_iterations: int,
     stream: AgentStream | None = None,
     observer: AgentTurnObserver | None = None,
@@ -110,7 +103,7 @@ def build_subagent_graph(
             "messages": [
                 HumanMessage(
                     content=(
-                        "程序检查到当前 work 仍有缺口，请在同一会话补齐后再次结束：\n"
+                        "程序检查到当前 Agent 仍有缺口，请在同一会话补齐后再次结束：\n"
                         + "\n".join(f"- {item}" for item in missing)
                     )
                 )
@@ -122,7 +115,7 @@ def build_subagent_graph(
     graph.add_edge(START, "agent")
     graph.add_conditional_edges(
         "agent",
-        _route_after_subagent_agent,
+        _route_after_agent_agent,
         {
             "tool_batch": "tool_batch",
             "check": "check",

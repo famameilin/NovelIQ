@@ -1,4 +1,4 @@
-"""图结构指标与 TextRank 关键词端点测试（赛道 A1/A2/A3）"""
+"""图结构指标与 TextRank 关键词端点测试"""
 
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def test_graph_metrics_returns_pagerank_hits_communities(api_client: TestClient,
 
 
 def test_graph_metrics_accumulates_reverse_relations(monkeypatch) -> None:
-    """2026-08-31 用于验证双向端点进入无向图后累加权重而不是相互覆盖"""
+    """验证双向端点进入无向图后累加权重而不是相互覆盖"""
     snapshot = {
         "nodes": [
             {"name": "甲", "entity_type": "character"},
@@ -94,7 +94,7 @@ def test_graph_metrics_accumulates_reverse_relations(monkeypatch) -> None:
     captured: dict[str, int] = {}
 
     def capture_pagerank(graph, *, weight: str) -> dict[str, float]:
-        """2026-08-31 用于读取 PageRank 收到的规范化无向边权"""
+        """读取 PageRank 收到的规范化无向边权"""
         captured["甲乙"] = int(graph["甲"]["乙"][weight])
         return dict.fromkeys(graph.nodes, 1 / 3)
 

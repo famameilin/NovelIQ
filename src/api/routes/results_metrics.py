@@ -1,9 +1,4 @@
-"""
-聚合指标结果查询路由
-
-说明: 从 src/api/routes/results.py 拆出 metrics/* 域路由（叙事结构/情感/角色/风格/全书波动），
-行为保持不变。
-"""
+"""聚合指标结果查询路由（叙事结构/情感/角色/风格/全书波动）"""
 
 from __future__ import annotations
 
@@ -23,7 +18,7 @@ from src.api.routes.results_common import (
 from src.api.services.metrics_service import MetricsService
 from src.storage.repositories import ChapterRepository, StatsRepository
 
-# 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
+# tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
 
 

@@ -11,13 +11,8 @@ const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const STALE_TIME = 5 * 60 * 1000;
 
 /**
- * 修改原因: 首页白底预备态不应污染业务页 seedColor，组件展示页也不应在首屏先吃到任务主题
- *
- * 修改原因: 新建任务的诊断结果尚未生成时，不能用 DEFAULT_SEED 推导业务页背景色，
- * 否则分析进度页会先切到紫色底；只在拿到有效 theme_color 后才进入任务主题
- *
- * 把动态主题色板应用到 `:root` 的 CSS 变量
- * 当 novel / task 变化时，自动从 diagnosis API 拉取 `theme_color`
+ * 把动态主题色板应用到 `:root` 的 CSS 变量；novel / task 变化时从 diagnosis API 拉取 `theme_color`。
+ * 未拿到有效 theme_color 时保持首页白底预备态，不用 DEFAULT_SEED 推导业务页背景色
  */
 export function useNovelTheme() {
   const { seedColor, isDark, setSeedColor } = useThemeStore();

@@ -1,9 +1,9 @@
-"""语言结构阶段集成测试（run_linguistic，§3.1 B/C 赛道）
+"""语言结构阶段集成测试（run_linguistic）
 
 LTP 推理用 FakeLtpSession 替换（真实 LTP 模型只做模块级验证），
 analyze_paragraph 纯函数路径保持真实；短语匹配与 Word2Vec 全真实。
 
-2026-10-16 3NF 冻结结构：逐段事实落 linguistic_spans（词元/NER/短语三类互斥
+逐段事实落 linguistic_spans（词元/NER/短语三类互斥
 区间）与 linguistic_arcs（dep:*/sdp:*），句式五类计数落 paragraph_features；
 完成事实（linguistic_completed_at/phrase_completed_at）与共享句数落
 paragraph_metrics；run 级 LTP/短语/w2v 合同落 analysis_runs。派生量（词长分组、
@@ -40,7 +40,7 @@ from tests.support.analysis_factories import insert_test_novel
 
 _TEST_TEXTS = ["江湖快意恩仇，刀光剑影之间英雄辈出。", "他叫汤姆去拿外衣，但是天色已晚。"]
 
-#: 3NF 前的并行事实表必须全部退场（本切片的回归护栏）
+#: 旧并行事实表不得存在（本切片的回归护栏）
 _RETRACTED_TABLES = (
     "paragraph_linguistic_completions",
     "paragraph_tokens",
@@ -139,7 +139,7 @@ def _feature_count(db_session, run_id: str, code_prefix: str) -> int:
 
 
 def test_retracted_parallel_tables_are_absent(db_session) -> None:
-    """3NF 冻结结构：语言/主题/向量的旧拆分表与旧宽表不得存在于运行库"""
+    """语言/主题/向量的旧拆分表与旧宽表不得存在于运行库"""
     rows = db_session.execute(
         text(
             "SELECT table_name FROM information_schema.tables "
@@ -252,11 +252,10 @@ class TestRunLinguistic:
 
     @pytest.mark.asyncio()
     async def test_ltp_inference_runs_off_event_loop(self, monkeypatch) -> None:
-        """2026-10-03 回归（run 08f9ba42）：LTP 批推理必须运行在工作线程
+        """LTP 批推理必须运行在工作线程
 
-        LTP 批推理是重 CPU 同步调用，直接在事件循环上跑会冻结整个 API
-        （状态端点/SSE 全部无响应，实证单次 30s 尖峰）。to_thread 后调用
-        线程必须是工作线程而非事件循环主线程。
+        LTP 批推理是重 CPU 同步调用，直接在事件循环上跑会冻结整个 API；
+        to_thread 后调用线程必须是工作线程而非事件循环主线程。
         """
         import threading
 
@@ -280,7 +279,7 @@ class TestRunLinguistic:
 
     @pytest.mark.asyncio()
     async def test_word2vec_enabled_trains_and_writes_contract(self, monkeypatch, tmp_path) -> None:
-        """2026-08-30 用于验证共享 kv 初始化后写入实际来源与 run 私有模型契约"""
+        """验证共享 kv 初始化后写入实际来源与 run 私有模型契约"""
 
         from src.config import settings as _settings
         from src.linguistic import reset_pretrained_cache
@@ -309,7 +308,7 @@ class TestRunLinguistic:
         run_model_dir = tmp_path / "run-models" / self.run_id
 
         def resolve_test_run_model_dir(candidate_run_id: str, kind: str) -> Path:
-            """2026-08-30 用于把工作流 run 模型路径隔离到临时目录"""
+            """把工作流 run 模型路径隔离到临时目录"""
             assert candidate_run_id == self.run_id
             assert kind == "word2vec"
             return run_model_dir
@@ -329,7 +328,7 @@ class TestRunLinguistic:
         model_run = LinguisticRepository(self.db_session).fetch_word2vec_model_run(self.run_id)
         assert model_run is not None
         assert model_run.embedding_dimension == 4
-        # 2026-10-16 3NF：训练参数按 analysis_runs.w2v_* 明确列落库
+        # 训练参数按 analysis_runs.w2v_* 明确列落库
         assert model_run.window_size == _settings.linguistic.word2vec.window
         assert model_run.min_count == 1
         assert model_run.epochs == 1
@@ -447,7 +446,7 @@ class FakeSdpLtpSession:
 
 
 class TestMnegCorrection:
-    """2026-09-05 B 批：mNEG 接管词典否定翻转——paragraph_metrics 回写 + 曲线重算"""
+    """mNEG 接管词典否定翻转——paragraph_metrics 回写 + 曲线重算"""
 
     @pytest.fixture(autouse=True)
     def setup(self, db_session, monkeypatch):
@@ -543,9 +542,9 @@ class TestMnegCorrection:
 
 
 class TestParagraphBoundary:
-    """2026-09-14 段落级监督（按书边界）：自选段标签→段落向量边界→逐段打分回写
+    """段落级监督（按书边界）：自选段标签→段落向量边界→逐段打分回写
 
-    2026-10-16 3NF：标签读 analysis_assessments 的逐段情绪形状（经章节标注产物头
+    标签读 analysis_assessments 的逐段情绪形状（经章节标注产物头
     关联本 run 的标注 work），段落向量读 paragraph_features 的 semantic_vector 行，
     打分回写 paragraph_metrics 的 boundary_*_score_sum 列。
     """
@@ -603,7 +602,10 @@ class TestParagraphBoundary:
         return LinguisticRepository(self.db_session).fetch_linguistic_features(self.run_id)
 
     def _insert_labels(self, labels: list[tuple[int, int]]) -> None:
-        """直接落正式条目行：work_items → executions → chapter_annotations → analysis_assessments"""
+        """直接落正式条目行：executions → chapter_annotations → analysis_assessments
+
+        真实执行（标注角色 + 章 + run）直接携带归属；正式产物头同样落 run/章/角色。
+        """
         from collections import defaultdict
 
         from src.storage.models import (
@@ -611,7 +613,6 @@ class TestParagraphBoundary:
             ChapterAnnotation,
             Execution,
             Paragraph,
-            WorkItem,
         )
 
         chapter_of = {
@@ -626,32 +627,27 @@ class TestParagraphBoundary:
 
         now = datetime.now(UTC).replace(tzinfo=None)
         for chapter_id, chapter_labels in by_chapter.items():
-            work_id = f"work-{self.run_id[:8]}-{chapter_id}"[:64]
             execution_id = uuid.uuid4().hex
             record_id = str(uuid.uuid4())
             self.db_session.add(
-                WorkItem(
-                    work_id=work_id,
-                    role="solo",
-                    annotation_run_id=self.run_id,
-                    annotation_chapter_id=chapter_id,
-                )
-            )
-            self.db_session.flush()  # 明确顺序：work → execution → annotation 头 → 逐段条目
-            self.db_session.add(
                 Execution(
                     execution_id=execution_id,
-                    work_id=work_id,
+                    run_id=self.run_id,
+                    role="annotation",
+                    chapter_id=chapter_id,
                     attempt_number=1,
                     started_at=now,
                     status="success",
                 )
             )
-            self.db_session.flush()
+            self.db_session.flush()  # 明确顺序：execution → annotation 头 → 逐段条目
             self.db_session.add(
                 ChapterAnnotation(
                     record_id=record_id,
                     execution_id=execution_id,
+                    run_id=self.run_id,
+                    chapter_id=chapter_id,
+                    role="annotation",
                     contract_version="test-contract",
                     chapter_consolidation_version="test-consolidation",
                     summary="测试",

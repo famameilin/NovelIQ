@@ -1,7 +1,6 @@
 """章节结构解析的规则常量与阈值
 
-参考 simple_read_pro 的 Config 设计：正则与阈值集中在本模块常量中管理，
-不进入 settings.json。新增规则或调整阈值时修改本文件即可。
+正则与阈值集中在本模块常量中管理，不进入 settings.json。
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ VOLUME_RE = re.compile(
     rf"[ \t]*[：:、.\-—]*[ \t]*(.*)$",
     re.MULTILINE,
 )
-# 章：第一章、第1章、1章、Chapter 1（第? 可选兼容旧格式）
+# 章：第一章、第1章、1章、Chapter 1（第? 可选）
 CHAPTER_RE = re.compile(
     rf"^[ \t]*(第?{_CN_NUMERALS_CLASS}+章|[Cc]hapter[ \t]*\d+)[ \t]*[：:、.\-—]*[ \t]*(.*)$",
     re.MULTILINE,
@@ -60,8 +59,8 @@ EXTRA_RE = re.compile(
     re.MULTILINE,
 )
 # 开篇标题猜测：楔子/序章/前言 等（不含 EXTRA_RE 的章节类词）
-# 2026-08-13 P2：标题形态约束——关键词后仅允许分隔符/空白/短标题内容，
-# 剩余部分不得含句末标点，防止正文段落首行（如「引言：本书讲述了……」）被误当开篇标题
+# 标题形态约束：关键词后仅允许分隔符/空白/短标题内容，
+# 剩余部分不得含句末标点，防止正文段落首行被误当开篇标题
 PRELIMINARY_TITLE_RE = re.compile(
     r"^(楔子|序言|前言|引子|序章|序幕|引言|写在前面|Prologue)"
     r"(?:[ \t]*[：:、.\-—][ \t]*)?([^\n。！？…]*)$",

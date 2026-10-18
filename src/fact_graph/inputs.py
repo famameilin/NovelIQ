@@ -2,12 +2,6 @@
 章节标注 Agent 输入模型：Agent 提交面载荷、章内段落坐标与对话候选
 """
 
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：schema.py 大文件拆分——原输入模型段（EntityInput…DialogueCandidate 等）迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；依赖 schema 的共享件（StrictModel、字段描述
-# 常量、EntityRef、normalize_semantic_text）与 vocabulary 的词表，schema.py 对全部符号
-# 保留 re-export，既有导入方零改动。类 docstring 会进模型可见面，一律按"说明"写。
-
 from __future__ import annotations
 
 import re
@@ -38,7 +32,7 @@ from .vocabulary import (
 
 
 class EntityInput(StrictModel):
-    """2026-08-08 用于提交当前章 明确出现的实体"""
+    """提交当前章 明确出现的实体"""
 
     name: str = Field(min_length=1, description="实体名称（新实体用本章出现的名称，已登记实体用登记名）")
     entity_type: EntityType = Field(
@@ -60,7 +54,7 @@ class EntityInput(StrictModel):
 
     @model_validator(mode="after")
     def normalize_entity(self) -> EntityInput:
-        """2026-08-08 用于规范化实体名称、可选描述和自由标签"""
+        """规范化实体名称、可选描述和自由标签"""
         self.name = normalize_semantic_text(self.name, label="entity.name")
         normalized_tags: list[str] = []
         for tag in self.tags:
@@ -101,14 +95,13 @@ class RelationInput(StrictModel):
 
 
 class EntityDirectoryInput(StrictModel):
-    """2026-08-08 用于提交当前章 出现的全部实体（单列表）"""
+    """提交当前章 出现的全部实体（单列表）"""
 
     entities: list[EntityInput] = Field(default_factory=list)
 
 
-# 2026-09-14 段落级情绪监督：句级口径退役，标签随指标整域提交。
-# 2026-09-18 锚点口径改为"段首可见号"：注入正文每段以 `N：` 开头（N 为块内 1 基顺序号），
-# 标签与 evidence 一律引用该号；落库时再映射回全局 paragraph_id（对持久化无影响）。
+# 段落级情绪监督：标签随指标整域提交；锚点用"段首可见号"（注入正文每段以 `N：` 开头），
+# 标签与 evidence 一律引用该号，落库时再映射回全局 paragraph_id（对持久化无影响）。
 class ParagraphLabelInput(StrictModel):
     """一个段落的情绪标签
 
@@ -120,7 +113,7 @@ class ParagraphLabelInput(StrictModel):
 
 
 class ChapterMetricsInput(StrictModel):
-    """2026-08-07 用于提交当前章 摘要和叙事指标"""
+    """提交当前章 摘要和叙事指标"""
 
     summary: str = Field(min_length=1)
     emotional_valence: int = Field(ge=-2, le=2, description=EMOTION_SCORE_DESCRIPTION)
@@ -134,7 +127,7 @@ class ChapterMetricsInput(StrictModel):
 
     @model_validator(mode="after")
     def normalize_summary(self) -> ChapterMetricsInput:
-        """2026-08-07 用于规范化当前章 摘要；labels 按 paragraph_id 去重（后写覆盖）"""
+        """规范化当前章 摘要；labels 按 paragraph_id 去重（后写覆盖）"""
         self.summary = normalize_semantic_text(self.summary, label="summary")
         deduped: dict[int, ParagraphLabelInput] = {}
         for label in self.labels:
@@ -144,7 +137,7 @@ class ChapterMetricsInput(StrictModel):
 
 
 class DialogueInput(StrictModel):
-    """2026-08-11 用于按候选序号提交对话三态判断"""
+    """按候选序号提交对话三态判断"""
 
     candidate_index: int = Field(
         gt=0, description="候选序号，从 1 开始，与 DialogueCandidates 区块的 candidate_index 一致"
@@ -157,13 +150,13 @@ class DialogueInput(StrictModel):
         default=None,
         description="说话人名称（已登记实体用登记名）；无法确认说话人时留 null",
     )
-    # 2026-09-14 枚举字段本身即拒绝非法词，不再叠函数级校验（越界值由类型报错，
+    # 枚举字段本身即拒绝非法词，不再叠函数级校验（越界值由类型报错，
     # 全词表与「其他」指引由工具层记录级回执给出）
     tone: Tone | None = None
 
     @model_validator(mode="after")
     def validate_dialogue(self) -> DialogueInput:
-        """2026-08-11 用于规范化说话人并约束三态字段组合"""
+        """规范化说话人并约束三态字段组合"""
         if self.verdict == DialogueVerdict.NOT_DIALOGUE:
             if self.speaker is not None or self.tone is not None:
                 raise ValueError("not_dialogue 候选只能提交 candidate_index 和 verdict；speaker/tone 必须为 null")
@@ -177,7 +170,7 @@ class DialogueInput(StrictModel):
 
 
 class TextEvidence(StrictModel):
-    """2026-08-18 用于保存原文段落锚点证据（段落 ID + 字符范围）"""
+    """保存原文段落锚点证据（段落 ID + 字符范围）"""
 
     paragraph_ids: list[int] = Field(min_length=1, description="全局段落 ID 列表")
     char_start: int = Field(ge=0, description="锚点文本在章文本中的起始字符偏移")
@@ -185,7 +178,7 @@ class TextEvidence(StrictModel):
 
     @model_validator(mode="after")
     def validate_span(self) -> TextEvidence:
-        """2026-08-18 用于保证文本证据段落和字符范围具有有效顺序"""
+        """保证文本证据段落和字符范围具有有效顺序"""
         if any(paragraph_id < 0 for paragraph_id in self.paragraph_ids):
             raise ValueError("TextEvidence.paragraph_ids 不能为负数")
         if self.char_end <= self.char_start:
@@ -195,21 +188,21 @@ class TextEvidence(StrictModel):
         return self
 
 
-# 2026-09-18 段首可见号：正文段落若自带 `N：` 前缀则沿用该号，否则按顺序编 1 基号。
+# 段首可见号：正文段落若自带 `N：` 前缀则沿用该号，否则按顺序编 1 基号。
 # 注入、evidence、标签三处共用这一个号码空间；全局 paragraph_id 只留在持久化侧。
 _PARAGRAPH_NUMBER_PREFIX_RE = re.compile(r"^\s*(\d+)\s*：")
 
 
 def paragraph_has_visible_prefix(text: str) -> bool:
-    """2026-09-18 用于判断段落文本是否已自带 `N：` 段首号（注入时避免重复渲染）"""
+    """判断段落文本是否已自带 `N：` 段首号（注入时避免重复渲染）"""
     return _PARAGRAPH_NUMBER_PREFIX_RE.match(text) is not None
 
 
 @dataclass(slots=True)
 class ChapterParagraphInfo:
-    """2026-08-18 用于保存当前 章内段落坐标映射（注入 prompt 标记和派生事件锚点）
+    """保存当前 章内段落坐标映射（注入 prompt 标记和派生事件锚点）
 
-    2026-09-18 锚点口径：模型可见的段落号是"段首可见号"——正文每段以 `N：` 开头
+    模型可见的段落号是"段首可见号"——正文每段以 `N：` 开头
     （正文自带该前缀时沿用前缀里的号，否则按块内顺序编 1 基号）；evidence 与
     write_metrics.labels 都提交这个号，服务端按本映射取段落并映射回全局
     paragraph_id 再落库。三组列表内部仍按 0 基 章内序号索引。
@@ -223,7 +216,7 @@ class ChapterParagraphInfo:
     texts: list[str]
 
     def __post_init__(self) -> None:
-        """2026-08-18 用于校验三组列表长度一致且非空"""
+        """校验三组列表长度一致且非空"""
         n = len(self.paragraph_ids)
         if n == 0:
             raise ValueError("ChapterParagraphInfo 不能为空")
@@ -231,7 +224,7 @@ class ChapterParagraphInfo:
             raise ValueError("paragraph_ids / char_spans / texts 长度不一致")
 
     def visible_ids(self) -> list[int]:
-        """2026-09-18 用于取每段的段首可见号（正文自带 N：前缀时用该号，否则 1 基顺序号）
+        """取每段的段首可见号（正文自带 N：前缀时用该号，否则 1 基顺序号）
 
         自带前缀出现重复号时退回纯 1 基顺序号：号码空间必须一对一，注入的正文
         与 evidence 锚点才不会有歧义。
@@ -245,12 +238,12 @@ class ChapterParagraphInfo:
         return ids
 
     def text_by_visible_id(self) -> dict[int, str]:
-        """2026-09-18 用于取"段首可见号 → 段落文本"映射（evidence/标签按号取段）"""
+        """取"段首可见号 → 段落文本"映射（evidence/标签按号取段）"""
         return dict(zip(self.visible_ids(), self.texts, strict=True))
 
 
 class BoundRelationInput(StrictModel):
-    """2026-08-12 用于通过实体名称提交本章确认存在的闭合类型关系边（内部系统形态）"""
+    """通过实体名称提交本章确认存在的闭合类型关系边（内部系统形态）"""
 
     from_entity: str = Field(min_length=1, description="关系起点实体（图上的登记名称）")
     to_entity: str = Field(min_length=1, description="关系终点实体（图上的登记名称）")
@@ -258,7 +251,7 @@ class BoundRelationInput(StrictModel):
 
     @model_validator(mode="after")
     def normalize_relation(self) -> BoundRelationInput:
-        """2026-08-11 用于规范化关系两端实体名称"""
+        """规范化关系两端实体名称"""
         self.from_entity = normalize_semantic_text(
             self.from_entity,
             label="relation.from_entity",
@@ -273,7 +266,7 @@ class BoundRelationInput(StrictModel):
 
 
 class DialogueCandidate(StrictModel):
-    """2026-08-07 用于系统保存对话候选真实原文和位置"""
+    """系统保存对话候选真实原文和位置"""
 
     candidate_key: str = Field(min_length=1)
     chapter_id: int = Field(gt=0)
@@ -284,7 +277,7 @@ class DialogueCandidate(StrictModel):
 
     @model_validator(mode="after")
     def validate_bounds(self) -> DialogueCandidate:
-        """2026-08-07 用于拒绝倒置或空的系统对话区间"""
+        """拒绝倒置或空的系统对话区间"""
         if self.end <= self.start:
             raise ValueError("dialogue candidate end 必须大于 start")
         return self

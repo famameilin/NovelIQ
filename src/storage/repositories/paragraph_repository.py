@@ -1,25 +1,18 @@
 """
 段落事实源存储与检索
 
-paragraphs 是全文唯一的段落事实源（设计文档《章节粒度分析指标重设计》§5.1），
+paragraphs 是全文唯一的段落事实源，
 本仓储负责段落行的写入（先删后插）、完整性检查与按 run 读取，
-并管理段落级派生数据：paragraph_metrics（原始计数/充分统计量/完成事实，§5.3）、
-paragraph_topics（段落 LDA 主题，§5.4）与 paragraph_features 的曲线平滑行（§5.5）。
+并管理段落级派生数据：paragraph_metrics（原始计数/充分统计量/完成事实）、
+paragraph_topics（段落 LDA 主题）与 paragraph_features 的曲线平滑行。
 
-主题链路按《分析能力扩展路线图》§5.8-5.10：LDA 实际构建列在 analysis_runs.lda_*、
+主题链路：LDA 实际构建列在 analysis_runs.lda_*、
 paragraph_metrics.inference_* 每段一行保存推断状态与 token 分母、
 paragraph_topics 只保存完整 K 维主题权重。
 
-2026-10-02 拆分说明（Trae）：实现迁移至 paragraph/ 子包模块函数
-（rows/writer/reader/metrics_ops/curve_ops/topic_ops，接收 session 参数），
-本模块保留 ParagraphRepository 门面（方法体一行委托）并 re-export
-ParagraphCurveRow/ParagraphMetricRow，44 个导入方零改动。
-
-2026-10-16 全库第三范式改造：paragraphs 只落身份/来源/章内起点/原文，
-local_end_char、global 坐标、char_count 与 token_count 由读取投影得到
-（见 paragraph/reader.py）；ParagraphMetricRow 只保留仍然落列的基础计数，
-功能词/语义类别计数写 paragraph_metrics 的 fw_*/semantic_* 列、表面张力 z 写
-paragraph_features 的 tension_z 行（见 paragraph/writer.py）。
+实现位于 paragraph/ 子包模块函数（rows/writer/reader/metrics_ops/curve_ops/
+topic_ops，接收 session 参数）；本模块保留 ParagraphRepository 门面（方法体
+一行委托）并 re-export ParagraphCurveRow/ParagraphMetricRow。
 """
 
 from __future__ import annotations
@@ -74,8 +67,8 @@ class ParagraphRepository(BaseRepository[Paragraph]):
 
     管理 run 内段落行的批量写入、查询与完整性判定，支持 run_id 过滤
 
-    2026-10-02 拆分说明：方法实现位于 paragraph/ 子包（函数接收 session 参数），
-    本类保留为门面，方法体为一行委托，对外接口与行为不变。
+    实现位于 paragraph/ 子包（函数接收 session 参数），本类保留为门面，
+    方法体为一行委托。
     """
 
     def insert_paragraphs(self, run_id: str, spans: Sequence[ParagraphSpan]) -> int:
@@ -110,7 +103,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         return fetch_paragraph_rows_batch(self.session, run_id, chapter_id=chapter_id, after_id=after_id, limit=limit)
 
     # ------------------------------------------------------------------
-    # paragraph_metrics（§5.3 原始计数与充分统计量）
+    # paragraph_metrics（原始计数与充分统计量）
     # ------------------------------------------------------------------
 
     def insert_paragraph_metrics(self, run_id: str, rows: Sequence[ParagraphMetricRow]) -> int:
@@ -126,11 +119,11 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         return has_paragraph_metrics(self.session, run_id)
 
     def fetch_chapter_metric_aggregates(self, run_id: str) -> list[tuple[int, dict[str, float]]]:
-        """按章聚合段落指标充分统计量（§9.1 分子/分母守恒；char_count 为正文长度投影）"""
+        """按章聚合段落指标充分统计量（分子/分母守恒；char_count 为正文长度投影）"""
         return fetch_chapter_metric_aggregates(self.session, run_id)
 
     # ------------------------------------------------------------------
-    # 主题链路（§5.8 analysis_runs.lda_* / §5.9 paragraph_metrics.inference_* / §5.10 paragraph_topics）
+    # 主题链路（analysis_runs.lda_* / paragraph_metrics.inference_* / paragraph_topics）
     # ------------------------------------------------------------------
 
     def insert_topic_model_run(
@@ -183,11 +176,11 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         return fetch_topic_inference_total(self.session, run_id)
 
     def fetch_chapter_inference_totals(self, run_id: str) -> Sequence[Row]:
-        """按章节返回推断 token 分母（每段一行，§5.11 章节聚合分母）"""
+        """按章节返回推断 token 分母（每段一行，章节聚合分母）"""
         return fetch_chapter_inference_totals(self.session, run_id)
 
     def fetch_topic_emotion_aggregates(self, run_id: str) -> Sequence[Row]:
-        """主题-情感分子分母（§5.11）：net_density 空值段落在 SQL 层同时排除"""
+        """主题-情感分子分母：net_density 空值段落在 SQL 层同时排除"""
         return fetch_topic_emotion_aggregates(self.session, run_id)
 
     def insert_paragraph_topics(
@@ -203,19 +196,19 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         clear_paragraph_topics(self.session, run_id)
 
     def fetch_paragraph_topics_agg(self, run_id: str) -> Sequence[Row]:
-        """全书主题分子：按主题返回 token 加权和（§5.11，禁止对段落等权求和）"""
+        """全书主题分子：按主题返回 token 加权和（禁止对段落等权求和）"""
         return fetch_paragraph_topics_agg(self.session, run_id)
 
     def fetch_chapter_topic_aggregates(self, run_id: str) -> Sequence[Row]:
-        """章节主题分子：按章节返回主题 token 加权和（§5.11）"""
+        """章节主题分子：按章节返回主题 token 加权和"""
         return fetch_chapter_topic_aggregates(self.session, run_id)
 
     def fetch_paragraph_topic_rows(self, run_id: str) -> Sequence[Row]:
-        """段落主题序列数据（§5.11）：段落真实字符位置、章节序列与推断 token 数齐备"""
+        """段落主题序列数据：段落真实字符位置、章节序列与推断 token 数齐备"""
         return fetch_paragraph_topic_rows(self.session, run_id)
 
     # ------------------------------------------------------------------
-    # paragraph_curves（§5.5 段落曲线）
+    # paragraph_curves（段落曲线）
     # ------------------------------------------------------------------
 
     def insert_paragraph_curves(self, run_id: str, rows: Sequence[ParagraphCurveRow]) -> int:

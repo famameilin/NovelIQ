@@ -26,10 +26,7 @@ def _default_distribution(value: Any) -> dict[str, float]:
 def _convert_narrative_structure(
     result: AggregateResult,
 ) -> NarrativeStructureStats | None:
-    """转换叙事结构统计数据
-    说明: 从 _convert_aggregate_result 拆分出来，专门处理叙事结构统计转换。
-    2026-08-14 重命名（§13.3）：event_density 键 → chapter_narrative_function_share。
-    """
+    """转换叙事结构统计数据"""
     if not result.narrative_structure:
         return None
 
@@ -59,10 +56,7 @@ def _convert_narrative_structure(
 def _convert_emotion_stats(
     result: AggregateResult,
 ) -> EmotionStats | None:
-    """转换情感统计数据
-    说明: 从 _convert_aggregate_result 拆分出来，专门处理情感统计转换。
-    2026-08-14 重命名（§13.3）：pivot_moment_density → chapter_pivot_rate。
-    """
+    """转换情感统计数据"""
     if not result.emotion_curve:
         return None
 
@@ -83,10 +77,7 @@ def _convert_emotion_stats(
 def _convert_character_stats(
     result: AggregateResult,
 ) -> CharacterStatsAggregate | None:
-    """转换人物统计数据
-    说明: 从 _convert_aggregate_result 拆分出来，专门处理人物统计转换。
-    2026-08-14 重命名（§13.3）：change_rate → relation_change_per_10k_chars。
-    """
+    """转换人物统计数据"""
     if not result.character_relations:
         return None
 
@@ -115,9 +106,7 @@ def _convert_character_stats(
 def _convert_style_stats(
     result: AggregateResult,
 ) -> StyleStats | None:
-    """转换风格统计数据
-    说明: 从 _convert_aggregate_result 拆分出来，专门处理风格统计转换
-    """
+    """转换风格统计数据"""
     if not result.language_style:
         return None
 
@@ -159,9 +148,7 @@ def _convert_aggregate_result(
     CharacterStatsAggregate | None,
     StyleStats | None,
 ]:
-    """转换聚合结果为响应模型
-    说明: 将原有逻辑拆分为 5 个独立的转换函数，提高代码可读性和可维护性
-    """
+    """转换聚合结果为响应模型"""
     narrative_structure = _convert_narrative_structure(result)
     emotion_stats = _convert_emotion_stats(result)
     character_stats = _convert_character_stats(result)

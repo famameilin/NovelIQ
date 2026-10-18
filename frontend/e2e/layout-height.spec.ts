@@ -110,12 +110,12 @@ const PAGE_HEIGHT_CASES: readonly PageHeightCase[] = [
 ];
 
 /**
- * 2026-08-31 作用：组装页面高度测试使用的当前接口响应
+ * 组装页面高度测试使用的当前接口响应
  * 简要说明：复用项目数据工厂并补齐各页面所需的聚合合同
  */
 function createMockApiResponses(): Readonly<Record<string, unknown>> {
   const characterTemplates = createCharacters(10);
-  // 2026-08-31 作用：以真实任务量级覆盖角色长列表
+  // 以真实任务量级覆盖角色长列表
   // 简要说明：重复角色画像字段但保持名称唯一以验证页签内部滚动
   const characters = Array.from({ length: 20 }, (_, index) => {
     const template = characterTemplates[index % characterTemplates.length];
@@ -138,7 +138,7 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
   const emotionTrend = createEmotionTrendWindows(20, null);
   const graph = createGraph();
   const graphChangeTemplates = createGraphChangesPage(null, 8).changes;
-  // 2026-08-31 作用：构造可在本地继续展开的图谱变化列表
+  // 构造可在本地继续展开的图谱变化列表
   // 简要说明：验证初始八条记录展开后仍只在页签内部滚动
   const graphChanges = {
     changes: Array.from({ length: 40 }, (_, index) => {
@@ -158,14 +158,14 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
       next_cursor: null,
     },
   };
-  // 2026-08-31 作用：构造高主题数量且键值唯一的压力数据
+  // 构造高主题数量且键值唯一的压力数据
   // 简要说明：避免重复词键告警干扰页面运行时错误门禁
   const topics = createTopics(25).map((topic, topicIndex) => ({
     ...topic,
     words: topic.words.map((word) => `${word}${topicIndex + 1}`),
   }));
   const foreshadowingTemplate = createForeshadowingTrees()[0];
-  // 2026-09-27 作用：覆盖伏笔追踪长列表的页面高度边界
+  // 覆盖伏笔追踪长列表的页面高度边界
   // 简要说明：为每条线索提供唯一树标识，并验证分页后的末页内容
   const foreshadowingThreads = Array.from({ length: 8 }, (_, index) => ({
     ...foreshadowingTemplate,
@@ -394,7 +394,7 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
 }
 
 /**
- * 2026-08-31 作用：安装页面高度测试所需的即时接口响应
+ * 安装页面高度测试所需的即时接口响应
  * 简要说明：未知接口返回明确错误并记录请求路径
  */
 async function installAnalysisApiMocks(page: Page): Promise<Set<string>> {
@@ -402,7 +402,7 @@ async function installAnalysisApiMocks(page: Page): Promise<Set<string>> {
   const unhandledRequests = new Set<string>();
 
   /**
-   * 2026-08-31 作用：响应页面测试期间发出的接口请求
+   * 响应页面测试期间发出的接口请求
    * 简要说明：事件流进入完成态其余请求按当前路径合同返回
    */
   const handleRoute = async (route: Route) => {
@@ -443,7 +443,7 @@ async function installAnalysisApiMocks(page: Page): Promise<Set<string>> {
 }
 
 /**
- * 2026-08-31 作用：等待页面主体和字体完成首轮布局
+ * 等待页面主体和字体完成首轮布局
  * 简要说明：排除懒加载骨架和字体切换造成的瞬时尺寸
  */
 async function waitForStableLayout(
@@ -492,7 +492,7 @@ async function waitForStableLayout(
 }
 
 /**
- * 2026-08-31 作用：测量业务页面主内容区的竖向溢出
+ * 测量业务页面主内容区的竖向溢出
  * 简要说明：以 main 的直接滚动父容器作为统一页面高度边界
  */
 async function measurePageHeight(page: Page, pageCase: PageHeightCase, view: string): Promise<HeightMeasurement> {
@@ -525,7 +525,7 @@ async function measurePageHeight(page: Page, pageCase: PageHeightCase, view: str
 }
 
 /**
- * 2026-08-31 作用：格式化页面高度门禁的失败信息
+ * 格式化页面高度门禁的失败信息
  * 简要说明：逐项报告路由视图和超过可用高度的像素数
  */
 function formatOverflowReport(measurements: readonly HeightMeasurement[]): string {
@@ -557,7 +557,7 @@ test.describe('全局页面高度门禁', () => {
   });
 
   /**
-   * 2026-08-31 作用：验证全部业务页面不会撑出页面级竖向滚动
+   * 验证全部业务页面不会撑出页面级竖向滚动
    * 简要说明：覆盖侧栏路由及其页面主体切换状态
    */
   test('所有业务页面内容必须处于 1920x1080 最大化桌面网页可用高度内', async ({ page }) => {

@@ -1,7 +1,7 @@
 """
 结果元数据查询组装器
 
-说明: 承载 global_stats、token_usage、novel_name 等辅助查询逻辑
+承载 global_stats、token_usage、novel_name 等辅助查询逻辑
 """
 
 from __future__ import annotations

@@ -1,12 +1,7 @@
-"""
-分析阶段编排
+"""分析阶段编排
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分（analysis_service.py → analysis/ 子模块）
-说明: 从 src/api/services/analysis_service.py 拆出阶段 emitter 构造（_make_stage_emitter）
-与阶段编排执行（_execute_analysis_stages），以混入形式提供给 AnalysisService，
-行为保持不变；取消检查经 TaskClaimMixin 继承链访问。
+阶段 emitter 构造（_make_stage_emitter）与阶段编排执行（_execute_analysis_stages）
+以混入形式提供给 AnalysisService；取消检查经 TaskClaimMixin 继承链访问。
 """
 
 from __future__ import annotations
@@ -44,23 +39,16 @@ class StageOrchestratorMixin(TaskClaimMixin):
     ) -> Callable[[StreamEvent], Awaitable[None]]:
         """创建阶段 emitter：自动补全 stage 上下文，并在发事件前提交编排器 session
 
-        2026-10-03 死锁修复（run 08f9ba42 实证）：编排器 session 的事务跨阶段存活，
-        阶段内写入（如 topic 表 INSERT 对 analysis_runs 行取的外键 FOR KEY SHARE、
-        以及任何显式行锁）与 emit 路径 to_thread 的 UPDATE analysis_runs 行锁互斥——
-        编排器协程 await 自己事务堵住的 UPDATE 即永久死锁（topic INSERT 后 emit
-        complete 挂死 14+ 分钟，后端 CPU 归零）。emitter 先 commit 再 emit：
-        本阶段已完成写入对其它连接可见，行锁随提交释放，emit 永不被自己事务阻塞。
-        expire_on_commit=False，已加载 ORM 对象不会失效。
+        编排器 session 的事务跨阶段存活，其行锁会被 emit 路径 to_thread 的 UPDATE
+        analysis_runs 阻塞（自锁死锁），故先 commit 再 emit；expire_on_commit=False。
         """
 
         async def emitter(event: StreamEvent) -> None:
             try:
                 session.commit()
             except BaseException:
-                # 2026-10-17 run 52cbb1ac 实证：提交中途被打断会把会话留在 PREPARED
-                # 中间态，之后任意一次 SQL 都报 "session is in 'prepared' state" 且难
-                # 归因（曾伪装成诊断工具依赖故障）。先回滚把会话救回健康态再原样上抛：
-                # 失败必须当场可归因，不允许毒化会话流入下游。
+                # 提交中途被打断会把会话留在 PREPARED 中间态，之后任意 SQL 都报错；
+                # 先回滚把会话救回健康态再原样上抛，不允许毒化会话流入下游
                 with contextlib.suppress(Exception):
                     session.rollback()
                 raise

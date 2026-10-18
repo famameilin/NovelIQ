@@ -46,7 +46,7 @@ class EntityRelationState:
     ) -> str:
         """用于登记或更新一个实体、绑定 el 局部键并即时返回 run 级 id（同键同内容重放幂等）
 
-        2026-10-13 身份=规范名+实体大类：同名不同类各自登记为独立实体、各自 el 与 id。
+        身份=规范名+实体大类：同名不同类各自登记为独立实体、各自 el 与 id。
         present（本次实际提交的字段集合）给定时按部分更新合并：未提交字段保留现值，
         兑现 write_entity 合同"只提交本次变化的字段"；不传=整条记录语义（直连调用）。
         """
@@ -86,10 +86,10 @@ class EntityRelationState:
 
     @staticmethod
     def _merge_partial_entity(existing: EntityInput, incoming: EntityInput, present: set[str]) -> EntityInput:
-        """用于已登记实体的部分更新合并（2026-09-14 兑现"只提交本次变化的字段"合同）
+        """用于已登记实体的部分更新合并（兑现"只提交本次变化的字段"合同）
 
         未提交字段保留现值；tags 提交空列表=清空、省略=保留；
-        description 与 representative 省略=保留现值（自由属性已随 3NF 合同取消）。
+        description 与 representative 省略=保留现值。
         """
         updates: dict[str, Any] = {}
         if "tags" in present:
@@ -185,8 +185,7 @@ class EntityRelationState:
     def _flush_relations(self, ctx: EntityRelationStateContext) -> list[dict[str, Any]]:
         """用于把本章关系完整集合重放到事实图（先清空本章 assert 再按序重放）
 
-        与旧的"领域结算整体替换"语义一致：同一对端点重写换类型即为替换，
-        重放保证图终态与本章关系集合同源。
+        同一对端点重写换类型即为整体替换：重放保证图终态与本章关系集合同源。
         """
         if ctx.graph is None:
             raise AnnotationInvariantError("write_relation 需要常驻事实图，graph 缺失")
@@ -197,13 +196,8 @@ class EntityRelationState:
             resolved_from = ctx.graph.resolve_key(item.from_entity)
             resolved_to = ctx.graph.resolve_key(item.to_entity)
             if resolved_from == resolved_to:
-                # 两端沿同一人物分量解析到同一实体：
-                # "同一人物"边（含同批双向重申、跨章重申、传递归并）= 归并已
-                # 成立，按合同接受为 skipped_existing；普通关系类型塌成自环
-                # 才是退化输入，标 skipped_self_loop。两者照常入图都会在持久化
-                # 插入 from_entity_id=to_entity_id 的自环行，违反
-                # graph_relations 端点互异约束炸掉完成事务（run a83fae3d
-                # 第9章实锤），一律跳过不入图不入操作日志
+                # 两端解析到同一实体一律跳过不入图（自环违反 graph_relations 端点互异约束）：
+                # "同一人物"边记 skipped_existing，普通关系塌成自环记 skipped_self_loop
                 is_same_character = RELATION_DEFINITIONS[str(item.relation_type)]["semantics"] == "same_character"
                 outcomes.append(
                     {
@@ -246,10 +240,8 @@ class EntityRelationState:
     def entity_ledger(self, ctx: EntityRelationStateContext) -> list[dict[str, Any]]:
         """用于列举本章已写入实体的账本（el 绑定序）：{el, name, id, entity_type}，带 tags 与同一人物别名
 
-        别名列（alias）与标签列直接对抗"外号没接上登记名→重复注册实体"（run b7477080
-        ch3 把猴子当新人物又建一套登记）。
-        2026-09-20 entity_type：大类一经登记不可变更，账本行带上它，省得模型凭记忆重写
-        时写错大类（run 54a72932：10 次"实体大类已登记为 X"的拒绝）。
+        别名列（alias）与标签列用于防止"外号没接上登记名→重复注册实体"。
+        账本行带 entity_type：大类一经登记不可变更，模型不必凭记忆重写。
         """
         rows: list[dict[str, Any]] = []
         for el, key in self.entity_el_index.items():
@@ -275,7 +267,7 @@ class EntityRelationState:
         self,
         directory: EntityDirectoryInput,
     ) -> tuple[dict[str, EntityType], dict[str, str]]:
-        """2026-10-13 用于建立当前章唯一实体身份目录（键=规范名+实体大类复合键）"""
+        """用于建立当前章唯一实体身份目录（键=规范名+实体大类复合键）"""
         types: dict[str, EntityType] = {}
         names: dict[str, str] = {}
         for entity in directory.entities:
@@ -288,7 +280,7 @@ class EntityRelationState:
         return types, names
 
     def _fact_entity_catalog(self, ctx: EntityRelationStateContext) -> dict[str, EntityType]:
-        """2026-08-10 用于合并内存图已登记实体与当前章 已声明实体作为事实端点目录"""
+        """用于合并内存图已登记实体与当前章 已声明实体作为事实端点目录"""
         catalog = dict(ctx.graph.entity_types) if ctx.graph is not None else {}
         entities_payload = self.domain_payloads.get("entities")
         if entities_payload is not None:
@@ -305,7 +297,7 @@ class EntityRelationState:
         expected_types: tuple[EntityType, ...] | None = None,
         label: str,
     ) -> str:
-        """2026-08-11 用于校验事实端点已由当前章 实体目录或已登记实体声明（别名解析后）"""
+        """用于校验事实端点已由当前章 实体目录或已登记实体声明（别名解析后）"""
         resolved_key = ctx.graph.resolve_key(key) if ctx.graph is not None else key
         actual_type = entity_types.get(resolved_key) or entity_types.get(key)
         name = ctx.graph.display_name(key) if ctx.graph is not None else key
@@ -353,8 +345,7 @@ class EntityRelationState:
             **entity_types,
         }
 
-        # 2026-08-20 内联全量端点校验，合并 _validate_fact_endpoints 和 _validate_domain_endpoints
-        # 2026-10-04 错误点名生产记录键（原 "[下标] 域.字段" 模型无法映射回具体记录）
+        # 错误点名生产记录键（不只报"[下标] 域.字段"，模型要能映射回具体记录）
         errors: list[str] = []
 
         def check_entity(

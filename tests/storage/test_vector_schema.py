@@ -1,4 +1,4 @@
-"""paragraph_features 语义向量 HNSW 索引管理测试（2026-10-16 3NF）
+"""paragraph_features 语义向量 HNSW 索引管理测试
 
 语义向量不再是独立表：向量行是 paragraph_features 的 semantic_vector 行。
 vector_schema 只负责按实测维度建立/校验该列上的 HNSW 部分表达式索引，
@@ -141,7 +141,7 @@ def test_validate_rejects_wrong_vector_column_type(db_session, monkeypatch) -> N
 
 
 def test_hnsw_index_uses_halfvec_boundary() -> None:
-    """2026-09-25 形态判定边界：2000 维（含）以内裸 vector 索引，2001 维起 halfvec"""
+    """形态判定边界：2000 维（含）以内裸 vector 索引，2001 维起 halfvec"""
     from src.storage.vector_schema import hnsw_index_uses_halfvec
 
     assert hnsw_index_uses_halfvec(1024) is False

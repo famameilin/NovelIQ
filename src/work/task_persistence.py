@@ -1,8 +1,4 @@
-"""
-任务运行态持久化服务
-
-说明: 将 TaskManager 的 DB 写回、run_id 解析与 worker heartbeat 刷新逻辑收口到独立服务
-"""
+"""任务运行态持久化服务：DB 写回、run_id 解析与 worker heartbeat 刷新"""
 
 from __future__ import annotations
 
@@ -47,18 +43,16 @@ class TaskRuntimePersistenceService:
             # 只要任务仍由本进程活跃推进，就持续刷新 worker 归属和心跳，
             # 这样启动恢复才能准确识别“这个进程留下来的孤儿任务”
             update_params.setdefault("worker_id", self._worker_id)
-            # 2026-08-13 P2：heartbeat_at 列为无时区 DateTime，aware UTC 写入会被 PG
-            # 按会话时区转换（UTC+8 错位 8h），统一落 naive UTC 挂钟，比较端按 UTC 补时区
+            # heartbeat_at 列为无时区 DateTime，aware UTC 写入会被 PG 按会话时区转换
+            # （UTC+8 错位 8h），统一落 naive UTC 挂钟，比较端按 UTC 补时区
             update_params["heartbeat_at"] = datetime.now(UTC).replace(tzinfo=None)
 
         if not update_params:
             return
 
         session = self._session_factory()
-        # 2026-10-03 运行态写回分级：纯进度/心跳字段是可观测性信号，DB 锁等待/抖动只
-        # 降级为警告跳过——run 4a6c268c 实证 aggregate 完成后的进度更新被下一阶段长
-        # 事务阻塞 2 分钟语句超时，把 27 章标注+聚合全部冤杀成 failed。状态迁移
-        # （status/completed_at/error/cancel_requested）仍是可靠写，失败照旧上抛。
+        # 运行态写回分级：纯进度/心跳字段的 DB 错误只降级为警告跳过；状态迁移
+        # （status/completed_at/error/cancel_requested）仍是可靠写，失败照旧上抛
         state_transition = bool({"status", "completed_at", "error", "cancel_requested"} & set(update_params))
         try:
             run_repo = RunRepository(session)

@@ -1,5 +1,4 @@
-"""
-主题聚合端点测试（《分析能力扩展路线图》§5.11 / D1-D3）
+"""主题聚合端点测试
 
 覆盖 GET /{novel_id}/topics 新口径与四个新端点：
 - /topics/aggregate（book/chapter 分布）
@@ -180,7 +179,7 @@ def test_shifts_endpoint_rejects_invalid_overrides(
     parameter: str,
     value: int | float,
 ) -> None:
-    """2026-08-31 用于验证主题迁移端点在进入计算前拒绝非法覆盖参数"""
+    """验证主题迁移端点在进入计算前拒绝非法覆盖参数"""
     novel_id, run_id = _create_fixture_run(db_session)
 
     response = api_client.get(

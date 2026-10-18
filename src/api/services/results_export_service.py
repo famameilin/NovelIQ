@@ -1,11 +1,8 @@
-"""
-结果导出服务
-
-说明: 从 results.py 提取的结果导出逻辑，负责数据获取和组装
+"""结果导出服务：负责结果导出的数据获取和组装
 
 本模块保留 build_export_payload/fetch_all_results_data，并 re-export 全部装载函数与
-结果获取依赖（tests 会对本模块命名空间中的 _fetch_* 与 get_metrics_service 打补丁，
-装载函数亦按调用期经本模块命名空间解析同名依赖，语义保持不变）。
+结果获取依赖；装载函数按调用期经本模块命名空间解析同名依赖（tests 会对本模块命名空间
+中的 _fetch_* 与 get_metrics_service 打补丁）。
 """
 
 from __future__ import annotations

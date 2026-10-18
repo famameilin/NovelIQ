@@ -1,7 +1,5 @@
 """
 任务与小说产物清理服务
-
-说明: 将 NovelService 中的文件系统清理逻辑拆到独立服务，避免领域服务混入 logs/outputs/source file 的 GC 细节
 """
 
 from __future__ import annotations
@@ -39,10 +37,7 @@ class ArtifactGcService:
             logger.info(f"Novel source file deleted: {file_path}")
 
     def delete_task_artifacts(self, task_id: str, run_id: str) -> None:
-        """2026-08-30 用于删除任务日志导出文件与 run 私有模型目录
-
-        2026-10-02 移除历史短 run_id 目录兼容：日志目录只按 run_id 删除。
-        """
+        """删除任务日志导出文件与 run 私有模型目录（日志目录只按 run_id 删除）"""
         word2vec_model_dir = resolve_run_model_dir(run_id, "word2vec")
         output_file = self.outputs_dir / f"{task_id}.json"
         if output_file.exists():

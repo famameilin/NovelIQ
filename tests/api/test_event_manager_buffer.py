@@ -11,7 +11,7 @@ from src.sse.manager import EventManager
 
 
 def _persisted_message_count(db_session, run_id: str) -> int:
-    """2026-10-16 用于按真实路由列统计 run 内已保存的展示消息（run 归属在 event_outbox 宽行）"""
+    """按真实路由列统计 run 内已保存的展示消息（run 归属在 event_outbox 宽行）"""
     from src.storage.models import EventOutbox
 
     return int(
@@ -23,7 +23,7 @@ def _persisted_message_count(db_session, run_id: str) -> int:
 
 @pytest.mark.asyncio
 async def test_default_buffer_holds_recent_256_messages() -> None:
-    """2026-08-13 P2：默认缓冲从 64 提升到 256，断线窗口期消息更不易被淘汰"""
+    """默认缓冲从 64 提升到 256，断线窗口期消息更不易被淘汰"""
     manager = EventManager()
     try:
         assert manager._buffer_size == 256
@@ -389,11 +389,10 @@ async def test_resume_preserves_saved_work_display_but_filters_persisted_old_ter
     outbox = SseMessageRepository(get_session_factory())
     manager = EventManager(outbox=outbox)
     completed = {
-        "work_id": "complete-work",
         "invocation_id": "complete-inv",
         "stage": "annotate",
         "chapter_id": 1,
-        "sub_stage": "solo",
+        "sub_stage": "annotation",
     }
     try:
         await manager.send(run_id, "work_reset", {**completed, "message_id": "reset-complete:" + run_id})
@@ -432,7 +431,7 @@ async def test_reset_filters_old_invocation_after_restart_without_deleting_messa
     _novel, run_id = create_run_with_chunks(db_session, texts=["原文。"])
     outbox = SseMessageRepository(get_session_factory())
     manager = EventManager(outbox=outbox)
-    base = {"work_id": "same-work", "stage": "annotate", "sub_stage": "event", "chapter_id": 1}
+    base = {"stage": "annotate", "sub_stage": "event", "chapter_id": 1}
     try:
         await manager.send(run_id, "work_reset", {**base, "invocation_id": "old", "message_id": "old-reset:" + run_id})
         await manager.send(
@@ -519,9 +518,9 @@ async def test_chapter_reset_retires_old_lanes_but_keeps_other_chapters_after_re
     outbox = SseMessageRepository(get_session_factory())
     manager = EventManager(outbox=outbox)
     try:
-        for chapter, work, invocation, role in [(1, "complete", "saved", "solo"), (2, "old-event", "old", "event")]:
+        scenarios = [(1, "complete", "saved", "annotation"), (2, "old-event", "old", "event")]
+        for chapter, work, invocation, role in scenarios:
             data = {
-                "work_id": work,
                 "invocation_id": invocation,
                 "chapter_id": chapter,
                 "stage": "annotate",
@@ -531,14 +530,15 @@ async def test_chapter_reset_retires_old_lanes_but_keeps_other_chapters_after_re
             await manager.send(run_id, "llm_output", {**data, "content": work, "message_id": f"{run_id}:output:{work}"})
         await manager.send(run_id, "chapter_reset", {"stage": "annotate", "chapter_id": 2})
         data = {
-            "work_id": "new-solo",
             "invocation_id": "new",
             "chapter_id": 2,
             "stage": "annotate",
-            "sub_stage": "solo",
+            "sub_stage": "annotation",
         }
-        await manager.send(run_id, "work_reset", {**data, "message_id": f"{run_id}:reset:solo"})
-        await manager.send(run_id, "llm_output", {**data, "content": "new-solo", "message_id": f"{run_id}:output:solo"})
+        await manager.send(run_id, "work_reset", {**data, "message_id": f"{run_id}:reset:annotation"})
+        await manager.send(
+            run_id, "llm_output", {**data, "content": "new-annotation", "message_id": f"{run_id}:output:annotation"}
+        )
         restarted = EventManager(outbox=outbox)
         try:
             await restarted.send(
@@ -548,7 +548,6 @@ async def test_chapter_reset_retires_old_lanes_but_keeps_other_chapters_after_re
                     "stage": "annotate",
                     "chapter_id": 2,
                     "sub_stage": "event",
-                    "work_id": "old-event",
                     "invocation_id": "old",
                     "content": "迟到旧角色",
                     "message_id": f"{run_id}:late",
@@ -557,7 +556,7 @@ async def test_chapter_reset_retires_old_lanes_but_keeps_other_chapters_after_re
             replay = await restarted.replay(run_id, 0)
             assert [message["data"]["content"] for message in replay if message["type"] == "llm_output"] == [
                 "complete",
-                "new-solo",
+                "new-annotation",
             ]
         finally:
             restarted.reset_for_testing()
@@ -566,8 +565,9 @@ async def test_chapter_reset_retires_old_lanes_but_keeps_other_chapters_after_re
 
 
 def test_outbox_keeps_identity_route_emitted_bytes_and_publication(db_session):
-    """2026-10-16 用于验证发件箱宽行保存消息身份、路由、当时发出字节与投递事实，
-    并以原字节解码重放（中文契约不变）"""
+    """验证发件箱宽行保存消息身份、路由、当时发出字节与投递事实，
+    并以原字节解码重放（中文契约不变）
+    """
     from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
     from src.storage.models import EventOutbox
@@ -582,7 +582,7 @@ def test_outbox_keeps_identity_route_emitted_bytes_and_publication(db_session):
         "invocation_id": "inv-1",
         "chapter_id": 2,
         "stage": "annotate",
-        "sub_stage": "solo",
+        "sub_stage": "annotation",
         "content": "中文内容：住手",
     }
     emitted = outbox.emit(run_id, "llm_output", data)
@@ -605,7 +605,7 @@ def test_outbox_keeps_identity_route_emitted_bytes_and_publication(db_session):
 
 
 def test_outbox_rejects_same_message_id_with_different_content(db_session):
-    """2026-10-16 用于验证同一消息身份的重复投递只要内容不同就报冲突，不改写已发出字节"""
+    """验证同一消息身份的重复投递只要内容不同就报冲突，不改写已发出字节"""
     from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
     from tests.support.chapter_annotation_helpers import create_run_with_chunks

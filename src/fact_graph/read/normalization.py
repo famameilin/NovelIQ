@@ -16,7 +16,7 @@ def build_name_resolution(
     run_id: str,
     preferred_names: list[str] | None = None,
 ) -> dict[str, str]:
-    """2026-08-09 用于把别名角色名归一到代表角色名"""
+    """把别名角色名归一到代表角色名"""
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     entities = authority_service.build_export_view(run_id).canonical_entities
     preferred = set(preferred_names or [])
@@ -105,7 +105,7 @@ def partition_chapter_relations(
                 "resolved_to_global_name": to_char,
                 "reference_skip_reason": None,
                 "type": graph_change.relation_type or "",
-                # 2026-08-13 P2：changes 为空时兜底，避免隐式不变量破坏后 IndexError
+                # changes 为空时兜底，避免 IndexError
                 "change": str(graph_change.changes[0].get("change_kind") or "refine")
                 if graph_change.changes
                 else "refine",

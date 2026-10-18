@@ -57,8 +57,7 @@ const INITIAL_VISIBLE_CHANGE_COUNT = 8;
 const CHANGE_REVEAL_STEP = 20;
 
 /**
- * 2026-08-31，作用：将图谱关系方向转换为中文文案
- * 简要说明：关系变化详情不再直接显示后端英文枚举
+ * 将图谱关系方向转换为中文文案
  */
 function getDirectionalityLabel(directionality?: "directed" | "bidirectional" | null): string {
   if (directionality === "bidirectional") return "双向关系";
@@ -67,7 +66,7 @@ function getDirectionalityLabel(directionality?: "directed" | "bidirectional" | 
 }
 
 /**
- * 2026-04-23，作用：承载关系画布、变化记录和联动详情
+ * 承载关系画布、变化记录和联动详情
  * 简要说明：根据主视图组合画布与变化区域，并分批展示已经加载的变化记录
  */
 export function GraphWorkspaceSection({
@@ -114,7 +113,7 @@ export function GraphWorkspaceSection({
   const canRevealLoadedChanges = visibleChanges.length < sortedChanges.length;
 
   /**
-   * 2026-08-31，作用：分批展开已经加载的图谱变化
+   * 分批展开已经加载的图谱变化
    * 简要说明：先控制页面长度，再在本地记录显示完后继续请求下一页
    */
   function handleRevealMoreChanges() {

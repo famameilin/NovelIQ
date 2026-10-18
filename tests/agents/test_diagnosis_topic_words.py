@@ -44,7 +44,7 @@ def test_read_topics_with_words() -> None:
     ]
     with patch("src.diagnosis.queries.DiagnosisQueries") as repo:
         repo.return_value.fetch_topic_words.return_value = rows
-        tools = {item.name: item for item in build_diagnosis_tools(MagicMock(), "run")}
+        tools = {item.name: item for item in build_diagnosis_tools(MagicMock(), "run", role="report")}
         result = json.loads(tools["read_topics"].invoke({}))
     assert result == {"topics": rows}
     assert [item["topic_id"] for item in result["topics"]] == [23, 7]

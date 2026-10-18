@@ -1,14 +1,10 @@
 """
-语言结构关系 ORM 模型定义（2026-10-16 全库 3NF 改造）
+语言结构关系 ORM 模型定义
 
-旧宽表 paragraph_linguistic_features 退场：词元、NER、短语三类原文区间标注
-合并进固定三形状的 linguistic_spans；依存与语义依存的有序词元弧合并进
-linguistic_arcs（relation_code 带命名空间，如 dep:SBV、sdp:AGT）。
-
-词面从原文切片读取；POS/NER 归一由版本化代码合同（LTP_PIPELINE_VERSION 对应
-的固定映射）投影；LTP 词元数与完成事实从词元行/paragraph_metrics 读取；
+词面从原文切片读取；POS/NER 归一由版本化代码合同（LTP_PIPELINE_VERSION 对应的
+固定映射）投影；LTP 词元数与完成事实从词元行/paragraph_metrics 读取；
 句式分类计数进 paragraph_features；情绪事件（谓词/持有者/对象/否定/程度词）
-按原提取器从正式词元与弧投影，不另建重复谓词文本/坐标的表。
+从正式词元与弧投影。
 """
 
 from __future__ import annotations

@@ -60,8 +60,7 @@ function getStatusIcon(status: TaskStatus) {
 
 function formatRelativeTime(dateStr: string | null): string {
 
-  // 与 TaskRowProps.created_at 的可空语义保持一致，避免严格类型检查构建失败
-  // 列表接口历史上可能漏传 created_at，前端需要兜底避免显示 epoch 假时间
+  // 列表接口可能漏传 created_at，兜底避免显示 epoch 假时间
   if (!dateStr) return "未知时间";
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime())) return "未知时间";

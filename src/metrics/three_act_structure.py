@@ -1,11 +1,9 @@
 """
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分 src/metrics/narrative_metrics.py（三幕结构算法段）
-说明: 承接三幕结构诊断算法——比例归一化、窗口工具、主高潮区识别、
-      第一幕边界选择与 analyze_three_act_structure 主入口；数据类与峰值
-      基础件从 narrative_primitives 导入，narrative_metrics.py re-export
-      analyze_three_act_structure 保持导入方零改动。
+三幕结构诊断算法段
+
+承接比例归一化、窗口工具、主高潮区识别、第一幕边界选择与
+analyze_three_act_structure 主入口；数据类与峰值基础件从
+narrative_primitives 导入。
 """
 
 from __future__ import annotations
@@ -27,8 +25,7 @@ def _build_min_ratio_normalized_result(
     act3_raw: float,
     min_ratio: float = 0.05,
 ) -> dict[str, float]:
-    """将三幕原始比例按最低占比下限做归一化（2026-08-14 起支持自定义 min_ratio，
-    旧调用方不传参时行为不变）。"""
+    """将三幕原始比例按最低占比下限做归一化。"""
     act1 = max(act1_raw, min_ratio)
     act2 = max(act2_raw, min_ratio)
     act3 = max(act3_raw, min_ratio)
@@ -80,7 +77,7 @@ def _select_climax_region(
     pivot_moments: Sequence[int],
     tension_scores: Sequence[float],
 ) -> tuple[int, int, int, int, int, float]:
-    """主高潮区识别（§10/§19.8 字符坐标版）：8% 跨度窗口扫描后 45%。"""
+    """主高潮区识别（字符坐标版）：8% 跨度窗口扫描后 45%。"""
     total = len(tension_scores)
     if total == 0:
         return 0, 0, 0, 0, 0, 0.0
@@ -174,7 +171,7 @@ def _select_act1_boundary(
     climax_region_start: int,
     representative_peak_idx: int,
 ) -> tuple[int, bool, list[ThreeActBoundaryCandidate]]:
-    """第一幕边界选择（§10/§19.8 字符坐标版）：6% 跨度双窗口择优。"""
+    """第一幕边界选择（字符坐标版）：6% 跨度双窗口择优。"""
     total = len(tension_scores)
     if total < 3:
         return 0, True, []

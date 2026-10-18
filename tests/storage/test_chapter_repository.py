@@ -109,7 +109,7 @@ def test_fetch_chapters_ordered_by_sequence(db_session) -> None:
 
 
 def test_insert_chapter_texts_writes_text_columns_on_chapters(db_session) -> None:
-    """2026-10-16 3NF：正文切片与全文起点与章节目录同键合并进 chapters（text/char_offset）"""
+    """正文切片与全文起点与章节目录同键合并进 chapters（text/char_offset）"""
     run_id = _create_run(db_session)
     repo = ChapterRepository(db_session)
     repo.insert_chapters(run_id, _make_chapters())

@@ -1,4 +1,4 @@
-"""新声明契约的正式身份、阶段截点与来源审计不能退回过程归属（2026-10-16 全库 3NF 改造）
+"""新声明契约的正式身份、阶段截点与来源审计不能退回过程归属
 
 夹具自足：真实标注来源链 + 章级声明（event_declarations）直接写入；
 发布走正式入口（诊断草稿 → 报告 → 完整事件/阶段 → 叙事组织）。
@@ -32,11 +32,11 @@ TEXTS = ["开始营救", "继续营救", "成功营救"]
 
 def _fixture(session, *, published=True):
     novel_id, run_id = create_run_with_chunks(session, texts=TEXTS, chapter_ids=[1, 2, 3])
-    session_id, work_id, execution_id = add_diagnosis_context(session, run_id)
+    session_id, execution_id = add_diagnosis_context(session, run_id)
     declarations: list[str] = []
     annotation_executions: list[str] = []
     for chapter in range(1, 4):
-        record_id, _work, annotation_execution = add_annotation_source(session, run_id, chapter, role="event")
+        record_id, annotation_execution = add_annotation_source(session, run_id, chapter, role="event")
         annotation_executions.append(annotation_execution)
         paragraph = first_paragraph(session, run_id, chapter_id=chapter)
         declarations.append(
@@ -59,7 +59,7 @@ def _fixture(session, *, published=True):
         session.commit()
         return novel_id, run_id, declarations, None, annotation_executions
     draft, _meta = identity_every_declaration(
-        session, run_id, groups=[declarations], context=(session_id, work_id, execution_id)
+        session, run_id, groups=[declarations], context=(session_id, execution_id)
     )
     close_structure(
         session, draft, evidence_paragraph_id=int(first_paragraph(session, run_id, chapter_id=1).paragraph_id)
@@ -157,8 +157,8 @@ def test_declaration_source_api_does_not_offer_process_owner_navigation(db_sessi
 
 def test_missing_binding_and_mixed_source_contract_are_rejected(db_session):
     _, run_id, declarations, _, _ = _fixture(db_session)
-    # 绑定后的新声明没有正式身份绑定：已发布运行必须拒绝缺失绑定的声明
-    record_id, _work, _execution = add_annotation_source(db_session, run_id, 3, role="structure")
+    # 绑定后的新声明没有正式身份绑定：已保存运行必须拒绝缺失绑定的声明
+    record_id, _execution = add_annotation_source(db_session, run_id, 3, role="metric")
     orphan = add_declaration(
         db_session,
         record_id=record_id,

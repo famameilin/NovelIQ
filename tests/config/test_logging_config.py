@@ -68,8 +68,7 @@ class TestLoggingSetup(unittest.TestCase):
 
 
 def test_setup_logging_module_files_match_real_src_namespaces() -> None:
-    """
-    2026-08-12 用于验证模块文件 sink 使用真实命名空间前缀（src.*）：
+    """验证模块文件 sink 使用真实命名空间前缀（src.*）：
     settings.json 的模块键与 loguru 实际 record name 前缀一致，模块日志才会写入文件。
     loguru 的 record name 取自调用帧，测试通过 patch 显式模拟真实 src 前缀。
     """
@@ -96,8 +95,7 @@ def test_setup_logging_module_files_match_real_src_namespaces() -> None:
 
 
 def test_console_sinks_separate_project_and_third_party(capsys) -> None:
-    """
-    2026-08-12 用于验证控制台双 sink 分工：
+    """验证控制台双 sink 分工：
     src.* 第一方日志按 console_level 输出；第三方日志按 third_party_level 输出，
     不再出现第一方日志被过滤、第三方日志重复输出的问题。
     """

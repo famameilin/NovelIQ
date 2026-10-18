@@ -29,7 +29,7 @@ _PRETRAINED_SUFFIXES = {".bin": True, ".vec": False, ".txt": False}
 
 
 def resolve_pretrained_file(model_dir: Path) -> tuple[Path, bool]:
-    """2026-08-30 用于定位目录内首个受支持的预训练词向量源文件"""
+    """定位目录内首个受支持的预训练词向量源文件"""
     if not model_dir.is_dir():
         raise FileNotFoundError(f"预训练词向量目录不存在: {model_dir}")
     candidates = sorted(
@@ -42,7 +42,7 @@ def resolve_pretrained_file(model_dir: Path) -> tuple[Path, bool]:
 
 
 def read_vector_size(path: Path) -> int:
-    """2026-08-30 用于从 word2vec 文件头读取向量维度而不解析完整文件"""
+    """从 word2vec 文件头读取向量维度而不解析完整文件"""
     with path.open("rb") as fin:
         header = fin.readline()
     parts = header.split()
@@ -52,7 +52,7 @@ def read_vector_size(path: Path) -> int:
 
 
 def convert_pretrained_to_kv(source: Path, *, binary: bool, output_dir: Path) -> Path:
-    """2026-08-30 用于转换预训练向量并维持共享目录唯一 kv 主文件契约"""
+    """转换预训练向量并维持共享目录唯一 kv 主文件契约"""
     if not output_dir.is_dir():
         raise FileNotFoundError(f"预训练模型输出目录不存在: {output_dir}")
     kv_path = output_dir / f"{source.stem}.kv"
@@ -68,7 +68,7 @@ def convert_pretrained_to_kv(source: Path, *, binary: bool, output_dir: Path) ->
 
 
 def main() -> int:
-    """2026-08-30 用于解析命令行参数并执行预训练词向量转换"""
+    """解析命令行参数并执行预训练词向量转换"""
     parser = argparse.ArgumentParser(description="转换预训练词向量为 .kv 二进制")
     parser.add_argument("--source", type=Path, default=_DEFAULT_SOURCE_DIR, help="预训练源文件目录")
     parser.add_argument("--output", type=Path, default=_DEFAULT_OUTPUT_DIR, help="产物 .kv 输出目录")

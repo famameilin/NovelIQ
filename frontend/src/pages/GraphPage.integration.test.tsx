@@ -15,7 +15,7 @@ const getGraphChangesMock = vi.fn();
 const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
 
-// 2026-08-07 用于在图谱集成测试中消除动画运行时差异
+// 用于在图谱集成测试中消除动画运行时差异
 function motionElement(tagName: string) {
   const Component = (props: { children?: ReactNode; [key: string]: unknown }) => {
     const sanitizedProps = { ...props };
@@ -89,7 +89,7 @@ vi.mock("@/api/analysis", () => ({
   getAnalysisTasks: vi.fn().mockResolvedValue([]),
 }));
 
-// 2026-08-07 用于构造真实图谱工作区所需的最小章节快照
+// 用于构造真实图谱工作区所需的最小章节快照
 function createGraphData(): GraphData {
   return {
     chapter_id: 1,
@@ -135,7 +135,7 @@ function createGraphData(): GraphData {
   };
 }
 
-// 2026-08-07 用于构造图谱变化面板所需的最小分页结果
+// 用于构造图谱变化面板所需的最小分页结果
 function createGraphChanges(): GraphChangesPageResponse {
   return {
     changes: [
@@ -162,7 +162,7 @@ function createGraphChanges(): GraphChangesPageResponse {
   };
 }
 
-// 2026-08-07 用于渲染包含真实图谱页面子组件的集成用例
+// 用于渲染包含真实图谱页面子组件的集成用例
 function renderGraphPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

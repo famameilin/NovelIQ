@@ -1,8 +1,7 @@
 """所属领域的产物完整性查询，供恢复编排调用
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：从 diagnosis_reports 报告头、
-analysis_assessments 的标签/名单条目与 complete_events 发布事实判定，
-正文与评分列、组织发布事实分别核对，不再读取通用产物 payload。
+从 diagnosis_reports 报告头、analysis_assessments 的标签/名单条目与
+complete_events 发布事实判定，正文与评分列、组织发布事实分别核对。
 """
 
 from __future__ import annotations

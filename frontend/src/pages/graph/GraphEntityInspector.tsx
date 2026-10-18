@@ -38,7 +38,7 @@ const NARRATIVE_ROLE_DESCRIPTIONS: Record<string, string> = {
 };
 
 /**
- * 2026-08-31，作用：将图谱实体类型转换为中文展示名称
+ * 将图谱实体类型转换为中文展示名称
  * 简要说明：未知类型使用通用实体名称，避免直接暴露内部枚举
  */
 function getEntityTypeLabel(entityType: string): string {
@@ -46,7 +46,7 @@ function getEntityTypeLabel(entityType: string): string {
 }
 
 /**
- * 2026-08-31，作用：将关系方向转换为中文展示名称
+ * 将关系方向转换为中文展示名称
  * 简要说明：统一图谱详情和关系变化中的方向语义
  */
 function getDirectionLabel(directionality: GraphRelatedEntity["directionality"]): string {
@@ -54,7 +54,7 @@ function getDirectionLabel(directionality: GraphRelatedEntity["directionality"])
 }
 
 /**
- * 2026-08-31，作用：在关系画布旁展示用户可读的实体信息
+ * 在关系画布旁展示用户可读的实体信息
  * 简要说明：隐藏内部编号，仅保留名称、出现范围、人物叙事作用、状态和主要关系
  */
 export function GraphEntityInspector({

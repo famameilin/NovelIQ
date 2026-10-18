@@ -165,8 +165,7 @@ def test_body_line_not_matched_as_named_volume() -> None:
 
 
 def test_sentence_starting_with_hui_unit_rejected() -> None:
-    """
-    2026-09-09 重明传形态回归：正文句"第二回合。马骁欺身而上…"被 HUI_RE
+    """重明传形态回归：正文句"第二回合。马骁欺身而上…"被 HUI_RE
     拆成 标签"第二回"+内容"合。马骁欺身而上…"，同行截断后标题退化到单字"合"。
     截断退化即判整行是正文，丢弃候选。
     """

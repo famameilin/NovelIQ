@@ -39,7 +39,7 @@ def _retract_relation(
 ) -> None:
     """按正式 work 保存入口提交本章事实图操作：人物观察 + 一次关系撤回
 
-    2026-10-16 3NF：关系变化是 chapter_annotations 的事实图操作，经 agent._save
+    关系变化是 chapter_annotations 的事实图操作，经 agent._save
     与原文证据同事务落库；这里沿用同一入口，不手拼图事实行。
     """
     from src.agents.annotation.output_models import BoundChapterAnnotation
@@ -137,7 +137,7 @@ def _retract_relation(
 
 
 def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_session) -> None:
-    """2026-08-07 用于验证章节快照继承状态并按事实原因返回关系变化"""
+    """验证章节快照继承状态并按事实原因返回关系变化"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌", "两人此后分道扬镳"],
@@ -204,7 +204,7 @@ def test_graph_repository_returns_frozen_chapter_snapshots_and_changes(db_sessio
 
 
 def test_graph_repository_keeps_parallel_stable_relations_for_same_entity_pair(db_session) -> None:
-    """2026-08-07 用于验证同一实体对可并行保存不同关系语义"""
+    """验证同一实体对可并行保存不同关系语义"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜既是盟友也是师徒"],
@@ -244,8 +244,9 @@ def test_graph_repository_keeps_parallel_stable_relations_for_same_entity_pair(d
 
 
 def test_graph_repository_fetch_changes_filters_by_chapter_id(db_session) -> None:
-    """2026-08-12 用于验证带 chapter_id 的 fetch_changes 在 PostgreSQL 上按章节过滤，
-    不因 CTE 表别名错误（gv.chapter_id）报 missing FROM-clause entry"""
+    """验证带 chapter_id 的 fetch_changes 在 PostgreSQL 上按章节过滤，
+    不因 CTE 表别名错误（gv.chapter_id）报 missing FROM-clause entry
+    """
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌", "两人此后分道扬镳"],
@@ -333,8 +334,8 @@ def test_graph_repository_break_targets_relation_created_after_first_chapter(
 
 
 def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) -> None:
-    """2026-08-13 补测试 P1：fetch_changes 的 offset/limit 分页 SQL 此前零真实执行覆盖。
-    构造 3 章变化验证：分页拼接 = 全量、无重叠、倒序、total 一致。"""
+    """fetch_changes 的 offset/limit 分页 SQL 覆盖：
+    构造 3 章变化验证分页拼接 = 全量、无重叠、倒序、total 一致。"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌", "两人关系日渐紧密", "两人最终分道扬镳"],
@@ -408,7 +409,7 @@ def test_graph_repository_fetch_changes_pagination_matches_full_set(db_session) 
 
 
 def test_graph_repository_fetch_changes_rejects_negative_offset(db_session) -> None:
-    """2026-08-13 补测试 P1：负 offset 必须抛 ValueError（路由层 400 的依据）。"""
+    """负 offset 必须抛 ValueError（路由层 400 的依据）。"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["第一章内容"], title="负偏移")
     repository = GraphRepository(db_session)
     import pytest as _pytest

@@ -26,8 +26,7 @@ export interface NarrativeStructureBarProps {
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-08-16，任务：恢复叙事结构三段线
- * 作用：判断接口是否提供任一幕的结构比例
+ * 判断接口是否提供任一幕的结构比例
  */
 function hasActData(
   act1: number | null | undefined,
@@ -38,8 +37,7 @@ function hasActData(
 }
 
 /**
- * 2026-08-16，任务：恢复叙事结构分段线
- * 作用：把接口提供的章节功能占比转换为分段线所需的数据
+ * 把接口提供的章节功能占比转换为分段线所需的数据
  */
 function toShareSegments(
   share: Record<string, number> | null | undefined,
@@ -62,8 +60,7 @@ function toShareSegments(
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：让叙事结构概览卡复用共享卡片壳，与其他仪表盘业务卡片保持一致
+ * 叙事结构概览卡复用共享卡片壳，与其他仪表盘业务卡片一致
  */
 export function NarrativeStructureBar({
   act1Ratio,

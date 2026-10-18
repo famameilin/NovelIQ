@@ -1,15 +1,4 @@
-"""
-API 分析端点测试
-修改时间: 2026-04-05
-任务: fix-test-data-pollution
-修改内容: 使用 api_client fixture 确保测试使用测试数据库
-修改时间: 2026-04-19
-任务: fix-task-system-review-findings
-修改内容: 补充 DB-first 任务系统回归测试，覆盖创建失败、进程外取消、resume 清脏字段、message 持久化
-修改时间: 2026-04-20
-任务: fix-test-db-isolation
-修改内容: 补充直接调用 get_session_factory()() 仍绑定测试库的回归测试，防止测试污染开发库
-"""
+"""API 分析端点测试"""
 
 import tempfile
 import uuid
@@ -35,12 +24,7 @@ class TestTestDatabaseIsolation:
     """测试后端测试环境的数据库隔离"""
 
     def test_get_session_factory_uses_test_database_url(self):
-        """
-        验证直接调用 get_session_factory()() 也会绑定测试数据库。
-        创建时间: 2026-04-20
-        任务: fix-test-db-isolation
-        说明: 这是此前污染开发库的直接入口，必须有回归测试锁住。
-        """
+        """验证直接调用 get_session_factory()() 也会绑定测试数据库。"""
         expected_url = resolve_database_url_from_env("TEST_DATABASE")
         with get_session_factory()() as session:
             actual_url = session.get_bind().engine.url.render_as_string(hide_password=False)
@@ -48,7 +32,7 @@ class TestTestDatabaseIsolation:
 
 
 class TestRunTimestampContract:
-    """2026-08-26 运行时间戳口径回归：无时区列统一 naive UTC，序列化带 Z 后缀"""
+    """运行时间戳口径回归：无时区列统一 naive UTC，序列化带 Z 后缀"""
 
     def test_aware_completed_at_persists_as_naive_utc_with_z_suffix(self, api_client: TestClient):
         """验证 aware UTC 写入不会按会话时区虚增 8 小时，且 API 侧带 Z 后缀"""
@@ -59,7 +43,7 @@ class TestRunTimestampContract:
             run_repo.update_run_task_fields(
                 run_id,
                 status="completed",
-                completed_at=datetime.now(UTC),  # 此前 aware UTC 被 PG 按 Asia/Shanghai 转换虚增 8h
+                completed_at=datetime.now(UTC),  # completed_at 必须是 naive UTC（aware 值会被 PG 按时区转换虚增 8h）
             )
             run = run_repo.get_run(run_id)
         assert run["status"] == "completed"
@@ -275,7 +259,7 @@ class TestAnalysis:
                 task_id,
                 status="running",
                 worker_id="worker-running",
-                # 2026-08-13 P2：heartbeat_at 列无时区，统一落 naive UTC 挂钟
+                # heartbeat_at 列无时区，统一落 naive UTC 挂钟
                 heartbeat_at=datetime.now(UTC).replace(tzinfo=None),
             )
         response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
@@ -410,7 +394,7 @@ class TestAnalysis:
         assert run["completed_at"] is None
 
     def test_resume_cancelled_task_allowed(self, api_client: TestClient):
-        """2026-08-08 用于验证 cancelled 任务可以继续分析并重置运行态"""
+        """验证 cancelled 任务可以继续分析并重置运行态"""
         with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
@@ -430,7 +414,7 @@ class TestAnalysis:
                 status="cancelled",
                 progress=45.0,
                 stage="annotate",
-                sub_stage="chapter_agent",
+                sub_stage="annotation",
                 current=3,
                 total=8,
                 message="用户取消",
@@ -701,8 +685,7 @@ class TestAnalysis:
         assert restored_request == expected_request
 
     def test_cancel_message_does_not_claim_uncancellable_when_atomic_request_misses(self, api_client: TestClient):
-        """
-        2026-08-13 P2：cancel 竞态中持久化返回 pending/running 时，
+        """cancel 竞态中持久化返回 pending/running 时，
         文案必须说“取消请求未生效”，不能说“无法取消”。
         """
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:

@@ -17,7 +17,7 @@ from src.api.services.results_queries.graph import (
 
 
 def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
-    """2026-08-07 用于验证图变化分页直接返回页面展示与定位字段"""
+    """验证图变化分页直接返回页面展示与定位字段"""
     row = SimpleNamespace(
         change_id="relation:12:4",
         change_kind="relation",
@@ -57,7 +57,7 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
 
 
 def test_graph_changes_cursor_round_trip() -> None:
-    """2026-08-12 用于验证合法游标可往返解析"""
+    """验证合法游标可往返解析"""
     assert _decode_graph_changes_cursor(_encode_graph_changes_cursor(12)) == 12
     assert _decode_graph_changes_cursor(None) == 0
     assert _decode_graph_changes_cursor("") == 0
@@ -65,7 +65,7 @@ def test_graph_changes_cursor_round_trip() -> None:
 
 @pytest.mark.parametrize("raw_payload", ["[1, 2, 3]", '"not-a-dict"', "42", "null"])
 def test_graph_changes_cursor_rejects_non_dict_payload(raw_payload: str) -> None:
-    """2026-08-12 用于验证非 dict JSON 载荷按非法游标处理（→400）而非 AttributeError（→500）"""
+    """验证非 dict JSON 载荷按非法游标处理（→400）而非 AttributeError（→500）"""
     encoded = urlsafe_b64encode(raw_payload.encode("utf-8")).decode("ascii").rstrip("=")
 
     with pytest.raises(ValueError, match="invalid graph changes cursor"):
@@ -73,8 +73,7 @@ def test_graph_changes_cursor_rejects_non_dict_payload(raw_payload: str) -> None
 
 
 def test_graph_changes_page_clamps_limit_and_passes_offset() -> None:
-    """2026-08-13 补测试 P1：fetch_changes 的 limit 钳制（1~200）与 cursor→offset 传递
-    此前只有前端 hook 测试（MSW mock），后端路由参数从未被断言。"""
+    """fetch_changes 的 limit 钳制（1~200）与 cursor→offset 传递"""
     row = SimpleNamespace(
         change_id="relation:12:4",
         change_kind="relation",
@@ -119,8 +118,9 @@ def test_graph_changes_page_clamps_limit_and_passes_offset() -> None:
 
 
 def test_graph_changes_page_rejects_out_of_range_cursor() -> None:
-    """2026-08-13 补测试 P1：游标偏移越过 total 时必须抛 ValueError（路由层 →400），
-    不得返回空页冒充合法分页。"""
+    """游标偏移越过 total 时必须抛 ValueError（路由层 →400），
+    不得返回空页冒充合法分页。
+    """
     row = SimpleNamespace(
         change_id="relation:1:1",
         change_kind="relation",

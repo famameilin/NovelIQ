@@ -1,15 +1,10 @@
-"""
-诊断 Agent 路由测试
+"""诊断 Agent 路由测试
 
-说明: 诊断已 agent 化（工具化自主取证），payload 构建与 DiagnosisClient 已移除；
-     本文件保留数据层取证测试，并通过 patch run_diagnosis_agent 验证工作流落库
+本文件保留数据层取证测试，并通过 patch run_diagnosis_agent 验证工作流落库。
 
-2026-08-14 M8a：取证事实源段落化——测试数据改为写入 paragraphs/paragraph_topics/
-paragraph_curves（chunk_topics 已删除），高张力素材来自段落曲线 surface_tension。
-
-2026-10-16 全库第三范式改造收尾：高张力素材改自 paragraph_features 的 tension_z
-正式观测；伏笔树根按事件声明写入（event_nodes 退场）；诊断落库断言改按
-diagnosis_reports/analysis_assessments 的正式读接口与 run 作用域查询。
+取证事实源：测试数据写入 paragraphs/paragraph_topics/paragraph_curves，
+高张力素材来自 paragraph_features 的 tension_z 正式观测；伏笔树根按事件声明写入；
+诊断落库断言按 diagnosis_reports/analysis_assessments 的正式读接口与 run 作用域查询。
 """
 
 import json
@@ -60,53 +55,44 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
             if isinstance(message.content, str) and message.content.startswith('{"role":')
         )
         self.calls += 1
-        role, inputs = material["role"], material["materials"]
-        if role == "event" and "identity_snapshot" not in inputs:
+        role = material["role"]
+        if role == "case":
+            # 案例会话自取未承诺案例：接手承诺后直接写入完成；无未承诺案例即结束
             code = (
-                f'declarations = {list(material["responsible_ids"])!r}\n'
-                'page = search_events(limit=20)\n'
-                'reached = 0\n'
-                'targets = []\n'
-                'for item in page["events"]:\n'
-                '    if reached == 1:\n'
-                '        targets = targets + [item["declaration_id"]]\n'
-                '    if item["declaration_id"] == declarations[0]:\n'
-                '        reached = 1\n'
-                'source = read_event(node_id=declarations[0])["content"]\n'
-                'evidence = [{"paragraph_id":source["evidence"][0]["paragraph_id"]}]\n'
-                'item = write_event(items=[{"operation":"identity", "key":declarations[0], '
+                'cases = search_cases(unresolved_only=True)\n'
+                'if cases:\n'
+                '    case = cases[0]\n'
+                '    promise_case(case_id=case["case_id"])\n'
+                '    declaration = case["payload"]["event_id"]\n'
+                '    page = search_events(limit=20)\n'
+                '    source = read_event(node_id=declaration)["content"]\n'
+                '    evidence = [{"paragraph_id":source["evidence"][0]["paragraph_id"]}]\n'
+                '    own = write_event(items=[{"operation":"identity", "key":declaration, '
                 '"title":source["title"], "problem":source["problem"], "summary":source["summary"], '
                 '"event_type":source["event_type"], "status":source["status"], '
-                '"declaration_ids":[declarations[0]], "stage_order":[declarations[0]], '
-                '"current_declaration_id":declarations[0], "reason":"按真实章节核对身份", "evidence":evidence}])\n'
-                'write_event(items=[{"operation":"declaration_review", "declaration_ids":'
-                '[declarations[0]], "reason":"逐项核对已保存章节声明"}])\n'
-                'if targets:\n'
-                '    write_event(items=[{"operation":"compare", "source_declaration_id":'
-                'declarations[0], "target_declaration_ids":targets, "disposition":"independent", '
-                '"reason":"本测试各章问题明确独立", "evidence":evidence}])\nfinish()'
-            )
-        elif role == "event":
-            code = (
-                f'declarations = {list(material["responsible_ids"])!r}\n'
-                'events = search_events(kind="event", limit=20)\n'
-                'own = None\n'
-                'others = []\n'
-                'for item in events["events"]:\n'
-                '    detail = read_event(node_id=item["event_id"], kind="event")\n'
-                '    if declarations[0] in detail["declaration_ids"]:\n'
-                '        own = detail\n'
-                'evidence = [{"paragraph_id":own["evidence"][0]["paragraph_id"]}]\n'
-                'write_event(items=[{"operation":"review", "event_ids":[own["event_id"]], '
-                '"reason":"核对本事件实际版本"}])\n'
-                'pairs = []\n'
-                'for item in events["events"]:\n'
-                '    if own["event_id"] != item["event_id"]:\n'
-                '        pairs = pairs + [{"operation":"structure_review", "source_event_id":'
-                'own["event_id"], "target_event_id":item["event_id"], "disposition":"independent", '
+                '"declaration_ids":[declaration], "stage_order":[declaration], '
+                '"current_declaration_id":declaration, "reason":"按真实章节核对身份", "evidence":evidence}], '
+                'caseid=case["case_id"])["results"][0]["event_id"]\n'
+                '    write_event(items=[{"operation":"declaration_review", "declaration_ids":[declaration], '
+                '"reason":"逐项核对已保存章节声明"}], caseid=case["case_id"])\n'
+                '    targets = []\n'
+                '    for item in page["events"]:\n'
+                '        if item["chapter_id"] > source["chapter_id"]:\n'
+                '            targets = targets + [item["declaration_id"]]\n'
+                '    if targets:\n'
+                '        write_event(items=[{"operation":"compare", "source_declaration_id":declaration, '
+                '"target_declaration_ids":targets, "disposition":"independent", '
+                '"reason":"本测试各章问题明确独立", "evidence":evidence}], caseid=case["case_id"])\n'
+                '    pairs = []\n'
+                '    for item in search_events(kind="event", limit=20)["events"]:\n'
+                '        if item["event_id"] != own:\n'
+                '            pairs = pairs + [{"operation":"structure_review", "source_event_id":own, '
+                '"target_event_id":item["event_id"], "disposition":"independent", '
                 '"reason":"本测试各事件没有包含或因果关系", "evidence":evidence}]\n'
-                'if pairs:\n'
-                '    write_event(items=pairs)\nfinish()'
+                '    if pairs:\n'
+                '        write_event(items=pairs, caseid=case["case_id"])\n'
+                'else:\n'
+                '    finish()'
             )
         else:
             assert role == "report"
@@ -140,6 +126,8 @@ class TestDiagnosisRoutes:
         from src.config import settings
 
         monkeypatch.setattr(settings.models.model_pool[0], "max_tokens", 16000)
+        # 案例会话数=池条目并发位；固定为 1 使自取顺序确定
+        monkeypatch.setattr(settings.models.model_pool[0], "max_in_flight", 1)
         self.db_session = db_session
         self.novel_id = uuid.uuid4().hex[:8]
         insert_test_novel(self.novel_id, session=db_session)
@@ -166,7 +154,7 @@ class TestDiagnosisRoutes:
         paragraph_repo = ParagraphRepository(self.db_session)
         spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks)]
         paragraph_repo.insert_paragraphs(self.run_id, spans)
-        # 主题三表契约（§5.8-5.10）：模型契约 + 每段一行状态 + 完整分布
+        # 主题三表契约：模型契约 + 每段一行状态 + 完整分布
         paragraph_repo.insert_topic_model_run(
             self.run_id,
             model_key="gensim-lda",
@@ -242,6 +230,60 @@ class TestDiagnosisRoutes:
             )
 
         self.db_session.commit()
+        self._register_event_cases()
+
+    def _register_event_cases(self) -> None:
+        """声明落地即登记事件案例（生产由标注工具登记、章保存落库）：诊断期按案例自取办理"""
+        from sqlalchemy import select
+
+        from src.case_pool import CasePool
+        from src.case_pool.contributions import CaseContribution
+        from src.storage.models import ChapterAnnotation, EventDeclaration
+        from tests.support.chapter_annotation_helpers import _create_work_identity
+
+        _work_id, author = _create_work_identity(
+            self.db_session, run_id=self.run_id, chapter_id=1, role="event"
+        )
+        pool = CasePool(self.run_id)
+        pool.begin(author)
+        rows = self.db_session.execute(
+            select(
+                EventDeclaration.declaration_id,
+                EventDeclaration.title,
+                EventDeclaration.summary,
+                EventDeclaration.status,
+                ChapterAnnotation.chapter_id,
+            )
+            .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+            .where(ChapterAnnotation.run_id == self.run_id)
+        ).all()
+        for declaration_id, title, summary, status, chapter_id in rows:
+            pool.register_event_case(
+                declaration_id=declaration_id,
+                title=title,
+                summary=summary,
+                status=status,
+                chapter_id=int(chapter_id),
+                author=author,
+            )
+        assert pool.save_work(
+            self.db_session,
+            CaseContribution(
+                self.run_id,
+                author,
+                json.dumps(
+                    {
+                        "created_case_ids": sorted(pool.created.get(author, set())),
+                        "registrations": {
+                            key: pool.cases[key] for key in sorted(pool.registrations.get(author, set()))
+                        },
+                        "deliveries": [],
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        ) == []
+        self.db_session.commit()
 
     def test_fetch_pivot_blocks(self) -> None:
         self._create_full_data(5)
@@ -280,7 +322,7 @@ class TestDiagnosisRoutes:
                 session=self.db_session,
             )
         assert analysis is not None
-        assert llm.calls == 11  # 五份章级事件身份/结构与一份报告
+        assert llm.calls == 7  # 五件事件案例逐件办理与一次收尾，加一份报告
         assert analysis.genre_labels == ["通用"]
         assert analysis.style_labels == ["严肃"]
 
@@ -290,6 +332,38 @@ class TestDiagnosisRoutes:
         assert fetched["genre_labels"] == ["通用"]
         assert fetched["style_labels"] == ["严肃"]
         assert fetched["diagnosis"] == "ok"
+
+    @pytest.mark.asyncio()
+    async def test_case_session_save_survives_failure_and_resume_skips_done_cases(self) -> None:
+        """会话做完保存一次：报告保存失败时已办案例与承诺随会话落库，续跑水合后不重办"""
+        from src.case_pool import CasePool
+        from src.event_trees.storage_map import run_events
+
+        self._create_full_data(3)
+        llm = _EvidenceThenFinishLLM(_fake_analysis(self.novel_id).model_dump())
+        with patch("src.model_pool.llm.build_chat_model", return_value=llm):
+            with patch(
+                "src.agents.diagnosis.domain.save_diagnosis_result",
+                side_effect=RuntimeError("模拟报告保存失败"),
+            ):
+                with pytest.raises(RuntimeError, match="模拟报告保存失败"):
+                    await run_diagnose(run_id=self.run_id, session=self.db_session)
+
+        saved_event_ids = set(run_events(self.db_session, self.run_id))
+        assert saved_event_ids
+        pool = CasePool(self.run_id)
+        pool.load_storage(self.db_session)
+        promised = [item for item in pool.search() if item["promised"]]
+        assert len(promised) == len(saved_event_ids)
+
+        with patch("src.model_pool.llm.build_chat_model", return_value=llm):
+            analysis = await run_diagnose(run_id=self.run_id, session=self.db_session)
+        assert analysis is not None
+        # 续跑：案例会话对空池一次 finish、报告会话一次收尾，不重复办理既有案例
+        assert llm.calls == 5 + 2
+        assert set(run_events(self.db_session, self.run_id)) == saved_event_ids
+        fetched = fetch_diagnosis_payload(self.db_session, self.run_id)
+        assert fetched is not None and fetched["diagnosis"] == "ok"
 
     @pytest.mark.asyncio()
     async def test_run_diagnose_persists_result(self) -> None:
@@ -302,7 +376,7 @@ class TestDiagnosisRoutes:
                 session=self.db_session,
             )
 
-        assert llm.calls == 7  # 三份章级事件身份/结构与一份报告
+        assert llm.calls == 5  # 三件事件案例逐件办理与一次收尾，加一份报告
         fetched = fetch_diagnosis_payload(self.db_session, self.run_id)
         assert fetched is not None
         assert fetched["novel_id"] == self.novel_id

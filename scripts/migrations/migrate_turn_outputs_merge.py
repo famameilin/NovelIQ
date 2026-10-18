@@ -1,6 +1,6 @@
 """审计与产物六表合并迁移：默认只读检查，--apply 单事务执行
 
-2026-10-06 表合并：
+表合并映射：
 - agent_invocations / agent_turns / audit_messages / token_usage → model_turns 一张回合级台账
   （invocation 上下文反规范化到回合行，token 计账列内联，audit_messages 幂等职责由
   message_key 唯一列承担；回合行保留原 agent_turns.id 以维持 agent_tool_calls.turn_id）；

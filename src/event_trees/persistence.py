@@ -1,6 +1,6 @@
 """章级声明候选关系的事务保存与核对，不发布正式事件或结构
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：章级声明之间的候选关系进入
+章级声明之间的候选关系进入
 narrative_links 的语义形状（两端都引用 event_declarations），证据进入
 source_evidence 的 narrative_link_id 所有者列。
 """
@@ -20,10 +20,8 @@ from src.storage.models import (
     CompleteEvent,
     EventDeclaration,
     EventRevision,
-    Execution,
     NarrativeLink,
     SourceEvidence,
-    WorkItem,
 )
 
 
@@ -50,19 +48,17 @@ def save_declaration_contribution(session: Any, frozen: EventContribution, annot
         if row is None:
             raise ValueError(f"declaration_id={identifier} 未有效保存于本 run")
         source = session.execute(
-            select(WorkItem.work_id, ChapterAnnotation.execution_id, Chapter.sequence)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
+            select(ChapterAnnotation.run_id, Chapter.sequence)
             .join(
                 Chapter,
-                (Chapter.run_id == WorkItem.annotation_run_id) & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+                (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
             )
-            .where(ChapterAnnotation.record_id == row.record_id, WorkItem.annotation_run_id == run_id)
+            .where(ChapterAnnotation.record_id == row.record_id, ChapterAnnotation.run_id == run_id)
             .limit(1)
         ).first()
         if source is None:
             raise ValueError(f"declaration_id={identifier} 未有效保存于本 run")
-        if int(source[2]) > frozen.chapter_order:
+        if int(source[1]) > frozen.chapter_order:
             raise ValueError(f"declaration_id={identifier} 来源章晚于当前 work")
         return row
 
@@ -77,7 +73,7 @@ def save_declaration_contribution(session: Any, frozen: EventContribution, annot
         session.add(
             NarrativeLink(
                 link_id=item["relation_id"],
-                producer_execution_id=frozen.invocation_id,
+                producer_execution_id=frozen.execution_id,
                 reason=item["reason"],
                 semantic_source_declaration_id=item["source_id"],
                 semantic_target_declaration_id=item["target_id"],
@@ -112,7 +108,7 @@ def check_declaration_contribution(session: Any, frozen: EventContribution) -> b
             if row is None:
                 return False
             if (
-                row.producer_execution_id != frozen.invocation_id
+                row.producer_execution_id != frozen.execution_id
                 or row.semantic_source_declaration_id != item["source_id"]
                 or row.semantic_target_declaration_id != item["target_id"]
                 or row.source_operation_local_key != item["source_operation_id"]
@@ -134,7 +130,7 @@ def check_declaration_contribution(session: Any, frozen: EventContribution) -> b
 
 
 def discard_declaration_contributions(
-    session: Any, run_id: str, work_ids: set[str], declaration_ids: list[str]
+    session: Any, run_id: str, execution_ids: set[str], declaration_ids: list[str]
 ) -> None:
     """仅撤销未进入诊断发布的标注贡献，已发布 run 不允许局部改写"""
     from sqlalchemy import delete
@@ -150,12 +146,9 @@ def discard_declaration_contributions(
     ) is not None:
         raise ValueError("声明已正式发布，必须从原文建立新 run")
 
-    executions = select(Execution.execution_id).join(WorkItem, WorkItem.work_id == Execution.work_id).where(
-        WorkItem.work_id.in_(work_ids)
-    )
     session.execute(
         delete(NarrativeLink).where(
-            NarrativeLink.producer_execution_id.in_(executions),
+            NarrativeLink.producer_execution_id.in_(sorted(execution_ids)),
             NarrativeLink.semantic_source_declaration_id.is_not(None),
         )
     )

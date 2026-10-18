@@ -1,4 +1,4 @@
-"""2026-09-10 设置注册表与 settings 热生效工具的闸门测试
+"""设置注册表与 settings 热生效工具的闸门测试
 
 覆盖：
 - diff_user_overrides 稀疏化（含开放键空间 dict 例外）

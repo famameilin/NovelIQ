@@ -1,16 +1,8 @@
 """
-书级案例 ORM 模型（2026-10-16 全库 3NF 改造）
+书级案例 ORM 模型
 
-- book_cases：案例登记、明确目标与独立评审状态。两种身份：按声明自动登记
-  （automatic_declaration_id 为该分支唯一自然目标）与普通描述登记；**不设
-  全表 run+type+description 唯一键**。正式目标（实体/关系/对话/声明/完整事件）
-  有具体 FK；两种尚无正式对象的现行定位合同在此承接：
-  - 对话候选：无 dialogue_records 时存真实章节及候选 start/end
-  - 诊断失败候选：pending_event_entry_id 引用 case_entries 的候选观察形状
-- case_entries：支持→交付→连接及独立保存告警的有限结构（父子层级固定）
-
-公共约束：全局目标、两种候选形状互斥，普通无目标也允许；正式目标或 pending
-entry 可决定 run 时 registration_run_id 必须空；无目标/对话候选必须有真实 run。
+公共约束：全局目标、两种候选形状互斥，普通无目标也允许；
+正式目标或 pending entry 决定 run 时 registration_run_id 必须空，无目标/对话候选必须有真实 run。
 """
 
 from __future__ import annotations
@@ -152,12 +144,8 @@ class CaseEntry(Base):
     """
     案例条目表（六种互斥形状，父子层级固定）
 
-    - Agent 支持/贡献：case_id+producer_execution_id+adopted（可无交付）
-    - 已有程序登记支持：case_id+program_work_id（无模型调用、无伪造交付）
-    - 真实交付：parent_entry_id→Agent 支持；business_call_id/accepted_order/tool_name/receipt_bytes
-    - 实际连接：parent_entry_id→交付；narrative_link_id
-    - 保存失败告警：warning_record_id/report_id 恰一 + ordinal/attempted_case_reference/warning_message
-    - 未发布事件的失败观察：candidate_producer_execution_id + pending_event_reference/title/chapter
+    六种形状由 ck_case_entries_shape 约束互斥：Agent 支持 / 程序登记支持 /
+    真实交付 / 实际连接 / 保存失败告警 / 未发布事件的失败观察。
     """
 
     __tablename__ = "case_entries"

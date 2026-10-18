@@ -8,7 +8,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -25,16 +25,15 @@ from src.event_trees.trees import CONTRIBUTION_KEYS, EventTrees
 from src.fact_graph.contributions import FactContribution
 from src.fact_graph.evidence import EvidenceParagraph
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.identity import comparison_relation_pair
 from src.utils.identity import stable_uuid
 from src.work.annotation_work import WorkReceipt
 
+from .agent_graph import build_agent_graph
+from .agent_ir import AgentAnnotation
+from .agent_runtime import AgentProgramRuntime
 from .errors import AnnotationDependencyError, AnnotationInputError, AnnotationInvariantError
 from .ledger import AnnotationToolLedger
 from .paragraphs import build_chapter_paragraph_info
-from .subagent_graph import build_subagent_graph
-from .subagent_ir import SubagentAnnotation
-from .subagent_runtime import SubagentProgramRuntime
 from .work_tools import build_work_tools
 
 
@@ -43,7 +42,7 @@ class WorkExecution:
     receipt: WorkReceipt
     invocation_id: str
     ledger: AnnotationToolLedger
-    subagent: SubagentAnnotation
+    agent: AgentAnnotation
     task: asyncio.Task[Any] | None = None
     finished: bool = False
     end_requested: bool = False
@@ -76,7 +75,7 @@ class WorkExecution:
         """返回当前 work 的完整性缺口；不改变写入状态，也不关闭写面"""
         missing: list[str] = []
         ledger = self.ledger
-        if ledger.role in {"solo", "evidence"}:
+        if ledger.role in {"annotation", "metric"}:
             if ledger.metrics_payload is None:
                 missing.append("metrics")
             pending = ledger.dialogue_ledger()["pending"]
@@ -161,7 +160,6 @@ class AnnotationAgent:
             ("agent.saved_progress", self.saved_progress),
             ("agent.cancel", self.cancel),
             ("agent.abort", self.abort),
-            ("agent.check", self.check),
             ("agent.recover", self.recover),
             ("agent.consolidate_chapter", self.consolidate_chapter),
         ):
@@ -172,7 +170,7 @@ class AnnotationAgent:
         from .chapter_consolidation import consolidate_chapter
 
         async with self.lock:
-            snapshot = self.case_pool.snapshot(("chapter", "program"))
+            snapshot = self.case_pool.snapshot(f"chapter:{message.payload['chapter_id']}")
             executions = set(self.case_pool.executions)
             warnings = deepcopy(self.case_pool.save_warnings)
             try:
@@ -180,7 +178,11 @@ class AnnotationAgent:
                 def save() -> dict[str, Any]:
                     with self.session_factory() as session:
                         result = consolidate_chapter(
-                            session, self.run_id, message.payload["chapter_id"], self.case_pool
+                            session,
+                            self.run_id,
+                            message.payload["chapter_id"],
+                            self.case_pool,
+                            recheck=bool(message.payload.get("recheck", False)),
                         )
                         session.commit()
                         return result
@@ -199,7 +201,7 @@ class AnnotationAgent:
                 self.case_pool.save_warnings = warnings
                 raise
             if result["status"] == "saved":
-                self.case_pool.confirm_pending(result["author"], result["case_states"])
+                self.case_pool.confirm_pending(result["author"])
             if cancelled:
                 raise asyncio.CancelledError
             return result
@@ -240,7 +242,7 @@ class AnnotationAgent:
             role=payload["role"],
         )
         execution = WorkExecution(
-            receipt, invocation_id, ledger, SubagentAnnotation(role=payload["role"]), task=asyncio.current_task()
+            receipt, invocation_id, ledger, AgentAnnotation(role=payload["role"]), task=asyncio.current_task()
         )
         self.executions[receipt.work_id] = execution
         await self.bus.request(
@@ -253,11 +255,11 @@ class AnnotationAgent:
                 invocation_id=invocation_id,
             )
         )
-        author = (receipt.work_id, invocation_id)
+        author = invocation_id
         async with self.lock:
-            self.fact_graph.begin(*author, payload["chapter_sequence"], payload["role"])
-            self.event_trees.begin(*author)
-            self.case_pool.begin(*author)
+            self.fact_graph.begin(author, payload["chapter_sequence"], payload["role"])
+            self.event_trees.begin(author)
+            self.case_pool.begin(author)
         recorder = AuditMessages(self.bus, self.run_id, receipt.work_id, invocation_id, payload["role"])
         audit_id: int | None = None
         try:
@@ -271,7 +273,6 @@ class AnnotationAgent:
                 attempt_number=payload["attempt_number"],
                 model=model_name,
                 chapter_id=payload["chapter_id"],
-                work_id=receipt.work_id,
                 role=payload["role"],
             )
             audit_id = recorder.start_invocation(**audit_context)
@@ -307,8 +308,8 @@ class AnnotationAgent:
             ledger.invoke_tool = partial(self.invoke_tool, execution)
             ledger.finish_work = execution.validate
             tools = build_work_tools(self, execution, query)
-            runtime = SubagentProgramRuntime(
-                {tool.name: tool for tool in tools}, ledger, execution.subagent, observer=observer, stream=stream
+            runtime = AgentProgramRuntime(
+                {tool.name: tool for tool in tools}, ledger, execution.agent, observer=observer, stream=stream
             )
             program = runtime.build_tool()
             from loguru import logger
@@ -328,37 +329,37 @@ class AnnotationAgent:
                 missing = execution.validate()
                 if not missing:
                     execution.finished = True
-                    execution.subagent.finished = True
+                    execution.agent.finished = True
                     ledger.chapter_finished = True
                 return missing
 
-            graph = build_subagent_graph(
+            graph = build_agent_graph(
                 model,
                 program,
                 runtime.finish_tool,
                 ledger=ledger,
-                subagent=execution.subagent,
+                agent=execution.agent,
                 max_iterations=max_iterations,
                 stream=stream,
                 observer=observer,
                 retries=settings.models.annotation.total_attempts,
                 completion_check=completion_check,
             )
-            from .prompts import SUBAGENT_ROLE_SCOPES, SUBAGENT_SYSTEM_PROMPT, build_subagent_message
+            from .prompts import AGENT_ROLE_SCOPES, AGENT_SYSTEM_PROMPT, build_agent_message
 
-            scope = SUBAGENT_ROLE_SCOPES.get(payload["role"], "独立完成本章实体关系、事件参与者、全部对话候选和指标")
+            scope = AGENT_ROLE_SCOPES.get(payload["role"], "独立完成本章实体关系、事件参与者、全部对话候选和指标")
             try:
                 state = await graph.ainvoke(
                     {
                         "messages": [
                             SystemMessage(
-                                content=SUBAGENT_SYSTEM_PROMPT + "\n全书图树案例共享；finish 只完成自己的 work。"
+                                content=AGENT_SYSTEM_PROMPT + "\n全书图树案例共享；finish 只完成自己的标注。"
                                 "push_case(case_type,description) 归入人物/关系/对话/事件，"
                                 "promise_case 只填真实 case_id。"
                                 "跨章连接用 write_link 引用已实际读取且已保存的声明；未保存端点不能连接。"
                             ),
                             HumanMessage(
-                                content=build_subagent_message(
+                                content=build_agent_message(
                                     role=payload["role"],
                                     paragraph_info=paragraph_info,
                                     candidates=ledger.dialogue_candidates,
@@ -423,9 +424,9 @@ class AnnotationAgent:
 
             logger.error("work 执行失败 work_id={} role={} error={!r}", receipt.work_id, payload["role"], exc)
             async with self.lock:
-                self.fact_graph.rollback(*author)
-                self.event_trees.rollback(*author)
-                self.case_pool.rollback(*author)
+                self.fact_graph.rollback(author)
+                self.event_trees.rollback(author)
+                self.case_pool.rollback(author)
             if audit_id is not None:
                 recorder.finish_invocation(**audit_context, status="error", final_error=str(exc))
             await self.bus.request(
@@ -471,7 +472,7 @@ class AnnotationAgent:
                         caseid,
                         lambda **values: self.case_pool.associate(
                             values["caseid"],
-                            (execution.work_id, execution.invocation_id),
+                            execution.invocation_id,
                             tool_name=call["name"],
                             call_id=str(call["id"]),
                             receipt=values["receipt"],
@@ -482,9 +483,9 @@ class AnnotationAgent:
             execution.case_reads.append({"tool": call["name"], "result": str(result)})
             return str(result)
         async with self.lock:
-            author = (execution.work_id, execution.invocation_id)
+            author = execution.invocation_id
             execution.call_id = str(call["id"])
-            with self.fact_graph.author(*author):
+            with self.fact_graph.author(author):
                 snapshots = (
                     execution.ledger.snapshot(),
                     self.fact_graph.snapshot(),
@@ -508,7 +509,7 @@ class AnnotationAgent:
                     self.event_trees.restore(snapshots[2])
                     self.case_pool.restore(snapshots[3])
                     # 就地恢复：读取工具装配时捕获的是这三个容器对象本身，
-                    # 换成快照副本会让此后读取的记录与核查读取的容器断裂
+                    # 换成快照副本会让此后读取的记录与工具持有的容器断裂
                     execution.event_reads.clear()
                     execution.event_reads.update(local[0])
                     execution.case_connections[:] = local[1]
@@ -533,11 +534,12 @@ class AnnotationAgent:
 
         if not execution.finished:
             raise ValueError("只有通过程序完整性检查的 work 可以保存")
+        payload = execution.receipt.payload
         annotation_id = stable_uuid(self.run_id, execution.work_id)
         existing = session.get(ChapterAnnotation, annotation_id)
         if existing is not None:
             if existing.execution_id != execution.invocation_id:
-                raise ValueError(f"work_id={execution.work_id} 已有另一份不可变结果")
+                raise ValueError(f"chapter={payload['chapter_id']} role={payload['role']} 已有另一份不可变结果")
             return annotation_id
         output = execution.output()
         metrics = output["metrics"]
@@ -545,6 +547,9 @@ class AnnotationAgent:
             ChapterAnnotation(
                 record_id=annotation_id,
                 execution_id=execution.invocation_id,
+                run_id=self.run_id,
+                chapter_id=int(payload["chapter_id"]),
+                role=str(payload["role"]),
                 # 记录合同版本取本次产出的内容合同：事件域读写按该值判定记录形状
                 contract_version=str(output["contract_version"]),
                 chapter_consolidation_version=RULE_VERSION,
@@ -592,9 +597,9 @@ class AnnotationAgent:
     async def confirm(self, message: Message) -> None:
         execution = self._execution(message)
         async with self.lock:
-            self.fact_graph.confirm(execution.work_id, execution.invocation_id)
-            self.event_trees.confirm(execution.work_id, execution.invocation_id)
-            self.case_pool.confirm(execution.work_id, execution.invocation_id)
+            self.fact_graph.confirm(execution.invocation_id)
+            self.event_trees.confirm(execution.invocation_id)
+            self.case_pool.confirm(execution.invocation_id)
             execution.saved = True
 
     async def saved_progress(self, message: Message) -> None:
@@ -641,14 +646,14 @@ class AnnotationAgent:
         async with self.lock:
             if execution.saved:
                 raise ValueError(f"work_id={execution.work_id} 已确认保存，不能撤销")
-            self.fact_graph.rollback(execution.work_id, execution.invocation_id)
-            self.event_trees.rollback(execution.work_id, execution.invocation_id)
-            self.case_pool.rollback(execution.work_id, execution.invocation_id)
+            self.fact_graph.rollback(execution.invocation_id)
+            self.event_trees.rollback(execution.invocation_id)
+            self.case_pool.rollback(execution.invocation_id)
 
     def freeze(self, execution: WorkExecution) -> None:
         """程序完整性检查通过后固定贡献，数据库线程不遍历并发修改的全书字典"""
-        author = (execution.work_id, execution.invocation_id)
-        facts: dict[str, Any] = self.fact_graph.drain_ops(*author)
+        author = execution.invocation_id
+        facts: dict[str, Any] = self.fact_graph.drain_ops(author)
         keys = {self.fact_graph.entity_key(op["name"], op["entity_type"]) for op in facts["entity_ops"]}
         for op in facts["relation_assert_ops"]:
             keys.update((str(op["from_entity"]), str(op["to_entity"])))
@@ -722,7 +727,6 @@ class AnnotationAgent:
         )
         execution.fact_contribution = FactContribution(
             self.run_id,
-            execution.work_id,
             execution.invocation_id,
             payload["chapter_id"],
             paragraphs,
@@ -731,7 +735,6 @@ class AnnotationAgent:
         )
         execution.event_contribution = EventContribution(
             self.run_id,
-            execution.work_id,
             execution.invocation_id,
             payload["chapter_sequence"],
             paragraphs,
@@ -740,7 +743,6 @@ class AnnotationAgent:
         )
         execution.case_contribution = CaseContribution(
             self.run_id,
-            execution.work_id,
             execution.invocation_id,
             json.dumps(contributions["cases"], ensure_ascii=False),
         )
@@ -749,13 +751,15 @@ class AnnotationAgent:
         from src.fact_graph.graph import mention_uuid
         from src.storage.models import DialogueRecord
 
-        if execution.ledger.role not in {"solo", "evidence"}:
+        if execution.ledger.role not in {"annotation", "metric"}:
             return
         for content in execution.output()["dialogues"]:
             identifier = stable_uuid(self.run_id, execution.work_id, content["candidate_key"])
             session.add(
                 DialogueRecord(
                     dialogue_id=identifier,
+                    run_id=self.run_id,
+                    chapter_id=execution.ledger.current_chapter_id,
                     creation_execution_id=execution.invocation_id,
                     candidate_key=content["candidate_key"],
                     start_char=int(content["start"]),
@@ -770,320 +774,6 @@ class AnnotationAgent:
                 )
             )
         session.flush()
-
-    async def check(self, message: Message) -> bool:
-        execution = self._execution(message)
-
-        def query() -> bool:
-            from loguru import logger
-            from sqlalchemy import select
-
-            from src.storage.models import (
-                AnalysisAssessment,
-                BookCase,
-                ChapterAnnotation,
-                DialogueRecord,
-                EventForeshadowingAction,
-                GraphEntity,
-                GraphFact,
-                GraphRelation,
-                WorkItem,
-            )
-
-            def mismatch(label: str, **sides: Any) -> bool:
-                actual, expected = sides.get("actual"), sides.get("expected")
-                if isinstance(actual, set) and isinstance(expected, set):
-                    detail = (
-                        f"actual_only={sorted(map(repr, actual - expected))[:15]}"
-                        f" expected_only={sorted(map(repr, expected - actual))[:15]}"
-                    )
-                elif isinstance(actual, list) and isinstance(expected, list):
-                    index = next(
-                        (
-                            position
-                            for position, pair in enumerate(zip(actual, expected, strict=False))
-                            if pair[0] != pair[1]
-                        ),
-                        min(len(actual), len(expected)),
-                    )
-                    left = actual[index] if index < len(actual) else None
-                    right = expected[index] if index < len(expected) else None
-                    detail = (
-                        f"first_diff={index} n_actual={len(actual)} n_expected={len(expected)}"
-                        f" actual={left!r} expected={right!r}"
-                    )
-                else:
-                    detail = " | ".join(f"{key}={value!r}"[:1500] for key, value in sides.items())
-                logger.warning(
-                    "work 保存核查不一致 work_id={} label={} {}", message.work_id, label, detail[:4000]
-                )
-                return False
-
-            with self.session_factory() as session:
-                work = session.get(WorkItem, execution.work_id)
-                expected_work = {
-                    "annotation_run_id": self.run_id,
-                    "annotation_chapter_id": execution.receipt.payload["chapter_id"],
-                    "role": execution.receipt.payload["role"],
-                }
-                if work is None or any(
-                    getattr(work, name) != value for name, value in expected_work.items()
-                ):
-                    actual_work = (
-                        None if work is None else {name: getattr(work, name) for name in expected_work}
-                    )
-                    return mismatch("work_row", expected=expected_work, actual=actual_work)
-                annotation_id = stable_uuid(self.run_id, message.work_id)
-                record = session.get(ChapterAnnotation, annotation_id)
-                if record is None or record.execution_id != message.invocation_id:
-                    return mismatch(
-                        "annotation_record",
-                        expected_execution=message.invocation_id,
-                        actual=(
-                            None
-                            if record is None
-                            else {"record_id": record.record_id, "execution_id": record.execution_id}
-                        ),
-                    )
-                expected = execution.contributions["facts"]
-                detail = self.fact_graph._read_work_facts(
-                    session,
-                    execution_id=message.invocation_id,
-                    work_id=message.work_id,
-                    chapter_id=execution.receipt.payload["chapter_id"],
-                )
-                references = sorted(detail["entity_references"], key=lambda value: value["entity_id"])
-                expected_references = sorted(
-                    expected["entities"].values(), key=lambda value: value["entity_id"]
-                )
-                if references != expected_references:
-                    return mismatch("entity_references", actual=references, expected=expected_references)
-                actual_entities = [
-                    (
-                        op["name"],
-                        op["entity_type"],
-                        tuple(op["tags"]),
-                        tuple(op["fields"]),
-                        op.get("description"),
-                    )
-                    for op in detail["entity_ops"]
-                ]
-                expected_entities = [
-                    (
-                        op["name"],
-                        op["entity_type"],
-                        tuple(op.get("tags") or []),
-                        tuple(op.get("fields") or []),
-                        op.get("description"),
-                    )
-                    for op in expected["entity_ops"]
-                ]
-                if actual_entities != expected_entities:
-                    return mismatch("entity_ops", actual=actual_entities, expected=expected_entities)
-                expected_relations = {
-                    comparison_relation_pair(
-                        self.fact_graph.entity_id_for_key(str(op["from_entity"])),
-                        self.fact_graph.entity_id_for_key(str(op["to_entity"])),
-                        str(op["relation_type"]),
-                    )
-                    for op in expected["relation_assert_ops"]
-                }
-                actual_relation_ids = set(
-                    session.scalars(
-                        select(GraphFact.relation_id).where(
-                            GraphFact.direct_producer_execution_id == message.invocation_id,
-                            GraphFact.relation_id.is_not(None),
-                        )
-                    )
-                )
-                actual_relations = {
-                    comparison_relation_pair(
-                        str(row.from_entity_id), str(row.to_entity_id), str(row.relation_type)
-                    )
-                    for row in session.scalars(
-                        select(GraphRelation).where(GraphRelation.relation_id.in_(actual_relation_ids))
-                    )
-                }
-                if actual_relations != expected_relations:
-                    return mismatch("relations", actual=actual_relations, expected=expected_relations)
-                expected_plotline = [
-                    {
-                        "source_operation_id": str(item["source_operation_id"]),
-                        "event_id": item.get("event_id"),
-                        "operation": {
-                            key: item["operation"].get(key)
-                            for key in ("subject_id", "subject_title", "description", "before", "after")
-                        },
-                        "evidence": [
-                            (int(row["paragraph_id"]), int(row["char_start"]), int(row["char_end"]))
-                            for row in item.get("evidence") or []
-                        ],
-                    }
-                    for item in expected.get("plotline_ops", [])
-                ]
-                actual_plotline = [
-                    {
-                        "source_operation_id": op["source_operation_id"],
-                        "event_id": op["event_id"],
-                        "operation": {
-                            key: op["operation"].get(key)
-                            for key in ("subject_id", "subject_title", "description", "before", "after")
-                        },
-                        "evidence": [
-                            (int(row["paragraph_id"]), int(row["char_start"]), int(row["char_end"]))
-                            for row in op.get("evidence") or []
-                        ],
-                    }
-                    for op in detail["plotline_ops"]
-                ]
-                if actual_plotline != expected_plotline:
-                    return mismatch("plotline_ops", actual=actual_plotline, expected=expected_plotline)
-                from src.storage.models import DeclarationParticipant, EventDeclaration
-
-                expected_observations = {
-                    (item["character"], item.get("role_function"), item.get("action"), item.get("emotion"))
-                    for item in execution.output()["character_observations"]
-                }
-                actual_observations = set()
-                for participant_fact in session.scalars(
-                    select(GraphFact).where(GraphFact.participant_id.is_not(None))
-                ):
-                    participant = session.get(DeclarationParticipant, participant_fact.participant_id)
-                    if participant is None:
-                        continue
-                    declaration = session.get(EventDeclaration, participant.declaration_id)
-                    if declaration is None or declaration.record_id != annotation_id:
-                        continue
-                    entity = session.get(GraphEntity, participant.entity_id)
-                    actual_observations.add(
-                        (
-                            str(entity.canonical_name) if entity is not None else "",
-                            participant.narrative_role,
-                            participant.action,
-                            participant.emotion,
-                        )
-                    )
-                if actual_observations != expected_observations:
-                    return mismatch(
-                        "character_observations",
-                        actual=actual_observations,
-                        expected=expected_observations,
-                    )
-                expected_labels = {
-                    (int(item["paragraph_id"]), int(item["emotion"]))
-                    for item in execution.output()["paragraph_labels"]
-                }
-                actual_labels = {
-                    # record_id 非空的条目即逐段情绪形状：ck_analysis_assessments_shape
-                    # 要求该形状 paragraph_id/emotion 与 record_id 同非空
-                    (cast(int, row.paragraph_id), cast(int, row.emotion))
-                    for row in session.scalars(
-                        select(AnalysisAssessment).where(AnalysisAssessment.record_id == annotation_id)
-                    )
-                }
-                if actual_labels != expected_labels:
-                    return mismatch("paragraph_labels", actual=actual_labels, expected=expected_labels)
-                expected_actions = execution.contributions["events"]["actions"]
-                actual_actions = {
-                    row.action_id: row
-                    for row in session.scalars(
-                        select(EventForeshadowingAction).where(
-                            EventForeshadowingAction.producer_execution_id == message.invocation_id
-                        )
-                    )
-                }
-                if set(actual_actions) != set(expected_actions):
-                    return mismatch(
-                        "actions_keys",
-                        actual=sorted(actual_actions),
-                        expected=sorted(expected_actions),
-                    )
-                for identifier, value in expected_actions.items():
-                    row = actual_actions[identifier]
-                    if (
-                        str(row.action_type) != value["action_type"]
-                        or str(row.source_declaration_id) != value["root_event_id"]
-                        or row.target_declaration_id != value.get("target_event_id")
-                    ):
-                        return mismatch(
-                            "action_fields",
-                            identifier=identifier,
-                            actual=(
-                                str(row.action_type),
-                                str(row.source_declaration_id),
-                                row.target_declaration_id,
-                            ),
-                            expected=value,
-                        )
-                from src.event_trees.persistence import check_declaration_contribution
-
-                if execution.event_contribution is None:
-                    return mismatch("declaration_contribution", frozen=False)
-                if not check_declaration_contribution(session, execution.event_contribution):
-                    return mismatch("declaration_contribution", frozen=True)
-                case_ids = set(execution.contributions["cases"]["registrations"])
-                case_ids.update(item["case_id"] for item in execution.contributions["cases"]["deliveries"])
-                for identifier in case_ids:
-                    if identifier in {item["caseid"] for item in execution.case_save_warnings}:
-                        continue
-                    if session.get(BookCase, identifier) is None:
-                        return mismatch("book_case", case_id=identifier)
-                if execution.ledger.role in {"solo", "evidence"}:
-                    dialogues = list(
-                        session.scalars(
-                            select(DialogueRecord).where(
-                                DialogueRecord.creation_execution_id == message.invocation_id
-                            )
-                        )
-                    )
-                    if {row.candidate_key for row in dialogues} != {
-                        item["candidate_key"] for item in execution.output()["dialogues"]
-                    }:
-                        return mismatch(
-                            "dialogue_keys",
-                            actual=sorted(row.candidate_key for row in dialogues),
-                            expected=sorted(item["candidate_key"] for item in execution.output()["dialogues"]),
-                        )
-                    from src.fact_graph.graph import mention_uuid
-
-                    by_key = {row.candidate_key: row for row in dialogues}
-                    for content in execution.output()["dialogues"]:
-                        dialogue = by_key[content["candidate_key"]]
-                        speaker = (
-                            mention_uuid(
-                                self.run_id, execution.ledger.current_chapter_id, content["speaker"], "character"
-                            )
-                            if content["speaker"]
-                            else None
-                        )
-                        if (
-                            dialogue.speaker_entity_id != speaker
-                            or int(dialogue.start_char) != int(content["start"])
-                            or int(dialogue.end_char) != int(content["end"])
-                            or dialogue.tone != content["tone"]
-                            or bool(dialogue.is_inner_monologue) != bool(content["is_inner_monologue"])
-                        ):
-                            return mismatch(
-                                "dialogue_fields",
-                                candidate_key=content["candidate_key"],
-                                actual=(
-                                    str(dialogue.speaker_entity_id),
-                                    int(dialogue.start_char),
-                                    int(dialogue.end_char),
-                                    dialogue.tone,
-                                    bool(dialogue.is_inner_monologue),
-                                ),
-                                expected=(
-                                    str(speaker),
-                                    int(content["start"]),
-                                    int(content["end"]),
-                                    content["tone"],
-                                    bool(content["is_inner_monologue"]),
-                                ),
-                            )
-                return True
-
-        return await asyncio.to_thread(query)
 
     async def cancel(self, message: Message) -> None:
         execution = self.executions.get(message.work_id)
@@ -1116,14 +806,11 @@ class AnnotationAgent:
     async def _recover_saved_work(self, message: Message) -> None:
         """确认故障只重建当前已保存作者，不清理其他 work 或释放其案例占用"""
         execution = self._execution(message)
-        if not await self.check(message):
-            raise ValueError(f"work_id={message.work_id} 保存结果不一致，不能恢复确认")
 
         def load() -> tuple[Any, Any, Any]:
             with self.session_factory() as session:
                 args = (
                     session,
-                    execution.work_id,
                     execution.invocation_id,
                     stable_uuid(self.run_id, execution.work_id),
                 )
@@ -1141,6 +828,7 @@ class AnnotationAgent:
             execution.saved = False
 
     def _recover(self, data: dict[str, Any]) -> None:
+        """整章废弃按产物行与执行归属清理：产物、域事实与真实尝试一起退场"""
         from sqlalchemy import delete, select
 
         from src.storage.models import (
@@ -1150,66 +838,68 @@ class AnnotationAgent:
             DialogueRecord,
             EventDeclaration,
             Execution,
-            WorkItem,
         )
 
-        session, discard = data["session"], set(data["discard"])
-        executions = select(Execution.execution_id).where(Execution.work_id.in_(discard))
-        discarded_declarations = select(EventDeclaration.declaration_id).where(
-            EventDeclaration.record_id.in_(
-                select(ChapterAnnotation.record_id)
-                .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-                .where(Execution.work_id.in_(discard))
-            )
+        session = data["session"]
+        chapter_ids = {int(chapter) for chapter in data["chapter_ids"]}
+        ordered_chapters = sorted(chapter_ids)
+        executions = select(Execution.execution_id).where(
+            Execution.run_id == self.run_id, Execution.chapter_id.in_(ordered_chapters)
         )
-        # 案例的正式目标（声明）随整章废弃退场：先在声明外键（RESTRICT）之前清案例行
+        discarded_records = select(ChapterAnnotation.record_id).where(
+            ChapterAnnotation.run_id == self.run_id, ChapterAnnotation.chapter_id.in_(ordered_chapters)
+        )
+        discarded_declarations = select(EventDeclaration.declaration_id).where(
+            EventDeclaration.record_id.in_(discarded_records)
+        )
+        discarded_dialogues = select(DialogueRecord.dialogue_id).where(
+            DialogueRecord.creation_execution_id.in_(executions)
+        )
+        # 案例的正式目标（声明/对话）随整章废弃退场：先在目标外键（RESTRICT）之前清案例行
         session.execute(
             delete(BookCase).where(
                 BookCase.automatic_declaration_id.in_(discarded_declarations)
                 | BookCase.declaration_target_id.in_(discarded_declarations)
+                | BookCase.dialogue_target_id.in_(discarded_dialogues)
             )
         )
         # 本章章末核对凭据的来源集合已失效：撤销凭据，重建不受旧回执阻挡
         from src.agents.annotation.chapter_consolidation import discard_chapter_receipts
 
-        discarded_chapters = list(
-            session.scalars(
-                select(WorkItem.annotation_chapter_id).where(
-                    WorkItem.work_id.in_(discard), WorkItem.annotation_chapter_id.is_not(None)
-                )
-            )
-        )
-        discard_chapter_receipts(session, self.run_id, {int(chapter) for chapter in discarded_chapters})
-        self.fact_graph.discard_storage(session, discard)
-        self.event_trees.discard_storage(session, discard)
+        discard_chapter_receipts(session, self.run_id, chapter_ids)
+        execution_ids = set(session.scalars(executions))
+        self.fact_graph.discard_storage(session, execution_ids)
+        self.event_trees.discard_storage(session, execution_ids)
         session.execute(delete(DialogueRecord).where(DialogueRecord.creation_execution_id.in_(executions)))
-        session.execute(delete(ChapterAnnotation).where(ChapterAnnotation.execution_id.in_(executions)))
+        session.execute(delete(ChapterAnnotation).where(ChapterAnnotation.record_id.in_(discarded_records)))
         session.flush()
         records = list(
             session.execute(
                 select(
                     ChapterAnnotation.record_id,
-                    Execution.execution_id,
-                    WorkItem.work_id,
-                    WorkItem.role,
-                    WorkItem.annotation_chapter_id.label("chapter_id"),
+                    ChapterAnnotation.execution_id,
+                    ChapterAnnotation.role,
+                    ChapterAnnotation.chapter_id,
                     Chapter.sequence,
                 )
-                .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-                .join(WorkItem, WorkItem.work_id == Execution.work_id)
                 .join(
                     Chapter,
-                    (Chapter.run_id == WorkItem.annotation_run_id)
-                    & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+                    (Chapter.run_id == ChapterAnnotation.run_id)
+                    & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
                 )
-                .where(WorkItem.annotation_run_id == self.run_id)
+                .where(ChapterAnnotation.run_id == self.run_id)
             )
         )
         self.fact_graph.rebuild_storage(session)
         self.event_trees.rebuild_storage(session)
         self.fact_graph.restore_storage(session, records)
         self.event_trees.restore_storage(session, records)
-        self.case_pool.restore_storage(session, discard)
+        self.case_pool.restore_storage(session, execution_ids)
+        # 产物、域事实与案例支持都已退场，正式尝试行随整章废弃退出（模型调用行由外键级联）
+        session.execute(
+            delete(Execution).where(Execution.run_id == self.run_id, Execution.chapter_id.in_(ordered_chapters))
+        )
+        session.flush()
 
     def close(self) -> None:
         for topic in (
@@ -1219,7 +909,6 @@ class AnnotationAgent:
             "agent.saved_progress",
             "agent.cancel",
             "agent.abort",
-            "agent.check",
             "agent.recover",
             "agent.consolidate_chapter",
         ):

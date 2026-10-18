@@ -1,10 +1,6 @@
-"""
-二期段落化关键词检索测试：直接扫 paragraphs 事实源 + trgm 索引
+"""关键词检索测试：直接扫 paragraphs 事实源 + trgm 索引
 
-创建时间: 2026-08-14
-任务: M5 检索段落化（§12.1）
-说明: keyword_ops.search_paragraphs_by_keywords 不再扫 chunks + Python 重切段，
-段落身份与 local/global 坐标一律取 paragraphs 持久化列。
+keyword_ops.search_paragraphs_by_keywords 不再扫 chunks + Python 重切段，
 """
 
 from types import SimpleNamespace
@@ -17,9 +13,7 @@ from src.storage.repositories.paragraph.keyword_ops import (
 
 
 def test_search_paragraphs_by_keywords_orders_by_match_count() -> None:
-    """
-    2026-08-14 二期段落化：SQL 直接扫 paragraphs 行，按 (-match_count, paragraph_id) 排序
-    """
+    """SQL 直接扫 paragraphs 行，按 (-match_count, paragraph_id) 排序"""
     session = MagicMock()
     session.execute.return_value.all.return_value = [
         SimpleNamespace(
@@ -61,9 +55,7 @@ def test_search_paragraphs_by_keywords_orders_by_match_count() -> None:
 
 
 def test_search_paragraphs_by_keywords_filters_non_matching_rows() -> None:
-    """
-    2026-08-02 用于过滤数据库替身返回的非字面命中段落
-    """
+    """过滤数据库替身返回的非字面命中段落"""
     session = MagicMock()
     session.execute.return_value.all.return_value = [
         SimpleNamespace(
@@ -89,9 +81,7 @@ def test_search_paragraphs_by_keywords_filters_non_matching_rows() -> None:
 
 
 def test_search_paragraphs_by_keywords_rejects_empty_keywords() -> None:
-    """
-    2026-08-02 用于拒绝空关键词请求且不访问数据库
-    """
+    """拒绝空关键词请求且不访问数据库"""
     session = MagicMock()
 
     results = search_paragraphs_by_keywords(session, run_id="run-1", keywords=["  ", ""], top_k=5)
@@ -101,8 +91,7 @@ def test_search_paragraphs_by_keywords_rejects_empty_keywords() -> None:
 
 
 def test_search_paragraphs_by_keywords_scans_paragraphs_table() -> None:
-    """
-    2026-08-14 二期段落化：查询 FROM paragraphs（不再 FROM chunks），
+    """查询 FROM paragraphs（不再 FROM chunks），
     命中条件为 lower(text) LIKE（trgm 可命中 lower(text) gin_trgm_ops 索引）
     """
     session = MagicMock()
@@ -138,8 +127,7 @@ def test_search_paragraphs_by_keywords_scans_paragraphs_table() -> None:
 
 
 def test_search_paragraphs_by_keywords_treats_wildcards_as_globs_and_deduplicates() -> None:
-    """
-    2026-09-04 用于保证 %/_ 按 LIKE 通配符语义匹配（不再转义为字面量）
+    """保证 %/_ 按 LIKE 通配符语义匹配（不再转义为字面量）
     且重复关键词不重复计分
     """
     session = MagicMock()
@@ -167,15 +155,14 @@ def test_search_paragraphs_by_keywords_treats_wildcards_as_globs_and_deduplicate
     compiled_sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "ESCAPE" not in compiled_sql
     assert len(results) == 1
-    # 2026-08-13 P2-6：词项统一小写归一后 matched_keywords 保留小写形式
+    # 词项统一小写归一后 matched_keywords 保留小写形式
     # 100% → 前缀通配命中"100"；A_B → A+任意单字符+B 命中"A_B"
     assert results[0].matched_keywords == ("100%", "a_b")
     assert results[0].match_count == 2
 
 
 def test_search_paragraphs_by_keywords_matches_case_insensitively() -> None:
-    """
-    2026-08-13 P2-6 用于验证查询词项（已小写）能命中大小写混合的原文，
+    """验证查询词项（已小写）能命中大小写混合的原文，
     SQL LIKE 与 Python 侧子串匹配都做 lower 归一，英文词不再因大小写漏命中。
     """
     session = MagicMock()
@@ -208,8 +195,7 @@ def test_search_paragraphs_by_keywords_matches_case_insensitively() -> None:
 
 
 def test_fetch_chunk_text_returns_text_when_missing_returns_none(db_session) -> None:
-    """
-    2026-10-16 3NF 运行级验证：关键词检索的 local/global 坐标由 chapters.char_offset
+    """关键词检索的 local/global 坐标由 chapters.char_offset
     与段落正文长度投影得到，章节正文读取 chapters.text（正文与目录同键一行）
     """
     import uuid
@@ -250,9 +236,7 @@ def test_fetch_chunk_text_returns_text_when_missing_returns_none(db_session) -> 
 
 
 def test_fetch_chunk_text_returns_text_when_present() -> None:
-    """
-    2026-08-02 用于返回存在的历史 chunk 原文
-    """
+    """返回存在的历史 chunk 原文"""
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = "完整章节原文。"
 
@@ -262,9 +246,7 @@ def test_fetch_chunk_text_returns_text_when_present() -> None:
 
 
 def test_fetch_chunk_text_returns_none_when_missing() -> None:
-    """
-    2026-08-02 用于在历史 chunk 不存在时返回 None
-    """
+    """在历史 chunk 不存在时返回 None"""
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = None
 

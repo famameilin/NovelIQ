@@ -1,4 +1,4 @@
-"""主题聚合查询服务测试（《分析能力扩展路线图》§5.11 / D1-D3）
+"""主题聚合查询服务测试
 
 覆盖：
 - JS 散度（以 2 为底、范围 [0,1]）单元语义
@@ -77,7 +77,7 @@ class TestComputeTopicShiftCandidates:
         ],
     )
     def test_rejects_invalid_overrides(self, overrides: dict[str, int | float], message: str) -> None:
-        """2026-08-31 用于验证直接调用无法绕过主题迁移参数边界"""
+        """验证直接调用无法绕过主题迁移参数边界"""
         parameters: dict[str, int | float] = {
             "window_size": 2,
             "min_tokens_per_window": 1,
@@ -180,7 +180,7 @@ class TestComputeTopicShiftCandidates:
 
 
 class TestTopicAggregations:
-    """三表契约 + 曲线数据的真实 SQL 聚合（§5.11）"""
+    """三表契约 + 曲线数据的真实 SQL 聚合"""
 
     @pytest.fixture(autouse=True)
     def setup(self, db_session):
@@ -285,7 +285,7 @@ class TestTopicAggregations:
         assert chapters[1]["token_total"] == 40
 
     def test_chapter_aggregate_keeps_chapter_without_topic_rows(self) -> None:
-        """2026-08-31 用于验证空推断章节仍按真实章节顺序返回并使用空分布"""
+        """验证空推断章节仍按真实章节顺序返回并使用空分布"""
         repo = ParagraphRepository(self.db_session)
         repo.insert_paragraph_topic_inferences(
             self.run_id,

@@ -14,7 +14,7 @@ interface AnalysisMetricStripProps {
 }
 
 /**
- * 2026-08-31，作用：展示分析页最常用的摘要指标
+ * 展示分析页最常用的摘要指标
  * 简要说明：以同一条带承载关键数字，避免为每个指标重复创建独立卡片
  */
 export function AnalysisMetricStrip({ items, className }: AnalysisMetricStripProps) {

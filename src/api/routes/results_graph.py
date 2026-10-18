@@ -1,9 +1,4 @@
-"""
-图结构与事件森林结果查询路由
-
-说明: 从 src/api/routes/results.py 拆出图快照/图变化/图指标/关键词与事件森林域路由，
-手工 DTO 装配抽为模块内 converter（_build_event_forest_response），行为保持不变。
-"""
+"""图结构与事件森林结果查询路由"""
 
 from __future__ import annotations
 
@@ -43,7 +38,7 @@ from src.storage.repositories import AnnotationRepository
 if TYPE_CHECKING:
     pass
 
-# 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
+# tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
 
 
@@ -54,7 +49,7 @@ async def get_graph(
     session: Annotated[Session, Depends(get_db_session)],
     chapter_id: Annotated[int | None, Query(gt=0)] = None,
 ) -> GraphSnapshotResponse:
-    """2026-08-07 用于读取指定章节边界或最新章节的动态图快照"""
+    """读取指定章节边界或最新章节的动态图快照"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
@@ -80,7 +75,7 @@ async def get_graph_changes(
     changes_cursor: Annotated[str | None, Query(description="章节图变化分页 cursor")] = None,
     changes_limit: Annotated[int, Query(ge=1, le=GRAPH_CHANGE_LIMIT)] = GRAPH_CHANGE_LIMIT,
 ) -> GraphChangesResponse:
-    """2026-08-07 用于按章节分页读取实体状态与稳定关系变化"""
+    """按章节分页读取实体状态与稳定关系变化"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
@@ -104,7 +99,7 @@ async def get_graph_metrics(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> GraphMetricsResponse:
     """
-    人物关系图结构指标（赛道 A1/A2）：PageRank / HITS / Louvain
+    人物关系图结构指标：PageRank / HITS / Louvain
 
     查询时计算；输入为代表性人物子图（别名归并、边权=关系计数），
     结构社区不直接等同于故事阵营。
@@ -122,7 +117,7 @@ async def get_keywords(
     top_n: int = Query(default=10, ge=1, le=50),
 ) -> KeywordsResponse:
     """
-    TextRank 关键词（赛道 A3）：独立词共现图 + PageRank
+    TextRank 关键词：独立词共现图 + PageRank
 
     与 LDA 主题词口径独立，可对照不可混用。
     """
@@ -131,7 +126,7 @@ async def get_keywords(
     return KeywordsResponse(**compute_keywords(run_id, session, top_n=top_n))
 
 
-# 说明: event-forest 路由在原注册顺序中位于 metrics/* 之后，独立成 router 以保持主模块注册顺序一致
+# event-forest 独立成 router，以保持主模块注册顺序一致
 event_forest_router = APIRouter()
 
 

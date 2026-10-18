@@ -1,6 +1,6 @@
 """用 AST 锁定 21 个模块的职责方向及包内运行时依赖
 
-2026-10-16 全库第三范式改造收尾：白名单按当前实际依赖面重列（删去已无对应导入的
+白名单按当前实际依赖面重列（删去已无对应导入的
 旧项），并按现状补上 storage 读投影的领域依赖——存储层承担正式读投影的唯一定义，
 会引用版本化代码合同所在的领域模块（event_trees/fact_graph/lexicons/linguistic/
 metrics/topic），这是冻结结构下的既有方向，不是新的越层。
@@ -265,7 +265,12 @@ def test_domain_save_consumes_frozen_contributions() -> None:
         tree = ast.parse((_ROOT / f"src/{module}/{leaf}.py").read_text(encoding="utf-8"))
         save = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "save_work")
         assert any(a.annotation is not None and ast.unparse(a.annotation) == contribution for a in save.args.args)
-        assert not any(isinstance(n, ast.Name) and n.id == "execution" for n in ast.walk(save))
+        # 保存只消费冻结贡献：不接受也不读取 work 行（执行归属校验直接读 executions，不经 work 链）
+        assert not any(
+            isinstance(n, ast.Name) and n.id in {"WorkItem", "work_id"} for n in ast.walk(save)
+        ) and not any(
+            isinstance(n, ast.Attribute) and n.attr in {"WorkItem", "work_id"} for n in ast.walk(save)
+        )
         tree = ast.parse((_ROOT / f"src/{module}/contributions.py").read_text(encoding="utf-8"))
         cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == contribution)
         assert any(

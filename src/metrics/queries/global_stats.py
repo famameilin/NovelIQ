@@ -1,7 +1,6 @@
 """全书充分统计量的计算与保存入口
 
-2026-10-16 全库 3NF 改造：独立 global_stats 表退场，16 个具名结果按运行写入
-analysis_runs 的明确列（分子/分母不落库，密度与张力读投影计算）。
+16 个具名结果按运行写入 analysis_runs 的明确列（分子/分母不落库，密度与张力读投影计算）。
 """
 
 from __future__ import annotations

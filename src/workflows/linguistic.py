@@ -1,8 +1,7 @@
-"""语言结构基础数据阶段（《分析能力扩展路线图》§3.1 B/C 赛道）
+"""语言结构基础数据阶段
 
-执行顺序与落库契约（2026-10-16 全库 3NF 冻结结构：旧宽表与拆分观测表退场，
-逐段事实落 linguistic_spans / linguistic_arcs / paragraph_features /
-paragraph_metrics）：
+执行顺序与落库契约（逐段事实落 linguistic_spans / linguistic_arcs /
+paragraph_features / paragraph_metrics）：
 1. LTP 词法/句法/实体/语义：analyze_paragraph_batch（cws/pos/ner/dep/sdp）→
    linguistic_spans 词元行（token_index/raw_pos）+ linguistic_arcs
    （dep:*/sdp:*，source_ordinal 保留源顺序）+ paragraph_features 的五类
@@ -13,7 +12,7 @@ paragraph_metrics）：
    phrase_match_kind 行（lexicon/four_char_candidate）+ 完成事实
    （phrase_completed_at）；词表来源与计量合同登记在 analysis_runs
    （fixed_phrase_lexicon_key/fixed_phrase_contract_version）
-3. 情绪事件与 mNEG 修正（2026-09-05 B 批，ltp.enabled 时生效）：
+3. 情绪事件与 mNEG 修正（ltp.enabled 时生效）：
    情绪词典只做谓词极性候选标记，持有者/对象/否定/程度取 sdp 的 AGT/DATV/
    mNEG/mDEPD；mNEG 接管词典否定翻转后回写 paragraph_metrics 情绪计数并
    整卷重算段落曲线（词典窗口规则基线与 mNEG 对照计数由读取投影按同一
@@ -54,7 +53,7 @@ async def run_linguistic(
     batch_size: int = 128,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, int]:
-    """2026-08-30 用于执行语言结构阶段并返回段落数与词法特征段落数
+    """执行语言结构阶段并返回段落数与词法特征段落数
 
     batch_size 控制每批处理的段落数并限制阶段内存峰值
     取消在每个段落批边界生效：LTP 批推理是线程内重活，不能安全硬中断
@@ -94,8 +93,8 @@ async def run_linguistic(
         registry = LexiconRegistry()
         terms = registry.get(LEXICON_FILES["fixed_phrases"])
 
-        # 2026-10-16 3NF：先落 run 级 LTP 管线/模型合同（归一映射是版本化代码
-        # 合同，不镜像成数据库表；读取侧按 pipeline_version 投影 pos_group/类型）
+        # 先落 run 级 LTP 管线/模型合同（归一映射是版本化代码合同，不镜像成
+        # 数据库表；读取侧按 pipeline_version 投影 pos_group/类型）
         pipeline_version, model_key = ltp_pipeline_contract()
         ling_repo.ensure_ltp_contract(
             run_id,
@@ -105,7 +104,7 @@ async def run_linguistic(
             entity_type_mappings=ENTITY_TYPE_MAP,
         )
 
-        # 2026-09-05 B 批：词典情绪计数对照基线（命中集与 preprocess 同源，
+        # 词典情绪计数对照基线（命中集与 preprocess 同源，
         # 读 paragraph_metrics 现值作为窗口规则口径）
         lexicon_counts = {
             int(metric_row.paragraph_id): (
@@ -127,17 +126,15 @@ async def run_linguistic(
             last_id = batch[-1].paragraph_id
 
             logger.info(f"LTP 分析 {len(batch)} 个段落（游标 after={last_id}）...")
-            # 2026-10-03 LTP 批推理移出事件循环（run 08f9ba42 实证 30s API 尖峰）：
-            # 128 段/批的 cws/pos/ner/dep/sdp 是重 CPU 同步调用，直接在事件循环上
-            # 跑会冻结整个 API（状态端点/SSE 全部无响应）。批间 await 串行化模型
-            # 访问，无并发推理风险。
+            # LTP 批推理在事件循环外执行：128 段/批的 cws/pos/ner/dep/sdp 是重 CPU
+            # 同步调用，直接在事件循环上跑会冻结整个 API；批间 await 串行化模型访问
             results = await asyncio.to_thread(analyze_paragraph_batch, [row.text for row in batch])
 
             feature_rows: list[dict] = []
             entity_rows: list[dict] = []
             for row, result in zip(batch, results, strict=True):
                 data = result.to_dict()
-                # 2026-09-05 B 批：词典极性候选标记 × sdp 结构 → 情绪事件 + mNEG 修正计数
+                # 词典极性候选标记 × sdp 结构 → 情绪事件 + mNEG 修正计数
                 events = extract_emotion_events(result, POSITIVE_TERMS, NEGATIVE_TERMS)
                 mneg_pos, mneg_neg = mneg_corrected_counts(
                     row.text,
@@ -226,8 +223,8 @@ async def run_linguistic(
 
         logger.info(f"LTP 全库完成：段落={total_paragraphs} 词法特征段落={total_feature_paragraphs}")
 
-        # 2026-09-05 B 批：mNEG 接管词典否定翻转——回写 paragraph_metrics 情绪
-        # 计数并按新分子整卷重算段落曲线（聚合/曲线/零信号占比随之切换口径）
+        # mNEG 接管词典否定翻转：回写 paragraph_metrics 情绪计数并按新分子整卷
+        # 重算段落曲线（聚合/曲线/零信号占比随之切换口径）
         corrected = _apply_mneg_correction(session, run_id, paragraph_repo, mneg_corrections)
         if corrected:
             logger.info(f"mNEG 情绪修正回写：{corrected} 段（sdp 否定辖域替代窗口规则），段落曲线已重算")
@@ -235,10 +232,8 @@ async def run_linguistic(
         logger.info("linguistic.ltp.enabled=false，跳过词法/句法/实体与固定短语")
 
     # ------------------------------------------------------------------
-    # 2026-09-14 段落级监督（按书边界）：全书自选段标签现算该书线性边界，
-    # 逐段打分回写 paragraph_metrics 的两列边界观测。不依赖 LTP——向量源是
-    # paragraph_features 的 semantic_vector 行（preprocess 落库），故挂在
-    # ltp 闸门之外；标签不足或类别单一时无边界（两列 NULL），不伪造。
+    # 段落级监督（按书边界）：全书自选段标签现算该书线性边界，逐段打分回写
+    # paragraph_metrics 的两列边界观测；不依赖 LTP（向量源是 preprocess 落的 semantic_vector 行）
     check_cancelled(is_cancelled)
     boundary_rows = _apply_paragraph_boundary_scores(run_id, paragraph_repo, ling_repo)
     if boundary_rows:
@@ -260,7 +255,7 @@ async def run_linguistic(
         pretrained_path = resolve_shared_pretrained_path(model_dir)
         pretrained_vectors = load_shared_pretrained_vectors(model_dir)
 
-        # 2026-10-03 Word2Vec 训练（gensim CPU 重活，分钟级）同样移出事件循环；
+        # Word2Vec 训练（gensim CPU 重活，分钟级）同样移出事件循环；
         # 编排器 session 只被本协程使用，跨线程顺序访问安全（事件循环 await 期间不触碰）
         train_result, pos_rows_count = await asyncio.to_thread(
             _train_and_build,
@@ -295,16 +290,14 @@ def _apply_paragraph_boundary_scores(
     paragraph_repo: ParagraphRepository,
     ling_repo: LinguisticRepository,
 ) -> int:
-    """2026-09-14 段落级监督（按书边界，用户定稿）：全书自选段标签 → 岭回归边界 → 逐段打分
+    """段落级监督（按书边界）：全书自选段标签 → 岭回归边界 → 逐段打分
 
-    链路：analysis_assessments 逐段情绪标签读全书标签（agent 逐章自选 2-3 段）→
-    paragraph_features 的 semantic_vector 行取全书段落向量（preprocess 落库的
-    ritrieve 向量，零新模型文件、零 LTP 依赖）→ fit_emotion_boundary 现算该书
-    线性边界 → 全书逐段打分回写 paragraph_metrics 的
-    boundary_pos_score_sum / boundary_neg_score_sum。
+    链路：analysis_assessments 逐段情绪标签读全书标签 → paragraph_features 的
+    semantic_vector 行取全书段落向量（preprocess 落库）→ fit_emotion_boundary
+    现算该书线性边界 → 全书逐段打分回写 paragraph_metrics 的
+    boundary_pos_score_sum / boundary_neg_score_sum；跨书曲线口径不同不可比。
 
-    边界无效（标签 <2 或全同分值）、段落向量缺失时返回 0，两列维持 NULL，不伪造；
-    打分本地免费（CPU 前向），跨书曲线口径不同不可比（用户已接受）。
+    边界无效（标签 <2 或全同分值）、段落向量缺失时返回 0，两列维持 NULL，不伪造。
     """
     import numpy as np
 
@@ -341,7 +334,7 @@ def _apply_paragraph_boundary_scores(
         paragraph_id = int(row.paragraph_id)
         vector = vectors_by_id.get(paragraph_id)
         if vector is None or vector.shape[0] != expected_dim:
-            # 与旧口径一致：无向量段落按 0 贡献（两侧皆零），不写 NULL 之外的伪造值
+            # 无向量段落按 0 贡献（两侧皆零），不写 NULL 之外的伪造值
             pos_sum = neg_sum = 0.0
         else:
             score = boundary.score(vector)
@@ -358,12 +351,11 @@ def _apply_mneg_correction(
     paragraph_repo: ParagraphRepository,
     corrections: list[dict[str, float | int]],
 ) -> int:
-    """2026-09-05 B 批：mNEG 情绪修正回写（sdp 否定辖域接管窗口规则）
+    """mNEG 情绪修正回写（sdp 否定辖域接管窗口规则）
 
     命中集与 preprocess 完全一致（同一 get_emotion_spans 短语匹配），唯一差异
     是翻转判定由 sdp mNEG 决定；回写 paragraph_metrics 两列后按新分子整卷重算
-    段落曲线（compute_paragraph_curves 与 preprocess 同一函数，LOWESS 参数同源），
-    聚合层 emotion_avg / lexicon_zero_hit_share 与前端曲线随之切换口径。
+    段落曲线（compute_paragraph_curves 与 preprocess 同一函数，LOWESS 参数同源）。
     """
     if not corrections:
         return 0
@@ -415,7 +407,7 @@ def _train_and_build(
     pretrained_vectors: KeyedVectors,
     pretrained_source: str,
 ) -> tuple[TrainResult, int]:
-    """2026-08-30 用于完成预训练微调落库并构建词性聚合向量"""
+    """完成预训练微调落库并构建词性聚合向量"""
     from src.config.paths import resolve_run_model_dir
     from src.linguistic import build_pos_embeddings, train_book_model
 
@@ -449,7 +441,7 @@ def _train_and_build(
             vectors,
             paragraph_id=paragraph_id,
         ):
-            # source_token_count 不再是存储列：读取侧由正式词元 + 版本分组投影
+            # source_token_count 不是存储列：读取侧由正式词元 + 版本分组投影
             pos_rows.append(
                 {
                     "run_id": run_id,

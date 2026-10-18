@@ -1,9 +1,4 @@
-"""
-段落级结果查询路由
-
-说明: 从 src/api/routes/results.py 拆出段落曲线/情绪趋势/章节指标/章节标注/角色域路由，
-行为保持不变。
-"""
+"""段落级结果查询路由"""
 
 from __future__ import annotations
 
@@ -41,14 +36,14 @@ from src.api.services.results_queries.paragraphs import (
 )
 from src.storage.repositories import AnnotationRepository, ParagraphRepository, StatsRepository
 
-# 说明: tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
+# tags 由主模块 router（tags=["results"]）在 include 时统一附加，避免标签重复
 router = APIRouter()
 
 
 @router.get(
     "/{novel_id}/paragraph-curves",
     response_model=list[ParagraphCurvePoint],
-    summary="段落曲线（§13.1，展示降采样可选）",
+    summary="段落曲线（展示降采样可选）",
 )
 async def get_paragraph_curves(
     novel_id: str,
@@ -70,7 +65,7 @@ async def get_paragraph_curves(
 @router.get(
     "/{novel_id}/emotion-trend",
     response_model=list[EmotionTrendWindow],
-    summary="情绪趋势窗口聚合（§13.1 展示层，缩放自适应窗口）",
+    summary="情绪趋势窗口聚合（缩放自适应窗口）",
 )
 async def get_emotion_trend(
     novel_id: str,
@@ -84,12 +79,9 @@ async def get_emotion_trend(
     window_paragraphs: Annotated[int, Query(description="目标窗口大小，服务端钳制到 5~40")] = 20,
 ) -> list[EmotionTrendWindow]:
     """
-    2026-08-15 提供按 position 区间和每窗段落数重聚合的情绪趋势数据
-
     获取情绪趋势窗口聚合序列（展示层重采样，不回写数据库）
 
-    每窗段落数作用于 range 过滤后的段落集；窗口大小由服务端钳制到 5~40，
-    深缩放段数不足时最后一个窗口自然退化为实际剩余段落数。
+    每窗段落数作用于 range 过滤后的段落集；窗口大小由服务端钳制到 5~40。
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -108,7 +100,7 @@ async def get_emotion_trend(
 @router.get(
     "/{novel_id}/chapter-metrics",
     response_model=ChapterMetricsResponse,
-    summary="章节与全书汇总指标（§13.2）",
+    summary="章节与全书汇总指标",
 )
 async def get_chapter_metrics(
     novel_id: str,

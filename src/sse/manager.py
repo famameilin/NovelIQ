@@ -1,8 +1,4 @@
-"""
-SSE 事件管理器
-
-说明: 管理 SSE 连接和消息推送
-"""
+"""SSE 事件管理器：管理 SSE 连接和消息推送"""
 
 from __future__ import annotations
 

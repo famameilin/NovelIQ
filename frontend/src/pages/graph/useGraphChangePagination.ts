@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getGraphChanges } from "@/api/results";
 import type { GraphChange, GraphChangesPageInfo } from "@/api/types";
 
-// 2026-08-07 用于按稳定 change_id 合并章节图变化分页结果
+// 用于按稳定 change_id 合并章节图变化分页结果
 function mergeGraphChanges(existingChanges: GraphChange[], incomingChanges: GraphChange[]): GraphChange[] {
   const merged = new Map<string, GraphChange>();
   existingChanges.forEach((change) => {
@@ -20,7 +20,7 @@ interface UseGraphChangePaginationOptions {
   taskScopeId: string | null;
 }
 
-// 2026-08-07 用于独立加载章节图变化，避免快照接口承担历史变化分页
+// 用于独立加载章节图变化，避免快照接口承担历史变化分页
 export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChangePaginationOptions) {
   const [loadedChanges, setLoadedChanges] = useState<GraphChange[]>([]);
   const [changesPageInfo, setChangesPageInfo] = useState<GraphChangesPageInfo | null>(null);
@@ -28,8 +28,8 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
   const [changesLoadError, setChangesLoadError] = useState<string | null>(null);
   const changesRequestVersionRef = useRef(0);
   const currentTaskScopeIdRef = useRef<string | null>(null);
-  // 2026-08-12: 快速双击"加载更多"时第二次调用可能仍处于同一渲染闭包（读到旧的
-  // isChangesLoading=false）；用 in-flight 游标引用兜底，同游标重复请求直接丢弃
+  // 快速双击"加载更多"时第二次调用可能仍处于同一渲染闭包（读到旧 isChangesLoading）；
+  // 用 in-flight 游标引用兜底，同游标重复请求直接丢弃
   const inFlightLoadMoreCursorRef = useRef<string | null>(null);
 
   useEffect(() => {

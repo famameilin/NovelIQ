@@ -1,6 +1,6 @@
 """本领域的独立只读投影，不返回 HTTP 模型
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：伏笔来源声明 = event_declarations 的
+伏笔来源声明 = event_declarations 的
 伏笔根行（属性随行保存，strength 为 payoff_likelihood 读投影）；动作事实 =
 event_foreshadowing_actions，经阶段声明绑定投影正式事件身份。
 """
@@ -176,7 +176,10 @@ def calculate_foreshadow_expectation(
     *,
     declaration_bindings: dict[str, str] | None = None,
 ) -> float | None:
-    """沿明确身份归组及正文动作计算既有指标，不改写不可变声明状态"""
+    """沿明确身份归组及正文动作计算既有指标，不改写不可变声明状态
+
+    未绑定事件身份的伏笔根按自身身份单独成组：身份覆盖缺口不阻止发布与读取。
+    """
     roots, _sources = _foreshadowing_roots(session, run_id)
     if not roots:
         return None
@@ -185,8 +188,6 @@ def calculate_foreshadow_expectation(
         if declaration_bindings is not None
         else _bound_events(session, run_id, [root.declaration_id for root in roots])
     )
-    if declaration_bindings is not None and any(root.declaration_id not in bindings for root in roots):
-        raise ValueError("冻结身份缺少伏笔来源声明绑定")
     grouped_roots: dict[str, list[EventDeclaration]] = {}
     for root in roots:
         grouped_roots.setdefault(bindings.get(root.declaration_id, root.declaration_id), []).append(root)
@@ -203,8 +204,8 @@ def calculate_foreshadow_expectation(
         root = sources[0]
         actions = grouped_actions.get(identity, [])
         hit_count = max(1, len(actions))
-        # 2026-08-16 P3：字段为 None 时不冒充 LLM 判断；若全树都无
-        # payoff_likelihood 证据，说明上游输入退化，结果为 None。
+        # payoff_likelihood 为 None 时不冒充 LLM 判断；若全树都无
+        # 该证据，说明上游输入退化，结果为 None。
         has_evidence = has_evidence or root.payoff_likelihood is not None
         status = (
             {"setup": "open", "reinforce": "reinforced", "payoff": "likely_paid_off"}[actions[-1].action_type]

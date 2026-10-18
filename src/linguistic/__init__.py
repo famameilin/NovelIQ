@@ -1,4 +1,4 @@
-"""语言结构基础数据链路（《分析能力扩展路线图》赛道 B/C）
+"""语言结构基础数据链路
 """
 
 from __future__ import annotations

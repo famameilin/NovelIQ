@@ -90,9 +90,8 @@ class DialogueData:
 
 @dataclass
 class StyleData:
-    """风格指标数据（全书守恒聚合，§9.1）
+    """风格指标数据（全书守恒聚合）
 
-    2026-08-14 M8b：由每章比值列表改为全书分子/分母守恒值——
     dialogue_ratio = Σdialogue_char_count / Σchar_count，
     avg_sent_len = Σsentence_char_sum / Σsentence_count。
     """

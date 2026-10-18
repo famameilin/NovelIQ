@@ -1,8 +1,5 @@
 """
-Aggregate Metrics 数据提取模块
-
-提取所有数据提取函数
-
+Aggregate Metrics 数据提取模块：提取所有数据提取函数
 """
 
 from __future__ import annotations
@@ -46,8 +43,8 @@ if TYPE_CHECKING:
 def _fetch_chapter_progress_map(session: Session, run_id: str) -> dict[int, float]:
     """章起点归一化进度：char_offset / max(章正文终点)。缺 offset 的章不入表。
 
-    2026-10-16 全库 3NF 改造：正文终点 = char_offset + 正文精确字符长度（读投影，
-    不再有 char_end_offset 列）；正文与起点同为空（成对约束），空章不参与。
+    正文终点 = char_offset + 正文精确字符长度（读投影）；正文与起点同为空
+    （成对约束），空章不参与。
     """
     chapter_end_char = Chapter.char_offset + func.length(Chapter.text)
     total = session.execute(select(func.max(chapter_end_char)).where(Chapter.run_id == run_id)).scalar_one_or_none()
@@ -82,8 +79,7 @@ def _build_aggregate_graph_view(
     """
     获取 aggregate 允许依赖的 graph authority view
 
-    聚合指标属于 graph 下游消费者，只能读取 authority 暴露的稳定事实，
-    不能再直接依赖 GraphRepository 的原始 row 形状
+    聚合指标属于 graph 下游消费者，只能读取 authority 暴露的稳定事实
     """
 
     service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
@@ -96,11 +92,7 @@ def _resolve_aggregate_character_name(
     surface_name: str | None,
     resolved_global_name: str | None,
 ) -> str | None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: aggregate 指标只能消费已准入的全局角色，不能把未解析代词重新混回情绪统计。
-    """
+    """解析角色引用：只消费已准入的全局角色，未解析代词不混回情绪统计。"""
     decision = decide_character_reference(
         surface_name,
         resolved_global_name=resolved_global_name,
@@ -113,8 +105,7 @@ def fetch_annotation_data(
     run_id: str,
 ) -> AnnotationData:
     """
-    从章节正式标注的 chunks metrics 提取 chunk 粒度指标数据
-
+    从章节正式标注提取章节粒度指标数据
     """
     rows = fetch_chapter_annotations_full(annotation_repo.session, run_id)
 
@@ -132,7 +123,7 @@ def fetch_emotion_data(
     run_id: str,
 ) -> EmotionData:
     """
-    提取每章（chunk）情绪密度（§9.1 守恒聚合，2026-08-14 M8b 段落化）
+    提取每章情绪密度（守恒聚合）
 
     章情绪密度 = 章内段落分子之和 / 分母之和（Σpos/Σtoken、Σneg/Σtoken、
     (Σpos − Σneg)/Σtoken）；token 为 0 的章无有效密度，直接跳过。
@@ -234,7 +225,7 @@ def fetch_relation_data(
 ) -> RelationData:
     """提取 graph_* 关系数据（权威来源）"""
     graph_view = _build_aggregate_graph_view(annotation_repo, run_id)
-    # P4：人物网络只消费 entity_type=character 的角色子图，不再把地点/物品等全实体节点计入
+    # 人物网络只消费 entity_type=character 的角色子图，不计入地点/物品等全实体节点
     character_names = {
         state.name for state in graph_view.participant_states if state.entity_type == "character" and state.name
     }
@@ -261,7 +252,7 @@ def fetch_relation_data(
                 change.from_name or "",
                 change.to_name or "",
                 change.relation_type or "",
-                # 2026-08-13 P2：changes 为空时兜底，避免隐式不变量破坏后 IndexError
+                # changes 为空时兜底，避免隐式不变量破坏后 IndexError
                 str(change.changes[0].get("change_kind") or "refine") if change.changes else "refine",
             )
             for change in relation_changes
@@ -274,7 +265,7 @@ def fetch_text_data(
     chapter_repo: ChapterRepository,
     run_id: str,
 ) -> TextData:
-    """提取 chunks 表文本数据"""
+    """提取章节文本数据"""
     texts = chapter_repo.fetch_all_chapter_texts(run_id)
 
     all_tokens: list[str] = []
@@ -290,7 +281,7 @@ def fetch_tension_data(
     run_id: str,
 ) -> TensionData:
     """
-    提取每章（chunk）张力（2026-08-14 M8b 段落化）
+    提取每章张力
 
     章张力 = 章内段落 surface_tension 均值（段落值已为 run 内稳健标准化 +
     sigmoid 的 [0,1] 值，直接取均值；无张力数据的章不输出，由调用方兜底）。
@@ -311,10 +302,7 @@ def fetch_dialogue_data(
     run_id: str,
 ) -> DialogueData:
     """
-    从数据库图对话事实提取 tone 数据
-
-    按事实中的 chapter_id 展开语气类型用于聚合计算
-
+    从数据库图对话事实提取 tone 数据（按事实中的 chapter_id 展开语气类型）
     """
     rows = fetch_chapter_dialogues_full(annotation_repo.session, run_id)
     tones = [row.tone for row in rows if row.tone is not None]
@@ -326,7 +314,7 @@ def fetch_style_data(
     run_id: str,
 ) -> StyleData:
     """
-    提取全书风格指标（§9.1 守恒聚合，2026-08-14 M8b 段落化）
+    提取全书风格指标（守恒聚合）
 
     从段落充分统计量计算全书守恒值：dialogue_ratio = Σdialogue_char_count /
     Σchar_count；avg_sent_len = Σsentence_char_sum / Σsentence_count。

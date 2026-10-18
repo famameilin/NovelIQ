@@ -24,7 +24,7 @@ def _persist_authority_chapter(
     characters: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
 ) -> None:
-    """2026-08-19 用于为 authority 视图写入章节图数据"""
+    """为 authority 视图写入章节图数据"""
     persist_chapter_annotation(
         session,
         run_id=run_id,
@@ -44,7 +44,7 @@ def _retract_relation(
     relation_type: str,
     reason: str,
 ) -> None:
-    """2026-10-16 3NF：关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
+    """关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
     from src.agents.annotation.output_models import BoundChapterAnnotation
     from src.fact_graph.inputs import ChapterMetricsInput
 
@@ -84,7 +84,7 @@ def _relation_id(session, run_id: str, from_name: str, to_name: str, relation_ty
 
 
 def test_authority_views_project_chapter_history_and_graph_changes(db_session) -> None:
-    """2026-08-07 用于验证 authority 从章节快照输出实体关系和变化合同"""
+    """验证 authority 从章节快照输出实体关系和变化合同"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜并肩迎敌"],
@@ -131,7 +131,7 @@ def test_authority_views_project_chapter_history_and_graph_changes(db_session) -
 
 
 def test_authority_keeps_relation_change_history_after_break(db_session) -> None:
-    """2026-08-07 用于验证当前关系消失后 authority 仍保留章节关系变化历史"""
+    """验证当前关系消失后 authority 仍保留章节关系变化历史"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["林渡与顾霜结盟", "两人分道扬镳"],
@@ -182,7 +182,7 @@ def test_authority_keeps_relation_change_history_after_break(db_session) -> None
 
 
 def test_authority_merges_same_character_aliases_in_views(db_session) -> None:
-    """2026-08-09 用于验证同一人物关系在 authority 视图中归并别名实体"""
+    """验证同一人物关系在 authority 视图中归并别名实体"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["伯安与猴子同游"],

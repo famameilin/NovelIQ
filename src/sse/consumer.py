@@ -27,7 +27,8 @@ class SSEModule:
         async with self.lock:
             if message.message_id in self.seen:
                 return
-            scope = message.work_id or f"{message.payload.sub_stage}:{message.payload.chapter_id or 0}"
+            # 流作用域由实际阶段上下文构成：标注=章+角色，诊断=案例锚（sub_stage）
+            scope = f"{message.payload.stage}:{message.payload.chapter_id or 0}:{message.payload.sub_stage or ''}"
             invocation = message.invocation_id
             if (scope, invocation) in self.retired:
                 return
@@ -47,17 +48,12 @@ class SSEModule:
                 self.executions[scope] = invocation
                 self.execution_chapters[scope] = message.payload.chapter_id or 0
                 self.suspended.discard(scope)
-            elif (
-                scope in self.suspended
-                or message.work_id and scope not in self.executions
-                or scope in self.executions and self.executions[scope] != invocation
-            ):
+            elif scope in self.suspended or scope in self.executions and self.executions[scope] != invocation:
                 return
             if self.emitter is not None:
                 await self.emitter(
                     replace(
                         message.payload,
-                        work_id=message.work_id or None,
                         invocation_id=message.invocation_id or None,
                         message_id=message.message_id,
                     )

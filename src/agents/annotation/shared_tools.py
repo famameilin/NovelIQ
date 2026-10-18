@@ -10,6 +10,7 @@ from langchain_core.tools import tool
 from pydantic import Field
 
 from src.fact_graph.vocabulary import EntityType
+from src.storage.query_terms import query_search_terms, term_matches
 
 SearchLimit = Annotated[int, Field(ge=1, le=20)]
 # 紧凑索引只回一行式字段，单页体量小，允许到 100 条（详情预览仍限 20，由工具内校验）
@@ -59,12 +60,15 @@ def build_state_read_tools(
     ) -> str:
         """按条数分页读取简洁索引，除末页外返回 limit 条；详情用 read_event，续页用 next_offset；
         isforeshadowing=True 只返回伏笔根声明（False 只返回非伏笔根），不填不过滤；
-        compact=True 返回紧凑索引（声明 id、章号、标题、类型、状态、保存态与伏笔标记），每页最多 100 条"""
+        compact=True 读取紧凑索引（声明附章号与伏笔标记，诊断对象返回简洁索引行），每页最多 100 条；
+        compact=False 的详情预览每页最多 20 条"""
         if kind != "declaration":
             if organization is None:
                 raise ValueError(f"本执行不提供 kind={kind} 的诊断对象")
-            if limit > 20:
-                raise ValueError(f"limit={limit} 越界：本面每页最多 20 条")
+            if not compact and limit > 20:
+                raise ValueError(
+                    f"limit={limit} 越界：详情预览每页最多 20 条，紧凑索引请用 compact=True（最多 100 条）"
+                )
             values = organization.search(kind, query, chapter_id=chapter_id, tree_id=tree_id)
             page = values[offset : offset + limit]
             next_offset = offset + len(page)
@@ -154,11 +158,16 @@ def build_state_read_tools(
         offset: SearchOffset = 0,
         relation_offset: SearchOffset = 0,
     ) -> str:
-        """分页预览实体和命中端点的关系，两组续页独立，read_entity 读取完整属性"""
+        """分页预览实体和命中端点的关系，两组续页独立，read_entity 读取完整属性
+
+        query 按空白/标点拆分词项、任一命中实体名即召回（% 匹配任意长度、_ 匹配单字符），
+        不填不按词项过滤。
+        """
+        terms = query_search_terms(query)
         matching = {
             key
             for key, name in graph.entity_names.items()
-            if query.casefold() in name.casefold()
+            if (not terms or any(term_matches(term, name) for term in terms))
             and (entity_type is None or str(graph.entity_types[key]) == entity_type)
         }
         values = [
@@ -210,8 +219,14 @@ def build_state_read_tools(
     return [search_events, read_event, search_graph, read_entity]
 
 
-def build_case_tools(pool: Any, author: tuple[str, str], *, on_claim: Callable[[], None] | None = None) -> list[Any]:
-    """案例池原子认领及类型化登记共用实现，作者是实际执行身份"""
+def build_case_tools(
+    pool: Any,
+    author: str,
+    *,
+    on_claim: Callable[[], None] | None = None,
+    case_view: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> list[Any]:
+    """案例池登记、接手承诺与检索共用实现，作者是实际执行身份（真实执行号或程序 work 身份）"""
 
     @tool
     def push_case(
@@ -226,16 +241,23 @@ def build_case_tools(pool: Any, author: tuple[str, str], *, on_claim: Callable[[
 
     @tool
     def promise_case(case_id: str) -> str:
-        """原子认领真实案例 ID，被占用返回 busy，业务写入需显式关联"""
+        """接手承诺一个真实案例：承诺即视为解决，随后由你调用写入工具完成处置；
+        已被他人承诺返回 taken；只填 search_cases 返回的真实 case_id"""
         result = pool.promise(case_id, author)
-        if result["status"] == "claimed" and on_claim is not None:
+        if result["status"] == "promised" and on_claim is not None:
             on_claim()
         return json.dumps(result, ensure_ascii=False)
 
     @tool
-    def search_cases(case_type: str | None = None) -> str:
-        """读取当前 run 的案例 ID、说明和办理状态；case_type=event 只返回声明事件案例"""
-        return json.dumps(pool.search(case_type=case_type), ensure_ascii=False)
+    def search_cases(case_type: str | None = None, unresolved_only: bool = False) -> str:
+        """读取当前 run 的案例 ID、说明与是否已被承诺（promised）；promised=false 即尚未解决；
+        case_type=event 只返回声明事件案例；unresolved_only=true 只返回尚未承诺的案例"""
+        cases = pool.search(case_type=case_type)
+        if unresolved_only:
+            cases = [case for case in cases if not case["promised"]]
+        if case_view is not None:
+            cases = [case_view(case) for case in cases]
+        return json.dumps(cases, ensure_ascii=False)
 
     return [push_case, promise_case, search_cases]
 

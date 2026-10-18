@@ -28,7 +28,7 @@ def _retract_relation(
     relation_type: str,
     reason: str,
 ) -> None:
-    """2026-10-16 3NF：关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
+    """关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
     from src.agents.annotation.output_models import BoundChapterAnnotation
     from src.fact_graph.inputs import ChapterMetricsInput
 
@@ -89,7 +89,7 @@ def test_relation_history_reads_states_once_and_preserves_inactive_history(db_se
 
 
 def _insert_completion(db_session, run_id: str, paragraph_id: int) -> None:
-    """写入单段语言处理完成标记（2026-10-16 3NF：零词元同样算已完成）
+    """写入单段语言处理完成标记（零词元同样算已完成）
 
     完成行 FK 到 linguistic_runs 与运行合同，映射种子先落库再写完成行。
     """
@@ -172,7 +172,7 @@ def test_topic_contract_and_partial_inference_or_distribution_cannot_be_reused(d
 
 
 def test_topic_rerun_writes_commit_against_deferred_constraints(db_session) -> None:
-    """同 run 主题重跑写入必须可提交：重跑不得踩延迟约束触发器（2026-10-17 run 52cbb1ac）
+    """同 run 主题重跑写入必须可提交：重跑不得踩延迟约束触发器
 
     延迟行为触发器在提交时按每条修改行的当时版本校验，校验里的主题行计数读
     提交时的最终状态：重跑若先做全量"清空推断列"UPDATE，旧 complete 行以

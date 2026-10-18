@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-#: 段落主题推断状态（《分析能力扩展路线图》§5.9）
+#: 段落主题推断状态
 INFERENCE_COMPLETE = "complete"
 INFERENCE_EMPTY_AFTER_PREPROCESS = "empty_after_preprocess"
 INFERENCE_EMPTY_BOW = "empty_bow"
@@ -96,7 +96,7 @@ class TopicModel:
         return results
 
     def infer_full_distribution(self, doc_tokens: list[str]) -> ParagraphInferenceResult:
-        """按完整 K 维分布推断段落主题（《分析能力扩展路线图》§5.9/§5.10）。
+        """按完整 K 维分布推断段落主题。
 
         top_n 只属于 API 展示裁剪，不进入持久化；本方法始终输出 0..K-1
         全覆盖的权重列表，缺省主题补零以保证段落权重和守恒。

@@ -37,7 +37,7 @@ def _collect_events() -> list[tuple[str, str, str]]:
 
 
 def _tool_call_message(content: str = "完整回复") -> AIMessage:
-    """2026-08-23 用于构造带工具调用的完整回复，满足调用层对工具调用的完成判据"""
+    """构造带工具调用的完整回复，满足调用层对工具调用的完成判据"""
     return AIMessage(
         content=content,
         tool_calls=[{"name": "finish", "args": {}, "id": "call-1", "type": "tool_call"}],
@@ -45,7 +45,7 @@ def _tool_call_message(content: str = "完整回复") -> AIMessage:
 
 
 def test_provider_request_metadata_keeps_thinking_and_excludes_credentials() -> None:
-    """2026-08-30 用于验证请求审计快照保留 think 开关且不含 URL 凭据或查询密钥"""
+    """验证请求审计快照保留 think 开关且不含 URL 凭据或查询密钥"""
     chat_model = SimpleNamespace(
         model_name="glm-test",
         base_url="https://user:secret@provider.example/v1?api_key=hidden",
@@ -69,7 +69,7 @@ def test_provider_request_metadata_keeps_thinking_and_excludes_credentials() -> 
 
 
 def test_provider_request_metadata_rejects_unparseable_url() -> None:
-    """2026-08-30 用于验证无协议地址不会原样进入审计快照泄露查询认证信息"""
+    """验证无协议地址不会原样进入审计快照泄露查询认证信息"""
     chat_model = SimpleNamespace(
         model_name="glm-test",
         base_url="provider.example/v1?api_key=hidden",
@@ -84,7 +84,7 @@ def test_provider_request_metadata_rejects_unparseable_url() -> None:
 
 
 def test_provider_request_metadata_redacts_sensitive_tool_key_variants() -> None:
-    """2026-08-30 用于验证工具合同指纹忽略常见认证字段名变体"""
+    """验证工具合同指纹忽略常见认证字段名变体"""
     chat_model = SimpleNamespace(model_name="glm-test", streaming=True, model_kwargs={})
     clean_tools = [
         {
@@ -121,7 +121,7 @@ def test_provider_request_metadata_redacts_sensitive_tool_key_variants() -> None
 
 
 def _tool_call_chunk() -> AIMessageChunk:
-    """2026-08-23 用于在流式分片末尾附加工具调用，满足调用层对工具调用的完成判据"""
+    """在流式分片末尾附加工具调用，满足调用层对工具调用的完成判据"""
     return AIMessageChunk(
         content="",
         tool_call_chunks=[{"name": "finish", "args": "{}", "id": "call-1", "index": 0}],
@@ -146,11 +146,12 @@ class _StreamingLLM:
 
 
 class _FlakyStreamingLLM:
-    """2026-08-11 用于模拟流式输出中途断流的测试模型（前 fail_count 次调用抛异常）"""
+    """模拟流式输出中途断流的测试模型（前 fail_count 次调用抛异常）"""
 
-    def __init__(self, chunks: list[AIMessageChunk], fail_count: int) -> None:
+    def __init__(self, chunks: list[AIMessageChunk], fail_count: int, *, error: BaseException | None = None) -> None:
         self.chunks = chunks
         self.fail_count = fail_count
+        self.error = error if error is not None else ConnectionError("stream interrupted mid-way")
         self.captured_messages: list[list] = []
 
     def bind_tools(self, tools):
@@ -161,13 +162,13 @@ class _FlakyStreamingLLM:
         self.captured_messages.append(list(messages))
         if self.fail_count > 0:
             self.fail_count -= 1
-            raise ConnectionError("stream interrupted mid-way")
+            raise self.error
         for chunk in self.chunks:
             yield chunk
 
 
 class _TimedChunkLLM:
-    """2026-10-04 用于按间隔逐个吐块的测试模型（内容进度看门狗的时序型用例）"""
+    """按间隔逐个吐块的测试模型（内容进度看门狗的时序型用例）"""
 
     def __init__(self, chunks: list[AIMessageChunk], interval_s: float) -> None:
         self.chunks = chunks
@@ -186,7 +187,7 @@ class _TimedChunkLLM:
 
 
 class _EmptyChunkForeverLLM:
-    """2026-10-04 用于模拟保活帧喂活解析块看门狗的僵流：持续给空块、永不给内容"""
+    """模拟保活帧喂活解析块看门狗的僵流：持续给空块、永不给内容"""
 
     def __init__(self) -> None:
         self.captured_messages: list[list] = []
@@ -203,7 +204,7 @@ class _EmptyChunkForeverLLM:
 
 
 class _RetryWithUsageLLM:
-    """2026-08-12 用于模拟断流重试且两次尝试各自上报用量的测试模型（首次尝试产出后断流）"""
+    """模拟断流重试且两次尝试各自上报用量的测试模型（首次尝试产出后断流）"""
 
     def __init__(
         self,
@@ -231,7 +232,7 @@ class _RetryWithUsageLLM:
 @pytest.mark.asyncio
 async def test_agent_stream_emits_thinking_and_output_events() -> None:
     events, emitter = _collect_events()
-    stream = AgentStream(emitter, chapter_id=7, sub_stage="chapter_agent")
+    stream = AgentStream(emitter, chapter_id=7, sub_stage="annotation")
 
     await stream.thinking("正在推理，规划下一步动作...")
     await stream.output("模型说了一句")
@@ -329,7 +330,7 @@ async def test_run_model_call_streams_chunks_to_events() -> None:
 
 @pytest.mark.asyncio
 async def test_run_model_call_retries_current_request_on_stream_interruption() -> None:
-    """2026-08-11 用于验证断流时用同一 messages 重发当前模型请求"""
+    """验证断流时用同一 messages 重发当前模型请求"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _FlakyStreamingLLM([AIMessageChunk(content="你好世界"), _tool_call_chunk()], fail_count=1)
@@ -345,8 +346,35 @@ async def test_run_model_call_retries_current_request_on_stream_interruption() -
 
 
 @pytest.mark.asyncio
+async def test_run_model_call_retries_remote_protocol_interruption() -> None:
+    """验证对端流中途断连按瞬态错误重发同一请求"""
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _FlakyStreamingLLM(
+        [AIMessageChunk(content="你好世界"), _tool_call_chunk()],
+        fail_count=1,
+        error=httpx.RemoteProtocolError(
+            "peer closed connection without sending complete message body (incomplete chunked read)"
+        ),
+    )
+
+    response = await run_model_call(model, [AIMessage(content="问")], stream)
+
+    assert response.content == "你好世界"
+    assert len(model.captured_messages) == 2
+    retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
+    assert len(retry_events) == 1
+
+
+def test_remote_protocol_error_is_transient_for_retry_channel() -> None:
+    """验证远端协议断连进入重发通道，本地协议错误不进入"""
+    assert _is_transient_model_error(httpx.RemoteProtocolError("peer closed connection")) is True
+    assert _is_transient_model_error(httpx.LocalProtocolError("bad request on our side")) is False
+
+
+@pytest.mark.asyncio
 async def test_run_model_call_exhausts_stream_retries_and_raises() -> None:
-    """2026-08-11 用于验证 total_attempts=3 语义（总调用 3 次、重试 2 次），耗尽后抛出最后一次异常"""
+    """验证 total_attempts=3 语义（总调用 3 次、重试 2 次），耗尽后抛出最后一次异常"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _FlakyStreamingLLM([], fail_count=99)
@@ -361,12 +389,7 @@ async def test_run_model_call_exhausts_stream_retries_and_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_run_model_call_content_stall_kills_silent_chunks_and_exhausts_retries() -> None:
-    """2026-10-04 用于验证内容进度看门狗判死僵流：流块持续到达而内容零增长
-
-    run 4cb054dc 末章实证形态：Provider 卡死生成但保活帧持续喂活全部
-    "有块"信号。看门狗判死为 ContentStallTimeoutError（TimeoutError 子类），
-    按瞬态错误走既有重发预算；本例 total_attempts=2，两次判死后上抛。
-    """
+    """验证内容进度看门狗判死僵流：流块持续到达而内容零增长"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _EmptyChunkForeverLLM()
@@ -385,7 +408,7 @@ async def test_run_model_call_content_stall_kills_silent_chunks_and_exhausts_ret
 
 @pytest.mark.asyncio
 async def test_run_model_call_content_stall_watchdog_resets_on_each_content_chunk() -> None:
-    """2026-10-04 用于验证看门狗按内容帧重置计时而非按流起点一刀切
+    """验证看门狗按内容帧重置计时而非按流起点一刀切
 
     内容块每 0.06s 到达、共 6 块（总历时 >0.2s 阈值）：若计时不在内容帧
     重置必然误杀；每帧重置则健康流完整跑完。
@@ -410,7 +433,7 @@ async def test_run_model_call_content_stall_watchdog_resets_on_each_content_chun
 
 @pytest.mark.asyncio
 async def test_run_model_call_content_stall_watchdog_counts_reasoning_as_content() -> None:
-    """2026-10-04 用于验证思考流（仅 reasoning_content 的块）保持看门狗判活
+    """验证思考流（仅 reasoning_content 的块）保持看门狗判活
 
     思考模式下大部分时间只有 reasoning 增量：若只认可见正文/工具调用，
     正常思考回合会被误杀。
@@ -434,12 +457,12 @@ async def test_run_model_call_content_stall_watchdog_counts_reasoning_as_content
 
 
 def test_content_stall_error_is_transient_for_retry_channel() -> None:
-    """2026-10-04 用于验证僵流判死异常落进 _is_transient_model_error 的重发通道"""
+    """验证僵流判死异常落进 _is_transient_model_error 的重发通道"""
     assert _is_transient_model_error(ContentStallTimeoutError(300.0, 120, 0, 300.0)) is True
 
 
 class _RaceIterationStreamingLLM:
-    """2026-10-05 用于模拟并发共享面竞态抛出的迭代中变更错误（前 fail_count 次调用抛出）"""
+    """模拟并发共享面竞态抛出的迭代中变更错误（前 fail_count 次调用抛出）"""
 
     def __init__(self, chunks: list[AIMessageChunk], fail_count: int, message: str) -> None:
         self.chunks = chunks
@@ -465,7 +488,7 @@ class _SilentError(Exception):
 
 
 class _EmptyMessageErrorLLM:
-    """2026-10-05 用于模拟 str(exc) 为空的流中断（空消息异常，审计空串来源）"""
+    """模拟 str(exc) 为空的流中断（空消息异常，审计空串来源）"""
 
     def bind_tools(self, tools):
         del tools
@@ -486,14 +509,14 @@ class _EmptyMessageErrorLLM:
     ],
 )
 def test_race_iteration_errors_are_transient_for_retry_channel(message: str) -> None:
-    """2026-10-05 用于验证并发竞态迭代错误按消息匹配落进 _is_transient_model_error 重发通道"""
+    """验证并发竞态迭代错误按消息匹配落进 _is_transient_model_error 重发通道"""
     assert _is_transient_model_error(RuntimeError(message)) is True
     assert _is_transient_model_error(RuntimeError("普通运行时错误")) is False
 
 
 @pytest.mark.asyncio
 async def test_run_model_call_retries_current_request_on_race_iteration_error() -> None:
-    """2026-10-05 用于验证字典迭代竞态错误按瞬态重发而非整章上抛（run 483cd5c5 ch15）"""
+    """验证字典迭代竞态错误按瞬态重发而非整章上抛"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _RaceIterationStreamingLLM(
@@ -512,7 +535,7 @@ async def test_run_model_call_retries_current_request_on_race_iteration_error() 
 
 @pytest.mark.asyncio
 async def test_run_model_call_reports_failed_turn_error_with_exception_type_prefix() -> None:
-    """2026-10-05 用于验证审计 error 恒带异常类型前缀：str(exc) 为空时审计不再只剩空串"""
+    """验证审计 error 恒带异常类型前缀：str(exc) 为空时审计不再只剩空串"""
     failures: list[str] = []
     model = _EmptyMessageErrorLLM()
 
@@ -530,7 +553,7 @@ async def test_run_model_call_reports_failed_turn_error_with_exception_type_pref
 
 @pytest.mark.asyncio
 async def test_run_model_call_total_attempts_one_disables_retries() -> None:
-    """2026-08-12 用于验证 total_attempts=1 时关闭断流重试，只调用一次即失败"""
+    """验证 total_attempts=1 时关闭断流重试，只调用一次即失败"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _FlakyStreamingLLM([], fail_count=99)
@@ -545,9 +568,7 @@ async def test_run_model_call_total_attempts_one_disables_retries() -> None:
 
 @pytest.mark.asyncio
 async def test_run_model_call_accumulates_usage_from_failed_attempts() -> None:
-    """
-    2026-08-30 用于验证断流重试不再把失败物理请求的 token 合并到成功请求。
-    """
+    """验证断流重试不再把失败物理请求的 token 合并到成功请求。"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _RetryWithUsageLLM(
@@ -580,7 +601,7 @@ async def test_run_model_call_accumulates_usage_from_failed_attempts() -> None:
 
 @pytest.mark.asyncio
 async def test_run_model_call_reports_each_physical_stream_request_separately() -> None:
-    """2026-08-30 用于验证断流重试按物理请求分别回调开始失败与成功审计"""
+    """验证断流重试按物理请求分别回调开始失败与成功审计"""
     model = _RetryWithUsageLLM(
         failing_chunks=[
             AIMessageChunk(
@@ -619,11 +640,9 @@ async def test_run_model_call_reports_each_physical_stream_request_separately() 
 
 @pytest.mark.asyncio
 async def test_run_model_call_keeps_retry_output_when_shorter_than_failed_attempt() -> None:
-    """2026-08-13 用于验证重试输出比失败尝试已推送内容短时不再整段丢弃
+    """验证重试输出比失败尝试已推送内容短时不整段丢弃
 
-    修复前按字符数跳过（skip_output_chars），重试输出更短（非确定性 LLM）时
-    全部内容被清零，消息链正文凭空消失；修复后按公共前缀逐字符比对，
-    重试全文保留在消息链中。
+    重试输出按公共前缀逐字符比对，重试全文保留在消息链中。
     """
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
@@ -640,7 +659,7 @@ async def test_run_model_call_keeps_retry_output_when_shorter_than_failed_attemp
 
 @pytest.mark.asyncio
 async def test_run_model_call_skips_only_overlapping_prefix_on_retry() -> None:
-    """2026-08-13 用于验证重试仅跳过与失败尝试重叠的前缀，非重叠内容完整推送"""
+    """验证重试仅跳过与失败尝试重叠的前缀，非重叠内容完整推送"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _RetryWithUsageLLM(
@@ -657,7 +676,7 @@ async def test_run_model_call_skips_only_overlapping_prefix_on_retry() -> None:
 
 
 def _noop_sleep(monkeypatch) -> list[float]:
-    """2026-08-13 用于把 asyncio.sleep 替换为 no-op 并记录退避时长"""
+    """把 asyncio.sleep 替换为 no-op 并记录退避时长"""
     sleeps: list[float] = []
 
     async def fake_sleep(seconds: float) -> None:
@@ -669,7 +688,7 @@ def _noop_sleep(monkeypatch) -> list[float]:
 
 @pytest.mark.asyncio
 async def test_run_model_call_retry_backoff_is_exponential_and_capped(monkeypatch) -> None:
-    """2026-08-13 P2-12 重试退避指数递增（1s/2s）且上限 3s，仅对瞬态错误生效"""
+    """重试退避指数递增（1s/2s）且上限 3s，仅对瞬态错误生效"""
     model = _FlakyStreamingLLM([], fail_count=99)
     sleeps = _noop_sleep(monkeypatch)
 
@@ -681,7 +700,7 @@ async def test_run_model_call_retry_backoff_is_exponential_and_capped(monkeypatc
 
 
 def test_retry_backoff_seconds_exponential_with_cap() -> None:
-    """2026-08-13 P2-12 退避公式：0.5s × 2^attempt，attempt≥1，上限 3s"""
+    """退避公式：0.5s × 2^attempt，attempt≥1，上限 3s"""
     from src.agents.stream import _retry_backoff_seconds
 
     assert _retry_backoff_seconds(1) == 1.0
@@ -839,7 +858,7 @@ async def test_cancel_interrupts_real_rate_limit_cooldown_without_another_reques
 
 @pytest.mark.asyncio
 async def test_aggregator_announces_tool_by_name_across_retries() -> None:
-    """2026-08-13 P2-8 重试后 index 相同但工具名不同时补发 started 事件（按名抑制）"""
+    """重试后 index 相同但工具名不同时补发 started 事件（按名抑制）"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     # 首次尝试已宣布 write_metrics（index 0），重试改调 finish（同一 index）
@@ -865,9 +884,7 @@ async def test_aggregator_announces_tool_by_name_across_retries() -> None:
 
 @pytest.mark.asyncio
 async def test_aggregator_accumulates_usage_metadata_into_final_message() -> None:
-    """
-    2026-08-10 用于验证流式 chunk 的用量数值字段被累加并挂到完整 AIMessage
-    """
+    """验证流式 chunk 的用量数值字段被累加并挂到完整 AIMessage"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
@@ -902,9 +919,7 @@ async def test_aggregator_accumulates_usage_metadata_into_final_message() -> Non
 
 @pytest.mark.asyncio
 async def test_aggregator_accumulates_raw_gateway_usage_from_metadata() -> None:
-    """
-    2026-08-10 用于验证 DeepSeek 原始 token_usage 出现在响应元数据时也被累积
-    """
+    """验证 DeepSeek 原始 token_usage 出现在响应元数据时也被累积"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
@@ -935,8 +950,7 @@ async def test_aggregator_accumulates_raw_gateway_usage_from_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_aggregator_prefers_standard_usage_metadata_over_raw_gateway_usage() -> None:
-    """
-    2026-08-13 P1-3 用于验证同一 chunk 双源（标准 usage_metadata + provider 原始
+    """验证同一 chunk 双源（标准 usage_metadata + provider 原始
     token_usage）时只累计标准字段，避免用量翻倍；原始字段仅在标准字段缺失时回退
     """
     events, emitter = _collect_events()
@@ -1015,7 +1029,7 @@ async def test_run_model_call_streams_usage_metadata_into_response() -> None:
 
 @pytest.mark.asyncio
 async def test_run_model_call_streams_without_agent_stream() -> None:
-    """2026-08-10 用于验证不开启 SSE 时仍优先走 Provider 流式接口"""
+    """验证不开启 SSE 时仍优先走 Provider 流式接口"""
     model = _StreamingLLM([AIMessageChunk(content="你好"), _tool_call_chunk()])
 
     response = await run_model_call(model, [], None)
@@ -1026,7 +1040,7 @@ async def test_run_model_call_streams_without_agent_stream() -> None:
 
 @pytest.mark.asyncio
 async def test_run_model_call_records_ttft_first_visible_and_reasoning_timings(monkeypatch) -> None:
-    """2026-08-10 用于验证流式调用逐项计时按 perf_counter_ns 计算"""
+    """验证流式调用逐项计时按 perf_counter_ns 计算"""
     ticks = iter(
         [
             0,
@@ -1065,9 +1079,7 @@ async def test_run_model_call_records_ttft_first_visible_and_reasoning_timings(m
 
 @pytest.mark.asyncio
 async def test_aggregator_notes_reasoning_not_streamed(monkeypatch) -> None:
-    """
-    2026-08-11 用于验证流式响应未探测到思考内容时回合审计记录未流出原因
-    """
+    """验证流式响应未探测到思考内容时回合审计记录未流出原因"""
     ticks = iter([100_000_000, 200_000_000])
     aggregator = StreamChunkAggregator(None, started_ns=0, clock_ns=lambda: next(ticks))
 
@@ -1081,9 +1093,7 @@ async def test_aggregator_notes_reasoning_not_streamed(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_aggregator_notes_empty_stream_without_payload(monkeypatch) -> None:
-    """
-    2026-08-11 用于验证流式调用完全未流出任何内容时记录无 payload 原因
-    """
+    """验证流式调用完全未流出任何内容时记录无 payload 原因"""
     ticks = iter([100_000_000, 200_000_000])
     aggregator = StreamChunkAggregator(None, started_ns=0, clock_ns=lambda: next(ticks))
 
@@ -1097,9 +1107,7 @@ async def test_aggregator_notes_empty_stream_without_payload(monkeypatch) -> Non
 
 @pytest.mark.asyncio
 async def test_aggregator_omits_note_when_reasoning_streamed() -> None:
-    """
-    2026-08-11 用于验证思考内容正常流出时不再记录未流出原因
-    """
+    """验证思考内容正常流出时不再记录未流出原因"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
@@ -1151,8 +1159,7 @@ async def test_run_model_call_uses_mock_astream_when_present() -> None:
 
 @pytest.mark.asyncio
 async def test_aggregator_records_finish_reason_from_response_metadata() -> None:
-    """
-    2026-08-11 用于验证流式 chunk 的 finish_reason 被采集并挂到完整消息。
+    """验证流式 chunk 的 finish_reason 被采集并挂到完整消息。
 
     真实 Provider 实测 finish_reason 出现在倒数第二个 chunk 的 response_metadata，
     因此必须扫描全部 chunk 而不是只取最后一个。
@@ -1177,7 +1184,7 @@ async def test_aggregator_records_finish_reason_from_response_metadata() -> None
 
 @pytest.mark.asyncio
 async def test_aggregator_keeps_latest_finish_reason_when_repeated() -> None:
-    """2026-08-11 用于验证 finish_reason 出现多次时保留最后一次（length 优先于 stop）"""
+    """验证 finish_reason 出现多次时保留最后一次（length 优先于 stop）"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
@@ -1193,8 +1200,7 @@ async def test_aggregator_keeps_latest_finish_reason_when_repeated() -> None:
 
 @pytest.mark.asyncio
 async def test_merge_truncated_args_marks_call_instead_of_raw_wrap() -> None:
-    """
-    2026-08-11 用于验证工具参数 JSON 截断时不再静默包装 {"_raw": ...} 执行，
+    """验证工具参数 JSON 截断时不再静默包装 {"_raw":...} 执行，
     而是打截断标记并保留原始文本供诊断与拒绝执行。
     """
     events, emitter = _collect_events()
@@ -1237,7 +1243,7 @@ async def test_merge_truncated_args_marks_call_instead_of_raw_wrap() -> None:
 
 
 def test_merge_tool_call_chunks_carries_raw_args() -> None:
-    """2026-08-11 用于验证合并后的工具调用保留原始参数片段供审计"""
+    """验证合并后的工具调用保留原始参数片段供审计"""
     from src.agents.stream_aggregator import _merge_tool_call_chunks
 
     chunks = [
@@ -1251,7 +1257,7 @@ def test_merge_tool_call_chunks_carries_raw_args() -> None:
 
 
 class _ScriptedStreamingLLM:
-    """2026-08-22 用于按脚本逐次返回流式分片，验证无工具回复的调用层重发"""
+    """按脚本逐次返回流式分片，验证无工具回复的调用层重发"""
 
     def __init__(self, scripts: list[list[Any]]):
         self.scripts = [list(script) for script in scripts]
@@ -1267,12 +1273,12 @@ class _ScriptedStreamingLLM:
 
 
 async def _no_sleep(_seconds: float) -> None:
-    """2026-08-22 用于在重试测试中跳过退避等待"""
+    """在重试测试中跳过退避等待"""
 
 
 @pytest.mark.asyncio
 async def test_run_model_call_retries_when_reply_has_no_tool_call(monkeypatch) -> None:
-    """2026-08-22 用于验证无工具回复视同调用未正常结束：退避重发后返回正常回复"""
+    """验证无工具回复视同调用未正常结束：退避重发后返回正常回复"""
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
     truncated = AIMessageChunk(content="", additional_kwargs={"reasoning_content": "思考被截断"})
     complete = AIMessageChunk(
@@ -1289,7 +1295,7 @@ async def test_run_model_call_retries_when_reply_has_no_tool_call(monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_run_model_call_raises_after_no_tool_call_retry_exhaustion(monkeypatch) -> None:
-    """2026-08-22 用于验证无工具回复重试耗尽后上抛，而非把空回复交回上层协议处理"""
+    """验证无工具回复重试耗尽后上抛，而非把空回复交回上层协议处理"""
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
     truncated = AIMessageChunk(content="", additional_kwargs={"reasoning_content": "思考被截断"})
     model = _ScriptedStreamingLLM([[truncated], [truncated]])
@@ -1302,7 +1308,7 @@ async def test_run_model_call_raises_after_no_tool_call_retry_exhaustion(monkeyp
 
 @pytest.mark.asyncio
 async def test_run_model_call_retries_plain_text_reply_by_default(monkeypatch) -> None:
-    """2026-08-22 用于验证默认即要求工具调用：纯文本回复视同未正常结束并重发"""
+    """验证默认即要求工具调用：纯文本回复视同未正常结束并重发"""
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
     text_only = AIMessageChunk(content="普通文本回复")
     complete = AIMessageChunk(
@@ -1319,7 +1325,7 @@ async def test_run_model_call_retries_plain_text_reply_by_default(monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_run_model_call_injects_completion_hint_before_no_tool_retry(monkeypatch) -> None:
-    """2026-09-08 用于验证无工具回复重发前注入缺域提醒且只注入一次"""
+    """验证无工具回复重发前注入缺域提醒且只注入一次"""
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
     text_only = AIMessageChunk(content="本章标注已完成")
     complete = AIMessageChunk(
@@ -1330,7 +1336,7 @@ async def test_run_model_call_injects_completion_hint_before_no_tool_retry(monke
     hints: list[str | None] = []
 
     def completion_hint() -> str | None:
-        """2026-09-08 用于模拟账本按当前缺域生成提醒"""
+        """模拟账本按当前缺域生成提醒"""
         hint = f"【缺域提醒】缺 {len(hints) + 1} 个领域" if len(hints) < 2 else None
         hints.append(hint)
         return hint
@@ -1349,7 +1355,7 @@ async def test_run_model_call_injects_completion_hint_before_no_tool_retry(monke
 
 @pytest.mark.asyncio
 async def test_run_model_call_skips_hint_when_factory_returns_none(monkeypatch) -> None:
-    """2026-09-08 用于验证工厂返回 None 时维持原样重发、消息列表不被改动"""
+    """验证工厂返回 None 时维持原样重发、消息列表不被改动"""
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
     text_only = AIMessageChunk(content="纯文本")
     complete = AIMessageChunk(
@@ -1360,7 +1366,7 @@ async def test_run_model_call_skips_hint_when_factory_returns_none(monkeypatch) 
     calls: list[bool] = []
 
     def completion_hint() -> str | None:
-        """2026-09-08 用于模拟调用方无上下文可提示"""
+        """模拟调用方无上下文可提示"""
         calls.append(True)
         return None
 

@@ -24,7 +24,7 @@ class DiagnosisAgentRunError(RuntimeError):
 
 
 def _model_name(llm: Any) -> str | None:
-    """2026-08-10 用于从模型对象稳定读取审计用模型名"""
+    """用于从模型对象稳定读取审计用模型名"""
     return str(getattr(llm, "model_name", None) or getattr(llm, "model", "") or None) or None
 
 
@@ -49,9 +49,7 @@ def _finalize_diagnosis_result(
     foreshadow_expectation: float | None,
     organization: NarrativeOrganization | None = None,
 ) -> AgentAnalysis:
-    """
-    2026-08-02 用于以运行元数据和伏笔 ledger 确定性收口诊断终态
-    """
+    """用于以运行元数据和伏笔 ledger 确定性收口诊断终态"""
     payload = analysis.model_dump()
     payload["novel_id"] = novel_id
     payload["foreshadow_expectation"] = foreshadow_expectation
@@ -66,9 +64,7 @@ def _validate_diagnosis_submission(
     evidence_ledger: DiagnosisEvidenceLedger,
     organization_draft: EventOrganizationDraft | None = None,
 ) -> None:
-    """
-    2026-08-04 用于同时校验诊断结果主题合同与工具取证来源
-    """
+    """用于同时校验诊断结果主题合同与工具取证来源"""
     _validate_topic_label_ids(analysis, expected_ids=expected_topic_ids)
     evidence_ledger.require_evidence()
     if organization_draft is not None:
@@ -89,7 +85,7 @@ async def _run_diagnosis_agent(
     domain: Any = None,
     bus: Any = None,
 ) -> AgentAnalysis:
-    """诊断只运行独立work；依赖与最终保存由普通程序及领域适配完成"""
+    """诊断只运行独立会话：案例会话自取办理，报告会话收尾，依赖与最终保存由领域完成"""
     from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
     from src.audit.module import AuditMessages
     from src.config import settings
@@ -105,33 +101,39 @@ async def _run_diagnosis_agent(
         from .domain import create_diagnosis_domain
 
         domain_session = open_diagnosis_session(session)
-        domain = create_diagnosis_domain(
-            session=domain_session,
-            run_id=run_id,
-            novel_id=novel_id,
-            execution_id=execution_id,
-            novel_title=novel_title,
-        )
+        try:
+            domain = create_diagnosis_domain(
+                session=domain_session,
+                run_id=run_id,
+                novel_id=novel_id,
+                execution_id=execution_id,
+                novel_title=novel_title,
+            )
+        except BaseException:
+            # 构造中途失败也要交还连接：会话挂在 idle in transaction 会拖住后续建表与清库
+            domain_session.close()
+            domain_session = None
+            raise
     model_id = settings.models.diagnosis_model_id
     if not model_id:
         raise DiagnosisAgentRunError("请从模型池指定诊断模型")
 
     def observer_factory(progress: Any) -> Any:
         recorder = audit_recorder or AuditMessages(
-            active_bus, run_id, progress.work.work_id, progress.execution_id, progress.work.role
+            active_bus, run_id, progress.key, progress.execution_id, progress.role
         )
         if hasattr(recorder, "sequence"):
             recorder.sequence = progress.audit_sequence
-        # 审计登记真实 invocation 要求 work 身份已存在：派发时先登记会话与 work
-        domain.register_work_identity(progress.work)
+        # 审计登记真实 invocation 要求会话身份已存在：派发时先登记整轮会话
+        domain.register_session_identity()
         context = build_invocation_context(
             run_id=run_id,
             task_type="diagnosis",
             execution_id=progress.execution_id,
-            attempt_number=progress.dispatch_attempt,
+            attempt_number=1,
             model=model_id,
-            work_id=progress.work.work_id,
-            role=progress.work.role,
+            case_anchor=None,
+            role=progress.role,
         )
         local_id = recorder.start_invocation(**context)
         observer = AgentTurnObserver(recorder, invocation_id=local_id, context=context)
@@ -186,11 +188,10 @@ async def _run_diagnosis_agent(
 def open_diagnosis_session(session: Session) -> Session:
     """落前序阶段在管线会话上的未提交写入，再开独立诊断会话
 
-    2026-10-17 run 52cbb1ac 实证：诊断阶段共用管线会话时，管线会话会被流式 emitter
-    持续 commit；一次提交中途被打断就把会话留在 PREPARED 中间态，此后诊断的任意一次
-    读取都抛 "session is in 'prepared' state" 并伪装成工具依赖故障。与 annotate 阶段
-    同构：开工先 commit 管线会话（前序阶段写入对独立会话可见，per-work 读会话同权），
-    之后整轮诊断只用独立会话读写与发布，不再受管线会话事务状态影响。
+    诊断阶段若共用管线会话，管线会话会被流式 emitter 持续 commit；一次提交中途被打断
+    就把会话留在 PREPARED 中间态，此后诊断的任意一次读取都抛 "session is in 'prepared'
+    state" 并伪装成工具依赖故障。开工先 commit 管线会话（前序阶段写入对独立会话可见，
+    per-work 读会话同权），之后整轮诊断只用独立会话读写与保存，不受管线会话事务状态影响。
     """
     session.commit()
     bind = session.get_bind()

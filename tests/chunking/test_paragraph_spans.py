@@ -1,7 +1,7 @@
 """
 段落单元（ParagraphSpan）切分测试
 
-验收映射：设计文档《章节粒度分析指标重设计》§18.1（切分与身份）：
+验收映射（切分与身份）：
 - 超长自然段生成相同 source_paragraph_index、递增 fragment_index
 - 段落文本逐字匹配章节切片（chunk.text[local_start:local_end] == span.text）
 - 段落身份与坐标单调不重叠

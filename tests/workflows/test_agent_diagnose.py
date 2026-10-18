@@ -1,7 +1,7 @@
 """
 诊断 Agent 工作流测试（CLI 入口）
 
-说明: run_diagnose 已 agent 化，测试通过 patch run_diagnosis_agent 注入假诊断结果
+run_diagnose 已 agent 化，测试通过 patch run_diagnosis_agent 注入假诊断结果
 """
 
 import sys

@@ -1,11 +1,8 @@
 """通过诊断终态校验后保存正式诊断报告、叙事组织及案例交付，事务不交给工作流
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：
-- 正式报告进 diagnosis_reports（report_id 沿用原 output UUID；session_id 唯一，
-  会话是 executions 的整轮 session 形状），标签/名单/评分进 analysis_assessments
-- 组织、完整事件与核对由 save_diagnosis_events / save_organization 写入新关系
-- 案例采纳调用点传正式报告 id；案例交付关系由 case_pool 负责人实现
-- 重投校验按报告投影与冻结贡献比较，不覆盖已发布结果
+报告进 diagnosis_reports（session_id 唯一）、标签/名单/评分进 analysis_assessments；
+组织与完整事件由 save_diagnosis_events / save_organization 写入；重投校验按报告投影
+与已保存结果比较，不覆盖。
 """
 
 from __future__ import annotations
@@ -22,6 +19,7 @@ from src.event_trees import storage_map as smap
 from src.event_trees.organization import (
     CONTRACT_VERSION,
     NarrativeOrganization,
+    close_diagnosis_execution,
     save_organization,
     snapshot_digest,
 )
@@ -155,27 +153,27 @@ def _published_report(session: Session, run_id: str) -> Any:
 
 
 def _verify_replay(session: Session, run_id: str, report: Any, analysis: AgentAnalysis) -> None:
-    """提交回执不明时只核验已发布结果：报告投影、冻结快照与正式事件身份必须一致"""
+    """提交回执不明时只核验已保存结果：报告投影、身份/结构快照与正式事件身份必须一致"""
     from src.diagnosis.read import fetch_diagnosis_payload
     from src.event_trees.organization import _run_events
 
     stored = fetch_diagnosis_payload(session, run_id)
-    # 读取投影附带 run_id 等读取面键；重投核验只在正式合同字段上比较冻结贡献
+    # 读取投影附带 run_id 等读取面键；重投核验只在正式合同字段上比较已保存结果
     comparable = set(AgentAnalysis.model_fields) - {"narrative_organization"}
     stored_payload = {key: value for key, value in (stored or {}).items() if key in comparable}
     incoming = {key: value for key, value in analysis.model_dump(mode="json").items() if key in comparable}
     if snapshot_digest(stored_payload) != snapshot_digest(incoming):
-        raise ValueError("已发布诊断与冻结贡献不一致，禁止覆盖")
+        raise ValueError("已保存诊断与本次提交不一致，禁止覆盖")
     # 唯一调用点已要求叙事组织非空（persist_analysis：诊断结果缺少全书叙事组织即拒绝）
     organization = cast(NarrativeOrganization, analysis.narrative_organization)
     if (
         report.identity_snapshot != organization.identity_snapshot
         or report.structure_snapshot != organization.structure_snapshot
     ):
-        raise ValueError("已发布诊断的冻结快照与本次提交不一致，禁止覆盖")
+        raise ValueError("已保存诊断的身份/结构快照与本次提交不一致，禁止覆盖")
     published = set(_run_events(session, run_id))
     if published != {item.event_id for item in organization.events}:
-        raise ValueError("已发布完整事件身份与本次提交不一致，禁止覆盖")
+        raise ValueError("已保存完整事件身份与本次提交不一致，禁止覆盖")
 
 
 def _save_case_writes(
@@ -189,15 +187,15 @@ def _save_case_writes(
 ) -> None:
     """把三类案例处置写入折入正式产物：事实图贡献与对话归因同一事务落库
 
-    2026-10-15 用户裁定「复用标注工具」「没权限」：语义由标注状态原语保证，
-    本函数只负责按 work 冻结贡献走 save_work 正式链与按候选键定位对话行。
+    语义由标注状态原语保证，本函数只负责按案例贡献快照走 save_work 正式链与按
+    候选键定位对话行。
     """
     import json
 
     from src.fact_graph.contributions import FactContribution
 
-    for work_id, (writer, author) in sorted(writers.items()):
-        facts = graph.drain_ops(*author)
+    for _case_id, (writer, author) in sorted(writers.items()):
+        facts = graph.drain_ops(author)
         keys: set[str] = set()
         for op in facts["entity_ops"]:
             keys.add(graph.entity_key(op["name"], op["entity_type"]))
@@ -217,14 +215,15 @@ def _save_case_writes(
         graph.reference_entities(author, list(facts["entities"].values()))
         frozen = FactContribution(
             run_id,
-            work_id,
-            author[1],
+            author,
             int(writer.current_chapter_id),
             (),
             json.dumps(facts, ensure_ascii=False),
             "[]",
         )
         graph.save_work(session, frozen, output_id)
+        # 案例产物折入正式结果：该案例的真实执行行同事务收口
+        close_diagnosis_execution(session, execution_id=author)
         for index, item in sorted(writer.dialogue.written_dialogues.items()):
             candidate = candidates[index - 1] if 0 < index <= len(candidates) else None
             if candidate is None:
@@ -233,7 +232,7 @@ def _save_case_writes(
             if row is None:
                 raise ValueError(f"对话候选缺少持久化记录: {candidate.candidate_key}")
             # 当前归因及本次生产者：诊断改归因记诊断执行，原创建来源不改写
-            row.current_attribution_execution_id = author[1]
+            row.current_attribution_execution_id = author
             row.speaker_entity_id = graph.entity_id(item.speaker, "character") if item.speaker else None
             row.tone = str(item.tone) if item.tone else None
             row.is_inner_monologue = item.verdict == "inner_monologue"
@@ -263,10 +262,10 @@ def save_diagnosis_result(
         _verify_replay(session, run_id, existing, analysis)
         from src.event_trees.read.organization import EventTreeQuery
 
-        # 提交回执不明时只核验已发布结果，不再调用模型或重写任何候选
+        # 提交回执不明时只核验已保存结果，不再调用模型或重写任何候选
         EventTreeQuery(session, run_id).fetch()
         return
-    authors: list[tuple[str, str]] = []
+    authors: list[str] = []
     try:
         report_id = save_diagnosis_report(session, run_id, session_id, analysis)
         save_diagnosis_events(session, run_id, analysis.narrative_organization, report_id)
@@ -290,8 +289,7 @@ def save_diagnosis_result(
             for author in authors:
                 frozen = CaseContribution(
                     run_id,
-                    author[0],
-                    author[1],
+                    author,
                     json.dumps(
                         {
                             "created_case_ids": sorted(case_pool.created.get(author, set())),
@@ -310,7 +308,7 @@ def save_diagnosis_result(
         session.commit()
         if case_pool is not None:
             for author in authors:
-                case_pool.confirm(*author)
+                case_pool.confirm(author)
     except Exception:
         session.rollback()
         raise

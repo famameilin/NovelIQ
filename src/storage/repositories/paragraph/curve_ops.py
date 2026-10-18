@@ -1,19 +1,14 @@
 """
-段落曲线区块（§5.5 段落曲线 / §5.2 计算合同与读投影）
+段落曲线区块（计算合同与读投影）
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分——从 paragraph_repository.py 提取段落曲线
-说明: 纯结构搬移，不改 SQL 与聚合口径；密度列在分母为 0 时为 None
-（合法观测，不伪造为零）。
+密度列在分母为 0 时为 None（合法观测，不伪造为零）。
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：
-- 旧宽表 paragraph_curves 退场：逐段 LOWESS 平滑结果写 paragraph_features 的
-  lowess_net_density / lowess_surface_tension 两类标量行（NULL 保留不可计算
-  语义）；批次完成事实写 analysis_runs.curve_completed_at
-- 原始 pos/neg 密度与 net_density 不再落列，由指标分子÷同口径 token_count
-  投影；surface_tension 由 paragraph_features 的 tension_z 观测按 sigmoid 投影；
-  写入时的 pos/neg/net/surface_tension 字段一律忽略
+- 逐段 LOWESS 平滑结果写 paragraph_features 的 lowess_net_density /
+  lowess_surface_tension 标量行（NULL 保留不可计算语义）；批次完成事实写
+  analysis_runs.curve_completed_at
+- pos/neg 密度与 net_density 由指标分子÷同口径 token_count 投影；
+  surface_tension 由 tension_z 观测按 sigmoid 投影；写入行的
+  pos/neg/net/surface_tension 字段被忽略
 """
 
 from __future__ import annotations
@@ -100,8 +95,8 @@ def insert_paragraph_curves(session: Session, run_id: str, rows: Sequence[Paragr
 def fetch_paragraph_curves(session: Session, run_id: str) -> Sequence[Row]:
     """读取 run 的全部段落曲线行，按 paragraph_id 升序
 
-    行集合为已有曲线平滑样本的段落（与旧曲线行一致）；pos/neg/net 密度与
-    surface_tension 由指标分子/分母与张力 z 读投影给出，平滑值取特征行。
+    行集合为已有曲线平滑样本的段落；pos/neg/net 密度与 surface_tension
+    由指标分子/分母与张力 z 读投影给出，平滑值取特征行。
     """
     sample_net = aliased(ParagraphFeature, name="sample_net")
     sample_tension = aliased(ParagraphFeature, name="sample_tension")
@@ -152,7 +147,7 @@ def fetch_chapter_tension_scores(session: Session, run_id: str) -> list[tuple[in
 
     段落表面张力已是 run 内稳健标准化 + sigmoid 后的 [0,1] 值，
     章节值取段落均值（缺失张力数据的章由调用方兜底）；先投影 sigmoid
-    再求均值，保持原「逐段值平均」口径。
+    再求均值，保持逐段值平均口径。
     """
     tension = surface_tension_projection()
     statement = (

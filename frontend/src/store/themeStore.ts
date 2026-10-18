@@ -27,12 +27,8 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: "novel-viz-theme",
-      // 2026-04-30: 本地 version 迁移清理
-      // 任务：theme store latest-only 收口
-      // 说明：只保留当前状态真正需要的持久化字段，不再兼容旧版本 migrate/version 分支
-      // 自动同步开启时，seedColor 属于任务上下文的派生结果，
-      // 不应跨会话持久化到首页；autoSyncEnabled 只用于组件展示页的临时试色，也不应持久化
-      // 只有组件展示页手动试色时，才保留用户显式选择的颜色
+      // 只持久化当前状态需要的字段：开启自动同步时 seedColor 属于任务派生结果，不持久化；
+      // 关闭自动同步时保留组件展示页手动试色选择的颜色；autoSyncEnabled 不持久化
       partialize: (state) => ({
         isDark: state.isDark,
         ...(state.autoSyncEnabled ? {} : { seedColor: state.seedColor }),

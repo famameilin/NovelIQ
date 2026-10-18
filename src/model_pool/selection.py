@@ -19,9 +19,9 @@ def select_annotation_model(
 ) -> str | None:
     """尝试键决定加权选择；有其他可用模型时不重复失败的模型
 
-    2026-10-02 并发语义归位：选举在模型池分发时刻发生——只在有空位的模型
-    （在途任务数 < max_in_flight）中加权选举，全部满位返回 None，任务留在队列；
-    in_flight=None 时退化为无容量过滤的纯加权选择。
+    选举在模型池分发时刻发生——只在有空位的模型（在途任务数 < max_in_flight）中
+    加权选举，全部满位返回 None，任务留在队列；in_flight=None 时退化为无容量
+    过滤的纯加权选择。
     """
     candidates = [item for item in pool if item.weight > 0]
     if not candidates:

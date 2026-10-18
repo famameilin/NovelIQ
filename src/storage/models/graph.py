@@ -1,12 +1,5 @@
 """
-事实图谱 ORM 模型（2026-10-16 全库 3NF 改造）
-
-- graph_entities：实体身份（run+规范名+大类的 Unicode 比较合同由写入链保持一致；
-  当前标签/属性/动态状态从贡献读取，不存缓存）
-- graph_relations：稳定关系身份及真实端点（run 从端点取得，双向按既有身份排序；
-  十二种关系的方向/语义为版本化代码合同，不逐行保存）
-- graph_facts：封闭类型的正式图谱贡献与字段操作（五种互斥形状）
-- fact_entity_tags：一次标签设置的有序成员（父事实 tags_submitted=true 且零行=清空）
+事实图谱 ORM 模型
 
 operation kind 由具体列形状表达，不存由引用决定的重复 operation_code；
 graph 与 plotline 两个列表都从 0 开始，不能用 producer+order 作全表键。
@@ -96,14 +89,8 @@ class GraphFact(Base):
     """
     图事实表（五种互斥形状）
 
-    - 实体引用/更新：direct_producer+entity；description/representative 为
-      omit/set/clear 操作列，tags_submitted 区分没提交与提交空集合
-    - 实体关系操作：direct_producer+relation+relation_change_kind；identity_kind/reason 按合同
-    - 人物动态观测：participant_id（作者/实体/动态值从参与者来源取，不填 direct_producer）
-    - 独立情节推进：direct_producer+business_call_id+subject/description/after（write_plotline 真实记录）
-    - 章末程序核对回执：program_work_id 指向实际章末核对来源（结论按固定规则投影）
-
-    run 从真实生产来源取得；effective_chapter_id 仅真实独立选章时保存。
+    五种形状由 ck_graph_facts_shape 约束互斥；run 从真实生产来源取得；
+    effective_chapter_id 仅真实独立选章时保存。
     """
 
     __tablename__ = "graph_facts"
@@ -128,8 +115,7 @@ class GraphFact(Base):
             name="ck_graph_facts_representative_value_pair",
         ),
         CheckConstraint(
-            # 关系变化的取值就是写面合同的七类（不把 break 归一为 retract：
-            # 旧读面对断裂与撤回各有展示标签，值原样入事实行）
+            # 关系变化的取值就是写面合同的七类（不把 break 归一为 retract，值原样入事实行）
             "relation_change_kind IS NULL OR relation_change_kind IN"
             " ('assert', 'reinforce', 'weaken', 'retract', 'refine', 'supersede', 'break')",
             name="ck_graph_facts_relation_change_kind",

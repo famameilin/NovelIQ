@@ -10,12 +10,7 @@ from sqlalchemy.engine import make_url
 
 
 def _load_setup_test_db_module() -> ModuleType:
-    """
-    创建时间: 2026-04-27
-    任务: fix-test-db-timeline-contract-bootstrap
-    说明: `scripts/` 目录不是 Python package；
-          这里用 importlib 按文件路径加载脚本模块，便于只验证脚本行为而不改项目导入结构。
-    """
+    """这里用 importlib 按文件路径加载脚本模块，便于只验证脚本行为而不改项目导入结构。"""
 
     script_path = Path(__file__).resolve().parents[2] / "scripts" / "db" / "setup_test_db.py"
     spec = importlib.util.spec_from_file_location("test_setup_test_db_script", script_path)
@@ -27,12 +22,7 @@ def _load_setup_test_db_module() -> ModuleType:
 
 
 def test_default_db_url_keeps_real_password_when_switching_to_postgres_database() -> None:
-    """
-    创建时间: 2026-04-28
-    任务: fix-setup-test-db-maintenance-url-password-mask
-    说明: SQLAlchemy URL 在 `str(url)` 时默认会把密码掩码成 `***`；
-          setup_test_db.py 若直接把该字符串拿去 create_engine，会导致维护库连接永远密码错误。
-    """
+    """setup_test_db.py 若直接把该字符串拿去 create_engine，会导致维护库连接永远密码错误。"""
 
     module = _load_setup_test_db_module()
 
@@ -75,13 +65,7 @@ def test_create_test_database_recreates_existing_database() -> None:
 
 
 def test_create_tables_bootstraps_test_db_via_init_db() -> None:
-    """
-    创建时间: 2026-04-27
-    任务: tighten-setup-test-db-contract-regression
-    说明: 直接验证 setup_test_db.py 的 create_tables() 会切换到测试库，
-          并通过 src.storage.db.init_db() 拉起 fresh schema。
-          这条测试保护的是脚本引导链，而不是仅验证单个 SQL 片段。
-    """
+    """这条测试保护的是脚本引导链，而不是仅验证单个 SQL 片段。"""
 
     module = _load_setup_test_db_module()
     call_order: list[str] = []
@@ -90,7 +74,7 @@ def test_create_tables_bootstraps_test_db_via_init_db() -> None:
         call_order.append("dispose")
 
     def mark_init_db() -> None:
-        """2026-08-07 用于记录最终数据库初始化调用"""
+        """记录最终数据库初始化调用"""
         call_order.append("init")
 
     with (
@@ -110,12 +94,7 @@ def test_create_tables_bootstraps_test_db_via_init_db() -> None:
 
 
 def test_main_falls_back_to_in_place_table_reset_when_maintenance_db_is_unavailable() -> None:
-    """
-    创建时间: 2026-04-28
-    任务: fix-setup-test-db-fallback-and-console-errors
-    说明: 当前环境里维护库 `postgres` 可能因认证或权限不可用；
-          只要目标测试库本身仍可连接，脚本就应显式降级到“原地重建表结构”，而不是直接失败退出。
-    """
+    """只要目标测试库本身仍可连接，脚本就应显式降级到“原地重建表结构”，而不是直接失败退出。"""
 
     module = _load_setup_test_db_module()
 

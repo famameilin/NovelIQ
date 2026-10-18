@@ -55,7 +55,7 @@ function getChangeTypeLabel(changeType?: string | null): string {
 }
 
 /**
- * 2026-04-28，作用：展示关系图谱分析页面
+ * 展示关系图谱分析页面
  * 简要说明：人物关系同屏联动实体详情，关系演变整合快照指标、画布和变化记录
  */
 export function GraphPage() {
@@ -337,7 +337,7 @@ export function GraphPage() {
   };
 
   /**
-   * 2026-08-31，作用：渲染图谱工作区的两个固定高度页签
+   * 渲染图谱工作区的两个固定高度页签
    * 简要说明：人物关系保留画布和实体详情，关系演变在同一剩余高度内承载概览、画布和变化记录
    */
   const renderLoadedContent = () => (

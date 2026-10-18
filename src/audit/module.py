@@ -1,9 +1,8 @@
 """统计审计独立接收实际运行事实并保存，不参与 work 业务事务
 
-2026-10-16 全库 3NF 改造：invocation 的执行事实随 start_invocation 落到
-executions（work 绑定、run/章节/角色由 work 身份取得），跨重启重放的幂等去重
-由 model_calls.message_key / agent_tool_calls.message_key 这两个可空唯一列承担
-（每条审计消息自带唯一 id，重放命中原行）。
+invocation 的执行事实随 start_invocation 落到 executions 并直接携带归属
+（run、角色、章或案例锚）；跨重启重放按 model_calls / agent_tool_calls 的
+message_key 可空唯一列幂等去重。
 """
 
 from __future__ import annotations
@@ -87,7 +86,7 @@ class AuditModule:
         local_id = payload["local_id"]
         execution_id = message.invocation_id
         if method == "start_invocation":
-            # 执行事实在此登记；run/章节/角色由 work 身份取得，上下文仍随每条审计调用流动
+            # 执行事实在此登记；归属随审计上下文流动，直接落执行行
             recorder.start_invocation(**kwargs)
             self.identifiers[(execution_id, "invocation", local_id)] = local_id
             return local_id

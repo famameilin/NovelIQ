@@ -75,7 +75,7 @@ class ConfirmedRelation:
 
 @dataclass(slots=True)
 class GraphChange:
-    """2026-08-11 用于向章节版本消费者传递事实原因与变化"""
+    """向章节版本消费者传递事实原因与变化"""
 
     change_id: str
     change_kind: str

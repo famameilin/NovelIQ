@@ -1,10 +1,9 @@
 """
 段落级结果查询组装器
 
-说明: 承载 paragraph-curves（§13.1）、emotion-trend、chapter-metrics（§13.2）的
-取数与响应装配；聚合口径与计算在 `src.metrics.aggregate.aggregations`。
-
-曲线展示降采样只发生在 API 传输层，不参与指标计算（§9.4）。
+承载 paragraph-curves、emotion-trend、chapter-metrics 的取数与响应装配；
+聚合口径与计算在 `src.metrics.aggregate.aggregations`。曲线展示降采样只发生在 API 传输层，
+不参与指标计算。
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ from src.storage.repositories import AnnotationRepository, ParagraphRepository
 
 
 def _apply_emotion_smoothing(windows: list[EmotionTrendWindow]) -> list[EmotionTrendWindow]:
-    """2026-08-15 在窗口聚合结果上追加后端 LOWESS 展示值（原始值保留，算法在 aggregate.algorithms）"""
+    """在窗口聚合结果上追加后端 LOWESS 展示值（原始值保留，算法在 aggregate.algorithms）"""
     if not windows:
         return windows
 
@@ -70,7 +69,7 @@ def _fetch_emotion_trend(
     range_end: float | None,
     window_paragraphs: int,
 ) -> list[EmotionTrendWindow]:
-    """2026-08-15 由段落原始指标构造情绪趋势窗口并附带后端展示平滑值"""
+    """由段落原始指标构造情绪趋势窗口并附带后端展示平滑值"""
     windows = aggregate_emotion_trend_windows(
         paragraph_repo.fetch_paragraph_rows(run_id),
         paragraph_repo.fetch_paragraph_metrics(run_id),
@@ -87,7 +86,7 @@ def _fetch_paragraph_curves(
     max_points: int | None,
 ) -> list[ParagraphCurvePoint]:
     """
-    获取段落曲线（§13.1）
+    获取段落曲线
 
     - fetch_paragraph_rows + fetch_paragraph_curves 按 paragraph_id 对齐，
       缺任一侧的段落跳过
@@ -149,7 +148,7 @@ def _fetch_chapter_metrics(
     run: dict[str, Any],
 ) -> ChapterMetricsResponse:
     """
-    获取章节与全书汇总指标（§13.2）
+    获取章节与全书汇总指标
 
     - 章节来自段落聚合（paragraphs + paragraph_metrics 按 paragraph_id 对齐）
     - 章节标签来自 fetch_chapter_annotations_full（按 chapter_id 映射）

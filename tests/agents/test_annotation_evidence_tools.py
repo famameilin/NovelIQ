@@ -1,11 +1,11 @@
 """章节 Agent 语义写入工具与系统账本合同测试
 
-2026-09-14 写入面重构：模型面为五个领域写工具（write_entity / write_metrics /
-write_event / write_relation / write_dialogue）+ 唯一 finish 收尾。
-写入一次一个语义单元、写入即生效并返回真实回执（{status: written, record}；实体另带
-el 与 n），没有逐域 finish——收尾判定在本回合全部调用处理完后由账本执行；事件根/子/
-参与者折叠进单工具 write_event（el 层级键：根=树键 t1、子=t1/e2，树内先后=调用顺序），
-段落情绪标签并入 write_metrics.labels（{paragraph_id, emotion}），真实 uuid 不外露。
+模型面为五个领域写工具（write_entity / write_metrics / write_event / write_relation /
+write_dialogue）+ 唯一 finish 收尾。写入一次一个语义单元、写入即生效并返回真实回执
+（{status: written, record}；实体另带 el 与 n），没有逐域 finish——收尾判定在本回合
+全部调用处理完后由账本执行；事件根/子/参与者折叠进单工具 write_event（el 层级键：
+根=树键 t1、子=t1/e2，树内先后=调用顺序），段落情绪标签并入 write_metrics.labels
+（{paragraph_id, emotion}），真实 uuid 不外露。
 """
 
 from __future__ import annotations
@@ -28,12 +28,12 @@ from tests.support.annotation_work_tools import build_annotation_tools
 
 
 class _QueryService:
-    """2026-08-07 用于记录搜索解决与原文工具调用的测试查询服务"""
+    """记录搜索解决与原文工具调用的测试查询服务"""
 
     def __init__(self, *, text_result_count: int = 1, known_dialogue_ids: set[str] | None = None) -> None:
-        """2026-08-30 用于初始化原文查询记录
+        """初始化原文查询记录
 
-        2026-09-18 对话记录订正下沉到写入路径：账本对非本章候选问一次库
+        对话记录订正下沉到写入路径：账本对非本章候选问一次库
         （has_dialogue_record），桩按本集合回答前文已落库的对话记录标识。
         """
         self.text_queries: list[tuple[str, str, int]] = []
@@ -41,7 +41,7 @@ class _QueryService:
         self.known_dialogue_ids = known_dialogue_ids if known_dialogue_ids is not None else {"dlg_prev_1"}
 
     async def search_text(self, query, *, range_name, limit=50):
-        """2026-08-30 用于记录范围查询并返回完整原文命中"""
+        """记录范围查询并返回完整原文命中"""
         self.text_queries.append((query, range_name, limit))
         return [
             TextSearchCandidate(
@@ -56,7 +56,7 @@ class _QueryService:
 
 
 class _GraphTestEntity:
-    """2026-08-11 用于构造内存图测试实体目录项"""
+    """构造内存图测试实体目录项"""
 
     def __init__(self, name: str, entity_type: str) -> None:
         self.name = name
@@ -68,7 +68,7 @@ def _graph_relation(
     to_entity: str,
     relation_type: str,
 ) -> BoundRelationInput:
-    """2026-08-12 用于构造三字段关系边输入（本章确认存在的边）"""
+    """构造三字段关系边输入（本章确认存在的边）"""
     return BoundRelationInput(
         from_entity=from_entity,
         to_entity=to_entity,
@@ -77,25 +77,25 @@ def _graph_relation(
 
 
 def _find_tool(tools: list, name: str):
-    """2026-08-07 用于按工具名取得 LangChain 测试工具"""
+    """按工具名取得 LangChain 测试工具"""
     return next(candidate for candidate in tools if candidate.name == name)
 
 
 def _entity_id(name: str, entity_type: str = "character") -> str:
-    """按测试章内图的 scope 和 chapter_id 计算提及 ID（2026-10-13 名+大类复合身份）"""
+    """按测试章内图的 scope 和 chapter_id 计算提及 ID（名+大类复合身份）"""
     return mention_uuid("", 0, name, entity_type)
 
 
 def _ledger(*, allow_future_context: bool = False) -> AnnotationToolLedger:
-    """2026-08-30 用于构造带唯一当前原文和检索范围配置的工具账本
+    """构造带唯一当前原文和检索范围配置的工具账本
 
-    2026-08-18：注入 paragraph_info 供事件锚点校验和证据派生使用。
-    2026-09-04 单一写面：图域写工具（write_entity/write_relation）
+    注入 paragraph_info 供事件锚点校验和证据派生使用。
+    单一写面：图域写工具（write_entity/write_relation）
     以常驻 FactGraph 为唯一真相源，故默认注入空图；需要历史实体的用例随后覆盖
     ledger.graph。
-    2026-09-13 取消暂存：每个小调用写入即生效（written_* / event_trees 即时落账），
+    取消暂存：每个小调用写入即生效（written_* / event_trees 即时落账），
     直接调用工具的测试写完内容后统一调用 ledger.finish_chapter() 收尾。
-    2026-09-14 段落级监督：paragraph_info 给出两个段号（¶0/¶1），供
+    段落级监督：paragraph_info 给出两个段号（¶0/¶1），供
     write_metrics.labels 默认提交两段、满足每章 2 段软下限。
     """
     chapter_text = "“住手”回荡"
@@ -131,12 +131,12 @@ def _graph_with_entities(names: dict[str, str], *, relations: set[tuple[str, str
 
 
 def _tools(service: _QueryService, ledger: AnnotationToolLedger) -> list:
-    """2026-08-07 用于构建绑定查询服务与账本的测试工具"""
+    """构建绑定查询服务与账本的测试工具"""
     return build_annotation_tools(service, ledger)
 
 
 def _write_metrics_args() -> dict:
-    """2026-08-11 用于构造合法 write_metrics 参数"""
+    """构造合法 write_metrics 参数"""
     return {
         "summary": "住手回荡",
         "emotional_valence": 0,
@@ -145,35 +145,35 @@ def _write_metrics_args() -> dict:
 
 
 def _call(tools: list, name: str, args: dict):
-    """2026-08-07 用于同步调用测试工具并解析 JSON"""
+    """同步调用测试工具并解析 JSON"""
     if name == "write_event" and "evidence" not in args:
         args = {**args, "evidence": 1}
     return json.loads(_find_tool(tools, name).invoke(args))
 
 
 def _write_call(name: str, args: dict) -> dict:
-    """2026-09-13 用于构造单个有类型小调用（一次只提交一个完整语义单元）"""
+    """构造单个有类型小调用（一次只提交一个完整语义单元）"""
     if name == "write_event" and "evidence" not in args:
         args = {**args, "evidence": 1}
     return {"name": name, "args": args}
 
 
 def _finish_call() -> dict:
-    """2026-09-14 用于构造唯一 finish 收尾声明（判定在本回合全部调用处理完后执行）"""
+    """构造唯一 finish 收尾声明（判定在本回合全部调用处理完后执行）"""
     return _write_call("finish", {})
 
 
 def _call_all(tools: list, calls: list[dict]) -> list:
-    """2026-09-13 用于按顺序执行一组小调用并解析各自回执"""
+    """按顺序执行一组小调用并解析各自回执"""
     return [_call(tools, call["name"], call["args"]) for call in calls]
 
 
 def _reject(tools: list, ledger: AnnotationToolLedger, name: str, args: dict) -> dict:
-    """2026-09-13 用于经生产路径（graph._invoke_tool）取单条记录的结构化拒绝回执
+    """经生产路径（graph._invoke_tool）取单条记录的结构化拒绝回执
 
     schema 层（langchain 参数绑定）失败只在 _invoke_tool 这条生产路径翻译成
     AnnotationStageRejection，直接 .invoke 仍是裸 pydantic ValidationError。
-    2026-09-14 与 graph.tool_batch 同口径：执行前快照、失败后回滚——单条调用失败
+    与 graph.tool_batch 同口径：执行前快照、失败后回滚——单条调用失败
     只回滚该调用自己，之前的成功写入原样保留（生产收尾前的直接调用测试走同一协议）。
     """
     tool_map = {candidate.name: candidate for candidate in tools}
@@ -193,7 +193,7 @@ def _entity_calls(
     entity_type: str = "character",
     el: str | None = None,
 ) -> list[dict]:
-    """2026-09-14 用于构造 write_entity 小调用（一次登记一个实体，el=章内引用键）"""
+    """构造 write_entity 小调用（一次登记一个实体，el=章内引用键）"""
     return [
         _write_call(
             "write_entity",
@@ -203,7 +203,7 @@ def _entity_calls(
 
 
 def _metrics_calls(labels: list[dict] | None = None) -> list[dict]:
-    """2026-09-14 用于构造 write_metrics 小调用（指标整域一次提交，段落标签随本域提交）"""
+    """构造 write_metrics 小调用（指标整域一次提交，段落标签随本域提交）"""
     args = dict(_write_metrics_args())
     if labels is not None:
         args["labels"] = labels
@@ -211,13 +211,13 @@ def _metrics_calls(labels: list[dict] | None = None) -> list[dict]:
 
 
 def _paragraph_labels(items: list[tuple[int, int]] | None = None) -> list[dict]:
-    """2026-09-14 用于构造 write_metrics.labels 段落情绪标签条目（默认两段满足每章软下限）"""
+    """构造 write_metrics.labels 段落情绪标签条目（默认两段满足每章软下限）"""
     resolved = items if items is not None else [(1, -2), (2, -1)]
     return [{"paragraph_id": paragraph_id, "emotion": emotion} for paragraph_id, emotion in resolved]
 
 
 def _dialogue_calls(items: list[tuple] | None = None) -> list[dict]:
-    """2026-09-13 用于构造 write_dialogue 小调用（默认第一条候选判为真实对话）
+    """构造 write_dialogue 小调用（默认第一条候选判为真实对话）
 
     items 元组形如 (candidate_index, verdict, speaker, tone)，speaker 是实体引用
     （运行期编号 n 或本章的 el 键）。
@@ -238,7 +238,7 @@ def _dialogue_calls(items: list[tuple] | None = None) -> list[dict]:
 
 
 def _relation_calls(items: list[tuple[int, int, str]] | None = None) -> list[dict]:
-    """2026-09-13 用于构造 write_relation 小调用（默认空域，本章不写关系）"""
+    """构造 write_relation 小调用（默认空域，本章不写关系）"""
     resolved = items if items is not None else []
     return [
         _write_call(
@@ -262,7 +262,7 @@ def _event_calls(
     child_description: str = "顾霜收势",
     child_action: str = "收势",
 ) -> list[dict]:
-    """2026-09-14 用于构造一棵事件树的小调用组（write_event 根 + 子事件，参与者内联 characters）
+    """构造一棵事件树的小调用组（write_event 根 + 子事件，参与者内联 characters）
 
     根 el=树键（不带 /），子 el=树键/节点键；树内先后=调用顺序（order 参数已下线）。
     同一章内 (人物, 动作) 二元组不得重复（人物动态状态唯一），多棵树同轮
@@ -317,7 +317,7 @@ def _event_calls(
 
 
 def test_schema_rejects_tone_words_in_emotion_with_guidance() -> None:
-    """2026-08-12 用于验证 tone 中文词写进 emotional_valence 时给出纠正引导"""
+    """验证 tone 中文词写进 emotional_valence 时给出纠正引导"""
     with pytest.raises(ValidationError):
         EventParticipantInput.model_validate(
             {
@@ -331,9 +331,9 @@ def test_schema_rejects_tone_words_in_emotion_with_guidance() -> None:
 
 
 def test_schema_rejects_event_role_words_in_narrative_role_with_guidance() -> None:
-    """2026-08-30 用于验证事件专属词写进 narrative_role 时给出纠正引导
+    """验证事件专属词写进 narrative_role 时给出纠正引导
 
-    2026-09-11 见证者已并入 RoleFunction 词表（实测 10 次映射失败），
+    见证者已并入 RoleFunction 词表，
     只剩地点等纯空间角色词仍被拒绝。
     """
     witness = EventParticipantInput.model_validate(
@@ -359,7 +359,7 @@ def test_schema_rejects_event_role_words_in_narrative_role_with_guidance() -> No
 
 
 def test_event_participant_allows_partial_character_state_group() -> None:
-    """2026-10-04 合同放开：人物动态字段允许部分缺省，缺省值原样保留为 None"""
+    """合同放开：人物动态字段允许部分缺省，缺省值原样保留为 None"""
     participant = EventParticipantInput.model_validate(
         {
             "entity": "顾霜",
@@ -372,7 +372,7 @@ def test_event_participant_allows_partial_character_state_group() -> None:
 
 
 def test_dialogue_verdict_contract_rules() -> None:
-    """2026-08-11 用于验证 not_dialogue 时 speaker/tone 必须为空"""
+    """验证 not_dialogue 时 speaker/tone 必须为空"""
     with pytest.raises(ValidationError):
         DialogueInput.model_validate(
             {
@@ -403,10 +403,10 @@ def test_dialogue_verdict_contract_rules() -> None:
 
 
 def test_entity_attributes_merge_patch_validation() -> None:
-    """2026-10-16 3NF：任意键值 attributes 已退场（实体只有 description/tags/representative）
+    """实体只有 description/tags/representative 三个可写可选字段
 
-    可写可选字段的规范化仍须成立：description 去空白、缺省 None，tags 缺省空列表；
-    旧 attributes 输入不再被静默接收，提交即拒绝。
+    规范化：description 去空白、缺省 None，tags 缺省空列表；
+    attributes 输入提交即拒绝。
     """
     entity = EntityInput.model_validate(
         {
@@ -437,7 +437,7 @@ def test_entity_attributes_merge_patch_validation() -> None:
 
 
 def test_entity_tags_limited_to_three_and_five_chars() -> None:
-    """2026-08-08 用于验证实体标签最多 3 个且每个最多 5 个字"""
+    """验证实体标签最多 3 个且每个最多 5 个字"""
     with pytest.raises(ValidationError):
         EntityInput.model_validate(
             {
@@ -457,7 +457,7 @@ def test_entity_tags_limited_to_three_and_five_chars() -> None:
 
 
 def test_entity_tags_normalized_deduplicated_and_type_enforced() -> None:
-    """2026-08-08 用于验证标签规范化去重并拒绝非法实体类型"""
+    """验证标签规范化去重并拒绝非法实体类型"""
     entity = EntityInput.model_validate(
         {
             "name": "赤羽炽尾鸡",
@@ -476,9 +476,9 @@ def test_entity_tags_normalized_deduplicated_and_type_enforced() -> None:
 
 
 def test_dialogue_verdict_binds_inner_monologue() -> None:
-    """2026-08-11 用于验证 inner_monologue 判定映射为对话记录独白标记
+    """验证 inner_monologue 判定映射为对话记录独白标记
 
-    2026-09-13 取消暂存：逐个候选 write_dialogue 写入即生效；旧"重交
+    取消暂存：逐个候选 write_dialogue 写入即生效；旧"重交
     not_dialogue 后载荷清空"的第二次提交按同序号更新语义覆盖独白判定。
     """
     service = _QueryService()
@@ -512,13 +512,11 @@ def test_dialogue_verdict_binds_inner_monologue() -> None:
 
 
 def test_fact_endpoint_validation_moves_to_write_time() -> None:
-    """2026-08-30 用于验证非人物事件参与者不产人物动态状态
+    """验证非人物事件参与者不产人物动态状态
 
-    2026-09-13 取消暂存：校验移到参与者写入调用点。2026-09-14 写入面重构：两类
-    参与者工具折叠进 write_event 的 characters 数组；非 character 条目只收录
-    entityid/role（ParticipantArg 的参数面承接旧 write_noncharacter_participation
-    的窄表）。2026-10-13：非 character 条目携带三态不再拒绝，改为忽略三态、只保留
-    entityid/role，参与者写入即挂到实时落账的事件节点上。
+    校验在参与者写入调用点（结构化拒绝）；参与者折叠进 write_event 的
+    characters 数组，非 character 条目只收录 entityid/role（三态被忽略），
+    写入即挂到实时落账的事件节点上。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -539,7 +537,7 @@ def test_fact_endpoint_validation_moves_to_write_time() -> None:
         },
     )
     # 山门是本用例唯一登记实体，运行期编号为 1
-    # 2026-10-13：非 character 条目带三态不再拒绝，改为忽略三态、保留 entityid/role
+    # 非 character 条目带三态不再拒绝，改为忽略三态、保留 entityid/role
     ignored = _call(
         tools,
         "write_event",
@@ -594,14 +592,10 @@ def test_fact_endpoint_validation_moves_to_write_time() -> None:
 
 
 def test_event_location_participant_role_rejects_character_endpoint() -> None:
-    """2026-08-11 用于验证事件参与者角色为地点时端点不能是人物
+    """验证事件参与者角色为地点时端点不能是人物
 
-    2026-09-13 取消暂存：地点角色校验移到参与者写入调用点（结构化拒绝
-    code=role_type_mismatch）。2026-09-14 写入面重构：参与者折叠进 write_event 的
-    characters 数组，经生产路径（graph._invoke_tool + 单次调用回滚）拒绝，失败只
-    拒绝该条记录、不挂到已落账的事件节点、也不在人物动态状态上留痕迹。
-    2026-10-14 口径统一：地点角色放开为接受 location 与 organization，人物/道具
-    端点仍拒（本用例即人物端点）。
+    地点角色校验在参与者写入调用点（结构化拒绝 code=role_type_mismatch）：
+    失败只拒绝该条记录，不挂到已落账的事件节点、也不在人物动态状态上留痕迹。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -655,12 +649,10 @@ def test_event_location_participant_role_rejects_character_endpoint() -> None:
 
 
 def test_event_location_participant_role_accepts_organization_endpoint() -> None:
-    """2026-10-14 口径统一：地点角色接受 organization 型端点
+    """地点角色接受 organization 型端点
 
-    注解策略要求"机构名称兼指场所时统一登记 organization"，太学/兵部/贺府 这类
-    既是机构又是场所的词条只登记 organization；此前地点角色校验硬要求 location 型
-    端点，与策略互相矛盾（模型照策略登记反而被拒）。本用例锁定放开后的行为：
-    organization 型端点当地点可直接落账，不再是 role_type_mismatch。
+    注解策略要求"机构名称兼指场所时统一登记 organization"：太学/兵部/贺府 这类
+    既是机构又是场所的词条只登记 organization，可直接作为地点落账。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -701,12 +693,7 @@ def test_event_location_participant_role_accepts_organization_endpoint() -> None
 
 
 def test_write_entity_without_prior_search_graph_is_allowed() -> None:
-    """2026-09-14 删除"提交 write_entity 前必须先 search_graph"硬闸
-
-    旧行为（2026-08-09 起）：图中存在已登记实体时未先 search_graph 禁止登记。
-    闸门（graph_queried / entity_gate_passed）删净后，首笔登记不再要求先检索——
-    模型判完即写，写入不被检索回执推后一个回合。
-    """
+    """删除"提交 write_entity 前必须先 search_graph"硬闸"""
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
@@ -719,11 +706,7 @@ def test_write_entity_without_prior_search_graph_is_allowed() -> None:
 
 
 def test_write_entity_same_name_different_type_is_new_entity() -> None:
-    """2026-10-13 身份=规范名+实体大类：同名换大类不再拒绝，登记为独立实体
-
-    旧合同（2026-08-09 起）同一登记名改大类即结构化拒绝 type_conflict；新合同下
-    (名, 大类) 才是身份，同名不同类各自登记、各自 id，原大类实体不受影响。
-    """
+    """身份=规范名+实体大类：同名换大类不再拒绝，登记为独立实体"""
     service = _QueryService()
     ledger = _ledger()
     ledger.graph = _graph_with_entities({"顾霜": "character"})
@@ -741,9 +724,9 @@ def test_write_entity_same_name_different_type_is_new_entity() -> None:
 
 
 def test_write_tools_reject_invalid_enum_at_call_time() -> None:
-    """2026-08-11 用于验证非法枚举在工具参数校验阶段直接失败
+    """验证非法枚举在工具参数校验阶段直接失败
 
-    2026-09-13 取消暂存：小调用工具的 schema 层失败经生产路径
+    取消暂存：小调用工具的 schema 层失败经生产路径
     （graph._invoke_tool）翻译成结构化拒绝回执，只指向出错的那条记录
     （record/field/code/expected），不进入任何写入结构也不留账本痕迹。
     """
@@ -774,15 +757,12 @@ def test_write_tools_reject_invalid_enum_at_call_time() -> None:
 
 
 def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
-    """2026-09-13 伏笔即事件树：isforeshadowing=true 根事件携带置信度并拒绝未知参数
+    """伏笔即事件树：isforeshadowing=true 根事件携带置信度并拒绝未知参数
 
-    2026-09-13 取消暂存：write_event 整树提交改为逐节点写入即生效。
-    2026-09-14 写入面重构：根走 write_event(el=树键, isroot=true)，伏笔属性收敛为
-    isforeshadowing+confidence——isforeshadowing=true 缺 confidence 在调用点即被拒
-    （结构化拒绝），confidence 写进落账根节点的 payoff_likelihood；
-    expected_payoff_family 全链退役（不再作为参数或节点字段）。根节点 id 由服务端
-    在写入时生成并由账本内部持有；旧 setup_kind 约束由工具参数面的 extra=forbid
-    承接（经生产路径报 unknown_field）。
+    根走 write_event(el=树键, isroot=true)，伏笔属性为 isforeshadowing+confidence：
+    isforeshadowing=true 缺 confidence 在调用点即被拒（结构化拒绝），confidence 写进
+    落账根节点的 payoff_likelihood。根节点 id 由服务端在写入时生成并由账本内部持有；
+    未知参数由工具参数面的 extra=forbid 拒绝（经生产路径报 unknown_field）。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -876,7 +856,7 @@ def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
 
 
 def test_search_text_returns_bounded_content_and_authorizes_exact_paragraphs() -> None:
-    """2026-08-30 用于验证单次文本查询限制正文并即时登记精确段落授权"""
+    """验证单次文本查询限制正文并即时登记精确段落授权"""
     import asyncio
 
     service = _QueryService()
@@ -897,7 +877,7 @@ def test_search_text_returns_bounded_content_and_authorizes_exact_paragraphs() -
 
 
 def test_search_text_caps_visible_results_and_authorization_at_eight() -> None:
-    """2026-08-30 用于验证第九条命中不会回传或进入正式授权"""
+    """验证第九条命中不会回传或进入正式授权"""
     import asyncio
 
     service = _QueryService(text_result_count=9)
@@ -911,7 +891,7 @@ def test_search_text_caps_visible_results_and_authorization_at_eight() -> None:
 
 
 def test_search_text_uses_all_range_when_future_context_is_enabled() -> None:
-    """2026-08-30 用于验证后文开关仅影响服务端检索范围"""
+    """验证后文开关仅影响服务端检索范围"""
     import asyncio
 
     service = _QueryService()
@@ -924,9 +904,9 @@ def test_search_text_uses_all_range_when_future_context_is_enabled() -> None:
 
 
 def test_write_relation_rejects_unregistered_entity_reference() -> None:
-    """2026-08-11 用于验证关系端点必须已登记或本章声明
+    """验证关系端点必须已登记或本章声明
 
-    2026-09-18 端点解析位于写入路径（编号 n / el 键）：未登记编号在解析点结构化
+    端点解析位于写入路径（编号 n / el 键）：未登记编号在解析点结构化
     拒绝（code=unregistered_number），不再抛裸 ValueError，也不落任何写入。
     """
     service = _QueryService()
@@ -955,11 +935,9 @@ def test_write_relation_rejects_unregistered_entity_reference() -> None:
 
 
 def test_dialogue_small_calls_bind_speaker_tone_and_null_fields() -> None:
-    """2026-08-12 用于验证对话判定绑定说话人与语气、null 字段合法
+    """验证对话判定绑定说话人与语气、null 字段合法
 
-    2026-09-13 取消暂存：四元组数组参数变成 write_dialogue 有类型参数且写入即生效；
-    旧"数组整体替换"的第二次提交是同序号更新语义。
-    2026-09-14 写入面重构：write_entity 必填 el（本用例直接以登记名为键）。
+    四元组数组参数为 write_dialogue 有类型参数，写入即生效，同序号重交按更新语义。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -1009,13 +987,7 @@ def test_dialogue_small_calls_bind_speaker_tone_and_null_fields() -> None:
 
 @pytest.mark.parametrize("foreign_tone", ["委屈", "严厉", "平和", "调侃", "温柔", "激动"])
 def test_write_dialogue_rejects_foreign_tone_word_with_full_catalog(foreign_tone: str) -> None:
-    """2026-09-13 用于验证枚举外语气词一律拒绝，且回执给出全词表与「其他」兜底指引
-
-    run 431a66d8 实测 10 次 tone 拒绝全部是自造词（委屈/严厉/平和/调侃/温柔/激动）：
-    闭合词表不放行枚举外取值，拒绝必须让模型一次自纠。
-    2026-09-14 写入面重构：write_entity 必填 el；tone 是模型面真 enum，越界走
-    记录级结构化拒绝（record=dialogue/<序号>）。
-    """
+    """验证枚举外语气词一律拒绝，且回执给出全词表与「其他」兜底指引"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -1041,7 +1013,7 @@ def test_write_dialogue_rejects_foreign_tone_word_with_full_catalog(foreign_tone
 
 
 def test_write_dialogue_rejects_oversized_tone_word_with_receipt() -> None:
-    """2026-09-13 用于验证非语气长度的自由文本（关系词等）整条拒绝且回执可读"""
+    """验证非语气长度的自由文本（关系词等）整条拒绝且回执可读"""
     service = _QueryService()
     ledger = _ledger()
     tools = _tools(service, ledger)
@@ -1058,11 +1030,9 @@ def test_write_dialogue_rejects_oversized_tone_word_with_receipt() -> None:
 
 
 def test_relation_write_asserts_new_edge_immediately() -> None:
-    """2026-08-11 用于验证三字段边在图中无对应边时自动按新建处理（assert）
+    """验证三字段边在图中无对应边时自动按新建处理（assert）
 
-    2026-09-13 取消暂存：逐条 write_relation 写入即入图（旧合同"结算前图中不得
-    出现该边"的暂存语义废止），assert 结果由 FactGraph 操作日志承载——旧结束
-    回执里的 relations outcome 列表随逐域 finish 一起删除。
+    逐条 write_relation 写入即入图，assert 结果由 FactGraph 操作日志承载。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -1175,11 +1145,10 @@ def test_relation_type_replacement_rebuilds_local_aliases() -> None:
 
 
 def test_relation_state_field_rejected_from_contract() -> None:
-    """2026-08-12 用于验证关系合同已删除 state 字段
+    """验证关系合同不接受 state 字段
 
-    2026-09-13 取消暂存：write_relation 扁平三参数——state 在工具参数面上根本
-    不存在（多余字段经生产路径整条拒绝）；内部形态 BoundRelationInput 仍以
-    extra=forbid 兜底拒绝该字段。
+    write_relation 扁平三参数——state 在工具参数面上不存在（多余字段整条拒绝）；
+    内部形态 BoundRelationInput 以 extra=forbid 兜底拒绝该字段。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -1212,7 +1181,7 @@ def test_relation_state_field_rejected_from_contract() -> None:
 
 
 def test_text_search_result_accepts_paragraph_id_zero() -> None:
-    """2026-08-30 用于验证首段可作为精确命中段落授权"""
+    """验证首段可作为精确命中段落授权"""
     result = TextSearchResult(
         chapter_id=1,
         paragraph_ids=[0],
@@ -1223,7 +1192,7 @@ def test_text_search_result_accepts_paragraph_id_zero() -> None:
 
 
 def test_text_search_result_rejects_invalid_paragraph_ids() -> None:
-    """2026-08-30 用于验证负数和重复段落身份均被拒绝"""
+    """验证负数和重复段落身份均被拒绝"""
     with pytest.raises(ValidationError):
         TextSearchResult(
             chapter_id=1,
@@ -1241,9 +1210,9 @@ def test_text_search_result_rejects_invalid_paragraph_ids() -> None:
 
 
 def _ledger_with_text(text: str) -> AnnotationToolLedger:
-    """2026-09-05 用于构造指定章原文的账本（覆盖告警用例需要多条对话候选）
+    """构造指定章原文的账本（覆盖告警用例需要多条对话候选）
 
-    2026-09-14 段落级监督：paragraph_info 给出两个段号，供默认标签满足每章 2 段软下限。
+    段落级监督：paragraph_info 给出两个段号，供默认标签满足每章 2 段软下限。
     """
     mid = max(1, len(text) // 2)
     paragraph_info = ChapterParagraphInfo(
@@ -1262,19 +1231,18 @@ def _ledger_with_text(text: str) -> AnnotationToolLedger:
 
 
 def _paragraph_labels_for_ledger(ledger: AnnotationToolLedger) -> list[dict]:
-    """2026-09-14 用于按账本段号构造满足软下限（2 段）的 write_metrics.labels 条目"""
+    """按账本段号构造满足软下限（2 段）的 write_metrics.labels 条目"""
     assert ledger.paragraph_info is not None
     known = ledger.paragraph_info.visible_ids()
     return _paragraph_labels(list(zip(known[:2], [-2, -1], strict=True)))
 
 
 def test_paragraph_labels_reject_foreign_paragraph_and_dedup_on_replay() -> None:
-    """2026-09-07 用于验证越界段号直接报错自纠（拒绝不落任何写入）
+    """验证越界段号直接报错自纠（拒绝不落任何写入）
 
-    2026-09-13 取消暂存：非原句只拒绝该条记录（结构化拒绝，旧记录键带原句文本），
-    不牵连其他域。2026-09-14 写入面重构：段文本/span 概念没了，句文本定位失败
-    （not_found）换算为段号归属失败（code=out_of_range，record=metrics，
-    field=paragraph_id）；旧"同区间重交只保留一条记录"换算为提交内按段号去重。
+    非原句只拒绝该条记录（结构化拒绝，记录键带原句文本），不牵连其他域；
+    段文本定位失败换算为段号归属失败（code=out_of_range，record=metrics，
+    field=paragraph_id）；提交内按段号去重。
     """
     service = _QueryService()
     ledger = _ledger()
@@ -1301,12 +1269,12 @@ def test_paragraph_labels_reject_foreign_paragraph_and_dedup_on_replay() -> None
     labels = ledger.bound_payloads["paragraph_labels"]
     assert len(labels) == 1
     assert labels[0].emotion == -1
-    # 旧"句标签不触碰指标域"随域合并退役：标签并入指标整域，提交即落账
+    # 标签并入指标整域：提交即落账
     assert ledger.metrics_payload is not None
 
 
 def test_tone_rejection_receipt_is_self_correcting_through_production_path() -> None:
-    """2026-09-14 枚举外语气词的拒绝回执必须一次可自纠：指回记录、给出全词表与「其他」
+    """枚举外语气词的拒绝回执必须一次可自纠：指回记录、给出全词表与「其他」
 
     词表进 schema 后越界调用很少，但一旦发生，回执仍要能自纠（不靠模型再猜一轮）。
     """

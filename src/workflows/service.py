@@ -1,7 +1,7 @@
 """
 分析服务类
 
-说明: 编排的公开入口——建任务、跑阶段、恢复、重分析。阶段编排、取消检查、终态兜底
+编排的公开入口——建任务、跑阶段、恢复、重分析。阶段编排、取消检查、终态兜底
 分别在 src/workflows/analysis/ 下，队列运行时由 src/work 提供（本层向下调用）。
 """
 
@@ -168,8 +168,7 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         resume: bool = False,
     ) -> None:
         """
-        2026-08-20 统一调度入口，直接创建执行协程，消除冗余跳转层
-        根据任务类型构建参数后直接调用核心执行逻辑
+        统一调度入口：按任务类型构建参数后直接创建执行协程
         """
         # 根据任务类型构建执行参数
         if task_kind == TASK_KIND_ANALYSIS:
@@ -221,9 +220,7 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
 
     async def create_task_and_start(self, novel_id: str) -> str:
         """
-        创建新任务并立即启动分析
-
-        说明: 只负责“创建+启动”，不做复用/猜测行为
+        创建新任务并立即启动分析（只负责创建+启动，不复用已有任务）
         """
         novel = self.task_service.get_novel(novel_id)
         task_id = self.task_service.create_task(novel_id, task_kind=TASK_KIND_ANALYSIS)
@@ -233,9 +230,7 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
         """
-        继续执行 pending/failed/cancelled 任务
-
-        说明: 只负责“继续已有任务”，不创建新任务
+        继续执行 pending/failed/cancelled 任务（不创建新任务）
         """
         novel = self.task_service.get_novel(novel_id)
         task = self.task_service.get_task(task_id)
@@ -303,8 +298,6 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
     ) -> None:
         """
         统一的分析执行核心逻辑
-
-        说明: 封装 _run_analysis 和 _run_reanalysis 的公共逻辑
 
         Args:
             task_id: 任务ID

@@ -25,9 +25,8 @@ from typing import Any
 
 from sqlalchemy import text
 
-# ---------------------------------------------------------------------------
-# 公共推导函数：run 从真实生产链取得，不做任何列复制
-# ---------------------------------------------------------------------------
+# 公共推导函数：run 直接读执行行自身的归属（invocation 的 run_id 或 session 的 session_run_id），
+# 不经 work 链；work 支路只在程序回执的身份上求值
 
 _HELPER_FUNCTIONS = (
     """
@@ -35,13 +34,10 @@ CREATE OR REPLACE FUNCTION dc_execution_run_id(p_execution_id text) RETURNS text
 DECLARE
     v_run text;
 BEGIN
-    SELECT COALESCE(w.annotation_run_id, w.program_run_id, e.session_run_id,
-                    (SELECT se.session_run_id FROM executions se
-                      WHERE se.execution_id = w.diagnosis_session_id))
+    SELECT COALESCE(run_id, session_run_id)
       INTO v_run
-      FROM executions e
-      LEFT JOIN work_items w ON w.work_id = e.work_id
-     WHERE e.execution_id = p_execution_id;
+      FROM executions
+     WHERE execution_id = p_execution_id;
     RETURN v_run;
 END
 $dc$ LANGUAGE plpgsql

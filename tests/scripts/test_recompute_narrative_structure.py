@@ -8,12 +8,7 @@ from src.metrics.aggregate.types import AnnotationData, TensionData
 
 
 def _load_recompute_narrative_structure_module() -> ModuleType:
-    """
-    创建时间: 2026-05-02
-    任务: fix-recompute-narrative-structure-alignment
-    说明: `scripts/` 目录不是 Python package；这里按文件路径加载复算脚本模块，
-          便于直接验证脚本内部对齐逻辑，而不改项目导入结构。
-    """
+    """`scripts/` 目录不是 Python package；这里按文件路径加载复算脚本模块，"""
 
     script_path = Path(__file__).resolve().parents[2] / "scripts" / "tools" / "recompute_narrative_structure.py"
     spec = importlib.util.spec_from_file_location("test_recompute_narrative_structure_script", script_path)
@@ -25,12 +20,7 @@ def _load_recompute_narrative_structure_module() -> ModuleType:
 
 
 def test_build_aligned_three_act_diagnostics_filters_null_tension_and_aligns_by_chunk_id() -> None:
-    """
-    创建时间: 2026-05-02
-    任务: fix-recompute-narrative-structure-alignment
-    说明: 复算脚本必须先按 chunk_id 对齐 annotation 与 tension，
-          并跳过 NULL tension；否则会把错位事件喂给三幕分析，或直接触发 TypeError。
-    """
+    """复算脚本必须先按 chunk_id 对齐 annotation 与 tension，"""
 
     module = _load_recompute_narrative_structure_module()
     annotation_data = AnnotationData(

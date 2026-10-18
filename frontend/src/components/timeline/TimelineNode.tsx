@@ -1,5 +1,5 @@
 /**
- * TimelineNode - 事件森林节点徽标（2026-08-20 一树一节点版）
+ * TimelineNode - 事件森林节点徽标
  *
  * 一棵树=一个节点：展示 title||summary 前30字 + character_names + main_chain 长度 + 旁支数
  * 点击回调传递 tree_id，选中态按 tree_id 判

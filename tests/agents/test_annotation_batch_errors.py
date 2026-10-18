@@ -1,14 +1,4 @@
-"""单记录写入拒绝测试（2026-09-14 写入面重构后取代旧的领域批量校验错误收集）
-
-旧合同（write_entities / write_dialogues / write_event / write_relations 一次大载荷）
-在领域结算时按 [index] 批量收集端点/参与者错误；2026-09-13 取消暂存概念：
-每个小调用写入即生效并返回真实回执（status=written），每条记录在写入点独立校验，
-失败只指向该记录（record/field/code/expected）。2026-09-14 写入面再收敛为五工具：
-参与者并入 write_event 的 characters 数组（记录键 "<节点记录>/participant/<entityid原值>"）、
-实体引用统一 EntityRef（编号 n 或本章的 el 键）、收尾更名 finish。
-因此本文件的验证意图不变——每次违规都被精确拒绝并可定位到出错记录，好记录照常落账；
-逐条拒绝断言与 written_* 账本断言取代批量收集/暂存断言（各测试 docstring 详述）。
-"""
+"""单记录写入拒绝测试：每条记录在写入点独立校验，失败只指向该记录（record/field/code/expected）"""
 
 import pytest
 
@@ -49,12 +39,9 @@ def test_relation_endpoint_rejections_are_per_record_and_localized() -> None:
 
 
 def test_relation_endpoint_type_rejection_points_at_the_single_record() -> None:
-    """原 test_relation_endpoint_errors_collected_with_indexes 的端点类型分支
+    """端点类型不符在写入该条边时即拒绝，record 用登记名定位（relation/丙-乙/师徒）
 
-    2026-09-13 变化：旧合同对"已登记但类型不符"的端点在同一批校验里报
-    "[index] relation.from_entity 端点类型必须属于 [...]"；新合同在写入该条边时
-    即拒绝，record 用登记名定位（relation/丙-乙/师徒），不再有批次下标。
-    2026-09-14 apply_entity 需自定 el 键（解析后记录键仍用登记名）。
+    apply_entity 需自定 el 键（解析后记录键仍用登记名）。
     """
     ledger = _ledger()
     numbers = {

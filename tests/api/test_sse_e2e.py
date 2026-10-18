@@ -5,8 +5,6 @@
 - seq 单调递增、缓冲回放与实时推送衔接
 - 重连增量：last_seq 只回放之后的缓冲
 - 终止类事件（task_complete）直接经 event_manager.send 下发
-
-2026-08-13 创建，补齐此前三层各自单测（EventBus patch send / 路由 patch manager）之间的链路缺口。
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ from src.workflows.progress import AnalysisEventBus
 
 @pytest.fixture(autouse=True)
 def _allow_existing_task(monkeypatch):
-    """2026-08-14 P2-11：任务存在性校验默认放行（e2e 使用虚构 task_id）"""
+    """任务存在性校验默认放行（e2e 使用虚构 task_id）"""
 
     monkeypatch.setattr("src.api.routes.sse._task_run_belongs_to_novel", lambda task_id, novel_id: True)
     monkeypatch.setattr(event_manager, "_outbox", None)
@@ -126,8 +124,8 @@ async def test_sse_e2e_tool_call_status_passthrough() -> None:
         StreamEvent(
             action="tool_call",
             stage="annotate",
-            sub_stage="chapter_agent",
-            stream_id="chapter-agent-1",
+            sub_stage="annotation",
+            stream_id="invocation-1",
             content="write_relations",
             status="started",
         )
@@ -136,8 +134,8 @@ async def test_sse_e2e_tool_call_status_passthrough() -> None:
         StreamEvent(
             action="tool_call",
             stage="annotate",
-            sub_stage="chapter_agent",
-            stream_id="chapter-agent-1",
+            sub_stage="annotation",
+            stream_id="invocation-1",
             content="write_relations",
             status="success",
             message="写入 3 条关系",
@@ -155,7 +153,7 @@ async def test_sse_e2e_tool_call_status_passthrough() -> None:
     assert data1["message"] == "写入 3 条关系"
     # 上下文补全：stage/sub_stage 来自总线
     assert data1["stage"] == "annotate"
-    assert data1["sub_stage"] == "chapter_agent"
+    assert data1["sub_stage"] == "annotation"
 
 
 @pytest.mark.asyncio

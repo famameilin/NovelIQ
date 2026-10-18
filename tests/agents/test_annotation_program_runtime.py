@@ -85,15 +85,18 @@ async def test_json_literals_true_false_null_are_accepted() -> None:
         ('write_entity(el="a1", name=unknown, entity_type="character")', "undefined_name"),
         ("import os", "unsupported_statement"),
         ("value = {'a': 1}.keys()", "unsupported_expression"),
+        ("value = [item for item in (1, 2)]", "unsupported_expression"),
+        ('value = f"{1}"', "unsupported_expression"),
         ("while True:\n    pass", "unsupported_statement"),
         ("write_entity = 1", "name_reserved"),
+        ("len = 1", "name_reserved"),
         ("_tmp = 1", "name_reserved"),
         ("value = write_metrics(*[1])", "bad_call"),
         ("left, right = (1, 2, 3)", "bad_assignment"),
+        ("first, *rest = (1, 2, 3)", "bad_assignment"),
         ("for item in 'abc':\n    pass", "unsupported_expression"),
-        ("value = 1 if True else 2", "unsupported_expression"),
-        ("count = len('abc')", "unknown_tool"),
-        ("write_metrics(cliffhanger=True)\ncount = len('abc')", "unknown_tool"),
+        ("count = len(1)", "runtime_error"),
+        ("unit = 1 / 0", "runtime_error"),
     ],
 )
 async def test_unsafe_or_invalid_programs_return_structured_errors(code: str, error_code: str) -> None:
@@ -198,6 +201,18 @@ async def test_variables_persist_across_programs() -> None:
 
 
 @pytest.mark.asyncio
+async def test_for_loop_iterates_dict_keys_in_insertion_order() -> None:
+    """字典按键遍历与 Python 语义一致：有界、插入序稳定"""
+    runtime = _runtime(_ledger())
+    receipt = await _run(
+        runtime,
+        'counts = {"a": 1, "b": 2}\nkey_list = []\nfor key in counts:\n    key_list = key_list + [key]',
+    )
+    assert receipt["status"] == "applied"
+    assert runtime.env["key_list"] == ["a", "b"]
+
+
+@pytest.mark.asyncio
 async def test_limits_keep_applied_ops_and_allow_next_program(monkeypatch: pytest.MonkeyPatch) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
@@ -266,12 +281,64 @@ if left == 1:
 
 
 @pytest.mark.asyncio
-async def test_anchor_accepts_bare_tree_key_as_root_record() -> None:
-    """2026-10-04 裸树键补全：模型按自然形态拿树键当记录键时统一指到它的根记录
+async def test_language_supports_conditionals_boolean_and_unpacking() -> None:
+    """放行常见语法：条件表达式/and-or-not/链式与序比较/is/*、** 解包"""
+    ledger = _ledger()
+    runtime = _runtime(ledger)
+    receipt = await _run(
+        runtime,
+        """
+numbers = [*[1, 2], 3]
+scale = "多" if len(numbers) > 2 else "少"
+if scale == "多" and 1 < 2 < 3 and numbers[0] != 9 and 9 not in numbers:
+    write_metrics(summary="常见语法", emotional_valence=0, narrative_function="铺垫")
+row = {"el": "a1", "name": "顾霜", "entity_type": "character"}
+extra = {"description": None}
+write_entity(**row, **extra)
+if scale == "少" or not (numbers[-1] >= 3 and numbers[-1] is not None):
+    write_dialogue(candidate_index=1, verdict="not_dialogue")
+""",
+    )
+    assert receipt["applied"] == 2, receipt
+    assert ledger.metrics_payload.summary == "常见语法"
+    assert entity_key("顾霜", "character") in ledger.written_entities
+    assert runtime.env["numbers"] == [1, 2, 3]
+    assert set(ledger.written_dialogues) == set()
 
-    run 4cb054dc 实证 18 次锚定被拒（回执给 batch_x/root、模型锚 batch_x），
-    树键在索引里时唯一指到根记录，production_record_key 统一补 /root。
-    """
+
+@pytest.mark.asyncio
+async def test_language_supports_basic_builtin_functions() -> None:
+    """放行基础函数：len/str/int/float/bool/min/max/abs/sum/sorted/enumerate"""
+    ledger = _ledger()
+    runtime = _runtime(ledger)
+    receipt = await _run(
+        runtime,
+        """
+values = sorted([3, 1, 2])
+total = sum(values)
+widest = max(values) - min(values)
+count = len(values)
+ratio = total / count
+floored = total // count
+remainder = total % count
+parsed = int("3") + int(1.5) + int(True)
+negated = abs(-widest)
+if bool(count) and str(count) == "3" and ratio == 2.0 and floored == 2:
+    if remainder == 0 and parsed == 5 and negated == 2 and values[0] == 1:
+        write_metrics(summary="基础函数", emotional_valence=0, narrative_function="铺垫")
+for index, item in enumerate(values, 1):
+    if index == 1 and item == 1:
+        write_dialogue(candidate_index=2, verdict="not_dialogue")
+""",
+    )
+    assert receipt["applied"] == 2, receipt
+    assert ledger.metrics_payload.summary == "基础函数"
+    assert set(ledger.written_dialogues) == {2}
+
+
+@pytest.mark.asyncio
+async def test_anchor_accepts_bare_tree_key_as_root_record() -> None:
+    """裸树键补全：模型按自然形态拿树键当记录键时统一指到它的根记录"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
@@ -290,12 +357,7 @@ async def test_anchor_accepts_bare_tree_key_as_root_record() -> None:
 
 @pytest.mark.asyncio
 async def test_repeat_failed_batch_guard_hints_then_fails_program() -> None:
-    """2026-10-04 重复失败批守卫（两级）：同一失败批第 2 次注入聚合提示、第 3 次判程序失败
-
-    run 08f9ba42 审计实证盲发死循环：ch13/21/26 的 lane 连续 4~6 个回合原样重发
-    同一批被拒调用。守卫把"原样重发"的浪费上限压到 2 轮；判败不结算收尾意图，
-    模型必须真正修改失败取值。
-    """
+    """重复失败批守卫（两级）：同一失败批第 2 次注入聚合提示、第 3 次判程序失败"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     # 越界候选已在程序执行前拦截，守卫用仍会逐项拒绝的未知实体引用验证

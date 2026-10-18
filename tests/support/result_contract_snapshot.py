@@ -39,7 +39,7 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
     monkeypatch.setattr(timeline_contract_helpers, "uuid4", uuid.uuid4)
     scenario = create_timeline_contract_scenario(
         session,
-        # 最终保留三角人物关系，避开旧版本空图故障及二分图 HITS 重根
+        # 最终保留三角人物关系，避免空图与二分图 HITS 重根
         final_relations=[
             relation_fact(chapter_id=5, from_name=left, to_name=right, relation_type="友情")
             for left, right in [("顾承渊", "苏映雪"), ("顾承渊", "陆遥"), ("苏映雪", "陆遥")]
@@ -111,7 +111,7 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
     monkeypatch.setattr(diagnosis_helpers, "uuid4", uuid.uuid4)
     from sqlalchemy import select
 
-    from src.storage.models import ChapterAnnotation, EventDeclaration, Execution, WorkItem
+    from src.storage.models import ChapterAnnotation, EventDeclaration
 
     # 声明身份是铸造 uuid，场景中的 node_id 是本地键；分组按本地键解析到正式声明身份
     declaration_of = {
@@ -119,9 +119,7 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
         for declaration_id, local_key in session.execute(
             select(EventDeclaration.declaration_id, EventDeclaration.local_key)
             .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(WorkItem.annotation_run_id == scenario.run_id)
+            .where(ChapterAnnotation.run_id == scenario.run_id)
         )
     }
     draft = diagnosis_helpers.declaration_event_draft(

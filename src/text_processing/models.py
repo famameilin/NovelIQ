@@ -1,6 +1,5 @@
-"""文本单元行形态（设计文档《章节粒度分析指标重设计》§3）
+"""文本单元行形态
 
-2026-10-06 自 src/chunking 收归：这两者是被存储层落库的行形态——
 `Chunk` 是章级文本块，`ParagraphSpan` 是段落单元（分析的最小事实单元）。
 切分算法在 `src.text_processing.paragraphs`。
 """

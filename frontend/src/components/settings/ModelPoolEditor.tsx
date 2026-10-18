@@ -33,7 +33,7 @@ interface ModelForm {
   max_tokens: string;
 }
 
-/** 模型级采样参数的表单元数据（2026-10-02 从任务级参数设置移入模型池编辑） */
+/** 模型级采样参数的表单元数据 */
 const SAMPLING_FIELDS = [
   { name: "temperature", label: "温度", min: 0, max: 2, step: "0.1" },
   { name: "top_p", label: "top_p", min: 0, max: 1, step: "0.05" },

@@ -1,5 +1,5 @@
 """
-GET /{novel_id}/emotion-trend 端点测试（设计文档《章节粒度分析指标重设计》§13.1 展示层）
+GET /{novel_id}/emotion-trend 端点测试
 
 覆盖：
 - 契约字段全集与窗口聚合数学（覆盖率 / 池化密度）

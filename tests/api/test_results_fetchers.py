@@ -21,13 +21,7 @@ from tests.support.results_query_stubs import _fetch_chapter_annotations, _fetch
 
 
 class _DummyRow:
-    """
-    模拟 SQLAlchemy Row 对象，支持字段名访问
-
-    修改时间: 2026-03-31
-    任务: refactor-hardcoded-index-access
-    修改内容: 新增类，用于测试中模拟 Row 对象
-    """
+    """模拟 SQLAlchemy Row 对象，支持字段名访问"""
 
     __slots__ = ("_fields", "_values")
 
@@ -178,7 +172,7 @@ def test_fetch_diagnosis_preserves_graph_resolved_character_fields(db_session) -
 
 
 def test_fetch_foreshadowing_trees_preserves_status_field():
-    """2026-09-13 伏笔树视图经 fetchers 透传（伏笔即事件树）"""
+    """伏笔树视图经 fetchers 透传（伏笔即事件树）"""
 
     class DummyRepo:
         def fetch_foreshadowing_trees(self, run_id):
@@ -340,7 +334,7 @@ def test_fetch_diagnosis_normalizes_controlled_labels_before_returning(db_sessio
 
 
 def test_fetch_diagnosis_blank_narrative_arc_type_is_none(db_session) -> None:
-    """P3 回归：空白 narrative_arc_type 不应透传空串，读取层归一化为 None。"""
+    """空白 narrative_arc_type 不应透传空串，读取层归一化为 None。"""
     novel_id, run_id = _diagnosis_scenario(db_session, narrative_arc_type="  ")
 
     result = _diagnosis_result(db_session, novel_id, run_id)
@@ -350,7 +344,7 @@ def test_fetch_diagnosis_blank_narrative_arc_type_is_none(db_session) -> None:
 
 
 def test_fetch_diagnosis_strips_narrative_arc_type_whitespace(db_session) -> None:
-    """P3 回归：narrative_arc_type 首尾空白应被剥离，不把脏串写入诊断结果。"""
+    """narrative_arc_type 首尾空白应被剥离，不把脏串写入诊断结果。"""
     novel_id, run_id = _diagnosis_scenario(db_session, narrative_arc_type=" 三幕式")
 
     result = _diagnosis_result(db_session, novel_id, run_id)
@@ -479,11 +473,7 @@ def test_fetch_characters_returns_all_items_when_limit_is_none():
 
 
 def test_fetch_characters_filters_unresolved_pronoun_references():
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    说明: 角色榜只展示 global-character 准入后的名字，未解析“我”不能进入聚合结果。
-    """
+    """角色榜只展示 global-character 准入后的名字，未解析“我”不能进入聚合结果。"""
     rows = [
         _DummyRow(surface_name="我", resolved_global_name="我", role_function="主体", emotion_score=0),
         _DummyRow(surface_name="沈砚", resolved_global_name="沈砚", role_function="主体", emotion_score=0),
@@ -832,7 +822,7 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
     assert len(result) == 1
     assert result[0].is_strong_setup is False
     assert result[0].why_unresolved_now is None
-    # 2026-09-14 expected_payoff_family 全链退役（响应模型删字段）；按新合同换算为
+    # expected_payoff_family 无对应响应字段；按新合同换算为
     # 保留字段 payoff_likelihood/foreshadowing_root_event_id 在无伏笔行时同样保持 None
     assert result[0].payoff_likelihood is None
     assert result[0].foreshadowing_root_event_id is None
@@ -844,7 +834,7 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
 
 
 def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
-    """2026-08-05 用于验证 chunk 展开结果只读取显式数据库图视图"""
+    """验证 chunk 展开结果只读取显式数据库图视图"""
 
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
         def fetch_chapter_annotations_full(self, _run_id):
@@ -884,7 +874,7 @@ def test_fetch_chapter_annotations_uses_explicit_database_graph_view():
 
 
 def test_fetch_chapter_annotations_propagates_database_graph_failure(monkeypatch):
-    """2026-08-05 用于验证 chunk 消费者不会在数据库图失败时降级读取"""
+    """验证 chunk 消费者不会在数据库图失败时降级读取"""
 
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
         def fetch_chapter_annotations_full(self, _run_id):

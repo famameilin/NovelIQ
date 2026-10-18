@@ -1,7 +1,7 @@
 """
 角色查询组装器
 
-说明: 承载 characters 相关取数与响应装配；出现量归并、焦点评分与别名归一
+承载 characters 相关取数与响应装配；出现量归并、焦点评分与别名归一
 分别在 `src.metrics.aggregate.aggregations` 与 `normalization`。
 """
 

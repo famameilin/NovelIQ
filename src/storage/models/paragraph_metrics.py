@@ -1,16 +1,11 @@
 """
-段落指标表 ORM 模型定义（2026-10-16 全库 3NF 改造）
+段落指标表 ORM 模型定义
 
-paragraph_metrics 是同一段落键下原始计数、阶段完成事实与推断状态的唯一落点：
-- 原指标充分统计量（分子/分母）与真实指标计算时间
-- 预处理观测时间、语言完成时间、短语完成时间（完成事实，不靠非空推断）
-- 固定功能词 20 个明确计数列、固定语义分类 10 个明确计数列（目录穷举，
-  不建任意 category/value 仓库）
-- 独立监督观测（边界打分和）与主题推断 token 数/状态/真实异常
+paragraph_metrics 是同一段落键下原始计数、阶段完成事实与推断状态的唯一落点。
 
 char_count（读取投影）、密度、张力 z/sigmoid 与 LOWESS 值不在本表；
-句式五个分类计数进 paragraph_features；预处理与指标同批 token 已核实同义，
-只留 token_count 一个口径，LTP 词元数从 linguistic_spans 行数取得。
+句式五个分类计数进 paragraph_features；预处理与指标同批 token 只留 token_count
+一个口径，LTP 词元数从 linguistic_spans 行数取得。
 """
 
 from __future__ import annotations
@@ -84,7 +79,7 @@ class ParagraphMetric(Base):
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="所属分析运行")
     paragraph_id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="所属段落编号")
 
-    # 原指标充分统计量（指标算法口径；预处理 tokenizer 与指标同批，共用该计数）
+    # 指标充分统计量（指标算法口径；预处理 tokenizer 与指标同批，共用该计数）
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="token 数（分母）")
     sentence_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="句数")
     sentence_char_sum: Mapped[float | None] = mapped_column(Float, nullable=True, comment="句长字符和")

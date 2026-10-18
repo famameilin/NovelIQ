@@ -1,7 +1,7 @@
 """
 事件值域：子事件在树内的位置、参与实体在事件里的角色，以及参与角色的归一
 
-说明: 事件专属值域随写入目标（事件树）同包；实体/关系/对话/指标值域在
+事件专属值域随写入目标（事件树）同包；实体/关系/对话/指标值域在
 src/fact_graph/vocabulary.py。本模块只有标准库依赖。
 """
 
@@ -11,8 +11,7 @@ import unicodedata
 from enum import StrEnum
 from typing import Literal
 
-# 2026-08-30 事件参与者专属角色词不能写进同一参与者的人物功能字段
-# （2026-09-11 见证者已并入 RoleFunction 词表，从拒绝表移除）
+# 事件参与者专属角色词不能写进同一参与者的人物功能字段
 _EVENT_ONLY_ROLE_WORDS = frozenset({"地点", "行动者", "承受者", "协助者", "对抗者"})
 
 
@@ -26,9 +25,9 @@ class EventChildType(StrEnum):
     SECONDARY = "secondary"
 
 
-# 2026-08-19 事件树内部节点角色（一棵树 = 一个完整事件；根 = 触发该
+# 事件树内部节点角色（一棵树 = 一个完整事件；根 = 触发该
 # 事件的第一个自立动作；main = 主因链上；secondary = 父的兄弟即次因分支）
-# 2026-09-14 模型面 type 参数用 EventChildType（root 由 isroot=true 表达，不外露）
+# 模型面 type 参数用 EventChildType（root 由 isroot=true 表达，不外露）
 EventCauseRole = Literal["root", "main", "secondary"]
 
 

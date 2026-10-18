@@ -10,9 +10,9 @@ from src.api.services.results_queries.graph import _fetch_graph_snapshot
 
 
 def _entity(entity_id: str, name: str, *, representative: bool = False) -> SimpleNamespace:
-    """2026-08-11 用于构造实体快照桩（含规范名标记属性）
+    """构造实体快照桩（含规范名标记属性）
 
-    2026-09-19 entity_id 随图实体主键改 uuid（String(36)），桩一律用 uuid 字符串。
+    entity_id 随图实体主键改 uuid（String(36)），桩一律用 uuid 字符串。
     """
     return SimpleNamespace(
         entity_id=entity_id,
@@ -38,7 +38,7 @@ def _relation(
     relation_semantics: str = "ordinary",
     attributes: dict | None = None,
 ) -> SimpleNamespace:
-    """2026-08-09 用于构造关系快照桩"""
+    """构造关系快照桩"""
     return SimpleNamespace(
         relation_id=relation_id,
         chapter_id=9,
@@ -56,7 +56,7 @@ def _relation(
 
 
 def test_graph_snapshot_merges_alias_nodes_and_rewrites_edges() -> None:
-    """2026-08-09 用于验证图谱快照折叠别名节点并重写边端点"""
+    """验证图谱快照折叠别名节点并重写边端点"""
     boundary = SimpleNamespace(
         chapter_id=9,
         chapter_order=9,

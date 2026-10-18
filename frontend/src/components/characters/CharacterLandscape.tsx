@@ -27,7 +27,7 @@ type CharacterSortMode = "appearance" | "focus";
 const ROLE_SEGMENT_CLASSES = ["bg-primary", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5"] as const;
 
 /**
- * 2026-08-31，作用：格式化角色功能分布中的单项数值
+ * 格式化角色功能分布中的单项数值
  * 简要说明：总和接近一时按比例展示，否则保留原始计数口径
  */
 function formatRoleDistributionValue(value: number, total: number): string {
@@ -36,7 +36,7 @@ function formatRoleDistributionValue(value: number, total: number): string {
 }
 
 /**
- * 2026-08-31，作用：格式化角色平均情绪
+ * 格式化角色平均情绪
  * 简要说明：正值补充加号，缺失值使用统一占位
  */
 function formatEmotion(value: number | null | undefined): string {
@@ -45,7 +45,7 @@ function formatEmotion(value: number | null | undefined): string {
 }
 
 /**
- * 2026-08-31，作用：渲染角色分析工作区的当前页签内容
+ * 渲染角色分析工作区的当前页签内容
  * 简要说明：概览、排行和详情共用页面级选择状态，避免在页签切换后丢失角色上下文
  */
 export function CharacterLandscape({

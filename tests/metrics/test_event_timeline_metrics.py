@@ -1,6 +1,6 @@
-"""2026-08-20 事件森林时间轴度量单元测试（一树一节点）
+"""事件森林时间轴度量单元测试（一树一节点）
 
-2026-10-16 全库 3NF 新写面：标注来源链与章级声明由夹具按正式关系写入，完整事件
+标注来源链与章级声明由夹具按正式关系写入，完整事件
 经正式诊断发布链（EventOrganizationDraft → save_diagnosis_result）建立；断言只针对
 时间轴读面的行为与输出，不复制文案或数量形状。
 """
@@ -13,14 +13,12 @@ import pytest
 from sqlalchemy import select
 
 from src.agents.diagnosis.persistence import save_diagnosis_result
-from src.agents.diagnosis.work_planning import WorkSpec
 from src.diagnosis.schema import AgentAnalysis
 from src.event_trees.organization import (
     EventOrganizationDraft,
     OrganizationEvidence,
     register_diagnosis_execution,
     register_diagnosis_session,
-    register_diagnosis_work,
 )
 from src.event_trees.read.forest import EventForestQuery
 from src.metrics.event_timeline_metrics import serialize_event_timeline_node
@@ -29,6 +27,7 @@ from src.storage.models import Paragraph
 from src.storage.repositories import ChapterRepository, StatsRepository
 from src.storage.repositories.paragraph import insert_paragraph_tension_observations
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
+from tests.support.event_tree_fixtures import report_case_anchor
 from tests.support.timeline_contract_helpers import (
     create_chapter_annotation_source,
     save_event_declaration,
@@ -50,19 +49,14 @@ def _publish_one_event_per_declaration(
     character_names: list[str],
 ) -> None:
     """经正式诊断发布链把每条声明收口为一个完整事件（互不包含、互不相同）"""
-    spec = WorkSpec(
-        run_id=run_id,
-        role="report",
-        responsible_ids=tuple(declarations),
-        input_payload={"declaration_ids": list(declarations)},
-    )
-    session_id = f"diagnosis-session-{spec.work_id[:12]}"
-    register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
-    register_diagnosis_work(db_session, session_id=session_id, work_id=spec.work_id, role="report")
+    session_id = f"diagnosis-session-{run_id[:12]}"
     execution_id = uuid4().hex
-    register_diagnosis_execution(db_session, work_id=spec.work_id, execution_id=execution_id, attempt_number=1)
+    register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
+    register_diagnosis_execution(
+        db_session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=1
+    )
     draft = EventOrganizationDraft(db_session, run_id, session_id)
-    draft.work_id, draft.producer_invocation_id = spec.work_id, execution_id
+    draft.case_id, draft.producer_invocation_id = report_case_anchor(run_id), execution_id
     rows = {row["declaration_id"]: row for row in draft.read_declarations(declarations)["items"]}
 
     def source_evidence(declaration_id: str) -> list[OrganizationEvidence]:
@@ -94,7 +88,6 @@ def _publish_one_event_per_declaration(
                 evidence=source_evidence(source),
             )
     draft.review_declarations(list(declarations), reason="读取夹具已逐项核对不可变声明与原文")
-    draft.freeze_identity()
     events = list(draft.events)
     structure_evidence = [OrganizationEvidence(paragraph_id=evidence_paragraph_id)]
     for index, source in enumerate(events):
@@ -108,7 +101,6 @@ def _publish_one_event_per_declaration(
             )
     for event_id in events:
         draft.review_events([event_id], reason="读取夹具已核对正式身份与结构")
-    draft.freeze_structure()
     organization = draft.finish()
     save_diagnosis_result(
         db_session,
@@ -142,7 +134,7 @@ def _build_forest(
     declarations: list[str] = []
     paragraph_ids: list[int] = []
     for index, chapter_id in enumerate(chapter_ids):
-        record_id, _work_id, _execution_id = create_chapter_annotation_source(
+        record_id, _execution_id = create_chapter_annotation_source(
             db_session, run_id=run_id, chapter_id=chapter_id
         )
         paragraph = db_session.scalar(

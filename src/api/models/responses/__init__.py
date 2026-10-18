@@ -1,11 +1,7 @@
-"""
-API 响应模型包
+"""API 响应模型包
 
-说明: 读侧响应模型（任务与小说域 DTO 留在 src/api/models/tasks.py）
-原 src/api/models/responses.py 按资源域拆分为 tasks/curves/chapters/stats/
-topics/linguistic/entities 子模块；本包全量 re-export 原有公开名，
-`from src.api.models.responses import X` 与 `from src.api.models.responses.xxx import X`
-两种导入方式均可使用，现有导入方零改动。
+读侧响应模型（任务与小说域 DTO 留在 src/api/models/tasks.py）。本包按资源域分子模块并全量
+re-export 公开名，`from src.api.models.responses import X` 与子模块直接导入两种方式均可使用。
 """
 
 from src.api.models.responses.chapters import (

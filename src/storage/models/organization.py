@@ -1,13 +1,5 @@
 """
-全书叙事组织 ORM 模型（2026-10-16 全库 3NF 改造）
-
-- narrative_links：因果/语义关系、单父包含、事件—线及事件—结果关联四种互斥形状
-  （关联种类由列形状与关系码表达，不用无外键 source_id/target_id）
-- narrative_groups：叙事线与事件结果两类全书组织节点（父线只能指向线）
-- organization_checks：声明/事件核对与声明对/事件对判断四类互斥形状
-- conflict_records / conflict_claims：冲突登记及各方独立陈述（每方自己的证据）
-- event_foreshadowing_actions：真实伏笔动作及声明目标（root/target 事件按绑定投影）
-- source_evidence：由明确领域所有者直接持有的有序原文证据（九个所有者恰一）
+全书叙事组织 ORM 模型
 
 不复制 run/session/work；producer 是该判断的真实作者，不由端点作者替代。
 """
@@ -50,7 +42,7 @@ class NarrativeLink(Base):
     - 事件—叙事线：member_event_id + arc_group_id 自然唯一，arc_role 为该关联实际角色
     - 事件—结果：member_event_id + outcome_group_id 自然唯一
 
-    线关联全部平等；is_active/expired_at 不互相推算，只承接旧边真实观察。
+    线关联全部平等；is_active/expired_at 不互相推算，只保存真实观察。
     """
 
     __tablename__ = "narrative_links"

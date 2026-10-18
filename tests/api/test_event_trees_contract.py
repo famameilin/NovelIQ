@@ -1,4 +1,4 @@
-"""事件树契约：完整事件读取、同结构事件卡、关系定位与原文来源（2026-10-16 全库 3NF 改造）
+"""事件树契约：完整事件读取、同结构事件卡、关系定位与原文来源
 
 夹具自足：三章真实原文与标注来源链 + 六份章级声明，沿正式诊断草稿发布
 （完整事件/阶段链/包含/关系/叙事线/结果/伏笔动作），读取面用公开 API 与
@@ -74,7 +74,7 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
     )
     set_run_status(session, run_id, "completed")
     paragraphs = _paragraphs(session, run_id)
-    session_id, work_id, execution_id = add_diagnosis_context(session, run_id)
+    session_id, execution_id = add_diagnosis_context(session, run_id)
     annotations: dict[int, str] = {}
     declarations: dict[str, str] = {}
 
@@ -93,7 +93,7 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
         )
 
     for chapter in (1, 2, 3):
-        record_id, _work, _execution = add_annotation_source(session, run_id, chapter, role="event")
+        record_id, _execution = add_annotation_source(session, run_id, chapter, role="event")
         annotations[chapter] = record_id
     third_chapter_second = list(
         session.scalars(
@@ -124,7 +124,7 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
             [declarations["p3"]],
             [declarations["p6"]],
         ],
-        context=(session_id, work_id, execution_id),
+        context=(session_id, execution_id),
     )
     mapping = {key: item.event_id for item in draft.events.values() for key in item.declaration_ids}
     events = {
@@ -372,7 +372,7 @@ def test_multi_page_cursor_consumes_all_pages(api_client, db_session):
 
 def test_current_annotation_does_not_hide_old_diagnosis_contract(db_session):
     _, run_id = create_run_with_chunks(db_session, texts=["原文。"])
-    session_id, _work, _execution = add_diagnosis_context(db_session, run_id)
+    session_id, _execution = add_diagnosis_context(db_session, run_id)
     add_annotation_source(db_session, run_id, 1, role="event")
     db_session.add(
         DiagnosisReport(
@@ -578,8 +578,8 @@ def test_saved_contract_allows_zero_events(api_client, db_session):
 def test_corrupt_saved_contract_is_rejected_without_get_repair(api_client, db_session, invalid):
     scenario = _seed_scenario(db_session)
     if invalid == "missing_binding":
-        # 已发布之后新增的声明没有任何正式身份绑定
-        record_id, _work, _execution = add_annotation_source(db_session, scenario.run_id, 2, role="structure")
+        # 已保存之后新增的声明没有任何正式身份绑定
+        record_id, _execution = add_annotation_source(db_session, scenario.run_id, 2, role="metric")
         orphan = add_declaration(
             db_session,
             record_id=record_id,

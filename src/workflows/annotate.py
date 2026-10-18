@@ -6,10 +6,9 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
-from typing import cast
 
 from loguru import logger
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.agent import AnnotationAgent
@@ -21,11 +20,11 @@ from src.event_bus import EventBus, Message
 from src.sse.consumer import SSEModule
 from src.sse.events import StreamEvent
 from src.storage.db import get_session_factory
-from src.storage.models import Chapter, Paragraph, WorkItem
+from src.storage.models import Chapter, Paragraph
 from src.work.annotation_work import WorkReceipt, annotation_work_id, required_roles
 from src.work.chapter_pool import ChapterWorkerPool
 from src.work.policy import completed_chapters
-from src.work.queries import fetch_annotation_work_states
+from src.work.queries import fetch_annotation_role_records
 from src.workflows.progress import stage_progress_percent
 
 
@@ -38,8 +37,8 @@ def _load_work(session_factory: Callable[[], Session], run_id: str) -> tuple[lis
             .scalars()
             .all()
         )
-        # 完成判定按新形状推导：work_items 标注形状 + 该 work 是否存在正式产物行
-        complete = completed_chapters(fetch_annotation_work_states(session, run_id))
+        # 完成判定按产物行推导：chapter_annotations(run, 章, 角色) 产物集合覆盖必需角色
+        complete = completed_chapters(fetch_annotation_role_records(session, run_id))
         orders = [{"chapter_id": chapter.chapter_id, "sequence": chapter.sequence} for chapter in chapters]
         work: list[WorkReceipt] = []
         for chapter in chapters:
@@ -117,22 +116,19 @@ async def run_annotate(
     try:
         recovery_session = factory()
         try:
-            states = await asyncio.to_thread(fetch_annotation_work_states, recovery_session, run_id)
-            discard = sorted({state.work_id for state in states if state.chapter_id not in retained})
+            # 未完成章节的全部角色先按章废弃：产物、域事实与真实尝试一并废弃。
+            # 枚举取自派发集而非产物行，否则重派按 attempt=1 登记会撞
+            # uq_executions_annotation_attempt
+            discard = sorted({item.payload["chapter_id"] for item in work})
             await bus.request(
                 Message(
                     topic="agent.recover",
                     source=f"queue:{run_id}",
                     target=agent.address,
                     run_id=run_id,
-                    payload={"session": recovery_session, "discard": discard},
+                    payload={"session": recovery_session, "chapter_ids": discard},
                 )
             )
-            if discard:
-                # 整章废弃：域数据已由 agent 同会话清除，再删 work 身份（级联真实尝试行）
-                await asyncio.to_thread(
-                    recovery_session.execute, delete(WorkItem).where(WorkItem.work_id.in_(discard))
-                )
             await asyncio.to_thread(recovery_session.commit)
             # 整章废弃已提交后再清除旧角色展示，阈值变化不会遗留旧 lane
             if work:
@@ -154,7 +150,7 @@ async def run_annotate(
         finally:
             recovery_session.close()
 
-        async def consolidate(chapter_id: int) -> None:
+        async def consolidate(chapter_id: int, *, recheck: bool = False) -> None:
             await bus.request(Message(topic="audit.barrier", source=agent.address, target=audit.address, run_id=run_id))
             await bus.request(
                 Message(
@@ -162,7 +158,7 @@ async def run_annotate(
                     source=f"queue:{run_id}",
                     target=agent.address,
                     run_id=run_id,
-                    payload={"chapter_id": chapter_id},
+                    payload={"chapter_id": chapter_id, "recheck": recheck},
                 )
             )
 
@@ -174,14 +170,15 @@ async def run_annotate(
 
         async def progress(receipt: WorkReceipt) -> None:
             with factory() as progress_session:
-                states = await asyncio.to_thread(fetch_annotation_work_states, progress_session, run_id)
+                states = await asyncio.to_thread(fetch_annotation_role_records, progress_session, run_id)
                 completed = completed_chapters(states)
                 current = len(completed)
                 invocation_id = next(
-                    # 收到回执的 work 必有一次真实尝试，invocation_id 取那次执行
-                    cast(str, state.invocation_id)
+                    # 收到回执的 work 必有正式产物行，执行号取该产物行的真实执行
+                    state.invocation_id
                     for state in states
-                    if state.work_id == receipt.work_id
+                    if state.chapter_id == receipt.payload["chapter_id"]
+                    and state.role == receipt.payload["role"]
                 )
             await bus.request(
                 Message(
@@ -206,12 +203,14 @@ async def run_annotate(
         await pool.run(work, bus=bus, session_factory=factory, is_cancelled=is_cancelled, on_saved=progress)
         await bus.request(Message(topic="audit.barrier", source=agent.address, target=audit.address, run_id=run_id))
         with factory() as final_session:
-            states = await asyncio.to_thread(fetch_annotation_work_states, final_session, run_id)
+            states = await asyncio.to_thread(fetch_annotation_role_records, final_session, run_id)
             actual = completed_chapters(states)
         if len(actual) != total:
             raise RuntimeError(f"必需角色未全部成功保存: completed={len(actual)} total={total}")
-        for chapter_id in sorted(actual - retained):
-            await consolidate(chapter_id)
+        # 池排空后按章序重算核对：多章并发时完成序可能反转，早跑的核对看不到更早章
+        # 未保存的引用会误报孤立；与既有回执一致不动，不一致才替换（含恢复章与保留章）
+        for chapter_id in sorted(actual):
+            await consolidate(chapter_id, recheck=True)
         logger.info(
             "annotation work completed run_id={} chapters={} elapsed={:.2f}s",
             run_id,

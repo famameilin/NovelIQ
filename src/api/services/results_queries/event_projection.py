@@ -1,7 +1,7 @@
 """事件森林与时间轴的读侧装配
 
-说明: 把仓储层的事件森林快照（EventForestSnapshot）转成 API 响应 DTO；
-      手工装配集中在此，路由只做依赖注入与取数编排。
+把仓储层的事件森林快照（EventForestSnapshot）转成 API 响应 DTO；手工装配集中在此，
+路由只做依赖注入与取数编排。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 def build_event_forest_response(snapshot: EventForestSnapshot) -> EventForestResponse:
-    """组装事件森林响应 DTO（2026-10-02 自路由体抽取的手工装配 converter）"""
+    """组装事件森林响应 DTO"""
     return EventForestResponse(
         chapter_id=snapshot.chapter_id,
         chapter_order=snapshot.chapter_order,

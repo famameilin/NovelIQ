@@ -1,14 +1,13 @@
-"""
-主题查询组装器测试
+"""主题查询组装器测试
 
 覆盖 src/api/services/results_queries/topics.py 的 _fetch_topics：
-- 聚合源为 ParagraphRepository.fetch_paragraph_topics_agg（token 加权，§11.1），
+- 聚合源为 ParagraphRepository.fetch_paragraph_topics_agg（token 加权），
   归一化使用 weighted_total
 - 无模型文件时降级（words 为空则过滤）
 - 模型文件存在时填充词表/标签并归一化权重
 - 模型加载异常时降级为警告
 
-2026-08-12 创建，补齐该模块 17% 的低覆盖率。
+创建，补齐该模块 17% 的低覆盖率。
 Paragraph-only 主题结果：fetch_paragraph_topics_agg 使用 weighted_total。
 """
 
@@ -31,7 +30,7 @@ def _make_row(topic_id: int, weighted_total: float) -> SimpleNamespace:
 def _make_repo(rows: list[SimpleNamespace], book_total: float | None = 150.0) -> MagicMock:
     repo = MagicMock()
     repo.fetch_paragraph_topics_agg.return_value = rows
-    # §5.11 新口径：全书归一化分母为所有段落推断 token 和（每段一行）
+    # 全书归一化分母为所有段落推断 token 和（每段一行）
     repo.fetch_topic_inference_total.return_value = book_total
     return repo
 
@@ -72,7 +71,7 @@ def test_fetch_topics_with_model_fills_words_labels_and_normalizes() -> None:
     assert first.topic_id == 0
     assert list(first.words) == ["修炼", "境界"]
     assert first.label == "修炼主题"
-    # §5.11 归一化：weighted_total / 全书推断 token 和 = 100 / 150
+    # 归一化：weighted_total / 全书推断 token 和 = 100 / 150
     assert first.weight == round(100.0 / 150.0, 6)
     assert second.topic_id == 1
     assert second.label == "成长主题"
@@ -81,7 +80,6 @@ def test_fetch_topics_with_model_fills_words_labels_and_normalizes() -> None:
 
 @pytest.mark.parametrize("book_total", [None, 0.0])
 def test_fetch_topics_rejects_rows_without_current_inference(book_total: float | None) -> None:
-    """旧 Top-5 行不能充当当前全量分布，不加载模型或返回原始权重"""
     repo = _make_repo([_make_row(0, 100.0), _make_row(1, 50.0)], book_total=book_total)
     trainer = _make_trainer_with_model()
 
@@ -117,8 +115,7 @@ def test_fetch_topics_empty_rows_returns_empty() -> None:
 
 
 def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
-    """
-    2026-08-13 P2：模型目录必须基于项目根推导（干净检出以 pyproject.toml + config/ 为锚点），
+    """模型目录必须基于项目根推导（干净检出以 pyproject.toml + config/ 为锚点），
     而不是相对 CWD 解析，避免服务启动目录不同导致词表/标签加载静默降级。
     """
     from src.config.paths import resolve_model_dir
@@ -138,20 +135,20 @@ def test_fetch_topics_model_dir_anchored_at_project_root() -> None:
 
 
 def test_validate_agg_row_rejects_missing_fields() -> None:
-    """2026-08-20 验证聚合结果缺字段时快速失败"""
+    """验证聚合结果缺字段时快速失败"""
     with pytest.raises(RuntimeError):
         validate_topic_aggregation_row(SimpleNamespace(topic_id=1))
 
 
 @pytest.mark.parametrize("weighted_total", [float("nan"), float("inf"), -1.0])
 def test_validate_agg_row_rejects_invalid_weight(weighted_total: float) -> None:
-    """2026-08-20 验证聚合权重必须是非负有限数"""
+    """验证聚合权重必须是非负有限数"""
     with pytest.raises(RuntimeError, match="weighted_total"):
         validate_topic_aggregation_row(SimpleNamespace(topic_id=1, weighted_total=weighted_total))
 
 
 def test_describe_topics_unavailability_reports_missing_artifact() -> None:
-    """2026-09-05 A6：模型 artifact 缺失给出显式原因（不再静默过滤聚合行）"""
+    """模型 artifact 缺失给出显式原因（不再静默过滤聚合行）"""
     reason = describe_topics_unavailability("run-no-model")
     assert reason is not None
     assert reason.startswith("topic_model_artifact_missing:")

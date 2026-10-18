@@ -1,8 +1,8 @@
 """
 任务应用服务
 
-说明: 将 analysis 路由中的取消、删除、恢复状态机下沉到 service 层，
-      让 route 只保留 HTTP 参数绑定与响应装配职责
+将 analysis 路由中的取消、删除、恢复状态机下沉到 service 层，
+让 route 只保留 HTTP 参数绑定与响应装配职责
 """
 
 from __future__ import annotations
@@ -135,9 +135,7 @@ async def cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMan
 
 class TaskApplicationService:
     """
-    任务应用服务
-
-    说明: 面向 API 编排任务恢复、取消、删除等跨 DB/运行态的流程
+    任务应用服务：面向 API 编排任务恢复、取消、删除等跨 DB/运行态的流程
     """
 
     def __init__(self, task_service: TaskService, task_manager: TaskManager):
@@ -174,7 +172,7 @@ class TaskApplicationService:
         """
         删除小说下全部任务（含运行态清理）
 
-        说明: 小说级删除的前置条件是任务不在飞——ensure_tasks_deletable 会拒绝运行态任务；
+        小说级删除的前置条件是任务不在飞——ensure_tasks_deletable 会拒绝运行态任务；
         因此这里无需（也无法）做异步中断。返回删除的任务数。
         """
         runs = self.task_service.collect_runs(novel_id)

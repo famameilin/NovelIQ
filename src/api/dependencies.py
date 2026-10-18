@@ -1,9 +1,8 @@
 """
 API 统一依赖注入模块
 
-说明: 统一 FastAPI 依赖注入函数，替代手动 session 管理。任务与运行的读写、编排与应用
-      服务由 src/workflows 装配（见 src/workflows/dependencies.py），本层只取实例；
-      work 队列的运行态类型不出现在 api。
+统一 FastAPI 依赖注入函数。任务与运行的读写、编排与应用服务由 src/workflows 装配
+（见 src/workflows/dependencies.py），本层只取实例；work 队列的运行态类型不出现在 api。
 """
 
 from __future__ import annotations
@@ -63,7 +62,7 @@ def invalidate_metrics_cache(run_id: str) -> None:
     """
     run 成功收口时失效聚合指标缓存
 
-    说明: 缓存归读侧所有，装配时登记给编排层，避免执行层反向依赖 api
+    缓存归读侧所有，装配时登记给编排层，避免执行层反向依赖 api
     """
     get_metrics_service().invalidate_cache(run_id)
 

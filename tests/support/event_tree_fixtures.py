@@ -1,8 +1,8 @@
-"""事件声明/完整事件/叙事组织测试夹具（2026-10-16 全库 3NF 改造，本切片自足）
+"""事件声明/完整事件/叙事组织测试夹具（六 agent 归属，本切片自足）
 
-只做真实表行的分层写入：标注来源链（work→执行→记录）、章级声明与原文证据、
-诊断会话/work/执行身份，以及沿正式发布入口（EventOrganizationDraft →
-报告 → 完整事件 → 叙事组织）一次性发布。夹具不复制旧 payload、不恢复旧行类型。
+只做真实表行的分层写入：标注来源链（执行→正式记录）、章级声明与原文证据、
+诊断整轮会话与真实尝试身份，以及沿正式保存入口（EventOrganizationDraft →
+报告 → 完整事件 → 叙事组织）保存。夹具不复制旧 payload、不恢复旧行类型。
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from src.event_trees.organization import (
     OrganizationEvidence,
     register_diagnosis_execution,
     register_diagnosis_session,
-    register_diagnosis_work,
 )
 from src.storage.models import (
     Chapter,
@@ -31,11 +30,16 @@ from src.storage.models import (
     NarrativeLink,
     Paragraph,
     SourceEvidence,
-    WorkItem,
     naive_utcnow,
 )
+from src.utils.identity import stable_digest
 
 CONTRACT_VERSION = "event-tree-declarations-v1"
+
+
+def report_case_anchor(run_id: str) -> str:
+    """本 run 报告级组织单元的真实案例锚（与生产 report CaseUnit 同源）"""
+    return stable_digest(run_id, "diagnosis_report")
 
 
 def chapter_text(session: Session, run_id: str, chapter_id: int) -> str:
@@ -88,23 +92,15 @@ def add_annotation_source(
     *,
     role: str = "event",
     contract_version: str = CONTRACT_VERSION,
-) -> tuple[str, str, str]:
-    """建立一份真实标注来源链，返回 (record_id, work_id, execution_id)"""
-    work_id = f"work-{uuid4().hex[:12]}"
+) -> tuple[str, str]:
+    """建立一份真实标注来源链（执行行直接带 run/章/角色），返回 (record_id, execution_id)"""
     execution_id = uuid4().hex
-    session.add(
-        WorkItem(
-            work_id=work_id,
-            role=role,
-            annotation_run_id=run_id,
-            annotation_chapter_id=chapter_id,
-        )
-    )
-    session.flush()
     session.add(
         Execution(
             execution_id=execution_id,
-            work_id=work_id,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            role=role,
             attempt_number=1,
             started_at=naive_utcnow(),
             status="success",
@@ -116,12 +112,15 @@ def add_annotation_source(
         ChapterAnnotation(
             record_id=record_id,
             execution_id=execution_id,
+            run_id=run_id,
+            chapter_id=chapter_id,
+            role=role,
             contract_version=contract_version,
             chapter_consolidation_version="v1",
         )
     )
     session.flush()
-    return record_id, work_id, execution_id
+    return record_id, execution_id
 
 
 def add_declaration(
@@ -191,15 +190,26 @@ def add_declaration(
     return declaration_id
 
 
-def add_diagnosis_context(session: Session, run_id: str) -> tuple[str, str, str]:
-    """登记诊断整轮身份/work/真实尝试，返回 (session_id, work_id, execution_id)"""
+def add_diagnosis_context(session: Session, run_id: str) -> tuple[str, str]:
+    """登记诊断整轮会话与报告角色的真实尝试，返回 (session_id, execution_id)
+
+    同一 run 再次登记是本轮的又一次真实尝试（跨轮累计序号），不覆盖既有终态行。
+    """
+    from sqlalchemy import func
+
     session_id = f"diag-session-{uuid4().hex[:12]}"
-    work_id = f"diag-work-{uuid4().hex[:12]}"
     execution_id = uuid4().hex
+    attempt = int(
+        session.scalar(
+            select(func.count()).select_from(Execution).where(Execution.run_id == run_id, Execution.role == "report")
+        )
+        or 0
+    ) + 1
     register_diagnosis_session(session, run_id=run_id, session_id=session_id)
-    register_diagnosis_work(session, session_id=session_id, work_id=work_id, role="report")
-    register_diagnosis_execution(session, work_id=work_id, execution_id=execution_id, attempt_number=1)
-    return session_id, work_id, execution_id
+    register_diagnosis_execution(
+        session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=attempt
+    )
+    return session_id, execution_id
 
 
 def identity_every_declaration(
@@ -207,12 +217,14 @@ def identity_every_declaration(
     run_id: str,
     *,
     groups: list[list[str]] | None = None,
-    context: tuple[str, str, str] | None = None,
+    context: tuple[str, str] | None = None,
 ) -> tuple[EventOrganizationDraft, dict[str, Any]]:
-    """按显式分组提交声明核对、身份与全对比较并冻结身份（不发布）"""
-    session_id, _work_id, execution_id = context or add_diagnosis_context(session, run_id)
+    """按显式分组提交声明核对、身份与全对比较（不保存）"""
+    session_id, execution_id = context or add_diagnosis_context(session, run_id)
     draft = EventOrganizationDraft(session, run_id, session_id)
-    draft.work_id = draft.producer_invocation_id = execution_id
+    # 报告级组织单元：案例锚与生产 report 单元同源，调用来源是本次报告角色尝试
+    draft.case_id = report_case_anchor(run_id)
+    draft.producer_invocation_id = execution_id
     rows = list(draft._declarations().values())
     by_id = {row["declaration_id"]: row for row in rows}
     groups = groups if groups is not None else [[row["declaration_id"]] for row in rows]
@@ -246,7 +258,6 @@ def identity_every_declaration(
                 reason="夹具按显式分组核对两项声明身份",
                 evidence=[OrganizationEvidence(paragraph_id=row_evidence(row)[0]["paragraph_id"])],
             )
-    draft.freeze_identity()
     return draft, {"membership": membership, "session_id": session_id, "execution_id": execution_id}
 
 
@@ -260,7 +271,7 @@ def close_structure(
     *,
     evidence_paragraph_id: int,
 ) -> None:
-    """按草稿已提交的包含/关系逐对收口结构判断并核对全部事件（不发布）"""
+    """按草稿已提交的包含/关系逐对收口结构判断并核对全部事件（不保存）"""
     events = sorted(draft.events)
     for index, source in enumerate(events):
         for target in events[index + 1 :]:
@@ -283,7 +294,6 @@ def close_structure(
             )
     for event_id in events:
         draft.review_events([event_id], reason="夹具已核对正式身份与结构")
-    draft.freeze_structure()
 
 
 def publish_draft(
@@ -293,7 +303,7 @@ def publish_draft(
     *,
     diagnosis: str | None = None,
 ) -> dict[str, str]:
-    """沿正式发布入口保存报告、完整事件与叙事组织，返回声明→事件映射"""
+    """沿正式保存入口保存报告、完整事件与叙事组织，返回声明→事件映射"""
     from src.agents.diagnosis.persistence import save_diagnosis_report
     from src.event_trees.diagnosis_persistence import save_diagnosis_events
     from src.event_trees.organization import save_organization
@@ -323,7 +333,7 @@ def publish_declarations(
     evidence_paragraph_id: int | None = None,
     diagnosis: str | None = None,
 ) -> tuple[dict[str, str], EventOrganizationDraft]:
-    """一步发布全部声明的独立/同组身份，返回 (声明→事件, 草稿)"""
+    """一步保存全部声明的独立/同组身份，返回 (声明→事件, 草稿)"""
     draft, _meta = identity_every_declaration(session, run_id, groups=groups)
     paragraph_id = (
         first_paragraph(session, run_id).paragraph_id if evidence_paragraph_id is None else evidence_paragraph_id

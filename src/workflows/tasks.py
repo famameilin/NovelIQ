@@ -1,8 +1,6 @@
 """分析任务读写与产物清理（work 队列侧）
 
-2026-10-06 自 `src/ingest/novel_service.py` 收归：任务的创建、查询、删除，小说记录的
-读取，以及 logs/outputs 产物清理都属于运行生命周期，归 work 队列；小说源文件的上传与
-登记属于 api 的文本导入（`src/api/services/novel_service.py`）。
+任务的创建、查询、删除，小说记录的读取，以及 logs/outputs 产物清理都属于运行生命周期。
 
 本模块只读写存储与文件系统，不碰 HTTP、不碰 SSE。
 """
@@ -184,9 +182,8 @@ class TaskService:
             return RunRepository(sess).get_runs_by_novel(novel_id)
 
     def ensure_tasks_deletable(self, novel_id: str, runs: list[dict]) -> None:
-        """校验小说下的任务是否都允许删除
-
-        说明: novel 级删除沿用 task 删除状态机，不允许绕过 pending/running/cancelling 护栏
+        """校验小说下的任务是否都允许删除（沿用 task 删除状态机，
+        不绕过 pending/running/cancelling 护栏）
         """
         for run in runs:
             status = str(run.get("status", ""))

@@ -1,4 +1,4 @@
-"""伏笔回收预期计算防回归测试（2026-10-16 全库 3NF 改造）
+"""伏笔回收预期计算防回归测试
 
 伏笔根属性随不可变声明行保存（payoff_likelihood 是唯一属性，strength 为读
 投影）；预期沿真实声明与原文证据计算，不再向旧事件行写 strength/status。
@@ -29,7 +29,7 @@ def _create_foreshadow_root(
     chapter_id: int = 1,
 ) -> str:
     """经真实标注来源链写入一条伏笔根声明（属性随声明行）"""
-    record_id, _work_id, _execution_id = add_annotation_source(session, run_id, chapter_id)
+    record_id, _execution_id = add_annotation_source(session, run_id, chapter_id)
     return add_declaration(
         session,
         record_id=record_id,
@@ -68,7 +68,7 @@ def test_calculate_expectation_low_scores_below_medium(db_session) -> None:
 
 
 def test_formal_event_rejects_invalid_foreshadowing_confidence() -> None:
-    """P3：伏笔枚举非法值直接 raise，不再降级为 unknown。"""
+    """伏笔枚举非法值直接 raise，不再降级为 unknown。"""
     with pytest.raises(ValidationError):
         BoundEvent(
             declaration_id="decl-root",
@@ -87,7 +87,7 @@ def test_formal_event_rejects_invalid_foreshadowing_confidence() -> None:
 
 
 def test_calculate_expectation_returns_none_when_all_evidence_missing(db_session) -> None:
-    """P3：payoff_likelihood 全缺失时返回 None，不输出伪分。"""
+    """payoff_likelihood 全缺失时返回 None，不输出伪分。"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"])
     _create_foreshadow_root(db_session, run_id=run_id, payoff_likelihood=None)
     db_session.commit()

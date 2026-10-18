@@ -1,21 +1,15 @@
 """
-段落事实源写入（paragraphs 事实源，§5.1）
+段落事实源写入（paragraphs 事实源）
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分——从 paragraph_repository.py 提取段落行写入逻辑
-说明: 纯结构搬移，不改 SQL 与校验行为。insert_paragraphs 先删后插写入
-run 的段落行（同 run 不可重跑前序阶段的语义），插入前经 validate_spans
-校验段落身份、token 计数与 local/global 坐标不变量，违反时抛 ValueError。
-ParagraphRepository（paragraph_repository.py）保留同名门面方法委托至此。
+insert_paragraphs 先删后插写入 run 的段落行（同 run 不可重跑前序阶段的语义），
+插入前经 validate_spans 校验段落身份、token 计数与 local/global 坐标不变量，
+违反时抛 ValueError。
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：
 - paragraphs 只写身份/来源/章内起点/原文；local_end_char、global 坐标与
-  char_count 均为读取投影（见 reader.py）；预处理 token_count 与指标同步
-  写 paragraph_metrics（本模块不再单写观测表）
-- 预处理阶段同批产生的派生观测按冻结结构落点：表面张力 z 写
-  paragraph_features 的 tension_z 行；功能词/语义类别计数写 paragraph_metrics
-  的 20 个 fw_* / 10 个 semantic_* 明确列（缺项补零，完成事实由指标行表达）
+  char_count 均为读取投影（见 reader.py）
+- 预处理阶段同批派生观测：表面张力 z 写 paragraph_features 的 tension_z 行；
+  功能词/语义类别计数写 paragraph_metrics 的 fw_*/semantic_* 明确列
+  （缺项补零，完成事实由指标行表达）
 """
 
 from __future__ import annotations
@@ -72,8 +66,7 @@ def insert_paragraphs(session: Session, run_id: str, spans: Sequence[ParagraphSp
     先删后插写入 run 的段落行（同 run 不可重跑前序阶段的语义）
 
     插入前校验段落身份、坐标不变量，违反时抛 ValueError。
-    预处理 token_count 不再单写观测表：它与指标同批 token，统一写
-    paragraph_metrics.token_count（指标阶段）。
+    token_count 与指标同批，统一写 paragraph_metrics.token_count（指标阶段）。
 
     Returns:
         本次写入的段落行数
@@ -202,11 +195,10 @@ def _update_metric_statement(columns):
 
 
 def validate_spans(session: Session, run_id: str, spans: Sequence[ParagraphSpan]) -> None:
-    """2026-08-14 用于写入前校验段落身份、token 与坐标不变量
+    """写入前校验段落身份、token 与坐标不变量
 
-    2026-10-16 3NF：global 坐标不再落列，校验口径改为"局部坐标必须与
-    所属章节正文起点自洽"（存在性由读取投影保证）；local 跨度必须等于原文
-    字符数，否则投影出的 local_end_char/global/char_count 与文本不一致。
+    局部坐标必须与所属章节正文起点自洽；local 跨度必须等于原文字符数，
+    否则投影出的 local_end_char/global/char_count 与文本不一致。
     """
     for span in spans:
         if (

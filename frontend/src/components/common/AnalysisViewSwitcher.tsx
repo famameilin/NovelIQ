@@ -17,7 +17,7 @@ interface AnalysisViewSwitcherProps<T extends string> {
 }
 
 /**
- * 2026-08-31，作用：统一分析页主视图的分段切换控件
+ * 统一分析页主视图的分段切换控件
  * 简要说明：使用真实按钮和 aria-pressed 表达当前桌面视图并支持键盘操作
  */
 export function AnalysisViewSwitcher<T extends string>({

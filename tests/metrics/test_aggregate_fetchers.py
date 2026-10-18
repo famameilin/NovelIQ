@@ -170,11 +170,7 @@ def test_fetch_relation_data_propagates_database_graph_readiness_failure():
 
 
 def test_fetch_relation_data_allows_empty_database_graph():
-    """
-    修改时间: 2026-04-29
-    任务: 修复全量测试阻塞
-    修改原因: GraphAuthorityView 正式合同包含 participant_states，测试 mock 需要补齐该字段。
-    """
+    
 
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
@@ -193,11 +189,7 @@ def test_fetch_relation_data_allows_empty_database_graph():
 
 
 def test_fetch_relation_data_consumes_authority_view():
-    """
-    修改时间: 2026-04-29
-    任务: 修复全量测试阻塞
-    修改原因: GraphAuthorityView 正式合同包含 participant_states，测试 mock 需要补齐该字段。
-    """
+    
 
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
@@ -222,7 +214,7 @@ def test_fetch_relation_data_consumes_authority_view():
                 changes=[{"change_kind": "assert"}],
             ),
         ],
-        # P4：人物网络只消费 character 参与者；mock 需补 entity_type
+        # 人物网络只消费 character 参与者；mock 需补 entity_type
         participant_states=[
             SimpleNamespace(name="主角", entity_type="character"),
             SimpleNamespace(name="反派", entity_type="character"),

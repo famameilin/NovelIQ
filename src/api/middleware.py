@@ -1,5 +1,5 @@
 """
-说明: HTTP 错误 body 统一契约（三字段 detail/error_type/status_code）与请求日志中间件
+HTTP 错误 body 统一契约（三字段 detail/error_type/status_code）与请求日志中间件
 
 域异常由各域定义（运行编排 src/workflows、事实图 src/fact_graph、配置 src/config、存储 src/storage），
 本模块只做「异常类型 → 状态码 + 文案」的映射表与注册。
@@ -112,9 +112,7 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    """2026-08-13 统一错误 body 契约：路由内直接 raise 的 HTTPException（400/404/409 等）
-    此前返回 FastAPI 默认的 {detail}，与自定义异常处理器的 {detail, error_type, status_code}
-    两种结构并存。统一为三字段格式（前端 client.ts 以 detail 为主读取，兼容）。
+    """路由内直接 raise 的 HTTPException（400/404/409 等）统一为三字段格式。
     注意：detail 可能是结构化对象，必须保留原结构不做字符串化。"""
     error_response = create_error_response(
         detail=exc.detail,
@@ -131,8 +129,7 @@ async def task_application_error_handler(request: Request, exc: TaskApplicationE
 
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """2026-08-13 统一错误 body 契约：请求参数校验失败（422）也走三字段格式，
-    detail 转可读字符串（FastAPI 默认 detail 是 [{loc, msg, type}] 列表）。"""
+    """请求参数校验失败（422）也走三字段格式，detail 转可读字符串。"""
     errors = exc.errors()
     if request.url.path.startswith("/api/settings"):
         # 设置请求包含模型 Key，校验失败也不能回显原始输入
@@ -150,8 +147,7 @@ def register_exception_handlers(app) -> None:
     for exc_type, error_type, status_code, log_level, extra_of in _EXCEPTION_MAP:
         app.add_exception_handler(exc_type, _make_domain_handler(error_type, status_code, log_level, extra_of))
 
-    # 2026-08-13 统一错误 body 契约：路由内 HTTPException 与请求校验失败
-    # 不再返回 FastAPI 默认 {detail}，与自定义异常处理器同为三字段结构
+    # 路由内 HTTPException 与请求校验失败同为三字段错误 body
     app.add_exception_handler(TaskApplicationError, task_application_error_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
@@ -161,11 +157,7 @@ def register_exception_handlers(app) -> None:
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """
-    请求日志中间件
-
-    说明: 记录每个请求的进入、退出和耗时信息
-    """
+    """请求日志中间件：记录每个请求的进入、退出和耗时信息"""
 
     async def dispatch(self, request: Request, call_next):
         request_id = str(uuid.uuid4())[:8]
@@ -181,9 +173,5 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 
 def register_middlewares(app) -> None:
-    """
-    注册所有中间件
-
-    说明: 注册请求日志等中间件
-    """
+    """注册所有中间件"""
     app.add_middleware(RequestLoggingMiddleware)

@@ -8,7 +8,7 @@ from src.fact_graph.character_reference_policy import filter_global_character_na
 
 
 def normalize_name_list(values: list[str] | None) -> list[str] | None:
-    """2026-08-06 用于清理名称列表中的重复项并保持原有顺序"""
+    """清理名称列表中的重复项并保持原有顺序"""
     if not values:
         return values
 
@@ -24,7 +24,7 @@ def normalize_name_list(values: list[str] | None) -> list[str] | None:
 
 
 def normalize_arc_scores(arc_scores: Any) -> dict[str, float] | None:
-    """2026-08-06 用于把诊断角色弧评分收口为命名浮点字典"""
+    """把诊断角色弧评分收口为命名浮点字典"""
     if not arc_scores:
         return None
 
@@ -59,7 +59,7 @@ def filter_character_list_against_arc_scores(
 
 
 def filter_global_arc_scores(arc_scores: dict[str, float] | None) -> dict[str, float] | None:
-    """创建时间: 2026-04-29 作用: 过滤未解析局部引用的角色弧线分数"""
+    """过滤未解析局部引用的角色弧线分数"""
     if not arc_scores:
         return None
     filtered = {name: score for name, score in arc_scores.items() if filter_global_character_names([name])}
@@ -69,10 +69,7 @@ def filter_global_arc_scores(arc_scores: dict[str, float] | None) -> dict[str, f
 def derive_focus_structure_from_characters(
     focus_characters: list[str] | None,
 ) -> Literal["single", "dual", "ensemble"] | None:
-    """
-    说明: 角色名单过滤后必须重新推导 focus_structure，
-    避免把 `dual` 与单人列表这样的矛盾合同继续对外暴露
-    """
+    """角色名单过滤后必须重新推导 focus_structure，避免 `dual` 与单人列表这样的矛盾合同对外暴露"""
     if not focus_characters:
         return None
     focus_count = len(focus_characters)

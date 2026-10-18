@@ -1,5 +1,5 @@
 /**
- * 2026-08-13 P2-5: 生命周期字段（first_seen_chapter/last_seen_chapter）为 null 时
+ * 生命周期字段（first_seen_chapter/last_seen_chapter）为 null 时
  * 不得渲染"第 null 章"，且整行出场信息应隐藏
  */
 import { render, screen } from "@testing-library/react";

@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from src.event_trees.contributions import EventContribution
+from src.storage.query_terms import query_search_terms, term_matches
 from src.utils.identity import stable_uuid
 
 # 完整事件域集合名：快照/回滚/冻结/保存共用同一份声明
@@ -21,6 +22,25 @@ CONTRIBUTION_KEYS = (
 )
 
 
+def _event_search_text(content: dict[str, Any]) -> str:
+    """拼装事件检索的召回文本
+
+    召回面 = 标题/问题/概要/描述 + 参与者实体名与行动（对齐诊断面三字段口径）；
+    词项与通配符语义见 storage.query_terms。
+    """
+    fields = [str(content.get(name) or "") for name in ("title", "problem", "summary", "description")]
+    for item in content.get("participants") or []:
+        if not isinstance(item, dict):
+            continue
+        entity = item.get("entity")
+        if isinstance(entity, dict):
+            fields.append(str(entity.get("name") or ""))
+        else:
+            fields.append(str(entity or ""))
+        fields.append(str(item.get("action") or ""))
+    return "\n".join(value for value in fields if value)
+
+
 class EventTrees:
     """内存方法只由 agent 在 run 锁内调用，不订阅事件总线"""
 
@@ -28,11 +48,11 @@ class EventTrees:
         self.run_id = run_id
         self.nodes: dict[str, dict[str, Any]] = {}
         self.connections: dict[str, dict[str, Any]] = {}
-        self.executions: set[tuple[str, str]] = set()
-        self.saved: set[tuple[str, str]] = set()
+        self.executions: set[str] = set()
+        self.saved: set[str] = set()
         self.actions: dict[str, dict[str, Any]] = {}
         # 完整事件域：event_id/revision_id/child_event_id/process_id/structure_id/
-        # relation_id/conflict_id → {"author": (work_id, invocation_id), "content": {...}}
+        # relation_id/conflict_id → {"author": execution_id, "content": {...}}
         self.complete_events: dict[str, dict[str, Any]] = {}
         self.revisions: dict[str, dict[str, Any]] = {}
         self.containments: dict[str, dict[str, Any]] = {}
@@ -40,10 +60,10 @@ class EventTrees:
         self.relations: dict[str, dict[str, Any]] = {}
         self.conflicts: dict[str, dict[str, Any]] = {}
 
-    def begin(self, work_id: str, invocation_id: str) -> None:
-        self.executions.add((work_id, invocation_id))
+    def begin(self, execution_id: str) -> None:
+        self.executions.add(execution_id)
 
-    def sync(self, author: tuple[str, str], chapter_id: int, events: list[Any]) -> None:
+    def sync(self, author: str, chapter_id: int, events: list[Any]) -> None:
         if author not in self.executions:
             raise ValueError(f"事件执行已停止: {author}")
         for event in events:
@@ -70,7 +90,7 @@ class EventTrees:
             self.nodes[identifier] = {"author": author, "chapter_id": chapter_id, "content": deepcopy(content)}
         self._parents()
 
-    def sync_contributions(self, author: tuple[str, str], payloads: dict[str, dict[str, Any]]) -> None:
+    def sync_contributions(self, author: str, payloads: dict[str, dict[str, Any]]) -> None:
         """完整事件域挂起记录发布：与节点同一作者纪律（未保存前只允许本 work 重写）"""
         if author not in self.executions:
             raise ValueError(f"事件执行已停止: {author}")
@@ -93,24 +113,23 @@ class EventTrees:
         }
         for identifier, value in result.items():
             author = self.complete_events[identifier]["author"]
-            value["source_work_id"], value["producer_invocation_id"] = author
+            value["producer_invocation_id"] = author
             value["revisions"] = [
                 {
                     "summary": value["summary"],
                     "progress": value["progress"],
                     "status": value["status"],
-                    "source_work_id": author[0],
-                    "producer_invocation_id": author[1],
+                    "producer_invocation_id": author,
                     "source_operation_id": f"create/{value['local_key']}",
                     "evidence_paragraph_id": value["evidence_paragraph_id"],
                 }
             ]
             value["current_revision"] = value["revisions"][0]
             value["current_revision_id"] = stable_uuid(
-                self.run_id, author[0], "event_revision", f"create/{value['local_key']}"
+                self.run_id, author, "event_revision", f"create/{value['local_key']}"
             )
         revisions = [
-            {**value["content"], "source_work_id": value["author"][0], "producer_invocation_id": value["author"][1]}
+            {**value["content"], "producer_invocation_id": value["author"]}
             for value in self.revisions.values()
             if value["author"] in self.saved
         ]
@@ -155,11 +174,11 @@ class EventTrees:
             if value["author"] in self.saved
         }
 
-    def write_action(self, author: tuple[str, str], value: dict[str, Any]) -> str:
+    def write_action(self, author: str, value: dict[str, Any]) -> str:
         """明确动作沿用来源操作身份，同章多次动作分别保留"""
         if author not in self.executions or author in self.saved:
             raise ValueError(f"事件执行已停止: {author}")
-        identifier = stable_uuid(self.run_id, author[0], value["source_operation_id"])
+        identifier = stable_uuid(self.run_id, author, value["source_operation_id"])
         action = {**deepcopy(value), "author": author}
         existing = self.actions.get(identifier)
         if existing is not None:
@@ -207,8 +226,7 @@ class EventTrees:
             "node_id": node_id,
             "declaration_id": node_id,
             "kind": "declaration",
-            "work_id": node["author"][0],
-            "producer_invocation_id": node["author"][1],
+            "producer_invocation_id": node["author"],
             "chapter_id": node["chapter_id"],
             "saved": node["author"] in self.saved,
             "content": content,
@@ -222,8 +240,13 @@ class EventTrees:
         tree_id: str | None = None,
         isforeshadowing: bool | None = None,
     ) -> list[str]:
-        """先筛选稳定节点 ID，分页读取详情时不复制整本书的节点正文；伏笔标记过滤在分页前生效"""
+        """先筛选稳定节点 ID，分页读取详情时不复制整本书的节点正文；伏笔标记过滤在分页前生效
+
+        query 按空白/标点拆分词项、任一命中即召回（% 匹配任意长度、_ 匹配单字符），
+        召回面为标题/问题/概要/描述与参与者；空查询不按词项过滤。
+        """
         parents = self._parents() if tree_id is not None else {}
+        terms = query_search_terms(query)
         values: list[str] = []
         # 与正式过程读取同按正文排序，段内并列节点用稳定身份打破平局
         ordered = sorted(
@@ -239,8 +262,10 @@ class EventTrees:
                 continue
             if isforeshadowing is not None and bool(node["content"]["is_foreshadow_setup"]) != isforeshadowing:
                 continue
-            if query.casefold() not in node["content"]["description"].casefold():
-                continue
+            if terms:
+                haystack = _event_search_text(node["content"])
+                if not any(term_matches(term, haystack) for term in terms):
+                    continue
             if tree_id is not None:
                 root = identifier
                 while root in parents:
@@ -252,7 +277,7 @@ class EventTrees:
 
     def connect(
         self,
-        author: tuple[str, str],
+        author: str,
         child: str,
         parent: str,
         kind: str,
@@ -278,11 +303,13 @@ class EventTrees:
             if read["content"] != current["content"]:
                 raise ValueError(f"node_id={identifier} 当前业务内容已变化，请重新读取")
             if self.nodes[identifier]["author"] != author and not current["saved"]:
-                raise ValueError(f"node_id={identifier} 属于其他未成功保存 work={current['work_id']}")
+                raise ValueError(
+                    f"node_id={identifier} 属于其他未成功保存执行={current['producer_invocation_id']}"
+                )
             paragraph_id = current["content"]["evidence_paragraph_id"]
             if paragraph_id not in authorized_paragraphs:
                 raise ValueError(f"node_id={identifier} 原文 paragraph_id={paragraph_id} 尚未实际读取")
-        connection_id = stable_uuid(self.run_id, author[0], parent, child, kind)
+        connection_id = stable_uuid(self.run_id, author, parent, child, kind)
         if kind == "foreshadowing" and not self.nodes[parent]["content"]["is_foreshadow_setup"]:
             raise ValueError(f"node_id={parent} is_foreshadow_setup=False，不能作为伏笔来源")
         existing = self.connections.get(connection_id)
@@ -329,16 +356,15 @@ class EventTrees:
         if visited != len(indegree):
             raise ValueError(f"事件连接形成环 node_ids={sorted(key for key, value in indegree.items() if value)}")
 
-    def stop(self, author: tuple[str, str]) -> None:
+    def stop(self, author: str) -> None:
         self.executions.discard(author)
 
-    def confirm(self, work_id: str, invocation_id: str) -> None:
-        author = (work_id, invocation_id)
-        self.saved.add(author)
-        self.stop(author)
+    def confirm(self, execution_id: str) -> None:
+        self.saved.add(execution_id)
+        self.stop(execution_id)
 
-    def rollback(self, work_id: str, invocation_id: str) -> None:
-        author = (work_id, invocation_id)
+    def rollback(self, execution_id: str) -> None:
+        author = execution_id
         if author in self.saved:
             return
         self.stop(author)
@@ -383,7 +409,8 @@ class EventTrees:
                 return True
         return False
 
-    def snapshot(self, author: tuple[str, str]) -> dict[str, Any]:
+    def snapshot(self, author: str) -> dict[str, Any]:
+        del author
         return deepcopy(
             {
                 "nodes": self.nodes,
@@ -400,7 +427,7 @@ class EventTrees:
         for key in CONTRIBUTION_KEYS:
             setattr(self, key, snapshot.get(key, {}))
 
-    def freeze_actions(self, author: tuple[str, str], paragraphs: Any) -> dict[str, dict[str, Any]]:
+    def freeze_actions(self, author: str, paragraphs: Any) -> dict[str, dict[str, Any]]:
         """自动埋设和显式动作进入同一冻结贡献，保存确认与恢复按同一份事实核对"""
         from src.fact_graph.evidence import evidence_for
 
@@ -410,7 +437,7 @@ class EventTrees:
                 continue
             paragraph = next(row for row in paragraphs if row.paragraph_id == node["content"]["evidence_paragraph_id"])
             operation = f"setup/{node_id}"
-            actions[stable_uuid(self.run_id, author[0], operation)] = {
+            actions[stable_uuid(self.run_id, author, operation)] = {
                 "author": author,
                 "root_event_id": node_id,
                 "target_event_id": node_id,
@@ -434,9 +461,9 @@ class EventTrees:
     def save_work(self, session: Session, frozen: EventContribution, annotation_id: str) -> None:
         """只保存章级声明与动作来源，全书事件及其正式端点等待诊断发布
 
-        2026-10-16 全库 3NF 改造：声明进 event_declarations，参与者进
-        declaration_participants，证据进 source_evidence（declaration 所有者列）；
-        伏笔动作进 event_foreshadowing_actions（证据 owner 为动作）。
+        声明进 event_declarations，参与者进 declaration_participants，证据进
+        source_evidence（declaration 所有者列）；伏笔动作进 event_foreshadowing_actions
+        （证据 owner 为动作）。
         """
         from sqlalchemy import text
 
@@ -455,17 +482,17 @@ class EventTrees:
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": f"event_trees:{self.run_id}"}
         )
         contribution = frozen.snapshot()
-        # 正式来源必须是本 work 的真实标注记录；标注行存在即成功保存事实
+        # 正式来源必须是本执行的真实标注记录；标注行存在即成功保存事实
         record = session.get(ChapterAnnotation, annotation_id)
         if (
             record is None
-            or record.execution_id != frozen.invocation_id
+            or record.execution_id != frozen.execution_id
             or record.contract_version != "event-tree-declarations-v1"
         ):
-            raise ValueError("事件保存必须引用本 work 的真实标注记录")
+            raise ValueError("事件保存必须引用本执行的真实标注记录")
         source = smap.declaration_record_source(session, annotation_id)
-        if source is None or source[0] != frozen.work_id or source[1] != self.run_id:
-            raise ValueError("事件保存的标注记录不属于本 work 或本 run")
+        if source is None or source[0] != frozen.execution_id or source[1] != self.run_id:
+            raise ValueError("事件保存的标注记录不属于本执行或本 run")
         for declaration_id, node in contribution["nodes"].items():
             content = node["content"]
             paragraph = next(row for row in frozen.paragraphs if row.paragraph_id == content["evidence_paragraph_id"])
@@ -516,16 +543,14 @@ class EventTrees:
                         emotion=emotion,
                     )
                 )
-                # 人物动态观测事实：三态至少一项非空时随声明与参与者同事务写一行，
-                # 作者与实体从参与者来源取，不另填生产执行或操作序号
-                if narrative_role or action or emotion:
-                    # 观测事实按参与者主键建外键，无 ORM relationship 时须先落参与者行
-                    session.flush()
-                    fact = GraphFact(participant_id=participant_id)
-                    session.add(fact)
-                    # 观测事实自身携带原文证据：人物维度取源与其余事实形状走同一证据路径
-                    session.flush()
-                    smap.write_evidence_rows(session, {"graph_fact_id": fact.graph_fact_id}, refs)
+                # 参与者事实随声明与参与者同事务写一行，不按三态取值筛选；作者与实体从
+                # 参与者来源取，不另填生产执行或操作序号
+                session.flush()
+                fact = GraphFact(participant_id=participant_id)
+                session.add(fact)
+                # 事实自身携带原文证据：与其余事实形状走同一证据路径
+                session.flush()
+                smap.write_evidence_rows(session, {"graph_fact_id": fact.graph_fact_id}, refs)
             smap.write_evidence_rows(session, {"declaration_id": declaration_id}, refs)
         session.flush()
         for identifier, action in contribution.get("actions", {}).items():
@@ -534,7 +559,7 @@ class EventTrees:
                 raise ValueError(f"source_declaration_id={action['root_event_id']} 缺少有效伏笔声明")
             # 端点可以来自本 run 任意 work 的已保存声明（跨章伏笔的强化/回收）：
             # 声明只在记录提交后存在，记录链有效即为"来源 work 已有效保存"，
-            # 不区分同 work/跨 work（0.2.x 语义；2026-10-17 修复 3NF 重写把跨 work 端点误拒）
+            # 不区分同 work/跨 work
             for field, endpoint_id in (
                 ("source_declaration_id", action["root_event_id"]),
                 ("target_declaration_id", action.get("target_event_id")),
@@ -557,7 +582,7 @@ class EventTrees:
             session.add(
                 EventForeshadowingAction(
                     action_id=identifier,
-                    producer_execution_id=frozen.invocation_id,
+                    producer_execution_id=frozen.execution_id,
                     source_operation_local_key=str(action["source_operation_id"])[:128],
                     operation_order=int(action["operation_order"]),
                     action_type=action["action_type"],
@@ -575,41 +600,35 @@ class EventTrees:
         """章级来源不可变，恢复不折叠或回写正式结构和伏笔状态"""
         session.flush()
 
-    def discard_storage(self, session: Any, work_ids: set[str]) -> None:
-        """只撤销本 work 尚未进入正式发布的声明、动作与来源候选"""
+    def discard_storage(self, session: Any, execution_ids: set[str]) -> None:
+        """只撤销本执行尚未进入正式发布的声明、动作与来源候选"""
         from sqlalchemy import delete, select
 
         from src.storage.models import (
             ChapterAnnotation,
             EventDeclaration,
             EventForeshadowingAction,
-            Execution,
             GraphFact,
-            WorkItem,
         )
 
         identifiers = list(
             session.execute(
                 select(EventDeclaration.declaration_id).where(
                     EventDeclaration.record_id.in_(
-                        select(ChapterAnnotation.record_id)
-                        .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-                        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-                        .where(WorkItem.work_id.in_(work_ids))
+                        select(ChapterAnnotation.record_id).where(
+                            ChapterAnnotation.execution_id.in_(sorted(execution_ids))
+                        )
                     )
                 )
             ).scalars()
         )
         from src.event_trees.persistence import discard_declaration_contributions
 
-        discard_declaration_contributions(session, self.run_id, work_ids, identifiers)
+        discard_declaration_contributions(session, self.run_id, execution_ids, identifiers)
         session.execute(delete(GraphFact).where(GraphFact.declaration_id.in_(identifiers)))
-        executions = select(Execution.execution_id).join(WorkItem, WorkItem.work_id == Execution.work_id).where(
-            WorkItem.work_id.in_(work_ids)
-        )
         session.execute(
             delete(EventForeshadowingAction).where(
-                (EventForeshadowingAction.producer_execution_id.in_(executions))
+                (EventForeshadowingAction.producer_execution_id.in_(sorted(execution_ids)))
                 | (EventForeshadowingAction.source_declaration_id.in_(identifiers))
                 | (EventForeshadowingAction.target_declaration_id.in_(identifiers))
             )
@@ -626,8 +645,8 @@ class EventTrees:
             getattr(self, key).clear()
         self.executions.clear()
         for record in records:
-            author = (str(record.work_id), str(record.execution_id))
-            saved = self.load_saved_work(session, str(record.work_id), str(record.execution_id), str(record.record_id))
+            author = str(record.execution_id)
+            saved = self.load_saved_work(session, str(record.execution_id), str(record.record_id))
             self.nodes.update(saved["nodes"])
             self.actions.update(saved["actions"])
             for key in CONTRIBUTION_KEYS:
@@ -635,8 +654,8 @@ class EventTrees:
             self.saved.add(author)
         self._parents()
 
-    def load_saved_work(self, session: Any, work_id: str, invocation_id: str, annotation_id: str) -> dict[str, Any]:
-        """锁外取得已保存作者的原始声明、实际有效动作与来源候选关系"""
+    def load_saved_work(self, session: Any, execution_id: str, annotation_id: str) -> dict[str, Any]:
+        """锁外取得已保存执行的原始声明、实际有效动作与来源候选关系"""
         from sqlalchemy import select
 
         from src.event_trees import storage_map as smap
@@ -645,22 +664,18 @@ class EventTrees:
             DeclarationParticipant,
             EventDeclaration,
             EventForeshadowingAction,
-            Execution,
             GraphEntity,
             NarrativeLink,
         )
 
         record = session.get(ChapterAnnotation, annotation_id)
-        execution = session.get(Execution, record.execution_id) if record is not None else None
         if (
             record is None
-            or execution is None
-            or execution.work_id != work_id
-            or record.execution_id != invocation_id
+            or record.execution_id != execution_id
             or record.contract_version != "event-tree-declarations-v1"
         ):
-            raise ValueError(f"事件保存身份不一致: {work_id}/{invocation_id}")
-        author = (work_id, invocation_id)
+            raise ValueError(f"事件保存身份不一致: {execution_id}")
+        author = execution_id
         declarations = list(
             session.scalars(select(EventDeclaration).where(EventDeclaration.record_id == annotation_id))
         )
@@ -726,7 +741,7 @@ class EventTrees:
             list(
                 session.scalars(
                     select(EventForeshadowingAction).where(
-                        EventForeshadowingAction.producer_execution_id == invocation_id
+                        EventForeshadowingAction.producer_execution_id == execution_id
                     )
                 )
             )
@@ -763,7 +778,7 @@ class EventTrees:
             }
             for row in session.scalars(
                 select(NarrativeLink).where(
-                    NarrativeLink.producer_execution_id == invocation_id,
+                    NarrativeLink.producer_execution_id == execution_id,
                     NarrativeLink.semantic_source_declaration_id.is_not(None),
                 )
             )
@@ -779,7 +794,7 @@ class EventTrees:
 
     def recover_work(self, snapshot: dict[str, Any]) -> None:
         """同 run 锁内只替换当前作者的贡献，不恢复全书快照"""
-        author = tuple(snapshot["author"])
+        author = str(snapshot["author"])
         self.nodes = {key: value for key, value in self.nodes.items() if value["author"] != author}
         self.connections = {key: value for key, value in self.connections.items() if value["author"] != author}
         self.nodes.update(deepcopy(snapshot["nodes"]))

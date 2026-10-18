@@ -1,7 +1,7 @@
 """
 事件域模型：事件参与者的提交与绑定形态、事件树节点、章级绑定结果
 
-说明: 引用事件值域（本包 vocabulary）与事实图侧共享件（StrictModel、实体引用、
+引用事件值域（本包 vocabulary）与事实图侧共享件（StrictModel、实体引用、
 人物功能/情绪/伏笔值域）拼出章级产物；事实图反而不引用本模块，两侧单向。
 
 类 docstring 会进模型可见面，一律按"说明"写——这是什么字段、能取哪些值、怎么判。
@@ -43,11 +43,10 @@ def _enum_values_text(enum_cls: type[StrEnum]) -> str:
 
 
 class EventParticipantInput(StrictModel):
-    """2026-08-30 用于同时描述事件参与角色和人物动态状态（内部系统形态，实体=规范名）
+    """同时描述事件参与角色和人物动态状态（内部系统形态，实体=规范名）
 
-    2026-09-13 小调用改造后只保留内部形态；2026-09-14 模型面参与记录由
-    write_event 的 characters 数组提交（ParticipantArg），服务端在写入点把
-    实体引用翻成规范名并组装成本形态。
+    模型面参与记录由 write_event 的 characters 数组提交（ParticipantArg），
+    服务端在写入点把实体引用翻成规范名并组装成本形态。
     """
 
     entity: str = Field(
@@ -76,7 +75,7 @@ class EventParticipantInput(StrictModel):
     @field_validator("narrative_role", mode="before")
     @classmethod
     def _reject_event_role_words(cls, value: object) -> object:
-        """2026-08-30 用于阻止事件专属角色词进入人物功能字段"""
+        """阻止事件专属角色词进入人物功能字段"""
         if isinstance(value, str) and value.strip() in _EVENT_ONLY_ROLE_WORDS:
             raise ValueError(
                 "narrative_role 不接受 "
@@ -88,7 +87,7 @@ class EventParticipantInput(StrictModel):
     @field_validator("emotion", mode="before")
     @classmethod
     def _reject_tone_words_in_emotion(cls, value: object) -> object:
-        """2026-08-30 用于阻止对话语气词进入人物情绪分值字段"""
+        """阻止对话语气词进入人物情绪分值字段"""
         if isinstance(value, str) and value.strip() in _TONE_CHINESE_WORDS:
             raise ValueError(
                 f"emotion 不接受 {value.strip()}：该字段是整数分值 -2..2"
@@ -98,7 +97,7 @@ class EventParticipantInput(StrictModel):
 
     @model_validator(mode="after")
     def normalize_participant(self) -> EventParticipantInput:
-        """用于规范化参与者（2026-10-04 起三态字段允许任意缺省，不再成组约束）"""
+        """用于规范化参与者（三态字段允许任意缺省，不再成组约束）"""
         self.entity = normalize_semantic_text(self.entity, label="event.participant.entity")
         if self.action is not None:
             self.action = normalize_semantic_text(self.action, label="event.participant.action")
@@ -108,9 +107,9 @@ class EventParticipantInput(StrictModel):
 class ParticipantArg(EntityNameRef):
     """事件的一个参与者（write_event.characters 数组元素）
 
-    2026-10-04 合同放开：role/narrative_role/action/emotion 均可省略或写偏——缺省值
-    与归一在解析层完成（role 按实体登记类型默认、叙事功能同义词归一、情绪分值钳制），
-    拒绝面只留字段误用（事件角色词写进叙事功能、语气词写进情绪分值）。
+    role/narrative_role/action/emotion 均可省略或写偏——缺省值与归一在解析层完成
+    （role 按实体登记类型默认、叙事功能同义词归一、情绪分值钳制），拒绝面只留字段误用
+    （事件角色词写进叙事功能、语气词写进情绪分值）。
     """
 
     role: EventParticipantRole | None = Field(
@@ -195,7 +194,7 @@ class BoundEvent(StrictModel):
     evidence_paragraph_id: int | None = Field(default=None, ge=0, description="事件所在段的全局段落 ID")
     participants: list[EventParticipantInput] = Field(default_factory=list)
     is_foreshadow_setup: bool = False
-    # 2026-09-13 伏笔入森林：根事件携带伏笔属性（落库到 event_nodes 根列）
+    # 根事件携带伏笔属性（落库到 event_nodes 根列）
     payoff_likelihood: Confidence | None = None
 
     @field_validator("title", "problem", "summary", "event_type")

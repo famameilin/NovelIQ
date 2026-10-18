@@ -1,8 +1,5 @@
 /**
  * TopicWordCloud - 关键词词云组件
- *
- * 2026-04-30，任务：替换 frontend 中与 echarts@6 冲突的 echarts-wordcloud
- * 修改原因：保持 TopicWordCloud 的外部 props 和页面交互基本不变，同时移除 Docker 构建中的 peer dependency 冲突
  */
 import { useEffect, useMemo, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
@@ -69,8 +66,7 @@ const FALLBACK_WIDTH = 320;
 const FALLBACK_HEIGHT = 300;
 
 /**
- * 2026-04-30，任务：替换 frontend 词云布局库
- * 新建原因：词云布局需要稳定的线性映射，避免在更换底层库后出现字号飘忽
+ * 词云布局使用稳定的线性映射，避免字号飘忽
  */
 function scaleWordSize(value: number, minValue: number, maxValue: number) {
   if (maxValue <= minValue) {
@@ -82,8 +78,7 @@ function scaleWordSize(value: number, minValue: number, maxValue: number) {
 }
 
 /**
- * 2026-04-30，任务：替换 frontend 词云布局库
- * 新建原因：d3-cloud 允许注入随机数生成器，这里固定种子以减少同一批数据反复抖动
+ * 固定 d3-cloud 随机数种子，减少同一批数据的布局抖动
  */
 function createSeededRandom(seedSource: string) {
   let seed = 0;
@@ -99,8 +94,7 @@ function createSeededRandom(seedSource: string) {
 }
 
 /**
- * 2026-04-30，任务：替换 frontend 词云布局库
- * 新建原因：保留原先 0/90 度旋转的视觉风格，但改成与词本身绑定的稳定结果
+ * 0/90 度旋转由词本身决定，保证渲染结果稳定
  */
 function getWordRotation(word: Pick<LayoutWord, "name">) {
   let hash = 0;
@@ -113,8 +107,7 @@ function getWordRotation(word: Pick<LayoutWord, "name">) {
 }
 
 /**
- * 2026-04-30，任务：替换 frontend 词云布局库
- * 新建原因：统一把容器尺寸兜底到可布局的范围，避免首帧测量为 0 时直接跳空
+ * 把容器尺寸兜底到可布局范围，避免首帧测量为 0 时直接跳空
  */
 function resolveContainerSize(element: HTMLDivElement) {
   return {
@@ -124,9 +117,7 @@ function resolveContainerSize(element: HTMLDivElement) {
 }
 
 /**
- * 2026-04-28，任务：分析详情页单屏 Tabs 改造
- * 2026-04-30，任务：替换 frontend 中与 echarts@6 冲突的 echarts-wordcloud
- * 修改原因：主题词云需要在统一 tab 工作区内填满可用高度，同时保留独立使用时的最小高度，并维持原有数据入口
+ * 主题词云填满 tab 工作区可用高度，独立使用时保留最小高度
  */
 export function TopicWordCloud({
   topics,
@@ -304,8 +295,7 @@ export function TopicWordCloud({
   const isLayoutReady = placedWords.length > 0;
 
   /**
-   * 2026-04-30，任务：替换 frontend 词云布局库
-   * 新建原因：保留词云 hover 提示语义，并继续显示“所属主题”信息
+   * 词云 hover 提示显示所属主题
    */
   const handleWordPointerMove = (event: ReactPointerEvent<SVGTextElement>, word: LayoutWord) => {
     const containerRect = containerRef.current?.getBoundingClientRect();
@@ -322,8 +312,7 @@ export function TopicWordCloud({
   };
 
   /**
-   * 2026-04-30，任务：替换 frontend 词云布局库
-   * 新建原因：在 SVG 文本离开时及时清理 tooltip，避免残留在卡片上
+   * SVG 文本离开时清理 tooltip，避免残留在卡片上
    */
   const handleWordPointerLeave = () => {
     setTooltip(null);

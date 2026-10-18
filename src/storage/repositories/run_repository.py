@@ -1,11 +1,8 @@
 """
 分析运行记录的数据库操作实现
 
-从 sqlite3.Connection 迁移到 SQLAlchemy Session
-
-2026-10-16 全库 3NF：analysis_runs 的 title/author 改名 source_title/source_author
-（运行开始时的来源观察）；原 request_payload JSON 列拆成六个 force_* 与
-requested_num_topics 具名标量（无请求该组全空，false 仍为实际提交）。
+来源观察写 source_title/source_author；重分析请求以六个 force_* 与
+requested_num_topics 具名标量列保存（无请求该组全空，false 为实际提交）。
 """
 
 from __future__ import annotations
@@ -23,26 +20,24 @@ from .base import BaseRepository
 
 
 def _naive_utcnow() -> datetime:
-    """2026-08-26 无时区列统一落 naive UTC 挂钟
+    """无时区列统一落 naive UTC 挂钟
 
-    与 2026-08-13 heartbeat_at 修复同口径：aware UTC 直接赋给
-    timestamp without time zone 列会被 PG 按会话时区（如 Asia/Shanghai）
-    转换，导致 completed_at 等时间戳虚增 8 小时。
+    aware UTC 直接赋给 timestamp without time zone 列会被 PG 按会话时区转换，
+    导致时间戳虚增时差。
     """
     return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _utc_isoformat(value: datetime | None) -> str | None:
-    """2026-08-26 无时区 UTC 挂钟序列化为 ISO 字符串并标注 Z 后缀
+    """无时区 UTC 挂钟序列化为 ISO 字符串并标注 Z 后缀
 
-    DB 各列统一存 naive UTC 墙钟，序列化显式带 Z 后前端
-    new Date() 可按 UTC 解析并正确显示本地时间。
+    DB 各列统一存 naive UTC 墙钟；显式带 Z 后前端 new Date() 可按 UTC 解析。
     """
     return value.isoformat() + "Z" if value is not None else None
 
 
 def _as_naive_utc(value: datetime | None) -> datetime | None:
-    """2026-08-26 归一化调用方传入的时间戳为 naive UTC 挂钟"""
+    """归一化调用方传入的时间戳为 naive UTC 挂钟"""
     if value is None or value.tzinfo is None:
         return value
     return value.astimezone(UTC).replace(tzinfo=None)
@@ -51,10 +46,8 @@ def _as_naive_utc(value: datetime | None) -> datetime | None:
 _UNSET = object()
 T = TypeVar("T")
 
-#: run 级表的清理顺序（子 → 父）。RESTRICT 外键决定依赖方必须先删；
-#: 两处互相引用按可删方向显式排定：book_cases 先于 case_entries
-#: （pending_event_entry_id 是 RESTRICT 回指），work_items 先于 executions
-#: （diagnosis_session_id 是 RESTRICT 回指）。novels 是全局书目，不在此表。
+#: run 级表的清理顺序（子 → 父）：RESTRICT 外键决定依赖方必须先删；
+#: book_cases 先于 case_entries、work_items 先于 executions（两处 RESTRICT 回指）。
 _RUN_PURGE_ORDER: tuple[str, ...] = (
     "source_evidence",
     "conflict_claims",
@@ -112,7 +105,6 @@ def _run_purge_predicates(run_id: str) -> dict[str, Any]:
         "work_id",
         or_(
             col("work_items", "program_run_id") == run_id,
-            col("work_items", "annotation_run_id") == run_id,
             col("work_items", "diagnosis_session_id").in_(sessions),
         ),
     )
@@ -121,7 +113,7 @@ def _run_purge_predicates(run_id: str) -> dict[str, Any]:
         "execution_id",
         or_(
             col("executions", "session_run_id") == run_id,
-            col("executions", "work_id").in_(work_items),
+            col("executions", "run_id") == run_id,
         ),
     )
     model_calls = ids(
@@ -164,6 +156,15 @@ def _run_purge_predicates(run_id: str) -> dict[str, Any]:
             col("dialogue_records", "current_attribution_execution_id").in_(executions),
         ),
     )
+    entries = ids(
+        "case_entries",
+        "entry_id",
+        or_(
+            col("case_entries", "producer_execution_id").in_(executions),
+            col("case_entries", "candidate_producer_execution_id").in_(executions),
+            col("case_entries", "program_work_id").in_(work_items),
+        ),
+    )
     facts = ids(
         "graph_facts",
         "graph_fact_id",
@@ -192,11 +193,17 @@ def _run_purge_predicates(run_id: str) -> dict[str, Any]:
         "conflict_claims": col("conflict_claims", "producer_execution_id").in_(executions),
         "fact_entity_tags": col("fact_entity_tags", "graph_fact_id").in_(facts),
         "conflict_records": col("conflict_records", "producer_execution_id").in_(executions),
-        "book_cases": col("book_cases", "registration_run_id") == run_id,
-        "case_entries": or_(
-            col("case_entries", "producer_execution_id").in_(executions),
-            col("case_entries", "candidate_producer_execution_id").in_(executions),
+        "book_cases": or_(
+            col("book_cases", "registration_run_id") == run_id,
+            col("book_cases", "pending_event_entry_id").in_(entries),
+            col("book_cases", "case_id").in_(
+                select(m["case_entries"].c.case_id).where(
+                    col("case_entries", "entry_id").in_(entries),
+                    col("case_entries", "case_id").is_not(None),
+                )
+            ),
         ),
+        "case_entries": col("case_entries", "entry_id").in_(entries),
         "graph_facts": col("graph_facts", "graph_fact_id").in_(facts),
         "organization_checks": col("organization_checks", "producer_execution_id").in_(executions),
         "narrative_links": col("narrative_links", "producer_execution_id").in_(executions),
@@ -300,17 +307,15 @@ def _is_set[T](value: T | object) -> TypeGuard[T]:
 class RunRepository(BaseRepository[dict[str, Any]]):
     """运行记录数据访问层
 
-    管理分析运行的创建、查询和状态更新
-    使用 AnalysisRun ORM 模型
-    从 sqlite3.Connection 迁移到 SQLAlchemy Session
+    管理分析运行的创建、查询和状态更新（使用 AnalysisRun ORM 模型）
     """
 
     def _to_dict_with_deserialization(self, run: AnalysisRun) -> dict[str, Any]:
         """
         将 ORM 对象转换为字典并重建 request_payload
 
-        2026-10-16 3NF：请求不再存 JSON 列，按 force_*/requested_num_topics
-        列重建与 ReanalyzeRequest 同键的字典（无请求为 None）。
+        按 force_*/requested_num_topics 列重建与 ReanalyzeRequest 同键的
+        字典（无请求为 None）。
         """
         request_payload_dict = _request_payload_from_columns(run)
 
@@ -458,8 +463,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import func, update
 
-        # 2026-08-13 P2：heartbeat_at 列无时区，默认值统一落 naive UTC 挂钟
-        # （避免 aware UTC 被 PG 按会话时区转换，导致 resume 窗口/孤儿回收误判）
+        # heartbeat_at 列无时区，统一落 naive UTC 挂钟，避免 PG 按会话时区转换导致误判
         now = heartbeat_at or _naive_utcnow()
         stmt = (
             update(AnalysisRun)
@@ -470,9 +474,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
                 status="running",
                 worker_id=worker_id,
                 heartbeat_at=now,
-                # 2026-10-04 重领（诊断重试触发的 re-claim）保留首次开始时间：
-                # started_at 曾被覆盖成最后一次 claim 时刻，两次 run 的表面耗时
-                # 因此缩水成 13m36s/7m26s（真实 16h46m/4h09m）
+                # 重领（诊断重试触发的 re-claim）保留首次开始时间：
+                # started_at 不能被覆盖成最后一次 claim 的时刻
                 started_at=func.coalesce(AnalysisRun.started_at, now),
                 updated_at=now,
             )
@@ -554,7 +557,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         if _is_set(task_kind):
             run.task_kind = task_kind
         if _is_set(request_payload):
-            # 2026-10-16 3NF：请求整组重写为具名列；未提交口径置空
+            # 请求整组重写为具名列；未提交口径置空
             for field, value in _request_payload_columns(request_payload).items():
                 setattr(run, field, value)
         if _is_set(cancel_requested):
@@ -572,7 +575,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def get_run_by_run_id_prefix(self, run_id_prefix: str) -> dict[str, Any] | None:
         """按 run_id 前缀查询（LIKE 转义 %/_/\，limit(1) 防多记录异常）。Args: run_id_prefix；Returns: 记录或 None。"""
-        # 2026-08-13 P2-9：前缀中的 %/_/\\ 按字面字符匹配，避免被 LIKE 当作通配符
+        # 前缀中的 %/_/\\ 按字面字符匹配，避免被 LIKE 当作通配符
         escaped_prefix = run_id_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         stmt = (
             select(AnalysisRun)
@@ -588,8 +591,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
     def delete_run(self, run_id: str) -> bool:
         """按运行范围删除全部 run 级数据，由调用方统一提交
 
-        2026-10-16 全库 3NF：35 表里只有 9 张带 run_id 列，其余 run 级表
-        按真实外键链解析归属；删除按 _RUN_PURGE_ORDER 的显式子→父顺序走，
+        35 表里只有 9 张带 run_id 列，其余 run 级表按真实外键链解析归属；
+        删除按 _RUN_PURGE_ORDER 的显式子→父顺序走，
         保证 RESTRICT 外键（含 book_cases↔case_entries、executions↔work_items
         两处互相引用）先删依赖方。novels 是全局书目，不属于任何 run，不删。
         """
@@ -624,8 +627,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "running")
-            # 2026-08-14 P2-12：孤儿回收同时落 error/completed_at，
-            # 前端 failed 不再缺错误原因与完成时间
+            # 孤儿回收同时落 error/completed_at，使 failed 带错误原因与完成时间
             .values(
                 status="failed",
                 error="进程重启，运行中的任务已终止",

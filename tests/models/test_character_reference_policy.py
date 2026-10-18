@@ -7,11 +7,7 @@ from src.fact_graph.character_reference_policy import (
 
 
 def test_reference_policy_blocks_raw_pronoun_from_global_character() -> None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 锁定 raw 代词默认不能进入 global character 主链。
-    """
+    """锁定 raw 代词默认不能进入 global character 主链。"""
     decision = decide_character_reference("我", chapter_id=7)
 
     assert decision.reference_kind == "pov_slot"
@@ -21,11 +17,7 @@ def test_reference_policy_blocks_raw_pronoun_from_global_character() -> None:
 
 
 def test_reference_policy_allows_explicit_global_name() -> None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 显式实名仍应直接进入角色榜、图谱和 diagnosis 主链。
-    """
+    """显式实名仍应直接进入角色榜、图谱和 diagnosis 主链。"""
     decision = decide_character_reference("汪淼")
 
     assert decision.reference_kind == "global_character"
@@ -34,11 +26,7 @@ def test_reference_policy_allows_explicit_global_name() -> None:
 
 
 def test_reference_policy_allows_resolved_pronoun_as_global_target_only() -> None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 已解析代词只能用 resolved_global_name 进入主链，surface 本身不能变成全局实体。
-    """
+    """已解析代词只能用 resolved_global_name 进入主链，surface 本身不能变成全局实体。"""
     decision = decide_character_reference("我", resolved_global_name="汪淼")
 
     assert decision.reference_kind == "pov_slot"
@@ -48,22 +36,14 @@ def test_reference_policy_allows_resolved_pronoun_as_global_target_only() -> Non
 
 
 def test_filter_global_character_names_dedupes_and_filters_references() -> None:
-    """
-    创建时间: 2026-04-29
-    任务: 角色引用分层重构
-    新建原因: 各读侧共享 helper 需要同时覆盖去重和代词过滤。
-    """
+    """各读侧共享 helper 需要同时覆盖去重和代词过滤。"""
     result = filter_global_character_names(["我", "叶文洁", "叶文洁", "大史"])
 
     assert result == ["叶文洁", "大史"]
 
 
 def test_reference_policy_recognizes_explicit_reference_slot_as_non_global_name() -> None:
-    """
-    创建时间: 2026-04-29
-    任务: Phase4 / RAG reference_slots 合同
-    新建原因: slot 前缀必须被显式识别，避免 Phase4 / graph / diagnosis 把 slot 当成正式角色名。
-    """
+    """slot 前缀必须被显式识别，避免 Phase4 / graph / diagnosis 把 slot 当成正式角色名。"""
     slot_name = "POV_SLOT_C7_我"
 
     assert is_reference_slot_name(slot_name) is True

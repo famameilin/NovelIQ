@@ -1,4 +1,4 @@
-"""主题建模工作流（段落粒度 §11.1 + 分析能力扩展路线图 §5.8-5.10）。
+"""主题建模工作流（段落粒度）。
 
 paragraphs 为唯一事实源；训练排除短段，推断覆盖所有有 token 段落。
 结果按冻结结构落库：
@@ -7,7 +7,7 @@ paragraphs 为唯一事实源；训练排除短段，推断覆盖所有有 token
 - paragraph_metrics.inference_*：每个段落一行推断状态与 token 分母
 - paragraph_topics：完整 K 维主题分布（top_n 只属于 API 展示裁剪）
 
-2026-10-16 全库 3NF：固定推断说明由固定状态合同投影，工作流只传状态。
+固定推断说明由固定状态合同投影，工作流只传状态。
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def resolve_num_topics(
     max_topics: int,
     scaling_divisor: int,
 ) -> int:
-    """N2：未显式指定 num_topics 时按训练文档数在 [min_topics, max_topics] 内缩放。
+    """未显式指定 num_topics 时按训练文档数在 [min_topics, max_topics] 内缩放。
 
     缩放公式：valid_doc_count // scaling_divisor，缺省边界回落最小值。
     """
@@ -61,7 +61,7 @@ async def run_topic_model(
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, int]:
-    """执行主题建模（§5.8-5.10），训练用达标段落，推断覆盖所有有 token 段落。
+    """执行主题建模，训练用达标段落，推断覆盖所有有 token 段落。
 
     写库顺序：LDA 实际构建列 analysis_runs.lda_* → 段落推断状态
     paragraph_metrics.inference_* → 完整分布 paragraph_topics；同 run 重跑整体覆盖
@@ -133,8 +133,7 @@ async def run_topic_model(
         )
         return 0, 0
 
-    # 2026-08-16 N2：未显式指定 num_topics 时按训练文档数缩放，
-    # 避免 25 个主题在短书上退化为大量无行主题/权重偏斜。
+    # 未显式指定 num_topics 时按训练文档数缩放，避免短书上主题退化
     _num_topics = resolve_num_topics(
         num_topics,
         len(valid_docs),
@@ -157,12 +156,12 @@ async def run_topic_model(
     logger.info(f"Model trained. Inferring topics for {total_paragraphs} paragraphs...")
 
     # 模型 artifact 落盘后先确定 artifact_key，再写模型契约
-    # （读取侧的 artifact_key 按同一 resolve_model_dir 规则投影，不再落列）
+    # （读取侧的 artifact_key 按同一 resolve_model_dir 规则投影，不落列）
     model_dir = resolve_model_dir(run_id)
     trainer.save_model(topic_model, model_dir)
     artifact_key = str(model_dir.relative_to(resolve_project_root()).as_posix())
 
-    # 推断覆盖全部段落：完整 K 维分布 + 每段一行推断状态（§5.9/§5.10）
+    # 推断覆盖全部段落：完整 K 维分布 + 每段一行推断状态
     inference_rows: list[tuple[int, int, int, str, str | None, float | None]] = []
     topic_rows: list[tuple[int, int, float]] = []
     complete_count = 0
@@ -210,7 +209,7 @@ async def run_topic_model(
         )
 
     # filter_extremes=False 与 no_below/no_above=null 是当前算法合同
-    # （train(filter_extremes=False) 已在调用处固定），不再作为参数副本存储
+    # （train(filter_extremes=False) 已在调用处固定），不作为参数副本存储
     parameters = dict(config.to_parameters_dict())
 
     paragraph_repo.insert_topic_model_run(

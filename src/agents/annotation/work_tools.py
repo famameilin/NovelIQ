@@ -21,7 +21,7 @@ from .tools import _forbid_undeclared_args
 
 def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any]:
     ledger = execution.ledger
-    author = (execution.work_id, execution.invocation_id)
+    author = execution.invocation_id
     tools = [
         candidate
         for candidate in build_annotation_tools(query_service, ledger)
@@ -66,8 +66,8 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         value = agent.event_trees.read(node_id)
         if execution.event_reads.get(node_id) != value:
             raise ValueError(f"declaration_id={identifier} 尚未读取当前内容，请先 read_event")
-        if (value["work_id"], value["producer_invocation_id"]) != author and not value["saved"]:
-            raise ValueError(f"declaration_id={identifier} 所属 work 尚未保存")
+        if value["producer_invocation_id"] != author and not value["saved"]:
+            raise ValueError(f"declaration_id={identifier} 所属执行尚未保存")
         # 允许读取后文上下文不等于允许把后文事件记成本章已经披露的变化
         if query_service.chapter_orders[value["chapter_id"]] > query_service.current_chapter_order:
             raise ValueError(f"declaration_id={identifier} 来源章晚于当前章，不能写入本章变化")
@@ -88,7 +88,7 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
 
         if not all(value.strip() for value in (subject_title, description, after)) or before == after:
             raise ValueError("情节推进需要非空主体、描述和变化后的状态，前后不能相同")
-        if ledger.role not in {"solo", "event"}:
+        if ledger.role not in {"annotation", "event"}:
             raise ValueError("情节推进由事件角色写入")
         # 冻结载荷 event_id 仅为内部来源别名，落库写 source_declaration_id
         event_node_id = declaration_reference_id(declaration_id) if declaration_id else None
@@ -137,7 +137,7 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         """引用已埋伏笔（is_foreshadow_setup=True 的树根声明）记录强化或疑似回收；
         action_type 取 'reinforce'（强化）或 'payoff'（疑似回收）英文常量；
         引用前须先 read_event 读取声明；正式事件身份在诊断发布时绑定"""
-        if ledger.role not in {"solo", "event"}:
+        if ledger.role not in {"annotation", "event"}:
             raise ValueError("伏笔动作由事件角色写入")
         root_id = declaration_reference_id(source_declaration_id)
         root = require_declaration(source_declaration_id)
@@ -170,6 +170,7 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         )
 
     def on_claim() -> None:
+        # 接手新案例后，此前的连接与读取不再代表本案例
         execution.case_connections.clear()
         execution.case_reads.clear()
 
@@ -218,8 +219,8 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         declaration_id = content["declaration_id"]
         read = agent.event_trees.read(declaration_id)
         execution.event_reads[declaration_id] = read
-        # 2026-10-15 用户裁定「建一个事件进一个池」：声明落地后程序侧立刻把该事件
-        # 登记进全书共享案例池（case_type=event），诊断期按事件并发派工时据此取材
+        # 事件声明落地后立刻登记进全书共享案例池（case_type=event），诊断期按事件并发
+        # 派工时据此取材。
         agent.case_pool.register_event_case(
             declaration_id=declaration_id,
             title=read["content"]["title"],

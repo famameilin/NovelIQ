@@ -1,5 +1,5 @@
 /**
- * TopicDistributionChart - 主题完整分布柱状图（赛道 D）
+ * TopicDistributionChart - 主题完整分布柱状图
  *
  * book 视图：全书 K 维完整分布（含零权重主题，不补零截断）；
  * chapter 视图：按 chapters.sequence 排列的章节级 K 维堆积柱。

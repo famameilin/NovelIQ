@@ -50,7 +50,7 @@ export const EMOTION_TREND_SERIES_CONFIG: readonly EmotionTrendSeriesConfig[] = 
   },
 ] as const;
 
-/** 2026-08-16 读取情绪窗口系列值，保证概览预览与完整曲线使用相同的后端口径 */
+/** 读取情绪窗口系列值，保证概览预览与完整曲线使用相同的后端口径 */
 export function getEmotionTrendSeriesValue(
   window: EmotionTrendWindow,
   config: EmotionTrendSeriesConfig,
@@ -60,7 +60,7 @@ export function getEmotionTrendSeriesValue(
   return config.useSmoothed ? smoothedValue ?? rawValue : rawValue;
 }
 
-/** 2026-08-16 格式化 ECharts tooltip 的数值，兼容 value 为坐标数组的返回形态 */
+/** 格式化 ECharts tooltip 的数值，兼容 value 为坐标数组的返回形态 */
 export function formatEmotionTrendTooltipValue(value: unknown): string {
   const numericValue = Array.isArray(value) ? value[1] : value;
   return typeof numericValue === "number" && Number.isFinite(numericValue)

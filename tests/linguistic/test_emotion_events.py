@@ -1,4 +1,4 @@
-"""LTP sdp 情绪事件与 mNEG 修正测试（2026-09-05 B 批，纯函数，不加载模型）"""
+"""LTP sdp 情绪事件与 mNEG 修正测试（纯函数，不加载模型）"""
 
 from __future__ import annotations
 

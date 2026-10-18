@@ -1,5 +1,4 @@
-"""
-SSE 路由测试
+"""SSE 路由测试
 
 覆盖 src/api/routes/sse.py 的 sse_endpoint：
 - 事件透传（type -> event 字段、data -> JSON 字符串、seq -> id 字段）
@@ -7,7 +6,7 @@ SSE 路由测试
 - last_seq 解析：Last-Event-ID 头优先、查询参数兜底、非法值忽略
 - 客户端断开时的清理（disconnect 调用）
 
-2026-08-12 创建，补齐 SSE 路由零覆盖缺口。
+创建，补齐 SSE 路由零覆盖缺口。
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from src.api.routes.sse import _resolve_last_seq, sse_endpoint
 
 @pytest.fixture(autouse=True)
 def _allow_existing_task(monkeypatch):
-    """2026-08-14 P2-11：默认放行任务存在性/归属校验（校验本身由 404 用例单独覆盖）"""
+    """默认放行任务存在性/归属校验（校验本身由 404 用例单独覆盖）"""
 
     monkeypatch.setattr("src.api.routes.sse._task_run_belongs_to_novel", lambda task_id, novel_id: True)
 
@@ -118,7 +117,7 @@ async def test_sse_prefers_last_event_id_header_over_query_param() -> None:
         chunks = [chunk async for chunk in response.body_iterator]
 
     assert chunks == []
-    # 2026-08-14 P1-6：Last-Event-ID 头优先（浏览器原生重连每次携带最新已收 id），
+    # Last-Event-ID 头优先（浏览器原生重连每次携带最新已收 id），
     # query 中的 last_seq 是前端重建时冻结的旧值，若 query 优先会重复回放
     mock_em.connect.assert_awaited_once_with("task-1", last_seq=3)
 
@@ -161,7 +160,7 @@ def test_resolve_last_seq_returns_none_when_both_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_sse_returns_404_for_unknown_task() -> None:
-    """2026-08-14 P2-11：任务不存在时 SSE 端点返回 404，不建立订阅"""
+    """任务不存在时 SSE 端点返回 404，不建立订阅"""
     request = _make_request([True])
 
     with (

@@ -66,8 +66,7 @@ vi.mock("d3-cloud", () => ({
 }));
 
 /**
- * 2026-04-30，任务：为替换后的 TopicWordCloud 补定向测试
- * 新建原因：统一构造主题输入，覆盖重复词聚合和颜色映射场景
+ * 统一构造主题输入，覆盖重复词聚合和颜色映射场景
  */
 function createTopics(): Topic[] {
   return [

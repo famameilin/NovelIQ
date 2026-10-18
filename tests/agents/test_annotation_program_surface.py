@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage
 
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.program_contract import PROGRAM_TOOL_NAME
-from src.agents.annotation.prompts import build_subagent_message
+from src.agents.annotation.prompts import build_agent_message
 from src.agents.annotation.text_search import TextSearchCandidate
 from src.agents.annotation.tool_batch import _build_tool_batch_node
 from src.fact_graph.graph import FactGraph
@@ -119,7 +119,7 @@ def test_dialogue_candidate_prompts_report_actual_total(empty: bool) -> None:
     ledger = _ledger()
     candidates = [] if empty else ledger.dialogue_candidates
     messages = [
-        build_subagent_message(
+        build_agent_message(
             role="dialogue",
             paragraph_info=ledger.paragraph_info,
             candidates=candidates,

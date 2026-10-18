@@ -245,7 +245,7 @@ describe("NovelDetailPage", () => {
     useNovelStore.setState({ currentNovelId: null, currentTaskId: null, novelsCache: [] });
   });
 
-  it("跨小说切换后旧任务不得用于新小说查询或固化成 URL（P1-2 修复）", async () => {
+  it("跨小说切换后旧任务不得用于新小说查询或固化成 URL", async () => {
     currentNovelId = "novel-2";
     currentSearchParams = "";
     // store 仍停留在小说 1 的旧任务，页面已切到小说 2
@@ -262,7 +262,7 @@ describe("NovelDetailPage", () => {
     expect(await screen.findByRole("button", { name: "开始分析" })).toBeInTheDocument();
   });
 
-  it("URL deep-link 任务优先于旧 store 状态，不被旧任务回写覆盖（P1-2 修复）", async () => {
+  it("URL deep-link 任务优先于旧 store 状态，不被旧任务回写覆盖", async () => {
     currentNovelId = "novel-2";
     currentSearchParams = "task_id=task-new";
     useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: "task-old", novelsCache: [] });

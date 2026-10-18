@@ -1,5 +1,5 @@
 /**
- * 2026-08-12 用于验证 useSSEListener 默认注册完整事件类型集：
+ * 用于验证 useSSEListener 默认注册完整事件类型集：
  * 防止 tool_call 等事件类型被遗漏导致前端静默丢弃后端事件
  */
 import { act, render } from "@testing-library/react";
@@ -96,7 +96,7 @@ describe("useSSEListener", () => {
     expect(registered).toEqual(new Set(["llm_output", "tool_call"]));
   });
 
-  it("url 变化（taskId 切换）重建连接时不携带旧 last_seq（P1-8 跨任务串流修复）", () => {
+  it("url 变化（taskId 切换）重建连接时不携带旧 last_seq", () => {
     const view = render(<Harness url="http://test/api/events/tasks/task-a" />);
 
     // 后端按契约逐条下发 id: 字段（单调递增 seq）
@@ -109,7 +109,7 @@ describe("useSSEListener", () => {
       data: JSON.stringify({ action: "output", content: "第二段" }),
     });
 
-    // 2026-08-13 P1-8: 切换任务重建 EventSource 时清空 last_seq，避免新任务
+    // 切换任务重建 EventSource 时清空 last_seq，避免新任务
     // 早期事件被后端按旧任务 seq 过滤跳过（跨任务串流）；同任务断线重连
     // 由浏览器原生 Last-Event-ID 头续传
     view.rerender(<Harness url="http://test/api/events/tasks/task-b" />);
@@ -175,7 +175,7 @@ describe("useSSEListener", () => {
     expect(MockEventSource.instances[1].url).toBe("http://test/api/events/tasks/task-b");
   });
 
-  it("同一任务下 url 重建（effect 重建）保留 last_seq，query 只回放增量（P1-1 修复）", () => {
+  it("同一任务下 url 重建（effect 重建）保留 last_seq，query 只回放增量", () => {
     const view = render(<Harness url="http://test/api/events/tasks/task-a" />);
 
     MockEventSource.fire("llm_output", {
@@ -199,7 +199,7 @@ describe("useSSEListener", () => {
     );
   });
 
-  it("路径段形式 task_id 同一任务重建保留 last_seq，跨任务清空（P1-1 修复）", () => {
+  it("路径段形式 task_id 同一任务重建保留 last_seq，跨任务清空", () => {
     const view = render(<Harness url="http://test/api/events/tasks/task-a" />);
 
     MockEventSource.fire("llm_output", {
@@ -216,7 +216,7 @@ describe("useSSEListener", () => {
     expect(MockEventSource.instances[2].url).toBe("http://test/api/events/tasks/task-b");
   });
 
-  it("监听启停（url 变 null 再恢复同一任务）保留 last_seq（P1-1 修复）", () => {
+  it("监听启停（url 变 null 再恢复同一任务）保留 last_seq", () => {
     const view = render(<Harness url="http://test/api/events/tasks/task-a" />);
 
     MockEventSource.fire("stage_progress", {
@@ -236,7 +236,7 @@ describe("useSSEListener", () => {
     );
   });
 
-  it("组件真正卸载后重挂载同一任务仍保留 last_seq（P1-6 修复：此前 useRef 随实例销毁导致全量回放）", () => {
+  it("组件真正卸载后重挂载同一任务仍保留 last_seq", () => {
     const view = render(<Harness url="http://test/api/events/tasks/task-a" />);
 
     MockEventSource.fire("llm_output", {

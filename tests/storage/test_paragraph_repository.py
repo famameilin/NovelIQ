@@ -138,7 +138,7 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
         assert row.source_paragraph_index == span.source_paragraph_index
         assert row.fragment_index == span.fragment_index
         assert row.local_start_char == span.local_start_char
-        # 2026-10-16 3NF：local_end_char/global/char_count 是读取投影
+        # local_end_char/global/char_count 是读取投影
         assert row.local_end_char == span.local_end_char
         assert row.global_start_char == span.global_start_char
         assert row.global_end_char == span.global_end_char
@@ -149,7 +149,7 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
 
 
 def test_paragraph_token_count_projection_comes_from_metrics(db_session) -> None:
-    """2026-10-16 3NF：token_count 从 paragraph_metrics 读取投影（预处理与指标同批 token）"""
+    """token_count 从 paragraph_metrics 读取投影（预处理与指标同批 token）"""
     run_id = _create_run(db_session)
     chunks = _single_chunk(CHUNK_TEXT, start=0)
     _insert_chapter_texts(db_session, run_id, chunks)
@@ -314,7 +314,7 @@ def test_insert_paragraphs_rejects_inconsistent_global_offset(db_session) -> Non
 def test_db_constraint_rejects_duplicate_local_start_in_chapter(db_session) -> None:
     """绕过 repository 校验直接插入同章重复 local_start_char 时触发 IntegrityError
 
-    2026-10-16 3NF：local_end_char 不再落列，DDL 层不再有 local_start < local_end 检查，
+    local_end_char 不再落列，DDL 层不再有 local_start < local_end 检查，
     同章定位唯一性（uq_paragraphs_run_chapter_local_start）仍是数据库约束。
     """
     run_id = _create_run(db_session)

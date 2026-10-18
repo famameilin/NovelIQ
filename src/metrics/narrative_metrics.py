@@ -1,13 +1,9 @@
 """
 叙事曲线指标入口
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分 src/metrics/narrative_metrics.py
-说明: 本模块保留独立曲线指标（高潮间距/中段塌陷/事件密度/悬念率/高潮剖面）；
-      数据类与峰值工具迁至 narrative_primitives.py、三幕结构诊断迁至
-      three_act_structure.py，并在此 re-export（timeline_phase、computers、
-      src.metrics.__init__ 与测试的导入路径零改动）。
+本模块保留独立曲线指标（高潮间距/中段塌陷/事件密度/悬念率/高潮剖面）；
+数据类与峰值工具在 narrative_primitives.py、三幕结构诊断在
+three_act_structure.py，并在此 re-export。
 """
 
 from __future__ import annotations
@@ -114,7 +110,7 @@ def compute_climax_profile(
     positions: Sequence[float],
     tension_scores: Sequence[float],
 ) -> dict:
-    """多高潮剖面（§10/§19.8 字符坐标版）：真实位置三位小数。"""
+    """多高潮剖面（字符坐标版）：真实位置三位小数。"""
     if not tension_scores:
         return {
             "climax_count": 0,

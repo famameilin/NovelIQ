@@ -1,7 +1,6 @@
 """持久 SSE 消息的可见性查询，游标分配与原始消息写入委托 storage
 
-2026-10-16 全库 3NF 改造：路由（run/章节/事件类型）与当时实际发出的消息字节
-都在 event_outbox 宽表上按列读取，重放不按当前业务状态重建。
+消息按 event_outbox 宽表列读取（run/章节/事件类型与实际发出的字节），重放不按当前业务状态重建。
 """
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ class SseMessageRepository(OutboxRecords):
                     if not self._visible_to_display(state, data):
                         continue
                     messages.append({"type": payload.get("type"), "data": data, "seq": int(stream_id)})
-                    # 与旧查询同口径：只返回过滤后的一整页，短页表示其后没有更多可见消息
+                    # 只返回过滤后的一整页，短页表示其后没有更多可见消息
                     if len(messages) >= limit:
                         break
             finally:
@@ -72,13 +71,9 @@ class SseMessageRepository(OutboxRecords):
 
     @staticmethod
     def _visible_to_display(state: DisplayState, data: dict[str, Any]) -> bool:
-        """旧 SQL 展示过滤的等价重写：工作可见性、执行一致性与退役执行"""
+        """展示过滤：执行一致性与退役执行（作用域取实际阶段上下文）"""
         scope = display_scope(data)
         invocation = str(data.get("invocation_id") or "")
-        work_id = data.get("work_id")
-        # 带工作身份的展示只接受当前在编执行；无工作身份的展示按阶段作用域判断
-        if work_id and work_id not in state.executions:
-            return False
         if scope in state.suspended:
             return False
         for key, current in state.executions.items():

@@ -1,18 +1,14 @@
 """
-原文自然段语义向量 pgvector schema 管理（2026-10-16 全库 3NF 冻结结构）
+原文自然段语义向量 pgvector schema 管理
 
-段落语义向量不再是独立表：向量行是 paragraph_features 的 semantic_vector 行
-（通用 vector 列，列宽按运行模型合同解析）。本模块负责建/校验该列上的
-HNSW 检索索引：
+语义向量是 paragraph_features 的 semantic_vector 行（通用 vector 列）；
+本模块负责建/校验该列上的 HNSW 检索索引：
 
-- 向量列（paragraph_features.vector_value）由 ORM/新库初始化建立，本模块不建表、
-  不 DROP 任何对象；结构或索引不兼容时校验失败即停止
-- 语义向量的 HNSW 索引按维度建立**部分表达式索引**：同一列里还有不同维度的
-  POS 向量行与其它运行的历史维度，只有固定维度表达式 + 维度谓词才能安全建索引，
-  且查询侧必须带同谓词才能命中（见 embedding_ops.search_similar_paragraphs）
-- pgvector 对 vector 类型的 HNSW 索引上限 2000 维；更高维（如 Qwen3-Embedding-4B
-  的 2560 维）必须改用 halfvec 表达式索引（上限 4000 维），形态判定共用
-  hnsw_index_uses_halfvec
+- 向量列由 ORM/新库初始化建立，本模块不建表、不 DROP 任何对象
+- HNSW 索引按维度建立部分表达式索引：固定维度表达式 + 维度谓词，
+  查询侧必须带同谓词才能命中
+- vector 类型 HNSW 索引上限 2000 维，更高维必须改用 halfvec 表达式索引
+  （上限 4000 维），形态判定共用 hnsw_index_uses_halfvec
 """
 
 from __future__ import annotations
@@ -35,12 +31,12 @@ _REQUIRED_FEATURE_COLUMNS = {
     "vector_value",
 }
 
-# 2026-09-25 pgvector 对 vector 类型的 HNSW 索引上限 2000 维
+# pgvector 对 vector 类型的 HNSW 索引上限 2000 维
 _HNSW_MAX_VECTOR_DIM = 2000
 
 
 def _runtime_schema() -> str:
-    """2026-08-07 用于解析当前连接使用的安全 PostgreSQL schema"""
+    """解析当前连接使用的安全 PostgreSQL schema"""
     schema = get_database_schema() or "public"
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
         raise ValueError(f"invalid runtime schema: {schema}")
@@ -48,7 +44,7 @@ def _runtime_schema() -> str:
 
 
 def _get_table_columns(session: Session, table_name: str) -> set[str]:
-    """2026-08-07 用于在当前事务连接中读取运行 schema 的列集合"""
+    """在当前事务连接中读取运行 schema 的列集合"""
     schema = _runtime_schema()
     return {
         str(column_name)
@@ -67,7 +63,7 @@ def _get_table_columns(session: Session, table_name: str) -> set[str]:
 
 
 def _get_column_format_type(session: Session, table_name: str, column_name: str) -> str | None:
-    """2026-10-06 用于读取指定列的格式化数据库类型"""
+    """读取指定列的格式化数据库类型"""
     schema = _runtime_schema()
     return session.execute(
         text(
@@ -84,7 +80,7 @@ def _get_column_format_type(session: Session, table_name: str, column_name: str)
 
 
 def hnsw_index_uses_halfvec(embedding_dim: int) -> bool:
-    """2026-09-25 用于判定段落向量 HNSW 索引是否需要 halfvec 表达式形态"""
+    """判定段落向量 HNSW 索引是否需要 halfvec 表达式形态"""
     return embedding_dim > _HNSW_MAX_VECTOR_DIM
 
 
@@ -93,12 +89,10 @@ def _semantic_hnsw_index_name(embedding_dim: int) -> str:
 
 
 def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
-    """2026-08-07 用于准备原文自然段语义向量的检索索引（按实测维度）
+    """准备原文自然段语义向量的检索索引（按实测维度）
 
-    2026-10-16 3NF：不再动态建表（语义向量是 paragraph_features 的行）：
-    只校验目标表/列就绪，并按维度建立语义向量的 HNSW 部分表达式索引。
-    表结构不兼容（缺列/列类型不是 vector）时抛出 ValueError，由新库初始化
-    或另行授权的重建处理，运行读写期间不销毁任何已有结果。
+    只校验目标表/列就绪，并按维度建立语义向量的 HNSW 部分表达式索引；
+    表结构不兼容（缺列/列类型不是 vector）时抛出 ValueError。
     """
     if embedding_dim <= 0:
         raise ValueError("embedding_dim must be positive")
@@ -153,7 +147,7 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
 
 
 def _hnsw_index_exists(session: Session, schema: str) -> bool:
-    """2026-08-13 用于校验 paragraph_features 是否已建语义向量 HNSW 索引"""
+    """校验 paragraph_features 是否已建语义向量 HNSW 索引"""
     return (
         session.execute(
             text(
@@ -173,10 +167,9 @@ def _hnsw_index_exists(session: Session, schema: str) -> bool:
 
 
 def validate_paragraph_embeddings_schema(session: Session) -> None:
-    """2026-08-07 用于校验原文自然段向量存储就绪（2026-10-16 3NF 目标结构）
+    """校验原文自然段向量存储就绪
 
-    2026-09-10 维度不再是配置：维度校验在 ensure（按探测值）完成，
-    这里只做结构与索引校验。
+    这里只做结构与索引校验，维度校验在 ensure（按探测值）完成。
     """
     schema = _runtime_schema()
     table_exists = session.execute(
@@ -193,5 +186,5 @@ def validate_paragraph_embeddings_schema(session: Session) -> None:
             f"expected={sorted(_REQUIRED_FEATURE_COLUMNS)} missing={sorted(missing)}"
         )
     if not _hnsw_index_exists(session, schema):
-        # 2026-08-13 P2：索引缺失时不再静默通过，避免语义检索继续全表扫描
+        # 索引缺失时抛出异常，避免语义检索继续全表扫描
         raise ValueError("paragraph_features missing HNSW index on vector_value (semantic_vector)")

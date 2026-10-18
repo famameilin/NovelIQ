@@ -1,13 +1,7 @@
 """
-段落特征结果表 ORM 模型定义（2026-10-16 全库 3NF 改造）
+段落特征结果表 ORM 模型定义
 
-paragraph_features 是封闭种类的段落向量与标量计算结果唯一落点：
-- semantic_vector：段落语义向量（嵌入模型，列宽由运行合同解析并校验）
-- pos_vector:<pos_group>：段落内某归一词性分组的 Word2Vec 加权均值向量
-  （in_vocabulary_token_count=0 时向量为空，不伪造零向量）
-- tension_z：表层张力 z 分数（sigmoid 展示值读取投影，不保存）
-- lowess_net_density / lowess_surface_tension：两条 LOWESS 平滑序列
-- sentence_short/medium/long/compound/parallel_candidate：五个句式分类计数
+paragraph_features 是封闭种类的段落向量与标量计算结果唯一落点。
 
 feature_code 是封闭数学结果目录，不是任意属性名；三种值列（向量/标量/计数）
 恰一适用，不加可由 feature_code 还原的重复 kind/group 列；模型、维度与曲线

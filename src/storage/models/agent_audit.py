@@ -1,15 +1,8 @@
 """
-模型与工具调用审计及消息发件箱 ORM 模型（2026-10-16 全库 3NF 改造）
+模型与工具调用审计及消息发件箱 ORM 模型
 
-- model_calls：每条真实模型请求及该请求的审计观测（Agent 上下文或 standalone
-  上下文恰一；用量分项/供应商实报总量/费用/五类计时/通信文档均为本表明确列）
-- agent_tool_calls：每次真实外层工具调用及该调用的审计观测（原始参数与实际
-  执行参数分别保存，工具耗时独立测量）
-- event_outbox：实际消息、路由、游标与投递时间（emitted_bytes 原样重放）
-
-审计保持独立短事务；合成总量/合成耗时读取计算（turn_ms = model_ms + tool_wall_ms
-按原规则），供应商实报与程序 fallback 明确区分；bytes 文档仅原样审计/展示，
-不用于正式业务查询/修改。
+审计保持独立短事务；turn_ms = model_ms + tool_wall_ms 为读取计算；
+供应商实报与程序 fallback 明确区分；bytes 文档仅原样审计/展示，不用于业务查询/修改。
 """
 
 from __future__ import annotations

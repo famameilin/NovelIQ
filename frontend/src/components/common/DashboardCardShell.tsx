@@ -25,11 +25,9 @@ interface DashboardCardShellProps {
 }
 
 /**
- * 2026-04-21，任务：仪表盘组件视觉重构
  * 让仪表盘业务组件统一复用 MetricCard 的容器、图标色块与 hover 反馈
  *
- * 2026-04-28，任务：分析详情页单屏布局收口
- * 修改原因：卡片 hover 的阴影过渡改为只过渡视觉属性，避免和位移动画错拍。
+ * 卡片 hover 的阴影只过渡视觉属性，避免和位移动画错拍
  */
 export function DashboardCardShell({
   title,

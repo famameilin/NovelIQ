@@ -16,12 +16,7 @@ def _fetch_token_usage_stats(run_id, source):
 
 
 class _StatsRepoStub:
-    """
-    结果页 token_usage fetcher 的最小 repo stub。
-
-    创建时间: 2026-04-22
-    任务: unify-estimated-token-accounting
-    """
+    """结果页 token_usage fetcher 的最小 repo stub。"""
 
     def fetch_token_usage_stats(self, run_id: str) -> dict:
         assert run_id == "run-1"
@@ -50,11 +45,7 @@ class _StatsRepoStub:
 
 
 def test_fetch_token_usage_stats_exposes_coverage_fields() -> None:
-    """
-    创建时间: 2026-04-22
-    任务: unify-estimated-token-accounting
-    说明: fetcher 应把新的 accounting / coverage / by_call_type 字段完整暴露给 API。
-    """
+    """fetcher 应把新的 accounting / coverage / by_call_type 字段完整暴露给 API。"""
     stats = _fetch_token_usage_stats("run-1", _StatsRepoStub())
 
     assert stats.summary.accounting_method == "estimated"
@@ -71,12 +62,7 @@ class _FailingStatsRepoStub:
 
 
 def test_fetch_token_usage_stats_marks_partial_when_stats_fetch_fails() -> None:
-    """
-    创建时间: 2026-04-30
-    任务: fix-level3-query-example-review-findings
-    说明: token stats 查询失败时，fetcher 不能假装 coverage complete；
-          至少要把结果标成 partial，并暴露明确的 unavailable gap。
-    """
+    """至少要把结果标成 partial，并暴露明确的 unavailable gap。"""
     stats = _fetch_token_usage_stats("run-1", _FailingStatsRepoStub())
 
     assert stats.summary.coverage_status == "partial"

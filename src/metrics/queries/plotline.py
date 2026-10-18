@@ -1,11 +1,9 @@
 """按正文披露章归并独立变化；窗口和分页只裁剪记录，不裁剪历史状态
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：
-- 贡献事实只读 graph_facts 的封闭形状列，旧 content JSON 不再解析
-- 章节、作者 work 与章内角色由真实生产执行→标注 work 投影；独立选章取
-  effective_chapter_id，不按当前章替代
-- 实体/关系状态按贡献顺序在读取侧折叠（entity_states/relation_states 已退场，
-  不写第二份状态缓存；折叠口径与旧 changes 的 field/before/after 一致）
+- 贡献事实只读 graph_facts 的封闭形状列
+- 章节、作者执行与执行角色由真实生产执行行投影；独立选章取 effective_chapter_id
+- 实体/关系状态按贡献顺序在读取侧折叠（不写第二份状态缓存；折叠口径与
+  field/before/after 一致）
 - 原文证据按 source_evidence 的 owner 序号读取，文本哈希从正式原文切片计算
 - 伏笔动作使用 event_trees.action_order 的正式读投影（声明绑定事件身份）
 """
@@ -19,7 +17,7 @@ from collections.abc import Sequence
 from copy import deepcopy
 from typing import Any, cast
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
 
 from src.event_trees.action_order import load_foreshadowing_actions
@@ -38,14 +36,13 @@ from src.storage.models import (
     GraphRelation,
     Paragraph,
     SourceEvidence,
-    WorkItem,
 )
 from src.utils.identity import stable_uuid, text_digest
 
 DIMENSIONS = ("plot", "character", "relationship", "foreshadowing")
 
-#: 贡献事实的角色顺序（与标注 work 的章内角色合同一致）
-ROLE_ORDER = {"solo": 0, "structure": 0, "event": 1, "evidence": 2}
+#: 贡献事实的角色顺序（六执行角色的章内折叠口径）
+ROLE_ORDER = {"annotation": 0, "entity": 0, "event": 1, "metric": 2, "case": 3, "report": 3}
 
 #: 不构成情节变化的字段（首次登记的类型/支持数/主角与代表标记沿用原口径）
 SKIPPED_DELTA_FIELDS = frozenset({"entity_type", "support_count", "is_main_character", "is_representative"})
@@ -97,28 +94,12 @@ class PlotlineQuery:
         }
 
     def _run_execution_ids(self):
-        """本运行真实执行：标注 work 直接带运行，诊断 work 经整轮会话取得运行"""
-        diagnosis_sessions = select(Execution.execution_id).where(Execution.session_run_id == self.run_id)
-        return (
-            select(Execution.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(
-                or_(
-                    WorkItem.annotation_run_id == self.run_id,
-                    WorkItem.diagnosis_session_id.in_(diagnosis_sessions),
-                )
-            )
-        )
+        """本运行真实执行：执行行直接携带运行归属（标注与诊断同一列）
 
-    def _fact_chapter_column(self):
-        """事实所属章节：标注 work 已决定的章节优先，独立选章取 effective_chapter_id"""
-        producer_work_chapter = (
-            select(WorkItem.annotation_chapter_id)
-            .join(Execution, Execution.work_id == WorkItem.work_id)
-            .where(Execution.execution_id == GraphFact.direct_producer_execution_id)
-            .scalar_subquery()
-        )
-        return func.coalesce(producer_work_chapter, GraphFact.effective_chapter_id)
+        correlate(None)：外层语句自己也 join 了 executions 时必须禁用自动关联，
+        否则本子查询会被抽掉 FROM 而语义漂移。
+        """
+        return select(Execution.execution_id).where(Execution.run_id == self.run_id).correlate(None)
 
     def _evidence_by_owner(
         self, owner_column, owner_ids: Sequence[int | str]
@@ -164,13 +145,15 @@ class PlotlineQuery:
         """本运行在阅读截点内的贡献事实（实体/关系/人物观测/情节推进四种形状）"""
         from_entity = aliased(GraphEntity)
         to_entity = aliased(GraphEntity)
-        chapter_column = self._fact_chapter_column()
+        # 事实所属章节：标注执行决定的章节优先，案例执行取 effective_chapter_id；
+        # 本语句已 join 该执行行，章节列直接取 join 列（不用标量子查询，防自动关联剥空 FROM）
+        chapter_column = func.coalesce(Execution.chapter_id, GraphFact.effective_chapter_id)
         direct_statement = (
             select(
                 GraphFact.graph_fact_id,
                 chapter_column.label("chapter_id"),
-                WorkItem.work_id.label("author_work_id"),
-                WorkItem.role.label("role"),
+                Execution.execution_id.label("author_execution_id"),
+                Execution.role.label("role"),
                 GraphFact.operation_order,
                 GraphFact.entity_id,
                 GraphFact.relation_id,
@@ -194,7 +177,6 @@ class PlotlineQuery:
                 to_entity.canonical_name.label("to_entity"),
             )
             .join(Execution, Execution.execution_id == GraphFact.direct_producer_execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
             .outerjoin(GraphEntity, GraphEntity.entity_id == GraphFact.entity_id)
             .outerjoin(GraphRelation, GraphRelation.relation_id == GraphFact.relation_id)
             .outerjoin(from_entity, from_entity.entity_id == GraphRelation.from_entity_id)
@@ -211,9 +193,9 @@ class PlotlineQuery:
         participant_statement = (
             select(
                 GraphFact.graph_fact_id,
-                WorkItem.annotation_chapter_id.label("chapter_id"),
-                WorkItem.work_id.label("author_work_id"),
-                WorkItem.role.label("role"),
+                ChapterAnnotation.chapter_id.label("chapter_id"),
+                Execution.execution_id.label("author_execution_id"),
+                Execution.role.label("role"),
                 GraphFact.operation_order,
                 GraphFact.declaration_id,
                 GraphFact.participant_id,
@@ -228,11 +210,10 @@ class PlotlineQuery:
             .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
             .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
             .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
             .where(
                 GraphFact.participant_id.is_not(None),
-                WorkItem.annotation_run_id == self.run_id,
-                WorkItem.annotation_chapter_id.in_(chapter_ids),
+                ChapterAnnotation.run_id == self.run_id,
+                ChapterAnnotation.chapter_id.in_(chapter_ids),
             )
         )
         facts: list[dict[str, Any]] = []
@@ -255,7 +236,7 @@ class PlotlineQuery:
             key=lambda fact: (
                 self.orders[fact["chapter_id"]],
                 ROLE_ORDER.get(str(fact["role"]), 99),
-                str(fact["author_work_id"]),
+                str(fact["author_execution_id"]),
                 int(fact["operation_order"] or 0),
                 int(fact["graph_fact_id"]),
             )
@@ -284,7 +265,7 @@ class PlotlineQuery:
         return tags
 
     def _entity_deltas(self, facts: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
-        """按贡献顺序折叠实体状态，产出每个事实的字段 before/after（旧状态缓存列的读投影）
+        """按贡献顺序折叠实体状态，产出每个事实的字段 before/after
 
         - 实体形状：description 与代表标记按 omit/set/clear 三态、标签按 tags_submitted 投影
         - 人物观测形状：动作/情绪/叙事功能从声明的参与者行读取，保留贡献顺序
@@ -421,7 +402,7 @@ class PlotlineQuery:
             )
         actions = load_foreshadowing_actions(self.session, self.run_id) if self.organization_status == "ready" else []
         actions = [row for row in actions if row.chapter_id in chapter_ids]
-        # 正式伏笔端点已在发布事务绑定，读取时不再用声明寻找另一个 owner
+        # 正式伏笔端点已在发布事务绑定，读取时直接使用绑定结果
         visible_events = {
             event_id
             for event_id, row in self.events.items()

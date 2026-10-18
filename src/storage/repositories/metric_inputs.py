@@ -1,12 +1,11 @@
 """全书指标输入的原始 SQL 读取；业务计算由 metrics 负责
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：段落密度与表面张力不再落列。
-本模块同时给出这些读投影的唯一定义，供指标/曲线/主题各存取点复用：
+本模块给出读投影的唯一定义，供指标/曲线/主题各存取点复用：
 
 - char_count：段落正文精确字符长度（与 Python ``len`` 同口径）
 - pos/neg_density：权重分子 ÷ 同口径 token_count；token=0 或指标缺失保持 NULL
 - net_density：正密度 − 负密度（NULL 分量保持 NULL）
-- surface_tension：paragraph_features 的 tension_z 观测按现 sigmoid 投影
+- surface_tension：paragraph_features 的 tension_z 观测按 sigmoid 投影
   （数值稳定等价式，NULL→NULL）
 """
 
@@ -48,7 +47,7 @@ def density_projection(
 
 
 def net_density_projection() -> ColumnElement[float | None]:
-    """净密度读投影：按当前口径正密度 − 负密度，NULL 分量保持 NULL"""
+    """净密度读投影：正密度 − 负密度，NULL 分量保持 NULL"""
     return density_projection(ParagraphMetric.positive_weight_sum) - density_projection(
         ParagraphMetric.negative_weight_sum
     )
@@ -57,7 +56,7 @@ def net_density_projection() -> ColumnElement[float | None]:
 def surface_tension_projection(
     z_column: SQLCoreOperations[float | None] = ParagraphFeature.scalar_value,
 ) -> ColumnElement[float | None]:
-    """表面张力读投影：对正式 tension_z 观测应用现 sigmoid，保留数值稳定与 NULL 语义
+    """表面张力读投影：对正式 tension_z 观测应用 sigmoid，保留数值稳定与 NULL 语义
 
     z >= 0 用 1/(1+exp(-z))、z < 0 用 exp(z)/(1+exp(z))，避免指数溢出；
     z 为 NULL 时两条分支均为 NULL，不把缺失变成 sigmoid(0)=0.5。
@@ -73,7 +72,7 @@ def tension_z_feature_join(statement, *, run_column, paragraph_column, isouter: 
     """连接段落张力 z 特征行（feature_code='tension_z'，scalar_value 为 z）
 
     run_column/paragraph_column 为左侧关系的 (run_id, paragraph_id) 列；
-    外连接时无观测行为 NULL（保持原空值口径）。
+    外连接时无观测为 NULL。
     """
     return statement.join(
         ParagraphFeature,
@@ -88,7 +87,7 @@ def fetch_global_stat_rows(session: Session, run_id: str):
     """全书统计的段落级输入行（按 paragraph_id 升序，与全文顺序一致）
 
     char_count 取正文长度投影，net_density/surface_tension 取读投影；
-    指标行或张力 z 特征行缺失时对应值为 NULL，由计算侧沿用原空值口径。
+    指标行或张力 z 特征行缺失时对应值为 NULL。
     """
     return session.execute(
         select(

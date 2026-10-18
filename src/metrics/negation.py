@@ -1,5 +1,5 @@
 """
-否定处理共享计算层（docs/词表体系重设计-修订版实施计划.md M5）
+否定处理共享计算层
 
 供生产路径 `paragraph_metrics.compute_paragraph_metric_counts` 使用，
 否定规则只此一处，不在调用方复制。
@@ -108,7 +108,7 @@ def load_negation_spec(filepath: str | Path | None = None) -> NegationSpec:
     """
     加载否定词分类
 
-    默认经注册表解析 LEXICON_FILES.negation_words 指向的词表文件（v3 唯一事实源）；
+    默认经注册表解析 LEXICON_FILES.negation_words 指向的词表文件（唯一事实源）；
     显式 filepath 用于测试。
     """
     if filepath is None:
@@ -201,7 +201,7 @@ def is_flipped(text: str, emotion_start: int, spec: NegationSpec | None = None) 
         gap_tokens = tokenize_words(gap) if gap else []
         if len(gap_tokens) > 1:
             # 距离约束例外：小句首否定词（并没有/没有/不要…）管辖整个小句，
-            # 但否定与情绪词之间出现分句界（，、；：）仍视为出界（计划 §5.2 例 3）；
+            # 但否定与情绪词之间出现分句界（，、；：）仍视为出界；
             # 含"的"为定语修饰（不灭的/没察觉的），否定只辖相邻词，不翻转
             if not _span_at_clause_start(prefix, span) or any(c in gap for c in _CLAUSE_BOUNDARY_CHARS) or "的" in gap:
                 continue

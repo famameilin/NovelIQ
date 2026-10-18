@@ -43,7 +43,7 @@ def load_core_results(
     """
     加载核心结果数据：paragraph_curves、缺失字段
 
-    2026-08-14 M8a：results export 是复盘/比对用 payload，必须返回段落事实源
+    export 是复盘/比对用 payload，必须返回段落事实源
     持久化原值（fetch_paragraph_rows + fetch_paragraph_curves 按 paragraph_id
     对齐，max_points 不限制），不经过展示层降采样。
 
@@ -96,8 +96,7 @@ def load_character_bundle(
     if not characters:
         missing_fields.append("characters")
     valid_character_names = {character.name for character in characters}
-    # export 过滤口径必须和同一份 authority view 对齐，避免这里再回退到
-    # GraphRepository 原始查询，导致 dangling 过滤与 export graph payload 分叉
+    # export 过滤口径必须与同一份 authority view 对齐，避免 dangling 过滤与 export graph payload 分叉
     valid_character_names = valid_character_names | {
         entity.name for entity in export_graph_view.canonical_entities if entity.entity_type == "character"
     }
@@ -114,18 +113,15 @@ def load_chapter_bundle(
     """
     加载分块相关数据
 
-    2026-08-14 M8a：chunk_styles 已从 export 移除（前端 M4 已切换段落端点，
-    风格消费在 M8b 段落化切换后再处理）。
-
     Returns:
         (topics, chapter_annotations, missing_fields)
     """
     missing_fields: list[str] = []
 
-    # 2026-08-14 切换段落：主题聚合源改为 paragraph_topics token 加权聚合（§11.1）
+    # 主题聚合源为 paragraph_topics token 加权聚合
     paragraph_repo = ParagraphRepository(annotation_repo.session)
     topics = _fetch_topics(run_id, paragraph_repo)
-    # 2026-09-05 A6：artifact 缺失导致聚合被静默清空时，给出显式原因进 missing_fields
+    # artifact 缺失导致聚合被清空时，给出显式原因进 missing_fields
     if not topics:
         from src.topic.artifacts import describe_topics_unavailability
 
@@ -166,8 +162,7 @@ def load_aggregate_metrics_bundle(
     """
     加载非 graph 的聚合结论
 
-    aggregate_metrics 与 /metrics/* 现在统一复用 MetricsService 的缓存入口，
-    避免 export 和 metrics 各自重复跑一遍 aggregate_all_metrics()
+    aggregate_metrics 与 /metrics/* 统一复用 MetricsService 的缓存入口
     """
 
     global_stats = _fetch_global_stats(run_id, stats_repo, chapter_repo)

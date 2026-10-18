@@ -1,10 +1,8 @@
 """
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分 src/agents/stream.py（chunk 纯函数与流式聚合段）
-说明: 承接自 stream.py 的 extract_reasoning_content、用量累加、工具调用
-      增量合并与 StreamChunkAggregator；经 stream.py re-export（导入方
-      零改动）。计时器经 stream 模块延迟解析以保持 monkeypatch 语义不变。
+流式 chunk 纯函数与聚合器
+
+包含 extract_reasoning_content、用量累加、工具调用增量合并与
+StreamChunkAggregator；经 stream.py re-export。
 """
 
 from __future__ import annotations
@@ -51,7 +49,7 @@ def extract_reasoning_content(chunk: Any) -> str:
 
 def _accumulate_usage_metadata(target: dict[str, Any], source: Mapping[str, Any]) -> None:
     """
-    2026-08-10 用于累加流式 chunk 的用量数值字段，嵌套字典递归合并
+    用于累加流式 chunk 的用量数值字段，嵌套字典递归合并
 
     OpenAI 兼容网关通常在末个 chunk 返回完整 usage；部分网关按 chunk 增量上报，
     数值字段直接相加可兼容两种情况
@@ -72,9 +70,9 @@ def _merge_tool_call_chunks(tool_call_chunks: list[dict[str, Any]]) -> list[dict
 
     OpenAI 兼容流式接口把工具调用拆成多个分片：name 首片完整、args 为 JSON 片段增量，
     需要按 index 拼接后再解析。JSON 解析失败说明流被截断（Provider 丢尾包/模型截断），
-    不再静默包装 {"_raw": ...} 执行，而是打 truncated 标记并保留原文供诊断与拒绝执行。
-    2026-08-22 修复：部分网关（muse-spark via zen）并发工具返回 index 均为 0，
-    需按 name/id 冲突自动分配新 index，避免名串接成单条（如 get_a+get_b）。
+    被打断的调用打 truncated 标记并保留原文，供诊断与拒绝执行。
+    部分网关并发工具返回的 index 均为 0，需按 name/id 冲突自动分配新 index，
+    避免多个工具名串接成单条。
     """
     merged: dict[int, dict[str, str]] = {}
     for raw in tool_call_chunks:
@@ -159,8 +157,8 @@ class StreamChunkAggregator:
         self._content_parts: list[str] = []
         self._reasoning_parts: list[str] = []
         self._tool_call_chunks: list[dict[str, Any]] = []
-        # 2026-08-13 P2-8 按工具名记录已推送 started 事件（原按 index 记录会导致
-        # 断流重试后 index 相同但工具名不同时客户端看不到 started 事件）
+        # 按工具名记录已推送 started 事件（断流重试后 index 相同但工具名不同时
+        # 客户端仍能收到 started 事件）
         self._announced_tools: set[str] = set(announced_tools or ())
         self._skip_output_prefix = skip_output_prefix
         self._usage_metadata: dict[str, Any] = {}
@@ -172,7 +170,7 @@ class StreamChunkAggregator:
 
     @staticmethod
     def _split_overlap(content: str, skip_prefix: str) -> tuple[str, str, str]:
-        """2026-08-13 拆分与上次已推送内容的重叠部分，返回（重叠部分, 非重叠部分, 剩余跳过前缀）
+        """拆分与上次已推送内容的重叠部分，返回（重叠部分, 非重叠部分, 剩余跳过前缀）
 
         断流重试时客户端已看到失败尝试推送的全文。重叠部分进入消息链（重试
         输出的完整内容必须保留，否则后续回合上下文缺失）但不推 SSE；非重叠
@@ -242,10 +240,8 @@ class StreamChunkAggregator:
 
         usage_metadata = getattr(chunk, "usage_metadata", None)
         if isinstance(usage_metadata, Mapping):
-            # 2026-08-13 P1-3 防御：同一 chunk 可能同时携带 LangChain 标准
-            # usage_metadata 与 provider 原始 usage（response_metadata/
-            # additional_kwargs），双源累加会把用量翻倍。以标准字段为准，
-            # 原始字段仅作为标准字段缺失时的回退（真实网关每 turn 恰好 1 条）。
+        # 防御：同一 chunk 同时携带标准 usage_metadata 与 provider 原始 usage 时双源
+        # 累加会把用量翻倍；以标准字段为准，原始字段仅作标准字段缺失时的回退。
             has_usage_metadata = True
             _accumulate_usage_metadata(self._usage_metadata, usage_metadata)
         else:
@@ -282,7 +278,7 @@ class StreamChunkAggregator:
         return message
 
     def timing(self) -> ModelCallTiming:
-        """2026-08-10 用于按采集时间戳计算逐项耗时（毫秒）并记录计时口径备注"""
+        """用于按采集时间戳计算逐项耗时（毫秒）并记录计时口径备注"""
         now_ns = self._clock_ns()
         reasoning_ms = None
         if self._first_reasoning_ns is not None and self._last_reasoning_ns is not None:

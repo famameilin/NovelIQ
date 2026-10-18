@@ -93,12 +93,12 @@ def test_diagnosis_budget_setting_is_editable_and_used_by_scheduler(isolated_set
             run_id="test", domain=MagicMock(), bus=EventBus(), model_id="model",
             llm_factory=MagicMock(), observer_factory=MagicMock(), audit_barrier=MagicMock(),
         )
-        assert scheduler.max_iterations == limit
+        assert scheduler.report_max_rounds == limit
         scheduler.pool.close()
 
 
 def test_pool_has_no_context_window_field_and_rejects_legacy_key(isolated_settings, api_client):
-    """2026-10-15 用户裁定「不要context_window_tokens」：该配置项全栈移除"""
+    """该配置项全栈移除"""
     schema_paths = [item["path"] for item in api_client.get("/api/settings/schema").json()["fields"]]
     assert ["models", "model_pool", "context_window_tokens"] not in schema_paths
     response = api_client.put("/api/settings/env", json={"model_pool": [_entry(context_window_tokens=32768)]})
@@ -134,7 +134,7 @@ def test_pool_roundtrip_masks_keys_and_preserves_behavior_config(
     annotation = load_task_config("annotation", selection_key="task")
     diagnosis = load_task_config("diagnosis")
     assert (annotation.model, annotation.api_key, annotation.max_in_flight) == ("model-a", "sk-model-a-1234", 2)
-    # 2026-10-02 设置迁移：采样参数来自池内模型配置
+    # 采样参数来自池内模型配置
     assert (annotation.temperature, annotation.top_p, annotation.max_tokens) == (0.5, 0.9, 4096)
     assert (diagnosis.model, diagnosis.base_url, diagnosis.max_in_flight) == (
         "diagnostic",

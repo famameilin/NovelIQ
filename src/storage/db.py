@@ -1,11 +1,5 @@
 """
-说明: PostgreSQL 数据库引擎与 Session 管理，使用 SQLAlchemy
-
-本模块提供：
-- get_engine(): 获取 SQLAlchemy 引擎（单例）
-- SessionLocal: Session 工厂类
-- get_session(): 上下文管理器，用于获取 Session
-- init_db(): 初始化数据库（创建所有表）
+PostgreSQL 数据库引擎与 Session 管理，使用 SQLAlchemy
 """
 
 from __future__ import annotations
@@ -47,8 +41,8 @@ def get_database_schema() -> str | None:
     """
     获取数据库 schema 名称
 
-    说明: 运行时默认不指定 schema；
-          测试环境可通过 DATABASE_SCHEMA 把所有未限定表名收敛到独立 schema
+    运行时默认不指定 schema；
+    测试环境可通过 DATABASE_SCHEMA 把所有未限定表名收敛到独立 schema
     """
     schema = os.environ.get("DATABASE_SCHEMA")
     if not schema:
@@ -62,7 +56,7 @@ def get_database_schema() -> str | None:
 
 
 def _database_name_from_url(database_url: str) -> str | None:
-    """2026-08-08 用于从 SQLAlchemy URL 解析目标数据库名称"""
+    """从 SQLAlchemy URL 解析目标数据库名称"""
     if not database_url.startswith("postgresql"):
         return None
     url = make_url(database_url)
@@ -73,17 +67,17 @@ def _database_name_from_url(database_url: str) -> str | None:
 
 
 def _admin_database_url(database_url: str) -> str:
-    """2026-08-08 用于把目标库 URL 指向默认 postgres 库以执行建库 DDL"""
+    """把目标库 URL 指向默认 postgres 库以执行建库 DDL"""
     return make_url(database_url).set(database="postgres").render_as_string(hide_password=False)
 
 
 def _safe_identifier(name: str) -> bool:
-    """2026-08-08 用于限制自动建库标识符为 PostgreSQL 安全格式"""
+    """限制自动建库标识符为 PostgreSQL 安全格式"""
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*", name))
 
 
 def ensure_database_exists() -> None:
-    """2026-08-08 用于首次启动时自动创建缺失的目标数据库"""
+    """首次启动时自动创建缺失的目标数据库"""
     if os.environ.get("DB_AUTO_CREATE_DATABASE", "true").lower() != "true":
         return
     database_url = get_database_url()
@@ -122,8 +116,6 @@ def get_engine():
     """
     获取 SQLAlchemy 引擎（单例模式）
 
-    说明: 单例模式获取数据库引擎，支持连接池配置
-
     Returns:
         SQLAlchemy Engine 实例
     """
@@ -139,8 +131,7 @@ def get_engine():
     pool_timeout = int(os.environ.get("DB_POOL_TIMEOUT", "30"))
     pool_recycle = int(os.environ.get("DB_POOL_RECYCLE", "1800"))
     connect_timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "5"))
-    # 2026-08-14 D9：默认 120s（原 30s 会误杀 HNSW 建索引与十万级段落批量插入）；
-    # 仍可经 DB_STATEMENT_TIMEOUT 覆盖
+    # 默认 120s，可经 DB_STATEMENT_TIMEOUT 覆盖
     statement_timeout = int(os.environ.get("DB_STATEMENT_TIMEOUT", "120000"))
     echo = os.environ.get("DB_ECHO", "false").lower() == "true"
     database_schema = get_database_schema()
@@ -188,9 +179,7 @@ def get_engine():
         if _engine is not None:
             logger.debug(f"Pool checkin: active={_engine.pool.status()}")
 
-    # 2026-08-13 P2：启动期合同校验——引擎创建后立即验证连接可达与数据库版本，
-    # 避免 URL/schema/服务未起等配置错误延迟到首次查询才暴露（pool_pre_ping 只处理
-    # 失效连接，不验证首次连接）；连接失败按原始异常抛出，由调用方决定启动策略
+    # 启动期合同校验：立即验证连接可达与数据库版本，失败按原始异常抛出
     with _engine.connect() as conn:
         conn.execute(text("SELECT 1"))
         server_version_num = conn.execute(text("SHOW server_version_num")).scalar_one()
@@ -208,8 +197,6 @@ def get_engine():
 def get_session_factory() -> sessionmaker:
     """
     获取 Session 工厂（单例模式）
-
-    说明: 返回 Session 工厂类，用于创建 Session
 
     Returns:
         sessionmaker 实例
@@ -252,7 +239,7 @@ def init_db() -> None:
     """
     初始化数据库（创建所有表）
 
-    说明: 使用 ORM 模型创建所有数据库表；目标数据库缺失时先自动创建
+    使用 ORM 模型创建所有数据库表；目标数据库缺失时先自动创建
 
     注意：生产环境推荐使用 Alembic 迁移
     """
@@ -277,8 +264,6 @@ def init_db() -> None:
 def dispose_engine() -> None:
     """
     释放数据库引擎资源
-
-    说明: 用于测试或应用关闭时清理资源
     """
     global _engine, _session_factory
 
@@ -292,8 +277,6 @@ def dispose_engine() -> None:
 def get_pool_status() -> dict | None:
     """
     获取连接池状态
-
-    说明: 返回连接池状态信息，用于监控和调试
 
     Returns:
         包含连接池状态的字典，如果引擎未初始化则返回 None

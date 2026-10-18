@@ -1,10 +1,4 @@
-"""
-API 重分析端点测试
-
-创建时间: 2026-04-23
-任务: 复杂度与耦合审查 P2 - 测试工程化
-说明: 从 test_analysis.py 拆出 reanalysis 场景，降低单文件维护成本。
-"""
+"""API 重分析端点测试"""
 
 import tempfile
 from unittest.mock import patch

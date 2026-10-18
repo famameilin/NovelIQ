@@ -12,19 +12,19 @@ from typing import Any
 
 from src.agents.annotation.program_contract import PROGRAM_TOOL_NAME
 
-from .subagent_ir import SubagentAnnotation
+from .agent_ir import AgentAnnotation
 from .tools import FINISH_TOOL_NAME
 
-# 长章三个角色独立执行，短章使用 solo；展示名供职责文案和日志共用
-SUBAGENT_ROLE_LABELS: dict[str, str] = {
-    "structure": "实体与关系",
+# 长章三个角色独立执行，短章使用 annotation；展示名供职责文案和日志共用
+AGENT_ROLE_LABELS: dict[str, str] = {
+    "entity": "实体与关系",
     "event": "事件与参与者",
-    "evidence": "对话与章级证据",
+    "metric": "对话与章级证据",
 }
 
 # Agent 内部程序面的基础工具目录，共享状态读取和案例认领由当前 work 工具表补入
 # 构造器编译的业务写入直接调用同一 Agent，程序检查自身角色，不等待其他角色
-SUBAGENT_TOOL_NAMES: tuple[str, ...] = (
+AGENT_TOOL_NAMES: tuple[str, ...] = (
     "search_text",
     "read_text",
     "read_chapter_text",
@@ -34,10 +34,10 @@ SUBAGENT_TOOL_NAMES: tuple[str, ...] = (
 )
 
 # 三个职责共享程序入口和收尾信号；事件事实由既有 event 构造器写入
-SUBAGENT_BOUND_TOOL_NAMES: tuple[str, ...] = (PROGRAM_TOOL_NAME, FINISH_TOOL_NAME)
+AGENT_BOUND_TOOL_NAMES: tuple[str, ...] = (PROGRAM_TOOL_NAME, FINISH_TOOL_NAME)
 
 # 模型可见引用必须来自本 work 登记或实际读取，目录统一描述当前全书共享状态合同
-_SUBAGENT_REFERENCE_SCOPE_TEXT: str = (
+_AGENT_REFERENCE_SCOPE_TEXT: str = (
     "引用与证据口径：\n"
     "- 实体引用写正文名字 + 大类；运行时解析，图里没有就自动登记，不再写 id；别名分别登记。\n"
     "- evidence 与 paragraph_id 使用正文段首可见号；原文跨章全局段号须经 read_text 读取。\n"
@@ -52,12 +52,12 @@ _SUBAGENT_REFERENCE_SCOPE_TEXT: str = (
     "- promise_case 只填真实 case_id."
     "所有调用可传 caseid，须先认领；关联失败仅 warning。\n"
     "- finish(caseid=None) 仅请求结束，同模型本轮不调用工具；程序缺项提示后继续同一会话。\n"
-    "- structure/event 不要求指标或对话；solo/evidence 必须提交实际指标并逐条判定全部对话候选。\n\n"
+    "- entity/event 不要求指标或对话；annotation/metric 必须提交实际指标并逐条判定全部对话候选。\n\n"
 )
 
-# 八类构造器（§3.1 的目录就是模型知道"能交什么、怎么交"的全部依据）。
+# 八类构造器的目录就是模型知道"能交什么、怎么交"的全部依据。
 # finish 使用当前 work 工具表，仅登记结束请求
-_SUBAGENT_CONSTRUCTOR_ORDER: tuple[str, ...] = (
+_AGENT_CONSTRUCTOR_ORDER: tuple[str, ...] = (
     "entity",
     "relation",
     "event",
@@ -71,14 +71,14 @@ _SUBAGENT_CONSTRUCTOR_ORDER: tuple[str, ...] = (
 )
 
 
-def subagent_gap(subagent: SubagentAnnotation, *, candidate_total: int) -> dict[str, Any]:
+def agent_gap(agent: AgentAnnotation, *, candidate_total: int) -> dict[str, Any]:
     """回报当前职责的实际缺口，不补造指标或对话判定"""
-    if subagent.role not in {"solo", "evidence"}:
-        # 结构 subagent 与事件 subagent 的完整性口径只有"声明了收尾"；候选与指标不属于它们
-        return {"finished": subagent.finished, "missing_candidates": [], "missing_metric": False}
-    judged = {item.candidate_index for item in subagent.dialogues}
+    if agent.role not in {"annotation", "metric"}:
+        # 实体 agent 与事件 agent 的完整性口径只有"声明了收尾"；候选与指标不属于它们
+        return {"finished": agent.finished, "missing_candidates": [], "missing_metric": False}
+    judged = {item.candidate_index for item in agent.dialogues}
     return {
-        "finished": subagent.finished,
+        "finished": agent.finished,
         "missing_candidates": sorted(set(range(1, candidate_total + 1)) - judged),
-        "missing_metric": subagent.metric is None,
+        "missing_metric": agent.metric is None,
     }

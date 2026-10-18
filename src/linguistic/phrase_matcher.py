@@ -1,4 +1,4 @@
-"""固定短语匹配器（《分析能力扩展路线图》§B2 / §5.5）
+"""固定短语匹配器
 
 - 词表命中：词典按词条长度降序做最长匹配优先，同起点或交叠命中按
   贪心非重叠消解，全部命中行保留用于审计
@@ -76,7 +76,7 @@ def match_fixed_phrases(
     phrase_type: str | None = None,
     four_char_candidate_enabled: bool = True,
 ) -> list[PhraseMatch]:
-    """匹配一段文本的固定短语命中与四字候选（§5.5 行语义）"""
+    """匹配一段文本的固定短语命中与四字候选（行语义）"""
     if not lexicon_terms or not text:
         return []
 

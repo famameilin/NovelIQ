@@ -1,9 +1,4 @@
-"""事件森林 / 事件树 / 时间轴 API 响应模型（树内图外）
-
-2026-08-19：事件层改为「树视图 + 树间边」——event_trees 为事件树列表（树根/主链/次因分支），
-causal_edges 只含因果关联边（contains 派生化不再返回）。
-2026-08-20：时间轴合同（一树一节点）复用同一批节点/边模型，仅补充阶段与进度字段。
-"""
+"""事件森林 / 事件树 / 时间轴 API 响应模型（树内图外）"""
 
 from __future__ import annotations
 
@@ -14,7 +9,7 @@ from pydantic import BaseModel, Field
 
 
 class EventNodeResponse(BaseModel):
-    """2026-08-19 用于返回事件节点（含树结构字段）"""
+    """事件节点（含树结构字段）"""
 
     event_id: str
     chapter_id: int = Field(gt=0)
@@ -33,7 +28,7 @@ class EventNodeResponse(BaseModel):
 
 
 class EventEdgeResponse(BaseModel):
-    """2026-08-19 用于返回因果关联边（contains 已派生化，不再返回）"""
+    """因果关联边（树间）"""
 
     edge_id: str
     edge_type: Literal["causal"]
@@ -46,13 +41,13 @@ class EventEdgeResponse(BaseModel):
 
 
 class EventTimelineCausalEdge(EventEdgeResponse):
-    """2026-08-20 时间轴用的全量因果边（含已失效边，故补 expired_at）"""
+    """时间轴用的全量因果边（含已失效边）"""
 
     expired_at: datetime | None = None
 
 
 class ForeshadowingEdgeResponse(BaseModel):
-    """2026-09-13 用于返回伏笔边（伏笔即事件树）"""
+    """伏笔边（伏笔即事件树）"""
 
     root_event_id: str
     tree_id: str
@@ -65,14 +60,14 @@ class ForeshadowingEdgeResponse(BaseModel):
 
 
 class EventSecondaryGroupResponse(BaseModel):
-    """2026-08-19 用于返回事件树的次因分支（挂在某个目标事件下）"""
+    """事件树的次因分支（挂在某个目标事件下）"""
 
     target_event_id: str
     branch: list[str]
 
 
 class EventTreeResponse(BaseModel):
-    """2026-08-19 用于返回一棵事件树（一棵树 = 一个完整事件）"""
+    """一棵事件树（一棵树 = 一个完整事件）"""
 
     tree_id: str
     root_event_id: str
@@ -84,7 +79,7 @@ class EventTreeResponse(BaseModel):
 
 
 class EventForestResponse(BaseModel):
-    """2026-08-19 用于返回完整事件森林快照（事件树列表 + 树间因果边 + 伏笔边）"""
+    """完整事件森林快照（事件树列表 + 树间因果边 + 伏笔边）"""
 
     chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
@@ -130,7 +125,7 @@ class EventTimelinePhase(BaseModel):
 
 
 class EventTimelineNode(BaseModel):
-    """2026-08-20 用于返回事件时间轴节点（一树一节点）"""
+    """事件时间轴节点（一树一节点）"""
 
     tree_id: str = Field(min_length=1)
     root_event_id: str
@@ -162,7 +157,7 @@ class EventTimelineNode(BaseModel):
 
 
 class EventTimelineResponse(BaseModel):
-    """2026-08-20 用于返回事件森林时间轴（一树一节点）"""
+    """事件森林时间轴（一树一节点）"""
 
     meta: EventTimelineMeta = Field(description="时间轴元信息")
     phases: list[EventTimelinePhase] = Field(description="四阶段划分")

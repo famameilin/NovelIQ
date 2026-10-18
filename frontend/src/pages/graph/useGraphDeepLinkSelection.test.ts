@@ -7,7 +7,7 @@ import { useGraphDeepLinkSelection } from "@/pages/graph/useGraphDeepLinkSelecti
 const navigateMock = vi.fn();
 
 /**
- * 2026-08-12 用于锁住图谱页 deep-link 选择逻辑：
+ * 用于锁住图谱页 deep-link 选择逻辑：
  * 首屏默认选中、change_id 命中/miss、章节唯一命中、手动选择后清除提示、
  * load-more 合并进新变化后自动补选中、任务切换重置
  */

@@ -1,25 +1,4 @@
-"""
-CLI topic model 模块测试（段落粒度，设计 §11.1）
-
-创建时间: 2025-03-11
-任务: 测试主题建模流程
-
-修改时间: 2026-03-15
-任务: storage-layer-decoupling
-修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning
-
-修改时间: 2026-03-15
-任务: postgresql-migration
-修改内容: 使用 SQLAlchemy text() 替换 ? 占位符，移除 sqlite3 导入
-
-修改时间: 2026-03-15
-任务: postgresql-migration-cleanup
-修改内容: 改用 PostgreSQL db_session fixture，移除 SessionFactory 依赖
-
-修改时间: 2026-08-14
-任务: paragraph-granularity
-修改内容: 主题文档使用段落（paragraphs 是唯一事实源），写入 paragraph_topics
-"""
+"""CLI topic model 模块测试（段落粒度）"""
 
 import asyncio
 import sys
@@ -70,7 +49,7 @@ class TestTopicModel:
     def _create_paragraphs(self, paragraph_count: int) -> None:
         """每个章节插入一个段落，构造 paragraphs 唯一事实源测试数据
 
-        2026-10-16 3NF：token_count 是指标/预处理同批唯一口径，落 paragraph_metrics
+        token_count 是指标/预处理同批唯一口径，落 paragraph_metrics
         （正式链由 preprocess 写入），训练达标判定读该行。
         """
         chapter_repo = ChapterRepository(self.db_session)
@@ -140,7 +119,7 @@ class TestTopicModel:
         assert topics == 3
         assert self._count_paragraph_topics() > 0
 
-        # §5.8 模型契约单行：参数拆列，model_key/artifact_key/推断段落数为合同投影
+        # 模型契约单行：参数拆列，model_key/artifact_key/推断段落数为合同投影
         paragraph_repo = ParagraphRepository(self.db_session)
         model_run = paragraph_repo.fetch_topic_model_run(self.run_id)
         assert model_run is not None
@@ -181,7 +160,7 @@ class TestTopicModel:
         paragraph_repo = ParagraphRepository(self.db_session)
         rows = list(paragraph_repo.fetch_paragraph_rows(self.run_id))
         short_row = rows[0]
-        # 2026-10-16 3NF：预处理/指标同批 token_count 观测落 paragraph_metrics（唯一口径）
+        # 预处理/指标同批 token_count 观测落 paragraph_metrics（唯一口径）
         self.db_session.execute(
             text(
                 "UPDATE paragraph_metrics SET token_count = :token_count "
@@ -197,7 +176,7 @@ class TestTopicModel:
         original_train = LDATrainer.train
 
         def capture_train(self, tokenized_docs, *args, **kwargs):
-            """2026-08-20 捕获实际送入 LDA 训练的段落文档"""
+            """捕获实际送入 LDA 训练的段落文档"""
             captured_docs.append(tokenized_docs)
             return original_train(self, tokenized_docs, *args, **kwargs)
 
@@ -216,7 +195,7 @@ class TestTopicModel:
         assert len(captured_docs) == 1
         assert len(captured_docs[0]) == 1
 
-        # §5.8 训练文档数只计达标段落
+        # 训练文档数只计达标段落
         model_run = paragraph_repo.fetch_topic_model_run(self.run_id)
         assert model_run is not None
         assert model_run.training_document_count == 1

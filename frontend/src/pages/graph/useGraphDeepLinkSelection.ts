@@ -28,7 +28,6 @@ function getUniqueChapterChange(changes: GraphChange[], chapterId: number | null
   return chapterChanges.length === 1 ? chapterChanges[0] ?? null : null;
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P1
 // 把 deep-link 解析、回退提示和 URL 同步独立出来，避免分页与跳转状态交叉耦合
 export function useGraphDeepLinkSelection({
   novelId,
@@ -129,7 +128,7 @@ export function useGraphDeepLinkSelection({
       if (matchedChange) {
         return null;
       }
-      // 2026-08-12: change_id 可能落在当前分页窗口之外（后页），
+      // change_id 可能落在当前分页窗口之外（后页），
       // 提示用户可继续加载更多；加载更多合并进新变化后，上方 effect 会自动补选中
       return "未在当前图谱变化窗口定位到指定变化，可能在后页，点击加载更多可继续查找。";
     }

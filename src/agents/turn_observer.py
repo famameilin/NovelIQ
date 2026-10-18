@@ -1,7 +1,7 @@
 """
 Agent 回合审计观察器
 
-说明: 图节点在模型请求与工具执行的关键点调用观察器，
+图节点在模型请求与工具执行的关键点调用观察器，
 观察器把完整回合与工具审计写入 AgentAuditRecorder（独立短事务）。
 """
 
@@ -28,10 +28,10 @@ def build_invocation_context(
     attempt_number: int,
     model: str,
     chapter_id: int | None = None,
-    work_id: str | None = None,
     role: str | None = None,
+    case_anchor: str | None = None,
 ) -> dict[str, Any]:
-    """构造一次尝试的 invocation 上下文，随每条审计调用流动并落到回合行"""
+    """构造一次尝试的 invocation 上下文（含执行归属），随每条审计调用流动并落到回合行"""
     return {
         "run_id": run_id,
         "task_type": task_type,
@@ -40,13 +40,13 @@ def build_invocation_context(
         "execution_id": execution_id,
         "attempt_number": attempt_number,
         "chapter_id": chapter_id,
-        "work_id": work_id,
         "role": role,
+        "case_anchor": case_anchor,
     }
 
 
 def _extract_finish_reason(message: Any) -> str:
-    """2026-08-11 用于从完整响应探测流结束原因（聚合器挂在 additional_kwargs，非流式在 metadata）"""
+    """用于从完整响应探测流结束原因（additional_kwargs 或 response_metadata）"""
     additional = getattr(message, "additional_kwargs", None) or {}
     finish_reason = additional.get("finish_reason")
     if finish_reason:
@@ -59,7 +59,7 @@ def _extract_finish_reason(message: Any) -> str:
 
 
 def _serialize_ai_message(message: Any) -> dict[str, Any]:
-    """2026-08-10 用于把单条模型回复压缩为审计可持久化结构（含正文与思考内容）"""
+    """用于把单条模型回复压缩为审计可持久化结构（含正文与思考内容）"""
     payload: dict[str, Any] = {
         "role": str(getattr(message, "type", "unknown")),
         "content": str(getattr(message, "content", "") or ""),
@@ -81,7 +81,7 @@ def _serialize_ai_message(message: Any) -> dict[str, Any]:
 
 
 def _serialize_request_messages(messages: list[Any]) -> list[dict[str, Any]]:
-    """2026-08-11 用于把请求消息序列化为可持久化结构，支持完整重放一次模型请求"""
+    """用于把请求消息序列化为可持久化结构，支持完整重放一次模型请求"""
     serialized: list[dict[str, Any]] = []
     if not messages:
         return serialized
@@ -107,7 +107,7 @@ def _serialize_request_messages(messages: list[Any]) -> list[dict[str, Any]]:
 
 
 def _usage_for_turn(request_messages: list[Any], response_message: Any) -> dict[str, Any] | None:
-    """2026-08-10 用于优先取 Provider 用量，缺失时按本地估算兜底"""
+    """用于优先取 Provider 用量，缺失时按本地估算兜底"""
     usage = extract_agent_token_usage(response_message)
     if usage is None:
         estimates = estimate_agent_token_usage([*request_messages, response_message])
@@ -127,15 +127,15 @@ def _usage_for_turn(request_messages: list[Any], response_message: Any) -> dict[
 
 
 class AgentTurnObserver:
-    """2026-08-10 用于在 Agent 图节点间传递当前回合审计上下文并逐笔落库
+    """用于在 Agent 图节点间传递当前回合审计上下文并逐笔落库
 
     context 是本次尝试的 invocation 上下文（run_id/task_type/call_type/model/
-    execution_id/attempt_number/chapter_id/work_id/role），随每条
+    execution_id/attempt_number/chapter_id/role/case_anchor），随每条
     审计调用流动，落库端不需要额外状态。
     """
 
     def __init__(self, recorder: Any, *, invocation_id: int, context: dict[str, Any]) -> None:
-        """2026-08-10 用于绑定审计库与本次尝试的运行元数据"""
+        """用于绑定审计库与本次尝试的运行元数据"""
         self._recorder = recorder
         self._invocation_id = invocation_id
         self._context = dict(context)
@@ -156,7 +156,7 @@ class AgentTurnObserver:
         provider_request: Mapping[str, Any],
         started_ns: int,
     ) -> None:
-        """2026-08-30 用于在每个物理 Provider 请求发送前写入独立 running 回合"""
+        """用于在每个物理 Provider 请求发送前写入独立 running 回合"""
         if self._pending_turn_id is not None:
             raise RuntimeError("物理 Provider 请求审计尚未收口")
         self._turn_counter += 1
@@ -175,7 +175,7 @@ class AgentTurnObserver:
         self._pending_request_messages = list(request_messages)
 
     def complete_provider_turn(self, *, response_message: Any, timing: ModelCallTiming) -> None:
-        """2026-08-30 用于收口成功的物理 Provider 请求并激活其工具审计上下文"""
+        """用于收口成功的物理 Provider 请求并激活其工具审计上下文"""
         if self._pending_turn_id is None:
             raise RuntimeError("物理 Provider 请求尚未开始")
         turn_id = self._pending_turn_id
@@ -210,7 +210,7 @@ class AgentTurnObserver:
         timing: ModelCallTiming,
         response_message: Any | None,
     ) -> None:
-        """2026-08-30 用于按单个物理 Provider 请求收口断流超时与空工具回复"""
+        """用于按单个物理 Provider 请求收口断流超时与空工具回复"""
         if self._pending_turn_id is None:
             raise RuntimeError("物理 Provider 请求尚未开始")
         response = response_message if response_message is not None else _FALLBACK_AI_MESSAGE
@@ -246,7 +246,7 @@ class AgentTurnObserver:
         tool_duration_ms: int | None,
         started_ns: int,
     ) -> None:
-        """2026-08-11 用于写入单次工具调用审计并累计工具墙钟区间"""
+        """用于写入单次工具调用审计并累计工具墙钟区间"""
         if self._active_turn_id is None:
             raise RuntimeError("工具审计必须先于模型回合写入 turn 行")
         self._recorder.record_tool_call(
@@ -269,7 +269,7 @@ class AgentTurnObserver:
         )
 
     def close_turn(self) -> None:
-        """2026-08-10 用于在全部 ToolReceipt 构造完成后补写工具墙钟与回合总耗时"""
+        """用于在全部 ToolReceipt 构造完成后补写工具墙钟与回合总耗时"""
         if self._active_turn_id is None:
             return
         now_ns = time.perf_counter_ns()

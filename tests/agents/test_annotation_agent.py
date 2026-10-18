@@ -1,6 +1,6 @@
 """章节级标注 Agent（agent 路径，程序面）LangGraph 与 Runner 测试
 
-2026-09-19 双路径定案：agent 路径（单块章）的模型可见面=[execute_code, finish]，模型
+agent 路径（单块章）的模型可见面=[execute_code, finish]，模型
 把工具调用写成 Python 程序提交；本文件按程序面驱动（_program_message），覆盖：
 
 - 程序内跨领域调用全部生效、逐条独立回滚、失败不阻塞同程序 finish；
@@ -30,36 +30,36 @@ from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 class _QueryService:
-    """2026-08-07 用于提供无数据库依赖的新合同查询桩"""
+    """提供无数据库依赖的新合同查询桩"""
 
     async def search_text(self, query, *, range_name, limit=50):
-        """2026-08-07 用于返回空原文候选"""
+        """返回空原文候选"""
         del query, range_name, limit
         return []
 
 
 class _SequenceLLM(StreamedFakeModelMixin):
-    """2026-08-07 用于按顺序返回 Agent 消息的测试模型（仅 ainvoke，无流式）"""
+    """按顺序返回 Agent 消息的测试模型（仅 ainvoke，无流式）"""
 
     def __init__(self, responses: list[AIMessage]) -> None:
-        """2026-08-07 用于保存待返回的模型消息序列"""
+        """保存待返回的模型消息序列"""
         self.responses = list(responses)
         self.calls = 0
         self.captured_messages: list[list] = []
 
     def bind_tools(self, tools):
-        """2026-09-13 用于满足 LangChain 模型绑定合同"""
+        """满足 LangChain 模型绑定合同"""
         return self
 
     async def ainvoke(self, messages):
-        """2026-08-07 用于返回下一条测试模型消息并记录输入"""
+        """返回下一条测试模型消息并记录输入"""
         self.calls += 1
         self.captured_messages.append(list(messages))
         return self.responses.pop(0)
 
 
 def _tool_message(calls: list[dict]) -> AIMessage:
-    """2026-08-07 用于构造带工具调用的模型回复"""
+    """构造带工具调用的模型回复"""
     return AIMessage(content="", tool_calls=calls)
 
 
@@ -69,12 +69,12 @@ def _write_call(
     *,
     call_id: str,
 ) -> dict:
-    """2026-08-07 用于构造单个工具调用"""
+    """构造单个工具调用"""
     return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
 
 
 def _entity_id(name: str) -> str:
-    """2026-09-19 用于按 FactGraph 同款算法铸造实体 run 级 uuid（uuid5(run_scope+归一化名)）
+    """按 FactGraph 同款算法铸造实体 run 级 uuid（uuid5(run_scope+归一化名)）
 
     本文件的 FactGraph() 用默认 run_scope=""（uuid 命名空间键 = "novel-annotation-entity::名"）。
     """
@@ -87,7 +87,7 @@ def _entity_id(name: str) -> str:
 
 
 def _program_message(code: str, call_id: str = "call-program") -> AIMessage:
-    """2026-09-19 用于构造一条 execute_code 程序回复（程序内的语句即工具调用）"""
+    """构造一条 execute_code 程序回复（程序内的语句即工具调用）"""
     return _tool_message([_write_call("execute_code", {"code": code}, call_id=call_id)])
 
 
@@ -97,12 +97,12 @@ def _entity_stmt(
     *,
     extra_args: str = "",
 ) -> str:
-    """2026-09-19 用于构造 write_entity 程序语句（el=章内引用键）"""
+    """构造 write_entity 程序语句（el=章内引用键）"""
     return f'write_entity(name="{name}", entity_type="{entity_type}", el="{name}"{extra_args})'
 
 
 def _metrics_stmt(*, labels: bool = True) -> str:
-    """2026-09-19 用于构造 write_metrics 程序语句（段落标签随本域提交）"""
+    """构造 write_metrics 程序语句（段落标签随本域提交）"""
     labels_arg = ', labels=[{"paragraph_id": 1, "emotion": -2}]' if labels else ""
     return f'write_metrics(summary="住手回荡", emotional_valence=0, narrative_function="铺垫"{labels_arg})'
 
@@ -114,7 +114,7 @@ def _event_root_stmt(
     *,
     emotion: int = -1,
 ) -> str:
-    """2026-09-19 用于构造 write_event 根事件程序语句"""
+    """构造 write_event 根事件程序语句"""
     return (
         f'write_event(el="{tree_key}", isroot=True, description="{description}", '
         'characters=[{"name": "顾霜", "entity_type": "character", "role": "主体", "narrative_role": "主体", '
@@ -130,7 +130,7 @@ def _event_child_stmt(
     *,
     emotion: int = 0,
 ) -> str:
-    """2026-09-19 用于构造 write_event 子事件程序语句"""
+    """构造 write_event 子事件程序语句"""
     return (
         f'write_event(el="{tree_key}/{child_key}", isroot=False, type="main", '
         f'description="{description}", '
@@ -140,22 +140,22 @@ def _event_child_stmt(
 
 
 def _relation_stmt() -> str:
-    """2026-09-19 用于构造 write_relation 程序语句（两端=实体引用）"""
+    """构造 write_relation 程序语句（两端=实体引用）"""
     return 'write_relation(from_entity="顾霜", to_entity="褚大山", relation_type="敌对")'
 
 
 def _dialogue_stmt() -> str:
-    """2026-09-19 用于构造 write_dialogue 程序语句（第一条候选判为真实对话）"""
+    """构造 write_dialogue 程序语句（第一条候选判为真实对话）"""
     return 'write_dialogue(candidate_index=1, verdict="dialogue", speaker=None, tone="平静")'
 
 
 def _finish_stmt() -> str:
-    """2026-09-19 用于构造 finish 收尾声明（工具体只回 pending，程序末尾结算）"""
+    """构造 finish 收尾声明（工具体只回 pending，程序末尾结算）"""
     return "finish()"
 
 
 def _serial_program_messages() -> list[AIMessage]:
-    """2026-09-19 用于构造三轮程序回复：实体+指标 → 事件树 → 对话+finish"""
+    """构造三轮程序回复：实体+指标 → 事件树 → 对话+finish"""
     return [
         _program_message("\n".join([_entity_stmt(), _metrics_stmt()])),
         _program_message("\n".join([_event_root_stmt(), _event_child_stmt()])),
@@ -164,7 +164,7 @@ def _serial_program_messages() -> list[AIMessage]:
 
 
 def _bound_annotation(*, summary: str = "顾霜进入山门") -> BoundChapterAnnotation:
-    """2026-08-07 用于构造 Runner 重试测试的最小章节标注（2026-09-19 章即块拍平）"""
+    """构造 Runner 重试测试的最小章节标注（章即块拍平）"""
     return BoundChapterAnnotation(
         metrics=ChapterMetricsInput(
             summary=summary,
@@ -178,15 +178,15 @@ def _bound_annotation(*, summary: str = "顾霜进入山门") -> BoundChapterAnn
 
 
 def _tool_receipts(captured_round: list) -> list[str]:
-    """2026-08-10 用于提取某轮模型请求中的全部 ToolMessage 内容"""
+    """提取某轮模型请求中的全部 ToolMessage 内容"""
     return [str(message.content) for message in captured_round if getattr(message, "type", "") == "tool"]
 
 
 @pytest.mark.asyncio
 async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
-    """2026-08-26 回归（2026-09-04 单一写面改契约为 op log）：实体登记追加语义必须落进 FactGraph
+    """实体登记追加语义必须落进 FactGraph
 
-    2026-09-13 小调用改造后一次登记一个实体（write_entity），op log 仍按提交顺序
+    一次登记一个实体（write_entity），op log 按提交顺序
     累积；同名重交按更新语义覆盖（tags/description 增量）。
     """
     ledger = AnnotationToolLedger(
@@ -222,7 +222,7 @@ async def test_second_write_entities_appends_to_catalog_not_replaces() -> None:
 
 @pytest.mark.asyncio
 async def test_entity_reregistration_same_content_is_idempotent() -> None:
-    """2026-09-13 同键同内容重放返回相同 written 回执且不重复写操作日志（重试不重复造数据）"""
+    """同键同内容重放返回相同 written 回执且不重复写操作日志（重试不重复造数据）"""
     ledger = AnnotationToolLedger(
         run_scope="run-1",
         current_chapter_id=1,
@@ -238,7 +238,7 @@ async def test_entity_reregistration_same_content_is_idempotent() -> None:
 
 
 def test_validate_bound_annotation_verifies_dialogue_original_text() -> None:
-    """2026-08-07 用于验证对话原文位置与内容由系统绑定且可回查"""
+    """验证对话原文位置与内容由系统绑定且可回查"""
     annotation = _bound_annotation()
     annotation.dialogues = [
         BoundDialogue(
@@ -258,7 +258,7 @@ def test_validate_bound_annotation_verifies_dialogue_original_text() -> None:
 
 
 def test_validate_bound_annotation_verifies_paragraph_label_membership() -> None:
-    """2026-09-14 段落级监督：自选段标签复核改段落号归属（段号没有逐字复核的对象）"""
+    """段落级监督：自选段标签复核改段落号归属（段号没有逐字复核的对象）"""
     annotation = _bound_annotation()
     paragraph_info = ChapterParagraphInfo(
         paragraph_ids=[0, 1],

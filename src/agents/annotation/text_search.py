@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -14,38 +12,20 @@ from sqlalchemy.orm import Session
 
 from src.embedding import EmbeddingClient, EmbeddingServiceError, format_query_instruct
 from src.storage.models import Chapter, Paragraph
+from src.storage.query_terms import extract_query_terms
 from src.storage.repositories.paragraph import search_paragraphs_by_keywords, search_similar_paragraphs
 
 from .errors import AnnotationDependencyError
 
-_WHOLE_QUERY_MAX_CHARS = 20
-_SPLIT_RE = re.compile(r"[\s,，。；;：:、!?！？\"'（）()\[\]{}]+")
-
-
-def extract_query_terms(query: str, *, max_whole_query_chars: int = _WHOLE_QUERY_MAX_CHARS) -> list[str]:
-    """2026-08-12 用于从中英文查询中提取稳定关键词（NFC 归一化 + 小写 + 去重）
-
-    整句原文仅在前缀长度受限时保留为词项；长句只保留拆分词项；
-    长句无分隔符时返回空列表（不产生必然不命中的整句全表 LIKE 扫描）。
-    """
-    normalized = unicodedata.normalize("NFC", query).replace("\r\n", "\n").replace("\r", "\n").strip().lower()
-    if not normalized:
-        return []
-    terms = [term for term in _SPLIT_RE.split(normalized) if term]
-    if len(normalized) > max_whole_query_chars:
-        if not _SPLIT_RE.search(normalized):
-            # 无分隔符时 re.split 退化为整句本身，必须丢弃避免整句 LIKE 扫描
-            return []
-        return list(dict.fromkeys(terms))
-    return list(dict.fromkeys([normalized, *terms]))
+__all__ = ["TextSearchCandidate", "TextSearchService", "extract_query_terms"]
 
 
 @dataclass(frozen=True, slots=True)
 class TextSearchCandidate:
-    """2026-08-14 用于返回段落级原文定位候选且不赋予 Evidence 身份
+    """用于返回段落级原文定位候选且不赋予 Evidence 身份
 
-    二期段落化：候选粒度固定为自然段（paragraph_id），同章多个候选段落
-    不再按 chunk 合并；坐标字段直接取 paragraphs 事实源列。
+    候选粒度固定为自然段（paragraph_id），同章多个候选段落不按 chunk 合并；
+    坐标字段直接取 paragraphs 事实源列。
     """
 
     chapter_id: int
@@ -60,7 +40,7 @@ class TextSearchCandidate:
 
 
 class _MergedCandidate(TypedDict):
-    """2026-08-14 用于合并同一段落的关键词与语义定位分数"""
+    """用于合并同一段落的关键词与语义定位分数"""
 
     excerpt: str
     keyword_score: float
@@ -72,7 +52,7 @@ class _MergedCandidate(TypedDict):
 
 
 class TextSearchService:
-    """2026-08-14 用于以关键词和段落向量联合定位同 run 原文段落"""
+    """用于以关键词和段落向量联合定位同 run 原文段落"""
 
     def __init__(
         self,
@@ -83,7 +63,7 @@ class TextSearchService:
         semantic_enabled: bool = True,
         semantic_top_k: int = 5,
     ) -> None:
-        """2026-08-14 用于绑定单次 Agent 查询的 run 与语义检索配置"""
+        """用于绑定单次 Agent 查询的 run 与语义检索配置"""
         self._session = session
         self._run_id = run_id
         self._embedding_client = embedding_client
@@ -100,9 +80,9 @@ class TextSearchService:
         after_chapter_sequence: int | None = None,
         limit: int = 50,
     ) -> list[TextSearchCandidate]:
-        """2026-08-14 用于合并关键词与 pgvector 分数并按段落返回候选
+        """用于合并关键词与 pgvector 分数并按段落返回候选
 
-        二期段落化：不再按 chunk 合并——同章多个候选段落都是独立候选；
+        同章多个候选段落都是独立候选，不按 chunk 合并；
         仅当同一段落同时命中关键词与语义检索时合并为一条（两分取各自最优）。
         """
         normalized_query = query.strip()

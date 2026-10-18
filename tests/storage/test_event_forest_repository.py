@@ -1,4 +1,4 @@
-"""事件森林/DAG 查询仓储测试（2026-10-16 全库 3NF 改造）
+"""事件森林/DAG 查询仓储测试
 
 读取面输入为正式发布的完整事件（complete_events + event_revisions 显式阶段链
 + narrative_links 语义形状）；章级声明只作为来源，读取时不冒充事件身份。
@@ -57,7 +57,7 @@ def _publish(session, run_id, relations=()):
 
 
 def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None:
-    """2026-08-19 用于验证持久化后 fetch_snapshot 返回树视图与因果边（）"""
+    """验证持久化后 fetch_snapshot 返回树视图与因果边"""
     text = "顾霜进入山门。\n顾霜拔剑。"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -65,7 +65,7 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
         title="事件森林快照",
     )
     paragraphs = paragraphs_of(db_session, run_id, 1)
-    record_id, _work_id, _execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, _execution_id = add_annotation_source(db_session, run_id, 1)
     first_declaration = add_declaration(
         db_session,
         record_id=record_id,
@@ -124,7 +124,7 @@ def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_sessio
         title="伏笔边不混因果",
     )
     paragraphs = paragraphs_of(db_session, run_id, 1)
-    record_id, _work_id, _execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, _execution_id = add_annotation_source(db_session, run_id, 1)
     root_declaration = add_declaration(
         db_session,
         record_id=record_id,
@@ -167,7 +167,7 @@ def repo_foreshadow_edges(session, run_id: str) -> int:
 
 
 def test_source_branch_markers_do_not_infer_formal_structure(db_session) -> None:
-    """2026-08-19 用于验证次因分支（secondary）按因果前驱 target 归组（）"""
+    """验证次因分支（secondary）按因果前驱 target 归组"""
     text = "顾霜拔剑。\n顾霜喝止。\n顾霜降敌。\n顾霜追问。"
     _novel_id, run_id = create_run_with_chunks(
         db_session,
@@ -175,7 +175,7 @@ def test_source_branch_markers_do_not_infer_formal_structure(db_session) -> None
         title="次因分支聚合",
     )
     paragraphs = paragraphs_of(db_session, run_id, 1)
-    record_id, _work_id, _execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, _execution_id = add_annotation_source(db_session, run_id, 1)
     declarations = [
         add_declaration(
             db_session,
@@ -210,14 +210,14 @@ def test_source_branch_markers_do_not_infer_formal_structure(db_session) -> None
 
 
 def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
-    """2026-09-13 用于验证 fetch_snapshot 返回伏笔树视图（伏笔即事件树）"""
+    """验证 fetch_snapshot 返回伏笔树视图（伏笔即事件树）"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜立誓"],
         title="伏笔边快照",
     )
     paragraph = first_paragraph(db_session, run_id)
-    record_id, _work_id, execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, execution_id = add_annotation_source(db_session, run_id, 1)
     declaration_id = add_declaration(
         db_session,
         record_id=record_id,
@@ -253,7 +253,7 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
     """同段声明的来源候选关系不能改写已经发布的正式因果关系"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜入门，随后立誓。"])
     paragraph = first_paragraph(db_session, run_id)
-    record_id, _work_id, execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, execution_id = add_annotation_source(db_session, run_id, 1)
     first_declaration = add_declaration(
         db_session,
         record_id=record_id,
@@ -288,7 +288,7 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
     # 节点坐标来自各声明自身的原文证据，不由来源候选关系重新绑定
     assert snapshot.event_nodes[0].char_start == 0
     assert snapshot.event_nodes[1].char_start == paragraph.text.find("随后立誓")
-    # 反向来源候选只是章级建议，不改写已发布的正式方向
+    # 反向来源候选只是章级建议，不改写既有的正式方向
     add_declaration_relation(
         db_session,
         producer_execution_id=execution_id,
@@ -304,22 +304,22 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
 
 
 def test_fetch_snapshot_returns_none_for_missing_run(db_session) -> None:
-    """2026-08-18 用于验证不存在的 run 查询返回 None"""
+    """验证不存在的 run 查询返回 None"""
     repo = EventForestQuery(db_session)
     snapshot = repo.fetch_snapshot("nonexistent-run-id")
     assert snapshot is None
 
 
 def test_fetch_snapshot_filters_by_chapter_id(db_session) -> None:
-    """2026-08-18 用于验证 chapter_id 参数按章节边界截断事件节点"""
+    """验证 chapter_id 参数按章节边界截断事件节点"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["顾霜进入山门。", "顾霜拔剑。"],
         chapter_ids=[1, 2],
         title="章节边界截断",
     )
-    first_record, _work_id, _execution_id = add_annotation_source(db_session, run_id, 1)
-    second_record, _work_id_2, _execution_id_2 = add_annotation_source(db_session, run_id, 2)
+    first_record, _execution_id = add_annotation_source(db_session, run_id, 1)
+    second_record, _execution_id_2 = add_annotation_source(db_session, run_id, 2)
     add_declaration(
         db_session,
         record_id=first_record,

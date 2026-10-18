@@ -115,7 +115,7 @@ def guess_preliminary_title(text: str) -> str | None:
 
 
 def auto_split(text: str, config: ChapterConfig | None = None) -> list[ChapterData]:
-    """自动分章兜底：按固定字数在段落/句子边界切分（对齐原 _chunk_simple 策略）"""
+    """自动分章兜底：按固定字数在段落/句子边界切分"""
     config = config or ChapterConfig()
     max_chars = config.fallback_chunk_size
 

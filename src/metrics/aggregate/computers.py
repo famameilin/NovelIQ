@@ -238,7 +238,7 @@ def compute_character_relation_metrics(
     char_data: CharacterData,
     total_chars: int,
 ) -> dict[str, Any]:
-    """计算人物关系聚合指标（total_chars 为全书总字符数，用于每万字关系变化频率，§19.10）"""
+    """计算人物关系聚合指标（total_chars 为全书总字符数，用于每万字关系变化频率）"""
     relation_input = relation_data.relations
     relation_graph = build_character_graph(relation_input) if relation_input else None
     result: dict[str, Any] = {
@@ -289,7 +289,7 @@ def compute_language_style_metrics(
         result.update({f"function_word_{k}": v for k, v in function_word_vector.items()})
 
     if style_data:
-        # §9.1 守恒：全书比率 = 分子之和 / 分母之和，禁止对章节比值等权平均
+        # 守恒：全书比率 = 分子之和 / 分母之和，禁止对章节比值等权平均
         result["dialogue_ratio"] = style_data.dialogue_ratio
         result["avg_sent_len"] = style_data.avg_sent_len
     else:

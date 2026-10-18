@@ -36,7 +36,7 @@ def test_character_emotion_preserves_numeric_graph_fact(db_session) -> None:
 
 
 def test_fetch_characters_merges_same_character_aliases(db_session) -> None:
-    """2026-08-09 用于验证角色榜把同一人物别名归一到代表名"""
+    """验证角色榜把同一人物别名归一到代表名"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["伯安与猴子同游"],
@@ -83,7 +83,7 @@ def test_fetch_characters_merges_same_character_aliases(db_session) -> None:
 
 
 def test_fetch_characters_prefers_diagnosis_name_as_representative(db_session) -> None:
-    """2026-08-09 用于验证角色榜代表名优先采用诊断命中名字"""
+    """验证角色榜代表名优先采用诊断命中名字"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["伯安与贺重明同游"],
@@ -116,7 +116,7 @@ def test_fetch_characters_prefers_diagnosis_name_as_representative(db_session) -
 
 
 def test_fetch_characters_normalizes_diagnosis_keys_for_focus_scores(db_session) -> None:
-    """2026-08-09 用于验证诊断别名名归一到代表名后聚焦评分正确匹配"""
+    """验证诊断别名名归一到代表名后聚焦评分正确匹配"""
     _novel_id, run_id = create_run_with_chunks(
         db_session,
         texts=["伯安与贺重明同游"],

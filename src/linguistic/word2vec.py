@@ -1,4 +1,4 @@
-"""词向量能力（《分析能力扩展路线图》赛道 C3，可开关）
+"""词向量能力（可开关）
 
 单流水线：公开预训练中文词向量做初始化，再用本书 LTP 词元继续训练
 （warm-start 微调）——书内词站在预训练语义底子上微调，预训练未覆盖的
@@ -6,8 +6,7 @@
 models/word2vec/{run_id}/word2vec.model（run 私有 artifact）。
 
 预训练共享向量由 scripts/convert_word2vec_pretrained.py 一次性
-转成 .kv 落盘，运行时直接加载共享 KeyedVectors（进程级只加载一次），
-不再重复解析 4.3GB 文本文件。
+转成 .kv 落盘，运行时直接加载共享 KeyedVectors（进程级只加载一次）。
 
 - POS 聚合向量：按段落、词性分组的词向量均值（word2vec_model_runs 的
   维度约束），覆盖率 = 词表内词数 / 该组原始词数，由查询层计算
@@ -40,7 +39,7 @@ _KV_SUFFIX = ".kv"
 
 
 def resolve_shared_pretrained_path(model_dir: Path) -> Path:
-    """2026-08-30 用于解析共享模型目录中唯一的 KeyedVectors 主文件"""
+    """解析共享模型目录中唯一的 KeyedVectors 主文件"""
     if not model_dir.is_dir():
         raise FileNotFoundError(
             f"预训练共享模型目录不存在: {model_dir}（请先执行 python -m scripts.convert_word2vec_pretrained）"
@@ -56,7 +55,7 @@ def resolve_shared_pretrained_path(model_dir: Path) -> Path:
 
 
 def load_shared_pretrained_vectors(model_dir: Path) -> KeyedVectors:
-    """2026-08-30 用于以只读内存映射加载并缓存唯一的共享预训练向量"""
+    """以只读内存映射加载并缓存唯一的共享预训练向量"""
     kv_path = resolve_shared_pretrained_path(model_dir)
     with _PRETRAINED_CACHE_LOCK:
         cached = _PRETRAINED_CACHE.get(str(kv_path))
@@ -68,7 +67,7 @@ def load_shared_pretrained_vectors(model_dir: Path) -> KeyedVectors:
 
 
 def reset_pretrained_cache() -> None:
-    """2026-08-30 用于在测试之间清除共享预训练向量进程级缓存"""
+    """清除共享预训练向量进程级缓存（供测试调用）"""
     with _PRETRAINED_CACHE_LOCK:
         _PRETRAINED_CACHE.clear()
 
@@ -77,8 +76,8 @@ def reset_pretrained_cache() -> None:
 class TrainResult:
     """按书微调产物摘要（word2vec_model_runs 契约）
 
-    2026-10-16 3NF：训练参数在契约表按明确列落库，这里同时给出逐列字段
-    与聚合的 parameters（供调用方对照/测试使用）。
+    训练参数在契约表按明确列落库，这里同时给出逐列字段与聚合的 parameters
+    （供调用方对照/测试使用）。
     """
 
     embedding_dimension: int
@@ -102,11 +101,10 @@ def train_book_model(
     min_count: int | None = None,
     epochs: int | None = None,
 ) -> TrainResult:
-    """2026-08-30 用于以共享预训练向量初始化并微调 run 私有模型
+    """以共享预训练向量初始化并微调 run 私有模型
 
     - 先按本书词表 build_vocab，再把共享预训练向量按词索引拷贝进交集词
-      （全部词可微调，与旧 intersect lockf=1.0 语义等价），预训练未覆盖的
-      书内词保持随机初始化由本书语料训练
+      （全部词可微调），预训练未覆盖的书内词保持随机初始化由本书语料训练
     - 维度以预训练共享向量为准；模型保存到
       models/word2vec/{run_id}/word2vec.model（run 私有）
     - training_token_count 为全部文档的有效词元总数（含重复词元）
@@ -132,9 +130,8 @@ def train_book_model(
         workers=1,
     )
     model.build_vocab(non_empty)
-    # 预训练共享向量按词索引拷贝进交集词；
-    # gensim 4.4 的 vectors_lockf 默认 ones(1)（广播），按词索引赋值会越界，先展开到词表全长；
-    # 全 1 表示微调期所有词都可更新（与旧 intersect_word2vec_format lockf=1.0 等价）
+    # 预训练共享向量按词索引拷贝进交集词；gensim 4.4 的 vectors_lockf 默认 ones(1)（广播），
+    # 按词索引赋值会越界，先展开到词表全长；全 1 表示微调期所有词都可更新
     model.wv.vectors_lockf = np.ones(len(model.wv))
     for idx, word in enumerate(model.wv.index_to_key):
         if word in pretrained_vectors:
@@ -170,7 +167,7 @@ def train_book_model(
 
 @dataclass(frozen=True)
 class PosEmbeddingRow:
-    """段落词性聚合向量行（§5.7）"""
+    """段落词性聚合向量行"""
 
     paragraph_id: int
     pos_group: str

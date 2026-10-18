@@ -1,9 +1,9 @@
 """
 设置应用服务
 
-说明: settings.json 与 .env 的写入通道集中在此——用户设置深合并 → 校验 → 稀疏化原子写回 →
-      原地热生效，以及模型池、嵌入凭据、LTP 目录的受控编辑。HTTP 视图（打码、来源标注、
-      连通性测试）留在 api 路由
+settings.json 与 .env 的写入通道集中在此——用户设置深合并 → 校验 → 稀疏化原子写回 →
+原地热生效，以及模型池、嵌入凭据、LTP 目录的受控编辑。HTTP 视图（打码、来源标注、
+连通性测试）留在 api 路由
 """
 
 from __future__ import annotations
@@ -190,7 +190,6 @@ def _resolve_model_pool(model_pool: list[dict[str, Any]] | None) -> list[Any]:
                 "api_key": api_key,
                 "weight": entry["weight"],
                 "max_in_flight": entry["max_in_flight"],
-                # 2026-10-02 设置迁移：采样参数随模型保存
                 "temperature": entry["temperature"],
                 "top_p": entry["top_p"],
                 "max_tokens": entry["max_tokens"],

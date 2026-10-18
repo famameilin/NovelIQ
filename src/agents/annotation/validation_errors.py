@@ -2,12 +2,6 @@
 章节标注校验错误翻译层：把 pydantic 校验失败翻成模型可自纠的结构化拒绝回执
 """
 
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：tools.py 大文件拆分——原校验错误翻译层（_STAGE_FIELD_* 三表 +
-# _translate_record_validation / translate_write_validation_error）迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；记录键仍由 tools.tool_record_key 生成，
-# tools.py 对外保留 re-export（program/graph 的导入零改动）。
-
 from __future__ import annotations
 
 import re
@@ -24,14 +18,14 @@ from .tools import tool_record_key
 
 
 def _short_pydantic_message(msg: str) -> str:
-    """2026-09-12 用于剥离 pydantic 报错样板（Value error 前缀与文档链接尾注）"""
+    """用于剥离 pydantic 报错样板（Value error 前缀与文档链接尾注）"""
     cleaned = msg
     if cleaned.startswith("Value error, "):
         cleaned = cleaned[len("Value error, ") :]
     return re.sub(r"\s*\[type=[^\]]*\]$", "", cleaned)
 
 
-# 2026-09-13 小调用改造：字段级取值域纠错文案（按 pydantic 失败族翻译成可自纠说明）
+# 字段级取值域纠错文案（按 pydantic 失败族翻译成可自纠说明）
 _EVENT_ROLE_VALUES_TEXT = "主体/客体/接收者/帮助者/反对者/见证者/地点"
 
 _EVENT_NARRATIVE_ROLE_VALUES_TEXT = "主体/客体/发送者/接收者/帮助者/反对者/见证者"
@@ -39,8 +33,8 @@ _STAGE_FIELD_EXPECTATIONS: dict[str, str] = {
     "verdict": "dialogue=真实对话 / inner_monologue=内心独白 / not_dialogue=误判候选",
     "tone": tone_catalog_text(),
     "relation_type": "闭合关系类型（见 write_relation 参数说明）",
-    # 2026-09-20 回执只报字段取值域，"这个字段是什么、怎么判"归提示词面——写在载荷模型的
-    # 字段说明里（schema.ParticipantArg.role/narrative_role），本表不再替它复述。
+    # 回执只报字段取值域；"这个字段是什么、怎么判"写在载荷模型的字段说明里
+    # （schema.ParticipantArg.role/narrative_role），本表不复述。
     "role": _EVENT_ROLE_VALUES_TEXT,
     "narrative_role": _EVENT_NARRATIVE_ROLE_VALUES_TEXT,
     "entity_type": "character / location / item / organization",
@@ -81,7 +75,7 @@ _STAGE_FIELD_CODES: dict[str, str] = {
     # 记录级联合约束（三态字段组合、单表内一致性）由 model_validator 抛出
     "value_error": "invalid_combination",
 }
-# 2026-09-14 闭合枚举字段的拒绝文案：枚举类型只给出合法值本身，这里补上"没有贴合的用哪个"
+# 闭合枚举字段的拒绝文案：枚举类型只给出合法值本身，这里补上"没有贴合的用哪个"
 _STAGE_ENUM_FALLBACKS: dict[str, str] = {
     "tone": "没有贴合的用「其他」",
 }
@@ -94,7 +88,7 @@ def _translate_record_validation(
     tool_name: str,
     args: dict[str, Any] | None = None,
 ) -> AnnotationStageRejection:
-    """2026-09-13 用于把单条记录的 pydantic 失败翻成结构化拒绝回执
+    """用于把单条记录的 pydantic 失败翻成结构化拒绝回执
 
     只报第一个失败字段：小调用的粒度就是一个字段一个语义单元，一次修一处。
     """
@@ -115,12 +109,11 @@ def _translate_record_validation(
     if kind == "missing" and expected:
         message = f"{tool_name} 缺少必填字段 {field}：{expected}"
     if kind == "extra_forbidden":
-        # 2026-09-13 未声明参数不再被静默丢弃：整条拒绝并指出多余字段名
+        # 未声明参数整条拒绝并指出多余字段名
         expected = "只提交本工具声明的参数（多余字段会被整条拒绝）"
         message = f"{tool_name} 不接受参数 {field}：该字段不属于本工具"
     if kind == "enum" and expected:
-        # 2026-09-14 闭合枚举字段（tone 等）：pydantic 只说"输入必须是…"，把取值域与
-        # 兜底指引写全，模型一次就能自纠（不回显整份合同）
+        # 闭合枚举字段（tone 等）：把取值域与兜底指引写全，一次自纠（不回显整份合同）
         value = first.get("input")
         fallback = _STAGE_ENUM_FALLBACKS.get(field or "")
         suffix = f"（{fallback}）" if fallback else ""
@@ -163,7 +156,7 @@ def translate_write_validation_error(
     args: dict[str, Any],
     exc: ValidationError,
 ) -> AnnotationStageRejection:
-    """2026-09-13 用于把工具层 schema（langchain 参数绑定）失败翻成结构化拒绝回执
+    """用于把工具层 schema（langchain 参数绑定）失败翻成结构化拒绝回执
 
     schema 层的失败发生在工具函数体之前，记录键只能从原始参数拼装。
     """

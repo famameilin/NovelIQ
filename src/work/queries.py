@@ -1,11 +1,9 @@
-"""按成功 work 只读聚合章节结果，不生成第二份章级持久化产物
+"""按已保存角色只读聚合章节结果，不生成第二份章级持久化产物
 
-2026-10-16 全库 3NF：旧 annotation_work 与 analysis_outputs 退场后
-- 完成判定：复用 AnnotationRepository 的标注 work 读投影（work_items 标注形状
-  + 该 work 是否存在 chapter_annotations 正式产物行；state 是派生观察，不新增列）
-- 章级结果：从正式关系投影重组（chapter_annotations 正式头与具名指标、
-  analysis_assessments 段落情绪、event_declarations/declaration_participants、
-  dialogue_records）；不恢复通用 payload JSON 列
+完成判定直接读产物行——chapter_annotations 自带 run/章/角色与真实执行号；章级结果
+从正式关系投影重组（chapter_annotations 正式头与具名指标、analysis_assessments
+段落情绪、event_declarations/declaration_participants、dialogue_records），
+不落通用 payload JSON 列。
 """
 
 from __future__ import annotations
@@ -23,13 +21,14 @@ from src.storage.models import (
     DeclarationParticipant,
     DialogueRecord,
     EventDeclaration,
-    Execution,
 )
 from src.storage.repositories.annotation import AnnotationRepository
-from src.storage.repositories.annotation.rows import AnnotationWorkRow
+from src.storage.repositories.annotation.rows import AnnotationRoleRecord
 from src.work.policy import completed_chapters
 
-_ROLE_ORDER = {"solo": 0, "structure": 0, "event": 1, "evidence": 2}
+_ROLE_ORDER = {"annotation": 0, "entity": 0, "event": 1, "metric": 2}
+#: 章级具名指标所在的角色（短章整章与长章指标角色）
+METRIC_ROLES = ("annotation", "metric")
 #: 每章段落级情绪标签软下限（与标注合同固定覆盖规则同口径，低于此值随章留痕）
 _PARAGRAPH_LABEL_MIN_PER_CHAPTER = 2
 
@@ -44,14 +43,13 @@ class ChapterAnnotationView:
     role: str | None
     payload: dict[str, Any]
     created_at: datetime
-    work_id: str | None = None
     invocation_id: str | None = None
     kind: str = "chapter_annotation"
 
 
-def fetch_annotation_work_states(session: Session, run_id: str) -> list[AnnotationWorkRow]:
-    """标注 work 完成判定视图；saved 由正式标注记录存在性推导（repository 冻结读面）"""
-    return AnnotationRepository(session).fetch_work_records(run_id)
+def fetch_annotation_role_records(session: Session, run_id: str) -> list[AnnotationRoleRecord]:
+    """章内标注角色完成判定视图：saved 由正式产物行存在性表达（repository 冻结读面）"""
+    return AnnotationRepository(session).fetch_role_records(run_id)
 
 
 def _paragraph_labels(session: Session, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -174,11 +172,11 @@ def _coverage_warnings(label_count: int) -> list[str]:
 
 
 def chapter_annotations(session: Session, run_id: str) -> list[ChapterAnnotationView]:
-    """按成功 work 聚合章节结果；只读取正式关系，不写任何行"""
+    """按已保存角色聚合章节结果；只读取正式关系，不写任何行"""
     repository = AnnotationRepository(session)
     records = repository.fetch_saved_outputs(run_id)
-    works = repository.fetch_work_records(run_id)
-    complete = completed_chapters(works)
+    roles = repository.fetch_role_records(run_id)
+    complete = completed_chapters(roles)
     if not records or not complete:
         return []
     groups: dict[int, list[Any]] = defaultdict(list)
@@ -187,25 +185,17 @@ def chapter_annotations(session: Session, run_id: str) -> list[ChapterAnnotation
             groups[record.chapter_id].append(record)
     sequence = repository.fetch_chapter_sequence_map(run_id)
     record_ids = [record.record_id for record in records]
-    execution_work = {
-        str(execution_id): (str(work_id) if work_id is not None else None)
-        for execution_id, work_id in session.execute(
-            select(Execution.execution_id, Execution.work_id).where(
-                Execution.execution_id.in_([record.execution_id for record in records])
-            )
-        )
-    }
     labels_by_record = _paragraph_labels(session, record_ids)
     declarations_by_record = _declaration_projections(session, record_ids)
     dialogues_by_execution = _dialogue_projections(session, [record.execution_id for record in records])
     observations_by_record = _character_observations(session, record_ids)
     results: list[ChapterAnnotationView] = []
     for chapter_id, sources in sorted(groups.items(), key=lambda item: sequence.get(item[0], item[0])):
-        expected = {work.role for work in works if work.chapter_id == chapter_id}
+        expected = {record.role for record in roles if record.chapter_id == chapter_id}
         if {record.role for record in sources} != expected:
             continue
         metric_index = next(
-            (index for index, record in enumerate(sources) if record.role in {"solo", "evidence"}), None
+            (index for index, record in enumerate(sources) if record.role in METRIC_ROLES), None
         )
         if metric_index is None:
             continue
@@ -242,7 +232,6 @@ def chapter_annotations(session: Session, run_id: str) -> list[ChapterAnnotation
                 role=metric.role,
                 payload=payload,
                 created_at=metric.created_at,
-                work_id=execution_work.get(metric.execution_id),
                 invocation_id=metric.execution_id,
             )
         )
@@ -250,7 +239,7 @@ def chapter_annotations(session: Session, run_id: str) -> list[ChapterAnnotation
 
 
 def is_annotate_complete(session: Session, run_id: str) -> bool:
-    """2026-08-05 用于按真实章节集合严格判断标注阶段完成状态"""
+    """按真实章节集合严格判断标注阶段完成状态"""
     expected = AnnotationRepository(session).fetch_chapter_ids(run_id)
     if not expected:
         return False

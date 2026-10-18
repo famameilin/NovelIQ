@@ -1,15 +1,15 @@
-"""段落级情绪边界（2026-09-07 定稿句级，2026-09-14 改段落级监督，用户定稿）
+"""段落级情绪边界
 
 监督信号 = 标注 agent 逐章自选段的整段情绪标签（analysis_assessments 的逐段
 情绪条目，经章节标注产物头关联本 run）；边界 = 该书自己的段落向量现算的岭回归
-线性映射（paragraph_features 的 semantic_vector 行 → 情绪分值），numpy 亚秒级、
-确定性；无标签 run 无边界（上层保留词典/mNEG 口径）。
+线性映射（paragraph_features 的 semantic_vector 行 → 情绪分值），确定性；
+无标签 run 无边界（上层保留词典/mNEG 口径）。
 
 拟合器对"文本向量 → 分值"这一抽象建模（不绑定句/段粒度）：向量源、样本单位
-由上层决定，算法（中心化岭回归闭式解 + 截距）与 09-07 版一致。
+由上层决定，算法为中心化岭回归闭式解 + 截距。
 
 分值目标 = 标签自带的 -2..2 整数分值（强烈负面=-2 … 强烈正面=2）；
-p(负向) 由分值单调映射供分层（p≥0.8 强），跨书曲线口径不同不可比（用户已接受）。
+p(负向) 由分值单调映射供分层（p≥0.8 强），跨书曲线口径不同不可比。
 
 纯函数，不依赖模型实例；测试可直接构造向量矩阵。
 """
@@ -22,7 +22,7 @@ import numpy as np
 
 #: 岭正则强度：向量已 L2 归一化、样本量小（每章 2-3 段），固定值保证数值稳定
 _RIDGE_LAMBDA = 1.0
-#: 强度分层阈值（方案：p≥0.8 强）
+#: 强度分层阈值（p≥0.8 强）
 _STRONG_SCORE_THRESHOLD = 0.8
 #: 向量最大维度上限（防御异常模型输出；ritrieve 段落向量 1024）
 _MAX_DIM = 4096
@@ -89,7 +89,7 @@ def score_items(
 
 
 def strong_negative_share(scores: list[float | None]) -> float | None:
-    """强度分层占比（方案 p≥0.8 强的负向侧）：分值 ≤ -threshold 计强负"""
+    """强度分层占比（p≥0.8 强的负向侧）：分值 ≤ -threshold 计强负"""
     valid = [score for score in scores if score is not None]
     if not valid:
         return None

@@ -14,7 +14,7 @@ interface AnalysisPageViewportProps {
 }
 
 /**
- * 2026-04-28，作用：统一分析页标题、宽度、留白和滚动边界
+ * 统一分析页标题、宽度、留白和滚动边界
  * 简要说明：默认约束为固定视口，文档流模式把纵向滚动交给 AppLayout 外层
  */
 export function AnalysisPageViewport({

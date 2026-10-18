@@ -1,5 +1,5 @@
 /**
- * TopicKeywordsCard - TextRank 关键词卡片（赛道 A3）
+ * TopicKeywordsCard - TextRank 关键词卡片
  *
  * 口径独立于 LDA 主题词：独立词共现图（窗口 5）+ PageRank 的 Top-N。
  */

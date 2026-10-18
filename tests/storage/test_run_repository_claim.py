@@ -1,8 +1,6 @@
 """RunRepository.claim_pending_run 的 started_at 语义
 
-2026-10-04 修复：重领（诊断重试触发的 re-claim）曾无条件把 started_at 重置为
-claim 时刻，两次生产 run 的表面耗时因此缩水成 13m36s/7m26s（真实 16h46m/4h09m）。
-现契约：首次 claim 盖 started_at；已有值一律保留（coalesce）。
+契约：首次 claim 盖 started_at；已有值一律保留（coalesce）。
 """
 
 from __future__ import annotations

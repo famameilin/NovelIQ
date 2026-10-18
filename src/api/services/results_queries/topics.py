@@ -1,7 +1,7 @@
 """
 主题查询组装器
 
-说明: 承载 topics 相关取数与响应装配；权重归一在
+承载 topics 相关取数与响应装配；权重归一在
 `src.topic.queries.normalize_topic_weights`。
 
 Paragraph 粒度主题结果使用 paragraph_topics 的原始 token 加权聚合

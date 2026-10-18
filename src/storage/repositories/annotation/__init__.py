@@ -14,7 +14,7 @@ from .repository import (
     ForeshadowingTreeView,
 )
 from .rows import (
-    AnnotationWorkRow,
+    AnnotationRoleRecord,
     DialogueRecordRow,
     ForeshadowingEdgeRow,
     GraphFactRow,
@@ -23,7 +23,7 @@ from .rows import (
 
 __all__ = [
     "AnnotationRepository",
-    "AnnotationWorkRow",
+    "AnnotationRoleRecord",
     "ChapterAnnotationRow",
     "CharacterFactRow",
     "DialogueFactRow",

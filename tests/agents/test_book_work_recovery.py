@@ -17,10 +17,9 @@ def test_saved_reference_restores_endpoints_without_fabricating_entity_writes():
         for name in ("Alice", "Bob")
     ]
     graph.restore_work(
-        "saved-b",
         "b1",
         2,
-        "solo",
+        "annotation",
         [],
         [
             {
@@ -35,21 +34,21 @@ def test_saved_reference_restores_endpoints_without_fabricating_entity_writes():
     assert graph.entity_id("Alice", "character") == references[0]["entity_id"]
     resolved = graph.resolve_entity_id(references[1]["entity_id"], label="target")
     assert graph.display_name(resolved) == "Bob"
-    assert graph.drain_ops("saved-b", "b1")["entity_ops"] == []
+    assert graph.drain_ops("b1")["entity_ops"] == []
     assert len(graph.active_relations) == 1
 
 
 def test_legacy_identity_and_event_facts_are_not_current_work_operations(db_session):
-    """2026-10-16 3NF：从存储读回 work 只恢复当前形状的图操作
+    """从存储读回执行只恢复当前形状的图操作
 
-    已登记实体在后续章只作为引用支持（旧 identity/event 事实类型已退场）：读回该 work
-    后不产生实体操作与关系操作，引用端点仍可解析。
+    已登记实体在后续章只作为引用支持：读回该执行后不产生实体操作与关系操作，
+    引用端点仍可解析。
     """
     from uuid import uuid4
 
     from src.agents.annotation.output_models import BoundChapterAnnotation
     from src.fact_graph.inputs import ChapterMetricsInput
-    from src.storage.models import ChapterAnnotation, Execution, Paragraph
+    from src.storage.models import ChapterAnnotation, Paragraph
     from tests.support.chapter_annotation_helpers import (
         character_fact,
         commit_test_annotation,
@@ -84,34 +83,34 @@ def test_legacy_identity_and_event_facts_are_not_current_work_operations(db_sess
     )
     record_id = commit_test_annotation(db_session, run_id=run_id, chapter_id=2, annotation=output)
     record = db_session.get(ChapterAnnotation, record_id)
-    work_id = str(db_session.get(Execution, record.execution_id).work_id)
+    author = str(record.execution_id)
     graph = FactGraph(run_scope=run_id)
     graph.restore_storage(
         db_session,
         [
             SimpleNamespace(
-                execution_id=record.execution_id, work_id=work_id, chapter_id=2, sequence=2, role="solo"
+                execution_id=author, record_id=record_id, chapter_id=2, sequence=2, role="annotation"
             )
         ],
     )
-    snapshot = graph.load_saved_work(db_session, work_id, record.execution_id, record_id)
+    snapshot = graph.load_saved_work(db_session, author, record_id)
     graph.recover_work(snapshot)
     assert graph.entity_id("Alice", "character") == mention_uuid(run_id, 1, "Alice", "character")
-    assert graph.drain_ops(work_id, record.execution_id) == {"entity_ops": [], "relation_assert_ops": []}
+    assert graph.drain_ops(author) == {"entity_ops": [], "relation_assert_ops": []}
 
 
 def test_single_work_fact_recovery_preserves_other_inflight_contribution():
     graph = FactGraph(run_scope="run")
-    graph.begin("other", "o1", 3, "structure")
-    with graph.author("other", "o1"):
+    graph.begin("o1", 3, "entity")
+    with graph.author("o1"):
         entity = EntityInput(name="Other", entity_type="character", description="在飞实体")
         graph.register_entities([entity])
         graph.record_entity_ops([entity], chapter_id=3)
-    other = deepcopy(graph.contributions[("other", "o1")])
+    other = deepcopy(graph.contributions["o1"])
     snapshot = {
-        "author": ("saved", "s1"),
+        "author": "s1",
         "sequence": 1,
-        "role": "solo",
+        "role": "annotation",
         "entity_ops": [],
         "relation_assert_ops": [],
         "entity_references": [
@@ -120,32 +119,32 @@ def test_single_work_fact_recovery_preserves_other_inflight_contribution():
     }
     graph.recover_work(snapshot)
     graph.recover_work(snapshot)
-    assert graph.contributions[("other", "o1")] == other
+    assert graph.contributions["o1"] == other
     assert graph.entity_attributes[entity_key("Other", "character")] == {"description": "在飞实体"}
     assert graph.entity_id("Saved", "character") is not None
 
 
 def test_saved_reference_survives_source_rollback_in_current_run():
     graph = FactGraph(run_scope="run")
-    graph.begin("source", "a1", 1, "structure")
-    graph.begin("saved", "b1", 2, "solo")
-    with graph.author("source", "a1"):
+    graph.begin("a1", 1, "entity")
+    graph.begin("b1", 2, "annotation")
+    with graph.author("a1"):
         entity = EntityInput(name="Alice", entity_type="character", description="来源章专属")
         graph.register_entities([entity])
         graph.record_entity_ops([entity], chapter_id=1)
     identifier = graph.entity_id("Alice", "character")
-    graph.reference_entities(("saved", "b1"), [{"entity_id": identifier, "name": "Alice", "entity_type": "character"}])
-    graph.confirm("saved", "b1")
-    graph.rollback("source", "a1")
+    graph.reference_entities("b1", [{"entity_id": identifier, "name": "Alice", "entity_type": "character"}])
+    graph.confirm("b1")
+    graph.rollback("a1")
     assert graph.display_name(graph.resolve_entity_id(identifier, label="actual reference")) == "Alice"
     # 回滚的源章不留下实体状态（只有保留侧的引用支持）
     assert graph.entity_attributes.get(entity_key("Alice", "character"), {}) == {}
-    assert graph.drain_ops("saved", "b1")["entity_ops"] == []
+    assert graph.drain_ops("b1")["entity_ops"] == []
 
 
 def test_single_work_tree_recovery_preserves_other_inflight_nodes():
     trees = EventTrees("run")
-    trees.begin("other", "o1")
+    trees.begin("o1")
     other = BoundEvent(
         node_id="other-node",
         tree_id="other-tree",
@@ -160,11 +159,11 @@ def test_single_work_tree_recovery_preserves_other_inflight_nodes():
         status="ongoing",
         declaration_id="other-node",
     )
-    trees.sync(("other", "o1"), 3, [other])
+    trees.sync("o1", 3, [other])
     saved = other.model_copy(update={"node_id": "saved-node", "tree_id": "saved-tree"})
     snapshot = {
-        "author": ("saved", "s1"),
-        "nodes": {"saved-node": {"author": ("saved", "s1"), "chapter_id": 1, "content": saved.model_dump(mode="json")}},
+        "author": "s1",
+        "nodes": {"saved-node": {"author": "s1", "chapter_id": 1, "content": saved.model_dump(mode="json")}},
         "connections": {},
         "actions": {},
     }
@@ -172,14 +171,14 @@ def test_single_work_tree_recovery_preserves_other_inflight_nodes():
     trees.recover_work(snapshot)
     assert trees.read("other-node")["saved"] is False
     assert trees.read("saved-node")["saved"] is True
-    assert ("other", "o1") in trees.executions
+    assert "o1" in trees.executions
 
 
 def test_single_work_case_recovery_restores_own_exclusion_and_preserves_other_owner():
     pool = CasePool("run")
-    saved, other = ("saved", "s1"), ("other", "o1")
-    pool.begin(*saved)
-    pool.begin(*other)
+    saved, other = "s1", "o1"
+    pool.begin(saved)
+    pool.begin(other)
     own = pool.push("character", "Own case", saved)
     external = pool.push("character", "Other case", other)
     pool.promise(own["case_id"], saved)
@@ -198,59 +197,59 @@ def test_single_work_case_recovery_restores_own_exclusion_and_preserves_other_ow
         "registrations": {own["case_id"]: own},
         "deliveries": deepcopy(pool.deliveries[saved]),
     }
-    pool.confirm(*saved)
+    pool.confirm(saved)
     pool.recover_work(snapshot)
     pool.recover_work(snapshot)
     assert pool.case_runtime[own["case_id"]]["owner"] == saved
+    assert pool.case_runtime[own["case_id"]]["promised"] is True
     assert pool.case_runtime[external["case_id"]]["owner"] == other
-    assert pool.case_runtime[external["case_id"]]["active"] is True
-    assert len(pool.deliveries[saved]) == 1
-    pool.confirm(*saved)
-    assert pool.case_runtime[own["case_id"]]["owner"] is None
+    assert pool.case_runtime[external["case_id"]]["promised"] is True
+    assert len(pool.deliveries[saved]) == 2  # 承诺痕迹 + 写交付
+    pool.confirm(saved)
+    # 确认只标记保存完成：承诺与归属不退回
+    assert pool.case_runtime[own["case_id"]]["owner"] == saved
 
 
 def test_full_case_restore_is_idempotent_and_forgets_discarded_contributions(db_session):
-    """真实存储重载：重复恢复幂等，废弃 work 的支持与交付整体退场"""
+    """真实存储重载：重复恢复幂等，废弃作者的支持与交付不被恢复"""
     import json
     from uuid import uuid4
 
     from src.case_pool.contributions import CaseContribution
-    from src.storage.models import Execution, WorkItem
+    from src.storage.models import Execution
     from src.storage.models.base import naive_utcnow
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
     _novel, run_id = create_run_with_chunks(db_session, texts=["原文一。", "原文二。"], chapter_ids=[1, 2])
-    # work 身份在库内全局唯一（work_items 主键即 work_id），用例内自取名避免跨用例碰撞
+    # 作者身份是真实执行号；案例支持必须引用真实执行：
+    # (run, chapter, role) 唯一，因此两个作者落在两章
     suffix = uuid4().hex[:8]
-    a = (f"a-{suffix}", f"a1-{suffix}")
-    b = (f"b-{suffix}", f"b1-{suffix}")
+    a, b = f"a1-{suffix}", f"b1-{suffix}"
     for author, chapter_id in ((a, 1), (b, 2)):
         db_session.add(
-            WorkItem(
-                work_id=author[0], role="solo", annotation_run_id=run_id, annotation_chapter_id=chapter_id
-            )
-        )
-    db_session.flush()
-    for author in (a, b):
-        db_session.add(
             Execution(
-                execution_id=author[1], work_id=author[0], attempt_number=1,
-                started_at=naive_utcnow(), status="success",
+                execution_id=author,
+                run_id=run_id,
+                chapter_id=chapter_id,
+                role="annotation",
+                attempt_number=1,
+                started_at=naive_utcnow(),
+                status="success",
             )
         )
     db_session.flush()
     pool = CasePool(run_id)
-    pool.begin(*a)
-    pool.begin(*b)
-    case = pool.push("character", "Actual case", a)
-    pool.promise(case["case_id"], a)
+    pool.begin(a)
+    pool.begin(b)
+    first = pool.push("character", "Actual case", a)
+    second = pool.push("character", "Second case", b)
+    assert pool.promise(first["case_id"], a)["status"] == "promised"
+    assert pool.promise(second["case_id"], b)["status"] == "promised"
     assert pool.associate(
-        case["case_id"], a, tool_name="read_event", call_id="a", receipt={}, is_write=False
+        first["case_id"], a, tool_name="write_event", call_id="a", receipt={}, is_write=True
     )["status"] == "success"
-    pool.stop(a)
-    pool.promise(case["case_id"], b)
     assert pool.associate(
-        case["case_id"], b, tool_name="write_event", call_id="b", receipt={}, is_write=True
+        second["case_id"], b, tool_name="write_event", call_id="b", receipt={}, is_write=True
     )["status"] == "success"
 
     def contribution(author):
@@ -259,7 +258,7 @@ def test_full_case_restore_is_idempotent_and_forgets_discarded_contributions(db_
             "registrations": {key: pool.cases[key] for key in pool.registrations[author]},
             "deliveries": pool.deliveries[author],
         }
-        return CaseContribution(run_id, author[0], author[1], json.dumps(snapshot, ensure_ascii=False))
+        return CaseContribution(run_id, author, json.dumps(snapshot, ensure_ascii=False))
 
     assert pool.save_work(db_session, contribution(a)) == []
     assert pool.save_work(db_session, contribution(b)) == []
@@ -268,11 +267,14 @@ def test_full_case_restore_is_idempotent_and_forgets_discarded_contributions(db_
     restored = CasePool(run_id)
     restored.restore_storage(db_session, set())
     restored.restore_storage(db_session, set())
-    assert len(restored.deliveries[b]) == 1 and len(restored.deliveries[a]) == 1
-    assert restored.case_runtime[case["case_id"]]["state"] == "resolved"
-    restored.restore_storage(db_session, {b[0]})
-    assert b not in restored.deliveries and b not in restored.saved
-    assert restored.search()[0]["state"] == "pending"
-    restored.begin("later", "l1")
-    restored.rollback("later", "l1")
-    assert restored.search()[0]["state"] == "pending"
+    # 承诺痕迹随交付重建：每作者 = 承诺行 + 写交付行
+    assert len(restored.deliveries[a]) == 2 and len(restored.deliveries[b]) == 2
+    assert restored.case_runtime[first["case_id"]]["promised"] is True
+    assert restored.case_runtime[second["case_id"]]["promised"] is True
+    restored.restore_storage(db_session, {b})
+    assert b not in restored.deliveries and b not in restored.saved and b not in restored.registrations
+    # b 的案例无支持整体退场；a 的案例与承诺不受影响
+    assert [item["case_id"] for item in restored.search()] == [first["case_id"]]
+    restored.begin("later")
+    restored.rollback("later")
+    assert restored.search()[0]["promised"] is True

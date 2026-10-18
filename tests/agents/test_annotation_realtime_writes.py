@@ -1,19 +1,15 @@
-"""2026-09-13 实时写入改造 / 2026-09-14 写入面重构后的合同测试（小调用写入即生效、唯一 finish 收尾）
+"""实时写入合同测试：小调用写入即生效、唯一 finish 收尾
 
-覆盖用户裁定的必要行为边界：同轮多调用只计一轮、失败不丢失已写入记录、
+覆盖必要行为边界：同轮多调用只计一轮、失败不丢失已写入记录、
 逐条失败不阻塞已齐全产物的收尾、重试按记录更新不重复、关系写入即入图、
 对话必须实际判定、事件实时按调用顺序生长。
 
-2026-09-14 合同变化点（相对 09-13 九工具面，见 docs/write-surface-2026-0914-test-contract.md）：
-- 写入面为五个领域工具（write_entity/write_metrics/write_event/write_relation/write_dialogue）
-  + 唯一 finish；事件根/子/参与者折叠进单工具 write_event：
-  el 层级键挂树（根 "t1"、子 "t1/e2"），树内先后=调用顺序，没有 order 参数；
-- 句标签收编进 write_metrics(labels=[{paragraph_id, emotion}])，绑定载荷键
-  sentence_labels → paragraph_labels；
-- 参与写从独立工具改为 write_event 的 characters 数组（给出即整节点替换）；
-  (人物, 动作) 重复、三态必填/非 character 不接受三态等校验全部保留；
-- 收尾声明 ledger.finish_chunk() → ledger.finish_chapter()，chunk_finished → chapter_finished；
-  快照/回滚语义保留（snapshot 含 entity_el_index，失败只回滚该条调用）。
+写入面为五个领域工具（write_entity/write_metrics/write_event/write_relation/write_dialogue）
++ 唯一 finish；事件根/子/参与者折叠进单工具 write_event：el 层级键挂树
+（根 "t1"、子 "t1/e2"），树内先后=调用顺序，没有 order 参数；
+句标签并入 write_metrics(labels=[{paragraph_id, emotion}])，绑定载荷键 paragraph_labels；
+参与写经 write_event 的 characters 数组（给出即整节点替换）；
+收尾声明 ledger.finish_chapter()，快照/回滚语义保留（失败只回滚该条调用）。
 
 此处以账本层为主（tools + ledger 直调 apply_* / finish），
 回合计数的图循环语义用本文件末尾的真实 LangGraph 用例覆盖；
@@ -36,21 +32,21 @@ from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
 
 class _QueryService:
-    """2026-09-13 用于提供无数据库依赖的查询桩"""
+    """提供无数据库依赖的查询桩"""
 
     async def search_text(self, query, *, range_name, limit=50):
-        """2026-09-13 用于返回空正文命中"""
+        """返回空正文命中"""
         del query, range_name, limit
         return []
 
 
 def _chapter_text() -> str:
-    """2026-09-13 用于提供含两个对话候选的单段章文本"""
+    """提供含两个对话候选的单段章文本"""
     return "“住手！”顾霜喝道。“退下。”众人散去，夜色渐深。"
 
 
 def _ledger(**overrides) -> AnnotationToolLedger:
-    """2026-09-14 用于构造带事实图与段落坐标的账本（labels 段号校验依赖 paragraph_info）"""
+    """构造带事实图与段落坐标的账本（labels 段号校验依赖 paragraph_info）"""
     text = _chapter_text()
     kwargs = {
         "run_scope": "run-1",
@@ -69,12 +65,12 @@ def _ledger(**overrides) -> AnnotationToolLedger:
 
 
 def _tools(ledger: AnnotationToolLedger) -> dict:
-    """2026-09-13 用于按工具名索引新工具面"""
+    """按工具名索引新工具面"""
     return {tool.name: tool for tool in build_annotation_tools(_QueryService(), ledger)}
 
 
 async def _call(tools: dict, name: str, args: dict) -> dict:
-    """2026-09-13 用于按生产路径（graph._invoke_tool）执行单个小调用并解析回执
+    """按生产路径（graph._invoke_tool）执行单个小调用并解析回执
 
     走 graph 入口而不是直接 ainvoke：schema 层的 pydantic 失败在真运行里也由该层
     翻译成结构化拒绝，测试必须覆盖同一条路径。
@@ -84,14 +80,14 @@ async def _call(tools: dict, name: str, args: dict) -> dict:
 
 
 async def _rejection(tools: dict, name: str, args: dict) -> AnnotationStageRejection:
-    """2026-09-13 用于执行预期被拒的小调用并取回结构化拒绝"""
+    """执行预期被拒的小调用并取回结构化拒绝"""
     with pytest.raises(AnnotationStageRejection) as excinfo:
         await _call(tools, name, args)
     return excinfo.value
 
 
 async def _register_entities(tools: dict) -> dict[str, str]:
-    """2026-09-19 用于登记测试用实体并返回 id 表（run 级 uuid/el 键供关系、对话、事件引用）"""
+    """登记测试用实体并返回 id 表（run 级 uuid/el 键供关系、对话、事件引用）"""
     ids = {}
     for name, entity_type in (("顾霜", "character"), ("众人", "organization"), ("山门", "location")):
         receipt = await _call(
@@ -104,7 +100,7 @@ async def _register_entities(tools: dict) -> dict[str, str]:
 
 
 async def _seed_metrics(tools: dict) -> None:
-    """2026-09-13 用于提交最小指标载荷（收尾前置条件）"""
+    """提交最小指标载荷（收尾前置条件）"""
     await _call(
         tools,
         "write_metrics",
@@ -185,12 +181,12 @@ async def test_context_facts_cover_all_states_and_survive_restore() -> None:
 
 @pytest.mark.asyncio
 async def test_character_participation_defaults_partial_state_fields() -> None:
-    """2026-10-04 合同放开：三态字段缺省/越界不再拒绝
+    """合同放开：三态字段缺省/越界不再拒绝
 
     character 条目缺三态→不产动态状态行（同日补裁决：全空行会撞收尾重复语义，
     参与者仍落账）、role 缺省按登记大类取（character→主体）；
     只给部分三态→原样落账；emotion 越界→按边界钳制；
-    非 character 带三态→忽略三态、只保留 entityid/role（2026-10-13 由拒绝改为忽略）。
+    非 character 带三态→忽略三态、只保留 entityid/role（由拒绝改为忽略）。
     """
     ledger = _ledger()
     tools = _tools(ledger)
@@ -308,11 +304,7 @@ async def test_character_participation_defaults_partial_state_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_noncharacter_participation_derives_no_observation() -> None:
-    """2026-09-14 只有 character 参与者派生人物动态状态，地点/组织只入参与列表
-
-    旧两条参与写（write_character_participation + write_noncharacter_participation）
-    合并为一次 write_event 的 characters 完整集合，分流与派生语义不变。
-    """
+    """只有 character 参与者派生人物动态状态，地点/组织只入参与列表"""
     ledger = _ledger()
     tools = _tools(ledger)
     await _register_entities(tools)
@@ -350,7 +342,7 @@ async def test_noncharacter_participation_derives_no_observation() -> None:
 
 @pytest.mark.asyncio
 async def test_duplicate_observation_pair_rejected_per_record_at_write() -> None:
-    """2026-09-14 同一章内 (人物, 动作) 重复：只拒绝后写的那一条，先写的照常保留
+    """同一章内 (人物, 动作) 重复：只拒绝后写的那一条，先写的照常保留
 
     小调用合同下重复在校验时点即写入点拦下，拒绝 message 指出已记在哪条记录，
     修正那条后无需重交全树；重复的参与条目不落账，节点其余内容不受影响。
@@ -528,7 +520,7 @@ async def test_same_local_key_cannot_overwrite_a_declaration() -> None:
 
 @pytest.mark.asyncio
 async def test_dialogue_replay_updates_verdict_in_place() -> None:
-    """2026-09-13 同序号重交按更新语义（旧契约的"candidate_index 重复"报错已退役）"""
+    """同序号重交按更新语义"""
     ledger = _ledger()
     tools = _tools(ledger)
     await _register_entities(tools)
@@ -567,9 +559,9 @@ async def test_dialogue_replay_updates_verdict_in_place() -> None:
 
 @pytest.mark.asyncio
 async def test_dialogue_speaker_nullish_string_is_read_as_unattributed() -> None:
-    """2026-09-14 null 字面串统一容错（run a8c29ec8 实锤：ch1 t6/ch4 t6/t7 白烧 3 个调用）
+    """null 字面串统一容错
 
-    模型把 JSON null 写成字符串 "null"，落到实体引用校验面报 unknown_entity_id，白烧一回合才自愈。
+    模型把 JSON null 写成字符串 "null"，落到实体引用校验面报 unknown_entity_id。
     转换收口在生产调用入口（graph._invoke_tool）：可空参数一律按留空读取，
     必填参数不改、仍严格拒绝。
     """
@@ -606,12 +598,7 @@ async def test_dialogue_speaker_nullish_string_is_read_as_unattributed() -> None
 
 @pytest.mark.asyncio
 async def test_dialogue_receipt_reports_chapter_progress() -> None:
-    """2026-09-13 对话回执带本章进度：判一条写一条时不必自己记已判到哪
-
-    run c80105cc 实测：同一份 speaker/tone 映射在 ch2 誊写 2 遍、ch4 誊写 3 遍
-    （约 1.2 万字符），根因是思考不入历史、进度只存在模型心里。回执给
-    written/total 两个数，进度成为可回读的事实；同序号重写不推进 written。
-    """
+    """对话回执带本章进度：判一条写一条时不必自己记已判到哪"""
     ledger = _ledger()
     tools = _tools(ledger)
     await _register_entities(tools)
@@ -642,11 +629,7 @@ async def test_dialogue_receipt_reports_chapter_progress() -> None:
 
 @pytest.mark.asyncio
 async def test_relations_are_flushed_on_write_and_replayed_by_endpoint_pair() -> None:
-    """2026-09-13 关系写入即入图：同一对端点重写即整体替换，图终态=本章完整集合
-
-    旧合同"关系先暂存、结束关系域时一次性入图"已废止：实测写入即 flush，
-    等价验证=同对端点第二次提交换类型后图与操作日志都只留后写的那条。
-    """
+    """关系写入即入图：同一对端点重写即整体替换，图终态=本章完整集合"""
     ledger = _ledger()
     tools = _tools(ledger)
     await _register_entities(tools)
@@ -697,14 +680,7 @@ async def test_relations_are_flushed_on_write_and_replayed_by_endpoint_pair() ->
 
 @pytest.mark.asyncio
 async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> None:
-    """2026-09-14 已登记实体部分更新：未提交字段保留现值、tags 空数组清空
-
-    旧实现整条替换——模型按 docstring 指引只提交变化字段时其余字段被静默抹掉，
-    可见合同与服务端行为相悖（content 回显把该现状显形后修复）。合并语义：
-    省略字段保留；tags 提交空数组=清空。
-    2026-10-16 3NF：任意键值 attributes 已不是实体可写列（实体只有
-    description/tags/representative），本用例只覆盖仍存在的可写字段。
-    """
+    """已登记实体部分更新：未提交字段保留现值、tags 空数组清空"""
     ledger = _ledger()
     tools = _tools(ledger)
     first = await _call(
@@ -757,11 +733,7 @@ async def test_write_entity_partial_update_preserves_unsubmitted_fields() -> Non
 
 @pytest.mark.asyncio
 async def test_write_entity_no_longer_requires_search_graph_gate() -> None:
-    """2026-09-14 删除"提交 write_entity 前必须先 search_graph"硬闸
-
-    旧行为：图中已有登记实体时首笔登记必须先检索。闸门删净后省去 search_graph
-    直接写入即生效，同轮多条登记照常各自独立。
-    """
+    """删除"提交 write_entity 前必须先 search_graph"硬闸"""
     ledger = _ledger(graph=FactGraph())
     tools = _tools(ledger)
     await _call(tools, "write_entity", {"name": "顾霜", "entity_type": "character", "el": "顾霜"})
@@ -776,11 +748,10 @@ async def test_write_entity_no_longer_requires_search_graph_gate() -> None:
 
 @pytest.mark.asyncio
 async def test_paragraph_label_replay_updates_emotion_and_bad_submission_rejected() -> None:
-    """2026-09-14 段落标签随 write_metrics 整域提交：同段号重交覆盖分值，越界段号只拒这一次提交
+    """段落标签随 write_metrics 整域提交：同段号重交覆盖分值，越界段号只拒这一次提交
 
-    句标签（write_sentence_label 按原文区间绑定）退役：paragraph_id 取
-    ledger.paragraph_info.paragraph_ids，越界段号在 apply_metrics 写入点整次
-    提交拒绝并指明是哪一条标签，此前已提交的标签照常保留。
+    paragraph_id 取 ledger.paragraph_info.paragraph_ids，越界段号在 apply_metrics
+    写入点整次提交拒绝并指明是哪一条标签，其已提交的标签照常保留。
     """
     ledger = _ledger()
     tools = _tools(ledger)
@@ -806,7 +777,7 @@ async def test_paragraph_label_replay_updates_emotion_and_bad_submission_rejecte
 
 @pytest.mark.asyncio
 async def test_failed_call_keeps_previously_written_records_in_same_round() -> None:
-    """2026-09-14 失败不丢失已写入记录：同轮后面的失败调用只回滚自己
+    """失败不丢失已写入记录：同轮后面的失败调用只回滚自己
 
     参与者并入 write_event 的 characters 后，被拒数组在账本改写中途抛出：
     snapshot/restore 必须把该节点已派生的动态状态原样带回，先写记录不受影响。
@@ -878,20 +849,20 @@ async def test_failed_call_keeps_previously_written_records_in_same_round() -> N
 
 
 class _SingleReplyLLM(StreamedFakeModelMixin):
-    """2026-09-13 用于返回单个回合的多工具回复并记录累计轮次"""
+    """返回单个回合的多工具回复并记录累计轮次"""
 
     def __init__(self, response) -> None:
-        """2026-09-13 用于保存唯一回复"""
+        """保存唯一回复"""
         self.response = response
         self.calls = 0
 
     def bind_tools(self, tools):
-        """2026-09-13 用于兼容 langchain 绑定协议"""
+        """兼容 langchain 绑定协议"""
         del tools
         return self
 
     async def ainvoke(self, messages):
-        """2026-09-13 用于返回该回复（第二个回合直接耗尽）"""
+        """返回该回复（第二个回合直接耗尽）"""
         del messages
         self.calls += 1
         if self.calls > 1:
@@ -906,7 +877,7 @@ class _SingleReplyLLM(StreamedFakeModelMixin):
 
 @pytest.mark.asyncio
 async def test_undeclared_argument_is_rejected_per_call_not_dropped() -> None:
-    """2026-09-14 未声明参数被整条拒绝：多余字段不静默丢弃，字段名随回执回到模型"""
+    """未声明参数被整条拒绝：多余字段不静默丢弃，字段名随回执回到模型"""
     ledger = _ledger()
     tools = _tools(ledger)
 
@@ -972,17 +943,16 @@ async def test_undeclared_argument_is_rejected_per_call_not_dropped() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 2026-09-13 根因修复：可见约束 / 登记即进池
+# 根因修复：可见约束 / 登记即进池
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_writer_program_registers_written_records_for_case_links() -> None:
-    """2026-09-20 写者面程序里的成功写入同样登记记录键（案例工具的授权面）
+    """写者面程序里的成功写入同样登记记录键（案例工具的授权面）
 
     走 agent 路径的程序面（`ProgramRuntime._run_op` → `_execute_call`）而不是直接调工具
-    函数：登记发生在事务边界上，模型跨程序引用"我刚写的 t1/root"要能命中
-    （run 54a72932：写者面这条路没登记，promise_case 两次引用本章写出的事件树根全被拒）。
+    函数：登记发生在事务边界上，模型跨程序引用"我刚写的 t1/root"要能命中。
     """
     from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 
@@ -1019,12 +989,7 @@ async def test_name_reference_auto_registers_relation_endpoints() -> None:
 
 @pytest.mark.asyncio
 async def test_relation_rejects_undeclared_evidence_argument() -> None:
-    """2026-09-20 evidence 只收段首号：引文这类自由文本在参数校验处就被拒
-
-    run 54a72932：160 次 write_relation 把引文填进 evidence（159 次在新增分支，
-    那条分支本来不消费它），整笔写入按 schema 校验失败作废——字段口径统一为
-    "段落开头的段首号（整数）"，说明与拒绝都按同一口径给。
-    """
+    """evidence 只收段首号：引文这类自由文本在参数校验处就被拒"""
     ledger = _ledger()
     tools = _tools(ledger)
     await _register_entities(tools)
@@ -1045,10 +1010,9 @@ async def test_relation_rejects_undeclared_evidence_argument() -> None:
 
 @pytest.mark.asyncio
 async def test_entity_ledger_rows_carry_entity_type() -> None:
-    """2026-09-20 账本实体行带大类：实体大类一经登记不可变更，重写只能照它来
+    """账本实体行带大类：实体大类一经登记不可变更，重写只能照它来
 
-    注入块按该行渲染（el=name(大类；id=…)），模型凭记忆重写时写错大类会被拒
-    （run 54a72932：10 次 entity_type 类拒绝）。
+    注入块按该行渲染（el=name(大类；id=…)），模型凭记忆重写时写错大类会被拒。
     """
     ledger = _ledger()
     tools = _tools(ledger)

@@ -235,7 +235,7 @@ async def test_characters_full_replacement_clears_stale_observations() -> None:
     )
     root_event = next(event for event in ledger.bound_payloads["events"] if event.cause_role == "root")
     assert [ledger.graph.display_name(participant.entity) for participant in root_event.participants] == ["顾霜"]
-    # 参与者记录键按模型提交的引用原样构造（2026-09-19：uuid id 引用即进键）
+    # 参与者记录键按模型提交的引用原样构造（：uuid id 引用即进键）
     uuid_record = "t1/root/participant/顾霜"
     assert list(ledger.observation_by_record) == [uuid_record]
     assert ledger.domain_payloads["character_observations"] == [ledger.observation_by_record[uuid_record]]

@@ -63,7 +63,7 @@ class TaskManager:
         """
         上报 run 成功收口，供读侧失效自身缓存
 
-        说明: 读侧缓存归读侧所有，执行层只上报事实，不感知其实现
+        读侧缓存归读侧所有，执行层只上报事实，不感知其实现
         """
         if self._run_completed_callback is None:
             return
@@ -86,9 +86,7 @@ class TaskManager:
 
     def _update_db(self, task_id: str, **kwargs) -> None:
         """
-        可靠地更新数据库中的任务状态
-
-        说明: 移除静默失败，确保状态变更可靠持久化。DB 为唯一业务真相
+        可靠地更新数据库中的任务状态（DB 为唯一业务真相）
         """
         self._runtime_persistence.update_task_runtime(task_id, **kwargs)
 
@@ -119,8 +117,8 @@ class TaskManager:
         """
         查询当前进程是否持有该任务的执行缓存
 
-        说明: 仅回答"当前进程是否有该任务的执行缓存"，不回答"系统是否存在该任务"
-              服务重启后返回 None 是正常行为，调用方应从 DB 查询业务状态
+        仅回答"当前进程是否有该任务的执行缓存"，不回答"系统是否存在该任务"；
+        服务重启后返回 None 是正常行为，调用方应从 DB 查询业务状态
 
         Returns:
             TaskInfo 对象（如果进程持有缓存），否则返回 None
@@ -176,7 +174,7 @@ class TaskManager:
         """
         设置取消信号（纯执行层操作）
 
-        说明: 本方法仅负责设置 cancel_event，不做"是否允许取消"的业务判断
+        本方法仅负责设置 cancel_event，不做"是否允许取消"的业务判断
 
         Returns:
             True 表示 cancel_event 已设置，False 表示任务不在内存中
@@ -226,7 +224,7 @@ class TaskManager:
         """
         为当前运行任务启动独立心跳协程
 
-        说明: 心跳与阶段进度写回解耦，保证长阶段静默执行时也能持续刷新 heartbeat_at
+        心跳与阶段进度写回解耦，保证长阶段静默执行时也能持续刷新 heartbeat_at
         """
         task_info = self._tasks.get(task_id)
         if task_info is None:
@@ -248,7 +246,7 @@ class TaskManager:
         """
         停止任务心跳协程
 
-        说明: 在任务成功/失败/取消/删除时及时停止 heartbeat，避免终态后继续刷新 liveness
+        在任务成功/失败/取消/删除时及时停止 heartbeat，避免终态后继续刷新 liveness
         """
         task_info = self._tasks.get(task_id)
         if task_info is None:
@@ -263,7 +261,7 @@ class TaskManager:
         """
         周期性刷新活跃任务的 worker 心跳
 
-        说明: 即使阶段内部长时间没有 progress 事件，也要持续写回 heartbeat_at
+        即使阶段内部长时间没有 progress 事件，也要持续写回 heartbeat_at
         """
         while not stop_event.is_set():
             try:
@@ -282,7 +280,7 @@ class TaskManager:
 
             try:
                 # heartbeat 独立于 progress/message 写回，专门用于表示“这个进程仍然活着并持有执行权”
-                # 2026-08-13 P2：列无时区，统一落 naive UTC 挂钟（避免 PG 会话时区转换错位）
+                # 列无时区，统一落 naive UTC 挂钟（避免 PG 会话时区转换错位）
                 self._update_db(
                     task_id,
                     worker_id=self._worker_id,
@@ -295,7 +293,7 @@ class TaskManager:
         """
         收尾 heartbeat 协程并记录异常
 
-        说明: 避免 heartbeat 后台任务异常结束后只留下未观察到的 Task exception
+        避免 heartbeat 后台任务异常结束后只留下未观察到的 Task exception
         """
         task_info = self._tasks.get(task_id)
         if task_info and task_info.heartbeat_task is heartbeat_task:

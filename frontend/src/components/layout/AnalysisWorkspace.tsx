@@ -45,8 +45,7 @@ export interface AnalysisWorkspaceTabProps {
 const AnalysisWorkspaceDocumentFlowContext = createContext(false);
 
 /**
- * 2026-04-28，任务：分析详情页 slot 工作区收口
- * 新建原因：把单屏页面根布局和分析工作区统一成复合组件，页面只声明 header 与 slot 内容。
+ * 把单屏页面根布局和分析工作区统一成复合组件，页面只声明 header 与 slot 内容。
  */
 function AnalysisWorkspaceRoot({
   title,
@@ -82,16 +81,14 @@ function AnalysisWorkspaceRoot({
 }
 
 /**
- * 2026-04-28，任务：分析详情页 slot 工作区收口
- * 新建原因：用 React 复合组件表达 tab slot，避免页面继续维护数组映射和重复面板骨架。
+ * 用 React 复合组件表达 tab slot，避免页面继续维护数组映射和重复面板骨架。
  */
 function AnalysisWorkspaceTab({ children }: AnalysisWorkspaceTabProps) {
   return <>{children}</>;
 }
 
 /**
- * 2026-04-28，任务：分析详情页 slot 工作区收口
- * 新建原因：只允许 `AnalysisWorkspace.Tab` 进入 tab 编排，避免误把普通节点当成 tab item 解析。
+ * 只允许 `AnalysisWorkspace.Tab` 进入 tab 编排，避免误把普通节点当成 tab item 解析。
  */
 function isAnalysisWorkspaceTabElement(
   child: ReactNode,
@@ -100,8 +97,7 @@ function isAnalysisWorkspaceTabElement(
 }
 
 /**
- * 2026-04-28，任务：分析详情页 slot 工作区收口
- * 新建原因：统一 tabs 的激活状态、上下留白和 overflow 边界，不再让页面各自补滚动壳。
+ * 统一 tabs 的激活状态、上下留白和 overflow 边界，不再让页面各自补滚动壳。
  */
 function AnalysisWorkspaceTabs({
   children,
@@ -136,7 +132,7 @@ function AnalysisWorkspaceTabs({
   }, [activeValue, internalValue, isControlled]);
 
   /**
-   * 2026-08-31，作用：页签首次激活时再挂载内容，并在后续切换中保留局部状态
+   * 页签首次激活时再挂载内容，并在后续切换中保留局部状态
    * 简要说明：避免 ECharts 在初始隐藏面板中以 0x0 容器初始化
    */
   useEffect(() => {
@@ -149,8 +145,7 @@ function AnalysisWorkspaceTabs({
   }, [activeValue]);
 
   /**
-   * 2026-04-28，任务：分析详情页 slot 工作区收口
-   * 新建原因：受控与非受控两种模式都要共用同一套 tab 值切换逻辑。
+   * 受控与非受控两种模式都要共用同一套 tab 值切换逻辑。
    */
   function handleValueChange(nextValue: string) {
     if (!isControlled) {

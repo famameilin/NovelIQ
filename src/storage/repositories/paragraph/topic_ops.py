@@ -1,20 +1,13 @@
 """
-主题链路（§5.8 LDA 构建事实 / §5.9 inference / §5.10 paragraph_topics）
+主题链路（LDA 构建事实 / inference / paragraph_topics）
 
-创建时间: 2026-10-02
-创建者: Trae
-任务: 大文件拆分——从 paragraph_repository.py 提取主题模型契约、
-段落推断状态与主题-情感/章节/序列聚合逻辑
-说明: 纯结构搬移，不改 SQL 与聚合口径；paragraph_topics 只保存完整 K 维
-主题权重（分母不在此表重复保存）。
+paragraph_topics 只保存完整 K 维主题权重（分母不在此表重复保存）。
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：
-- LDA 实际构建列上提到 analysis_runs 的 lda_* 具名列（含 library/pipeline
-  版本、K、词典规模、训练文档数、标量超参与构建时间）；model_key 按固定实现
-  合同投影、artifact_key 按 resolve_model_dir 投影、inference_paragraph_count
-  由正式推断状态聚合，三者不再落列
-- 段落推断状态写 paragraph_metrics 的 inference_* 列（token 数/状态/真实异常
-  时间）；固定原因说明由固定状态合同投影，不建原因词典表
+- LDA 实际构建写 analysis_runs 的 lda_* 具名列；model_key 按固定实现合同投影、
+  artifact_key 按 resolve_model_dir 投影、inference_paragraph_count 由正式推断
+  状态聚合，三者不落列
+- 段落推断状态写 paragraph_metrics 的 inference_* 列；固定原因说明由固定状态
+  合同投影，不建原因词典表
 - 主题建模完成事实写 analysis_runs.topic_completed_at
 """
 
@@ -62,11 +55,10 @@ def _utcnow() -> datetime:
 
 @dataclass(frozen=True)
 class TopicModelRunContract:
-    """主题模型读取模型（attribute 面与旧契约一致，来源改为 analysis_runs.lda_*）
+    """主题模型读取模型（属性面取自 analysis_runs.lda_*）
 
-    保持原有属性面（含 model_key / artifact_key / inference_paragraph_count），
-    使下游按属性读取的代码零改动；三个投影值不落库，由实现合同、
-    artifact 解析器与正式推断状态聚合得到。
+    保持属性面（含 model_key / artifact_key / inference_paragraph_count），
+    三个投影值不落库，由实现合同、artifact 解析器与正式推断状态聚合得到。
     """
 
     run_id: str
@@ -153,9 +145,9 @@ def insert_topic_model_run(
 ) -> None:
     """写入 run 的 LDA 实际构建事实（analysis_runs.lda_* 具名列）
 
-    model_key/artifact_key/inference_paragraph_count 为合同投影，不再落列
+    model_key/artifact_key/inference_paragraph_count 为合同投影，不落列
     （inference_paragraph_count 由推断状态聚合、artifact 由解析器投影）。
-    model_key 与当前固定实现不一致时报错，避免静默写错模型身份。
+    model_key 与固定实现不一致时报错，避免静默写错模型身份。
     写入同时登记主题阶段真实完成事实 topic_completed_at。
     """
     expected_model_key = project_topic_model_key()
@@ -255,9 +247,7 @@ def insert_paragraph_topic_inferences(
     UPDATE：paragraph_metrics 上的延迟约束触发器
     trg_dc_paragraph_metric_inference_rows 在提交时按每条修改行的当时版本校验
     （计数读提交时的最终主题行）——清空会把旧 complete 行记成 status=<NULL>
-    修改事件，与重跑写入的最终主题行形成假冲突，任何同 run 重跑都会在提交
-    瞬间被拒（2026-10-17 run 52cbb1ac 实证：topic 阶段完整跑完、
-    提交时 CheckViolation '非 complete 段落不得留主题行 ... status=<NULL> rows=25'）。
+    修改事件，与重跑写入的最终主题行形成假冲突，同 run 重跑会在提交时被拒。
     """
     inference_rows = [
         {
@@ -299,8 +289,7 @@ def clear_paragraph_topic_inferences(session: Session, run_id: str) -> None:
 
     禁止把它当作"重跑先清"步骤：全量清空会产生 complete→NULL 修改事件，
     与随后重跑写入的最终主题行在提交时假冲突（延迟约束触发器按修改行当时
-    版本校验，见 insert_paragraph_topic_inferences docstring）；重跑覆盖
-    统一走 insert_paragraph_topic_inferences 的全量 upsert。
+    版本校验）；重跑覆盖统一走 insert_paragraph_topic_inferences 的全量 upsert。
     """
     session.execute(
         update(ParagraphMetric).where(ParagraphMetric.run_id == run_id).values(**dict.fromkeys(_INFERENCE_COLUMNS))
@@ -315,7 +304,7 @@ def fetch_topic_inference_total(session: Session, run_id: str) -> int | None:
 
 
 def fetch_chapter_inference_totals(session: Session, run_id: str) -> Sequence[Row]:
-    """按章节返回推断 token 分母（每段一格，§5.11 章节聚合分母）"""
+    """按章节返回推断 token 分母（每段一格，章节聚合分母）"""
     stmt = (
         select(
             Chapter.chapter_id,
@@ -338,10 +327,9 @@ def fetch_chapter_inference_totals(session: Session, run_id: str) -> Sequence[Ro
 
 
 def fetch_topic_emotion_aggregates(session: Session, run_id: str) -> Sequence[Row]:
-    """主题-情感分子分母（§5.11）：净密度为 NULL 的段落在 SQL 层同时排除
+    """主题-情感分子分母：净密度为 NULL 的段落在 SQL 层同时排除
 
-    净密度由指标分子/分母的读投影给出（token_count=0 或指标行缺失即 NULL），
-    因此过滤条件等价于旧的 "曲线净密度非空"。
+    净密度由指标分子/分母的读投影给出（token_count=0 或指标行缺失即 NULL）。
     """
     net_density = net_density_projection()
     stmt = (
@@ -381,7 +369,7 @@ def insert_paragraph_topics(
     先清后插写入 run 的段落主题行（同 run 重跑语义是"重新计算"）
 
     rows: (paragraph_id, topic_id, topic_weight)；完整 K 维分布由调用方保证，
-    token 分母不在此表重复保存（§5.10）
+    token 分母不在此表重复保存
     """
     topic_rows = [
         {
@@ -407,7 +395,7 @@ def clear_paragraph_topics(session: Session, run_id: str) -> None:
 
 def fetch_paragraph_topics_agg(session: Session, run_id: str) -> Sequence[Row]:
     """
-    全书主题分子：按主题返回 token 加权和（§5.11）
+    全书主题分子：按主题返回 token 加权和
 
     分母为全书所有段落的 inference_token_count 之和，
     由 fetch_topic_inference_total 提供；归一化在调用方完成。
@@ -434,7 +422,7 @@ def fetch_paragraph_topics_agg(session: Session, run_id: str) -> Sequence[Row]:
 
 def fetch_chapter_topic_aggregates(session: Session, run_id: str) -> Sequence[Row]:
     """
-    章节主题分子：按章节返回主题 token 加权和（§5.11）
+    章节主题分子：按章节返回主题 token 加权和
 
     章节边界用 paragraphs.chapter_id 关联 chapters 并按 chapters.sequence
     排序，不使用段落列表下标推断章节；分母与归一化在调用方完成。
@@ -470,8 +458,7 @@ def fetch_chapter_topic_aggregates(session: Session, run_id: str) -> Sequence[Ro
 
 def fetch_paragraph_topic_rows(session: Session, run_id: str) -> Sequence[Row]:
     """
-    段落主题序列数据（§5.11）：段落真实字符位置、章节序列与
-    推断 token 数齐备
+    段落主题序列数据：段落真实字符位置、章节序列与推断 token 数齐备
 
     全文起点由 chapters.char_offset + 段落章内起点投影；
     返回: (paragraph_id, chapter_id, chapter_sequence, global_start_char,

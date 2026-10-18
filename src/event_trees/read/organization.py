@@ -1,6 +1,5 @@
 """正式事件与阶段的只读投影；章级声明只供追索，不形成第二种业务身份
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：
 - 章级声明 = event_declarations（来源归属从 chapter_annotations → executions → work_items 取得）
 - 完整事件 = complete_events（正文不在事件行，当前内容取显式 stage_index 链尾）
 - 阶段版本 = event_revisions（声明绑定或独立 origin 正文恰一，前驱为 index−1 投影）
@@ -31,7 +30,6 @@ from src.storage.models import (
     NarrativeGroup,
     NarrativeLink,
     Paragraph,
-    WorkItem,
 )
 from src.utils.identity import text_digest
 
@@ -62,13 +60,12 @@ class EventView:
     current_revision_id: str | None
     first_text_position: int | None
     evidence: list[dict[str, Any]]
-    source_work_id: str | None
     source_execution_id: str | None
 
 
 @dataclass(frozen=True)
 class DeclarationView:
-    """不可变章级声明：来源记录/工作/章节与参与者/证据均为读取投影"""
+    """不可变章级声明：来源记录/章节与参与者/证据均为读取投影"""
 
     declaration_id: str
     record_id: str
@@ -88,7 +85,6 @@ class DeclarationView:
     char_end: int
     chapter_id: int | None
     chapter_order: int | None
-    source_work_id: str | None
     producer_invocation_id: str | None
     contract_version: str
 
@@ -103,7 +99,7 @@ class DeclarationView:
 
     @property
     def payload_path(self) -> str:
-        return f"work/{self.source_work_id}/{self.declaration_id}"
+        return f"declaration/{self.declaration_id}"
 
     @property
     def first_text_position(self) -> int:
@@ -127,7 +123,6 @@ class RevisionView:
     progress: str | None
     participants: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
-    source_work_id: str | None
     producer_invocation_id: str
     source_execution_id: str | None
     source_operation_id: str
@@ -145,7 +140,6 @@ class LinkView:
     relation_type: str
     reason: str
     evidence: list[dict[str, Any]]
-    source_work_id: str | None
     producer_invocation_id: str
     source_operation_id: str | None
 
@@ -199,7 +193,6 @@ class BindingView:
     declaration_id: str
     event_id: str
     revision_id: str
-    source_work_id: str | None
     producer_invocation_id: str
 
 
@@ -217,7 +210,7 @@ class ConflictView:
 
 @dataclass(frozen=True)
 class ForeshadowingView:
-    """伏笔动作的读取形状（旧 foreshadowing_actions 载荷字段保持）"""
+    """伏笔动作的读取形状"""
 
     action_id: str
     action_type: str
@@ -226,7 +219,6 @@ class ForeshadowingView:
     target_event_id: str | None
     chapter_id: int | None
     chapter_order: int | None
-    source_work_id: str | None
     source_operation_id: str
     evidence: list[dict[str, Any]]
     operation_order: int = 0
@@ -264,9 +256,7 @@ class EventTreeQuery:
     def _load_annotations(self) -> list[ChapterAnnotation]:
         stmt = (
             select(ChapterAnnotation)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
-            .where(WorkItem.annotation_run_id == self.run_id)
+            .where(ChapterAnnotation.run_id == self.run_id)
             .order_by(ChapterAnnotation.created_at, ChapterAnnotation.record_id)
         )
         return list(self.session.scalars(stmt))
@@ -317,7 +307,6 @@ class EventTreeQuery:
                 declaration_id=row.declaration_id,
                 event_id=row.event_id,
                 revision_id=row.revision_id,
-                source_work_id=self.events[row.event_id].source_work_id,
                 producer_invocation_id=self.events[row.event_id].producer_execution_id,
             )
             for row in self._revision_rows
@@ -355,11 +344,8 @@ class EventTreeQuery:
                 else {}
             )
             content = contents.get(event_id) or {}
-            work_id = smap.work_of_execution(self.session, row.producer_execution_id)
-            session_id = (
-                self.session.scalar(select(WorkItem.diagnosis_session_id).where(WorkItem.work_id == work_id))
-                if work_id is not None
-                else None
+            session_id = self.session.scalar(
+                select(Execution.execution_id).where(Execution.session_run_id == self.run_id)
             )
             stages = chains.get(event_id) or []
             result[event_id] = EventView(
@@ -380,7 +366,6 @@ class EventTreeQuery:
                     else None
                 ),
                 evidence=payloads,
-                source_work_id=work_id,
                 source_execution_id=session_id,
             )
         return result
@@ -448,16 +433,6 @@ class EventTreeQuery:
             return {}
         records = {row.record_id: row for row in annotations}
         execution_by_record = {row.record_id: row.execution_id for row in annotations}
-        executions = {
-            row.execution_id: row
-            for row in self.session.scalars(
-                select(Execution).where(Execution.execution_id.in_(set(execution_by_record.values())))
-            )
-        }
-        work_ids = {row.work_id for row in executions.values() if row.work_id is not None}
-        works = {
-            row.work_id: row for row in self.session.scalars(select(WorkItem).where(WorkItem.work_id.in_(work_ids)))
-        }
         declaration_rows = list(
             self.session.scalars(select(EventDeclaration).where(EventDeclaration.record_id.in_(list(records))))
         )
@@ -470,13 +445,7 @@ class EventTreeQuery:
         result: dict[str, DeclarationView] = {}
         for row in declaration_rows:
             record = records[row.record_id]
-            work_id = executions[record.execution_id].work_id
-            work = works.get(work_id) if work_id is not None else None
-            chapter_id = (
-                int(work.annotation_chapter_id)
-                if work is not None and work.annotation_chapter_id is not None
-                else None
-            )
+            chapter_id = int(record.chapter_id) if record.chapter_id is not None else None
             bound = smap.evidence_payloads(self.session, self.run_id, evidence.get(row.declaration_id, []))
             if not bound:
                 raise ValueError(f"声明缺少原文证据: {row.declaration_id}")
@@ -499,7 +468,6 @@ class EventTreeQuery:
                 char_end=bound[0]["char_end"],
                 chapter_id=chapter_id,
                 chapter_order=self.orders.get(chapter_id) if chapter_id is not None else None,
-                source_work_id=work.work_id if work is not None else None,
                 producer_invocation_id=record.execution_id,
                 contract_version=record.contract_version,
             )
@@ -547,7 +515,6 @@ class EventTreeQuery:
                         self.session, self.run_id, declaration_evidence.get(row.declaration_id, [])
                     )
                     rev_participants = declaration.participants
-                    source_work_id = declaration.source_work_id
                     source_execution_id = self._declaration_executions.get(row.declaration_id)
                     producer_invocation_id = declaration.producer_invocation_id or row.declaration_id
                 else:
@@ -556,7 +523,6 @@ class EventTreeQuery:
                         self.session, self.run_id, event_evidence.get(event_id, [])
                     )
                     rev_participants = []
-                    source_work_id = event.source_work_id
                     source_execution_id = event.source_execution_id
                     producer_invocation_id = event.producer_execution_id
                 result[row.revision_id] = RevisionView(
@@ -573,7 +539,6 @@ class EventTreeQuery:
                     progress=content["progress"],
                     participants=rev_participants,
                     evidence=rev_evidence,
-                    source_work_id=source_work_id,
                     producer_invocation_id=str(producer_invocation_id),
                     source_execution_id=source_execution_id,
                     source_operation_id=f"stage/{event_id}/{row.stage_index}",
@@ -697,7 +662,6 @@ class EventTreeQuery:
             relation_type=row.relation_type or "",
             reason=row.reason,
             evidence=evidence,
-            source_work_id=smap.work_of_execution(self.session, row.producer_execution_id),
             producer_invocation_id=row.producer_execution_id,
             source_operation_id=row.source_operation_local_key,
         )
@@ -727,7 +691,6 @@ class EventTreeQuery:
             target_event_id=row.target_event_id,
             chapter_id=row.chapter_id,
             chapter_order=row.chapter_order,
-            source_work_id=row.source_work_id,
             source_operation_id=row.source_operation_id,
             evidence=row.evidence,
             operation_order=int(row.operation_order),
@@ -776,8 +739,7 @@ class EventTreeQuery:
 
     def _validate_saved_contract(self) -> None:
         """读取只核验正式对象，不忽略错误端点或用旧字段补救版本"""
-        if self.organization_status == "pending_diagnosis" and (self.events or self.revisions or self.bindings):
-            raise ValueError("诊断尚未发布却存在正式事件或阶段")
+        # 案例会话逐案写正式树、报告最后落库：报告未存不代表树必须为空，按已有对象校验
         if self.organization_status == "ready" and set(self.bindings) != set(self.declarations):
             raise ValueError("已发布事件声明缺少完整的正式身份绑定")
         for binding in self.bindings.values():
@@ -1008,7 +970,6 @@ class EventTreeQuery:
                     "target_event_id": action.target_event_id,
                     "chapter_id": action.chapter_id,
                     "chapter_order": action.chapter_order,
-                    "source_work_id": action.source_work_id,
                     "source_operation_id": action.source_operation_id,
                     "evidence": action.evidence,
                     "evidence_scope": action.evidence_scope,
@@ -1201,7 +1162,6 @@ class EventTreeQuery:
                 "char_end": declaration.char_end,
                 "chapter_id": declaration.chapter_id,
                 "chapter_order": declaration.chapter_order,
-                "source_work_id": declaration.source_work_id,
                 "producer_invocation_id": declaration.producer_invocation_id,
                 "annotation_id": declaration.record_id,
                 "payload_path": declaration.payload_path,
@@ -1216,7 +1176,6 @@ class EventTreeQuery:
                 "declaration_id": row.declaration_id,
                 "event_id": row.event_id,
                 "revision_id": row.revision_id,
-                "source_work_id": row.source_work_id,
                 "producer_invocation_id": row.producer_invocation_id,
             }
             for row in sorted(self.bindings.values(), key=lambda row: row.declaration_id)
@@ -1229,7 +1188,6 @@ class EventTreeQuery:
                 "relation_type": row.relation_type,
                 "reason": row.reason,
                 "evidence": row.evidence,
-                "source_work_id": row.source_work_id,
                 "producer_invocation_id": row.producer_invocation_id,
                 "source_operation_id": row.source_operation_id,
             }
@@ -1256,7 +1214,6 @@ class EventTreeQuery:
                 "title": row.title,
                 "problem": row.problem,
                 "event_type": row.event_type,
-                "source_work_id": row.source_work_id,
                 "summary": row.summary,
                 "status": row.status,
                 "progress": row.progress,

@@ -1,11 +1,11 @@
 """全书案例池：人物/关系/对话/事件四类问题案例，业务内容含结构化 payload 与描述
 
-2026-10-16 全库 3NF：旧 book_cases.payload/contributions/state JSON 退场
 - book_cases 承接登记身份、明确目标（实体/关系/对话/声明/完整事件真实 FK）、
   对话候选与诊断失败候选定位、登记原因与独立评审状态
 - case_entries 承接 Agent 支持→交付→连接层级（父父子固定深度）、保存告警与
   未发布事件的失败观察；连接的规范身份是 narrative_links.link_id（不读旧边）
-- is_write / reads / resolved 由固定工具合同与真实采纳交付投影，不落重复列
+- is_write / reads 由固定工具合同与真实交付投影；案例是否解决只认 promise 交付痕迹
+  （有承诺即已解决、没有即未解决，不存在中间状态），不落重复列
 """
 
 from __future__ import annotations
@@ -40,9 +40,6 @@ from src.utils.identity import stable_digest, stable_uuid
 CASE_TYPES = ("character", "relation", "dialogue", "event")
 EVENT_CASE_TYPE = "event"
 
-#: 诊断失败登记沿用 diagnosis-pending:{session} 的稳定程序身份
-DIAGNOSIS_PENDING_PREFIX = "diagnosis-pending:"
-
 #: 可降级为单案例告警的真实约束冲突（外键/唯一/检查）；结构缺陷必须上抛
 _CASE_CONFLICT_SQLSTATES = {"23503", "23505", "23514"}
 
@@ -75,7 +72,7 @@ def _receipt_dict(raw: bytes | None) -> Any:
 
 
 def _dialogue_candidate_key(chapter_id: int, start: int, end: int, content: str) -> str:
-    """对话候选键投影：沿用原 UUID5(章号:起止:原文) 算法，不与区间重复存编码"""
+    """对话候选键投影：按 UUID5(章号:起止:原文) 算法计算，不与区间重复存编码"""
     return f"dlg_{uuid5(NAMESPACE_DNS, f'{chapter_id}:{start}:{end}:{content}').hex}"
 
 
@@ -98,31 +95,30 @@ class CasePool:
         self.run_id = run_id
         self.cases: dict[str, dict[str, Any]] = {}
         self.case_runtime: dict[str, dict[str, Any]] = {}
-        self.registrations: dict[tuple[str, str], set[str]] = {}
-        self.created: dict[tuple[str, str], set[str]] = {}
-        self.deliveries: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        self.saved: set[tuple[str, str]] = set()
-        self.executions: set[tuple[str, str]] = set()
+        self.registrations: dict[str, set[str]] = {}
+        self.created: dict[str, set[str]] = {}
+        self.deliveries: dict[str, list[dict[str, Any]]] = {}
+        self.saved: set[str] = set()
+        self.executions: set[str] = set()
         self._sequence = 0
-        self.save_warnings: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        self.save_warnings: dict[str, list[dict[str, Any]]] = {}
 
-    def begin(self, work_id: str, invocation_id: str) -> None:
-        author = (work_id, invocation_id)
+    def begin(self, execution_id: str) -> None:
+        author = execution_id
         self.executions.add(author)
         self.registrations.setdefault(author, set())
         self.created.setdefault(author, set())
         self.deliveries.setdefault(author, [])
 
-    def _require(self, author: tuple[str, str]) -> None:
+    def _require(self, author: str) -> None:
         if author not in self.executions:
             raise ValueError(f"案例执行已停止: {author}")
 
     @staticmethod
     def case_identity(record: dict[str, Any]) -> tuple[Any, ...]:
-        """案例不可变身份：只比较新库真实保存的定位键与原因
+        """案例不可变身份：只比较真实保存的定位键与原因
 
-        名字/类型/章号副本由正式目标推导（旧 payload 可推导副本取消），
-        不参与身份比较；描述与案例 ID 的身份算法不变。
+        名字/类型/章号副本由正式目标推导，不参与身份比较；描述与案例 ID 的身份算法不变。
         """
         payload = record.get("payload") or {}
         return (
@@ -134,7 +130,7 @@ class CasePool:
             payload.get("reason"),
         )
 
-    def push(self, case_type: str, description: str, author: tuple[str, str]) -> dict[str, Any]:
+    def push(self, case_type: str, description: str, author: str) -> dict[str, Any]:
         """模型侧登记类型化案例：必须归入四类之一，结构化 payload 留空"""
         self._require(author)
         if case_type not in CASE_TYPES:
@@ -147,7 +143,7 @@ class CasePool:
             case_id,
             {"case_id": case_id, "case_type": case_type, "description": normalized, "payload": {}},
         )
-        self.case_runtime.setdefault(case_id, {"state": "pending", "owner": None})
+        self.case_runtime.setdefault(case_id, {"promised": False, "owner": None})
         self.registrations[author].add(case_id)
         self.created[author].add(case_id)
         return dict(self.cases[case_id])
@@ -158,7 +154,7 @@ class CasePool:
         case_type: str,
         description: str,
         payload: dict[str, Any],
-        author: tuple[str, str],
+        author: str,
     ) -> dict[str, Any]:
         """程序链登记结构化案例：按类型校验必填定位键，同键同内容幂等"""
         self._require(author)
@@ -176,14 +172,14 @@ class CasePool:
         }
         return self._register(record, author)
 
-    def _register(self, record: dict[str, Any], author: tuple[str, str]) -> dict[str, Any]:
+    def _register(self, record: dict[str, Any], author: str) -> dict[str, Any]:
         case_id = record["case_id"]
         existing = self.cases.get(case_id)
         if existing is not None and self.case_identity(existing) != self.case_identity(record):
             raise ValueError(f"case_id={case_id} 已有另一份不可变说明")
         if existing is None:
             self.cases[case_id] = record
-            self.case_runtime.setdefault(case_id, {"state": "pending", "owner": None})
+            self.case_runtime.setdefault(case_id, {"promised": False, "owner": None})
         self.registrations[author].add(case_id)
         self.created[author].add(case_id)
         return dict(self.cases[case_id])
@@ -196,9 +192,9 @@ class CasePool:
         summary: str,
         status: str,
         chapter_id: int,
-        author: tuple[str, str],
+        author: str,
     ) -> dict[str, Any]:
-        """2026-10-15 用户裁定「建一个事件进一个池」：write_event 落地时由程序侧登记
+        """write_event 落地时由程序侧登记案例
 
         同一事件按声明 id 幂等登记一次；声明内容不可改写由事件声明侧保证，重复登记
         返回既有案例，不改写业务字段。不走模型可见工具。
@@ -223,37 +219,45 @@ class CasePool:
             raise ValueError(f"case_id={idempotence} 已有另一份不可变说明")
         if existing is None:
             self.cases[idempotence] = record
-            self.case_runtime.setdefault(idempotence, {"state": "pending", "owner": None})
+            self.case_runtime.setdefault(idempotence, {"promised": False, "owner": None})
         self.registrations[author].add(idempotence)
         self.created[author].add(idempotence)
         return dict(self.cases[idempotence])
 
-    def promise(self, case_id: str, author: tuple[str, str]) -> dict[str, Any]:
+    def promise(self, case_id: str, author: str) -> dict[str, Any]:
+        """接手承诺：承诺即视为解决，系统不做完成度核对；已被接手返回 taken
+
+        承诺落一条非写入交付（tool_name=promise_case）作为持久化痕迹，
+        读取重建时「有承诺交付」即已解决，没有即未解决，不存在中间状态。
+        """
         self._require(author)
         if case_id not in self.cases:
             raise ValueError(f"promise_case.case_id={case_id!r} 不存在；请取案例列表的真实 ID")
         runtime = self.case_runtime[case_id]
-        active = next(
-            (key for key, value in self.case_runtime.items() if value["owner"] == author and value.get("active")), None
+        if runtime["promised"]:
+            return {**self.cases[case_id], "status": "taken"}
+        runtime["promised"] = True
+        runtime["owner"] = author
+        self.registrations[author].add(case_id)
+        self._sequence += 1
+        self.deliveries[author].append(
+            {
+                "case_id": case_id,
+                "call_id": f"promise-{author}-{case_id}",
+                "accepted_order": self._sequence,
+                "connections": [],
+                "reads": [],
+                "tool_name": "promise_case",
+                "receipt": {"status": "promised"},
+                "is_write": False,
+            }
         )
-        if active is not None and active != case_id:
-            raise ValueError(f"当前 active case_id={active}，先通过业务工具显式传 caseid 交付")
-        if runtime["owner"] is not None and (runtime["owner"] != author or not runtime.get("active")):
-            return {**self.cases[case_id], "status": "busy", "state": runtime["state"]}
-        if runtime["state"] == "resolved":
-            return {**self.cases[case_id], "status": "resolved", "state": "resolved"}
-        runtime.update(owner=author, active=True)
-        return {**self.cases[case_id], "status": "claimed", "state": runtime["state"]}
-
-    def active(self, author: tuple[str, str]) -> str | None:
-        return next(
-            (key for key, value in self.case_runtime.items() if value["owner"] == author and value.get("active")), None
-        )
+        return {**self.cases[case_id], "status": "promised"}
 
     def associate(
         self,
         caseid: Any,
-        author: tuple[str, str],
+        author: str,
         *,
         tool_name: str,
         call_id: str,
@@ -270,8 +274,9 @@ class CasePool:
                 raise ValueError("caseid 必须是非空案例 ID")
             if caseid not in self.cases:
                 raise ValueError("caseid 不属于当前 run")
-            if self.case_runtime[caseid]["owner"] != author:
-                raise ValueError("当前执行尚未 promise 此 caseid，或已被其他执行认领")
+            runtime = self.case_runtime[caseid]
+            if not runtime.get("promised") or runtime.get("owner") != author:
+                raise ValueError("该案例尚未由本执行承诺；先 promise_case 接手，再带 caseid 调用")
             if receipt.get("status") in {"deferred", "rejected", "error", "runtime_error", "partial"}:
                 raise ValueError("本次调用未形成有效产物，不登记交付")
             previous = next((item for item in self.deliveries[author] if item["call_id"] == call_id), None)
@@ -287,7 +292,6 @@ class CasePool:
                 self.deliveries[author].append(
                     {
                         "case_id": caseid,
-                        "state": "resolved" if is_write else "pending",
                         "call_id": call_id,
                         "accepted_order": self._sequence,
                         "connections": [],
@@ -298,45 +302,21 @@ class CasePool:
                     }
                 )
             self.registrations[author].add(caseid)
-            if is_write:
-                # 已交付可认领下一项；直到事务确认前保留该案例的独占作者
-                self.case_runtime[caseid]["active"] = False
             return {"status": "success", "caseid": caseid, "delivery": is_write}
         except Exception as exc:
             self.restore(snapshot)
             return {"status": "warning", "code": "case_association_failed", "caseid": caseid, "message": str(exc)}
 
-    def stop(self, author: tuple[str, str]) -> None:
+    def stop(self, author: str) -> None:
         self.executions.discard(author)
-        for runtime in self.case_runtime.values():
-            if runtime["owner"] == author and runtime.get("active"):
-                runtime.update(owner=None, active=False)
 
-    def _saved_state(self, case_id: str) -> str:
-        """只有已确认保存的有效写入能解决案例，后续读取不撤销交付"""
-        return (
-            "resolved"
-            if any(
-                fact["case_id"] == case_id and fact.get("is_write")
-                for author in self.saved
-                if case_id not in {item["caseid"] for item in self.save_warnings.get(author, [])}
-                for fact in self.deliveries.get(author, [])
-            )
-            else "pending"
-        )
-
-    def confirm(self, work_id: str, invocation_id: str) -> None:
-        author = (work_id, invocation_id)
+    def confirm(self, execution_id: str) -> None:
+        author = execution_id
         self.saved.add(author)
         self.stop(author)
-        for runtime in self.case_runtime.values():
-            if runtime["owner"] == author:
-                runtime.update(owner=None, active=False)
-        for caseid, runtime in self.case_runtime.items():
-            runtime["state"] = self._saved_state(caseid)
 
-    def rollback(self, work_id: str, invocation_id: str) -> None:
-        author = (work_id, invocation_id)
+    def rollback(self, execution_id: str) -> None:
+        author = execution_id
         if author in self.saved:
             return
         self.stop(author)
@@ -348,13 +328,8 @@ class CasePool:
             if case_id not in supported:
                 self.cases.pop(case_id)
                 self.case_runtime.pop(case_id)
-                continue
-            runtime = self.case_runtime[case_id]
-            runtime["state"] = self._saved_state(case_id)
-            if runtime["owner"] == author:
-                runtime.update(owner=None, active=False)
 
-    def snapshot(self, author: tuple[str, str]) -> dict[str, Any]:
+    def snapshot(self, author: str) -> dict[str, Any]:
         # 单条操作由 agent 持锁，快照只覆盖本操作可能改动的案例域
         return deepcopy(
             {
@@ -377,7 +352,7 @@ class CasePool:
 
     def search(self, case_type: str | None = None) -> list[dict[str, Any]]:
         return [
-            {**case, "state": self.case_runtime[key]["state"], "busy": self.case_runtime[key]["owner"] is not None}
+            {**case, "promised": bool(self.case_runtime[key]["promised"])}
             for key, case in sorted(self.cases.items())
             if case_type is None or case.get("case_type") == case_type
         ]
@@ -387,12 +362,11 @@ class CasePool:
     # ------------------------------------------------------------------
 
     def _run_execution_ids(self, session: Session) -> set[str]:
-        """本运行的真实执行：标注 work 尝试与诊断整轮会话（运行归属经真实形状取得）"""
-        work_ids = select(WorkItem.work_id).where(WorkItem.annotation_run_id == self.run_id)
+        """本运行的真实执行：执行行直接携带运行归属（调用形状或整轮会话形状）"""
         return set(
             session.scalars(
                 select(Execution.execution_id).where(
-                    or_(Execution.session_run_id == self.run_id, Execution.work_id.in_(work_ids))
+                    or_(Execution.run_id == self.run_id, Execution.session_run_id == self.run_id)
                 )
             )
         )
@@ -474,7 +448,7 @@ class CasePool:
             raise ValueError("未发布事件候选缺少来源章")
         existing = session.scalar(
             select(CaseEntry.entry_id).where(
-                CaseEntry.candidate_producer_execution_id == contribution.invocation_id,
+                CaseEntry.candidate_producer_execution_id == contribution.author,
                 CaseEntry.pending_event_reference == reference,
             )
         )
@@ -482,8 +456,8 @@ class CasePool:
             return str(existing)
         title = str(payload.get("name") or payload.get("title") or reference)[:255]
         entry = CaseEntry(
-            entry_id=stable_uuid("case_pending_observation", contribution.invocation_id, reference),
-            candidate_producer_execution_id=contribution.invocation_id,
+            entry_id=stable_uuid("case_pending_observation", contribution.author, reference),
+            candidate_producer_execution_id=contribution.author,
             pending_event_reference=reference,
             pending_event_title=title,
             pending_event_chapter_id=int(chapter_id),
@@ -590,22 +564,22 @@ class CasePool:
     ) -> CaseEntry:
         """Agent 支持/贡献：每 (case, producer execution) 一行，不伪造第二份支持
 
-        程序形状 work（role NULL：章末核对/诊断失败保留）不走 invocation，支持条目
-        引用程序 work，adopted 恒 NULL，digest 不能冒充 producer 执行。
+        程序形状（章末核对/诊断失败保留）按 work_items 登记的程序身份区分：
+        支持条目引用程序 work，adopted 恒 NULL，程序身份不能冒充 producer 执行。
         """
-        work = session.get(WorkItem, contribution.work_id)
-        if work is not None and work.role is None:
+        work = session.get(WorkItem, contribution.author)
+        if work is not None:
             existing = session.scalar(
                 select(CaseEntry).where(
-                    CaseEntry.case_id == case_id, CaseEntry.program_work_id == contribution.work_id
+                    CaseEntry.case_id == case_id, CaseEntry.program_work_id == contribution.author
                 )
             )
             if existing is not None:
                 return existing
             entry = CaseEntry(
-                entry_id=stable_uuid("case_program_support", case_id, contribution.work_id),
+                entry_id=stable_uuid("case_program_support", case_id, contribution.author),
                 case_id=case_id,
-                program_work_id=contribution.work_id,
+                program_work_id=contribution.author,
             )
             session.add(entry)
             session.flush()
@@ -613,16 +587,16 @@ class CasePool:
         existing = session.scalar(
             select(CaseEntry).where(
                 CaseEntry.case_id == case_id,
-                CaseEntry.producer_execution_id == contribution.invocation_id,
+                CaseEntry.producer_execution_id == contribution.author,
             )
         )
         if existing is not None:
             existing.adopted = bool(existing.adopted) or adopted
             return existing
         entry = CaseEntry(
-            entry_id=stable_uuid("case_support", case_id, contribution.invocation_id),
+            entry_id=stable_uuid("case_support", case_id, contribution.author),
             case_id=case_id,
-            producer_execution_id=contribution.invocation_id,
+            producer_execution_id=contribution.author,
             adopted=adopted,
         )
         session.add(entry)
@@ -674,7 +648,7 @@ class CasePool:
         """正式产物 owner：标注尝试记录或诊断发布报告（告警行归属不伪造）"""
         record_id = session.scalar(
             select(ChapterAnnotation.record_id).where(
-                ChapterAnnotation.execution_id == contribution.invocation_id
+                ChapterAnnotation.execution_id == contribution.author
             )
         )
         if record_id is not None:
@@ -691,7 +665,7 @@ class CasePool:
             if report_id is not None:
                 return None, str(report_id)
         report_id = session.scalar(
-            report_statement.where(DiagnosisReport.session_id == contribution.invocation_id)
+            report_statement.where(DiagnosisReport.session_id == contribution.author)
         )
         if report_id is not None:
             return None, str(report_id)
@@ -789,25 +763,24 @@ class CasePool:
                 failed(case_id, exc)
         if warnings:
             self._save_warnings(session, record_id, report_id, warnings)
-        self.save_warnings[(contribution.work_id, contribution.invocation_id)] = warnings
+        self.save_warnings[contribution.author] = warnings
         return warnings
 
     def save_pending(
-        self, session: Session, items: list[tuple[str, str, dict[str, Any]]], *, author: tuple[str, str]
+        self, session: Session, items: list[tuple[str, str, dict[str, Any]]], *, author: str
     ) -> list[str]:
         """章末程序登记结构化案例（case_type, description, payload）；事务由 Agent 提交，失败不能降成 warning
 
         调用方持 run 锁，并负责成功后的 confirm 和失败后的内存恢复
         """
-        self.begin(*author)
+        self.begin(author)
         cases = [
             self.register_case(case_type=case_type, description=description, payload=payload, author=author)
             for case_type, description, payload in items
         ]
         contribution = CaseContribution(
             run_id=self.run_id,
-            work_id=author[0],
-            invocation_id=author[1],
+            author=author,
             snapshot_json=json.dumps(
                 {
                     "created_case_ids": [case["case_id"] for case in cases],
@@ -822,12 +795,10 @@ class CasePool:
             raise ValueError(f"章末案例未成功保存: {warnings}")
         return [case["case_id"] for case in cases]
 
-    def confirm_pending(self, author: tuple[str, str], states: dict[str, str]) -> None:
-        """程序只新增登记支持，采用已提交状态，不撤销既有办理结果"""
+    def confirm_pending(self, author: str) -> None:
+        """程序登记案例已随事务保存：只标记作者保存完成，不改动承诺痕迹"""
         self.saved.add(author)
         self.stop(author)
-        for case_id, state in states.items():
-            self.case_runtime[case_id]["state"] = state
 
     def _observation_for(self, session: Session, case: BookCase) -> CaseEntry | None:
         """案例引用的候选观察条目（未发布事件观察形状）"""
@@ -836,7 +807,7 @@ class CasePool:
         return session.get(CaseEntry, case.pending_event_entry_id)
 
     def _candidate_key_for(self, session: Session, case: BookCase) -> str | None:
-        """对话候选键投影：按真实章节区间与原文重算原 UUID5 算法"""
+        """对话候选键投影：按真实章节区间与原文重算 UUID5 算法"""
         if case.dialogue_candidate_chapter_id is None:
             return None
         chapter_text = session.scalar(
@@ -850,7 +821,7 @@ class CasePool:
         return _dialogue_candidate_key(case.dialogue_candidate_chapter_id, start, end, content)
 
     def _delivery_dict(self, session: Session, delivery: CaseEntry, support: CaseEntry) -> dict[str, Any]:
-        """交付条目读回内存形状：is_write/reads/resolved 由固定工具合同与真实交付投影"""
+        """交付条目读回内存形状：is_write/reads 由固定工具合同与真实交付投影"""
         connection_ids = [
             str(link_id)
             for link_id in session.scalars(
@@ -861,7 +832,6 @@ class CasePool:
         receipt = _receipt_dict(delivery.receipt_bytes)
         return {
             "case_id": support.case_id,
-            "state": "resolved" if is_write else "pending",
             "call_id": delivery.business_call_id,
             "accepted_order": delivery.accepted_order,
             "connections": connection_ids,
@@ -925,22 +895,11 @@ class CasePool:
         self.save_warnings.clear()
         self._sequence = 0
 
-    def _support_author(
-        self, session: Session, support: CaseEntry, execution_work: dict[str, str | None]
-    ) -> tuple[str, str]:
-        """支持作者身份：Agent 形状由执行取 work；程序形状按程序身份规则重建"""
+    def _support_author(self, support: CaseEntry) -> str:
+        """支持作者身份：程序形状是程序 work 身份，Agent 形状是真实执行号（单一字符串）"""
         if support.program_work_id is not None:
-            work_id = str(support.program_work_id)
-            if work_id.startswith(DIAGNOSIS_PENDING_PREFIX):
-                return (work_id, work_id[len(DIAGNOSIS_PENDING_PREFIX):])
-            work = session.get(WorkItem, work_id)
-            key = work.program_invocation_key if work is not None else None
-            if not key or key.count(":") < 2:
-                raise ValueError(f"程序支持缺少可重建的作者身份: work_id={work_id}")
-            return (work_id, key.split(":", 2)[2])
-        producer = str(support.producer_execution_id)
-        work_id = execution_work.get(producer) or f"{DIAGNOSIS_PENDING_PREFIX}{producer}"
-        return (work_id, producer)
+            return str(support.program_work_id)
+        return str(support.producer_execution_id)
 
     def _load_cases(
         self, session: Session, *, discard: set[str] | None = None
@@ -948,18 +907,10 @@ class CasePool:
         """从正式关系重建内存案例域
 
         discard 为空表示只读加载（诊断启动不改写任何行）；非空表示恢复：
-        废弃 work 的支持条目连同交付/连接一起删除（承接旧贡献丢失语义），
+        废弃执行的支持条目连同交付/连接一起删除，
         连接已失效的交付按规范链路 live 集合过滤，无支持的案例整体退场。
         """
-        run_execution_ids = self._run_execution_ids(session)
-        execution_work = {
-            str(execution_id): (str(work_id) if work_id is not None else None)
-            for execution_id, work_id in session.execute(
-                select(Execution.execution_id, Execution.work_id).where(
-                    Execution.execution_id.in_(run_execution_ids)
-                )
-            )
-        }
+        discard_executions = set(discard or ())
         case_ids = self._case_ids(session)
         if not case_ids:
             return
@@ -977,11 +928,6 @@ class CasePool:
         )
         pruned_supports: set[str] = set()
         if discard is not None:
-            discard_executions = set(
-                session.scalars(
-                    select(Execution.execution_id).where(Execution.work_id.in_(sorted(discard)))
-                )
-            )
             # 候选观察同样属于被废弃执行：先删引用它的案例行（RESTRICT），
             # 案例行级联带走其支持条目，再删观察条目
             observation_ids: set[str] = set()
@@ -1007,11 +953,11 @@ class CasePool:
                 set(
                     session.scalars(
                         select(NarrativeLink.link_id).where(
-                            NarrativeLink.producer_execution_id.in_(run_execution_ids)
+                            NarrativeLink.producer_execution_id.in_(self._run_execution_ids(session))
                         )
                     )
                 )
-                if run_execution_ids
+                if self._run_execution_ids(session)
                 else set()
             )
             for support in supports:
@@ -1050,14 +996,9 @@ class CasePool:
                     session.delete(case)
                 continue
             self.cases[case.case_id] = self._row_record(session, case)
-            resolved = any(bool(support.adopted) for support in case_supports)
-            self.case_runtime[case.case_id] = {
-                "state": "resolved" if resolved else "pending",
-                "owner": None,
-                "active": False,
-            }
+            self.case_runtime[case.case_id] = {"promised": False, "owner": None}
             for support in case_supports:
-                author = self._support_author(session, support, execution_work)
+                author = self._support_author(support)
                 self.registrations.setdefault(author, set()).add(case.case_id)
                 for delivery in session.scalars(
                     select(CaseEntry).where(CaseEntry.parent_entry_id == support.entry_id)
@@ -1065,6 +1006,9 @@ class CasePool:
                     self.deliveries.setdefault(author, []).append(
                         self._delivery_dict(session, delivery, support)
                     )
+                    if str(delivery.tool_name or "") == "promise_case":
+                        # 承诺痕迹：有承诺交付即已解决，没有即未解决
+                        self.case_runtime[case.case_id]["promised"] = True
                     self._sequence = max(self._sequence, int(delivery.accepted_order or 0))
                 self.saved.add(author)
         if discard is not None:
@@ -1080,20 +1024,17 @@ class CasePool:
         self._clear()
         self._load_cases(session, discard=set(discard))
 
-    def load_saved_work(self, session: Any, work_id: str, invocation_id: str, annotation_id: str) -> dict[str, Any]:
+    def load_saved_work(self, session: Any, execution_id: str, annotation_id: str) -> dict[str, Any]:
         """锁外读取当前作者实际保存的登记和交付，不恢复数据库认领"""
         record = session.get(ChapterAnnotation, annotation_id)
-        if record is None or record.execution_id != invocation_id:
-            raise ValueError(f"案例保存身份不一致: {work_id}/{invocation_id}")
-        execution = session.get(Execution, invocation_id)
-        if execution is None or execution.work_id != work_id:
-            raise ValueError(f"案例保存身份不一致: {work_id}/{invocation_id}")
+        if record is None or record.execution_id != execution_id:
+            raise ValueError(f"案例保存身份不一致: {execution_id}")
         cases: dict[str, dict[str, str]] = {}
         deliveries: list[dict[str, Any]] = []
         supports = list(
             session.scalars(
                 select(CaseEntry).where(
-                    CaseEntry.producer_execution_id == invocation_id, CaseEntry.case_id.is_not(None)
+                    CaseEntry.producer_execution_id == execution_id, CaseEntry.case_id.is_not(None)
                 )
             )
         )
@@ -1106,11 +1047,11 @@ class CasePool:
                 select(CaseEntry).where(CaseEntry.parent_entry_id == support.entry_id)
             ):
                 deliveries.append(self._delivery_dict(session, delivery, support))
-        return {"author": (work_id, invocation_id), "registrations": cases, "deliveries": deliveries}
+        return {"author": execution_id, "registrations": cases, "deliveries": deliveries}
 
     def recover_work(self, snapshot: dict[str, Any]) -> None:
-        """同 run 锁内恢复单作者，其他在飞交付与排他占用保持有效"""
-        author = tuple(snapshot["author"])
+        """同 run 锁内恢复单作者，其他在飞交付保持有效；承诺痕迹随交付重建"""
+        author = str(snapshot["author"])
         old_cases = set(self.registrations.get(author, set()))
         self.registrations[author] = set(snapshot["registrations"])
         self.deliveries[author] = deepcopy(snapshot["deliveries"])
@@ -1121,23 +1062,31 @@ class CasePool:
             if existing is not None and self.case_identity(existing) != self.case_identity(case):
                 raise ValueError(f"case_id={case_id} 已有另一份不可变说明")
             self.cases[case_id] = dict(case)
-            self.case_runtime.setdefault(case_id, {"state": "pending", "owner": None, "active": False})
+            self.case_runtime.setdefault(case_id, {"promised": False, "owner": None})
+        promised_ids = {
+            str(item["case_id"])
+            for items in self.deliveries.values()
+            for item in items
+            if item.get("tool_name") == "promise_case"
+        }
+        for case_id in snapshot["registrations"]:
+            if case_id in promised_ids:
+                self.case_runtime[case_id]["promised"] = True
         supported = set().union(*self.registrations.values()) if self.registrations else set()
         for case_id in old_cases | set(snapshot["registrations"]):
             if case_id not in supported:
                 self.cases.pop(case_id, None)
                 self.case_runtime.pop(case_id, None)
                 continue
-            facts = [
-                (source, item)
-                for source, items in self.deliveries.items()
-                for item in items
-                if item["case_id"] == case_id
-            ]
-            latest = max(facts, key=lambda pair: pair[1]["accepted_order"], default=None)
-            runtime = self.case_runtime[case_id]
-            runtime["state"] = self._saved_state(case_id)
-            # 部分确认可能先释放了本作者占用，重建到再次确认；不能覆盖别人的认领
-            if latest and latest[0] == author and latest[1]["state"] == "resolved" and runtime["owner"] is None:
-                runtime.update(owner=author, active=False)
-            self._sequence = max(self._sequence, max((item["accepted_order"] for _, item in facts), default=0))
+            self._sequence = max(
+                self._sequence,
+                max(
+                    (
+                        int(item["accepted_order"])
+                        for items in self.deliveries.values()
+                        for item in items
+                        if item["case_id"] == case_id
+                    ),
+                    default=0,
+                ),
+            )

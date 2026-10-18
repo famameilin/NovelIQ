@@ -73,7 +73,7 @@ def test_selected_models_use_their_own_credentials_and_concurrency(monkeypatch) 
         "key-b",
         5,
     )
-    # 2026-10-02 设置迁移：采样参数跟随选中的池内模型
+    # 采样参数跟随选中的池内模型
     assert (selected.temperature, selected.top_p, selected.max_tokens) == (0.3, 0.9, 2048)
     diagnosis = load_task_config("diagnosis")
     assert (diagnosis.model, diagnosis.base_url, diagnosis.api_key, diagnosis.max_in_flight) == (

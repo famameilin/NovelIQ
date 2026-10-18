@@ -1,9 +1,6 @@
-"""
-AnalysisService 服务级状态机测试。
+"""AnalysisService 服务级状态机测试。
 
-创建时间: 2026-04-23
-任务: P0-analysis-service-state-machine-tests
-说明: 覆盖恢复、取消、失败持久化、任务认领等服务级路径，避免状态机逻辑只由路由测试间接保护。
+覆盖恢复、取消、失败持久化、任务认领等服务级路径，避免状态机逻辑只由路由测试间接保护。
 """
 
 from __future__ import annotations
@@ -26,9 +23,7 @@ from src.workflows.service import AnalysisService
 class _StaticSessionFactory:
     """为 AnalysisService 测试提供固定 SQLAlchemy Session。
 
-    创建时间: 2026-04-23
-    任务: P0-analysis-service-state-machine-tests
-    说明: 复用 db_session fixture，避免服务内部重新连到非测试库。
+    复用 db_session fixture，避免服务内部重新连到非测试库。
     """
 
     def __init__(self, session):
@@ -63,7 +58,7 @@ def _make_service(db_session, *, worker_id: str = "worker-state-machine") -> Ana
 
 @pytest.mark.asyncio
 async def test_execute_stages_runs_linguistic_before_aggregate(db_session, monkeypatch) -> None:
-    """2026-08-31 用于验证执行顺序与全局进度里程碑保持一致"""
+    """验证执行顺序与全局进度里程碑保持一致"""
     service = _make_service(db_session)
     monkeypatch.setattr(service, "_is_cancelled", MagicMock(return_value=False))
     tracker = MagicMock()
@@ -207,8 +202,7 @@ def test_prepare_task_execution_claim_skips_already_running_run(db_session) -> N
 
 @pytest.mark.asyncio
 async def test_run_analysis_core_skipped_claim_cleans_memory_task(db_session) -> None:
-    """
-    2026-08-13 P2：claim 返回 skipped（其他执行方持有 DB 真相）时，
+    """claim 返回 skipped（其他执行方持有 DB 真相）时，
     _run_analysis_core 必须清理本进程的内存执行缓存（停心跳），
     防止残留 TaskInfo 的心跳写回覆盖真实 owner 的 worker_id/heartbeat_at。
     """
@@ -257,10 +251,8 @@ def test_write_failure_to_db_persists_failed_terminal_state(db_session) -> None:
 
 
 def test_claim_pending_run_closes_cancelling_window_to_cancelled(db_session) -> None:
-    """
-    2026-08-13 修复 P1：取消信号落在「worker 读 pending」与「原子 claim」之间时，
-    claim 的 UPDATE 不命中且状态已变 cancelling。此前返回 skipped 静默退出，
-    任务永久卡在无 owner 的 cancelling；修复后应直接收口为 cancelled 终态。
+    """取消信号落在「worker 读 pending」与「原子 claim」之间时，
+    claim 的 UPDATE 不命中且状态已变 cancelling；必须直接收口为 cancelled 终态。
     """
     _insert_novel(db_session, "svccnc2")
     run_repo = RunRepository(db_session)
@@ -300,10 +292,8 @@ def test_claim_pending_run_skips_cancelling_with_owner(db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_run_analysis_core_persists_db_terminal_state_when_env_init_fails(db_session) -> None:
-    """
-    2026-08-13 修复 P1：环境初始化失败（session/run_id 均未建立）时，
-    通用异常分支此前只改内存任务状态，DB 停留在 running 无终态；
-    修复后必须通过兜底路径把 failed + error 写入 DB。
+    """环境初始化失败（session/run_id 均未建立）时，
+    必须通过兜底路径把 failed + error 写入 DB（不能只改内存任务状态）。
     """
 
     _insert_novel(db_session, "svcfail3")
@@ -359,12 +349,7 @@ async def test_recover_pending_tasks_schedules_pending_and_cancels_requested(db_
 
 @pytest.mark.asyncio
 async def test_recover_pending_tasks_continues_after_unexpected_resume_failure(db_session) -> None:
-    """
-    创建时间: 2026-04-26
-    任务: fix-diagnosis-review-findings
-    说明: startup recovery 必须按任务级隔离异常；
-    单个 pending 恢复时报错时，后续 pending 仍应继续恢复。
-    """
+    """单个 pending 恢复时报错时，后续 pending 仍应继续恢复。"""
 
     _insert_novel(db_session, "svcrcv02")
     run_repo = RunRepository(db_session)
@@ -393,8 +378,7 @@ async def test_recover_pending_tasks_continues_after_unexpected_resume_failure(d
 
 
 def test_is_recent_resume_reset_compares_heartbeat_in_utc(db_session) -> None:
-    """
-    2026-08-13 P2: 写入端与孤儿回收均以 UTC 落库（DateTime 列无时区，tz 被剥离），
+    """写入端与孤儿回收均以 UTC 落库（DateTime 列无时区，tz 被剥离），
     _is_recent_resume_reset 必须按 UTC 挂钟比较；本地时区（如 UTC+8）下若按
     本地挂钟比较，会把新鲜心跳误判为陈旧，导致真实取消被当作 resume 后陈旧取消。
     """
@@ -437,8 +421,7 @@ def test_is_recent_resume_reset_compares_heartbeat_in_utc(db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_run_analysis_core_emits_cancelled_event_when_claim_cancelled(db_session, monkeypatch) -> None:
-    """
-    2026-08-14 P2-10：claim 前取消必须补发 SSE task_cancelled 终态事件，
+    """claim 前取消必须补发 SSE task_cancelled 终态事件，
     否则已连接的客户端永远等不到取消信号
     """
     _insert_novel(db_session, "svcevt1")
@@ -470,11 +453,8 @@ async def test_run_analysis_core_emits_cancelled_event_when_claim_cancelled(db_s
 
 @pytest.mark.asyncio
 async def test_run_analysis_core_cancel_after_stages_persists_cancelled(db_session, monkeypatch) -> None:
-    """
-    2026-08-14 P2-13：所有阶段完成但成功收口前收到取消时，必须落 cancelled 终态
-    （此前直接 return，run 卡在 running 直到重启孤儿回收）
-
-    2026-10-02 修改: _call_execute_analysis_stages 纯转发包装已内联删除，patch 目标改为 _execute_analysis_stages
+    """所有阶段完成但成功收口前收到取消时，必须落 cancelled 终态
+    （不能停在 running 等重启孤儿回收）
     """
     from src.workflows.analysis.error_handler import AnalysisErrorHandler
 
@@ -517,8 +497,7 @@ async def test_run_analysis_core_cancel_after_stages_persists_cancelled(db_sessi
 
 @pytest.mark.asyncio
 async def test_error_handler_skips_terminal_write_when_run_reclaimed(db_session) -> None:
-    """
-    2026-08-14 P2-13：旧 worker 的延迟取消写回在 run 已被新 worker（resume 后）
+    """旧 worker 的延迟取消写回在 run 已被新 worker（resume 后）
     接管时被归属守卫跳过，不得覆写新轮 running 状态
     """
     from datetime import UTC, datetime

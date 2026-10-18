@@ -1,10 +1,8 @@
 /**
  * timelineNodePresentation - 时间轴节点视觉语义配置
  *
- * 统一维护节点类型的图标、颜色、文案，避免时间轴、图例、详情面板各自维护一套含义
- *
- *   - 改为 node_type + node_subtype 双层语义
- *   - lifecycle 的 entry / exit 与 relation 的不同变化类型统一走同一选择器
+ * 统一维护节点类型的图标、颜色、文案，供时间轴、图例、详情面板共用；
+ * 按 node_type + node_subtype 双层语义取值，lifecycle 的 entry / exit 与 relation 的变化类型走同一选择器
  */
 
 import { Activity, Link2, Zap, type LucideIcon } from "lucide-react";

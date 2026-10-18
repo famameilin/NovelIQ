@@ -1,9 +1,8 @@
-"""主题聚合（《分析能力扩展路线图》§5.11 / D1、D3）。
+"""主题聚合
 
-2026-10-06 自 `src/api/services/results_queries/topic_aggregations.py` 收归读侧聚合模块；
-D2 的 JS 散度与变化候选在 `algorithms.py`。全部复合结果查询时计算，不落结果表；
-每个聚合携带模型契约元数据与样本量，缺失或样本不足时返回 unavailable_reason，
-不用零值伪造结果。本模块返回纯 dict 载荷，响应装配留在 api 读侧。
+全部复合结果查询时计算，不落结果表；每个聚合携带模型契约元数据与样本量，
+缺失或样本不足时返回 unavailable_reason，不用零值伪造结果。本模块返回纯
+dict 载荷，响应装配留在 api 读侧。
 """
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ def model_unavailable_reason(model_row: Any | None) -> str | None:
 
 def aggregate_book_topics(run_id: str, session: Session) -> dict[str, Any]:
     """
-    全书主题分布（§5.11）：sum(topic_weight * inference_token_count) / sum(inference_token_count)
+    全书主题分布：sum(topic_weight * inference_token_count) / sum(inference_token_count)
 
     分母从每段一行的推断状态读取，不因 K 条主题行重复放大；分布补零至
     模型契约的 num_topics 维度。
@@ -73,7 +72,7 @@ def aggregate_book_topics(run_id: str, session: Session) -> dict[str, Any]:
 
 def aggregate_chapter_topics(run_id: str, session: Session) -> dict[str, Any]:
     """
-    章节主题分布（§5.11）：每章 sum(w * t) / 该章段落推断 token 和
+    章节主题分布：每章 sum(w * t) / 该章段落推断 token 和
 
     章节边界用 paragraphs.chapter_id 关联 chapters 并按 chapters.sequence
     排序，不使用段落列表下标推断章节。
@@ -147,7 +146,7 @@ def aggregate_chapter_topics(run_id: str, session: Session) -> dict[str, Any]:
 
 def fetch_paragraph_topic_series(run_id: str, session: Session) -> dict[str, Any]:
     """
-    段落主题序列（D1）：按真实字符位置输出完整 K 维主题权重
+    段落主题序列：按真实字符位置输出完整 K 维主题权重
 
     横轴使用 global_start_char / global_end_char；top_n 只属于前端展示裁剪，
     本接口始终返回完整分布。
@@ -195,9 +194,9 @@ def fetch_paragraph_topic_series(run_id: str, session: Session) -> dict[str, Any
 
 def compute_topic_emotion(run_id: str, session: Session) -> dict[str, Any]:
     """
-    主题-情感统计（D3）：sum(weight * token * net_density) / sum(weight * token)
+    主题-情感统计：sum(weight * token * net_density) / sum(weight * token)
 
-    情感输入使用指标分子/分母投影的净密度原始值（原曲线宽表退场后同一口径）；
+    情感输入使用指标分子/分母投影的净密度原始值；
     净密度为空的段落（token=0 或指标缺失）在 SQL 层同时从分子分母排除；
     权重和为零时返回空值并记录原因。
     """

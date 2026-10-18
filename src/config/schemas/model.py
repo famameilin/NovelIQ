@@ -17,9 +17,7 @@ from src.config.runtime_env import ModelEnvironment
 class WeightedModelSettings:
     """每个模型独立拥有连接、采样参数、标注分配权重和物理请求并发上限
 
-    2026-10-02 设置迁移（模型参数随模型走）：temperature/top_p/max_tokens
-    从任务级配置（TaskModelSettings）移入本类——模型池内不同模型可各自
-    指定采样与输出上限，随加权选择一并生效。
+    池内不同模型可各自指定采样与输出上限，随加权选择一并生效。
     """
 
     model_id: str
@@ -27,9 +25,7 @@ class WeightedModelSettings:
     api_key: str = field(repr=False)
     temperature: float = 0.7
     top_p: float = 0.8
-    # 2026-09-11 显式封顶 128K：思考模式补全上限的provider默认值不定（DeepSeek 文档
-    # 8K/64K 随模式漂移），截断长度实测 7.7K~61K 字符散布——显式封顶消除该变量
-    # 2026-10-02 从任务级配置移入模型级
+    # 显式封顶 128K：思考模式补全上限不依赖 provider 默认值
     max_tokens: int = 131072
     weight: float = 1.0
     max_in_flight: int = 8
@@ -39,19 +35,15 @@ class WeightedModelSettings:
 class TaskModelSettings:
     """
     任务模型配置（含 Agent 运行参数与行为开关）
-
-    2026-10-02 设置迁移：temperature/top_p/max_tokens 移入
-    WeightedModelSettings，任务级只保留运行参数与行为开关。
     """
 
     timeout_s: float | None = None
     thinking: bool = False
-    # 2026-10-02 删除 streaming 字段：流式输出不再可配置，LLM 调用固定开启（src/agents/llm.py）
     max_iterations: int = 15
     total_attempts: int = 3
-    allow_future_context: bool = True
-    # 2026-10-02 恢复（随章内三子代理路径加回）：章正文超过该字数派发三条职责 subagent 并发，
-    # 不超线走单 agent 路径（派发点在 PipelineAgentExecutor.execute）
+    # 标注期不能读取未来章节原文
+    allow_future_context: bool = False
+    # 章正文超过该字数派发三条职责 Agent 并发，不超线走单 agent 路径
     sub_chunk_max_chars: int = 3500
 
 
@@ -59,9 +51,7 @@ class TaskModelSettings:
 class EmbeddingModelSettings:
     """嵌入模型配置
 
-    2026-09-10 embedding_dim 不再是配置：维度以嵌入服务实测输出为准
-    （preprocess 探测锁定，EmbeddingClient.detect_embedding_dimension），
-    pgvector 列宽在建表时按探测值固化。
+    嵌入维度不在配置中：以嵌入服务探测输出为准，pgvector 列宽建表时按探测值固化。
     """
 
     base_url: str | None = None
@@ -83,7 +73,7 @@ class ModelsSettings:
     diagnosis_model_id: str | None = None
     annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
     paragraph_embedding: EmbeddingModelSettings = field(default_factory=EmbeddingModelSettings)
-    diagnosis: TaskModelSettings = field(default_factory=lambda: TaskModelSettings(max_iterations=10))
+    diagnosis: TaskModelSettings = field(default_factory=lambda: TaskModelSettings(max_iterations=15))
 
 
 def _positive_integer(data: dict[str, Any], key: str, default: int) -> int:
@@ -94,15 +84,14 @@ def _positive_integer(data: dict[str, Any], key: str, default: int) -> int:
 
 
 _POOL_REQUIRED_KEYS = {"model_id", "base_url", "api_key", "weight", "max_in_flight"}
-# 2026-10-02 设置迁移：采样参数随模型池条目可选提供，缺省用模型级默认
+# 采样参数随模型池条目可选提供，缺省用模型级默认
 _POOL_SAMPLING_KEYS = {"temperature", "top_p", "max_tokens"}
 
 
 def _parse_pool_sampling(item: dict[str, Any]) -> tuple[float, float, int]:
     """
-    2026-10-02 设置迁移：解析模型级采样参数（temperature/top_p/max_tokens）
-    任务: 采样参数移入模型配置
-    说明: 缺省回退模型级默认；越界或类型错误直接拒绝整个模型池。
+    解析模型级采样参数（temperature/top_p/max_tokens）
+    缺省回退模型级默认；越界或类型错误直接拒绝整个模型池。
     """
 
     temperature = item.get("temperature", 0.7)
@@ -177,21 +166,13 @@ def _parse_model_pool(value: Any) -> list[WeightedModelSettings]:
 
 
 def _is_running_in_docker_container() -> bool:
-    """
-    2026-05-01: Docker 本机模型地址自动兼容
-    任务: docker-model-base-url-autofix
-    说明: 仅用于判断当前后端是否运行在 Docker 容器内，避免把宿主机源码运行时的 localhost 配置误改写。
-    """
+    """判断当前后端是否运行在 Docker 容器内"""
 
     return os.path.exists("/.dockerenv")
 
 
 def _replace_url_hostname(parts: SplitResult, new_hostname: str) -> str:
-    """
-    2026-05-01: Docker 本机模型地址自动兼容
-    任务: docker-model-base-url-autofix
-    说明: 保留原 URL 的协议、端口、路径和鉴权信息，仅替换主机名。
-    """
+    """保留原 URL 的协议、端口、路径和鉴权信息，仅替换主机名。"""
 
     auth_prefix = ""
     if parts.username is not None:
@@ -214,12 +195,7 @@ def _replace_url_hostname(parts: SplitResult, new_hostname: str) -> str:
 
 
 def _normalize_model_base_url_for_docker(base_url: str | None) -> str | None:
-    """
-    2026-05-01: Docker 本机模型地址自动兼容
-    任务: docker-model-base-url-autofix
-    说明: 当后端运行在 Docker 容器内时，把模型配置里误写的 localhost/127.0.0.1/::1
-    自动改写为 host.docker.internal，降低部署文档理解门槛；数据库 URL 等非模型地址不走这里。
-    """
+    """容器内运行时把模型地址的 localhost/127.0.0.1/::1 改写为 host.docker.internal，数据库 URL 等非模型地址不走这里"""
 
     if not base_url or not _is_running_in_docker_container():
         return base_url
@@ -242,26 +218,21 @@ def _normalize_model_base_url_for_docker(base_url: str | None) -> str | None:
 
 
 def _parse_task_model_settings(data: dict[str, Any] | None, *, default_iterations: int = 15) -> TaskModelSettings:
-    """
-    2026-08-03 用于解析任务模型的非敏感行为参数
-    """
+    """解析任务模型的非敏感行为参数"""
 
     json_data = data or {}
     return TaskModelSettings(
         timeout_s=json_data.get("timeout_s"),
         thinking=json_data.get("thinking", False),
-        # 2026-10-02 streaming 键不再解析（残留值静默忽略），流式固定开启
         max_iterations=_positive_integer(json_data, "max_iterations", default_iterations),
         total_attempts=_positive_integer(json_data, "total_attempts", 3),
-        allow_future_context=json_data.get("allow_future_context", True),
+        allow_future_context=json_data.get("allow_future_context", False),
         sub_chunk_max_chars=_positive_integer(json_data, "sub_chunk_max_chars", 3500),
     )
 
 
 def _parse_embedding_model_settings(data: dict[str, Any] | None) -> EmbeddingModelSettings:
-    """
-    2026-08-03 用于解析嵌入模型的非敏感行为参数
-    """
+    """解析嵌入模型的非敏感行为参数"""
 
     json_data = data or {}
 
@@ -274,14 +245,12 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None) -> EmbeddingMod
 
 
 def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
-    """
-    2026-08-03 用于解析任务级模型行为配置集合
-    """
+    """解析任务级模型行为配置集合"""
     if not data:
         data = {}
     if "model_pool" in data or "diagnosis_model_id" in data:
         raise ValueError("模型池和诊断模型请通过模型池配置接口保存")
-    diagnosis = _parse_task_model_settings(data.get("diagnosis"), default_iterations=10)
+    diagnosis = _parse_task_model_settings(data.get("diagnosis"))
     return ModelsSettings(
         annotation=_parse_task_model_settings(data.get("annotation")),
         paragraph_embedding=_parse_embedding_model_settings(data.get("paragraph_embedding")),

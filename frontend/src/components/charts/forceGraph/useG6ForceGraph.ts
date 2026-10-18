@@ -30,7 +30,6 @@ interface UseG6ForceGraphOptions {
   onGraphReady: (graph: Graph | null) => void;
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P1
 // 把 G6 实例初始化、事件绑定和销毁都封到独立 hook，减少 ForceGraph 组件的生命周期负担
 export function useG6ForceGraph({
   containerRef,
@@ -41,12 +40,8 @@ export function useG6ForceGraph({
   onNodeClick,
   onGraphReady,
 }: UseG6ForceGraphOptions) {
-  // 2026-08-13 P2-7: 搜索词防抖 300ms。G6 力导向图没有轻量的节点过滤 API，
-  // 搜索高亮依赖 graph.node() 映射函数，逐键重建整个图实例代价高；
-  // 这里把 searchQuery 从主 effect 依赖中隔离出来，改为防抖后的值触发重建，
-  // 输入停顿 300ms 后才全量重建一次，连续输入期间不再逐键销毁/重建。
-  // 说明：防抖期间搜索高亮会短暂滞后（输入框本身即时反馈），
-  // 相比逐键重建整图的卡顿是可接受的折中；不改主 effect 语义（数据/布局不变）。
+  // 搜索词防抖 300ms：searchQuery 从主 effect 依赖隔离，改为防抖后的值触发重建。
+  // 高亮依赖 graph.node() 映射函数，逐键重建整图代价高；防抖期间高亮短暂滞后是可接受的折中
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
   useEffect(() => {
     const timer = window.setTimeout(() => {

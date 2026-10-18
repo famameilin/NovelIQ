@@ -2,13 +2,6 @@
 程序面检索投影层：检索回执的紧凑投影（fields/limit 不进底层工具 schema）
 """
 
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：program.py 大文件拆分——检索投影层（_SearchProjection/_SEARCH_PROJECTIONS/
-# _projection_options/_project_payload/_ProgramSearchTool/build_program_tools 与
-# _failed_view/_call_rejection）迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑与签名；program.py 对全部符号保留 re-export，
-# 既有导入方零改动。本模块不依赖 program/catalog/runtime，无循环导入。
-
 from __future__ import annotations
 
 import json
@@ -17,13 +10,10 @@ from typing import Any
 
 from .errors import AnnotationStageRejection
 
-# 全书检索的预览与程序回显使用同一预算，正文详情保留按需读取入口
-SHARED_SEARCH_MAX_CHARS = 6000
-
 
 @dataclass(frozen=True)
 class _SearchProjection:
-    """2026-09-15 用于声明程序面检索回执的紧凑投影（省略 fields 时用 default_fields）"""
+    """用于声明程序面检索回执的紧凑投影（省略 fields 时用 default_fields）"""
 
     # 主集合在回执里的键；空字符串表示回执本身就是数组（search_text）
     collections: tuple[str, ...]
@@ -44,9 +34,8 @@ _SEARCH_PROJECTIONS: dict[str, _SearchProjection] = {
     ),
 }
 
-# 2026-09-18 检索工具在程序面比工具 schema 多两个参数（fields/limit 由投影层消费，不进
-# 工具 schema）：目录里的签名要把它们写出来，否则模型读不到"能按需裁字段"这件事。
-# 2026-09-20 两个投影参数不在 schema 里，类型标签按投影规则手写（其余参数一律从注解派生）。
+# 检索工具在程序面比工具 schema 多两个参数（fields/limit 由投影层消费，不进工具
+# schema）：目录里的签名要把它们写出来，类型标签按投影规则手写。
 _PROJECTION_PARAMETERS: tuple[str, ...] = ("fields", "limit")
 _PROJECTION_PARAMETER_LABELS: dict[str, str] = {"fields": "文本列表", "limit": "整数"}
 
@@ -58,7 +47,7 @@ def _projection_options(
     raw_fields: Any,
     raw_limit: Any,
 ) -> tuple[tuple[str, ...], int]:
-    """2026-09-15 用于校验程序面 fields/limit 参数（未声明字段名结构化拒绝并列出可选字段）"""
+    """用于校验程序面 fields/limit 参数（未声明字段名结构化拒绝并列出可选字段）"""
     expected = "、".join(rule.fields)
     if raw_fields is None:
         fields = rule.default_fields
@@ -106,14 +95,14 @@ def _projection_options(
 
 
 def _project_item(item: Any, fields: tuple[str, ...]) -> Any:
-    """2026-09-15 用于按字段白名单投影单条检索结果（非字典项原样返回）"""
+    """用于按字段白名单投影单条检索结果（非字典项原样返回）"""
     if not isinstance(item, dict):
         return item
     return {key: item[key] for key in fields if key in item}
 
 
 def _project_payload(tool_name: str, payload: Any, *, fields: tuple[str, ...], limit: int) -> Any:
-    """2026-09-15 用于把检索回执压成"明确要求的字段 + 前若干项"（只动程序面）"""
+    """用于把检索回执压成"明确要求的字段 + 前若干项"（只动程序面）"""
     rule = _SEARCH_PROJECTIONS[tool_name]
     if "" in rule.collections:
         if not isinstance(payload, list):
@@ -130,7 +119,7 @@ def _project_payload(tool_name: str, payload: Any, *, fields: tuple[str, ...], l
 
 
 def _failed_view(op: dict[str, Any]) -> dict[str, Any]:
-    """2026-09-15 用于把逐 op 记录渲染成模型可见的失败清单（按 op 序号与源码行定位）
+    """用于把逐 op 记录渲染成模型可见的失败清单（按 op 序号与源码行定位）
 
     message 取结构化拒绝的原文（如端点类型不符时说明实际登记类型），是自纠的关键，
     与原生路径的拒绝回执口径一致；成功记录不进本清单。
@@ -151,11 +140,10 @@ def _failed_view(op: dict[str, Any]) -> dict[str, Any]:
 
 
 def _call_rejection(name: str, exc: Exception, *, signature_hint: str) -> dict[str, Any]:
-    """2026-09-16 用于把构造器调用失败渲染成记录级拒绝回执（块面与章面共用）
+    """用于把构造器调用失败渲染成记录级拒绝回执（块面与章面共用）
 
     结构化拒绝（AnnotationStageRejection）带 record/field/code/expected 原样透传；
     其余失败（多为参数名写错）给签名提示，让模型下一轮就能改对。
-    2026-10-02 恢复：随章内三子代理路径一并加回（0.2.0 重构曾摘除）。
     """
     if isinstance(exc, AnnotationStageRejection):
         return exc.receipt()
@@ -169,7 +157,7 @@ def _call_rejection(name: str, exc: Exception, *, signature_hint: str) -> dict[s
 
 
 class _ProgramSearchTool:
-    """2026-09-15 用于给程序面检索工具加一层投影（fields/limit 不传给底层工具 schema）"""
+    """用于给程序面检索工具加一层投影（fields/limit 不传给底层工具 schema）"""
 
     def __init__(self, tool: Any) -> None:
         self._tool = tool
@@ -194,7 +182,7 @@ class _ProgramSearchTool:
 
 
 def build_program_tools(tools: list[Any]) -> list[Any]:
-    """2026-09-15 用于构建程序面工具面（四个检索工具包紧凑投影，其余工具原样）"""
+    """用于构建程序面工具面（四个检索工具包紧凑投影，其余工具原样）"""
     program_tools: list[Any] = []
     for tool in tools:
         if str(tool.name) in _SEARCH_PROJECTIONS:

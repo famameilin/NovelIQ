@@ -1,15 +1,5 @@
 """
-事件声明、完整事件与阶段版本身份 ORM 模型（2026-10-16 全库 3NF 改造）
-
-- event_declarations：不可变章级声明正文及其伏笔属性（原 work/生产尝试/章序/
-  合同从 record 取；description=summary、tree_id=自身、cause_role=root、parent=NULL
-  均为读投影）
-- declaration_participants：声明中的真实参与者（名字/类型读实体，动态观测三态
-  仅当至少一项非空时由 graph_facts 关联本行）
-- complete_events：完整事件身份、实际生产者与同一性理由（source_work 从
-  producer 推导；当前内容/当前版本从正式版本与证据读取）
-- event_revisions：明确阶段序号链（声明绑定或独立 origin 内容互斥），前驱为
-  index−1、当前版本为 MAX(index)，均为读取计算
+事件声明、完整事件与阶段版本身份 ORM 模型
 
 声明正文/原生产者/参与者/证据从声明读；origin 生产者从完整事件读；
 不复制源事实，不按时间/章号猜顺序。

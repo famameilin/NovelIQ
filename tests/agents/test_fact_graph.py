@@ -1,6 +1,6 @@
 """正式章节局部图的稳定身份、关系幂等、操作日志与回滚测试
 
-2026-10-13 身份=规范名+实体大类：实体键是复合键（entity_key(名, 大类)），
+身份=规范名+实体大类：实体键是复合键（entity_key(名, 大类)），
 同名不同类是两条独立身份；关系端点、active_relations、id 查询都按复合键。
 """
 
@@ -35,7 +35,7 @@ def test_entities_append_and_update_explicit_fields() -> None:
 
 
 def test_same_name_different_type_are_distinct_entities() -> None:
-    """2026-10-13 同名不同大类各自登记为独立身份、独立 id，互不覆盖"""
+    """同名不同大类各自登记为独立身份、独立 id，互不覆盖"""
     graph = FactGraph(run_scope="run-1")
     graph.register_entities([EntityInput(name="圣城", entity_type="organization")])
     graph.register_entities([EntityInput(name="圣城", entity_type="location")])

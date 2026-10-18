@@ -17,9 +17,8 @@ _TASK_STATE_EVENTS = {
 
 
 def display_scope(data: dict[str, Any]) -> str:
-    """工作身份优先；诊断等无 work 的展示使用实际阶段作用域"""
-    scope = f"{data.get('stage') or ''}:{data.get('chapter_id') or 0}:{data.get('sub_stage') or ''}"
-    return str(data.get("work_id") or scope)
+    """展示作用域取实际阶段上下文：标注=章+角色，诊断=案例锚（sub_stage）"""
+    return f"{data.get('stage') or ''}:{data.get('chapter_id') or 0}:{data.get('sub_stage') or ''}"
 
 
 @dataclass
@@ -47,8 +46,6 @@ class DisplayState:
         if scope in self.suspended:
             return False
         current = self.executions.get(scope)
-        if data.get("work_id") and current is None:
-            return False
         return current is None or invocation == current
 
     def observe(self, event_type: str, data: dict[str, Any], sequence: int) -> None:

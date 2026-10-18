@@ -1,10 +1,10 @@
 """
-词表注册中心 (Lexicon Registry v3)
+词表注册中心
 
 注册关系唯一事实源：src/lexicons/constants.py 的 LEXICON_FILES
 （语义 key -> 文件名），注册文件集合即其全部文件名。
 
-设计（2026-08-15 按用户要求）：
+设计：
   - 表目标识即文件名（data/lexicons/ 下无语义 key 层）。
   - 消费方经 LEXICON_FILES["key"] 引用文件名，不写魔法字符串。
   - 加载报错保留（fail-fast）：注册词表文件缺失 -> 加载即报错，防止分析链

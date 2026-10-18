@@ -3,11 +3,10 @@
 
 包含文本清洗、分块、写入数据库，以及风格/文化指标计算等功能。
 
-2026-10-16 全库 3NF 改造（原文链）：章节身份写 chapters、正文切片写 chapter_bodies；
-段落身份/原文写 paragraphs、tokenizer 计数写 paragraph_preprocess_observations；
-段落向量写 paragraph_embeddings，运行模型合同（模型 key + 实测维度）写
-embedding_model_runs；表面张力 z、功能词/语义类别计数写各自固定领域表。
-坐标、长度与密度的读取投影见各仓储模块。
+落库结构：章节身份写 chapters、正文切片写 chapter_bodies；段落身份/原文写
+paragraphs、tokenizer 计数写 paragraph_preprocess_observations；段落向量写
+paragraph_embeddings，运行模型合同（模型 key + 实测维度）写 embedding_model_runs；
+表面张力 z、功能词/语义类别计数写各自固定领域表。坐标、长度与密度的读取投影见各仓储模块。
 """
 
 from __future__ import annotations
@@ -97,8 +96,8 @@ async def run_preprocess(
     logger.info(f"inserted {total_chapters} chunks into db (run_id={run_id})")
 
     # 章节正文切片（chapter_bodies）落库后无条件生成段落行（语义检索开关不影响
-    # paragraphs 的生成和内容），段落身份以 paragraphs 表为准，
-    # embedding/检索/指标均从该表读取，保证与段落严格对齐
+    # paragraphs 的生成和内容）；段落身份以 paragraphs 表为准，
+    # embedding/检索/指标均从该表读取
     spans = split_chunk_paragraphs(all_chunks, max_chars=settings.paragraphs.max_chars)
     tokenized: list[list[str]] = [tokenize(span.text) for span in spans]
     spans = [replace(span, token_count=len(tokens)) for span, tokens in zip(spans, tokenized, strict=True)]
@@ -107,14 +106,14 @@ async def run_preprocess(
     _commit_preprocess_writes(session, step="insert_paragraphs")
     logger.info(f"inserted {len(spans)} paragraphs into db (run_id={run_id})")
 
-    # 段落指标（§5.3）：原始计数与充分统计量；表面张力 z 在 run 内稳健标准化后
+    # 段落指标：原始计数与充分统计量；表面张力 z 在 run 内稳健标准化后
     # 写入 paragraph_tension_observations（sigmoid 展示值读取投影）
     if spans:
         _insert_paragraph_metrics(session, run_id, spans, tokenized, lexicons)
         _insert_paragraph_curves(session, run_id, spans)
 
-    # 2026-08-14 M8b：chunk_style 链已删除——风格指标以 paragraph_metrics
-    # 的充分统计量（sentence_count/sum/sum_sq、dialogue_char_count 等）为事实源。
+    # 风格指标以 paragraph_metrics 的充分统计量
+    # （sentence_count/sum/sum_sq、dialogue_char_count 等）为事实源
     if settings.models.paragraph_embedding.semantic_enabled:
         logger.info("generating paragraph embeddings for semantic text retrieval")
         await _generate_paragraph_embeddings(session, run_id, emitter=emitter, is_cancelled=is_cancelled)
@@ -138,13 +137,11 @@ def _commit_preprocess_writes(session: Session, *, step: str) -> None:
     """
     提交 preprocess 阶段的分段写入，及时释放事务锁
 
-    preprocess 会连续写 chapters、paragraphs、paragraph_metrics/paragraph_curves 与 paragraph_embeddings，
-          这些表都外键关联 analysis_runs
-          若整段预处理共用一个长事务，EventBus 另一条连接更新 analysis_runs 时可能被阻塞到 statement timeout
-          因此这里在关键批量写入后立即提交，主动切断长事务
+    preprocess 连续写 chapters、paragraphs、paragraph_metrics/paragraph_curves 与
+    paragraph_embeddings，这些表都外键关联 analysis_runs；若共用长事务，EventBus
+    另一条连接更新 analysis_runs 时可能被阻塞到 statement timeout，故在关键批量写入后立即提交
     """
-    # 这里的 commit 目标是缩短锁持有时间，而不是改变业务原子性边界；
-    # preprocess 本身已是可恢复阶段，分段提交比让状态写回超时更符合当前系统语义
+    # commit 目标是缩短锁持有时间，不改变业务原子性边界
     session.commit()
     logger.debug(f"Committed preprocess writes after step={step}")
 
@@ -157,18 +154,18 @@ def _insert_paragraph_metrics(
     lexicons: dict[str, Any],
 ) -> list[ParagraphMetricRow]:
     """
-    计算并落库段落指标（§5.3 原始计数与充分统计量）
+    计算并落库段落指标（原始计数与充分统计量）
 
-    表面张力（§9.2）在 run 内两遍计算：先收集全部段落的 5 个分量原始值，
+    表面张力在 run 内两遍计算：先收集全部段落的 5 个分量原始值，
     再做稳健标准化（median/MAD）得到 z，z 写入 paragraph_tension_observations
     （sigmoid 展示值不落库，由读取投影计算）。
 
-    2026-10-16 3NF：功能词/语义类别计数写入各自固定领域计数表，
-    char_count 由段落正文长度投影，均不再随 paragraph_metrics 行写入。
+    功能词/语义类别计数写入各自固定领域计数表，char_count 由段落正文长度投影，
+    不随 paragraph_metrics 行写入。
 
     Returns:
-        写入的 ParagraphMetricRow 列表（基础计数与充分统计量，便于同一步内
-        日志核对；密度/张力等派生值一律由读取投影给出）
+        写入的 ParagraphMetricRow 列表（基础计数与充分统计量；密度/张力等派生值
+        由读取投影给出）
     """
     from src.metrics.paragraph_metrics import compute_paragraph_metric_counts
     from src.metrics.paragraph_surface_tension import (
@@ -239,18 +236,14 @@ def _insert_paragraph_curves(
     spans: list[ParagraphSpan],
 ) -> int:
     """
-    计算并落库段落曲线（§5.5 / §9）
+    计算并落库段落曲线
 
     段落坐标与字符权重取段落事实源读取投影（fetch_paragraph_rows：local_end/
     global 坐标/char_count 都不落列）；指标分子/分母取指标读取投影
     （fetch_paragraph_metrics：char_count 为正文长度、surface_tension 为
-    sigmoid(z)、z 取自 paragraph_tension_observations）。两侧都从同一 run 的
-    正式落库结果读取，投影口径与其它消费者一致。total_chars 取段落 span
-    字符数之和；LOWESS 参数默认取 settings.metrics 的 lowess_bandwidth /
-    lowess_min_points（§9.3）。
-
-    2026-10-16 3NF：段落曲线的正式计算结果（计算合同 + 净密度/表面张力平滑
-    样本）由曲线面负责落库。
+    sigmoid(z)、z 取自 paragraph_tension_observations），两侧从同一 run 的正式
+    落库结果读取。total_chars 取段落 span 字符数之和；LOWESS 参数默认取
+    settings.metrics 的 lowess_bandwidth / lowess_min_points。
     """
     from src.workflows.paragraph_curves import compute_paragraph_curves
 
@@ -312,8 +305,8 @@ async def _generate_paragraph_embeddings(
                 f"semantic text retrieval requires paragraph embeddings, error={e}"
             ) from e
 
-        # 维度以嵌入服务实测输出为准（2026-09-10 删配置）：探针锁定客户端校验基准，
-        # 建表列宽按探测值固化；换模型维度变化时 ensure 的列类型校验快速失败
+        # 维度以嵌入服务实测输出为准：探针锁定客户端校验基准，建表列宽按探测值
+        # 固化；换模型维度变化时 ensure 的列类型校验快速失败
         embedding_dim = await embedding_client.detect_embedding_dimension()
 
         ensure_paragraph_embeddings_schema(session, embedding_dim)
@@ -327,8 +320,8 @@ async def _generate_paragraph_embeddings(
             is_cancelled=is_cancelled,
         )
         if paragraph_rows:
-            # 2026-10-16 3NF：向量行只存 (run_id,paragraph_id)/向量/时间，
-            # 运行模型合同（模型 key + 实测维度）由本调用同事务写入 embedding_model_runs
+            # 向量行只存 (run_id,paragraph_id)/向量/时间，运行模型合同（模型 key +
+            # 实测维度）由本调用同事务写入 embedding_model_runs
             insert_paragraph_embeddings(session, run_id, paragraph_rows, embedding_dimension=embedding_dim)
             _commit_preprocess_writes(session, step="insert_embedding_rows")
             logger.info(
@@ -390,10 +383,7 @@ async def _generate_paragraph_embedding_rows(
         total_batches: int,
         total_items: int,
     ) -> None:
-        """
-        发射 preprocess 阶段 paragraph embedding 的批次进度
-
-        """
+        """发射 preprocess 阶段 paragraph embedding 的批次进度"""
         # 批间是取消的安全边界：在飞的 embedding 请求不受取消影响，先让本批收尾
         check_cancelled(is_cancelled)
         if emitter is None or total_batches <= 0:

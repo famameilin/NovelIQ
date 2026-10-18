@@ -2,11 +2,6 @@
 章节标注语义写入工具工厂：五个领域写入工具、finish 与 push_case 的闭包构造
 """
 
-# 创建时间：2026-10-02　创建者：Trae
-# 任务：tools.py 大文件拆分——build_annotation_tools 闭包工厂段迁入本模块
-# 说明：纯结构搬移，不改任何运行逻辑、签名与模型可见文案；搜索工具与参数收紧仍由
-# tools.build_search_tools/_forbid_undeclared_args 提供，tools.py 对本模块保留 re-export。
-
 from __future__ import annotations
 
 import json
@@ -49,7 +44,7 @@ def build_annotation_tools(
     query_service: AnnotationQueryService,
     ledger: AnnotationToolLedger,
 ) -> list[Any]:
-    """2026-08-07 用于构建语义写入搜索解决和完成工具集"""
+    """用于构建语义写入搜索解决和完成工具集"""
 
     @tool
     def write_metrics(
@@ -119,8 +114,8 @@ def build_annotation_tools(
         本入口用于补充 tags/description/representative 与 el 锚点。
         回执 content 回显该实体合并后的生效记录（含 run 级 id）。
         """
-        # 2026-09-14 删除"提交 write_entity 前必须先 search_graph"硬闸——
-        # 首写被检索挡在门外会迫使判定跨回合等待回执；登记序由 el 键承接，闸门删净
+        # 登记序由 el 键承接，不设"提交 write_entity 前必须先 search_graph"硬闸：
+        # 首写被检索挡在门外会迫使判定跨回合等待回执。
         entity = EntityInput(
             name=name,
             entity_type=entity_type,

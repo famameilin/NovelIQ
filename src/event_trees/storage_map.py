@@ -1,13 +1,13 @@
-"""event_trees 与冻结 35 表结构之间的读写映射（2026-10-16 全库 3NF 改造）
+"""event_trees 与冻结 35 表结构之间的读写映射
 
 本模块只做结构映射，不含业务规则：
 
-- 运行归属投影：诊断 work 经整轮会话（executions 的 session 形状）取得运行，
-  标注 work 直接带 annotation_run_id，二者不互相冒充
+- 运行归属投影：执行行直接携带 run（调用形状）或 session_run_id（整轮会话形状），
+  标注与诊断都从执行自身取归属，不互相冒充、不经 work 推导
 - 证据读写：source_evidence 的九个所有者列恰一，读回按 ordinal 还原原文引用，
   哈希由不可变原文切片重算
-- 声明/完整事件读取：声明经 record→标注执行→work 取得运行归属；完整事件经
-  真实生产者执行取得；当前阶段是 MAX(stage_index)，不由时间或章号猜
+- 声明/完整事件读取：声明经记录（chapter_annotations 自带 run/章）取得运行归属；
+  完整事件经真实生产者执行取得；当前阶段是 MAX(stage_index)，不由时间或章号猜
 """
 
 from __future__ import annotations
@@ -22,39 +22,29 @@ from src.storage.models import (
     Chapter,
     ChapterAnnotation,
     CompleteEvent,
+    DialogueRecord,
     EventDeclaration,
     EventRevision,
     Execution,
     Paragraph,
     SourceEvidence,
-    WorkItem,
 )
 from src.utils.identity import text_digest
 
 
 def run_execution_ids(run_id: str) -> Select:
-    """本 run 的真实执行：标注 work 直接带 run，诊断 work 经整轮会话取得运行"""
-    diagnosis_sessions = select(Execution.execution_id).where(Execution.session_run_id == run_id)
-    return (
-        select(Execution.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .where(
-            or_(
-                WorkItem.annotation_run_id == run_id,
-                WorkItem.diagnosis_session_id.in_(diagnosis_sessions),
-            )
-        )
+    """本 run 的真实执行：整轮会话行与直接携带 run 的调用行"""
+    return select(Execution.execution_id).where(
+        or_(Execution.run_id == run_id, Execution.session_run_id == run_id)
     )
 
 
 def run_declaration_ids(session: Session, run_id: str) -> set[str]:
-    """本 run 的章级声明：记录→标注执行→标注 work 取得运行归属"""
+    """本 run 的章级声明：记录自身带运行归属"""
     stmt = (
         select(EventDeclaration.declaration_id)
         .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-        .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .where(WorkItem.annotation_run_id == run_id)
+        .where(ChapterAnnotation.run_id == run_id)
     )
     return set(session.scalars(stmt))
 
@@ -68,16 +58,14 @@ def run_events(session: Session, run_id: str) -> dict[str, CompleteEvent]:
 def declaration_sources(
     session: Session, record_ids: set[str]
 ) -> dict[str, tuple[int | None, int | None]]:
-    """声明的来源章节：记录→标注执行→标注 work→chapters，返回 record_id→(章号, 章序)"""
+    """声明的来源章节：记录自身的章归属与 chapters，返回 record_id→(章号, 章序)"""
     if not record_ids:
         return {}
     rows = session.execute(
-        select(ChapterAnnotation.record_id, WorkItem.annotation_chapter_id, Chapter.sequence)
-        .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
+        select(ChapterAnnotation.record_id, ChapterAnnotation.chapter_id, Chapter.sequence)
         .join(
             Chapter,
-            (Chapter.run_id == WorkItem.annotation_run_id) & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+            (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
         )
         .where(ChapterAnnotation.record_id.in_(record_ids))
     ).all()
@@ -91,14 +79,12 @@ def declaration_sources(
 
 
 def declaration_record_source(session: Session, record_id: str) -> tuple[str, str, int, int] | None:
-    """声明来源记录的真实上下文：work_id、run_id、章号、章序（不存在返回 None）"""
+    """声明来源记录的真实上下文：执行号、run_id、章号、章序（不存在返回 None）"""
     row = session.execute(
-        select(WorkItem.work_id, WorkItem.annotation_run_id, WorkItem.annotation_chapter_id, Chapter.sequence)
-        .join(Execution, Execution.work_id == WorkItem.work_id)
-        .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
+        select(ChapterAnnotation.execution_id, ChapterAnnotation.run_id, ChapterAnnotation.chapter_id, Chapter.sequence)
         .join(
             Chapter,
-            (Chapter.run_id == WorkItem.annotation_run_id) & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+            (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
         )
         .where(ChapterAnnotation.record_id == record_id)
         .limit(1)
@@ -110,24 +96,20 @@ def declaration_record_source(session: Session, record_id: str) -> tuple[str, st
 
 def dialogue_candidate_rows(session: Session, run_id: str) -> list[dict[str, Any]]:
     """对话候选目录：按章序与候选键稳定排序，正文从所属章节区间投影"""
-    from src.storage.models import DialogueRecord
-
     stmt = (
         select(
             DialogueRecord.dialogue_id,
             DialogueRecord.candidate_key,
             DialogueRecord.start_char,
             DialogueRecord.end_char,
-            WorkItem.annotation_chapter_id,
+            DialogueRecord.chapter_id,
             Chapter.text,
         )
-        .join(Execution, Execution.execution_id == DialogueRecord.creation_execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
         .join(
             Chapter,
-            (Chapter.run_id == WorkItem.annotation_run_id) & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+            (Chapter.run_id == DialogueRecord.run_id) & (Chapter.chapter_id == DialogueRecord.chapter_id),
         )
-        .where(WorkItem.annotation_run_id == run_id)
+        .where(DialogueRecord.run_id == run_id)
         .order_by(Chapter.sequence, DialogueRecord.candidate_key)
     )
     rows: list[dict[str, Any]] = []
@@ -147,30 +129,21 @@ def dialogue_candidate_rows(session: Session, run_id: str) -> list[dict[str, Any
 
 
 def dialogue_record_by_candidate(session: Session, run_id: str, candidate_key: str):
-    """按候选键定位本 run 的对话记录（经原标注来源取得运行归属）"""
-    from src.storage.models import DialogueRecord
-
+    """按候选键定位本 run 的对话记录（记录自身带运行归属）"""
     return session.scalars(
         select(DialogueRecord)
-        .join(Execution, Execution.execution_id == DialogueRecord.creation_execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .where(WorkItem.annotation_run_id == run_id, DialogueRecord.candidate_key == candidate_key)
+        .where(DialogueRecord.run_id == run_id, DialogueRecord.candidate_key == candidate_key)
         .limit(1)
     ).first()
 
 
-def work_of_execution(session: Session, execution_id: str) -> str | None:
-    """执行所属 work：session 形状无 work，真实 invocation 才有"""
-    return session.scalar(select(Execution.work_id).where(Execution.execution_id == execution_id))
-
-
 def execution_in_run(session: Session, execution_id: str, run_id: str) -> bool:
-    """真实执行的本 run 归属（标注 work 或诊断会话）"""
+    """真实执行的本 run 归属（调用形状带 run，整轮会话形状带 session_run）"""
     return (
         session.scalar(
             select(Execution.execution_id).where(
                 Execution.execution_id == execution_id,
-                Execution.execution_id.in_(run_execution_ids(run_id)),
+                or_(Execution.run_id == run_id, Execution.session_run_id == run_id),
             )
         )
         is not None
@@ -178,17 +151,14 @@ def execution_in_run(session: Session, execution_id: str, run_id: str) -> bool:
 
 
 def annotation_chapter_of_execution(session: Session, execution_id: str) -> tuple[int | None, int | None]:
-    """标注执行的来源章：章号与章序从标注 work 与 chapters 取得"""
-    work_id = work_of_execution(session, execution_id)
-    if work_id is None:
-        return None, None
+    """标注执行的来源章：章号取执行自身归属列，章序从 chapters 取得"""
     row = session.execute(
-        select(WorkItem.annotation_chapter_id, Chapter.sequence)
+        select(ChapterAnnotation.chapter_id, Chapter.sequence)
         .join(
             Chapter,
-            (Chapter.run_id == WorkItem.annotation_run_id) & (Chapter.chapter_id == WorkItem.annotation_chapter_id),
+            (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
         )
-        .where(WorkItem.work_id == work_id)
+        .where(ChapterAnnotation.execution_id == execution_id)
         .limit(1)
     ).first()
     if row is None:

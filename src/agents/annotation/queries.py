@@ -27,13 +27,12 @@ class DatabaseAnnotationQueryService:
         current_last_paragraph_id: int,
         embedding_client: EmbeddingClient | None = None,
     ):
-        """2026-08-14 用于绑定单次尝试的 run 章节边界与原文检索服务
+        """用于绑定单次尝试的 run 章节边界与原文检索服务
 
-        二期段落化：边界为当前章的段落事实源边界（paragraph_id，§5.2）；
-        M7 子 chunk 场景由调用方传章的段落边界，不是子块的边界。
-        2026-09-16 连接粒度=单次工具调用：构造期只用一次性只读会话解析章节序与
-        章序（每 agent 会话一次，与改动前同量），连接随即归还；查询方法各自在
-        _read_scope() 内开只读会话，模型生成期间不占用连接。
+        边界为当前章的段落事实源边界（paragraph_id）；子 chunk 场景由调用方传章的
+        段落边界，不是子块的边界。
+        连接粒度=单次工具调用：构造期只用一次性只读会话解析章节序与章序，连接随即
+        归还；查询方法各自在 _read_scope() 内开只读会话，模型生成期间不占用连接。
         """
         self._session_factory = session_factory
         self._embedding_client = embedding_client
@@ -65,9 +64,9 @@ class DatabaseAnnotationQueryService:
 
     @contextmanager
     def _read_scope(self) -> Iterator[Session]:
-        """2026-09-16 用于把连接占用收敛到单次工具调用：开只读会话，返回前归还
+        """用于把连接占用收敛到单次工具调用：开只读会话，返回前归还
 
-        守卫（PostgreSQL 显式只读）从三个会话入口的内联块收进这里一处；
+        守卫（PostgreSQL 显式只读）集中在这里一处；
         SQLite 等方言没有该语句，非 PostgreSQL 绑定跳过。作用域退出时无论
         正常返回还是抛错都回滚并关闭，异常路径不泄漏连接。
         """
@@ -90,10 +89,10 @@ class DatabaseAnnotationQueryService:
         range_name: str,
         limit: int = 50,
     ) -> list[TextSearchCandidate]:
-        """2026-08-30 用于按 Chapter.sequence 在 SQL 层执行配置授权的正文范围检索
+        """用于按 Chapter.sequence 在 SQL 层执行配置授权的正文范围检索
 
-        2026-09-16 检索服务改为只读作用域内按次构造（构造函数纯赋值，零成本），
-        语义检索的 HTTP 往返仍落在这一次调用里。
+        检索服务在只读作用域内按次构造（构造函数纯赋值），语义检索的 HTTP 往返
+        仍落在这一次调用里。
         返回段落级候选行；域模型（TextSearchResult）由调用方标注 agent 自行构造。
         """
         before_chapter_sequence: int | None = None

@@ -23,7 +23,7 @@ _DIALOGUE_LINE_PATTERN = re.compile(
 
 @dataclass(frozen=True, slots=True)
 class _CandidateSpan:
-    """2026-08-07 用于在去重前保存候选原文区间"""
+    """用于在去重前保存候选原文区间"""
 
     start: int
     end: int
@@ -32,12 +32,12 @@ class _CandidateSpan:
 
 
 def _candidate_key(chapter_id: int, span: _CandidateSpan) -> str:
-    """2026-08-07 用于根据系统位置和原文生成稳定对话候选键"""
+    """用于根据系统位置和原文生成稳定对话候选键"""
     return f"dlg_{uuid5(NAMESPACE_DNS, f'{chapter_id}:{span.start}:{span.end}:{span.content}').hex}"
 
 
 def _extract_paired_quotes(text: str) -> list[_CandidateSpan]:
-    """2026-08-07 用于扫描中文和 ASCII 成对引号候选"""
+    """用于扫描中文和 ASCII 成对引号候选"""
     spans: list[_CandidateSpan] = []
     stacks: dict[str, list[int]] = {opener: [] for opener in _QUOTE_PAIRS}
     ascii_start: int | None = None
@@ -105,12 +105,12 @@ def _extract_paired_quotes(text: str) -> list[_CandidateSpan]:
 
 
 def _overlaps(start: int, end: int, spans: list[_CandidateSpan]) -> bool:
-    """2026-08-07 用于避免对话行规则重复覆盖已有引号候选"""
+    """用于避免对话行规则重复覆盖已有引号候选"""
     return any(start < span.end and end > span.start for span in spans)
 
 
 def _extract_dialogue_lines(text: str, existing: list[_CandidateSpan]) -> list[_CandidateSpan]:
-    """2026-08-07 用于提取破折号或人物冒号引出的潜在对话行"""
+    """用于提取破折号或人物冒号引出的潜在对话行"""
     spans: list[_CandidateSpan] = []
     for match in _DIALOGUE_LINE_PATTERN.finditer(text):
         content = match.group("content").strip()
@@ -134,7 +134,7 @@ def _extract_dialogue_lines(text: str, existing: list[_CandidateSpan]) -> list[_
 
 
 def extract_dialogue_candidates(chapter_id: int, text: str) -> list[DialogueCandidate]:
-    """2026-08-07 用于按原文顺序生成系统托管的完整对话候选"""
+    """用于按原文顺序生成系统托管的完整对话候选"""
     quote_spans = _extract_paired_quotes(text)
     spans = [
         *quote_spans,

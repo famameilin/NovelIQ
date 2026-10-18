@@ -22,7 +22,6 @@ from src.storage.models import (
     ModelCall,
     Paragraph,
     SourceEvidence,
-    WorkItem,
 )
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -37,12 +36,8 @@ from tests.workflows.test_annotation_work_pipeline import ProgramModel
 
 
 def _run_executions(run_id: str):
-    """本 run 的真实尝试执行（跨表断言的归属口径）"""
-    return (
-        select(Execution.execution_id)
-        .join(WorkItem, WorkItem.work_id == Execution.work_id)
-        .where(WorkItem.annotation_run_id == run_id)
-    )
+    """本 run 的真实尝试执行（执行行直接携带运行归属）"""
+    return select(Execution.execution_id).where(Execution.run_id == run_id)
 
 
 def _run_actions(db_session, run_id: str) -> list[EventForeshadowingAction]:
@@ -68,21 +63,19 @@ def _run_plotlines(db_session, run_id: str) -> list[GraphFact]:
 
 
 def _declaration_ids_by_chapter(db_session, run_id: str) -> list[str]:
-    """本 run 全部不可变声明，按章节顺序（章序从真实标注来源链取得）"""
+    """本 run 全部不可变声明，按章节顺序（章序从正式产物行的自身归属取得）"""
     return list(
         db_session.scalars(
             select(EventDeclaration.declaration_id)
             .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
             .join(
                 Chapter,
                 and_(
-                    Chapter.run_id == WorkItem.annotation_run_id,
-                    Chapter.chapter_id == WorkItem.annotation_chapter_id,
+                    Chapter.run_id == ChapterAnnotation.run_id,
+                    Chapter.chapter_id == ChapterAnnotation.chapter_id,
                 ),
             )
-            .where(WorkItem.annotation_run_id == run_id)
+            .where(ChapterAnnotation.run_id == run_id)
             .order_by(Chapter.sequence, EventDeclaration.created_at)
         )
     )
@@ -144,13 +137,14 @@ async def test_plotline_and_explicit_actions_survive_save_and_resume(db_session)
     assert len(trees) == 1
     assert trees[0].status == "likely_paid_off"
     assert trees[0].payoff_likelihood == "high"
-    # 实际诊断工具读取同一份已发布来源，统计与图谱非本测试范围的数据接口单独置空
+    # 实际诊断工具读取同一份已保存来源，统计与图谱非本测试范围的数据接口单独置空
     with (
         patch("src.storage.repositories.StatsRepository") as stats,
         patch("src.agents.diagnosis.tools.graph_signals", return_value={}),
     ):
         stats.return_value.fetch_global_stats_dict.return_value = {}
-        tools = {tool.name: tool for tool in build_diagnosis_tools(db_session, run_id, execution_id="read-contract")}
+        tools = {tool.name: tool for tool in build_diagnosis_tools(
+            db_session, run_id, role="report", execution_id="read-contract")}
         metrics = json.loads(tools["read_metrics"].invoke({}))
     assert metrics["foreshadowing"] == [source]
     assert metrics["foreshadow_expectation"] == pytest.approx(1.0)
@@ -275,3 +269,22 @@ async def test_foreshadow_expectation_uses_frozen_and_published_identity(db_sess
     assert calculate_foreshadow_expectation(db_session, run_id) < frozen
     publish_draft(db_session, run_id, draft)
     assert calculate_foreshadow_expectation(db_session, run_id) == pytest.approx(frozen)
+
+
+@pytest.mark.asyncio
+async def test_foreshadow_expectation_tolerates_unbound_identity(db_session):
+    """身份覆盖缺口不阻止计算：未绑定事件身份的伏笔根按自身身份单独成组"""
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["旧信暗示秘密。"])
+    program = (
+        'event(el="letter", title="旧信之谜", problem="秘密是什么", summary="旧信暗示秘密", '
+        'event_type="悬念", status="ongoing", evidence=1, isforeshadowing=True, confidence="high")\n'
+        'metric(summary="旧信", emotional_valence=0, narrative_function="转折")\nfinish()'
+    )
+    with patch("src.model_pool.llm.build_chat_model", return_value=ProgramModel(program)):
+        assert await run_annotate(run_id, db_session, novel_id=novel_id) == (1, 0, 1)
+    db_session.expire_all()
+    expectation = DiagnosisQueries(db_session).calculate_foreshadow_expectation(
+        run_id, declaration_bindings={}
+    )
+    assert expectation is not None and 0.0 <= expectation <= 1.0
+    assert expectation == calculate_foreshadow_expectation(db_session, run_id)

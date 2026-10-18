@@ -1,32 +1,4 @@
-"""
-CLI aggregate 模块测试
-
-创建时间: 2025-03-11
-任务: 测试聚合流程
-
-修改时间: 2026-03-15
-任务: storage-layer-decoupling
-修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning
-
-修改时间: 2026-03-15
-任务: postgresql-migration
-修改内容: 使用 SQLAlchemy text() 替换 ? 占位符，移除 sqlite3 导入
-
-修改时间: 2026-03-15
-任务: postgresql-migration-cleanup
-修改内容: 改用 PostgreSQL db_session fixture，移除 SessionFactory 依赖
-
-修改时间: 2026-08-14
-任务: M8b 段落化
-修改内容: 聚合阶段不再写入 chunk_curves（曲线事实源为 paragraph_curves），
-测试夹具改为插入段落事实源 + 段落指标 + 段落曲线，断言 global_stats 守恒聚合。
-
-修改时间: 2026-10-16
-任务: 全库第三范式改造收尾
-修改内容: 段落指标行只带 paragraph_metrics 可写列；张力以 paragraph_features 的
-tension_z 观测表达（sigmoid 为读投影）；全书统计改读 analysis_runs 具名列，
-断言保留守恒与 run 隔离行为面。
-"""
+"""CLI aggregate 模块测试"""
 
 import sys
 import uuid
@@ -56,7 +28,7 @@ def _build_paragraph_rows(
 ) -> tuple[list, list, list, list]:
     """按章节构造段落事实源 + 段落指标 + 曲线平滑样本 + 张力 z 观测（每章一个段落）。
 
-    2026-10-16 3NF：指标行只带 paragraph_metrics 的可写列；表面张力以正式
+    指标行只带 paragraph_metrics 的可写列；表面张力以正式
     z 观测（paragraph_features.tension_z）表达，sigmoid 展示值由读取投影给出。
     """
     spans = [replace(span, token_count=10) for span in split_chunk_paragraphs(chunks, max_chars=1500)]
@@ -154,7 +126,7 @@ class TestAggregate:
 
         by_name = StatsRepository(self.db_session).fetch_global_stats_dict(self.run_id)
 
-        # §9.1 守恒：全书情绪密度 = (Σpos − Σneg) / Σtoken
+        # 守恒：全书情绪密度 = (Σpos − Σneg) / Σtoken
         assert by_name["emotion_avg"] == pytest.approx((5 * 1.0 - 5 * 0.5) / (5 * 10))
         # 平均句长 = Σsentence_char_sum / Σsentence_count
         assert by_name["avg_sent_len"] == pytest.approx(40.0 / 2)
@@ -202,8 +174,9 @@ class TestAggregate:
 
     @pytest.mark.asyncio()
     async def test_aggregate_metrics_graph_not_ready_degrades_gracefully(self, monkeypatch) -> None:
-        """2026-08-13 P2-3 用于验证 aggregate_all_metrics 抛 GraphReadinessError 时
-        保留降级（全书统计正常写入）且记录 error 级别日志"""
+        """验证 aggregate_all_metrics 抛 GraphReadinessError 时
+        保留降级（全书统计正常写入）且记录 error 级别日志
+        """
         from unittest.mock import patch
 
         from src.api.exceptions import GraphReadinessError
@@ -230,8 +203,9 @@ class TestAggregate:
 
 
 class TestGlobalStatsRunIsolation:
-    """2026-08-13 修复 P1：compute_global_stats 此前查询 chunk_style 缺 run_id 过滤，
-    跨 run 累积的数据会污染当前 run 的 avg_* 指标（M8b 后改为段落充分统计量聚合）。"""
+    """compute_global_stats 的聚合必须按 run 隔离，
+    跨 run 累积的数据不得污染当前 run 的 avg_* 指标。
+    """
 
     @pytest.fixture(autouse=True)
     def setup(self, db_session):

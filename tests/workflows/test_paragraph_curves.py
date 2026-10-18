@@ -1,8 +1,8 @@
 """
-段落曲线计算测试（设计 §5.5 / §9）
+段落曲线计算测试
 
-覆盖：密度分子/分母计算、token_count=0 → None（§15.2）、position 字符中点/
-总字符数（§9.1）、平滑映射回全量（含 None 点）、对齐缺失段落跳过、
+覆盖：密度分子/分母计算、token_count=0 → None、position 字符中点/
+总字符数、平滑映射回全量（含 None 点）、对齐缺失段落跳过、
 settings 默认参数生效、total_chars<=0 时 position 全 0
 """
 
@@ -53,7 +53,7 @@ def _metric(
 
 class TestComputeParagraphCurves:
     def test_density_and_position_calculation(self) -> None:
-        """密度 = 分子/分母；position = 段落字符中点/全书字符数（§9.1）"""
+        """密度 = 分子/分母；position = 段落字符中点/全书字符数"""
         paragraphs = [
             _paragraph(0, global_start_char=0, global_end_char=10, char_count=10, token_count=5),
             _paragraph(1, global_start_char=10, global_end_char=30, char_count=20, token_count=10),
@@ -78,7 +78,7 @@ class TestComputeParagraphCurves:
         assert rows[1].surface_tension == 0.7
 
     def test_token_count_zero_yields_none_densities(self) -> None:
-        """token_count == 0 时密度为 None，不伪造（§15.2）"""
+        """token_count == 0 时密度为 None，不伪造"""
         paragraphs = [
             _paragraph(0, global_start_char=0, global_end_char=10, char_count=10, token_count=0),
             _paragraph(1, global_start_char=10, global_end_char=20, char_count=10, token_count=4),
@@ -99,7 +99,7 @@ class TestComputeParagraphCurves:
 
     def test_position_midpoint_over_total_chars(self) -> None:
         """
-        position = ((global_start + global_end) / 2) / total_chars（§9.1）
+        position = ((global_start + global_end) / 2) / total_chars
 
         用 net_density 编码 position 本身：密度随位置线性变化时，
         LOWESS 平滑精确恢复该线性关系，间接验证坐标计算

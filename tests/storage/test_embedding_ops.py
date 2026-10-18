@@ -1,4 +1,4 @@
-"""原文自然段语义向量存取测试（2026-10-16 3NF：向量行在 paragraph_features）
+"""原文自然段语义向量存取测试（向量行在 paragraph_features）
 
 语义向量不再是独立表：向量行是 paragraph_features 的 semantic_vector 行，
 模型 key 写在 analysis_runs.embedding_model_key；HNSW 索引是按维度建立的
@@ -46,14 +46,9 @@ def _create_run_with_paragraph(db_session, text_of_paragraph: str) -> str:
 
 
 def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
-    """
-    创建时间: 2026-08-13
-    任务: P1-1 hnsw-index-miss
-    说明: ORDER BY 必须使用裸距离算子 vector_value <=> :query（升序），
-    阈值下推为 distance <= 1 - threshold，pgvector 才能命中 HNSW ANN 索引；
-    包裹成 1 - (vector_value <=> :query) 的表达式会让 planner 退化为全表扫描。
+    """包裹成 1 - (vector_value <=> :query) 的表达式会让 planner 退化为全表扫描。
 
-    2026-10-16 3NF：向量行来自 paragraph_features，JOIN paragraphs 取身份；
+    向量行来自 paragraph_features，JOIN paragraphs 取身份；
     维度谓词与部分索引同型（vector_dims(vector_value) = N）才能命中。
     """
     session = MagicMock()
@@ -100,8 +95,7 @@ def test_search_similar_paragraphs_uses_bare_cosine_distance_for_hnsw() -> None:
 
 
 def test_search_similar_paragraphs_compiles_halfvec_cast_beyond_hnsw_dim_limit() -> None:
-    """
-    2026-09-25 pgvector 对 vector 类型的 HNSW 索引上限 2000 维：>2000 维检索的
+    """pgvector 对 vector 类型的 HNSW 索引上限 2000 维：>2000 维检索的
     距离表达式必须与建索引同型 cast 成 halfvec，规划器才能命中 halfvec 表达式索引。
     """
     session = MagicMock()
@@ -124,7 +118,7 @@ def test_search_similar_paragraphs_compiles_halfvec_cast_beyond_hnsw_dim_limit()
 
 
 def test_hnsw_index_uses_halfvec_boundary() -> None:
-    """2026-09-25 形态判定边界：2000 维（含）以内裸 vector 索引，2001 维起 halfvec"""
+    """形态判定边界：2000 维（含）以内裸 vector 索引，2001 维起 halfvec"""
     assert hnsw_index_uses_halfvec(1024) is False
     assert hnsw_index_uses_halfvec(2000) is False
     assert hnsw_index_uses_halfvec(2001) is True
@@ -132,7 +126,7 @@ def test_hnsw_index_uses_halfvec_boundary() -> None:
 
 
 def test_insert_paragraph_embeddings_requires_measured_dimension() -> None:
-    """2026-10-16 3NF：维度不再逐行保存，缺少实测维度时拒绝写入（不伪造运行模型合同）"""
+    """维度不再逐行保存，缺少实测维度时拒绝写入（不伪造运行模型合同）"""
     session = MagicMock()
     with pytest.raises(ValueError, match="embedding_dimension"):
         insert_paragraph_embeddings(
@@ -143,8 +137,7 @@ def test_insert_paragraph_embeddings_requires_measured_dimension() -> None:
 
 
 def test_search_and_insert_roundtrip_beyond_hnsw_dim_limit(db_session) -> None:
-    """
-    2026-09-25 运行级验证（Qwen3-Embedding-4B 2560 维 preprocess 实测踩坑）：
+    """运行级验证：
     2001 维建 halfvec 部分表达式索引 + 写入 paragraph_features.semantic_vector
     + 裸余弦检索全链路可用；模型 key 写 analysis_runs.embedding_model_key。
     """
@@ -196,8 +189,7 @@ def test_search_and_insert_roundtrip_beyond_hnsw_dim_limit(db_session) -> None:
 
 
 def test_get_incomplete_paragraph_embedding_paragraph_ids_combines_missing_and_null_vector() -> None:
-    """
-    2026-08-14 二期段落化：readiness 缺口以段落为粒度——
+    """readiness 缺口以段落为粒度——
     对照 paragraphs 表找出"有段落但无 semantic_vector 行"的段落，叠加空向量段落。
     """
     session = MagicMock()
@@ -219,7 +211,7 @@ def test_get_incomplete_paragraph_embedding_paragraph_ids_combines_missing_and_n
 
 
 def test_get_incomplete_paragraph_embedding_paragraph_ids_returns_empty_when_complete() -> None:
-    """2026-08-14 用于验证段落全部有向量时缺口为空"""
+    """验证段落全部有向量时缺口为空"""
     session = MagicMock()
     session.execute.side_effect = [
         MagicMock(all=MagicMock(return_value=[])),

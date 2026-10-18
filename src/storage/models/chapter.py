@@ -1,10 +1,8 @@
 """
-章节与正文表 ORM 模型（2026-10-16 全库 3NF 改造）
+章节与正文表 ORM 模型
 
-chapters 保留完整章节身份与章节原始区域（含标题/间隔语义的 start_pos/end_pos），
-正文切片与全文起点为同一章节身份的一对一属性并在本表合并：text 与 char_offset
-同空或同有（空正文章节无正文）；正文终点由 char_offset + 字符长度投影，char_end_offset
-不落列。
+chapters 保留完整章节身份与章节原始区域；正文切片与全文起点一对一合并于本表：
+text 与 char_offset 同空或同有；正文终点由 char_offset + 字符长度投影，char_end_offset 不落列。
 """
 
 from __future__ import annotations
@@ -25,8 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
 
-# 注：sql_text 为 sqlalchemy.text 的别名——本模块存在 Chapter.text 列属性，
-# __table_args__ 直接引用 text 会解析到列对象而非函数（与既有段落表同口径）
+# 注：sql_text 为 sqlalchemy.text 别名——__table_args__ 直接引用 text 会解析到 Chapter.text 列对象
 
 
 class Chapter(Base):

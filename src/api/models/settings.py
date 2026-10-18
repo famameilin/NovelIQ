@@ -1,4 +1,4 @@
-"""2026-09-10 设置模块 API 契约（/api/settings）
+"""设置模块 API 契约（/api/settings）
 
 设置页三条通道：
 - 字段注册表 + 生效值视图（schema 驱动表单）
@@ -73,10 +73,8 @@ class TaskEnvPatchRequest(BaseModel):
 
 
 class ModelPoolEntryRequest(BaseModel):
-    """池内模型的完整配置；已有模型 Key 缺省时保留，不接收打码值
-
-    2026-10-02 设置迁移：temperature/top_p/max_tokens 随模型保存，
-    不再经参数设置接口按任务配置。
+    """池内模型的完整配置；已有模型 Key 缺省时保留，不接收打码值。
+    采样参数（temperature/top_p/max_tokens）随模型保存。
     """
 
     model_config = ConfigDict(extra="forbid")

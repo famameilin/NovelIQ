@@ -60,7 +60,7 @@ function SkeletonGrid() {
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-04-27，作用：展示角色格局分析页面
+ * 展示角色格局分析页面
  * 简要说明：消费角色列表与焦点结构，在单一文档流中整合排行、功能分布和角色详情
  */
 export function CharactersPage() {
@@ -69,7 +69,7 @@ export function CharactersPage() {
 
   const urlTaskId = searchParams.get("task_id");
 
-  // 2026-08-13 P1-2: 小说作用域任务守卫——跨小说切换后旧小说的任务
+  // 小说作用域任务守卫——跨小说切换后旧小说的任务
   // 不得用于新小说的查询/SSE（模式同 GraphPage）
   const { storeTaskId } = useNovelScopedTask(novelId, urlTaskId);
 

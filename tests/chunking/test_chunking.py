@@ -31,11 +31,7 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(len(chunk.text) <= 2000 for chunk in chunks))
 
     async def test_chunk_text_uses_real_text_offsets_after_strip(self) -> None:
-        """
-        创建时间: 2026-04-24
-        任务: full-global-offset-rollout
-        说明: chunk 的 start/end 应对应最终保留文本在原文中的真实位置，不能继续沿用 strip 前的粗边界。
-        """
+        """chunk 的 start/end 应对应最终保留文本在原文中的真实位置，不能继续沿用 strip 前的粗边界。"""
         text = "  第一段。  \n\n 第二段。"
         chunks = await chunk_text(text)
 
@@ -45,9 +41,7 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks[0].end, len(text))
 
     async def test_duplicate_chapter_titles_keep_distinct_occurrence_indices(self) -> None:
-        """
-        2026-08-02 用于保证重复章节标题按出现位置生成不同章节序号
-        """
+        """保证重复章节标题按出现位置生成不同章节序号"""
         text = "第1章 序章\n甲。\n第2章 中段\n乙。\n第1章 序章\n丙。"
 
         chunks = await chunk_text(text)
@@ -55,9 +49,7 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([chunk.chapter_id for chunk in chunks], [1, 2, 3])
 
     async def test_chapter_never_split_however_long(self) -> None:
-        """
-        2026-08-08 用于验证章节无论多长整章保持为一个 chunk，不再按字数切分
-        """
+        """验证章节无论多长整章保持为一个 chunk，不再按字数切分"""
         text = "第1章 长章\n" + "甲。" * 5000
         chunks = await chunk_text(text)
 
@@ -66,9 +58,7 @@ class TestChunking(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(chunks[0].text), 2000)
 
     def test_empty_chapter_with_title_is_skipped_and_logged(self) -> None:
-        """
-        2026-08-08 用于验证仅有标题无正文的章节不生成 chunk（目录中仍保留）且记录警告
-        """
+        """验证仅有标题无正文的章节不生成 chunk（目录中仍保留）且记录警告"""
         text = "第七章\nxxxx\n第八章\n第九章\nyyyy"
         sink = io.StringIO()
         handler_id = logger.add(sink, level="WARNING", format="{message}")

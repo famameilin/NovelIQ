@@ -48,7 +48,7 @@ class EventBindingStateContext(Protocol):
     run_scope: str
     work_id: str
 
-    # 2026-10-12 事件树重做：work 开始时从本 run 已确认（confirm）状态装载的索引，
+    # 事件树索引：work 开始时从本 run 已确认（confirm）状态装载，
     # 跨章引用只接受这里的已确认身份，不接受迟到 invocation 或未确认内容
     text_references: dict[str, Any]
     confirmed_complete_event_index: dict[str, dict[str, Any]]
@@ -65,7 +65,7 @@ class EventBindingState:
     observation_by_record: dict[str, BoundCharacterObservation] = field(default_factory=dict)
     domain_payloads: dict[str, Any] = field(default_factory=dict)
     bound_payloads: dict[str, Any] = field(default_factory=dict)
-    # 2026-10-12 完整事件域：EventNode 继续保存过程，下列对象是完整事件及其关联的
+    # 完整事件域：EventNode 继续保存过程，下列对象是完整事件及其关联的
     # 本 work 挂起记录（局部键 → 声明；随正式贡献冻结、保存、确认与回滚）
     complete_events: dict[str, dict[str, Any]] = field(default_factory=dict)
     event_revisions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -316,7 +316,7 @@ class EventBindingState:
                     code="unregistered",
                     expected="先用 write_entity 登记本章实体",
                 )
-            # 2026-10-04 合同放开：role 可省略，按实体登记类型给缺省
+            # 合同放开：role 可省略，按实体登记类型给缺省
             # （character→主体、location→地点、其余→客体）；显式写错仍拒
             effective_role = arg.role or (
                 EventParticipantRole.LOCATION
@@ -325,8 +325,8 @@ class EventBindingState:
                 if actual_type == EntityType.CHARACTER.value
                 else EventParticipantRole.OBJECT
             )
-            # 2026-10-14 口径统一：机构兼指场所按 organization 登记（见 ANNOTATION_SCOPE_POLICY），
-            # 故"地点"角色接受 location 与 organization 两类端点，不再要求必须是 location
+            # 机构兼指场所按 organization 登记（见 ANNOTATION_SCOPE_POLICY），
+            # 故"地点"角色接受 location 与 organization 两类端点，不要求必须是 location
             if effective_role == EventParticipantRole.LOCATION and actual_type not in {
                 EntityType.LOCATION.value,
                 EntityType.ORGANIZATION.value,
@@ -340,11 +340,11 @@ class EventBindingState:
                 )
             has_observation = any(value is not None for value in (arg.narrative_role, arg.action, arg.emotion))
             if actual_type == EntityType.CHARACTER.value:
-                # 2026-10-04 合同放开：三态字段可空落账（不再要求必填），缺省由消费方按空处理
+                # 三态字段可空落账，缺省由消费方按空处理
                 if arg.action is not None:
                     self._reject_duplicate_observation(participant_record, entity_name, arg.action)
-                # 2026-10-04 三态全空不产动态状态行：同一人物在多个事件上无动作参与是放开后的
-                # 正常形态，全空行既无信息量又会在收尾校验撞 (character, action=None) 重复语义；
+                # 三态全空不产动态状态行：同一人物在多个事件上无动作参与是正常形态，
+                # 全空行既无信息量又会在收尾校验撞 (character, action=None) 重复语义；
                 # 参与者本身仍随事件落账，只是不进 character_observations
                 if has_observation:
                     self.observation_by_record[participant_record] = BoundCharacterObservation(
@@ -355,9 +355,9 @@ class EventBindingState:
                     )
                 narrative_role, action, emotion = arg.narrative_role, arg.action, arg.emotion
             else:
-                # 2026-10-13 三态只服务人物动态状态，item/organization/location 无消费者；模型常给
+                # 三态只服务人物动态状态，item/organization/location 无消费者；模型常给
                 # 非角色实体补动作，硬拒会连带丢掉整组参与者（含同组合法 character 条目）并烧尽回合，
-                # 故改为忽略三态、保留名字、大类与 role
+                # 故忽略三态、保留名字、大类与 role
                 narrative_role, action, emotion = None, None, None
             try:
                 participants.append(
@@ -535,7 +535,7 @@ class EventBindingState:
         tree = self.event_trees.get(self.tree_key_index.get(tree_key_clean, ""))
         if tree is None:
             if tree_key_clean in self.pending_child_events:
-                # 2026-10-04 树键校验下沉：暂挂子事件的回显即挂起状态本身
+                # 树键校验：暂挂子事件的回显即挂起状态本身
                 return {
                     "deferred": True,
                     "note": f"树 {tree_key_clean} 尚未建根：该子事件已挂起，根建好后自动生效",

@@ -25,9 +25,6 @@ export interface ArcScoresChartProps {
 }
 
 /**
- * 2026-04-21，任务：多页面卡片风格统一
- * 修改原因：把诊断页弧线图也接入共享卡片壳，避免图表页和信息卡页出现两套容器体系
- *
  * 少量评分按人数确定高度，大量评分分页浏览，保留全部人物的可达性
  */
 export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {

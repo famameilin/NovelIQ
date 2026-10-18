@@ -14,6 +14,7 @@ from src.fact_graph.evidence import EvidenceParagraph, evidence_for
 from src.fact_graph.read.references import EntityReferenceProjection
 from src.storage.models import (
     BookCase,
+    CaseEntry,
     Chapter,
     ChapterAnnotation,
     DeclarationParticipant,
@@ -41,8 +42,6 @@ def discard_chapter_receipts(session: Session, run_id: str, chapter_ids: set[int
     必须连同其事实与程序支持条目一起清除，重建章才能生成新回执。
     """
     from sqlalchemy import delete
-
-    from src.storage.models import BookCase, CaseEntry, GraphFact, WorkItem
 
     if not chapter_ids:
         return
@@ -108,10 +107,9 @@ def eligible_chapters(session: Session, run_id: str) -> set[int]:
     return {
         int(chapter_id)
         for chapter_id, version in session.execute(
-            select(WorkItem.annotation_chapter_id, ChapterAnnotation.chapter_consolidation_version)
-            .join(Execution, Execution.work_id == WorkItem.work_id)
-            .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
-            .where(WorkItem.annotation_run_id == run_id, WorkItem.annotation_chapter_id.is_not(None))
+            select(ChapterAnnotation.chapter_id, ChapterAnnotation.chapter_consolidation_version).where(
+                ChapterAnnotation.run_id == run_id
+            )
         )
         if version == RULE_VERSION
     }
@@ -147,51 +145,36 @@ def case_spec(item: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
     return "event", description, payload
 
 
-def consolidate_chapter(session: Session, run_id: str, chapter_id: int, cases: CasePool) -> dict[str, Any]:
+def consolidate_chapter(
+    session: Session, run_id: str, chapter_id: int, cases: CasePool, *, recheck: bool = False
+) -> dict[str, Any]:
     """在调用方短事务中保存一次来源绑定的结论；案例、回执和完成凭据一起提交
 
     回执不保存结论 JSON：来源摘要以 program_invocation_key（chapter:{章}:{digest}）
     冻结，sources/identity_mapping/support/issues 由正式贡献按本规则版本投影。
+    recheck 供池排空后的按序收尾使用：整体重算，结果与既有回执一致则当作既有回执不动，
+    不一致才废弃旧回执重落——并发完成序反转时早跑的核对看不到更早章未保存的引用，
+    会把实体误判成孤立，收尾重算负责清掉这类误报。
     """
     session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": f"fact_graph:{run_id}"})
-    works = list(
-        session.scalars(
-            select(WorkItem).where(
-                WorkItem.annotation_run_id == run_id, WorkItem.annotation_chapter_id == chapter_id
-            )
-        )
-    )
     chapter_records = list(
-        session.execute(
-            select(WorkItem.work_id, ChapterAnnotation)
-            .join(Execution, Execution.work_id == WorkItem.work_id)
-            .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
-            .where(
-                WorkItem.annotation_run_id == run_id,
-                WorkItem.annotation_chapter_id == chapter_id,
-            )
+        session.scalars(
+            select(ChapterAnnotation)
+            .where(ChapterAnnotation.run_id == run_id, ChapterAnnotation.chapter_id == chapter_id)
+            .order_by(ChapterAnnotation.role, ChapterAnnotation.record_id)
         )
     )
-    saved: dict[str, ChapterAnnotation] = {str(work_id): record for work_id, record in chapter_records}
     states = [
-        SimpleNamespace(
-            chapter_id=chapter_id,
-            state="saved" if str(work.work_id) in saved else "pending",
-            role=str(work.role),
-        )
-        for work in works
+        SimpleNamespace(chapter_id=chapter_id, state="saved", role=str(record.role))
+        for record in chapter_records
     ]
     if chapter_id not in completed_chapters(states):
         raise ValueError(f"章末核对缺少必需角色的有效保存产物: chapter_id={chapter_id}")
-    if not all(record.chapter_consolidation_version == RULE_VERSION for record in saved.values()):
+    if not all(record.chapter_consolidation_version == RULE_VERSION for record in chapter_records):
         return {"status": "historical", "chapter_id": chapter_id}
-    chapter_works = sorted(
-        ((work, saved[str(work.work_id)]) for work in works if str(work.work_id) in saved),
-        key=lambda item: (str(item[0].role), str(item[0].work_id)),
-    )
     sources = [
-        {"work_id": str(work.work_id), "invocation_id": str(record.execution_id), "output_id": str(record.record_id)}
-        for work, record in chapter_works
+        {"execution_id": str(record.execution_id), "output_id": str(record.record_id)}
+        for record in chapter_records
     ]
     digest = stable_digest(run_id, chapter_id, RULE_VERSION, sources)
     previous = session.scalar(
@@ -202,9 +185,12 @@ def consolidate_chapter(session: Session, run_id: str, chapter_id: int, cases: C
         )
     )
     if previous is not None:
-        if previous.program_invocation_key == f"chapter:{chapter_id}:{digest}":
+        if previous.program_invocation_key != f"chapter:{chapter_id}:{digest}":
+            raise ValueError(f"章末凭据与有效来源集合不同，不能覆盖: chapter_id={chapter_id}")
+        if not recheck:
             return {"status": "existing", "chapter_id": chapter_id, "fact_id": digest}
-        raise ValueError(f"章末凭据与有效来源集合不同，不能覆盖: chapter_id={chapter_id}")
+        # 重算要替换旧回执：先把旧行从会话身份图里摘掉，替换时按同一 author 重新插入
+        session.expunge(previous)
     repo = GraphRepository(session)
     boundary = repo.resolve_chapter_boundary(run_id, chapter_id=chapter_id)
     if boundary is None:
@@ -215,32 +201,24 @@ def consolidate_chapter(session: Session, run_id: str, chapter_id: int, cases: C
     }
     sequence = chapters[chapter_id]
     # 全书可见保存产物（含本章）作为身份与支持的有效边界
-    visible: dict[str, tuple[WorkItem, ChapterAnnotation]] = {}
-    for work, record in session.execute(
-        select(WorkItem, ChapterAnnotation)
-        .join(Execution, Execution.work_id == WorkItem.work_id)
-        .join(ChapterAnnotation, ChapterAnnotation.execution_id == Execution.execution_id)
-        .where(WorkItem.annotation_run_id == run_id)
-    ):
-        if work.annotation_chapter_id is None:
-            continue
-        if chapters.get(int(work.annotation_chapter_id), 0) <= sequence:
-            visible[str(work.work_id)] = (work, record)
-    valid_executions = {str(record.execution_id) for _, record in visible.values()}
+    visible: dict[str, ChapterAnnotation] = {}
+    for record in session.scalars(select(ChapterAnnotation).where(ChapterAnnotation.run_id == run_id)):
+        if chapters.get(int(record.chapter_id), 0) <= sequence:
+            visible[str(record.record_id)] = record
+    valid_executions = {str(record.execution_id) for record in visible.values()}
     fact_rows = list(
         session.execute(
-            select(GraphFact, WorkItem.annotation_chapter_id)
+            select(GraphFact, Execution.chapter_id)
             .join(Execution, Execution.execution_id == GraphFact.direct_producer_execution_id)
-            .join(WorkItem, WorkItem.work_id == Execution.work_id)
             .where(GraphFact.direct_producer_execution_id.in_(valid_executions))
         )
     )
     fact_chapter: dict[int, int | None] = {}
-    for fact, work_chapter in fact_rows:
+    for fact, execution_chapter in fact_rows:
         if fact.effective_chapter_id is not None:
             fact_chapter[int(fact.graph_fact_id)] = int(fact.effective_chapter_id)
-        elif work_chapter is not None:
-            fact_chapter[int(fact.graph_fact_id)] = int(work_chapter)
+        elif execution_chapter is not None:
+            fact_chapter[int(fact.graph_fact_id)] = int(execution_chapter)
         else:
             fact_chapter[int(fact.graph_fact_id)] = None
     fact_evidence: dict[int, list[dict[str, Any]]] = defaultdict(list)
@@ -257,15 +235,14 @@ def consolidate_chapter(session: Session, run_id: str, chapter_id: int, cases: C
                     "char_end": int(evidence.end_char),
                 }
             )
-    work_by_record: dict[str, WorkItem] = {str(record.record_id): work for work, record in visible.values()}
+    records_by_record = {str(record.record_id): record for record in visible.values()}
 
     def record_chapter(record_id: str) -> int | None:
-        work = work_by_record.get(str(record_id))
-        chapter = work.annotation_chapter_id if work is not None else None
-        return int(chapter) if chapter is not None else None
+        record = records_by_record.get(str(record_id))
+        return int(record.chapter_id) if record is not None else None
 
     declarations = list(
-        session.scalars(select(EventDeclaration).where(EventDeclaration.record_id.in_(list(work_by_record))))
+        session.scalars(select(EventDeclaration).where(EventDeclaration.record_id.in_(list(records_by_record))))
     )
     declaration_chapter = {str(row.declaration_id): record_chapter(str(row.record_id)) for row in declarations}
     declaration_evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -394,9 +371,20 @@ def consolidate_chapter(session: Session, run_id: str, chapter_id: int, cases: C
         if representative not in referenced and identifier in projection.entities:
             entity = projection.entities[identifier]
             issue(identifier, entity.name, entity.entity_type, "unreferenced_entity", evidence_by_entity[identifier])
-    author = (f"chapter:{chapter_id}:{digest[:16]}", digest)
+    author = f"chapter:{chapter_id}:{digest[:16]}"
+    if previous is not None:
+        existing = set(
+            session.scalars(
+                select(BookCase.description)
+                .join(CaseEntry, CaseEntry.case_id == BookCase.case_id)
+                .where(CaseEntry.program_work_id == author)
+            )
+        )
+        if existing == {case_description(item) for item in issues}:
+            return {"status": "existing", "chapter_id": chapter_id, "fact_id": digest}
+        discard_chapter_receipts(session, run_id, {chapter_id})
     program_work = WorkItem(
-        work_id=author[0],
+        work_id=author,
         program_run_id=run_id,
         program_chapter_id=chapter_id,
         program_code=PROGRAM_CODE,
@@ -404,19 +392,14 @@ def consolidate_chapter(session: Session, run_id: str, chapter_id: int, cases: C
     )
     session.add(program_work)
     session.flush()
-    session.add(GraphFact(program_work_id=program_work.work_id))
+    session.add(GraphFact(program_work_id=author))
     session.flush()
     case_ids = cases.save_pending(session, [case_spec(item) for item in issues], author=author)
-    case_states = {
-        row.case_id: str(row.review_state or "pending")
-        for row in session.scalars(select(BookCase).where(BookCase.case_id.in_(case_ids)))
-    }
     return {
         "status": "saved",
         "chapter_id": chapter_id,
         "fact_id": digest,
         "author": author,
         "case_ids": case_ids,
-        "case_states": case_states,
         "issues": len(issues),
     }

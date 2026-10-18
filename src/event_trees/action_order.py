@@ -1,9 +1,8 @@
 """伏笔动作统一按正文披露位置归并，调用顺序只用于同位置的稳定排列
 
-2026-10-16 全库 3NF 改造（35 表冻结结构）：动作事实来自
-event_foreshadowing_actions，证据来自 source_evidence 的动作所有者列；
+动作事实来自 event_foreshadowing_actions，证据来自 source_evidence 的动作所有者列；
 root/target 事件身份按阶段声明绑定投影（未发布为空，不回填冒充）；
-来源章序从真实生产执行的标注 work 与 chapters 取得。
+来源章序从真实标注产物行（chapter_annotations 自带章归属）与 chapters 取得。
 """
 
 from __future__ import annotations
@@ -38,10 +37,9 @@ class ForeshadowingActionRow:
     chapter_order: int | None
     evidence: list[dict[str, Any]] = field(default_factory=list)
     evidence_scope: str = "paragraph"
-    # 以下为读取投影：来源/目标声明绑定的完整事件与真实来源 work，未发布保持空
+    # 以下为读取投影：来源/目标声明绑定的完整事件，未发布保持空
     root_event_id: str | None = None
     target_event_id: str | None = None
-    source_work_id: str | None = None
 
 
 class ForeshadowingActionLike(Protocol):
@@ -108,7 +106,6 @@ def load_foreshadowing_actions(session: Session, run_id: str) -> list[Foreshadow
                 chapter_id=chapter_id,
                 chapter_order=chapter_order,
                 evidence=smap.evidence_payloads(session, run_id, evidence.get(row.action_id, [])),
-                source_work_id=smap.work_of_execution(session, row.producer_execution_id),
                 root_event_id=bindings.get(row.source_declaration_id),
                 target_event_id=(
                     bindings.get(row.target_declaration_id) if row.target_declaration_id is not None else None

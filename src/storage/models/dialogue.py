@@ -1,15 +1,13 @@
 """
-对话记录 ORM 模型（2026-10-16 全库 3NF 改造）
+对话记录 ORM 模型
 
 dialogue_records 是对话定位与当前实际归因的唯一落点：
-- creation_execution_id 是实际原标注来源；current_attribution_execution_id
-  是当前归因生产者（诊断可正式改归因，不改写原创建来源）
-- speaker_entity_id 真实 FK→同 run 角色；tone/is_inner_monologue 为当前归因具名列
-- 对话原文从所属章节区间读取（run/chapter 从 creation execution 推导，不落列）
-- confidence=high 由生成合同投影，不存空壳列
+creation_execution_id 是原标注来源，current_attribution_execution_id 是当前归因
+生产者（诊断可正式改归因，不改写原创建来源）；run/chapter 为创建时的归属事实，
+直接落列（读投影不依赖审计表与 work）；speaker_entity_id 真实 FK→同 run 角色；
+tone/is_inner_monologue 为当前归因具名列。
 
-两个事件引用（声明/完整事件）互斥；声明发布后通过版本绑定取得完整事件，
-不回填另一个 ID。
+两个事件引用（声明/完整事件）互斥；声明发布后通过版本绑定取得完整事件，不回填另一个 ID。
 """
 
 from __future__ import annotations
@@ -42,6 +40,8 @@ class DialogueRecord(Base):
     )
 
     dialogue_id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="对话主键（uuid）")
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False, comment="创建时所属运行")
+    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="创建时所属章节编号")
     creation_execution_id: Mapped[str] = mapped_column(
         String(64),
         ForeignKey("executions.execution_id", ondelete="RESTRICT", name="dialogue_records_creation_fkey"),

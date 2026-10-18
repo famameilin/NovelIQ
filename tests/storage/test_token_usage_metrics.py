@@ -7,7 +7,7 @@ from src.audit import queries as metrics
 
 
 def test_fetch_token_usage_stats_reports_unknown_without_rows() -> None:
-    """2026-08-10 用于验证无任何计账行时 summary 标记 unknown 且无缺口"""
+    """验证无任何计账行时 summary 标记 unknown 且无缺口"""
     session = MagicMock()
     with (
         patch.object(
@@ -45,7 +45,7 @@ def test_fetch_token_usage_stats_reports_unknown_without_rows() -> None:
 
 
 def test_fetch_token_usage_stats_marks_partial_when_gaps_exist() -> None:
-    """2026-08-10 用于验证存在覆盖缺口时 coverage_status 标记 partial 并透出缺口桶"""
+    """验证存在覆盖缺口时 coverage_status 标记 partial 并透出缺口桶"""
     session = MagicMock()
     with (
         patch.object(
@@ -86,7 +86,7 @@ def test_fetch_token_usage_stats_marks_partial_when_gaps_exist() -> None:
 
 
 def test_build_invocation_context_maps_annotation_to_agent_call_type() -> None:
-    """2026-08-10 用于验证审计任务类型到计账桶 call_type 的稳定映射"""
+    """验证审计任务类型到计账桶 call_type 的稳定映射"""
     annotation = build_invocation_context(
         run_id="run-1",
         task_type="annotation",
@@ -94,8 +94,7 @@ def test_build_invocation_context_maps_annotation_to_agent_call_type() -> None:
         attempt_number=1,
         model="test-model",
         chapter_id=1,
-        work_id="work-1",
-        role="solo",
+        role="annotation",
     )
     assert annotation["call_type"] == "agent"
     diagnosis = build_invocation_context(
@@ -104,14 +103,14 @@ def test_build_invocation_context_maps_annotation_to_agent_call_type() -> None:
         execution_id="exec-2",
         attempt_number=1,
         model="test-model",
+        role="case",
+        case_anchor="case-1",
     )
     assert diagnosis["call_type"] == "diagnosis"
 
 
 def test_fetch_usage_by_task_groups_current_task_buckets() -> None:
-    """
-    2026-08-05 用于验证当前 token 统计任务桶按原始任务聚合
-    """
+    """验证当前 token 统计任务桶按原始任务聚合"""
     session = MagicMock()
     execute_result = MagicMock()
     execute_result.fetchall.return_value = [
@@ -129,7 +128,7 @@ def test_fetch_usage_by_task_groups_current_task_buckets() -> None:
 
 
 def test_detect_token_coverage_gaps_reports_unclosed_and_unaccounted_rows() -> None:
-    """2026-10-06 用于验证 running、缺计账与本地估算的回合按调用桶报缺口"""
+    """验证 running、缺计账与本地估算的回合按调用桶报缺口"""
     session = MagicMock()
     session.execute.return_value = [
         MagicMock(task_type="annotation", call_type="agent"),

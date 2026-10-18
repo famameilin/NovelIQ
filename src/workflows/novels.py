@@ -1,6 +1,6 @@
 """小说文本导入、登记与删除用例（workflows）
 
-说明: api 只负责「文本导入」——把上传内容落成文件与 novels 行、列出/删除小说。
+api 只负责「文本导入」——把上传内容落成文件与 novels 行、列出/删除小说。
 任务与运行的读写、产物清理、取消/删除状态机在 src/workflows（编排层按需向下驱动
 work 队列），本模块按需调用，不做转发层。
 """
@@ -79,11 +79,7 @@ class NovelService:
         return self.task_service.get_novel(novel_id, session)
 
     def list_novels(self, session: Session | None = None) -> list[dict]:
-        """
-        列出所有小说及其信息
-
-        2026-08-20 阶段 3.2：使用 LEFT JOIN 和窗口函数消除 N+1 查询
-        """
+        """列出所有小说及其信息"""
         novels = []
         try:
             with self._get_session(session) as sess:

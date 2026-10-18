@@ -124,8 +124,7 @@ class DialogueEvidenceState:
     def dialogue_ledger(self) -> dict[str, Any]:
         """用于对话域账本：候选总数/已判定写入数/未写入编号 + 已判条目的判定值
 
-        judged 带值是对抗整册重推的关键：只报"已判 N/M"时模型把未判清单读成
-        "一切从零重推"，写完的条目也要回文核对（run b7477080 ch1 全册过 6 遍）。
+        judged 带值可避免模型把未判清单读成"一切从零重推"，写完的条目也要回文核对。
         """
         judged: dict[str, str] = {}
         for index, item in sorted(self.written_dialogues.items()):

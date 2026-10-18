@@ -38,7 +38,7 @@ _MODEL_FIELD_NAMES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
-#: LTP 语言结构服务环境字段（2026-08-28：离线模型目录）
+#: LTP 语言结构服务环境字段（离线模型目录）
 _LTP_FIELD_NAMES: tuple[tuple[str, str], ...] = (
     ("model_dir", "LTP_MODEL_DIR"),
 )
@@ -164,7 +164,7 @@ def load_model_environment(env_var_name: ModelEnvironmentName) -> ModelEnvironme
 
 
 def load_model_pool_environment() -> list[dict[str, Any]]:
-    """模型池只从 MODEL_POOL 读取，不拼装旧的共享连接配置"""
+    """模型池只从 MODEL_POOL 读取"""
     raw = os.environ.get("MODEL_POOL")
     if raw is None:
         return []

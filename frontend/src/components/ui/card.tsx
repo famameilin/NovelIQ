@@ -32,8 +32,7 @@ export interface CardProps
 /* ------------------------------------------------------------------ */
 
 /**
- * 2026-04-28，任务：分析详情页单屏布局收口
- * 修改原因：elevated 卡片 hover 位移提高到 2px，并缩短过渡时长，让位移和阴影变化更接近同时发生。
+ * elevated 卡片 hover 位移 2px，过渡时长使位移与阴影变化接近同时发生
  */
 const Card = React.forwardRef<HTMLDivElement, CardProps>(
   ({ className, variant, ...props }, ref) => {

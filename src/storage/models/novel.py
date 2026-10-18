@@ -1,10 +1,7 @@
 """
 小说表 ORM 模型定义
 
-存储小说元数据，解决上传后列表不显示的问题
-
-2026-10-16 全库 3NF 改造：novel_id 沿用当前登记身份 VARCHAR(255)（不再按历史
-样本长度收窄为 8 字符）；filename/title/author 都不唯一，novel_id 是唯一候选键。
+存储小说元数据；filename/title/author 都不唯一，novel_id 是唯一候选键。
 """
 
 from __future__ import annotations

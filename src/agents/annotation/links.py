@@ -80,7 +80,7 @@ def build_link_tools(query_service: AnnotationQueryService, ledger: AnnotationTo
 
     def require_record(record_id: str) -> str:
         require_open()
-        # 2026-10-04 裸树键补全：树键（如 t1）按自然形态当记录键时翻译成根记录再校验，
+        # 裸树键补全：树键（如 t1）按自然形态当记录键时翻译成根记录再校验，
         # 原值或翻译值任一在本章写出的记录键集合里即接受，返回统一为生产键
         resolved = ledger.production_record_key(record_id)
         if record_id not in ledger.written_record_keys and resolved not in ledger.written_record_keys:

@@ -52,7 +52,7 @@ class LDAConfig:
         )
 
     def to_parameters_dict(self) -> dict[str, Any]:
-        """输出非空参数快照（参数按明确列落 analysis_runs.lda_*，§5.8）"""
+        """输出非空参数快照（参数按明确列落 analysis_runs.lda_*）"""
         return {
             key: value
             for key, value in {
@@ -165,7 +165,7 @@ def infer_paragraph_topics(
     topic_model: TopicModel,
     doc_tokens: list[str],
 ) -> ParagraphInferenceResult:
-    """推断单个段落的完整主题分布（持久化入口，§5.9/§5.10）"""
+    """推断单个段落的完整主题分布（持久化入口）"""
     return topic_model.infer_full_distribution(doc_tokens)
 
 
