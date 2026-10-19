@@ -36,15 +36,15 @@ class FactWriter:
 
         _queries.fact_graph_graph_save_work_1(session, self.run_scope)
         del annotation_id
-        execution = _queries.fact_graph_graph_save_work_2(session, frozen.execution_id)
+        execution = _queries.fact_graph_graph_save_work_2(session, frozen.agent_id)
         if execution is None or execution.run_id != self.run_scope:
-            raise ValueError(f"事实贡献缺少真实执行身份: execution_id={frozen.execution_id}")
-        effective_chapter_id = int(frozen.chapter_id)
+            raise ValueError(f"事实贡献缺少真实执行身份: agent_id={frozen.agent_id}")
+        effective_chapter_id = int(frozen.chapter_id) if frozen.chapter_id is not None else None
         contribution = frozen.snapshot()
-        execution_id = frozen.execution_id
+        agent_id = frozen.agent_id
         entities = contribution["entities"]
         self.ensure_entity_rows(session, frozen)
-        if _queries.fact_graph_graph_save_work_3(session, execution_id) is not None:
+        if _queries.fact_graph_graph_save_work_3(session, agent_id) is not None:
             return
         operations: list[tuple[str, dict[str, Any]]] = []
         operations += [("entity", op) for op in contribution["entity_ops"]]
@@ -54,7 +54,7 @@ class FactWriter:
             fact: GraphFact | None = None
             if kind == "entity_reference":
                 fact = GraphFact(
-                    direct_producer_execution_id=execution_id,
+                    direct_producer_agent_id=agent_id,
                     operation_order=index,
                     effective_chapter_id=effective_chapter_id,
                     entity_id=str(op["entity_id"]),
@@ -69,7 +69,7 @@ class FactWriter:
                 description = op.get("description") if "description" in fields else None
                 representative: bool | None = op.get("representative") if "representative" in fields else None
                 fact = GraphFact(
-                    direct_producer_execution_id=execution_id,
+                    direct_producer_agent_id=agent_id,
                     operation_order=index,
                     effective_chapter_id=effective_chapter_id,
                     entity_id=entity_id,
@@ -99,7 +99,7 @@ class FactWriter:
                     session.flush()
                 change_kind = op.get("change_kind", "assert")
                 fact = GraphFact(
-                    direct_producer_execution_id=execution_id,
+                    direct_producer_agent_id=agent_id,
                     operation_order=index,
                     effective_chapter_id=effective_chapter_id,
                     relation_id=identifier,
@@ -118,7 +118,7 @@ class FactWriter:
         for index, item in enumerate(contribution.get("plotline_ops", [])):
             operation = item["operation"]
             fact = GraphFact(
-                direct_producer_execution_id=execution_id,
+                direct_producer_agent_id=agent_id,
                 operation_order=index,
                 effective_chapter_id=effective_chapter_id,
                 business_call_id=str(item["source_operation_id"]),
@@ -186,14 +186,14 @@ class FactWriter:
         from src.storage.models import ChapterAnnotation, DeclarationParticipant, EventDeclaration, GraphFact
 
         ordered = sorted(execution_ids)
-        session.execute(delete(GraphFact).where(GraphFact.direct_producer_execution_id.in_(ordered)))
+        session.execute(delete(GraphFact).where(GraphFact.direct_producer_agent_id.in_(ordered)))
         session.execute(
             delete(GraphFact).where(
                 GraphFact.participant_id.in_(
                     select(DeclarationParticipant.participant_id)
                     .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
                     .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-                    .where(ChapterAnnotation.execution_id.in_(ordered))
+                    .where(ChapterAnnotation.agent_id.in_(ordered))
                 )
             )
         )
