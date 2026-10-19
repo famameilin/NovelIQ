@@ -5,13 +5,13 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from src.storage.models import (
+    Agent,
     Chapter,
     ChapterAnnotation,
     DeclarationParticipant,
     DiagnosisReport,
     EventDeclaration,
-    EventRevision,
-    Execution,
+    EventDeclarationBinding,
     GraphEntity,
     NarrativeGroup,
     NarrativeLink,
@@ -32,8 +32,8 @@ def event_trees_read_organization_load_annotations_1(_session, value_1):
 def event_trees_read_organization_load_report_1(_session, value_1):
     return _session.scalars(
         select(DiagnosisReport)
-        .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
-        .where(Execution.session_run_id == value_1)
+        .join(Agent, Agent.id == DiagnosisReport.agent_id)
+        .where(Agent.run_id == value_1)
         .order_by(DiagnosisReport.created_at.desc(), DiagnosisReport.report_id.desc())
         .limit(1)
     ).first()
@@ -51,14 +51,10 @@ def event_trees_read_organization_load_2(_session, value_1):
     )
 
 
-def event_trees_read_organization_load_events_1(_session, value_1):
-    return _session.scalar(select(Execution.execution_id).where(Execution.session_run_id == value_1))
-
-
 def event_trees_read_organization_load_containments_1(_session, value_1):
     return _session.scalars(
         select(NarrativeLink).where(
-            NarrativeLink.producer_execution_id.in_(smap.run_execution_ids(value_1)),
+            NarrativeLink.producer_agent_id.in_(smap.run_execution_ids(value_1)),
             NarrativeLink.contained_child_id.is_not(None),
         )
     )
@@ -80,18 +76,18 @@ def event_trees_read_organization_load_declarations_1(_session, records):
     return _session.scalars(select(EventDeclaration).where(EventDeclaration.record_id.in_(list(records))))
 
 
-def event_trees_read_organization_load_revisions_1(_session, event_ids):
+def event_trees_read_organization_load_bindings_1(_session, event_ids):
     return _session.scalars(
-        select(EventRevision)
-        .where(EventRevision.event_id.in_(event_ids))
-        .order_by(EventRevision.event_id, EventRevision.stage_index)
+        select(EventDeclarationBinding)
+        .where(EventDeclarationBinding.event_id.in_(event_ids))
+        .order_by(EventDeclarationBinding.event_id, EventDeclarationBinding.declaration_id)
     )
 
 
 def event_trees_read_organization_load_organization_1(_session, producer_executions):
     return _session.scalars(
         select(NarrativeGroup)
-        .where(NarrativeGroup.producer_execution_id.in_(producer_executions))
+        .where(NarrativeGroup.producer_agent_id.in_(producer_executions))
         .order_by(NarrativeGroup.group_id)
     )
 
@@ -99,6 +95,6 @@ def event_trees_read_organization_load_organization_1(_session, producer_executi
 def event_trees_read_organization_load_organization_2(_session, producer_executions):
     return _session.scalars(
         select(NarrativeLink)
-        .where(NarrativeLink.producer_execution_id.in_(producer_executions))
+        .where(NarrativeLink.producer_agent_id.in_(producer_executions))
         .order_by(NarrativeLink.link_id)
     )

@@ -33,7 +33,7 @@ class EventForestRecords:
             select(
                 ChapterAnnotation.record_id.label("output_id"),
                 ChapterAnnotation.record_id,
-                ChapterAnnotation.execution_id,
+                ChapterAnnotation.agent_id,
                 ChapterAnnotation.chapter_id,
             )
             .where(ChapterAnnotation.run_id == run_id)
@@ -106,7 +106,7 @@ class EventForestRecords:
             self.session.execute(
                 select(NarrativeLink)
                 .where(
-                    NarrativeLink.producer_execution_id.in_(run_execution_ids(run_id)),
+                    NarrativeLink.producer_agent_id.in_(run_execution_ids(run_id)),
                     NarrativeLink.relation_type == relation_type,
                     NarrativeLink.semantic_source_event_id.is_not(None),
                     NarrativeLink.semantic_target_event_id.is_not(None),

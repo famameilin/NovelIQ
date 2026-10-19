@@ -9,18 +9,18 @@ from src.storage.models import (
     ChapterAnnotation,
     CompleteEvent,
     EventDeclaration,
-    EventRevision,
+    EventDeclarationBinding,
 )
 from src.storage.repositories import narrative_records as smap
 
 
 def event_trees_persistence_discard_declaration_contributions_1(_session, declaration_ids, run_id):
     return _session.scalar(
-        select(EventRevision.declaration_id)
-        .join(CompleteEvent, CompleteEvent.event_id == EventRevision.event_id)
+        select(EventDeclarationBinding.declaration_id)
+        .join(CompleteEvent, CompleteEvent.event_id == EventDeclarationBinding.event_id)
         .where(
-            EventRevision.declaration_id.in_(declaration_ids),
-            CompleteEvent.producer_execution_id.in_(smap.run_execution_ids(run_id)),
+            EventDeclarationBinding.declaration_id.in_(declaration_ids),
+            CompleteEvent.producer_agent_id.in_(smap.run_execution_ids(run_id)),
         )
         .limit(1)
     )

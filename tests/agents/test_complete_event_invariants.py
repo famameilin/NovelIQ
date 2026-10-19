@@ -24,11 +24,11 @@ async def draft_case(db_session):
     assert not result.get("failed"), result
     await save_and_confirm(agent, db_session, execution)
     # 诊断整轮身份与报告级真实尝试：草案的 producer 是真实执行，不借用占位串
-    session_id, execution_id = add_diagnosis_context(db_session, run_id)
+    session_id, agent_id = add_diagnosis_context(db_session, run_id)
     draft = EventOrganizationDraft(storage_for(db_session), run_id, session_id)
     draft.fixture_session = db_session
     draft.case_id = report_case_anchor(run_id)
-    draft.producer_invocation_id = execution_id
+    draft.producer_agent_id = agent_id
     yield draft
     agent.close()
 
@@ -42,8 +42,6 @@ def event(draft, key, declaration_ids, **kwargs):
         event_type="探寻",
         status="ongoing",
         declaration_ids=declaration_ids,
-        stage_order=kwargs.pop("stage_order", declaration_ids),
-        current_declaration_id=kwargs.pop("current_declaration_id", declaration_ids[-1]),
         reason="测试明确判断同一事件",
         evidence=[OrganizationEvidence(paragraph_id=0)],
         **kwargs,
@@ -167,7 +165,7 @@ def test_checked_snapshots_survive_candidate_restore_order_and_pair_orientation(
     assert draft.structure_digest() == frozen
 
 
-def test_repeated_identity_submission_and_stage_values_not_copied_from_model(draft_case):
+def test_repeated_identity_submission_keeps_full_book_body(draft_case):
     """保存前重提自己的身份候选不报错；阶段值由来源声明决定，不复制模型输入"""
     draft = draft_case
     ids = list(draft._declarations())
@@ -175,4 +173,4 @@ def test_repeated_identity_submission_and_stage_values_not_copied_from_model(dra
     submit_identities(draft, same=True)
     event(draft, "journey", ids, progress="改写身份")
     assert identifier in draft.events
-    assert not draft.revisions
+    assert not hasattr(draft, "revisions")

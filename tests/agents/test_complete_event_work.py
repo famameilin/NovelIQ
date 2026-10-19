@@ -6,7 +6,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from src.agents.annotation.agent import AnnotationAgent, WorkExecution
@@ -18,10 +18,9 @@ from src.agents.annotation.work_tools import build_work_tools
 from src.event_bus import EventBus, Message
 from src.storage import new_id
 from src.storage.models import (
+    Agent,
     Chapter,
-    Execution,
     Paragraph,
-    naive_utcnow,
 )
 from src.work.annotation_work import WorkReceipt, annotation_work_id
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -91,31 +90,8 @@ async def save_and_confirm(agent, session, execution):
     agent.freeze(execution)
     # 无 relationship：真实尝试 → 正式记录按依赖分层 flush
     payload = execution.receipt.payload
-    attempt = (
-        int(
-            session.scalar(
-                select(func.count())
-                .select_from(Execution)
-                .where(
-                    Execution.run_id == agent.run_id,
-                    Execution.chapter_id == payload["chapter_id"],
-                    Execution.role == payload["role"],
-                )
-            )
-            or 0
-        )
-        + 1
-    )
     session.add(
-        Execution(
-            execution_id=execution.invocation_id,
-            run_id=agent.run_id,
-            chapter_id=payload["chapter_id"],
-            role=payload["role"],
-            attempt_number=attempt,
-            started_at=naive_utcnow(),
-            status="success",
-        )
+        Agent(id=execution.invocation_id, run_id=agent.run_id, type=payload["role"], status="success")
     )
     session.flush()
     identifier = agent._save(execution, storage_for(session))
@@ -174,7 +150,7 @@ async def test_same_fact_cannot_be_recreated_as_second_declaration(db_session, r
 
 async def test_annotation_declarations_then_diagnosis_once_publication(db_session):
     from src.event_trees.read.organization import EventTreeQuery
-    from src.event_trees.storage_map import run_declaration_ids, run_events, stage_chain
+    from src.event_trees.storage_map import declaration_bindings, run_declaration_ids, run_events
     from tests.support.event_tree_fixtures import close_structure, identity_every_declaration, publish_draft
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻找山门，点燃一盏灯。"])
@@ -198,7 +174,7 @@ async def test_annotation_declarations_then_diagnosis_once_publication(db_sessio
         publish_draft(db_session, run_id, draft)
         assert len(run_events(storage_for(db_session), run_id)) == 2
         # 阶段链读取面：本运行的每个正式事件各有且仅有 1 个绑定声明的版本
-        chains = stage_chain(storage_for(db_session), list(run_events(storage_for(db_session), run_id)))
+        chains = declaration_bindings(storage_for(db_session), list(run_events(storage_for(db_session), run_id)))
         bound = [row for rows in chains.values() for row in rows if row.declaration_id is not None]
         assert len(bound) == 2
         assert len(run_declaration_ids(storage_for(db_session), run_id)) == 2

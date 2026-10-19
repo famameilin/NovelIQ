@@ -40,7 +40,7 @@ def save_declaration_contribution(session: Any, frozen: EventContribution, annot
             raise ValueError(f"declaration_id={identifier} 来源章晚于当前 work")
         return row
 
-    for key in ("complete_events", "revisions", "containments", "ownerships", "conflicts", "structures"):
+    for key in ("complete_events", "containments", "ownerships", "structures"):
         if payload.get(key):
             raise ValueError(f"标注不得保存诊断产物: {key}")
     for item in content("relations"):
@@ -51,7 +51,7 @@ def save_declaration_contribution(session: Any, frozen: EventContribution, annot
         session.add(
             NarrativeLink(
                 link_id=item["relation_id"],
-                producer_execution_id=frozen.execution_id,
+                producer_agent_id=frozen.agent_id,
                 reason=item["reason"],
                 semantic_source_declaration_id=item["source_id"],
                 semantic_target_declaration_id=item["target_id"],
@@ -79,7 +79,7 @@ def check_declaration_contribution(session: Any, frozen: EventContribution) -> b
             if row is None:
                 return False
             if (
-                row.producer_execution_id != frozen.execution_id
+                row.producer_agent_id != frozen.agent_id
                 or row.semantic_source_declaration_id != item["source_id"]
                 or row.semantic_target_declaration_id != item["target_id"]
                 or (row.source_operation_local_key != item["source_operation_id"])
@@ -112,7 +112,7 @@ def discard_declaration_contributions(
         raise ValueError("声明已正式发布，必须从原文建立新 run")
     session.execute(
         delete(NarrativeLink).where(
-            NarrativeLink.producer_execution_id.in_(sorted(execution_ids)),
+            NarrativeLink.producer_agent_id.in_(sorted(execution_ids)),
             NarrativeLink.semantic_source_declaration_id.is_not(None),
         )
     )

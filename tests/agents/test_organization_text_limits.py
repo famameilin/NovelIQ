@@ -101,7 +101,7 @@ def text_limit_draft(db_session):
     draft = EventOrganizationDraft(storage_for(db_session), case.run_id, case.session_id)
     draft.fixture_session = db_session
     draft.case_id = report_case_anchor(case.run_id)
-    draft.producer_invocation_id = case.execution_id
+    draft.producer_agent_id = case.agent_id
     return draft
 
 

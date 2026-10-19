@@ -41,7 +41,7 @@ def _retract_relation(
 ) -> None:
     """按正式 work 保存入口提交本章事实图操作：人物观察 + 一次关系撤回
 
-    关系变化是 chapter_annotations 的事实图操作，经 agent._save
+    关系变化是 agent_annotations 的事实图操作，经 agent._save
     与原文证据同事务落库；这里沿用同一入口，不手拼图事实行。
     """
     from src.agents.annotation.output_models import BoundChapterAnnotation

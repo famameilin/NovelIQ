@@ -26,5 +26,5 @@ def test_saved_contributions_isolate_nested_input_and_readers():
         read["nested"][0]["value"] = "读方修改"
         assert value.snapshot()["nested"][0]["value"] == "原值"
         with pytest.raises(FrozenInstanceError):
-            value.execution_id = "其他执行"
+            value.agent_id = "其他执行"
     assert paragraph.text == " 原文 "

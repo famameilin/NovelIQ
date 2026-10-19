@@ -24,12 +24,11 @@ class EventWriter:
         record = _queries.event_trees_trees_save_work_2(session, annotation_id)
         if (
             record is None
-            or record.execution_id != frozen.execution_id
-            or record.contract_version != "event-tree-declarations-v1"
+            or record.agent_id != frozen.agent_id
         ):
             raise ValueError("事件保存必须引用本执行的真实标注记录")
         source = smap.declaration_record_source(session, annotation_id)
-        if source is None or source.execution_id != frozen.execution_id or source.run_id != self.run_id:
+        if source is None or source.agent_id != frozen.agent_id or source.run_id != self.run_id:
             raise ValueError("事件保存的标注记录不属于本执行或本 run")
         for declaration_id, node in contribution["nodes"].items():
             content = node["content"]
@@ -112,7 +111,7 @@ class EventWriter:
             session.add(
                 EventForeshadowingAction(
                     action_id=identifier,
-                    producer_execution_id=frozen.execution_id,
+                    producer_agent_id=frozen.agent_id,
                     source_operation_local_key=str(action["source_operation_id"])[:128],
                     operation_order=int(action["operation_order"]),
                     action_type=action["action_type"],
@@ -143,7 +142,7 @@ class EventWriter:
         session.execute(delete(GraphFact).where(GraphFact.declaration_id.in_(identifiers)))
         session.execute(
             delete(EventForeshadowingAction).where(
-                EventForeshadowingAction.producer_execution_id.in_(sorted(execution_ids))
+                EventForeshadowingAction.producer_agent_id.in_(sorted(execution_ids))
                 | EventForeshadowingAction.source_declaration_id.in_(identifiers)
                 | EventForeshadowingAction.target_declaration_id.in_(identifiers)
             )

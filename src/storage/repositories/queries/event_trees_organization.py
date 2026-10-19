@@ -5,14 +5,13 @@ from __future__ import annotations
 from sqlalchemy import or_, select
 
 from src.storage.models import (
+    Agent,
     Chapter,
     ChapterAnnotation,
-    ConflictRecord,
     DeclarationParticipant,
     DiagnosisReport,
     EventDeclaration,
     EventForeshadowingAction,
-    Execution,
     GraphEntity,
     GraphFact,
     NarrativeGroup,
@@ -22,29 +21,8 @@ from src.storage.models import (
 from src.storage.repositories import narrative_records as smap
 
 
-def event_trees_organization_register_diagnosis_session_1(_session, session_id):
-    return _session.get(Execution, session_id)
-
-
-def event_trees_organization_register_diagnosis_execution_1(_session, execution_id):
-    return _session.get(Execution, execution_id)
-
-
-def event_trees_organization_register_diagnosis_execution_2(_session, attempt_number, case_anchor, role, run_id):
-    return _session.scalar(
-        select(Execution.execution_id).where(
-            Execution.run_id == run_id,
-            Execution.role == role,
-            Execution.case_anchor == case_anchor,
-            Execution.attempt_number == attempt_number,
-        )
-    )
-
-
 def event_trees_organization_published_arc_ids_1(_session, run_id):
-    stmt = select(NarrativeGroup.group_id).where(
-        NarrativeGroup.producer_execution_id.in_(smap.run_execution_ids(run_id))
-    )
+    stmt = select(NarrativeGroup.group_id).where(NarrativeGroup.producer_agent_id.in_(smap.run_execution_ids(run_id)))
     return _session.scalars(stmt)
 
 
@@ -69,25 +47,17 @@ def event_trees_organization_run_foreshadowing_actions_1(_session, declarations)
     return _session.scalars(stmt.order_by(EventForeshadowingAction.operation_order, EventForeshadowingAction.action_id))
 
 
-def event_trees_organization_run_conflict_rows_1(_session, run_id):
-    return _session.scalars(
-        select(ConflictRecord)
-        .where(ConflictRecord.producer_execution_id.in_(smap.run_execution_ids(run_id)))
-        .order_by(ConflictRecord.conflict_id)
-    )
-
-
 def event_trees_organization_require_report_1(_session, report_id):
     return _session.get(DiagnosisReport, report_id)
 
 
 def event_trees_organization_require_report_2(_session, report):
-    return _session.get(Execution, report.session_id)
+    return _session.get(Agent, report.agent_id)
 
 
 def event_trees_organization_parents_1(_session, value_1):
     stmt = select(NarrativeLink).where(
-        NarrativeLink.producer_execution_id.in_(smap.run_execution_ids(value_1)),
+        NarrativeLink.producer_agent_id.in_(smap.run_execution_ids(value_1)),
         NarrativeLink.contained_child_id.is_not(None),
     )
     return _session.scalars(stmt)
@@ -105,7 +75,7 @@ def event_trees_organization_declaration_rows_2(_session, declaration_ids, value
     return _session.scalars(
         select(NarrativeLink)
         .where(
-            NarrativeLink.producer_execution_id.in_(smap.run_execution_ids(value_1)),
+            NarrativeLink.producer_agent_id.in_(smap.run_execution_ids(value_1)),
             NarrativeLink.semantic_source_declaration_id.is_not(None),
             NarrativeLink.semantic_target_declaration_id.is_not(None),
             or_(

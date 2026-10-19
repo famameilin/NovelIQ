@@ -1,7 +1,7 @@
 """事件森林/DAG 查询仓储测试
 
-读取面输入为正式发布的完整事件（complete_events + event_revisions 显式阶段链
-+ narrative_links 语义形状）；章级声明只作为来源，读取时不冒充事件身份。
+读取面输入为正式发布的完整事件（event_records + event_revisions 显式阶段链
++ event_links 语义形状）；章级声明只作为来源，读取时不冒充事件身份。
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
         title="事件森林快照",
     )
     paragraphs = paragraphs_of(db_session, run_id, 1)
-    record_id, _execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, _agent_id = add_annotation_source(db_session, run_id, 1)
     first_declaration = add_declaration(
         db_session,
         record_id=record_id,
@@ -93,25 +93,21 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
     assert "顾霜拔剑" in nodes_by_desc
     assert nodes_by_desc["顾霜进入山门"].event_id == first_event
     assert nodes_by_desc["顾霜拔剑"].event_id == second_event
-    assert nodes_by_desc["顾霜进入山门"].tree_id == first_event
+    assert nodes_by_desc["顾霜进入山门"].tree_id == first_declaration
     assert nodes_by_desc["顾霜进入山门"].cause_role == "root"
 
     # 树视图：两棵树，因果边跨树；主链按原文顺序
     assert len(snapshot.event_trees) == 2
-    gate_tree = next(tree for tree in snapshot.event_trees if tree.tree_id == first_event)
-    assert gate_tree.root_event_id == first_event
-    assert gate_tree.main_chain == [first_event]
+    gate_tree = next(tree for tree in snapshot.event_trees if tree.tree_id == first_declaration)
+    assert gate_tree.root_event_id == first_declaration
+    assert gate_tree.main_chain == [first_declaration]
     assert gate_tree.secondary_groups == []
     assert gate_tree.chapter_ids == [1]
 
-    # 因果边（contains 已派生化：只返回 causal 且两端必非空）
-    causal_edges = snapshot.causal_edges
-    assert len(causal_edges) == 1
-    assert all(edge.edge_type == "causal" for edge in causal_edges)
-    assert all(edge.source_event_id is not None for edge in causal_edges)
-    assert causal_edges[0].source_event_id == first_event
-    assert causal_edges[0].target_event_id == second_event
-    assert causal_edges[0].is_active is True
+    # 全书事件关系不任意投射到声明端点
+    assert snapshot.causal_edges == []
+    from src.event_trees.read.organization import EventTreeQuery
+    assert len(EventTreeQuery(storage_for(db_session), run_id).fetch()["relations"]) == 1
 
 
 def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_session) -> None:
@@ -123,7 +119,7 @@ def test_fetch_snapshot_excludes_foreshadowing_edges_from_causal_edges(db_sessio
         title="伏笔边不混因果",
     )
     paragraphs = paragraphs_of(db_session, run_id, 1)
-    record_id, _execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, _agent_id = add_annotation_source(db_session, run_id, 1)
     root_declaration = add_declaration(
         db_session,
         record_id=record_id,
@@ -158,7 +154,7 @@ def repo_foreshadow_edges(session, run_id: str) -> int:
             select(func.count())
             .select_from(NarrativeLink)
             .where(
-                NarrativeLink.producer_execution_id.in_(smap.run_execution_ids(storage_for(session), run_id)),
+                NarrativeLink.producer_agent_id.in_(smap.run_execution_ids(storage_for(session), run_id)),
                 NarrativeLink.relation_type == "foreshadowing",
             )
         ).scalar_one()
@@ -174,7 +170,7 @@ def test_source_branch_markers_do_not_infer_formal_structure(db_session) -> None
         title="次因分支聚合",
     )
     paragraphs = paragraphs_of(db_session, run_id, 1)
-    record_id, _execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, _agent_id = add_annotation_source(db_session, run_id, 1)
     declarations = [
         add_declaration(
             db_session,
@@ -195,9 +191,7 @@ def test_source_branch_markers_do_not_infer_formal_structure(db_session) -> None
     assert snapshot is not None
     # 来源的旧树标记不能替代诊断对正式身份与包含关系的判断
     assert len(snapshot.event_trees) == 4
-    assert {tree.root_event_id for tree in snapshot.event_trees} == {
-        mapping[declaration] for declaration in declarations
-    }
+    assert {tree.root_event_id for tree in snapshot.event_trees} == set(declarations)
     assert all(tree.main_chain == [tree.root_event_id] and tree.secondary_groups == [] for tree in snapshot.event_trees)
     assert snapshot.causal_edges == []
     nodes = {node.event_id: node for node in snapshot.event_nodes}
@@ -213,7 +207,7 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
         title="伏笔边快照",
     )
     paragraph = first_paragraph(db_session, run_id)
-    record_id, execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, agent_id = add_annotation_source(db_session, run_id, 1)
     declaration_id = add_declaration(
         db_session,
         record_id=record_id,
@@ -226,7 +220,7 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     )
     add_foreshadowing_action(
         db_session,
-        producer_execution_id=execution_id,
+        producer_agent_id=agent_id,
         source_declaration_id=declaration_id,
         paragraph=paragraph,
     )
@@ -239,7 +233,7 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     assert len(snapshot.foreshadowing_edges) == 1
     edge = snapshot.foreshadowing_edges[0]
     assert edge.description == "顾霜立誓"
-    assert edge.root_event_id == mapping[declaration_id]
+    assert edge.root_event_id == declaration_id
     assert edge.payoff_event_id is None
     assert edge.status == "open"
     assert edge.active is True
@@ -249,7 +243,7 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
     """同段声明的来源候选关系不能改写已经发布的正式因果关系"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜入门，随后立誓。"])
     paragraph = first_paragraph(db_session, run_id)
-    record_id, execution_id = add_annotation_source(db_session, run_id, 1)
+    record_id, agent_id = add_annotation_source(db_session, run_id, 1)
     first_declaration = add_declaration(
         db_session,
         record_id=record_id,
@@ -268,17 +262,18 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
     )
     add_declaration_relation(
         db_session,
-        producer_execution_id=execution_id,
+        producer_agent_id=agent_id,
         source_declaration_id=first_declaration,
         target_declaration_id=second_declaration,
         paragraph=paragraph,
+        relation_type="causal",
     )
     db_session.commit()
 
-    mapping = _publish(db_session, run_id, [(first_declaration, second_declaration, "causal")])
+    _publish(db_session, run_id, [(first_declaration, second_declaration, "causal")])
     snapshot = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
     assert snapshot is not None
-    assert set(snapshot.derived_event_order) == {mapping[first_declaration], mapping[second_declaration]}
+    assert set(snapshot.derived_event_order) == {first_declaration, second_declaration}
     assert (
         snapshot.derived_event_order
         == EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id).derived_event_order
@@ -287,19 +282,21 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
     # 节点坐标来自各声明自身的原文证据，不由来源候选关系重新绑定
     assert snapshot.event_nodes[0].char_start == 0
     assert snapshot.event_nodes[1].char_start == paragraph.text.find("随后立誓")
-    # 反向来源候选只是章级建议，不改写既有的正式方向
+    # 章级关系保留原声明端点，全书关系单独保留
     add_declaration_relation(
         db_session,
-        producer_execution_id=execution_id,
+        producer_agent_id=agent_id,
         source_declaration_id=second_declaration,
         target_declaration_id=first_declaration,
         paragraph=paragraph,
+        relation_type="causal",
     )
     db_session.commit()
     refreshed = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
-    assert [(edge.source_event_id, edge.target_event_id) for edge in refreshed.causal_edges] == [
-        (mapping[first_declaration], mapping[second_declaration])
-    ]
+    assert {(edge.source_event_id, edge.target_event_id) for edge in refreshed.causal_edges} == {
+        (first_declaration, second_declaration),
+        (second_declaration, first_declaration)
+    }
 
 
 def test_fetch_snapshot_returns_none_for_missing_run(db_session) -> None:
@@ -317,7 +314,7 @@ def test_fetch_snapshot_filters_by_chapter_id(db_session) -> None:
         chapter_ids=[1, 2],
         title="章节边界截断",
     )
-    first_record, _execution_id = add_annotation_source(db_session, run_id, 1)
+    first_record, _agent_id = add_annotation_source(db_session, run_id, 1)
     second_record, _execution_id_2 = add_annotation_source(db_session, run_id, 2)
     add_declaration(
         db_session,

@@ -10,11 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.storage.models import (
+    Agent,
     Chapter,
     ChapterAnnotation,
     DeclarationParticipant,
     EventDeclaration,
-    Execution,
     FactEntityTag,
     GraphEntity,
     GraphFact,
@@ -53,9 +53,9 @@ class GraphRepository(BaseRepository[GraphFact]):
         self.internal = internal
 
     def run_exists(self, run_id: str) -> bool:
-        from src.storage.models import AnalysisRun
+        from src.storage.models import Run
 
-        return self.session.get(AnalysisRun, run_id) is not None
+        return self.session.get(Run, run_id) is not None
 
     def _require_visible(self, run_id: str) -> None:
         "只有释放事务内部可绕过最终边界，普通查询不能读未发布的物化状态"
@@ -75,7 +75,7 @@ class GraphRepository(BaseRepository[GraphFact]):
 
     def _chapter_order_map(self, run_id: str) -> dict[int, int]:
         "用于把章节身份映射为历史排序"
-        return {int(chapter.chapter_id): index for index, chapter in enumerate(self._chapter_rows(run_id), start=1)}
+        return {int(chapter.chapter_id): int(chapter.sequence) for chapter in self._chapter_rows(run_id)}
 
     def _records_by_chapter(self, run_id: str) -> dict[int, str]:
         "用于读取每章已成功保存的正式标注产物身份（章内多角色取最后一份）"
@@ -102,7 +102,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         return ChapterBoundary(
             run_id=run_id,
             chapter_id=target.chapter_id,
-            chapter_order=chapters.index(target) + 1,
+            chapter_order=int(target.sequence),
             first_chapter_id=target.chapter_id,
             last_chapter_id=target.chapter_id,
             annotation_id=records[target.chapter_id],
@@ -116,7 +116,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         return ChapterBoundary(
             run_id=run_id,
             chapter_id=int(chapters[-1].chapter_id),
-            chapter_order=len(chapters),
+            chapter_order=int(chapters[-1].sequence),
             first_chapter_id=int(chapters[0].chapter_id),
             last_chapter_id=int(chapters[-1].chapter_id),
             annotation_id="",
@@ -125,18 +125,19 @@ class GraphRepository(BaseRepository[GraphFact]):
     def _fold_graph(self, run_id: str) -> _FoldedGraph:
         "按原始贡献序折叠实体与关系状态；事实序 =（章序、角色序、执行、列表内序）"
         chapters = self._chapter_rows(run_id)
-        order_map = {int(chapter.chapter_id): index for index, chapter in enumerate(chapters, start=1)}
+        order_map = {int(chapter.chapter_id): int(chapter.sequence) for chapter in chapters}
         entities = {
             str(row.entity_id): row
             for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars()
         }
         direct_rows = list(
             self.session.execute(
-                select(GraphFact, Execution.execution_id, Execution.chapter_id, Execution.role)
-                .join(Execution, Execution.execution_id == GraphFact.direct_producer_execution_id)
+                select(GraphFact, Agent.id, ChapterAnnotation.chapter_id, Agent.type)
+                .join(Agent, Agent.id == GraphFact.direct_producer_agent_id)
+                .outerjoin(ChapterAnnotation, ChapterAnnotation.agent_id == Agent.id)
                 .where(
-                    GraphFact.direct_producer_execution_id.is_not(None),
-                    Execution.run_id == run_id,
+                    GraphFact.direct_producer_agent_id.is_not(None),
+                    Agent.run_id == run_id,
                 )
             )
         )
@@ -148,34 +149,34 @@ class GraphRepository(BaseRepository[GraphFact]):
                     DeclarationParticipant.narrative_role,
                     DeclarationParticipant.action,
                     DeclarationParticipant.emotion,
-                    Execution.execution_id,
+                    Agent.id,
                     ChapterAnnotation.chapter_id,
-                    Execution.role,
+                    Agent.type,
                 )
                 .join(DeclarationParticipant, DeclarationParticipant.participant_id == GraphFact.participant_id)
                 .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
                 .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-                .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+                .join(Agent, Agent.id == ChapterAnnotation.agent_id)
                 .where(GraphFact.participant_id.is_not(None), ChapterAnnotation.run_id == run_id)
             )
         )
         role_order = {"annotation": 0, "entity": 0, "event": 1, "metric": 2, "case": 3, "report": 3}
         entry: list[tuple[tuple[Any, ...], str, int | None, str, Any]] = []
-        for fact, execution_id, execution_chapter, role in direct_rows:
+        for fact, agent_id, execution_chapter, role in direct_rows:
             chapter_id = fact.effective_chapter_id if fact.effective_chapter_id is not None else execution_chapter
             sort_key: tuple[Any, ...] = (
                 order_map.get(int(chapter_id), 10**9) if chapter_id is not None else 10**9,
                 role_order.get(str(role), 3),
-                str(execution_id),
+                str(agent_id),
                 0,
                 int(fact.operation_order or 0),
             )
-            entry.append((sort_key, str(fact.graph_fact_id), chapter_id, str(execution_id), fact))
-        for fact, entity_id, narrative_role, action, emotion, execution_id, record_chapter, role in participant_rows:
+            entry.append((sort_key, str(fact.graph_fact_id), chapter_id, str(agent_id), fact))
+        for fact, entity_id, narrative_role, action, emotion, agent_id, record_chapter, role in participant_rows:
             sort_key = (
                 order_map.get(int(record_chapter), 10**9) if record_chapter is not None else 10**9,
                 role_order.get(str(role), 3),
-                str(execution_id),
+                str(agent_id),
                 1,
                 str(fact.graph_fact_id),
             )
@@ -184,7 +185,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     sort_key,
                     str(fact.graph_fact_id),
                     record_chapter,
-                    str(execution_id),
+                    str(agent_id),
                     (fact, str(entity_id), narrative_role, action, emotion),
                 )
             )
@@ -235,7 +236,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                         {
                             "fact_id": str(fact_id),
                             "chapter_id": chapter_id,
-                            "author_execution_id": author,
+                            "author_agent_id": author,
                             "operation": dict(operation),
                             "field": field_name,
                             "before": before,
@@ -271,7 +272,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     {
                         "fact_id": str(fact_id),
                         "chapter_id": chapter_id,
-                        "author_execution_id": author,
+                        "author_agent_id": author,
                         "operation": {
                             "from_entity": str(from_name.canonical_name) if from_name is not None else "",
                             "to_entity": str(to_name.canonical_name) if to_name is not None else "",
@@ -312,7 +313,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                 {
                     "fact_id": str(fact_id),
                     "chapter_id": chapter_id,
-                    "author_execution_id": author,
+                    "author_agent_id": author,
                     "operation": {"name": name, "entity_type": entity_type, "chapter_id": chapter_id},
                     "field": "entity_type",
                     "before": before.get("entity_type"),
@@ -325,7 +326,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     {
                         "fact_id": str(fact_id),
                         "chapter_id": chapter_id,
-                        "author_execution_id": author,
+                        "author_agent_id": author,
                         "operation": operation,
                         "field": "description",
                         "before": before["attributes"].get("description"),
@@ -338,7 +339,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     {
                         "fact_id": str(fact_id),
                         "chapter_id": chapter_id,
-                        "author_execution_id": author,
+                        "author_agent_id": author,
                         "operation": operation,
                         "field": "description",
                         "before": before["attributes"].get("description"),
@@ -351,7 +352,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     {
                         "fact_id": str(fact_id),
                         "chapter_id": chapter_id,
-                        "author_execution_id": author,
+                        "author_agent_id": author,
                         "operation": operation,
                         "field": "is_representative",
                         "before": before["attributes"].get("is_representative"),
@@ -364,7 +365,7 @@ class GraphRepository(BaseRepository[GraphFact]):
                     {
                         "fact_id": str(fact_id),
                         "chapter_id": chapter_id,
-                        "author_execution_id": author,
+                        "author_agent_id": author,
                         "operation": operation,
                         "field": "is_representative",
                         "before": before["attributes"].get("is_representative"),

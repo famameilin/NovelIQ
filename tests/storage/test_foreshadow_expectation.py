@@ -30,7 +30,7 @@ def _create_foreshadow_root(
     chapter_id: int = 1,
 ) -> str:
     """经真实标注来源链写入一条伏笔根声明（属性随声明行）"""
-    record_id, _execution_id = add_annotation_source(session, run_id, chapter_id)
+    record_id, _agent_id = add_annotation_source(session, run_id, chapter_id)
     return add_declaration(
         session,
         record_id=record_id,

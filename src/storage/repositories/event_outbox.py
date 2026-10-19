@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from src.storage.ids import new_id
-from src.storage.models import AnalysisRun, EventOutbox
+from src.storage.models import EventOutbox, Run
 from src.storage.models.base import naive_utcnow
 
 _DOCUMENT_SEPARATORS = (",", ":")
@@ -33,8 +33,8 @@ class OutboxRecords:
         self._session = session
 
     @staticmethod
-    def _resolve_run(session: Session, task_id: str) -> AnalysisRun:
-        row = session.execute(select(AnalysisRun).where(AnalysisRun.task_id == task_id)).scalar_one_or_none()
+    def _resolve_run(session: Session, task_id: str) -> Run:
+        row = session.execute(select(Run).where(Run.taskid == task_id)).scalar_one_or_none()
         if row is None:
             raise ValueError(f"SSE 任务不存在: {task_id}")
         return row
@@ -43,12 +43,12 @@ class OutboxRecords:
         session = self._session
         run = self._resolve_run(session, task_id)
         existing = session.scalar(
-            select(EventOutbox).where(EventOutbox.run_id == run.run_id, EventOutbox.message_key == message_id)
+            select(EventOutbox).where(EventOutbox.run_id == run.id, EventOutbox.message_key == message_id)
         )
         if existing is not None:
             return int(existing.stream_id)
         return int(
-            session.execute(text("SELECT nextval(pg_get_serial_sequence('event_outbox', 'stream_id'))")).scalar_one()
+            session.execute(text("SELECT nextval(pg_get_serial_sequence('agent_outbox', 'stream_id'))")).scalar_one()
         )
 
     def emit(
@@ -68,7 +68,7 @@ class OutboxRecords:
                 event_id=identifier,
                 message_key=message_id,
                 stream_id=sequence,
-                run_id=run.run_id,
+                run_id=run.id,
                 chapter_id=chapter_id,
                 event_type=event_type,
                 emitted_bytes=encode_document(emitted),
@@ -78,12 +78,12 @@ class OutboxRecords:
             .on_conflict_do_nothing(index_elements=[EventOutbox.run_id, EventOutbox.message_key])
         )
         row = session.scalar(
-            select(EventOutbox).where(EventOutbox.run_id == run.run_id, EventOutbox.message_key == message_id)
+            select(EventOutbox).where(EventOutbox.run_id == run.id, EventOutbox.message_key == message_id)
         )
         if row is None:
             raise ValueError(f"SSE message_id={message_id} 消息身份丢失")
         if (
-            row.run_id != run.run_id
+            row.run_id != run.id
             or row.event_type != event_type
             or row.chapter_id != chapter_id
             or (decode_document(bytes(row.emitted_bytes)) != emitted)

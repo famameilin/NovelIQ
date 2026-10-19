@@ -36,7 +36,7 @@ def event_trees_trees_discard_storage_1(_session, execution_ids):
     return _session.execute(
         select(EventDeclaration.declaration_id).where(
             EventDeclaration.record_id.in_(
-                select(ChapterAnnotation.record_id).where(ChapterAnnotation.execution_id.in_(sorted(execution_ids)))
+                select(ChapterAnnotation.record_id).where(ChapterAnnotation.agent_id.in_(sorted(execution_ids)))
             )
         )
     ).scalars()
@@ -58,16 +58,16 @@ def event_trees_trees_load_saved_work_3(_session, declaration_ids):
     )
 
 
-def event_trees_trees_load_saved_work_4(_session, execution_id):
+def event_trees_trees_load_saved_work_4(_session, agent_id):
     return _session.scalars(
-        select(EventForeshadowingAction).where(EventForeshadowingAction.producer_execution_id == execution_id)
+        select(EventForeshadowingAction).where(EventForeshadowingAction.producer_agent_id == agent_id)
     )
 
 
-def event_trees_trees_load_saved_work_5(_session, execution_id):
+def event_trees_trees_load_saved_work_5(_session, agent_id):
     return _session.scalars(
         select(NarrativeLink).where(
-            NarrativeLink.producer_execution_id == execution_id,
+            NarrativeLink.producer_agent_id == agent_id,
             NarrativeLink.semantic_source_declaration_id.is_not(None),
         )
     )
