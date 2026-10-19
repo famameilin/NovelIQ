@@ -1,8 +1,8 @@
 """按已保存角色只读聚合章节结果，不生成第二份章级持久化产物
 
-完成判定直接读产物行——chapter_annotations 自带 run/章/角色与真实执行号；章级结果
-从正式关系投影重组（chapter_annotations 正式头与具名指标、analysis_assessments
-段落情绪、event_declarations/declaration_participants、dialogue_records），
+完成判定直接读产物行——agent_annotations 自带 run/章/角色与真实执行号；章级结果
+从正式关系投影重组（agent_annotations 正式头与具名指标、agent_assessments
+段落情绪、event_declarations/event_participants、graph_dialogues），
 不落通用 payload JSON 列。
 """
 
@@ -42,7 +42,7 @@ def fetch_annotation_role_records(session: Storage, run_id: str) -> list[Annotat
 
 
 def _paragraph_labels(session: Storage, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
-    """段落情绪标签：正式落点为 analysis_assessments 的逐段情绪分支（按段号定序投影）"""
+    """段落情绪标签：正式落点为 agent_assessments 的逐段情绪分支（按段号定序投影）"""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for _stored_row_1 in session.reads.work_queries_paragraph_labels_1(record_ids):
         record_id = _stored_row_1.record_id
@@ -92,7 +92,7 @@ def _dialogue_projections(session: Storage, execution_ids: list[str]) -> dict[st
     """对话：正式定位与当前归因（原文从章节区间读取，不复制正文）"""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in session.reads.work_queries_dialogue_projections_1(execution_ids):
-        grouped[row.creation_execution_id].append(
+        grouped[row.creation_agent_id].append(
             {
                 "dialogue_id": row.dialogue_id,
                 "candidate_key": row.candidate_key,
@@ -153,7 +153,7 @@ def chapter_annotations(session: Storage, run_id: str) -> list[ChapterAnnotation
     record_ids = [record.record_id for record in records]
     labels_by_record = _paragraph_labels(session, record_ids)
     declarations_by_record = _declaration_projections(session, record_ids)
-    dialogues_by_execution = _dialogue_projections(session, [record.execution_id for record in records])
+    dialogues_by_execution = _dialogue_projections(session, [record.agent_id for record in records])
     observations_by_record = _character_observations(session, record_ids)
     results: list[ChapterAnnotationView] = []
     for chapter_id, sources in sorted(groups.items(), key=lambda item: sequence.get(item[0], item[0])):
@@ -177,7 +177,7 @@ def chapter_annotations(session: Storage, run_id: str) -> list[ChapterAnnotation
         }
         payload["events"] = [value for record in ordered for value in declarations_by_record.get(record.record_id, [])]
         payload["dialogues"] = [
-            value for record in ordered for value in dialogues_by_execution.get(record.execution_id, [])
+            value for record in ordered for value in dialogues_by_execution.get(record.agent_id, [])
         ]
         payload["character_observations"] = [
             value for record in ordered for value in observations_by_record.get(record.record_id, [])
@@ -194,7 +194,7 @@ def chapter_annotations(session: Storage, run_id: str) -> list[ChapterAnnotation
                 role=metric.role,
                 payload=payload,
                 created_at=metric.created_at,
-                invocation_id=metric.execution_id,
+                invocation_id=metric.agent_id,
             )
         )
     return results
