@@ -23,7 +23,7 @@ def validate_topic_aggregation_row(row: object) -> tuple[int, float]:
         raw_topic_id = typed_row.topic_id
         raw_weighted_total = typed_row.weighted_total
     except AttributeError as exc:
-        raise RuntimeError("paragraph_topics 聚合结果缺少 topic_id 或 weighted_total 字段") from exc
+        raise RuntimeError("lda_paragraph_topics 聚合结果缺少 topic_id 或 weighted_total 字段") from exc
 
     if isinstance(raw_topic_id, bool) or not isinstance(raw_topic_id, int):
         raise RuntimeError(f"paragraph_topics 聚合结果 topic_id 类型错误: {type(raw_topic_id).__name__}")

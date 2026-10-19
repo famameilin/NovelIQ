@@ -52,7 +52,7 @@ class LDAConfig:
         )
 
     def to_parameters_dict(self) -> dict[str, Any]:
-        """输出非空参数快照（参数按明确列落 analysis_runs.lda_*）"""
+        """输出本次构建的非空参数"""
         return {
             key: value
             for key, value in {

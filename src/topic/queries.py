@@ -15,13 +15,11 @@ from src.topic.schema import TOPIC_MODEL_KEY
 
 
 def model_meta(dict_row: Any | None) -> dict[str, Any] | None:
-    """analysis_runs.lda_* 构建事实的 API 元数据视图（model_key/artifact_key 为合同投影）"""
+    """runs.lda_* 构建事实的 API 元数据视图（model_key/artifact_key 为合同投影）"""
     if dict_row is None:
         return None
     return {
         "model_key": TOPIC_MODEL_KEY,
-        "library_version": dict_row.library_version,
-        "pipeline_version": dict_row.pipeline_version,
         "num_topics": dict_row.num_topics,
         "artifact_key": dict_row.artifact_key,
     }

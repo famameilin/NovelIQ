@@ -9,10 +9,10 @@ INFERENCE_EMPTY_AFTER_PREPROCESS = "empty_after_preprocess"
 INFERENCE_EMPTY_BOW = "empty_bow"
 INFERENCE_FAILED = "failed"
 
-#: 固定 LDA 实现的模型合同标识（LDA 构建事实落 analysis_runs，身份读取投影）
+#: 固定 LDA 实现的模型标识
 TOPIC_MODEL_KEY = "gensim-lda"
 
-#: 推断状态 → 固定标准说明（版本化固定状态合同；不镜像成数据库词典表）
+#: 推断状态 → 固定标准说明（固定状态合同；不镜像成数据库词典表）
 #: 真实异常文字另记 paragraph_metrics.inference_error_text，不与固定说明双存
 INFERENCE_REASON_TEXTS: dict[str, str | None] = {
     INFERENCE_COMPLETE: None,
@@ -27,7 +27,7 @@ class ParagraphInferenceResult:
     """单个段落的完整主题推断结果。
 
     distribution 为完整 K 维 (topic_id, weight) 列表（仅 complete 状态非空），
-    推断状态与 token 数写 paragraph_metrics.inference_*，分布写 paragraph_topics。
+    推断状态与 token 数写 paragraph_metrics.inference_*，分布写 lda_paragraph_topics。
     """
 
     inference_status: str
