@@ -1,17 +1,14 @@
 """共享案例的保存顺序及独立审计回执验证"""
 
-from copy import deepcopy
 
 import pytest
 from sqlalchemy import select
 
 from src.audit.module import AuditModule
-from src.case_pool import CasePool
 from src.event_bus import EventBus, Message
 from src.fact_graph.read.annotations import fetch_chapter_characters_full
 from src.storage import new_id
 from src.storage.db import get_session_factory
-from src.storage.models import BookCase
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.storage_fixtures import fixture_id, storage_factory, storage_for
 
@@ -91,7 +88,7 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
     db_session.expire_all()
     kept = db_session.get(ChapterAnnotation, kept_id)
     kept_record = SimpleNamespace(
-        execution_id=kept.execution_id,
+        agent_id=kept.agent_id,
         record_id=kept.record_id,
         chapter_id=2,
         sequence=2,
@@ -118,94 +115,6 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
     assert fetch_chapter_characters_full(storage_for(AnnotationRepository(db_session).session), run_id) == []
 
 
-def test_case_delivery_rows_decide_adoption_and_promise_reconstructs(db_session):
-    """采纳由真实交付行决定（写交付=adopted）；承诺随痕迹重建，废弃作者不被恢复"""
-
-    _novel, run_id = create_run_with_chunks(db_session, texts=["原文一。", "原文二。"], chapter_ids=[1, 2])
-    from src.storage.models import CaseEntry, Execution
-    from src.storage.models.base import naive_utcnow
-
-    # 作者身份是真实执行号（单一字符串）；案例支持必须引用真实执行：
-    # (run, chapter, role) 唯一，因此两个作者落在两章
-    a, b = new_id(), new_id()
-    for author, chapter_id in ((a, 1), (b, 2)):
-        db_session.add(
-            Execution(
-                execution_id=author,
-                run_id=run_id,
-                chapter_id=chapter_id,
-                role="annotation",
-                attempt_number=1,
-                started_at=naive_utcnow(),
-                status="success",
-            )
-        )
-    db_session.flush()
-    pool = CasePool(run_id)
-    pool.begin(a)
-    pool.begin(b)
-    case = pool.push("dialogue", "核查实际关联", a)
-    pool.promise(case["case_id"], a)
-    pool.associate(
-        case["case_id"], a, tool_name="read_event", call_id=fixture_id(__name__, "first"), receipt={}, is_write=False
-    )
-    # 同一案例只有承诺者能投递：他执行接手只会得到 taken，投递直接拒收
-    assert pool.promise(case["case_id"], b)["status"] == "taken"
-    assert (
-        pool.associate(
-            case["case_id"],
-            b,
-            tool_name="write_event",
-            call_id=fixture_id(__name__, "second"),
-            receipt={},
-            is_write=True,
-        )["status"]
-        == "warning"
-    )
-    pool.associate(
-        case["case_id"], a, tool_name="write_event", call_id=fixture_id(__name__, "second"), receipt={}, is_write=True
-    )
-    # 案例本身先落行；交付行决定采纳，不依赖保存顺序
-    db_session.add(
-        BookCase(
-            case_id=case["case_id"],
-            registration_run_id=run_id,
-            case_type="dialogue",
-            description="核查实际关联",
-        )
-    )
-    db_session.flush()
-
-    def execution(author):
-        import json
-
-        from src.case_pool.contributions import CaseContribution
-
-        snapshot = {
-            "created_case_ids": sorted(pool.created.get(author, set())),
-            "registrations": {key: deepcopy(pool.cases[key]) for key in pool.registrations[author]},
-            "deliveries": deepcopy(pool.deliveries[author]),
-        }
-        return CaseContribution(run_id, author, json.dumps(snapshot, ensure_ascii=False))
-
-    pool.save_work(storage_for(db_session), execution(a))
-    db_session.commit()
-    supports = {
-        str(entry.producer_execution_id): entry
-        for entry in db_session.scalars(
-            select(CaseEntry).where(CaseEntry.case_id == case["case_id"], CaseEntry.producer_execution_id.is_not(None))
-        )
-    }
-    assert supports[a].adopted is True and b not in supports
-    loaded = CasePool(run_id)
-    loaded.load_storage(storage_for(db_session))
-    assert loaded.case_runtime[case["case_id"]]["promised"] is True
-    calls = [item["call_id"] for item in loaded.deliveries[a] if item["tool_name"] != "promise_case"]
-    assert sorted(calls) == [fixture_id(__name__, "first"), fixture_id(__name__, "second")]
-    restored = CasePool(run_id)
-    restored.restore_storage(storage_for(db_session), {a})
-    # 无支持的案例随废弃执行整体退场
-    assert restored.search() == []
 
 
 @pytest.mark.asyncio
@@ -240,10 +149,10 @@ async def test_actual_usage_duplicate_is_durable_and_does_not_double_charge(db_s
     bus.publish(message)
     await audit.close()
     db_session.expire_all()
-    from src.storage.models import ModelCall
+    from src.storage.models import AgentLoop
 
     # 独立调用与用量同列于 model_calls（用量与实报总量是同一行的事实）
-    calls = list(db_session.scalars(select(ModelCall).where(ModelCall.standalone_run_id == run_id)))
+    calls = list(db_session.scalars(select(AgentLoop).where(AgentLoop.standalone_run_id == run_id)))
     assert len(calls) == 1
     assert calls[0].prompt_tokens == 10
     assert calls[0].reported_total_tokens == 10

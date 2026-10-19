@@ -5,18 +5,17 @@ from __future__ import annotations
 from sqlalchemy import Select, func, or_, select
 
 from src.storage.models import (
+    Agent,
     Chapter,
     ChapterAnnotation,
     DeclarationParticipant,
     DialogueRecord,
     EventDeclaration,
-    Execution,
     GraphEntity,
     GraphFact,
     NarrativeLink,
     Paragraph,
     SourceEvidence,
-    WorkItem,
 )
 from src.storage.records.annotation import AnnotationRoleRecord as AnnotationRoleRecord
 from src.storage.records.annotation import ChapterAnnotationRow as ChapterAnnotationRow
@@ -49,7 +48,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
 
     def run_execution_ids(self, run_id: str) -> Select:
         "本运行的真实执行：整轮 session 行与直接携带 run 的调用行"
-        return select(Execution.execution_id).where(or_(Execution.run_id == run_id, Execution.session_run_id == run_id))
+        return select(Agent.id).where(or_(Agent.run_id == run_id, Agent.run_id == run_id))
 
     def fetch_saved_outputs(self, run_id: str) -> list[SavedAnnotationRecord]:
         "本运行已正式保存的章节标注：行存在即保存事实，章号/角色取记录自身列"
@@ -63,9 +62,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
                 record_id=str(annotation.record_id),
                 chapter_id=int(annotation.chapter_id),
                 role=str(annotation.role) if annotation.role is not None else None,
-                execution_id=str(annotation.execution_id),
-                contract_version=str(annotation.contract_version),
-                chapter_consolidation_version=str(annotation.chapter_consolidation_version),
+                agent_id=str(annotation.agent_id),
                 # 结构/事件角色没有章级指标时各列为空：按模型可空合同原样投影，不强行转型
                 summary=None if annotation.summary is None else str(annotation.summary),
                 emotional_valence=None if annotation.emotional_valence is None else int(annotation.emotional_valence),
@@ -92,7 +89,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
                 run_id=run_id,
                 chapter_id=int(row.chapter_id),
                 role=str(row.role),
-                invocation_id=str(row.execution_id),
+                invocation_id=str(row.agent_id),
                 state="saved",
                 saved_at=row.saved_at,
             )
@@ -147,7 +144,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         ]
 
     def _declaration_statement(self, run_id: str) -> Select:
-        "本运行的章级声明：记录自身带运行归属（chapter_annotations.run_id）"
+        "本运行的章级声明：记录自身带运行归属（agent_annotations.run_id）"
         return (
             select(EventDeclaration)
             .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
@@ -171,7 +168,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
             self.session.scalars(
                 select(NarrativeLink)
                 .where(
-                    NarrativeLink.producer_execution_id.in_(self.run_execution_ids(run_id)),
+                    NarrativeLink.producer_agent_id.in_(self.run_execution_ids(run_id)),
                     NarrativeLink.relation_type == "foreshadowing",
                     NarrativeLink.semantic_source_event_id.is_not(None),
                     NarrativeLink.semantic_target_event_id.is_not(None),
@@ -243,7 +240,7 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         statement = (
             select(NarrativeLink.semantic_source_event_id, func.count().label("edge_count"))
             .where(
-                NarrativeLink.producer_execution_id.in_(self.run_execution_ids(run_id)),
+                NarrativeLink.producer_agent_id.in_(self.run_execution_ids(run_id)),
                 NarrativeLink.relation_type == "foreshadowing",
                 NarrativeLink.semantic_source_event_id.is_not(None),
             )
@@ -262,24 +259,19 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
             raise ValueError(f"未知的图事实内容类型: {content_kind}")
         if shape == "entity":
             shape_filter = GraphFact.entity_id.is_not(None)
-            producer_filter = GraphFact.direct_producer_execution_id.in_(self.run_execution_ids(run_id))
+            producer_filter = GraphFact.direct_producer_agent_id.in_(self.run_execution_ids(run_id))
         elif shape == "relation":
             shape_filter = GraphFact.relation_id.is_not(None)
-            producer_filter = GraphFact.direct_producer_execution_id.in_(self.run_execution_ids(run_id))
+            producer_filter = GraphFact.direct_producer_agent_id.in_(self.run_execution_ids(run_id))
         elif shape == "plotline":
             shape_filter = GraphFact.plotline_subject_id.is_not(None)
-            producer_filter = GraphFact.direct_producer_execution_id.in_(self.run_execution_ids(run_id))
+            producer_filter = GraphFact.direct_producer_agent_id.in_(self.run_execution_ids(run_id))
         elif shape == "participant":
             shape_filter = GraphFact.participant_id.is_not(None)
             producer_filter = GraphFact.participant_id.in_(
                 select(DeclarationParticipant.participant_id).where(
                     DeclarationParticipant.declaration_id.in_(self._run_declaration_ids(run_id))
                 )
-            )
-        elif shape == "program":
-            shape_filter = GraphFact.program_work_id.is_not(None)
-            producer_filter = GraphFact.program_work_id.in_(
-                select(WorkItem.work_id).where(WorkItem.program_run_id == run_id)
             )
         else:
             raise ValueError(f"图事实形状 {shape} 尚无读取实现")

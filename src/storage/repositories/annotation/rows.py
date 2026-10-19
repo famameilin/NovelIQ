@@ -78,18 +78,16 @@ class ForeshadowingTreeView:
 
 @dataclass(frozen=True)
 class SavedAnnotationRecord:
-    """已保存的正式章节标注读投影（chapter_annotations 宽表自带章号与角色）
+    """已保存的正式章节标注读投影（agent_annotations 宽表自带章号与角色）
 
     章号/角色是标注记录自身列（写入时归属），段落情绪条目与覆盖告警
-    另从 analysis_assessments 与固定覆盖规则取得。
+    另从 agent_assessments 与固定覆盖规则取得。
     """
 
     record_id: str
     chapter_id: int
     role: str | None
-    execution_id: str
-    contract_version: str
-    chapter_consolidation_version: str
+    agent_id: str
     summary: str | None
     emotional_valence: int | None
     narrative_function: str | None
@@ -101,7 +99,7 @@ class SavedAnnotationRecord:
 
 @dataclass(frozen=True)
 class AnnotationRoleRecord:
-    """章内标注角色读投影（chapter_annotations 产物行 + 真实执行号）
+    """章内标注角色读投影（agent_annotations 产物行 + 真实执行号）
 
     state：已有正式标注记录为 saved，否则 pending；
     invocation_id 即产物行的真实执行号，saved_at 是保存时间。
@@ -117,7 +115,7 @@ class AnnotationRoleRecord:
 
 @dataclass(frozen=True)
 class DialogueRecordRow:
-    """对话记录读投影（dialogue_records + 由创建执行取得的章号与原文切片）
+    """对话记录读投影（graph_dialogues + 由创建执行取得的章号与原文切片）
 
     content 按章节正文 [start_char, end_char) 精确切片，不从文档字段读取。
     """
@@ -158,7 +156,7 @@ class GraphFactRow:
 
 @dataclass(frozen=True)
 class ForeshadowingEdgeRow:
-    """伏笔语义链路读投影（narrative_links 语义形状 + 端点完整事件的来源章号）
+    """伏笔语义链路读投影（event_links 语义形状 + 端点完整事件的来源章号）
 
     edge_type 为伏笔边取值，source/target 是完整事件身份；来源章号由该事件
     自身证据的段落所属章节投影，is_active/expired_at 只承接真实观察。

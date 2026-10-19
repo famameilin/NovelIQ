@@ -254,7 +254,7 @@ async def test_audit_rows_carry_program_meta_and_inner_call_index() -> None:
         "direct_fallback": False,
     }
     assert search_row["request_args"]["_program"]["error_code"] == "unknown_field"
-    assert search_row["status"] == "error"
+    assert search_row["error"]
 
 
 @pytest.mark.asyncio

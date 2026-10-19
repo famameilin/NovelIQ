@@ -5,15 +5,15 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from src.storage.models import (
+    Agent,
     AnalysisAssessment,
-    BookCase,
+    Case,
     Chapter,
     ChapterAnnotation,
     DeclarationParticipant,
     DialogueRecord,
     EventDeclaration,
     EventForeshadowingAction,
-    Execution,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -32,7 +32,7 @@ def agents_annotation_agent_recover_1(_session, value_1):
     return _session.execute(
         select(
             ChapterAnnotation.record_id,
-            ChapterAnnotation.execution_id,
+            ChapterAnnotation.agent_id,
             ChapterAnnotation.role,
             ChapterAnnotation.chapter_id,
             Chapter.sequence,
@@ -45,7 +45,7 @@ def agents_annotation_agent_recover_1(_session, value_1):
 
 
 def agents_annotation_agent_query_1(_session, execution_invocation_id):
-    return _session.get(Execution, execution_invocation_id)
+    return _session.get(Agent, execution_invocation_id)
 
 
 def agents_annotation_agent_query_2(_session, annotation_id):
@@ -59,7 +59,7 @@ def agents_annotation_agent_query_3(_session):
 def agents_annotation_agent_query_4(_session, message_invocation_id):
     return _session.scalars(
         select(GraphFact.relation_id).where(
-            GraphFact.direct_producer_execution_id == message_invocation_id, GraphFact.relation_id.is_not(None)
+            GraphFact.direct_producer_agent_id == message_invocation_id, GraphFact.relation_id.is_not(None)
         )
     )
 
@@ -86,13 +86,13 @@ def agents_annotation_agent_query_9(_session, annotation_id):
 
 def agents_annotation_agent_query_10(_session, message_invocation_id):
     return _session.scalars(
-        select(EventForeshadowingAction).where(EventForeshadowingAction.producer_execution_id == message_invocation_id)
+        select(EventForeshadowingAction).where(EventForeshadowingAction.producer_agent_id == message_invocation_id)
     )
 
 
 def agents_annotation_agent_query_11(_session, identifier):
-    return _session.get(BookCase, identifier)
+    return _session.get(Case, identifier)
 
 
 def agents_annotation_agent_query_12(_session, message_invocation_id):
-    return _session.scalars(select(DialogueRecord).where(DialogueRecord.creation_execution_id == message_invocation_id))
+    return _session.scalars(select(DialogueRecord).where(DialogueRecord.creation_agent_id == message_invocation_id))

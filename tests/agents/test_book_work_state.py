@@ -138,18 +138,10 @@ def test_case_exclusion_is_a_one_time_promise() -> None:
     pool.begin(a)
     pool.begin(b)
     case = pool.push("dialogue", "核查关联", a)
-    assert set(case) == {"case_id", "case_type", "description", "payload"}
+    assert set(case) == {"case_id", "case_type", "description"}
     pool.push("dialogue", "核查关联", b)
     assert pool.promise(case["case_id"], a)["status"] == "promised"
     assert pool.promise(case["case_id"], b)["status"] == "taken"
-    pool.associate(
-        case["case_id"],
-        a,
-        tool_name="write_event",
-        call_id="write",
-        receipt={"status": "written", "record": "process"},
-        is_write=True,
-    )
     assert pool.promise(case["case_id"], b)["status"] == "taken"
     pool.confirm(a)
     assert pool.promise(case["case_id"], b)["status"] == "taken"

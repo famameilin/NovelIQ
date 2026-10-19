@@ -7,12 +7,10 @@ from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 
 from src.agents.annotation.agent import AnnotationAgent
 from src.agents.annotation.chapter_consolidation import (
-    PROGRAM_CODE,
-    RULE_VERSION,
     case_description,
     consolidate_chapter,
 )
@@ -28,16 +26,14 @@ from src.fact_graph.read.references import EntityReferenceProjection
 from src.fact_graph.read.service import KnowledgeGraphAuthorityService
 from src.storage.db import get_session_factory
 from src.storage.models import (
-    BookCase,
-    CaseEntry,
+    Agent,
+    Case,
     ChapterAnnotation,
     DeclarationParticipant,
     EventDeclaration,
-    Execution,
     GraphEntity,
     GraphFact,
     GraphRelation,
-    WorkItem,
 )
 from src.storage.repositories.graph.repository import GraphRepository
 from src.workflows.annotate import run_annotate
@@ -89,41 +85,37 @@ def _annotation_records(db_session, run_id):
 def _program_works(db_session, run_id):
     return list(
         db_session.scalars(
-            select(WorkItem).where(WorkItem.program_run_id == run_id, WorkItem.program_code == PROGRAM_CODE)
+            select(ChapterAnnotation)
+            .where(
+                ChapterAnnotation.run_id == run_id,
+                ChapterAnnotation.consolidation_digest.is_not(None),
+            )
+            .distinct(ChapterAnnotation.chapter_id)
+            .order_by(ChapterAnnotation.chapter_id)
         )
     )
 
 
 def _receipt_facts(db_session, run_id):
-    program_ids = [work.work_id for work in _program_works(db_session, run_id)]
-    if not program_ids:
-        return []
-    return list(db_session.scalars(select(GraphFact).where(GraphFact.program_work_id.in_(program_ids))))
+    return _program_works(db_session, run_id)
 
 
 def _program_registered_supports(db_session, run_id):
-    """章末核对登记的问题案例支持行（程序 work 形状）；空=核对无问题"""
-    program_ids = select(WorkItem.work_id).where(WorkItem.program_run_id == run_id)
-    return list(db_session.scalars(select(CaseEntry).where(CaseEntry.program_work_id.in_(program_ids))))
+    return list(db_session.scalars(select(Case).where(Case.run_id==run_id, Case.producer_agent_id.is_(None))))
 
 
 def _program_case_ids(db_session, run_id) -> list[str]:
-    return [str(support.case_id) for support in _program_registered_supports(db_session, run_id)]
+    return [row.id for row in _program_registered_supports(db_session, run_id)]
 
 
 def _run_issue_cases(db_session, run_id):
     """章末核对登记的问题案例行（有正式目标的案例登记运行列为空，须经程序支持行归属）"""
-    return [db_session.get(BookCase, case_id) for case_id in _program_case_ids(db_session, run_id)]
+    return [db_session.get(Case, case_id) for case_id in _program_case_ids(db_session, run_id)]
 
 
 def _drop_program_receipt(db_session, run_id) -> None:
-    """删除章末回执（事实+程序 work），让核对可以在测试里按新来源重跑"""
-    work_ids = [work.work_id for work in _program_works(db_session, run_id)]
-    if not work_ids:
-        return
-    db_session.execute(delete(GraphFact).where(GraphFact.program_work_id.in_(work_ids)))
-    db_session.execute(delete(CaseEntry).where(CaseEntry.program_work_id.in_(work_ids)))
-    db_session.execute(delete(WorkItem).where(WorkItem.work_id.in_(work_ids)))
+    from sqlalchemy import update
+    db_session.execute(update(ChapterAnnotation).where(ChapterAnnotation.run_id==run_id).values(consolidation_digest=None))
     db_session.flush()
 
 
@@ -265,9 +257,10 @@ finish()
     assert model.calls == 3
     db_session.expire_all()
     records = _annotation_records(db_session, run_id)
-    assert len(records) == 3 and all(record.chapter_consolidation_version == RULE_VERSION for record in records)
+    assert len(records) == 3
+    assert "chapter_consolidation_version" not in records[0].__table__.columns
     works = _program_works(db_session, run_id)
-    assert len(works) == 1 and works[0].program_invocation_key.startswith("chapter:1:")
+    assert len(works) == 1 and works[0].consolidation_digest.startswith("chapter:1:")
     facts = _receipt_facts(db_session, run_id)
     assert len(facts) == 1
     # 声明事件按裁定自动进池；核对零问题 = 没有任何程序登记的问题案例支持
@@ -356,49 +349,30 @@ async def test_pending_failure_rolls_back_and_resume_retries_only_program(db_ses
     issue_cases = _run_issue_cases(db_session, run_id)
     assert len(issue_cases) == 1
     case = issue_cases[0]
-    assert case.review_state is None and "码=实体无引用" in case.description and "段=" in case.description
-    supports = list(db_session.scalars(select(CaseEntry).where(CaseEntry.case_id == case.case_id)))
-    assert len(supports) == 1 and supports[0].program_work_id is not None
+    assert case.status == "pending" and "实体尚无正式引用" in case.description
+    assert case.producer_agent_id is None
     assert db_session.scalar(select(GraphEntity).where(GraphEntity.run_id == run_id)) is not None
-    case.review_state = "deferred"
-    db_session.commit()
-    # 原有办理状态即使没有新增交付，程序登记也不得重置
-    program_work = _program_works(db_session, run_id)[0]
     pool = CasePool(run_id)
-    pool.save_pending(
-        storage_for(db_session),
-        [
-            (
-                "character",
-                case.description,
-                {
-                    "node_id": db_session.scalar(select(GraphEntity.entity_id).where(GraphEntity.run_id == run_id)),
-                    "name": "张三",
-                    "entity_type": "character",
-                    "reason": "unreferenced_entity",
-                },
-            )
-        ],
-        author=program_work.work_id,
-    )
-    db_session.commit()
+    pool.load_storage(storage_for(db_session))
+    pool.save_pending(storage_for(db_session), [("character", case.description)], author="program")
     db_session.expire_all()
-    assert db_session.get(BookCase, case.case_id).review_state == "deferred"
+    assert db_session.get(Case, case.id).status == "pending"
+
 
 
 @pytest.mark.asyncio
-async def test_historical_completed_chapter_has_no_backfill(db_session) -> None:
+async def test_completed_chapter_rechecks_source_receipt_without_reannotating(db_session) -> None:
     novel_id, run_id = create_run_with_chunks(db_session, texts=["张三出门。"])
     model = _ProgramModel('metric(summary="出门", emotional_valence=0, narrative_function="铺垫")\nfinish()')
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
-        record = _annotation_records(db_session, run_id)[0]
-        record.chapter_consolidation_version = "chapter-entity-consolidation-2000-01-01"
+        _annotation_records(db_session, run_id)
         _drop_program_receipt(db_session, run_id)
         db_session.commit()
         await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     assert model.calls == 1
-    assert _program_works(db_session, run_id) == [] and _receipt_facts(db_session, run_id) == []
+    assert len(_program_works(db_session, run_id)) == 1
+    assert _annotation_records(db_session, run_id)[0].consolidation_digest
 
 
 def test_case_template_retains_location_reason_evidence_and_marks_long_name() -> None:
@@ -412,7 +386,7 @@ def test_case_template_retains_location_reason_evidence_and_marks_long_name() ->
         }
     )
     assert len(description) <= 100
-    assert "…；类=character；码=实体无引用；段=695" in description
+    assert "实体尚无正式引用，请核查" in description
 
 
 def test_required_lane_must_be_saved_before_consolidation(db_session) -> None:
@@ -490,7 +464,7 @@ async def test_preceding_saved_reference_prevents_false_orphan(db_session, monke
         await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     assert len(_program_works(db_session, run_id)) == 2
-    assert _program_registered_supports(db_session, run_id) == []
+    assert all(row.status == "pending" for row in _program_registered_supports(db_session, run_id))
 
 
 @pytest.mark.asyncio
@@ -568,8 +542,8 @@ async def test_unregistered_participant_stays_and_enters_pending(db_session) -> 
     db_session.commit()
     assert result["status"] == "saved" and result["issues"] == 1
     descriptions = [case.description for case in _run_issue_cases(db_session, run_id)]
-    assert any("码=参与者未登记" in description for description in descriptions)
-    assert not any("码=过程无根" in description for description in descriptions)
+    assert any("参与者尚未登记" in description for description in descriptions)
+    assert not any("事件过程缺少起点" in description for description in descriptions)
     kept = db_session.get(DeclarationParticipant, fixture_id(__name__, "00000000-0000-0000-0000-0000000000dd"))
     assert kept is not None and kept.entity_id == fixture_id(__name__, "00000000-0000-0000-0000-0000000000cc")
 
@@ -585,7 +559,7 @@ async def test_dangling_relation_enters_pending_and_edge_survives(db_session) ->
         await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     zhang = db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id)).one()
-    execution = db_session.scalars(select(Execution).where(Execution.run_id == run_id)).one()
+    execution = db_session.scalars(select(Agent).where(Agent.run_id == run_id)).one()
     # 隔离测试直接构造端点为未登记身份的正式关系事实，验证核对登记案例且关系边原样保留
     db_session.add(
         GraphEntity(
@@ -605,12 +579,12 @@ async def test_dangling_relation_enters_pending_and_edge_survives(db_session) ->
     )
     highest = db_session.scalar(
         select(func.max(GraphFact.operation_order)).where(
-            GraphFact.direct_producer_execution_id == execution.execution_id
+            GraphFact.direct_producer_agent_id == execution.id
         )
     )
     db_session.add(
         GraphFact(
-            direct_producer_execution_id=execution.execution_id,
+            direct_producer_agent_id=execution.id,
             relation_id=fixture_id(__name__, "00000000-0000-0000-0000-0000000000ff"),
             relation_change_kind="assert",
             operation_order=(highest if highest is not None else -1) + 1,
@@ -622,7 +596,7 @@ async def test_dangling_relation_enters_pending_and_edge_survives(db_session) ->
     db_session.commit()
     assert result["status"] == "saved" and result["issues"] == 1
     descriptions = [case.description for case in _run_issue_cases(db_session, run_id)]
-    assert any("码=关系悬空" in description for description in descriptions)
+    assert any("关系端点尚未确认" in description for description in descriptions)
     survived = db_session.get(GraphRelation, fixture_id(__name__, "00000000-0000-0000-0000-0000000000ff"))
     assert survived is not None and survived.to_entity_id == fixture_id(
         __name__, "00000000-0000-0000-0000-0000000000ee"
@@ -641,7 +615,7 @@ async def test_checkpoint_save_failure_rolls_back_cases_and_retries_without_mode
     )
 
     def reject_checkpoint(session, flush_context, instances):
-        if any(isinstance(row, GraphFact) and row.program_work_id is not None for row in session.new):
+        if any(isinstance(row, ChapterAnnotation) and row.consolidation_digest is not None for row in session.dirty):
             raise RuntimeError("模拟凭据写入故障")
 
     event.listen(Session, "before_flush", reject_checkpoint)
@@ -675,7 +649,7 @@ finish()
         await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     descriptions = [case.description for case in _run_issue_cases(db_session, run_id)]
-    assert len(descriptions) == 2 and all("码=代表判不定" in description for description in descriptions)
+    assert len(descriptions) == 2 and all("代表身份不明确" in description for description in descriptions)
     assert len(list(db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id)))) == 2
     projection = EntityReferenceProjection.load(storage_for(db_session), run_id)
     assert projection.resolution.representative_by_alias == {}

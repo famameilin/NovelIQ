@@ -5,43 +5,25 @@ from __future__ import annotations
 from sqlalchemy import select, text
 
 from src.storage.models import (
-    BookCase,
-    CaseEntry,
+    Agent,
+    Case,
     Chapter,
     ChapterAnnotation,
     DeclarationParticipant,
     DialogueRecord,
     EventDeclaration,
-    Execution,
     GraphEntity,
     GraphFact,
     Paragraph,
     SourceEvidence,
-    WorkItem,
 )
 
 PROGRAM_CODE = "chapter_consolidation"
 
 
-def agents_annotation_chapter_consolidation_discard_chapter_receipts_1(_session, chapter_ids, run_id):
-    return _session.scalars(
-        select(WorkItem.work_id).where(
-            WorkItem.program_run_id == run_id,
-            WorkItem.program_chapter_id.in_(sorted(chapter_ids)),
-            WorkItem.program_code == PROGRAM_CODE,
-        )
-    )
-
-
-def agents_annotation_chapter_consolidation_discard_chapter_receipts_2(_session, receipts):
-    return _session.scalars(
-        select(CaseEntry.case_id).where(CaseEntry.program_work_id.in_(receipts), CaseEntry.case_id.is_not(None))
-    )
-
-
 def agents_annotation_chapter_consolidation_eligible_chapters_1(_session, run_id):
     return _session.execute(
-        select(ChapterAnnotation.chapter_id, ChapterAnnotation.chapter_consolidation_version).where(
+        select(ChapterAnnotation.chapter_id).where(
             ChapterAnnotation.run_id == run_id
         )
     )
@@ -55,11 +37,13 @@ def agents_annotation_chapter_consolidation_consolidate_chapter_1(_session, run_
 
 def agents_annotation_chapter_consolidation_consolidate_chapter_2(_session, chapter_id, run_id):
     return _session.scalar(
-        select(WorkItem).where(
-            WorkItem.program_run_id == run_id,
-            WorkItem.program_chapter_id == chapter_id,
-            WorkItem.program_code == PROGRAM_CODE,
+        select(ChapterAnnotation)
+        .where(
+            ChapterAnnotation.run_id == run_id,
+            ChapterAnnotation.chapter_id == chapter_id,
+            ChapterAnnotation.consolidation_digest.is_not(None),
         )
+        .limit(1)
     )
 
 
@@ -77,9 +61,10 @@ def agents_annotation_chapter_consolidation_consolidate_chapter_4(_session, chap
 
 def agents_annotation_chapter_consolidation_consolidate_chapter_5(_session, valid_executions):
     return _session.execute(
-        select(GraphFact, Execution.chapter_id)
-        .join(Execution, Execution.execution_id == GraphFact.direct_producer_execution_id)
-        .where(GraphFact.direct_producer_execution_id.in_(valid_executions))
+        select(GraphFact, ChapterAnnotation.chapter_id)
+        .join(Agent, Agent.id == GraphFact.direct_producer_agent_id)
+        .outerjoin(ChapterAnnotation, ChapterAnnotation.agent_id == Agent.id)
+        .where(GraphFact.direct_producer_agent_id.in_(valid_executions))
     )
 
 
@@ -102,7 +87,7 @@ def agents_annotation_chapter_consolidation_consolidate_chapter_9(_session, decl
 
 
 def agents_annotation_chapter_consolidation_consolidate_chapter_10(_session, valid_executions):
-    return _session.scalars(select(DialogueRecord).where(DialogueRecord.creation_execution_id.in_(valid_executions)))
+    return _session.scalars(select(DialogueRecord).where(DialogueRecord.creation_agent_id.in_(valid_executions)))
 
 
 def agents_annotation_chapter_consolidation_consolidate_chapter_11(_session, chapter_id, run_id):
@@ -118,7 +103,7 @@ def agents_annotation_chapter_consolidation_consolidate_chapter_12(_session, run
 
 
 def agents_annotation_chapter_consolidation_consolidate_chapter_13(_session, case_ids):
-    return _session.scalars(select(BookCase).where(BookCase.case_id.in_(case_ids)))
+    return _session.scalars(select(Case).where(Case.id.in_(case_ids)))
 
 
 def agents_annotation_chapter_consolidation_consolidate_chapter_14(_session, lookup_ids):

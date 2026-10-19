@@ -82,11 +82,11 @@ def test_legacy_identity_and_event_facts_are_not_current_work_operations(db_sess
     )
     record_id = commit_test_annotation(db_session, run_id=run_id, chapter_id=2, annotation=output)
     record = db_session.get(ChapterAnnotation, record_id)
-    author = str(record.execution_id)
+    author = str(record.agent_id)
     graph = FactGraph(run_scope=run_id)
     graph.restore_storage(
         storage_for(db_session),
-        [SimpleNamespace(execution_id=author, record_id=record_id, chapter_id=2, sequence=2, role="annotation")],
+        [SimpleNamespace(agent_id=author, record_id=record_id, chapter_id=2, sequence=2, role="annotation")],
     )
     snapshot = graph.load_saved_work(storage_for(db_session), author, record_id)
     graph.recover_work(snapshot)
@@ -191,20 +191,12 @@ def test_single_work_case_recovery_restores_own_exclusion_and_preserves_other_ow
     own = pool.push("character", "Own case", saved)
     external = pool.push("character", "Other case", other)
     pool.promise(own["case_id"], saved)
-    pool.associate(
-        own["case_id"],
-        saved,
-        tool_name="write_event",
-        call_id=fixture_id(__name__, "write"),
-        receipt={"status": "written", "record": "process"},
-        is_write=True,
-    )
 
     pool.promise(external["case_id"], other)
     snapshot = {
         "author": saved,
         "registrations": {own["case_id"]: own},
-        "deliveries": deepcopy(pool.deliveries[saved]),
+        "promises": pool.promises_for(saved),
     }
     pool.confirm(saved)
     pool.recover_work(snapshot)
@@ -213,7 +205,7 @@ def test_single_work_case_recovery_restores_own_exclusion_and_preserves_other_ow
     assert pool.case_runtime[own["case_id"]]["promised"] is True
     assert pool.case_runtime[external["case_id"]]["owner"] == other
     assert pool.case_runtime[external["case_id"]]["promised"] is True
-    assert len(pool.deliveries[saved]) == 2  # 承诺痕迹 + 写交付
+    assert pool.promises_for(saved) == [own["case_id"]]
     pool.confirm(saved)
     # 确认只标记保存完成：承诺与归属不退回
     assert pool.case_runtime[own["case_id"]]["owner"] == saved
@@ -224,25 +216,16 @@ def test_full_case_restore_is_idempotent_and_forgets_discarded_contributions(db_
     import json
 
     from src.case_pool.contributions import CaseContribution
-    from src.storage.models import Execution
-    from src.storage.models.base import naive_utcnow
+    from src.storage.models import Agent
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
 
     _novel, run_id = create_run_with_chunks(db_session, texts=["原文一。", "原文二。"], chapter_ids=[1, 2])
     # 作者身份是真实执行号；案例支持必须引用真实执行：
     # (run, chapter, role) 唯一，因此两个作者落在两章
     a, b = new_id(), new_id()
-    for author, chapter_id in ((a, 1), (b, 2)):
+    for author, _chapter_id in ((a, 1), (b, 2)):
         db_session.add(
-            Execution(
-                execution_id=author,
-                run_id=run_id,
-                chapter_id=chapter_id,
-                role="annotation",
-                attempt_number=1,
-                started_at=naive_utcnow(),
-                status="success",
-            )
+            Agent(id=author, run_id=run_id, type="annotation", status="success")
         )
     db_session.flush()
     pool = CasePool(run_id)
@@ -252,24 +235,12 @@ def test_full_case_restore_is_idempotent_and_forgets_discarded_contributions(db_
     second = pool.push("character", "Second case", b)
     assert pool.promise(first["case_id"], a)["status"] == "promised"
     assert pool.promise(second["case_id"], b)["status"] == "promised"
-    assert (
-        pool.associate(
-            first["case_id"], a, tool_name="write_event", call_id=fixture_id(__name__, "a"), receipt={}, is_write=True
-        )["status"]
-        == "success"
-    )
-    assert (
-        pool.associate(
-            second["case_id"], b, tool_name="write_event", call_id=fixture_id(__name__, "b"), receipt={}, is_write=True
-        )["status"]
-        == "success"
-    )
 
     def contribution(author):
         snapshot = {
             "created_case_ids": sorted(pool.created.get(author, set())),
             "registrations": {key: pool.cases[key] for key in pool.registrations[author]},
-            "deliveries": pool.deliveries[author],
+            "promises": pool.promises_for(author),
         }
         return CaseContribution(run_id, author, json.dumps(snapshot, ensure_ascii=False))
 
@@ -281,12 +252,13 @@ def test_full_case_restore_is_idempotent_and_forgets_discarded_contributions(db_
     restored.restore_storage(storage_for(db_session), set())
     restored.restore_storage(storage_for(db_session), set())
     # 承诺痕迹随交付重建：每作者 = 承诺行 + 写交付行
-    assert len(restored.deliveries[a]) == 2 and len(restored.deliveries[b]) == 2
+    assert restored.promises_for(a) == [first["case_id"]] and restored.promises_for(b) == [second["case_id"]]
     assert restored.case_runtime[first["case_id"]]["promised"] is True
     assert restored.case_runtime[second["case_id"]]["promised"] is True
+    from src.storage.repositories.annotation_recovery import prune_cases
+    prune_cases(db_session, run_id, {b})
+    db_session.commit()
     restored.restore_storage(storage_for(db_session), {b})
-    assert b not in restored.deliveries and b not in restored.saved and b not in restored.registrations
-    # b 的案例无支持整体退场；a 的案例与承诺不受影响
     assert [item["case_id"] for item in restored.search()] == [first["case_id"]]
     restored.begin(fixture_id(__name__, "later"))
     restored.rollback(fixture_id(__name__, "later"))

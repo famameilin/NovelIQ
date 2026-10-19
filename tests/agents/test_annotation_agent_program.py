@@ -194,7 +194,7 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
         )
     calls = [call.kwargs for call in recorder.record_tool_call.call_args_list]
     assert [call["tool_name"] for call in calls] == ["search_text", "execute_code"]
-    assert all(call["status"] == "error" for call in calls)
+    assert all(call["error"] for call in calls)
     assert calls[0]["request_args"]["_program"]["source_line"] == 1
     assert calls[0]["receipt"]["code"] == "dependency_unavailable"
     recorder.update_turn_timings.assert_called_once()

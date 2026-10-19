@@ -263,15 +263,17 @@ async def test_program_business_failure_is_audited_without_rolling_back_applied_
         observer=observer,
         program_tool_name="execute_code",
     )
-    reply = _program_reply('entity(id="a", name="阿青", entity_type="character", evidence=1)\nprint("done")', "p")
+    reply = _program_reply(
+        'entity(id="a", name="阿青", entity_type="character", evidence=1)\nunknown_call("done")', "p"
+    )
     await batch({"messages": [reply], "phase": "chapter_open", "iterations": 0, "error": None})
     row = next(row for row in observer.rows if row["call_index"] == 0)
-    assert row["status"] == "error"
+    assert row["error"]
     assert row["receipt"]["execution_status"] == "success"
     assert row["receipt"]["business_status"] == "runtime_error"
     assert row["receipt"]["applied"] == 0
     assert entity_key("阿青", "character") not in execution.ledger.written_entities
-    assert "print" in row["receipt"]["error"]["message"]
+    assert "unknown_call" in row["receipt"]["error"]["message"]
     positional = json.loads(await runtime.execute('search_graph("阿青")'))
     assert positional["error"]["type"] == "bad_call"
     assert "具名参数" in positional["error"]["message"]

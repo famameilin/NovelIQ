@@ -21,11 +21,9 @@ def save_annotation(session, request: AnnotationSave):
         )
     )
     if existing is not None:
-        if existing.execution_id != record["execution_id"] or existing.record_id != record["record_id"]:
+        if existing.agent_id != record["agent_id"] or existing.record_id != record["record_id"]:
             raise ValueError("章与角色已有另一份不可变标注结果")
-        from src.storage.repositories.annotation_receipts import annotation_warnings
-
-        return {"annotation_id": existing.record_id, "warnings": annotation_warnings(session, existing.record_id)}
+        return {"annotation_id": existing.record_id, "warnings": []}
     session.add(ChapterAnnotation(**record))
     session.flush()
     EventWriter(record["run_id"]).save_work(session, request.events, record["record_id"])
