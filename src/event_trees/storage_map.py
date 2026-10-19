@@ -1,14 +1,4 @@
-"""event_trees 与冻结 35 表结构之间的读写映射
-
-本模块只做结构映射，不含业务规则：
-
-- 运行归属投影：执行行直接携带 run（调用形状）或 session_run_id（整轮会话形状），
-  标注与诊断都从执行自身取归属，不互相冒充、不经 work 推导
-- 证据读写：source_evidence 的九个所有者列恰一，读回按 ordinal 还原原文引用，
-  哈希由不可变原文切片重算
-- 声明/完整事件读取：声明经记录（chapter_annotations 自带 run/章）取得运行归属；
-  完整事件经真实生产者执行取得；当前阶段是 MAX(stage_index)，不由时间或章号猜
-"""
+"章级声明、全书事件及其来源归属的存储映射"
 
 from __future__ import annotations
 
@@ -48,14 +38,14 @@ def dialogue_record_by_candidate(session: Storage, run_id: Any, candidate_key: A
     return session.narrative.dialogue_record_by_candidate(run_id, candidate_key)
 
 
-def execution_in_run(session: Storage, execution_id: Any, run_id: Any) -> Any:
+def execution_in_run(session: Storage, agent_id: Any, run_id: Any) -> Any:
     """真实执行的本 run 归属（调用形状带 run，整轮会话形状带 session_run）"""
-    return session.narrative.execution_in_run(execution_id, run_id)
+    return session.narrative.execution_in_run(agent_id, run_id)
 
 
-def annotation_chapter_of_execution(session: Storage, execution_id: Any) -> Any:
+def annotation_chapter_of_execution(session: Storage, agent_id: Any) -> Any:
     """标注执行的来源章：章号取执行自身归属列，章序从 chapters 取得"""
-    return session.narrative.annotation_chapter_of_execution(execution_id)
+    return session.narrative.annotation_chapter_of_execution(agent_id)
 
 
 def chapter_offsets(session: Storage, run_id: Any, chapter_ids: Any) -> Any:
@@ -78,29 +68,24 @@ def evidence_payloads(session: Storage, run_id: Any, rows: Any) -> Any:
     return session.narrative.evidence_payloads(run_id, rows)
 
 
+def evidence_payload_groups(session: Storage, run_id: Any, groups: Any) -> Any:
+    """批量重组多个所有者的证据行；段落一次读取"""
+    return session.narrative.evidence_payload_groups(run_id, groups)
+
+
 def fetch_evidence(session: Storage, owner_column: Any, owner_ids: Any) -> Any:
     """按所有者列批量读取证据行，返回 owner→有序证据"""
     return session.narrative.fetch_evidence(owner_column, owner_ids)
 
 
 def write_evidence_rows(session: Storage, owner: Any, evidence: Any) -> Any:
-    """证据逐条按原顺序写入 source_evidence；owner 恰一由目标表 CHECK 保证"""
+    """证据逐条按原顺序写入 paragraph_evidence；owner 恰一由目标表 CHECK 保证"""
     return session.narrative.write_evidence_rows(owner, evidence)
 
 
-def conflict_payloads(session: Storage, run_id: Any) -> Any:
-    """本 run 的冲突读取形状：主体类型、逐条陈述及各自证据"""
-    return session.narrative.conflict_payloads(run_id)
-
-
-def stage_chain(session: Storage, event_ids: Any) -> Any:
-    """事件阶段链：按显式 stage_index 升序读取，链尾为当前阶段"""
-    return session.narrative.stage_chain(event_ids)
-
-
-def revision_contents(session: Storage, revisions: Any) -> Any:
-    """阶段内容：绑定声明取不可变声明正文，独立 origin 取 origin_* 列"""
-    return session.narrative.revision_contents(revisions)
+def declaration_bindings(session: Storage, event_ids: Any) -> Any:
+    "读取完整事件的全部声明归属"
+    return session.narrative.declaration_bindings(event_ids)
 
 
 def run_execution_ids(session: Storage, run_id: str) -> list[str]:

@@ -8,7 +8,7 @@ from typing import Any
 from src.storage import new_id
 from src.storage.query_terms import query_search_terms, term_matches
 
-CONTRIBUTION_KEYS = ("complete_events", "revisions", "containments", "ownerships", "relations", "conflicts")
+CONTRIBUTION_KEYS = ("complete_events", "containments", "ownerships", "relations")
 
 
 def _event_search_text(content: dict[str, Any]) -> str:
@@ -42,11 +42,9 @@ class EventTrees:
         self.saved: set[str] = set()
         self.actions: dict[str, dict[str, Any]] = {}
         self.complete_events: dict[str, dict[str, Any]] = {}
-        self.revisions: dict[str, dict[str, Any]] = {}
         self.containments: dict[str, dict[str, Any]] = {}
         self.ownerships: dict[str, dict[str, Any]] = {}
         self.relations: dict[str, dict[str, Any]] = {}
-        self.conflicts: dict[str, dict[str, Any]] = {}
 
     def _identifier(self, *key) -> str:
         """一次冻结内的重复业务键复用已分配身份"""
@@ -54,8 +52,8 @@ class EventTrees:
             self._identifiers[key] = new_id()
         return self._identifiers[key]
 
-    def begin(self, execution_id: str) -> None:
-        self.executions.add(execution_id)
+    def begin(self, agent_id: str) -> None:
+        self.executions.add(agent_id)
 
     def sync(self, author: str, chapter_id: int, events: list[Any]) -> None:
         if author not in self.executions:
@@ -99,59 +97,19 @@ class EventTrees:
                 target[identifier] = {"author": author, "content": deepcopy(content)}
 
     def confirmed_complete_event_index(self, *, through_paragraph_id: int | None = None) -> dict[str, dict[str, Any]]:
-        """按真实原文可见范围读取已确认当前版本，未来来源整项拒绝，不回退旧版本"""
+        "按真实原文可见范围读取已确认全书事件"
         result = {
             key: deepcopy(value["content"])
             for key, value in self.complete_events.items()
             if value["author"] in self.saved
         }
         for identifier, value in result.items():
-            author = self.complete_events[identifier]["author"]
-            value["producer_invocation_id"] = author
-            value["revisions"] = [
-                {
-                    "summary": value["summary"],
-                    "progress": value["progress"],
-                    "status": value["status"],
-                    "producer_invocation_id": author,
-                    "source_operation_id": f"create/{value['local_key']}",
-                    "evidence_paragraph_id": value["evidence_paragraph_id"],
-                }
-            ]
-            value["current_revision"] = value["revisions"][0]
-            value["current_revision_id"] = self._identifier(
-                self.run_id, author, "event_revision", f"create/{value['local_key']}"
-            )
-        revisions = [
-            {**value["content"], "producer_invocation_id": value["author"]}
-            for value in self.revisions.values()
-            if value["author"] in self.saved
-        ]
-        pending = list(revisions)
-        while pending:
-            ready = [
-                value
-                for value in pending
-                if value["previous_revision_id"] is None
-                or value["previous_revision_id"] == result[value["event_id"]]["current_revision_id"]
-            ]
-            if not ready:
-                raise ValueError("已确认事件版本链无法恢复")
-            for value in ready:
-                result[value["event_id"]].update({key: value[key] for key in ("summary", "progress", "status")})
-                result[value["event_id"]]["current_revision_id"] = value["revision_id"]
-                result[value["event_id"]]["revisions"].append(value)
-                result[value["event_id"]]["current_revision"] = value
-                pending.remove(value)
+            value["producer_agent_id"] = self.complete_events[identifier]["author"]
         if through_paragraph_id is not None:
             result = {
-                identifier: value
-                for identifier, value in result.items()
-                if all(
-                    type(revision.get("evidence_paragraph_id")) is int
-                    and 0 <= revision["evidence_paragraph_id"] <= through_paragraph_id
-                    for revision in value["revisions"]
-                )
+                identifier: value for identifier, value in result.items()
+                if type(value.get("evidence_paragraph_id")) is int
+                and 0 <= value["evidence_paragraph_id"] <= through_paragraph_id
             }
         return result
 
@@ -218,7 +176,7 @@ class EventTrees:
             "node_id": node_id,
             "declaration_id": node_id,
             "kind": "declaration",
-            "producer_invocation_id": node["author"],
+            "producer_agent_id": node["author"],
             "chapter_id": node["chapter_id"],
             "saved": node["author"] in self.saved,
             "content": content,
@@ -287,16 +245,16 @@ class EventTrees:
             read = reads.get(identifier)
             if read is None:
                 raise ValueError(f"node_id={identifier} 本 invocation 尚未实际读取，请重新读取")
-            if read["producer_invocation_id"] != current["producer_invocation_id"]:
+            if read["producer_agent_id"] != current["producer_agent_id"]:
                 raise ValueError(
-                    f"node_id={identifier} 读取生产者={read[('producer_invocation_id')]} 当前生产者={
-                        current['producer_invocation_id']
+                    f"node_id={identifier} 读取生产者={read[('producer_agent_id')]} 当前生产者={
+                        current['producer_agent_id']
                     }，请重新读取"
                 )
             if read["content"] != current["content"]:
                 raise ValueError(f"node_id={identifier} 当前业务内容已变化，请重新读取")
             if self.nodes[identifier]["author"] != author and (not current["saved"]):
-                raise ValueError(f"node_id={identifier} 属于其他未成功保存执行={current['producer_invocation_id']}")
+                raise ValueError(f"node_id={identifier} 属于其他未成功保存执行={current['producer_agent_id']}")
             paragraph_id = current["content"]["evidence_paragraph_id"]
             if paragraph_id not in authorized_paragraphs:
                 raise ValueError(f"node_id={identifier} 原文 paragraph_id={paragraph_id} 尚未实际读取")
@@ -350,12 +308,12 @@ class EventTrees:
     def stop(self, author: str) -> None:
         self.executions.discard(author)
 
-    def confirm(self, execution_id: str) -> None:
-        self.saved.add(execution_id)
-        self.stop(execution_id)
+    def confirm(self, agent_id: str) -> None:
+        self.saved.add(agent_id)
+        self.stop(agent_id)
 
-    def rollback(self, execution_id: str) -> None:
-        author = execution_id
+    def rollback(self, agent_id: str) -> None:
+        author = agent_id
         if author in self.saved:
             return
         self.stop(author)
@@ -386,9 +344,6 @@ class EventTrees:
             key: value
             for key, value in self.relations.items()
             if not self._relation_touches(value["content"], removed_events, removed)
-        }
-        self.revisions = {
-            key: value for key, value in self.revisions.items() if value["content"]["event_id"] not in removed_events
         }
 
     @staticmethod
@@ -459,8 +414,8 @@ class EventTrees:
             getattr(self, key).clear()
         self.executions.clear()
         for record in records:
-            author = str(record.execution_id)
-            saved = self.load_saved_work(session, str(record.execution_id), str(record.record_id))
+            author = str(record.agent_id)
+            saved = self.load_saved_work(session, str(record.agent_id), str(record.record_id))
             self.nodes.update(saved["nodes"])
             self.actions.update(saved["actions"])
             for key in CONTRIBUTION_KEYS:
@@ -468,18 +423,14 @@ class EventTrees:
             self.saved.add(author)
         self._parents()
 
-    def load_saved_work(self, session: Any, execution_id: str, annotation_id: str) -> dict[str, Any]:
+    def load_saved_work(self, session: Any, agent_id: str, annotation_id: str) -> dict[str, Any]:
         """锁外取得已保存执行的原始声明、实际有效动作与来源候选关系"""
         from src.event_trees import storage_map as smap
 
         record = session.reads.event_trees_trees_load_saved_work_1(annotation_id)
-        if (
-            record is None
-            or record.execution_id != execution_id
-            or record.contract_version != "event-tree-declarations-v1"
-        ):
-            raise ValueError(f"事件保存身份不一致: {execution_id}")
-        author = execution_id
+        if record is None or record.agent_id != agent_id:
+            raise ValueError(f"事件保存身份不一致: {agent_id}")
+        author = agent_id
         declarations = list(session.reads.event_trees_trees_load_saved_work_2(annotation_id))
         declaration_ids = [row.declaration_id for row in declarations]
         participant_rows = (
@@ -527,7 +478,7 @@ class EventTrees:
             }
             nodes[row.declaration_id] = {"author": author, "chapter_id": chapter_id, "content": deepcopy(content)}
         actions: dict[str, Any] = {}
-        action_rows = list(session.reads.event_trees_trees_load_saved_work_4(execution_id)) if annotation_id else []
+        action_rows = list(session.reads.event_trees_trees_load_saved_work_4(agent_id)) if annotation_id else []
         action_evidence = smap.fetch_evidence(session, "foreshadow_action_id", [row.action_id for row in action_rows])
         for row in action_rows:
             actions[row.action_id] = {
@@ -554,7 +505,7 @@ class EventTrees:
                     "source_operation_id": row.source_operation_local_key,
                 },
             }
-            for row in session.reads.event_trees_trees_load_saved_work_5(execution_id)
+            for row in session.reads.event_trees_trees_load_saved_work_5(agent_id)
         }
         return {
             "author": author,

@@ -1,9 +1,4 @@
-"""伏笔动作统一按正文披露位置归并，调用顺序只用于同位置的稳定排列
-
-动作事实来自 event_foreshadowing_actions，证据来自 source_evidence 的动作所有者列；
-root/target 事件身份按阶段声明绑定投影（未发布为空，不回填冒充）；
-来源章序从真实标注产物行（chapter_annotations 自带章归属）与 chapters 取得。
-"""
+"""伏笔动作按原文位置排列，正式事件身份沿声明归属取得"""
 
 from __future__ import annotations
 
@@ -22,7 +17,7 @@ class ForeshadowingActionRow:
     action_type: str
     source_declaration_id: str
     target_declaration_id: str | None
-    producer_execution_id: str
+    producer_agent_id: str
     source_operation_id: str
     operation_order: int
     chapter_id: int | None
@@ -71,7 +66,7 @@ def load_foreshadowing_actions(session: Storage, run_id: str) -> list[Foreshadow
     evidence = smap.fetch_evidence(session, "foreshadow_action_id", [row.action_id for row in action_rows])
     result: list[ForeshadowingActionRow] = []
     for row in action_rows:
-        source_context = smap.annotation_chapter_of_execution(session, row.producer_execution_id)
+        source_context = smap.annotation_chapter_of_execution(session, row.producer_agent_id)
         chapter_id, chapter_order = source_context.chapter_id, source_context.chapter_order
         result.append(
             ForeshadowingActionRow(
@@ -79,7 +74,7 @@ def load_foreshadowing_actions(session: Storage, run_id: str) -> list[Foreshadow
                 action_type=row.action_type,
                 source_declaration_id=row.source_declaration_id,
                 target_declaration_id=row.target_declaration_id,
-                producer_execution_id=row.producer_execution_id,
+                producer_agent_id=row.producer_agent_id,
                 source_operation_id=row.source_operation_local_key,
                 operation_order=int(row.operation_order),
                 chapter_id=chapter_id,
