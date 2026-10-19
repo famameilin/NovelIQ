@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.storage.models import AnalysisRun
+from src.storage.models import Run
 
 
 def api_dependencies_require_run_for_novel_1(_session, run_id):
-    return _session.get(AnalysisRun, run_id)
+    return _session.get(Run, run_id)

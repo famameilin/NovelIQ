@@ -15,12 +15,12 @@ from src.storage.records.models import GraphFactRecord
 
 
 def test_every_table_has_one_uuid_primary_key():
-    assert len(Base.metadata.tables) == 35
+    assert len(Base.metadata.tables) == 32
     for table in Base.metadata.tables.values():
         keys = list(table.primary_key.columns)
         assert len(keys) == 1, table.name
         assert isinstance(keys[0].type.impl, Uuid), table.name
-        assert keys[0].default is not None, table.name
+        assert keys[0].default is not None or table.name == "global_stats", table.name
 
 
 def test_storage_does_not_export_transaction_or_query_controls():
@@ -136,4 +136,4 @@ def test_diagnosis_formal_entry_allocates_uuid7_session(monkeypatch):
         is sentinel
     )
     assert received["session"] is storage
-    assert UUID(received["execution_id"]).version == 7
+    assert UUID(received["agent_id"]).version == 7

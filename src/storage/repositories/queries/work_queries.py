@@ -34,8 +34,8 @@ def work_queries_declaration_projections_2(_session, record_ids):
 def work_queries_dialogue_projections_1(_session, execution_ids):
     return _session.scalars(
         select(DialogueRecord)
-        .where(DialogueRecord.creation_execution_id.in_(execution_ids))
-        .order_by(DialogueRecord.creation_execution_id, DialogueRecord.start_char, DialogueRecord.candidate_key)
+        .where(DialogueRecord.creation_agent_id.in_(execution_ids))
+        .order_by(DialogueRecord.creation_agent_id, DialogueRecord.start_char, DialogueRecord.candidate_key)
     )
 
 

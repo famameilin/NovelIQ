@@ -35,7 +35,7 @@ def test_create_and_insert(db_session) -> None:
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
+    run_id = run_repo.create_run(novel_id=novel_id)
 
     chapter_repo = ChapterRepository(db_session)
 
@@ -71,11 +71,7 @@ def test_insert_chapter_texts_keeps_duplicate_chapter_titles_separate(db_session
 
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Duplicate Chapter Titles",
-    )
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
 
     chapter_repo = ChapterRepository(db_session)
     chapter_repo.insert_chapter_texts(run_id, chunks)
@@ -100,7 +96,7 @@ def test_retired_analysis_output_entrypoints_raise(db_session) -> None:
     """诊断报告只走 diagnosis_reports 正式关系"""
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Test Novel")
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
     stats_repo = StatsRepository(db_session)
 
     with pytest.raises(NotImplementedError):
@@ -114,11 +110,11 @@ def test_insert_agent_analysis(db_session) -> None:
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
+    run_id = run_repo.create_run(novel_id=novel_id)
     for name in ("角色0", "角色1"):
         ensure_character(db_session, run_id=run_id, name=name)
 
-    session_id, _execution_id = add_diagnosis_context(db_session, run_id)
+    session_id, _agent_id = add_diagnosis_context(db_session, run_id)
     insert_report_fixture(
         db_session,
         run_id,
@@ -150,10 +146,10 @@ def test_fetch_agent_analysis_prefers_latest_row_for_same_run(db_session) -> Non
     insert_test_novel(novel_id, session=db_session)
 
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
+    run_id = run_repo.create_run(novel_id=novel_id)
     ensure_character(db_session, run_id=run_id, name="角色0")
 
-    session_id, _execution_id = add_diagnosis_context(db_session, run_id)
+    session_id, _agent_id = add_diagnosis_context(db_session, run_id)
     insert_report_fixture(
         db_session,
         run_id,
