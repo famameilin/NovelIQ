@@ -1,6 +1,6 @@
 """章内人物观测的正式写链夹具：观测三态随事件参与者落账
 
-后人物动态观测的唯一事实源是「声明的参与者行」（declaration_participants
+后人物动态观测的唯一事实源是「声明的参与者行」（event_participants
 三态列 + 参与者观测事实行）。共享的 `persist_chapter_annotation` 不产出带三态的
 事件参与者，`characters=[...]` 只会落成不可读的观测载荷；需要可读人物观测行
 （别名归并、标签页、时间轴人物维度）的测试用本模块的 `persist_observed_characters`

@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from src.storage.models import AnalysisRun
+from src.storage.models import Run
 
 
 def set_run_status(session: Session, run_id: str, status: str) -> None:
-    run = session.get(AnalysisRun, run_id)
+    run = session.get(Run, run_id)
     if run is None:
         return
     now = datetime.now(UTC).replace(tzinfo=None)

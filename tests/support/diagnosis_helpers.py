@@ -2,12 +2,9 @@
 
 from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
 from src.storage import new_id
+from src.storage.models import Agent
 from src.storage.repositories.diagnosis_event_writes import save_diagnosis_events
-from src.storage.repositories.organization_writes import (
-    register_diagnosis_execution,
-    register_diagnosis_session,
-    save_organization,
-)
+from src.storage.repositories.organization_writes import save_organization
 from tests.support.storage_fixtures import storage_for
 
 from .event_tree_fixtures import report_case_anchor
@@ -16,13 +13,13 @@ from .event_tree_fixtures import report_case_anchor
 def declaration_event_draft(session, run_id, *, groups=None):
     """夹具显式指定声明身份分组，未指定时各项独立，不按旧树推断"""
     session_id = new_id()
-    execution_id = new_id()
-    register_diagnosis_session(session, run_id=run_id, session_id=session_id)
-    register_diagnosis_execution(session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=1)
+    agent_id = new_id()
+    session.add(Agent(id=session_id, run_id=run_id, type="report", status="running"))
+    session.add(Agent(id=agent_id, run_id=run_id, type="report", status="running"))
     draft = EventOrganizationDraft(storage_for(session), run_id, session_id)
     draft.fixture_session = session
     draft.case_id = report_case_anchor(run_id)
-    draft.producer_invocation_id = execution_id
+    draft.producer_agent_id = agent_id
     declarations = list(draft._declarations().values())
     by_id = {row["declaration_id"]: row for row in declarations}
     # 显式分组之外的同 run 声明各自独立成组：身份候选必须覆盖全部声明才能通过保存校验
@@ -43,8 +40,6 @@ def declaration_event_draft(session, run_id, *, groups=None):
             status=current["status"],
             progress=current["progress"],
             declaration_ids=group,
-            stage_order=group,
-            current_declaration_id=group[-1],
             reason="读取夹具显式指定本组声明组成一个事件身份",
             evidence=evidence,
         )
@@ -95,7 +90,7 @@ def persist_event_draft(session, draft, report_id=None):
         report_id = insert_report_fixture(
             session,
             draft.run_id,
-            str(draft.execution_id),
+            str(draft.agent_id),
             AgentAnalysis(narrative_organization=organization),
         )
     save_diagnosis_events(session, draft.run_id, organization, report_id)

@@ -33,11 +33,7 @@ def create_completed_run(
     """创建 completed run 与一章一个 chunk 的原文（chunk.index 从 0 起，chapter_id 从 1 起）"""
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title=title,
-    )
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
     offset = 0
     chunks: list[Chunk] = []
     for chapter_index, text in enumerate(chapter_texts):
@@ -65,11 +61,7 @@ def create_run_with_status(
     """创建指定终态/运行态的 run（用于 409/400 门禁测试）"""
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="段落接口门禁测试",
-    )
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
     if status != "pending":
         set_run_status(RunRepository(db_session).session, run_id, status)
     return novel_id, run_id

@@ -1,9 +1,9 @@
 """时间轴与剧情推进场景夹具
 
 夹具按冻结 35 表的正式关系写入，读取一律走正式读面（plotline/timeline 读面）：
-- 标注来源链：executions(真实调用，直接带 run/章/角色) → chapter_annotations
-- 章级声明：event_declarations + declaration_participants + source_evidence
-- 图谱事实：graph_facts 的实体/关系/人物动态观测三种形状 + source_evidence
+- 标注来源链：agent(真实调用，直接带 run/章/角色) → agent_annotations
+- 章级声明：event_declarations + event_participants + paragraph_evidence
+- 图谱事实：graph_facts 的实体/关系/人物动态观测三种形状 + paragraph_evidence
 - 章张力：paragraph_features 的 tension_z 正式观测，展示值由读面 sigmoid 投影
 
 新契约下人物动态观测只能挂在声明的参与者上，故每章为本章 characters 观测建立
@@ -20,17 +20,15 @@ from typing import Any
 
 from sqlalchemy import select
 
-from src.agents.annotation.chapter_consolidation import RULE_VERSION
-from src.event_trees.read.organization import CONTRACT_VERSION
 from src.fact_graph.vocabulary import RELATION_DEFINITIONS
 from src.storage import new_id
 from src.storage.models import (
+    Agent,
     Chapter,
     ChapterAnnotation,
     DeclarationParticipant,
     EventDeclaration,
     EventForeshadowingAction,
-    Execution,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -113,32 +111,22 @@ def create_chapter_annotation_source(
     pivot_moment: bool | None = None,
     cliffhanger: bool | None = None,
 ) -> tuple[str, str]:
-    """建立一章的正式标注来源链（执行行直接带 run/章/角色），返回 (record_id, execution_id)"""
+    """建立一章的正式标注来源链（执行行直接带 run/章/角色），返回 (record_id, agent_id)"""
     chapter = session.scalar(select(Chapter).where(Chapter.run_id == run_id, Chapter.chapter_id == chapter_id))
     if chapter is None or chapter.text is None:
         raise ValueError(f"章节没有原文: run_id={run_id} chapter_id={chapter_id}")
-    execution_id, record_id = new_id(), new_id()
+    agent_id, record_id = new_id(), new_id()
     session.add(
-        Execution(
-            execution_id=execution_id,
-            run_id=run_id,
-            chapter_id=chapter_id,
-            role=role,
-            attempt_number=1,
-            started_at=_utcnow(),
-            status="success",
-        )
+        Agent(id=agent_id, run_id=run_id, type=role, status="success")
     )
     session.flush()
     session.add(
         ChapterAnnotation(
             record_id=record_id,
-            execution_id=execution_id,
+            agent_id=agent_id,
             run_id=run_id,
             chapter_id=chapter_id,
             role=role,
-            contract_version=CONTRACT_VERSION,
-            chapter_consolidation_version=RULE_VERSION,
             summary=summary if summary is not None else f"章节 {chapter_id} 摘要",
             emotional_valence=emotional_valence,
             narrative_function=narrative_function,
@@ -147,7 +135,7 @@ def create_chapter_annotation_source(
         )
     )
     session.flush()
-    return record_id, execution_id
+    return record_id, agent_id
 
 
 def declaration_id_for_event(run_id: str, work_id: str, node_key: str, *, tree_key: str | None = None) -> str:
@@ -185,10 +173,10 @@ def save_event_declaration(
     if not paragraphs:
         raise ValueError(f"章节没有段落: run_id={run_id} chapter_id={chapter_id}")
     paragraph = next((row for row in paragraphs if row.paragraph_id == evidence_paragraph_id), paragraphs[0])
-    execution_id = session.scalar(
-        select(ChapterAnnotation.execution_id).where(ChapterAnnotation.record_id == record_id)
+    agent_id = session.scalar(
+        select(ChapterAnnotation.agent_id).where(ChapterAnnotation.record_id == record_id)
     )
-    if execution_id is None:
+    if agent_id is None:
         raise ValueError(f"声明必须引用本 run 已保存的标注记录: record_id={record_id}")
     identifier = fixture_id(run_id, record_id, "declaration", declaration_id or local_key)
     session.add(
@@ -237,7 +225,7 @@ def save_event_declaration(
             registered.add(entity_id)
             _write_entity_reference(
                 session,
-                execution_id=execution_id,
+                agent_id=agent_id,
                 paragraph=paragraph,
                 entity_id=entity_id,
             )
@@ -254,11 +242,11 @@ def save_event_declaration(
     if is_foreshadowing_root:
         # 与生产 freeze_actions 同形：伏笔树根在标注保存时即写 setup 动作（证据挂动作所有者列）
         operation = f"setup/{identifier}"
-        action_id = fixture_id(run_id, execution_id, operation)
+        action_id = fixture_id(run_id, agent_id, operation)
         session.add(
             EventForeshadowingAction(
                 action_id=action_id,
-                producer_execution_id=execution_id,
+                producer_agent_id=agent_id,
                 source_operation_local_key=operation[:128],
                 operation_order=0,
                 action_type="setup",
@@ -293,12 +281,12 @@ def _write_fact_evidence(session: Any, fact_id: int, paragraph: Paragraph) -> No
     )
 
 
-def _next_operation_order(session: Any, execution_id: str) -> int:
+def _next_operation_order(session: Any, agent_id: str) -> int:
     """同一真实执行内的下一个操作序号（事实序是执行内显式顺序，不猜时间）"""
     from sqlalchemy import func
 
     current = session.scalar(
-        select(func.max(GraphFact.operation_order)).where(GraphFact.direct_producer_execution_id == execution_id)
+        select(func.max(GraphFact.operation_order)).where(GraphFact.direct_producer_agent_id == agent_id)
     )
     return 0 if current is None else int(current) + 1
 
@@ -306,15 +294,15 @@ def _next_operation_order(session: Any, execution_id: str) -> int:
 def _write_entity_reference(
     session: Any,
     *,
-    execution_id: str,
+    agent_id: str,
     paragraph: Paragraph,
     entity_id: str,
 ) -> None:
     """章内实体引用事实：只登记身份与出现章，不提交描述/代表标记/标签（omit）"""
     fact = GraphFact(
-        direct_producer_execution_id=execution_id,
+        direct_producer_agent_id=agent_id,
         entity_id=entity_id,
-        operation_order=_next_operation_order(session, execution_id),
+        operation_order=_next_operation_order(session, agent_id),
     )
     session.add(fact)
     session.flush()
@@ -325,7 +313,7 @@ def _write_relation_change(
     session: Any,
     *,
     run_id: str,
-    execution_id: str,
+    agent_id: str,
     paragraph: Paragraph,
     from_name: str,
     to_name: str,
@@ -335,7 +323,7 @@ def _write_relation_change(
     to_entity_type: str = "character",
     reason: str | None = None,
 ) -> str:
-    """关系事实：端点、变化类型与理由按关系形状落 graph_facts，证据进 source_evidence"""
+    """关系事实：端点、变化类型与理由按关系形状落 graph_facts，证据进 paragraph_evidence"""
     definition = RELATION_DEFINITIONS.get(relation_type)
     if definition is None:
         raise ValueError(f"关系类型不在版本化合同内: {relation_type}")
@@ -353,9 +341,9 @@ def _write_relation_change(
         )
         session.flush()
     fact = GraphFact(
-        direct_producer_execution_id=execution_id,
+        direct_producer_agent_id=agent_id,
         relation_id=identifier,
-        operation_order=_next_operation_order(session, execution_id),
+        operation_order=_next_operation_order(session, agent_id),
         relation_change_kind=change_kind,
         reason=reason,
     )
@@ -386,7 +374,7 @@ def persist_timeline_chapter(
     关系撤回事实）；events 提供章内事件声明，tree_id/cause_role 等旧结构列在
     新契约里是读投影，不再作为写入输入。
     """
-    record_id, execution_id = create_chapter_annotation_source(
+    record_id, agent_id = create_chapter_annotation_source(
         session,
         run_id=run_id,
         chapter_id=chapter_id,
@@ -453,7 +441,7 @@ def persist_timeline_chapter(
         _write_relation_change(
             session,
             run_id=run_id,
-            execution_id=execution_id,
+            agent_id=agent_id,
             paragraph=first_paragraph,
             from_name=str(fact["from_entity"]),
             to_name=str(fact["to_entity"]),
@@ -467,7 +455,7 @@ def persist_timeline_chapter(
         _write_relation_change(
             session,
             run_id=run_id,
-            execution_id=execution_id,
+            agent_id=agent_id,
             paragraph=first_paragraph,
             from_name=str(resolution["from_entity"]),
             to_name=str(resolution["to_entity"]),

@@ -155,7 +155,7 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
 
 def _seed_complete_event_contract(draft: Any, created: dict[str, str]) -> None:
     """由显式身份、包含、真实关系与证据组成正式发布候选"""
-    from src.event_trees.organization import ConflictClaim, OrganizationEvidence
+    from src.event_trees.organization import OrganizationEvidence
 
     def evidence(paragraph_id):
         return [OrganizationEvidence(paragraph_id=paragraph_id)]
@@ -215,16 +215,8 @@ def _seed_complete_event_contract(draft: Any, created: dict[str, str]) -> None:
             reason=reason,
             evidence=evidence(paragraph),
         )
-    draft.register_conflict(
-        key="years",
-        subject_kind="event",
-        subject_id=arrival,
-        claims=[
-            ConflictClaim(claim="入行十年", evidence=evidence(0)),
-            ConflictClaim(claim="入行十四年", evidence=evidence(1)),
-        ],
-        reason="原文对入行年数说法不一",
-    )
+    from src.case_pool import CasePool
+    CasePool(draft.run_id).save_pending(draft.session, [("event", "原文对入行年数说法不一")], author="program")
 
 
 def capture(client: Any, novel_id: str, task_id: str) -> dict[str, Any]:

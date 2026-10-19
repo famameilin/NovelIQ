@@ -1,8 +1,8 @@
 """章节正式标注与数据库图测试夹具
 
 写面合同（与 src/agents/annotation/agent.py 的 _save 一致）：
-- 真实尝试 = executions 的 invocation 形状（run_id/章/角色 + attempt_number + status）
-- 正式产物 = chapter_annotations 头（自带 run/章/角色）+ 五组件同事务（事件声明、
+- 真实尝试 = agent 的 invocation 形状（run_id/章/角色 + attempt_number + status）
+- 正式产物 = agent_annotations 头（自带 run/章/角色）+ 五组件同事务（事件声明、
   事实图、对话与逐段情绪、案例）
 - 队列票据身份（annotation_work_id）只是内存对象，不落 work_items 行
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from src.agents.annotation.candidates import extract_dialogue_candidates
 from src.agents.annotation.output_models import BoundChapterAnnotation
@@ -23,9 +23,9 @@ from src.fact_graph.vocabulary import EntityType
 from src.storage import new_id
 from src.storage.db import get_session_factory
 from src.storage.models import (
+    Agent,
     Chapter,
     ChapterAnnotation,
-    Execution,
     Novel,
     Paragraph,
 )
@@ -41,7 +41,7 @@ from tests.support.storage_fixtures import fixture_id, natural_record, storage_f
 class _SavedWorkRecord:
     """已保存标注的真实执行复读身份：执行号与正式产物号同源，供域重建读取"""
 
-    execution_id: str
+    agent_id: str
     record_id: str
     chapter_id: int
     role: str
@@ -49,7 +49,7 @@ class _SavedWorkRecord:
 
     @property
     def invocation_id(self) -> str:
-        return self.execution_id
+        return self.agent_id
 
     @property
     def output_id(self) -> str:
@@ -76,12 +76,7 @@ def create_run_with_chunks(
         )
     )
     session.commit()
-    RunRepository(session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title=title,
-        run_id=run_id,
-    )
+    RunRepository(session).create_run(novel_id=novel_id, run_id=run_id)
     resolved_chapter_ids = chapter_ids or [1] * len(texts)
     if len(resolved_chapter_ids) != len(texts):
         raise ValueError("chapter_ids 必须与 texts 等长")
@@ -118,13 +113,13 @@ def _saved_work_records(session: Any, run_id: str) -> list[_SavedWorkRecord]:
     """按正式关系复读本 run 已保存标注（章末核对与域重建共用读取身份）"""
     rows = session.execute(
         select(
-            ChapterAnnotation.execution_id,
+            ChapterAnnotation.agent_id,
             ChapterAnnotation.record_id,
             ChapterAnnotation.chapter_id,
             ChapterAnnotation.role,
             Chapter.sequence,
         )
-        .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+        .join(Agent, Agent.id == ChapterAnnotation.agent_id)
         .join(
             Chapter,
             (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
@@ -134,49 +129,26 @@ def _saved_work_records(session: Any, run_id: str) -> list[_SavedWorkRecord]:
     ).all()
     return [
         _SavedWorkRecord(
-            execution_id=str(execution_id),
+            agent_id=str(agent_id),
             record_id=str(record_id),
             chapter_id=int(chapter_id),
             role=str(role),
             sequence=int(sequence),
         )
-        for execution_id, record_id, chapter_id, role, sequence in rows
+        for agent_id, record_id, chapter_id, role, sequence in rows
     ]
 
 
 def _create_work_identity(session: Any, *, run_id: str, chapter_id: int, role: str = "annotation") -> tuple[str, str]:
-    """登记 executions 的真实尝试，返回 (队列票据 work_id, invocation_id)
+    """登记 agent 的真实尝试，返回 (队列票据 work_id, invocation_id)
 
     票据身份只是内存对象：正式产物 record_id 与对话/树记录键都按它铸造，
-    executions 行只落真实归属（run/章/角色）。
+    agent 行只落真实归属（run/章/角色）。
     """
     work_id = annotation_work_id(run_id, chapter_id, role)
-    attempt = (
-        int(
-            session.scalar(
-                select(func.count())
-                .select_from(Execution)
-                .where(
-                    Execution.run_id == run_id,
-                    Execution.chapter_id == chapter_id,
-                    Execution.role == role,
-                )
-            )
-            or 0
-        )
-        + 1
-    )
     invocation = new_id()
     session.add(
-        Execution(
-            execution_id=invocation,
-            run_id=run_id,
-            chapter_id=chapter_id,
-            role=role,
-            attempt_number=attempt,
-            started_at=naive_utcnow(),
-            status="running",
-        )
+        Agent(id=invocation, run_id=run_id, type=role, status="running")
     )
     session.flush()
     return work_id, invocation
@@ -184,7 +156,7 @@ def _create_work_identity(session: Any, *, run_id: str, chapter_id: int, role: s
 
 def _finish_execution(session: Any, invocation: str) -> None:
     """真实尝试在当前事务内收口为成功终态（失败尝试不写正式产物）"""
-    execution = session.get(Execution, invocation)
+    execution = session.get(Agent, invocation)
     if execution is not None:
         execution.status = "success"
         execution.finished_at = naive_utcnow()
@@ -198,7 +170,7 @@ def _work_execution_of_chapter(session: Any, run_id: str, chapter_id: int) -> st
         raise ValueError(f"章节没有已保存标注的真实执行: run_id={run_id} chapter_id={chapter_id}")
     preference = {"annotation": 0, "metric": 1, "entity": 2, "event": 3}
     record = min(records, key=lambda item: (preference.get(item.role, 9), item.record_id))
-    return record.execution_id
+    return record.agent_id
 
 
 def _entity_spec(
@@ -760,7 +732,7 @@ def commit_test_resolution(
         session.add(
             NarrativeLink(
                 link_id=link_id,
-                producer_execution_id=invocation,
+                producer_agent_id=invocation,
                 reason=reason,
                 semantic_source_declaration_id=source_id,
                 semantic_target_declaration_id=target_id,
@@ -799,7 +771,7 @@ def commit_test_resolution(
         if relation is None:
             raise ValueError(f"关系历史夹具必须引用已存在的关系: relation_id={identifier}")
         fact = GraphFact(
-            direct_producer_execution_id=invocation,
+            direct_producer_agent_id=invocation,
             operation_order=1000,
             relation_id=relation.relation_id,
             relation_change_kind=str(resolution["change_kind"]),
@@ -856,7 +828,7 @@ def confirm_test_work(session: Any, run_id: str, *, create_missing: bool = False
         int(chapter_id)
         for chapter_id in session.execute(
             select(ChapterAnnotation.chapter_id)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
+            .join(Agent, Agent.id == ChapterAnnotation.agent_id)
             .where(ChapterAnnotation.run_id == run_id)
         ).scalars()
     }

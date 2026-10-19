@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 
 from src.diagnosis.schema import AgentAnalysis
 from src.storage import new_id
-from src.storage.models import Novel
+from src.storage.models import Agent, Novel
 
 
 def insert_graph_test_novel(db_session, novel_id: str) -> None:
@@ -60,7 +60,6 @@ def insert_focus_contract_agent_analysis(
     返回正式报告 report_id。
     """
 
-    from src.storage.repositories.organization_writes import register_diagnosis_session
     from tests.support.event_tree_fixtures import ensure_character
     from tests.support.storage_fixtures import insert_report_fixture
 
@@ -86,7 +85,7 @@ def insert_focus_contract_agent_analysis(
         core_cast=core_names,
     )
     session_id = new_id()
-    register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
+    db_session.add(Agent(id=session_id, run_id=run_id, type="report", status="running"))
     report_id = insert_report_fixture(db_session, run_id, session_id, analysis)
     db_session.commit()
     return report_id
@@ -95,11 +94,10 @@ def insert_focus_contract_agent_analysis(
 def insert_partial_diagnosis(db_session, *, run_id: str, diagnosis: str) -> str:
     """用正式发布链写入只有正文的诊断报告（标签/名单/评分缺失的真实部分结果）"""
 
-    from src.storage.repositories.organization_writes import register_diagnosis_session
     from tests.support.storage_fixtures import insert_report_fixture
 
     session_id = new_id()
-    register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
+    db_session.add(Agent(id=session_id, run_id=run_id, type="report", status="running"))
     report_id = insert_report_fixture(db_session, run_id, session_id, AgentAnalysis(diagnosis=diagnosis))
     db_session.commit()
     return report_id

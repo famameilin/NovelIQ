@@ -103,7 +103,7 @@ def test_database_schema() -> str:
 
 
 def _create_all_orm_tables(engine) -> None:
-    """与生产 init_db 同口径：建全部 35 张基表并安装领域约束触发器"""
+    """与生产 init_db 同口径：建全部 32 张基表并安装领域约束触发器"""
     from src.storage.constraints import install_domain_constraints
 
     Base.metadata.create_all(bind=engine)
@@ -262,25 +262,25 @@ def pipeline_run_cleanup(configured_model_pool: None) -> Generator[None, None, N
 
     from src.model_pool.capacity import MODEL_CAPACITY
     from src.storage.db import get_session_factory
-    from src.storage.models import AnalysisRun
+    from src.storage.models import Run
 
     factory = get_session_factory()
     with factory() as session:
-        existing = set(session.execute(select(AnalysisRun.run_id)).scalars())
+        existing = set(session.execute(select(Run.id)).scalars())
     try:
         yield
     finally:
         MODEL_CAPACITY.reset()
         with factory() as session, session.begin():
-            created = set(session.execute(select(AnalysisRun.run_id)).scalars()) - existing
+            created = set(session.execute(select(Run.id)).scalars()) - existing
             for run_id in created:
-                run = session.get(AnalysisRun, run_id)
+                run = session.get(Run, run_id)
                 if run is not None and run.status in {"pending", "running", "cancelling"}:
                     run.status = "cancelled"
 
 
 @pytest.fixture
-def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
+def api_client(setup_test_database: None, monkeypatch) -> Generator[TestClient, None, None]:
     """API 测试客户端 fixture
 
     基于全局数据库隔离夹具启动 FastAPI TestClient。
@@ -299,6 +299,7 @@ def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
     get_task_manager().reset_for_testing()
     event_manager.reset_for_testing()
 
+    monkeypatch.setattr("src.workflows.service.AnalysisService._schedule_task_execution", lambda *args, **kwargs: None)
     client = TestClient(app)
     try:
         yield client

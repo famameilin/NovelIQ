@@ -10,7 +10,6 @@ from uuid import UUID
 from sqlalchemy import select
 
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import CONTRACT_VERSION
 from src.storage import Storage, new_id
 from src.storage.detached import detached
 
@@ -79,18 +78,17 @@ def _character_entity_ids(session, run_id: str, names: list[str]) -> dict[str, s
 def insert_report_fixture(session, run_id: str, session_id: str, analysis: AgentAnalysis) -> str:
     """写入正式诊断报告及标签/名单/评分条目；同一会话只允许一份报告"""
 
-    from src.storage.models import AnalysisAssessment, DiagnosisReport, Execution
+    from src.storage.models import Agent, AnalysisAssessment, DiagnosisReport
 
-    owner = session.get(Execution, session_id)
-    if owner is None or owner.session_run_id != run_id:
+    owner = session.get(Agent, session_id)
+    if owner is None or owner.run_id != run_id:
         raise ValueError("诊断报告缺少本 run 的真实诊断会话")
     report_id = new_id()
     organization = analysis.narrative_organization
     session.add(
         DiagnosisReport(
             report_id=report_id,
-            session_id=session_id,
-            contract_version=CONTRACT_VERSION,
+            agent_id=session_id,
             diagnosis=analysis.diagnosis,
             value_logic_type=analysis.value_logic_type,
             value_logic_reason=analysis.value_logic_reason,
@@ -173,20 +171,42 @@ def _stub_task_id(run_id):
 def task_for_run(run_id, session=None):
     "真实运行读取 task 映射，内存桩使用独立分配的短 ID"
     from src.storage.db import get_session_factory
-    from src.storage.models import AnalysisRun
+    from src.storage.models import Run
 
     if session is not None:
         session.flush()
-        row = session.get(AnalysisRun, run_id)
+        row = session.get(Run, run_id)
         if row is not None:
-            return row.task_id
+            return row.taskid
     try:
         valid = UUID(run_id).version == 7
     except ValueError:
         valid = False
     if valid:
         with get_session_factory()() as session:
-            task_id = session.scalar(select(AnalysisRun.task_id).where(AnalysisRun.run_id == run_id))
+            task_id = session.scalar(select(Run.taskid).where(Run.id == run_id))
         if task_id is not None:
             return task_id
     return _stub_task_id(run_id)
+
+
+def save_topic_artifact(run_id, num_topics):
+    "生成测试运行私有的小型 LDA 产物"
+    from src.config.paths import resolve_model_dir
+    from src.topic import LDAConfig, LDATrainer
+    trainer = LDATrainer(LDAConfig(num_topics=num_topics, passes=1, iterations=1))
+    model = trainer.train([["山门", "寻找", "人物"], ["拔剑", "行动", "人物"]], filter_extremes=False)
+    trainer.save_model(model, resolve_model_dir(run_id))
+
+
+def save_word2vec_artifact(run_id, row):
+    "保存具有指定维度与词典大小的测试词向量"
+    from gensim.models import Word2Vec
+
+    from src.config.paths import resolve_run_model_dir
+    path = resolve_run_model_dir(run_id, "word2vec")
+    path.mkdir(parents=True, exist_ok=True)
+    words = [f"词{index}" for index in range(row["vocabulary_size"])]
+    model = Word2Vec(vector_size=row["embedding_dimension"], min_count=1, workers=1)
+    model.build_vocab([words])
+    model.save(str(path / "word2vec.model"))

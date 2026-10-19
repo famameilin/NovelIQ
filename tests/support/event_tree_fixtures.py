@@ -16,22 +16,18 @@ from src.diagnosis.schema import AgentAnalysis
 from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
 from src.storage import new_id
 from src.storage.models import (
+    Agent,
     Chapter,
     ChapterAnnotation,
     DeclarationParticipant,
     EventDeclaration,
-    Execution,
     GraphEntity,
     NarrativeLink,
     Paragraph,
     SourceEvidence,
-    naive_utcnow,
 )
-from src.storage.repositories.organization_writes import register_diagnosis_execution, register_diagnosis_session
 from src.utils.identity import stable_digest
 from tests.support.storage_fixtures import natural_record, storage_for
-
-CONTRACT_VERSION = "event-tree-declarations-v1"
 
 
 def report_case_anchor(run_id: str) -> str:
@@ -86,36 +82,25 @@ def add_annotation_source(
     chapter_id: int,
     *,
     role: str = "event",
-    contract_version: str = CONTRACT_VERSION,
 ) -> tuple[str, str]:
-    """建立一份真实标注来源链（执行行直接带 run/章/角色），返回 (record_id, execution_id)"""
-    execution_id = new_id()
+    """建立一份真实标注来源链（执行行直接带 run/章/角色），返回 (record_id, agent_id)"""
+    agent_id = new_id()
     session.add(
-        Execution(
-            execution_id=execution_id,
-            run_id=run_id,
-            chapter_id=chapter_id,
-            role=role,
-            attempt_number=1,
-            started_at=naive_utcnow(),
-            status="success",
-        )
+        Agent(id=agent_id, run_id=run_id, type=role, status="success")
     )
     session.flush()
     record_id = new_id()
     session.add(
         ChapterAnnotation(
             record_id=record_id,
-            execution_id=execution_id,
+            agent_id=agent_id,
             run_id=run_id,
             chapter_id=chapter_id,
             role=role,
-            contract_version=contract_version,
-            chapter_consolidation_version="v1",
         )
     )
     session.flush()
-    return record_id, execution_id
+    return record_id, agent_id
 
 
 def add_declaration(
@@ -186,30 +171,11 @@ def add_declaration(
 
 
 def add_diagnosis_context(session: Session, run_id: str) -> tuple[str, str]:
-    """登记诊断整轮会话与报告角色的真实尝试，返回 (session_id, execution_id)
-
-    同一 run 再次登记是本轮的又一次真实尝试（跨轮累计序号），不覆盖既有终态行。
-    """
-    from sqlalchemy import func
-
-    session_id = new_id()
-    execution_id = new_id()
-    attempt = (
-        int(
-            session.scalar(
-                select(func.count())
-                .select_from(Execution)
-                .where(Execution.run_id == run_id, Execution.role == "report")
-            )
-            or 0
-        )
-        + 1
-    )
-    register_diagnosis_session(session, run_id=run_id, session_id=session_id)
-    register_diagnosis_execution(
-        session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=attempt
-    )
-    return session_id, execution_id
+    "登记报告 Agent，返回组织写出者与审计身份"
+    agent_id = new_id()
+    session.add(Agent(id=agent_id,run_id=run_id,type="report",status="running"))
+    session.flush()
+    return agent_id, agent_id
 
 
 def identity_every_declaration(
@@ -220,12 +186,12 @@ def identity_every_declaration(
     context: tuple[str, str] | None = None,
 ) -> tuple[EventOrganizationDraft, dict[str, Any]]:
     """按显式分组提交声明核对、身份与全对比较（不保存）"""
-    session_id, execution_id = context or add_diagnosis_context(session, run_id)
+    session_id, agent_id = context or add_diagnosis_context(session, run_id)
     draft = EventOrganizationDraft(storage_for(session), run_id, session_id)
     draft.fixture_session = session
     # 报告级组织单元：案例锚与生产 report 单元同源，调用来源是本次报告角色尝试
     draft.case_id = report_case_anchor(run_id)
-    draft.producer_invocation_id = execution_id
+    draft.producer_agent_id = agent_id
     rows = list(draft._declarations().values())
     by_id = {row["declaration_id"]: row for row in rows}
     groups = groups if groups is not None else [[row["declaration_id"]] for row in rows]
@@ -241,8 +207,6 @@ def identity_every_declaration(
             status=current["status"],
             progress=current["progress"],
             declaration_ids=list(group),
-            stage_order=list(group),
-            current_declaration_id=group[-1],
             reason="夹具显式判断本组声明组成一个事件身份",
             evidence=[
                 OrganizationEvidence(paragraph_id=item["paragraph_id"]) for item in row_evidence(by_id[group[0]])
@@ -259,7 +223,7 @@ def identity_every_declaration(
                 reason="夹具按显式分组核对两项声明身份",
                 evidence=[OrganizationEvidence(paragraph_id=row_evidence(row)[0]["paragraph_id"])],
             )
-    return draft, {"membership": membership, "session_id": session_id, "execution_id": execution_id}
+    return draft, {"membership": membership, "session_id": session_id, "agent_id": agent_id}
 
 
 def row_evidence(row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -311,7 +275,7 @@ def publish_draft(
     report_id = insert_report_fixture(
         session,
         run_id,
-        str(draft.execution_id),
+        str(draft.agent_id),
         AgentAnalysis(narrative_organization=organization, diagnosis=diagnosis),
     )
     save_diagnosis_events(session, run_id, organization, report_id)
@@ -341,7 +305,7 @@ def publish_declarations(
 def add_declaration_relation(
     session: Session,
     *,
-    producer_execution_id: str,
+    producer_agent_id: str,
     source_declaration_id: str,
     target_declaration_id: str,
     paragraph: Paragraph,
@@ -354,7 +318,7 @@ def add_declaration_relation(
     session.add(
         NarrativeLink(
             link_id=link_id,
-            producer_execution_id=producer_execution_id,
+            producer_agent_id=producer_agent_id,
             reason=reason,
             semantic_source_declaration_id=source_declaration_id,
             semantic_target_declaration_id=target_declaration_id,
@@ -380,7 +344,7 @@ def add_declaration_relation(
 def add_foreshadowing_action(
     session: Session,
     *,
-    producer_execution_id: str,
+    producer_agent_id: str,
     source_declaration_id: str,
     paragraph: Paragraph,
     action_type: str = "setup",
@@ -395,7 +359,7 @@ def add_foreshadowing_action(
     session.add(
         EventForeshadowingAction(
             action_id=action_id,
-            producer_execution_id=producer_execution_id,
+            producer_agent_id=producer_agent_id,
             source_operation_local_key=operation_key or f"action-{action_id}",
             operation_order=operation_order,
             action_type=action_type,
