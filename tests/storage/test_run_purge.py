@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 
 from src.event_trees.storage_map import run_execution_ids
-from src.storage.models import AnalysisRun, Base, Chapter, GraphEntity, GraphFact, Paragraph
+from src.storage.models import Base, Chapter, GraphEntity, GraphFact, Paragraph, Run
 from src.storage.repositories.run_repository import (
     _RUN_PURGE_ORDER,
     RunRepository,
@@ -52,7 +52,7 @@ def test_delete_run_only_clears_its_own_run(db_session) -> None:
             db_session.scalar(
                 select(func.count())
                 .select_from(GraphFact)
-                .where(GraphFact.direct_producer_execution_id.in_(run_execution_ids(storage_for(db_session), run_id)))
+                .where(GraphFact.direct_producer_agent_id.in_(run_execution_ids(storage_for(db_session), run_id)))
             )
             or 0
         )
@@ -64,7 +64,7 @@ def test_delete_run_only_clears_its_own_run(db_session) -> None:
     assert RunRepository(db_session).delete_run(run_a) is True
     db_session.flush()
 
-    assert db_session.get(AnalysisRun, run_a) is None
+    assert db_session.get(Run, run_a) is None
     assert entity_names(run_a) == []
     assert scoped_count(Chapter, Chapter.run_id, run_a) == 0
     assert scoped_count(Paragraph, Paragraph.run_id, run_a) == 0

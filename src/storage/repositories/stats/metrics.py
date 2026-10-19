@@ -1,8 +1,8 @@
 """全书统计与模型计账落库
 
-- 全书统计：正式聚合的 16 个具名结果落在 analysis_runs 的明确列（不加统计行表、
+- 全书统计：正式聚合的 16 个具名结果落在 runs 的明确列（不加统计行表、
   不加分子/分母列）；插入即按运行覆盖同名统计列，读取按列是否可用投影。
-- 非 Agent 模型调用：每条真实请求进 model_calls，非 Agent 上下文进
+- 非 Agent 模型调用：每条真实请求进 agent_loop，非 Agent 上下文进
   standalone_* 列，用量分项、供应商实报总量、费用与幂等键与请求同一行，
   不伪造 Agent 工作身份、不另建用量/实报/费用子表。
 """
@@ -11,17 +11,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select, update
-from sqlalchemy.engine import CursorResult
+from sqlalchemy import select
 
-from src.storage.models import AnalysisRun, ModelCall, Novel
+from src.storage.models import AgentLoop, GlobalStats, Novel
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
-#: 全书统计目录（analysis_runs 的 16 个具名列；目录穷举，不接纳任意统计名）
+#: 全书统计目录（global_stats 的 16 个具名列；目录穷举，不接纳任意统计名）
 GLOBAL_STAT_COLUMNS: tuple[str, ...] = (
     "avg_mtld",
     "avg_ttr",
@@ -53,11 +52,11 @@ GLOBAL_STAT_CHAPTER_ID_COLUMNS: frozenset[str] = frozenset(
 
 
 def insert_global_stats(session: Session, run_id: str, stats: Iterable[tuple[str, float | None]]) -> None:
-    "把正式聚合的全书统计写入 analysis_runs 的具名列"
+    "把正式聚合的全书统计写入 runs 的具名列"
     assignments: dict[str, float | int | datetime | None] = {}
     for stat_name, stat_value in stats:
         if stat_name not in GLOBAL_STAT_COLUMNS:
-            raise ValueError(f"未知的全书统计名: {stat_name}（目录为 analysis_runs 的 16 个具名列）")
+            raise ValueError(f"未知的全书统计名: {stat_name}（目录为 global_stats 的 16 个具名列）")
         if stat_value is None:
             assignments[stat_name] = None
         elif stat_name in GLOBAL_STAT_CHAPTER_ID_COLUMNS:
@@ -66,20 +65,17 @@ def insert_global_stats(session: Session, run_id: str, stats: Iterable[tuple[str
             assignments[stat_name] = float(stat_value)
     if not assignments:
         return
-    # 完成事实与统计同一 UPDATE 落库：一次提交成功后聚合阶段即判完成，幂等重跑覆盖同列
-    assignments["aggregate_completed_at"] = datetime.now(UTC).replace(tzinfo=None)
+    from sqlalchemy.dialects.postgresql import insert
 
-    result = session.execute(update(AnalysisRun).where(AnalysisRun.run_id == run_id).values(**assignments))
-    # 运行期返回游标结果（DML 影响的真实行数只在运行期可知），静态返回类型不含 rowcount
-    if cast(CursorResult[Any], result).rowcount == 0:
-        raise ValueError(f"运行不存在，无法写入全书统计: {run_id}")
+    statement = insert(GlobalStats).values(run_id=run_id, **assignments)
+    session.execute(statement.on_conflict_do_update(index_elements=[GlobalStats.run_id], set_=assignments))
     session.flush()
 
 
 def fetch_global_stats_dict(session: Session, run_id: str) -> dict[str, float | None]:
     "按运行读出可用的全书统计项（无值列不输出，与旧统计行缺失读法一致）"
-    statement = select(*[getattr(AnalysisRun, name) for name in GLOBAL_STAT_COLUMNS]).where(
-        AnalysisRun.run_id == run_id
+    statement = select(*[getattr(GlobalStats, name) for name in GLOBAL_STAT_COLUMNS]).where(
+        GlobalStats.run_id == run_id
     )
     row = session.execute(statement).first()
     if row is None:
@@ -106,9 +102,8 @@ def insert_model_turn(
 ) -> str:
     "写入一次非 Agent 模型调用的真实请求、用量与费用（Agent 回合由审计记录器写入）"
     now = datetime.now(UTC).replace(tzinfo=None)
-    call = ModelCall(
+    call = AgentLoop(
         model=model,
-        status="success",
         error=None,
         started_at=now,
         finished_at=now,
@@ -130,7 +125,7 @@ def insert_model_turn(
     )
     session.add(call)
     session.flush()
-    return str(call.call_id)
+    return str(call.id)
 
 
 def insert_agent_analysis(session: Session, run_id: str, payload: Mapping[str, Any]) -> str:

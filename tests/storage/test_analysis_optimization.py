@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
 
 from src.diagnosis.queries import DiagnosisQueries
@@ -94,18 +95,9 @@ def _insert_completion(db_session, run_id: str, paragraph_id: int) -> None:
 
     完成行 FK 到 linguistic_runs 与运行合同，映射种子先落库再写完成行。
     """
-    from src.linguistic import ENTITY_TYPE_MAP, POS_GROUP_MAP, ltp_pipeline_contract
     from src.storage.repositories.linguistic_repository import LinguisticRepository
 
     repo = LinguisticRepository(db_session)
-    pipeline_version, model_key = ltp_pipeline_contract()
-    repo.ensure_ltp_contract(
-        run_id,
-        pipeline_version=pipeline_version,
-        model_key=model_key,
-        pos_mappings=POS_GROUP_MAP,
-        entity_type_mappings=ENTITY_TYPE_MAP,
-    )
     repo.insert_linguistic_features(
         run_id,
         [
@@ -146,11 +138,12 @@ def test_topic_contract_and_partial_inference_or_distribution_cannot_be_reused(d
     )
     repo = ParagraphRepository(db_session)
     stats = StatsRepository(db_session)
+    from tests.support.storage_fixtures import save_topic_artifact
+    save_topic_artifact(run_id, 2)
     repo.insert_topic_model_run(
         run_id,
         model_key="gensim-lda",
         library_version="4.4.0",
-        pipeline_version="current",
         num_topics=2,
         parameters={"num_topics": 2},
         dictionary_size=4,
@@ -166,7 +159,8 @@ def test_topic_contract_and_partial_inference_or_distribution_cannot_be_reused(d
     assert not is_topic_model_complete(storage_for(stats.session), run_id)
     repo.insert_paragraph_topic_inferences(run_id, [complete, empty])
     assert not is_topic_model_complete(storage_for(stats.session), run_id)
-    repo.insert_paragraph_topics(run_id, [(identifiers[0], 0, 0.7)])
+    with pytest.raises(ValueError, match="实际模型"):
+        repo.insert_paragraph_topics(run_id, [(identifiers[0], 0, 0.7)])
     assert not is_topic_model_complete(storage_for(stats.session), run_id)
     repo.insert_paragraph_topics(run_id, [(identifiers[0], 0, 0.7), (identifiers[0], 1, 0.3)])
     assert is_topic_model_complete(storage_for(stats.session), run_id)
@@ -187,11 +181,12 @@ def test_topic_rerun_writes_commit_against_deferred_constraints(db_session) -> N
         ).scalars()
     )
     repo = ParagraphRepository(db_session)
+    from tests.support.storage_fixtures import save_topic_artifact
+    save_topic_artifact(run_id, 2)
     repo.insert_topic_model_run(
         run_id,
         model_key="gensim-lda",
         library_version="4.4.0",
-        pipeline_version="current",
         num_topics=2,
         parameters={"num_topics": 2},
         dictionary_size=4,

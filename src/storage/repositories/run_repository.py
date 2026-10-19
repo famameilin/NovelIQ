@@ -1,589 +1,189 @@
-"分析运行记录的数据库操作实现"
+"运行身份与按运行删除的存储操作"
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Any, TypeGuard, TypeVar
+from typing import Any, cast
 from uuid import UUID
 
-from loguru import logger
-from sqlalchemy import delete, inspect, select
+from sqlalchemy import delete, or_, select, update
+from sqlalchemy.engine import CursorResult
 
 from src.storage.ids import new_id, new_task_id
-from src.storage.models import AnalysisRun, Base
-from src.storage.records.sentinels import UNSET as _UNSET
-
-from .base import BaseRepository
-
-
-def _naive_utcnow() -> datetime:
-    "无时区列统一落 naive UTC 挂钟"
-    return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _utc_isoformat(value: datetime | None) -> str | None:
-    "无时区 UTC 挂钟序列化为 ISO 字符串并标注 Z 后缀"
-    return value.isoformat() + "Z" if value is not None else None
-
-
-def _as_naive_utc(value: datetime | None) -> datetime | None:
-    "归一化调用方传入的时间戳为 naive UTC 挂钟"
-    if value is None or value.tzinfo is None:
-        return value
-    return value.astimezone(UTC).replace(tzinfo=None)
-
-
-T = TypeVar("T")
-
-#: run 级表的清理顺序（子 → 父）。RESTRICT 外键决定依赖方必须先删；
-#: 两处互相引用按可删方向显式排定：book_cases 先于 case_entries
-#: （pending_event_entry_id 是 RESTRICT 回指），work_items 先于 executions
-#: （diagnosis_session_id 是 RESTRICT 回指）。novels 是全局书目，不在此表。
-_RUN_PURGE_ORDER: tuple[str, ...] = (
-    "source_evidence",
-    "conflict_claims",
-    "fact_entity_tags",
-    "conflict_records",
-    "book_cases",
-    "case_entries",
-    "graph_facts",
-    "organization_checks",
-    "narrative_links",
-    "event_revisions",
-    "event_foreshadowing_actions",
-    "dialogue_records",
-    "declaration_participants",
-    "event_declarations",
-    "analysis_assessments",
-    "agent_tool_calls",
-    "narrative_groups",
-    "model_calls",
-    "linguistic_arcs",
-    "diagnosis_reports",
-    "complete_events",
-    "chapter_annotations",
-    "work_items",
-    "executions",
-    "paragraph_topics",
-    "paragraph_metrics",
-    "paragraph_features",
-    "linguistic_spans",
-    "paragraphs",
-    "graph_relations",
-    "graph_entities",
-    "event_outbox",
-    "chapters",
-    "analysis_runs",
-)
+from src.storage.models import Base, Run
+from src.storage.records.sentinels import UNSET
+from src.storage.repositories.base import BaseRepository
 
 
 def _run_purge_predicates(run_id: str) -> dict[str, Any]:
-    "每张 run 级表「属于该 run」的谓词：有 run_id 列直接用，其余按外键链解析"
-    from sqlalchemy import or_
+    tables = Base.metadata.tables
 
-    m = Base.metadata.tables
+    def ids(name, key, condition):
+        return select(tables[name].c[key]).where(condition)
 
-    def col(table: str, name: str) -> Any:
-        return m[table].c[name]
-
-    def ids(table: str, column: str, predicate: Any) -> Any:
-        return select(m[table].c[column]).where(predicate)
-
-    entities = ids("graph_entities", "entity_id", col("graph_entities", "run_id") == run_id)
-    sessions = ids("executions", "execution_id", col("executions", "session_run_id") == run_id)
-    work_items = ids(
-        "work_items",
-        "work_id",
-        or_(
-            col("work_items", "program_run_id") == run_id,
-            col("work_items", "diagnosis_session_id").in_(sessions),
-        ),
-    )
-    executions = ids(
-        "executions",
-        "execution_id",
-        or_(
-            col("executions", "session_run_id") == run_id,
-            col("executions", "run_id") == run_id,
-        ),
-    )
-    model_calls = ids(
-        "model_calls",
-        "call_id",
-        or_(col("model_calls", "standalone_run_id") == run_id, col("model_calls", "execution_id").in_(executions)),
-    )
-    annotations = ids("chapter_annotations", "record_id", col("chapter_annotations", "execution_id").in_(executions))
-    events = ids("complete_events", "event_id", col("complete_events", "producer_execution_id").in_(executions))
-    declarations = ids("event_declarations", "declaration_id", col("event_declarations", "record_id").in_(annotations))
-    reports = ids("diagnosis_reports", "report_id", col("diagnosis_reports", "session_id").in_(executions))
-    links = ids("narrative_links", "link_id", col("narrative_links", "producer_execution_id").in_(executions))
-    groups = ids("narrative_groups", "group_id", col("narrative_groups", "producer_execution_id").in_(executions))
-    conflicts = ids("conflict_records", "conflict_id", col("conflict_records", "producer_execution_id").in_(executions))
-    claims = ids("conflict_claims", "claim_id", col("conflict_claims", "producer_execution_id").in_(executions))
-    checks = ids("organization_checks", "check_id", col("organization_checks", "producer_execution_id").in_(executions))
-    actions = ids(
-        "event_foreshadowing_actions",
-        "action_id",
-        col("event_foreshadowing_actions", "producer_execution_id").in_(executions),
+    agents = ids("agent", "id", tables["agent"].c.run_id == run_id)
+    annotations = ids("agent_annotations", "record_id", tables["agent_annotations"].c.run_id == run_id)
+    reports = ids("diagnosis_reports", "report_id", tables["diagnosis_reports"].c.agent_id.in_(agents))
+    declarations = ids(
+        "event_declarations", "declaration_id", tables["event_declarations"].c.record_id.in_(annotations)
     )
     participants = ids(
-        "declaration_participants",
-        "participant_id",
-        col("declaration_participants", "declaration_id").in_(declarations),
-    )
-    relations = ids(
-        "graph_relations",
-        "relation_id",
-        or_(
-            col("graph_relations", "from_entity_id").in_(entities),
-            col("graph_relations", "to_entity_id").in_(entities),
-        ),
-    )
-    dialogues = ids(
-        "dialogue_records",
-        "dialogue_id",
-        or_(
-            col("dialogue_records", "creation_execution_id").in_(executions),
-            col("dialogue_records", "current_attribution_execution_id").in_(executions),
-        ),
-    )
-    entries = ids(
-        "case_entries",
-        "entry_id",
-        or_(
-            col("case_entries", "producer_execution_id").in_(executions),
-            col("case_entries", "candidate_producer_execution_id").in_(executions),
-            col("case_entries", "program_work_id").in_(work_items),
-        ),
+        "event_participants", "participant_id", tables["event_participants"].c.declaration_id.in_(declarations)
     )
     facts = ids(
         "graph_facts",
         "graph_fact_id",
         or_(
-            col("graph_facts", "direct_producer_execution_id").in_(executions),
-            col("graph_facts", "program_work_id").in_(work_items),
-            col("graph_facts", "entity_id").in_(entities),
-            col("graph_facts", "relation_id").in_(relations),
-            col("graph_facts", "participant_id").in_(participants),
+            tables["graph_facts"].c.direct_producer_agent_id.in_(agents),
+            tables["graph_facts"].c.participant_id.in_(participants),
         ),
     )
-
-    return {
-        "source_evidence": or_(
-            col("source_evidence", "declaration_id").in_(declarations),
-            col("source_evidence", "complete_event_id").in_(events),
-            col("source_evidence", "related_complete_event_id").in_(events),
-            col("source_evidence", "graph_fact_id").in_(facts),
-            col("source_evidence", "narrative_link_id").in_(links),
-            col("source_evidence", "foreshadow_action_id").in_(actions),
-            col("source_evidence", "narrative_group_id").in_(groups),
-            col("source_evidence", "conflict_id").in_(conflicts),
-            col("source_evidence", "claim_id").in_(claims),
-            col("source_evidence", "check_id").in_(checks),
-        ),
-        "conflict_claims": col("conflict_claims", "producer_execution_id").in_(executions),
-        "fact_entity_tags": col("fact_entity_tags", "graph_fact_id").in_(facts),
-        "conflict_records": col("conflict_records", "producer_execution_id").in_(executions),
-        "book_cases": or_(
-            col("book_cases", "registration_run_id") == run_id,
-            col("book_cases", "pending_event_entry_id").in_(entries),
-            col("book_cases", "case_id").in_(
-                select(m["case_entries"].c.case_id).where(
-                    col("case_entries", "entry_id").in_(entries),
-                    col("case_entries", "case_id").is_not(None),
-                )
+    loops = ids(
+        "agent_loop",
+        "id",
+        or_(tables["agent_loop"].c.agent_id.in_(agents), tables["agent_loop"].c.standalone_run_id == run_id),
+    )
+    predicates = {}
+    for name, table in tables.items():
+        if name == "novels":
+            continue
+        if name == "runs":
+            predicates[name] = table.c.id == run_id
+        elif "run_id" in table.c:
+            predicates[name] = table.c.run_id == run_id
+        elif "producer_agent_id" in table.c:
+            predicates[name] = table.c.producer_agent_id.in_(agents)
+    predicates.update(
+        {
+            "agent_loop": or_(
+                tables["agent_loop"].c.agent_id.in_(agents), tables["agent_loop"].c.standalone_run_id == run_id
             ),
-        ),
-        "case_entries": col("case_entries", "entry_id").in_(entries),
-        "graph_facts": col("graph_facts", "graph_fact_id").in_(facts),
-        "organization_checks": col("organization_checks", "producer_execution_id").in_(executions),
-        "narrative_links": col("narrative_links", "producer_execution_id").in_(executions),
-        "event_revisions": or_(
-            col("event_revisions", "declaration_id").in_(declarations),
-            col("event_revisions", "event_id").in_(events),
-        ),
-        "event_foreshadowing_actions": col("event_foreshadowing_actions", "producer_execution_id").in_(executions),
-        "dialogue_records": col("dialogue_records", "dialogue_id").in_(dialogues),
-        "declaration_participants": col("declaration_participants", "declaration_id").in_(declarations),
-        "event_declarations": col("event_declarations", "declaration_id").in_(declarations),
-        "analysis_assessments": or_(
-            col("analysis_assessments", "report_id").in_(reports),
-            col("analysis_assessments", "record_id").in_(annotations),
-            col("analysis_assessments", "scored_entity_id").in_(entities),
-            col("analysis_assessments", "cast_entity_id").in_(entities),
-        ),
-        "agent_tool_calls": col("agent_tool_calls", "call_id").in_(model_calls),
-        "narrative_groups": col("narrative_groups", "group_id").in_(groups),
-        "model_calls": col("model_calls", "call_id").in_(model_calls),
-        "linguistic_arcs": or_(
-            col("linguistic_arcs", "head_span_id").in_(
-                ids("linguistic_spans", "span_id", col("linguistic_spans", "run_id") == run_id)
+            "agent_toolcall": tables["agent_toolcall"].c.agentloop_id.in_(loops),
+            "diagnosis_reports": tables["diagnosis_reports"].c.agent_id.in_(agents),
+            "agent_assessments": or_(
+                tables["agent_assessments"].c.record_id.in_(annotations),
+                tables["agent_assessments"].c.report_id.in_(reports),
             ),
-            col("linguistic_arcs", "dependent_span_id").in_(
-                ids("linguistic_spans", "span_id", col("linguistic_spans", "run_id") == run_id)
-            ),
+            "event_declarations": tables["event_declarations"].c.record_id.in_(annotations),
+            "event_participants": tables["event_participants"].c.declaration_id.in_(declarations),
+            "graph_facts": tables["graph_facts"].c.graph_fact_id.in_(facts),
+            "graph_fact_entity_tags": tables["graph_fact_entity_tags"].c.graph_fact_id.in_(facts),
+        }
+    )
+    for name, _key in [
+        ("event_records", "event_id"),
+        ("event_groups", "group_id"),
+        ("event_links", "link_id"),
+        ("event_checks", "check_id"),
+        ("event_foreshadowing_actions", "action_id"),
+    ]:
+        predicates[name] = tables[name].c.producer_agent_id.in_(agents)
+    events = ids("event_records", "event_id", predicates["event_records"])
+    predicates["event_declaration_bindings"] = tables["event_declaration_bindings"].c.event_id.in_(events)
+    evidence = tables["paragraph_evidence"].c
+    predicates["paragraph_evidence"] = or_(
+        evidence.graph_fact_id.in_(facts),
+        evidence.declaration_id.in_(declarations),
+        evidence.complete_event_id.in_(events),
+        evidence.narrative_group_id.in_(ids("event_groups", "group_id", predicates["event_groups"])),
+        evidence.narrative_link_id.in_(ids("event_links", "link_id", predicates["event_links"])),
+        evidence.foreshadow_action_id.in_(
+            ids("event_foreshadowing_actions", "action_id", predicates["event_foreshadowing_actions"])
         ),
-        "diagnosis_reports": col("diagnosis_reports", "report_id").in_(reports),
-        "complete_events": col("complete_events", "event_id").in_(events),
-        "chapter_annotations": col("chapter_annotations", "record_id").in_(annotations),
-        "work_items": col("work_items", "work_id").in_(work_items),
-        "executions": col("executions", "execution_id").in_(executions),
-        "paragraph_topics": col("paragraph_topics", "run_id") == run_id,
-        "paragraph_metrics": col("paragraph_metrics", "run_id") == run_id,
-        "paragraph_features": col("paragraph_features", "run_id") == run_id,
-        "linguistic_spans": col("linguistic_spans", "run_id") == run_id,
-        "paragraphs": col("paragraphs", "run_id") == run_id,
-        "graph_relations": col("graph_relations", "relation_id").in_(relations),
-        "graph_entities": col("graph_entities", "entity_id").in_(entities),
-        "event_outbox": col("event_outbox", "run_id") == run_id,
-        "chapters": col("chapters", "run_id") == run_id,
-        "analysis_runs": col("analysis_runs", "run_id") == run_id,
-    }
+        evidence.check_id.in_(ids("event_checks", "check_id", predicates["event_checks"])),
+    )
+    predicates["graph_relations"] = tables["graph_relations"].c.from_entity_id.in_(
+        ids("graph_entities", "entity_id", tables["graph_entities"].c.run_id == run_id)
+    )
+    predicates["paragraph_arcs"] = tables["paragraph_arcs"].c.dependent_span_id.in_(
+        ids("paragraph_spans", "span_id", tables["paragraph_spans"].c.run_id == run_id)
+    )
+    return predicates
 
 
-#: 重分析请求载荷中的 force_* 阶段字段，与 analysis_runs 列名一一对应
-_REQUEST_FORCE_FIELDS: tuple[str, ...] = (
-    "force_preprocess",
-    "force_annotate",
-    "force_aggregate",
-    "force_topic_model",
-    "force_diagnose",
-    "force_linguistic",
-)
-
-
-def _request_payload_columns(request_payload: dict[str, Any] | None) -> dict[str, Any]:
-    "把重分析请求载荷拆成 analysis_runs 具名列（无请求该组全空）"
-    columns: dict[str, Any] = dict.fromkeys(_REQUEST_FORCE_FIELDS)
-    columns["requested_num_topics"] = None
-    if request_payload is None:
-        return columns
-    for field in _REQUEST_FORCE_FIELDS:
-        raw_value = request_payload.get(field)
-        if raw_value is not None:
-            columns[field] = bool(raw_value)
-    raw_num_topics = request_payload.get("num_topics")
-    if raw_num_topics is not None:
-        columns["requested_num_topics"] = int(raw_num_topics)
-    return columns
-
-
-def _request_payload_from_columns(run: AnalysisRun) -> dict[str, Any] | None:
-    "把 analysis_runs 请求列重建为规范请求字典（无请求返回 None）"
-    payload: dict[str, Any] = {}
-    for field in _REQUEST_FORCE_FIELDS:
-        value = getattr(run, field)
-        if value is not None:
-            payload[field] = bool(value)
-    if run.requested_num_topics is not None:
-        payload["num_topics"] = int(run.requested_num_topics)
-    return payload or None
-
-
-def _is_set[T](value: T | object) -> TypeGuard[T]:
-    "判断参数是否不是 `_UNSET` 哨兵值"
-    return value is not _UNSET
+_RUN_PURGE_ORDER = tuple(table.name for table in reversed(Base.metadata.sorted_tables) if table.name != "novels")
 
 
 class RunRepository(BaseRepository[dict[str, Any]]):
-    "运行记录数据访问层"
+    "任务身份与状态，不保存运行明细"
 
-    def _to_dict_with_deserialization(self, run: AnalysisRun) -> dict[str, Any]:
-        "将 ORM 对象转换为字典并重建 request_payload"
-        request_payload_dict = _request_payload_from_columns(run)
-
+    @staticmethod
+    def _record(row: Run) -> dict[str, Any]:
         return {
-            "run_id": run.run_id,
-            "task_id": run.task_id,
-            "novel_id": run.novel_id,
-            "source_path": run.source_path,
-            "title": run.source_title,
-            "author": run.source_author,
-            "source_title": run.source_title,
-            "source_author": run.source_author,
-            "status": run.status,
-            "progress": run.progress,
-            "stage": run.stage,
-            "sub_stage": run.sub_stage,
-            "current": run.current,
-            "total": run.total,
-            "message": run.message,
-            "error": run.error,
-            "task_kind": run.task_kind,
-            "request_payload": request_payload_dict,
-            "cancel_requested": run.cancel_requested,
-            "worker_id": run.worker_id,
-            "heartbeat_at": _utc_isoformat(run.heartbeat_at),
-            "started_at": _utc_isoformat(run.started_at),
-            "completed_at": _utc_isoformat(run.completed_at),
-            "created_at": _utc_isoformat(run.created_at),
-            "updated_at": _utc_isoformat(run.updated_at),
+            "run_id": row.id,
+            "novel_id": row.novelid,
+            "task_id": row.taskid,
+            "status": row.status,
+            "lda_completed": row.lda_completed,
+            "w2v_completed": row.w2v_completed,
         }
 
-    def create_run(
-        self,
-        novel_id: str,
-        source_path: str | None = None,
-        title: str | None = None,
-        author: str | None = None,
-        run_id: str | None = None,
-        task_kind: str = "analysis",
-        request_payload: dict[str, Any] | None = None,
-        task_id: str | None = None,
-    ) -> str:
-        "创建新的分析运行记录"
-        if run_id is None:
-            run_id = new_id()
+    def create_run(self, novel_id: str, run_id: str | None = None, task_id: str | None = None) -> str:
+        run_id = run_id or new_id()
         if UUID(run_id).version != 7:
-            raise ValueError("运行主键必须是由 Storage 分配的 UUIDv7")
-        if task_id is None:
-            task_id = new_task_id()
-            while self.session.scalar(select(AnalysisRun.run_id).where(AnalysisRun.task_id == task_id)):
-                task_id = new_task_id()
+            raise ValueError("运行主键必须为 UUIDv7")
+        task_id = task_id or new_task_id()
         if len(task_id) != 8:
-            raise ValueError("task 短 ID 必须为 8 位")
-        now = _naive_utcnow()
-
-        run = AnalysisRun(
-            run_id=run_id,
-            task_id=task_id,
-            novel_id=novel_id,
-            source_path=source_path,
-            source_title=title,
-            source_author=author,
-            status="pending",
-            task_kind=task_kind,
-            created_at=now,
-            updated_at=now,
-            **_request_payload_columns(request_payload),
-        )
-        self.session.add(run)
+            raise ValueError("任务短 ID 必须为 8 位")
+        self.session.add(Run(id=run_id, novelid=novel_id, taskid=task_id, status="pending"))
         self.session.flush()
         return run_id
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
-        "获取运行记录"
-        stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
-        run = self.session.execute(stmt).scalar_one_or_none()
-        if run is None:
-            return None
-        return self._to_dict_with_deserialization(run)
-
-    def get_runs_by_novel(self, novel_id: str) -> list[dict[str, Any]]:
-        "获取指定小说的所有运行记录"
-        stmt = select(AnalysisRun).where(AnalysisRun.novel_id == novel_id).order_by(AnalysisRun.created_at.desc())
-        runs = self.session.execute(stmt).scalars().all()
-        return [self._to_dict_with_deserialization(run) for run in runs]
-
-    def request_task_cancellation(self, run_id: str) -> str | None:
-        "原子性地把可取消任务推进到 cancelling"
-        from sqlalchemy import update
-
-        now = _naive_utcnow()
-        stmt = (
-            update(AnalysisRun)
-            .where(AnalysisRun.run_id == run_id)
-            .where(AnalysisRun.status.in_(("pending", "running")))
-            .values(
-                status="cancelling",
-                cancel_requested=True,
-                updated_at=now,
-            )
-        )
-        result = self.session.execute(stmt)
-        self.session.flush()
-        if result.rowcount > 0:  # type: ignore[attr-defined]
-            return "cancelling"
-
-        status_stmt = select(AnalysisRun.status).where(AnalysisRun.run_id == run_id)
-        refreshed_status = self.session.execute(status_stmt).scalar_one_or_none()
-        return str(refreshed_status) if refreshed_status is not None else None
-
-    def get_by_status(self, status: str) -> list[dict[str, Any]]:
-        "按状态查询任务。Args: status；Returns: 任务记录列表"
-        stmt = select(AnalysisRun).where(AnalysisRun.status == status).order_by(AnalysisRun.created_at.desc())
-        runs = self.session.execute(stmt).scalars().all()
-        return [self._to_dict_with_deserialization(run) for run in runs]
-
-    def get_pending_tasks(self) -> list[dict[str, Any]]:
-        "获取所有 pending 任务"
-        return self.get_by_status("pending")
-
-    def claim_pending_run(self, run_id: str, *, worker_id: str, heartbeat_at: datetime | None = None) -> bool:
-        "原子性领取一个尚未执行的 pending 任务"
-        from sqlalchemy import func, update
-
-        # （避免 aware UTC 被 PG 按会话时区转换，导致 resume 窗口/孤儿回收误判）
-        now = heartbeat_at or _naive_utcnow()
-        stmt = (
-            update(AnalysisRun)
-            .where(AnalysisRun.run_id == run_id)
-            .where(AnalysisRun.status == "pending")
-            .where(AnalysisRun.cancel_requested.is_(False))
-            .values(
-                status="running",
-                worker_id=worker_id,
-                heartbeat_at=now,
-                # started_at 曾被覆盖成最后一次 claim 时刻，两次 run 的表面耗时
-                # 因此缩水成 13m36s/7m26s（真实 16h46m/4h09m）
-                started_at=func.coalesce(AnalysisRun.started_at, now),
-                updated_at=now,
-            )
-        )
-        result = self.session.execute(stmt)
-        self.session.flush()
-        return result.rowcount > 0  # type: ignore[attr-defined]
-
-    def cancel_unclaimed_pending_run(self, run_id: str, *, message: str) -> bool:
-        "原子性终结尚未被任何 worker 领取的 pending 任务"
-        from sqlalchemy import update
-
-        now = _naive_utcnow()
-        stmt = (
-            update(AnalysisRun)
-            .where(AnalysisRun.run_id == run_id)
-            .where(AnalysisRun.status == "pending")
-            .values(
-                status="cancelled",
-                cancel_requested=False,
-                completed_at=now,
-                message=message,
-                worker_id=None,
-                heartbeat_at=None,
-                updated_at=now,
-            )
-        )
-        result = self.session.execute(stmt)
-        self.session.flush()
-        return result.rowcount > 0  # type: ignore[attr-defined]
-
-    def update_run_task_fields(
-        self,
-        run_id: str,
-        *,
-        status: str | None | object = _UNSET,
-        progress: float | None | object = _UNSET,
-        stage: str | None | object = _UNSET,
-        sub_stage: str | None | object = _UNSET,
-        current: int | None | object = _UNSET,
-        total: int | None | object = _UNSET,
-        message: str | None | object = _UNSET,
-        error: str | None | object = _UNSET,
-        task_kind: str | None | object = _UNSET,
-        request_payload: dict[str, Any] | None | object = _UNSET,
-        cancel_requested: bool | None | object = _UNSET,
-        worker_id: str | None | object = _UNSET,
-        heartbeat_at: datetime | None | object = _UNSET,
-        started_at: datetime | None | object = _UNSET,
-        completed_at: datetime | None | object = _UNSET,
-    ) -> None:
-        "批量更新运行态字段（仅写入显式传入的字段）"
-        stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
-        run = self.session.execute(stmt).scalar_one_or_none()
-        if not run:
-            return
-
-        now = _naive_utcnow()
-        if _is_set(status):
-            run.status = status
-        if _is_set(progress):
-            run.progress = progress
-        if _is_set(stage):
-            run.stage = stage
-        if _is_set(sub_stage):
-            run.sub_stage = sub_stage
-        if _is_set(current):
-            run.current = current
-        if _is_set(total):
-            run.total = total
-        if _is_set(message):
-            run.message = message
-        if _is_set(error):
-            run.error = error
-        if _is_set(task_kind):
-            run.task_kind = task_kind
-        if _is_set(request_payload):
-            for field, value in _request_payload_columns(request_payload).items():
-                setattr(run, field, value)
-        if _is_set(cancel_requested):
-            run.cancel_requested = cancel_requested
-        if _is_set(worker_id):
-            run.worker_id = worker_id
-        if _is_set(heartbeat_at):
-            run.heartbeat_at = _as_naive_utc(heartbeat_at)
-        if _is_set(started_at):
-            run.started_at = _as_naive_utc(started_at)
-        if _is_set(completed_at):
-            run.completed_at = _as_naive_utc(completed_at)
-        run.updated_at = now
-        self.session.flush()
+        row = self.session.get(Run, run_id)
+        return self._record(row) if row is not None else None
 
     def get_run_by_task_id(self, task_id: str) -> dict[str, Any] | None:
-        "按独立的 task 短 ID 精确查询，不匹配 UUIDv7 时间前缀"
-        run = self.session.scalar(select(AnalysisRun).where(AnalysisRun.task_id == task_id))
-        return self._to_dict_with_deserialization(run) if run is not None else None
+        row = self.session.scalar(select(Run).where(Run.taskid == task_id))
+        return self._record(row) if row is not None else None
+
+    def get_runs_by_novel(self, novel_id: str) -> list[dict[str, Any]]:
+        return [
+            self._record(row)
+            for row in self.session.scalars(select(Run).where(Run.novelid == novel_id).order_by(Run.id.desc()))
+        ]
+
+    def get_by_status(self, status: str) -> list[dict[str, Any]]:
+        return [
+            self._record(row) for row in self.session.scalars(select(Run).where(Run.status == status).order_by(Run.id))
+        ]
+
+    def get_pending_tasks(self) -> list[dict[str, Any]]:
+        return self.get_by_status("pending")
+
+    def claim_pending_run(self, run_id: str) -> bool:
+        result = self.session.execute(
+            update(Run).where(Run.id == run_id, Run.status == "pending").values(status="running")
+        )
+        self.session.flush()
+        return bool(cast(CursorResult[Any], result).rowcount)
+
+    def cancel_pending_run(self, run_id: str) -> bool:
+        "仅取消尚未被领取的任务"
+        result = self.session.execute(
+            update(Run).where(Run.id == run_id, Run.status == "pending").values(status="cancelled")
+        )
+        self.session.flush()
+        return bool(cast(CursorResult[Any], result).rowcount)
+
+    def update_run_task_fields(self, run_id: str, *, status: str | object = UNSET) -> None:
+        if status is not UNSET:
+            self.session.execute(update(Run).where(Run.id == run_id).values(status=status))
+            self.session.flush()
 
     def delete_run(self, run_id: str) -> bool:
-        "按运行范围删除全部 run 级数据，由调用方统一提交"
-        exists_stmt = select(AnalysisRun.run_id).where(AnalysisRun.run_id == run_id)
-        if self.session.execute(exists_stmt).scalar_one_or_none() is None:
+        if self.session.get(Run, run_id) is None:
             return False
-
-        existing_table_names = set(inspect(self.session.get_bind()).get_table_names())
         predicates = _run_purge_predicates(run_id)
-        for table_name in _RUN_PURGE_ORDER:
-            if table_name not in existing_table_names:
-                continue
-            table = Base.metadata.tables[table_name]
-            self.session.execute(delete(table).where(predicates[table_name]))
+        for table in reversed(Base.metadata.sorted_tables):
+            if table.name in predicates:
+                self.session.execute(delete(table).where(predicates[table.name]))
         self.session.flush()
         return True
 
     def mark_running_as_failed(self) -> int:
-        "启动时把所有 running 任务标记为 failed"
-        from sqlalchemy import update
-
-        now = _naive_utcnow()
-        stmt = (
-            update(AnalysisRun)
-            .where(AnalysisRun.status == "running")
-            # 前端 failed 不再缺错误原因与完成时间
-            .values(
-                status="failed",
-                error="进程重启，运行中的任务已终止",
-                completed_at=now,
-                worker_id=None,
-                heartbeat_at=None,
-                updated_at=now,
-            )
-        )
-        result = self.session.execute(stmt)
-        self.session.flush()
-        count = result.rowcount  # type: ignore[attr-defined]
-        if count > 0:
-            logger.info(f"Marked {count} running task(s) as failed on startup")
-        return count
+        result = self.session.execute(update(Run).where(Run.status == "running").values(status="failed"))
+        return int(cast(CursorResult[Any], result).rowcount or 0)
 
     def mark_cancelling_as_cancelled(self) -> int:
-        "启动时把所有 cancelling 任务收口为 cancelled"
-        from sqlalchemy import update
-
-        now = _naive_utcnow()
-        stmt = (
-            update(AnalysisRun)
-            .where(AnalysisRun.status == "cancelling")
-            .values(
-                status="cancelled",
-                cancel_requested=False,
-                completed_at=now,
-                worker_id=None,
-                heartbeat_at=None,
-                updated_at=now,
-            )
-        )
-        result = self.session.execute(stmt)
-        self.session.flush()
-        count = result.rowcount  # type: ignore[attr-defined]
-        if count > 0:
-            logger.info(f"Marked {count} cancelling task(s) as cancelled on startup")
-        return count
+        result = self.session.execute(update(Run).where(Run.status == "cancelling").values(status="cancelled"))
+        return int(cast(CursorResult[Any], result).rowcount or 0)

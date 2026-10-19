@@ -94,7 +94,7 @@ def test_build_invocation_context_maps_annotation_to_agent_call_type() -> None:
     annotation = build_invocation_context(
         run_id=fixture_id(__name__, "run-1"),
         task_type="annotation",
-        execution_id=fixture_id(__name__, "exec-1"),
+        agent_id=fixture_id(__name__, "exec-1"),
         attempt_number=1,
         model="test-model",
         chapter_id=1,
@@ -104,7 +104,7 @@ def test_build_invocation_context_maps_annotation_to_agent_call_type() -> None:
     diagnosis = build_invocation_context(
         run_id=fixture_id(__name__, "run-1"),
         task_type="diagnosis",
-        execution_id=fixture_id(__name__, "exec-2"),
+        agent_id=fixture_id(__name__, "exec-2"),
         attempt_number=1,
         model="test-model",
         role="case",

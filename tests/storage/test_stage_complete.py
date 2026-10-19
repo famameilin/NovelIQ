@@ -118,11 +118,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         assert not is_preprocess_complete(storage_for(chapter_repo.session), run_id)
 
@@ -131,11 +127,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         chunks = _create_chunks(1)
         chapter_repo.insert_chapter_texts(run_id, chunks)
@@ -154,11 +146,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         chunks = _create_chunks(2)
         chapter_repo.insert_chapter_texts(run_id, chunks)
@@ -175,11 +163,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         chunks = _create_chunks(2)
         chapter_repo.insert_chapter_texts(run_id, chunks)
@@ -210,11 +194,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         chunks = _create_chunks(1)
         chapter_repo.insert_chapter_texts(run_id, chunks)
@@ -233,11 +213,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         chunks = _create_chunks(2)
         chapter_repo.insert_chapter_texts(run_id, chunks)
@@ -262,11 +238,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         ann_repo = AnnotationRepository(db_session)
         chunks = _create_chunks(3)
@@ -278,11 +250,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         ann_repo = AnnotationRepository(db_session)
         chunks = _create_chunks(3)
@@ -297,11 +265,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         ann_repo = AnnotationRepository(db_session)
         chunks = _create_chunks(3)
@@ -317,11 +281,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         stats_repo = StatsRepository(db_session)
         chunks = _create_chunks(3)
@@ -333,11 +293,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         stats_repo = StatsRepository(db_session)
         chunks = _create_chunks(3)
@@ -362,11 +318,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         stats_repo = StatsRepository(db_session)
         assert not stats_repo.has_topic_data(run_id)
 
@@ -375,22 +327,19 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         chapter_repo = ChapterRepository(db_session)
         stats_repo = StatsRepository(db_session)
         chunks = _create_chunks(1)
         chapter_repo.insert_chapter_texts(run_id, chunks)
         _insert_paragraphs(db_session, run_id, chunks)
         paragraph_repo = ParagraphRepository(db_session)
+        from tests.support.storage_fixtures import save_topic_artifact
+        save_topic_artifact(run_id, 1)
         paragraph_repo.insert_topic_model_run(
             run_id,
             model_key="gensim-lda",
             library_version="4.4.0",
-            pipeline_version="1.0",
             num_topics=1,
             parameters={"num_topics": 1},
             dictionary_size=10,
@@ -407,11 +356,7 @@ class TestStageCompleteChecks:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         stats_repo = StatsRepository(db_session)
         assert not has_diagnosis_data(storage_for(stats_repo.session), run_id)
 
@@ -430,7 +375,7 @@ class TestStageCompleteChecks:
 
         novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻找山门并点灯。"])
         paragraph = first_paragraph(db_session, run_id)
-        record_id, _execution_id = add_annotation_source(db_session, run_id, 1, role="event")
+        record_id, _agent_id = add_annotation_source(db_session, run_id, 1, role="event")
         add_declaration(
             db_session,
             record_id=record_id,
@@ -447,7 +392,7 @@ class TestStageCompleteChecks:
         report_id = insert_report_fixture(
             db_session,
             run_id,
-            str(draft.execution_id),
+            str(draft.agent_id),
             AgentAnalysis(
                 novel_id=novel_id,
                 narrative_organization=organization,
@@ -471,7 +416,7 @@ class TestStageCompleteChecks:
         from tests.support.storage_fixtures import insert_report_fixture
 
         novel_id, run_id = create_run_with_chunks(db_session, texts=["旧 row 缺少焦点合同。"])
-        session_id, _execution_id = add_diagnosis_context(db_session, run_id)
+        session_id, _agent_id = add_diagnosis_context(db_session, run_id)
         insert_report_fixture(
             db_session,
             run_id,
