@@ -26,7 +26,7 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
   const [changesPageInfo, setChangesPageInfo] = useState<GraphChangesPageInfo | null>(null);
   const [isChangesLoading, setIsChangesLoading] = useState(false);
   const [changesLoadError, setChangesLoadError] = useState<string | null>(null);
-  const changesRequestVersionRef = useRef(0);
+  const changesRequestSeqRef = useRef(0);
   const currentTaskScopeIdRef = useRef<string | null>(null);
   // 快速双击"加载更多"时第二次调用可能仍处于同一渲染闭包（读到旧 isChangesLoading）；
   // 用 in-flight 游标引用兜底，同游标重复请求直接丢弃
@@ -37,8 +37,8 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
   }, [taskScopeId]);
 
   useEffect(() => {
-    const requestVersion = changesRequestVersionRef.current + 1;
-    changesRequestVersionRef.current = requestVersion;
+    const requestSeq = changesRequestSeqRef.current + 1;
+    changesRequestSeqRef.current = requestSeq;
     inFlightLoadMoreCursorRef.current = null;
     setLoadedChanges([]);
     setChangesPageInfo(null);
@@ -53,21 +53,21 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
     setIsChangesLoading(true);
     void getGraphChanges(novelId, taskScopeId)
       .then((page) => {
-        if (changesRequestVersionRef.current !== requestVersion || currentTaskScopeIdRef.current !== requestTaskId) {
+        if (changesRequestSeqRef.current !== requestSeq || currentTaskScopeIdRef.current !== requestTaskId) {
           return;
         }
         setLoadedChanges(page.changes);
         setChangesPageInfo(page.page_info);
       })
       .catch((error: unknown) => {
-        if (changesRequestVersionRef.current !== requestVersion || currentTaskScopeIdRef.current !== requestTaskId) {
+        if (changesRequestSeqRef.current !== requestSeq || currentTaskScopeIdRef.current !== requestTaskId) {
           return;
         }
         const message = error instanceof Error ? error.message : "加载图谱变化失败";
         setChangesLoadError(message);
       })
       .finally(() => {
-        if (changesRequestVersionRef.current === requestVersion && currentTaskScopeIdRef.current === requestTaskId) {
+        if (changesRequestSeqRef.current === requestSeq && currentTaskScopeIdRef.current === requestTaskId) {
           setIsChangesLoading(false);
         }
       });
@@ -98,8 +98,8 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
 
     const requestTaskId = taskScopeId;
     const requestCursor = changesPageInfo.next_cursor;
-    const requestVersion = changesRequestVersionRef.current + 1;
-    changesRequestVersionRef.current = requestVersion;
+    const requestSeq = changesRequestSeqRef.current + 1;
+    changesRequestSeqRef.current = requestSeq;
     inFlightLoadMoreCursorRef.current = requestCursor;
 
     setIsChangesLoading(true);
@@ -109,20 +109,20 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
         changesCursor: requestCursor,
         changesLimit: changesPageInfo.limit,
       });
-      if (changesRequestVersionRef.current !== requestVersion || currentTaskScopeIdRef.current !== requestTaskId) {
+      if (changesRequestSeqRef.current !== requestSeq || currentTaskScopeIdRef.current !== requestTaskId) {
         return;
       }
       setLoadedChanges((currentChanges) => mergeGraphChanges(currentChanges, page.changes));
       setChangesPageInfo(page.page_info);
     } catch (error) {
-      if (changesRequestVersionRef.current !== requestVersion || currentTaskScopeIdRef.current !== requestTaskId) {
+      if (changesRequestSeqRef.current !== requestSeq || currentTaskScopeIdRef.current !== requestTaskId) {
         return;
       }
       const message = error instanceof Error ? error.message : "加载更多图谱变化失败";
       setChangesLoadError(message);
     } finally {
       inFlightLoadMoreCursorRef.current = null;
-      if (changesRequestVersionRef.current === requestVersion && currentTaskScopeIdRef.current === requestTaskId) {
+      if (changesRequestSeqRef.current === requestSeq && currentTaskScopeIdRef.current === requestTaskId) {
         setIsChangesLoading(false);
       }
     }

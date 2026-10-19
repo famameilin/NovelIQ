@@ -29,24 +29,14 @@ export interface TaskStatusResponse {
   novel_id: string;
   task_id: string;
   status: TaskStatus;
-  progress: number;
-  current_step: string;
-  error?: string;
-  stage?: string;
-  sub_stage?: string;
-  current?: number;
-  total?: number;
-  message?: string;
-  llm_outputs?: string[];
+
 }
 
 export interface AnalysisTask {
   task_id: string;
   novel_id: string;
   status: TaskStatus;
-  created_at: string | null;
-  completed_at?: string;
-  error?: string;
+
 }
 
 export interface AnalysisStartResponse {
@@ -516,7 +506,6 @@ export interface StyleStatsMetrics {
 export interface TopicModelMetaInfo {
   model_key: string;
   library_version: string;
-  pipeline_version: string;
   num_topics: number;
   artifact_key: string;
 }

@@ -14,155 +14,32 @@ const BASE = import.meta.env.VITE_API_BASE_URL || "";
 /*  模拟进度状态（内存）                                                 */
 /* ------------------------------------------------------------------ */
 
-interface SimulatedTask {
-  novelId: string;
-  taskId: string;
-  status: TaskStatus;
-  progress: number;
-  currentStep: string;
-  stage: string;
-  subStage: string;
-  current: number;
-  total: number;
-  startedAt: number;
-  stageTimings: Record<string, number>;
-  timer: ReturnType<typeof setInterval> | null;
-  llmOutputs: string[];
-}
+interface SimulatedTask { novelId: string; taskId: string; status: TaskStatus; timer: ReturnType<typeof setTimeout> | null; }
 
 const simulatedTasks = new Map<string, SimulatedTask>();
 
-// sub_stage 与后端契约枚举对齐（paragraph_embedding/标注四角色/诊断案例角色），
-// 使 PHASE_CONFIG 映射链路在 mock 模式下同样被覆盖
-const STAGES = [
-  { key: "preprocess", label: "预处理", weight: 0.08, steps: ["paragraph_embedding"] },
-  { key: "annotate", label: "标注分析", weight: 0.55, steps: ["annotation", "entity", "event", "metric"] },
-  { key: "aggregate", label: "数据聚合", weight: 0.15, steps: ["指标计算", "曲线生成"] },
-  { key: "topic-model", label: "主题建模", weight: 0.1, steps: ["LDA训练", "主题提取"] },
-  { key: "diagnose", label: "诊断报告", weight: 0.12, steps: ["case", "report"] },
-];
-
-const TOTAL_ANALYSIS_MS = 18_000;
-
-const MOCK_LLM_OUTPUTS = [
-  "正在分析文本结构...",
-  "识别到主角：张三，性格特征：勇敢、正直",
-  "发现关键情节转折点：第15章 - 意外相遇",
-  "分析对话模式：主角与反派的对峙场景",
-  "提取情感曲线：高潮位于第28章",
-  "主题建模完成，发现3个主要主题",
-  "生成诊断报告...",
-];
-
-// 同步 taskDb 中的任务状态，避免 mock 列表与运行态漂移
-function updateTaskRecord(
-  novelId: string,
-  taskId: string,
-  updates: Partial<Pick<SimulatedTask, "status">> & {
-    completed_at?: string | undefined;
-  }
-) {
-  const tasks = taskDb.get(novelId) ?? [];
-  const task = tasks.find((item) => item.task_id === taskId);
-  if (!task) return;
-
-  if (updates.status) {
-    task.status = updates.status;
-  }
-  if ("completed_at" in updates) {
-    task.completed_at = updates.completed_at;
-  }
+function updateTaskRecord(novelId: string, taskId: string, updates: {status: TaskStatus}) {
+  const task = (taskDb.get(novelId) ?? []).find((item) => item.task_id === taskId);
+  if (task) task.status = updates.status;
 }
 
 function startSimulation(novelId: string, taskId: string) {
-  const sim: SimulatedTask = {
-    novelId,
-    taskId,
-    status: "pending",
-    progress: 0,
-    currentStep: "等待开始",
-    stage: "preprocess",
-    subStage: "paragraph_embedding",
-    current: 0,
-    total: 100,
-    startedAt: Date.now(),
-    stageTimings: {},
-    timer: null,
-    llmOutputs: [],
-  };
-
+  const sim: SimulatedTask = {novelId, taskId, status: "running", timer: null};
   simulatedTasks.set(taskId, sim);
-
-  sim.timer = setInterval(() => {
-    const elapsed = Date.now() - sim.startedAt - 300;
-    const progress = Math.min(100, (elapsed / TOTAL_ANALYSIS_MS) * 100);
-
-    sim.progress = progress;
-
-    if (progress >= 100) {
-      sim.status = "completed";
-      sim.currentStep = "分析完成";
-      sim.stage = "completed";
-      sim.progress = 100;
-      updateTaskRecord(novelId, taskId, {
-        status: "completed",
-        completed_at: new Date().toISOString(),
-      });
-
-      if (sim.timer) {
-        clearInterval(sim.timer);
-        sim.timer = null;
-      }
-      return;
-    }
-
-    let accumulated = 0;
-    for (const stage of STAGES) {
-      const stageEnd = (accumulated + stage.weight) * 100;
-      if (progress < stageEnd) {
-        sim.stage = stage.key;
-        const stageProgress = (progress - accumulated * 100) / (stage.weight * 100);
-        const stepIdx = Math.min(
-          stage.steps.length - 1,
-          Math.floor(stageProgress * stage.steps.length)
-        );
-        sim.subStage = stage.steps[stepIdx];
-        sim.current = Math.floor(stageProgress * 100);
-        sim.total = 100;
-        sim.currentStep = `${stage.label} - ${stage.steps[stepIdx]}`;
-
-        const statusMap: Record<string, TaskStatus> = {
-          preprocess: "running",
-          annotate: "running",
-          aggregate: "running",
-          "topic-model": "running",
-          diagnose: "running",
-        };
-        sim.status = statusMap[stage.key] ?? "pending";
-        updateTaskRecord(novelId, taskId, { status: sim.status, completed_at: undefined });
-
-        if (Math.random() < 0.15 && sim.llmOutputs.length < MOCK_LLM_OUTPUTS.length) {
-          const outputIdx = Math.floor(progress / 15);
-          if (outputIdx < MOCK_LLM_OUTPUTS.length && !sim.llmOutputs.includes(MOCK_LLM_OUTPUTS[outputIdx])) {
-            sim.llmOutputs.push(MOCK_LLM_OUTPUTS[outputIdx]);
-          }
-        }
-        break;
-      }
-      accumulated += stage.weight;
-    }
-  }, 200);
+  updateTaskRecord(novelId, taskId, {status: "running"});
+  sim.timer = setTimeout(() => {
+    sim.status = "completed";
+    updateTaskRecord(novelId, taskId, {status: "completed"});
+    sim.timer = null;
+  }, 18000);
 }
 
 function createAndStartTask(novelId: string) {
-  const taskId = Math.random().toString(36).slice(2, 10);
-  const task = createTask(novelId, "pending", {
-    task_id: taskId,
-  });
+  const taskId = Math.random().toString(36).slice(2,10);
   const tasks = taskDb.get(novelId) ?? [];
-  tasks.unshift(task);
-  taskDb.set(novelId, tasks);
-  startSimulation(novelId, taskId);
+  tasks.unshift(createTask(novelId,"pending",{task_id:taskId}));
+  taskDb.set(novelId,tasks);
+  startSimulation(novelId,taskId);
   return taskId;
 }
 
@@ -191,37 +68,10 @@ export const reanalyzeHandler = http.post(`${BASE}/api/novels/:novelId/reanalyze
 });
 
 function buildTaskStatusPayload(novelId: string, taskId: string) {
-  const sim = simulatedTasks.get(taskId);
-  if (sim) {
-    return HttpResponse.json({
-      novel_id: novelId,
-      task_id: taskId,
-      status: sim.status,
-      progress: sim.progress,
-      current_step: sim.currentStep,
-      stage: sim.stage,
-      sub_stage: sim.subStage,
-      current: sim.current,
-      total: sim.total,
-      message: sim.currentStep,
-      llm_outputs: sim.llmOutputs,
-    });
-  }
-
-  const tasks = taskDb.get(novelId) ?? [];
-  const task = tasks.find((item) => item.task_id === taskId);
-  if (task) {
-    return HttpResponse.json({
-      novel_id: novelId,
-      task_id: taskId,
-      status: task.status,
-      progress: task.status === "completed" ? 100 : 0,
-      current_step: task.status === "completed" ? "分析完成" : "等待开始",
-      stage: task.status,
-    });
-  }
-
-  return HttpResponse.json({ detail: "任务不存在" }, { status: 404 });
+  const task = (taskDb.get(novelId) ?? []).find((item) => item.task_id === taskId);
+  const status = simulatedTasks.get(taskId)?.status ?? task?.status;
+  return status ? HttpResponse.json({novel_id: novelId, task_id: taskId, status})
+    : HttpResponse.json({detail: "任务不存在"}, {status: 404});
 }
 
 export const taskStatusHandler = http.get(
@@ -327,8 +177,6 @@ export const analysisTasksHandler = http.get(`${BASE}/api/novels/:novelId/tasks`
       task_id: t.task_id,
       novel_id: t.novel_id,
       status: t.status,
-      created_at: t.created_at,
-      completed_at: t.completed_at,
     })),
   });
 });

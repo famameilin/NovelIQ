@@ -35,7 +35,6 @@ export interface PlotlineTimelineResponse {
 /* ===== 事件声明与统一正式身份契约 =====
  * 列表仅 events（顶层大事件）分页，其余字段每页完整；
  * 子事件不经列表下发，通过事件详情卡的 direct_children 逐级访问 */
-export const EVENT_TREE_CONTRACT_VERSION = "event-tree-declarations-v1";
 export interface EventTreeChapter { chapter_id: number; title: string; chapter_order: number }
 export interface EventTreeCounts {
   top_level_events: number;
@@ -88,7 +87,6 @@ export interface ForeshadowingActionItem {
 }
 export interface EventTreeListResponse {
   run_id: string;
-  contract_version: typeof EVENT_TREE_CONTRACT_VERSION;
   organization_status?: "ready" | "pending_diagnosis";
   chapters: EventTreeChapter[];
   counts: EventTreeCounts;
@@ -117,7 +115,6 @@ export interface EventCardDetail {
   source_chapters: number[];
   evidence_scope: "chapter" | "paragraph";
   ancestry: string[];
-  revision_id: string;
   relations: EventRelationItem[];
 }
 export interface NarrativeSource {
@@ -134,4 +131,19 @@ export interface NarrativeSource {
   chapter_id: number;
   title: string;
   paragraphs: Array<{ paragraph_id: number; paragraph_index: number; text: string }>;
+}
+
+export interface ChapterEventDetail {
+  run_id: string;
+  chapter_id: number;
+  declaration_id: string;
+  event_id: string | null;
+  title: string;
+  problem: string;
+  summary: string;
+  status: string;
+  progress: string | null;
+  event_type: string;
+  participants: Array<{ entity: { entity_id?: string | null; name: string; entity_type: string }; role: string; [key: string]: unknown }>;
+  evidence: EventCardDetail["evidence"];
 }

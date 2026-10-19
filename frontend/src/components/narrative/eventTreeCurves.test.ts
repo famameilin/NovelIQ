@@ -6,7 +6,6 @@ import { curveCrossesWindow, eventTreeCurves } from "./eventTreeCurves";
 function bookWith(relations: EventTreeListResponse["relations"]): EventTreeListResponse {
   return {
     run_id: "run-curve",
-    contract_version: "event-tree-declarations-v1",
     chapters: [{ chapter_id: 1, title: "第 1 章", chapter_order: 1 }],
     counts: { top_level_events: 2, child_events: 0, all_events: 2, declarations: 3, outcomes: 1, event_outcome_links: 1, arcs: 1, event_arc_links: 2, relations: relations.length, foreshadowing_actions: 0 },
     arcs: [{ arc_id: "arc-1", parent_arc_id: null, kind: "main", title: "主线", objective: "目标" }],

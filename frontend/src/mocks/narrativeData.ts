@@ -13,7 +13,7 @@ export const eventB: EventTreeEvent = { ...eventA, event_id: "event:b", title: "
 export const childEvent = { ...eventA, event_id: "child:a", title: "辨认信封印记" };
 export const grandchildEvent = { ...eventA, event_id: "grandchild:a", title: "核对邮戳" };
 export const tree: EventTreeListResponse = {
-  run_id: "run-a", contract_version: "event-tree-declarations-v1", chapters: chapters.map(chapter => ({ ...chapter, chapter_order: chapter.order })),
+  run_id: "run-a", chapters: chapters.map(chapter => ({ ...chapter, chapter_order: chapter.order })),
   counts: { top_level_events: 2, child_events: 2, all_events: 4, declarations: 2, outcomes: 1, event_outcome_links: 2, arcs: 1, event_arc_links: 2, relations: 1, foreshadowing_actions: 0 },
   arcs: [arc], events: [eventA, eventB], outcomes: [{ outcome_id: "outcome:a", title: "旧信来源查明", description: "两个事件共同确认信件来自旧港口", first_text_position: 3 }],
   event_arc_links: [eventA, eventB].map(event => ({ event_id: event.event_id, arc_id: "a", role: "推进调查", reason: "原文行动推进谜题" })),
@@ -37,7 +37,7 @@ export function treeDetail(event: EventTreeEvent): EventCardDetail {
   return { kind: "event", event_id: event.event_id, run_id: "run-a", title: event.title, summary: event.summary, progress: "investigating", event_type: event.event_type, status: event.status,
     arcs: [{ ...arc, role: "推进调查", reason: "原文行动推进谜题" }], characters: [{ name: "林舟", entity_id: "lin" }],
     direct_children: children.map(child => ({ event_id: child.event_id, title: child.title, event_type: child.event_type, status: child.status })),
-    evidence_scope: "paragraph", evidence: [{ chapter_id: event.chapter_id, paragraph_id: event.chapter_id }], source_chapters: [event.chapter_id], ancestry, revision_id: `revision:${event.event_id}`, relations: tree.relations.filter(relation => relation.source_id === event.event_id),
+    evidence_scope: "paragraph", evidence: [{ chapter_id: event.chapter_id, paragraph_id: event.chapter_id }], source_chapters: [event.chapter_id], ancestry, relations: tree.relations.filter(relation => relation.source_id === event.event_id),
   };
 }
 

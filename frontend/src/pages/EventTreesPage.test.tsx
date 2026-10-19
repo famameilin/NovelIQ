@@ -11,7 +11,7 @@ let api: ReturnType<typeof installNarrativeApi>;
 beforeEach(() => { api = installNarrativeApi(); });
 afterEach(() => vi.restoreAllMocks());
 const url = "/novels/novel-1/event-trees?task_id=task-a";
-const key = "novel-1:run-a:event-trees:event-tree-declarations-v1";
+const key = "novel-1:run-a:event-trees";
 
 it("事件声明保存但诊断未发布时显示阶段提示", async () => {
   api.mockImplementation(async (path, config) => {

@@ -228,14 +228,10 @@ export function createTask(
   status: AnalysisTask["status"] = "completed",
   overrides?: Partial<AnalysisTask>
 ): AnalysisTask {
-  const completed = status === "completed";
   return {
     task_id: uuid(),
     novel_id: novelId,
     status,
-    created_at: dateAgo(1),
-    completed_at: completed ? dateAgo(0) : undefined,
-    error: status === "failed" ? "模拟分析失败" : undefined,
     ...overrides,
   };
 }

@@ -39,7 +39,7 @@ export function EventTreesPage() {
 function TreeWorkspace({ novelId, book, targetEvent }: { novelId: string; book: EventTreeListResponse; targetEvent: string | null }) {
   const [host, size] = useNarrativeSize();
   // 新契约独立状态键，不恢复已取消的搜索和缩放状态
-  const [view, update] = useNarrativeState<TreeState>(`${novelId}:${book.run_id}:event-trees:${book.contract_version}`, { selected: null, x: 0, cards: [], reader: null });
+  const [view, update] = useNarrativeState<TreeState>(`${novelId}:${book.run_id}:event-trees`, { selected: null, x: 0, cards: [], reader: null });
   const [directory, setDirectory] = useState(false);
   const layout = useMemo(() => eventTreeLayout(book, size.width, size.height), [book, size]);
   const x = clampX(view.x, size.width, layout.width);

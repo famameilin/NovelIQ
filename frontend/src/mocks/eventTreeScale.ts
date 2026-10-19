@@ -33,7 +33,6 @@ export function buildScaleBook({ chapters, eventsPerChapter, arcs, outcomes }: S
   const eventOutcomeLinks = events.flatMap((event, index) => [{ event_id: event.event_id, outcome_id: `oc-${index % Math.max(1, outcomes)}`, reason: "依据" }]);
   return {
     run_id: "run-scale",
-    contract_version: "event-tree-declarations-v1",
     chapters: chapterList,
     counts: {
       top_level_events: events.length, child_events: 0, all_events: events.length,

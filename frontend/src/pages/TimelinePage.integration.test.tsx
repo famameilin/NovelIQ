@@ -21,10 +21,10 @@ it("两页选择、截点、详情和原文独立恢复", async () => {
   await screen.findByRole("dialog", { name: "事件详情：最初的信" });
   expect(screen.queryByRole("textbox", { name: "搜索全书事件" })).not.toBeInTheDocument();
   expect(localStorage.getItem("novel-1:run-a:timeline")).toBe(before);
-  const treeBefore = localStorage.getItem("novel-1:run-a:event-trees:event-tree-declarations-v1");
+  const treeBefore = localStorage.getItem("novel-1:run-a:event-trees");
   await act(async () => { await router.navigate("/novels/novel-1/timeline?task_id=task-a"); });
   await waitFor(() => expect(screen.getByRole("combobox", { name: "阅读截点" })).toHaveValue("2"));
   expect(await screen.findByRole("dialog", { name: "变化详情" })).toHaveTextContent("信件线索 2");
   await screen.findByRole("dialog", { name: "章节原文" });
-  expect(localStorage.getItem("novel-1:run-a:event-trees:event-tree-declarations-v1")).toBe(treeBefore);
+  expect(localStorage.getItem("novel-1:run-a:event-trees")).toBe(treeBefore);
 });

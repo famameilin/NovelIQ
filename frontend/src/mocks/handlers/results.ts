@@ -180,7 +180,6 @@ export const topicSeriesHandler = http.get(
       model: {
         model_key: "gensim-lda",
         library_version: "4.4.0",
-        pipeline_version: "1.0",
         num_topics: MOCK_NUM_TOPICS,
         artifact_key: "models/topic/mock-run",
       },
@@ -228,7 +227,6 @@ export const topicEmotionHandler = http.get(
       model: {
         model_key: "gensim-lda",
         library_version: "4.4.0",
-        pipeline_version: "1.0",
         num_topics: MOCK_NUM_TOPICS,
         artifact_key: "models/topic/mock-run",
       },

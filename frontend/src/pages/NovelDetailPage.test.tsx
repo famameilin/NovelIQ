@@ -216,8 +216,6 @@ describe("NovelDetailPage", () => {
       novel_id: "novel-1",
       task_id: "task-ready",
       status: "completed",
-      progress: 100,
-      current_step: "done",
     });
     getDashboardTabMock.mockResolvedValue({
       run_id: "task-ready",
@@ -270,8 +268,6 @@ describe("NovelDetailPage", () => {
       novel_id: "novel-2",
       task_id: "task-new",
       status: "completed",
-      progress: 100,
-      current_step: "done",
     });
 
     renderNovelDetailPage();
@@ -381,8 +377,6 @@ describe("NovelDetailPage", () => {
       novel_id: "novel-1",
       task_id: "task-ready",
       status: "completed",
-      progress: 100,
-      current_step: "done",
     });
     getDashboardTabMock.mockResolvedValue({
       run_id: "task-ready",
@@ -425,8 +419,6 @@ describe("NovelDetailPage", () => {
       novel_id: "novel-1",
       task_id: "task-ready",
       status: "completed",
-      progress: 100,
-      current_step: "done",
     });
     getDashboardTabMock.mockResolvedValue({
       run_id: "task-ready",
@@ -455,8 +447,6 @@ describe("NovelDetailPage", () => {
       novel_id: "novel-1",
       task_id: "task-running",
       status: "running",
-      progress: 12,
-      current_step: "preprocess",
       stage: "preprocess",
       message: "任务执行中",
     });
@@ -474,8 +464,6 @@ describe("NovelDetailPage", () => {
       novel_id: "novel-1",
       task_id: "task-failed",
       status: "failed",
-      progress: 0,
-      current_step: "done",
     });
     const notCompleteError = {
       isAxiosError: true,

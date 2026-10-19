@@ -49,7 +49,6 @@ function buildTopicModelMeta(numTopics: number) {
   return {
     model_key: "gensim-lda",
     library_version: "4.4.0",
-    pipeline_version: "1.0",
     num_topics: numTopics,
     artifact_key: "models/topic/mock-run",
   };
@@ -144,7 +143,7 @@ export const graphNetworkTabHandler = http.get(
       graph_metrics: {
         run_id: taskId,
         unavailable_reason: null,
-        algorithm: { version: "graph-metrics-v1" },
+        algorithm: { name: "graph-metrics" },
         pagerank: Object.fromEntries(
           characters.slice(0, 8).map((character, index) => [character.name, Number((0.3 - index * 0.03).toFixed(6))])
         ),

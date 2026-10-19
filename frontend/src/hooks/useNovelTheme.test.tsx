@@ -86,8 +86,6 @@ describe("useNovelTheme", () => {
       novel_id: "novel-1",
       task_id: "task-1",
       status: "completed",
-      progress: 100,
-      current_step: "done",
     });
     document.documentElement.removeAttribute("style");
   });
@@ -274,8 +272,6 @@ describe("useNovelTheme", () => {
       novel_id: "novel-1",
       task_id: "task-running",
       status: "running",
-      progress: 12,
-      current_step: "preprocess",
       stage: "preprocess",
       message: "任务执行中",
     });

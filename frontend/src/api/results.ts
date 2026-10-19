@@ -8,7 +8,7 @@ import type {
   TopicSeriesResponse,
   TopicShiftResponse,
 } from "./types";
-import { EVENT_TREE_CONTRACT_VERSION, type EventCardDetail, type EventTreeListResponse, type NarrativeSource, type PlotlineChange, type PlotlineDimension, type PlotlineTimelineResponse } from "./narrativeTypes";
+import { type EventCardDetail, type EventTreeListResponse, type NarrativeSource, type PlotlineChange, type PlotlineDimension, type PlotlineTimelineResponse } from "./narrativeTypes";
 
 // 情绪趋势窗口聚合：window_paragraphs 作用于 range 区间内（缺省=全书）；
 // 情绪趋势 tab 的数据源（单源端点直接作为 tab API）
@@ -107,7 +107,6 @@ export async function getEventTrees(options: { novelId: string; taskId: string; 
 /** 循环 cursor 完整消费全部页，按 counts 校验收齐；收不齐、游标重复或运行身份变化都视为读取失败 */
 export async function getEventTreeBook(novelId: string, taskId: string, signal?: AbortSignal): Promise<EventTreeListResponse> {
   const first = await getEventTrees({ novelId, taskId, limit: 50, signal });
-  if (first.contract_version !== EVENT_TREE_CONTRACT_VERSION) throw new Error("事件树契约不匹配，需要从原文重建");
   const events = new Map(first.events.map(event => [event.event_id, event]));
   const seenCursors = new Set<string>();
   let cursor = first.next_cursor;
@@ -115,7 +114,7 @@ export async function getEventTreeBook(novelId: string, taskId: string, signal?:
     if (seenCursors.has(cursor)) throw new Error("事件树分页游标重复，无法收齐全书事件");
     seenCursors.add(cursor);
     const page = await getEventTrees({ novelId, taskId, limit: 50, cursor, signal });
-    if (page.run_id !== first.run_id || page.contract_version !== first.contract_version) throw new Error("事件树分页运行身份变化，无法合并全书事件");
+    if (page.run_id !== first.run_id) throw new Error("事件树分页运行身份变化，无法合并全书事件");
     page.events.forEach(event => events.set(event.event_id, event));
     cursor = page.next_cursor;
   }
@@ -188,6 +187,15 @@ export async function getTopicEmotion(
   const { data } = await apiClient.get<TopicEmotionResponse>(
     `/api/novels/${novelId}/topics/emotion`,
     { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+/** 当前章详情按原声明身份读取，全书归属仅作为关联信息 */
+export async function getChapterEventDetail(novelId: string, taskId: string, chapterId: number, declarationId: string): Promise<import("./narrativeTypes").ChapterEventDetail> {
+  const { data } = await apiClient.get<import("./narrativeTypes").ChapterEventDetail>(
+    `/api/novels/${novelId}/event-forest/chapters/${chapterId}/nodes/${encodeURIComponent(declarationId)}`,
+    { params: { task_id: taskId } },
   );
   return data;
 }
