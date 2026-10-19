@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from src.diagnosis.normalization import normalize_topic_label_input
 
 
 class AgentAnalysisPatch(BaseModel):
@@ -36,6 +38,11 @@ class AgentAnalysisPatch(BaseModel):
     main_characters: list[str] | None = None
     core_cast: list[str] | None = None
     theme_color: str | None = None
+
+    @field_validator("topic_labels", mode="before")
+    @classmethod
+    def validate_topic_labels(cls, values: object) -> object:
+        return None if values is None else normalize_topic_label_input(values)
 
 
 __all__ = ["AgentAnalysisPatch"]

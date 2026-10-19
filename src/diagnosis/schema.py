@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from src.diagnosis.normalization import normalize_topic_label_input
 from src.diagnosis.vocabulary import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
 from src.event_trees.organization import NarrativeOrganization
 from src.fact_graph.character_reference_policy import is_global_character_surface_name
@@ -116,17 +117,10 @@ class AgentAnalysis(BaseModel):
             raise ValueError("style_labels cannot exceed 3 items")
         return normalized
 
-    @field_validator("topic_labels")
+    @field_validator("topic_labels", mode="before")
     @classmethod
-    def validate_topic_labels(cls, values: dict[str, str]) -> dict[str, str]:
-        normalized: dict[str, str] = {}
-        for raw_id, raw_label in values.items():
-            topic_id = str(raw_id)
-            label = raw_label.strip()
-            if not topic_id.isdecimal() or not label:
-                raise ValueError("topic_labels must map non-negative topic IDs to non-empty labels")
-            normalized[str(int(topic_id))] = label
-        return normalized
+    def validate_topic_labels(cls, values: object) -> dict[str, str]:
+        return normalize_topic_label_input(values)
 
     @field_validator("focus_characters", "main_characters", "core_cast")
     @classmethod

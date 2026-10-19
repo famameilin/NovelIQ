@@ -1,7 +1,7 @@
 """所属领域的产物完整性查询，供恢复编排调用
 
-从 diagnosis_reports 报告头、analysis_assessments 的标签/名单条目与
-complete_events 发布事实判定，正文与评分列、组织发布事实分别核对。
+从 diagnosis_reports 报告头、agent_assessments 的标签/名单条目与
+event_records 发布事实判定，正文与评分列、组织发布事实分别核对。
 """
 
 from __future__ import annotations

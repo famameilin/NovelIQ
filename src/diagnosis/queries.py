@@ -43,11 +43,14 @@ class DiagnosisQueries:
             if relation.relation_semantics == "same_character":
                 continue
             for change in relation.changes:
+                chapter_id = change.get("chapter_id")
+                if chapter_id is None:
+                    continue
                 raw_after = change.get("after")
                 after = raw_after if isinstance(raw_after, dict) else {}
                 rows.append(
                     (
-                        int(change["chapter_id"]),
+                        int(chapter_id),
                         relation.from_name,
                         relation.to_name,
                         str(after.get("relation_type") or relation.relation_type),

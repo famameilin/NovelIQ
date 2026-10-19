@@ -119,3 +119,18 @@ def normalize_topic_labels(values: object) -> dict[str, str] | None:
             return None
         normalized[str(int(raw_id))] = raw_label.strip()
     return normalized
+
+
+def normalize_topic_label_input(values: object) -> dict[str, str]:
+    "写入输入把整数或字符串 topic_id 统一成十进制字符串键"
+    if not isinstance(values, dict):
+        raise ValueError("topic_labels must be a valid dictionary")
+    normalized: dict[str, str] = {}
+    for raw_id, raw_label in values.items():
+        if isinstance(raw_id, bool) or not isinstance(raw_id, (int, str)):
+            raise ValueError("topic_labels must map non-negative topic IDs to non-empty labels")
+        topic_id = str(raw_id).strip()
+        if not topic_id.isdecimal() or not isinstance(raw_label, str) or not raw_label.strip():
+            raise ValueError("topic_labels must map non-negative topic IDs to non-empty labels")
+        normalized[str(int(topic_id))] = raw_label.strip()
+    return normalized

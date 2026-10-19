@@ -1,6 +1,6 @@
 """诊断结果查询及归一化；返回领域读模型
 
-读侧从 diagnosis_reports 报告头及 analysis_assessments 的标签/名单/评分条目重组，
+读侧从 diagnosis_reports 报告头及 agent_assessments 的标签/名单/评分条目重组，
 novel_id 从运行取，foreshadow_expectation 从正式伏笔链与阶段声明绑定投影；
 对 API 的中文字段语义、空值与顺序保持不变。
 """
