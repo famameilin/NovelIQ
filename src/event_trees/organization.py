@@ -1,17 +1,4 @@
-"""诊断内部的完整事件组织草稿、原文绑定与事务写入
-
-写入目标关系（35 表冻结结构）：
-- 会话/执行：executions 的整轮 session 形状与真实 invocation 形状
-  （同表两形状互斥，不互相冒充；诊断调用直接携带运行与案例锚）
-- 完整事件：complete_events（身份 + 真实生产者 + 同一性理由）
-- 阶段版本：event_revisions（显式 stage_index 链；声明绑定或 origin 正文恰一）
-- 包含/关系：narrative_links（单父包含 / 语义关系两类互斥形状）
-- 叙事组织：narrative_groups（叙事线/结果）与 narrative_links（线/结果关联）
-- 组织核对：organization_checks（单事件/单声明核对与声明对/结构对判断四类形状）
-- 冲突：conflict_records / conflict_claims
-证据一律进入 source_evidence 的明确所有者列（owner 恰一 + ordinal 顺序）；
-source_hashes 不新存，由声明绑定集合连接 organization_checks 的快照承诺读取重构。
-"""
+"完整事件组织草稿、原文绑定与正式产出保存"
 
 from __future__ import annotations
 
@@ -26,11 +13,8 @@ from src.event_trees import storage_map as smap
 from src.fact_graph.outputs import SourceReference
 from src.storage import Storage, new_id
 from src.storage.records.models import CompleteEventRecord as CompleteEvent
-from src.storage.records.models import EventRevisionRecord as EventRevision
 from src.storage.records.models import ParagraphRecord as Paragraph
 from src.utils.identity import text_digest
-
-CONTRACT_VERSION: Literal["event-tree-declarations-v1"] = "event-tree-declarations-v1"
 
 
 def _validate_narrative_description(value: str) -> str:
@@ -65,15 +49,15 @@ def snapshot_digest(payload: Any) -> str:
 
 
 def record_payloads(records: Any) -> list[dict[str, Any]]:
-    """无序候选集合以内容排序，跨工作恢复顺序不改变已核对版本"""
+    """无序候选集合以内容排序，跨工作恢复顺序不改变核对结果"""
     return sorted((item.model_dump(mode="json") for item in records), key=snapshot_digest)
 
 
 class CandidateConflict(ValueError):
     """可定位的候选冲突只返回真实生产者，不能重开无关会话"""
 
-    def __init__(self, message: str, case_ids: list[str]) -> None:
-        self.case_ids = tuple(sorted(set(case_ids)))
+    def __init__(self, message: str, producer_agent_ids: list[str]) -> None:
+        self.producer_agent_ids = tuple(sorted(set(producer_agent_ids)))
         super().__init__(message)
 
 
@@ -96,8 +80,7 @@ class BoundOrganizationEvidence(SourceReference):
 class OrganizationRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     evidence: list[BoundOrganizationEvidence] = Field(min_length=1, max_length=100)
-    source_case_id: str = ""
-    producer_invocation_id: str = ""
+    producer_agent_id: str = ""
 
 
 class NarrativeArcDraft(OrganizationRecord):
@@ -130,25 +113,6 @@ class EventOutcomeLinkDraft(OrganizationRecord):
     reason: str = Field(min_length=1)
 
 
-class ConflictClaim(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    claim: str = Field(min_length=1)
-    evidence: list[OrganizationEvidence] = Field(min_length=1, max_length=100)
-
-
-class BoundConflictClaim(OrganizationRecord):
-    claim: str = Field(min_length=1)
-
-
-class ConflictDraft(OrganizationRecord):
-    conflict_id: str
-    subject_kind: Literal["event", "declaration", "fact"]
-    subject_id: str
-    claims: list[BoundConflictClaim] = Field(min_length=2)
-    reason: str = Field(min_length=1)
-    resolution: Literal["unresolved"] = "unresolved"
-
-
 class EventReviewDraft(BaseModel):
     """诊断产物的覆盖审计，不制造无原文依据的线或结果关联"""
 
@@ -156,8 +120,7 @@ class EventReviewDraft(BaseModel):
     event_id: str
     reason: str = Field(min_length=1)
     snapshot_hash: str = Field(min_length=1)
-    source_case_id: str
-    producer_invocation_id: str
+    producer_agent_id: str
 
 
 class CompleteEventDraft(OrganizationRecord):
@@ -172,26 +135,9 @@ class CompleteEventDraft(OrganizationRecord):
     status: Literal["ongoing", "resolved"]
     progress: str | None = None
     declaration_ids: list[str] = Field(default_factory=list)
-    stage_order: list[str] = Field(default_factory=list)
-    current_declaration_id: str | None = None
     reason: str = Field(min_length=1)
     source_hashes: dict[str, str] = Field(default_factory=dict)
     first_text_position: int = Field(ge=0)
-
-
-class RevisionDraft(OrganizationRecord):
-    revision_id: str
-    event_id: str
-    previous_revision_id: str | None = None
-    summary: str = Field(min_length=1)
-    progress: str | None = None
-    status: Literal["ongoing", "resolved"]
-    source_operation_id: str
-    declaration_id: str | None = None
-    title: str
-    problem: str
-    event_type: str
-    participants: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ContainmentDraft(OrganizationRecord):
@@ -205,8 +151,7 @@ class DeclarationReviewDraft(BaseModel):
     declaration_id: str
     source_hash: str
     reason: str = Field(min_length=1)
-    source_case_id: str
-    producer_invocation_id: str
+    producer_agent_id: str
 
 
 class DeclarationComparisonDraft(OrganizationRecord):
@@ -239,16 +184,13 @@ class NarrativeOrganization(BaseModel):
     """完整事件的全书组织；章节概要、类型和包含结构保持不可变"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    contract_version: Literal["event-tree-declarations-v1"] = CONTRACT_VERSION
-    source_execution_id: str | None = None
+    source_agent_id: str | None = None
     events: list[CompleteEventDraft] = Field(default_factory=list)
-    revisions: list[RevisionDraft] = Field(default_factory=list)
     relations: list[RelationDraft] = Field(default_factory=list)
     arcs: list[NarrativeArcDraft] = Field(default_factory=list)
     event_arc_links: list[EventArcLinkDraft] = Field(default_factory=list)
     outcomes: list[EventOutcomeDraft] = Field(default_factory=list)
     event_outcome_links: list[EventOutcomeLinkDraft] = Field(default_factory=list)
-    conflicts: list[ConflictDraft] = Field(default_factory=list)
     reviewed_events: list[EventReviewDraft] = Field(default_factory=list)
     declaration_reviews: list[DeclarationReviewDraft] = Field(default_factory=list)
     declaration_comparisons: list[DeclarationComparisonDraft] = Field(default_factory=list)
@@ -263,11 +205,9 @@ class NarrativeOrganization(BaseModel):
         outcomes = {item.outcome_id for item in self.outcomes}
         for records, keys in (
             (self.events, {item.event_id for item in self.events}),
-            (self.revisions, {item.revision_id for item in self.revisions}),
             (self.relations, {item.relation_id for item in self.relations}),
             (self.arcs, list(arcs)),
             (self.outcomes, list(outcomes)),
-            (self.conflicts, {item.conflict_id for item in self.conflicts}),
             (self.reviewed_events, {item.event_id for item in self.reviewed_events}),
             (self.event_arc_links, {(item.event_id, item.arc_id) for item in self.event_arc_links}),
             (self.event_outcome_links, {(item.event_id, item.outcome_id) for item in self.event_outcome_links}),
@@ -298,11 +238,6 @@ class NarrativeOrganization(BaseModel):
 # ---------------------------------------------------------------------------
 # 诊断会话与真实执行的登记（新关系；不恢复 checkpoint）
 # ---------------------------------------------------------------------------
-
-
-def register_diagnosis_session(session: Storage, *, run_id: str, session_id: str) -> None:
-    """登记诊断整轮身份（executions 的 session 形状）；已存在且同 run 时幂等，不覆盖既有轮次"""
-    session.diagnosis.register_session(run_id=run_id, session_id=session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -344,56 +279,31 @@ def _run_events(session: Storage, run_id: str) -> dict[str, CompleteEvent]:
     return smap.run_events(session, run_id)
 
 
-def _current_event_contents(session: Storage, event_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """当前阶段内容：绑定声明取不可变声明，origin 取独立内容；current 必须是显式链尾"""
-    if not event_ids:
-        return {}
-    chains = smap.stage_chain(session, event_ids)
-    tails: dict[str, EventRevision] = {}
-    for event_id in event_ids:
-        rows = chains.get(event_id) or []
-        if not rows:
-            raise ValueError(f"正式事件缺少阶段版本: event_id={event_id}")
-        tails[event_id] = rows[-1]
-    contents = smap.revision_contents(session, {event_id: [row] for event_id, row in tails.items()})
-    return {event_id: contents[row.revision_id] for event_id, row in tails.items()}
-
-
 def _run_event_dicts(session: Storage, run_id: str) -> dict[str, dict[str, Any]]:
     """本 run 完整事件的读取形状：身份 + 当前内容 + 整体证据"""
     rows = _run_events(session, run_id)
     if not rows:
         return {}
     event_ids = list(rows)
-    contents = _current_event_contents(session, event_ids)
-    chains = smap.stage_chain(session, event_ids)
     evidence = smap.fetch_evidence(session, "complete_event_id", event_ids)
     result: dict[str, dict[str, Any]] = {}
-    for event_id in event_ids:
+    for event_id, row in rows.items():
         payloads = _evidence_payloads(session, run_id, evidence.get(event_id, []))
         if not payloads:
             raise ValueError(f"正式事件缺少整体证据: event_id={event_id}")
         positions = _global_positions(session, run_id, {item["paragraph_id"] for item in payloads})
-        stages = chains.get(event_id) or []
-        current = stages[-1].revision_id if stages else None
         result[event_id] = {
             "event_id": event_id,
-            "title": contents[event_id]["title"],
-            "problem": contents[event_id]["problem"],
-            "summary": contents[event_id]["summary"],
-            "event_type": contents[event_id]["event_type"],
-            "status": contents[event_id]["status"],
-            "progress": contents[event_id]["progress"],
-            "current_revision_id": current,
+            "title": row.title,
+            "problem": row.problem,
+            "summary": row.summary,
+            "event_type": row.event_type,
+            "status": row.status,
+            "progress": row.progress,
             "first_text_position": min(positions[item["paragraph_id"]] + item["char_start"] for item in payloads),
             "evidence": payloads,
         }
     return result
-
-
-def _published_arc_ids(session: Storage, run_id: str) -> set[str]:
-    """本 run 已发布的叙事线（经由真实诊断执行取得运行归属）"""
-    return set(session.reads.event_trees_organization_published_arc_ids_1(run_id))
 
 
 def _run_annotation_records(session: Storage, run_id: str) -> list[Any]:
@@ -422,14 +332,13 @@ class EventOrganizationDraft:
             self._identifiers[key] = new_id()
         return self._identifiers[key]
 
-    def __init__(self, session: Storage, run_id: str, execution_id: str | None = None) -> None:
-        # execution_id 是诊断整轮的会话身份（executions 的 session 形状），不是单个案例的调用
+    def __init__(self, session: Storage, run_id: str, agent_id: str | None = None) -> None:
+        # agent_id 是诊断整轮的会话身份（executions 的 session 形状），不是单个案例的调用
         self.session = session
         self.run_id = run_id
         self._identifiers: dict[tuple, str] = {}
-        self.execution_id = execution_id
-        self.case_id: str | None = None
-        self.producer_invocation_id: str | None = None
+        self.agent_id = agent_id
+        self.producer_agent_id: str | None = None
         self.identity_snapshot: str | None = None
         self.structure_snapshot: str | None = None
         self.containments: dict[tuple[str, str], ContainmentDraft] = {}
@@ -437,13 +346,11 @@ class EventOrganizationDraft:
         self.declaration_comparisons: dict[tuple[str, str], DeclarationComparisonDraft] = {}
         self.structure_reviews: dict[tuple[str, str], StructureReviewDraft] = {}
         self.events: dict[str, CompleteEventDraft] = {}
-        self.revisions: dict[str, RevisionDraft] = {}
         self.relations: dict[str, RelationDraft] = {}
         self.arcs: dict[str, NarrativeArcDraft] = {}
         self.event_arc_links: dict[tuple[str, str], EventArcLinkDraft] = {}
         self.outcomes: dict[str, EventOutcomeDraft] = {}
         self.event_outcome_links: dict[tuple[str, str], EventOutcomeLinkDraft] = {}
-        self.conflicts: dict[str, ConflictDraft] = {}
         self.reviewed_events: dict[str, EventReviewDraft] = {}
 
     def _all_events(self) -> dict[str, dict[str, Any]]:
@@ -464,7 +371,7 @@ class EventOrganizationDraft:
                 raise CandidateConflict(
                     f"包含候选存在多个直接父: child_event_id={edge.child_event_id}",
                     [
-                        item.source_case_id
+                        item.producer_agent_id
                         for item in self.containments.values()
                         if item.child_event_id == edge.child_event_id
                     ],
@@ -523,14 +430,21 @@ class EventOrganizationDraft:
     def read_events(self, event_ids: list[str]) -> list[dict[str, Any]]:
         _page_size(len(event_ids))
         by_id, parents = self._all_events(), self._parents()
-        if set(event_ids) - set(by_id):
-            raise ValueError(f"本任务事件不存在: {sorted(set(event_ids) - set(by_id))}")
+        missing = sorted(set(event_ids) - set(by_id))
+        if missing:
+            declarations = smap.run_declaration_ids(self.session, self.run_id)
+            sources = [key for key in missing if key in declarations]
+            hint = (
+                f"；其中 {sources} 是声明身份，事件关联须使用 search_events 返回的正式 event_id"
+                if sources
+                else ""
+            )
+            raise ValueError(f"本任务事件不存在: {missing}{hint}")
         return [
             {
                 **by_id[key],
                 **self._event_hierarchy(key, parents),
                 "direct_child_event_ids": [child for child, parent in parents.items() if parent == key],
-                "revisions": [item.model_dump(mode="json") for item in self.revisions.values() if item.event_id == key],
             }
             for key in event_ids
         ]
@@ -577,6 +491,40 @@ class EventOrganizationDraft:
         proposals: dict[str, list[dict[str, Any]]] = {key: [] for key in declaration_ids}
         link_rows = list(session.reads.event_trees_organization_declaration_rows_2(declaration_ids, self.run_id))
         link_evidence = smap.fetch_evidence(session, "narrative_link_id", [row.link_id for row in link_rows])
+        action_rows = [
+            row
+            for row in _run_foreshadowing_actions(session, self.run_id)
+            if row.source_declaration_id in declarations or row.target_declaration_id in declarations
+        ]
+        action_evidence = smap.fetch_evidence(
+            session, "foreshadow_action_id", [row.action_id for row in action_rows]
+        )
+        grouped = smap.evidence_payload_groups(
+            session,
+            self.run_id,
+            [evidence.get(identifier, []) for identifier in declaration_ids]
+            + [link_evidence.get(row.link_id, []) for row in link_rows]
+            + [action_evidence.get(row.action_id, []) for row in action_rows],
+        )
+        declaration_payloads = dict(zip(declaration_ids, grouped[: len(declaration_ids)], strict=True))
+        link_payloads = dict(
+            zip(
+                [row.link_id for row in link_rows],
+                grouped[len(declaration_ids) : len(declaration_ids) + len(link_rows)],
+                strict=True,
+            )
+        )
+        action_payloads = dict(
+            zip(
+                [row.action_id for row in action_rows],
+                grouped[len(declaration_ids) + len(link_rows) :],
+                strict=True,
+            )
+        )
+        chapter_context = {
+            producer: smap.annotation_chapter_of_execution(session, producer)
+            for producer in {row.producer_agent_id for row in action_rows}
+        }
         for link_row in link_rows:
             source_id, target_id = link_row.semantic_source_declaration_id, link_row.semantic_target_declaration_id
             payload: dict[str, Any] = {
@@ -585,18 +533,15 @@ class EventOrganizationDraft:
                 "target_declaration_id": target_id,
                 "relation_type": link_row.relation_type,
                 "reason": link_row.reason,
-                "evidence": _evidence_payloads(session, self.run_id, link_evidence.get(link_row.link_id, [])),
-                "producer_invocation_id": link_row.producer_execution_id,
+                "evidence": link_payloads[link_row.link_id],
+                "producer_agent_id": link_row.producer_agent_id,
             }
             for endpoint in (source_id, target_id):
                 if endpoint in proposals:
                     proposals[endpoint].append(payload)
         actions: dict[str, list[dict[str, Any]]] = {key: [] for key in declaration_ids}
-        for row in _run_foreshadowing_actions(session, self.run_id):
-            if row.source_declaration_id not in declaration_ids and row.target_declaration_id not in declaration_ids:
-                continue
-            action_evidence = smap.fetch_evidence(session, "foreshadow_action_id", [row.action_id])
-            source_context = smap.annotation_chapter_of_execution(session, row.producer_execution_id)
+        for row in action_rows:
+            source_context = chapter_context[row.producer_agent_id]
             chapter_id, chapter_order = source_context.chapter_id, source_context.chapter_order
             payload = {
                 "action_id": row.action_id,
@@ -605,7 +550,7 @@ class EventOrganizationDraft:
                 "action_type": row.action_type,
                 "chapter_id": chapter_id,
                 "chapter_order": chapter_order,
-                "evidence": _evidence_payloads(session, self.run_id, action_evidence.get(row.action_id, [])),
+                "evidence": action_payloads[row.action_id],
             }
             for endpoint in (row.source_declaration_id, row.target_declaration_id):
                 if endpoint in actions:
@@ -614,9 +559,7 @@ class EventOrganizationDraft:
         for identifier, declaration in declarations.items():
             record = records[declaration.record_id]
             chapter_id, chapter_order = chapter_by_record[declaration.record_id]
-            if record.contract_version != CONTRACT_VERSION:
-                raise ValueError(f"声明缺少当前契约的已保存真实来源: {identifier}")
-            bound = _evidence_payloads(session, self.run_id, evidence.get(identifier, []))
+            bound = declaration_payloads[identifier]
             if not bound:
                 raise ValueError(f"声明缺少原文证据: {identifier}")
             payload = {
@@ -633,7 +576,7 @@ class EventOrganizationDraft:
                 "chapter_order": chapter_order,
                 "char_start": bound[0]["char_start"],
                 "local_key": declaration.local_key,
-                "producer_invocation_id": record.execution_id,
+                "producer_agent_id": record.agent_id,
             }
             payload.update(
                 is_foreshadow_setup=declaration.is_foreshadowing_root,
@@ -674,9 +617,9 @@ class EventOrganizationDraft:
         return self._declaration_rows()
 
     def _source(self) -> dict[str, Any]:
-        if not self.case_id or not self.producer_invocation_id:
-            raise ValueError("诊断贡献缺少实际案例与调用来源")
-        return {"source_case_id": self.case_id, "producer_invocation_id": self.producer_invocation_id}
+        if not self.producer_agent_id:
+            raise ValueError("诊断贡献缺少真实生产者")
+        return {"producer_agent_id": self.producer_agent_id}
 
     def review_declarations(self, declaration_ids: list[str], *, reason: str) -> None:
         all_sources = self._declarations()
@@ -689,6 +632,23 @@ class EventOrganizationDraft:
                 declaration_id=row["declaration_id"], source_hash=row["source_hash"], reason=reason, **source
             )
 
+    def _require_free_key(self, key: str, event_id: str) -> None:
+        """局部键在同一执行内唯一：被其他事件占用时拒收，同一事件重发放行"""
+        holder = next(
+            (
+                item
+                for item in self.events.values()
+                if item.producer_agent_id == self.producer_agent_id and item.local_key == key
+            ),
+            None,
+        )
+        if holder is not None and holder.event_id != event_id:
+            raise ValueError(
+                f"局部键已被本执行的其他事件占用: key={key} event_id={holder.event_id} title={holder.title}；"
+                "同一执行内局部键必须唯一且不随章节、批次重置；请换用未占用的键（建议由声明 id 派生），"
+                "或复用、撤回占用的候选后重新提交"
+            )
+
     def identity(
         self,
         *,
@@ -699,21 +659,13 @@ class EventOrganizationDraft:
         event_type: str,
         status: Literal["ongoing", "resolved"],
         declaration_ids: list[str],
-        stage_order: list[str],
-        current_declaration_id: str,
         reason: str,
         evidence: list[OrganizationEvidence],
         progress: str | None = None,
     ) -> dict[str, Any]:
-        """模型判断同一身份与阶段顺序，程序仅机械分配身份并保留所有来源原值"""
-        if (
-            not declaration_ids
-            or len(declaration_ids) != len(set(declaration_ids))
-            or set(stage_order) != set(declaration_ids)
-            or len(stage_order) != len(declaration_ids)
-            or current_declaration_id != stage_order[-1]
-        ):
-            raise ValueError("stage_order 必须逐一包含所有声明且 current_declaration_id 为显式链尾")
+        """判断同一事件身份并保留全部章级声明，程序仅机械分配身份并保留所有来源原值"""
+        if not declaration_ids or len(declaration_ids) != len(set(declaration_ids)):
+            raise ValueError("声明列表不能为空或包含重复身份")
         all_sources = self._declarations()
         if set(declaration_ids) - set(all_sources):
             raise ValueError("声明引用不属于本 run")
@@ -729,9 +681,7 @@ class EventOrganizationDraft:
             event_type=event_type,
             status=status,
             progress=progress,
-            declaration_ids=declaration_ids,
-            stage_order=stage_order,
-            current_declaration_id=current_declaration_id,
+            declaration_ids=sorted(declaration_ids),
             reason=reason,
             source_hashes={row["declaration_id"]: row["source_hash"] for row in rows},
             first_text_position=self._first_position(bound),
@@ -739,23 +689,24 @@ class EventOrganizationDraft:
             **self._source(),
         )
         existing = self.events.get(event_id)
-        if existing is not None and existing.source_case_id != self.case_id:
-            raise ValueError("身份候选已由其他案例提交，不能覆盖其判断")
+        if existing is not None and existing.producer_agent_id != self.producer_agent_id:
+            raise ValueError("身份候选已由其他生产者提交，不能覆盖其判断")
         # 同一声明只能被一个事件认领，
         # 重叠认领的第二份在提交时拒收，由模型在原会话内改判（撤回或复用既有事件）
         for identifier in declaration_ids:
             holder = next((item for item in self.events.values() if identifier in item.declaration_ids), None)
             if holder is None or holder.event_id == event_id:
                 continue
-            if holder.source_case_id == self.case_id:
+            if holder.producer_agent_id == self.producer_agent_id:
                 raise ValueError(
-                    f"声明已被本案例既有事件认领: declaration_id={identifier} event_id={holder.event_id}；"
+                    f"声明已被当前生产者既有事件认领: declaration_id={identifier} event_id={holder.event_id}；"
                     "复用该事件或先撤回原候选再提交"
                 )
             raise ValueError(
-                f"声明已被其他案例提交的事件认领: declaration_id={identifier} event_id={holder.event_id}；"
+                f"声明已被其他生产者提交的事件认领: declaration_id={identifier} event_id={holder.event_id}；"
                 "不得重复认领，复用该事件并在来源比较中处置"
             )
+        self._require_free_key(key, event_id)
         self.events = {**self.events, event_id: candidate}
         self.reviewed_events.pop(event_id, None)
         return {"status": "accepted_candidate", "event_id": event_id, "declaration_ids": declaration_ids}
@@ -784,8 +735,8 @@ class EventOrganizationDraft:
             if target is None or (target["chapter_order"], target["char_start"], target_id) <= source_order:
                 raise ValueError("比较来源必须是配对中更早的真实来源；请以更早一端为 source 提交")
             existing = self.declaration_comparisons.get((source_declaration_id, target_id))
-            if existing is not None and existing.source_case_id != self.case_id:
-                raise ValueError("来源比较已由其他案例提交，不能覆盖")
+            if existing is not None and existing.producer_agent_id != self.producer_agent_id:
+                raise ValueError("来源比较已由其他生产者提交，不能覆盖")
         item = DeclarationComparisonDraft(
             source_declaration_id=source_declaration_id,
             target_declaration_ids=target_declaration_ids,
@@ -796,6 +747,79 @@ class EventOrganizationDraft:
         )
         for target_id in target_declaration_ids:
             self.declaration_comparisons[(source_declaration_id, target_id)] = item
+
+    def _references_to(self, event_id: str) -> list[tuple[str, str]]:
+        """引用指定事件的行：(结构名称, 生产者)，含证据内的事件引用"""
+        found: list[tuple[str, str]] = []
+        referencing: tuple[tuple[str, dict[Any, Any], tuple[str, ...]], ...] = (
+            ("事件核对", self.reviewed_events, ("event_id",)),
+            ("结构对", self.structure_reviews, ("source_event_id", "target_event_id")),
+            ("包含", self.containments, ("parent_event_id", "child_event_id")),
+            ("事件关系", self.relations, ("source_id", "target_id")),
+            ("叙事线关联", self.event_arc_links, ("event_id",)),
+            ("结果关联", self.event_outcome_links, ("event_id",)),
+        )
+        for name, container, fields in referencing:
+            for item in container.values():
+                if any(getattr(item, field) == event_id for field in fields):
+                    found.append((name, item.producer_agent_id))
+        evidence_rows: tuple[tuple[str, dict[Any, Any]], ...] = (
+            ("事件证据", self.events),
+            ("包含证据", self.containments),
+            ("关系证据", self.relations),
+            ("来源比较证据", self.declaration_comparisons),
+            ("结构对证据", self.structure_reviews),
+            ("叙事线证据", self.arcs),
+            ("结果证据", self.outcomes),
+            ("叙事线关联证据", self.event_arc_links),
+            ("结果关联证据", self.event_outcome_links),
+        )
+        for name, container in evidence_rows:
+            for item in container.values():
+                if any(ref.event_id == event_id for ref in item.evidence):
+                    found.append((name, item.producer_agent_id))
+        return found
+
+    def _drop_own_references(self, event_id: str) -> None:
+        """撤回前清除本生产者引用该事件的行；其余记录证据只清事件引用字段，证据本身保留"""
+        referencing: tuple[tuple[dict[Any, Any], tuple[str, ...]], ...] = (
+            (self.reviewed_events, ("event_id",)),
+            (self.structure_reviews, ("source_event_id", "target_event_id")),
+            (self.containments, ("parent_event_id", "child_event_id")),
+            (self.relations, ("source_id", "target_id")),
+            (self.event_arc_links, ("event_id",)),
+            (self.event_outcome_links, ("event_id",)),
+        )
+        for container, fields in referencing:
+            for key, item in list(container.items()):
+                if item.producer_agent_id == self.producer_agent_id and any(
+                    getattr(item, field) == event_id for field in fields
+                ):
+                    del container[key]
+        carriers: tuple[dict[Any, Any], ...] = (
+            self.events,
+            self.containments,
+            self.relations,
+            self.declaration_comparisons,
+            self.structure_reviews,
+            self.arcs,
+            self.outcomes,
+            self.event_arc_links,
+            self.event_outcome_links,
+        )
+        for container in carriers:
+            for key, item in list(container.items()):
+                if item.producer_agent_id != self.producer_agent_id:
+                    continue
+                if any(ref.event_id == event_id for ref in item.evidence):
+                    container[key] = item.model_copy(
+                        update={
+                            "evidence": [
+                                ref.model_copy(update={"event_id": None}) if ref.event_id == event_id else ref
+                                for ref in item.evidence
+                            ]
+                        }
+                    )
 
     def retract(
         self,
@@ -812,8 +836,18 @@ class EventOrganizationDraft:
         records: Any = {"identity": self.events, "contain": self.containments, "relation": self.relations}[kind]
         key: Any = tuple(identifier.split("/", 1)) if kind == "contain" else identifier
         item = records.get(key)
-        if item is None or item.source_case_id != self.case_id:
-            raise ValueError("只能撤回本案例的实际候选")
+        if item is None or item.producer_agent_id != self.producer_agent_id:
+            raise ValueError("只能撤回当前生产者的实际候选")
+        if kind == "identity":
+            foreign = sorted(
+                {name for name, producer in self._references_to(identifier) if producer != self.producer_agent_id}
+            )
+            if foreign:
+                raise ValueError(
+                    f"事件已被其他执行引用（{'、'.join(foreign)}），不能撤回；"
+                    "请改用其他事件，或由引用方处置后再撤回"
+                )
+            self._drop_own_references(identifier)
         del records[key]
 
     def event(
@@ -835,7 +869,7 @@ class EventOrganizationDraft:
             raise ValueError("新增事件须明确核对当前全部候选事件身份；同一事件应复用已有 event_id")
         source = self._source()
         bound = self.bind_evidence(evidence)
-        event_id = self._identifier("cross_chapter_event", self.run_id, self.case_id, key)
+        event_id = self._identifier("cross_chapter_event", self.run_id, self.producer_agent_id, key)
         candidate = CompleteEventDraft(
             event_id=event_id,
             local_key=key,
@@ -850,6 +884,7 @@ class EventOrganizationDraft:
             evidence=bound,
             **source,
         )
+        self._require_free_key(key, event_id)
         if event_id in self.events and self.events[event_id] != candidate:
             raise ValueError("已接受事件不能被其他操作覆盖")
         self.events[event_id] = candidate
@@ -887,10 +922,10 @@ class EventOrganizationDraft:
             **self._source(),
         )
         previous = self.containments.get((parent_event_id, child_event_id))
-        if previous is not None and previous.source_case_id != self.case_id:
-            raise ValueError("不能覆盖其他案例提交的包含候选，请引用原判断或显式交接")
+        if previous is not None and previous.producer_agent_id != self.producer_agent_id:
+            raise ValueError("不能覆盖其他生产者提交的包含候选，请引用原判断或显式交接")
         self.containments = {**self.containments, (parent_event_id, child_event_id): edge}
-        # 保留旧核对及其真实作者；屏障发现版本失效后回原案例，不丢失修正责任
+        # 保留旧核对及其真实作者；屏障发现来源改变后回原案例，不丢失修正责任
 
     def structure_review(
         self,
@@ -932,7 +967,7 @@ class EventOrganizationDraft:
         )
 
     def validate_events(self, events: dict[str, CompleteEventDraft] | None = None) -> None:
-        """逐事件核对来源哈希与阶段链；声明覆盖与事实核对缺口不再作为保存条件"""
+        """逐事件核对来源哈希与身份归属；声明覆盖与事实核对缺口不再作为保存条件"""
         events = self.events if events is None else events
         declarations = self._declarations()
         used: dict[str, str] = {}
@@ -941,27 +976,16 @@ class EventOrganizationDraft:
                 if identifier in used and used[identifier] != event.event_id:
                     raise CandidateConflict(
                         f"声明身份候选相冲突: declaration_id={identifier}",
-                        [item.source_case_id for item in events.values() if identifier in item.declaration_ids],
+                        [item.producer_agent_id for item in events.values() if identifier in item.declaration_ids],
                     )
                 source = declarations.get(identifier)
                 if source is None or event.source_hashes.get(identifier) != source["source_hash"]:
                     raise ValueError(f"声明来源不存在或已改变: {identifier}")
                 used[identifier] = event.event_id
-            if event.declaration_ids:
-                if (
-                    set(event.stage_order) != set(event.declaration_ids)
-                    or len(event.stage_order) != len(event.declaration_ids)
-                    or event.current_declaration_id != event.stage_order[-1]
-                ):
-                    raise ValueError("事件阶段链未完整明确指定")
         for identifier, review in self.declaration_reviews.items():
             source = declarations.get(identifier)
             if source is None or review.source_hash != source["source_hash"]:
                 raise ValueError(f"声明事实核对的来源已改变: {identifier}")
-
-    def _validate_revisions(self, events: dict[str, CompleteEventDraft] | None = None) -> None:
-        if self.revisions:
-            raise ValueError("阶段从已确认声明原样生成，不接受无来源的额外 revision")
 
     def relate_events(
         self,
@@ -978,7 +1002,7 @@ class EventOrganizationDraft:
         self.read_events([source_id, target_id])
         if relation_type in {"main", "secondary", "contains", "containment", "same_identity"}:
             raise ValueError("身份、包含及旧主链标记不能伪装为普通事件关系")
-        relation_id = self._identifier("event_relation", self.run_id, self.case_id, key)
+        relation_id = self._identifier("event_relation", self.run_id, self.producer_agent_id, key)
         self.relations[relation_id] = RelationDraft(
             relation_id=relation_id,
             source_kind=source_kind,
@@ -1069,7 +1093,7 @@ class EventOrganizationDraft:
         """登记或修正叙事线，不据数量和局部树键推定主线"""
         if not key.strip():
             raise ValueError("叙事线稳定键不能为空")
-        arc_id = self._identifier("narrative_arc", self.run_id, self.case_id, key)
+        arc_id = self._identifier("narrative_arc", self.run_id, self.producer_agent_id, key)
         arc = NarrativeArcDraft(
             arc_id=arc_id,
             kind=kind,
@@ -1118,7 +1142,7 @@ class EventOrganizationDraft:
         """结果身份由本轮稳定键派生，不包含任何来源事件身份"""
         if not key.strip():
             raise ValueError("结果稳定键不能为空")
-        outcome_id = self._identifier("event_outcome", self.run_id, self.case_id, key)
+        outcome_id = self._identifier("event_outcome", self.run_id, self.producer_agent_id, key)
         bound = self.bind_evidence(evidence)
         self.outcomes[outcome_id] = EventOutcomeDraft(
             outcome_id=outcome_id,
@@ -1165,49 +1189,11 @@ class EventOrganizationDraft:
             except (TypeError, ValueError) as exc:
                 raise ValueError("冲突事实主体必须是正式图谱事实流水号") from exc
             row = self.session.reads.event_trees_organization_validate_subject_1(fact_id)
-            producer_execution_id = None if row is None else row.direct_producer_execution_id
-            if producer_execution_id is None or not _execution_in_run(self.session, producer_execution_id, self.run_id):
+            producer_agent_id = None if row is None else row.direct_producer_agent_id
+            if producer_agent_id is None or not _execution_in_run(self.session, producer_agent_id, self.run_id):
                 raise ValueError("冲突事实主体不存在或不属于本 run")
         else:
             raise ValueError("冲突主体类型无效")
-
-    def register_conflict(
-        self,
-        *,
-        key: str,
-        subject_kind: Literal["event", "declaration", "fact"],
-        subject_id: str,
-        claims: list[ConflictClaim],
-        reason: str,
-    ) -> str:
-        """各项说法分别绑定证据，保留未解决，不裁定原文的唯一答案"""
-        if not key.strip():
-            raise ValueError("冲突稳定键不能为空")
-        self._validate_subject(subject_kind, subject_id)
-        # 每条陈述的真实来源是提交它的这次案例调用，写入各自来源列而不是只挂在冲突登记行
-        bound_claims = [
-            BoundConflictClaim(claim=item.claim, evidence=self.bind_evidence(item.evidence), **self._source())
-            for item in claims
-        ]
-        conflict_id = self._identifier("diagnosis_conflict", self.run_id, self.case_id, key)
-        self.conflicts[conflict_id] = ConflictDraft(
-            conflict_id=conflict_id,
-            subject_kind=subject_kind,
-            subject_id=subject_id,
-            claims=bound_claims,
-            reason=reason,
-            evidence=[ref for item in bound_claims for ref in item.evidence],
-            **self._source(),
-        )
-        return conflict_id
-
-    def read_conflicts(self, offset: int = 0, limit: int = 50) -> dict[str, Any]:
-        """核对章节标注留下的冲突说法，保留其原始身份和来源"""
-        _page_size(limit)
-        if offset < 0:
-            raise ValueError("offset 不能为负数")
-        rows = _run_conflicts(self.session, self.run_id)
-        return {"items": rows[offset : offset + limit]}
 
     def read_draft(self, offset: int = 0, limit: int = 50) -> dict[str, Any]:
         """分别分页检查组织事实和完整事件覆盖审计"""
@@ -1216,13 +1202,11 @@ class EventOrganizationDraft:
             raise ValueError("offset 不能为负数")
         groups: dict[str, list[BaseModel]] = {
             "events": list(self.events.values()),
-            "revisions": list(self.revisions.values()),
             "relations": list(self.relations.values()),
             "arcs": list(self.arcs.values()),
             "event_arc_links": list(self.event_arc_links.values()),
             "outcomes": list(self.outcomes.values()),
             "event_outcome_links": list(self.event_outcome_links.values()),
-            "conflicts": list(self.conflicts.values()),
             "reviewed_events": list(self.reviewed_events.values()),
         }
         return {
@@ -1274,15 +1258,13 @@ class EventOrganizationDraft:
         self.identity_snapshot = self.identity_digest()
         self.structure_snapshot = self.structure_digest()
         result = NarrativeOrganization(
-            source_execution_id=self.execution_id,
+            source_agent_id=self.agent_id,
             events=list(self.events.values()),
-            revisions=list(self.revisions.values()),
             relations=list(self.relations.values()),
             arcs=list(self.arcs.values()),
             event_arc_links=list(self.event_arc_links.values()),
             outcomes=list(self.outcomes.values()),
             event_outcome_links=list(self.event_outcome_links.values()),
-            conflicts=list(self.conflicts.values()),
             reviewed_events=list(self.reviewed_events.values()),
             declaration_reviews=list(self.declaration_reviews.values()),
             declaration_comparisons=list(
@@ -1300,32 +1282,20 @@ class EventOrganizationDraft:
         return result
 
 
-def _execution_in_run(session: Storage, execution_id: str, run_id: str) -> bool:
+def _execution_in_run(session: Storage, agent_id: str, run_id: str) -> bool:
     """真实执行的本 run 归属：调用形状直接带 run，整轮会话形状带 session_run"""
-    return smap.execution_in_run(session, execution_id, run_id)
+    return smap.execution_in_run(session, agent_id, run_id)
 
 
-def _annotation_chapter_of_execution(session: Storage, execution_id: str) -> tuple[int | None, int | None]:
+def _annotation_chapter_of_execution(session: Storage, agent_id: str) -> tuple[int | None, int | None]:
     """章级伏笔动作的来源章序：从其真实生产执行的记录归属与章节取得"""
-    return smap.annotation_chapter_of_execution(session, execution_id)
-
-
-def _run_conflict_rows(session: Storage, run_id: str) -> list[Any]:
-    """本 run 的冲突记录：真实登记执行属于本 run 的标注或诊断执行"""
-    return list(session.reads.event_trees_organization_run_conflict_rows_1(run_id))
-
-
-def _run_conflicts(session: Storage, run_id: str) -> list[dict[str, Any]]:
-    """冲突的读取形状：主体类型、逐条陈述及各自证据"""
-    return smap.conflict_payloads(session, run_id)
+    return smap.annotation_chapter_of_execution(session, agent_id)
 
 
 def validate_organization(session: Storage, run_id: str, organization: NarrativeOrganization) -> None:
     """保存前核对同 run 端点、独立结果及每项真实证据；核对覆盖缺口不作为保存条件"""
     organization = NarrativeOrganization.model_validate(organization.model_dump())
     records = _run_annotation_records(session, run_id)
-    if any(record.ChapterAnnotation.contract_version != CONTRACT_VERSION for record in records):
-        raise ValueError("章节正式产物属于旧契约，需要从原文重建")
     all_ids = set(_run_events(session, run_id))
     all_ids.update(item.event_id for item in organization.events)
     draft = EventOrganizationDraft(session, run_id)
@@ -1354,19 +1324,15 @@ def validate_organization(session: Storage, run_id: str, organization: Narrative
             raise ValueError("关联完整事件端点不属于本 run")
     if child_ids & {link.event_id for link in organization.event_outcome_links}:
         raise ValueError("全书结果贡献端点必须是顶层完整事件")
-    for conflict in organization.conflicts:
-        draft._validate_subject(conflict.subject_kind, conflict.subject_id)
     refs = [
         ref
         for records in (
             organization.events,
-            organization.revisions,
             organization.relations,
             organization.arcs,
             organization.outcomes,
             organization.event_arc_links,
             organization.event_outcome_links,
-            organization.conflicts,
             organization.containments,
             organization.declaration_comparisons,
             organization.structure_reviews,
@@ -1374,7 +1340,6 @@ def validate_organization(session: Storage, run_id: str, organization: Narrative
         for item in records
         for ref in item.evidence
     ]
-    refs.extend(ref for item in organization.conflicts for claim in item.claims for ref in claim.evidence)
     for records in (
         organization.events,
         organization.containments,
@@ -1383,12 +1348,11 @@ def validate_organization(session: Storage, run_id: str, organization: Narrative
         organization.event_arc_links,
         organization.outcomes,
         organization.event_outcome_links,
-        organization.conflicts,
         organization.declaration_comparisons,
     ):
         for record in records:
-            if not record.source_case_id or not record.producer_invocation_id:
-                raise ValueError("诊断贡献缺少真实案例与调用来源")
+            if not record.producer_agent_id:
+                raise ValueError("诊断贡献缺少真实 Agent 写出者")
     paragraphs = _paragraph_rows(session, run_id, {ref.paragraph_id for ref in refs})
     for ref in refs:
         row = paragraphs.get(ref.paragraph_id)
