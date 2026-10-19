@@ -1,10 +1,10 @@
 """本领域的独立只读投影，不返回 HTTP 模型
 
-章节标注按 chapter_annotations 宽表取具名指标：
+章节标注按 agent_annotations 宽表取具名指标：
 
 - 章号与章内角色取记录自身归属列
 - 情绪效价/叙事功能/转折/悬念为标注记录的独立具名列
-- coverage_warnings 按固定覆盖规则对 analysis_assessments 的逐段情绪条目投影
+- coverage_warnings 按固定覆盖规则对 agent_assessments 的逐段情绪条目投影
 - 章节完成与角色集合沿用 src.work.policy 的完成判定（saved 由正式记录存在性表达）
 """
 
@@ -34,7 +34,7 @@ def paragraph_label_coverage_warnings(label_count: int) -> list[str]:
 
 
 def _fetch_paragraph_label_counts(session: Storage, record_ids: list[str]) -> dict[str, int]:
-    """按标注记录统计逐段情绪条目数（analysis_assessments 的情绪形状）"""
+    """按标注记录统计逐段情绪条目数（agent_assessments 的情绪形状）"""
     if not record_ids:
         return {}
     return {

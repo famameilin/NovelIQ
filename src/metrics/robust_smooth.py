@@ -6,10 +6,6 @@ from collections.abc import Sequence
 
 import numpy as np
 
-#: LOWESS 算法版本标识（paragraph_curve_computations.algorithm_version）
-#: 实现为 tricube 核加权局部一次多项式回归；算法口径变更必须同步改版本串
-LOWESS_ALGORITHM_VERSION = "lowess-tricube-local-linear-v1"
-
 
 def _tricube_weights(distances: np.ndarray, h: float) -> np.ndarray:
     """

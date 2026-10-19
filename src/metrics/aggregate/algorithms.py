@@ -19,8 +19,6 @@ from src.lexicons.tables import STOPWORDS_TERMS
 from src.metrics.robust_smooth import robust_local_regression
 from src.text_processing.text_utils import split_sentences, tokenize_words
 
-GRAPH_METRICS_VERSION = "graph-metrics-v1"
-KEYWORD_ALGORITHM_VERSION = "textrank-v1"
 WINDOW_SIZE = 5
 MIN_WORD_LENGTH = 2
 
@@ -102,7 +100,7 @@ def compute_graph_structure_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
 
     metrics: dict[str, Any] = {
         "algorithm": {
-            "version": GRAPH_METRICS_VERSION,
+            "name": "graph-metrics",
             "graph": {
                 "node_count": graph.number_of_nodes(),
                 "edge_count": graph.number_of_edges(),
@@ -160,7 +158,7 @@ def compute_keywords(run_id: str, texts: Sequence[str], top_n: int = 10) -> dict
     停用词来自 registry 的 stopwords.txt。关键词只表示词共现结构信号，
     与 LDA 主题词可对照但口径独立。
     """
-    algorithm = {"version": KEYWORD_ALGORITHM_VERSION, "window": WINDOW_SIZE, "top_n": top_n}
+    algorithm = {"name": "textrank", "window": WINDOW_SIZE, "top_n": top_n}
     if not texts:
         return {
             "run_id": run_id,

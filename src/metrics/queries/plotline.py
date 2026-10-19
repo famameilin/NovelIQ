@@ -4,7 +4,7 @@
 - 章节、作者执行与执行角色由真实生产执行行投影；独立选章取 effective_chapter_id
 - 实体/关系状态按贡献顺序在读取侧折叠（不写第二份状态缓存；折叠口径与
   field/before/after 一致）
-- 原文证据按 source_evidence 的 owner 序号读取，文本哈希从正式原文切片计算
+- 原文证据按 paragraph_evidence 的 owner 序号读取，文本哈希从正式原文切片计算
 - 伏笔动作使用 event_trees.action_order 的正式读投影（声明绑定事件身份）
 """
 
@@ -105,7 +105,7 @@ class PlotlineQuery:
             key=lambda fact: (
                 self.orders[fact["chapter_id"]],
                 ROLE_ORDER.get(str(fact["role"]), 99),
-                str(fact["author_execution_id"]),
+                str(fact["author_agent_id"]),
                 int(fact["operation_order"] or 0),
                 str(fact["graph_fact_id"]),
             )
