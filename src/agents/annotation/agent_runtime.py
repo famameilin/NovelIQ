@@ -224,14 +224,6 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
             plan.commit()
             self.ledger.written_record_keys.add(plan.record)
             receipt: Any = _written_receipt(plan.record, plan.ref)
-            if caseid is not None:
-                warning = {
-                    "status": "warning",
-                    "code": "case_no_independent_artifact",
-                    "caseid": caseid,
-                    "message": "label 随章级指标保存；请在 metric 写入时显式传 caseid 关联",
-                }
-                receipt.update(case_link=warning, warnings=[warning])
             return self._finish_call(
                 name,
                 op_index=op_index,
@@ -249,7 +241,7 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
                     {
                         "name": target,
                         "args": exec_args,
-                        # call_id 是业务事实的全局唯一实际地址：graph_facts/case_entries 的
+                        # call_id 是业务事实的全局唯一实际地址：graph_facts 的
                         # business_call_id 唯一键按执行身份限定，只用程序内序号会跨执行撞键
                         "id": f"{identity}{self._program_id}-op{op_index}",
                     },
@@ -297,7 +289,7 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
             receipt = _written_receipt(plan.record, plan.ref)
             actual = entry.get("receipt")
             if isinstance(actual, dict):
-                for key in ("case_link", "warnings"):
+                for key in ("warnings",):
                     if key in actual:
                         receipt[key] = actual[key]
                 content = actual.get("content") or {}
@@ -373,7 +365,7 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
         op_index: int,
         line: int | None,
     ) -> None:
-        """用于把一个调用写进 agent_tool_calls（构造器与工具同一份字段）
+        """用于把一个调用写进 agent_toolcall（构造器与工具同一份字段）
 
         记录键与错误码取自回执（生产拒绝的 code、构造器校验的 code 或工具的载荷），
         source_line 来自模型程序里的源码行——构造器与工具都有，质量统计按
@@ -400,7 +392,6 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
             raw_args=None,
             response=receipt,
             receipt=receipt,
-            status=status,
             error=error,
             tool_duration_ms=max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000)),
             started_ns=started_ns,

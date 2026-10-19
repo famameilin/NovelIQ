@@ -54,7 +54,6 @@ class WorkExecution:
     persistence: Any = None
     call_id: str = ""
     event_reads: dict[str, dict[str, Any]] = field(default_factory=dict)
-    case_connections: list[str] = field(default_factory=list)
     case_reads: list[dict[str, Any]] = field(default_factory=list)
     case_save_warnings: list[dict[str, Any]] = field(default_factory=list)
 
@@ -116,12 +115,9 @@ class WorkExecution:
         return missing
 
     def output(self) -> dict[str, Any]:
-        from .chapter_consolidation import RULE_VERSION
 
         ledger = self.ledger
         return {
-            "contract_version": "event-tree-declarations-v1",
-            "chapter_consolidation_version": RULE_VERSION,
             "declaration_contributions": {
                 key: value for key, value in ledger.events.contribution_payloads().items() if key == "relations"
             },
@@ -273,7 +269,7 @@ class AnnotationAgent:
             audit_context = build_invocation_context(
                 run_id=self.run_id,
                 task_type="annotation",
-                execution_id=invocation_id,
+                agent_id=invocation_id,
                 attempt_number=payload["attempt_number"],
                 model=model_name,
                 chapter_id=payload["chapter_id"],
@@ -462,27 +458,10 @@ class AnnotationAgent:
         if call["name"] == "execute_code":
             return str(await tool.ainvoke(call.get("args", {})))
         if call["name"] in {"read_text", "search_text", "read_chapter_text", "anchor_record"}:
-            # 原文 I/O 不持书级锁，结束后仅在锁内登记可选案例关联
+            # 原文 I/O 不持书级锁，读取结果不关联案例
             args = dict(call.get("args", {}))
-            caseid = args.pop("caseid", None)
+            args.pop("caseid", None)
             result = await tool.ainvoke(args)
-            if caseid is not None:
-                from src.case_pool.tool_binding import attach_case_link
-
-                async with self.lock:
-                    result = attach_case_link(
-                        result,
-                        caseid,
-                        lambda **values: self.case_pool.associate(
-                            values["caseid"],
-                            execution.invocation_id,
-                            tool_name=call["name"],
-                            call_id=str(call["id"]),
-                            receipt=values["receipt"],
-                            is_write=False,
-                        ),
-                        call["name"],
-                    )
             execution.case_reads.append({"tool": call["name"], "result": str(result)})
             return str(result)
         async with self.lock:
@@ -495,7 +474,7 @@ class AnnotationAgent:
                     self.event_trees.snapshot(author),
                     self.case_pool.snapshot(author),
                 )
-                local = deepcopy((execution.event_reads, execution.case_connections, execution.case_reads))
+                local = deepcopy((execution.event_reads, execution.case_reads))
                 finished = execution.finished
                 try:
                     args = tool.args_schema.model_validate(call.get("args", {})).model_dump(exclude_unset=True)
@@ -511,12 +490,11 @@ class AnnotationAgent:
                     self.fact_graph.restore(snapshots[1])
                     self.event_trees.restore(snapshots[2])
                     self.case_pool.restore(snapshots[3])
-                    # 就地恢复：读取工具装配时捕获的是这三个容器对象本身，
+                    # 就地恢复：读取工具装配时捕获的是这两个容器对象本身，
                     # 换成快照副本会让此后读取的记录与工具持有的容器断裂
                     execution.event_reads.clear()
                     execution.event_reads.update(local[0])
-                    execution.case_connections[:] = local[1]
-                    execution.case_reads[:] = local[2]
+                    execution.case_reads[:] = local[1]
                     execution.finished = finished
                     raise
 
@@ -679,7 +657,7 @@ class AnnotationAgent:
                         for identifier in self.case_pool.registrations.get(author, set())
                     }
                 ),
-                "deliveries": deepcopy(self.case_pool.deliveries.get(author, [])),
+                "promises": self.case_pool.promises_for(author),
             },
         }
         for node in contributions["events"]["nodes"].values():
@@ -714,17 +692,14 @@ class AnnotationAgent:
         from src.storage.records.events import EventSave
         from src.storage.records.facts import FactSave
 
-        from .chapter_consolidation import RULE_VERSION
 
         metrics = output["metrics"]
         record = {
             "record_id": execution.annotation_id,
-            "execution_id": author,
+            "agent_id": author,
             "run_id": self.run_id,
             "chapter_id": int(payload["chapter_id"]),
             "role": str(payload["role"]),
-            "contract_version": str(output["contract_version"]),
-            "chapter_consolidation_version": RULE_VERSION,
             **{
                 key: metrics[key] if metrics else None
                 for key in ("summary", "emotional_valence", "narrative_function", "pivot_moment", "cliffhanger")
@@ -736,7 +711,7 @@ class AnnotationAgent:
                     "dialogue_id": new_id(),
                     "run_id": self.run_id,
                     "chapter_id": int(payload["chapter_id"]),
-                    "creation_execution_id": author,
+                    "creation_agent_id": author,
                     "candidate_key": item["candidate_key"],
                     "start_char": int(item["start"]),
                     "end_char": int(item["end"]),

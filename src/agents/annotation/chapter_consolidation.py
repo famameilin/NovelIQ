@@ -17,7 +17,6 @@ from src.storage.records.models import GraphEntityRecord as GraphEntity
 from src.utils.identity import stable_digest
 from src.work.policy import completed_chapters
 
-RULE_VERSION = "chapter-entity-consolidation-2026-10-14"
 PROGRAM_CODE = "chapter_consolidation"
 CHARACTER_REASONS = {
     "identity_assertion_conflict",
@@ -36,56 +35,37 @@ REASONS = {
 
 
 def case_description(issue: dict[str, Any]) -> str:
-    """完整节点键、原因和主段号优先；超长正文名称明确标示截短，完整证据保存在结论中"""
-    paragraphs = sorted({item["paragraph_id"] for item in issue["evidence"] if "paragraph_id" in item})
-    suffix = f"；类={issue['entity_type']}；码={REASONS[issue['reason']]}；段={paragraphs[0] if paragraphs else '无'}"
-    prefix = f"节点={issue['node_id']}；名="
-    available = 100 - len(prefix) - len(suffix)
-    if available < 2:
-        raise ValueError(f"章末案例定位超过描述长度: {issue['node_id']}")
+    "用普通文字说明待核查问题，不嵌入目标或原文坐标"
     name = " ".join(str(issue["name"]).split())
-    if len(name) > available:
-        name = name[: available - 1] + "…"
-    return prefix + name + suffix
+    problem = {
+        "identity_assertion_conflict": "身份判断存在分歧，请核查",
+        "representative_ambiguous": "代表身份不明确，请核查",
+        "dangling_relation": "关系端点尚未确认，请核查",
+        "dangling_participant": "参与者尚未登记，请核查",
+        "root_unreachable": "事件过程缺少起点，请核查",
+        "unreferenced_entity": "实体尚无正式引用，请核查",
+    }[issue["reason"]]
+    return f"{name[: 100 - len(problem) - 1]}：{problem}"
 
 
 def eligible_chapters(session: Storage, run_id: str) -> set[int]:
-    """只恢复启用本步骤后保存的章；历史完成章不通过新程序追溯补写"""
+    "读取当前运行已保存的章节"
     return {
         int(_stored_row_1.chapter_id)
         for _stored_row_1 in session.reads.agents_annotation_chapter_consolidation_eligible_chapters_1(run_id)
-        if _stored_row_1.chapter_consolidation_version == RULE_VERSION
     }
 
 
-def case_spec(item: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
-    """章末案例显式归类：人物悬置归 character、关系悬空归 relation、其余按事件处理
-
-    payload 携带定位键与首段事实证据，处置方不必再解析描述文本。
-    """
-    paragraphs = sorted(
-        {
-            (entry["chapter_id"], entry["paragraph_id"])
-            for entry in item["evidence"]
-            if "chapter_id" in entry and "paragraph_id" in entry
-        }
+def case_spec(item: dict[str, Any]) -> tuple[str, str]:
+    "按问题所属领域登记普通文字案例"
+    kind = (
+        "relation"
+        if item["reason"] == "dangling_relation"
+        else "character"
+        if item["reason"] in CHARACTER_REASONS
+        else "event"
     )
-    reason = item["reason"]
-    payload: dict[str, Any] = {
-        "node_id": item["node_id"],
-        "name": item["name"],
-        "entity_type": item["entity_type"],
-        "reason": reason,
-    }
-    if paragraphs:
-        payload["chapter_id"], payload["paragraph_id"] = paragraphs[0]
-    description = case_description(item)
-    if reason == "dangling_relation":
-        return "relation", description, payload
-    if reason in CHARACTER_REASONS:
-        return "character", description, payload
-    payload["event_id"] = item["node_id"]
-    return "event", description, payload
+    return kind, case_description(item)
 
 
 def consolidate_chapter(
@@ -94,7 +74,7 @@ def consolidate_chapter(
     """在调用方短事务中保存一次来源绑定的结论；案例、回执和完成凭据一起提交
 
     回执不保存结论 JSON：来源摘要以 program_invocation_key（chapter:{章}:{digest}）
-    冻结，sources/identity_mapping/support/issues 由正式贡献按本规则版本投影。
+    冻结，sources/identity_mapping/support/issues 由正式贡献投影。
     """
     chapter_records = list(
         session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_4(chapter_id, run_id)
@@ -104,17 +84,13 @@ def consolidate_chapter(
     ]
     if chapter_id not in completed_chapters(states):
         raise ValueError(f"章末核对缺少必需角色的有效保存产物: chapter_id={chapter_id}")
-    if not all(record.chapter_consolidation_version == RULE_VERSION for record in chapter_records):
-        return {"status": "historical", "chapter_id": chapter_id}
-    sources = [
-        {"execution_id": str(record.execution_id), "output_id": str(record.record_id)} for record in chapter_records
-    ]
-    digest = stable_digest(run_id, chapter_id, RULE_VERSION, sources)
+    sources = [{"agent_id": str(record.agent_id), "output_id": str(record.record_id)} for record in chapter_records]
+    digest = stable_digest(run_id, chapter_id, sources)
     previous = session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_2(chapter_id, run_id)
     if previous is not None:
-        if previous.program_invocation_key == f"chapter:{chapter_id}:{digest}" and not recheck:
+        if previous.consolidation_digest == f"chapter:{chapter_id}:{digest}" and not recheck:
             return {"status": "existing", "chapter_id": chapter_id, "fact_id": digest}
-        if previous.program_invocation_key != f"chapter:{chapter_id}:{digest}":
+        if previous.consolidation_digest != f"chapter:{chapter_id}:{digest}":
             raise ValueError(f"章末凭据与有效来源集合不同，不能覆盖: chapter_id={chapter_id}")
     repo = graph_projection(session.graph)
     boundary = repo.resolve_chapter_boundary(run_id, chapter_id=chapter_id)
@@ -130,7 +106,7 @@ def consolidate_chapter(
     for record in session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_3(run_id):
         if chapters.get(int(record.chapter_id), 0) <= sequence:
             visible[str(record.record_id)] = record
-    valid_executions = {str(record.execution_id) for record in visible.values()}
+    valid_executions = {str(record.agent_id) for record in visible.values()}
     fact_rows = list(session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_5(valid_executions))
     fact_chapter: dict[str, int | None] = {}
     for _stored_row_2 in fact_rows:
@@ -279,17 +255,17 @@ def consolidate_chapter(
     author = new_id()
     cases.begin(author)
     registered = [
-        cases.register_case(case_type=kind, description=description, payload=payload, author=author)
-        for kind, description, payload in map(case_spec, issues)
+        cases.register_case(case_type=kind, description=description, author=author)
+        for kind, description in map(case_spec, issues)
     ]
     frozen_cases = CaseSave(
         run_id,
-        author,
+        None,
         json.dumps(
             {
                 "created_case_ids": [item["case_id"] for item in registered],
                 "registrations": {item["case_id"]: item for item in registered},
-                "deliveries": [],
+                "promises": [],
             },
             ensure_ascii=False,
         ),
@@ -300,7 +276,6 @@ def consolidate_chapter(
             "run_id": run_id,
             "chapter_id": chapter_id,
             "sources": sources,
-            "rule_version": RULE_VERSION,
             "program_code": PROGRAM_CODE,
             "program_key": f"chapter:{chapter_id}:{digest}",
             "digest": digest,

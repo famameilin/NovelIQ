@@ -22,7 +22,7 @@ def build_text_read_tool(query_service: AnnotationQueryService, ledger: TextRead
 
     @tool
     async def read_text(paragraph_id: int, quote: str | None = None, occurrence: int = 1) -> str:
-        """读取完整段落或精确原文片段，返回跨章引用能力；不依赖该章标注是否完成"""
+        """读取完整段落或精确原文片段，返回 content 与 source_ref；不依赖该章标注是否完成"""
         if ledger.phase not in {"chapter_open", "diagnosis_open"}:
             raise AnnotationAuthorizationError("当前执行已收尾，不能读取原文")
         if occurrence < 1:

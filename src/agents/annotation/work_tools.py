@@ -66,7 +66,7 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         value = agent.event_trees.read(node_id)
         if execution.event_reads.get(node_id) != value:
             raise ValueError(f"declaration_id={identifier} 尚未读取当前内容，请先 read_event")
-        if value["producer_invocation_id"] != author and not value["saved"]:
+        if value["producer_agent_id"] != author and not value["saved"]:
             raise ValueError(f"declaration_id={identifier} 所属执行尚未保存")
         # 允许读取后文上下文不等于允许把后文事件记成本章已经披露的变化
         if query_service.chapter_orders[value["chapter_id"]] > query_service.current_chapter_order:
@@ -182,7 +182,6 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         )
 
     def on_claim() -> None:
-        execution.case_connections.clear()
         execution.case_reads.clear()
 
     shared = build_state_read_tools(
@@ -233,11 +232,8 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
 
         # 登记进全书共享案例池（case_type=event），诊断期按事件并发派工时据此取材
         agent.case_pool.register_event_case(
-            declaration_id=declaration_id,
             title=read["content"]["title"],
             summary=read["content"]["summary"],
-            status=read["content"]["status"],
-            chapter_id=read["chapter_id"],
             author=author,
         )
         return json.dumps(
@@ -320,7 +316,7 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         return json.dumps({"status": "written", "kind": kind, "connection_id": identifier}, ensure_ascii=False)
 
     def request_end() -> dict[str, Any]:
-        """请求结束当前回合；完整性由程序统一检查，caseid 只产生可选 warning"""
+        """请求结束当前回合，完整性由程序统一检查"""
         execution.end_requested = True
         ledger.end_requested = True
         body: dict[str, Any] = {
@@ -345,15 +341,5 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         _forbid_undeclared_args(candidate)
         from src.case_pool.tool_binding import bind_caseid
 
-        def associate(*, caseid: Any, tool_name: str, receipt: dict[str, Any]) -> dict[str, Any]:
-            return agent.case_pool.associate(
-                caseid,
-                author,
-                tool_name=tool_name,
-                call_id=execution.call_id,
-                receipt=receipt,
-                is_write=tool_name.startswith("write_"),
-            )
-
-        bind_caseid(candidate, associate)
+        bind_caseid(candidate)
     return tools

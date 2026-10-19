@@ -14,7 +14,6 @@ from pydantic import ValidationError
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.tools import _WRITE_TOOL_NAMES
 from src.agents.annotation.validation_errors import translate_write_validation_error
-from src.case_pool.tool_binding import current_case_call_id
 
 from .errors import AnnotationDependencyError, AnnotationInvariantError
 from .graph import (
@@ -79,7 +78,6 @@ async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
     args = dict(call.get("args") or {})
     if name in _WRITE_TOOL_NAMES:
         args = _coerce_nullish_write_args(candidate, args)
-    case_binding = current_case_call_id.set(str(call.get("id") or ""))
     try:
         result = await candidate.ainvoke(args)
     except ValidationError as exc:
@@ -87,8 +85,6 @@ async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
         if name in _WRITE_TOOL_NAMES | {"anchor_record", "write_link"}:
             raise translate_write_validation_error(name, args, exc) from None
         raise
-    finally:
-        current_case_call_id.reset(case_binding)
     return str(result)
 
 
@@ -173,7 +169,6 @@ async def _failed_entry(
             raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
             response=receipt,
             receipt=receipt,
-            status="error",
             error=error_text,
             tool_duration_ms=0,
             started_ns=started_ns,
@@ -272,7 +267,6 @@ async def _execute_call(
             raw_args=(str(call.get("raw_args")) if call.get("raw_args") is not None else None),
             response=audit_receipt,
             receipt=audit_receipt,
-            status=audit_status,
             error=audit_error,
             tool_duration_ms=max(0, round((time.perf_counter_ns() - started_ns) / 1_000_000)),
             started_ns=started_ns,

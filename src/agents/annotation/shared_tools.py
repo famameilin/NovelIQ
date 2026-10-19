@@ -16,7 +16,7 @@ SearchLimit = Annotated[int, Field(ge=1, le=20)]
 # 紧凑索引只回一行式字段，单页体量小，允许到 100 条（详情预览仍限 20，由工具内校验）
 EventSearchLimit = Annotated[int, Field(ge=1, le=100)]
 SearchOffset = Annotated[int, Field(ge=0)]
-ObjectKind = Literal["declaration", "event", "arc", "outcome", "conflict"]
+ObjectKind = Literal["declaration", "event", "arc", "outcome"]
 
 
 def _search_page(values: list[Any], *, offset: int, limit: int, budget: int) -> tuple[list[Any], int | None]:

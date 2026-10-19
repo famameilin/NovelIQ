@@ -76,11 +76,9 @@ class EventBindingState:
     # 完整事件域：EventNode 继续保存过程，下列对象是完整事件及其关联的
     # 本 work 挂起记录（局部键 → 声明；随正式贡献冻结、保存、确认与回滚）
     complete_events: dict[str, dict[str, Any]] = field(default_factory=dict)
-    event_revisions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     containments: dict[str, dict[str, Any]] = field(default_factory=dict)
     ownerships: dict[str, dict[str, Any]] = field(default_factory=dict)
     relations: list[dict[str, Any]] = field(default_factory=list)
-    conflicts: list[dict[str, Any]] = field(default_factory=list)
 
     def _tree_id(self, ctx: EventBindingStateContext, tree_key: str) -> str:
         """树身份绑定章与局部键，重试和乱序执行都得到同一 id"""
@@ -526,13 +524,9 @@ class EventBindingState:
         """整理本 work 的候选关系；非标注产物在保存面明确拒绝"""
         return {
             "complete_events": {str(item["event_id"]): dict(item) for item in self.complete_events.values()},
-            "revisions": {
-                str(item["revision_id"]): dict(item) for chain in self.event_revisions.values() for item in chain
-            },
             "containments": {key: dict(item) for key, item in self.containments.items()},
             "ownerships": {key: dict(item) for key, item in self.ownerships.items()},
             "relations": {str(item["relation_id"]): dict(item) for item in self.relations},
-            "conflicts": {str(item["conflict_id"]): dict(item) for item in self.conflicts},
         }
 
     def event_content(self, ctx: EventBindingStateContext, *, el: str, isroot: bool) -> dict[str, Any]:

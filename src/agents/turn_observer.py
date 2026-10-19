@@ -24,7 +24,7 @@ def build_invocation_context(
     *,
     run_id: str,
     task_type: str,
-    execution_id: str,
+    agent_id: str,
     attempt_number: int,
     model: str,
     chapter_id: int | None = None,
@@ -37,7 +37,7 @@ def build_invocation_context(
         "task_type": task_type,
         "call_type": "agent" if task_type == "annotation" else task_type,
         "model": model or "unknown",
-        "execution_id": execution_id,
+        "agent_id": agent_id,
         "attempt_number": attempt_number,
         "chapter_id": chapter_id,
         "role": role,
@@ -130,7 +130,7 @@ class AgentTurnObserver:
     """用于在 Agent 图节点间传递当前回合审计上下文并逐笔落库
 
     context 是本次尝试的 invocation 上下文（run_id/task_type/call_type/model/
-    execution_id/attempt_number/chapter_id/role/case_anchor），随每条
+    agent_id/attempt_number/chapter_id/role/case_anchor），随每条
     审计调用流动，落库端不需要额外状态。
     """
 
@@ -183,7 +183,6 @@ class AgentTurnObserver:
         self._recorder.finish_turn(
             turn_id,
             raw_response=_serialize_ai_message(response_message),
-            status="success",
             error=None,
             timing={
                 "ttft_ms": timing.ttft_ms,
@@ -217,7 +216,6 @@ class AgentTurnObserver:
         self._recorder.finish_turn(
             self._pending_turn_id,
             raw_response=_serialize_ai_message(response),
-            status="error",
             error=error,
             timing={
                 "ttft_ms": timing.ttft_ms,
@@ -241,7 +239,6 @@ class AgentTurnObserver:
         raw_args: str | None = None,
         response: dict[str, Any] | None,
         receipt: dict[str, Any] | None,
-        status: str,
         error: str | None,
         tool_duration_ms: int | None,
         started_ns: int,
@@ -257,7 +254,6 @@ class AgentTurnObserver:
             raw_args=raw_args,
             response=response,
             receipt=receipt,
-            status=status,
             error=error,
             tool_duration_ms=tool_duration_ms,
         )
