@@ -16,7 +16,6 @@ from src.storage.repositories.queries import api_main as _api_main
 from src.storage.repositories.queries import api_routes_results_graph as _api_routes_results_graph
 from src.storage.repositories.queries import audit_module as _audit_module
 from src.storage.repositories.queries import audit_queries as _audit_queries
-from src.storage.repositories.queries import case_pool_pool as _case_pool_pool
 from src.storage.repositories.queries import diagnosis_completion as _diagnosis_completion
 from src.storage.repositories.queries import diagnosis_read as _diagnosis_read
 from src.storage.repositories.queries import event_trees_action_order as _event_trees_action_order
@@ -305,10 +304,10 @@ class ReadAccess:
             read_only=True,
         )
 
-    def agents_diagnosis_persistence_published_report_1(self, run_id: Any) -> Any:
+    def agents_diagnosis_persistence_existing_report_1(self, run_id: Any) -> Any:
         "读取固定数据投影，连接和结果资源在包内释放"
         return self._runner.run(
-            lambda session: _agents_diagnosis_persistence.agents_diagnosis_persistence_published_report_1(
+            lambda session: _agents_diagnosis_persistence.agents_diagnosis_persistence_existing_report_1(
                 session, run_id
             ),
             read_only=True,
@@ -408,72 +407,6 @@ class ReadAccess:
             lambda session: _audit_queries.audit_queries_fetch_usage_by_model(session, run_id), read_only=True
         )
 
-    def case_pool_pool_observation_for_1(self, case: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_observation_for_1(session, case), read_only=True
-        )
-
-    def case_pool_pool_candidate_key_for_1(self, case: Any, value_1: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_candidate_key_for_1(session, case, value_1), read_only=True
-        )
-
-    def case_pool_pool_delivery_dict_1(self, delivery: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_delivery_dict_1(session, delivery), read_only=True
-        )
-
-    def case_pool_pool_row_record_1(self, case: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_row_record_1(session, case), read_only=True
-        )
-
-    def case_pool_pool_load_cases_1(self, cases: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_load_cases_1(session, cases), read_only=True
-        )
-
-    def case_pool_pool_load_cases_2(self, cases: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_load_cases_2(session, cases), read_only=True
-        )
-
-    def case_pool_pool_load_cases_5(self, support: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_load_cases_5(session, support), read_only=True
-        )
-
-    def case_pool_pool_load_saved_work_1(self, annotation_id: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_load_saved_work_1(session, annotation_id), read_only=True
-        )
-
-    def case_pool_pool_load_saved_work_2(self, execution_id: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_load_saved_work_2(session, execution_id), read_only=True
-        )
-
-    def case_pool_pool_load_saved_work_3(self, support: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_load_saved_work_3(session, support), read_only=True
-        )
-
-    def case_pool_pool_load_saved_work_4(self, support: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _case_pool_pool.case_pool_pool_load_saved_work_4(session, support), read_only=True
-        )
-
     def diagnosis_completion_has_diagnosis_data_1(self, run_id: Any) -> Any:
         "读取固定数据投影，连接和结果资源在包内释放"
         return self._runner.run(
@@ -571,13 +504,6 @@ class ReadAccess:
             lambda session: _event_trees_organization.event_trees_organization_run_foreshadowing_actions_1(
                 session, declarations
             ),
-            read_only=True,
-        )
-
-    def event_trees_organization_run_conflict_rows_1(self, run_id: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _event_trees_organization.event_trees_organization_run_conflict_rows_1(session, run_id),
             read_only=True,
         )
 
@@ -688,15 +614,6 @@ class ReadAccess:
             read_only=True,
         )
 
-    def event_trees_read_organization_load_events_1(self, value_1: Any) -> Any:
-        "读取固定数据投影，连接和结果资源在包内释放"
-        return self._runner.run(
-            lambda session: _event_trees_read_organization.event_trees_read_organization_load_events_1(
-                session, value_1
-            ),
-            read_only=True,
-        )
-
     def event_trees_read_organization_load_containments_1(self, value_1: Any) -> Any:
         "读取固定数据投影，连接和结果资源在包内释放"
         return self._runner.run(
@@ -733,10 +650,10 @@ class ReadAccess:
             read_only=True,
         )
 
-    def event_trees_read_organization_load_revisions_1(self, event_ids: Any) -> Any:
+    def event_trees_read_organization_load_bindings_1(self, event_ids: Any) -> Any:
         "读取固定数据投影，连接和结果资源在包内释放"
         return self._runner.run(
-            lambda session: _event_trees_read_organization.event_trees_read_organization_load_revisions_1(
+            lambda session: _event_trees_read_organization.event_trees_read_organization_load_bindings_1(
                 session, event_ids
             ),
             read_only=True,
@@ -781,17 +698,17 @@ class ReadAccess:
             read_only=True,
         )
 
-    def event_trees_trees_load_saved_work_4(self, execution_id: Any) -> Any:
+    def event_trees_trees_load_saved_work_4(self, agent_id: Any) -> Any:
         "读取固定数据投影，连接和结果资源在包内释放"
         return self._runner.run(
-            lambda session: _event_trees_trees.event_trees_trees_load_saved_work_4(session, execution_id),
+            lambda session: _event_trees_trees.event_trees_trees_load_saved_work_4(session, agent_id),
             read_only=True,
         )
 
-    def event_trees_trees_load_saved_work_5(self, execution_id: Any) -> Any:
+    def event_trees_trees_load_saved_work_5(self, agent_id: Any) -> Any:
         "读取固定数据投影，连接和结果资源在包内释放"
         return self._runner.run(
-            lambda session: _event_trees_trees.event_trees_trees_load_saved_work_5(session, execution_id),
+            lambda session: _event_trees_trees.event_trees_trees_load_saved_work_5(session, agent_id),
             read_only=True,
         )
 
@@ -814,10 +731,10 @@ class ReadAccess:
             lambda session: _fact_graph_graph.fact_graph_graph_load_saved_work_1(session, annotation_id), read_only=True
         )
 
-    def fact_graph_graph_load_saved_work_2(self, execution_id: Any) -> Any:
+    def fact_graph_graph_load_saved_work_2(self, agent_id: Any) -> Any:
         "读取固定数据投影，连接和结果资源在包内释放"
         return self._runner.run(
-            lambda session: _fact_graph_graph.fact_graph_graph_load_saved_work_2(session, execution_id), read_only=True
+            lambda session: _fact_graph_graph.fact_graph_graph_load_saved_work_2(session, agent_id), read_only=True
         )
 
     def fact_graph_graph_load_saved_work_3(self, execution_chapter_id: Any, value_1: Any) -> Any:
@@ -841,10 +758,10 @@ class ReadAccess:
             lambda session: _fact_graph_graph.fact_graph_graph_read_execution_facts_2(session, rows), read_only=True
         )
 
-    def fact_graph_graph_read_execution_facts_3(self, execution_id: Any) -> Any:
+    def fact_graph_graph_read_execution_facts_3(self, agent_id: Any) -> Any:
         "读取固定数据投影，连接和结果资源在包内释放"
         return self._runner.run(
-            lambda session: _fact_graph_graph.fact_graph_graph_read_execution_facts_3(session, execution_id),
+            lambda session: _fact_graph_graph.fact_graph_graph_read_execution_facts_3(session, agent_id),
             read_only=True,
         )
 

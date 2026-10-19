@@ -45,16 +45,14 @@ class NarrativeAccess:
             lambda session: _records.dialogue_record_by_candidate(session, run_id, candidate_key), read_only=True
         )
 
-    def execution_in_run(self, execution_id: Any, run_id: Any) -> Any:
+    def execution_in_run(self, agent_id: Any, run_id: Any) -> Any:
         "真实执行的本 run 归属（调用形状带 run，整轮会话形状带 session_run）"
-        return self._runner.run(
-            lambda session: _records.execution_in_run(session, execution_id, run_id), read_only=True
-        )
+        return self._runner.run(lambda session: _records.execution_in_run(session, agent_id, run_id), read_only=True)
 
-    def annotation_chapter_of_execution(self, execution_id: Any) -> Any:
+    def annotation_chapter_of_execution(self, agent_id: Any) -> Any:
         "标注执行的来源章：章号取执行自身归属列，章序从 chapters 取得"
         return self._runner.run(
-            lambda session: _records.annotation_chapter_of_execution(session, execution_id), read_only=True
+            lambda session: _records.annotation_chapter_of_execution(session, agent_id), read_only=True
         )
 
     def chapter_offsets(self, run_id: Any, chapter_ids: Any) -> Any:
@@ -74,6 +72,12 @@ class NarrativeAccess:
     def evidence_payloads(self, run_id: Any, rows: Any) -> Any:
         "证据行按 ordinal 重组为原文引用，哈希由不可变原文切片重算"
         return self._runner.run(lambda session: _records.evidence_payloads(session, run_id, rows), read_only=True)
+
+    def evidence_payload_groups(self, run_id: Any, groups: Any) -> Any:
+        "批量重组多个所有者的证据行；段落一次读取"
+        return self._runner.run(
+            lambda session: _records.evidence_payload_groups(session, run_id, groups), read_only=True
+        )
 
     def fetch_evidence(self, owner_column: Any, owner_ids: Any) -> Any:
         "按所有者列批量读取证据行，返回 owner→有序证据"
@@ -95,20 +99,12 @@ class NarrativeAccess:
         )
 
     def write_evidence_rows(self, owner: Any, evidence: Any) -> Any:
-        "证据逐条按原顺序写入 source_evidence；owner 恰一由目标表 CHECK 保证"
+        "证据逐条按原顺序写入 paragraph_evidence；owner 恰一由目标表 CHECK 保证"
         return self._runner.run(lambda session: _records.write_evidence_rows(session, owner, evidence), read_only=False)
 
-    def conflict_payloads(self, run_id: Any) -> Any:
-        "本 run 的冲突读取形状：主体类型、逐条陈述及各自证据"
-        return self._runner.run(lambda session: _records.conflict_payloads(session, run_id), read_only=True)
-
-    def stage_chain(self, event_ids: Any) -> Any:
-        "事件阶段链：按显式 stage_index 升序读取，链尾为当前阶段"
-        return self._runner.run(lambda session: _records.stage_chain(session, event_ids), read_only=True)
-
-    def revision_contents(self, revisions: Any) -> Any:
-        "阶段内容：绑定声明取不可变声明正文，独立 origin 取 origin_* 列"
-        return self._runner.run(lambda session: _records.revision_contents(session, revisions), read_only=True)
+    def declaration_bindings(self, event_ids: Any) -> Any:
+        "读取完整事件的全部声明归属"
+        return self._runner.run(lambda session: _records.declaration_bindings(session, event_ids), read_only=True)
 
     def execution_ids(self, run_id: str) -> list[str]:
         "本 run 的直接执行及整轮会话身份列表"

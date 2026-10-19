@@ -16,7 +16,7 @@ class AuditAccess:
     def start_invocation(
         self,
         *,
-        execution_id: str | None = None,
+        agent_id: str | None = None,
         task_type: str | None = None,
         attempt_number: int = 1,
         run_id: str | None = None,
@@ -28,7 +28,7 @@ class AuditAccess:
         "保存一项完整审计事实，成功提交后才返回"
         return self._runner.run(
             lambda session: AuditRepository(session).start_invocation(
-                execution_id=execution_id,
+                agent_id=agent_id,
                 task_type=task_type,
                 attempt_number=attempt_number,
                 run_id=run_id,
@@ -46,7 +46,7 @@ class AuditAccess:
         task_type: str,
         call_type: str,
         model: str,
-        execution_id: str,
+        agent_id: str,
         attempt_number: int,
         chapter_id: int | None,
         role: str | None,
@@ -64,7 +64,7 @@ class AuditAccess:
                 task_type=task_type,
                 call_type=call_type,
                 model=model,
-                execution_id=execution_id,
+                agent_id=agent_id,
                 attempt_number=attempt_number,
                 chapter_id=chapter_id,
                 role=role,
@@ -82,7 +82,6 @@ class AuditAccess:
         turn_id: str,
         *,
         raw_response: dict[str, Any],
-        status: str,
         error: str | None,
         timing: dict[str, int | None],
         timing_notes: list[str],
@@ -93,7 +92,6 @@ class AuditAccess:
             lambda session: AuditRepository(session).finish_turn(
                 turn_id,
                 raw_response=raw_response,
-                status=status,
                 error=error,
                 timing=timing,
                 timing_notes=timing_notes,
@@ -119,7 +117,6 @@ class AuditAccess:
         raw_args: str | None = None,
         response: dict[str, Any] | None = None,
         receipt: dict[str, Any] | None = None,
-        status: str = "success",
         error: str | None = None,
         tool_duration_ms: int | None = None,
         message_key: str | None = None,
@@ -134,7 +131,6 @@ class AuditAccess:
                 raw_args=raw_args,
                 response=response,
                 receipt=receipt,
-                status=status,
                 error=error,
                 tool_duration_ms=tool_duration_ms,
                 message_key=message_key,
@@ -144,7 +140,7 @@ class AuditAccess:
     def finish_invocation(
         self,
         *,
-        execution_id: str,
+        agent_id: str,
         status: str,
         task_type: str | None = None,
         attempt_number: int = 1,
@@ -159,7 +155,7 @@ class AuditAccess:
         "保存一项完整审计事实，成功提交后才返回"
         return self._runner.run(
             lambda session: AuditRepository(session).finish_invocation(
-                execution_id=execution_id,
+                agent_id=agent_id,
                 status=status,
                 task_type=task_type,
                 attempt_number=attempt_number,
@@ -172,7 +168,3 @@ class AuditAccess:
                 **_,
             )
         )
-
-    def close_orphaned_turns(self, run_id: str) -> int:
-        "保存一项完整审计事实，成功提交后才返回"
-        return self._runner.run(lambda session: AuditRepository(session).close_orphaned_turns(run_id))

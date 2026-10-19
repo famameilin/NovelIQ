@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
-from src.config.constants.contracts import FIXED_CONTRACT_VERSION
 from src.storage.input_boundary import plain_inputs
 from src.storage.records.annotation import (
     AnnotationRoleRecord,
@@ -16,7 +14,6 @@ from src.storage.records.annotation import (
     GraphFactRow,
     SavedAnnotationRecord,
 )
-from src.storage.records.cases import CaseSave
 from src.storage.records.embedding_ops import ParagraphEmbeddingRow
 from src.storage.records.graph import (
     ChapterBoundary,
@@ -51,24 +48,9 @@ class RunAccess:
     def __init__(self, runner):
         self._runner = runner
 
-    def create_run(
-        self,
-        novel_id: str,
-        source_path: str | None = None,
-        title: str | None = None,
-        author: str | None = None,
-        run_id: str | None = None,
-        task_kind: str = "analysis",
-        request_payload: dict[str, Any] | None = None,
-        task_id: str | None = None,
-    ) -> str:
-        "创建新的分析运行记录"
-        return self._runner.run(
-            lambda _session: _RunRepository(_session).create_run(
-                novel_id, source_path, title, author, run_id, task_kind, request_payload, task_id=task_id
-            ),
-            read_only=False,
-        )
+    def create_run(self, novel_id: str, run_id: str | None = None, task_id: str | None = None) -> str:
+        "创建运行身份"
+        return self._runner.run(lambda session: _RunRepository(session).create_run(novel_id, run_id, task_id))
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         "获取运行记录"
@@ -78,12 +60,6 @@ class RunAccess:
         "获取指定小说的所有运行记录"
         return self._runner.run(lambda _session: _RunRepository(_session).get_runs_by_novel(novel_id), read_only=True)
 
-    def request_task_cancellation(self, run_id: str) -> str | None:
-        "原子性地把可取消任务推进到 cancelling"
-        return self._runner.run(
-            lambda _session: _RunRepository(_session).request_task_cancellation(run_id), read_only=False
-        )
-
     def get_by_status(self, status: str) -> list[dict[str, Any]]:
         "按状态查询任务。Args: status；Returns: 任务记录列表"
         return self._runner.run(lambda _session: _RunRepository(_session).get_by_status(status), read_only=True)
@@ -92,67 +68,20 @@ class RunAccess:
         "获取所有 pending 任务"
         return self._runner.run(lambda _session: _RunRepository(_session).get_pending_tasks(), read_only=True)
 
-    def claim_pending_run(self, run_id: str, *, worker_id: str, heartbeat_at: datetime | None = None) -> bool:
-        "原子性领取一个尚未执行的 pending 任务"
-        return self._runner.run(
-            lambda _session: _RunRepository(_session).claim_pending_run(
-                run_id, worker_id=worker_id, heartbeat_at=heartbeat_at
-            ),
-            read_only=False,
-        )
+    def claim_pending_run(self, run_id: str) -> bool:
+        "原子领取等待执行的任务"
+        return self._runner.run(lambda session: _RunRepository(session).claim_pending_run(run_id))
 
-    def cancel_unclaimed_pending_run(self, run_id: str, *, message: str) -> bool:
-        "原子性终结尚未被任何 worker 领取的 pending 任务"
-        return self._runner.run(
-            lambda _session: _RunRepository(_session).cancel_unclaimed_pending_run(run_id, message=message),
-            read_only=False,
-        )
+    def cancel_pending_run(self, run_id: str) -> bool:
+        "原子取消待执行任务"
+        return self._runner.run(lambda session: _RunRepository(session).cancel_pending_run(run_id))
 
-    def update_run_task_fields(
-        self,
-        run_id: str,
-        *,
-        status: str | None | object = _UNSET,
-        progress: float | None | object = _UNSET,
-        stage: str | None | object = _UNSET,
-        sub_stage: str | None | object = _UNSET,
-        current: int | None | object = _UNSET,
-        total: int | None | object = _UNSET,
-        message: str | None | object = _UNSET,
-        error: str | None | object = _UNSET,
-        task_kind: str | None | object = _UNSET,
-        request_payload: dict[str, Any] | None | object = _UNSET,
-        cancel_requested: bool | None | object = _UNSET,
-        worker_id: str | None | object = _UNSET,
-        heartbeat_at: datetime | None | object = _UNSET,
-        started_at: datetime | None | object = _UNSET,
-        completed_at: datetime | None | object = _UNSET,
-    ) -> None:
-        "批量更新运行态字段（仅写入显式传入的字段）"
-        return self._runner.run(
-            lambda _session: _RunRepository(_session).update_run_task_fields(
-                run_id,
-                status=status,
-                progress=progress,
-                stage=stage,
-                sub_stage=sub_stage,
-                current=current,
-                total=total,
-                message=message,
-                error=error,
-                task_kind=task_kind,
-                request_payload=request_payload,
-                cancel_requested=cancel_requested,
-                worker_id=worker_id,
-                heartbeat_at=heartbeat_at,
-                started_at=started_at,
-                completed_at=completed_at,
-            ),
-            read_only=False,
-        )
+    def update_run_task_fields(self, run_id: str, *, status: str | object = _UNSET) -> None:
+        "仅更新任务状态"
+        return self._runner.run(lambda session: _RunRepository(session).update_run_task_fields(run_id, status=status))
 
     def get_run_by_task_id(self, task_id: str) -> dict[str, Any] | None:
-        "按 run_id 前缀查询（LIKE 转义 %/_/\\"
+        "按任务短 ID 查询运行"
         return self._runner.run(lambda _session: _RunRepository(_session).get_run_by_task_id(task_id), read_only=True)
 
     def delete_run(self, run_id: str) -> bool:
@@ -327,7 +256,6 @@ class ParagraphAccess:
         *,
         model_key: str,
         library_version: str,
-        pipeline_version: str,
         num_topics: int,
         parameters: dict[str, Any],
         dictionary_size: int,
@@ -335,13 +263,12 @@ class ParagraphAccess:
         inference_paragraph_count: int,
         artifact_key: str,
     ) -> None:
-        "把 run 的 LDA 实际构建写入 analysis_runs.lda_*（model_key/artifact_key 为合同投影）"
+        "把 run 的 LDA 实际构建写入 runs.lda_*（model_key/artifact_key 为合同投影）"
         return self._runner.run(
             lambda _session: _ParagraphRepository(_session).insert_topic_model_run(
                 run_id,
                 model_key=model_key,
                 library_version=library_version,
-                pipeline_version=pipeline_version,
                 num_topics=num_topics,
                 parameters=parameters,
                 dictionary_size=dictionary_size,
@@ -353,7 +280,7 @@ class ParagraphAccess:
         )
 
     def fetch_topic_model_run(self, run_id: str) -> TopicModelRunContract | None:
-        "读取 run 的 LDA 实际构建行（analysis_runs.lda_* + 合同投影）"
+        "读取 run 的 LDA 实际构建行（runs.lda_* + 合同投影）"
         return self._runner.run(
             lambda _session: _ParagraphRepository(_session).fetch_topic_model_run(run_id), read_only=True
         )
@@ -764,75 +691,17 @@ class DiagnosisAccess:
 
         return self._runner.run(lambda session: session_rows(session, run_id), read_only=True)
 
-    def publish(self, request):
+    def save_report(self, request):
         "正式诊断的所有关系由 Storage 保证原子提交"
-        from src.storage.repositories.diagnosis_publish import publish
+        from src.storage.repositories.diagnosis_publish import save_report
 
-        return self._runner.run(lambda session: publish(session, request))
+        return self._runner.run(lambda session: save_report(session, request))
 
-    def saved_case_warnings(self, run_id: str, report_id: str) -> dict:
-        "读取已发布报告按执行归属的案例保存告警"
-        from src.storage.repositories.diagnosis_publish import saved_case_warnings
-
-        return self._runner.run(lambda session: saved_case_warnings(session, run_id, report_id), read_only=True)
-
-    def register_session(self, *, run_id: str, session_id: str):
-        "整轮身份在派发前独立提交"
-        from src.storage.repositories.organization_writes import register_diagnosis_session
-
-        return self._runner.run(
-            lambda session: register_diagnosis_session(session, run_id=run_id, session_id=session_id)
-        )
-
-    def register_attempt(
-        self,
-        *,
-        run_id: str,
-        session_id: str,
-        execution_id: str,
-        role: str,
-        attempt_number: int,
-        case_anchor: str | None = None,
-        case_registration: CaseSave | None = None,
-    ):
-        "会话与实际尝试身份一起登记，不向外提供事务对象"
-        from src.storage.repositories.organization_writes import (
-            register_diagnosis_execution,
-            register_diagnosis_session,
-        )
-
-        def operation(session):
-            register_diagnosis_session(session, run_id=run_id, session_id=session_id)
-            if case_registration is not None:
-                from src.storage.repositories.case_writes import CaseWritesRepository
-
-                if case_registration.run_id != run_id:
-                    raise ValueError("案例登记与执行不属于同一运行")
-                warnings = CaseWritesRepository(run_id).save_work(session, case_registration)
-                if warnings:
-                    raise ValueError(f"案例执行登记失败: {warnings}")
-            register_diagnosis_execution(
-                session,
-                run_id=run_id,
-                execution_id=execution_id,
-                role=role,
-                attempt_number=attempt_number,
-                case_anchor=case_anchor,
-            )
-
-        return self._runner.run(operation)
-
-    def retain_pending(self, run_id: str, session_id: str, contributions):
+    def retain_pending(self, run_id: str, agent_id: str, contributions):
         "失败登记独立保存，已发布的交付不可降级"
         from src.storage.repositories.diagnosis_publish import retain_pending
 
-        return self._runner.run(lambda session: retain_pending(session, run_id, session_id, contributions))
-
-    def next_attempt(self, run_id: str, role: str, case_anchor: str | None) -> int:
-        "读取已登记的真实尝试数量"
-        from src.storage.repositories.diagnosis_publish import next_attempt
-
-        return self._runner.run(lambda session: next_attempt(session, run_id, role, case_anchor), read_only=True)
+        return self._runner.run(lambda session: retain_pending(session, run_id, agent_id, contributions))
 
     def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, float]]:
         "高张力诊断数据源为正式表面张力读数（ 事实定位段落化）"
@@ -935,44 +804,6 @@ class LinguisticAccess:
     def __init__(self, runner):
         self._runner = runner
 
-    def ensure_ltp_contract(
-        self,
-        run_id: str,
-        *,
-        pipeline_version: str,
-        model_key: str,
-        pos_mappings: Mapping[str, str] | None = None,
-        entity_type_mappings: Mapping[str, str | None] | None = None,
-    ) -> None:
-        "登记 run 实际使用的 LTP 管线/模型合同"
-        return self._runner.run(
-            lambda _session: _LinguisticRepository(_session).ensure_ltp_contract(
-                run_id,
-                pipeline_version=pipeline_version,
-                model_key=model_key,
-                pos_mappings=pos_mappings,
-                entity_type_mappings=entity_type_mappings,
-            ),
-            read_only=False,
-        )
-
-    def ensure_phrase_contract(
-        self, run_id: str, *, lexicon_key: str | None, contract_version: str = FIXED_CONTRACT_VERSION
-    ) -> None:
-        "登记 run 的固定短语词表来源与计量合同版本（运行内唯一来源）"
-        return self._runner.run(
-            lambda _session: _LinguisticRepository(_session).ensure_phrase_contract(
-                run_id, lexicon_key=lexicon_key, contract_version=contract_version
-            ),
-            read_only=False,
-        )
-
-    def fetch_run_contract(self, run_id: str) -> NamedRecord | None:
-        "读取 run 的语言相关合同列（LTP/短语/w2v 全部在 analysis_runs 一行）"
-        return self._runner.run(
-            lambda _session: _LinguisticRepository(_session).fetch_run_contract(run_id), read_only=True
-        )
-
     def save_batch(self, run_id: str, features, entities, phrases, paragraph_ids, *, clear_first: bool):
         "词元、弧、实体、短语及完成标记按批整体提交"
 
@@ -1028,7 +859,7 @@ class LinguisticAccess:
         )
 
     def fetch_entities(self, run_id: str) -> Sequence[SimpleNamespace]:
-        "实体候选投影：词面按原文切片，归一类型按版本化代码合同"
+        "实体候选投影：词面按原文切片，归一类型按固定代码映射"
         return self._runner.run(lambda _session: _LinguisticRepository(_session).fetch_entities(run_id), read_only=True)
 
     def insert_phrase_hits(self, run_id: str, rows: Sequence[dict[str, Any]], *, clear_first: bool = True) -> int:
@@ -1058,7 +889,7 @@ class LinguisticAccess:
         )
 
     def insert_word2vec_model_run(self, run_id: str, row: dict[str, Any]) -> None:
-        "把本次 Word2Vec 实际构建写入 analysis_runs 的 w2v_* 具名列"
+        "把本次 Word2Vec 实际构建写入 runs 的 w2v_* 具名列"
         return self._runner.run(
             lambda _session: _LinguisticRepository(_session).insert_word2vec_model_run(run_id, row), read_only=False
         )

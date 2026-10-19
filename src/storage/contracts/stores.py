@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Protocol
 
-from src.config.constants.contracts import FIXED_CONTRACT_VERSION
 from src.storage.records.annotation import (
     AnnotationRoleRecord,
     DialogueRecordRow,
@@ -35,18 +33,8 @@ from src.storage.records.values import NamedRecord
 class RunStore(Protocol):
     "Run 的具名访问合同"
 
-    def create_run(
-        self,
-        novel_id: str,
-        source_path: str | None = None,
-        title: str | None = None,
-        author: str | None = None,
-        run_id: str | None = None,
-        task_kind: str = "analysis",
-        request_payload: dict[str, Any] | None = None,
-        task_id: str | None = None,
-    ) -> str:
-        "创建新的分析运行记录"
+    def create_run(self, novel_id: str, run_id: str | None = None, task_id: str | None = None) -> str:
+        "创建任务运行"
         ...
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
@@ -57,10 +45,6 @@ class RunStore(Protocol):
         "获取指定小说的所有运行记录"
         ...
 
-    def request_task_cancellation(self, run_id: str) -> str | None:
-        "原子性地把可取消任务推进到 cancelling"
-        ...
-
     def get_by_status(self, status: str) -> list[dict[str, Any]]:
         "按状态查询任务。Args: status；Returns: 任务记录列表"
         ...
@@ -69,39 +53,20 @@ class RunStore(Protocol):
         "获取所有 pending 任务"
         ...
 
-    def claim_pending_run(self, run_id: str, *, worker_id: str, heartbeat_at: datetime | None = None) -> bool:
-        "原子性领取一个尚未执行的 pending 任务"
+    def claim_pending_run(self, run_id: str) -> bool:
+        "原子领取 pending 任务"
         ...
 
-    def cancel_unclaimed_pending_run(self, run_id: str, *, message: str) -> bool:
-        "原子性终结尚未被任何 worker 领取的 pending 任务"
+    def cancel_pending_run(self, run_id: str) -> bool:
+        "原子取消待执行任务"
         ...
 
-    def update_run_task_fields(
-        self,
-        run_id: str,
-        *,
-        status: str | None | object = _UNSET,
-        progress: float | None | object = _UNSET,
-        stage: str | None | object = _UNSET,
-        sub_stage: str | None | object = _UNSET,
-        current: int | None | object = _UNSET,
-        total: int | None | object = _UNSET,
-        message: str | None | object = _UNSET,
-        error: str | None | object = _UNSET,
-        task_kind: str | None | object = _UNSET,
-        request_payload: dict[str, Any] | None | object = _UNSET,
-        cancel_requested: bool | None | object = _UNSET,
-        worker_id: str | None | object = _UNSET,
-        heartbeat_at: datetime | None | object = _UNSET,
-        started_at: datetime | None | object = _UNSET,
-        completed_at: datetime | None | object = _UNSET,
-    ) -> None:
-        "批量更新运行态字段（仅写入显式传入的字段）"
+    def update_run_task_fields(self, run_id: str, *, status: str | None | object = _UNSET) -> None:
+        "更新任务状态"
         ...
 
     def get_run_by_task_id(self, task_id: str) -> dict[str, Any] | None:
-        "按 run_id 前缀查询（LIKE 转义 %/_/\\"
+        "按任务短 ID 查询运行"
         ...
 
     def delete_run(self, run_id: str) -> bool:
@@ -204,7 +169,6 @@ class ParagraphStore(Protocol):
         *,
         model_key: str,
         library_version: str,
-        pipeline_version: str,
         num_topics: int,
         parameters: dict[str, Any],
         dictionary_size: int,
@@ -212,11 +176,11 @@ class ParagraphStore(Protocol):
         inference_paragraph_count: int,
         artifact_key: str,
     ) -> None:
-        "把 run 的 LDA 实际构建写入 analysis_runs.lda_*（model_key/artifact_key 为合同投影）"
+        "把 run 的 LDA 实际构建写入 runs.lda_*（model_key/artifact_key 为合同投影）"
         ...
 
     def fetch_topic_model_run(self, run_id: str) -> TopicModelRunContract | None:
-        "读取 run 的 LDA 实际构建行（analysis_runs.lda_* + 合同投影）"
+        "读取 run 的 LDA 实际构建行（runs.lda_* + 合同投影）"
         ...
 
     def insert_paragraph_topic_inferences(
@@ -447,28 +411,6 @@ class StatisticsStore(Protocol):
 class LinguisticStore(Protocol):
     "Linguistic 的具名访问合同"
 
-    def ensure_ltp_contract(
-        self,
-        run_id: str,
-        *,
-        pipeline_version: str,
-        model_key: str,
-        pos_mappings: Mapping[str, str] | None = None,
-        entity_type_mappings: Mapping[str, str | None] | None = None,
-    ) -> None:
-        "登记 run 实际使用的 LTP 管线/模型合同"
-        ...
-
-    def ensure_phrase_contract(
-        self, run_id: str, *, lexicon_key: str | None, contract_version: str = FIXED_CONTRACT_VERSION
-    ) -> None:
-        "登记 run 的固定短语词表来源与计量合同版本（运行内唯一来源）"
-        ...
-
-    def fetch_run_contract(self, run_id: str) -> NamedRecord | None:
-        "读取 run 的语言相关合同列（LTP/短语/w2v 全部在 analysis_runs 一行）"
-        ...
-
     def insert_linguistic_features(
         self, run_id: str, rows: Sequence[dict[str, Any]], *, clear_first: bool = True
     ) -> int:
@@ -492,7 +434,7 @@ class LinguisticStore(Protocol):
         ...
 
     def fetch_entities(self, run_id: str) -> Sequence[SimpleNamespace]:
-        "实体候选投影：词面按原文切片，归一类型按版本化代码合同"
+        "实体候选投影：词面按原文切片，归一类型按固定代码映射"
         ...
 
     def insert_phrase_hits(self, run_id: str, rows: Sequence[dict[str, Any]], *, clear_first: bool = True) -> int:
@@ -512,7 +454,7 @@ class LinguisticStore(Protocol):
         ...
 
     def insert_word2vec_model_run(self, run_id: str, row: dict[str, Any]) -> None:
-        "把本次 Word2Vec 实际构建写入 analysis_runs 的 w2v_* 具名列"
+        "把本次 Word2Vec 实际构建写入 runs 的 w2v_* 具名列"
         ...
 
     def fetch_word2vec_model_run(self, run_id: str) -> SimpleNamespace | None:
