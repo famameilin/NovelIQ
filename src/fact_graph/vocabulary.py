@@ -130,7 +130,7 @@ def normalize_role_function(value: object) -> RoleFunction | None:
     """用于把模型写的叙事功能词归一到 RoleFunction（缺省/未收录不拒绝）
 
     同义词按 ROLE_FUNCTION_ALIASES 映射；未收录值收敛为主体并留给审计
-    （原始入参始终在 agent_tool_calls.request_args 可查）。地点等事件专属角色词
+    （原始入参始终在 agent_toolcall.request_args 可查）。地点等事件专属角色词
     不在此处理——那是字段误用，仍由调用方按原口径拒绝。
     """
     if value is None:

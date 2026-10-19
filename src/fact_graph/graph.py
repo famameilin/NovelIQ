@@ -70,11 +70,11 @@ class FactGraph:
     saved: set[str] = field(default_factory=set, init=False)
     _author: ContextVar[str | None] = field(default_factory=lambda: ContextVar("fact_author", default=None), init=False)
 
-    def begin(self, execution_id: str, chapter_sequence: int, role: str) -> None:
-        if execution_id in self.saved:
-            raise ValueError(f"已保存执行不可重新打开: {execution_id}")
+    def begin(self, agent_id: str, chapter_sequence: int, role: str) -> None:
+        if agent_id in self.saved:
+            raise ValueError(f"已保存执行不可重新打开: {agent_id}")
         self.contributions.setdefault(
-            execution_id,
+            agent_id,
             {
                 "sequence": chapter_sequence,
                 "role": role,
@@ -85,24 +85,24 @@ class FactGraph:
         )
 
     @contextmanager
-    def author(self, execution_id: str):
-        key = execution_id
+    def author(self, agent_id: str):
+        key = agent_id
         if key not in self.contributions or key in self.saved:
-            raise ValueError(f"事实图执行已停止: {execution_id}")
+            raise ValueError(f"事实图执行已停止: {agent_id}")
         token = self._author.set(key)
         try:
             yield
         finally:
             self._author.reset(token)
 
-    def rollback(self, execution_id: str) -> None:
-        key = execution_id
+    def rollback(self, agent_id: str) -> None:
+        key = agent_id
         if key not in self.saved:
             self.contributions.pop(key, None)
             self._fold()
 
-    def confirm(self, execution_id: str) -> None:
-        self.saved.add(execution_id)
+    def confirm(self, agent_id: str) -> None:
+        self.saved.add(agent_id)
 
     def reference_entities(self, author: str, references: list[dict[str, Any]]) -> None:
         """Agent 持锁冻结实际引用，其他作者撤销后仍保留本次有效端点支持"""
@@ -132,7 +132,7 @@ class FactGraph:
             op.update(from_entity_id=left, to_entity_id=right, relation_id=self.relation_ids[key])
         return FactSave(
             frozen.run_id,
-            frozen.execution_id,
+            frozen.agent_id,
             frozen.chapter_id,
             tuple(
                 StoredParagraph(row.chapter_id, row.paragraph_id, row.text, row.local_start_char, row.local_end_char)
@@ -146,11 +146,9 @@ class FactGraph:
         self.contributions.clear()
         self.saved.clear()
         for record in records:
-            facts = self._read_execution_facts(
-                session, execution_id=str(record.execution_id), chapter_id=record.chapter_id
-            )
+            facts = self._read_execution_facts(session, agent_id=str(record.agent_id), chapter_id=record.chapter_id)
             self.restore_work(
-                str(record.execution_id),
+                str(record.agent_id),
                 int(record.sequence),
                 str(record.role),
                 facts["entity_ops"],
@@ -160,28 +158,28 @@ class FactGraph:
             )
         self._fold()
 
-    def load_saved_work(self, session: Any, execution_id: str, annotation_id: str) -> dict[str, Any]:
+    def load_saved_work(self, session: Any, agent_id: str, annotation_id: str) -> dict[str, Any]:
         """锁外读取当前执行的真实保存贡献，不读取或撤销其他执行"""
         record = session.reads.fact_graph_graph_load_saved_work_1(annotation_id)
-        if record is None or record.execution_id != execution_id:
-            raise ValueError(f"事实图保存身份不一致: {execution_id}")
-        execution = session.reads.fact_graph_graph_load_saved_work_2(execution_id)
-        if execution is None or execution.run_id != self.run_scope or execution.chapter_id is None:
-            raise ValueError(f"事实图保存身份不一致: {execution_id}")
-        chapter = session.reads.fact_graph_graph_load_saved_work_3(execution.chapter_id, self.run_scope)
-        detail = self._read_execution_facts(session, execution_id=execution_id, chapter_id=execution.chapter_id)
+        if record is None or record.agent_id != agent_id:
+            raise ValueError(f"事实图保存身份不一致: {agent_id}")
+        execution = session.reads.fact_graph_graph_load_saved_work_2(agent_id)
+        if execution is None or execution.run_id != self.run_scope or record.chapter_id is None:
+            raise ValueError(f"事实图保存身份不一致: {agent_id}")
+        chapter = session.reads.fact_graph_graph_load_saved_work_3(record.chapter_id, self.run_scope)
+        detail = self._read_execution_facts(session, agent_id=agent_id, chapter_id=record.chapter_id)
         return {
-            "author": execution_id,
+            "author": agent_id,
             "sequence": int(chapter.sequence) if chapter is not None else 0,
-            "role": str(execution.role),
+            "role": str(execution.type),
             **detail,
         }
 
     def _read_execution_facts(
-        self, session: Any, *, execution_id: str, chapter_id: int | None
+        self, session: Any, *, agent_id: str, chapter_id: int | None
     ) -> dict[str, list[dict[str, Any]]]:
         """按真实列形状把一次保存的事实读回内存贡献形态，供恢复与重折使用"""
-        rows = list(session.reads.fact_graph_graph_read_execution_facts_3(execution_id))
+        rows = list(session.reads.fact_graph_graph_read_execution_facts_3(agent_id))
         entity_names: dict[str, tuple[str, str]] = {
             str(item.entity_id): (str(item.canonical_name), str(item.entity_type))
             for item in session.reads.fact_graph_graph_read_execution_facts_4(self.run_scope)
@@ -292,7 +290,7 @@ class FactGraph:
 
     def restore_work(
         self,
-        execution_id: str,
+        agent_id: str,
         sequence: int,
         role: str,
         entity_ops: list[dict[str, Any]],
@@ -300,7 +298,7 @@ class FactGraph:
         entity_references: list[dict[str, Any]] | None = None,
         plotline_ops: list[dict[str, Any]] | None = None,
     ) -> None:
-        self.contributions[execution_id] = {
+        self.contributions[agent_id] = {
             "sequence": sequence,
             "role": role,
             "entity_ops": deepcopy(entity_ops),
@@ -308,7 +306,7 @@ class FactGraph:
             "entity_references": deepcopy(entity_references or []),
             "plotline_ops": deepcopy(plotline_ops or []),
         }
-        self.saved.add(execution_id)
+        self.saved.add(agent_id)
         self._fold()
 
     def _fold(self) -> None:
@@ -584,10 +582,10 @@ class FactGraph:
             self.contributions[author]["relation_assert_ops"] = deepcopy(self.relation_assert_ops)
             self._fold()
 
-    def drain_ops(self, execution_id: str | None = None) -> dict[str, list[dict[str, Any]]]:
+    def drain_ops(self, agent_id: str | None = None) -> dict[str, list[dict[str, Any]]]:
         """取出本章局部命令，交给正式提交事务"""
-        if execution_id is not None:
-            contribution = self.contributions[execution_id]
+        if agent_id is not None:
+            contribution = self.contributions[agent_id]
             return deepcopy(
                 {
                     "entity_ops": contribution["entity_ops"],
