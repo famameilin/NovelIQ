@@ -1,8 +1,4 @@
-"""case_pool 保存使用的冻结贡献；JSON 快照隔离并发可变状态
-
-作者身份：Agent 形状是真实执行号，程序形状是程序 work 身份（两者都是单一字符串，
-按 work_items 是否登记该身份区分形状，不双存第二份作者列）。
-"""
+"案例登记与承诺的冻结保存请求"
 
 from __future__ import annotations
 
