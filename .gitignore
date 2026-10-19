@@ -223,3 +223,6 @@ deprecated/
 !/tests/conftest.py
 !/tests/__init__.py
 !/tests/test_api_work_boundary.py
+
+# Mimosa 安全扫描本地状态
+.mimosa/
