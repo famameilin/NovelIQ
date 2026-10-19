@@ -30,7 +30,7 @@ Once analysis completes, the frontend provides:
 | --- | --- |
 | ![Event forest](assets/screenshots/event-growth-forest-1440x900.png) | ![Causal structure within a tree](assets/screenshots/event-growth-tree-1440x900.png) |
 
-For an existing 0.1.0 database, follow the [one-time 0.1.1 upgrade guide](docs/upgrades/UPGRADE-0.1.1.md) before deploying this release.
+See [Project version and chapter/book results](docs/upgrades/RESULT-STRUCTURE.md) for the current result structure. The historical [0.1.1 upgrade guide](docs/upgrades/UPGRADE-0.1.1.md) and migration scripts apply only to their corresponding release checkout. Current results must be rebuilt from original input in an isolated run.
 
 Stack: Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17 (pgvector); React 19 / Vite / ECharts / Tailwind CSS. LLMs go through an OpenAI-compatible interface (self-hosted or third-party, both work); lexical analysis and word vectors are local offline models.
 

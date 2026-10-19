@@ -30,7 +30,7 @@
 | --- | --- |
 | ![事件森林](assets/screenshots/event-growth-forest-1440x900.png) | ![树内因果结构](assets/screenshots/event-growth-tree-1440x900.png) |
 
-已有 0.1.0 数据库升级到 0.1.1 时，请先阅读 [一次性升级说明](docs/upgrades/UPGRADE-0.1.1.md)。
+当前结果结构与重建边界见 [统一项目版本与章节全书结果](docs/upgrades/RESULT-STRUCTURE.md)。历史 [0.1.1 升级说明](docs/upgrades/UPGRADE-0.1.1.md) 及迁移脚本仅适用于其对应发布代码，不用于当前结构；当前数据由原始输入在独立运行中重建。
 
 技术栈：Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17（pgvector）；React 19 / Vite / ECharts / Tailwind CSS。LLM 走 OpenAI 兼容接口（自建服务或第三方 API 均可），词法分析与词向量为本地离线模型。
 
