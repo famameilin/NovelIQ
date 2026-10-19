@@ -1,6 +1,6 @@
 """持久 SSE 消息的可见性查询，游标分配与原始消息写入委托 storage
 
-消息按 event_outbox 宽表列读取（run/章节/事件类型与实际发出的字节），重放不按当前业务状态重建。
+消息按 agent_outbox 宽表列读取（run/章节/事件类型与实际发出的字节），重放不按当前业务状态重建。
 """
 
 from __future__ import annotations

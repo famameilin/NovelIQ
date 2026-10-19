@@ -1,7 +1,7 @@
 """统计审计独立接收实际运行事实并保存，不参与 work 业务事务
 
-invocation 的执行事实随 start_invocation 落到 executions 并直接携带归属
-（run、角色、章或案例锚）；跨重启重放按 model_calls / agent_tool_calls 的
+invocation 的执行事实随 start_invocation 落到 agent 并直接携带归属
+（run、角色、章或案例锚）；跨重启重放按 agent_loop / agent_toolcall 的
 message_key 可空唯一列幂等去重。
 """
 
@@ -31,10 +31,6 @@ class AuditModule:
         self.error: Exception | None = None
         self.task = asyncio.create_task(self.consume())
         bus.handle("audit.barrier", self.address, self.barrier)
-
-    @staticmethod
-    def close_interrupted(session_factory: Callable[[], Any], run_id: str) -> int:
-        return AgentAuditRecorder(session_factory).close_orphaned_turns(run_id)
 
     async def consume(self) -> None:
         while True:
@@ -74,28 +70,28 @@ class AuditModule:
         args = list(payload["args"])
         kwargs = dict(payload["kwargs"])
         local_id = payload["local_id"]
-        execution_id = message.invocation_id
+        agent_id = message.invocation_id
         if method == "start_invocation":
             recorder.start_invocation(**kwargs)
-            self.identifiers[execution_id, "invocation", local_id] = local_id
+            self.identifiers[agent_id, "invocation", local_id] = local_id
             return local_id
         if method == "start_turn":
             kwargs.pop("invocation_id")
             turn_id = recorder.start_turn(**kwargs, message_key=message.message_id)
-            self.identifiers[execution_id, "turn", local_id] = turn_id
+            self.identifiers[agent_id, "turn", local_id] = turn_id
             return turn_id
         if method == "record_tool_call":
             recorder.record_tool_call(
-                turn_id=str(self.identifiers[execution_id, "turn", kwargs.pop("turn_id")]),
+                turn_id=str(self.identifiers[agent_id, "turn", kwargs.pop("turn_id")]),
                 **kwargs,
                 message_key=message.message_id,
             )
             return None
         if method == "finish_turn":
-            recorder.finish_turn(str(self.identifiers[execution_id, "turn", args[0]]), **kwargs)
+            recorder.finish_turn(str(self.identifiers[agent_id, "turn", args[0]]), **kwargs)
             return None
         if method == "update_turn_timings":
-            recorder.update_turn_timings(str(self.identifiers[execution_id, "turn", args[0]]), **kwargs)
+            recorder.update_turn_timings(str(self.identifiers[agent_id, "turn", args[0]]), **kwargs)
             return None
         if method == "finish_invocation":
             recorder.finish_invocation(**kwargs, message_key=message.message_id)

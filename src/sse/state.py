@@ -6,9 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 _TASK_STATE_EVENTS = {
-    "stage_start",
-    "stage_progress",
-    "stage_complete",
     "task_complete",
     "task_error",
     "task_cancelled",

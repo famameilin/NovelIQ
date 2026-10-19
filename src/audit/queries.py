@@ -1,6 +1,6 @@
 """审计查询：用量统计、覆盖缺口与 Agent 回合读投影；只统计实际请求事实
 
-审计事实全在 model_calls / agent_tool_calls 宽表上：run 内调用由执行的直接
+审计事实全在 agent_loop / agent_toolcall 宽表上：run 内调用由执行的直接
 归属取得，非 Agent 调用按 standalone_* 上下文列取。total_tokens 优先供应商
 实报、缺失才按分项投影；turn_ms 是 model_ms + tool_wall_ms 的读取投影。
 """
@@ -13,7 +13,7 @@ from typing import Any
 
 from src.audit.documents import decode_document, decode_text_document
 from src.storage import Storage
-from src.storage.records.models import ModelCallRecord as ModelCall
+from src.storage.records.models import AgentLoopRecord as AgentLoop
 
 _AGENT_CALL_BUCKETS: dict[str, tuple[str, str]] = {
     "annotation": ("annotation", "agent"),
@@ -50,13 +50,12 @@ def project_total_tokens(
 
 @dataclass(frozen=True, slots=True)
 class AuditedTurn:
-    """Agent 回合读投影：model_calls 宽行（身份、用量、计时与四类观察文档同列）"""
+    """Agent 回合读投影：agent_loop 宽行（身份、用量、计时与四类观察文档同列）"""
 
     call_id: str
-    execution_id: str
+    agent_id: str
     turn_index: int
     model: str
-    status: str
     error: str | None
     started_at: datetime
     finished_at: datetime | None
@@ -84,13 +83,12 @@ class AuditedTurn:
 
 @dataclass(frozen=True, slots=True)
 class AuditedToolCall:
-    """工具调用读投影：agent_tool_calls 宽行（耗时与四类观察文档同列）"""
+    """工具调用读投影：agent_toolcall 宽行（耗时与四类观察文档同列）"""
 
     tool_call_id: str
     call_id: str
     tool_name: str
     call_index: int
-    status: str
     error: str | None
     started_at: datetime
     duration_ms: int | None
@@ -185,29 +183,28 @@ def _detect_token_coverage_gaps(session: Storage, run_id: str) -> list[str]:
 def fetch_agent_turns(session: Storage, run_id: str) -> list[AuditedTurn]:
     """读取本 run 的 Agent 回合视图（按 call_id 先后排序）
 
-    model_calls 宽行的 execution_id+turn_index 决定身份与回合序，用量分项/实报/
+    agent_loop 宽行的 agent_id+turn_index 决定身份与回合序，用量分项/实报/
     费用/五类计时/计时备注/四类文档都取自同一行的具名列；四个 bytes 列缺值表示
     当时没有该观察，不伪造空文档。
     """
     calls = list(session.reads.audit_queries_fetch_agent_turns_2(run_id))
     if not calls:
         return []
-    execution_ids = {str(call.execution_id) for call in calls}
+    execution_ids = {str(call.agent_id) for call in calls}
     annotation_executions = set(session.reads.audit_queries_fetch_agent_turns_1(execution_ids))
     turns: list[AuditedTurn] = []
     for call in calls:
-        execution_id = str(call.execution_id)
+        agent_id = str(call.agent_id)
         if call.turn_index is None:
-            raise RuntimeError(f"Agent 调用缺少回合序号: {call.call_id}")
-        bucket = _AGENT_CALL_BUCKETS["annotation" if execution_id in annotation_executions else "diagnosis"]
+            raise RuntimeError(f"Agent 调用缺少回合序号: {call.id}")
+        bucket = _AGENT_CALL_BUCKETS["annotation" if agent_id in annotation_executions else "diagnosis"]
         timings = _read_timings(call)
         turns.append(
             AuditedTurn(
-                call_id=str(call.call_id),
-                execution_id=execution_id,
+                call_id=str(call.id),
+                agent_id=agent_id,
                 turn_index=int(call.turn_index),
                 model=str(call.model),
-                status=str(call.status),
                 error=call.error,
                 started_at=call.started_at,
                 finished_at=call.finished_at,
@@ -243,11 +240,10 @@ def fetch_run_tool_calls(session: Storage, run_id: str) -> list[AuditedToolCall]
     rows = session.reads.audit_queries_fetch_run_tool_calls_1(call_ids)
     return [
         AuditedToolCall(
-            tool_call_id=str(tool_call.id),
-            call_id=str(tool_call.call_id),
+            tool_call_id=str(tool_call.agentloop_id),
+            call_id=str(tool_call.agentloop_id),
             tool_name=str(tool_call.tool_name),
             call_index=int(tool_call.call_index),
-            status=str(tool_call.status),
             error=tool_call.error,
             started_at=tool_call.started_at,
             duration_ms=None if tool_call.tool_duration_ms is None else int(tool_call.tool_duration_ms),
@@ -260,7 +256,7 @@ def fetch_run_tool_calls(session: Storage, run_id: str) -> list[AuditedToolCall]
     ]
 
 
-def _read_timings(call: ModelCall) -> dict[str, int]:
+def _read_timings(call: AgentLoop) -> dict[str, int]:
     """按实际测得的具名计时列构建读投影；缺测量不出现在字典里"""
     timings: dict[str, int] = {}
     for timing_kind, column in _TIMING_READ_COLUMNS:

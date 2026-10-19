@@ -140,7 +140,7 @@ def build_token_usage_callback(*, bus: Any, run_id: str) -> TokenUsageCallback:
     from src.event_bus import Message
     from src.storage import new_id
 
-    execution_id = new_id()
+    agent_id = new_id()
     sequence = 0
 
     def callback(
@@ -159,8 +159,8 @@ def build_token_usage_callback(*, bus: Any, run_id: str) -> TokenUsageCallback:
                 source="preprocess",
                 target=f"audit:{run_id}",
                 run_id=run_id,
-                invocation_id=execution_id,
-                message_id=f"{execution_id}:usage:{sequence}",
+                invocation_id=agent_id,
+                message_id=f"{agent_id}:usage:{sequence}",
                 payload={
                     "method": "nonagent_usage",
                     "local_id": sequence,

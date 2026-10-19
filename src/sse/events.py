@@ -16,9 +16,6 @@ from typing import Any, Literal
 class StreamMessageType(StrEnum):
     """流式消息类型枚举（SSE 线上事件名）"""
 
-    stage_start = "stage_start"
-    stage_progress = "stage_progress"
-    stage_complete = "stage_complete"
     llm_output = "llm_output"
     llm_thinking = "llm_thinking"
     tool_call = "tool_call"

@@ -2,12 +2,12 @@
 Agent 审计记录器（Annotation 与 Diagnosis 共用）
 
 审计事实全部落到三张宽表：
-- executions 保存每个真实 invocation 的终态并直接携带归属（run、执行角色、
+- agent 保存每个真实 invocation 的终态并直接携带归属（run、执行角色、
   标注章或案例锚）；没有模型请求的派发失败只写执行终态，不伪造 turn=0
-- model_calls 保存每条真实模型请求：Agent 上下文（execution_id+turn_index）或
+- agent_loop 保存每条真实模型请求：Agent 上下文（agent_id+turn_index）或
   standalone 上下文恰一；用量分项、供应商实报总量、费用、五类计时与四类通信/
   观察文档都是本表明确列，审计消息键直接落在可空唯一列上
-- agent_tool_calls 保存每次真实外层工具调用：原始参数与实际执行参数分开，
+- agent_toolcall 保存每次真实外层工具调用：原始参数与实际执行参数分开，
   耗时与四类观察文档同列保存
 每次审计写入使用独立短事务即时提交，不随候选状态或最终标注事务回滚；
 审计写入失败直接抛出异常终止 Agent，不静默忽略。
@@ -28,7 +28,7 @@ class AgentAuditRecorder:
     def start_invocation(
         self,
         *,
-        execution_id: str | None = None,
+        agent_id: str | None = None,
         task_type: str | None = None,
         attempt_number: int = 1,
         run_id: str | None = None,
@@ -41,10 +41,10 @@ class AgentAuditRecorder:
 
         invocation 必须直接给出归属（run 与执行角色，标注角色再带章、案例角色
         带案例锚）；归属缺失即合同违约，直接报错。返回值仍是观察器使用的本地
-        句柄（执行身份以 execution_id 为准）。
+        句柄（执行身份以 agent_id 为准）。
         """
         return self._storage_factory().audit.start_invocation(
-            execution_id=execution_id,
+            agent_id=agent_id,
             task_type=task_type,
             attempt_number=attempt_number,
             run_id=run_id,
@@ -61,7 +61,7 @@ class AgentAuditRecorder:
         task_type: str,
         call_type: str,
         model: str,
-        execution_id: str,
+        agent_id: str,
         attempt_number: int,
         chapter_id: int | None,
         role: str | None,
@@ -75,7 +75,7 @@ class AgentAuditRecorder:
         """在物理 Provider 请求发出前创建独立运行中模型调用
 
         run/章节/角色只用于在缺登记时补齐执行归属；调用行（身份、请求消息、
-        审计上下文与起始计时备注）全部落在 model_calls 宽行上，返回 call_id
+        审计上下文与起始计时备注）全部落在 agent_loop 宽行上，返回 call_id
         作为后续收口句柄。
         """
         return self._storage_factory().audit.start_turn(
@@ -83,7 +83,7 @@ class AgentAuditRecorder:
             task_type=task_type,
             call_type=call_type,
             model=model,
-            execution_id=execution_id,
+            agent_id=agent_id,
             attempt_number=attempt_number,
             chapter_id=chapter_id,
             role=role,
@@ -100,7 +100,6 @@ class AgentAuditRecorder:
         turn_id: str,
         *,
         raw_response: dict[str, Any],
-        status: str,
         error: str | None,
         timing: dict[str, int | None],
         timing_notes: list[str],
@@ -110,7 +109,6 @@ class AgentAuditRecorder:
         return self._storage_factory().audit.finish_turn(
             turn_id,
             raw_response=raw_response,
-            status=status,
             error=error,
             timing=timing,
             timing_notes=timing_notes,
@@ -135,7 +133,6 @@ class AgentAuditRecorder:
         raw_args: str | None = None,
         response: dict[str, Any] | None = None,
         receipt: dict[str, Any] | None = None,
-        status: str = "success",
         error: str | None = None,
         tool_duration_ms: int | None = None,
         message_key: str | None = None,
@@ -143,7 +140,7 @@ class AgentAuditRecorder:
         """在独立短事务中写入单次工具调用审计（含原始参数片段）
 
         turn_id 即真实模型调用的 call_id；实际执行参数与原始参数字符串分开保存，
-        观察文档与耗时同列落在 agent_tool_calls 宽行上。
+        观察文档与耗时同列落在 agent_toolcall 宽行上。
         """
         return self._storage_factory().audit.record_tool_call(
             turn_id=turn_id,
@@ -153,7 +150,6 @@ class AgentAuditRecorder:
             raw_args=raw_args,
             response=response,
             receipt=receipt,
-            status=status,
             error=error,
             tool_duration_ms=tool_duration_ms,
             message_key=message_key,
@@ -162,7 +158,7 @@ class AgentAuditRecorder:
     def finish_invocation(
         self,
         *,
-        execution_id: str,
+        agent_id: str,
         status: str,
         task_type: str | None = None,
         attempt_number: int = 1,
@@ -181,7 +177,7 @@ class AgentAuditRecorder:
         重放幂等由终态相等承担：同状态同错误重复收口不报错，不同结果报错。
         """
         return self._storage_factory().audit.finish_invocation(
-            execution_id=execution_id,
+            agent_id=agent_id,
             status=status,
             task_type=task_type,
             attempt_number=attempt_number,
@@ -193,12 +189,3 @@ class AgentAuditRecorder:
             message_key=message_key,
             **_,
         )
-
-    def close_orphaned_turns(self, run_id: str) -> int:
-        """分析环境初始化时按落库事实收口本 run 遗留的 running 执行与调用
-
-        运行已有正式诊断报告（诊断产物落库）时，其残留诊断会话行按成功收口；
-        其余未落库的回合按未落库收口。审计是事实记录，只补状态不删除。
-        返回值是本次收口的调用行与执行行总数。
-        """
-        return self._storage_factory().audit.close_orphaned_turns(run_id)
