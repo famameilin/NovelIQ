@@ -11,12 +11,10 @@ from .emotion_boundary import (
 from .emotion_events import EmotionEvent, extract_emotion_events, mneg_corrected_counts
 from .ltp_client import (
     ENTITY_TYPE_MAP,
-    LTP_PIPELINE_VERSION,
     POS_GROUP_MAP,
     LtpSession,
     analyze_paragraph,
     analyze_paragraph_batch,
-    ltp_pipeline_contract,
 )
 from .phrase_matcher import PhraseMatch, match_fixed_phrases
 from .schema import (
@@ -40,7 +38,6 @@ __all__ = [
     "ENTITY_TYPE_MAP",
     "EmotionEvent",
     "EmotionBoundary",
-    "LTP_PIPELINE_VERSION",
     "LtpDependencyArc",
     "LtpEntityCandidate",
     "LtpSdpArc",
@@ -57,7 +54,6 @@ __all__ = [
     "extract_emotion_events",
     "fit_emotion_boundary",
     "load_shared_pretrained_vectors",
-    "ltp_pipeline_contract",
     "match_fixed_phrases",
     "mneg_corrected_counts",
     "resolve_shared_pretrained_path",

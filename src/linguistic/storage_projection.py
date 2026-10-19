@@ -25,7 +25,7 @@ _DEFAULT_POS_GROUP = "other"
 
 
 def _pos_group_of(raw_pos: object) -> str:
-    "POS 归一分组投影（版本化代码合同；未映射标签归 other）"
+    "POS 归一分组投影（固定代码映射；未映射标签归 other）"
     from src.linguistic.ltp_client import POS_GROUP_MAP
 
     if raw_pos is None:
@@ -34,7 +34,7 @@ def _pos_group_of(raw_pos: object) -> str:
 
 
 def _normalized_entity_type(raw_entity_type: object) -> str | None:
-    "NER 归一类型投影（版本化代码合同；未映射类型为 NULL）"
+    "NER 归一类型投影（固定代码映射；未映射类型为 NULL）"
     from src.linguistic.ltp_client import ENTITY_TYPE_MAP
 
     if raw_entity_type is None:

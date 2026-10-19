@@ -49,7 +49,7 @@ def aggregate_linguistic_features(run_id: str, session: Storage) -> dict[str, An
     词性/词长/句式/依存比例聚合（书级 + 章节级）
 
     - 词性比例、词长分布分母为 ltp_token_count（有效词元数）
-    - 句式比例分母为该规则版本下的句子总数
+    - 句式比例分母为当前规则识别的句子总数
     - 平均/最大句法深度、依存关系分布按有效句法节点守恒
     - 空段落返回零值并保留有效词元数（分母不伪造）
     """
@@ -369,7 +369,7 @@ def fetch_pos_centroids(run_id: str, session: Storage) -> list[dict[str, Any]]:
 def fetch_paragraph_labels(session: Storage, run_id: str) -> list[dict[str, Any]]:
     """读取全书自选段情绪标签（段落级监督按书边界）
 
-    逐段情绪标签的唯一落点是 analysis_assessments 的逐段情绪形状
+    逐段情绪标签的唯一落点是 agent_assessments 的逐段情绪形状
     （record_id+paragraph_id+emotion），经章节标注产物头取得运行归属
     （产物行自带 run/章/角色）。写入前的领域校验归标注 agent，这里只按正式
     条目行返回。

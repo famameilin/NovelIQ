@@ -1,18 +1,4 @@
-"""词向量能力（可开关）
-
-单流水线：公开预训练中文词向量做初始化，再用本书 LTP 词元继续训练
-（warm-start 微调）——书内词站在预训练语义底子上微调，预训练未覆盖的
-书内新词（人名等）随机初始化后由本书语料训练；模型产物保存为
-models/word2vec/{run_id}/word2vec.model（run 私有 artifact）。
-
-预训练共享向量由 scripts/convert_word2vec_pretrained.py 一次性
-转成 .kv 落盘，运行时直接加载共享 KeyedVectors（进程级只加载一次）。
-
-- POS 聚合向量：按段落、词性分组的词向量均值（word2vec_model_runs 的
-  维度约束），覆盖率 = 词表内词数 / 该组原始词数，由查询层计算
-- 默认关闭（settings.linguistic.word2vec.enabled=false），开启时预训练
-  共享模型缺失或语料为空则明确报错，不静默回退
-"""
+"词向量训练、共享预训练向量读取与按运行保存模型产物"
 
 from __future__ import annotations
 
@@ -74,11 +60,7 @@ def reset_pretrained_cache() -> None:
 
 @dataclass(frozen=True)
 class TrainResult:
-    """按书微调产物摘要（word2vec_model_runs 契约）
-
-    训练参数在契约表按明确列落库，这里同时给出逐列字段与聚合的 parameters
-    （供调用方对照/测试使用）。
-    """
+    "按书微调的产物属性与本次构建参数"
 
     embedding_dimension: int
     vocabulary_size: int

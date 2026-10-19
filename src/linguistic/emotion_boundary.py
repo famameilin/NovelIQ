@@ -1,6 +1,6 @@
 """段落级情绪边界
 
-监督信号 = 标注 agent 逐章自选段的整段情绪标签（analysis_assessments 的逐段
+监督信号 = 标注 agent 逐章自选段的整段情绪标签（agent_assessments 的逐段
 情绪条目，经章节标注产物头关联本 run）；边界 = 该书自己的段落向量现算的岭回归
 线性映射（paragraph_features 的 semantic_vector 行 → 情绪分值），确定性；
 无标签 run 无边界（上层保留词典/mNEG 口径）。
