@@ -5,11 +5,21 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import Engine, Uuid, create_engine, event, inspect, text
+from sqlalchemy import (
+    CheckConstraint,
+    Engine,
+    ForeignKeyConstraint,
+    UniqueConstraint,
+    Uuid,
+    create_engine,
+    event,
+    inspect,
+    text,
+)
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -233,27 +243,132 @@ def init_db() -> None:
     logger.info("Database tables created successfully")
 
 
-def validate_existing_schema(engine) -> None:
-    "只读检查已有表，拒绝隐式复用旧主键或缺列结构，不执行 ALTER 或数据转换"
+def _column_type(column_type, dialect) -> str:
+    "归一 PostgreSQL 双精度浮点类型的等价名称"
+    result = str(column_type.compile(dialect=dialect)).lower()
+    return "double precision" if result == "float" else result
+
+
+def _schema_expression(engine, schema, table_name: str, expression: str) -> str:
+    "通过只读执行计划取得 PostgreSQL 解析后的约束表达式"
+    quote = engine.dialect.identifier_preparer.quote
+    table = f"{quote(schema)}.{quote(table_name)}" if schema else quote(table_name)
+    with engine.connect() if isinstance(engine, Engine) else nullcontext(engine) as connection:
+        plan = connection.execute(
+            text(f"EXPLAIN (VERBOSE, FORMAT JSON, COSTS FALSE) SELECT ({expression}) FROM {table}")
+        ).scalar_one()
+    return plan[0]["Plan"]["Output"][0]
+
+
+def validate_existing_schema(engine, *, schema: str | None = None) -> None:
+    "建表前只读核对已有表、字段与引用约束，拒绝不兼容结构"
     from src.storage.models import Base
 
-    schema = engine.get_execution_options().get("schema_translate_map", {}).get(None)
+    schema = schema or engine.get_execution_options().get("schema_translate_map", {}).get(None)
     inspector = inspect(engine)
     existing = set(inspector.get_table_names(schema=schema))
     problems = []
+    expected = set(Base.metadata.tables)
+    if existing and existing != expected:
+        problems.append(
+            f"业务表结构不匹配: missing={sorted(expected - existing)}, unexpected={sorted(existing - expected)}"
+        )
     for table in Base.metadata.tables.values():
+        initial_problem_count = len(problems)
         if table.name not in existing:
             continue
         primary = inspector.get_pk_constraint(table.name, schema=schema)["constrained_columns"]
         if primary != [column.name for column in table.primary_key]:
             problems.append(f"{table.name}: 主键不符合独立 UUIDv7 合同")
         columns = {column["name"]: column for column in inspector.get_columns(table.name, schema=schema)}
+        extra = set(columns) - set(table.columns.keys())
+        if extra:
+            problems.append(f"{table.name}: 存在不属于当前结构的字段 {sorted(extra)}")
         for column in table.columns:
             if column.name not in columns:
                 problems.append(f"{table.name}.{column.name}: 缺少字段")
+            elif columns[column.name]["nullable"] != column.nullable:
+                problems.append(f"{table.name}.{column.name}: 可空约束不匹配")
             elif isinstance(column.type, Uuid) or isinstance(getattr(column.type, "impl", None), Uuid):
                 if not isinstance(columns[column.name]["type"], Uuid):
                     problems.append(f"{table.name}.{column.name}: 不是 UUID 类型")
+            elif _column_type(column.type, engine.dialect) != _column_type(
+                columns[column.name]["type"], engine.dialect
+            ):
+                problems.append(f"{table.name}.{column.name}: 字段类型不匹配")
+        if len(problems) != initial_problem_count:
+            continue
+
+        def canonical(expression, table_name=table.name):
+            return _schema_expression(engine, schema, table_name, str(expression)) if expression is not None else ""
+
+        expected_unique = {
+            (tuple(canonical(c.name) for c in constraint.columns), "")
+            for constraint in table.constraints
+            if isinstance(constraint, UniqueConstraint)
+        }
+        expected_unique.update(
+            (
+                tuple(canonical(expression) for expression in index.expressions),
+                canonical(index.dialect_options["postgresql"].get("where")),
+            )
+            for index in table.indexes
+            if index.unique
+        )
+        actual_unique = {
+            (tuple(canonical(c) for c in constraint["column_names"]), "")
+            for constraint in inspector.get_unique_constraints(table.name, schema=schema)
+        }
+        actual_unique.update(
+            (
+                tuple(canonical(c) for c in index.get("expressions", index["column_names"])),
+                canonical(index.get("dialect_options", {}).get("postgresql_where")),
+            )
+            for index in inspector.get_indexes(table.name, schema=schema)
+            if index["unique"]
+        )
+        if expected_unique != actual_unique:
+            problems.append(f"{table.name}: 唯一约束不匹配")
+        expected_foreign = {
+            (
+                tuple(c.name for c in constraint.columns),
+                tuple(element.column.table.name for element in constraint.elements),
+                tuple(
+                    element.column.table.schema or schema or inspector.default_schema_name
+                    for element in constraint.elements
+                ),
+                tuple(element.column.name for element in constraint.elements),
+                constraint.ondelete or "NO ACTION",
+            )
+            for constraint in table.constraints
+            if isinstance(constraint, ForeignKeyConstraint)
+        }
+        actual_foreign = {
+            (
+                tuple(constraint["constrained_columns"]),
+                tuple([constraint["referred_table"]] * len(constraint["referred_columns"])),
+                tuple(
+                    [constraint["referred_schema"] or schema or inspector.default_schema_name]
+                    * len(constraint["referred_columns"])
+                ),
+                tuple(constraint["referred_columns"]),
+                constraint.get("options", {}).get("ondelete", "NO ACTION"),
+            )
+            for constraint in inspector.get_foreign_keys(table.name, schema=schema, postgresql_ignore_search_path=True)
+        }
+        if expected_foreign != actual_foreign:
+            problems.append(f"{table.name}: 外键约束不匹配")
+        expected_checks = {
+            constraint.name: canonical(constraint.sqltext)
+            for constraint in table.constraints
+            if isinstance(constraint, CheckConstraint)
+        }
+        actual_checks = {
+            constraint["name"]: canonical(constraint["sqltext"])
+            for constraint in inspector.get_check_constraints(table.name, schema=schema)
+        }
+        if expected_checks != actual_checks:
+            problems.append(f"{table.name}: 检查约束不匹配")
     if problems:
         raise RuntimeError("Storage 结构不兼容，请在全新结构中从原始输入重建；" + "；".join(problems))
 

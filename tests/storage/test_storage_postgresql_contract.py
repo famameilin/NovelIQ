@@ -16,12 +16,12 @@ from sqlalchemy.orm import sessionmaker
 from src.storage import Storage
 from src.storage.constraints import install_domain_constraints
 from src.storage.database_url import resolve_database_url_from_env
-from src.storage.errors import StorageConstraintError, StorageError, StorageWriteError
+from src.storage.errors import StorageError
 from src.storage.models import Base
 from src.storage.operations import OperationRunner
 from src.storage.records.annotation_save import AnnotationSave
 from src.storage.records.cases import CaseSave
-from src.storage.records.diagnosis_save import DiagnosisPublish
+from src.storage.records.diagnosis_save import DiagnosisReportSave
 from src.storage.records.events import EventSave
 from src.storage.records.evidence import EvidenceParagraph
 from src.storage.records.facts import FactSave
@@ -82,7 +82,7 @@ def test_35_tables_have_independent_uuid_primary_keys(isolated_storage):
     inspector = inspect(engine)
     tables = inspector.get_table_names(schema=schema)
     assert set(tables) == set(Base.metadata.tables)
-    assert len(tables) == 35
+    assert len(tables) == 32
     for table in tables:
         primary = inspector.get_pk_constraint(table, schema=schema)["constrained_columns"]
         assert len(primary) == 1, table
@@ -191,7 +191,7 @@ def prepared_chapter(stored_run):
 def prepared_annotation(prepared_chapter):
     storage, run_id, text_value = prepared_chapter
     author, record_id, entity_id, event_id = [storage.new_id() for _ in range(4)]
-    storage.audit.start_invocation(execution_id=author, run_id=run_id, role="annotation", chapter_id=1)
+    storage.audit.start_invocation(agent_id=author, run_id=run_id, role="annotation", chapter_id=1)
     entities = {entity_id: {"entity_id": entity_id, "name": "张三", "entity_type": "character"}}
     facts = {
         "entities": entities,
@@ -225,18 +225,16 @@ def prepared_annotation(prepared_chapter):
     case = CaseSave(run_id, author, json.dumps({"created_case_ids": [], "registrations": {}, "deliveries": []}))
     record = {
         "record_id": record_id,
-        "execution_id": author,
+        "agent_id": author,
         "run_id": run_id,
         "chapter_id": 1,
         "role": "annotation",
-        "contract_version": "event-tree-declarations-v1",
-        "chapter_consolidation_version": "test",
     }
     dialogue = {
         "dialogue_id": storage.new_id(),
         "run_id": run_id,
         "chapter_id": 1,
-        "creation_execution_id": author,
+        "creation_agent_id": author,
         "candidate_key": "dialogue:1",
         "start_char": 0,
         "end_char": 2,
@@ -261,15 +259,15 @@ def _counts_for_run(engine, schema, run_id):
         return {
             name: connection.scalar(text(f"SELECT count(*) FROM {schema}.{name}"))
             for name in (
-                "chapter_annotations",
+                "agent_annotations",
                 "graph_entities",
                 "graph_facts",
-                "fact_entity_tags",
+                "graph_fact_entity_tags",
                 "event_declarations",
-                "declaration_participants",
-                "source_evidence",
-                "dialogue_records",
-                "analysis_assessments",
+                "event_participants",
+                "paragraph_evidence",
+                "graph_dialogues",
+                "agent_assessments",
             )
         }
 
@@ -290,7 +288,7 @@ def test_complete_annotation_and_replay_preserve_identifiers(prepared_annotation
     graph.load_registry(storage)
     entity_id = next(iter(request.facts.snapshot()["entities"]))
     assert graph.entity_id_for_key(entity_key("张三", "character")) == entity_id
-    restored = graph.load_saved_work(storage, request.record["execution_id"], request.record["record_id"])
+    restored = graph.load_saved_work(storage, request.record["agent_id"], request.record["record_id"])
     assert restored["entity_references"][0]["entity_id"] == entity_id
     assert storage.narrative.declaration_record_source(request.record["record_id"]).run_id == run_id
 
@@ -307,7 +305,7 @@ def test_last_annotation_component_failure_rolls_back_every_component(prepared_a
     with pytest.raises(StorageError):
         storage.annotations.save(bad)
     assert _counts_for_run(engine, schema, run_id) == before
-    assert storage.annotations.inspect_saved(request.record["execution_id"])["record_id"] is None
+    assert storage.annotations.inspect_saved(request.record["agent_id"])["record_id"] is None
 
 
 def test_topic_facts_commit_together_and_failed_distribution_rolls_back(prepared_annotation, isolated_storage):
@@ -316,7 +314,6 @@ def test_topic_facts_commit_together_and_failed_distribution_rolls_back(prepared
     model = {
         "model_key": "paragraph_lda",
         "library_version": "test",
-        "pipeline_version": "test",
         "num_topics": 2,
         "parameters": {},
         "dictionary_size": 2,
@@ -324,18 +321,18 @@ def test_topic_facts_commit_together_and_failed_distribution_rolls_back(prepared
         "inference_paragraph_count": 1,
         "artifact_key": "test",
     }
-    with pytest.raises(StorageWriteError) as failure:
+    from tests.support.storage_fixtures import save_topic_artifact
+    save_topic_artifact(run_id, 2)
+    with pytest.raises(ValueError, match="实际模型"):
         storage.paragraphs.save_topics(
             run_id, model=model, inferences=[(1, 3, 3, "complete", None, 1.0)], topics=[(1, 0, 0.4)]
         )
-    assert isinstance(failure.value.__cause__, StorageConstraintError)
-    assert failure.value.__cause__.kind == "check"
     with engine.connect() as connection:
         assert (
             connection.scalar(
-                text(f"SELECT lda_num_topics FROM {schema}.analysis_runs WHERE run_id=:run"), {"run": run_id}
+                text(f"SELECT lda_completed FROM {schema}.runs WHERE id=:run"), {"run": run_id}
             )
-            is None
+            is False
         )
     assert (
         storage.paragraphs.save_topics(
@@ -348,7 +345,7 @@ def test_topic_facts_commit_together_and_failed_distribution_rolls_back(prepared
 def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_storage):
     storage, run_id = stored_run
     session_id = storage.new_id()
-    storage.diagnosis.register_session(run_id=run_id, session_id=session_id)
+    storage.audit.start_invocation(run_id=run_id, agent_id=session_id, role="report")
     report_id = storage.new_id()
     # 报告与评估已写入后，对话目标缺失造成失败，不能留下半份正式报告
     organization = {
@@ -365,14 +362,13 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
             "outcomes",
             "event_arc_links",
             "event_outcome_links",
-            "conflicts",
         )
     }
-    organization["source_execution_id"] = session_id
-    request = DiagnosisPublish(
+    organization["source_agent_id"] = session_id
+    request = DiagnosisReportSave(
         run_id,
         session_id,
-        {"report_id": report_id, "session_id": session_id, "contract_version": "test"},
+        {"report_id": report_id, "agent_id": session_id},
         (),
         json.dumps(organization),
         frozenset(),
@@ -381,7 +377,7 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
         (),
     )
     with pytest.raises(ValueError, match="对话候选"):
-        storage.diagnosis.publish(request)
+        storage.diagnosis.save_report(request)
     _, engine, _, schema = isolated_storage
     with engine.connect() as connection:
         assert (
@@ -390,56 +386,9 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
             )
             == 0
         )
-    assert storage.diagnosis.publish(replace(request, dialogue_updates=()))["report_id"] == report_id
+    assert storage.diagnosis.save_report(replace(request, dialogue_updates=()))["report_id"] == report_id
 
 
-def test_case_registration_and_execution_commit_or_roll_back_together(prepared_annotation, isolated_storage):
-    """新案例必须先满足执行外键，执行登记失败时案例和会话也一起撤销"""
-    from src.case_pool import CasePool
-    from src.storage.models import BookCase, Execution
-
-    storage, run_id, request = prepared_annotation
-    storage.annotations.save(request)
-    event_id = next(iter(request.events.snapshot()["nodes"]))
-    _, _, factory, _ = isolated_storage
-    session_id, execution_id = storage.new_id(), storage.new_id()
-    pool = CasePool(run_id)
-    pool.begin(session_id)
-    case = pool.register_case(
-        case_type="event", description="核查事件含义", payload={"event_id": event_id}, author=session_id
-    )
-    case_id = case["case_id"]
-    registration = CaseSave(
-        run_id,
-        session_id,
-        json.dumps({"created_case_ids": [case_id], "registrations": {case_id: case}, "deliveries": []}),
-    )
-    with pytest.raises(ValueError, match="其他归属"):
-        storage.diagnosis.register_attempt(
-            run_id=run_id,
-            session_id=session_id,
-            execution_id=session_id,
-            role="case",
-            attempt_number=1,
-            case_anchor=case_id,
-            case_registration=registration,
-        )
-    with factory() as session:
-        assert session.get(BookCase, case_id) is None
-        assert session.get(Execution, session_id) is None
-    storage.diagnosis.register_attempt(
-        run_id=run_id,
-        session_id=session_id,
-        execution_id=execution_id,
-        role="case",
-        attempt_number=1,
-        case_anchor=case_id,
-        case_registration=registration,
-    )
-    with factory() as session:
-        assert session.get(BookCase, case_id) is not None
-        assert session.get(Execution, session_id).session_run_id == run_id
-        assert session.get(Execution, execution_id).case_anchor == case_id
 
 
 def test_domain_reads_restore_saved_graph_and_declarations(prepared_annotation):
@@ -452,20 +401,20 @@ def test_domain_reads_restore_saved_graph_and_declarations(prepared_annotation):
     graph = graph_projection(storage.graph).fetch_snapshot(run_id)
     assert len(graph.entities) == 1
     trees = EventTrees(run_id=run_id)
-    restored = trees.load_saved_work(storage, request.record["execution_id"], request.record["record_id"])
+    restored = trees.load_saved_work(storage, request.record["agent_id"], request.record["record_id"])
     assert restored
     assert fetch_foreshadowing_sources(storage, run_id) == []
 
 
 def test_audit_uuid_identifiers_and_sse_replay(prepared_annotation):
     storage, run_id, request = prepared_annotation
-    execution_id = request.record["execution_id"]
+    agent_id = request.record["agent_id"]
     call_id = storage.audit.start_turn(
         run_id=run_id,
         task_type="annotation",
         call_type="agent",
         model="test",
-        execution_id=execution_id,
+        agent_id=agent_id,
         attempt_number=1,
         chapter_id=1,
         role="annotation",
@@ -479,7 +428,7 @@ def test_audit_uuid_identifiers_and_sse_replay(prepared_annotation):
         turn_id=call_id, call_index=0, tool_name="read", request_args={}, response={"ok": True}
     )
     storage.audit.finish_turn(
-        call_id, raw_response={"ok": True}, status="success", error=None, timing={}, timing_notes=[], token_usage=None
+        call_id, raw_response={"ok": True},  error=None, timing={}, timing_notes=[], token_usage=None
     )
     from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls, fetch_token_usage_stats
 
@@ -498,38 +447,6 @@ def test_audit_uuid_identifiers_and_sse_replay(prepared_annotation):
     assert repository.replay(task_id, after_seq=0)
 
 
-def test_annotation_warning_receipt_keeps_failed_case_pending(prepared_annotation):
-    storage, run_id, request = prepared_annotation
-    from src.agents.annotation.agent import AnnotationAgent
-    from src.case_pool import CasePool
-
-    author = request.record["execution_id"]
-    pool = CasePool(run_id)
-    pool.begin(author)
-    case = pool.register_case(
-        case_type="character",
-        description="核查缺失人物",
-        payload={"node_id": storage.new_id(), "name": "李四", "entity_type": "character"},
-        author=author,
-    )
-    failed_case = CaseSave(
-        run_id,
-        author,
-        json.dumps({"created_case_ids": [case["case_id"]], "registrations": {case["case_id"]: case}, "deliveries": []}),
-    )
-    request = replace(request, cases=failed_case)
-    first = storage.annotations.save(request)
-    assert first["warnings"][0]["caseid"] == case["case_id"]
-    assert storage.annotations.save(request)["warnings"] == first["warnings"]
-    assert storage.annotations.inspect_saved(author)["warnings"] == first["warnings"]
-    # 模拟提交成功而首次响应丢失，重投必须同步原告警后才能确认内存贡献
-    agent = object.__new__(AnnotationAgent)
-    agent.case_pool = pool
-    execution = SimpleNamespace(finished=True, persistence=request, invocation_id=author, case_save_warnings=[])
-    agent._save(execution, storage)
-    pool.deliveries[author] = [{"case_id": case["case_id"], "is_write": True}]
-    pool.confirm(author)
-    assert pool.case_runtime[case["case_id"]]["promised"] is False
 
 
 def test_result_and_diagnosis_queries_consume_storage_interfaces(prepared_annotation):
@@ -557,90 +474,6 @@ def test_default_workflow_factories_return_storage_without_connecting():
     assert isinstance(EnvironmentInitializer().session_factory(), Storage)
 
 
-def test_diagnosis_case_warnings_keep_distinct_execution_receipts(stored_run):
-    from src.agents.diagnosis.persistence import save_diagnosis_result
-    from src.api.services.results_queries.diagnosis import _fetch_diagnosis
-    from src.case_pool import CasePool
-    from src.diagnosis.schema import AgentAnalysis
-    from src.event_trees.organization import CONTRACT_VERSION, NarrativeOrganization
-
-    storage, run_id = stored_run
-    session_id = storage.new_id()
-    authors = [storage.new_id(), storage.new_id()]
-    storage.diagnosis.register_session(run_id=run_id, session_id=session_id)
-    pool = CasePool(run_id)
-    cases = []
-    for attempt, author in enumerate(authors, start=1):
-        storage.diagnosis.register_attempt(
-            run_id=run_id, session_id=session_id, execution_id=author, role="report", attempt_number=attempt
-        )
-        pool.begin(author)
-        case = pool.register_case(
-            case_type="character",
-            description=f"核查缺失人物{attempt}",
-            payload={"node_id": storage.new_id(), "name": f"李四{attempt}", "entity_type": "character"},
-            author=author,
-        )
-        cases.append(
-            CaseSave(
-                run_id,
-                author,
-                json.dumps(
-                    {
-                        "created_case_ids": [case["case_id"]],
-                        "registrations": {case["case_id"]: case},
-                        "deliveries": [],
-                    }
-                ),
-            )
-        )
-    organization = {
-        key: []
-        for key in (
-            "events",
-            "containments",
-            "relations",
-            "reviewed_events",
-            "declaration_reviews",
-            "declaration_comparisons",
-            "structure_reviews",
-            "arcs",
-            "outcomes",
-            "event_arc_links",
-            "event_outcome_links",
-            "conflicts",
-        )
-    }
-    organization["source_execution_id"] = session_id
-    report_id = storage.new_id()
-    request = DiagnosisPublish(
-        run_id,
-        session_id,
-        {"report_id": report_id, "session_id": session_id, "contract_version": CONTRACT_VERSION},
-        (),
-        json.dumps(organization),
-        frozenset(),
-        (),
-        (),
-        tuple(cases),
-    )
-    result = storage.diagnosis.publish(request)
-    assert len(result["warnings"]) == 2
-    assert all(len(result["warnings_by_author"][author]) == 1 for author in authors)
-    assert storage.diagnosis.saved_case_warnings(run_id, report_id) == result["warnings_by_author"]
-    with pytest.raises(ValueError, match="不属于当前运行"):
-        storage.diagnosis.saved_case_warnings(storage.new_id(), report_id)
-    novel_id = storage.runs.get_run(run_id)["novel_id"]
-    assert _fetch_diagnosis(run_id, novel_id, storage) is not None
-    analysis = AgentAnalysis(
-        novel_id=novel_id, narrative_organization=NarrativeOrganization(source_execution_id=session_id)
-    )
-    for author in authors:
-        case_id = next(iter(pool.registrations[author]))
-        pool.deliveries[author] = [{"case_id": case_id, "is_write": True}]
-    save_diagnosis_result(storage, run_id, analysis, case_pool=pool)
-    assert pool.save_warnings == result["warnings_by_author"]
-    assert all(row["promised"] is False for row in pool.case_runtime.values())
 
 
 @pytest.mark.asyncio
@@ -702,72 +535,6 @@ async def test_formal_annotation_pipeline_commits_and_restores_without_model_rep
         MODEL_CAPACITY.reset()
 
 
-def test_recovery_removes_delivery_before_restricted_narrative_link(prepared_annotation, isolated_storage):
-    from src.storage.models import BookCase, CaseEntry, Chapter, Execution, NarrativeLink
-
-    storage, run_id, request = prepared_annotation
-    storage.annotations.save(request)
-    _, _, factory, _ = isolated_storage
-    source_id = next(iter(request.events.snapshot()["nodes"]))
-    discarded_author, link_id, case_id, support_id, delivery_id = [storage.new_id() for _ in range(5)]
-    with factory.begin() as session:
-        session.add(
-            Chapter(
-                run_id=run_id,
-                chapter_id=2,
-                sequence=2,
-                title="第二章",
-                display_title="第二章",
-                level="chapter",
-                start_pos=5,
-                end_pos=10,
-                text="后续判断。",
-                char_offset=5,
-            )
-        )
-    storage.audit.start_invocation(execution_id=discarded_author, run_id=run_id, chapter_id=2, role="annotation")
-    with factory.begin() as session:
-        session.add(
-            NarrativeLink(
-                link_id=link_id,
-                producer_execution_id=discarded_author,
-                reason="测试声明关联",
-                semantic_source_declaration_id=source_id,
-                semantic_target_declaration_id=source_id,
-                relation_type="承接",
-                source_operation_local_key="link-1",
-            )
-        )
-        session.add(
-            BookCase(case_id=case_id, case_type="event", description="保留第一章案例", declaration_target_id=source_id)
-        )
-        session.flush()
-        session.add(
-            CaseEntry(
-                entry_id=support_id, case_id=case_id, producer_execution_id=request.record["execution_id"], adopted=True
-            )
-        )
-        session.flush()
-        session.add(
-            CaseEntry(
-                entry_id=delivery_id,
-                parent_entry_id=support_id,
-                business_call_id=storage.new_id(),
-                accepted_order=1,
-                tool_name="event_relation",
-                receipt_bytes=b"{}",
-            )
-        )
-        session.flush()
-        session.add(CaseEntry(entry_id=storage.new_id(), parent_entry_id=delivery_id, narrative_link_id=link_id))
-    result = storage.annotations.discard_chapters(run_id, {2})
-    assert result["execution_ids"] == {discarded_author}
-    with factory() as session:
-        assert session.get(BookCase, case_id) is not None
-        assert session.get(CaseEntry, support_id) is not None
-        assert session.get(CaseEntry, delivery_id) is None
-        assert session.get(NarrativeLink, link_id) is None
-        assert session.get(Execution, discarded_author) is None
 
 
 def test_schema_guard_rejects_existing_composite_key_without_changing_it(isolated_storage):

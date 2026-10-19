@@ -20,7 +20,7 @@ def test_read_only_inspection_does_not_create_missing_schema(db_session) -> None
     missing_schema = "not_initialized_schema"
     assert not inspect(engine).has_schema(missing_schema)
     result = inspect_current_schema(engine, schema=missing_schema)
-    assert result["ready"] is False and "analysis_runs" in result["missing_tables"]
+    assert result["ready"] is False and "runs" in result["missing_tables"]
     assert not inspect(engine).has_schema(missing_schema)
 
 
