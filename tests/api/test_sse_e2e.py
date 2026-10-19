@@ -56,62 +56,34 @@ async def test_sse_e2e_eventbus_to_stream_full_chain() -> None:
     task_id = "e2e-chain"
     bus = AnalysisEventBus(task_id, TaskManager())
 
-    # 无连接时先 emit 两个事件（进缓冲）
-    await bus.emit(StreamEvent(action="start", stage="preprocess", message="预处理开始", percent=0.0))
-    await bus.emit(
-        StreamEvent(
-            action="progress",
-            stage="preprocess",
-            sub_stage="paragraph_embedding",
-            current=5,
-            total=10,
-            sub_percent=50.0,
-        )
-    )
-
-    response = await sse_endpoint(fixture_id(__name__, "novel-1"), task_id, _make_request(disconnect_after=4))
-    # 连接建立后（缓冲回放 2 条）再实时 emit 2 条
     await bus.emit(
         StreamEvent(
             action="output",
-            stage="preprocess",
-            stream_id="preprocess-output",
-            content="流式正文片段",
+            sub_stage="event",
+            stream_id="stream",
+            invocation_id="agent",
+            content="首段",
+        )
+    )
+    response = await sse_endpoint(fixture_id(__name__, "novel-1"), task_id, _make_request(disconnect_after=3))
+    await bus.emit(
+        StreamEvent(
+            action="output",
+            sub_stage="event",
+            stream_id="stream",
+            invocation_id="agent",
+            content="后段",
         )
     )
     await bus.emit_task_complete()
+    chunks = await _drain(response, event_count=3)
+    assert [chunk["event"] for chunk in chunks] == ["llm_output", "llm_output", "task_complete"]
+    assert [chunk["id"] for chunk in chunks] == ["1", "2", "3"]
+    data = json.loads(chunks[0]["data"])
+    assert data["invocation_id"] == "agent" and data["agent_type"] == "event"
+    assert not {"stage", "sub_stage", "percent", "sub_percent", "current", "total"} & data.keys()
+    assert json.loads(chunks[2]["data"])["status"] == "completed"
 
-    chunks = await _drain(response, event_count=4)
-
-    assert [chunk["event"] for chunk in chunks] == [
-        "stage_start",
-        "stage_progress",
-        "llm_output",
-        "task_complete",
-    ]
-    assert [chunk["id"] for chunk in chunks] == ["1", "2", "3", "4"]
-
-    data0 = json.loads(chunks[0]["data"])
-    assert data0["stage"] == "preprocess"
-    assert data0["message"] == "预处理开始"
-    assert data0["percent"] == 0.0
-
-    data1 = json.loads(chunks[1]["data"])
-    # sub_stage/sub_percent 贯穿 EventBus → manager → SSE 路由
-    assert data1["sub_stage"] == "paragraph_embedding"
-    assert data1["sub_percent"] == 50.0
-    assert data1["current"] == 5
-    assert data1["total"] == 10
-    # 全局 percent 由 current/total 按 preprocess 区间 0-10 计算
-    assert data1["percent"] == pytest.approx(5.0)
-
-    data2 = json.loads(chunks[2]["data"])
-    assert data2["content"] == "流式正文片段"
-    assert data2["stream_id"] == "preprocess-output"
-
-    data3 = json.loads(chunks[3]["data"])
-    assert data3["stage"] == "completed"
-    assert data3["percent"] == 100.0
 
 
 @pytest.mark.asyncio
@@ -153,8 +125,8 @@ async def test_sse_e2e_tool_call_status_passthrough() -> None:
     assert data1["status"] == "success"
     assert data1["message"] == "写入 3 条关系"
     # 上下文补全：stage/sub_stage 来自总线
-    assert data1["stage"] == "annotate"
-    assert data1["sub_stage"] == "annotation"
+    assert data1["agent_type"] == "annotation"
+    assert "stage" not in data1
 
 
 @pytest.mark.asyncio
@@ -164,8 +136,8 @@ async def test_sse_e2e_reconnect_replays_incremental_only() -> None:
     task_id = "e2e-reconnect"
     bus = AnalysisEventBus(task_id, TaskManager())
 
-    await bus.emit(StreamEvent(action="start", stage="preprocess", message="第一轮"))
-    await bus.emit(StreamEvent(action="progress", stage="preprocess", current=1, total=10, sub_percent=10.0))
+    await bus.emit(StreamEvent(action="output", stream_id="stream", content="第一轮"))
+    await bus.emit(StreamEvent(action="output", stream_id="stream", content="第二轮"))
 
     # 第一次连接：last_seq=None → 回放全部（seq 1,2）
     response1 = await sse_endpoint(fixture_id(__name__, "novel-1"), task_id, _make_request(disconnect_after=2))
@@ -173,7 +145,7 @@ async def test_sse_e2e_reconnect_replays_incremental_only() -> None:
     assert [chunk["id"] for chunk in chunks1] == ["1", "2"]
 
     # 断开后新事件继续进缓冲（seq 3）
-    await bus.emit(StreamEvent(action="progress", stage="preprocess", current=2, total=10, sub_percent=20.0))
+    await bus.emit(StreamEvent(action="output", stream_id="stream", content="第三轮"))
 
     # 第二次连接：last_seq=2 → 只回放 seq 3
     request2 = _make_request(disconnect_after=1)
@@ -182,8 +154,7 @@ async def test_sse_e2e_reconnect_replays_incremental_only() -> None:
     chunks2 = await _drain(response2, event_count=1)
     assert [chunk["id"] for chunk in chunks2] == ["3"]
     data = json.loads(chunks2[0]["data"])
-    assert data["current"] == 2
-    assert data["sub_percent"] == 20.0
+    assert data["content"] == "第三轮"
 
 
 @pytest.mark.asyncio
@@ -193,8 +164,8 @@ async def test_sse_e2e_last_event_id_header_as_fallback() -> None:
     task_id = "e2e-header"
     bus = AnalysisEventBus(task_id, TaskManager())
 
-    await bus.emit(StreamEvent(action="start", stage="aggregate", message="聚合开始"))
-    await bus.emit(StreamEvent(action="complete", stage="aggregate", percent=90.0))
+    await bus.emit(StreamEvent(action="output", stream_id="stream", content="首段"))
+    await bus.emit(StreamEvent(action="output", stream_id="stream", content="后段"))
 
     request = _make_request(disconnect_after=1)
     request.query_params = {}
@@ -203,4 +174,4 @@ async def test_sse_e2e_last_event_id_header_as_fallback() -> None:
     chunks = await _drain(response, event_count=1)
 
     assert [chunk["id"] for chunk in chunks] == ["2"]
-    assert json.loads(chunks[0]["data"])["stage"] == "aggregate"
+    assert json.loads(chunks[0]["data"])["content"] == "后段"

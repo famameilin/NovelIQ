@@ -3,11 +3,11 @@
 import pytest
 
 from src.storage import new_id
-from src.storage.models import AnalysisRun, Novel
+from src.storage.models import Novel, Run
 from src.storage.repositories import RunRepository
 from src.workflows.tasks import TaskService
 from tests.support.run_records import set_run_status
-from tests.support.storage_fixtures import fixture_id, storage_for
+from tests.support.storage_fixtures import storage_for
 
 
 class TestTaskServiceTaskLogic:
@@ -34,7 +34,7 @@ class TestTaskServiceTaskLogic:
 
         yield
 
-        db_session.query(AnalysisRun).filter(AnalysisRun.novel_id == self.test_novel_id).delete()
+        db_session.query(Run).filter(Run.novelid == self.test_novel_id).delete()
         db_session.query(Novel).filter(Novel.novel_id == self.test_novel_id).delete()
         db_session.commit()
 
@@ -43,13 +43,7 @@ class TestTaskServiceTaskLogic:
         if run_id is None:
             run_id = new_id()
 
-        run_id = self.run_repo.create_run(
-            novel_id=self.test_novel_id,
-            source_path="test.txt",
-            title="Test Novel",
-            author=fixture_id(__name__, "Test Author"),
-            run_id=run_id,
-        )
+        run_id = self.run_repo.create_run(novel_id=self.test_novel_id, run_id=run_id)
         set_run_status(self.db_session, run_id, status)
         return run_id
 
