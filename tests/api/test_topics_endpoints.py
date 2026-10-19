@@ -33,11 +33,12 @@ _NET_DENSITY = [0.5, 0.5, 0.5, -0.5, -0.5, None]
 def _insert_topic_fixture(db_session, run_id: str) -> None:
     """两章六段完整主题三表契约 + 情感曲线"""
     repo = ParagraphRepository(db_session)
+    from tests.support.storage_fixtures import save_topic_artifact
+    save_topic_artifact(run_id, 2)
     repo.insert_topic_model_run(
         run_id,
         model_key="gensim-lda",
         library_version="4.4.0",
-        pipeline_version="1.0",
         num_topics=2,
         parameters={"num_topics": 2},
         dictionary_size=20,

@@ -82,11 +82,7 @@ class TestResults:
         novel_id = new_id()
         insert_graph_test_novel(db_session, novel_id)
         run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Diagnosis Incomplete Contract",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         set_run_status(run_repo.session, run_id, "completed")
         confirm_test_work(db_session, run_id)
         # 部分结果 = 只有正文、没有标签/名单/评分的真实报告（正式发布链写入）
@@ -118,11 +114,7 @@ class TestResults:
         novel_id = new_id()
         insert_graph_test_novel(db_session, novel_id)
         run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path="test",
-            title="Graph Incomplete Contract",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
         set_run_status(run_repo.session, run_id, "completed")
         confirm_test_work(db_session, run_id)
         # 已存在带焦点名单的正式诊断：图谱族路由不因它而拒绝读取
@@ -140,7 +132,7 @@ class TestResults:
             assert response.json()["changes"] == []
 
     def test_get_chapter_annotations_rejects_task_from_other_novel(self, api_client: TestClient):
-        """测试 chapter_annotations 不接受属于其他小说的 task_id。"""
+        """测试 agent_annotations 不接受属于其他小说的 task_id。"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as first_file:
             first_file.write(b"First novel content\n" * 100)
             first_file.flush()
@@ -189,11 +181,7 @@ def test_result_routes_reject_non_terminal_run_status(api_client: TestClient, db
     novel_id = new_id()
     insert_graph_test_novel(db_session, novel_id)
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Metrics Non Terminal Run",
-    )
+    run_id = run_repo.create_run(novel_id=novel_id)
     set_run_status(run_repo.session, run_id, "running")
 
     response = api_client.get(path.format(novel_id=novel_id), params={"task_id": task_for_run(run_id, db_session)})
@@ -217,11 +205,7 @@ def test_diagnosis_and_characters_routes_reject_non_terminal_run_status(
     novel_id = new_id()
     insert_graph_test_novel(db_session, novel_id)
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Results Non Terminal Run",
-    )
+    run_id = run_repo.create_run(novel_id=novel_id)
     set_run_status(run_repo.session, run_id, "running")
 
     response = api_client.get(path.format(novel_id=novel_id), params={"task_id": task_for_run(run_id, db_session)})

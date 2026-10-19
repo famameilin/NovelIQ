@@ -10,8 +10,8 @@ from src.diagnosis.schema import AgentAnalysis
 from src.fact_graph.read import ExportGraphAuthorityView, ExportRelationSnapshot, GraphChange
 from src.metrics.queries.global_stats import save_global_stats
 from src.storage import new_id
+from src.storage.models import Agent
 from src.storage.repositories.annotation import ForeshadowingTreeView
-from src.storage.repositories.organization_writes import register_diagnosis_session
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import ensure_character
 from tests.support.paragraph_fixtures import insert_metrics, make_metric_row
@@ -67,7 +67,7 @@ def _publish_diagnosis(
         for name in sorted(str(item) for item in names):
             ensure_character(db_session, run_id=run_id, name=name)
     session_id = new_id()
-    register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
+    db_session.add(Agent(id=session_id, run_id=run_id, type="report", status="running"))
     report_id = insert_report_fixture(db_session, run_id, session_id, AgentAnalysis(**fields))
     db_session.commit()
     return report_id

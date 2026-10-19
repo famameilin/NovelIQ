@@ -8,11 +8,6 @@
     "graph.edges",
     "export.character_relations"
   ],
-  "narrative_contract_updated": "2026-10-17: 六 Agent 命名与 work 业务机制删除；执行归属直落产物与审计行，事件身份随身份收敛重建",
-  "contract_version": "event-tree-2026-10-13",
-  "project_version": "0.2.2",
-  "previous_baseline_commit": "486c0cbf7cfda1fcb20bec867b504e6ef93f36eb",
-  "baseline_contract_version": "event-tree-declarations-v1",
   "responses": {
     "tabs/dashboard": {
       "run_id": "018bcfe5-6800-7000-8000-000000000002",
@@ -48,13 +43,13 @@
         "network_density": null,
         "greimas_coverage": 0.3333333333333333,
         "function_coverage_distribution": {
-          "帮助者": 0.5,
-          "接收者": 0.0,
-          "反对者": 0.0,
+          "其他": 0.0,
           "发送者": 0.0,
           "主体": 0.5,
           "客体": 0.0,
-          "其他": 0.0
+          "帮助者": 0.5,
+          "反对者": 0.0,
+          "接收者": 0.0
         },
         "antagonist_strength_gap": null,
         "relation_change_per_10k_chars": 461.538462,
@@ -200,7 +195,7 @@
             {
               "fact_id": "018bcfe5-6800-7000-8000-00000000004f",
               "chapter_id": 3,
-              "author_execution_id": "018bcfe5-6800-7000-8000-00000000003c",
+              "author_agent_id": "018bcfe5-6800-7000-8000-00000000003c",
               "operation": {
                 "from_entity": "顾承渊",
                 "to_entity": "天衡宗",
@@ -230,7 +225,7 @@
             {
               "fact_id": "018bcfe5-6800-7000-8000-000000000064",
               "chapter_id": 5,
-              "author_execution_id": "018bcfe5-6800-7000-8000-00000000005a",
+              "author_agent_id": "018bcfe5-6800-7000-8000-00000000005a",
               "operation": {
                 "from_entity": "顾承渊",
                 "to_entity": "苏映雪",
@@ -260,7 +255,7 @@
             {
               "fact_id": "018bcfe5-6800-7000-8000-000000000068",
               "chapter_id": 5,
-              "author_execution_id": "018bcfe5-6800-7000-8000-00000000005a",
+              "author_agent_id": "018bcfe5-6800-7000-8000-00000000005a",
               "operation": {
                 "from_entity": "顾承渊",
                 "to_entity": "陆遥",
@@ -290,7 +285,7 @@
             {
               "fact_id": "018bcfe5-6800-7000-8000-00000000006b",
               "chapter_id": 5,
-              "author_execution_id": "018bcfe5-6800-7000-8000-00000000005a",
+              "author_agent_id": "018bcfe5-6800-7000-8000-00000000005a",
               "operation": {
                 "from_entity": "苏映雪",
                 "to_entity": "陆遥",
@@ -306,7 +301,6 @@
     },
     "event-trees": {
       "run_id": "018bcfe5-6800-7000-8000-000000000002",
-      "contract_version": "event-tree-declarations-v1",
       "organization_status": "ready",
       "chapters": [
         {
@@ -926,7 +920,7 @@
       "run_id": "018bcfe5-6800-7000-8000-000000000002",
       "unavailable_reason": null,
       "algorithm": {
-        "version": "graph-metrics-v1",
+        "name": "graph-metrics",
         "graph": {
           "node_count": 2,
           "edge_count": 1,
@@ -1227,13 +1221,13 @@
           "network_density": null,
           "greimas_coverage": 0.3333333333333333,
           "function_coverage_distribution": {
-            "帮助者": 0.5,
-            "接收者": 0.0,
-            "反对者": 0.0,
+            "其他": 0.0,
             "发送者": 0.0,
             "主体": 0.5,
             "客体": 0.0,
-            "其他": 0.0
+            "帮助者": 0.5,
+            "反对者": 0.0,
+            "接收者": 0.0
           },
           "antagonist_strength_gap": null,
           "relation_change_per_10k_chars": 461.538462,
@@ -1994,7 +1988,6 @@
       },
       "event_trees": {
         "run_id": "018bcfe5-6800-7000-8000-000000000002",
-        "contract_version": "event-tree-declarations-v1",
         "organization_status": "ready",
         "chapters": [
           {
@@ -2472,7 +2465,6 @@
               2
             ],
             "ancestry": [],
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008d",
             "relations": [
               {
                 "relation_id": "018bcfe5-6800-7000-8000-00000000007e",
@@ -2584,7 +2576,6 @@
               "018bcfe5-6800-7000-8000-000000000071",
               "018bcfe5-6800-7000-8000-000000000073"
             ],
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008e",
             "relations": [
               {
                 "relation_id": "018bcfe5-6800-7000-8000-00000000007f",
@@ -2676,7 +2667,6 @@
             "ancestry": [
               "018bcfe5-6800-7000-8000-000000000071"
             ],
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008f",
             "relations": [
               {
                 "relation_id": "018bcfe5-6800-7000-8000-00000000007f",
@@ -2749,7 +2739,6 @@
               1
             ],
             "ancestry": [],
-            "revision_id": "018bcfe5-6800-7000-8000-000000000091",
             "relations": []
           },
           {
@@ -2797,7 +2786,6 @@
               2
             ],
             "ancestry": [],
-            "revision_id": "018bcfe5-6800-7000-8000-000000000090",
             "relations": [
               {
                 "relation_id": "018bcfe5-6800-7000-8000-00000000007e",
@@ -2894,7 +2882,6 @@
               2
             ],
             "ancestry": [],
-            "revision_id": "018bcfe5-6800-7000-8000-000000000092",
             "relations": []
           },
           {
@@ -2935,7 +2922,6 @@
               3
             ],
             "ancestry": [],
-            "revision_id": "018bcfe5-6800-7000-8000-000000000093",
             "relations": []
           },
           {
@@ -2971,7 +2957,6 @@
               4
             ],
             "ancestry": [],
-            "revision_id": "018bcfe5-6800-7000-8000-000000000094",
             "relations": []
           },
           {
@@ -3007,11 +2992,10 @@
               5
             ],
             "ancestry": [],
-            "revision_id": "018bcfe5-6800-7000-8000-000000000095",
             "relations": []
           }
         ],
-        "event_records": [
+        "complete_events": [
           {
             "event_id": "018bcfe5-6800-7000-8000-000000000071",
             "title": "踏入江湖",
@@ -3020,9 +3004,8 @@
             "progress": "已查看石碑",
             "status": "resolved",
             "event_type": "启程",
-            "current_revision_id": "018bcfe5-6800-7000-8000-00000000008d",
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "source_agent_id": "018bcfe5-6800-7000-8000-000000000070",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070",
             "local_key": "018bcfe5-6800-7000-8000-000000000022",
             "evidence": [
               {
@@ -3044,9 +3027,8 @@
             "progress": null,
             "status": "ongoing",
             "event_type": "调查",
-            "current_revision_id": "018bcfe5-6800-7000-8000-00000000008e",
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "source_agent_id": "018bcfe5-6800-7000-8000-000000000070",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070",
             "local_key": "018bcfe5-6800-7000-8000-000000000027",
             "evidence": [
               {
@@ -3068,9 +3050,8 @@
             "progress": null,
             "status": "ongoing",
             "event_type": "调查",
-            "current_revision_id": "018bcfe5-6800-7000-8000-00000000008f",
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "source_agent_id": "018bcfe5-6800-7000-8000-000000000070",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070",
             "local_key": "018bcfe5-6800-7000-8000-00000000002a",
             "evidence": [
               {
@@ -3092,9 +3073,8 @@
             "progress": null,
             "status": "ongoing",
             "event_type": "行动",
-            "current_revision_id": "018bcfe5-6800-7000-8000-000000000091",
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "source_agent_id": "018bcfe5-6800-7000-8000-000000000070",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070",
             "local_key": "018bcfe5-6800-7000-8000-000000000019",
             "evidence": [
               {
@@ -3116,9 +3096,8 @@
             "progress": null,
             "status": "ongoing",
             "event_type": "结伴",
-            "current_revision_id": "018bcfe5-6800-7000-8000-000000000090",
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "source_agent_id": "018bcfe5-6800-7000-8000-000000000070",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070",
             "local_key": "018bcfe5-6800-7000-8000-000000000037",
             "evidence": [
               {
@@ -3140,9 +3119,8 @@
             "progress": null,
             "status": "ongoing",
             "event_type": "行动",
-            "current_revision_id": "018bcfe5-6800-7000-8000-000000000092",
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "source_agent_id": "018bcfe5-6800-7000-8000-000000000070",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070",
             "local_key": "018bcfe5-6800-7000-8000-00000000002e",
             "evidence": [
               {
@@ -3164,9 +3142,8 @@
             "progress": null,
             "status": "ongoing",
             "event_type": "行动",
-            "current_revision_id": "018bcfe5-6800-7000-8000-000000000093",
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "source_agent_id": "018bcfe5-6800-7000-8000-000000000070",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070",
             "local_key": "018bcfe5-6800-7000-8000-00000000003e",
             "evidence": [
               {
@@ -3188,9 +3165,8 @@
             "progress": null,
             "status": "ongoing",
             "event_type": "行动",
-            "current_revision_id": "018bcfe5-6800-7000-8000-000000000094",
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "source_agent_id": "018bcfe5-6800-7000-8000-000000000070",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070",
             "local_key": "018bcfe5-6800-7000-8000-000000000053",
             "evidence": [
               {
@@ -3212,9 +3188,8 @@
             "progress": null,
             "status": "ongoing",
             "event_type": "行动",
-            "current_revision_id": "018bcfe5-6800-7000-8000-000000000095",
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000006f",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
+            "source_agent_id": "018bcfe5-6800-7000-8000-000000000070",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070",
             "local_key": "018bcfe5-6800-7000-8000-00000000005c",
             "evidence": [
               {
@@ -3242,8 +3217,7 @@
               {
                 "entity": {
                   "name": "顾承渊",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
-                  "entity_type": "character"
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a"
                 },
                 "role": "主体",
                 "narrative_role": "主体",
@@ -3265,7 +3239,7 @@
             "char_end": 8,
             "chapter_id": 1,
             "chapter_order": 1,
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000017",
             "annotation_id": "018bcfe5-6800-7000-8000-000000000018",
             "payload_path": "declaration/018bcfe5-6800-7000-8000-000000000019"
           },
@@ -3292,7 +3266,7 @@
             "char_end": 8,
             "chapter_id": 1,
             "chapter_order": 1,
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000017",
             "annotation_id": "018bcfe5-6800-7000-8000-000000000018",
             "payload_path": "declaration/018bcfe5-6800-7000-8000-000000000022"
           },
@@ -3319,7 +3293,7 @@
             "char_end": 8,
             "chapter_id": 1,
             "chapter_order": 1,
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000017",
             "annotation_id": "018bcfe5-6800-7000-8000-000000000018",
             "payload_path": "declaration/018bcfe5-6800-7000-8000-000000000027"
           },
@@ -3346,7 +3320,7 @@
             "char_end": 8,
             "chapter_id": 1,
             "chapter_order": 1,
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000017",
             "annotation_id": "018bcfe5-6800-7000-8000-000000000018",
             "payload_path": "declaration/018bcfe5-6800-7000-8000-00000000002a"
           },
@@ -3362,8 +3336,7 @@
               {
                 "entity": {
                   "name": "苏映雪",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
-                  "entity_type": "character"
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f"
                 },
                 "role": "主体",
                 "narrative_role": "帮助者",
@@ -3385,7 +3358,7 @@
             "char_end": 10,
             "chapter_id": 2,
             "chapter_order": 2,
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-00000000002c",
             "annotation_id": "018bcfe5-6800-7000-8000-00000000002d",
             "payload_path": "declaration/018bcfe5-6800-7000-8000-00000000002e"
           },
@@ -3412,7 +3385,7 @@
             "char_end": 10,
             "chapter_id": 2,
             "chapter_order": 2,
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-00000000002c",
             "annotation_id": "018bcfe5-6800-7000-8000-00000000002d",
             "payload_path": "declaration/018bcfe5-6800-7000-8000-000000000037"
           },
@@ -3439,7 +3412,7 @@
             "char_end": 10,
             "chapter_id": 2,
             "chapter_order": 2,
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-00000000002c",
             "annotation_id": "018bcfe5-6800-7000-8000-00000000002d",
             "payload_path": "declaration/018bcfe5-6800-7000-8000-00000000003a"
           },
@@ -3455,8 +3428,7 @@
               {
                 "entity": {
                   "name": "顾承渊",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
-                  "entity_type": "character"
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a"
                 },
                 "role": "主体",
                 "narrative_role": "主体",
@@ -3466,8 +3438,7 @@
               {
                 "entity": {
                   "name": "苏映雪",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
-                  "entity_type": "character"
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f"
                 },
                 "role": "主体",
                 "narrative_role": "帮助者",
@@ -3489,7 +3460,7 @@
             "char_end": 19,
             "chapter_id": 3,
             "chapter_order": 3,
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000003c",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-00000000003c",
             "annotation_id": "018bcfe5-6800-7000-8000-00000000003d",
             "payload_path": "declaration/018bcfe5-6800-7000-8000-00000000003e"
           },
@@ -3505,8 +3476,7 @@
               {
                 "entity": {
                   "name": "苏映雪",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
-                  "entity_type": "character"
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f"
                 },
                 "role": "主体",
                 "narrative_role": "帮助者",
@@ -3528,7 +3498,7 @@
             "char_end": 11,
             "chapter_id": 4,
             "chapter_order": 4,
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000051",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000051",
             "annotation_id": "018bcfe5-6800-7000-8000-000000000052",
             "payload_path": "declaration/018bcfe5-6800-7000-8000-000000000053"
           },
@@ -3544,8 +3514,7 @@
               {
                 "entity": {
                   "name": "顾承渊",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
-                  "entity_type": "character"
+                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a"
                 },
                 "role": "主体",
                 "narrative_role": "主体",
@@ -3567,7 +3536,7 @@
             "char_end": 17,
             "chapter_id": 5,
             "chapter_order": 5,
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000005a",
+            "producer_agent_id": "018bcfe5-6800-7000-8000-00000000005a",
             "annotation_id": "018bcfe5-6800-7000-8000-00000000005b",
             "payload_path": "declaration/018bcfe5-6800-7000-8000-00000000005c"
           }
@@ -3576,62 +3545,52 @@
           {
             "declaration_id": "018bcfe5-6800-7000-8000-000000000019",
             "event_id": "018bcfe5-6800-7000-8000-000000000075",
-            "revision_id": "018bcfe5-6800-7000-8000-000000000091",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
             "declaration_id": "018bcfe5-6800-7000-8000-000000000022",
             "event_id": "018bcfe5-6800-7000-8000-000000000071",
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008c",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
             "declaration_id": "018bcfe5-6800-7000-8000-000000000027",
             "event_id": "018bcfe5-6800-7000-8000-000000000072",
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008e",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
             "declaration_id": "018bcfe5-6800-7000-8000-00000000002a",
             "event_id": "018bcfe5-6800-7000-8000-000000000073",
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008f",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
             "declaration_id": "018bcfe5-6800-7000-8000-00000000002e",
             "event_id": "018bcfe5-6800-7000-8000-000000000076",
-            "revision_id": "018bcfe5-6800-7000-8000-000000000092",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
             "declaration_id": "018bcfe5-6800-7000-8000-000000000037",
             "event_id": "018bcfe5-6800-7000-8000-000000000074",
-            "revision_id": "018bcfe5-6800-7000-8000-000000000090",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
             "declaration_id": "018bcfe5-6800-7000-8000-00000000003a",
             "event_id": "018bcfe5-6800-7000-8000-000000000071",
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008d",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
             "declaration_id": "018bcfe5-6800-7000-8000-00000000003e",
             "event_id": "018bcfe5-6800-7000-8000-000000000077",
-            "revision_id": "018bcfe5-6800-7000-8000-000000000093",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
             "declaration_id": "018bcfe5-6800-7000-8000-000000000053",
             "event_id": "018bcfe5-6800-7000-8000-000000000078",
-            "revision_id": "018bcfe5-6800-7000-8000-000000000094",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070"
           },
           {
             "declaration_id": "018bcfe5-6800-7000-8000-00000000005c",
             "event_id": "018bcfe5-6800-7000-8000-000000000079",
-            "revision_id": "018bcfe5-6800-7000-8000-000000000095",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070"
+            "producer_agent_id": "018bcfe5-6800-7000-8000-000000000070"
           }
         ],
         "declaration_relations": [],
@@ -3666,399 +3625,8 @@
               }
             ]
           }
-        ],
-        "revisions": [
-          {
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008c",
-            "event_id": "018bcfe5-6800-7000-8000-000000000071",
-            "previous_revision_id": null,
-            "declaration_id": "018bcfe5-6800-7000-8000-000000000022",
-            "participants": [],
-            "title": "踏入江湖",
-            "problem": "踏入江湖的问题",
-            "event_type": "启程",
-            "summary": "顾承渊踏入江湖",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "018bcfe5-6800-7000-8000-000000000017",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
-            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000071/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ]
-          },
-          {
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008d",
-            "event_id": "018bcfe5-6800-7000-8000-000000000071",
-            "previous_revision_id": "018bcfe5-6800-7000-8000-00000000008c",
-            "declaration_id": "018bcfe5-6800-7000-8000-00000000003a",
-            "participants": [],
-            "title": "踏入江湖",
-            "problem": "踏入江湖的问题",
-            "event_type": "启程",
-            "summary": "顾承渊踏入江湖并检查石碑",
-            "status": "resolved",
-            "progress": "已查看石碑",
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000002c",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
-            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000071/1",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
-                "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-              }
-            ]
-          },
-          {
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008e",
-            "event_id": "018bcfe5-6800-7000-8000-000000000072",
-            "previous_revision_id": null,
-            "declaration_id": "018bcfe5-6800-7000-8000-000000000027",
-            "participants": [],
-            "title": "线索记录",
-            "problem": "线索记录的问题",
-            "event_type": "调查",
-            "summary": "顾承渊记下线索",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "018bcfe5-6800-7000-8000-000000000017",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
-            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000072/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ]
-          },
-          {
-            "revision_id": "018bcfe5-6800-7000-8000-00000000008f",
-            "event_id": "018bcfe5-6800-7000-8000-000000000073",
-            "previous_revision_id": null,
-            "declaration_id": "018bcfe5-6800-7000-8000-00000000002a",
-            "participants": [],
-            "title": "石碑疑云",
-            "problem": "石碑疑云的问题",
-            "event_type": "调查",
-            "summary": "顾承渊检查石碑",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "018bcfe5-6800-7000-8000-000000000017",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
-            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000073/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ]
-          },
-          {
-            "revision_id": "018bcfe5-6800-7000-8000-000000000090",
-            "event_id": "018bcfe5-6800-7000-8000-000000000074",
-            "previous_revision_id": null,
-            "declaration_id": "018bcfe5-6800-7000-8000-000000000037",
-            "participants": [],
-            "title": "同行启程",
-            "problem": "同行启程的问题",
-            "event_type": "结伴",
-            "summary": "苏映雪现身同行",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000002c",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
-            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000074/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
-                "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-              }
-            ]
-          },
-          {
-            "revision_id": "018bcfe5-6800-7000-8000-000000000091",
-            "event_id": "018bcfe5-6800-7000-8000-000000000075",
-            "previous_revision_id": null,
-            "declaration_id": "018bcfe5-6800-7000-8000-000000000019",
-            "participants": [
-              {
-                "entity": {
-                  "name": "顾承渊",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": "初入江湖",
-                "emotion": null
-              }
-            ],
-            "title": "第1章人物动态",
-            "problem": "第1章人物动态",
-            "event_type": "行动",
-            "summary": "顾承渊初入江湖。",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "018bcfe5-6800-7000-8000-000000000017",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000017",
-            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000075/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              }
-            ]
-          },
-          {
-            "revision_id": "018bcfe5-6800-7000-8000-000000000092",
-            "event_id": "018bcfe5-6800-7000-8000-000000000076",
-            "previous_revision_id": null,
-            "declaration_id": "018bcfe5-6800-7000-8000-00000000002e",
-            "participants": [
-              {
-                "entity": {
-                  "name": "苏映雪",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "帮助者",
-                "action": "现身",
-                "emotion": null
-              }
-            ],
-            "title": "第2章人物动态",
-            "problem": "第2章人物动态",
-            "event_type": "行动",
-            "summary": "苏映雪现身与他同行。",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000002c",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000002c",
-            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000076/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
-                "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-              }
-            ]
-          },
-          {
-            "revision_id": "018bcfe5-6800-7000-8000-000000000093",
-            "event_id": "018bcfe5-6800-7000-8000-000000000077",
-            "previous_revision_id": null,
-            "declaration_id": "018bcfe5-6800-7000-8000-00000000003e",
-            "participants": [
-              {
-                "entity": {
-                  "name": "顾承渊",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": "结盟",
-                "emotion": -2
-              },
-              {
-                "entity": {
-                  "name": "苏映雪",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "帮助者",
-                "action": "回应",
-                "emotion": null
-              }
-            ],
-            "title": "第3章人物动态",
-            "problem": "第3章人物动态",
-            "event_type": "行动",
-            "summary": "顾承渊与苏映雪结盟，同时受天衡宗招揽。",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000003c",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000003c",
-            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000077/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 2,
-                "chapter_id": 3,
-                "char_start": 0,
-                "char_end": 19,
-                "text_hash": "0ba5c6c5d29d9193a1d0bf6443996fc00306432bf04119c2f6240a215e43f43b"
-              }
-            ]
-          },
-          {
-            "revision_id": "018bcfe5-6800-7000-8000-000000000094",
-            "event_id": "018bcfe5-6800-7000-8000-000000000078",
-            "previous_revision_id": null,
-            "declaration_id": "018bcfe5-6800-7000-8000-000000000053",
-            "participants": [
-              {
-                "entity": {
-                  "name": "苏映雪",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000002f",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "帮助者",
-                "action": "离开",
-                "emotion": -1
-              }
-            ],
-            "title": "第4章人物动态",
-            "problem": "第4章人物动态",
-            "event_type": "行动",
-            "summary": "苏映雪完成使命后离开。",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "018bcfe5-6800-7000-8000-000000000051",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000051",
-            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000078/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 3,
-                "chapter_id": 4,
-                "char_start": 0,
-                "char_end": 11,
-                "text_hash": "d338e70addc4a69ef63558f97dcdf386f9f8cf2144b42fa7c9863773d1b1eaa0"
-              }
-            ]
-          },
-          {
-            "revision_id": "018bcfe5-6800-7000-8000-000000000095",
-            "event_id": "018bcfe5-6800-7000-8000-000000000079",
-            "previous_revision_id": null,
-            "declaration_id": "018bcfe5-6800-7000-8000-00000000005c",
-            "participants": [
-              {
-                "entity": {
-                  "name": "顾承渊",
-                  "entity_id": "018bcfe5-6800-7000-8000-00000000001a",
-                  "entity_type": "character"
-                },
-                "role": "主体",
-                "narrative_role": "主体",
-                "action": "独行",
-                "emotion": null
-              }
-            ],
-            "title": "第5章人物动态",
-            "problem": "第5章人物动态",
-            "event_type": "行动",
-            "summary": "顾承渊最终与苏映雪决裂，独自前行。",
-            "status": "ongoing",
-            "progress": null,
-            "source_execution_id": "018bcfe5-6800-7000-8000-00000000005a",
-            "producer_invocation_id": "018bcfe5-6800-7000-8000-00000000005a",
-            "source_operation_id": "stage/018bcfe5-6800-7000-8000-000000000079/0",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 4,
-                "chapter_id": 5,
-                "char_start": 0,
-                "char_end": 17,
-                "text_hash": "5aa9c81bf9abc0e693d5040d60c3dc4ebff9dd2067cc099727b14e5c7a7b4b7e"
-              }
-            ]
-          }
-        ],
-        "conflicts": [
-          {
-            "conflict_id": "018bcfe5-6800-7000-8000-000000000081",
-            "subject_kind": "event",
-            "subject_id": "018bcfe5-6800-7000-8000-000000000071",
-            "claims": [
-              {
-                "claim": "入行十年",
-                "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
-                "evidence": [
-                  {
-                    "event_id": null,
-                    "paragraph_id": 0,
-                    "chapter_id": 1,
-                    "char_start": 0,
-                    "char_end": 8,
-                    "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-                  }
-                ]
-              },
-              {
-                "claim": "入行十四年",
-                "producer_invocation_id": "018bcfe5-6800-7000-8000-000000000070",
-                "evidence": [
-                  {
-                    "event_id": null,
-                    "paragraph_id": 1,
-                    "chapter_id": 2,
-                    "char_start": 0,
-                    "char_end": 10,
-                    "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-                  }
-                ]
-              }
-            ],
-            "reason": "原文对入行年数说法不一",
-            "resolution": "unresolved",
-            "evidence": [
-              {
-                "event_id": null,
-                "paragraph_id": 0,
-                "chapter_id": 1,
-                "char_start": 0,
-                "char_end": 8,
-                "text_hash": "884eef04ad584ff049695db925431bacacf283a66d4496a8867f0ed46e1aed97"
-              },
-              {
-                "event_id": null,
-                "paragraph_id": 1,
-                "chapter_id": 2,
-                "char_start": 0,
-                "char_end": 10,
-                "text_hash": "ea5cb89ab98d029e13702746903b78570e67c37b257eeaea4b07e17b7511b55f"
-              }
-            ]
-          }
         ]
       }
     }
-  },
-  "identity_contract": "Storage generated UUIDv7 with fixed clock and random inputs in the test"
+  }
 }

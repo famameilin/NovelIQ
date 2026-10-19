@@ -20,14 +20,14 @@ from tests.support.storage_fixtures import fixture_id, storage_for, task_for_run
 def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
     """为测试小说删除补一条已完成任务及其文件产物。
 
-    这里构造 chapters/global_context/graph/chapter_annotations 与日志导出文件，
+    这里构造 chapters/global_context/graph/agent_annotations 与日志导出文件，
     """
     task_id = task_for_run(run_id)
 
     with get_session_factory()() as session:
         run_repo = RunRepository(session)
         run_repo.create_run(novel_id=novel_id, run_id=run_id, task_id=task_id)
-        run_repo.update_run_task_fields(run_id, status="completed")
+        run_repo.update_run_task_fields(run_id, status='completed')
         session.execute(
             text(
                 """
@@ -170,7 +170,7 @@ class TestNovelUpload:
                 {"novel_id": novel_id},
             ).scalar_one()
             run_count = session.execute(
-                text("SELECT COUNT(*) FROM analysis_runs WHERE novel_id = :novel_id"),
+                text("SELECT COUNT(*) FROM runs WHERE novelid = :novel_id"),
                 {"novel_id": novel_id},
             ).scalar_one()
             chapter_count = session.execute(
@@ -227,7 +227,7 @@ class TestNovelUpload:
                 {"novel_id_1": novel_ids[0], "novel_id_2": novel_ids[1]},
             ).scalar_one()
             remaining_runs = session.execute(
-                text("SELECT COUNT(*) FROM analysis_runs WHERE novel_id IN (:novel_id_1, :novel_id_2)"),
+                text("SELECT COUNT(*) FROM runs WHERE novelid IN (:novel_id_1, :novel_id_2)"),
                 {"novel_id_1": novel_ids[0], "novel_id_2": novel_ids[1]},
             ).scalar_one()
             session.commit()

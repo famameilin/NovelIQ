@@ -152,13 +152,13 @@ def test_fetch_timeline_data_reuses_independent_plotline_contract(db_session) ->
     assert timeline_data["changes"][0]["action"] == "setup"
     from sqlalchemy import distinct
 
-    from src.storage.models import CompleteEvent, EventRevision
+    from src.storage.models import CompleteEvent, EventDeclarationBinding
 
     bound_events = list(
         db_session.scalars(
             select(distinct(CompleteEvent.event_id))
-            .join(EventRevision, EventRevision.event_id == CompleteEvent.event_id)
-            .where(EventRevision.declaration_id == eid1)
+            .join(EventDeclarationBinding, EventDeclarationBinding.event_id == CompleteEvent.event_id)
+            .where(EventDeclarationBinding.declaration_id == eid1)
         )
     )
     assert timeline_data["changes"][0]["source_event_ids"] == bound_events
@@ -750,7 +750,7 @@ def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeyp
     persist_event_draft(db_session, declaration_event_draft(db_session, run_id))
     event = db_session.scalar(
         select(CompleteEvent).where(
-            CompleteEvent.producer_execution_id.in_(smap.run_execution_ids(storage_for(db_session), run_id))
+            CompleteEvent.producer_agent_id.in_(smap.run_execution_ids(storage_for(db_session), run_id))
         )
     )
     event_id = event.event_id

@@ -70,16 +70,7 @@ def _make_feature_row(paragraph_id: int, *, text: str, pos_tags: list[str]) -> d
 def _seed_linguistic(db_session, run_id: str) -> None:
     repo = LinguisticRepository(db_session)
     # 运行合同先行：归一映射是版本化代码合同（不镜像成数据库表）
-    from src.linguistic import ENTITY_TYPE_MAP, POS_GROUP_MAP, ltp_pipeline_contract
 
-    pipeline_version, model_key = ltp_pipeline_contract()
-    repo.ensure_ltp_contract(
-        run_id,
-        pipeline_version=pipeline_version,
-        model_key=model_key,
-        pos_mappings=POS_GROUP_MAP,
-        entity_type_mappings=ENTITY_TYPE_MAP,
-    )
     rows = [
         {**_make_feature_row(0, text=_PARA_TEXTS[0], pos_tags=_PARA0_POS), "run_id": run_id},
         {**_make_feature_row(1, text=_PARA_TEXTS[1], pos_tags=_PARA1_POS), "run_id": run_id},
@@ -242,6 +233,20 @@ def test_word2vec_endpoint_reports_coverage_when_enabled(api_client: TestClient,
     novel_id, run_id = _create_run_with_paragraphs(db_session)
     _seed_linguistic(db_session, run_id)
     repo = LinguisticRepository(db_session)
+    from tests.support.storage_fixtures import save_word2vec_artifact
+    save_word2vec_artifact(run_id, {
+            "run_id": run_id,
+            "embedding_dimension": 128,
+            "vocabulary_size": 100,
+            "window_size": 5,
+            "min_count": 2,
+            "epochs": 5,
+            "pretrained_vocabulary_size": 100,
+            "source_uri": None,
+            "license_name": None,
+            "training_document_count": 2,
+            "training_token_count": 10,
+        })
     repo.insert_word2vec_model_run(
         run_id,
         {
@@ -304,6 +309,20 @@ def test_word2vec_endpoint_reports_similarity_matrix(api_client: TestClient, db_
     novel_id, run_id = _create_run_with_paragraphs(db_session)
     _seed_linguistic(db_session, run_id)
     repo = LinguisticRepository(db_session)
+    from tests.support.storage_fixtures import save_word2vec_artifact
+    save_word2vec_artifact(run_id, {
+            "run_id": run_id,
+            "embedding_dimension": 4,
+            "vocabulary_size": 100,
+            "window_size": 5,
+            "min_count": 2,
+            "epochs": 5,
+            "pretrained_vocabulary_size": 100,
+            "source_uri": None,
+            "license_name": None,
+            "training_document_count": 2,
+            "training_token_count": 10,
+        })
     repo.insert_word2vec_model_run(
         run_id,
         {
