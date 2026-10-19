@@ -5,20 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TaskRow } from "@/components/analysis/TaskRow";
 
-interface StreamStoreState {
-  progress: { stage: string } | null;
-  currentTaskId: string | null;
-}
-
-const useStreamStoreMock = vi.fn((selector: (state: StreamStoreState) => unknown) =>
-  selector({ progress: null, currentTaskId: null })
-);
-
-vi.mock("@/store/streamStore", () => ({
-  useStreamStore: (selector: (state: StreamStoreState) => unknown) =>
-    useStreamStoreMock(selector),
-}));
-
 vi.mock("@/components/ui/button", () => ({
   Button: ({
     children,
@@ -52,7 +38,6 @@ describe("TaskRow", () => {
         task={{
           task_id: "pending01",
           status: "pending",
-          created_at: "2026-04-19T00:00:00Z",
         }}
         isActive={false}
         onSelect={onSelect}
@@ -79,7 +64,6 @@ describe("TaskRow", () => {
         task={{
           task_id: "pending02",
           status: "pending",
-          created_at: null,
         }}
         isActive={false}
         onSelect={vi.fn()}
@@ -89,7 +73,7 @@ describe("TaskRow", () => {
       />
     );
 
-    expect(screen.getByText("未知时间")).toBeInTheDocument();
+    expect(screen.queryByText("未知时间")).not.toBeInTheDocument();
   });
 
   it("cancelled 任务应提供继续分析入口", async () => {
@@ -101,7 +85,6 @@ describe("TaskRow", () => {
         task={{
           task_id: "cancelled01",
           status: "cancelled",
-          created_at: "2026-08-08T00:00:00Z",
         }}
         isActive={false}
         onSelect={vi.fn()}
@@ -115,17 +98,13 @@ describe("TaskRow", () => {
     expect(onResume).toHaveBeenCalledWith("cancelled01");
   });
 
-  it("运行中 linguistic 阶段显示中文标签", () => {
-    useStreamStoreMock.mockImplementation((selector) =>
-      selector({ progress: { stage: "linguistic" }, currentTaskId: "running01" })
-    );
+  it("运行中的任务显示状态标签", () => {
 
     render(
       <TaskRow
         task={{
           task_id: "running01",
           status: "running",
-          created_at: "2026-08-08T00:00:00Z",
         }}
         isActive
         onSelect={vi.fn()}
@@ -135,6 +114,6 @@ describe("TaskRow", () => {
       />
     );
 
-    expect(screen.getByText("语言结构分析中")).toBeInTheDocument();
+    expect(screen.getByText("运行中")).toBeInTheDocument();
   });
 });

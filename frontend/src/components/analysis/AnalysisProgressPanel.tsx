@@ -1,16 +1,7 @@
-/**
- * AnalysisProgressPanel - 仪表盘进度展示面板
- *
- * 任务运行中时在仪表盘展示进度，替代骨架屏
- *
- * 使用 flex-1 填满父元素高度，移除固定高度
- *
- * 配合 NovelDetailPage 的 flex-1 flex-col min-h-0 父容器使用 flex-1
- */
+/** 展示运行状态、取消入口和真实 Agent 的模型输出 */
 import { Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ProgressDetail } from "./ProgressDetail";
 import { StreamOutput } from "./StreamOutput";
 
 export interface AnalysisProgressPanelProps {
@@ -32,7 +23,6 @@ export function AnalysisProgressPanel({
         </Button>
       </div>
 
-      <ProgressDetail className="mb-4 shrink-0" />
 
       <div className="min-h-0 flex-1 overflow-hidden">
         <StreamOutput taskId={taskId} className="h-full" />
