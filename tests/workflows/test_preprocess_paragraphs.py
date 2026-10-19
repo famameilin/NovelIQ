@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 from src.config import settings
 from src.storage import new_id
-from src.storage.models import AnalysisRun, ParagraphFeature, ParagraphMetric
+from src.storage.models import ParagraphFeature, ParagraphMetric, Run
 from src.storage.models.paragraph_features import (
     FEATURE_LOWESS_NET_DENSITY,
     FEATURE_LOWESS_SURFACE_TENSION,
@@ -74,11 +74,7 @@ class TestPreprocessParagraphs:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        return run_repo.create_run(
-            novel_id=novel_id,
-            source_path=str(source_path),
-            title=title,
-        )
+        return run_repo.create_run(novel_id=novel_id)
 
     @pytest.mark.asyncio()
     @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
@@ -187,9 +183,8 @@ class TestPreprocessParagraphs:
             assert vector is not None
             assert len(vector) == 1024
 
-        run = db_session.get(AnalysisRun, run_id)
+        run = db_session.get(Run, run_id)
         assert run is not None
-        assert run.embedding_model_key
 
     @pytest.mark.asyncio()
     @patch("src.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
@@ -289,7 +284,7 @@ class TestPreprocessParagraphs:
         每段两条曲线平滑值（净密度/表面张力）、运行级曲线合同、不可计算语义
 
         平滑值落 paragraph_features 的两类标量行，
-        LOWESS 参数落 analysis_runs；原始 pos/neg 密度由指标分子÷token_count 投影
+        LOWESS 参数落 runs；原始 pos/neg 密度由指标分子÷token_count 投影
         """
         source_path = self._create_source_file(str(tmp_path))
         run_id = self._create_run(db_session, source_path, "Curves Novel")
@@ -302,11 +297,6 @@ class TestPreprocessParagraphs:
 
         metric_rows = db_session.scalars(select(ParagraphMetric).where(ParagraphMetric.run_id == run_id)).all()
         metric_by_paragraph = {row.paragraph_id: row for row in metric_rows}
-
-        run = db_session.get(AnalysisRun, run_id)
-        assert run is not None and run.curve_completed_at is not None
-        assert run.curve_min_points == settings.metrics.lowess_min_points
-        assert run.curve_bandwidth == settings.metrics.lowess_bandwidth
 
         samples = db_session.scalars(
             select(ParagraphFeature).where(

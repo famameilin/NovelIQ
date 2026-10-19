@@ -87,11 +87,7 @@ class TestPreprocess:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path=str(source_path),
-            title="Test Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
 
         chunks_inserted, total_chars, _ = await run_preprocess(
             source_path=source_path, run_id=run_id, session=storage_for(db_session)
@@ -113,11 +109,7 @@ class TestPreprocess:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path=str(source_path),
-            title="Empty Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
 
         chunks_inserted, total_chars, _ = await run_preprocess(
             source_path=source_path, run_id=run_id, session=storage_for(db_session)
@@ -134,11 +126,7 @@ class TestPreprocess:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path=str(source_path),
-            title="Chapter Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
 
         chunks_inserted, total_chars, _ = await run_preprocess(
             source_path=source_path, run_id=run_id, session=storage_for(db_session)
@@ -153,11 +141,7 @@ class TestPreprocess:
         run_repo = RunRepository(db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = run_repo.create_run(
-            novel_id=novel_id,
-            source_path=str(source_path),
-            title="Resume Novel",
-        )
+        run_id = run_repo.create_run(novel_id=novel_id)
 
         chunks1, _, _ = await run_preprocess(source_path=source_path, run_id=run_id, session=storage_for(db_session))
         assert chunks1 > 0

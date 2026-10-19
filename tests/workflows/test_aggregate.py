@@ -92,7 +92,7 @@ class TestAggregate:
         insert_test_novel(self.novel_id, session=db_session)
 
         run_repo = RunRepository(db_session)
-        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
+        self.run_id = run_repo.create_run(novel_id=self.novel_id)
 
     def _create_chunks_with_paragraphs(self, chunk_count: int) -> None:
         chapter_repo = ChapterRepository(self.db_session)

@@ -45,7 +45,7 @@ def _insert_paragraph_metrics(
 
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Global Stats")
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
 
     texts = ["甲。", "乙。", "丙。", "丁。"]
     chunks: list[Chunk] = []
@@ -156,7 +156,7 @@ class TestGlobalStatsExtremes:
         """无段落曲线数据时输出张力分布统计，也不伪造极值定位"""
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Global Stats")
+        run_id = RunRepository(db_session).create_run(novel_id=novel_id)
 
         stats = dict(compute_global_stats(storage_for(db_session), run_id))
 
@@ -227,7 +227,7 @@ class TestLexiconZeroHitShare:
         """无指标行=数据缺失，不得冒充零信号（不输出该统计）"""
         novel_id = new_id()
         insert_test_novel(novel_id, session=db_session)
-        run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="No Metrics")
+        run_id = RunRepository(db_session).create_run(novel_id=novel_id)
 
         stats = dict(compute_global_stats(storage_for(db_session), run_id))
 

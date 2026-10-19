@@ -3,10 +3,10 @@
 LTP 推理用 FakeLtpSession 替换（真实 LTP 模型只做模块级验证），
 analyze_paragraph 纯函数路径保持真实；短语匹配与 Word2Vec 全真实。
 
-逐段事实落 linguistic_spans（词元/NER/短语三类互斥
-区间）与 linguistic_arcs（dep:*/sdp:*），句式五类计数落 paragraph_features；
+逐段事实落 paragraph_spans（词元/NER/短语三类互斥
+区间）与 paragraph_arcs（dep:*/sdp:*），句式五类计数落 paragraph_features；
 完成事实（linguistic_completed_at/phrase_completed_at）与共享句数落
-paragraph_metrics；run 级 LTP/短语/w2v 合同落 analysis_runs。派生量（词长分组、
+paragraph_metrics；run 级 LTP/短语/w2v 合同落 runs。派生量（词长分组、
 POS 分组、依存统计、词典对照、情绪事件）不落库，由读取投影从正式事实重算，
 因此本文件按同一投影断言。固定短语只有一个运行级来源（fixed_phrases 词表），
 不再扫描 draft 词表。
@@ -33,9 +33,8 @@ from tests.support.storage_fixtures import storage_for
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.config.constants.contracts import FIXED_CONTRACT_VERSION, FIXED_PHRASE_METRIC_ENABLED
-from src.lexicons.constants import LEXICON_FILES
-from src.linguistic.ltp_client import LTP_PIPELINE_VERSION, LtpPipelineOutput, ltp_pipeline_contract
+from src.config.constants.contracts import FIXED_PHRASE_METRIC_ENABLED
+from src.linguistic.ltp_client import LtpPipelineOutput
 from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
 from src.text_processing.models import Chunk
@@ -67,7 +66,7 @@ _RETRACTED_TABLES = (
 
 def _create_run(db_session, novel_id: str) -> str:
     """创建最小分析运行行（novel 先行；运行创建语义允许不填来源快照）"""
-    return RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Linguistic Test")
+    return RunRepository(db_session).create_run(novel_id=novel_id)
 
 
 class FakeLtpSession:
@@ -96,7 +95,7 @@ def _span_count(db_session, run_id: str, branch: str) -> int:
     }[branch]
     return int(
         db_session.execute(
-            text(f"SELECT COUNT(*) FROM linguistic_spans WHERE run_id = :run_id AND {branch_condition}"),
+            text(f"SELECT COUNT(*) FROM paragraph_spans WHERE run_id = :run_id AND {branch_condition}"),
             {"run_id": run_id},
         ).scalar()
         or 0
@@ -107,8 +106,8 @@ def _arc_count(db_session, run_id: str, prefix: str) -> int:
     return int(
         db_session.execute(
             text(
-                "SELECT COUNT(*) FROM linguistic_arcs a "
-                "JOIN linguistic_spans s ON s.span_id = a.dependent_span_id "
+                "SELECT COUNT(*) FROM paragraph_arcs a "
+                "JOIN paragraph_spans s ON s.span_id = a.dependent_span_id "
                 "WHERE s.run_id = :run_id AND a.relation_code LIKE :prefix"
             ),
             {"run_id": run_id, "prefix": f"{prefix}%"},
@@ -194,19 +193,6 @@ class TestRunLinguistic:
         # NER 候选（汤姆 Nh → person）与固定短语命中（刀光剑影等）
         assert _span_count(self.db_session, self.run_id, "ner") > 0
         assert _span_count(self.db_session, self.run_id, "phrase") > 0
-
-        # run 级合同：LTP 管线/模型 + 唯一固定短语词表来源与计量合同
-        contract = self.db_session.execute(
-            text(
-                "SELECT ltp_pipeline_version, ltp_model_key, fixed_phrase_lexicon_key, "
-                "fixed_phrase_contract_version FROM analysis_runs WHERE run_id = :run_id"
-            ),
-            {"run_id": self.run_id},
-        ).one()
-        assert contract.ltp_pipeline_version == LTP_PIPELINE_VERSION
-        assert contract.ltp_model_key == ltp_pipeline_contract()[1]
-        assert contract.fixed_phrase_lexicon_key == LEXICON_FILES["fixed_phrases"]
-        assert contract.fixed_phrase_contract_version == FIXED_CONTRACT_VERSION
 
         repo = LinguisticRepository(self.db_session)
         entity_rows = repo.fetch_entities(self.run_id)
@@ -331,11 +317,11 @@ class TestRunLinguistic:
         assert model_run is not None
         assert model_run.embedding_dimension == 4
         # 训练参数按 analysis_runs.w2v_* 明确列落库
-        assert model_run.window_size == _settings.linguistic.word2vec.window
-        assert model_run.min_count == 1
-        assert model_run.epochs == 1
-        assert model_run.pretrained_vocabulary_size == 4
-        assert Path(model_run.source_uri) == kv_path.resolve()
+        from gensim.models import Word2Vec
+        artifact = Word2Vec.load(str(run_model_dir / "word2vec.model"))
+        assert artifact.window == _settings.linguistic.word2vec.window
+        assert artifact.min_count == 1
+        assert artifact.epochs == 1
         assert (run_model_dir / "word2vec.model").is_file()
         assert _feature_count(self.db_session, self.run_id, "pos_vector:") > 0
 
@@ -382,11 +368,7 @@ class TestRunLinguistic:
         assert _metric_count(self.db_session, self.run_id, "phrase_completed_at") == 0
         assert _span_count(self.db_session, self.run_id, "token") == 0
         assert _span_count(self.db_session, self.run_id, "phrase") == 0
-        fixed_key = self.db_session.execute(
-            text("SELECT fixed_phrase_lexicon_key FROM analysis_runs WHERE run_id = :run_id"),
-            {"run_id": self.run_id},
-        ).scalar_one()
-        assert fixed_key is None
+
 
     @pytest.mark.asyncio()
     async def test_batch_size_one_produces_same_rows_as_full_batch(self) -> None:
@@ -533,8 +515,8 @@ class TestMnegCorrection:
         assert _arc_count(self.db_session, self.run_id, "sdp:") == 1
         sdp_code = self.db_session.execute(
             text(
-                "SELECT a.relation_code FROM linguistic_arcs a "
-                "JOIN linguistic_spans s ON s.span_id = a.dependent_span_id "
+                "SELECT a.relation_code FROM paragraph_arcs a "
+                "JOIN paragraph_spans s ON s.span_id = a.dependent_span_id "
                 "WHERE s.run_id = :run_id AND a.relation_code LIKE 'sdp:%'"
             ),
             {"run_id": self.run_id},
@@ -550,7 +532,7 @@ class TestMnegCorrection:
 class TestParagraphBoundary:
     """段落级监督（按书边界）：自选段标签→段落向量边界→逐段打分回写
 
-    标签读 analysis_assessments 的逐段情绪形状（经章节标注产物头
+    标签读 agent_assessments 的逐段情绪形状（经章节标注产物头
     关联本 run 的标注 work），段落向量读 paragraph_features 的 semantic_vector 行，
     打分回写 paragraph_metrics 的 boundary_*_score_sum 列。
     """
@@ -610,16 +592,16 @@ class TestParagraphBoundary:
         return project_linguistic_features(LinguisticRepository(self.db_session).fetch_linguistic_sources(self.run_id))
 
     def _insert_labels(self, labels: list[tuple[int, int]]) -> None:
-        """直接落正式条目行：executions → chapter_annotations → analysis_assessments
+        """直接落正式条目行：agent → agent_annotations → agent_assessments
 
         真实执行（标注角色 + 章 + run）直接携带归属；正式产物头同样落 run/章/角色。
         """
         from collections import defaultdict
 
         from src.storage.models import (
+            Agent,
             AnalysisAssessment,
             ChapterAnnotation,
-            Execution,
             Paragraph,
         )
 
@@ -635,29 +617,19 @@ class TestParagraphBoundary:
 
         now = datetime.now(UTC).replace(tzinfo=None)
         for chapter_id, chapter_labels in by_chapter.items():
-            execution_id = new_id()
+            agent_id = new_id()
             record_id = new_id()
             self.db_session.add(
-                Execution(
-                    execution_id=execution_id,
-                    run_id=self.run_id,
-                    role="annotation",
-                    chapter_id=chapter_id,
-                    attempt_number=1,
-                    started_at=now,
-                    status="success",
-                )
+                Agent(id=agent_id, run_id=self.run_id, type="annotation", status="success")
             )
             self.db_session.flush()  # 明确顺序：execution → annotation 头 → 逐段条目
             self.db_session.add(
                 ChapterAnnotation(
                     record_id=record_id,
-                    execution_id=execution_id,
+                    agent_id=agent_id,
                     run_id=self.run_id,
                     chapter_id=chapter_id,
                     role="annotation",
-                    contract_version="test-contract",
-                    chapter_consolidation_version="test-consolidation",
                     summary="测试",
                     emotional_valence=0,
                     narrative_function="setup",

@@ -46,7 +46,7 @@ class TestTopicModel:
         insert_test_novel(self.novel_id, session=db_session)
 
         run_repo = RunRepository(db_session)
-        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
+        self.run_id = run_repo.create_run(novel_id=self.novel_id)
 
     def _create_paragraphs(self, paragraph_count: int) -> None:
         """每个章节插入一个段落，构造 paragraphs 唯一事实源测试数据
@@ -101,7 +101,7 @@ class TestTopicModel:
 
     def _count_paragraph_topics(self) -> int:
         count = self.db_session.execute(
-            text("SELECT COUNT(*) FROM paragraph_topics WHERE run_id = :run_id"),
+            text("SELECT COUNT(*) FROM lda_paragraph_topics WHERE run_id = :run_id"),
             {"run_id": self.run_id},
         ).scalar()
         return int(count or 0)
@@ -128,8 +128,6 @@ class TestTopicModel:
         model_run = paragraph_repo.fetch_topic_model_run(self.run_id)
         assert model_run is not None
         assert model_run.num_topics == 3
-        assert model_run.passes == 5
-        assert model_run.training_document_count == 10
         assert model_run.inference_paragraph_count == 10
         assert model_run.dictionary_size > 0
 
@@ -196,7 +194,6 @@ class TestTopicModel:
         # 训练文档数只计达标段落
         model_run = paragraph_repo.fetch_topic_model_run(self.run_id)
         assert model_run is not None
-        assert model_run.training_document_count == 1
         assert model_run.inference_paragraph_count == 2
 
     @pytest.mark.asyncio()

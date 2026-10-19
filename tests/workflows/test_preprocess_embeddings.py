@@ -22,7 +22,7 @@ from tests.support.storage_fixtures import fixture_id, storage_for
 def _insert_chapter_texts_and_paragraphs(session, chunks: list[Chunk]) -> tuple[str, str]:
     """创建 run 并写入 chunks 与段落事实源
 
-    chunks 外键关联 analysis_runs，需要先建 run 记录
+    chunks 外键关联 runs，需要先建 run 记录
 
     Returns:
         (run_id, novel_id)：每次调用生成唯一 run_id，避免同会话内用例串数据
@@ -30,12 +30,7 @@ def _insert_chapter_texts_and_paragraphs(session, chunks: list[Chunk]) -> tuple[
     novel_id = new_id()
     run_id = new_id()
     insert_test_novel(novel_id, session=session)
-    RunRepository(session).create_run(
-        novel_id=novel_id,
-        source_path=f"data/uploads/{novel_id}.txt",
-        title="Embedding Test",
-        run_id=run_id,
-    )
+    RunRepository(session).create_run(novel_id=novel_id, run_id=run_id)
     ChapterRepository(session).insert_chapter_texts(run_id, chunks)
     spans = split_chunk_paragraphs(chunks)
     spans = [replace(span, token_count=len(tokenize(span.text))) for span in spans]

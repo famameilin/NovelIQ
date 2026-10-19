@@ -37,7 +37,7 @@ def _create_run_with_paragraph_metrics(
 
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
 
     texts = [f"第{i}章测试文本。" for i in range(len(token_counts))]
     chunks: list[Chunk] = []
@@ -109,7 +109,7 @@ def test_build_quality_gate_report_no_rows_is_not_a_pass(db_session) -> None:
     """无段落指标数据时质量门不通过（保守：缺数据=缺陷）"""
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
     agg_result = AggregateResult(
         language_style={"tone_distribution": {"neutral": 1.0}},
     )
@@ -123,7 +123,7 @@ def test_build_quality_gate_report_no_rows_is_not_a_pass(db_session) -> None:
 def test_build_quality_gate_report_handles_missing_fields(db_session) -> None:
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
     agg_result = AggregateResult(language_style={})
 
     report = _build_quality_gate_report(run_id, agg_result, storage_for(db_session))
@@ -149,7 +149,7 @@ def test_build_quality_gate_report_counts_chapters_without_metric_rows(db_sessio
 
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Quality Gate")
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
     chunks = [
         Chunk(index=0, start=0, end=4, text="第一章。", chapter_id=1),
         Chunk(index=1, start=4, end=8, text="第二章。", chapter_id=2),
