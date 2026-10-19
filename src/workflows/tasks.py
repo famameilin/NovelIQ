@@ -55,71 +55,20 @@ class TaskService:
         }
 
     def get_run_by_task_id(self, task_id: str, session: Storage | None = None) -> dict | None:
-        """获取任务对应的运行记录"""
+        "读取任务身份及状态"
+        return (session or get_storage()).runs.get_run_by_task_id(task_id)
+
+    def create_task(self, novel_id: str, task_id: str | None = None, session: Storage | None = None) -> str:
+        "创建待执行任务"
+        task_id = task_id or generate_task_id()
         sess = session or get_storage()
-        run = sess.runs.get_run_by_task_id(task_id)
-        if run:
-            return {
-                "task_id": task_id,
-                "novel_id": run["novel_id"],
-                "status": run["status"],
-                "run_id": run["run_id"],
-                "task_kind": run["task_kind"],
-                "request_payload": run["request_payload"],
-            }
-        return None
-
-    def create_task(
-        self,
-        novel_id: str,
-        task_id: str | None = None,
-        session: Storage | None = None,
-        task_kind: str = "analysis",
-        request_payload: dict | None = None,
-    ) -> str:
-        """创建分析任务（小说必须先存在）"""
-        if task_id is None:
-            task_id = generate_task_id()
-
-        try:
-            sess = session or get_storage()
-            self._require_novel(sess, novel_id)
-            sess.runs.create_run(
-                novel_id=novel_id,
-                task_id=task_id,
-                task_kind=task_kind,
-                request_payload=request_payload,
-            )
-        except Exception as e:
-            logger.error(f"Failed to create run in DB for novel {novel_id}, task {task_id}: {e}")
-            raise
-
-        logger.info(f"Created task: {task_id} for novel {novel_id}")
+        self._require_novel(sess, novel_id)
+        sess.runs.create_run(novel_id=novel_id, task_id=task_id)
         return task_id
 
     def load_task(self, task_id: str, session: Storage | None = None) -> dict | None:
-        """从数据库加载任务完整信息（含运行时状态字段）"""
-        sess = session or get_storage()
-        run = sess.runs.get_run_by_task_id(task_id)
-        if run:
-            return {
-                "task_id": task_id,
-                "novel_id": run["novel_id"],
-                "status": run["status"],
-                "run_id": run["run_id"],
-                "task_kind": run["task_kind"],
-                "request_payload": run["request_payload"],
-                "progress": run.get("progress", 0.0),
-                "stage": run.get("stage"),
-                "sub_stage": run.get("sub_stage"),
-                "current": run.get("current"),
-                "total": run.get("total"),
-                "message": run.get("message"),
-                "error": run.get("error"),
-                "started_at": run.get("started_at"),
-                "completed_at": run.get("completed_at"),
-            }
-        return None
+        "读取任务身份及状态"
+        return (session or get_storage()).runs.get_run_by_task_id(task_id)
 
     def get_task(self, task_id: str, session: Storage | None = None) -> dict:
         """获取任务信息"""
@@ -138,7 +87,6 @@ class TaskService:
                 "novel_id": run["novel_id"],
                 "status": run["status"],
                 "run_id": run["run_id"],
-                "created_at": run["created_at"],
             }
             for run in runs
         ]
