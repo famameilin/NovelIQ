@@ -25,6 +25,7 @@ from src.api.app_bootstrap import (
     tabs_router,
     timeline_router,
 )
+from src.config.project_version import project_version
 from src.storage import get_pool_status, get_storage, get_storage_factory, initialize_storage
 from src.workflows.startup_recovery import recover_orphaned_runs, resume_pending_tasks
 
@@ -77,7 +78,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="小说量化分析 API",
-    version="0.2.2",
+    version=project_version(),
     description="小说文本量化分析服务的 RESTful API",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -103,7 +104,7 @@ async def health_check():
         session = get_storage()
         session.reads.api_main_health_check_1()
         pool_status = get_pool_status()
-        return {"status": "healthy", "service": "novel-qa-api", "version": "0.2.2", "pool": pool_status}
+        return {"status": "healthy", "service": "novel-qa-api", "version": project_version(), "pool": pool_status}
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return JSONResponse(
@@ -111,7 +112,7 @@ async def health_check():
             content={
                 "status": "unhealthy",
                 "service": "novel-qa-api",
-                "version": "0.2.2",
+                "version": project_version(),
                 "error": "服务暂不可用，请稍后重试",
             },
         )
