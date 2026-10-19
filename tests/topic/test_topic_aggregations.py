@@ -190,7 +190,7 @@ class TestTopicAggregations:
         self.novel_id = new_id()
         insert_test_novel(self.novel_id, session=db_session)
         run_repo = RunRepository(db_session)
-        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
+        self.run_id = run_repo.create_run(novel_id=self.novel_id)
 
         chapters = [
             Chunk(index=i, start=i * 500, end=i * 500 + len(text), text=text, chapter_id=i + 1)
@@ -238,11 +238,12 @@ class TestTopicAggregations:
         # 主题推断状态与主题分配随后一个事务写入
         self.db_session.commit()
 
+        from tests.support.storage_fixtures import save_topic_artifact
+        save_topic_artifact(self.run_id, 2)
         repo.insert_topic_model_run(
             self.run_id,
             model_key="gensim-lda",
             library_version="4.4.0",
-            pipeline_version="1.0",
             num_topics=2,
             parameters={"num_topics": 2, "passes": 5},
             dictionary_size=20,
@@ -341,7 +342,7 @@ class TestTopicAggregations:
         run_repo = RunRepository(self.db_session)
         novel_id = new_id()
         insert_test_novel(novel_id, session=self.db_session)
-        other_run = run_repo.create_run(novel_id=novel_id, source_path="test", title="Other")
+        other_run = run_repo.create_run(novel_id=novel_id)
         result = aggregate_book_topics(other_run, storage_for(self.db_session))
         assert result["unavailable_reason"] is not None
         assert result["distribution"] is None

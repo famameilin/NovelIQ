@@ -17,9 +17,8 @@ from src.event_trees.read.forest import EventForestQuery
 from src.metrics.event_timeline_metrics import serialize_event_timeline_node
 from src.metrics.queries.timeline import build_event_timeline_plan
 from src.storage import new_id
-from src.storage.models import Paragraph
+from src.storage.models import Agent, Paragraph
 from src.storage.repositories import ChapterRepository
-from src.storage.repositories.organization_writes import register_diagnosis_execution, register_diagnosis_session
 from src.storage.repositories.paragraph import insert_paragraph_tension_observations
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import report_case_anchor
@@ -46,12 +45,12 @@ def _publish_one_event_per_declaration(
 ) -> None:
     """经正式诊断发布链把每条声明收口为一个完整事件（互不包含、互不相同）"""
     session_id = new_id()
-    execution_id = new_id()
-    register_diagnosis_session(db_session, run_id=run_id, session_id=session_id)
-    register_diagnosis_execution(db_session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=1)
+    agent_id = new_id()
+    db_session.add(Agent(id=session_id, run_id=run_id, type="report", status="running"))
+    db_session.add(Agent(id=agent_id, run_id=run_id, type="report", status="running"))
     draft = EventOrganizationDraft(storage_for(db_session), run_id, session_id)
     draft.fixture_session = db_session
-    draft.case_id, draft.producer_invocation_id = report_case_anchor(run_id), execution_id
+    draft.case_id, draft.producer_agent_id = report_case_anchor(run_id), agent_id
     rows = {row["declaration_id"]: row for row in draft.read_declarations(declarations)["items"]}
 
     def source_evidence(declaration_id: str) -> list[OrganizationEvidence]:
@@ -68,8 +67,6 @@ def _publish_one_event_per_declaration(
             status=row["status"],
             progress=row["progress"],
             declaration_ids=[declaration_id],
-            stage_order=[declaration_id],
-            current_declaration_id=declaration_id,
             reason="读取夹具显式指定本声明组成一个事件身份",
             evidence=source_evidence(declaration_id),
         )
@@ -129,7 +126,7 @@ def _build_forest(
     declarations: list[str] = []
     paragraph_ids: list[int] = []
     for index, chapter_id in enumerate(chapter_ids):
-        record_id, _execution_id = create_chapter_annotation_source(db_session, run_id=run_id, chapter_id=chapter_id)
+        record_id, _agent_id = create_chapter_annotation_source(db_session, run_id=run_id, chapter_id=chapter_id)
         paragraph = db_session.scalar(
             select(Paragraph)
             .where(Paragraph.run_id == run_id, Paragraph.chapter_id == chapter_id)
@@ -266,3 +263,19 @@ def test_empty_snapshot_returns_no_nodes_but_phases(db_session) -> None:
     assert plan.nodes == []
     assert plan.total_chapters == 1
     assert len(plan.phases) >= 1
+
+
+def test_non_contiguous_sequence_keeps_timeline_progress_in_reading_order(db_session):
+    from src.storage.models import Chapter
+
+    run_id = _build_forest(db_session, texts=["开篇。", "收束。"], tensions=[0.4, 0.8], title="章序间隔")
+    for chapter in db_session.scalars(select(Chapter).where(Chapter.run_id == run_id)):
+        chapter.sequence = chapter.chapter_id * 10
+    db_session.commit()
+    snapshot = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
+    assert {node.chapter_order for node in snapshot.event_nodes} == {10, 20}
+    plan = build_event_timeline_plan(run_id, ChapterRepository(db_session), storage_for(db_session), snapshot)
+    ordered = sorted(plan.nodes, key=lambda node: node.anchor_chapter_order)
+    assert [node.anchor_chapter_order for node in ordered] == [10, 20]
+    assert [node.progress for node in ordered] == [0.5, 1.0]
+    assert all(node.start_progress <= node.progress <= node.end_progress for node in ordered)
