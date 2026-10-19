@@ -52,14 +52,6 @@ class EnvironmentInitializer:
 
         run_id = self._get_or_create_run_id(task_id, novel_id, source_path, novel_title, conn)
 
-        # 收口进程重启遗留的 running 审计行，避免僵尸行永久污染错误率统计
-        # （run 08f9ba42 实证 12 条 running 僵尸行）；每次创建/恢复任务都会经过这里
-        from src.audit.module import AuditModule
-
-        orphaned = AuditModule.close_interrupted(self.session_factory, run_id)
-        if orphaned:
-            logger.info(f"Closed {orphaned} orphaned running invocations for run {run_id}")
-
         analysis_logger = self._create_analysis_logger(run_id)
         self._log_initialization_info(task_id, run_id, analysis_logger)
 
@@ -84,8 +76,6 @@ class EnvironmentInitializer:
             run_id = conn.new_id()
             run_repo.create_run(
                 novel_id=novel_id,
-                source_path=str(source_path),
-                title=novel_title,
                 run_id=run_id,
                 task_id=task_id,
             )

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -27,20 +26,6 @@ class AnalysisErrorHandler:
     def __init__(self, task_service: TaskService, task_manager: TaskManager):
         self.task_service = task_service
         self.task_manager = task_manager
-
-    def _run_still_owned_by_current_worker(self, session: Storage, run_id: str) -> bool:
-        """终态写回前的 worker 归属守卫
-
-        比较 run 当前 worker_id 与当前 worker：不匹配（已被新轮接管）或 run 已
-        不存在时跳过 DB 终态写回与 SSE 终态事件，避免旧轮终态污染新轮。
-        """
-        run = session.runs.get_run(run_id)
-        if run is None:
-            return False
-        worker_id = run.get("worker_id")
-        if worker_id is None:
-            return True
-        return worker_id == self.task_manager.get_worker_id()
 
     async def handle_success(
         self,
@@ -64,25 +49,12 @@ class AnalysisErrorHandler:
                     "status": "completed",
                 }
             )
-        self.task_manager.complete_task(task_id, success=True)
-        if not self._run_still_owned_by_current_worker(session, run_id):
-            logger.warning(
-                "Task "
-                f"{task_id}"
-                " 已完成但 run "
-                f"{run_id}"
-                " 已被其他 worker 接管，跳过终态 DB 写回与事件推送（旧轮收口，避免覆写新轮状"
-                "态）"
-            )
-            return
         run_repo = session.runs
         try:
-            run_repo.update_run_task_fields(
-                run_id, status="completed", progress=100.0, completed_at=datetime.now(UTC).replace(tzinfo=None)
-            )
-            pass
+            run_repo.update_run_task_fields(run_id, status="completed")
         except Exception as exc:
-            logger.error(f"Task {task_id} 终态 DB 写回失败（内存态已收口，DB 状态待重启回收兜底）: {exc}")
+            logger.error(f"Task {task_id} 终态 DB 写回失败: {exc}")
+            raise
         self.task_manager.notify_run_completed(run_id)
         if bus:
             await bus.emit_task_complete()
@@ -115,26 +87,12 @@ class AnalysisErrorHandler:
                 }
             )
         logger.error(f"{log_prefix} failed: {task_id} - {error}")
-        self.task_manager.complete_task(task_id, success=False, error=str(error))
-        pass
-        if not self._run_still_owned_by_current_worker(session, run_id):
-            logger.warning(
-                "Task "
-                f"{task_id}"
-                " 失败但 run "
-                f"{run_id}"
-                " 已被其他 worker 接管，跳过终态 DB 写回与事件推送（旧轮收口，避免覆写新轮状"
-                "态）"
-            )
-            return
         run_repo = session.runs
         try:
-            run_repo.update_run_task_fields(
-                run_id, status="failed", error=str(error), completed_at=datetime.now(UTC).replace(tzinfo=None)
-            )
-            pass
+            run_repo.update_run_task_fields(run_id, status="failed")
         except Exception as exc:
-            logger.error(f"Task {task_id} 终态 DB 写回失败（内存态已收口，DB 状态待重启回收兜底）: {exc}")
+            logger.error(f"Task {task_id} 终态 DB 写回失败: {exc}")
+            raise
         if bus:
             await bus.emit_task_error(str(error))
 
@@ -150,26 +108,12 @@ class AnalysisErrorHandler:
         """
         处理分析取消
         """
-        self.task_manager.cancel_completed_task(task_id, error="用户取消")
-        pass
-        if not self._run_still_owned_by_current_worker(session, run_id):
-            logger.warning(
-                "Task "
-                f"{task_id}"
-                " 取消但 run "
-                f"{run_id}"
-                " 已被其他 worker 接管，跳过终态 DB 写回与事件推送（旧轮收口，避免覆写新轮状"
-                "态）"
-            )
-            return
         run_repo = session.runs
         try:
-            run_repo.update_run_task_fields(
-                run_id, status="cancelled", cancel_requested=False, completed_at=datetime.now(UTC).replace(tzinfo=None)
-            )
-            pass
+            run_repo.update_run_task_fields(run_id, status="cancelled")
         except Exception as exc:
-            logger.error(f"Task {task_id} 终态 DB 写回失败（内存态已收口，DB 状态待重启回收兜底）: {exc}")
+            logger.error(f"Task {task_id} 终态 DB 写回失败: {exc}")
+            raise
         if bus:
             await bus.emit_task_cancelled()
         if analysis_logger:
@@ -205,18 +149,14 @@ class TerminalStateFallbackMixin:
     def _handle_already_completed(self, task_id: str, novel_id: str, analysis_logger: AnalysisLogger | None) -> None:
         """处理已完成的分析任务，确保 DB 状态一致"""
         logger.info(f"Task {task_id} already completed, no action needed")
-        self.task_manager.complete_task(task_id, success=True)
         from src.storage.id_mapping import task_id_to_run_id
 
-        pass
         sf = self.session_factory
         db_session = sf()
         sql_session = db_session
         run_repo = sql_session.runs
         run_id = task_id_to_run_id(task_id, sql_session)
-        run_repo.update_run_task_fields(
-            run_id, status="completed", progress=100.0, completed_at=datetime.now(UTC).replace(tzinfo=None)
-        )
+        run_repo.update_run_task_fields(run_id, status="completed")
         if analysis_logger:
             analysis_logger.write_summary(
                 {
@@ -238,16 +178,13 @@ class TerminalStateFallbackMixin:
         """
         from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
 
-        pass
         try:
             sf = self.session_factory
             db_session = sf()
             sql_session = db_session
             run_repo = sql_session.runs
             run_id = task_id_to_run_id(task_id, sql_session)
-            run_repo.update_run_task_fields(
-                run_id, status="failed", error=error_message, completed_at=datetime.now(UTC).replace(tzinfo=None)
-            )
+            run_repo.update_run_task_fields(run_id, status="failed")
         except TaskIDNotFoundError:
             logger.warning(f"Task {task_id} not found in id_mapping during failure DB write, skipping")
         except Exception as e:
