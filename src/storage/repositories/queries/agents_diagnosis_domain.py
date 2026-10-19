@@ -8,4 +8,4 @@ from src.storage.models import DiagnosisReport
 
 
 def agents_diagnosis_domain_retain_pending_cases_1(_session, value_1):
-    return _session.scalar(select(DiagnosisReport.report_id).where(DiagnosisReport.session_id == value_1))
+    return _session.scalar(select(DiagnosisReport.report_id).where(DiagnosisReport.agent_id == value_1))

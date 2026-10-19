@@ -21,7 +21,7 @@ from src.audit.recorder import AgentAuditRecorder
 from src.event_bus import EventBus
 from src.event_trees.organization import EventOrganizationDraft, run_declaration_ids
 from src.event_trees.storage_map import run_events
-from src.storage.models import DiagnosisReport, Execution
+from src.storage.models import Agent, DiagnosisReport
 from src.utils.cancellation import run_cancellable
 from tests.agents.test_complete_event_work import execution_for, save_and_confirm
 from tests.agents.test_diagnosis_agent import Replies, call, run_graph
@@ -46,7 +46,7 @@ async def declaration_case(db_session):
     await save_and_confirm(agent, db_session, execution)
     draft = EventOrganizationDraft(storage_for(db_session), run_id, "program-fixture")
     draft.fixture_session = db_session
-    draft.case_id, draft.producer_invocation_id = "program-fixture-case", "program-fixture"
+    draft.case_id, draft.producer_agent_id = "program-fixture-case", "program-fixture"
     yield draft
     agent.close()
 
@@ -86,8 +86,7 @@ def identity_item(key, index, *, invalid=False):
         + ', "title":'
         + json.dumps(key)
         + ', "problem":"能否找到路", "summary":"寻路与点灯", "event_type":"寻路", "status":"ongoing", '
-        '"declaration_ids":[' + reference + '], "stage_order":[' + reference + "], "
-        '"current_declaration_id":' + reference + ', "reason":"依据本章原文声明核对", '
+        '"declaration_ids":[' + reference + '], "reason":"依据原文核对身份", '
         '"evidence":[{"paragraph_id":0}]}'
     )
 
@@ -100,8 +99,7 @@ def case_identity_item(key, reference):
         + ', "title":'
         + json.dumps(key)
         + ', "problem":"能否找到路", "summary":"寻路与点灯", "event_type":"寻路", "status":"ongoing", '
-        '"declaration_ids":[' + reference + '], "stage_order":[' + reference + "], "
-        '"current_declaration_id":' + reference + ', "reason":"依据本章原文声明核对", '
+        '"declaration_ids":[' + reference + '], "reason":"依据原文核对身份", '
         '"evidence":[{"paragraph_id":0}]}'
     )
 
@@ -111,7 +109,7 @@ FIRST_CASE_PROGRAM = (
     "cases = search_cases(unresolved_only=True)\n"
     "case = cases[0]\n"
     'promise_case(case_id=case["case_id"])\n'
-    'declaration = case["payload"]["event_id"]\n'
+    'declaration = search_events(limit=20)["events"][0]["declaration_id"]\n'
     "page = search_events(limit=20)\n"
     'write_event(items=[{"operation":"declaration_review", "declaration_ids":[declaration], '
     '"reason":"按本章原文逐段核对"}], caseid=case["case_id"])\n'
@@ -125,7 +123,7 @@ SECOND_CASE_PROGRAM = (
     "cases = search_cases(unresolved_only=True)\n"
     "case = cases[0]\n"
     'promise_case(case_id=case["case_id"])\n'
-    'declaration = case["payload"]["event_id"]\n'
+    'declaration = search_events(limit=20)["events"][1]["declaration_id"]\n'
     'write_event(items=[{"operation":"declaration_review", "declaration_ids":[declaration], '
     '"reason":"按本章原文逐段核对"}], caseid=case["case_id"])\n'
     "own = write_event(items=["
@@ -196,7 +194,7 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         session=storage_for(draft.fixture_session),
         run_id=draft.run_id,
         novel_id=fixture_id(__name__, "test-novel"),
-        execution_id=fixture_id(__name__, "diag-program-save"),
+        agent_id=fixture_id(__name__, "diag-program-save"),
         novel_title=None,
         model_id="test-model",
     )
@@ -231,7 +229,7 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         session=storage_for(draft.fixture_session),
         run_id=draft.run_id,
         novel_id=fixture_id(__name__, "test-novel"),
-        execution_id=fixture_id(__name__, "diag-program-save"),
+        agent_id=fixture_id(__name__, "diag-program-save"),
         llm=model,
         audit_recorder=recorder,
         domain=domain,
@@ -251,39 +249,32 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
     assert {edge.parent_event_id, edge.child_event_id} == {event.event_id for event in organization.events}
     report = draft.fixture_session.scalars(
         select(DiagnosisReport)
-        .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
-        .where(Execution.session_run_id == draft.run_id)
+        .join(Agent, Agent.id == DiagnosisReport.agent_id)
+        .where(Agent.run_id == draft.run_id)
     ).one()
-    assert report.session_id == fixture_id(__name__, "diag-program-save")
+    turns = fetch_agent_turns(storage_for(draft.fixture_session), draft.run_id)
+    assert report.agent_id in {turn.agent_id for turn in turns}
     assert len(run_events(storage_for(draft.fixture_session), draft.run_id)) == 2
     # 案例写入按案例登记真实执行；两件事件案例均已接手承诺
     event_cases = {case["case_id"] for case in domain.case_pool.search() if case["case_type"] == "event"}
     assert len(event_cases) == 2
-    anchored = set(
-        draft.fixture_session.scalars(
-            select(Execution.case_anchor).where(
-                Execution.run_id == draft.run_id, Execution.role == "case", Execution.case_anchor.is_not(None)
-            )
-        )
-    )
-    assert anchored == event_cases
     reloaded = CasePool(draft.run_id)
     reloaded.load_storage(storage_for(draft.fixture_session))
     assert {case["case_id"] for case in reloaded.search() if case["promised"]} >= event_cases
     turns = fetch_agent_turns(storage_for(draft.fixture_session), draft.run_id)
     assert len(turns) == 4
-    assert len({turn.execution_id for turn in turns}) == 2
+    assert len({turn.agent_id for turn in turns}) == 2
     assert all(turn.task_type == "diagnosis" for turn in turns)
-    assert all(turn.status == "success" and turn.turn_ms is not None for turn in turns)
+    assert all(turn.error is None and turn.turn_ms is not None for turn in turns)
     # 成功会话的执行行同样写终态：执行行不能停在 running
     settled = list(
         draft.fixture_session.scalars(
-            select(Execution).where(Execution.run_id == draft.run_id, Execution.role.in_(("case", "report")))
+            select(Agent).where(Agent.run_id == draft.run_id, Agent.type.in_(("case", "report")))
         )
     )
-    assert settled and all(row.status == "success" and row.finished_at is not None for row in settled)
+    assert settled and all(row.status == "success" for row in settled)
     operations = fetch_run_tool_calls(storage_for(draft.fixture_session), draft.run_id)
-    refused = [operation for operation in operations if operation.status != "success"]
+    refused = [operation for operation in operations if operation.error is not None]
     assert refused == [], [(operation.tool_name, operation.error) for operation in refused]
     outer = [
         str(operation.response_observed.get("result", ""))
@@ -303,7 +294,7 @@ async def test_case_write_tool_lands_in_case_ledger_of_promised_case(declaration
         session=storage_for(draft.fixture_session),
         run_id=draft.run_id,
         novel_id=fixture_id(__name__, "test-novel"),
-        execution_id=fixture_id(__name__, "case-ledger-chain"),
+        agent_id=fixture_id(__name__, "case-ledger-chain"),
         novel_title=None,
         model_id="test-model",
     )
@@ -325,14 +316,12 @@ async def test_case_write_tool_lands_in_case_ledger_of_promised_case(declaration
         )
     )
     assert applied["status"] == "applied"
-    assert applied["written"][0]["result"]["case_link"]["status"] == "success"
-    ledger, invocation = domain.case_writers[case["case_id"]]
+    assert "case_link" not in applied["written"][0]["result"]
+    ledger, invocation = domain.case_writers[fixture_id(__name__, "case-session-a")]
     assert [op["name"] for op in ledger.graph.contributions[invocation]["entity_ops"]] == ["顾霜"]
-    assert [
-        item["tool_name"]
-        for item in domain.case_pool.deliveries[fixture_id(__name__, "case-session-a")]
-        if item["tool_name"] == "write_entity"
-    ] == ["write_entity"]
+    assert domain.case_pool.promises_for(fixture_id(__name__, "case-session-a")) == [case["case_id"]]
+    assert not hasattr(domain.case_pool, "deliveries")
+
 
 
 async def test_partial_program_keeps_success_and_rejected_operation_has_no_candidate(declaration_case):
@@ -342,7 +331,7 @@ async def test_partial_program_keeps_success_and_rejected_operation_has_no_candi
             storage_for(draft.fixture_session),
             draft.run_id,
             organization_draft=draft,
-            execution_id=fixture_id(__name__, "partial-program"),
+            agent_id=fixture_id(__name__, "partial-program"),
         )
     )
     first = (
@@ -370,7 +359,7 @@ async def test_case_warning_preserves_original_id_return_type(declaration_case):
             draft.run_id,
             role="report",
             organization_draft=draft,
-            execution_id=fixture_id(__name__, "case-warning"),
+            agent_id=fixture_id(__name__, "case-warning"),
         )
     )
     receipt = json.loads(
@@ -381,7 +370,7 @@ async def test_case_warning_preserves_original_id_return_type(declaration_case):
         )
     )
     assert receipt["status"] == "applied" and isinstance(runtime.env["arc"]["results"][0], str)
-    assert receipt["written"][0]["result"]["case_link"]["status"] == "warning"
+    assert "case_link" not in receipt["written"][0]["result"]
     assert runtime.env["arc"]["results"][0] in draft.arcs
 
 
@@ -394,7 +383,7 @@ async def test_report_event_index_compact_page_allows_one_hundred(declaration_ca
             draft.run_id,
             role="report",
             organization_draft=draft,
-            execution_id=fixture_id(__name__, "report-index"),
+            agent_id=fixture_id(__name__, "report-index"),
         )
     )
     receipt = json.loads(
@@ -429,7 +418,7 @@ async def test_partial_program_outer_audit_is_error_and_keeps_full_receipt_in_sa
     assert result.get("completion_ok") is True
     rows = [call.kwargs for call in observer.record_tool_call.call_args_list]
     assert [row["tool_name"] for row in rows] == ["bad", "execute_code"]
-    assert all(row["status"] == "error" for row in rows)
+    assert all(row["error"] is not None for row in rows)
     prior = model.requests[1][-1]
     receipt = json.loads(prior.content)
     assert receipt["status"] == "partial" and receipt["failed"][0]["line"] == 1
@@ -463,7 +452,7 @@ async def test_dependency_failure_audits_inner_and_outer_then_stops_without_next
     assert len(model.requests) == 1
     audited = [call.kwargs for call in observer.record_tool_call.call_args_list]
     assert [row["tool_name"] for row in audited] == ["broken", "execute_code"]
-    assert all(row["status"] == "error" for row in audited)
+    assert all(row["error"] is not None for row in audited)
     assert audited[0]["request_args"]["_program"]["source_line"] == 1
     observer.close_turn.assert_called_once()
 
@@ -541,7 +530,7 @@ async def test_batch_items_have_distinct_audit_ids_and_rejected_case_has_no_deli
             draft.run_id,
             organization_draft=draft,
             case_pool=pool,
-            execution_id=author,
+            agent_id=author,
         ),
         observer=observer,
     )
@@ -560,11 +549,10 @@ async def test_batch_items_have_distinct_audit_ids_and_rejected_case_has_no_deli
     rows = [
         item.kwargs for item in observer.record_tool_call.call_args_list if item.kwargs["tool_name"] == "write_event"
     ]
-    assert [row["status"] for row in rows] == ["success", "error", "success"]
+    assert [bool(row["error"]) for row in rows] == [False, True, False]
     assert [row["request_args"]["_program"]["item_index"] for row in rows] == [0, 1, 2]
     assert len({row["request_args"]["_tool_call_id"] for row in rows}) == 3
-    # 交付=承诺痕迹+两条实际写入；业务拒绝项不产生任何交付
-    assert [fact["is_write"] for fact in pool.deliveries[author]] == [False, True, True]
-    assert [fact["tool_name"] for fact in pool.deliveries[author]] == ["promise_case", "write_event", "write_event"]
-    assert rows[1]["receipt"]["case_link"]["code"] == "case_association_failed"
+    assert pool.promises_for(author) == [runtime.env["case"]["case_id"]]
+    assert not hasattr(pool, "deliveries")
+    assert "case_link" not in rows[1]["receipt"]
     assert runtime.env["result"]["results"][1] is None

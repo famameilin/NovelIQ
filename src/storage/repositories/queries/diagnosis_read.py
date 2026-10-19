@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from src.storage.models import AnalysisAssessment, AnalysisRun, DiagnosisReport, Execution, GraphEntity
+from src.storage.models import Agent, AnalysisAssessment, DiagnosisReport, GraphEntity, Run
 
 
 def diagnosis_read_fetch_diagnosis_payload_1(_session, run_id):
-    return _session.scalar(select(AnalysisRun.novel_id).where(AnalysisRun.run_id == run_id))
+    return _session.scalar(select(Run.novelid).where(Run.id == run_id))
 
 
 def diagnosis_read_fetch_diagnosis_payload_2(_session, run_id):
     return _session.scalars(
         select(DiagnosisReport)
-        .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
-        .where(Execution.session_run_id == run_id)
+        .join(Agent, Agent.id == DiagnosisReport.agent_id)
+        .where(Agent.run_id == run_id)
         .order_by(DiagnosisReport.created_at.desc(), DiagnosisReport.report_id.desc())
         .limit(1)
     ).first()

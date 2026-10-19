@@ -36,7 +36,7 @@ LONG_SUMMARY = "顾霜寻路并点灯。" * 200
 def declaration_case(db_session):
     """两章级声明的真实来源链与本模块草稿（同章两段声明，各带原文证据）"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻路并点灯。"])
-    session_id, execution_id = add_diagnosis_context(db_session, run_id)
+    session_id, agent_id = add_diagnosis_context(db_session, run_id)
     record_id, _source_execution = add_annotation_source(db_session, run_id, 1, role="event")
     paragraph = first_paragraph(db_session, run_id)
     add_declaration(
@@ -65,7 +65,7 @@ def declaration_case(db_session):
     draft = EventOrganizationDraft(storage_for(db_session), run_id, session_id)
     draft.fixture_session = db_session
     draft.case_id = report_case_anchor(run_id)
-    draft.producer_invocation_id = execution_id
+    draft.producer_agent_id = agent_id
     return draft
 
 
@@ -91,7 +91,7 @@ def test_declaration_index_keeps_paragraphs_and_detail_keeps_full_source(declara
             storage_for(draft.fixture_session),
             draft.run_id,
             organization_draft=draft,
-            execution_id=fixture_id(__name__, "read-surface"),
+            agent_id=fixture_id(__name__, "read-surface"),
         )
     }
     first = json.loads(tools["search_events"].invoke({"limit": 1}))
@@ -140,7 +140,7 @@ def test_saved_nested_event_read_and_rejection_identify_actual_top_level(db_sess
     fresh = EventOrganizationDraft(storage_for(db_session), case.run_id, case.session_id)
     fresh.fixture_session = db_session
     fresh.case_id = report_case_anchor(case.run_id)
-    fresh.producer_invocation_id = case.execution_id
+    fresh.producer_agent_id = case.agent_id
     tools = {
         tool.name: tool
         for tool in build_diagnosis_tools(
@@ -148,7 +148,7 @@ def test_saved_nested_event_read_and_rejection_identify_actual_top_level(db_sess
             case.run_id,
             role="report",
             organization_draft=fresh,
-            execution_id=fixture_id(__name__, "read-hierarchy"),
+            agent_id=fixture_id(__name__, "read-hierarchy"),
         )
     }
     detail = json.loads(tools["read_event"].invoke({"node_id": child, "kind": "event"}))
@@ -280,7 +280,7 @@ async def test_shared_search_embedding_failure_stops_program_before_later_operat
     with pytest.raises(DiagnosisProgramDependencyError, match="embedding unavailable"):
         await runtime.execute('search_text(query="寻路")\nread_topics()')
     rows = [item.kwargs for item in observer.record_tool_call.call_args_list]
-    assert len(rows) == 1 and rows[0]["tool_name"] == "search_text" and rows[0]["status"] == "error"
+    assert len(rows) == 1 and rows[0]["tool_name"] == "search_text" and rows[0]["error"] is not None
 
 
 async def test_shared_text_argument_rejection_remains_repairable_in_same_program(declaration_case):
@@ -335,7 +335,7 @@ def test_diagnosis_reads_survive_interrupted_pipeline_commit(declaration_case, m
         session=storage_for(domain_session),
         run_id=draft.run_id,
         novel_id=fixture_id(__name__, "test-novel"),
-        execution_id=fixture_id(__name__, "interrupted-pipeline-commit"),
+        agent_id=fixture_id(__name__, "interrupted-pipeline-commit"),
         novel_title=None,
     )
     try:

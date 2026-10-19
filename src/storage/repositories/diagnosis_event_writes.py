@@ -1,4 +1,4 @@
-"诊断会话与报告共用的事件、阶段及核对行保存"
+"诊断会话与报告共用的事件、声明归属及核对行保存"
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 from src.storage.ids import new_id
 from src.storage.models import (
     DIAGNOSIS_ROLES,
+    Agent,
     CompleteEvent,
-    EventRevision,
-    Execution,
+    EventDeclarationBinding,
     GraphFact,
     NarrativeLink,
     OrganizationCheck,
@@ -52,78 +52,107 @@ def _write_evidence_rows_once(session: Session, owner: dict[str, Any], evidence:
         _write_evidence_rows(session, owner, evidence)
 
 
+def _save_bindings(session: Session, run_id: str, events: Any) -> dict[str, str]:
+    "保存全部声明归属，拒绝跨运行和身份冲突"
+    declarations = smap.run_declaration_ids(session, run_id)
+    bindings: dict[str, str] = {}
+    for item in events:
+        for declaration_id in item.declaration_ids:
+            if declaration_id not in declarations:
+                raise ValueError("事件来源声明不属于本运行")
+            previous = session.scalar(
+                select(EventDeclarationBinding).where(EventDeclarationBinding.declaration_id == declaration_id)
+            )
+            if previous is not None and previous.event_id != item.event_id:
+                raise ValueError("声明已归属其他完整事件")
+            if declaration_id in bindings and bindings[declaration_id] != item.event_id:
+                raise ValueError("声明不能同时归属两个完整事件")
+            bindings[declaration_id] = item.event_id
+            if previous is None:
+                session.add(EventDeclarationBinding(event_id=item.event_id, declaration_id=declaration_id))
+    session.flush()
+    return bindings
+
+
 def _diagnosis_execution_ids(session: Session, run_id: str) -> list[str]:
     """本 run 诊断侧的会话与案例执行；只读写这些执行的行，不碰标注产物"""
-    return list(
-        session.scalars(
-            select(Execution.execution_id).where(Execution.run_id == run_id, Execution.role.in_(DIAGNOSIS_ROLES))
-        )
-    )
+    return list(session.scalars(select(Agent.id).where(Agent.run_id == run_id, Agent.type.in_(DIAGNOSIS_ROLES))))
 
 
-def save_case_session_rows(session: Session, run_id: str, case_ids: set[str], draft: Any) -> None:
-    """案例会话做完保存一次：该会话产出的组织条目按正式行形状入库，键与报告保存完全相同
+def _evidence_event_refs(records: list[Any]) -> set[str]:
+    "记录证据里引用的完整事件 id（证据行 related_complete_event_id 的外键面）"
+    return {ref.event_id for item in records for ref in item.evidence if getattr(ref, "event_id", None) is not None}
 
-    无报告、不跑整轮断言；报告保存时同键行只补缺不改写（save_diagnosis_events 幂等）。
-    会话按 producer 归属，条目按 source_case_id 归属，均已随写入确定。
-    """
-    owned = {case_id for case_id in case_ids if case_id}
-    if not owned:
-        return
-    events = [item for item in draft.events.values() if item.source_case_id in owned]
-    if events:
-        existing = set(
+
+def _referenced_event_ids(draft: Any, owned: set[str]) -> set[str]:
+    "本生产者行引用到的事件 id：核对、结构对、包含、关系与证据引用"
+    owned_events = [item for item in draft.events.values() if item.producer_agent_id in owned]
+    owned_containments = [item for item in draft.containments.values() if item.producer_agent_id in owned]
+    owned_relations = [item for item in draft.relations.values() if item.producer_agent_id in owned]
+    owned_comparisons = [item for item in draft.declaration_comparisons.values() if item.producer_agent_id in owned]
+    owned_structure_reviews = [item for item in draft.structure_reviews.values() if item.producer_agent_id in owned]
+    referenced: set[str] = {
+        item.event_id for item in draft.reviewed_events.values() if item.producer_agent_id in owned
+    }
+    for edge in owned_containments:
+        referenced.update((edge.parent_event_id, edge.child_event_id))
+    for relation in owned_relations:
+        referenced.update((relation.source_id, relation.target_id))
+    for review in owned_structure_reviews:
+        referenced.update((review.source_event_id, review.target_event_id))
+    for records in (owned_events, owned_containments, owned_relations, owned_comparisons, owned_structure_reviews):
+        referenced.update(_evidence_event_refs(records))
+    return referenced
+
+
+def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str, draft: Any) -> None:
+    """按真实生产者幂等保存会话组织条目，不保存案例与结果的关联"""
+    owned = {producer_agent_id}
+    events = [item for item in draft.events.values() if item.producer_agent_id in owned]
+    # 引用即固化：本批行引用到、尚未落库的草稿候选（可能由其他会话铸造）随本批一并落库，署名保持真实生产者
+    referenced = sorted(_referenced_event_ids(draft, owned) - {item.event_id for item in events})
+    existing = (
+        set(
             session.scalars(
-                select(CompleteEvent.event_id).where(CompleteEvent.event_id.in_([item.event_id for item in events]))
+                select(CompleteEvent.event_id).where(
+                    CompleteEvent.event_id.in_([item.event_id for item in events] + referenced)
+                )
             )
         )
+        if events or referenced
+        else set()
+    )
+    for event_id in referenced:
+        if event_id in existing:
+            continue
+        item = draft.events.get(event_id)
+        if item is None:
+            raise ValueError(f"被引用事件既不在草稿也不在库，无法落库: event_id={event_id}")
+        events.append(item)
+    if events:
         for item in events:
             if item.event_id in existing:
                 continue
             session.add(
                 CompleteEvent(
                     event_id=item.event_id,
-                    producer_execution_id=item.producer_invocation_id,
+                    producer_agent_id=item.producer_agent_id,
                     local_key=item.local_key,
                     identity_reason=item.reason,
+                    title=item.title,
+                    problem=item.problem,
+                    summary=item.summary,
+                    event_type=item.event_type,
+                    status=item.status,
+                    progress=item.progress,
                 )
             )
             _write_evidence_rows_once(session, {"complete_event_id": item.event_id}, item.evidence)
         session.flush()
-        for item in events:
-            if item.event_id in existing:
-                continue
-            stages: list[str | None] = list(item.stage_order) if item.stage_order else [None]
-            for stage_index, declaration_id in enumerate(stages):
-                revision_id = _key(
-                    session, EventRevision, "revision_id", event_id=item.event_id, declaration_id=declaration_id
-                )
-                if declaration_id is not None:
-                    session.add(
-                        EventRevision(
-                            revision_id=revision_id,
-                            event_id=item.event_id,
-                            stage_index=stage_index,
-                            declaration_id=declaration_id,
-                        )
-                    )
-                else:
-                    session.add(
-                        EventRevision(
-                            revision_id=revision_id,
-                            event_id=item.event_id,
-                            stage_index=stage_index,
-                            origin_title=item.title,
-                            origin_problem=item.problem,
-                            origin_summary=item.summary,
-                            origin_event_type=item.event_type,
-                            origin_status=item.status,
-                            origin_progress=item.progress,
-                        )
-                    )
+        _save_bindings(session, run_id, events)
         session.flush()
     for edge in draft.containments.values():
-        if edge.source_case_id not in owned:
+        if edge.producer_agent_id not in owned:
             continue
         link_id = _key(
             session,
@@ -137,7 +166,7 @@ def save_case_session_rows(session: Session, run_id: str, case_ids: set[str], dr
         session.add(
             NarrativeLink(
                 link_id=link_id,
-                producer_execution_id=edge.producer_invocation_id,
+                producer_agent_id=edge.producer_agent_id,
                 reason=edge.reason,
                 contained_child_id=edge.child_event_id,
                 contained_parent_id=edge.parent_event_id,
@@ -145,14 +174,14 @@ def save_case_session_rows(session: Session, run_id: str, case_ids: set[str], dr
         )
         _write_evidence_rows_once(session, {"narrative_link_id": link_id}, edge.evidence)
     for relation in draft.relations.values():
-        if relation.source_case_id not in owned:
+        if relation.producer_agent_id not in owned:
             continue
         if session.get(NarrativeLink, relation.relation_id) is not None:
             continue
         session.add(
             NarrativeLink(
                 link_id=relation.relation_id,
-                producer_execution_id=relation.producer_invocation_id,
+                producer_agent_id=relation.producer_agent_id,
                 reason=relation.reason,
                 semantic_source_event_id=relation.source_id,
                 semantic_target_event_id=relation.target_id,
@@ -170,7 +199,7 @@ def save_case_session_rows(session: Session, run_id: str, case_ids: set[str], dr
 def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
     """会话产出的四类核对行（单事件/单声明/声明对/事件对）；已存在不改写"""
     for event_review in draft.reviewed_events.values():
-        if event_review.source_case_id not in owned:
+        if event_review.producer_agent_id not in owned:
             continue
         check_id = _key(session, OrganizationCheck, "check_id", reviewed_event_id=event_review.event_id)
         if session.get(OrganizationCheck, check_id) is not None:
@@ -178,14 +207,14 @@ def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
         session.add(
             OrganizationCheck(
                 check_id=check_id,
-                producer_execution_id=event_review.producer_invocation_id,
+                producer_agent_id=event_review.producer_agent_id,
                 reason=event_review.reason,
                 reviewed_event_id=event_review.event_id,
                 snapshot_hash=event_review.snapshot_hash,
             )
         )
     for declaration_review in draft.declaration_reviews.values():
-        if declaration_review.source_case_id not in owned:
+        if declaration_review.producer_agent_id not in owned:
             continue
         check_id = _key(
             session, OrganizationCheck, "check_id", reviewed_declaration_id=declaration_review.declaration_id
@@ -195,14 +224,14 @@ def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
         session.add(
             OrganizationCheck(
                 check_id=check_id,
-                producer_execution_id=declaration_review.producer_invocation_id,
+                producer_agent_id=declaration_review.producer_agent_id,
                 reason=declaration_review.reason,
                 reviewed_declaration_id=declaration_review.declaration_id,
                 snapshot_hash=declaration_review.source_hash,
             )
         )
     for comparison in draft.declaration_comparisons.values():
-        if comparison.source_case_id not in owned:
+        if comparison.producer_agent_id not in owned:
             continue
         for target_id in comparison.target_declaration_ids:
             check_id = _key(
@@ -217,7 +246,7 @@ def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
             session.add(
                 OrganizationCheck(
                     check_id=check_id,
-                    producer_execution_id=comparison.producer_invocation_id,
+                    producer_agent_id=comparison.producer_agent_id,
                     reason=comparison.reason,
                     source_declaration_id=comparison.source_declaration_id,
                     target_declaration_id=target_id,
@@ -226,7 +255,7 @@ def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
             )
             _write_evidence_rows_once(session, {"check_id": check_id}, comparison.evidence)
     for structure_review in draft.structure_reviews.values():
-        if structure_review.source_case_id not in owned:
+        if structure_review.producer_agent_id not in owned:
             continue
         check_id = _key(
             session,
@@ -240,7 +269,7 @@ def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
         session.add(
             OrganizationCheck(
                 check_id=check_id,
-                producer_execution_id=structure_review.producer_invocation_id,
+                producer_agent_id=structure_review.producer_agent_id,
                 reason=structure_review.reason,
                 source_event_id=structure_review.source_event_id,
                 target_event_id=structure_review.target_event_id,
@@ -251,24 +280,20 @@ def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
         _write_evidence_rows_once(session, {"check_id": check_id}, structure_review.evidence)
 
 
-def _session_executions(session: Session, session_id: str) -> list[str]:
+def _session_executions(session: Session, agent_id: str) -> list[str]:
     """本诊断会话已登记的真实执行（用于情节推进来源校验）"""
-    run_id = session.scalar(select(Execution.session_run_id).where(Execution.execution_id == session_id))
+    run_id = session.scalar(select(Agent.run_id).where(Agent.id == agent_id))
     if run_id is None:
         return []
-    return list(
-        session.scalars(
-            select(Execution.execution_id).where(Execution.run_id == run_id, Execution.role.in_(DIAGNOSIS_ROLES))
-        )
-    )
+    return list(session.scalars(select(Agent.id).where(Agent.run_id == run_id, Agent.type.in_(DIAGNOSIS_ROLES))))
 
 
 def save_diagnosis_events(session: Session, run_id: str, organization: Any, report_id: str) -> None:
     """只绑定本次原始来源，不更新旧结果、不在保存事务里推断语义"""
-    session_id = organization.source_execution_id
-    if not session_id:
+    agent_id = organization.source_agent_id
+    if not agent_id:
         raise ValueError("事件保存缺少真实诊断会话身份")
-    _require_report(session, run_id, report_id, session_id)
+    _require_report(session, run_id, report_id, agent_id)
     # 会话保存（每个会话做完保存一次）可能已写入同 ID 行：重投只补缺，不改写既有行
     existing_events = (
         set(
@@ -287,60 +312,22 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
         session.add(
             CompleteEvent(
                 event_id=item.event_id,
-                producer_execution_id=item.producer_invocation_id,
+                producer_agent_id=item.producer_agent_id,
                 local_key=item.local_key,
                 identity_reason=item.reason,
+                title=item.title,
+                problem=item.problem,
+                summary=item.summary,
+                event_type=item.event_type,
+                status=item.status,
+                progress=item.progress,
             )
         )
         _write_evidence_rows_once(session, {"complete_event_id": item.event_id}, item.evidence)
-    # 阶段行先落库：event_id 外键不靠 ORM 表排序保证
+    # 完整事件先落库，供声明归属的 event_id 外键引用
     session.flush()
-    stage_declarations = sorted({declaration_id for item in organization.events for declaration_id in item.stage_order})
-    if stage_declarations:
-        # 阶段来源必须是本 run 的不可变声明；来源身份从不解释为正式事件身份
-        if not set(stage_declarations) <= smap.run_declaration_ids(session, run_id):
-            raise ValueError("事件阶段引用不属于本运行的声明")
-    bindings: dict[str, str] = {}
-    for item in organization.events:
-        # 顺序由模型明确提交；绝不按章号或最后写入时间选取事实发生顺序
-        stages: list[str | None] = list(item.stage_order) if item.stage_order else [None]
-        plan = [
-            (
-                _key(session, EventRevision, "revision_id", event_id=item.event_id, declaration_id=declaration_id),
-                declaration_id,
-            )
-            for declaration_id in stages
-        ]
-        for stage_index, (revision_id, declaration_id) in enumerate(plan):
-            if declaration_id is not None:
-                bindings[declaration_id] = item.event_id
-                if session.get(EventRevision, revision_id) is not None:
-                    continue
-                session.add(
-                    EventRevision(
-                        revision_id=revision_id,
-                        event_id=item.event_id,
-                        stage_index=stage_index,
-                        declaration_id=declaration_id,
-                    )
-                )
-            else:
-                if session.get(EventRevision, revision_id) is not None:
-                    continue
-                session.add(
-                    EventRevision(
-                        revision_id=revision_id,
-                        event_id=item.event_id,
-                        stage_index=stage_index,
-                        origin_title=item.title,
-                        origin_problem=item.problem,
-                        origin_summary=item.summary,
-                        origin_event_type=item.event_type,
-                        origin_status=item.status,
-                        origin_progress=item.progress,
-                    )
-                )
-        session.flush()
+    bindings = _save_bindings(session, run_id, organization.events)
+    session.flush()
     for edge in organization.containments:
         link_id = _key(
             session,
@@ -354,7 +341,7 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
         session.add(
             NarrativeLink(
                 link_id=link_id,
-                producer_execution_id=edge.producer_invocation_id,
+                producer_agent_id=edge.producer_agent_id,
                 reason=edge.reason,
                 contained_child_id=edge.child_event_id,
                 contained_parent_id=edge.parent_event_id,
@@ -367,7 +354,7 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
         session.add(
             NarrativeLink(
                 link_id=relation.relation_id,
-                producer_execution_id=relation.producer_invocation_id,
+                producer_agent_id=relation.producer_agent_id,
                 reason=relation.reason,
                 semantic_source_event_id=relation.source_id,
                 semantic_target_event_id=relation.target_id,
@@ -381,7 +368,7 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
     session.flush()
     _save_reviews(session, organization)
     _assert_foreshadowing_bound(session, run_id, bindings)
-    _assert_fact_declarations_bound(session, session_id, bindings)
+    _assert_fact_declarations_bound(session, agent_id, bindings)
     session.flush()
 
 
@@ -394,7 +381,7 @@ def _save_reviews(session: Session, organization: Any) -> None:
         session.add(
             OrganizationCheck(
                 check_id=check_id,
-                producer_execution_id=event_review.producer_invocation_id,
+                producer_agent_id=event_review.producer_agent_id,
                 reason=event_review.reason,
                 reviewed_event_id=event_review.event_id,
                 snapshot_hash=event_review.snapshot_hash,
@@ -409,7 +396,7 @@ def _save_reviews(session: Session, organization: Any) -> None:
         session.add(
             OrganizationCheck(
                 check_id=check_id,
-                producer_execution_id=declaration_review.producer_invocation_id,
+                producer_agent_id=declaration_review.producer_agent_id,
                 reason=declaration_review.reason,
                 reviewed_declaration_id=declaration_review.declaration_id,
                 snapshot_hash=declaration_review.source_hash,
@@ -429,7 +416,7 @@ def _save_reviews(session: Session, organization: Any) -> None:
             session.add(
                 OrganizationCheck(
                     check_id=check_id,
-                    producer_execution_id=comparison.producer_invocation_id,
+                    producer_agent_id=comparison.producer_agent_id,
                     reason=comparison.reason,
                     source_declaration_id=comparison.source_declaration_id,
                     target_declaration_id=target_id,
@@ -450,7 +437,7 @@ def _save_reviews(session: Session, organization: Any) -> None:
         session.add(
             OrganizationCheck(
                 check_id=check_id,
-                producer_execution_id=structure_review.producer_invocation_id,
+                producer_agent_id=structure_review.producer_agent_id,
                 reason=structure_review.reason,
                 source_event_id=structure_review.source_event_id,
                 target_event_id=structure_review.target_event_id,
@@ -471,15 +458,15 @@ def _assert_foreshadowing_bound(session: Session, run_id: str, bindings: dict[st
             raise ValueError("伏笔来源未得到完整事件身份确认")
 
 
-def _assert_fact_declarations_bound(session: Session, session_id: str, bindings: dict[str, str]) -> None:
+def _assert_fact_declarations_bound(session: Session, agent_id: str, bindings: dict[str, str]) -> None:
     """情节推进经声明引用取得正式事件；没有绑定的声明不能被伪装成正式事件"""
-    executions = _session_executions(session, session_id)
+    executions = _session_executions(session, agent_id)
     if not executions:
         return
     declarations = set(
         session.scalars(
             select(GraphFact.declaration_id).where(
-                GraphFact.direct_producer_execution_id.in_(executions),
+                GraphFact.direct_producer_agent_id.in_(executions),
                 GraphFact.declaration_id.is_not(None),
             )
         )

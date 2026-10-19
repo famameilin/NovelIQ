@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from src.storage.models import AnalysisAssessment, DiagnosisReport, Execution
+from src.storage.models import Agent, AnalysisAssessment, DiagnosisReport
 
 
 def diagnosis_completion_has_diagnosis_data_1(_session, run_id):
     return _session.scalars(
         select(DiagnosisReport)
-        .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
-        .where(Execution.session_run_id == run_id)
+        .join(Agent, Agent.id == DiagnosisReport.agent_id)
+        .where(Agent.run_id == run_id)
         .order_by(DiagnosisReport.created_at.desc(), DiagnosisReport.report_id.desc())
         .limit(1)
     ).first()

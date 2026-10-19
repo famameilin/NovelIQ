@@ -1,7 +1,7 @@
 """诊断完整事件组织的真实原文、多对多关系与保存事务验证
 
 夹具自足：直接建立真实来源链（标注 work/执行/记录 + 章级声明 + 诊断会话/work/执行），
-发布走正式入口（diagnosis_reports → complete_events/event_revisions → narrative_links）。
+发布走正式入口（diagnosis_reports → event_records/event_revisions → event_links）。
 """
 
 from __future__ import annotations
@@ -14,27 +14,25 @@ from sqlalchemy import select
 
 from src.agents.diagnosis.persistence import save_diagnosis_result
 from src.agents.diagnosis.tools import build_diagnosis_tools
-from src.diagnosis.read import fetch_diagnosis_payload
 from src.diagnosis.schema import AgentAnalysis
+from src.event_trees import storage_map as smap
 from src.event_trees.organization import (
-    ConflictClaim,
     EventOrganizationDraft,
     NarrativeOrganization,
     OrganizationEvidence,
     validate_organization,
 )
+from src.storage.ids import new_id
 from src.storage.models import (
-    ConflictClaim as ConflictClaimRow,
-)
-from src.storage.models import (
-    ConflictRecord,
+    Agent,
+    CompleteEvent,
     DiagnosisReport,
-    EventRevision,
-    Execution,
+    EventDeclarationBinding,
     NarrativeGroup,
     NarrativeLink,
+    OrganizationCheck,
 )
-from src.storage.repositories.diagnosis_event_writes import save_diagnosis_events
+from src.storage.repositories.diagnosis_event_writes import save_case_session_rows, save_diagnosis_events
 from src.storage.repositories.organization_writes import save_organization
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import (
@@ -44,7 +42,7 @@ from tests.support.event_tree_fixtures import (
     first_paragraph,
     report_case_anchor,
 )
-from tests.support.storage_fixtures import fixture_id, storage_for
+from tests.support.storage_fixtures import storage_for
 
 CONTRACT = "event-tree-declarations-v1"
 TEXTS = ["顾霜找回了身份。贺重明证实身份。", "他说等待了十年。她说等待了十四年。"]
@@ -63,10 +61,10 @@ class OrganizationCase:
             chapter_ids=list(range(1, chapters + 1)),
             title="组织测试",
         )
-        self.session_id, self.execution_id = add_diagnosis_context(session, self.run_id)
+        self.session_id, self.agent_id = add_diagnosis_context(session, self.run_id)
         self.declarations: list[str] = []
         for chapter_id in range(1, chapters + 1):
-            record_id, _execution_id = add_annotation_source(session, self.run_id, chapter_id, role="event")
+            record_id, _agent_id = add_annotation_source(session, self.run_id, chapter_id, role="event")
             phrase = PHRASES[(chapter_id - 1) % len(PHRASES)]
             declaration_id = add_declaration(
                 session,
@@ -87,7 +85,7 @@ def identity_draft(session, case: OrganizationCase) -> EventOrganizationDraft:
     draft = EventOrganizationDraft(storage_for(session), case.run_id, case.session_id)
     draft.fixture_session = session
     draft.case_id = report_case_anchor(case.run_id)
-    draft.producer_invocation_id = case.execution_id
+    draft.producer_agent_id = case.agent_id
     sources = list(draft._declarations().values())
     for row in sources:
         evidence = [OrganizationEvidence(paragraph_id=row["evidence"][0]["paragraph_id"])]
@@ -100,8 +98,6 @@ def identity_draft(session, case: OrganizationCase) -> EventOrganizationDraft:
             status=row["status"],
             progress=row["progress"],
             declaration_ids=[row["declaration_id"]],
-            stage_order=[row["declaration_id"]],
-            current_declaration_id=row["declaration_id"],
             reason="本例按原文明确判断每项声明为一个事件身份",
             evidence=evidence,
         )
@@ -193,12 +189,12 @@ def _organized(draft, event_ids):
     return draft.finish()
 
 
-def _publish(session, run_id, organization):
-    """与正式发布同序：先报告与完整事件，再叙事组织"""
+def _save_report(session, run_id, organization):
+    """与正式保存同序：先报告与完整事件，再叙事组织"""
     from tests.support.storage_fixtures import insert_report_fixture
 
     report_id = insert_report_fixture(
-        session, run_id, organization.source_execution_id, AgentAnalysis(narrative_organization=organization)
+        session, run_id, organization.source_agent_id, AgentAnalysis(narrative_organization=organization)
     )
     save_diagnosis_events(session, run_id, organization, report_id)
     save_organization(session, run_id, organization, report_id)
@@ -219,36 +215,209 @@ def test_containment_second_parent_rejected_at_submission(organization_case):
     assert len(draft.containments) == 1
 
 
-def test_complete_event_current_content_comes_from_bound_declaration(db_session, organization_case):
-    case, event_ids, draft = organization_case
-    organization = _organized(draft, event_ids)
-    report_id = _publish(db_session, case.run_id, organization)
-    assert len([row for row in db_session.scalars(select(NarrativeLink)) if row.arc_group_id is not None]) == 2
-    outcomes = [row for row in db_session.scalars(select(NarrativeGroup)) if row.outcome_description is not None]
-    assert len(outcomes) == 1
-    assert len([row for row in db_session.scalars(select(NarrativeLink)) if row.outcome_group_id is not None]) == 2
-    # 当前内容从声明绑定读取；绑定声明是显式阶段链尾
-    stages = list(
+def _fresh_draft(session, case: OrganizationCase) -> EventOrganizationDraft:
+    draft = EventOrganizationDraft(storage_for(session), case.run_id, case.session_id)
+    draft.fixture_session = session
+    draft.case_id = report_case_anchor(case.run_id)
+    draft.producer_agent_id = case.agent_id
+    return draft
+
+
+def _submit_identity(draft, row, key: str) -> None:
+    draft.identity(
+        key=key,
+        title=row["title"],
+        problem=row["problem"],
+        summary=row["summary"],
+        event_type=row["event_type"],
+        status=row["status"],
+        progress=row["progress"],
+        declaration_ids=[row["declaration_id"]],
+        reason="本例按原文明确判断每项声明为一个事件身份",
+        evidence=[OrganizationEvidence(paragraph_id=row["evidence"][0]["paragraph_id"])],
+    )
+
+
+def test_identity_key_reuse_for_another_event_is_rejected(db_session):
+    case = OrganizationCase(db_session)
+    db_session.commit()
+    draft = _fresh_draft(db_session, case)
+    rows = list(draft._declarations().values())
+    # 同一执行内局部键唯一：换声明复用同键拒收，同声明重发放行
+    _submit_identity(draft, rows[0], "k1")
+    with pytest.raises(ValueError, match="局部键"):
+        _submit_identity(draft, rows[1], "k1")
+    _submit_identity(draft, rows[0], "k1")
+    assert len(draft.events) == 1
+
+
+def test_identity_key_is_freed_after_retract(db_session):
+    case = OrganizationCase(db_session)
+    db_session.commit()
+    draft = _fresh_draft(db_session, case)
+    rows = list(draft._declarations().values())
+    _submit_identity(draft, rows[0], "k1")
+    occupied = next(iter(draft.events))
+    draft.retract(
+        kind="identity",
+        identifier=occupied,
+        reason="本例验证撤回后局部键重新可用",
+        evidence=[OrganizationEvidence(paragraph_id=rows[0]["evidence"][0]["paragraph_id"])],
+    )
+    _submit_identity(draft, rows[1], "k1")
+    assert len(draft.events) == 1
+
+
+def _second_producer(session, run_id: str) -> str:
+    "同轮另一个诊断执行身份（核对/关系行的真实生产者）"
+    producer = new_id()
+    session.add(Agent(id=producer, run_id=run_id, type="case", status="running"))
+    session.flush()
+    return producer
+
+
+def test_cross_session_references_persist_unstored_candidates(db_session):
+    "其他会话引用未落库候选时，保存把候选一并落库且署名真实生产者"
+    case = OrganizationCase(db_session)
+    db_session.commit()
+    draft = _fresh_draft(db_session, case)
+    rows = list(draft._declarations().values())
+    _submit_identity(draft, rows[0], "k1")
+    _submit_identity(draft, rows[1], "k2")
+    parent_id, child_id = sorted(draft.events)
+    other = _second_producer(db_session, case.run_id)
+    draft.producer_agent_id = other
+    draft.contain(
+        parent_event_id=parent_id,
+        child_event_id=child_id,
+        reason="其他执行判断的包含",
+        evidence=[OrganizationEvidence(paragraph_id=0)],
+    )
+    draft.review_events([parent_id, child_id], reason="参考其他执行的事件完成核对")
+    save_case_session_rows(db_session, case.run_id, other, draft)
+    db_session.commit()
+
+    db_session.expire_all()
+    for event_id in (parent_id, child_id):
+        saved = db_session.get(CompleteEvent, event_id)
+        assert saved is not None and saved.producer_agent_id == case.agent_id
+    assert len(list(db_session.scalars(select(NarrativeLink).where(NarrativeLink.contained_child_id == child_id)))) == 1
+    checks = list(
         db_session.scalars(
-            select(EventRevision).where(EventRevision.event_id == event_ids[0]).order_by(EventRevision.stage_index)
+            select(OrganizationCheck).where(OrganizationCheck.reviewed_event_id.in_([parent_id, child_id]))
         )
     )
-    current = stages[-1]
-    assert current.declaration_id == draft.events[event_ids[0]].current_declaration_id
-    # 已保存事件的内容由绑定声明投影读出，不再有第二份可写副本
+    assert {row.producer_agent_id for row in checks} == {other}
+
+    save_case_session_rows(db_session, case.run_id, other, draft)
+    save_case_session_rows(db_session, case.run_id, case.agent_id, draft)
+    db_session.commit()
+    assert (
+        len(
+            list(
+                db_session.scalars(
+                    select(CompleteEvent).where(CompleteEvent.event_id.in_([parent_id, child_id]))
+                )
+            )
+        )
+        == 2
+    )
+    assert (
+        len(
+            list(
+                db_session.scalars(
+                    select(OrganizationCheck).where(
+                        OrganizationCheck.reviewed_event_id.in_([parent_id, child_id])
+                    )
+                )
+            )
+        )
+        == 2
+    )
+
+
+def test_retract_blocked_when_other_execution_references_event(db_session):
+    case = OrganizationCase(db_session)
+    db_session.commit()
+    draft = _fresh_draft(db_session, case)
+    rows = list(draft._declarations().values())
+    _submit_identity(draft, rows[0], "k1")
+    minted = next(iter(draft.events))
+    other = _second_producer(db_session, case.run_id)
+    draft.producer_agent_id = other
+    draft.review_events([minted], reason="复用其他执行建立的事件并完成核对")
+    draft.producer_agent_id = case.agent_id
+    with pytest.raises(ValueError, match="其他执行引用"):
+        draft.retract(
+            kind="identity",
+            identifier=minted,
+            reason="本例验证被他人引用时不能撤回",
+            evidence=[OrganizationEvidence(paragraph_id=rows[0]["evidence"][0]["paragraph_id"])],
+        )
+    assert minted in draft.events
+
+
+def test_retract_clears_own_references_before_drop(db_session):
+    case = OrganizationCase(db_session)
+    db_session.commit()
+    draft = _fresh_draft(db_session, case)
+    rows = list(draft._declarations().values())
+    _submit_identity(draft, rows[0], "k1")
+    minted = next(iter(draft.events))
+    draft.review_events([minted], reason="先核对再改判")
+    draft.retract(
+        kind="identity",
+        identifier=minted,
+        reason="本例验证撤回清掉自己的引用",
+        evidence=[OrganizationEvidence(paragraph_id=rows[0]["evidence"][0]["paragraph_id"])],
+    )
+    assert minted not in draft.events
+    assert minted not in draft.reviewed_events
+    save_case_session_rows(db_session, case.run_id, case.agent_id, draft)
+    db_session.commit()
+    assert db_session.get(CompleteEvent, minted) is None
+
+
+def test_complete_event_body_and_declaration_bindings_are_saved_independently(db_session, organization_case):
+    case, event_ids, draft = organization_case
+    organization = _organized(draft, event_ids)
+    report_id = _save_report(db_session, case.run_id, organization)
+    arc_links = [
+        row
+        for row in db_session.scalars(select(NarrativeLink))
+        if row.arc_group_id is not None and row.member_event_id in event_ids
+    ]
+    assert len(arc_links) == 2
+    outcomes = [
+        row
+        for row in db_session.scalars(select(NarrativeGroup))
+        if row.outcome_description is not None and row.producer_agent_id == draft.producer_agent_id
+    ]
+    assert len(outcomes) == 1
+    outcome_links = [
+        row
+        for row in db_session.scalars(select(NarrativeLink))
+        if row.outcome_group_id is not None and row.member_event_id in event_ids
+    ]
+    assert len(outcome_links) == 2
+    bindings = list(
+        db_session.scalars(
+            select(EventDeclarationBinding).where(EventDeclarationBinding.event_id == event_ids[0])
+        )
+    )
+    assert {row.declaration_id for row in bindings} == set(draft.events[event_ids[0]].declaration_ids)
     from src.event_trees.organization import _run_event_dicts
 
     db_session.expire_all()
-    source = draft._declarations()[current.declaration_id]
     projected = _run_event_dicts(storage_for(db_session), case.run_id)[event_ids[0]]
-    assert projected["summary"] == source["summary"]
-    assert projected["event_type"] == source["event_type"]
-    assert projected["current_revision_id"] == current.revision_id
+    assert projected["summary"] == draft.events[event_ids[0]].summary
+    assert projected["event_type"] == draft.events[event_ids[0]].event_type
+    assert "current_revision_id" not in projected
     assert organization.event_arc_links[0].evidence != organization.outcomes[0].evidence
     assert "memberships" not in organization.model_dump()
     assert "outcome_arc_links" not in organization.model_dump()
     report = db_session.get(DiagnosisReport, report_id)
-    assert report is not None and report.session_id == case.session_id
+    assert report is not None and report.agent_id == case.session_id
 
 
 def test_unreviewed_events_stay_readable_and_no_review_gate(organization_case):
@@ -320,44 +489,16 @@ def test_cross_run_complete_event_is_rejected(db_session, organization_case):
         EventOrganizationDraft(storage_for(db_session), other.run_id).read_events([event_ids[0]])
 
 
-def test_conflict_preserves_each_claim_and_only_unresolved(db_session, organization_case):
-    case, event_ids, draft = organization_case
-    draft.review_events(event_ids, reason="核对两种原文说法")
-    conflict_id = draft.register_conflict(
-        key="waiting",
-        subject_kind="event",
-        subject_id=event_ids[0],
-        claims=[
-            ConflictClaim(claim="等待十年", evidence=[OrganizationEvidence(paragraph_id=1, quote="十年")]),
-            ConflictClaim(claim="等待十四年", evidence=[OrganizationEvidence(paragraph_id=1, quote="十四年")]),
-        ],
-        reason="同一次等待时长的两项说法不一致",
-    )
-    _structure_reviews(draft)
-    organization = draft.finish()
-    _publish(db_session, case.run_id, organization)
-    row = db_session.get(ConflictRecord, conflict_id)
-    claims = list(
-        db_session.scalars(
-            select(ConflictClaimRow)
-            .where(ConflictClaimRow.conflict_id == conflict_id)
-            .order_by(ConflictClaimRow.claim_ordinal)
-        )
-    )
-    assert [item.claim_text for item in claims] == ["等待十年", "等待十四年"]
-    assert row.reason == "同一次等待时长的两项说法不一致"
-    assert len(draft.read_conflicts()["items"]) == 1
-    assert draft.read_conflicts()["items"][0]["resolution"] == "unresolved"
-    first_conflict = draft.read_conflicts()["items"][0]["claims"][0]
-    assert first_conflict["claim"] == "等待十年"
-    payload = organization.model_dump()
-    payload["conflicts"][0]["resolution"] = "ten_years"
-    with pytest.raises(ValidationError):
-        NarrativeOrganization.model_validate(payload)
+def test_event_reads_identify_declaration_ids_as_sources(organization_case):
+    case, _event_ids, draft = organization_case
+    with pytest.raises(ValueError, match="是声明身份"):
+        draft.read_events([case.declarations[0]])
+
+
 
 
 def _finalized_submission(session, case, draft, event_ids, *, diagnosis):
-    """与 DiagnosisDomain.publish 同口径绑定运行时字段后提交，重投核验按正式合同字段比较"""
+    """与正式报告保存同口径绑定运行时字段后提交，重投核验按正式合同字段比较"""
     from src.diagnosis.queries import DiagnosisQueries
 
     bindings = {
@@ -374,41 +515,13 @@ def _finalized_submission(session, case, draft, event_ids, *, diagnosis):
     )
 
 
-def test_same_frozen_publication_replay_keeps_report_and_case_warnings(db_session, organization_case):
-    case, event_ids, draft = organization_case
-    analysis = _finalized_submission(db_session, case, draft, event_ids, diagnosis="完整已核对结果")
-    save_diagnosis_result(storage_for(db_session), case.run_id, analysis)
-    report = _report_for(db_session, case.run_id)
-    assert report is not None
-    report_id = report.report_id
-    from src.storage.models import CaseEntry
-
-    db_session.add(
-        CaseEntry(
-            entry_id=fixture_id(__name__, "warning-entry-0"),
-            warning_report_id=report_id,
-            producer_execution_id=case.execution_id,
-            warning_ordinal=0,
-            attempted_case_reference="case-x",
-            warning_message="案例保存失败",
-        )
-    )
-    db_session.commit()
-    save_diagnosis_result(storage_for(db_session), case.run_id, analysis)
-    assert db_session.get(DiagnosisReport, report_id) is not None
-    assert fetch_diagnosis_payload(storage_for(db_session), case.run_id)["diagnosis"] == "完整已核对结果"
-    assert _report_for(db_session, case.run_id).report_id == report_id
-    with pytest.raises(ValueError, match="不一致"):
-        save_diagnosis_result(
-            storage_for(db_session), case.run_id, analysis.model_copy(update={"diagnosis": "不同结果"})
-        )
 
 
 def _report_for(session, run_id: str) -> DiagnosisReport | None:
     return session.scalars(
         select(DiagnosisReport)
-        .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
-        .where(Execution.session_run_id == run_id)
+        .join(Agent, Agent.id == DiagnosisReport.agent_id)
+        .where(Agent.run_id == run_id)
     ).one_or_none()
 
 
@@ -443,15 +556,12 @@ def test_save_failure_rolls_back_report_and_organization(db_session):
     assert run_events(storage_for(db_session), case.run_id) == {}
 
 
-def test_old_chapter_contract_cannot_be_promoted_by_diagnosis(db_session, organization_case):
+def test_diagnosis_uses_sources_without_contract_marker(db_session, organization_case):
     _case, event_ids, draft = organization_case
     draft.review_events(event_ids, reason="已核对")
     _structure_reviews(draft)
-    stale_run_id = draft.run_id
-    add_annotation_source(db_session, stale_run_id, 1, role="metric", contract_version="old")
     db_session.flush()
-    with pytest.raises(ValueError, match="旧契约.*重建"):
-        draft.finish()
+    assert len(draft.finish().events) == len(event_ids)
 
 
 def test_tools_expose_complete_events_and_remove_unique_primary_api(organization_case):
@@ -476,7 +586,7 @@ def test_tools_expose_complete_events_and_remove_unique_primary_api(organization
         "write_event",
         "write_arc",
         "write_outcome",
-        "write_conflict",
+
         "read_metrics",
         "read_topics",
     } <= set(tools)
@@ -493,3 +603,21 @@ def test_tools_expose_complete_events_and_remove_unique_primary_api(organization
         }
     )
     assert draft.search_events(unreviewed_only=True)["total"] == 0
+
+
+def test_declaration_rows_reads_evidence_in_one_batch(db_session, monkeypatch):
+    case = OrganizationCase(db_session, chapters=3)
+    db_session.commit()
+    draft = EventOrganizationDraft(storage_for(db_session), case.run_id, case.agent_id)
+    calls: list[int] = []
+    original = smap.evidence_payload_groups
+
+    def counting(session, run_id, groups):
+        calls.append(len(groups))
+        return original(session, run_id, groups)
+
+    monkeypatch.setattr(smap, "evidence_payload_groups", counting)
+    first = draft._declarations()
+    second = draft._declarations()
+    assert first == second
+    assert calls == [len(case.declarations), len(case.declarations)]

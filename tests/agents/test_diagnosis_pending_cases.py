@@ -20,18 +20,17 @@ from src.case_pool import CasePool
 from src.case_pool.contributions import CaseContribution
 from src.event_trees.storage_map import run_declaration_ids, run_events
 from src.storage import new_id
-from src.storage.models import BookCase, CaseEntry, DiagnosisReport, Execution
-from src.storage.repositories.organization_writes import register_diagnosis_execution
+from src.storage.models import Agent, Case, DiagnosisReport
 from tests.agents.test_complete_event_invariants import draft_case as draft_case
 from tests.support.storage_fixtures import fixture_id, storage_factory, storage_for
 
 
-def domain_for(draft, *, execution_id: str | None = None):
+def domain_for(draft, *, agent_id: str | None = None):
     return DiagnosisDomain(
         session=storage_for(draft.fixture_session),
         run_id=draft.run_id,
         novel_id=fixture_id(__name__, "test-novel"),
-        execution_id=execution_id or new_id(),
+        agent_id=agent_id or new_id(),
         novel_title=None,
         model_id="test-model",
     )
@@ -39,33 +38,18 @@ def domain_for(draft, *, execution_id: str | None = None):
 
 def real_author(session, run_id: str) -> str:
     """真实诊断执行身份（报告角色 invocation）：案例支持条目引用正式执行，不伪造执行外键"""
-    from sqlalchemy import func, select
-
-    attempt = (
-        int(
-            session.scalar(
-                select(func.count())
-                .select_from(Execution)
-                .where(Execution.run_id == run_id, Execution.role == "report")
-            )
-            or 0
-        )
-        + 1
-    )
-    execution_id = new_id()
-    register_diagnosis_execution(
-        session, run_id=run_id, execution_id=execution_id, role="report", attempt_number=attempt
-    )
+    agent_id = new_id()
+    session.add(Agent(id=agent_id, run_id=run_id, type="report", status="running"))
     session.commit()
-    return execution_id
+    return agent_id
 
 
 def _reports(session, run_id: str) -> list[DiagnosisReport]:
     return list(
         session.scalars(
             select(DiagnosisReport)
-            .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
-            .where(Execution.session_run_id == run_id)
+            .join(Agent, Agent.id == DiagnosisReport.agent_id)
+            .where(Agent.run_id == run_id)
         )
     )
 
@@ -80,14 +64,6 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
     domain.case_pool.begin(author)
     case = domain.case_pool.push("relation", "核对寻路与照明的关联", author)
     domain.case_pool.promise(case["case_id"], author)
-    domain.case_pool.associate(
-        case["case_id"],
-        author,
-        tool_name="write_event",
-        call_id=fixture_id(__name__, "candidate-operation"),
-        receipt={"candidate": True},
-        is_write=True,
-    )
     error = asyncio.CancelledError("用户取消") if cancelled else RuntimeError("预算耗尽")
 
     async def fail(_scheduler):
@@ -99,7 +75,7 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
             session=storage_for(draft.fixture_session),
             run_id=draft.run_id,
             novel_id=fixture_id(__name__, "test-novel"),
-            execution_id=domain.execution_id,
+            agent_id=domain.agent_id,
             domain=domain,
             audit_recorder=recorder,
         )
@@ -108,19 +84,9 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
     pool.load_storage(storage_for(draft.fixture_session))
     # 承诺随会话保存落库：本会话未保存时，续跑重建后按未解决（未承诺）重办
     assert pool.case_runtime[case["case_id"]]["promised"] is False
-    support = draft.fixture_session.scalars(
-        select(CaseEntry).where(
-            CaseEntry.case_id == case["case_id"],
-            CaseEntry.producer_execution_id == author,
-        )
-    ).one()
-    # 候选交付未被采用：支持条目 adopted=False，且没有交付子行
-    assert support.adopted is False
-    assert not list(
-        draft.fixture_session.scalars(select(CaseEntry).where(CaseEntry.parent_entry_id == support.entry_id))
-    )
-    assert any(case["case_id"] in items for items in pool.registrations.values())
-    assert not any(item["case_id"] == case["case_id"] for items in pool.deliveries.values() for item in items)
+    row = draft.fixture_session.get(Case, case["case_id"])
+    assert row.producer_agent_id == author and row.status == "pending"
+    assert not hasattr(pool, "deliveries")
     assert author not in domain.case_pool.saved
     assert run_events(storage_for(draft.fixture_session), draft.run_id) == {}
     assert _reports(draft.fixture_session, draft.run_id) == []
@@ -145,7 +111,7 @@ async def test_retention_failure_reports_both_errors(draft_case, configured_mode
             session=storage_for(draft_case.fixture_session),
             run_id=draft_case.run_id,
             novel_id=fixture_id(__name__, "test-novel"),
-            execution_id=domain.execution_id,
+            agent_id=domain.agent_id,
             domain=domain,
             audit_recorder=recorder,
         )
@@ -178,12 +144,10 @@ def test_pending_registration_transaction_rolls_back_all_cases_on_storage_failur
     draft_case.fixture_session.expire_all()
     assert not list(
         draft_case.fixture_session.scalars(
-            select(BookCase).where(BookCase.description.in_(["核查第0个节点", "核查第1个节点"]))
+            select(Case).where(Case.description.in_(["核查第0个节点", "核查第1个节点"]))
         )
     )
-    assert not list(
-        draft_case.fixture_session.scalars(select(CaseEntry).where(CaseEntry.producer_execution_id.in_(authors)))
-    )
+
 
 
 def test_formal_output_adopts_real_child_delivery_without_fabricated_child_report(db_session):
@@ -199,7 +163,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
     )
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜找回了身份。"])
-    session_id, execution_id = add_diagnosis_context(db_session, run_id)
+    session_id, agent_id = add_diagnosis_context(db_session, run_id)
     record_id, _source_execution = add_annotation_source(db_session, run_id, 1, role="event")
     paragraph = first_paragraph(db_session, run_id)
     add_declaration(
@@ -213,7 +177,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
         event_type="身份确认",
     )
     db_session.commit()
-    draft, _meta = identity_every_declaration(db_session, run_id, context=(session_id, execution_id))
+    draft, _meta = identity_every_declaration(db_session, run_id, context=(session_id, agent_id))
     close_structure(db_session, draft, evidence_paragraph_id=int(paragraph.paragraph_id))
     publish_draft(db_session, run_id, draft)
     db_session.commit()
@@ -222,7 +186,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
         session=storage_for(db_session),
         run_id=run_id,
         novel_id=fixture_id(__name__, "test-novel"),
-        execution_id=session_id,
+        agent_id=session_id,
         novel_title=None,
         model_id="test-model",
     )
@@ -233,14 +197,6 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
     pool.begin(author)
     case = pool.push("relation", "检查寻路与照明", author)
     pool.promise(case["case_id"], author)
-    pool.associate(
-        case["case_id"],
-        author,
-        tool_name="write_arc",
-        call_id=fixture_id(__name__, "real-child-call"),
-        receipt={"status": "written"},
-        is_write=True,
-    )
     frozen = CaseContribution(
         run_id,
         author,
@@ -248,7 +204,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
             {
                 "created_case_ids": [case["case_id"]],
                 "registrations": {case["case_id"]: case},
-                "deliveries": pool.deliveries[author],
+                "promises": pool.promises_for(author),
             },
             ensure_ascii=False,
         ),
@@ -257,28 +213,12 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
     db_session.commit()
     domain.retain_pending_cases(RuntimeError("提交后的内存确认失败"))
     db_session.expire_all()
-    support = db_session.scalars(
-        select(CaseEntry).where(
-            CaseEntry.case_id == case["case_id"],
-            CaseEntry.producer_execution_id == author,
-        )
-    ).one()
-    children = list(db_session.scalars(select(CaseEntry).where(CaseEntry.parent_entry_id == support.entry_id)))
-    assert support.adopted is True
-    # 承诺痕迹与真实写交付都随成功保存落库
-    assert sorted(str(row.tool_name) for row in children) == ["promise_case", "write_arc"]
+    row = db_session.get(Case, case["case_id"])
+    assert row.status == "resolved" and row.promised_agent_id == author
     loaded = CasePool(run_id)
     loaded.load_storage(storage_for(db_session))
     assert loaded.case_runtime[case["case_id"]]["promised"] is True
-    loaded_deliveries = [
-        item
-        for items in loaded.deliveries.values()
-        for item in items
-        if item["case_id"] == case["case_id"] and item["tool_name"] != "promise_case"
-    ]
-    assert [item["call_id"] for item in loaded_deliveries] == [fixture_id(__name__, "real-child-call")]
-    assert loaded_deliveries[0]["is_write"] is True
     # 只有真实诊断报告被采纳，不伪造子报告
     reports = _reports(db_session, run_id)
     assert [row.report_id for row in reports] == [report_id]
-    assert db_session.get(DiagnosisReport, report_id).session_id == session_id
+    assert db_session.get(DiagnosisReport, report_id).agent_id == session_id

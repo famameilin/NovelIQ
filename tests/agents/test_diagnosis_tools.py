@@ -33,11 +33,11 @@ def _materials():
 
 def test_role_faces_expose_only_their_writes():
     case_tools = _build_tools()
-    assert {"write_event", "write_conflict"} <= set(case_tools)
+    assert {"write_event", "push_case"} <= set(case_tools)
     assert {"write_arc", "write_outcome", "write_diagnosis", "read_metrics", "read_topics"}.isdisjoint(case_tools)
     report_tools = _build_tools(role="report")
     assert {"write_arc", "write_outcome", "write_diagnosis", "read_metrics", "read_topics"} <= set(report_tools)
-    assert {"write_event", "write_conflict"}.isdisjoint(report_tools)
+    assert {"write_event"}.isdisjoint(report_tools)
     # 共享目录两个角色都有：搜索/读取、案例工具与 finish
     shared = {
         "search_text",
@@ -133,7 +133,7 @@ def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_cas
             storage_for(draft.fixture_session),
             draft.run_id,
             organization_draft=draft,
-            execution_id=fixture_id(__name__, "batch"),
+            agent_id=fixture_id(__name__, "batch"),
         )
     }
     ids = list(draft._declarations())
@@ -148,8 +148,6 @@ def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_cas
             "event_type": "寻路",
             "status": "ongoing",
             "declaration_ids": [declaration_id],
-            "stage_order": [declaration_id],
-            "current_declaration_id": declaration_id,
             "reason": "批量测试明确判断独立事件",
             "evidence": [{"paragraph_id": 0}],
         }

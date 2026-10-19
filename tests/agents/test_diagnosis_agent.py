@@ -82,7 +82,7 @@ def build_graph(responses, *, maximum=5, observer=None, stream=None, retries=Non
         fixture_id(__name__, "run"),
         role="report",
         report_draft=report,
-        execution_id=fixture_id(__name__, "diagnosis"),
+        agent_id=fixture_id(__name__, "diagnosis"),
     )
     model = Replies(responses)
     ledger = AnnotationToolLedger(
