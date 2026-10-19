@@ -19,216 +19,56 @@ from src.storage.uuid_type import Uuid7 as Uuid
 from .base import Base, naive_utcnow
 
 #: 执行角色封闭取值（章内四个标注角色 + 诊断两个角色）
-EXECUTION_ROLES = ("annotation", "entity", "event", "metric", "case", "report")
-#: 章内标注角色封闭取值（executions.chapter_id 必填；chapter_annotations.role 取值域）
+AGENT_TYPES = ("annotation", "entity", "event", "metric", "case", "report")
+#: 章内标注角色取值域
 ANNOTATION_ROLES = ("annotation", "entity", "event", "metric")
 #: 诊断角色封闭取值（案例办理与报告收尾）
 DIAGNOSIS_ROLES = ("case", "report")
 #: 执行状态封闭取值
-EXECUTION_STATUSES = ("running", "success", "error", "interrupted")
+AGENT_STATUSES = ("running", "success", "error")
 #: 诊断重点结构封闭取值
 FOCUS_STRUCTURES = ("single", "dual", "ensemble")
 #: 人物名单角色封闭取值（三份名单独立有序，不双存主角布尔）
 CAST_ROLES = ("focus", "main", "core")
 
 
-class WorkItem(Base):
-    "工作业务身份表（程序回执两种互斥形状）"
+class Agent(Base):
+    "真实 Agent 身份与运行结局"
 
-    __tablename__ = "work_items"
+    __tablename__ = "agent"
     __table_args__ = (
-        CheckConstraint(
-            "(annotation_run_id IS NULL AND annotation_chapter_id IS NULL AND role IS NULL"
-            " AND diagnosis_session_id IS NULL AND program_run_id IS NOT NULL AND program_chapter_id IS NOT NULL"
-            " AND program_code IS NOT NULL AND program_invocation_key IS NOT NULL)"
-            " OR (annotation_run_id IS NULL AND annotation_chapter_id IS NULL AND role IS NULL"
-            " AND diagnosis_session_id IS NOT NULL AND program_run_id IS NULL AND program_chapter_id IS NULL"
-            " AND program_code IS NOT NULL AND program_invocation_key IS NULL)",
-            name="ck_work_items_shape",
-        ),
-        ForeignKeyConstraint(
-            ["annotation_run_id", "annotation_chapter_id"],
-            ["chapters.run_id", "chapters.chapter_id"],
-            ondelete="CASCADE",
-            name="work_items_annotation_chapter_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["program_run_id", "program_chapter_id"],
-            ["chapters.run_id", "chapters.chapter_id"],
-            ondelete="CASCADE",
-            name="work_items_program_chapter_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["annotation_run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="work_items_annotation_run_fkey"
-        ),
-        ForeignKeyConstraint(
-            ["program_run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="work_items_program_run_fkey"
-        ),
-        Index(
-            "uq_work_items_program_invocation_key",
-            "program_invocation_key",
-            unique=True,
-            postgresql_where=sql_text("program_invocation_key IS NOT NULL"),
-        ),
-        Index(
-            "uq_work_items_diagnosis_failure",
-            "diagnosis_session_id",
-            unique=True,
-            postgresql_where=sql_text("diagnosis_session_id IS NOT NULL AND program_code IS NOT NULL"),
-        ),
-        {"comment": "工作表：两类程序回执的业务身份（章末核对/诊断失败保留，两种互斥形状）"},
+        CheckConstraint("type IN ('annotation', 'entity', 'event', 'metric', 'case', 'report')", name="ck_agent_type"),
+        CheckConstraint("status IN ('running', 'success', 'error')", name="ck_agent_status"),
     )
-
-    work_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), primary_key=True, comment="工作主键（uuid）", default=new_id, autoincrement=False
-    )
-    role: Mapped[str | None] = mapped_column(
-        String(20), nullable=True, comment="退场列：agent work 已删，程序回执形状恒为空"
-    )
-    annotation_run_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False), nullable=True, comment="退场列：agent work 已删，程序回执形状恒为空"
-    )
-    annotation_chapter_id: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, comment="退场列：agent work 已删，程序回执形状恒为空"
-    )
-    diagnosis_session_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey(
-            "executions.execution_id", ondelete="RESTRICT", name="work_items_diagnosis_session_fkey", use_alter=True
-        ),
-        nullable=True,
-        comment="所属诊断整轮会话（executions 的 session 形状）",
-    )
-    program_run_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True, comment="程序所属运行")
-    program_chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="程序所属章节编号")
-    program_code: Mapped[str | None] = mapped_column(
-        String(50), nullable=True, comment="程序代码（章末核对/诊断失败保留）"
-    )
-    program_invocation_key: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="程序来源摘要身份（chapter:{chapter}:{digest}）"
-    )
-
-    def __repr__(self) -> str:
-        return f"<WorkItem(work_id={self.work_id}, role={self.role})>"
-
-
-class Execution(Base):
-    "执行表（真实 session 与真实 invocation 两类互斥形状）"
-
-    __tablename__ = "executions"
-    __table_args__ = (
-        CheckConstraint(
-            "status IS NULL OR status IN ('running', 'success', 'error', 'interrupted')",
-            name="ck_executions_status",
-        ),
-        CheckConstraint(
-            "role IS NULL OR role IN ('annotation', 'entity', 'event', 'metric', 'case', 'report')",
-            name="ck_executions_role",
-        ),
-        CheckConstraint(
-            "(session_run_id IS NOT NULL AND session_created_at IS NOT NULL"
-            " AND run_id IS NULL AND role IS NULL AND chapter_id IS NULL AND case_anchor IS NULL"
-            " AND work_id IS NULL AND attempt_number IS NULL AND started_at IS NULL"
-            " AND finished_at IS NULL AND status IS NULL AND error IS NULL)"
-            " OR (session_run_id IS NULL AND session_created_at IS NULL AND run_id IS NOT NULL"
-            " AND role IS NOT NULL AND work_id IS NULL AND attempt_number IS NOT NULL"
-            " AND started_at IS NOT NULL AND status IS NOT NULL"
-            " AND ((role IN ('annotation', 'entity', 'event', 'metric')"
-            " AND chapter_id IS NOT NULL AND case_anchor IS NULL)"
-            " OR (role = 'case' AND chapter_id IS NULL)"
-            " OR (role = 'report' AND chapter_id IS NULL AND case_anchor IS NULL)))",
-            name="ck_executions_shape",
-        ),
-        ForeignKeyConstraint(
-            ["session_run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="executions_session_run_fkey"
-        ),
-        ForeignKeyConstraint(["run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="executions_run_fkey"),
-        Index(
-            "uq_executions_annotation_attempt",
-            "run_id",
-            "chapter_id",
-            "role",
-            "attempt_number",
-            unique=True,
-            postgresql_where=sql_text("chapter_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_executions_case_attempt",
-            "run_id",
-            "case_anchor",
-            "role",
-            "attempt_number",
-            unique=True,
-            postgresql_where=sql_text("case_anchor IS NOT NULL"),
-        ),
-        {"comment": "执行表：真实整轮 session（诊断轮次）与真实 invocation 两类互斥形状（run 直接落行）"},
-    )
-
-    execution_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False),
-        primary_key=True,
-        comment="执行主键（session/invocation id）",
-        default=new_id,
-        autoincrement=False,
-    )
-    session_run_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True, comment="整轮会话所属运行")
-    session_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="整轮会话创建时间")
-    run_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False), nullable=True, comment="真实执行所属运行（invocation 形状必填）"
-    )
-    role: Mapped[str | None] = mapped_column(
-        String(20), nullable=True, comment="执行角色（annotation/entity/event/metric/case/report）"
-    )
-    chapter_id: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, comment="章内标注执行的章节编号（标注角色必填）"
-    )
-    case_anchor: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("book_cases.case_id", ondelete="RESTRICT", name="executions_case_anchor_fkey", use_alter=True),
-        nullable=True,
-        comment="案例办理锚（事件案例 id；案例角色必填）",
-    )
-    work_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("work_items.work_id", ondelete="CASCADE", name="executions_work_fkey"),
-        nullable=True,
-        comment="退场列：新执行不再登记 work（领域约束规则 1 仍读取本列）",
-    )
-    attempt_number: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="第几次尝试（1 起）")
-    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="开始时间")
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="结束时间")
-    status: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="执行终态")
-    error: Mapped[str | None] = mapped_column(Text, nullable=True, comment="执行失败信息")
-
-    def __repr__(self) -> str:
-        return f"<Execution(execution_id={self.execution_id}, status={self.status})>"
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
 
 
 class ChapterAnnotation(Base):
     "正式章节标注记录表"
 
-    __tablename__ = "chapter_annotations"
+    __tablename__ = "agent_annotations"
     __table_args__ = (
         CheckConstraint("emotional_valence IN (-2, -1, 0, 1, 2)", name="ck_chapter_annotations_valence"),
         CheckConstraint("role IN ('annotation', 'entity', 'event', 'metric')", name="ck_chapter_annotations_role"),
-        ForeignKeyConstraint(
-            ["run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="chapter_annotations_run_fkey"
-        ),
+        ForeignKeyConstraint(["run_id"], ["runs.id"], ondelete="CASCADE", name="chapter_annotations_run_fkey"),
         ForeignKeyConstraint(
             ["run_id", "chapter_id"],
             ["chapters.run_id", "chapters.chapter_id"],
             ondelete="CASCADE",
             name="chapter_annotations_chapter_fkey",
         ),
-        {"comment": "章节标注表：正式产物头与归属（run/章/角色），成功保存事实（每 execution 至多一份）"},
+        {"comment": "章节标注表：正式产物头与归属（run/章/角色），每个 Agent 至多一份正式产物"},
     )
 
     record_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), primary_key=True, comment="产物主键（原 output uuid）", default=new_id, autoincrement=False
+        Uuid(as_uuid=False), primary_key=True, comment="产物主键", default=new_id, autoincrement=False
     )
-    execution_id: Mapped[str] = mapped_column(
+    agent_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="chapter_annotations_execution_fkey"),
+        ForeignKey("agent.id", ondelete="RESTRICT", name="chapter_annotations_execution_fkey"),
         nullable=False,
         unique=True,
         comment="产生产物的真实执行",
@@ -236,8 +76,7 @@ class ChapterAnnotation(Base):
     run_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), nullable=False, comment="产出所属运行")
     chapter_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="产出所属章节编号")
     role: Mapped[str] = mapped_column(String(20), nullable=False, comment="产出角色（annotation/entity/event/metric）")
-    contract_version: Mapped[str] = mapped_column(String(64), nullable=False, comment="标注合同版本")
-    chapter_consolidation_version: Mapped[str] = mapped_column(String(64), nullable=False, comment="章末核对规则版本")
+    consolidation_digest: Mapped[str | None] = mapped_column(Text, nullable=True, comment="已核对的正式标注来源摘要")
     # 具名指标独立提交：实体/事件角色执行没有章级指标时各列为空
     summary: Mapped[str | None] = mapped_column(String, nullable=True, comment="章节摘要")
     emotional_valence: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="情绪效价（-2..2）")
@@ -282,16 +121,15 @@ class DiagnosisReport(Base):
     )
 
     report_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), primary_key=True, comment="报告主键（原 output uuid）", default=new_id, autoincrement=False
+        Uuid(as_uuid=False), primary_key=True, comment="报告主键", default=new_id, autoincrement=False
     )
-    session_id: Mapped[str] = mapped_column(
+    agent_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="diagnosis_reports_session_fkey"),
+        ForeignKey("agent.id", ondelete="RESTRICT", name="diagnosis_reports_session_fkey"),
         nullable=False,
         unique=True,
-        comment="所属诊断整轮会话（executions 的 session 形状）",
+        comment="产出报告的真实 Agent",
     )
-    contract_version: Mapped[str] = mapped_column(String(64), nullable=False, comment="诊断合同版本")
     diagnosis: Mapped[str | None] = mapped_column(Text, nullable=True, comment="整体诊断正文")
     value_logic_type: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="价值观类型")
     value_logic_reason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="价值观判断理由")
@@ -315,7 +153,7 @@ class DiagnosisReport(Base):
 class AnalysisAssessment(Base):
     "分析条目表（六类有限条目，恰一形状）"
 
-    __tablename__ = "analysis_assessments"
+    __tablename__ = "agent_assessments"
     __table_args__ = (
         CheckConstraint(
             "(record_id IS NOT NULL AND paragraph_id IS NOT NULL AND emotion IS NOT NULL"
@@ -421,7 +259,7 @@ class AnalysisAssessment(Base):
     )
     record_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("chapter_annotations.record_id", ondelete="CASCADE", name="analysis_assessments_record_fkey"),
+        ForeignKey("agent_annotations.record_id", ondelete="CASCADE", name="analysis_assessments_record_fkey"),
         nullable=True,
         comment="所属章节标注记录（逐段情绪）",
     )
