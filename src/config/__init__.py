@@ -12,7 +12,6 @@ from .schemas import (
     MetricsSettings,
     ModelsSettings,
     PathSettings,
-    ProgressSettings,
     TaskModelSettings,
     TopicModelSettings,
 )
@@ -26,7 +25,6 @@ __all__ = [
     "MetricsSettings",
     "ModelsSettings",
     "PathSettings",
-    "ProgressSettings",
     "Settings",
     "TaskModelConfig",
     "TaskModelSettings",

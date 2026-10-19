@@ -7,40 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.config.constants import STAGE_PROGRESS_MILESTONES
 from src.config.runtime_env import LtpEnvironment
-
-
-@dataclass
-class StageProgressRange:
-    """
-    阶段进度范围配置：定义每个阶段的进度百分比范围 [start, end]
-    """
-
-    start: float = 0.0
-    end: float = 100.0
-
-
-def _stage_progress_range(stage: str) -> StageProgressRange:
-    """从 STAGE_PROGRESS_MILESTONES 推导阶段区间：起点=上一阶段完成点，首阶段起点=0"""
-    stages = list(STAGE_PROGRESS_MILESTONES)
-    index = stages.index(stage)
-    start = 0.0 if index == 0 else STAGE_PROGRESS_MILESTONES[stages[index - 1]]
-    return StageProgressRange(start, STAGE_PROGRESS_MILESTONES[stage])
-
-
-@dataclass
-class ProgressSettings:
-    """
-    分析进度配置（默认值来自 constants.STAGE_PROGRESS_MILESTONES）
-    """
-
-    preprocess: StageProgressRange = field(default_factory=lambda: _stage_progress_range("preprocess"))
-    annotate: StageProgressRange = field(default_factory=lambda: _stage_progress_range("annotate"))
-    linguistic: StageProgressRange = field(default_factory=lambda: _stage_progress_range("linguistic"))
-    aggregate: StageProgressRange = field(default_factory=lambda: _stage_progress_range("aggregate"))
-    topic_model: StageProgressRange = field(default_factory=lambda: _stage_progress_range("topic_model"))
-    diagnose: StageProgressRange = field(default_factory=lambda: _stage_progress_range("diagnose"))
 
 
 @dataclass
@@ -60,7 +27,7 @@ class LdaSettings:
 class TopicShiftSettings:
     """主题变化候选计算配置
 
-    窗口大小、平滑方式和阈值均为版本化配置，不在代码中写死；
+    窗口大小、平滑方式和阈值均为配置，不在代码中写死；
     topic_shift_score 定义为以 2 为底、范围 [0, 1] 的 JS 散度。
     """
 
@@ -121,7 +88,7 @@ class TopicModelSettings:
     num_topics_max: int = 25
     num_topics_scaling_divisor: int = 30
     lda: LdaSettings = field(default_factory=LdaSettings)
-    # 主题变化候选配置（版本化参数）
+    # 主题变化候选配置（参数）
     topic_shift: TopicShiftSettings = field(default_factory=TopicShiftSettings)
 
 

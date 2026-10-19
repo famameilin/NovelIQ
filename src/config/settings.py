@@ -14,7 +14,6 @@ from .schemas import (
     ModelsSettings,
     ParagraphSettings,
     PathSettings,
-    ProgressSettings,
     TopicModelSettings,
     _parse_linguistic_settings,
     _parse_logging_settings,
@@ -37,7 +36,6 @@ class Settings:
     models: ModelsSettings = field(default_factory=ModelsSettings)
     logging: LoggingSettings = field(default_factory=LoggingSettings)
     paths: PathSettings = field(default_factory=PathSettings)
-    progress: ProgressSettings = field(default_factory=ProgressSettings)
     topic_model: TopicModelSettings = field(default_factory=TopicModelSettings)
     # 语言结构基础数据阶段（LTP/固定短语/Word2Vec）
     linguistic: LinguisticSettings = field(default_factory=LinguisticSettings)
