@@ -75,7 +75,7 @@ async def _run_diagnosis_agent(
     session: Storage,
     run_id: str,
     novel_id: str,
-    execution_id: str,
+    agent_id: str,
     novel_title: str | None = None,
     llm: Any | None = None,
     stream: AgentStream | None = None,
@@ -105,7 +105,7 @@ async def _run_diagnosis_agent(
                 session=domain_session,
                 run_id=run_id,
                 novel_id=novel_id,
-                execution_id=execution_id,
+                agent_id=agent_id,
                 novel_title=novel_title,
             )
         except BaseException:
@@ -117,17 +117,12 @@ async def _run_diagnosis_agent(
         raise DiagnosisAgentRunError("请从模型池指定诊断模型")
 
     def observer_factory(progress: Any) -> Any:
-        recorder = audit_recorder or AuditMessages(
-            active_bus, run_id, progress.key, progress.execution_id, progress.role
-        )
-        if hasattr(recorder, "sequence"):
-            recorder.sequence = progress.audit_sequence
+        recorder = audit_recorder or AuditMessages(active_bus, run_id, progress.key, progress.agent_id, progress.role)
         # 审计登记真实 invocation 要求会话身份已存在：派发时先登记整轮会话
-        domain.register_session_identity()
         context = build_invocation_context(
             run_id=run_id,
             task_type="diagnosis",
-            execution_id=progress.execution_id,
+            agent_id=progress.agent_id,
             attempt_number=1,
             model=model_id,
             case_anchor=None,
@@ -208,7 +203,7 @@ async def run_diagnosis_agent(
             session=session,
             run_id=run_id,
             novel_id=novel_id,
-            execution_id=session.new_id(),
+            agent_id=session.new_id(),
             novel_title=novel_title,
             llm=llm,
             stream=stream,

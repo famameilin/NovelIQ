@@ -1,10 +1,4 @@
-"""诊断工具面：角色决定写入范围，案例写入按调用 caseid 绑定来源与账本
-
-案例会话可用：write_event/write_conflict 与三类案例处置写入（write_entity/
-write_relation/write_dialogue，复用标注语义原形）；报告会话可用：write_arc/
-write_outcome/write_diagnosis。其余读取面与案例检索（search_cases/promise_case）
-两个角色共用。
-"""
+"诊断 Agent 的案例、业务写入和读取工具"
 
 from __future__ import annotations
 
@@ -25,7 +19,7 @@ from src.event_trees.organization import EventOrganizationDraft
 from src.storage import Storage
 
 from .evidence import DiagnosisEvidenceLedger
-from .inputs import ArcWriteItem, ConflictItem, EventWriteItem, OutcomeWriteItem, WriteItem
+from .inputs import ArcWriteItem, EventWriteItem, OutcomeWriteItem, WriteItem
 from .read_context import (
     DiagnosisDeclarationSource,
     DiagnosisGraphSource,
@@ -36,21 +30,12 @@ from .read_context import (
 )
 
 WRITE_NAMES = frozenset(
-    {
-        "write_diagnosis",
-        "write_event",
-        "write_arc",
-        "write_outcome",
-        "write_conflict",
-        "write_entity",
-        "write_relation",
-        "write_dialogue",
-    }
+    {"write_diagnosis", "write_event", "write_arc", "write_outcome", "write_entity", "write_relation", "write_dialogue"}
 )
 
-#: 需要按调用 caseid 绑定本次来源的写入面；读取面只做关联，不改来源
+#: 案例写入先核验承诺，读取与报告收尾不关联案例
 CASE_WRITE_NAMES = frozenset(
-    {"write_event", "write_arc", "write_outcome", "write_conflict", "write_entity", "write_relation", "write_dialogue"}
+    {"write_event", "write_arc", "write_outcome", "write_entity", "write_relation", "write_dialogue"}
 )
 
 
@@ -59,7 +44,7 @@ def _write_items(items: Sequence[WriteItem], handlers: dict[str, Any]) -> str:
     results: list[Any] = []
     failed: list[dict[str, Any]] = []
     for index, item in enumerate(items):
-        operation = getattr(item, "operation", "conflict")
+        operation = item.model_dump()["operation"]
         args = {key: getattr(item, key) for key in type(item).model_fields if key != "operation"}
         try:
             results.append(handlers[operation](**args))
@@ -72,7 +57,7 @@ def _write_items(items: Sequence[WriteItem], handlers: dict[str, Any]) -> str:
 
 
 def _case_write_tools(query: Any, binding: Any, graph: Any) -> list[Any]:
-    """人物/关系/对话案例处置复用标注语义写入原形，按调用 caseid 选择账本与图作者"""
+    """人物/关系/对话案例处置复用标注语义写入原形，核验 caseid 承诺后使用当前生产者账本与图作者"""
     from src.agents.diagnosis.case_write_tools import build_case_write_tools
 
     built = build_case_write_tools(query, binding)
@@ -118,7 +103,7 @@ def build_diagnosis_tools(
     organization_draft: EventOrganizationDraft | None = None,
     report_draft: dict[str, Any] | None = None,
     case_pool: Any = None,
-    execution_id: str = "",
+    agent_id: str = "",
     text_search: TextSearchService | None = None,
     case_binding: Any = None,
     case_writes_graph: Any | None = None,
@@ -128,17 +113,17 @@ def build_diagnosis_tools(
     from src.case_pool import CasePool
 
     ledger = evidence_ledger or DiagnosisEvidenceLedger()
-    draft = organization_draft or EventOrganizationDraft(session, run_id, execution_id)
+    draft = organization_draft or EventOrganizationDraft(session, run_id, agent_id)
     report = report_draft if report_draft is not None else {}
     if case_pool is None:
         case_pool = CasePool(run_id)
         case_pool.load_storage(session)
-    author = execution_id
+    author = agent_id
     case_pool.begin(author)
 
     @tool
     def write_event(items: Annotated[list[EventWriteItem], Field(min_length=1, max_length=300)]) -> str:
-        """批量提交声明核对、身份阶段判断、跨章事件、显式包含/其他关系或事件核对"""
+        """批量提交声明核对、完整事件身份判断、跨章事件、显式包含/其他关系或事件核对"""
         return _write_items(
             items,
             {
@@ -171,11 +156,6 @@ def build_diagnosis_tools(
         return _write_items(items, {"outcome": draft.register_outcome, "link": draft.link_event_outcome})
 
     @tool
-    def write_conflict(items: Annotated[list[ConflictItem], Field(min_length=1, max_length=300)]) -> str:
-        """批量保留冲突对象、各说法及各自证据；原冲突校验保持，不裁定唯一答案"""
-        return _write_items(items, {"conflict": draft.register_conflict})
-
-    @tool
     def write_diagnosis(analysis: AgentAnalysis | None = None, patch: AgentAnalysisPatch | None = None) -> str:
         """提交报告或明确修订，analysis 与 patch 恰选一项，失败不覆盖有效草稿"""
         if (analysis is None) == (patch is None):
@@ -193,7 +173,10 @@ def build_diagnosis_tools(
 
     @tool
     def read_metrics() -> str:
-        """读真实聚合指标与转折、高张力、伏笔、关系变化、图谱统计素材；不重算指标或吞系统故障"""
+        """读真实聚合指标与转折、高张力、伏笔、关系变化、图谱统计素材；不重算指标或吞系统故障
+
+        伏笔条目的 declaration_id 是来源声明，事件关联只能用同一项的 event_id；event_id 为空表示尚无正式事件身份
+        """
         from src.diagnosis.queries import DiagnosisQueries
 
         repo = DiagnosisQueries(session)
@@ -254,25 +237,15 @@ def build_diagnosis_tools(
     if role == "report":
         tools: list[Any] = [write_arc, write_outcome, write_diagnosis, read_metrics, read_topics, *common]
     else:
-        tools = [write_event, write_conflict, *common]
+        tools = [write_event, *common]
         if case_binding is not None and case_writes_graph is not None:
-            # 三类案例处置复用标注语义写入原形；来源与账本按调用 caseid 选择
+            # 三类案例处置复用标注语义写入原形；caseid 核验承诺，来源与账本归属当前生产者
             tools.extend(_case_write_tools(query, case_binding, case_writes_graph))
 
-    from src.case_pool.tool_binding import bind_caseid, current_case_call_id
-
-    def associate(*, caseid: Any, tool_name: str, receipt: dict[str, Any]) -> dict[str, Any]:
-        return case_pool.associate(
-            caseid,
-            author,
-            tool_name=tool_name,
-            call_id=current_case_call_id.get(),
-            receipt=receipt,
-            is_write=tool_name in WRITE_NAMES,
-        )
+    from src.case_pool.tool_binding import bind_caseid
 
     for candidate in tools:
         _forbid_undeclared_args(candidate)
         prepare = case_binding.select if case_binding is not None and candidate.name in CASE_WRITE_NAMES else None
-        bind_caseid(candidate, associate, prepare=prepare)
+        bind_caseid(candidate, prepare=prepare)
     return tools

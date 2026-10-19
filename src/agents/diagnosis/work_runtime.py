@@ -1,8 +1,8 @@
-"""诊断会话运行：案例会话自取未承诺案例办理，报告会话收尾，普通程序只管容量与顺序
+"""诊断会话运行：持续补位派发案例会话直到案例池归零，报告会话收尾
 
-没有派发单元、没有排队、没有中途补派：若干案例会话各自领取模型池容量并自行
-search_cases 取未承诺案例，promise 接手后直接写入完成，搜不到未承诺案例即结束；
-全部案例会话结束后，由一个报告会话完成叙事组织与全书报告。
+没有派发单元、没有排队：案例会话各自领取模型池容量并自行 search_cases 取未承诺案例，
+promise 接手后直接写入完成；会话用尽自身上限即结束，空出的并发位立即由新会话接手剩余案例。
+案例池归零后，由一个报告会话完成叙事组织与全书报告。
 每个会话做完自行保存一次：案例会话存案例产物，报告会话存叙事组织与报告。
 """
 
@@ -18,9 +18,6 @@ from src.model_pool.capacity import ModelElectionPool
 from src.model_pool.contracts import SelectionRequest, SelectionResult
 from src.storage import new_id
 
-#: 案例会话连续办理的回合上限：会话自行连续办理多个案例，用尽即结束
-CASE_SESSION_MAX_ROUNDS = 200
-
 #: 报告会话在模型池中的工作代号
 REPORT_SESSION_KEY = "diagnosis-report"
 
@@ -31,7 +28,7 @@ class SessionProgress:
 
     key: str
     role: str
-    execution_id: str
+    agent_id: str
     rounds: int = 0
     physical_sequence: int = 0
     audit_sequence: int = 0
@@ -48,9 +45,11 @@ class DiagnosisWorkContext:
 
 
 class DiagnosisWorkDomain(Protocol):
-    """领域只暴露会话上下文、会话保存与报告结果"""
+    """领域只暴露会话上下文、案例池进度、会话保存与报告结果"""
 
-    def build_session_context(self, role: str, execution_id: str, observer: Any) -> DiagnosisWorkContext: ...
+    def build_session_context(self, role: str, agent_id: str, observer: Any) -> DiagnosisWorkContext: ...
+
+    def case_counts(self) -> tuple[int, int]: ...
 
     def save_session_progress(self, author: str, role: str) -> None: ...
 
@@ -137,11 +136,11 @@ class DiagnosisWorkScheduler:
         )
         selected = await future
         self._waiting.pop(key, None)
-        progress = SessionProgress(key=key, role=role, execution_id=new_id())
+        progress = SessionProgress(key=key, role=role, agent_id=new_id())
         observer = self.observer_factory(progress)
         release_capacity = False
         try:
-            context = self.domain.build_session_context(role, progress.execution_id, observer)
+            context = self.domain.build_session_context(role, progress.agent_id, observer)
             llm = self.llm_factory(selected.model_id)
             work_stream = None
             if self.stream is not None:
@@ -149,11 +148,11 @@ class DiagnosisWorkScheduler:
 
                 # 流作用域=会话角色（case/report），各会话的并行流由各自 stream_id 区分
                 async def emit(event: Any) -> None:
-                    event.sub_stage, event.invocation_id = role, progress.execution_id
+                    event.sub_stage, event.invocation_id = role, progress.agent_id
                     event.stage = "diagnose"
                     await self.stream._emitter(event)
 
-                work_stream = AgentStream(emit, sub_stage=role, stream_id=progress.execution_id)
+                work_stream = AgentStream(emit, sub_stage=role, stream_id=progress.agent_id)
             # 会话图按标注三节点族构建（复用 annotation/agent_graph 的同一图结构）
             from src.agents.annotation.agent_graph import build_agent_graph
             from src.agents.annotation.agent_ir import AgentAnnotation
@@ -194,7 +193,7 @@ class DiagnosisWorkScheduler:
                 raise RuntimeError(str(final_state["error"]))
             # 会话做完保存一次：案例与报告产物随各自会话落库，失败轮次不重做已保存内容
             await self.audit_barrier()
-            await asyncio.to_thread(self.domain.save_session_progress, progress.execution_id, role)
+            await asyncio.to_thread(self.domain.save_session_progress, progress.agent_id, role)
             # 成功出口同样登记执行终态：执行行不能停在 running 等孤儿清扫反推
             audit_context = getattr(observer, "_context", None)
             if recorder is not None and isinstance(audit_context, dict):
@@ -223,7 +222,7 @@ class DiagnosisWorkScheduler:
                         target=self.pool.address,
                         run_id=self.run_id,
                         work_id=key,
-                        invocation_id=progress.execution_id,
+                        invocation_id=progress.agent_id,
                         payload={"reservation_id": selected.reservation_id, "outcome": "released"},
                     )
                 )
@@ -259,6 +258,23 @@ class DiagnosisWorkScheduler:
             self.bus.unsubscribe(self.pool.assignment_topic, assignments)
 
     async def _run_work(self) -> Any:
-        await self._wave([(f"case:{index}", "case") for index in range(self.case_sessions)])
+        # 案例池未归零就持续补位派发：会话用尽回合结束、空出并发位时立即由新会话接手剩余案例
+        tasks: set[asyncio.Task[None]] = set()
+        serial = 0
+        try:
+            while True:
+                while len(tasks) < self.case_sessions and self.domain.case_counts()[0] > 0:
+                    serial += 1
+                    tasks.add(asyncio.create_task(self._session(f"case:{serial}", "case")))
+                if not tasks:
+                    break
+                done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         await self._wave([(self.report_key, "report")])
         return self.domain.analysis_result()

@@ -116,17 +116,6 @@ class DiagnosisOrganizationSource:
             return [item.model_dump(mode="json") for item in self.draft.arcs.values()]
         if kind == "outcome":
             return [item.model_dump(mode="json") for item in self.draft.outcomes.values()]
-        if kind == "conflict":
-            rows: list[dict[str, Any]] = []
-            offset = 0
-            while True:
-                page = self.draft.read_conflicts(offset=offset, limit=100)
-                rows.extend(page["items"])
-                if len(page["items"]) < 100:
-                    by_id = {item["conflict_id"]: item for item in rows}
-                    by_id.update({key: item.model_dump(mode="json") for key, item in self.draft.conflicts.items()})
-                    return list(by_id.values())
-                offset += 100
         raise ValueError(f"无诊断对象 kind={kind}")
 
     def search(
@@ -148,7 +137,6 @@ class DiagnosisOrganizationSource:
                         "event_id",
                         "arc_id",
                         "outcome_id",
-                        "conflict_id",
                         "title",
                         "problem",
                         "summary",
@@ -168,7 +156,7 @@ class DiagnosisOrganizationSource:
         ]
 
     def read(self, kind: ObjectKind, identifier: str) -> dict[str, Any]:
-        id_field = {"event": "event_id", "arc": "arc_id", "outcome": "outcome_id", "conflict": "conflict_id"}[kind]
+        id_field = {"event": "event_id", "arc": "arc_id", "outcome": "outcome_id"}[kind]
         item = next((row for row in self._rows(kind) if row[id_field] == identifier), None)
         if item is None:
             raise ValueError(f"kind={kind} 的本任务对象不存在: {identifier}")

@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.event_trees.organization import ConflictClaim, NarrativeDescription, NarrativeTitle, OrganizationEvidence
+from src.event_trees.organization import NarrativeDescription, NarrativeTitle, OrganizationEvidence
 
 
 class WriteItem(BaseModel):
@@ -17,15 +17,15 @@ class WriteItem(BaseModel):
 
 class IdentityItem(WriteItem):
     operation: Literal["identity"]
-    key: str
+    key: str = Field(
+        description="本执行的局部键：同一执行内唯一（不随章节、批次重置），重试沿用同一键；建议由声明 id 派生"
+    )
     title: str
     problem: str
     summary: str
     event_type: str
     status: Literal["ongoing", "resolved"]
     declaration_ids: list[str] = Field(min_length=1)
-    stage_order: list[str] = Field(min_length=1)
-    current_declaration_id: str
     reason: str = Field(min_length=1)
     evidence: list[OrganizationEvidence]
     progress: str | None = None
@@ -33,7 +33,7 @@ class IdentityItem(WriteItem):
 
 class EventItem(WriteItem):
     operation: Literal["event"]
-    key: str
+    key: str = Field(description="本执行的局部键：同一执行内唯一（不随章节、批次重置），重试沿用同一键")
     title: str
     problem: str
     summary: str
@@ -138,14 +138,6 @@ class OutcomeLinkItem(WriteItem):
     outcome_id: str
     reason: str
     evidence: list[OrganizationEvidence]
-
-
-class ConflictItem(WriteItem):
-    key: str
-    subject_kind: Literal["event", "declaration", "fact"]
-    subject_id: str
-    claims: list[ConflictClaim]
-    reason: str
 
 
 EventWriteItem = Annotated[

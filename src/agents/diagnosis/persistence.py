@@ -8,7 +8,7 @@ from typing import Any, cast
 from loguru import logger
 
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import CONTRACT_VERSION, NarrativeOrganization, snapshot_digest
+from src.event_trees.organization import NarrativeOrganization, snapshot_digest
 from src.storage import Storage
 
 
@@ -31,9 +31,9 @@ def _character_entity_ids(session: Storage, run_id: str, names: list[str]) -> di
     return resolved
 
 
-def _published_report(session: Storage, run_id: str) -> Any:
+def _existing_report(session: Storage, run_id: str) -> Any:
     """本 run 的正式诊断报告（经整轮会话取得运行归属）；多份报告是数据错误"""
-    rows = list(session.reads.agents_diagnosis_persistence_published_report_1(run_id))
+    rows = list(session.reads.agents_diagnosis_persistence_existing_report_1(run_id))
     if len(rows) > 1:
         raise ValueError("同一运行存在多份正式诊断报告，禁止覆盖或挑选其中一份")
     return rows[0] if rows else None
@@ -56,8 +56,8 @@ def _verify_replay(session: Storage, run_id: str, report: Any, analysis: AgentAn
         or report.structure_snapshot != organization.structure_snapshot
     ):
         raise ValueError("已发布诊断的冻结快照与本次提交不一致，禁止覆盖")
-    published = set(_run_events(session, run_id))
-    if published != {item.event_id for item in organization.events}:
+    saved = set(_run_events(session, run_id))
+    if saved != {item.event_id for item in organization.events}:
         raise ValueError("已发布完整事件身份与本次提交不一致，禁止覆盖")
 
 
@@ -70,14 +70,23 @@ def _save_case_writes(
     from src.fact_graph.contributions import FactContribution
 
     fact_inputs, changes = [], []
-    for _case_id, (writer, author) in sorted(writers.items()):
+    by_author: dict[str, list[Any]] = {}
+    for writer, author in writers.values():
+        by_author.setdefault(author, []).append(writer)
+    for author, authored in sorted(by_author.items()):
+        dialogues: dict[int, Any] = {}
+        for writer in authored:
+            for index, value in writer.dialogue.written_dialogues.items():
+                if index in dialogues and dialogues[index] != value:
+                    raise ValueError("同一 Agent 对同一对话提交了不同归因")
+                dialogues[index] = value
         facts = graph.drain_ops(author)
         keys: set[str] = set()
         for op in facts["entity_ops"]:
             keys.add(graph.entity_key(op["name"], op["entity_type"]))
         for op in facts["relation_assert_ops"]:
             keys.update((str(op["from_entity"]), str(op["to_entity"])))
-        for item in writer.dialogue.written_dialogues.values():
+        for item in dialogues.values():
             if item.speaker:
                 keys.add(graph.entity_key(item.speaker, "character"))
         facts["entities"] = {
@@ -89,18 +98,16 @@ def _save_case_writes(
             for key in sorted(keys)
         }
         graph.reference_entities(author, list(facts["entities"].values()))
-        frozen = FactContribution(
-            run_id, author, int(writer.current_chapter_id), (), json.dumps(facts, ensure_ascii=False), "[]"
-        )
+        frozen = FactContribution(run_id, author, None, (), json.dumps(facts, ensure_ascii=False), "[]")
         fact_inputs.append(graph.prepare_save(frozen))
-        for index, item in sorted(writer.dialogue.written_dialogues.items()):
+        for index, item in sorted(dialogues.items()):
             candidate = candidates[index - 1] if 0 < index <= len(candidates) else None
             if candidate is None:
                 raise ValueError(f"write_dialogue candidate_index={index} 超出候选目录")
             changes.append(
                 {
                     "candidate_key": candidate.candidate_key,
-                    "current_attribution_execution_id": author,
+                    "current_attribution_agent_id": author,
                     "speaker_entity_id": graph.entity_id(item.speaker, "character") if item.speaker else None,
                     "tone": str(item.tone) if item.tone else None,
                     "is_inner_monologue": item.verdict == "inner_monologue",
@@ -125,21 +132,19 @@ def save_diagnosis_result(
     from src.event_trees.organization import run_declaration_ids, validate_organization
     from src.storage import new_id
     from src.storage.records.cases import CaseSave
-    from src.storage.records.diagnosis_save import DiagnosisPublish
+    from src.storage.records.diagnosis_save import DiagnosisReportSave
 
     organization = analysis.narrative_organization
-    if organization is None or not organization.source_execution_id:
+    if organization is None or not organization.source_agent_id:
         raise ValueError("诊断结果缺少全书叙事组织或真实会话身份")
-    existing = _published_report(session, run_id)
+    existing = _existing_report(session, run_id)
     if existing is not None:
         _verify_replay(session, run_id, existing, analysis)
         from src.event_trees.read.organization import EventTreeQuery
 
         EventTreeQuery(session, run_id).fetch()
         if case_pool is not None:
-            warnings = session.diagnosis.saved_case_warnings(run_id, existing.report_id)
             for author in sorted(case_pool.executions):
-                case_pool.save_warnings[author] = warnings.get(author, [])
                 case_pool.confirm(author)
         return
     validate_organization(session, run_id, organization)
@@ -160,8 +165,7 @@ def save_diagnosis_result(
     )
     record = {
         "report_id": report_id,
-        "session_id": organization.source_execution_id,
-        "contract_version": CONTRACT_VERSION,
+        "agent_id": organization.source_agent_id,
         "identity_snapshot": organization.identity_snapshot,
         "structure_snapshot": organization.structure_snapshot,
         **{key: getattr(analysis, key) for key in keys},
@@ -204,16 +208,16 @@ def save_diagnosis_result(
                 {
                     "created_case_ids": sorted(case_pool.created.get(author, set())),
                     "registrations": {key: case_pool.cases[key] for key in case_pool.registrations.get(author, set())},
-                    "deliveries": case_pool.deliveries.get(author, []),
+                    "promises": case_pool.promises_for(author),
                 },
                 ensure_ascii=False,
             ),
         )
         for author in authors
     )
-    request = DiagnosisPublish(
+    request = DiagnosisReportSave(
         run_id,
-        organization.source_execution_id,
+        organization.source_agent_id,
         record,
         tuple(assessments),
         organization.model_dump_json(),
@@ -222,7 +226,7 @@ def save_diagnosis_result(
         updates,
         cases,
     )
-    result = session.diagnosis.publish(request)
+    result = session.diagnosis.save_report(request)
     if result["warnings"]:
         logger.warning("diagnosis case save warnings: {}", result["warnings"])
     if case_pool is not None:
