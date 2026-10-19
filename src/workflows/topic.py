@@ -2,10 +2,10 @@
 
 paragraphs 为唯一事实源；训练排除短段，推断覆盖所有有 token 段落。
 结果按冻结结构落库：
-- analysis_runs.lda_*：模型与管线版本、拆列后的实际 LDA 参数、语料摘要
+- runs.lda_*：模型与实际参数、拆列后的实际 LDA 参数、语料摘要
   （模型 key/artifact 路径/推断段落数为合同投影，不落列）
 - paragraph_metrics.inference_*：每个段落一行推断状态与 token 分母
-- paragraph_topics：完整 K 维主题分布（top_n 只属于 API 展示裁剪）
+- lda_paragraph_topics：完整 K 维主题分布（top_n 只属于 API 展示裁剪）
 
 固定推断说明由固定状态合同投影，工作流只传状态。
 """
@@ -26,7 +26,6 @@ from src.topic import (
     INFERENCE_EMPTY_AFTER_PREPROCESS,
     INFERENCE_REASON_TEXTS,
     TOPIC_MODEL_KEY,
-    TOPIC_PIPELINE_VERSION,
 )
 
 
@@ -62,8 +61,8 @@ async def run_topic_model(
 ) -> tuple[int, int]:
     """执行主题建模，训练用达标段落，推断覆盖所有有 token 段落。
 
-    写库顺序：LDA 实际构建列 analysis_runs.lda_* → 段落推断状态
-    paragraph_metrics.inference_* → 完整分布 paragraph_topics；同 run 重跑整体覆盖
+    写库顺序：LDA 实际构建列 runs.lda_* → 段落推断状态
+    paragraph_metrics.inference_* → 完整分布 lda_paragraph_topics；同 run 重跑整体覆盖
     （推断列全量 upsert、主题行先删后插），不允许新旧结果混合。
     取消在段落推断的批边界生效：LDA 训练与推断是库内调用，不能中途中断
     """
@@ -210,7 +209,6 @@ async def run_topic_model(
         model={
             "model_key": TOPIC_MODEL_KEY,
             "library_version": _gensim_version(),
-            "pipeline_version": TOPIC_PIPELINE_VERSION,
             "num_topics": topic_model.num_topics,
             "parameters": parameters,
             "dictionary_size": len(topic_model.dictionary),

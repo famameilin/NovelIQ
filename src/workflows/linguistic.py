@@ -1,24 +1,23 @@
 """语言结构基础数据阶段
 
-执行顺序与落库契约（逐段事实落 linguistic_spans / linguistic_arcs /
+执行顺序与落库契约（逐段事实落 paragraph_spans / paragraph_arcs /
 paragraph_features / paragraph_metrics）：
 1. LTP 词法/句法/实体/语义：analyze_paragraph_batch（cws/pos/ner/dep/sdp）→
-   linguistic_spans 词元行（token_index/raw_pos）+ linguistic_arcs
+   paragraph_spans 词元行（token_index/raw_pos）+ paragraph_arcs
    （dep:*/sdp:*，source_ordinal 保留源顺序）+ paragraph_features 的五类
    句式计数行；完成事实与共享句数写 paragraph_metrics
-   （linguistic_completed_at/sentence_count）；NER 候选写 linguistic_spans
+   （linguistic_completed_at/sentence_count）；NER 候选写 paragraph_spans
    的 raw_entity_type 行（非图谱事实；词面与归一类型读取投影）
-2. 固定短语：唯一 fixed_phrases 词表匹配 → linguistic_spans 的
+2. 固定短语：唯一 fixed_phrases 词表匹配 → paragraph_spans 的
    phrase_match_kind 行（lexicon/four_char_candidate）+ 完成事实
-   （phrase_completed_at）；词表来源与计量合同登记在 analysis_runs
-   （fixed_phrase_lexicon_key/fixed_phrase_contract_version）
+   （phrase_completed_at）；词表来源与计量合同登记在 runs
 3. 情绪事件与 mNEG 修正（ltp.enabled 时生效）：
    情绪词典只做谓词极性候选标记，持有者/对象/否定/程度取 sdp 的 AGT/DATV/
    mNEG/mDEPD；mNEG 接管词典否定翻转后回写 paragraph_metrics 情绪计数并
    整卷重算段落曲线（词典窗口规则基线与 mNEG 对照计数由读取投影按同一
    正式词元/弧重算，不落第二份可违反守恒的副本）
 4. Word2Vec（可开关）：预训练词向量初始化 + 本书语料微调（warm-start）→
-   analysis_runs 的 w2v_* 实际构建列 + paragraph_features 的 pos_vector 行
+   runs 的 w2v_* 实际构建列 + paragraph_features 的 pos_vector 行
 
 同 run 重跑先清后插（仓储层），不允许新旧结果混合；LTP 关闭时词法
 阶段跳过（各语言关系为空），Word2Vec 关闭时不写 w2v_* 列。
@@ -79,28 +78,14 @@ async def run_linguistic(
         from src.lexicons import LexiconRegistry
         from src.lexicons.tables import NEGATIVE_TERMS, POSITIVE_TERMS
         from src.linguistic import (
-            ENTITY_TYPE_MAP,
-            POS_GROUP_MAP,
             analyze_paragraph_batch,
             extract_emotion_events,
-            ltp_pipeline_contract,
             match_fixed_phrases,
             mneg_corrected_counts,
         )
 
         registry = LexiconRegistry()
         terms = registry.get(LEXICON_FILES["fixed_phrases"])
-
-        # 3NF：先落 run 级 LTP 管线/模型合同（归一映射是版本化代码
-        # 合同，不镜像成数据库表；读取侧按 pipeline_version 投影 pos_group/类型）
-        pipeline_version, model_key = ltp_pipeline_contract()
-        ling_repo.ensure_ltp_contract(
-            run_id,
-            pipeline_version=pipeline_version,
-            model_key=model_key,
-            pos_mappings=POS_GROUP_MAP,
-            entity_type_mappings=ENTITY_TYPE_MAP,
-        )
 
         # B 批：词典情绪计数对照基线（命中集与 preprocess 同源，
         # 读 paragraph_metrics 现值作为窗口规则口径）
@@ -170,7 +155,7 @@ async def run_linguistic(
                 )
                 for entity in result.entities:
                     # 3NF：只写候选区间与原始类型；词面按原文切片、
-                    # 归一类型按版本合同、来源与空 confidence 按语言合同投影
+                    # 归一类型按固定映射、来源与空 confidence 按语言合同投影
                     entity_rows.append(
                         {
                             "run_id": run_id,
@@ -300,7 +285,7 @@ def _apply_paragraph_boundary_scores(
 ) -> int:
     """段落级监督（按书边界）：全书自选段标签 → 岭回归边界 → 逐段打分
 
-    链路：analysis_assessments 逐段情绪标签读全书标签 → paragraph_features 的
+    链路：agent_assessments 逐段情绪标签读全书标签 → paragraph_features 的
     semantic_vector 行取全书段落向量（preprocess 落库）→ fit_emotion_boundary
     现算该书线性边界 → 全书逐段打分回写 paragraph_metrics 的
     boundary_pos_score_sum / boundary_neg_score_sum；跨书曲线口径不同不可比。

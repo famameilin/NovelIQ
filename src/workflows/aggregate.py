@@ -154,10 +154,6 @@ async def run_aggregate(
     from src.utils.cancellation import check_cancelled
 
     start_time = time.time()
-    # 改短事务版边界检查：编排器 session 是长活事务，在其上取 FOR SHARE
-    # 会把 analysis_runs 行锁持有整个阶段，饿死任务心跳的 UPDATE（详见
-    # require_released_cutoff_short docstring）
-    pass
 
     if not is_annotate_complete(session, run_id):
         raise ValueError("必需角色 work 尚未全部成功保存，不能聚合")

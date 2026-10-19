@@ -22,7 +22,6 @@ from src.work.annotation_work import WorkReceipt, annotation_work_id, required_r
 from src.work.chapter_pool import ChapterWorkerPool
 from src.work.policy import completed_chapters
 from src.work.queries import fetch_annotation_role_records
-from src.workflows.progress import stage_progress_percent
 
 
 def _load_work(session_factory: Callable[[], Storage], run_id: str) -> tuple[list[WorkReceipt], set[int]]:
@@ -148,28 +147,6 @@ async def run_annotate(
             progress_session = factory()
             states = await asyncio.to_thread(fetch_annotation_role_records, progress_session, run_id)
             completed = completed_chapters(states)
-            current = len(completed)
-            invocation_id = next(
-                state.invocation_id
-                for state in states
-                if state.chapter_id == receipt.payload["chapter_id"] and state.role == receipt.payload["role"]
-            )
-            await bus.request(
-                Message(
-                    topic="agent.saved_progress",
-                    source=f"queue:{run_id}",
-                    target=agent.address,
-                    run_id=run_id,
-                    work_id=receipt.work_id,
-                    invocation_id=invocation_id,
-                    payload={
-                        "current": current,
-                        "total": total,
-                        "percent": stage_progress_percent("annotate", current, total),
-                        "sub_percent": current / total * 100,
-                    },
-                )
-            )
             chapter_id = receipt.payload["chapter_id"]
             if chapter_id in completed and chapter_id not in retained:
                 await consolidate(chapter_id)
