@@ -184,7 +184,6 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
   const topicModel = {
     model_key: 'gensim-lda',
     library_version: '4.4.0',
-    pipeline_version: '1.0',
     num_topics: topics.length,
     artifact_key: 'models/topic/layout-test',
   };

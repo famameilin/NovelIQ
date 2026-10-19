@@ -1,7 +1,6 @@
 import { buildScaleBook } from "../src/mocks/eventTreeScale";
 import { test, expect, type Page } from "@playwright/test";
 import { narrativeResponse } from "../src/mocks/narrativeData";
-import { EVENT_TREE_CONTRACT_VERSION } from "../src/api/narrativeTypes";
 
 const novelId = "narrative-fixture", taskId = "task-a";
 const url = (page: "timeline" | "event-trees") => `/novels/${novelId}/${page}?task_id=${taskId}`;
@@ -30,7 +29,7 @@ async function installFixtures(page: Page, status = "completed") {
   });
 }
 
-const treeKey = `${novelId}:run-a:event-trees:${EVENT_TREE_CONTRACT_VERSION}`;
+const treeKey = `${novelId}:run-a:event-trees`;
 for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
   test(`桌面事件树、卡片和独立状态 ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
@@ -203,7 +202,6 @@ for (const { scale, width, height } of [
         const arc = book.arcs.find(item => item.arc_id === link.arc_id)!;
         return { arc_id: arc.arc_id, title: arc.title, kind: arc.kind, role: link.role, reason: link.reason };
       });
-      return route.fulfill({ json: { kind: "event", ...event, run_id: book.run_id, progress: 0.5, arcs, characters: [], direct_children: [], evidence: [], evidence_scope: "paragraph", source_chapters: [], ancestry: [], revision_id: `revision:${eventId}`, relations: [] } });
     });
     await page.goto(url("event-trees"));
     const canvas = page.getByLabel("事件树画布");
