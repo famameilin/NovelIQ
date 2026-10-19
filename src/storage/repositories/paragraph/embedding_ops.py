@@ -7,11 +7,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pgvector.sqlalchemy import HALFVEC
-from sqlalchemy import cast, delete, func, insert, select, update
+from sqlalchemy import cast, delete, func, insert, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.storage.models import AnalysisRun, Chapter, Paragraph, ParagraphFeature
+from src.storage.models import Chapter, Paragraph, ParagraphFeature
 from src.storage.records.embedding_ops import ParagraphEmbeddingRow, SimilarParagraphRow
 from src.storage.repositories.paragraph.reader import join_chapter_body, paragraph_projection
 from src.storage.vector_schema import hnsw_index_uses_halfvec
@@ -34,7 +34,6 @@ def insert_paragraph_embeddings(
             ParagraphFeature.feature_code == FEATURE_SEMANTIC_VECTOR,
         )
     )
-    session.execute(update(AnalysisRun).where(AnalysisRun.run_id == run_id).values(embedding_model_key=None))
     if not materialized:
         return 0
     if embedding_dimension is None or embedding_dimension <= 0:
@@ -50,7 +49,6 @@ def insert_paragraph_embeddings(
             "paragraph embedding 写入失败：settings.models.paragraph_embedding.model 未配置，"
             f"无法登记运行模型合同 run_id={run_id}"
         )
-    session.execute(update(AnalysisRun).where(AnalysisRun.run_id == run_id).values(embedding_model_key=str(model_key)))
     created_at = datetime.now(UTC).replace(tzinfo=None)
     session.execute(
         insert(ParagraphFeature),

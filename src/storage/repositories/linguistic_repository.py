@@ -2,15 +2,15 @@
 语言结构领域仓储
 
 语言面落点：
-- linguistic_spans：词元（token_index/raw_pos）、NER（raw_entity_type）、固定短语
+- paragraph_spans：词元（token_index/raw_pos）、NER（raw_entity_type）、固定短语
   （phrase_match_kind）三种互斥区间的唯一事实表；词面按原文切片，POS/NER 归一
-  由版本化代码合同（POS_GROUP_MAP/ENTITY_TYPE_MAP）投影
-- linguistic_arcs：依存（dep:*，单头，ROOT 以 head_span_id 为空表达）与语义依存
+  由固定代码映射（POS_GROUP_MAP/ENTITY_TYPE_MAP）投影
+- paragraph_arcs：依存（dep:*，单头，ROOT 以 head_span_id 为空表达）与语义依存
   （sdp:*，多头多标签）的有序弧；source_ordinal 保留各层段落内真实源顺序
 - paragraph_features：句式五类计数与 POS 分组向量（pos_vector:<group>）等封闭计算种类
 - paragraph_metrics：语言完成事实 linguistic_completed_at/phrase_completed_at、
   共享句数 sentence_count 与边界监督观测（boundary_*_score_sum）
-- analysis_runs：run 级 LTP 合同、固定短语合同与 w2v_* 构建事实
+- runs：run 级 LTP 合同、固定短语合同与 w2v_* 构建事实
 
 存储的 token_index 为 0 起词元序号（冻结模型合同）；读取投影转回 LTP 原生
 1 起坐标（ROOT=0）。派生量（词长分组、POS 分组计数、依存统计、词典与 mNEG
@@ -30,15 +30,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapper, Session
 
-from src.config.constants.contracts import FIXED_CONTRACT_VERSION
 from src.storage.ids import new_id
 from src.storage.models import (
-    AnalysisRun,
     LinguisticArc,
     LinguisticSpan,
     Paragraph,
     ParagraphFeature,
     ParagraphMetric,
+    Run,
 )
 from src.storage.repositories.base import BaseRepository
 
@@ -90,56 +89,8 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
         super().__init__(session)
 
     # ------------------------------------------------------------------
-    # 运行合同（analysis_runs 的 ltp_*/fixed_phrase_* 列）
+    # 语言结构产出
     # ------------------------------------------------------------------
-
-    def ensure_ltp_contract(
-        self,
-        run_id: str,
-        *,
-        pipeline_version: str,
-        model_key: str,
-        pos_mappings: Mapping[str, str] | None = None,
-        entity_type_mappings: Mapping[str, str | None] | None = None,
-    ) -> None:
-        "登记 run 实际使用的 LTP 管线/模型合同"
-        self.session.execute(
-            update(AnalysisRun)
-            .where(AnalysisRun.run_id == run_id)
-            .values(
-                contract_version=FIXED_CONTRACT_VERSION,
-                ltp_pipeline_version=pipeline_version,
-                ltp_model_key=model_key,
-            )
-        )
-
-    def ensure_phrase_contract(
-        self,
-        run_id: str,
-        *,
-        lexicon_key: str | None,
-        contract_version: str = FIXED_CONTRACT_VERSION,
-    ) -> None:
-        "登记 run 的固定短语词表来源与计量合同版本（运行内唯一来源）"
-        self.session.execute(
-            update(AnalysisRun)
-            .where(AnalysisRun.run_id == run_id)
-            .values(
-                fixed_phrase_lexicon_key=lexicon_key,
-                fixed_phrase_contract_version=contract_version if lexicon_key is not None else None,
-            )
-        )
-
-    def fetch_run_contract(self, run_id: str) -> Row | None:
-        "读取 run 的语言相关合同列（LTP/短语/w2v 全部在 analysis_runs 一行）"
-        return self.session.execute(
-            select(
-                AnalysisRun.ltp_pipeline_version,
-                AnalysisRun.ltp_model_key,
-                AnalysisRun.fixed_phrase_lexicon_key,
-                AnalysisRun.fixed_phrase_contract_version,
-            ).where(AnalysisRun.run_id == run_id)
-        ).one_or_none()
 
     # ------------------------------------------------------------------
     # 段落语言结构：spans（词元）+ arcs（dep/sdp）+ 句式特征 + 完成事实
@@ -425,7 +376,7 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
         return len(span_rows)
 
     def fetch_entities(self, run_id: str) -> Sequence[SimpleNamespace]:
-        "实体候选投影：词面按原文切片，归一类型按版本化代码合同"
+        "实体候选投影：词面按原文切片，归一类型按固定代码映射"
         rows = self.session.execute(
             text(
                 """
@@ -435,7 +386,7 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
                        e.raw_entity_type,
                        e.start_char AS local_start_char,
                        e.end_char AS local_end_char
-                  FROM linguistic_spans e
+                  FROM paragraph_spans e
                   JOIN paragraphs p
                          ON p.run_id = e.run_id AND p.paragraph_id = e.paragraph_id
                  WHERE e.run_id = :run_id
@@ -497,8 +448,6 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
             for row in rows
         ]
         self.session.bulk_insert_mappings(cast(Mapper[Any], LinguisticSpan), span_rows)
-        if lexicon_keys:
-            self.ensure_phrase_contract(run_id, lexicon_key=next(iter(lexicon_keys)))
         return len(span_rows)
 
     def mark_phrase_completed(self, run_id: str, paragraph_ids: Sequence[int]) -> int:
@@ -537,7 +486,7 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
                        h.start_char AS local_start_char,
                        h.end_char AS local_end_char,
                        h.phrase_match_kind AS match_kind
-                  FROM linguistic_spans h
+                  FROM paragraph_spans h
                   JOIN paragraphs p
                          ON p.run_id = h.run_id AND p.paragraph_id = h.paragraph_id
                  WHERE h.run_id = :run_id
@@ -574,58 +523,31 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
         )
 
     # ------------------------------------------------------------------
-    # Word2Vec 合同与 POS 向量（analysis_runs.w2v_* + paragraph_features）
+    # Word2Vec 合同与 POS 向量（实际 Word2Vec 产物与 paragraph_features）
     # ------------------------------------------------------------------
 
     def insert_word2vec_model_run(self, run_id: str, row: dict[str, Any]) -> None:
-        "把本次 Word2Vec 实际构建写入 analysis_runs 的 w2v_* 具名列"
-        values = {
-            "w2v_dimension": row.get("embedding_dimension"),
-            "w2v_vocabulary_size": row.get("vocabulary_size"),
-            "w2v_source_uri": row.get("source_uri"),
-            "w2v_license_name": row.get("license_name"),
-            "w2v_training_document_count": row.get("training_document_count"),
-            "w2v_training_token_count": row.get("training_token_count"),
-            "w2v_window_size": row.get("window_size"),
-            "w2v_min_count": row.get("min_count"),
-            "w2v_epochs": row.get("epochs"),
-            "w2v_pretrained_vocabulary_size": row.get("pretrained_vocabulary_size"),
-            "w2v_created_at": row.get("created_at") or _utcnow(),
-        }
-        self.session.execute(update(AnalysisRun).where(AnalysisRun.run_id == run_id).values(**values))
+        "验证已保存词向量产物后标记完成"
+        from gensim.models import Word2Vec
+
+        from src.config.paths import resolve_run_model_dir
+
+        model = Word2Vec.load(str(resolve_run_model_dir(run_id, "word2vec") / "word2vec.model"))
+        if model.wv.vector_size != row["embedding_dimension"] or len(model.wv) != row["vocabulary_size"]:
+            raise ValueError("Word2Vec 产物属性校验失败")
+        self.session.execute(update(Run).where(Run.id == run_id).values(w2v_completed=True))
 
     def fetch_word2vec_model_run(self, run_id: str) -> SimpleNamespace | None:
-        "读取 run 的 Word2Vec 实际构建列（属性名保持原契约面）"
-        row = self.session.execute(
-            select(
-                AnalysisRun.w2v_dimension,
-                AnalysisRun.w2v_vocabulary_size,
-                AnalysisRun.w2v_source_uri,
-                AnalysisRun.w2v_license_name,
-                AnalysisRun.w2v_training_document_count,
-                AnalysisRun.w2v_training_token_count,
-                AnalysisRun.w2v_window_size,
-                AnalysisRun.w2v_min_count,
-                AnalysisRun.w2v_epochs,
-                AnalysisRun.w2v_pretrained_vocabulary_size,
-                AnalysisRun.w2v_created_at,
-            ).where(AnalysisRun.run_id == run_id)
-        ).one_or_none()
-        if row is None or row.w2v_dimension is None:
+        "从实际词向量产物读取模型属性"
+        if not self.session.scalar(select(Run.w2v_completed).where(Run.id == run_id)):
             return None
+        from gensim.models import Word2Vec
+
+        from src.config.paths import resolve_run_model_dir
+
+        model = Word2Vec.load(str(resolve_run_model_dir(run_id, "word2vec") / "word2vec.model"))
         return SimpleNamespace(
-            run_id=run_id,
-            embedding_dimension=int(row.w2v_dimension),
-            vocabulary_size=int(row.w2v_vocabulary_size or 0),
-            source_uri=row.w2v_source_uri,
-            license_name=row.w2v_license_name,
-            training_document_count=int(row.w2v_training_document_count or 0),
-            training_token_count=int(row.w2v_training_token_count or 0),
-            window_size=int(row.w2v_window_size or 0),
-            min_count=int(row.w2v_min_count or 0),
-            epochs=int(row.w2v_epochs or 0),
-            pretrained_vocabulary_size=int(row.w2v_pretrained_vocabulary_size or 0),
-            created_at=row.w2v_created_at,
+            run_id=run_id, embedding_dimension=int(model.wv.vector_size), vocabulary_size=len(model.wv)
         )
 
     def insert_pos_embeddings(self, run_id: str, rows: Sequence[dict[str, Any]]) -> int:

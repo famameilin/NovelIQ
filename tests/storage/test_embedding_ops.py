@@ -1,7 +1,7 @@
 """原文自然段语义向量存取测试（向量行在 paragraph_features）
 
 语义向量不再是独立表：向量行是 paragraph_features 的 semantic_vector 行，
-模型 key 写在 analysis_runs.embedding_model_key；HNSW 索引是按维度建立的
+模型 key 写在 runs.embedding_model_key；HNSW 索引是按维度建立的
 部分表达式索引，检索 SQL 必须带同维度谓词才能命中索引。
 """
 
@@ -12,9 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import func, select
 
-from src.config import settings
 from src.storage import new_id
-from src.storage.models import AnalysisRun, ParagraphFeature
+from src.storage.models import ParagraphFeature
 from src.storage.repositories.paragraph.embedding_ops import (
     FEATURE_SEMANTIC_VECTOR,
     ParagraphEmbeddingRow,
@@ -38,7 +37,7 @@ def _create_run_with_paragraph(db_session, text_of_paragraph: str) -> str:
 
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Embedding Test")
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
     chunks = [Chunk(index=0, text=text_of_paragraph, start=0, end=len(text_of_paragraph), chapter_id=1)]
     ChapterRepository(db_session).insert_chapter_texts(run_id, chunks)
     spans = [replace(span, token_count=len(tokenize(span.text))) for span in split_chunk_paragraphs(chunks)]
@@ -140,7 +139,7 @@ def test_insert_paragraph_embeddings_requires_measured_dimension() -> None:
 def test_search_and_insert_roundtrip_beyond_hnsw_dim_limit(db_session) -> None:
     """运行级验证：
     2001 维建 halfvec 部分表达式索引 + 写入 paragraph_features.semantic_vector
-    + 裸余弦检索全链路可用；模型 key 写 analysis_runs.embedding_model_key。
+    + 裸余弦检索全链路可用；模型 key 写 runs.embedding_model_key。
     """
     ensure_paragraph_embeddings_schema(db_session, 2001)
     assert hnsw_index_uses_halfvec(2001) is True
@@ -168,12 +167,6 @@ def test_search_and_insert_roundtrip_beyond_hnsw_dim_limit(db_session) -> None:
     ).one()
     assert feature_row.feature_code == FEATURE_SEMANTIC_VECTOR
     assert int(feature_row.dims) == 2001
-    # 运行模型合同：本次实际使用的嵌入模型 key
-    model_key = db_session.execute(
-        select(AnalysisRun.embedding_model_key).where(AnalysisRun.run_id == run_id)
-    ).scalar_one()
-    assert model_key == settings.models.paragraph_embedding.model
-
     results = search_similar_paragraphs(
         db_session,
         run_id=run_id,

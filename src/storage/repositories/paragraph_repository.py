@@ -110,7 +110,6 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         *,
         model_key: str,
         library_version: str,
-        pipeline_version: str,
         num_topics: int,
         parameters: dict[str, Any],
         dictionary_size: int,
@@ -118,13 +117,12 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         inference_paragraph_count: int,
         artifact_key: str,
     ) -> None:
-        "把 run 的 LDA 实际构建写入 analysis_runs.lda_*（model_key/artifact_key 为合同投影）"
+        "把 run 的 LDA 实际构建写入 runs.lda_*（model_key/artifact_key 为合同投影）"
         insert_topic_model_run(
             self.session,
             run_id,
             model_key=model_key,
             library_version=library_version,
-            pipeline_version=pipeline_version,
             num_topics=num_topics,
             parameters=parameters,
             dictionary_size=dictionary_size,
@@ -134,7 +132,7 @@ class ParagraphRepository(BaseRepository[Paragraph]):
         )
 
     def fetch_topic_model_run(self, run_id: str) -> TopicModelRunContract | None:
-        "读取 run 的 LDA 实际构建行（analysis_runs.lda_* + 合同投影）"
+        "读取 run 的 LDA 实际构建行（runs.lda_* + 合同投影）"
         return fetch_topic_model_run(self.session, run_id)
 
     def insert_paragraph_topic_inferences(

@@ -211,7 +211,7 @@ def test_fetch_chunk_text_returns_text_when_missing_returns_none(db_session) -> 
 
     novel_id = new_id()
     insert_test_novel(novel_id, session=db_session)
-    run_id = RunRepository(db_session).create_run(novel_id=novel_id, source_path="test", title="Keyword Test")
+    run_id = RunRepository(db_session).create_run(novel_id=novel_id)
     chunk_text = "灰衣人站在门外。\n屋内传来声响。\n"
     ChapterRepository(db_session).insert_chapter_texts(
         run_id,

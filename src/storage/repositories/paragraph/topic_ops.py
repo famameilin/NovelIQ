@@ -1,8 +1,8 @@
-"主题链路（ LDA 构建事实 /  inference /  paragraph_topics）"
+"主题链路（ LDA 构建事实 /  inference /  lda_paragraph_topics）"
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -11,14 +11,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
-from src.config import settings
 from src.config.paths import resolve_model_dir, resolve_project_root
 from src.storage.models import (
-    AnalysisRun,
     Chapter,
     Paragraph,
     ParagraphMetric,
     ParagraphTopic,
+    Run,
 )
 from src.storage.records.topic import TopicModelRunContract
 from src.storage.repositories.metric_inputs import (
@@ -47,67 +46,29 @@ def project_topic_artifact_key(run_id: str) -> str:
     return str(resolve_model_dir(run_id).relative_to(resolve_project_root()).as_posix())
 
 
-def _prior_scalar(raw: object, *, num_topics: int, field_name: str) -> float:
-    "LDA 先验拆列：数值直接取；字符串选择器按 gensim 合同取对称先验 1/K"
-    if isinstance(raw, str):
-        if raw not in {"auto", "symmetric"}:
-            raise ValueError(f"analysis_runs.lda_{field_name} 无法用标量表达的先验选择器: {raw!r}")
-        if num_topics <= 0:
-            raise ValueError(f"analysis_runs.lda_{field_name} 需要正数 num_topics，当前为 {num_topics}")
-        return 1.0 / float(num_topics)
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        raise ValueError(f"analysis_runs.lda_{field_name} 必须是数值或 auto/symmetric，当前为 {raw!r}")
-    return float(raw)
+def _load_topic_artifact(run_id: str):
+    "读取模型与词典并核对二者的词元编号"
+    from gensim.corpora import Dictionary
+    from gensim.models import LdaModel
+
+    directory = resolve_model_dir(run_id)
+    model = LdaModel.load(str(directory / "lda_model"))
+    dictionary = Dictionary.load(str(directory / "dictionary"))
+    if (
+        not dictionary
+        or len(dictionary) != len(model.id2word)
+        or any(model.id2word[index] != token for index, token in dictionary.items())
+    ):
+        raise ValueError("LDA 模型与词典产物不一致")
+    return model
 
 
-def _lda_parameter_columns(parameters: Mapping[str, Any], *, num_topics: int) -> dict[str, Any]:
-    "parameters 拆分列：缺失键按当前算法合同（settings）补齐；K 只在 lda_num_topics 列"
-    return {
-        "lda_passes": int(parameters.get("passes") or settings.topic_model.passes),
-        "lda_iterations": int(parameters.get("iterations") or settings.topic_model.iterations),
-        "lda_alpha": _prior_scalar(
-            parameters.get("alpha", settings.topic_model.lda.alpha), num_topics=num_topics, field_name="alpha"
-        ),
-        "lda_eta": _prior_scalar(
-            parameters.get("eta", settings.topic_model.lda.eta), num_topics=num_topics, field_name="eta"
-        ),
-        "lda_random_state": int(parameters.get("random_state") or settings.topic_model.lda.random_state),
-        "lda_batch_size": int(parameters.get("lda_batch_size") or settings.topic_model.lda.lda_batch_size),
-        "lda_minimum_probability": float(
-            parameters.get("minimum_probability", settings.topic_model.lda.minimum_probability)
-        ),
-    }
-
-
-def insert_topic_model_run(
-    session: Session,
-    run_id: str,
-    *,
-    model_key: str,
-    library_version: str,
-    pipeline_version: str,
-    num_topics: int,
-    parameters: dict[str, Any],
-    dictionary_size: int,
-    training_document_count: int,
-    inference_paragraph_count: int,
-    artifact_key: str,
-) -> None:
-    "写入 run 的 LDA 实际构建事实（analysis_runs.lda_* 具名列）"
-    session.execute(
-        update(AnalysisRun)
-        .where(AnalysisRun.run_id == run_id)
-        .values(
-            lda_library_version=library_version,
-            lda_pipeline_version=pipeline_version,
-            lda_num_topics=int(num_topics),
-            lda_dictionary_size=int(dictionary_size),
-            lda_training_document_count=int(training_document_count),
-            lda_created_at=_utcnow(),
-            topic_completed_at=_utcnow(),
-            **_lda_parameter_columns(parameters, num_topics=num_topics),
-        )
-    )
+def insert_topic_model_run(session: Session, run_id: str, *, num_topics: int, **parameters: Any) -> None:
+    "保存并验证实际 LDA 产物后标记完成"
+    model = _load_topic_artifact(run_id)
+    if model.num_topics != num_topics or not model.id2word:
+        raise ValueError("LDA 产物主题数或词典校验失败")
+    session.execute(update(Run).where(Run.id == run_id).values(lda_completed=True))
 
 
 def fetch_complete_inference_count(session: Session, run_id: str) -> int:
@@ -124,43 +85,16 @@ def fetch_complete_inference_count(session: Session, run_id: str) -> int:
 
 
 def fetch_topic_model_run(session: Session, run_id: str) -> TopicModelRunContract | None:
-    "读取 run 的 LDA 实际构建行（含 model_key/artifact_key/推断段落数投影）"
-    row = session.execute(
-        select(
-            AnalysisRun.lda_library_version,
-            AnalysisRun.lda_pipeline_version,
-            AnalysisRun.lda_num_topics,
-            AnalysisRun.lda_dictionary_size,
-            AnalysisRun.lda_training_document_count,
-            AnalysisRun.lda_passes,
-            AnalysisRun.lda_iterations,
-            AnalysisRun.lda_alpha,
-            AnalysisRun.lda_eta,
-            AnalysisRun.lda_random_state,
-            AnalysisRun.lda_batch_size,
-            AnalysisRun.lda_minimum_probability,
-            AnalysisRun.lda_created_at,
-        ).where(AnalysisRun.run_id == run_id)
-    ).one_or_none()
-    if row is None or row.lda_num_topics is None:
+    "从实际产物读取主题模型属性"
+    if not session.scalar(select(Run.lda_completed).where(Run.id == run_id)):
         return None
+    model = _load_topic_artifact(run_id)
     return TopicModelRunContract(
         run_id=run_id,
-        library_version=str(row.lda_library_version or ""),
-        pipeline_version=str(row.lda_pipeline_version or ""),
-        num_topics=int(row.lda_num_topics),
-        passes=int(row.lda_passes or 0),
-        iterations=int(row.lda_iterations or 0),
-        alpha=float(row.lda_alpha or 0.0),
-        eta=float(row.lda_eta or 0.0),
-        random_state=int(row.lda_random_state or 0),
-        lda_batch_size=int(row.lda_batch_size or 0),
-        minimum_probability=float(row.lda_minimum_probability or 0.0),
-        dictionary_size=int(row.lda_dictionary_size or 0),
-        training_document_count=int(row.lda_training_document_count or 0),
+        num_topics=model.num_topics,
+        dictionary_size=len(model.id2word),
         inference_paragraph_count=fetch_complete_inference_count(session, run_id),
         artifact_key=project_topic_artifact_key(run_id),
-        created_at=row.lda_created_at,
     )
 
 
@@ -274,6 +208,20 @@ def insert_paragraph_topics(
     rows: Sequence[tuple[int, int, float]],
 ) -> int:
     '先清后插写入 run 的段落主题行（同 run 重跑语义是"重新计算"）'
+    from math import isclose, isfinite
+
+    model = _load_topic_artifact(run_id)
+    distributions: dict[int, dict[int, float]] = {}
+    for paragraph_id, topic_id, weight in rows:
+        distribution = distributions.setdefault(paragraph_id, {})
+        if topic_id in distribution or not isfinite(weight) or weight < 0:
+            raise ValueError("段落主题概率无效或重复")
+        distribution[topic_id] = weight
+    for distribution in distributions.values():
+        if set(distribution) != set(range(model.num_topics)) or not isclose(
+            sum(distribution.values()), 1, abs_tol=1e-5
+        ):
+            raise ValueError("段落主题分布与实际模型不一致")
     topic_rows = [
         {
             "run_id": run_id,

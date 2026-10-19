@@ -23,11 +23,7 @@ CHUNK_TEXT = "第一段。\n第二段。\n第三段。\n"
 def _create_run(db_session) -> str:
     novel_id = new_id()
     _insert_test_novel(novel_id, session=db_session)
-    return RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Paragraph Repository Test",
-    )
+    return RunRepository(db_session).create_run(novel_id=novel_id)
 
 
 def _insert_chapter_texts(db_session, run_id: str, chunks: list[Chunk]) -> None:

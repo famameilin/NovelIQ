@@ -6,12 +6,11 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import cast
 
-from sqlalchemy import Table, delete, func, select, update
+from sqlalchemy import Table, delete, func, select
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session, aliased
 
-from src.config import settings
-from src.storage.models import AnalysisRun, Chapter, Paragraph, ParagraphFeature, ParagraphMetric
+from src.storage.models import Chapter, Paragraph, ParagraphFeature, ParagraphMetric
 from src.storage.records.paragraph import ParagraphCurveRow
 from src.storage.repositories.metric_inputs import (
     FEATURE_TENSION_Z,
@@ -39,18 +38,7 @@ def insert_paragraph_curves(session: Session, run_id: str, rows: Sequence[Paragr
             ParagraphFeature.feature_code.in_(_LOWESS_FEATURE_CODES),
         )
     )
-    # 运行级曲线合同与实际批次完成事实一并登记（参数是本次实际使用的 settings 值）
-    session.execute(
-        update(AnalysisRun)
-        .where(AnalysisRun.run_id == run_id)
-        .values(
-            curve_completed_at=_utcnow(),
-            curve_bandwidth=float(settings.metrics.lowess_bandwidth),
-            curve_min_points=int(settings.metrics.lowess_min_points),
-        )
-    )
     if not rows:
-        # 空输入也是真实执行结果（无段落），完成事实已随合同登记
         return 0
     feature_rows = [
         {
