@@ -109,7 +109,7 @@ async def get_topic_shifts(
     主题变化候选点：相邻不重叠窗口分布（入模 token 加权）的 JS 散度
 
     topic_shift_score 为以 2 为底、范围 [0,1] 的 JS 散度；窗口大小、最小
-    token 数与阈值均为版本化配置（返回在 config 中），本端点允许显式覆盖
+    token 数与阈值均为配置（返回在 config 中），本端点允许显式覆盖
     用于探索。候选点不直接命名"情节转折点"，须与 Agent 事件和人工样本
     联合验证。
     """

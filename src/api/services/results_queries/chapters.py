@@ -1,6 +1,6 @@
 """章节查询组装器
 
-承载章节标注相关查询组装逻辑（数据源为 chapter_annotations 表）；角色/关系/对话的引用裁决
+承载章节标注相关查询组装逻辑（数据源为 agent_annotations 表）；角色/关系/对话的引用裁决
 与按章归组在 `src.metrics.aggregate.normalization`，本模块只做取数与响应装配。
 """
 

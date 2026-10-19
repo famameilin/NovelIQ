@@ -31,6 +31,7 @@ def build_event_forest_response(snapshot: EventForestSnapshot) -> EventForestRes
         derived_event_order=snapshot.derived_event_order,
         event_nodes=[
             EventNodeResponse(
+                declaration_id=node.declaration_id,
                 event_id=node.event_id,
                 chapter_id=node.chapter_id,
                 chapter_order=node.chapter_order,

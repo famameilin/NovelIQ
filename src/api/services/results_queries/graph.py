@@ -15,7 +15,6 @@ from src.fact_graph.read.alias import build_alias_resolution
 from src.fact_graph.read.references import EntityReferenceProjection, relation_projection_key
 from src.fact_graph.read.storage_projection import graph_projection
 from src.metrics.aggregate.algorithms import (
-    GRAPH_METRICS_VERSION,
     InsufficientGraphNodesError,
     compute_graph_structure_metrics,
 )
@@ -28,29 +27,28 @@ HIERARCHICAL_RELATION_TYPES = {
 }
 
 
-def _encode_graph_changes_cursor(offset: int) -> str:
-    """把图变化分页偏移编码为稳定游标"""
-    payload = json.dumps({"offset": offset}, separators=(",", ":")).encode("utf-8")
+def _encode_graph_changes_cursor(offset: int, context: dict[str, Any]) -> str:
+    "图变化游标固定运行、请求条件与真实章节边界"
+    payload = json.dumps({"offset": offset, "context": context}, separators=(",", ":")).encode("utf-8")
     return urlsafe_b64encode(payload).decode("ascii").rstrip("=")
 
 
-def _decode_graph_changes_cursor(cursor: str | None) -> int:
-    """校验并解析图变化分页游标"""
+def _decode_graph_changes_cursor(cursor: str | None, context: dict[str, Any]) -> tuple[int, int | None]:
+    "校验运行与请求条件并返回固定的章节边界"
     if not cursor:
-        return 0
-    padded_cursor = cursor + ("=" * (-len(cursor) % 4))
+        return 0, None
     try:
-        payload = json.loads(urlsafe_b64decode(padded_cursor.encode("ascii")).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
+        payload = json.loads(urlsafe_b64decode((cursor + "=" * (-len(cursor) % 4)).encode("ascii")))
+        offset = payload["offset"]
+        saved = payload["context"]
+        boundary = saved["boundary_chapter_id"]
+        if type(offset) is not int or offset < 0 or type(boundary) is not int:
+            raise ValueError("invalid graph changes cursor")
+        if {key: value for key, value in saved.items() if key != "boundary_chapter_id"} != context:
+            raise ValueError("invalid graph changes cursor")
+    except (ValueError, TypeError, KeyError, UnicodeDecodeError, binascii.Error) as exc:
         raise ValueError("invalid graph changes cursor") from exc
-    if type(payload) is not dict:
-        # 非 dict JSON（list/str/int 等）调用 .get 会抛 AttributeError（→500），
-        # 这里统一按非法游标处理（→400）
-        raise ValueError("invalid graph changes cursor")
-    offset = payload.get("offset")
-    if type(offset) is not int or offset < 0:
-        raise ValueError("invalid graph changes cursor")
-    return offset
+    return offset, boundary
 
 
 def _build_graph_changes_page_info(
@@ -59,10 +57,11 @@ def _build_graph_changes_page_info(
     page_limit: int,
     returned_count: int,
     total: int,
+    context: dict[str, Any],
 ) -> dict[str, Any]:
     """组装图变化分页状态"""
     end = start + returned_count
-    next_cursor = _encode_graph_changes_cursor(end) if end < total else None
+    next_cursor = _encode_graph_changes_cursor(end, context) if end < total else None
     return {
         "limit": page_limit,
         "returned_count": returned_count,
@@ -247,7 +246,6 @@ def _graph_metrics_unavailable(run_id: str, reason: str) -> dict[str, Any]:
     return {
         "run_id": run_id,
         "unavailable_reason": reason,
-        "algorithm": {"version": GRAPH_METRICS_VERSION},
     }
 
 
@@ -259,12 +257,27 @@ def _fetch_graph_changes_page(
     changes_cursor: str | None = None,
     changes_limit: int = GRAPH_CHANGE_LIMIT,
 ) -> dict[str, Any]:
-    """按章节倒序分页返回实体与关系版本变化"""
-    start = _decode_graph_changes_cursor(changes_cursor)
+    """按固定章节边界倒序分页返回实体与关系变化"""
     page_limit = max(1, min(changes_limit, GRAPH_CHANGE_LIMIT))
-    rows, total = graph_projection(annotation_repo.graph).fetch_changes(
+    context = {"run_id": run_id, "chapter_id": chapter_id, "limit": page_limit}
+    start, saved_chapter_id = _decode_graph_changes_cursor(changes_cursor, context)
+    repository = graph_projection(annotation_repo.graph)
+    boundary = repository.resolve_chapter_boundary(
+        run_id, chapter_id=saved_chapter_id if changes_cursor else chapter_id
+    )
+    if boundary is None:
+        if changes_cursor:
+            raise ValueError("invalid graph changes cursor")
+        return {
+            "changes": [],
+            "page_info": _build_graph_changes_page_info(
+                start=0, page_limit=page_limit, returned_count=0, total=0, context=context
+            ),
+        }
+    context["boundary_chapter_id"] = boundary.chapter_id
+    rows, total = repository.fetch_changes(
         run_id,
-        chapter_id=chapter_id,
+        chapter_id=boundary.chapter_id,
         offset=start,
         limit=page_limit,
     )
@@ -303,6 +316,7 @@ def _fetch_graph_changes_page(
             page_limit=page_limit,
             returned_count=len(rows),
             total=total,
+            context=context,
         ),
     }
 

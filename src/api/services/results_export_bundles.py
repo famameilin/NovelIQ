@@ -111,7 +111,7 @@ def load_chapter_bundle(
     加载分块相关数据
 
     Returns:
-        (topics, chapter_annotations, missing_fields)
+        (topics, agent_annotations, missing_fields)
     """
     missing_fields: list[str] = []
 

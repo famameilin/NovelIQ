@@ -57,7 +57,7 @@ def build_graph_network_tab(run_id: str, session: Storage, chapter_id: int | Non
     except (ValueError, LookupError) as exc:
         snapshot_reason = str(exc)
 
-    changes_page = _fetch_graph_changes_page(run_id, annotation_repo, changes_limit=1)
+    changes_page = _fetch_graph_changes_page(run_id, annotation_repo, chapter_id=chapter_id, changes_limit=1)
     change_total = int(changes_page.get("page_info", {}).get("total") or 0)
 
     return {

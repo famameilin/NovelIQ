@@ -30,3 +30,4 @@ router.include_router(results_graph.router)
 router.include_router(results_metrics.router)
 # 7) 事件森林（原注册顺序位于 metrics/* 之后）
 router.include_router(event_trees.router)
+router.include_router(results_graph.event_forest_router)

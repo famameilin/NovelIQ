@@ -4,7 +4,7 @@
 说明: 承载 topics 相关取数与响应装配；权重归一在
 `src.topic.queries.normalize_topic_weights`。
 
-Paragraph 粒度主题结果使用 paragraph_topics 的原始 token 加权聚合
+Paragraph 粒度主题结果使用 lda_paragraph_topics 的原始 token 加权聚合
 （fetch_paragraph_topics_agg），归一化使用 weighted_total
 """
 

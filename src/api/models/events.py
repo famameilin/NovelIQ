@@ -11,7 +11,8 @@ from pydantic import BaseModel, Field
 class EventNodeResponse(BaseModel):
     """事件节点（含树结构字段）"""
 
-    event_id: str
+    declaration_id: str
+    event_id: str | None
     chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
     description: str

@@ -20,8 +20,6 @@ class TopicModelMetaInfo(BaseModel):
     """topic_model_runs 契约行的 API 元数据视图"""
 
     model_key: str
-    library_version: str
-    pipeline_version: str
     num_topics: int
     artifact_key: str
 
@@ -80,7 +78,7 @@ class TopicSeriesResponse(BaseModel):
 
 
 class TopicShiftConfig(BaseModel):
-    """主题变化候选版本化配置"""
+    """主题变化候选配置"""
 
     window_size: int
     min_tokens_per_window: int
