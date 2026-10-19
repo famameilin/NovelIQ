@@ -1,12 +1,4 @@
-"""正式事件与阶段的只读投影；章级声明只供追索，不形成第二种业务身份
-
-- 章级声明 = event_declarations（来源归属从 chapter_annotations → executions → work_items 取得）
-- 完整事件 = complete_events（正文不在事件行，当前内容取显式 stage_index 链尾）
-- 阶段版本 = event_revisions（声明绑定或独立 origin 正文恰一，前驱为 index−1 投影）
-- 包含/关系 = narrative_links；叙事线/结果 = narrative_groups 及两者的关联链路
-- 核对/冲突 = organization_checks / conflict_records + conflict_claims
-证据一律从 source_evidence 的所有者列读回，不在读取时补造坐标或哈希。
-"""
+"正式事件、声明及原文证据的只读投影"
 
 from __future__ import annotations
 
@@ -20,11 +12,8 @@ from src.fact_graph.read.references import EntityReferenceProjection
 from src.storage import Storage
 from src.storage.records.models import ChapterAnnotationRecord as ChapterAnnotation
 from src.storage.records.models import DiagnosisReportRecord as DiagnosisReport
-from src.storage.records.models import EventRevisionRecord as EventRevision
 from src.storage.records.models import NarrativeLinkRecord as NarrativeLink
 from src.utils.identity import text_digest
-
-CONTRACT_VERSION = "event-tree-declarations-v1"
 
 
 class RunRequiresRebuildError(ValueError):
@@ -36,10 +25,10 @@ class RunRequiresRebuildError(ValueError):
 
 @dataclass(frozen=True)
 class EventView:
-    """完整事件的读取投影：身份 + 真实生产者 + 当前阶段内容与整体证据"""
+    """完整事件的读取投影：身份 + 真实生产者 + 全书事件正文与整体证据"""
 
     event_id: str
-    producer_execution_id: str
+    producer_agent_id: str
     local_key: str
     identity_reason: str
     title: str | None
@@ -48,10 +37,9 @@ class EventView:
     event_type: str | None
     status: str | None
     progress: str | None
-    current_revision_id: str | None
     first_text_position: int | None
     evidence: list[dict[str, Any]]
-    source_execution_id: str | None
+    source_agent_id: str | None
 
 
 @dataclass(frozen=True)
@@ -76,8 +64,7 @@ class DeclarationView:
     char_end: int
     chapter_id: int | None
     chapter_order: int | None
-    producer_invocation_id: str | None
-    contract_version: str
+    producer_agent_id: str | None
 
     @property
     def event_id(self) -> str:
@@ -98,28 +85,6 @@ class DeclarationView:
 
 
 @dataclass(frozen=True)
-class RevisionView:
-    """阶段版本：声明阶段取声明正文，origin 阶段取 origin_* 正文；前驱为 index−1"""
-
-    revision_id: str
-    event_id: str
-    stage_index: int
-    previous_revision_id: str | None
-    declaration_id: str | None
-    title: str
-    problem: str
-    summary: str
-    event_type: str
-    status: str
-    progress: str | None
-    participants: list[dict[str, Any]]
-    evidence: list[dict[str, Any]]
-    producer_invocation_id: str
-    source_execution_id: str | None
-    source_operation_id: str
-
-
-@dataclass(frozen=True)
 class LinkView:
     """语义/因果链路的读取形状（两端都引用完整事件或声明）"""
 
@@ -131,7 +96,7 @@ class LinkView:
     relation_type: str
     reason: str
     evidence: list[dict[str, Any]]
-    producer_invocation_id: str
+    producer_agent_id: str
     source_operation_id: str | None
 
 
@@ -147,7 +112,7 @@ class GroupView:
     role: str
     reason: str
     evidence: list[dict[str, Any]]
-    producer_invocation_id: str
+    producer_agent_id: str
 
 
 @dataclass(frozen=True)
@@ -159,7 +124,7 @@ class OutcomeView:
     description: str
     first_text_position: int
     evidence: list[dict[str, Any]]
-    producer_invocation_id: str
+    producer_agent_id: str
 
 
 @dataclass(frozen=True)
@@ -183,20 +148,7 @@ class OutcomeLinkView:
 class BindingView:
     declaration_id: str
     event_id: str
-    revision_id: str
-    producer_invocation_id: str
-
-
-@dataclass(frozen=True)
-class ConflictView:
-    conflict_id: str
-    subject_kind: str
-    subject_id: str
-    claims: list[dict[str, Any]]
-    reason: str
-    resolution: str
-    evidence: list[dict[str, Any]]
-    producer_invocation_id: str
+    producer_agent_id: str
 
 
 @dataclass(frozen=True)
@@ -237,7 +189,6 @@ class EventTreeQuery:
         self.session, self.run_id = session, run_id
         self._loaded = False
         self._containment_links: list[NarrativeLink] = []
-        self._revision_rows: list[EventRevision] = []
         self._declaration_executions: dict[str, str] = {}
 
     # ------------------------------------------------------------------
@@ -256,15 +207,10 @@ class EventTreeQuery:
         annotations = self._load_annotations()
         report = self._load_report()
         contract_outputs = bool(annotations) or report is not None
-        # 正式保存的版本标记允许合法零事件运行，不能用业务对象数量猜测契约
-        if any(row.contract_version != CONTRACT_VERSION for row in annotations) or (
-            report is not None and report.contract_version != CONTRACT_VERSION
-        ):
-            raise RunRequiresRebuildError()
         self.organization_status = "ready" if report is not None else "pending_diagnosis"
         # 章节/段落基础投影先于声明与事件：声明章号与证据坐标都依赖它
         self.chapters: list[dict[str, Any]] = [
-            {"chapter_id": row.chapter_id, "title": row.display_title or row.title, "chapter_order": index + 1}
+            {"chapter_id": row.chapter_id, "title": row.display_title or row.title, "chapter_order": int(row.sequence)}
             for index, row in enumerate(self.session.reads.event_trees_read_organization_load_2(self.run_id))
         ]
         self.orders: dict[int, int] = {row["chapter_id"]: row["chapter_order"] for row in self.chapters}
@@ -273,27 +219,16 @@ class EventTreeQuery:
         }
         self.events = self._load_events()
         self.declarations = self._load_declarations(annotations)
-        self.revisions = self._load_revisions()
         self._load_containments()
-        self.bindings = {
-            row.declaration_id: BindingView(
-                declaration_id=row.declaration_id,
-                event_id=row.event_id,
-                revision_id=row.revision_id,
-                producer_invocation_id=self.events[row.event_id].producer_execution_id,
-            )
-            for row in self._revision_rows
-            if row.declaration_id is not None
-        }
-        # 尚未生成任何标注的合法空运行没有契约标记；已有对象却丢失来源产物不能冒充空运行
-        if not contract_outputs and (self.declarations or self.events or self.revisions):
+        self.bindings = self._load_bindings()
+        # 已有事件或声明必须保留正式来源产物
+        if not contract_outputs and (self.declarations or self.events or self.bindings):
             raise RunRequiresRebuildError()
         self.entity_projection = EntityReferenceProjection.load(self.session, self.run_id)
         self._load_organization()
         self.actions = (
             [self._action_view(row) for row in self._action_rows] if self.organization_status == "ready" else []
         )
-        self.conflicts = [ConflictView(**row) for row in smap.conflict_payloads(self.session, self.run_id)]
         self._validate_saved_contract()
         self._loaded = True
 
@@ -302,11 +237,6 @@ class EventTreeQuery:
         if not event_rows:
             return {}
         event_ids = list(event_rows)
-        chains = smap.stage_chain(self.session, event_ids)
-        contents: dict[str, dict[str, Any]] = {}
-        for event_id, rows in chains.items():
-            if rows:
-                contents[event_id] = smap.revision_contents(self.session, {event_id: [rows[-1]]})[rows[-1].revision_id]
         evidence = smap.fetch_evidence(self.session, "complete_event_id", event_ids)
         result: dict[str, EventView] = {}
         for event_id, row in event_rows.items():
@@ -316,26 +246,22 @@ class EventTreeQuery:
                 if payloads
                 else {}
             )
-            content = contents.get(event_id) or {}
-            session_id = self.session.reads.event_trees_read_organization_load_events_1(self.run_id)
-            stages = chains.get(event_id) or []
             result[event_id] = EventView(
                 event_id=event_id,
-                producer_execution_id=row.producer_execution_id,
+                producer_agent_id=row.producer_agent_id,
                 local_key=row.local_key,
                 identity_reason=row.identity_reason,
-                title=content.get("title"),
-                problem=content.get("problem"),
-                summary=content.get("summary"),
-                event_type=content.get("event_type"),
-                status=content.get("status"),
-                progress=content.get("progress"),
-                current_revision_id=stages[-1].revision_id if stages else None,
+                title=row.title,
+                problem=row.problem,
+                summary=row.summary,
+                event_type=row.event_type,
+                status=row.status,
+                progress=row.progress,
                 first_text_position=(
                     min(positions[item["paragraph_id"]] + item["char_start"] for item in payloads) if payloads else None
                 ),
                 evidence=payloads,
-                source_execution_id=session_id,
+                source_agent_id=row.producer_agent_id,
             )
         return result
 
@@ -384,7 +310,7 @@ class EventTreeQuery:
         if not annotations:
             return {}
         records = {row.record_id: row for row in annotations}
-        execution_by_record = {row.record_id: row.execution_id for row in annotations}
+        execution_by_record = {row.record_id: row.agent_id for row in annotations}
         declaration_rows = list(self.session.reads.event_trees_read_organization_load_declarations_1(records))
         declaration_ids = [row.declaration_id for row in declaration_rows]
         evidence = smap.fetch_evidence(self.session, "declaration_id", declaration_ids)
@@ -418,68 +344,20 @@ class EventTreeQuery:
                 char_end=bound[0]["char_end"],
                 chapter_id=chapter_id,
                 chapter_order=self.orders.get(chapter_id) if chapter_id is not None else None,
-                producer_invocation_id=record.execution_id,
-                contract_version=record.contract_version,
+                producer_agent_id=record.agent_id,
             )
         return result
 
-    def _load_revisions(self) -> dict[str, RevisionView]:
-
-        event_ids = list(self.events)
-        self._revision_rows = (
-            list(self.session.reads.event_trees_read_organization_load_revisions_1(event_ids)) if event_ids else []
-        )
-        if not self._revision_rows:
-            return {}
-        contents = smap.revision_contents(
-            self.session,
-            {event_id: [row for row in self._revision_rows if row.event_id == event_id] for event_id in event_ids},
-        )
-        declaration_ids = [row.declaration_id for row in self._revision_rows if row.declaration_id is not None]
-        declaration_evidence = smap.fetch_evidence(self.session, "declaration_id", declaration_ids)
-        event_evidence = smap.fetch_evidence(self.session, "complete_event_id", event_ids)
-        grouped: dict[str, list[EventRevision]] = {}
-        for row in self._revision_rows:
-            grouped.setdefault(row.event_id, []).append(row)
-        result: dict[str, RevisionView] = {}
-        for event_id, rows in grouped.items():
-            for index, row in enumerate(rows):
-                content = contents[row.revision_id]
-                if row.declaration_id is not None:
-                    declaration = self.declarations.get(row.declaration_id)
-                    if declaration is None:
-                        raise ValueError("已保存阶段绑定的声明不属于当前运行")
-                    rev_evidence = smap.evidence_payloads(
-                        self.session, self.run_id, declaration_evidence.get(row.declaration_id, [])
-                    )
-                    rev_participants = declaration.participants
-                    source_execution_id = self._declaration_executions.get(row.declaration_id)
-                    producer_invocation_id = declaration.producer_invocation_id or row.declaration_id
-                else:
-                    event = self.events[event_id]
-                    rev_evidence = smap.evidence_payloads(self.session, self.run_id, event_evidence.get(event_id, []))
-                    rev_participants = []
-                    source_execution_id = event.source_execution_id
-                    producer_invocation_id = event.producer_execution_id
-                result[row.revision_id] = RevisionView(
-                    revision_id=row.revision_id,
-                    event_id=event_id,
-                    stage_index=int(row.stage_index),
-                    previous_revision_id=rows[index - 1].revision_id if index > 0 else None,
-                    declaration_id=row.declaration_id,
-                    title=content["title"],
-                    problem=content["problem"],
-                    summary=content["summary"],
-                    event_type=content["event_type"],
-                    status=content["status"],
-                    progress=content["progress"],
-                    participants=rev_participants,
-                    evidence=rev_evidence,
-                    producer_invocation_id=str(producer_invocation_id),
-                    source_execution_id=source_execution_id,
-                    source_operation_id=f"stage/{event_id}/{row.stage_index}",
-                )
-        return result
+    def _load_bindings(self) -> dict[str, BindingView]:
+        rows = self.session.reads.event_trees_read_organization_load_bindings_1(list(self.events))
+        return {
+            row.declaration_id: BindingView(
+                declaration_id=row.declaration_id,
+                event_id=row.event_id,
+                producer_agent_id=self.events[row.event_id].producer_agent_id,
+            )
+            for row in rows
+        }
 
     def _load_organization(self) -> None:
 
@@ -496,7 +374,7 @@ class EventTreeQuery:
                 role=cast(str, row.arc_role),
                 reason=cast(str, row.arc_reason),
                 evidence=smap.evidence_payloads(self.session, self.run_id, group_evidence.get(row.group_id, [])),
-                producer_invocation_id=row.producer_execution_id,
+                producer_agent_id=row.producer_agent_id,
             )
             for row in groups
             if row.arc_kind is not None
@@ -508,7 +386,7 @@ class EventTreeQuery:
                 description=row.outcome_description,
                 first_text_position=self._first_evidence_position(group_evidence.get(row.group_id, [])),
                 evidence=smap.evidence_payloads(self.session, self.run_id, group_evidence.get(row.group_id, [])),
-                producer_invocation_id=row.producer_execution_id,
+                producer_agent_id=row.producer_agent_id,
             )
             for row in groups
             if row.outcome_description is not None
@@ -581,7 +459,7 @@ class EventTreeQuery:
             relation_type=row.relation_type or "",
             reason=row.reason,
             evidence=evidence,
-            producer_invocation_id=row.producer_execution_id,
+            producer_agent_id=row.producer_agent_id,
             source_operation_id=row.source_operation_local_key,
         )
 
@@ -618,12 +496,6 @@ class EventTreeQuery:
     # 契约校验
     # ------------------------------------------------------------------
 
-    def _current_revision(self, event: EventView) -> RevisionView:
-        revision = self.revisions.get(event.current_revision_id or "")
-        if revision is None or revision.event_id != event.event_id:
-            raise ValueError("已保存事件缺少有效的正式当前版本，需要从原文重建")
-        return revision
-
     def _validate_evidence(self, evidence: list[dict[str, Any]]) -> None:
         """拒绝失效来源，不在 GET 中补造段落、坐标或引文"""
         if not evidence:
@@ -652,39 +524,17 @@ class EventTreeQuery:
         ]
 
     def _validate_saved_contract(self) -> None:
-        """读取只核验正式对象，不忽略错误端点或用旧字段补救版本"""
+        "核验正式对象、来源与关系端点"
         # 案例会话逐案写正式树、报告最后落库：报告未存不代表树必须为空，按已有对象校验
         if self.organization_status == "ready" and set(self.bindings) != set(self.declarations):
             raise ValueError("已发布事件声明缺少完整的正式身份绑定")
         for binding in self.bindings.values():
-            revision = self.revisions.get(binding.revision_id)
-            declaration = self.declarations.get(binding.declaration_id)
-            event = self.events.get(binding.event_id)
-            if (
-                event is None
-                or revision is None
-                or revision.event_id != binding.event_id
-                or revision.declaration_id != binding.declaration_id
-                or declaration is None
-            ):
-                raise ValueError("已发布声明绑定与事件阶段或真实标注来源不一致")
-            if any(
-                getattr(revision, field) != getattr(declaration, field)
-                for field in ("title", "problem", "summary", "event_type", "status", "progress")
-            ):
-                raise ValueError("已发布阶段与不可变声明原始贡献不一致")
-        confirmed_revisions: set[str] = set()
+            if binding.event_id not in self.events or binding.declaration_id not in self.declarations:
+                raise ValueError("已发布声明归属与真实来源不一致")
         for event in self.events.values():
-            self._current_revision(event)
+            if not all((event.title, event.problem, event.summary, event.event_type, event.status)):
+                raise ValueError("全书事件缺少正式正文")
             self._ancestry(event.event_id)
-            stages = self._stages(event)
-            if [row.stage_index for row in stages] != list(range(len(stages))):
-                raise ValueError("已保存事件阶段序号不连续，需要从原文重建")
-            for stage in stages:
-                confirmed_revisions.add(stage.revision_id)
-                self._validate_evidence(stage.evidence)
-        if confirmed_revisions != set(self.revisions):
-            raise ValueError("已保存版本不在事件的正式当前版本链内")
         for link in self.arc_links:
             if link.event_id not in self.events or link.arc_id not in self.arcs:
                 raise ValueError("已保存事件叙事线关联端点无效")
@@ -699,13 +549,6 @@ class EventTreeQuery:
         for relation in self.declaration_relations:
             self._locate("declaration", relation.source_id)
             self._locate("declaration", relation.target_id)
-        for conflict in self.conflicts:
-            if conflict.subject_kind in {"event", "declaration"}:
-                self._locate(conflict.subject_kind, conflict.subject_id)
-            if not conflict.claims:
-                raise ValueError("已保存原文冲突缺少未解决说法")
-            for claim in conflict.claims:
-                self._validate_evidence(claim.get("evidence") or claim.get("source") or [])
         for action in self.actions:
             self._locate("event", action.root_event_id)
             if action.target_event_id is not None:
@@ -721,7 +564,6 @@ class EventTreeQuery:
             *(row.evidence for row in self.relations),
             *(row.evidence for row in self.declaration_relations),
             *(row.evidence for row in self.actions),
-            *(row.evidence for row in self.conflicts),
         ]:
             self._validate_evidence(evidence)
 
@@ -746,14 +588,13 @@ class EventTreeQuery:
         return min(chapter_ids, key=lambda chapter_id: self.orders[chapter_id]) if chapter_ids else None
 
     def _event_entry(self, event: EventView) -> dict[str, Any]:
-        revision = self._current_revision(event)
         chapter_id = self._first_evidence_chapter(event.evidence)
         return {
             "event_id": event.event_id,
             "title": event.title,
-            "summary": revision.summary,
+            "summary": event.summary,
             "event_type": event.event_type,
-            "status": revision.status,
+            "status": event.status,
             "first_text_position": event.first_text_position,
             "chapter_id": chapter_id,
             "chapter_order": self.orders.get(chapter_id) if chapter_id is not None else None,
@@ -823,7 +664,6 @@ class EventTreeQuery:
     def _payload(self, events_page: list[EventView], next_cursor: str | None) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
-            "contract_version": CONTRACT_VERSION,
             "organization_status": self.organization_status,
             "chapters": self.chapters,
             "counts": self._counts(),
@@ -901,7 +741,7 @@ class EventTreeQuery:
         top_level = sorted(
             (event for event in self.events.values() if event.event_id not in self.parent_of), key=_event_sort_key
         )
-        context: list[Any] = [self.run_id, CONTRACT_VERSION, "events"]
+        context: list[Any] = [self.run_id, "events"]
         offset = 0
         if cursor:
             try:
@@ -925,16 +765,15 @@ class EventTreeQuery:
         event = self.events.get(node_id)
         if event is None:
             raise LookupError("NODE_NOT_FOUND")
-        revision = self._current_revision(event)
         evidence = list(
             {
                 json.dumps(item, sort_keys=True, ensure_ascii=False): item
-                for item in [*event.evidence, *self._revision_evidence(event)]
+                for item in [*event.evidence, *self._source_evidence(event)]
             }.values()
         )
         characters: dict[str, dict[str, Any]] = {}
-        for stage in self._stages(event):
-            for participant in self.entity_projection.participants(stage.participants):
+        for source in self._sources(event):
+            for participant in self.entity_projection.participants(source.participants):
                 entity = participant.get("entity") or {}
                 if entity.get("entity_type") != "character" or entity.get("entity_id") in characters:
                     continue
@@ -949,10 +788,10 @@ class EventTreeQuery:
             "event_id": event.event_id,
             "run_id": self.run_id,
             "title": event.title,
-            "summary": revision.summary,
-            "progress": revision.progress,
+            "summary": event.summary,
+            "progress": event.progress,
             "event_type": event.event_type,
-            "status": revision.status,
+            "status": event.status,
             "arcs": [
                 {
                     "arc_id": link.arc_id,
@@ -971,7 +810,7 @@ class EventTreeQuery:
                     "event_id": _containment_child_id(row),
                     "title": self.events[_containment_child_id(row)].title,
                     "event_type": self.events[_containment_child_id(row)].event_type,
-                    "status": self._current_revision(self.events[_containment_child_id(row)]).status,
+                    "status": self.events[_containment_child_id(row)].status,
                 }
                 for row in self.children_of.get(node_id, [])
             ],
@@ -986,7 +825,6 @@ class EventTreeQuery:
                 key=lambda chapter_id: self.orders[chapter_id],
             ),
             "ancestry": ancestry,
-            "revision_id": event.current_revision_id,
             "relations": [
                 self._relation_entry(
                     relation,
@@ -1002,19 +840,44 @@ class EventTreeQuery:
             ],
         }
 
-    def _revision_evidence(self, event: EventView) -> list[dict[str, Any]]:
-        """跨章来源包含全部已确认版本，不以当前版本裁掉此前章的依据"""
-        return [item for revision in self._stages(event) for item in revision.evidence]
+    def _source_evidence(self, event: EventView) -> list[dict[str, Any]]:
+        "读取完整事件归属的全部章级原文来源"
+        return [item for source in self._sources(event) for item in source.evidence]
 
-    def _stages(self, event: EventView) -> list[RevisionView]:
-        """严格沿已确认的阶段链读取，不按章号或日期重新推断阶段顺序"""
-        stages: list[RevisionView] = []
-        revision = self._current_revision(event)
-        while True:
-            stages.append(revision)
-            if revision.previous_revision_id is None:
-                return list(reversed(stages))
-            revision = self.revisions[revision.previous_revision_id]
+    def _sources(self, event: EventView) -> list[DeclarationView]:
+        "按真实章节顺序读取全部声明，不生成阶段链"
+        return sorted(
+            (self.declarations[key] for key, binding in self.bindings.items() if binding.event_id == event.event_id),
+            key=lambda row: (row.chapter_order or 0, row.char_start, row.declaration_id),
+        )
+
+    def chapter_detail(self, chapter_id: int, declaration_id: str) -> dict[str, Any]:
+        "读取声明自身章节的正文与来源，完整事件仅返回归属身份"
+        self._load()
+        source = self.declarations.get(declaration_id)
+        if source is None or source.chapter_id != chapter_id:
+            raise LookupError("NODE_NOT_FOUND")
+        binding = self.bindings.get(declaration_id)
+        from src.fact_graph.read.storage_projection import graph_projection
+
+        boundary = graph_projection(self.session.graph).resolve_chapter_boundary(self.run_id, chapter_id=chapter_id)
+        if boundary is None:
+            raise LookupError("NODE_NOT_FOUND")
+        projection = EntityReferenceProjection.load(self.session, self.run_id, boundary=boundary)
+        return {
+            "run_id": self.run_id,
+            "chapter_id": source.chapter_id,
+            "declaration_id": source.declaration_id,
+            "event_id": binding.event_id if binding else None,
+            "title": source.title,
+            "problem": source.problem,
+            "summary": source.summary,
+            "status": source.status,
+            "progress": source.progress,
+            "event_type": source.event_type,
+            "participants": projection.participants(source.participants),
+            "evidence": list(source.evidence),
+        }
 
     def declaration_source(self, declaration_id: str) -> list[dict[str, Any]]:
         """仅追索不可变声明原文，不将声明包装成另一个正式事件"""
@@ -1043,18 +906,17 @@ class EventTreeQuery:
         )
         result = self._payload(top_level, None)
         result["details"] = [self.detail(event.event_id) for event in sorted(self.events.values(), key=_event_sort_key)]
-        result["event_records"] = [
+        result["complete_events"] = [
             {
                 "event_id": event.event_id,
                 "title": event.title,
                 "problem": event.problem,
-                "summary": self._current_revision(event).summary,
-                "progress": self._current_revision(event).progress,
-                "status": self._current_revision(event).status,
+                "summary": event.summary,
+                "progress": event.progress,
+                "status": event.status,
                 "event_type": event.event_type,
-                "current_revision_id": event.current_revision_id,
-                "source_execution_id": event.source_execution_id,
-                "producer_invocation_id": event.producer_execution_id,
+                "source_agent_id": event.source_agent_id,
+                "producer_agent_id": event.producer_agent_id,
                 "local_key": event.local_key,
                 "evidence": event.evidence,
                 "first_text_position": event.first_text_position,
@@ -1070,13 +932,13 @@ class EventTreeQuery:
                 "event_type": declaration.event_type,
                 "status": declaration.status,
                 "progress": declaration.progress,
-                "participants": self.entity_projection.participants(declaration.participants),
+                "participants": list(declaration.participants),
                 "evidence": declaration.evidence,
                 "first_text_position": declaration.char_start,
                 "char_end": declaration.char_end,
                 "chapter_id": declaration.chapter_id,
                 "chapter_order": declaration.chapter_order,
-                "producer_invocation_id": declaration.producer_invocation_id,
+                "producer_agent_id": declaration.producer_agent_id,
                 "annotation_id": declaration.record_id,
                 "payload_path": declaration.payload_path,
             }
@@ -1089,8 +951,7 @@ class EventTreeQuery:
             {
                 "declaration_id": row.declaration_id,
                 "event_id": row.event_id,
-                "revision_id": row.revision_id,
-                "producer_invocation_id": row.producer_invocation_id,
+                "producer_agent_id": row.producer_agent_id,
             }
             for row in sorted(self.bindings.values(), key=lambda row: row.declaration_id)
         ]
@@ -1102,7 +963,7 @@ class EventTreeQuery:
                 "relation_type": row.relation_type,
                 "reason": row.reason,
                 "evidence": row.evidence,
-                "producer_invocation_id": row.producer_invocation_id,
+                "producer_agent_id": row.producer_agent_id,
                 "source_operation_id": row.source_operation_id,
             }
             for row in self.declaration_relations
@@ -1117,38 +978,6 @@ class EventTreeQuery:
             for row in sorted(
                 self.parent_of.values(), key=lambda row: (row.contained_parent_id, row.contained_child_id)
             )
-        ]
-        result["revisions"] = [
-            {
-                "revision_id": row.revision_id,
-                "event_id": row.event_id,
-                "previous_revision_id": row.previous_revision_id,
-                "declaration_id": row.declaration_id,
-                "participants": self.entity_projection.participants(row.participants),
-                "title": row.title,
-                "problem": row.problem,
-                "event_type": row.event_type,
-                "summary": row.summary,
-                "status": row.status,
-                "progress": row.progress,
-                "source_execution_id": row.source_execution_id,
-                "producer_invocation_id": row.producer_invocation_id,
-                "source_operation_id": row.source_operation_id,
-                "evidence": row.evidence,
-            }
-            for row in sorted(self.revisions.values(), key=lambda row: row.revision_id)
-        ]
-        result["conflicts"] = [
-            {
-                "conflict_id": row.conflict_id,
-                "subject_kind": row.subject_kind,
-                "subject_id": row.subject_id,
-                "claims": row.claims,
-                "reason": row.reason,
-                "resolution": row.resolution,
-                "evidence": row.evidence,
-            }
-            for row in self.conflicts
         ]
         return result
 

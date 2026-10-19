@@ -39,15 +39,14 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
     if not rows:
         return
     dicts = _run_event_dicts(session, run_id)
-    chains = smap.stage_chain(session, list(rows))
+    bindings = smap.declaration_bindings(session, list(rows))
     declarations = draft._declarations()
     snapshot = session.diagnosis.session_rows(run_id)
-    anchors = {row.execution_id: row.case_anchor for row in snapshot["executions"] if row.case_anchor is not None}
     event_evidence = smap.fetch_evidence(session, "complete_event_id", list(rows))
     for event_id, row in rows.items():
         data = dicts[event_id]
-        stages = chains.get(event_id) or []
-        stage_order = [item.declaration_id for item in stages if item.declaration_id is not None]
+        sources = bindings.get(event_id) or []
+        declaration_ids = [item.declaration_id for item in sources]
         payloads = _evidence_payloads(session, run_id, event_evidence.get(event_id, []))
         draft.events[event_id] = CompleteEventDraft(
             event_id=event_id,
@@ -58,19 +57,16 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
             event_type=data["event_type"],
             status=data["status"],
             progress=data["progress"],
-            declaration_ids=list(stage_order),
-            stage_order=stage_order,
-            current_declaration_id=stage_order[-1] if stage_order else None,
+            declaration_ids=list(declaration_ids),
             reason=row.identity_reason,
             source_hashes={
                 declaration: declarations[declaration]["source_hash"]
-                for declaration in stage_order
+                for declaration in declaration_ids
                 if declaration in declarations
             },
             first_text_position=data["first_text_position"],
             evidence=[BoundOrganizationEvidence(**payload) for payload in payloads],
-            source_case_id=anchors.get(row.producer_execution_id, ""),
-            producer_invocation_id=row.producer_execution_id,
+            producer_agent_id=row.producer_agent_id,
         )
     link_rows = snapshot["links"]
     link_evidence = smap.fetch_evidence(session, "narrative_link_id", [row.link_id for row in link_rows])
@@ -85,8 +81,7 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
                 child_event_id=link.contained_child_id,
                 reason=link.reason,
                 evidence=bound,
-                source_case_id=anchors.get(link.producer_execution_id, ""),
-                producer_invocation_id=link.producer_execution_id,
+                producer_agent_id=link.producer_agent_id,
             )
         elif link.semantic_source_event_id is not None and link.semantic_target_event_id is not None:
             draft.relations[link.link_id] = RelationDraft(
@@ -99,8 +94,7 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
                 reason=link.reason,
                 source_operation_id=link.source_operation_local_key or "",
                 evidence=bound,
-                source_case_id=anchors.get(link.producer_execution_id, ""),
-                producer_invocation_id=link.producer_execution_id,
+                producer_agent_id=link.producer_agent_id,
             )
     check_rows = snapshot["checks"]
     check_evidence = smap.fetch_evidence(session, "check_id", [row.check_id for row in check_rows])
@@ -114,16 +108,14 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
                 event_id=check.reviewed_event_id,
                 reason=check.reason,
                 snapshot_hash=check.snapshot_hash or "",
-                source_case_id=anchors.get(check.producer_execution_id, ""),
-                producer_invocation_id=check.producer_execution_id,
+                producer_agent_id=check.producer_agent_id,
             )
         elif check.reviewed_declaration_id is not None:
             draft.declaration_reviews[check.reviewed_declaration_id] = DeclarationReviewDraft(
                 declaration_id=check.reviewed_declaration_id,
                 source_hash=check.snapshot_hash or "",
                 reason=check.reason,
-                source_case_id=anchors.get(check.producer_execution_id, ""),
-                producer_invocation_id=check.producer_execution_id,
+                producer_agent_id=check.producer_agent_id,
             )
         elif check.source_declaration_id is not None and check.target_declaration_id is not None:
             draft.declaration_comparisons[(check.source_declaration_id, check.target_declaration_id)] = (
@@ -133,8 +125,7 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
                     disposition=_checked_disposition(check.disposition, ("same_event", "independent", "related")),
                     reason=check.reason,
                     evidence=bound_check,
-                    source_case_id=anchors.get(check.producer_execution_id, ""),
-                    producer_invocation_id=check.producer_execution_id,
+                    producer_agent_id=check.producer_agent_id,
                 )
             )
         elif check.source_event_id is not None and check.target_event_id is not None:
@@ -149,6 +140,5 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
                 reason=check.reason,
                 snapshot_hash=check.snapshot_hash or "",
                 evidence=bound_check,
-                source_case_id=anchors.get(check.producer_execution_id, ""),
-                producer_invocation_id=check.producer_execution_id,
+                producer_agent_id=check.producer_agent_id,
             )

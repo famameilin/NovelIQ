@@ -11,7 +11,8 @@ from typing import Any
 class EventNodeRow:
     """返回章节事件节点"""
 
-    event_id: str
+    declaration_id: str
+    event_id: str | None
     chapter_id: int
     chapter_order: int
     description: str

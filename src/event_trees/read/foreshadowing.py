@@ -1,9 +1,4 @@
-"""本领域的独立只读投影，不返回 HTTP 模型
-
-伏笔来源声明 = event_declarations 的
-伏笔根行（属性随行保存，strength 为 payoff_likelihood 读投影）；动作事实 =
-event_foreshadowing_actions，经阶段声明绑定投影正式事件身份。
-"""
+"""从伏笔声明与动作事实读取全书事件身份和原文证据"""
 
 from __future__ import annotations
 
@@ -41,7 +36,7 @@ def _foreshadowing_roots(session: Storage, run_id: str) -> tuple[list[EventDecla
 
 
 def _bound_events(session: Storage, run_id: str, declaration_ids: list[str]) -> dict[str, str]:
-    """伏笔来源声明的正式事件身份绑定（阶段声明绑定 + 完整事件生产者属于本 run）"""
+    """读取伏笔声明在本运行中的完整事件归属"""
     if not declaration_ids:
         return {}
     return {
@@ -78,13 +73,13 @@ def foreshadowing_by_chapter(session: Storage, run_id: str) -> dict[int, dict[st
 
 
 def fetch_foreshadowing_trees(session: Storage, run_id: str) -> list[ForeshadowingTreeView]:
-    """按正式事件聚合明确伏笔动作；只有来源属性通过声明追索"""
+    """按正式事件聚合明确伏笔动作；没有正式事件身份的来源不进入树"""
     query = EventTreeQuery(session, run_id)
     query.fetch()
     by_root: dict[str, list[ForeshadowingActionRow]] = {}
     for action in sorted(load_foreshadowing_actions(session, run_id), key=action_order):
         if action.root_event_id is None:
-            raise ValueError("已发布伏笔缺少正式事件身份")
+            continue
         by_root.setdefault(action.root_event_id, []).append(action)
     result: list[ForeshadowingTreeView] = []
     for event_id, actions in by_root.items():
@@ -120,9 +115,11 @@ def fetch_foreshadowing_sources(session: Storage, run_id: str) -> list[dict[str,
     roots, sources = _foreshadowing_roots(session, run_id)
     actions = sorted(load_foreshadowing_actions(session, run_id), key=action_order)
     evidence = smap.fetch_evidence(session, "declaration_id", [row.declaration_id for row in roots])
+    bindings = _bound_events(session, run_id, [row.declaration_id for row in roots])
     return [
         {
             "declaration_id": row.declaration_id,
+            "event_id": bindings.get(row.declaration_id),
             "title": row.title,
             "problem": row.problem,
             "summary": row.summary,
