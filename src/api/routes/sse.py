@@ -1,7 +1,7 @@
 """
 SSE 路由
 
-说明: SSE 端点用于获取任务进度和 LLM 输出
+SSE 端点用于获取任务状态和模型输出
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def _task_run_belongs_to_novel(task_id: str, novel_id: str) -> bool:
 
 @router.get("/novels/{novel_id}/events/tasks/{task_id}")
 async def sse_endpoint(novel_id: str, task_id: str, request: Request) -> EventSourceResponse:
-    """SSE 端点：获取任务进度和 LLM 输出"""
+    """SSE 端点：获取任务状态和模型输出"""
     if not _task_run_belongs_to_novel(task_id, novel_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在或不属于该小说")
     last_seq = _resolve_last_seq(request)

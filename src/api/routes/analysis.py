@@ -92,7 +92,6 @@ async def list_tasks(novel_id: str, task_service: TaskService = Depends(get_task
                 task_id=t["task_id"],
                 novel_id=t["novel_id"],
                 status=t["status"],
-                created_at=t.get("created_at"),
             )
             for t in tasks
         ],
@@ -137,16 +136,6 @@ async def get_task_status(
         novel_id=novel_id,
         task_id=task_id,
         status=mapped_status,
-        progress=task.get("progress", 0.0),
-        stage=task.get("stage"),
-        sub_stage=task.get("sub_stage"),
-        current=task.get("current"),
-        total=task.get("total"),
-        message=task.get("message"),
-        llm_outputs=None,
-        error=task.get("error"),
-        started_at=task.get("started_at"),
-        completed_at=task.get("completed_at"),
     )
 
 

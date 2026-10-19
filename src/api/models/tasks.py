@@ -1,7 +1,5 @@
 """任务生命周期响应模型：任务状态枚举、任务创建/继续/状态查询、任务列表与批量删除"""
 
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
 from src.storage.task_status import TaskStatus
@@ -41,16 +39,6 @@ class StatusResponse(BaseModel):
     novel_id: str
     task_id: str
     status: TaskStatus
-    progress: float = Field(ge=0, le=100)
-    stage: str | None = None
-    sub_stage: str | None = None
-    current: int | None = None
-    total: int | None = None
-    message: str | None = None
-    llm_outputs: list[str] | None = None
-    error: str | None = None
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
 
 
 class TaskInfoResponse(BaseModel):
@@ -61,7 +49,6 @@ class TaskInfoResponse(BaseModel):
     task_id: str
     novel_id: str
     status: str
-    created_at: datetime | None = None
 
 
 class TaskListResponse(BaseModel):
