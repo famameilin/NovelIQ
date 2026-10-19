@@ -226,7 +226,7 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
     context = build_invocation_context(
         run_id=run_id,
         task_type="annotation",
-        execution_id=new_id(),
+        agent_id=new_id(),
         attempt_number=1,
         model="test-model",
         chapter_id=1,
@@ -281,7 +281,7 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
 
     db_session.rollback()
     turns = fetch_agent_turns(storage_for(db_session), run_id)
-    assert [turn.status for turn in turns] == ["error", "success"]
+    assert [bool(turn.error) for turn in turns] == [True, False]
     assert [turn.turn_index for turn in turns] == [1, 2]
     assert [turn.context_summary["provider_request"]["request_index"] for turn in turns] == [1, 2]
     assert turns[0].context_summary["provider_request"]["attempt"] == 1

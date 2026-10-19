@@ -6,7 +6,7 @@ from typing import Any, cast
 
 from sqlalchemy import CompoundSelect, Select, func, literal, select, union_all
 
-from src.storage.models import AgentToolCall, Execution, ModelCall
+from src.storage.models import Agent, AgentLoop, ToolCall
 from src.storage.models.work import ANNOTATION_ROLES, DIAGNOSIS_ROLES
 
 _AGENT_CALL_BUCKETS: dict[str, tuple[str, str]] = {
@@ -16,17 +16,17 @@ _AGENT_CALL_BUCKETS: dict[str, tuple[str, str]] = {
 
 
 def _annotation_execution_ids(run_id: str) -> Select[Any]:
-    "本 run 章内标注执行的 execution_id 选择器（执行行直接带 run 与标注角色）"
-    return select(Execution.execution_id).where(Execution.run_id == run_id, Execution.role.in_(ANNOTATION_ROLES))
+    "本 run 章内标注执行的 agent_id 选择器（执行行直接带 run 与标注角色）"
+    return select(Agent.id).where(Agent.run_id == run_id, Agent.type.in_(ANNOTATION_ROLES))
 
 
 def _diagnosis_execution_ids(run_id: str) -> Select[Any]:
-    "本 run 诊断执行（案例/报告角色）的 execution_id 选择器（执行行直接带 run）"
-    return select(Execution.execution_id).where(Execution.run_id == run_id, Execution.role.in_(DIAGNOSIS_ROLES))
+    "本 run 诊断执行（案例/报告角色）的 agent_id 选择器（执行行直接带 run）"
+    return select(Agent.id).where(Agent.run_id == run_id, Agent.type.in_(DIAGNOSIS_ROLES))
 
 
 def run_agent_execution_ids(run_id: str) -> Select[tuple[str]]:
-    "本 run 内 Agent 执行的 execution_id 选择器（两类执行归属的直接并集）"
+    "本 run 内 Agent 执行的 agent_id 选择器（两类执行归属的直接并集）"
     return cast("Select[tuple[str]]", _annotation_execution_ids(run_id).union(_diagnosis_execution_ids(run_id)))
 
 
@@ -34,7 +34,7 @@ def _annotation_calls(run_id: str) -> Select[Any]:
     "本 run 的标注 Agent 调用（执行行直接带 run 与标注角色）"
     task_type, call_type = _AGENT_CALL_BUCKETS["annotation"]
     return select(*_agent_call_columns(task_type, call_type)).where(
-        ModelCall.execution_id.in_(_annotation_execution_ids(run_id))
+        AgentLoop.agent_id.in_(_annotation_execution_ids(run_id))
     )
 
 
@@ -42,7 +42,7 @@ def _diagnosis_calls(run_id: str) -> Select[Any]:
     "本 run 的诊断 Agent 调用（执行行直接带 run 与诊断角色）"
     task_type, call_type = _AGENT_CALL_BUCKETS["diagnosis"]
     return select(*_agent_call_columns(task_type, call_type)).where(
-        ModelCall.execution_id.in_(_diagnosis_execution_ids(run_id))
+        AgentLoop.agent_id.in_(_diagnosis_execution_ids(run_id))
     )
 
 
@@ -54,34 +54,32 @@ def _agent_calls(run_id: str) -> CompoundSelect:
 def _standalone_calls(run_id: str) -> Select[Any]:
     "本 run 的非 Agent 真实模型调用（standalone 上下文列，不伪造工作身份）"
     return select(
-        ModelCall.call_id.label("call_id"),
-        ModelCall.model.label("model"),
-        ModelCall.status.label("status"),
-        ModelCall.standalone_task_type.label("task_type"),
-        ModelCall.standalone_call_type.label("call_type"),
-        ModelCall.prompt_tokens.label("prompt_tokens"),
-        ModelCall.completion_tokens.label("completion_tokens"),
-        ModelCall.cache_read_tokens.label("cache_read_tokens"),
-        ModelCall.reasoning_tokens.label("reasoning_tokens"),
-        ModelCall.accounting_source.label("accounting_source"),
-        ModelCall.reported_total_tokens.label("reported_total_tokens"),
-    ).where(ModelCall.standalone_run_id == run_id, ModelCall.execution_id.is_(None))
+        AgentLoop.id.label("call_id"),
+        AgentLoop.model.label("model"),
+        AgentLoop.standalone_task_type.label("task_type"),
+        AgentLoop.standalone_call_type.label("call_type"),
+        AgentLoop.prompt_tokens.label("prompt_tokens"),
+        AgentLoop.completion_tokens.label("completion_tokens"),
+        AgentLoop.cache_read_tokens.label("cache_read_tokens"),
+        AgentLoop.reasoning_tokens.label("reasoning_tokens"),
+        AgentLoop.accounting_source.label("accounting_source"),
+        AgentLoop.reported_total_tokens.label("reported_total_tokens"),
+    ).where(AgentLoop.standalone_run_id == run_id, AgentLoop.agent_id.is_(None))
 
 
 def _agent_call_columns(task_type: str, call_type: str) -> list[Any]:
     "Agent 调用的统一列面：调用身份、计账桶与用量/实报投影来源"
     return [
-        ModelCall.call_id.label("call_id"),
-        ModelCall.model.label("model"),
-        ModelCall.status.label("status"),
+        AgentLoop.id.label("call_id"),
+        AgentLoop.model.label("model"),
         literal(task_type).label("task_type"),
         literal(call_type).label("call_type"),
-        ModelCall.prompt_tokens.label("prompt_tokens"),
-        ModelCall.completion_tokens.label("completion_tokens"),
-        ModelCall.cache_read_tokens.label("cache_read_tokens"),
-        ModelCall.reasoning_tokens.label("reasoning_tokens"),
-        ModelCall.accounting_source.label("accounting_source"),
-        ModelCall.reported_total_tokens.label("reported_total_tokens"),
+        AgentLoop.prompt_tokens.label("prompt_tokens"),
+        AgentLoop.completion_tokens.label("completion_tokens"),
+        AgentLoop.cache_read_tokens.label("cache_read_tokens"),
+        AgentLoop.reasoning_tokens.label("reasoning_tokens"),
+        AgentLoop.accounting_source.label("accounting_source"),
+        AgentLoop.reported_total_tokens.label("reported_total_tokens"),
     ]
 
 
@@ -93,31 +91,23 @@ def audit_queries_fetch_token_usage_stats_1(_session, run_id):
 def audit_queries_detect_token_coverage_gaps_1(_session, run_id):
     calls = _agent_calls(run_id).subquery("agent_calls")
     statement = select(calls.c.task_type, calls.c.call_type).where(
-        (calls.c.status == "running")
-        | calls.c.prompt_tokens.is_(None)
-        | (func.coalesce(calls.c.accounting_source, "") != "reported")
+        calls.c.prompt_tokens.is_(None) | (func.coalesce(calls.c.accounting_source, "") != "reported")
     )
     return _session.execute(statement)
 
 
 def audit_queries_fetch_agent_turns_1(_session, execution_ids):
-    return _session.scalars(
-        select(Execution.execution_id).where(
-            Execution.execution_id.in_(execution_ids), Execution.role.in_(ANNOTATION_ROLES)
-        )
-    )
+    return _session.scalars(select(Agent.id).where(Agent.id.in_(execution_ids), Agent.type.in_(ANNOTATION_ROLES)))
 
 
 def audit_queries_fetch_agent_turns_2(_session, run_id):
     return _session.execute(
-        select(ModelCall).where(ModelCall.execution_id.in_(run_agent_execution_ids(run_id))).order_by(ModelCall.call_id)
+        select(AgentLoop).where(AgentLoop.agent_id.in_(run_agent_execution_ids(run_id))).order_by(AgentLoop.id)
     ).scalars()
 
 
 def audit_queries_fetch_run_tool_calls_1(_session, call_ids):
-    return _session.execute(
-        select(AgentToolCall).where(AgentToolCall.call_id.in_(call_ids)).order_by(AgentToolCall.id)
-    ).scalars()
+    return _session.execute(select(ToolCall).where(ToolCall.agentloop_id.in_(call_ids)).order_by(ToolCall.id)).scalars()
 
 
 def _usage_calls(run_id: str):

@@ -1,4 +1,4 @@
-"""AgentAuditRecorder 独立短事务审计测试（executions + 两张宽表）"""
+"""AgentAuditRecorder 独立短事务审计测试（agent + 两张宽表）"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from src.audit.documents import decode_document
 from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls, fetch_token_usage_stats
 from src.audit.recorder import AgentAuditRecorder
 from src.storage import new_id
-from src.storage.models import AgentToolCall, Execution, ModelCall
+from src.storage.models import Agent, AgentLoop, ToolCall
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.storage_fixtures import fixture_id, storage_factory, storage_for
 
@@ -26,7 +26,7 @@ def _session_factory(db_session):
 
 def _timings(db_session, call_id: int) -> dict[str, int]:
     """按宽表具名计时列读回实际测得的分项计时"""
-    call = db_session.get(ModelCall, call_id)
+    call = db_session.get(AgentLoop, call_id)
     timings: dict[str, int] = {}
     for timing_kind, column in (
         ("ttft", "ttft_ms"),
@@ -52,7 +52,7 @@ def _turn_context(run_id: str, **overrides: Any) -> dict[str, Any]:
         "task_type": "annotation",
         "call_type": "agent",
         "model": "test-model",
-        "execution_id": new_id(),
+        "agent_id": new_id(),
         "attempt_number": 1,
         "chapter_id": 1,
         "role": "annotation",
@@ -102,16 +102,15 @@ def test_start_turn_registers_execution_call_documents_and_notes(db_session) -> 
     )
 
     db_session.rollback()
-    execution = db_session.get(Execution, context["execution_id"])
-    assert execution is not None and execution.status == "running" and execution.finished_at is None
-    assert execution.attempt_number == 1
-    assert (execution.run_id, execution.role, execution.chapter_id) == (run_id, "annotation", 1)
+    execution = db_session.get(Agent, context["agent_id"])
+    assert execution is not None and execution.status == "running"
+    assert (execution.id, execution.run_id, execution.type) == (context["agent_id"], run_id, "annotation")
     # 真实执行直接携带归属，work 列恒为空
-    assert execution.work_id is None
-    call = db_session.get(ModelCall, call_id)
-    assert call.model == "test-model" and call.status == "running" and call.finished_at is None
+    assert not hasattr(execution, "work_id")
+    call = db_session.get(AgentLoop, call_id)
+    assert call.model == "test-model" and call.finished_at is None
     assert call.started_at is not None
-    assert call.execution_id == context["execution_id"]
+    assert call.agent_id == context["agent_id"]
     assert call.turn_index == 1
     turn = fetch_agent_turns(storage_for(db_session), run_id)[0]
     assert turn.request_messages == []
@@ -127,7 +126,7 @@ def test_start_turn_without_execution_ownership_is_rejected(db_session) -> None:
     context["run_id"], context["role"] = None, None
     recorder = AgentAuditRecorder(storage_factory(_session_factory(db_session)))
 
-    with pytest.raises(RuntimeError, match="执行归属未提供"):
+    with pytest.raises(ValueError, match="登记 Agent"):
         recorder.start_turn(
             **context,
             turn_index=1,
@@ -136,7 +135,7 @@ def test_start_turn_without_execution_ownership_is_rejected(db_session) -> None:
         )
 
     db_session.rollback()
-    assert db_session.get(Execution, context["execution_id"]) is None
+    assert db_session.get(Agent, context["agent_id"]) is None
     assert fetch_agent_turns(storage_for(db_session), run_id) == []
 
 
@@ -176,13 +175,9 @@ def test_failed_attempt_without_requests_only_closes_execution(db_session) -> No
     recorder.finish_invocation(**context, status="error", final_error="model dispatch failed")
 
     db_session.rollback()
-    execution = db_session.get(Execution, context["execution_id"])
+    execution = db_session.get(Agent, context["agent_id"])
     assert execution.status == "error"
-    assert execution.error == "model dispatch failed"
-    assert execution.finished_at is not None
     # 案例角色按新合同带案例锚且不带章
-    assert (execution.run_id, execution.role, execution.case_anchor) == (run_id, "case", context["case_anchor"])
-    assert execution.chapter_id is None and execution.work_id is None
     assert fetch_agent_turns(storage_for(db_session), run_id) == []
 
 
@@ -195,9 +190,8 @@ def test_successful_attempt_closes_execution_without_extra_model_call(db_session
     recorder.finish_invocation(**context, status="success")
 
     db_session.rollback()
-    execution = db_session.get(Execution, context["execution_id"])
-    assert execution.status == "success" and execution.error is None
-    assert execution.finished_at is not None
+    execution = db_session.get(Agent, context["agent_id"])
+    assert execution.status == "success"
     assert fetch_agent_turns(storage_for(db_session), run_id) == []
 
 
@@ -209,11 +203,11 @@ def test_finish_invocation_replay_is_idempotent_and_conflicting_result_is_reject
     recorder.finish_invocation(**context, status="error", final_error="失败")
 
     recorder.finish_invocation(**context, status="error", final_error="失败")
-    with pytest.raises(RuntimeError, match="已结束"):
+    with pytest.raises(RuntimeError, match="不同终态"):
         recorder.finish_invocation(**context, status="success")
 
     db_session.rollback()
-    assert db_session.get(Execution, context["execution_id"]).status == "error"
+    assert db_session.get(Agent, context["agent_id"]).status == "error"
 
 
 def test_redispatch_attempts_finalize_under_their_own_execution_identities(db_session) -> None:
@@ -223,15 +217,15 @@ def test_redispatch_attempts_finalize_under_their_own_execution_identities(db_se
     recorder = AgentAuditRecorder(storage_factory(_session_factory(db_session)))
     recorder.finish_invocation(**first_round, status="error", final_error="上一轮失败")
 
-    second_round = dict(first_round, execution_id=new_id(), attempt_number=2)
+    second_round = dict(first_round, agent_id=new_id(), attempt_number=2)
     recorder.finish_invocation(**second_round, status="success")
 
     db_session.rollback()
-    first_row = db_session.get(Execution, first_round["execution_id"])
-    second_row = db_session.get(Execution, second_round["execution_id"])
-    assert (first_row.status, first_row.error) == ("error", "上一轮失败")
-    assert (second_row.status, second_row.error) == ("success", None)
-    with pytest.raises(RuntimeError, match="已结束"):
+    first_row = db_session.get(Agent, first_round["agent_id"])
+    second_row = db_session.get(Agent, second_round["agent_id"])
+    assert first_row.status == "error"
+    assert second_row.status == "success"
+    with pytest.raises(RuntimeError, match="不同终态"):
         recorder.finish_invocation(**second_round, status="error", final_error="不同结果")
 
 
@@ -244,7 +238,7 @@ def test_update_turn_timings_writes_tool_wall_and_refreshes_finished_at(db_sessi
     recorder = AgentAuditRecorder(storage_factory(_session_factory(db_session)))
     inserted_at = datetime(2026, 8, 13, 1, 0, 0)
     updated_at = datetime(2026, 8, 13, 1, 0, 2)
-    times = iter([inserted_at, inserted_at, inserted_at, updated_at])
+    times = iter([inserted_at, inserted_at, updated_at])
     monkeypatch.setattr("src.storage.repositories.audit_repository.naive_utcnow", lambda: next(times))
 
     call_id = recorder.start_turn(
@@ -256,7 +250,7 @@ def test_update_turn_timings_writes_tool_wall_and_refreshes_finished_at(db_sessi
     recorder.finish_turn(
         call_id,
         raw_response={"role": "ai", "content": "输出"},
-        status="success",
+
         error=None,
         timing={"model_ms": 100},
         timing_notes=[],
@@ -265,7 +259,7 @@ def test_update_turn_timings_writes_tool_wall_and_refreshes_finished_at(db_sessi
     recorder.update_turn_timings(call_id, tool_wall_ms=250, turn_ms=1200)
 
     db_session.rollback()
-    call = db_session.get(ModelCall, call_id)
+    call = db_session.get(AgentLoop, call_id)
     assert (call.finished_at - call.started_at).total_seconds() == (updated_at - inserted_at).total_seconds()
     assert call.finished_at > call.started_at
     assert _timings(db_session, call_id) == {"model": 100, "tool_wall": 250}
@@ -290,7 +284,7 @@ def test_finish_turn_splits_usage_reported_total_and_cost(db_session) -> None:
     recorder.finish_turn(
         call_id,
         raw_response={"role": "ai", "content": "输出"},
-        status="success",
+
         error=None,
         timing={"model_ms": 100},
         timing_notes=[],
@@ -329,7 +323,7 @@ def test_finish_turn_estimated_usage_does_not_fake_reported_total(db_session) ->
     recorder.finish_turn(
         call_id,
         raw_response={"role": "ai", "content": "输出"},
-        status="success",
+
         error=None,
         timing={"model_ms": 100},
         timing_notes=[],
@@ -346,7 +340,7 @@ def test_finish_turn_estimated_usage_does_not_fake_reported_total(db_session) ->
     assert turn.accounting_source == "estimated"
     assert turn.total_tokens == 42
     # 程序估算不落成供应商实报：宽行 reported_total_tokens 保持为空
-    assert db_session.get(ModelCall, call_id).reported_total_tokens is None
+    assert db_session.get(AgentLoop, call_id).reported_total_tokens is None
 
 
 def test_finish_turn_writes_raw_response_and_timing_notes_in_order(db_session) -> None:
@@ -363,7 +357,7 @@ def test_finish_turn_writes_raw_response_and_timing_notes_in_order(db_session) -
     recorder.finish_turn(
         call_id,
         raw_response={"role": "ai", "content": "输出"},
-        status="success",
+
         error=None,
         timing={"model_ms": 900, "ttft_ms": 120},
         timing_notes=["provider_non_streaming", "provider_non_streaming"],
@@ -400,16 +394,16 @@ def test_record_tool_call_persists_args_result_receipt_and_duration(db_session) 
         request_args={"summary": "章节开端"},
         response={"accepted": True, "domain": "metrics", "revision": 1},
         receipt={"accepted": True, "domain": "metrics", "revision": 1},
-        status="success",
+
         error=None,
         tool_duration_ms=42,
     )
 
     db_session.rollback()
-    row = db_session.execute(select(AgentToolCall).where(AgentToolCall.call_id == call_id)).scalar_one()
+    row = db_session.execute(select(ToolCall).where(ToolCall.agentloop_id == call_id)).scalar_one()
     assert row.tool_name == "write_metrics"
     assert row.call_index == 0
-    assert row.status == "success"
+    assert row.error is None
     assert row.tool_duration_ms == 42
     assert decode_document(bytes(row.executed_args_bytes)) == {"summary": "章节开端"}
     assert decode_document(bytes(row.response_observed_bytes))["accepted"] is True
@@ -436,7 +430,7 @@ def test_record_tool_call_persists_raw_args_as_observed_text(db_session) -> None
         raw_args=raw,
         response={"accepted": True},
         receipt={"accepted": True},
-        status="success",
+
         error=None,
         tool_duration_ms=10,
     )
@@ -493,14 +487,14 @@ def test_failed_tool_call_recorded_with_error(db_session) -> None:
         request_args={"items": []},
         response={"accepted": False, "error": "参数非法"},
         receipt={"accepted": False, "error": "参数非法"},
-        status="error",
+
         error="参数非法",
         tool_duration_ms=3,
     )
 
     db_session.rollback()
     tool = fetch_run_tool_calls(storage_for(db_session), run_id)[0]
-    assert tool.status == "error"
+    assert tool.error is not None
     assert tool.error == "参数非法"
     assert tool.response_observed["accepted"] is False
 
@@ -528,7 +522,7 @@ def test_prior_audit_rows_survive_later_audit_failure(db_session) -> None:
         recorder.finish_turn(
             call_id,
             raw_response={"role": "ai", "content": "输出"},
-            status="success",
+
             error=None,
             timing={"model_ms": 100},
             timing_notes=[],
@@ -538,8 +532,8 @@ def test_prior_audit_rows_survive_later_audit_failure(db_session) -> None:
     db_session.rollback()
     turn = fetch_agent_turns(storage_for(db_session), run_id)[0]
     assert turn.call_id == call_id
-    assert turn.status == "running"
-    assert db_session.get(ModelCall, call_id).status == "running"
+    assert turn.finished_at is None
+    assert db_session.get(AgentLoop, call_id).finished_at is None
 
 
 def test_observer_records_turn_and_tool_calls(db_session) -> None:
@@ -567,7 +561,7 @@ def test_observer_records_turn_and_tool_calls(db_session) -> None:
         request_args={},
         response={"accepted": True, "domain": "metrics", "revision": 1},
         receipt={"accepted": True, "domain": "metrics", "revision": 1},
-        status="success",
+
         error=None,
         tool_duration_ms=5,
         started_ns=1_000_000,
@@ -576,7 +570,7 @@ def test_observer_records_turn_and_tool_calls(db_session) -> None:
 
     db_session.rollback()
     turn = fetch_agent_turns(storage_for(db_session), run_id)[0]
-    assert turn.status == "success"
+    assert turn.error is None
     assert turn.turn_ms is not None and turn.turn_ms >= 0
     assert turn.tool_wall_ms == 5
     tool_rows = fetch_run_tool_calls(storage_for(db_session), run_id)
@@ -734,7 +728,7 @@ def test_observer_fail_provider_turn_keeps_real_request_messages(db_session) -> 
 
     db_session.rollback()
     turn = fetch_agent_turns(storage_for(db_session), run_id)[0]
-    assert turn.status == "error"
+    assert turn.error is not None
     assert turn.error == "provider timeout"
     assert turn.turn_ms == 30
     assert turn.request_messages == [
@@ -757,63 +751,15 @@ def test_observer_raises_when_tool_recorded_without_active_turn(db_session) -> N
             request_args={},
             response=None,
             receipt=None,
-            status="success",
+
             error=None,
             tool_duration_ms=1,
             started_ns=0,
         )
 
 
-def test_close_orphaned_turns_interrupts_running_executions_and_calls(db_session) -> None:
-    """验证进程重启遗留的 running 执行与调用被统一收口为 interrupted"""
-    _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
-    stale_context = _turn_context(run_id)
-    finished_context = _turn_context(run_id, role="entity")
-    failed_context = _turn_context(run_id, role="event", attempt_number=2)
-    recorder = AgentAuditRecorder(storage_factory(_session_factory(db_session)))
-    recorder.start_turn(**stale_context, turn_index=1, context_summary={}, request_messages=[])
-    finished_id = recorder.start_turn(**finished_context, turn_index=1, context_summary={}, request_messages=[])
-    recorder.finish_turn(
-        finished_id,
-        raw_response={},
-        status="success",
-        error=None,
-        timing={"model_ms": 1},
-        timing_notes=[],
-        token_usage=None,
-    )
-    recorder.finish_invocation(**finished_context, status="success")
-    # 没有模型请求的失败执行也要随重启收口
-    recorder.finish_invocation(**failed_context, status="error")
-
-    interrupted = AgentAuditRecorder(storage_factory(_session_factory(db_session))).close_orphaned_turns(run_id)
-
-    db_session.rollback()
-    # 收口 1 条 running 调用 + 1 条 running 执行
-    assert interrupted == 2
-    assert db_session.get(ModelCall, finished_id).status == "success"
-    turns = fetch_agent_turns(storage_for(db_session), run_id)
-    assert {turn.status for turn in turns} == {"error", "success"}
-    assert [turn.error for turn in turns if turn.status == "error"] == ["正常结束前未落库"]
-    executions = db_session.get(Execution, stale_context["execution_id"])
-    assert executions.status == "error" and executions.finished_at is not None
-    assert db_session.get(Execution, failed_context["execution_id"]).status == "error"
 
 
-def test_close_orphaned_turns_ignores_other_runs(db_session) -> None:
-    """验证收口只作用于目标 run 的执行与调用"""
-    _novel_id, target_run = create_run_with_chunks(db_session, texts=["原文"])
-    other_novel_id, other_run = create_run_with_chunks(db_session, texts=["原文"], title="其他运行")
-    context = _turn_context(other_run)
-    recorder = AgentAuditRecorder(storage_factory(_session_factory(db_session)))
-    call_id = recorder.start_turn(**context, turn_index=1, context_summary={}, request_messages=[])
-
-    interrupted = AgentAuditRecorder(storage_factory(_session_factory(db_session))).close_orphaned_turns(target_run)
-
-    db_session.rollback()
-    assert interrupted == 0
-    assert db_session.get(ModelCall, call_id).status == "running"
-    assert db_session.get(Execution, context["execution_id"]).status == "running"
 
 
 def test_fetch_token_usage_stats_combines_agent_and_standalone_calls(db_session) -> None:
@@ -827,7 +773,7 @@ def test_fetch_token_usage_stats_combines_agent_and_standalone_calls(db_session)
     recorder.finish_turn(
         call_id,
         raw_response={},
-        status="success",
+
         error=None,
         timing={"model_ms": 10},
         timing_notes=[],

@@ -23,7 +23,7 @@ def _new_audit_context(db_session) -> tuple[AgentAuditRecorder, AgentTurnObserve
     context = build_invocation_context(
         run_id=run_id,
         task_type="diagnosis",
-        execution_id=new_id(),
+        agent_id=new_id(),
         attempt_number=1,
         model="test-model",
         case_anchor=None,
@@ -68,8 +68,8 @@ async def test_graph_audit_records_real_tools_and_closes_turns(db_session, mode)
     else:
         assert result.get("completion_ok") is True
         report_rows = [row for row in rows if row.tool_name == "write_diagnosis"]
-        assert [row.status for row in report_rows] == (
-            ["error", "success"] if mode == "rejected_report" else ["success"]
+        assert [bool(row.error) for row in report_rows] == (
+            [True, False] if mode == "rejected_report" else [False]
         )
 
 
@@ -82,7 +82,7 @@ async def test_provider_failure_retains_audit(db_session):
     recorder.finish_invocation(**context, status="error", final_error="provider failure")
     db_session.rollback()
     turn = fetch_agent_turns(storage_for(db_session), run_id)[0]
-    assert turn.status == "error" and turn.turn_ms is not None
+    assert turn.error is not None and turn.turn_ms is not None
 
 
 async def test_transport_retry_is_audited_separately_from_model_round(db_session):
@@ -94,5 +94,5 @@ async def test_transport_retry_is_audited_separately_from_model_round(db_session
     db_session.rollback()
     turns = fetch_agent_turns(storage_for(db_session), run_id)
     assert result["iterations"] == 1
-    assert [turn.status for turn in turns] == ["error", "success"]
+    assert [bool(turn.error) for turn in turns] == [True, False]
     assert all(turn.turn_ms is not None for turn in turns)

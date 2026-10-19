@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from src.storage.models import AgentToolCall, ModelCall
+from src.storage.models import AgentLoop, ToolCall
 
 
 def audit_module_skip_replayed_1(_session, message_message_id):
     return _session.execute(
-        select(ModelCall.call_id).where(ModelCall.message_key == message_message_id)
+        select(AgentLoop.id).where(AgentLoop.message_key == message_message_id)
     ).scalar_one_or_none()
 
 
 def audit_module_skip_replayed_2(_session, message_message_id):
-    return _session.execute(
-        select(AgentToolCall.id).where(AgentToolCall.message_key == message_message_id)
-    ).scalar_one_or_none()
+    return _session.execute(select(ToolCall.id).where(ToolCall.message_key == message_message_id)).scalar_one_or_none()
