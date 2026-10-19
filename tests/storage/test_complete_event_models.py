@@ -1,8 +1,8 @@
 """完整事件存储契约测试
 
 覆盖新关系的建表冒烟、候选键/唯一约束与 CheckConstraint/领域触发器在 DB 级的
-生效：complete_events + 真实生产执行、event_revisions 显式连续阶段链与声明绑定、
-narrative_links 单父包含与语义端点的互斥形状、冲突主体/陈述、组织核对逐对判断、
+生效：event_records + 真实生产执行、event_revisions 显式连续阶段链与声明绑定、
+event_links 单父包含与语义端点的互斥形状、冲突主体/陈述、组织核对逐对判断、
 伏笔动作幂等与证据所有者列。
 """
 
@@ -15,25 +15,22 @@ from sqlalchemy.orm import Session
 
 from src.storage import new_id
 from src.storage.models import (
-    AnalysisRun,
+    Agent,
     Base,
     Chapter,
     ChapterAnnotation,
     CompleteEvent,
-    ConflictClaim,
-    ConflictRecord,
     EventDeclaration,
+    EventDeclarationBinding,
     EventForeshadowingAction,
-    EventRevision,
-    Execution,
     GraphFact,
     NarrativeGroup,
     NarrativeLink,
     Novel,
     OrganizationCheck,
     Paragraph,
+    Run,
     SourceEvidence,
-    WorkItem,
     naive_utcnow,
 )
 from tests.support.storage_fixtures import natural_record
@@ -42,18 +39,15 @@ CONTRACT = "event-tree-declarations-v1"
 
 NEW_TABLES = [
     "event_declarations",
-    "declaration_participants",
-    "complete_events",
-    "event_revisions",
-    "narrative_links",
-    "narrative_groups",
-    "organization_checks",
-    "conflict_records",
-    "conflict_claims",
+    "event_participants",
+    "event_records",
+    "event_declaration_bindings",
+    "event_links",
+    "event_groups",
+    "event_checks",
     "event_foreshadowing_actions",
-    "source_evidence",
-    "book_cases",
-    "case_entries",
+    "paragraph_evidence",
+    "case",
     "diagnosis_reports",
 ]
 
@@ -77,14 +71,7 @@ class _Fixture:
         # 无 relationship：跨表插入按依赖分层 flush（先父后子）
         session.flush()
         session.add(
-            AnalysisRun(
-                run_id=self.run_id,
-                novel_id=self.novel_id,
-                status="completed",
-                progress=1.0,
-                task_kind="test",
-                created_at=naive_utcnow(),
-            )
+            Run(id=self.run_id, novelid=self.novel_id, status="completed")
         )
         self.paragraph_ids: list[int] = []
         self.declarations: list[str] = []
@@ -126,52 +113,27 @@ class _Fixture:
             paragraph_id += 1
         # 章节与段落先落库；标注执行直接携带 run/章/角色，不再有标注 work 身份
         session.flush()
-        self.annotation_execution_id = new_id()
+        self.annotation_agent_id = new_id()
         session.add(
-            Execution(
-                execution_id=self.annotation_execution_id,
-                run_id=self.run_id,
-                chapter_id=1,
-                role="event",
-                attempt_number=1,
-                started_at=naive_utcnow(),
-                status="success",
-            )
+            Agent(id=self.annotation_agent_id, run_id=self.run_id, type="event", status="success")
         )
         session.flush()
         self.record_id = new_id()
         session.add(
             ChapterAnnotation(
                 record_id=self.record_id,
-                execution_id=self.annotation_execution_id,
+                agent_id=self.annotation_agent_id,
                 run_id=self.run_id,
                 chapter_id=1,
                 role="event",
-                contract_version=CONTRACT,
-                chapter_consolidation_version="v1",
                 created_at=naive_utcnow(),
             )
         )
         # 诊断整轮会话与报告角色真实尝试：完整事件与关系的真实生产者
-        self.session_id = new_id()
-        self.execution_id = new_id()
+        self.agent_id = new_id()
+        self.session_id = self.agent_id
         session.add(
-            Execution(
-                execution_id=self.session_id,
-                session_run_id=self.run_id,
-                session_created_at=naive_utcnow(),
-            )
-        )
-        session.flush()
-        session.add(
-            Execution(
-                execution_id=self.execution_id,
-                run_id=self.run_id,
-                role="report",
-                attempt_number=1,
-                started_at=naive_utcnow(),
-                status="success",
-            )
+            Agent(id=self.agent_id, run_id=self.run_id, type="report", status="success")
         )
         session.flush()
 
@@ -218,41 +180,24 @@ class _Fixture:
         self.session.add(
             CompleteEvent(
                 event_id=event_id,
-                producer_execution_id=self.execution_id,
+                producer_agent_id=self.agent_id,
                 local_key=local_key or event_id,
                 identity_reason="夹具显式判断该身份",
+                title="全书事件", problem="能否入山", summary="完整入山过程", event_type="行程", status="ongoing",
             )
         )
         self.session.flush()
         return event_id
 
-    def make_revision(self, event_id: str, *, stage_index: int = 0, declaration_id: str | None = None) -> str:
-        revision_id = new_id()
-        if declaration_id is None:
-            self.session.add(
-                EventRevision(
-                    revision_id=revision_id,
-                    event_id=event_id,
-                    stage_index=stage_index,
-                    origin_title="独立阶段",
-                    origin_problem="独立阶段问题",
-                    origin_summary="独立阶段正文",
-                    origin_event_type="行动",
-                    origin_status="ongoing",
-                    origin_progress=None,
-                )
+    def make_binding(self, event_id: str, *, declaration_id: str | None) -> str:
+        binding_id = new_id()
+        self.session.add(
+            EventDeclarationBinding(
+                binding_id=binding_id, event_id=event_id, declaration_id=declaration_id
             )
-        else:
-            self.session.add(
-                EventRevision(
-                    revision_id=revision_id,
-                    event_id=event_id,
-                    stage_index=stage_index,
-                    declaration_id=declaration_id,
-                )
-            )
+        )
         self.session.flush()
-        return revision_id
+        return binding_id
 
     def make_fact(self) -> int:
         fact = GraphFact(
@@ -260,7 +205,7 @@ class _Fixture:
             entity_id=None,
             fact_type="character",
             subject_entity_id=None,
-            direct_producer_execution_id=self.execution_id,
+            direct_producer_agent_id=self.agent_id,
             source_operation_key=f"op-{new_id()}",
             created_at=naive_utcnow(),
         )
@@ -285,20 +230,19 @@ def test_create_all_smoke(db_session: Session) -> None:
         CompleteEvent,
         NarrativeLink,
         OrganizationCheck,
-        ConflictRecord,
         NarrativeGroup,
         EventForeshadowingAction,
     ):
         count = db_session.execute(
-            select(func.count()).select_from(model).where(model.producer_execution_id == fixture.execution_id)
+            select(func.count()).select_from(model).where(model.producer_agent_id == fixture.agent_id)
         ).scalar_one()
         assert count == 0
     # 版本表经事件归属核对；证据表无运行归属，按本夹具声明归属查询
     revisions = db_session.execute(
         select(func.count())
-        .select_from(EventRevision)
-        .join(CompleteEvent, CompleteEvent.event_id == EventRevision.event_id)
-        .where(CompleteEvent.producer_execution_id == fixture.execution_id)
+        .select_from(EventDeclarationBinding)
+        .join(CompleteEvent, CompleteEvent.event_id == EventDeclarationBinding.event_id)
+        .where(CompleteEvent.producer_agent_id == fixture.agent_id)
     ).scalar_one()
     assert revisions == 0
     evidence = db_session.execute(
@@ -317,7 +261,7 @@ def test_containment_single_parent_violates_unique_child(db_session: Session) ->
     db_session.add(
         NarrativeLink(
             link_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="首次归属",
             contained_child_id=child,
             contained_parent_id=parent_a,
@@ -327,7 +271,7 @@ def test_containment_single_parent_violates_unique_child(db_session: Session) ->
     db_session.add(
         NarrativeLink(
             link_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="重复归属",
             contained_child_id=child,
             contained_parent_id=parent_b,
@@ -345,7 +289,7 @@ def test_containment_self_reference_violates_ck(db_session: Session) -> None:
     db_session.add(
         NarrativeLink(
             link_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="自含",
             contained_child_id=event_id,
             contained_parent_id=event_id,
@@ -363,7 +307,7 @@ def test_containment_cycle_is_rejected_by_trigger(db_session: Session) -> None:
     db_session.add(
         NarrativeLink(
             link_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="首次归属",
             contained_child_id=second,
             contained_parent_id=first,
@@ -373,7 +317,7 @@ def test_containment_cycle_is_rejected_by_trigger(db_session: Session) -> None:
     db_session.add(
         NarrativeLink(
             link_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="反向归属成环",
             contained_child_id=first,
             contained_parent_id=second,
@@ -384,62 +328,44 @@ def test_containment_cycle_is_rejected_by_trigger(db_session: Session) -> None:
     db_session.rollback()
 
 
-def test_declaration_binding_unique_source_and_stage(db_session: Session) -> None:
-    """一项声明只能绑定一个版本，一个事件的一个阶段序号只有一行"""
+def test_declaration_binding_unique_source_keeps_same_chapter_sources(db_session: Session) -> None:
     fixture = _fixture(db_session, "声明绑定唯一")
     declaration_a = fixture.make_declaration(chapter_id=1)
     declaration_b = fixture.make_declaration(chapter_id=1, phrase="山门")
     event_a = fixture.make_event(local_key="a")
     event_b = fixture.make_event(local_key="b")
-    fixture.make_revision(event_a, stage_index=0, declaration_id=declaration_a)
+    fixture.make_binding(event_a, declaration_id=declaration_a)
     db_session.commit()
-    # 同声明换事件：绑定声明唯一索引冲突
     with pytest.raises(IntegrityError):
-        fixture.make_revision(event_b, stage_index=0, declaration_id=declaration_a)
+        fixture.make_binding(event_b, declaration_id=declaration_a)
     db_session.rollback()
-    # 同事件同阶段序号：候选键冲突
-    with pytest.raises(IntegrityError):
-        fixture.make_revision(event_a, stage_index=0, declaration_id=declaration_b)
-    db_session.rollback()
+    fixture.make_binding(event_a, declaration_id=declaration_b)
+    db_session.commit()
+    assert set(db_session.scalars(select(EventDeclarationBinding.declaration_id).where(
+        EventDeclarationBinding.event_id == event_a
+    ))) == {declaration_a, declaration_b}
 
 
-def test_revision_source_shape_is_exclusive(db_session: Session) -> None:
-    """阶段正文来源恰一：绑定声明与独立 origin 正文不能同时存在"""
-    fixture = _fixture(db_session, "阶段来源互斥")
-    declaration = fixture.make_declaration(chapter_id=1)
+def test_binding_requires_real_declaration(db_session: Session) -> None:
+    fixture = _fixture(db_session, "绑定必须引用声明")
     event_id = fixture.make_event()
-    db_session.add(
-        EventRevision(
-            revision_id=new_id(),
-            event_id=event_id,
-            stage_index=0,
-            declaration_id=declaration,
-            origin_title="冲突来源",
-            origin_problem="冲突来源",
-            origin_summary="冲突来源",
-            origin_event_type="行动",
-            origin_status="ongoing",
+    with pytest.raises(IntegrityError):
+        fixture.make_binding(event_id, declaration_id=None)
+    db_session.rollback()
+
+
+def test_whole_book_event_keeps_body_without_chapter_binding(db_session: Session) -> None:
+    fixture = _fixture(db_session, "独立全书事件")
+    event_id = fixture.make_event()
+    db_session.commit()
+    assert db_session.get(CompleteEvent, event_id).summary == "完整入山过程"
+    assert not list(
+        db_session.scalars(
+            select(EventDeclarationBinding).where(EventDeclarationBinding.event_id == event_id)
         )
     )
-    with pytest.raises(IntegrityError):
-        db_session.flush()
-    db_session.rollback()
-
-
-def test_revision_stage_chain_starts_at_zero_and_is_continuous(db_session: Session) -> None:
-    """阶段序号必须从 0 连续（领域触发器在提交时校验）"""
-    fixture = _fixture(db_session, "阶段链连续")
-    event_id = fixture.make_event()
-    fixture.make_revision(event_id, stage_index=1)
-    with pytest.raises(IntegrityError):
-        db_session.commit()
-    db_session.rollback()
-    event_id = fixture.make_event(local_key="second")
-    fixture.make_revision(event_id, stage_index=0)
-    fixture.make_revision(event_id, stage_index=2)
-    with pytest.raises(IntegrityError):
-        db_session.commit()
-    db_session.rollback()
+    assert "event_revisions" not in Base.metadata.tables
+    assert set(EventDeclarationBinding.__table__.columns.keys()) == {"binding_id", "event_id", "declaration_id"}
 
 
 def test_semantic_relation_requires_exclusive_endpoint_kinds(db_session: Session) -> None:
@@ -450,7 +376,7 @@ def test_semantic_relation_requires_exclusive_endpoint_kinds(db_session: Session
     db_session.add(
         NarrativeLink(
             link_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="缺目标端点",
             semantic_source_event_id=source,
             relation_type="causal",
@@ -463,7 +389,7 @@ def test_semantic_relation_requires_exclusive_endpoint_kinds(db_session: Session
     db_session.add(
         NarrativeLink(
             link_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="混入包含列",
             semantic_source_event_id=source,
             semantic_target_event_id=target,
@@ -485,7 +411,7 @@ def test_semantic_relation_operation_is_idempotent(db_session: Session) -> None:
     db_session.add(
         NarrativeLink(
             link_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="显式判断",
             semantic_source_event_id=source,
             semantic_target_event_id=target,
@@ -497,7 +423,7 @@ def test_semantic_relation_operation_is_idempotent(db_session: Session) -> None:
     db_session.add(
         NarrativeLink(
             link_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="重复操作",
             semantic_source_event_id=source,
             semantic_target_event_id=target,
@@ -518,7 +444,7 @@ def test_organization_check_pair_unique_and_direction(db_session: Session) -> No
     db_session.add(
         OrganizationCheck(
             check_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="无包含或因果关系",
             source_event_id=source,
             target_event_id=target,
@@ -530,7 +456,7 @@ def test_organization_check_pair_unique_and_direction(db_session: Session) -> No
     db_session.add(
         OrganizationCheck(
             check_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="重复判断",
             source_event_id=source,
             target_event_id=target,
@@ -544,7 +470,7 @@ def test_organization_check_pair_unique_and_direction(db_session: Session) -> No
     db_session.add(
         OrganizationCheck(
             check_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="反向重复",
             source_event_id=target,
             target_event_id=source,
@@ -565,7 +491,7 @@ def test_organization_check_declaration_pair_unique(db_session: Session) -> None
     db_session.add(
         OrganizationCheck(
             check_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="两项声明是独立问题",
             source_declaration_id=source,
             target_declaration_id=target,
@@ -576,7 +502,7 @@ def test_organization_check_declaration_pair_unique(db_session: Session) -> None
     db_session.add(
         OrganizationCheck(
             check_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             reason="重复判断",
             source_declaration_id=source,
             target_declaration_id=target,
@@ -588,94 +514,8 @@ def test_organization_check_declaration_pair_unique(db_session: Session) -> None
     db_session.rollback()
 
 
-def test_conflict_requires_two_claims_and_single_subject(db_session: Session) -> None:
-    """冲突至少两条独立陈述（延迟触发器），主体三类恰一"""
-    fixture = _fixture(db_session, "冲突主体")
-    event_id = fixture.make_event()
-    conflict_id = new_id()
-    db_session.add(
-        ConflictRecord(
-            conflict_id=conflict_id,
-            producer_execution_id=fixture.execution_id,
-            reason="原文两种说法",
-            subject_event_id=event_id,
-        )
-    )
-    db_session.flush()
-    db_session.add(
-        ConflictClaim(
-            claim_id=new_id(),
-            conflict_id=conflict_id,
-            claim_ordinal=0,
-            producer_execution_id=fixture.execution_id,
-            claim_text="等待十年",
-        )
-    )
-    with pytest.raises(IntegrityError):
-        db_session.commit()
-    db_session.rollback()
-
-    second = new_id()
-    declaration = fixture.make_declaration(chapter_id=1)
-    db_session.add(
-        ConflictRecord(
-            conflict_id=second,
-            producer_execution_id=fixture.execution_id,
-            reason="主体同时给两类",
-            subject_event_id=event_id,
-            subject_declaration_id=declaration,
-        )
-    )
-    with pytest.raises(IntegrityError):
-        db_session.flush()
-    db_session.rollback()
 
 
-def test_conflict_claims_keep_independent_ordinals(db_session: Session) -> None:
-    """各条陈述的序号唯一且各自保留自己的生产者"""
-    fixture = _fixture(db_session, "冲突陈述")
-    event_id = fixture.make_event()
-    conflict_id = new_id()
-    declaration = fixture.make_declaration(chapter_id=1)
-    db_session.add(
-        ConflictRecord(
-            conflict_id=conflict_id,
-            producer_execution_id=fixture.execution_id,
-            reason="同一次等待时长的两项说法不一致",
-            subject_event_id=event_id,
-        )
-    )
-    db_session.flush()
-    for ordinal, text in enumerate(("等待十年", "等待十四年")):
-        db_session.add(
-            ConflictClaim(
-                claim_id=new_id(),
-                conflict_id=conflict_id,
-                claim_ordinal=ordinal,
-                producer_execution_id=fixture.execution_id,
-                claim_text=text,
-            )
-        )
-    db_session.commit()
-    rows = list(
-        db_session.scalars(
-            select(ConflictClaim).where(ConflictClaim.conflict_id == conflict_id).order_by(ConflictClaim.claim_ordinal)
-        )
-    )
-    assert [row.claim_text for row in rows] == ["等待十年", "等待十四年"]
-    db_session.add(
-        ConflictClaim(
-            claim_id=new_id(),
-            conflict_id=conflict_id,
-            claim_ordinal=0,
-            producer_execution_id=fixture.execution_id,
-            claim_text="重复序号",
-        )
-    )
-    with pytest.raises(IntegrityError):
-        db_session.flush()
-    db_session.rollback()
-    assert declaration
 
 
 def test_foreshadowing_action_operation_and_type_constraints(db_session: Session) -> None:
@@ -685,7 +525,7 @@ def test_foreshadowing_action_operation_and_type_constraints(db_session: Session
     db_session.add(
         EventForeshadowingAction(
             action_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             source_operation_local_key="setup-1",
             operation_order=1,
             action_type="setup",
@@ -696,7 +536,7 @@ def test_foreshadowing_action_operation_and_type_constraints(db_session: Session
     db_session.add(
         EventForeshadowingAction(
             action_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             source_operation_local_key="setup-1",
             operation_order=2,
             action_type="reinforce",
@@ -709,7 +549,7 @@ def test_foreshadowing_action_operation_and_type_constraints(db_session: Session
     db_session.add(
         EventForeshadowingAction(
             action_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             source_operation_local_key="setup-2",
             operation_order=2,
             action_type="invalid",
@@ -781,7 +621,7 @@ def test_narrative_group_parent_must_be_line_and_acyclic(db_session: Session) ->
     db_session.add(
         NarrativeGroup(
             group_id=outcome_id,
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             title="身份获确认",
             outcome_description="身份最终得到证实",
         )
@@ -790,60 +630,13 @@ def test_narrative_group_parent_must_be_line_and_acyclic(db_session: Session) ->
     db_session.add(
         NarrativeGroup(
             group_id=new_id(),
-            producer_execution_id=fixture.execution_id,
+            producer_agent_id=fixture.agent_id,
             title="身份线",
             arc_kind="main",
             arc_objective="确认身份",
             arc_role="主线",
             arc_reason="围绕身份持续推进",
             parent_arc_id=outcome_id,
-        )
-    )
-    with pytest.raises(IntegrityError):
-        db_session.flush()
-    db_session.rollback()
-
-
-def test_execution_shape_is_single_type(db_session: Session) -> None:
-    """同一真实执行不能同时是整轮会话和 invocation"""
-    fixture = _fixture(db_session, "执行形状")
-    db_session.add(
-        Execution(
-            execution_id=new_id(),
-            session_run_id=fixture.run_id,
-            session_created_at=naive_utcnow(),
-            run_id=fixture.run_id,
-            role="report",
-            attempt_number=1,
-            started_at=naive_utcnow(),
-            status="success",
-        )
-    )
-    with pytest.raises(IntegrityError):
-        db_session.flush()
-    db_session.rollback()
-
-
-def test_work_item_shape_is_single_kind(db_session: Session) -> None:
-    """程序回执两种形状互斥：章末核对与诊断失败保留不能混填"""
-    fixture = _fixture(db_session, "工作形状")
-    # 诊断失败保留程序形状（diagnosis_session + program_code）本身可保存
-    db_session.add(
-        WorkItem(
-            work_id=new_id(),
-            diagnosis_session_id=fixture.session_id,
-            program_code="diagnosis_retain",
-        )
-    )
-    db_session.flush()
-    db_session.add(
-        WorkItem(
-            work_id=new_id(),
-            diagnosis_session_id=fixture.session_id,
-            program_run_id=fixture.run_id,
-            program_chapter_id=1,
-            program_code="chapter_check",
-            program_invocation_key=f"chapter:1:{new_id()}",
         )
     )
     with pytest.raises(IntegrityError):

@@ -30,7 +30,7 @@ class Chapter(Base):
         UniqueConstraint("run_id", "chapter_id", name="uq_chapters_business_key"),
         UniqueConstraint("run_id", "sequence", name="uq_chapters_run_sequence"),
         CheckConstraint("(text IS NULL) = (char_offset IS NULL)", name="ck_chapters_text_offset_pair"),
-        ForeignKeyConstraint(["run_id"], ["analysis_runs.run_id"], ondelete="CASCADE", name="chapters_run_fkey"),
+        ForeignKeyConstraint(["run_id"], ["runs.id"], ondelete="CASCADE", name="chapters_run_fkey"),
         Index("idx_chapters_run_id", "run_id"),
         # 原文检索按 lower(text) LIKE '%kw%' 定位，索引必须建在同一表达式上
         Index(

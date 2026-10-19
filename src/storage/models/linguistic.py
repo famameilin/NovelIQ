@@ -1,7 +1,7 @@
 """
 语言结构关系 ORM 模型定义
 
-词面从原文切片读取；POS/NER 归一由版本化代码合同（LTP_PIPELINE_VERSION 对应的
+词面从原文切片读取；POS/NER 归一由固定代码映射（
 固定映射）投影；LTP 词元数与完成事实从词元行/paragraph_metrics 读取；
 句式分类计数进 paragraph_features；情绪事件（谓词/持有者/对象/否定/程度词）
 从正式词元与弧投影。
@@ -27,7 +27,7 @@ ARC_RELATION_PREFIXES = ("dep:", "sdp:")
 class LinguisticSpan(Base):
     "原文区间标注表（词元 / NER / 短语三种有限形状互斥）"
 
-    __tablename__ = "linguistic_spans"
+    __tablename__ = "paragraph_spans"
     __table_args__ = (
         CheckConstraint("start_char < end_char", name="ck_linguistic_spans_char_order"),
         CheckConstraint(
@@ -112,7 +112,7 @@ class LinguisticSpan(Base):
 class LinguisticArc(Base):
     "依存/语义依存的有序词元弧"
 
-    __tablename__ = "linguistic_arcs"
+    __tablename__ = "paragraph_arcs"
     __table_args__ = (
         CheckConstraint(
             "relation_code LIKE 'dep:%' OR relation_code LIKE 'sdp:%'",
@@ -142,13 +142,13 @@ class LinguisticArc(Base):
     )
     dependent_span_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("linguistic_spans.span_id", ondelete="CASCADE", name="linguistic_arcs_dependent_fkey"),
+        ForeignKey("paragraph_spans.span_id", ondelete="CASCADE", name="linguistic_arcs_dependent_fkey"),
         nullable=False,
         comment="依存词元区间 id",
     )
     head_span_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("linguistic_spans.span_id", ondelete="CASCADE", name="linguistic_arcs_head_fkey"),
+        ForeignKey("paragraph_spans.span_id", ondelete="CASCADE", name="linguistic_arcs_head_fkey"),
         nullable=True,
         comment="中心词元区间 id（dep ROOT 为空）",
     )

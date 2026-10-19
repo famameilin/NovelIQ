@@ -1,8 +1,7 @@
 """
-事件声明、完整事件与阶段版本身份 ORM 模型
+章级事件声明、全书完整事件与来源归属模型
 
-声明正文/原生产者/参与者/证据从声明读；origin 生产者从完整事件读；
-不复制源事实，不按时间/章号猜顺序。
+章级正文与章节归属从原声明读取，全书正文由真实诊断执行提交
 """
 
 from __future__ import annotations
@@ -10,7 +9,6 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
-from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.storage.ids import new_id
@@ -43,7 +41,7 @@ class EventDeclaration(Base):
     )
     record_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("chapter_annotations.record_id", ondelete="RESTRICT", name="event_declarations_record_fkey"),
+        ForeignKey("agent_annotations.record_id", ondelete="RESTRICT", name="event_declarations_record_fkey"),
         nullable=False,
         comment="来源标注记录",
     )
@@ -69,7 +67,7 @@ class EventDeclaration(Base):
 class DeclarationParticipant(Base):
     "声明参与者：实体引用与事件中角色（名字/类型读实体，不复制）"
 
-    __tablename__ = "declaration_participants"
+    __tablename__ = "event_participants"
     __table_args__ = (
         UniqueConstraint("declaration_id", "participant_ordinal", name="uq_declaration_participants_ordinal"),
         UniqueConstraint("declaration_id", "entity_id", name="uq_declaration_participants_entity"),
@@ -106,79 +104,48 @@ class DeclarationParticipant(Base):
 class CompleteEvent(Base):
     "完整事件表：身份、真实生产者与同一性理由（source_work 从 producer 推导）"
 
-    __tablename__ = "complete_events"
+    __tablename__ = "event_records"
     __table_args__ = (
-        UniqueConstraint("producer_execution_id", "local_key", name="uq_complete_events_producer_local_key"),
-        Index("idx_complete_events_producer", "producer_execution_id"),
+        UniqueConstraint("producer_agent_id", "local_key", name="uq_complete_events_producer_local_key"),
+        Index("idx_complete_events_producer", "producer_agent_id"),
         {"comment": "完整事件表：正式身份（真实成功生产尝试 + 本地稳定键）与同一性理由"},
     )
 
     event_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, comment="事件主键（uuid）", default=new_id, autoincrement=False
     )
-    producer_execution_id: Mapped[str] = mapped_column(
+    producer_agent_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="complete_events_producer_fkey"),
+        ForeignKey("agent.id", ondelete="RESTRICT", name="complete_events_producer_fkey"),
         nullable=False,
         comment="真实成功生产尝试（整轮 session 从 producer→work→session 推导）",
     )
     local_key: Mapped[str] = mapped_column(String(255), nullable=False, comment="同 work 重试沿用的局部稳定键")
-    identity_reason: Mapped[str] = mapped_column(String, nullable=False, comment="同一身份判断理由（非诊断正文副本）")
+    identity_reason: Mapped[str] = mapped_column(String, nullable=False, comment="同一身份判断理由")
+    title: Mapped[str] = mapped_column(String, nullable=False, comment="全书事件标题")
+    problem: Mapped[str] = mapped_column(String, nullable=False, comment="全书事件问题")
+    summary: Mapped[str] = mapped_column(String, nullable=False, comment="全书事件概要")
+    event_type: Mapped[str] = mapped_column(String, nullable=False, comment="全书事件类型")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, comment="全书事件状态")
+    progress: Mapped[str | None] = mapped_column(String, nullable=True, comment="全书事件进展")
 
     def __repr__(self) -> str:
         return f"<CompleteEvent(event_id={self.event_id}, local_key={self.local_key})>"
 
 
-class EventRevision(Base):
-    "事件阶段版本表"
+class EventDeclarationBinding(Base):
+    "不可变章级声明与全书完整事件的身份归属"
 
-    __tablename__ = "event_revisions"
+    __tablename__ = "event_declaration_bindings"
     __table_args__ = (
-        UniqueConstraint("event_id", "stage_index", name="uq_event_revisions_event_stage"),
-        CheckConstraint(
-            "origin_status IS NULL OR origin_status IN ('ongoing', 'resolved')",
-            name="ck_event_revisions_origin_status",
-        ),
-        CheckConstraint(
-            "(declaration_id IS NOT NULL AND origin_title IS NULL AND origin_problem IS NULL"
-            " AND origin_summary IS NULL AND origin_event_type IS NULL AND origin_status IS NULL"
-            " AND origin_progress IS NULL)"
-            " OR (declaration_id IS NULL AND origin_title IS NOT NULL AND origin_problem IS NOT NULL"
-            " AND origin_summary IS NOT NULL AND origin_event_type IS NOT NULL AND origin_status IS NOT NULL)",
-            name="ck_event_revisions_source_shape",
-        ),
-        Index(
-            "uq_event_revisions_declaration",
-            "declaration_id",
-            unique=True,
-            postgresql_where=sql_text("declaration_id IS NOT NULL"),
-        ),
-        Index("idx_event_revisions_event", "event_id"),
-        {"comment": "事件版本表：显式连续阶段链（声明绑定与独立 origin 正文互斥）"},
+        UniqueConstraint("declaration_id", name="uq_event_declaration_bindings_declaration"),
+        Index("idx_event_declaration_bindings_event", "event_id"),
     )
 
-    revision_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), primary_key=True, comment="版本主键（uuid）", default=new_id, autoincrement=False
-    )
+    binding_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=new_id)
     event_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="CASCADE", name="event_revisions_event_fkey"),
-        nullable=False,
-        comment="所属完整事件",
+        Uuid(as_uuid=False), ForeignKey("event_records.event_id", ondelete="CASCADE"), nullable=False
     )
-    stage_index: Mapped[int] = mapped_column(Integer, nullable=False, comment="阶段序号（模型显式顺序，连续）")
-    declaration_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("event_declarations.declaration_id", ondelete="RESTRICT", name="event_revisions_declaration_fkey"),
-        nullable=True,
-        comment="绑定声明（声明分支，唯一）",
+    declaration_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("event_declarations.declaration_id", ondelete="RESTRICT"), nullable=False
     )
-    origin_title: Mapped[str | None] = mapped_column(String, nullable=True, comment="origin 标题（独立新增分支）")
-    origin_problem: Mapped[str | None] = mapped_column(String, nullable=True, comment="origin 问题")
-    origin_summary: Mapped[str | None] = mapped_column(String, nullable=True, comment="origin 概要")
-    origin_event_type: Mapped[str | None] = mapped_column(String, nullable=True, comment="origin 事件类型")
-    origin_status: Mapped[str | None] = mapped_column(String(16), nullable=True, comment="origin 生命周期状态")
-    origin_progress: Mapped[str | None] = mapped_column(String, nullable=True, comment="origin 进展")
-
-    def __repr__(self) -> str:
-        return f"<EventRevision(revision_id={self.revision_id}, event_id={self.event_id}, stage={self.stage_index})>"

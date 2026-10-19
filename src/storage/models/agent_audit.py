@@ -32,36 +32,34 @@ from src.storage.uuid_type import Uuid7 as Uuid
 from .base import Base, naive_utcnow
 
 
-class ModelCall(Base):
+class AgentLoop(Base):
     "模型调用表（每条真实请求一行）"
 
-    __tablename__ = "model_calls"
+    __tablename__ = "agent_loop"
     __table_args__ = (
         CheckConstraint(
-            "(execution_id IS NOT NULL AND turn_index IS NOT NULL AND standalone_run_id IS NULL"
+            "(agent_id IS NOT NULL AND turn_index IS NOT NULL AND standalone_run_id IS NULL"
             " AND standalone_chapter_id IS NULL AND standalone_task_type IS NULL"
             " AND standalone_call_type IS NULL)"
-            " OR (execution_id IS NULL AND turn_index IS NULL AND standalone_run_id IS NOT NULL"
+            " OR (agent_id IS NULL AND turn_index IS NULL AND standalone_run_id IS NOT NULL"
             " AND standalone_task_type IS NOT NULL AND standalone_call_type IS NOT NULL)",
-            name="ck_model_calls_shape",
+            name="ck_agent_loop_shape",
         ),
         Index(
-            "uq_model_calls_execution_turn",
-            "execution_id",
+            "uq_agent_loop_execution_turn",
+            "agent_id",
             "turn_index",
             unique=True,
-            postgresql_where=sql_text("execution_id IS NOT NULL"),
+            postgresql_where=sql_text("agent_id IS NOT NULL"),
         ),
-        Index("idx_model_calls_status", "status"),
-        Index("idx_model_calls_standalone_run", "standalone_run_id"),
-        {"comment": "模型调用表：真实请求的模型/状态/用量/费用/计时/通信文档（Agent 或 standalone 恰一）"},
+        Index("idx_agent_loop_standalone_run", "standalone_run_id"),
+        {"comment": "模型调用表：真实请求的模型/用量/费用/计时/通信文档（Agent 或 standalone 恰一）"},
     )
 
-    call_id: Mapped[str] = mapped_column(
+    id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, comment="调用流水", default=new_id, autoincrement=False
     )
     model: Mapped[str] = mapped_column(String(100), nullable=False, comment="模型名")
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running", comment="调用状态")
     error: Mapped[str | None] = mapped_column(Text, nullable=True, comment="调用错误信息")
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="开始时间")
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="结束时间")
@@ -69,19 +67,19 @@ class ModelCall(Base):
         String(128), nullable=True, unique=True, comment="审计消息幂等键（非空时唯一，缺失表示无键）"
     )
 
-    # Agent 上下文（execution+turn 恰一于 standalone 组）
-    execution_id: Mapped[str | None] = mapped_column(
+    # Agent 回合上下文与独立调用上下文互斥
+    agent_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="CASCADE", name="model_calls_execution_fkey"),
+        ForeignKey("agent.id", ondelete="CASCADE", name="agent_loop_execution_fkey"),
         nullable=True,
         comment="所属真实 invocation",
     )
-    turn_index: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="回合序号（execution 内 1 起）")
+    turn_index: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="回合序号（Agent 内 1 起）")
 
     # 非 Agent 独立上下文（不伪造成 work）
     standalone_run_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("analysis_runs.run_id", ondelete="CASCADE", name="model_calls_standalone_run_fkey"),
+        ForeignKey("runs.id", ondelete="CASCADE", name="agent_loop_standalone_run_fkey"),
         nullable=True,
         comment="独立调用所属分析运行",
     )
@@ -118,30 +116,29 @@ class ModelCall(Base):
     timing_notes_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, comment="有序计时诊断备注文档")
 
     def __repr__(self) -> str:
-        return f"<ModelCall(call_id={self.call_id}, model={self.model}, status={self.status})>"
+        return f"<AgentLoop(id={self.id}, model={self.model})>"
 
 
-class AgentToolCall(Base):
+class ToolCall(Base):
     "工具调用表：每次真实外层工具调用的身份、顺序与观察字节"
 
-    __tablename__ = "agent_tool_calls"
+    __tablename__ = "agent_toolcall"
     __table_args__ = (
-        Index("uq_agent_tool_calls_call_index", "call_id", "call_index", unique=True),
+        Index("uq_agent_toolcall_call_index", "agentloop_id", "call_index", unique=True),
         {"comment": "工具调用审计表：每个工具调用一行（原始参数与实际执行参数分列保存）"},
     )
 
     id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, comment="工具调用流水", default=new_id, autoincrement=False
     )
-    call_id: Mapped[str] = mapped_column(
+    agentloop_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("model_calls.call_id", ondelete="CASCADE", name="agent_tool_calls_call_fkey"),
+        ForeignKey("agent_loop.id", ondelete="CASCADE", name="agent_toolcall_call_fkey"),
         nullable=False,
         comment="所属模型调用",
     )
     tool_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="工具名")
     call_index: Mapped[int] = mapped_column(Integer, nullable=False, comment="调用内序号")
-    status: Mapped[str] = mapped_column(String(20), nullable=False, comment="调用状态")
     error: Mapped[str | None] = mapped_column(Text, nullable=True, comment="调用错误信息")
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="开始时间")
     tool_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="实际测量耗时（毫秒）")
@@ -158,13 +155,13 @@ class AgentToolCall(Base):
     receipt_observed_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, comment="原始程序回执文档")
 
     def __repr__(self) -> str:
-        return f"<AgentToolCall(id={self.id}, tool={self.tool_name}, status={self.status})>"
+        return f"<ToolCall(id={self.id}, tool={self.tool_name})>"
 
 
 class EventOutbox(Base):
     "SSE 发件箱表：实际展示消息、路由、稳定游标与投递时间"
 
-    __tablename__ = "event_outbox"
+    __tablename__ = "agent_outbox"
     __table_args__ = (
         UniqueConstraint("run_id", "message_key", name="uq_outbox_run_message"),
         Index("idx_event_outbox_created", "created_at"),
@@ -185,7 +182,7 @@ class EventOutbox(Base):
     )
     run_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("analysis_runs.run_id", ondelete="CASCADE", name="event_outbox_run_fkey"),
+        ForeignKey("runs.id", ondelete="CASCADE", name="event_outbox_run_fkey"),
         nullable=False,
         comment="真实路由运行",
     )

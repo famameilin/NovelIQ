@@ -5,7 +5,7 @@ paragraph_metrics 是同一段落键下原始计数、阶段完成事实与推�
 
 char_count（读取投影）、密度、张力 z/sigmoid 与 LOWESS 值不在本表；
 句式五个分类计数进 paragraph_features；预处理与指标同批 token 只留 token_count
-一个口径，LTP 词元数从 linguistic_spans 行数取得。
+一个口径，LTP 词元数从 paragraph_spans 行数取得。
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ class ParagraphMetric(Base):
         ),
         ForeignKeyConstraint(
             ["run_id"],
-            ["analysis_runs.run_id"],
+            ["runs.id"],
             ondelete="CASCADE",
         ),
         Index("idx_paragraph_metrics_run_paragraph", "run_id", "paragraph_id"),

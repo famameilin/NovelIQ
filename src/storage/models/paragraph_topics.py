@@ -1,7 +1,7 @@
 """
 段落主题表 ORM 模型定义
 
-paragraph_topics 保存每个段落（LDA 文档）的完整 K 维主题推断分布：
+lda_paragraph_topics 保存每个段落（LDA 文档）的完整 K 维主题推断分布：
 每个推断状态为 complete 的段落恰有 K 行，
 topic_id 完整覆盖 0..K-1，每段 topic_weight 和在数值容差内等于 1。
 
@@ -23,7 +23,7 @@ from .base import Base
 class ParagraphTopic(Base):
     "段落主题表"
 
-    __tablename__ = "paragraph_topics"
+    __tablename__ = "lda_paragraph_topics"
     __table_args__ = (
         UniqueConstraint("run_id", "paragraph_id", "topic_id", name="uq_paragraph_topics_business_key"),
         CheckConstraint("topic_weight >= 0 AND topic_weight <= 1", name="ck_paragraph_topics_weight_range"),

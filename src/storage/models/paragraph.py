@@ -41,7 +41,7 @@ class Paragraph(Base):
         ),
         ForeignKeyConstraint(
             ["run_id"],
-            ["analysis_runs.run_id"],
+            ["runs.id"],
             ondelete="CASCADE",
         ),
         Index("idx_paragraphs_run_chapter_index", "run_id", "chapter_id", "paragraph_index"),

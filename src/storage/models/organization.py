@@ -28,7 +28,7 @@ FORESHADOW_ACTION_TYPES = ("setup", "reinforce", "payoff")
 class NarrativeLink(Base):
     "叙事链路表（四种互斥形状）"
 
-    __tablename__ = "narrative_links"
+    __tablename__ = "event_links"
     __table_args__ = (
         CheckConstraint(
             "cause_role IS NULL OR cause_role IN ('root', 'main', 'secondary')",
@@ -65,14 +65,14 @@ class NarrativeLink(Base):
         ),
         Index(
             "uq_narrative_links_operation",
-            "producer_execution_id",
+            "producer_agent_id",
             "source_operation_local_key",
             unique=True,
             postgresql_where=sql_text("source_operation_local_key IS NOT NULL"),
         ),
         Index(
             "uq_narrative_links_annotation_local",
-            "producer_execution_id",
+            "producer_agent_id",
             "annotation_local_key",
             unique=True,
             postgresql_where=sql_text("annotation_local_key IS NOT NULL"),
@@ -97,7 +97,7 @@ class NarrativeLink(Base):
             unique=True,
             postgresql_where=sql_text("outcome_group_id IS NOT NULL"),
         ),
-        Index("idx_narrative_links_producer", "producer_execution_id"),
+        Index("idx_narrative_links_producer", "producer_agent_id"),
         Index("idx_narrative_links_source_event", "semantic_source_event_id"),
         Index("idx_narrative_links_target_event", "semantic_target_event_id"),
         {"comment": "叙事链路表：语义/因果、单父包含、事件—线、事件—结果四种互斥形状"},
@@ -106,16 +106,16 @@ class NarrativeLink(Base):
     link_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, comment="链路主键（uuid）", default=new_id, autoincrement=False
     )
-    producer_execution_id: Mapped[str] = mapped_column(
+    producer_agent_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="narrative_links_producer_fkey"),
+        ForeignKey("agent.id", ondelete="RESTRICT", name="narrative_links_producer_fkey"),
         nullable=False,
         comment="该判断的真实作者执行",
     )
     reason: Mapped[str] = mapped_column(String, nullable=False, comment="关联理由")
     semantic_source_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="RESTRICT", name="narrative_links_source_event_fkey"),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_source_event_fkey"),
         nullable=True,
         comment="语义关系源端（完整事件，与声明端点恰一）",
     )
@@ -129,7 +129,7 @@ class NarrativeLink(Base):
     )
     semantic_target_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="RESTRICT", name="narrative_links_target_event_fkey"),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_target_event_fkey"),
         nullable=True,
         comment="语义关系目标端（完整事件，与声明端点恰一）",
     )
@@ -156,31 +156,31 @@ class NarrativeLink(Base):
     cause_role: Mapped[str | None] = mapped_column(String(16), nullable=True, comment="因果角色（root/main/secondary）")
     contained_child_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="RESTRICT", name="narrative_links_child_fkey"),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_child_fkey"),
         nullable=True,
         comment="包含关系子事件（唯一直接父）",
     )
     contained_parent_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="RESTRICT", name="narrative_links_parent_fkey"),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_parent_fkey"),
         nullable=True,
         comment="包含关系父事件",
     )
     member_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="RESTRICT", name="narrative_links_member_event_fkey"),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_member_event_fkey"),
         nullable=True,
         comment="事件—线/事件—结果关联的事件",
     )
     arc_group_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("narrative_groups.group_id", ondelete="RESTRICT", name="narrative_links_arc_group_fkey"),
+        ForeignKey("event_groups.group_id", ondelete="RESTRICT", name="narrative_links_arc_group_fkey"),
         nullable=True,
         comment="关联叙事线节点",
     )
     outcome_group_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("narrative_groups.group_id", ondelete="RESTRICT", name="narrative_links_outcome_group_fkey"),
+        ForeignKey("event_groups.group_id", ondelete="RESTRICT", name="narrative_links_outcome_group_fkey"),
         nullable=True,
         comment="关联事件结果节点",
     )
@@ -193,7 +193,7 @@ class NarrativeLink(Base):
 class NarrativeGroup(Base):
     "全书组织节点表（叙事线 / 事件结果两种互斥形状）"
 
-    __tablename__ = "narrative_groups"
+    __tablename__ = "event_groups"
     __table_args__ = (
         CheckConstraint("arc_kind IS NULL OR arc_kind IN ('main', 'subplot')", name="ck_narrative_groups_arc_kind"),
         CheckConstraint(
@@ -204,7 +204,7 @@ class NarrativeGroup(Base):
             name="ck_narrative_groups_shape",
         ),
         CheckConstraint("parent_arc_id IS NULL OR parent_arc_id <> group_id", name="ck_narrative_groups_self_parent"),
-        Index("idx_narrative_groups_producer", "producer_execution_id"),
+        Index("idx_narrative_groups_producer", "producer_agent_id"),
         {"comment": "组织节点表：叙事线与事件结果两类互斥形状（父线只能指向线，无环）"},
     )
 
@@ -215,9 +215,9 @@ class NarrativeGroup(Base):
         default=new_id,
         autoincrement=False,
     )
-    producer_execution_id: Mapped[str] = mapped_column(
+    producer_agent_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="narrative_groups_producer_fkey"),
+        ForeignKey("agent.id", ondelete="RESTRICT", name="narrative_groups_producer_fkey"),
         nullable=False,
         comment="真实生产执行",
     )
@@ -228,7 +228,7 @@ class NarrativeGroup(Base):
     arc_reason: Mapped[str | None] = mapped_column(String, nullable=True, comment="叙事线判断理由")
     parent_arc_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("narrative_groups.group_id", ondelete="RESTRICT", name="narrative_groups_parent_fkey"),
+        ForeignKey("event_groups.group_id", ondelete="RESTRICT", name="narrative_groups_parent_fkey"),
         nullable=True,
         comment="父线（仅线→线，单父无环）",
     )
@@ -241,7 +241,7 @@ class NarrativeGroup(Base):
 class OrganizationCheck(Base):
     "组织核对表（四类互斥形状）"
 
-    __tablename__ = "organization_checks"
+    __tablename__ = "event_checks"
     __table_args__ = (
         CheckConstraint(
             "(reviewed_event_id IS NOT NULL AND snapshot_hash IS NOT NULL AND disposition IS NULL"
@@ -286,23 +286,23 @@ class OrganizationCheck(Base):
             unique=True,
             postgresql_where=sql_text("source_event_id IS NOT NULL"),
         ),
-        Index("idx_organization_checks_producer", "producer_execution_id"),
+        Index("idx_organization_checks_producer", "producer_agent_id"),
         {"comment": "组织核对表：单事件/单声明核对与声明对/结构对判断四类互斥形状"},
     )
 
     check_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, comment="核对主键（uuid）", default=new_id, autoincrement=False
     )
-    producer_execution_id: Mapped[str] = mapped_column(
+    producer_agent_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="organization_checks_producer_fkey"),
+        ForeignKey("agent.id", ondelete="RESTRICT", name="organization_checks_producer_fkey"),
         nullable=False,
         comment="真实生产者执行",
     )
     reason: Mapped[str] = mapped_column(String, nullable=False, comment="核对理由")
     reviewed_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="CASCADE", name="organization_checks_event_fkey"),
+        ForeignKey("event_records.event_id", ondelete="CASCADE", name="organization_checks_event_fkey"),
         nullable=True,
         comment="被核对事件（单事件核对）",
     )
@@ -332,13 +332,13 @@ class OrganizationCheck(Base):
     )
     source_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="RESTRICT", name="organization_checks_source_event_fkey"),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="organization_checks_source_event_fkey"),
         nullable=True,
         comment="结构对来源事件",
     )
     target_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="RESTRICT", name="organization_checks_target_event_fkey"),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="organization_checks_target_event_fkey"),
         nullable=True,
         comment="结构对目标事件",
     )
@@ -349,84 +349,6 @@ class OrganizationCheck(Base):
         return f"<OrganizationCheck(check_id={self.check_id})>"
 
 
-class ConflictRecord(Base):
-    "冲突登记表：真实生产者与理由，三个主体 FK 恰一（fact 为 BIGINT，不塞伪多态列）"
-
-    __tablename__ = "conflict_records"
-    __table_args__ = (
-        CheckConstraint(
-            "(subject_event_id IS NOT NULL)::int + (subject_declaration_id IS NOT NULL)::int "
-            "+ (subject_fact_id IS NOT NULL)::int = 1",
-            name="ck_conflict_records_exactly_one_subject",
-        ),
-        Index("idx_conflict_records_producer", "producer_execution_id"),
-        {"comment": "冲突记录表：原文冲突登记及具体主体（resolution 恒 unresolved 按存在性投影）"},
-    )
-
-    conflict_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), primary_key=True, comment="冲突主键（uuid）", default=new_id, autoincrement=False
-    )
-    producer_execution_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="conflict_records_producer_fkey"),
-        nullable=False,
-        comment="真实登记执行",
-    )
-    reason: Mapped[str] = mapped_column(String, nullable=False, comment="冲突理由")
-    subject_event_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="RESTRICT", name="conflict_records_event_fkey"),
-        nullable=True,
-        comment="主体完整事件",
-    )
-    subject_declaration_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("event_declarations.declaration_id", ondelete="RESTRICT", name="conflict_records_declaration_fkey"),
-        nullable=True,
-        comment="主体章级声明",
-    )
-    subject_fact_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("graph_facts.graph_fact_id", ondelete="RESTRICT", name="conflict_records_fact_fkey"),
-        nullable=True,
-        comment="主体图谱事实（BIGINT 流水）",
-    )
-
-    def __repr__(self) -> str:
-        return f"<ConflictRecord(conflict_id={self.conflict_id})>"
-
-
-class ConflictClaim(Base):
-    "冲突各方独立陈述：每条自己的真实生产者与证据（至少两条由触发器校验）"
-
-    __tablename__ = "conflict_claims"
-    __table_args__ = (
-        Index("uq_conflict_claims_ordinal", "conflict_id", "claim_ordinal", unique=True),
-        {"comment": "冲突陈述表：各条相反陈述及各自来源"},
-    )
-
-    claim_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), primary_key=True, comment="陈述主键（uuid）", default=new_id, autoincrement=False
-    )
-    conflict_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("conflict_records.conflict_id", ondelete="CASCADE", name="conflict_claims_conflict_fkey"),
-        nullable=False,
-        comment="所属冲突",
-    )
-    claim_ordinal: Mapped[int] = mapped_column(Integer, nullable=False, comment="陈述序号（0 起）")
-    producer_execution_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="conflict_claims_producer_fkey"),
-        nullable=False,
-        comment="该陈述的真实来源执行（不默认等于冲突登记者）",
-    )
-    claim_text: Mapped[str] = mapped_column(String, nullable=False, comment="陈述内容")
-
-    def __repr__(self) -> str:
-        return f"<ConflictClaim(claim_id={self.claim_id}, conflict_id={self.conflict_id})>"
-
-
 class EventForeshadowingAction(Base):
     "伏笔动作事实：来源/目标声明真实 FK（root/target 完整事件按绑定投影，不复制）"
 
@@ -435,7 +357,7 @@ class EventForeshadowingAction(Base):
         CheckConstraint("action_type IN ('setup', 'reinforce', 'payoff')", name="ck_event_foreshadowing_actions_type"),
         Index(
             "uq_event_foreshadowing_actions_operation",
-            "producer_execution_id",
+            "producer_agent_id",
             "source_operation_local_key",
             unique=True,
         ),
@@ -446,9 +368,9 @@ class EventForeshadowingAction(Base):
     action_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, comment="动作主键（uuid）", default=new_id, autoincrement=False
     )
-    producer_execution_id: Mapped[str] = mapped_column(
+    producer_agent_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="event_foreshadowing_actions_producer_fkey"),
+        ForeignKey("agent.id", ondelete="RESTRICT", name="event_foreshadowing_actions_producer_fkey"),
         nullable=False,
         comment="真实生产执行",
     )
@@ -479,14 +401,13 @@ class EventForeshadowingAction(Base):
 class SourceEvidence(Base):
     "原文证据表（九个所有者恰一；每个所有者分支 (owner,ordinal) 唯一）"
 
-    __tablename__ = "source_evidence"
+    __tablename__ = "paragraph_evidence"
     __table_args__ = (
         CheckConstraint("start_char < end_char", name="ck_source_evidence_char_order"),
         CheckConstraint(
             "(graph_fact_id IS NOT NULL)::int + (declaration_id IS NOT NULL)::int "
             "+ (complete_event_id IS NOT NULL)::int + (narrative_group_id IS NOT NULL)::int "
             "+ (narrative_link_id IS NOT NULL)::int + (foreshadow_action_id IS NOT NULL)::int "
-            "+ (conflict_id IS NOT NULL)::int + (claim_id IS NOT NULL)::int "
             "+ (check_id IS NOT NULL)::int = 1",
             name="ck_source_evidence_exactly_one_owner",
         ),
@@ -533,20 +454,6 @@ class SourceEvidence(Base):
             postgresql_where=sql_text("foreshadow_action_id IS NOT NULL"),
         ),
         Index(
-            "uq_source_evidence_conflict",
-            "conflict_id",
-            "ordinal",
-            unique=True,
-            postgresql_where=sql_text("conflict_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_source_evidence_claim",
-            "claim_id",
-            "ordinal",
-            unique=True,
-            postgresql_where=sql_text("claim_id IS NOT NULL"),
-        ),
-        Index(
             "uq_source_evidence_check",
             "check_id",
             "ordinal",
@@ -565,7 +472,7 @@ class SourceEvidence(Base):
     end_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="段内结束字符偏移")
     related_complete_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="RESTRICT", name="source_evidence_related_event_fkey"),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="source_evidence_related_event_fkey"),
         nullable=True,
         comment="证据的相关完整事件（非第二所有者）",
     )
@@ -583,19 +490,19 @@ class SourceEvidence(Base):
     )
     complete_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("complete_events.event_id", ondelete="CASCADE", name="source_evidence_event_fkey"),
+        ForeignKey("event_records.event_id", ondelete="CASCADE", name="source_evidence_event_fkey"),
         nullable=True,
         comment="所有者：完整事件",
     )
     narrative_group_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("narrative_groups.group_id", ondelete="CASCADE", name="source_evidence_group_fkey"),
+        ForeignKey("event_groups.group_id", ondelete="CASCADE", name="source_evidence_group_fkey"),
         nullable=True,
         comment="所有者：叙事组织节点",
     )
     narrative_link_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("narrative_links.link_id", ondelete="CASCADE", name="source_evidence_link_fkey"),
+        ForeignKey("event_links.link_id", ondelete="CASCADE", name="source_evidence_link_fkey"),
         nullable=True,
         comment="所有者：叙事链路",
     )
@@ -605,21 +512,9 @@ class SourceEvidence(Base):
         nullable=True,
         comment="所有者：伏笔动作",
     )
-    conflict_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("conflict_records.conflict_id", ondelete="CASCADE", name="source_evidence_conflict_fkey"),
-        nullable=True,
-        comment="所有者：冲突登记",
-    )
-    claim_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("conflict_claims.claim_id", ondelete="CASCADE", name="source_evidence_claim_fkey"),
-        nullable=True,
-        comment="所有者：冲突陈述",
-    )
     check_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("organization_checks.check_id", ondelete="CASCADE", name="source_evidence_check_fkey"),
+        ForeignKey("event_checks.check_id", ondelete="CASCADE", name="source_evidence_check_fkey"),
         nullable=True,
         comment="所有者：组织核对",
     )

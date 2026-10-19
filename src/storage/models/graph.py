@@ -40,7 +40,7 @@ class GraphEntity(Base):
     )
     run_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("analysis_runs.run_id", ondelete="CASCADE"),
+        ForeignKey("runs.id", ondelete="CASCADE"),
         nullable=False,
         comment="所属分析运行",
     )
@@ -81,12 +81,12 @@ class GraphRelation(Base):
         nullable=False,
         comment="终点实体",
     )
-    relation_type: Mapped[str] = mapped_column(String(100), nullable=False, comment="关系类型（版本化关系合同）")
+    relation_type: Mapped[str] = mapped_column(String(100), nullable=False, comment="关系类型（关系取值）")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="创建时间")
 
 
 class GraphFact(Base):
-    "图事实表（五种互斥形状）"
+    "实体、关系、参与者及情节推进的事实表"
 
     __tablename__ = "graph_facts"
     __table_args__ = (
@@ -122,46 +122,36 @@ class GraphFact(Base):
         ),
         CheckConstraint(
             # 实体引用/更新形状
-            "(direct_producer_execution_id IS NOT NULL AND entity_id IS NOT NULL AND operation_order IS NOT NULL"
-            " AND relation_id IS NULL AND participant_id IS NULL AND program_work_id IS NULL"
+            "(direct_producer_agent_id IS NOT NULL AND entity_id IS NOT NULL AND operation_order IS NOT NULL"
+            " AND relation_id IS NULL AND participant_id IS NULL"
             " AND business_call_id IS NULL AND declaration_id IS NULL"
             " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
             " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
             " AND relation_change_kind IS NULL AND identity_kind IS NULL AND reason IS NULL)"
             # 实体关系操作形状
-            " OR (direct_producer_execution_id IS NOT NULL AND relation_id IS NOT NULL"
+            " OR (direct_producer_agent_id IS NOT NULL AND relation_id IS NOT NULL"
             " AND operation_order IS NOT NULL AND relation_change_kind IS NOT NULL"
-            " AND entity_id IS NULL AND participant_id IS NULL AND program_work_id IS NULL"
+            " AND entity_id IS NULL AND participant_id IS NULL"
             " AND business_call_id IS NULL AND declaration_id IS NULL"
             " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
             " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
             " AND description_action IS NULL AND description_value IS NULL"
             " AND representative_action IS NULL AND representative_value IS NULL AND tags_submitted IS NULL)"
             # 人物动态观测形状
-            " OR (participant_id IS NOT NULL AND direct_producer_execution_id IS NULL"
+            " OR (participant_id IS NOT NULL AND direct_producer_agent_id IS NULL"
             " AND operation_order IS NULL AND relation_id IS NULL AND entity_id IS NULL"
-            " AND program_work_id IS NULL AND business_call_id IS NULL AND declaration_id IS NULL"
+            " AND business_call_id IS NULL AND declaration_id IS NULL"
             " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
             " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
             " AND description_action IS NULL AND description_value IS NULL"
             " AND representative_action IS NULL AND representative_value IS NULL AND tags_submitted IS NULL"
             " AND relation_change_kind IS NULL AND identity_kind IS NULL AND reason IS NULL)"
             # 独立情节推进形状
-            " OR (direct_producer_execution_id IS NOT NULL AND business_call_id IS NOT NULL"
+            " OR (direct_producer_agent_id IS NOT NULL AND business_call_id IS NOT NULL"
             " AND operation_order IS NOT NULL AND plotline_subject_id IS NOT NULL"
             " AND plotline_subject_title IS NOT NULL AND plotline_description IS NOT NULL"
             " AND plotline_after IS NOT NULL"
             " AND entity_id IS NULL AND relation_id IS NULL AND participant_id IS NULL"
-            " AND program_work_id IS NULL"
-            " AND description_action IS NULL AND description_value IS NULL"
-            " AND representative_action IS NULL AND representative_value IS NULL AND tags_submitted IS NULL"
-            " AND relation_change_kind IS NULL AND identity_kind IS NULL AND reason IS NULL)"
-            # 章末程序核对回执形状
-            " OR (program_work_id IS NOT NULL AND direct_producer_execution_id IS NULL"
-            " AND operation_order IS NULL AND entity_id IS NULL AND relation_id IS NULL"
-            " AND participant_id IS NULL AND business_call_id IS NULL AND declaration_id IS NULL"
-            " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
-            " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
             " AND description_action IS NULL AND description_value IS NULL"
             " AND representative_action IS NULL AND representative_value IS NULL AND tags_submitted IS NULL"
             " AND relation_change_kind IS NULL AND identity_kind IS NULL AND reason IS NULL)",
@@ -169,10 +159,10 @@ class GraphFact(Base):
         ),
         Index(
             "uq_graph_facts_producer_order",
-            "direct_producer_execution_id",
+            "direct_producer_agent_id",
             "operation_order",
             unique=True,
-            postgresql_where=sql_text("direct_producer_execution_id IS NOT NULL AND business_call_id IS NULL"),
+            postgresql_where=sql_text("direct_producer_agent_id IS NOT NULL AND business_call_id IS NULL"),
         ),
         Index(
             "uq_graph_facts_business_call",
@@ -186,33 +176,21 @@ class GraphFact(Base):
             unique=True,
             postgresql_where=sql_text("participant_id IS NOT NULL"),
         ),
-        Index(
-            "uq_graph_facts_program_work",
-            "program_work_id",
-            unique=True,
-            postgresql_where=sql_text("program_work_id IS NOT NULL"),
-        ),
-        Index("idx_graph_facts_producer_execution", "direct_producer_execution_id"),
-        {"comment": "图事实表：实体/关系/参与者/情节推进/程序核对五种互斥形状（运行从生产来源取得）"},
+        Index("idx_graph_facts_producer_execution", "direct_producer_agent_id"),
+        {"comment": "图事实表：实体、关系、参与者与情节推进的互斥形状"},
     )
 
     graph_fact_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, comment="事实流水", default=new_id, autoincrement=False
     )
     # 真实生产执行（实体/关系/情节推进形状必填；人物观测从参与者来源取，不填）
-    direct_producer_execution_id: Mapped[str | None] = mapped_column(
+    direct_producer_agent_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("executions.execution_id", ondelete="RESTRICT", name="graph_facts_producer_fkey"),
+        ForeignKey("agent.id", ondelete="RESTRICT", name="graph_facts_producer_fkey"),
         nullable=True,
         comment="直接生产执行（实体/关系/情节推进）",
     )
     # 章末程序核对回执来源
-    program_work_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("work_items.work_id", ondelete="RESTRICT", name="graph_facts_program_work_fkey"),
-        nullable=True,
-        comment="章末核对程序 work（回执形状）",
-    )
     operation_order: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="执行内操作顺序（0 起）")
     business_call_id: Mapped[str | None] = mapped_column(Text, nullable=True, comment="情节推进的实际程序 call_id")
     effective_chapter_id: Mapped[int | None] = mapped_column(
@@ -232,7 +210,7 @@ class GraphFact(Base):
     )
     participant_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("declaration_participants.participant_id", ondelete="RESTRICT", name="graph_facts_participant_fkey"),
+        ForeignKey("event_participants.participant_id", ondelete="RESTRICT", name="graph_facts_participant_fkey"),
         nullable=True,
         comment="人物动态观测的源参与者（唯一）",
     )
@@ -274,7 +252,7 @@ class GraphFact(Base):
 class FactEntityTag(Base):
     "标签成员：去重且保留顺序（父事实 tags_submitted=true 且零行表示清空）"
 
-    __tablename__ = "fact_entity_tags"
+    __tablename__ = "graph_fact_entity_tags"
     __table_args__ = (
         UniqueConstraint("graph_fact_id", "tag_ordinal", name="uq_fact_entity_tags_business_key"),
         UniqueConstraint("graph_fact_id", "tag", name="uq_fact_entity_tags_tag"),
