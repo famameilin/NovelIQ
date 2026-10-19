@@ -64,9 +64,6 @@ describe("useSSEListener", () => {
     const registered = MockEventSource.instances[0].registeredTypes;
 
     for (const eventType of [
-      "stage_start",
-      "stage_progress",
-      "stage_complete",
       "llm_output",
       "llm_thinking",
       "tool_call",
@@ -75,7 +72,6 @@ describe("useSSEListener", () => {
       "task_cancelled",
       "task_reset",
       "chapter_reset",
-      "pipeline_progress",
       "reconnect_required",
       "message",
     ]) {
@@ -160,9 +156,9 @@ describe("useSSEListener", () => {
     }
     const view = render(<DisconnectHarness url="http://test/api/events/tasks/task-a" />);
 
-    MockEventSource.fire("stage_progress", {
+    MockEventSource.fire("llm_output", {
       lastEventId: "64",
-      data: JSON.stringify({ action: "progress", stage: "annotate" }),
+      data: JSON.stringify({ action: "output", content: "模型输出" }),
     });
 
     act(() => {
@@ -219,9 +215,9 @@ describe("useSSEListener", () => {
   it("监听启停（url 变 null 再恢复同一任务）保留 last_seq", () => {
     const view = render(<Harness url="http://test/api/events/tasks/task-a" />);
 
-    MockEventSource.fire("stage_progress", {
+    MockEventSource.fire("llm_output", {
       lastEventId: "64",
-      data: JSON.stringify({ action: "progress", stage: "annotate" }),
+      data: JSON.stringify({ action: "output", content: "模型输出" }),
     });
 
     // 暂停监听：effect 提前返回，不重建 EventSource 也不清空 seq

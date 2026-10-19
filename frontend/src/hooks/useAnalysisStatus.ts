@@ -1,562 +1,66 @@
-/** 通过 SSE 和 HTTP backfill 同步分析任务状态 */
-
-import { useEffect, useRef, useCallback, useState } from "react";
+/** 同步任务状态并接收真实模型通信 */
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSSEListener } from "./useEventSource";
 import { useStreamStore } from "@/store/streamStore";
 import { appConfig } from "@/config";
 import { getTaskStatus } from "@/api/analysis";
-import type {
-  SSEEventType,
-  StreamEventData,
-  ErrorData,
-} from "@/api/streamTypes";
-import { buildStreamExecutionScope } from "@/api/streamTypes";
-import type { TaskStatusResponse } from "@/api/types";
-
-const SSE_URL = appConfig.apiBaseUrl;
-
-function buildBackfillProgress(status: TaskStatusResponse): StreamEventData {
-  // HTTP backfill 需要对 pending/running/cancelling 做统一归一化，
-  // 避免切换任务或刷新页面时沿用上一个任务留下来的旧进度面板状态
-  const fallbackStage =
-    status.stage ??
-    (status.status === "pending"
-      ? "preprocess"
-      : status.status === "cancelling"
-        ? "cancelling"
-        : "");
-  const fallbackMessage =
-    status.message ??
-    (status.status === "pending"
-      ? "任务待执行"
-      : status.status === "cancelling"
-        ? "任务取消中"
-        : "任务执行中");
-
-  return {
-    action: status.status === "pending" ? "start" : "progress",
-    stage: fallbackStage,
-    sub_stage: status.sub_stage ?? "",
-    // HTTP 回填不携带真实章节，不得覆写成 0——
-    // updateProgress 对缺失 chapter_id 保留旧值，避免 annotate 期间面板按章匹配落空
-    current: status.current ?? 0,
-    total: status.total ?? 0,
-    percent: status.progress,
-    sub_percent: 0,
-    content: "",
-    message: fallbackMessage,
-  };
-}
-
-function isMockEnabled(): boolean {
-  const mockWorkerActive =
-    typeof navigator !== "undefined" && navigator.serviceWorker?.controller != null;
-  return (
-    import.meta.env.DEV &&
-    (appConfig.enableMock ||
-      import.meta.env.VITE_ENABLE_MOCK === "true" ||
-      new URLSearchParams(window.location.search).get("mock") === "true" ||
-      mockWorkerActive)
-  );
-}
-
-/** 将同一流的连续输出合并进批量缓冲，减少后台恢复后的逐 token 刷新 */
-function buildLLMOutputBufferKey(data: Pick<StreamEventData, "action" | "stage" | "sub_stage" | "chapter_id" | "stream_id" | "invocation_id">): string {
-  if (!data.stream_id) {
-    throw new Error("LLM 流事件缺少 stream_id");
-  }
-  return [
-    data.action,
-    data.stage,
-    data.sub_stage || "default",
-    String(data.chapter_id ?? 0),
-    data.stream_id,
-    data.invocation_id || "",
-  ].join("|");
-}
-
+import type { SSEEventType, StreamEventData } from "@/api/streamTypes";
+import type { TaskStatus } from "@/api/types";
 export interface UseAnalysisStatusOptions {
-  enabled?: boolean;
-  onRunning?: () => void;
-  onCompleted?: () => void;
-  onCancelled?: () => void;
-  onFailed?: (error: string) => void;
+  enabled?: boolean; onRunning?: () => void; onCompleted?: () => void;
+  onCancelled?: () => void; onFailed?: (error: string) => void;
 }
-
-interface ApplyTaskStatusBackfillOptions {
-  notifyTerminalCallbacks: boolean;
-}
-
-export function useAnalysisStatus(
-  novelId: string | null,
-  taskId: string | null,
-  options?: UseAnalysisStatusOptions,
-) {
+export function useAnalysisStatus(novelId: string | null, taskId: string | null, options?: UseAnalysisStatusOptions) {
   const queryClient = useQueryClient();
-  const {
-    setConnected,
-    setTaskId,
-    updateProgress,
-    appendLLMOutput,
-    resetWorkOutput,
-    resetChapterOutput,
-    setError,
-    setStageDuration,
-    reset,
-    resumeEpoch,
-  } = useStreamStore();
-
+  const setTaskId = useStreamStore((s) => s.setTaskId);
+  const setStatus = useStreamStore((s) => s.setStatus);
+  const setError = useStreamStore((s) => s.setError);
+  const append = useStreamStore((s) => s.appendLLMOutput);
+  const setConnected = useStreamStore((s) => s.setConnected);
+  const epoch = useStreamStore((s) => s.resumeEpoch);
+  const [active, setActive] = useState(false);
+  const callbacks = useRef(options);
+  const previous = useRef<TaskStatus | null>(null);
   const enabled = !!novelId && !!taskId && (options?.enabled ?? true);
-  const prevStatusRef = useRef<string | null>(null);
-  // SSE 订阅闸门：只有回填判明任务活跃后才连接；判明终态（或 SSE 收到终态事件）
-  // 即关闭——终态任务的 SSE 只会全量回放旧事件流，对结果页是纯开销
-  const [sseGate, setSseGate] = useState<"pending" | "open" | "closed">("pending");
-  const stageStartTimeRef = useRef<number | null>(null);
-  const llmOutputBufferRef = useRef<Map<string, StreamEventData>>(new Map());
-  const executionRef = useRef(new Map<string, string>());
-  const retiredExecutionsRef = useRef(new Map<string, Set<string>>());
-  const executionChaptersRef = useRef(new Map<string, number>());
-  const executionTaskRef = useRef<string | null>(taskId);
-  const flushTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const hasConnectedOnceRef = useRef(false);
-  const hasHydratedTaskStatusRef = useRef(false);
-  const lastForegroundSyncAtRef = useRef(0);
-
-  const optionsRef = useRef(options);
+  useEffect(() => { callbacks.current = options; }, [options]);
+  const apply = useCallback((status: TaskStatus, notify: boolean) => {
+    setStatus(status);
+    setActive(status === "pending" || status === "running");
+    if (notify && previous.current !== status) {
+      if (status === "running") callbacks.current?.onRunning?.();
+      if (status === "completed") callbacks.current?.onCompleted?.();
+      if (status === "cancelled") callbacks.current?.onCancelled?.();
+      if (status === "failed") callbacks.current?.onFailed?.("分析失败");
+    }
+    previous.current = status;
+  }, [setStatus]);
   useEffect(() => {
-    optionsRef.current = options;
-  }, [options]);
-
-  const streamMessageOpts = useRef({ novelId, taskId });
-  useEffect(() => {
-    streamMessageOpts.current = { novelId, taskId };
-  }, [novelId, taskId]);
-
-  /** 处理阶段变化（stage_start / stage_progress 共用） */
-  const _handleStageChange = useCallback(
-    (data: StreamEventData) => {
-      updateProgress(data);
-      const opts = streamMessageOpts.current;
-      if (!opts.novelId || !opts.taskId) return;
-
-      // 阶段变化时触发 onRunning 回调
-      if (prevStatusRef.current !== data.stage) {
-        prevStatusRef.current = data.stage;
-        optionsRef.current?.onRunning?.();
-      }
-    },
-    [updateProgress],
-  );
-
-  /** 后台标签页恢复后，允许重新回填任务状态并同步终态 */
-  const applyTaskStatusBackfill = useCallback(
-    (status: TaskStatusResponse, options: ApplyTaskStatusBackfillOptions) => {
-      if (status.status === "pending" || status.status === "running" || status.status === "cancelling") {
-        setSseGate("open");
-        updateProgress(buildBackfillProgress(status));
-        setError(null);
-        if (prevStatusRef.current !== status.status) {
-          optionsRef.current?.onRunning?.();
-        }
-        prevStatusRef.current = status.status;
-        return;
-      }
-
-      if (status.status === "completed") {
-        setSseGate("closed");
-        updateProgress({
-          action: "complete",
-          stage: "completed",
-          sub_stage: "",
-          current: 0,
-          total: 0,
-          percent: 100,
-          sub_percent: 0,
-          content: "",
-          message: "分析完成",
-        });
-        setError(null);
-        if (options.notifyTerminalCallbacks && prevStatusRef.current !== "completed") {
-          optionsRef.current?.onCompleted?.();
-        }
-        prevStatusRef.current = "completed";
-        return;
-      }
-
-      if (status.status === "cancelled") {
-        setSseGate("closed");
-        updateProgress({
-          action: "complete",
-          stage: "cancelled",
-          sub_stage: "",
-          current: 0,
-          total: 0,
-          percent: 0,
-          sub_percent: 0,
-          content: "",
-          message: "任务已取消",
-        });
-        setError(null);
-        if (options.notifyTerminalCallbacks && prevStatusRef.current !== "cancelled") {
-          optionsRef.current?.onCancelled?.();
-        }
-        prevStatusRef.current = "cancelled";
-        return;
-      }
-
-      if (status.status === "failed") {
-        setSseGate("closed");
-        setError(status.error || "分析失败");
-        if (options.notifyTerminalCallbacks && prevStatusRef.current !== "failed") {
-          optionsRef.current?.onFailed?.(status.error || "分析失败");
-        }
-        prevStatusRef.current = "failed";
-      }
-    },
-    [setError, updateProgress],
-  );
-
-  /** 首次挂载、前台恢复和 SSE 重连都复用同一套活跃任务状态回填逻辑 */
-  const syncTaskStatus = useCallback(() => {
-    if (!novelId || !taskId) {
-      return Promise.resolve();
+    let disposed = false;
+    previous.current = null;
+    setTaskId(taskId);
+    if (!enabled || !novelId || !taskId) return;
+    const sync = () => getTaskStatus(novelId, taskId).then((data) => {
+      if (!disposed) { apply(data.status, previous.current !== null); setError(null); }
+    }).catch(() => { if (!disposed) setError("任务状态同步失败"); });
+    void sync();
+    const timer = window.setInterval(() => { void sync(); }, 5000);
+    const foreground = () => { if (document.visibilityState !== "hidden") void sync(); };
+    window.addEventListener("focus", foreground);
+    document.addEventListener("visibilitychange", foreground);
+    return () => { disposed = true; window.clearInterval(timer); window.removeEventListener("focus", foreground); document.removeEventListener("visibilitychange", foreground); };
+  }, [novelId, taskId, enabled, epoch, setTaskId, apply, setError]);
+  const handle = (type: SSEEventType, data: unknown) => {
+    if (type === "message") { const nested = data as {type: SSEEventType; data: unknown}; handle(nested.type, nested.data); return; }
+    if (type === "llm_output" || type === "llm_thinking" || type === "tool_call") append(data as StreamEventData);
+    if (type === "task_complete" || type === "task_error" || type === "task_cancelled") {
+      const status = type === "task_complete" ? "completed" : type === "task_error" ? "failed" : "cancelled";
+      apply(status, true);
+      setError(status === "failed" ? "分析失败" : null);
+      void queryClient.invalidateQueries({queryKey: ["pipeline", novelId, taskId]});
     }
-
-    const notifyTerminalCallbacks = hasHydratedTaskStatusRef.current;
-    return getTaskStatus(novelId, taskId)
-      .then((status) => {
-        applyTaskStatusBackfill(status, { notifyTerminalCallbacks });
-        hasHydratedTaskStatusRef.current = true;
-      })
-      .catch((error: unknown) => {
-        // HTTP backfill 只是 SSE 的补偿路径，失败时不终止监听，但必须显式暴露错误
-        setSseGate((current) => (current === "pending" ? "open" : current));
-        console.warn("Failed to backfill analysis task status", error);
-        setError("任务状态同步失败，正在等待实时事件恢复");
-      });
-  }, [applyTaskStatusBackfill, novelId, setError, taskId]);
-
-  /** LLM 输出先进入 ref 缓冲，再按固定节奏批量刷入 Zustand */
-  const flushBufferedLLMOutputs = useCallback(() => {
-    if (flushTimerRef.current !== null) {
-      window.clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
-
-    if (llmOutputBufferRef.current.size === 0) {
-      return;
-    }
-
-    const bufferedMessages = Array.from(llmOutputBufferRef.current.values());
-    llmOutputBufferRef.current.clear();
-    bufferedMessages.forEach((message) => {
-      appendLLMOutput(message);
-    });
-  }, [appendLLMOutput]);
-
-  const scheduleBufferedLLMFlush = useCallback(() => {
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-      return;
-    }
-    if (flushTimerRef.current !== null) {
-      return;
-    }
-
-    flushTimerRef.current = window.setTimeout(() => {
-      flushBufferedLLMOutputs();
-    }, appConfig.llmOutputFlushIntervalMs);
-  }, [flushBufferedLLMOutputs]);
-
-  const bufferLLMOutput = useCallback(
-    (eventData: StreamEventData) => {
-      // tool_call 事件按工具独立成行，且需要 started→success/failed 状态转移；
-      // 不参与按内容拼接的批处理缓冲（同窗口多个工具会拼成假工具名），直接刷入 store
-      if (eventData.action === "tool_call") {
-        appendLLMOutput({ ...eventData, status: eventData.status ?? "started" });
-        return;
-      }
-      const bufferKey = buildLLMOutputBufferKey({
-        action: eventData.action,
-        stage: eventData.stage,
-        sub_stage: eventData.sub_stage,
-        chapter_id: eventData.chapter_id,
-        stream_id: eventData.stream_id,
-        invocation_id: eventData.invocation_id,
-      });
-      const existing = llmOutputBufferRef.current.get(bufferKey);
-      if (existing) {
-        llmOutputBufferRef.current.set(bufferKey, {
-          ...existing,
-          current: eventData.current,
-          total: eventData.total,
-          percent: eventData.percent,
-          sub_percent: eventData.sub_percent,
-          content: existing.content + eventData.content,
-          message: eventData.message,
-          status: eventData.status ?? existing.status,
-        });
-      } else {
-        llmOutputBufferRef.current.set(bufferKey, { ...eventData });
-      }
-
-      scheduleBufferedLLMFlush();
-    },
-    [appendLLMOutput, scheduleBufferedLLMFlush],
-  );
-
-  const handleMessage = useCallback(
-    (type: SSEEventType, data: unknown) => {
-      const eventData = data as StreamEventData;
-
-      switch (type) {
-        case "task_reset":
-          flushBufferedLLMOutputs();
-          setError(null);
-          prevStatusRef.current = null;
-          void syncTaskStatus();
-          break;
-        case "chapter_reset":
-          for (const [scope, invocation] of executionRef.current) {
-            if (executionChaptersRef.current.get(scope) === eventData.chapter_id) {
-              const retired = new Set(retiredExecutionsRef.current.get(scope));
-              retired.add(invocation);
-              retiredExecutionsRef.current.set(scope, retired);
-              executionRef.current.delete(scope);
-            }
-          }
-          for (const [key, value] of llmOutputBufferRef.current) {
-            if (value.stage === eventData.stage && value.chapter_id === eventData.chapter_id) llmOutputBufferRef.current.delete(key);
-          }
-          resetChapterOutput(eventData);
-          break;
-        case "work_reset": {
-          const scope = buildStreamExecutionScope(eventData);
-          const invocation = eventData.invocation_id;
-          if (!invocation || executionRef.current.get(scope) === invocation) break;
-          if (invocation && retiredExecutionsRef.current.get(scope)?.has(invocation)) break;
-          const previous = executionRef.current.get(scope);
-          if (invocation) {
-            if (previous && previous !== invocation) {
-              const retired = new Set(retiredExecutionsRef.current.get(scope));
-              retired.add(previous);
-              retiredExecutionsRef.current.set(scope, retired);
-            }
-            executionRef.current.set(scope, invocation);
-            executionChaptersRef.current.set(scope, eventData.chapter_id ?? 0);
-          }
-          for (const [key, value] of llmOutputBufferRef.current) {
-            if (buildStreamExecutionScope(value) === scope) llmOutputBufferRef.current.delete(key);
-          }
-          resetWorkOutput(eventData);
-          break;
-        }
-        case "pipeline_progress": {
-          const payload = data as { event_type?: string };
-          if (payload.event_type === "work_saved") {
-            void queryClient.invalidateQueries({ queryKey: ["pipeline", novelId, taskId] });
-          }
-          break;
-        }
-        case "stage_start":
-          _handleStageChange(eventData);
-          // 记录阶段开始时间
-          stageStartTimeRef.current = Date.now();
-          break;
-
-        case "stage_progress":
-          if (eventData.stage === "annotate") void queryClient.invalidateQueries({queryKey: ["pipeline", novelId, taskId]});
-          _handleStageChange(eventData);
-          break;
-
-        case "stage_complete": {
-          // 计算并记录阶段耗时
-          if (stageStartTimeRef.current && eventData.stage) {
-            const duration = Date.now() - stageStartTimeRef.current;
-            setStageDuration(eventData.stage, duration);
-            stageStartTimeRef.current = null;
-          }
-          break;
-        }
-
-        case "llm_output":
-        case "llm_thinking":
-        case "tool_call": {
-          const current = executionRef.current.get(buildStreamExecutionScope(eventData));
-          if (current && current !== eventData.invocation_id) break;
-          const retired = retiredExecutionsRef.current.get(buildStreamExecutionScope(eventData));
-          if (retired?.has(eventData.invocation_id ?? "") || retired?.size && !current) break;
-          bufferLLMOutput({
-            action: eventData.action,
-            stage: eventData.stage,
-            sub_stage: eventData.sub_stage,
-            chapter_id: eventData.chapter_id,
-            stream_id: eventData.stream_id,
-            invocation_id: eventData.invocation_id,
-            current: eventData.current,
-            total: eventData.total,
-            percent: eventData.percent,
-            sub_percent: eventData.sub_percent,
-            content: eventData.content,
-            message: eventData.message,
-            status: eventData.status ?? null,
-          });
-          break;
-        }
-
-        case "task_error":
-          setSseGate("closed");
-          flushBufferedLLMOutputs();
-          setError((data as ErrorData).error);
-          prevStatusRef.current = "failed";
-          optionsRef.current?.onFailed?.((data as ErrorData).error || "未知错误");
-          break;
-
-        case "task_cancelled":
-          setSseGate("closed");
-          flushBufferedLLMOutputs();
-          updateProgress({
-            action: "complete",
-            stage: "cancelled",
-            sub_stage: "",
-            current: 0,
-            total: 0,
-            percent: 0,
-            sub_percent: 0,
-            content: "",
-            message: "任务已取消",
-          });
-          setError(null);
-          prevStatusRef.current = "cancelled";
-          optionsRef.current?.onCancelled?.();
-          break;
-
-        case "task_complete":
-          setSseGate("closed");
-          void queryClient.invalidateQueries({ queryKey: ["pipeline", novelId, taskId] });
-          flushBufferedLLMOutputs();
-          updateProgress({
-            action: "complete",
-            stage: "completed",
-            sub_stage: "",
-            current: 0,
-            total: 0,
-            percent: 100,
-            sub_percent: 0,
-            content: "",
-            message: "分析完成",
-          });
-          prevStatusRef.current = "completed";
-          optionsRef.current?.onCompleted?.();
-          break;
-      }
-    },
-    [bufferLLMOutput, flushBufferedLLMOutputs, _handleStageChange, setError, setStageDuration, updateProgress, resetWorkOutput,
-      queryClient, novelId, taskId, syncTaskStatus, resetChapterOutput],
-  );
-
-  const sseUrl =
-    enabled && !!taskId && !isMockEnabled() && sseGate === "open"
-      ? `${SSE_URL}/api/novels/${novelId}/events/tasks/${taskId}`
-      : null;
-
-  const { isConnected, disconnect } = useSSEListener(sseUrl, {
-    onEvent: (eventType, data) => {
-      // 后端 SSE 消息格式为 { type, data }，不含 task_id 字段；message 事件按内部类型分发
-      if (eventType === "message") {
-        const message = data as { type: SSEEventType; data: unknown };
-        handleMessage(message.type, message.data);
-      } else {
-        handleMessage(eventType as SSEEventType, data);
-      }
-    },
-    onError: () => {
-      setConnected(false);
-    },
-  });
-
-  useEffect(() => {
-    if (isConnected) {
-      setConnected(true);
-      flushBufferedLLMOutputs();
-      if (hasConnectedOnceRef.current && enabled) {
-        void syncTaskStatus();
-      }
-      hasConnectedOnceRef.current = true;
-    }
-  }, [enabled, flushBufferedLLMOutputs, isConnected, setConnected, syncTaskStatus]);
-
-  useEffect(() => {
-    if (executionTaskRef.current !== taskId) {
-      executionTaskRef.current = taskId;
-      executionRef.current.clear();
-      retiredExecutionsRef.current.clear();
-      executionChaptersRef.current.clear();
-    }
-    if (taskId && novelId) {
-      setTaskId(taskId);
-      prevStatusRef.current = null;
-      hasHydratedTaskStatusRef.current = false;
-      stageStartTimeRef.current = null;
-      hasConnectedOnceRef.current = false;
-      setSseGate("pending");
-      llmOutputBufferRef.current.clear();
-      if (flushTimerRef.current !== null) {
-        window.clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
-
-      void syncTaskStatus();
-    } else if (!taskId) {
-      llmOutputBufferRef.current.clear();
-      if (flushTimerRef.current !== null) {
-        window.clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
-      reset();
-    }
-    // resumeEpoch 变化（同 task_id resume 开新轮）时同样重置
-    // 内部缓冲，避免旧轮 LLM 输出/进度状态与新轮混叠
-  }, [taskId, novelId, setTaskId, reset, syncTaskStatus, resumeEpoch]);
-
-  // 浏览器后台期间 EventSource 可能保持连接（不触发重连），
-  // 前台恢复时主动 flush 缓冲并做一次 HTTP 状态回填，避免进度/终态陈旧
-  useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-
-    const handleForegroundResume = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        return;
-      }
-
-      const now = Date.now();
-      if (now - lastForegroundSyncAtRef.current < 300) {
-        return;
-      }
-      lastForegroundSyncAtRef.current = now;
-
-      flushBufferedLLMOutputs();
-      void syncTaskStatus();
-    };
-
-    document.addEventListener("visibilitychange", handleForegroundResume);
-    window.addEventListener("focus", handleForegroundResume);
-    return () => {
-      document.removeEventListener("visibilitychange", handleForegroundResume);
-      window.removeEventListener("focus", handleForegroundResume);
-    };
-  }, [enabled, flushBufferedLLMOutputs, syncTaskStatus]);
-
-  useEffect(() => {
-    return () => {
-      flushBufferedLLMOutputs();
-      disconnect();
-    };
-  }, [disconnect, flushBufferedLLMOutputs]);
-
-  return {
-    isConnected,
   };
+  const {isConnected} = useSSEListener(enabled && active ? `${appConfig.apiBaseUrl}/api/novels/${novelId}/events/tasks/${taskId}` : null, {onEvent: (type, data) => handle(type as SSEEventType, data)});
+  useEffect(() => { setConnected(isConnected); }, [isConnected, setConnected]);
+  return {isConnected};
 }

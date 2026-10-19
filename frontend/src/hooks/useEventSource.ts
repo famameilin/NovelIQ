@@ -3,9 +3,6 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 
 export type SSEEventType =
-  | "stage_start"
-  | "stage_progress"
-  | "stage_complete"
   | "llm_output"
   | "llm_thinking"
   | "tool_call"
@@ -15,7 +12,6 @@ export type SSEEventType =
   | "work_reset"
   | "task_reset"
   | "chapter_reset"
-  | "pipeline_progress"
   | "reconnect_required"
   | "message";
 
@@ -93,9 +89,6 @@ export function useSSEListener(
     };
 
     const defaultEventTypes: SSEEventType[] = [
-      "stage_start",
-      "stage_progress",
-      "stage_complete",
       "llm_output",
       "llm_thinking",
       "tool_call",
@@ -105,7 +98,6 @@ export function useSSEListener(
       "work_reset",
       "task_reset",
       "chapter_reset",
-      "pipeline_progress",
       "reconnect_required",
       "message",
     ];
