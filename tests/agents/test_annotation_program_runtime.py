@@ -84,9 +84,10 @@ async def test_json_literals_true_false_null_are_accepted() -> None:
     [
         ('write_entity(el="a1", name=unknown, entity_type="character")', "undefined_name"),
         ("import os", "unsupported_statement"),
-        ("value = {'a': 1}.keys()", "unsupported_expression"),
-        ("value = [item for item in (1, 2)]", "unsupported_expression"),
-        ('value = f"{1}"', "unsupported_expression"),
+        ("value = {item for item in (1, 2)}", "unsupported_expression"),
+        ("value = (item for item in (1, 2))", "unsupported_expression"),
+        ("value = object.attr", "unsupported_expression"),
+        ("value = {'a': 1}.unknown()", "unsupported_expression"),
         ("while True:\n    pass", "unsupported_statement"),
         ("write_entity = 1", "name_reserved"),
         ("len = 1", "name_reserved"),
@@ -97,6 +98,11 @@ async def test_json_literals_true_false_null_are_accepted() -> None:
         ("for item in 'abc':\n    pass", "unsupported_expression"),
         ("count = len(1)", "runtime_error"),
         ("unit = 1 / 0", "runtime_error"),
+        ("value = sorted([1, 2], key=1)", "bad_call"),
+        ("def pick(item=1):\n    return item", "bad_call"),
+        ("def pick(item: int):\n    return item", "bad_call"),
+        ("@decorator\ndef pick():\n    pass", "bad_call"),
+        ("def len(item):\n    pass", "name_reserved"),
     ],
 )
 async def test_unsafe_or_invalid_programs_return_structured_errors(code: str, error_code: str) -> None:
@@ -106,6 +112,59 @@ async def test_unsafe_or_invalid_programs_return_structured_errors(code: str, er
     assert receipt["error"]["type"] == error_code
     assert receipt["applied"] == 0
     assert ledger.written_entities == {}
+
+
+@pytest.mark.asyncio
+async def test_common_methods_lambda_and_fstring_are_applied() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        'data = {"a": 1}\n'
+        'data.update({"b": 2})\n'
+        "items = list(data.items())\n"
+        'items.append(("c", 3))\n'
+        'text = " ".join([str(key) for key, _ in items])\n'
+        'pairs = zip([1, 2], ["x", "y"])\n'
+        "pick = lambda item: item[1]\n"
+        "names = [pick(pair) for pair in pairs]\n"
+        'print(f"{len(items)}:{text}:{names}:{list(reversed([1, 2, 3]))}")',
+    )
+    assert receipt["status"] == "applied", receipt
+    assert receipt["printed"][-1] == "3:a b c:['x', 'y']:[3, 2, 1]"
+
+
+@pytest.mark.asyncio
+async def test_sorted_min_max_key_and_reverse_are_applied() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        'rows = [{"n": "b", "v": 2}, {"n": "a", "v": 3}]\n'
+        'ordered = sorted(rows, key=lambda row: row["v"], reverse=True)\n'
+        'lowest = min(rows, key=lambda row: row["v"])\n'
+        'print([row["n"] for row in ordered], lowest["n"])',
+    )
+    assert receipt["status"] == "applied", receipt
+    assert receipt["printed"][-1] == "['a', 'b'] b"
+
+
+@pytest.mark.asyncio
+async def test_simple_def_and_return_are_applied() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        "def pick(items, index):\n"
+        "    if index >= len(items):\n"
+        "        return None\n"
+        "    return items[index]\n"
+        "def total(items):\n"
+        "    if not items:\n"
+        "        return 0\n"
+        "    return items[0] + total(items[1:])\n"
+        'names = ["a", "b"]\n'
+        "print(pick(names, 1), pick(names, 5), total([1, 2, 3]))",
+    )
+    assert receipt["status"] == "applied", receipt
+    assert receipt["printed"][-1] == "b None 6"
 
 
 @pytest.mark.asyncio
@@ -308,7 +367,7 @@ if scale == "少" or not (numbers[-1] >= 3 and numbers[-1] is not None):
 
 @pytest.mark.asyncio
 async def test_language_supports_basic_builtin_functions() -> None:
-    """放行基础函数：len/str/int/float/bool/min/max/abs/sum/sorted/enumerate"""
+    """放行基础函数：len/str/int/float/bool/min/max/abs/sum/sorted/enumerate/isinstance/any/all/round/repr/print"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
@@ -334,6 +393,73 @@ for index, item in enumerate(values, 1):
     assert receipt["applied"] == 2, receipt
     assert ledger.metrics_payload.summary == "基础函数"
     assert set(ledger.written_dialogues) == {2}
+
+
+@pytest.mark.asyncio
+async def test_language_supports_comprehensions_print_and_type_checks() -> None:
+    """列表/字典推导式、isinstance 与 print 不再报废整段程序"""
+    ledger = _ledger()
+    runtime = _runtime(ledger)
+    receipt = await _run(
+        runtime,
+        """
+pairs = [(1, "a"), (2, "b"), (3, "c")]
+doubled = [item * 2 for item in [1, 2, 3] if item > 1]
+weights = {name: index for index, (number, name) in enumerate(pairs)}
+flat = [value for number, name in pairs for value in [number, name]]
+same = isinstance(doubled, list) and isinstance("x", (str, int)) and isinstance(1, int)
+print("built", len(doubled), repr(weights))
+if same and doubled == [4, 6] and len(flat) == 6 and weights["c"] == 2:
+    write_metrics(summary="推导式", emotional_valence=0, narrative_function="铺垫")
+""",
+    )
+    assert receipt["applied"] == 1, receipt
+    assert receipt["printed"] == ["built 2 {'a': 0, 'b': 1, 'c': 2}"]
+    assert ledger.metrics_payload.summary == "推导式"
+
+
+@pytest.mark.asyncio
+async def test_language_supports_slices() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        """
+text = "abcdef"
+head = text[:3]
+tail = text[3:]
+middle = text[1:5:2]
+values = [1, 2, 3, 4][1:]
+reversed_values = [1, 2, 3][::-1]
+joined = "ab" + "cd"
+pairs = (1, 2) + (3,)
+if head == "abc" and tail == "def" and middle == "bd" and values == [2, 3, 4] and reversed_values == [3, 2, 1]:
+    if joined == "abcd" and pairs == (1, 2, 3):
+        write_metrics(summary="切片", emotional_valence=0, narrative_function="铺垫")
+""",
+    )
+    assert receipt["applied"] == 1, receipt
+    assert ledger.metrics_payload.summary == "切片"
+
+
+@pytest.mark.asyncio
+async def test_slice_step_zero_is_reported_as_program_fault() -> None:
+    ledger = _ledger()
+    receipt = await _run(_runtime(ledger), "values = [1, 2, 3][::0]")
+    assert receipt["status"] == "runtime_error"
+    assert receipt["error"]["message"] == "切片步长不能为 0"
+    assert ledger.written_entities == {}
+
+
+@pytest.mark.asyncio
+async def test_comprehension_result_respects_container_limit() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        "values = [item for item in range(500) for other in range(2)]",
+    )
+    assert receipt["status"] == "runtime_error"
+    assert receipt["error"]["type"] == "collection_too_long"
+    assert ledger.written_entities == {}
 
 
 @pytest.mark.asyncio

@@ -33,20 +33,115 @@ _DIALOGUE_INDEX_ADAPTER = TypeAdapter(int)
 # 放行常见语法：通配符、表达式、基础函数。
 # 基础函数只读纯函数，与 range 同属解释器内置：不进工具目录，也不允许被赋值覆盖。
 BUILTIN_FUNCTION_NAMES = frozenset(
-    {"len", "str", "int", "float", "bool", "min", "max", "abs", "sum", "sorted", "enumerate"}
+    {
+        "len",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "min",
+        "max",
+        "abs",
+        "sum",
+        "sorted",
+        "enumerate",
+        "isinstance",
+        "any",
+        "all",
+        "round",
+        "repr",
+        "print",
+        "list",
+        "dict",
+        "tuple",
+        "zip",
+        "reversed",
+        "format",
+    }
+)
+
+_TYPE_NAMES = {
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "list": list,
+    "dict": dict,
+    "tuple": tuple,
+}
+_ABSENT = object()
+
+
+class _ProgramLambda:
+    "程序里 lambda 的可调用包装：只接受位置参数"
+
+    def __init__(self, invoke: Any) -> None:
+        self._invoke = invoke
+
+    async def __call__(self, *values: Any) -> Any:
+        return await self._invoke(*values)
+
+
+class _ProgramFunction:
+    "程序内 def 的包装：无默认值位置参数，变量环境由运行时共享"
+
+    def __init__(self, name: str, parameters: list[str], body: list[Any]) -> None:
+        self.name = name
+        self.parameters = parameters
+        self.body = body
+
+
+class _ReturnSignal(Exception):
+    "函数体 return 的控制流信号，只由函数调用边界捕获"
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+
+
+# 内置容器与字符串的常用方法；接收者类型、参数个数与返回值仍由运行时校验
+_METHOD_NAMES = frozenset(
+    {
+        "get",
+        "keys",
+        "values",
+        "items",
+        "copy",
+        "update",
+        "pop",
+        "append",
+        "extend",
+        "insert",
+        "remove",
+        "sort",
+        "reverse",
+        "index",
+        "count",
+        "split",
+        "rsplit",
+        "strip",
+        "lstrip",
+        "rstrip",
+        "replace",
+        "startswith",
+        "endswith",
+        "find",
+        "rfind",
+        "join",
+        "lower",
+        "upper",
+        "casefold",
+        "isdigit",
+        "isalpha",
+        "isspace",
+        "title",
+        "capitalize",
+    }
 )
 
 
 def _unknown_function_message(name: str) -> str:
-    """未开放函数的回执点名可用范围；print 另有检索回显替代写法
-
-    预检与运行时两条路径共用本条回执。
-    """
-    if name == "print":
-        return (
-            "未开放函数：print；检索结果自动回显在 reads，请删除 print，"
-            "直接用变量 = search_events(query=...) 或 search_graph(query=...) 读取"
-        )
+    """未开放函数的回执点名可用范围；预检与运行时两条路径共用本条回执"""
     builtins = "、".join(sorted(BUILTIN_FUNCTION_NAMES))
     return f"未开放函数：{name}；可调用的函数只有目录列出的工具、基础函数（{builtins}）与 range，没有其他内置函数"
 
@@ -85,6 +180,8 @@ class RestrictedProgramRuntime:
         self.ops: list[dict[str, Any]] = []
         # 本程序内检索读结果的回显（每次 execute 重置；见 _program._READ_TOOL_NAMES）
         self.reads: list[dict[str, Any]] = []
+        # print 输出按程序回显，不产生工具调用
+        self.printed: list[str] = []
         self._read_references: list[dict[str, Any]] = []
         self._reads_omitted = 0
         self._program_seq = 0
@@ -245,6 +342,7 @@ class RestrictedProgramRuntime:
         self._ops_in_program = 0
         self._steps = 0
         self.reads = []
+        self.printed = []
         self._read_references = []
         self._reads_omitted = 0
         self._deadline = time.monotonic() + program_contract.PROGRAM_DEADLINE_S
@@ -365,7 +463,7 @@ class RestrictedProgramRuntime:
         放行常见语法：条件表达式、and/or/not、算术与序比较、is/is not、
         链式比较、* 与 ** 解包、基础函数（BUILTIN_FUNCTION_NAMES）。
         """
-        statements = (ast.Assign, ast.Expr, ast.For, ast.If, ast.Pass)
+        statements = (ast.Assign, ast.Expr, ast.For, ast.If, ast.Pass, ast.FunctionDef, ast.Return)
         expressions = (
             ast.Constant,
             ast.Name,
@@ -380,7 +478,32 @@ class RestrictedProgramRuntime:
             ast.IfExp,
             ast.BoolOp,
             ast.Starred,
+            ast.ListComp,
+            ast.DictComp,
+            ast.Attribute,
+            ast.Lambda,
+            ast.JoinedStr,
+            ast.FormattedValue,
         )
+        container_calls = {
+            id(node.func)
+            for statement in nodes
+            for node in ast.walk(statement)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _METHOD_NAMES
+        }
+        lambda_names = {
+            target.id
+            for statement in nodes
+            for node in ast.walk(statement)
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Lambda)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        function_names = {
+            node.name for statement in nodes for node in ast.walk(statement) if isinstance(node, ast.FunctionDef)
+        }
         markers = (
             ast.Load,
             ast.Store,
@@ -405,6 +528,10 @@ class RestrictedProgramRuntime:
             ast.And,
             ast.Or,
             ast.keyword,
+            ast.comprehension,
+            ast.Slice,
+            ast.arguments,
+            ast.arg,
         )
         for statement in nodes:
             for node in ast.walk(statement):
@@ -418,42 +545,83 @@ class RestrictedProgramRuntime:
                     raise ProgramFault(
                         f"未支持的 Python 表达式：{type(node).__name__}", code="unsupported_expression", line=line
                     )
+                if isinstance(node, ast.Attribute) and id(node) not in container_calls:
+                    raise ProgramFault(
+                        "不支持该属性访问：只允许内置容器与字符串的常用方法"
+                        "（如 dict.get/dict.items、list.append/list.extend、str.split/str.replace）；"
+                        "取键与写回用下标（x['键']），拼接用 +，功能项用目录列出的工具",
+                        code="unsupported_expression",
+                        line=line,
+                    )
                 if isinstance(node, ast.Assign) and len(node.targets) != 1:
                     raise ProgramFault("只支持单目标赋值或等长解包", code="bad_assignment", line=line)
                 if isinstance(node, (ast.Assign, ast.For)):
                     target = node.targets[0] if isinstance(node, ast.Assign) else node.target
                     if any(isinstance(part, (ast.Call, ast.Starred)) for part in ast.walk(target)):
                         raise ProgramFault("赋值目标不能调用函数或使用星号解包", code="bad_assignment", line=line)
+                if isinstance(node, ast.FunctionDef):
+                    arguments = node.args
+                    if (
+                        node.decorator_list
+                        or arguments.posonlyargs
+                        or arguments.vararg
+                        or arguments.kwarg
+                        or arguments.kwonlyargs
+                        or arguments.defaults
+                        or arguments.kw_defaults
+                        or any(argument.annotation is not None for argument in arguments.args)
+                        or node.returns is not None
+                    ):
+                        raise ProgramFault(
+                            "def 只支持无默认值、无注解的普通位置参数", code="bad_call", line=line
+                        )
+                    if (
+                        node.name in self.tools
+                        or node.name == "range"
+                        or node.name in BUILTIN_FUNCTION_NAMES
+                        or (node.name.startswith("_") and node.name != "_")
+                    ):
+                        raise ProgramFault(f"不允许使用保留函数名：{node.name}", code="name_reserved", line=line)
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
                     if (
                         node.id in self.tools
                         or node.id == "range"
                         or node.id in BUILTIN_FUNCTION_NAMES
-                        or node.id.startswith("_")
+                        or (node.id.startswith("_") and node.id != "_")
                     ):
                         raise ProgramFault(f"不允许使用保留变量名：{node.id}", code="name_reserved", line=line)
                 if isinstance(node, ast.Call):
                     if not isinstance(node.func, ast.Name):
-                        raise ProgramFault(
-                            "不支持属性调用：对象方法不在开放面；取键与写回用下标（x['键']），"
-                            "拼接用 +，功能项用目录列出的工具",
-                            code="unsupported_expression",
-                            line=line,
-                        )
-                    name = node.func.id
-                    if name not in self.tools and name != "range" and name not in BUILTIN_FUNCTION_NAMES:
-                        raise ProgramFault(_unknown_function_message(name), code="unknown_tool", line=line)
-                    if name == "range":
-                        invalid = not 1 <= len(node.args) <= 3 or bool(node.keywords)
-                        message = "range 只接受1至3个整数位置参数"
-                    elif name in BUILTIN_FUNCTION_NAMES:
-                        invalid = bool(node.keywords)
-                        message = f"{name} 只接受位置参数"
+                        if not isinstance(node.func, ast.Attribute) or id(node.func) not in container_calls:
+                            raise ProgramFault(
+                                "不支持该属性调用：只允许内置容器与字符串的常用方法；"
+                                "取键与写回用下标（x['键']），拼接用 +，功能项用目录列出的工具",
+                                code="unsupported_expression",
+                                line=line,
+                            )
                     else:
-                        invalid = bool(node.args)
-                        message = "工具只接受具名参数（可用 ** 展开字典）"
-                    if invalid:
-                        raise ProgramFault(message, code="bad_call", line=line)
+                        name = node.func.id
+                        if name in lambda_names or name in function_names:
+                            continue
+                        if name not in self.tools and name != "range" and name not in BUILTIN_FUNCTION_NAMES:
+                            raise ProgramFault(_unknown_function_message(name), code="unknown_tool", line=line)
+                        if name == "range":
+                            invalid = not 1 <= len(node.args) <= 3 or bool(node.keywords)
+                            message = "range 只接受1至3个整数位置参数"
+                        elif name == "sorted":
+                            invalid = any(keyword.arg not in {"key", "reverse"} for keyword in node.keywords)
+                            message = "sorted 的关键字只接受 key 与 reverse"
+                        elif name in {"min", "max"}:
+                            invalid = any(keyword.arg != "key" for keyword in node.keywords)
+                            message = f"{name} 的关键字只接受 key"
+                        elif name in BUILTIN_FUNCTION_NAMES:
+                            invalid = bool(node.keywords)
+                            message = f"{name} 只接受位置参数"
+                        else:
+                            invalid = bool(node.args)
+                            message = "工具只接受具名参数（可用 ** 展开字典）"
+                        if invalid:
+                            raise ProgramFault(message, code="bad_call", line=line)
 
     def _receipt(
         self,
@@ -490,6 +658,8 @@ class RestrictedProgramRuntime:
             body["error"] = error
         if self.reads:
             body["reads"] = list(self.reads)
+        if self.printed:
+            body["printed"] = list(self.printed)
         if self._reads_omitted:
             body["reads_omitted"] = self._reads_omitted
         if self._read_references:
@@ -521,12 +691,46 @@ class RestrictedProgramRuntime:
                 await self._statements(body)
             elif isinstance(node, ast.Pass):
                 continue
+            elif isinstance(node, ast.FunctionDef):
+                self._define_function(node)
+            elif isinstance(node, ast.Return):
+                raise _ReturnSignal(await self._value(node.value) if node.value is not None else None)
             else:
                 raise ProgramFault(
-                    f"未支持的 Python 语句：{type(node).__name__}（只支持赋值、函数调用、for、if）",
+                    f"未支持的 Python 语句：{type(node).__name__}（只支持赋值、函数调用、def、return、for、if）",
                     code="unsupported_statement",
                     line=getattr(node, "lineno", None),
                 )
+
+    def _define_function(self, node: ast.FunctionDef) -> None:
+        "把 def 绑定到程序环境；参数绑定与 return 由调用边界处理"
+        self.env[node.name] = _ProgramFunction(
+            node.name, [argument.arg for argument in node.args.args], node.body
+        )
+
+    async def _invoke_function(self, function: _ProgramFunction, values: list[Any], *, line: int | None) -> Any:
+        "位置参数临时绑定，调用结束后恢复；return 由信号携带结果"
+        if len(values) != len(function.parameters):
+            raise ProgramFault(
+                f"{function.name} 需要 {len(function.parameters)} 个参数，实际 {len(values)} 个",
+                code="bad_call",
+                line=line,
+            )
+        saved = {name: self.env.get(name, _ABSENT) for name in function.parameters}
+        try:
+            for name, value in zip(function.parameters, values, strict=True):
+                self.env[name] = value
+            try:
+                await self._statements(function.body)
+            except _ReturnSignal as signal:
+                return signal.value
+            return None
+        finally:
+            for name, previous in saved.items():
+                if previous is _ABSENT:
+                    self.env.pop(name, None)
+                else:
+                    self.env[name] = previous
 
     async def _for_loop(self, node: ast.For) -> None:
         """用于执行有上限的 for（迭代项必须是有界列表/元组/字典按键，不支持 while）"""
@@ -561,7 +765,7 @@ class RestrictedProgramRuntime:
                     code="name_reserved",
                     line=getattr(node, "lineno", None),
                 )
-            if node.id.startswith("_"):
+            if node.id.startswith("_") and node.id != "_":
                 raise ProgramFault(
                     f"不允许使用 _ 前缀变量名：{node.id}",
                     code="name_reserved",
@@ -630,6 +834,17 @@ class RestrictedProgramRuntime:
                 else:
                     result[await self._value(key_node)] = await self._value(value_node)
             return result
+        if isinstance(node, (ast.ListComp, ast.DictComp)):
+            return await self._comprehension(node, line=line)
+        if isinstance(node, ast.Slice):
+            lower = await self._value(node.lower) if node.lower is not None else None
+            upper = await self._value(node.upper) if node.upper is not None else None
+            step = await self._value(node.step) if node.step is not None else None
+            if any(value is not None and type(value) is not int for value in (lower, upper, step)):
+                raise ProgramFault("切片边界必须是整数", code="unsupported_expression", line=line)
+            if step == 0:
+                raise ProgramFault("切片步长不能为 0", code="runtime_error", line=line)
+            return slice(lower, upper, step)
         if isinstance(node, ast.Subscript):
             value = await self._value(node.value)
             index = await self._value(node.slice)
@@ -642,12 +857,18 @@ class RestrictedProgramRuntime:
         if isinstance(node, ast.BinOp):
             left, right = await self._value(node.left), await self._value(node.right)
             if isinstance(node.op, ast.Add):
+                if isinstance(left, str) and isinstance(right, str):
+                    return left + right
                 if isinstance(left, list) and isinstance(right, list):
                     if len(left) + len(right) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
                         raise ProgramFault("列表拼接超过容器上限", code="collection_too_long", line=line)
                     return left + right
-                if isinstance(left, list) or isinstance(right, list):
-                    raise ProgramFault("+ 不能把列表与非列表相加", code="runtime_error", line=line)
+                if isinstance(left, tuple) and isinstance(right, tuple):
+                    if len(left) + len(right) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
+                        raise ProgramFault("元组拼接超过容器上限", code="collection_too_long", line=line)
+                    return left + right
+                if isinstance(left, (list, tuple)) or isinstance(right, (list, tuple)):
+                    raise ProgramFault("+ 不能把列表/元组与非同类容器相加", code="runtime_error", line=line)
             return self._number_op(left, node.op, right, line=line)
         if isinstance(node, ast.UnaryOp):
             if isinstance(node.op, ast.USub):
@@ -677,10 +898,18 @@ class RestrictedProgramRuntime:
                 code="unsupported_expression",
                 line=line,
             )
+        if isinstance(node, ast.Lambda):
+            return self._lambda(node, line=line)
+        if isinstance(node, ast.JoinedStr):
+            return await self._joined_str(node, line=line)
+        if isinstance(node, ast.FormattedValue):
+            return await self._formatted_value(node, line=line)
         if isinstance(node, ast.Compare):
             return await self._compare(node, line=line)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             return await self._call(node, line=line)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            return await self._method_call(node, line=line)
         raise ProgramFault(
             f"未支持的 Python 表达式：{type(node).__name__}",
             code="unsupported_expression",
@@ -701,6 +930,80 @@ class RestrictedProgramRuntime:
             else:
                 result.append(await self._value(item))
         return tuple(result) if as_tuple else result
+
+    async def _comprehension(self, node: Any, *, line: int | None) -> Any:
+        """有界列表/字典推导式：支持多 generator 与 if，迭代项和结果受容器上限约束"""
+        limit = program_contract.PROGRAM_MAX_LOOP_ITEMS
+        produced: list[Any] = []
+        mapping: dict[Any, Any] = {}
+        saved = self._save_target_names([generator.target for generator in node.generators])
+        try:
+
+            async def walk(index: int) -> None:
+                if index == len(node.generators):
+                    self._guard()
+                    if isinstance(node, ast.DictComp):
+                        key = await self._value(node.key)
+                        mapping[key] = await self._value(node.value)
+                        size = len(mapping)
+                    else:
+                        produced.append(await self._value(node.elt))
+                        size = len(produced)
+                    if size > limit:
+                        raise ProgramFault(
+                            f"推导式结果超过 {limit} 条", code="collection_too_long", line=line
+                        )
+                    return
+                generator = node.generators[index]
+                values = await self._value(generator.iter)
+                if isinstance(values, dict):
+                    values = list(values)
+                if not isinstance(values, (list, tuple)):
+                    raise ProgramFault(
+                        "推导式只能遍历列表、元组或字典", code="unsupported_expression", line=line
+                    )
+                if len(values) > limit:
+                    raise ProgramFault(
+                        f"推导式迭代项超过 {limit} 条（当前 {len(values)}）",
+                        code="loop_too_long",
+                        line=line,
+                    )
+                for item in values:
+                    self._guard()
+                    await self._assign(generator.target, item)
+                    conditions_ok = True
+                    for condition in generator.ifs:
+                        if not bool(await self._value(condition)):
+                            conditions_ok = False
+                            break
+                    if conditions_ok:
+                        await walk(index + 1)
+
+            await walk(0)
+        finally:
+            self._restore_target_names(saved)
+        return mapping if isinstance(node, ast.DictComp) else produced
+
+    def _save_target_names(self, targets: list[Any]) -> dict[str, Any]:
+        "推导式循环变量按 Python 语义不泄漏：保存进入前的值"
+        names = {name for target in targets for name in self._target_names(target)}
+        return {name: self.env.get(name, _ABSENT) for name in names}
+
+    def _restore_target_names(self, saved: dict[str, Any]) -> None:
+        "推导式结束后恢复循环变量，未定义过的变量直接删除"
+        for name, value in saved.items():
+            if value is _ABSENT:
+                self.env.pop(name, None)
+            else:
+                self.env[name] = value
+
+    def _target_names(self, target: Any) -> list[str]:
+        "收集赋值目标里的变量名（含元组/列表解包）"
+        if isinstance(target, ast.Name):
+            return [target.id]
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return [name for item in target.elts for name in self._target_names(item)]
+        return []
 
     def _number_op(self, left: Any, operator: Any, right: Any, *, line: int | None) -> Any:
         """算术只接受数字；+ 的数字分支也走这里（列表拼接在上游处理）"""
@@ -806,16 +1109,41 @@ class RestrictedProgramRuntime:
         except (TypeError, ValueError):
             return f"{name}(...)"
 
+    def _type_reference(self, node: Any, *, line: int | None) -> Any:
+        """isinstance 第二个参数只接受类型名或其元组，不开放任意表达式求值"""
+        if isinstance(node, ast.Name):
+            target = _TYPE_NAMES.get(node.id)
+            if target is not None:
+                return target
+        if isinstance(node, ast.Tuple):
+            return tuple(self._type_reference(item, line=line) for item in node.elts)
+        raise ProgramFault(
+            "isinstance 的第二个参数只能用类型名（str/int/float/bool/list/dict/tuple）",
+            code="bad_call",
+            line=line,
+        )
+
     async def _call(self, node: ast.Call, *, line: int | None) -> Any:
         """用于执行一次具名调用（名字属于工具、基础函数或 range；工具只收具名参数）"""
         function = node.func
         if not isinstance(function, ast.Name):
             raise ProgramFault(
-                "只支持直接调用工具函数（不支持属性访问或嵌套调用）",
+                "只支持直接调用工具函数（不支持嵌套调用或下标调用）",
                 code="unsupported_expression",
                 line=line,
             )
         name = function.id
+        candidate = self.env.get(name, _ABSENT)
+        if isinstance(candidate, _ProgramLambda):
+            if node.keywords:
+                raise ProgramFault("lambda 只接受位置参数", code="bad_call", line=line)
+            return await candidate(*[await self._value(arg) for arg in node.args])
+        if isinstance(candidate, _ProgramFunction):
+            if node.keywords:
+                raise ProgramFault("def 函数只接受位置参数", code="bad_call", line=line)
+            return await self._invoke_function(
+                candidate, [await self._value(arg) for arg in node.args], line=line
+            )
         if name == "range":
             arguments = [await self._value(arg) for arg in node.args]
             if node.keywords or not 1 <= len(arguments) <= 3 or any(type(arg) is not int for arg in arguments):
@@ -829,6 +1157,18 @@ class RestrictedProgramRuntime:
             except ValueError:
                 raise ProgramFault("range 的步长不能为0", code="bad_call", line=line) from None
             return list(values)
+        if name == "isinstance":
+            if node.keywords or len(node.args) != 2:
+                raise ProgramFault("isinstance 只接受 2 个位置参数", code="bad_call", line=line)
+            return self._builtin(
+                name,
+                [await self._value(node.args[0]), self._type_reference(node.args[1], line=line)],
+                line=line,
+            )
+        if name == "sorted":
+            return await self._sorted_call(node, line=line)
+        if name in {"min", "max"}:
+            return await self._min_max_call(name, node, line=line)
         if name in BUILTIN_FUNCTION_NAMES:
             if node.keywords:
                 raise ProgramFault(f"{name} 只接受位置参数", code="bad_call", line=line)
@@ -863,8 +1203,415 @@ class RestrictedProgramRuntime:
                 args[str(keyword.arg)] = await self._value(keyword.value)
         return await self._dispatch(name, args, line=line)
 
+    def _lambda(self, node: ast.Lambda, *, line: int | None) -> Any:
+        """构造只含普通位置参数的 lambda；参数在调用时临时绑定到变量环境"""
+        arguments = node.args
+        if (
+            arguments.vararg
+            or arguments.kwarg
+            or arguments.kwonlyargs
+            or arguments.defaults
+            or arguments.kw_defaults
+        ):
+            raise ProgramFault("lambda 只支持无默认值的普通位置参数", code="bad_call", line=line)
+        names = [argument.arg for argument in (*arguments.posonlyargs, *arguments.args)]
+
+        async def invoke(*values: Any) -> Any:
+            if len(values) != len(names):
+                raise ProgramFault(
+                    f"lambda 需要 {len(names)} 个参数，实际 {len(values)} 个", code="bad_call", line=line
+                )
+            saved = {name: self.env.get(name, _ABSENT) for name in names}
+            try:
+                for name, value in zip(names, values, strict=True):
+                    self.env[name] = value
+                return await self._value(node.body)
+            finally:
+                for name, previous in saved.items():
+                    if previous is _ABSENT:
+                        self.env.pop(name, None)
+                    else:
+                        self.env[name] = previous
+
+        return _ProgramLambda(invoke)
+
+    async def _joined_str(self, node: ast.JoinedStr, *, line: int | None) -> str:
+        parts: list[str] = []
+        for value in node.values:
+            if isinstance(value, ast.Constant):
+                parts.append(str(value.value))
+            elif isinstance(value, ast.FormattedValue):
+                parts.append(await self._formatted_value(value, line=line))
+            else:
+                raise ProgramFault("f-string 片段不受支持", code="unsupported_expression", line=line)
+        return "".join(parts)
+
+    async def _formatted_value(self, node: ast.FormattedValue, *, line: int | None) -> str:
+        value = await self._value(node.value)
+        if node.conversion == ord("r"):
+            rendered = repr(value)
+        elif node.conversion == ord("a"):
+            rendered = ascii(value)
+        elif node.conversion in (-1, ord("s")):
+            rendered = str(value)
+        else:
+            raise ProgramFault("f-string 转换符不受支持", code="unsupported_expression", line=line)
+        if node.format_spec is not None:
+            spec = await self._value(node.format_spec)
+            if not isinstance(spec, str):
+                raise ProgramFault("f-string 格式说明必须是字符串", code="bad_call", line=line)
+            try:
+                rendered = format(value, spec)
+            except (TypeError, ValueError) as exc:
+                raise ProgramFault(f"f-string 格式化失败：{exc}", code="runtime_error", line=line) from None
+        return rendered
+
+    async def _method_call(self, node: ast.Call, *, line: int | None) -> Any:
+        """执行内置容器/字符串方法；接收者类型与实参在运行时逐项校验"""
+        if not isinstance(node.func, ast.Attribute):
+            raise ProgramFault(
+                "不支持该属性调用：只允许内置容器与字符串的常用方法", code="unsupported_expression", line=line
+            )
+        method = node.func.attr
+        if method not in _METHOD_NAMES:
+            raise ProgramFault(
+                f"不支持对象方法 {method}：只允许内置容器与字符串的常用方法",
+                code="unsupported_expression",
+                line=line,
+            )
+        if node.keywords:
+            raise ProgramFault(f"{method} 只接受位置参数", code="bad_call", line=line)
+        receiver = await self._value(node.func.value)
+        args = [await self._value(arg) for arg in node.args]
+        limit = program_contract.PROGRAM_MAX_LOOP_ITEMS
+
+        def arity(minimum: int, maximum: int | None = None) -> None:
+            upper = minimum if maximum is None else maximum
+            if not minimum <= len(args) <= upper:
+                raise ProgramFault(
+                    f"{method} 参数个数应为 {minimum}" + (f"~{upper}" if upper != minimum else ""),
+                    code="bad_call",
+                    line=line,
+                )
+
+        def integer(value: Any, label: str) -> int:
+            if type(value) is not int:
+                raise ProgramFault(f"{method} 的{label}必须是整数", code="bad_call", line=line)
+            return value
+
+        def text(value: Any, label: str) -> str:
+            if not isinstance(value, str):
+                raise ProgramFault(f"{method} 的{label}必须是字符串", code="bad_call", line=line)
+            return value
+
+        def optional_text(value: Any, label: str) -> str | None:
+            return None if value is None else text(value, label)
+
+        def bounded(values: list[Any]) -> list[Any]:
+            if len(values) > limit:
+                raise ProgramFault(f"{method} 结果超过容器上限", code="collection_too_long", line=line)
+            return values
+
+        if isinstance(receiver, dict):
+            if method == "get":
+                arity(1, 2)
+                default = args[1] if len(args) == 2 else None
+                try:
+                    return receiver.get(args[0], default)
+                except TypeError as exc:
+                    raise ProgramFault(f"dict.get 键不可用：{exc}", code="runtime_error", line=line) from None
+            if method in {"keys", "values", "items"}:
+                arity(0)
+                return bounded(list(getattr(receiver, method)()))
+            if method == "copy":
+                arity(0)
+                if len(receiver) > limit:
+                    raise ProgramFault("dict.copy 结果超过容器上限", code="collection_too_long", line=line)
+                return dict(receiver)
+            if method == "update":
+                arity(1)
+                other = args[0]
+                if not isinstance(other, dict):
+                    raise ProgramFault("dict.update 只接受字典", code="bad_call", line=line)
+                if len(receiver) + len(other) > limit:
+                    raise ProgramFault("dict.update 结果超过容器上限", code="collection_too_long", line=line)
+                receiver.update(other)
+                return None
+            if method == "pop":
+                arity(1, 2)
+                try:
+                    return receiver.pop(args[0], *args[1:])
+                except KeyError:
+                    raise ProgramFault(f"dict.pop 键不存在：{args[0]}", code="runtime_error", line=line) from None
+                except TypeError as exc:
+                    raise ProgramFault(f"dict.pop 键不可用：{exc}", code="runtime_error", line=line) from None
+            raise ProgramFault(f"字典不支持方法 {method}", code="unsupported_expression", line=line)
+
+        if isinstance(receiver, list):
+            if method == "append":
+                arity(1)
+                if len(receiver) >= limit:
+                    raise ProgramFault("列表已达容器上限", code="collection_too_long", line=line)
+                if args[0] is receiver:
+                    raise ProgramFault("列表不能追加自身", code="runtime_error", line=line)
+                receiver.append(args[0])
+                return None
+            if method == "extend":
+                arity(1)
+                other = args[0]
+                if isinstance(other, dict):
+                    other = list(other)
+                if not isinstance(other, (list, tuple)):
+                    raise ProgramFault("list.extend 只接受列表或元组", code="bad_call", line=line)
+                if len(receiver) + len(other) > limit:
+                    raise ProgramFault("list.extend 结果超过容器上限", code="collection_too_long", line=line)
+                if other is receiver:
+                    raise ProgramFault("列表不能扩展自身", code="runtime_error", line=line)
+                receiver.extend(other)
+                return None
+            if method == "insert":
+                arity(2)
+                integer(args[0], "索引")
+                if len(receiver) >= limit:
+                    raise ProgramFault("列表已达容器上限", code="collection_too_long", line=line)
+                receiver.insert(args[0], args[1])
+                return None
+            if method == "remove":
+                arity(1)
+                try:
+                    receiver.remove(args[0])
+                except ValueError:
+                    raise ProgramFault("list.remove 的值不在列表中", code="runtime_error", line=line) from None
+                return None
+            if method == "pop":
+                arity(0, 1)
+                index = integer(args[0], "索引") if args else -1
+                try:
+                    return receiver.pop(index)
+                except IndexError:
+                    raise ProgramFault("list.pop 索引越界", code="runtime_error", line=line) from None
+            if method == "sort":
+                arity(0)
+                try:
+                    receiver.sort()
+                except TypeError as exc:
+                    raise ProgramFault(f"list.sort 无法比较元素：{exc}", code="runtime_error", line=line) from None
+                return None
+            if method == "reverse":
+                arity(0)
+                receiver.reverse()
+                return None
+            if method == "index":
+                arity(1, 3)
+                try:
+                    return receiver.index(*args)
+                except ValueError:
+                    raise ProgramFault("list.index 的值不在列表中", code="runtime_error", line=line) from None
+            if method == "count":
+                arity(1)
+                return receiver.count(args[0])
+            if method == "copy":
+                arity(0)
+                return bounded(list(receiver))
+            raise ProgramFault(f"列表不支持方法 {method}", code="unsupported_expression", line=line)
+
+        if isinstance(receiver, tuple):
+            if method == "index":
+                arity(1, 3)
+                try:
+                    return receiver.index(*args)
+                except ValueError:
+                    raise ProgramFault("tuple.index 的值不在元组中", code="runtime_error", line=line) from None
+            if method == "count":
+                arity(1)
+                return receiver.count(args[0])
+            raise ProgramFault(f"元组不支持方法 {method}", code="unsupported_expression", line=line)
+
+        if isinstance(receiver, str):
+            if method in {"split", "rsplit"}:
+                arity(0, 2)
+                separator = optional_text(args[0], "分隔符") if args else None
+                maxsplit = integer(args[1], "最大拆分次数") if len(args) == 2 else -1
+                return bounded(list(getattr(receiver, method)(separator, maxsplit)))
+            if method in {"strip", "lstrip", "rstrip"}:
+                arity(0, 1)
+                chars = optional_text(args[0], "字符集") if args else None
+                return getattr(receiver, method)(chars)
+            if method == "replace":
+                arity(2, 3)
+                old, new = text(args[0], "旧文本"), text(args[1], "新文本")
+                count = integer(args[2], "替换次数") if len(args) == 3 else -1
+                return receiver.replace(old, new, count)
+            if method in {"startswith", "endswith"}:
+                arity(1, 2)
+                prefix = args[0]
+                if not isinstance(prefix, (str, tuple)):
+                    raise ProgramFault(f"{method} 的匹配项必须是字符串或字符串元组", code="bad_call", line=line)
+                start = integer(args[1], "起点") if len(args) == 2 else 0
+                return getattr(receiver, method)(prefix, start)
+            if method in {"find", "rfind", "index"}:
+                arity(1, 3)
+                sub = text(args[0], "子串")
+                start = integer(args[1], "起点") if len(args) >= 2 else 0
+                end = integer(args[2], "终点") if len(args) == 3 else len(receiver)
+                try:
+                    return getattr(receiver, method)(sub, start, end)
+                except ValueError:
+                    raise ProgramFault(f"str.{method} 的子串不在原文中", code="runtime_error", line=line) from None
+            if method == "join":
+                arity(1)
+                values = args[0]
+                if not isinstance(values, (list, tuple)) or any(not isinstance(item, str) for item in values):
+                    raise ProgramFault("str.join 只接受字符串列表或元组", code="bad_call", line=line)
+                return receiver.join(values)
+            if method == "count":
+                arity(1, 3)
+                sub = text(args[0], "子串")
+                start = integer(args[1], "起点") if len(args) >= 2 else 0
+                end = integer(args[2], "终点") if len(args) == 3 else len(receiver)
+                return receiver.count(sub, start, end)
+            if method in {"lower", "upper", "casefold", "title", "capitalize", "isdigit", "isalpha", "isspace"}:
+                arity(0)
+                return getattr(receiver, method)()
+            raise ProgramFault(f"字符串不支持方法 {method}", code="unsupported_expression", line=line)
+
+        raise ProgramFault(
+            f"{method} 不能用于 {type(receiver).__name__}；只允许内置容器与字符串方法",
+            code="runtime_error",
+            line=line,
+        )
+
+    async def _keyword_values(
+        self, node: ast.Call, allowed: set[str], *, caller: str, line: int | None
+    ) -> dict[str, Any]:
+        "读取基础函数的关键字参数；只接受声明过的名字"
+        values: dict[str, Any] = {}
+        for keyword in node.keywords:
+            if keyword.arg is None or keyword.arg not in allowed:
+                raise ProgramFault(
+                    f"{caller} 的关键字只接受 {'、'.join(sorted(allowed))}", code="bad_call", line=line
+                )
+            if keyword.arg in values:
+                raise ProgramFault(f"{caller} 的关键字重复：{keyword.arg}", code="bad_call", line=line)
+            values[keyword.arg] = await self._value(keyword.value)
+        return values
+
+    async def _sorted_call(self, node: ast.Call, *, line: int | None) -> list[Any]:
+        "sorted(可迭代对象, key=lambda, reverse=bool)；key 只接受程序内 lambda"
+        arguments = [await self._value(arg) for arg in node.args]
+        if len(arguments) != 1 or not isinstance(arguments[0], (list, tuple)):
+            raise ProgramFault("sorted 只接受一个列表或元组", code="bad_call", line=line)
+        keywords = await self._keyword_values(node, {"key", "reverse"}, caller="sorted", line=line)
+        key = keywords.get("key")
+        if key is not None and not isinstance(key, _ProgramLambda):
+            raise ProgramFault("sorted 的 key 只接受 lambda", code="bad_call", line=line)
+        reverse = keywords.get("reverse", False)
+        if type(reverse) is not bool:
+            raise ProgramFault("sorted 的 reverse 必须是布尔值", code="bad_call", line=line)
+        items = list(arguments[0])
+        if len(items) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
+            raise ProgramFault("sorted 结果超过容器上限", code="collection_too_long", line=line)
+        try:
+            if key is None:
+                return sorted(items, reverse=reverse)
+            decorated = []
+            for item in items:
+                self._guard()
+                decorated.append((await key(item), item))
+            decorated.sort(key=lambda pair: pair[0], reverse=reverse)
+            return [item for _, item in decorated]
+        except TypeError:
+            raise ProgramFault("sorted 的元素类型不一致，无法排序", code="runtime_error", line=line) from None
+
+    async def _min_max_call(self, name: str, node: ast.Call, *, line: int | None) -> Any:
+        "min/max(可迭代对象或多项, key=lambda)；key 只接受程序内 lambda"
+        arguments = [await self._value(arg) for arg in node.args]
+        keywords = await self._keyword_values(node, {"key"}, caller=name, line=line)
+        key = keywords.get("key")
+        if key is not None and not isinstance(key, _ProgramLambda):
+            raise ProgramFault(f"{name} 的 key 只接受 lambda", code="bad_call", line=line)
+        if len(arguments) == 1 and isinstance(arguments[0], (list, tuple)):
+            items = list(arguments[0])
+        elif len(arguments) >= 2:
+            items = arguments
+        else:
+            raise ProgramFault(f"{name} 需要多个参数或一个列表", code="bad_call", line=line)
+        if not items:
+            raise ProgramFault(f"{name} 不能用于空序列", code="runtime_error", line=line)
+        try:
+            if key is None:
+                return min(items) if name == "min" else max(items)
+            best = items[0]
+            best_key = await key(best)
+            for item in items[1:]:
+                self._guard()
+                current = await key(item)
+                better = current < best_key if name == "min" else current > best_key
+                if better:
+                    best, best_key = item, current
+            return best
+        except TypeError:
+            raise ProgramFault(f"{name} 的元素类型不一致，无法比较", code="runtime_error", line=line) from None
+
     def _builtin(self, name: str, values: list[Any], *, line: int | None) -> Any:
         """基础函数的只读纯函数实现（只接受位置参数）"""
+        if name in {"list", "tuple"}:
+            if len(values) > 1:
+                raise ProgramFault(f"{name} 最多接受 1 个参数", code="bad_call", line=line)
+            target = values[0] if values else []
+            if isinstance(target, dict):
+                target = list(target)
+            elif isinstance(target, str):
+                target = list(target)
+            elif isinstance(target, (list, tuple)):
+                target = list(target)
+            else:
+                raise ProgramFault(f"{name} 只接受列表/元组/字典/字符串", code="runtime_error", line=line)
+            if len(target) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
+                raise ProgramFault(f"{name} 结果超过容器上限", code="collection_too_long", line=line)
+            return target if name == "list" else tuple(target)
+        if name == "dict":
+            if len(values) > 1:
+                raise ProgramFault("dict 最多接受 1 个参数", code="bad_call", line=line)
+            if not values:
+                return {}
+            target = values[0]
+            if isinstance(target, dict):
+                result = dict(target)
+            elif isinstance(target, (list, tuple)):
+                try:
+                    result = dict(target)
+                except (TypeError, ValueError):
+                    raise ProgramFault("dict 只接受键值对序列", code="runtime_error", line=line) from None
+            else:
+                raise ProgramFault("dict 只接受字典或键值对序列", code="runtime_error", line=line)
+            if len(result) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
+                raise ProgramFault("dict 结果超过容器上限", code="collection_too_long", line=line)
+            return result
+        if name == "zip":
+            if any(not isinstance(item, (list, tuple)) for item in values):
+                raise ProgramFault("zip 只接受列表或元组", code="bad_call", line=line)
+            zipped = list(zip(*values, strict=False))
+            if len(zipped) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
+                raise ProgramFault("zip 结果超过容器上限", code="collection_too_long", line=line)
+            return zipped
+        if name == "reversed":
+            if len(values) != 1 or not isinstance(values[0], (list, tuple, str, dict)):
+                raise ProgramFault("reversed 只接受列表/元组/字符串/字典", code="bad_call", line=line)
+            reversed_values = list(reversed(values[0]))
+            if len(reversed_values) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
+                raise ProgramFault("reversed 结果超过容器上限", code="collection_too_long", line=line)
+            return reversed_values
+        if name == "format":
+            if not 1 <= len(values) <= 2:
+                raise ProgramFault("format 接受一个值和一个可选格式说明", code="bad_call", line=line)
+            spec = values[1] if len(values) == 2 else ""
+            if not isinstance(spec, str):
+                raise ProgramFault("format 的格式说明必须是字符串", code="bad_call", line=line)
+            try:
+                return format(values[0], spec)
+            except (TypeError, ValueError) as exc:
+                raise ProgramFault(f"format 失败：{exc}", code="runtime_error", line=line) from None
         if name == "len":
             if not isinstance(values, list) or len(values) != 1:
                 raise ProgramFault("len 需要 1 个参数", code="bad_call", line=line)
@@ -892,19 +1639,6 @@ class RestrictedProgramRuntime:
             if len(values) != 1:
                 raise ProgramFault("bool 需要 1 个参数", code="bad_call", line=line)
             return bool(values[0])
-        if name in {"min", "max"}:
-            if len(values) == 1 and isinstance(values[0], (list, tuple)):
-                items = list(values[0])
-            elif len(values) >= 2:
-                items = list(values)
-            else:
-                raise ProgramFault(f"{name} 需要多个参数或一个列表", code="bad_call", line=line)
-            try:
-                return min(items) if name == "min" else max(items)
-            except ValueError:
-                raise ProgramFault(f"{name} 不能用于空序列", code="runtime_error", line=line) from None
-            except TypeError:
-                raise ProgramFault(f"{name} 的元素类型不一致，无法比较", code="runtime_error", line=line) from None
         if name == "abs":
             if len(values) != 1 or type(values[0]) not in (int, float):
                 raise ProgramFault("abs 只接受 1 个数字", code="runtime_error", line=line)
@@ -916,13 +1650,6 @@ class RestrictedProgramRuntime:
                 return sum(values[0])
             except TypeError:
                 raise ProgramFault("sum 的元素必须是数字", code="runtime_error", line=line) from None
-        if name == "sorted":
-            if len(values) != 1 or not isinstance(values[0], (list, tuple)):
-                raise ProgramFault("sorted 只接受一个列表或元组", code="bad_call", line=line)
-            try:
-                return sorted(values[0])
-            except TypeError:
-                raise ProgramFault("sorted 的元素类型不一致，无法排序", code="runtime_error", line=line) from None
         if name == "enumerate":
             if not 1 <= len(values) <= 2 or not isinstance(values[0], (list, tuple)):
                 raise ProgramFault("enumerate 接受一个列表/元组与可选起始值", code="bad_call", line=line)
@@ -932,6 +1659,33 @@ class RestrictedProgramRuntime:
             if len(values[0]) > program_contract.PROGRAM_MAX_LOOP_ITEMS:
                 raise ProgramFault("enumerate 超过容器上限", code="collection_too_long", line=line)
             return list(enumerate(values[0], start))
+        if name == "isinstance":
+            if len(values) != 2:
+                raise ProgramFault("isinstance 只接受 2 个位置参数", code="bad_call", line=line)
+            try:
+                return isinstance(values[0], values[1])
+            except TypeError:
+                raise ProgramFault("isinstance 的类型参数不合法", code="bad_call", line=line) from None
+        if name in {"any", "all"}:
+            if len(values) != 1 or not isinstance(values[0], (list, tuple)):
+                raise ProgramFault(f"{name} 只接受一个列表或元组", code="bad_call", line=line)
+            return any(values[0]) if name == "any" else all(values[0])
+        if name == "round":
+            if not 1 <= len(values) <= 2 or type(values[0]) not in (int, float):
+                raise ProgramFault("round 接受一个数字和可选整数位数", code="bad_call", line=line)
+            if len(values) == 2 and type(values[1]) is not int:
+                raise ProgramFault("round 的位数必须是整数", code="bad_call", line=line)
+            return round(*values)
+        if name == "repr":
+            if len(values) != 1:
+                raise ProgramFault("repr 需要 1 个参数", code="bad_call", line=line)
+            return repr(values[0])[:2000]
+        if name == "print":
+            rendered = " ".join(str(value) for value in values)[:2000]
+            self.printed.append(rendered)
+            if len(self.printed) > 50:
+                del self.printed[:-50]
+            return None
         raise ProgramFault(f"未开放函数：{name}", code="unknown_tool", line=line)
 
     def _next_op_index(self, *, line: int | None) -> int:
@@ -972,7 +1726,7 @@ class RestrictedProgramRuntime:
                 "source_line": line,
                 "tool_name": name,
                 "status": status,
-                "receipt": {key: body[key] for key in ("record", "ref", "warnings", "case_link") if key in body},
+                "receipt": {key: body[key] for key in ("record", "ref", "warnings") if key in body},
                 "record": body.get("record") or tool_record_key(name, dict(call_args or {})),
                 "error_code": body.get("code"),
                 "field": body.get("field"),
