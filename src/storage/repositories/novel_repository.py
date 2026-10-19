@@ -5,10 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import aliased
+from sqlalchemy import select
 
-from src.storage.models import AnalysisRun, Novel
+from src.storage.models import Novel, Run
 from src.storage.repositories.base import BaseRepository
 
 
@@ -38,22 +37,19 @@ class NovelRepository(BaseRepository):
         )
 
     def list_with_latest_status(self) -> list[dict[str, Any]]:
-        "列表投影采用原有最新运行时间口径，返回具名记录"
+        "按 UUIDv7 运行身份取得最新任务状态"
         latest = (
-            select(AnalysisRun.novel_id, func.max(AnalysisRun.created_at).label("latest_created_at"))
-            .group_by(AnalysisRun.novel_id)
+            select(Run.novelid, Run.id.label("latest_id"))
+            .distinct(Run.novelid)
+            .order_by(Run.novelid, Run.id.desc())
             .subquery()
         )
-        latest_run = aliased(AnalysisRun)
         rows = self.session.execute(
-            select(Novel, latest_run.status.label("latest_status"))
-            .outerjoin(latest, Novel.novel_id == latest.c.novel_id)
-            .outerjoin(
-                latest_run,
-                (latest_run.novel_id == latest.c.novel_id) & (latest_run.created_at == latest.c.latest_created_at),
-            )
+            select(Novel, Run.status.label("latest_status"))
+            .outerjoin(latest, Novel.novel_id == latest.c.novelid)
+            .outerjoin(Run, Run.id == latest.c.latest_id)
             .order_by(Novel.upload_time.desc())
-        ).all()
+        )
         return [{"novel": row.Novel, "latest_status": row.latest_status} for row in rows]
 
     def delete(self, novel_id: str) -> bool:

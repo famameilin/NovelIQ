@@ -45,11 +45,7 @@ def _make_chapters() -> list[ChapterData]:
 def _create_run(db_session) -> str:
     novel_id = new_id()
     _insert_test_novel(novel_id, session=db_session)
-    return RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Chapter Repository Test",
-    )
+    return RunRepository(db_session).create_run(novel_id=novel_id)
 
 
 def test_insert_and_fetch_chapters(db_session) -> None:
