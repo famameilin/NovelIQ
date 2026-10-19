@@ -76,14 +76,12 @@ class ForeshadowingTreeView:
 
 @dataclass(frozen=True)
 class SavedAnnotationRecord:
-    "已保存的正式章节标注读投影（chapter_annotations 宽表自带章号与角色）"
+    "已保存的正式章节标注读投影（agent_annotations 宽表自带章号与角色）"
 
     record_id: str
     chapter_id: int
     role: str | None
-    execution_id: str
-    contract_version: str
-    chapter_consolidation_version: str
+    agent_id: str
     summary: str | None
     emotional_valence: int | None
     narrative_function: str | None
@@ -95,7 +93,7 @@ class SavedAnnotationRecord:
 
 @dataclass(frozen=True)
 class AnnotationRoleRecord:
-    "章内标注角色读投影（chapter_annotations 产物行 + 真实执行号）"
+    "章内标注角色读投影（agent_annotations 产物行 + 真实执行号）"
 
     run_id: str
     chapter_id: int
@@ -107,7 +105,7 @@ class AnnotationRoleRecord:
 
 @dataclass(frozen=True)
 class DialogueRecordRow:
-    "对话记录读投影（dialogue_records + 由创建执行取得的章号与原文切片）"
+    "对话记录读投影（graph_dialogues + 由创建执行取得的章号与原文切片）"
 
     dialogue_id: str
     chapter_id: int
@@ -140,7 +138,7 @@ class GraphFactRow:
 
 @dataclass(frozen=True)
 class ForeshadowingEdgeRow:
-    "伏笔语义链路读投影（narrative_links 语义形状 + 端点完整事件的来源章号）"
+    "伏笔语义链路读投影（event_links 语义形状 + 端点完整事件的来源章号）"
 
     edge_id: str
     edge_type: str

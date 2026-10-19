@@ -3,15 +3,14 @@
 ANNOTATION_ROLES = ("annotation", "entity", "event", "metric")
 ARC_KINDS = ("main", "subplot")
 ARC_RELATION_PREFIXES = ("dep:", "sdp:")
-CASE_REVIEW_STATES = ("deferred", "contested")
 CASE_TYPES = ("character", "relation", "dialogue", "event")
 CAST_ROLES = ("focus", "main", "core")
 CAUSE_ROLES = ("root", "main", "secondary")
 DIAGNOSIS_ROLES = ("case", "report")
 ENTITY_TYPES = ("character", "location", "item", "organization")
 EVENT_STATUSES = ("ongoing", "resolved")
-EXECUTION_ROLES = ("annotation", "entity", "event", "metric", "case", "report")
-EXECUTION_STATUSES = ("running", "success", "error", "interrupted")
+AGENT_TYPES = ("annotation", "entity", "event", "metric", "case", "report")
+AGENT_STATUSES = ("running", "success", "error")
 FEATURE_LOWESS_NET_DENSITY = "lowess_net_density"
 FEATURE_LOWESS_SURFACE_TENSION = "lowess_surface_tension"
 FEATURE_POS_VECTOR_PREFIX = "pos_vector:"

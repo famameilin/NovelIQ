@@ -12,7 +12,7 @@ class CaseSave:
     "一次已冻结案例贡献的普通存储映射，不包含事务或运行时对象"
 
     run_id: str
-    author: str
+    author: str | None
     snapshot_json: str
 
     def snapshot(self) -> dict[str, Any]:

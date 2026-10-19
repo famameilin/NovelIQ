@@ -12,8 +12,8 @@ from src.storage.records.evidence import EvidenceParagraph
 @dataclass(frozen=True, slots=True)
 class FactSave:
     run_id: str
-    execution_id: str
-    chapter_id: int
+    agent_id: str
+    chapter_id: int | None
     paragraphs: tuple[EvidenceParagraph, ...]
     snapshot_json: str
     observations_json: str

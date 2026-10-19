@@ -1,4 +1,4 @@
-"Storage 的普通字段快照，不携带 ORM 或活动连接"
+"普通持久化记录快照"
 
 from __future__ import annotations
 
@@ -7,17 +7,14 @@ from datetime import datetime
 
 
 @dataclass(frozen=True, slots=True)
-class ModelCallRecord:
-    "ModelCall 的持久化事实快照"
-
-    call_id: str
+class AgentLoopRecord:
+    id: str
     model: str
-    status: str
     error: str | None
     started_at: datetime
     finished_at: datetime | None
     message_key: str | None
-    execution_id: str | None
+    agent_id: str | None
     turn_index: int | None
     standalone_run_id: str | None
     standalone_chapter_id: int | None
@@ -42,14 +39,11 @@ class ModelCallRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class AgentToolCallRecord:
-    "AgentToolCall 的持久化事实快照"
-
+class ToolCallRecord:
     id: str
-    call_id: str
+    agentloop_id: str
     tool_name: str
     call_index: int
-    status: str
     error: str | None
     started_at: datetime
     tool_duration_ms: int | None
@@ -63,7 +57,6 @@ class AgentToolCallRecord:
 @dataclass(frozen=True, slots=True)
 class EventOutboxRecord:
     message_key: str
-    """EventOutbox 的持久化事实快照"""
     event_id: str
     stream_id: int
     run_id: str
@@ -75,59 +68,18 @@ class EventOutboxRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class BookCaseRecord:
-    "BookCase 的持久化事实快照"
-
-    case_id: str
-    registration_run_id: str | None
-    case_type: str
+class CaseRecord:
+    id: str
+    run_id: str
+    type: str
     description: str
-    created_at: datetime
-    automatic_declaration_id: str | None
-    entity_target_id: str | None
-    relation_target_id: str | None
-    dialogue_target_id: str | None
-    declaration_target_id: str | None
-    complete_event_target_id: str | None
-    pending_event_entry_id: str | None
-    dialogue_candidate_chapter_id: int | None
-    dialogue_candidate_start: int | None
-    dialogue_candidate_end: int | None
-    registration_reason: str | None
-    registration_paragraph_id: int | None
-    review_state: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class CaseEntryRecord:
-    "CaseEntry 的持久化事实快照"
-
-    entry_id: str
-    case_id: str | None
-    producer_execution_id: str | None
-    program_work_id: str | None
-    parent_entry_id: str | None
-    adopted: bool | None
-    business_call_id: str | None
-    accepted_order: int | None
-    tool_name: str | None
-    receipt_bytes: bytes | None
-    narrative_link_id: str | None
-    warning_record_id: str | None
-    warning_report_id: str | None
-    warning_ordinal: int | None
-    attempted_case_reference: str | None
-    warning_message: str | None
-    candidate_producer_execution_id: str | None
-    pending_event_reference: str | None
-    pending_event_title: str | None
-    pending_event_chapter_id: int | None
+    status: str
+    producer_agent_id: str | None
+    promised_agent_id: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class ChapterRecord:
-    "Chapter 的持久化事实快照"
-
     id: str
     run_id: str
     chapter_id: int
@@ -143,75 +95,18 @@ class ChapterRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class AnalysisRunRecord:
-    task_id: str
-    """AnalysisRun 的持久化事实快照"""
-    run_id: str
-    novel_id: str
+class RunRecord:
+    id: str
+    novelid: str
+    taskid: str
     status: str
-    progress: float
-    stage: str | None
-    sub_stage: str | None
-    current: int
-    total: int
-    message: str | None
-    error: str | None
-    task_kind: str
-    cancel_requested: bool
-    worker_id: str | None
-    heartbeat_at: datetime | None
-    started_at: datetime | None
-    completed_at: datetime | None
-    created_at: datetime | None
-    updated_at: datetime | None
-    source_path: str | None
-    source_title: str | None
-    source_author: str | None
-    force_preprocess: bool | None
-    force_annotate: bool | None
-    force_aggregate: bool | None
-    force_topic_model: bool | None
-    force_diagnose: bool | None
-    force_linguistic: bool | None
-    requested_num_topics: int | None
-    contract_version: str
-    embedding_model_key: str | None
-    ltp_pipeline_version: str | None
-    ltp_model_key: str | None
-    fixed_phrase_lexicon_key: str | None
-    fixed_phrase_contract_version: str | None
-    curve_bandwidth: float | None
-    curve_min_points: int | None
-    w2v_dimension: int | None
-    w2v_vocabulary_size: int | None
-    w2v_source_uri: str | None
-    w2v_license_name: str | None
-    w2v_training_document_count: int | None
-    w2v_training_token_count: int | None
-    w2v_window_size: int | None
-    w2v_min_count: int | None
-    w2v_epochs: int | None
-    w2v_pretrained_vocabulary_size: int | None
-    w2v_created_at: datetime | None
-    lda_library_version: str | None
-    lda_pipeline_version: str | None
-    lda_num_topics: int | None
-    lda_dictionary_size: int | None
-    lda_training_document_count: int | None
-    lda_passes: int | None
-    lda_iterations: int | None
-    lda_alpha: float | None
-    lda_eta: float | None
-    lda_random_state: int | None
-    lda_batch_size: int | None
-    lda_minimum_probability: float | None
-    lda_created_at: datetime | None
-    preprocess_completed_at: datetime | None
-    linguistic_completed_at: datetime | None
-    curve_completed_at: datetime | None
-    aggregate_completed_at: datetime | None
-    topic_completed_at: datetime | None
-    guard_generation: int
+    lda_completed: bool
+    w2v_completed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class GlobalStatsRecord:
+    run_id: str
     avg_mtld: float | None
     avg_ttr: float | None
     avg_sent_len: float | None
@@ -232,16 +127,14 @@ class AnalysisRunRecord:
 
 @dataclass(frozen=True, slots=True)
 class DialogueRecordRecord:
-    "DialogueRecord 的持久化事实快照"
-
     dialogue_id: str
     run_id: str
     chapter_id: int
-    creation_execution_id: str
+    creation_agent_id: str
     candidate_key: str
     start_char: int
     end_char: int
-    current_attribution_execution_id: str | None
+    current_attribution_agent_id: str | None
     speaker_entity_id: str | None
     tone: str | None
     is_inner_monologue: bool
@@ -253,8 +146,6 @@ class DialogueRecordRecord:
 
 @dataclass(frozen=True, slots=True)
 class EventDeclarationRecord:
-    "EventDeclaration 的持久化事实快照"
-
     declaration_id: str
     record_id: str
     local_key: str
@@ -271,8 +162,6 @@ class EventDeclarationRecord:
 
 @dataclass(frozen=True, slots=True)
 class DeclarationParticipantRecord:
-    "DeclarationParticipant 的持久化事实快照"
-
     participant_id: str
     declaration_id: str
     participant_ordinal: int
@@ -285,34 +174,27 @@ class DeclarationParticipantRecord:
 
 @dataclass(frozen=True, slots=True)
 class CompleteEventRecord:
-    "CompleteEvent 的持久化事实快照"
-
     event_id: str
-    producer_execution_id: str
+    producer_agent_id: str
     local_key: str
     identity_reason: str
+    title: str
+    problem: str
+    summary: str
+    event_type: str
+    status: str
+    progress: str | None
 
 
 @dataclass(frozen=True, slots=True)
-class EventRevisionRecord:
-    "EventRevision 的持久化事实快照"
-
-    revision_id: str
+class EventDeclarationBindingRecord:
+    binding_id: str
     event_id: str
-    stage_index: int
-    declaration_id: str | None
-    origin_title: str | None
-    origin_problem: str | None
-    origin_summary: str | None
-    origin_event_type: str | None
-    origin_status: str | None
-    origin_progress: str | None
+    declaration_id: str
 
 
 @dataclass(frozen=True, slots=True)
 class GraphEntityRecord:
-    "GraphEntity 的持久化事实快照"
-
     entity_id: str
     run_id: str
     canonical_name: str
@@ -323,8 +205,6 @@ class GraphEntityRecord:
 
 @dataclass(frozen=True, slots=True)
 class GraphRelationRecord:
-    "GraphRelation 的持久化事实快照"
-
     relation_id: str
     from_entity_id: str
     to_entity_id: str
@@ -334,11 +214,8 @@ class GraphRelationRecord:
 
 @dataclass(frozen=True, slots=True)
 class GraphFactRecord:
-    "GraphFact 的持久化事实快照"
-
     graph_fact_id: str
-    direct_producer_execution_id: str | None
-    program_work_id: str | None
+    direct_producer_agent_id: str | None
     operation_order: int | None
     business_call_id: str | None
     effective_chapter_id: int | None
@@ -364,8 +241,6 @@ class GraphFactRecord:
 
 @dataclass(frozen=True, slots=True)
 class FactEntityTagRecord:
-    "FactEntityTag 的持久化事实快照"
-
     id: str
     graph_fact_id: str
     tag_ordinal: int
@@ -374,8 +249,6 @@ class FactEntityTagRecord:
 
 @dataclass(frozen=True, slots=True)
 class LinguisticSpanRecord:
-    "LinguisticSpan 的持久化事实快照"
-
     span_id: str
     run_id: str
     paragraph_id: int
@@ -390,8 +263,6 @@ class LinguisticSpanRecord:
 
 @dataclass(frozen=True, slots=True)
 class LinguisticArcRecord:
-    "LinguisticArc 的持久化事实快照"
-
     arc_id: str
     dependent_span_id: str
     head_span_id: str | None
@@ -401,8 +272,6 @@ class LinguisticArcRecord:
 
 @dataclass(frozen=True, slots=True)
 class NovelRecord:
-    "Novel 的持久化事实快照"
-
     novel_id: str
     filename: str | None
     file_path: str | None
@@ -414,10 +283,8 @@ class NovelRecord:
 
 @dataclass(frozen=True, slots=True)
 class NarrativeLinkRecord:
-    "NarrativeLink 的持久化事实快照"
-
     link_id: str
-    producer_execution_id: str
+    producer_agent_id: str
     reason: str
     semantic_source_event_id: str | None
     semantic_source_declaration_id: str | None
@@ -440,10 +307,8 @@ class NarrativeLinkRecord:
 
 @dataclass(frozen=True, slots=True)
 class NarrativeGroupRecord:
-    "NarrativeGroup 的持久化事实快照"
-
     group_id: str
-    producer_execution_id: str
+    producer_agent_id: str
     title: str
     arc_kind: str | None
     arc_objective: str | None
@@ -455,10 +320,8 @@ class NarrativeGroupRecord:
 
 @dataclass(frozen=True, slots=True)
 class OrganizationCheckRecord:
-    "OrganizationCheck 的持久化事实快照"
-
     check_id: str
-    producer_execution_id: str
+    producer_agent_id: str
     reason: str
     reviewed_event_id: str | None
     reviewed_declaration_id: str | None
@@ -471,34 +334,9 @@ class OrganizationCheckRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class ConflictRecordRecord:
-    "ConflictRecord 的持久化事实快照"
-
-    conflict_id: str
-    producer_execution_id: str
-    reason: str
-    subject_event_id: str | None
-    subject_declaration_id: str | None
-    subject_fact_id: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class ConflictClaimRecord:
-    "ConflictClaim 的持久化事实快照"
-
-    claim_id: str
-    conflict_id: str
-    claim_ordinal: int
-    producer_execution_id: str
-    claim_text: str
-
-
-@dataclass(frozen=True, slots=True)
 class EventForeshadowingActionRecord:
-    "EventForeshadowingAction 的持久化事实快照"
-
     action_id: str
-    producer_execution_id: str
+    producer_agent_id: str
     source_operation_local_key: str
     operation_order: int
     action_type: str
@@ -508,8 +346,6 @@ class EventForeshadowingActionRecord:
 
 @dataclass(frozen=True, slots=True)
 class SourceEvidenceRecord:
-    "SourceEvidence 的持久化事实快照"
-
     evidence_id: str
     ordinal: int
     paragraph_id: int
@@ -522,15 +358,11 @@ class SourceEvidenceRecord:
     narrative_group_id: str | None
     narrative_link_id: str | None
     foreshadow_action_id: str | None
-    conflict_id: str | None
-    claim_id: str | None
     check_id: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class ParagraphRecord:
-    "Paragraph 的持久化事实快照"
-
     id: str
     run_id: str
     paragraph_id: int
@@ -545,8 +377,6 @@ class ParagraphRecord:
 
 @dataclass(frozen=True, slots=True)
 class ParagraphFeatureRecord:
-    "ParagraphFeature 的持久化事实快照"
-
     id: str
     run_id: str
     paragraph_id: int
@@ -560,8 +390,6 @@ class ParagraphFeatureRecord:
 
 @dataclass(frozen=True, slots=True)
 class ParagraphMetricRecord:
-    "ParagraphMetric 的持久化事实快照"
-
     id: str
     run_id: str
     paragraph_id: int
@@ -624,8 +452,6 @@ class ParagraphMetricRecord:
 
 @dataclass(frozen=True, slots=True)
 class ParagraphTopicRecord:
-    "ParagraphTopic 的持久化事实快照"
-
     id: str
     run_id: str
     paragraph_id: int
@@ -634,50 +460,21 @@ class ParagraphTopicRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkItemRecord:
-    "WorkItem 的持久化事实快照"
-
-    work_id: str
-    role: str | None
-    annotation_run_id: str | None
-    annotation_chapter_id: int | None
-    diagnosis_session_id: str | None
-    program_run_id: str | None
-    program_chapter_id: int | None
-    program_code: str | None
-    program_invocation_key: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class ExecutionRecord:
-    "Execution 的持久化事实快照"
-
-    execution_id: str
-    session_run_id: str | None
-    session_created_at: datetime | None
-    run_id: str | None
-    role: str | None
-    chapter_id: int | None
-    case_anchor: str | None
-    work_id: str | None
-    attempt_number: int | None
-    started_at: datetime | None
-    finished_at: datetime | None
-    status: str | None
-    error: str | None
+class AgentRecord:
+    id: str
+    run_id: str
+    type: str
+    status: str
 
 
 @dataclass(frozen=True, slots=True)
 class ChapterAnnotationRecord:
-    "ChapterAnnotation 的持久化事实快照"
-
     record_id: str
-    execution_id: str
+    agent_id: str
     run_id: str
     chapter_id: int
     role: str
-    contract_version: str
-    chapter_consolidation_version: str
+    consolidation_digest: str | None
     summary: str | None
     emotional_valence: int | None
     narrative_function: str | None
@@ -689,11 +486,8 @@ class ChapterAnnotationRecord:
 
 @dataclass(frozen=True, slots=True)
 class DiagnosisReportRecord:
-    "DiagnosisReport 的持久化事实快照"
-
     report_id: str
-    session_id: str
-    contract_version: str
+    agent_id: str
     diagnosis: str | None
     value_logic_type: str | None
     value_logic_reason: str | None
@@ -713,8 +507,6 @@ class DiagnosisReportRecord:
 
 @dataclass(frozen=True, slots=True)
 class AnalysisAssessmentRecord:
-    "AnalysisAssessment 的持久化事实快照"
-
     assessment_id: str
     record_id: str | None
     report_id: str | None

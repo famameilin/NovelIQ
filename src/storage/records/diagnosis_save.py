@@ -1,4 +1,4 @@
-"正式诊断发布的普通输入记录"
+"正式诊断保存的普通输入记录"
 
 from dataclasses import dataclass
 
@@ -7,9 +7,9 @@ from src.storage.records.facts import FactSave
 
 
 @dataclass(frozen=True, slots=True)
-class DiagnosisPublish:
+class DiagnosisReportSave:
     run_id: str
-    session_id: str
+    agent_id: str
     report: dict
     assessments: tuple[dict, ...]
     organization_json: str
@@ -22,11 +22,9 @@ class DiagnosisPublish:
 @dataclass(frozen=True, slots=True)
 class DiagnosisSessionSave:
     run_id: str
-    session_id: str
-    case_ids: frozenset[str]
+    agent_id: str
     organization_json: str
     declaration_ids: frozenset[str]
-    execution_ids: tuple[str, ...]
     facts: tuple[FactSave, ...]
     dialogue_updates: tuple[dict, ...]
     cases: tuple[CaseSave, ...]
