@@ -47,7 +47,7 @@ class TestCli:
         insert_test_novel(self.novel_id, session=db_session)
 
         run_repo = RunRepository(db_session)
-        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
+        self.run_id = run_repo.create_run(novel_id=self.novel_id)
 
     @pytest.mark.asyncio()
     async def test_agent_diagnose_writes_db(self) -> None:

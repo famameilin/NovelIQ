@@ -12,16 +12,16 @@ from src.event_trees.read.foreshadowing import calculate_foreshadow_expectation,
 from src.event_trees.read.forest import EventForestQuery
 from src.metrics.queries.plotline import PlotlineQuery
 from src.storage.models import (
-    AgentToolCall,
+    Agent,
+    AgentLoop,
     Chapter,
     ChapterAnnotation,
     EventDeclaration,
     EventForeshadowingAction,
-    Execution,
     GraphFact,
-    ModelCall,
     Paragraph,
     SourceEvidence,
+    ToolCall,
 )
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -38,14 +38,14 @@ from tests.workflows.test_annotation_work_pipeline import ProgramModel
 
 def _run_executions(run_id: str):
     """本 run 的真实尝试执行（执行行直接携带运行归属）"""
-    return select(Execution.execution_id).where(Execution.run_id == run_id)
+    return select(Agent.id).where(Agent.run_id == run_id)
 
 
 def _run_actions(db_session, run_id: str) -> list[EventForeshadowingAction]:
     return list(
         db_session.scalars(
             select(EventForeshadowingAction)
-            .where(EventForeshadowingAction.producer_execution_id.in_(_run_executions(run_id)))
+            .where(EventForeshadowingAction.producer_agent_id.in_(_run_executions(run_id)))
             .order_by(EventForeshadowingAction.operation_order, EventForeshadowingAction.action_id)
         )
     )
@@ -56,7 +56,7 @@ def _run_plotlines(db_session, run_id: str) -> list[GraphFact]:
     return list(
         db_session.scalars(
             select(GraphFact).where(
-                GraphFact.direct_producer_execution_id.in_(_run_executions(run_id)),
+                GraphFact.direct_producer_agent_id.in_(_run_executions(run_id)),
                 GraphFact.plotline_subject_title.is_not(None),
             )
         )
@@ -130,9 +130,12 @@ async def test_plotline_and_explicit_actions_survive_save_and_resume(db_session)
     assert calculate_foreshadow_expectation(storage_for(db_session), run_id) == pytest.approx(1.0)
     source = DiagnosisQueries(storage_for(db_session)).fetch_foreshadowing_sources(run_id)[0]
     assert source["declaration_id"] == actions[0].source_declaration_id
+    assert source["event_id"] is None
     assert {item["action_type"] for item in source["source_actions"]} == {"setup", "reinforce", "payoff"}
     # 发布事件身份后同一批动作才成为正式伏笔树与章级投影（未发布动作没有可读事件身份）
-    publish_declarations(db_session, run_id)
+    mapping, _draft = publish_declarations(db_session, run_id)
+    published = DiagnosisQueries(storage_for(db_session)).fetch_foreshadowing_sources(run_id)[0]
+    assert published["event_id"] == mapping[actions[0].source_declaration_id]
     assert calculate_foreshadow_expectation(storage_for(db_session), run_id) == pytest.approx(1.0)
     trees = fetch_foreshadowing_trees(storage_for(db_session), run_id)
     assert len(trees) == 1
@@ -147,11 +150,11 @@ async def test_plotline_and_explicit_actions_survive_save_and_resume(db_session)
         tools = {
             tool.name: tool
             for tool in build_diagnosis_tools(
-                storage_for(db_session), run_id, role="report", execution_id=fixture_id(__name__, "read-contract")
+                storage_for(db_session), run_id, role="report", agent_id=fixture_id(__name__, "read-contract")
             )
         }
         metrics = json.loads(tools["read_metrics"].invoke({}))
-    assert metrics["foreshadowing"] == [source]
+    assert metrics["foreshadowing"] == [published]
     assert metrics["foreshadow_expectation"] == pytest.approx(1.0)
     result = PlotlineQuery(storage_for(db_session), run_id).fetch()
     assert result["total"] == 4
@@ -250,11 +253,11 @@ async def test_foreshadow_expectation_uses_frozen_and_published_identity(db_sess
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     failures = list(
         db_session.scalars(
-            select(AgentToolCall)
-            .join(ModelCall, ModelCall.call_id == AgentToolCall.call_id)
+            select(ToolCall)
+            .join(AgentLoop, AgentLoop.id == ToolCall.agentloop_id)
             .where(
-                ModelCall.execution_id.in_(_run_executions(run_id)),
-                AgentToolCall.error.is_not(None),
+                AgentLoop.agent_id.in_(_run_executions(run_id)),
+                ToolCall.error.is_not(None),
             )
         )
     )
@@ -293,3 +296,52 @@ async def test_foreshadow_expectation_tolerates_unbound_identity(db_session):
     )
     assert expectation is not None and 0.0 <= expectation <= 1.0
     assert expectation == calculate_foreshadow_expectation(storage_for(db_session), run_id)
+
+
+def test_foreshadowing_trees_skip_sources_without_event_identity(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.event_trees.read import foreshadowing as module
+
+    bound = SimpleNamespace(
+        root_event_id="event-1",
+        source_declaration_id="decl-1",
+        chapter_id=1,
+        action_type="setup",
+        target_event_id=None,
+        evidence=[],
+        evidence_scope="paragraph",
+        chapter_order=0,
+        operation_order=0,
+        action_id="action-1",
+    )
+    unbound = SimpleNamespace(
+        root_event_id=None,
+        source_declaration_id="decl-2",
+        chapter_id=1,
+        action_type="setup",
+        target_event_id=None,
+        evidence=[],
+        evidence_scope="paragraph",
+        chapter_order=0,
+        operation_order=0,
+        action_id="action-2",
+    )
+
+    class Query:
+        events = {"event-1": SimpleNamespace(title="根事件")}
+        declarations = {"decl-1": SimpleNamespace(payoff_likelihood="high", strength="high")}
+        orders = {1: 0}
+
+        def __init__(self, *_args):
+            pass
+
+        def fetch(self):
+            pass
+
+    monkeypatch.setattr(module, "load_foreshadowing_actions", lambda session, run_id: [unbound, bound])
+    monkeypatch.setattr(module, "EventTreeQuery", Query)
+
+    trees = module.fetch_foreshadowing_trees(SimpleNamespace(), "run")
+
+    assert [tree.root_event_id for tree in trees] == ["event-1"]

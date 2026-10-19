@@ -1,7 +1,7 @@
 """纯内存故障注入覆盖队列取消、模型重选和 work 保存确认边界
 
-内存存储模拟新写面——真实尝试（executions 的 invocation 形状）在派发期由审计登记，
-正式产物（chapter_annotations）由保存事务写入；保存确认=写事务提交成功，
+内存存储模拟新写面——真实尝试（agent 的 invocation 形状）在派发期由审计登记，
+正式产物（agent_annotations）由保存事务写入；保存确认=写事务提交成功，
 传输类异常按幂等重存一次。
 """
 
@@ -50,7 +50,7 @@ class _MemorySessions:
     def expect_attempt(self, work_id: str, invocation_id: str, *, role: str = "entity") -> None:
         """模拟派发期已登记的事实：真实尝试行，以及保存事务将写入的正式产物"""
         self.executions[invocation_id] = SimpleNamespace(
-            execution_id=invocation_id, run_id="run", chapter_id=1, role=role
+            agent_id=invocation_id, run_id="run", chapter_id=1, role=role
         )
         self.attempt = (work_id, invocation_id)
 
@@ -90,8 +90,8 @@ class _MemorySessions:
             def _write_pending(self) -> None:
                 for row in self.pending:
                     table = getattr(type(row), "__tablename__", "")
-                    if table == "executions":
-                        owner.executions[row.execution_id] = row
+                    if table == "agent":
+                        owner.executions[row.agent_id] = row
                 self.pending = []
 
             def rollback(self) -> None:
@@ -384,14 +384,6 @@ async def test_committed_work_confirmation_recovers_current_author_and_retains_o
         agent.case_pool.begin(key)
     case = agent.case_pool.push("character", "已核查案例", author)
     agent.case_pool.promise(case["case_id"], author)
-    agent.case_pool.associate(
-        case["case_id"],
-        author,
-        call_id="write-1",
-        tool_name="write_entity",
-        receipt={"status": "written"},
-        is_write=True,
-    )
     other_case = agent.case_pool.push("character", "其他 work 的案例", other)
     agent.case_pool.promise(other_case["case_id"], other)
     snapshots = (
@@ -407,7 +399,7 @@ async def test_committed_work_confirmation_recovers_current_author_and_retains_o
         {
             "author": author,
             "registrations": {case["case_id"]: case},
-            "deliveries": deepcopy(agent.case_pool.deliveries[author]),
+            "promises": agent.case_pool.promises_for(author),
         },
     )
     for domain, snapshot in zip((agent.fact_graph, agent.event_trees, agent.case_pool), snapshots, strict=True):
@@ -421,14 +413,14 @@ async def test_committed_work_confirmation_recovers_current_author_and_retains_o
     original_confirm = agent.fact_graph.confirm
     confirmation_count = 0
 
-    def confirm(domain: FactGraph, execution_id: str) -> None:
+    def confirm(domain: FactGraph, agent_id: str) -> None:
         nonlocal confirmation_count
         confirmation_count += 1
         calls.append("confirm")
         assert agent.case_pool.case_runtime[case["case_id"]]["owner"] == author
         if confirmation_count == 1:
             raise RuntimeError("内存确认故障")
-        original_confirm(execution_id)
+        original_confirm(agent_id)
 
     monkeypatch.setattr(FactGraph, "confirm", confirm)
     bus.unhandle("agent.save", "agent:run")

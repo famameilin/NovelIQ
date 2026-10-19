@@ -2,9 +2,9 @@
 
 本文件保留数据层取证测试，并通过 patch run_diagnosis_agent 验证工作流落库。
 
-取证事实源：测试数据写入 paragraphs/paragraph_topics/paragraph_curves，
+取证事实源：测试数据写入 paragraphs/lda_paragraph_topics/paragraph_curves，
 高张力素材来自 paragraph_features 的 tension_z 正式观测；伏笔树根按事件声明写入；
-诊断落库断言按 diagnosis_reports/analysis_assessments 的正式读接口与 run 作用域查询。
+诊断落库断言按 diagnosis_reports/agent_assessments 的正式读接口与 run 作用域查询。
 """
 
 import json
@@ -65,15 +65,17 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
                 "if cases:\n"
                 "    case = cases[0]\n"
                 '    promise_case(case_id=case["case_id"])\n'
-                '    declaration = case["payload"]["event_id"]\n'
                 "    page = search_events(limit=20)\n"
+                '    declaration = ""\n'
+                '    for item in page["events"]:\n'
+                '        if item["title"] in case["description"]:\n'
+                '            declaration = item["declaration_id"]\n'
                 '    source = read_event(node_id=declaration)["content"]\n'
                 '    evidence = [{"paragraph_id":source["evidence"][0]["paragraph_id"]}]\n'
                 '    own = write_event(items=[{"operation":"identity", "key":declaration, '
                 '"title":source["title"], "problem":source["problem"], "summary":source["summary"], '
                 '"event_type":source["event_type"], "status":source["status"], '
-                '"declaration_ids":[declaration], "stage_order":[declaration], '
-                '"current_declaration_id":declaration, "reason":"按真实章节核对身份", "evidence":evidence}], '
+                '"declaration_ids":[declaration], "reason":"依据当前章声明核对身份", "evidence":evidence}], '
                 'caseid=case["case_id"])["results"][0]["event_id"]\n'
                 '    write_event(items=[{"operation":"declaration_review", "declaration_ids":[declaration], '
                 '"reason":"逐项核对已保存章节声明"}], caseid=case["case_id"])\n'
@@ -135,7 +137,7 @@ class TestDiagnosisRoutes:
         insert_test_novel(self.novel_id, session=db_session)
 
         run_repo = RunRepository(db_session)
-        self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
+        self.run_id = run_repo.create_run(novel_id=self.novel_id)
 
     def _create_full_data(self, chunk_count: int = 5) -> None:
         chapter_repo = ChapterRepository(self.db_session)
@@ -157,11 +159,12 @@ class TestDiagnosisRoutes:
         spans = [replace(span, token_count=1) for span in split_chunk_paragraphs(chunks)]
         paragraph_repo.insert_paragraphs(self.run_id, spans)
         # 主题三表契约：模型契约 + 每段一行状态 + 完整分布
+        from tests.support.storage_fixtures import save_topic_artifact
+        save_topic_artifact(self.run_id, 1)
         paragraph_repo.insert_topic_model_run(
             self.run_id,
             model_key="gensim-lda",
             library_version="4.4.0",
-            pipeline_version="1.0",
             num_topics=1,
             parameters={"num_topics": 1},
             dictionary_size=5,
@@ -257,13 +260,10 @@ class TestDiagnosisRoutes:
             .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
             .where(ChapterAnnotation.run_id == self.run_id)
         ).all()
-        for declaration_id, title, summary, status, chapter_id in rows:
+        for _declaration_id, title, summary, _status, _chapter_id in rows:
             pool.register_event_case(
-                declaration_id=declaration_id,
                 title=title,
                 summary=summary,
-                status=status,
-                chapter_id=int(chapter_id),
                 author=author,
             )
         assert (
@@ -278,7 +278,7 @@ class TestDiagnosisRoutes:
                             "registrations": {
                                 key: pool.cases[key] for key in sorted(pool.registrations.get(author, set()))
                             },
-                            "deliveries": [],
+                            "promises": [],
                         },
                         ensure_ascii=False,
                     ),
@@ -359,8 +359,8 @@ class TestDiagnosisRoutes:
         with patch("src.model_pool.llm.build_chat_model", return_value=llm):
             analysis = await run_diagnose(run_id=self.run_id, session=storage_for(self.db_session))
         assert analysis is not None
-        # 续跑：案例会话对空池一次 finish、报告会话一次收尾，不重复办理既有案例
-        assert llm.calls == 5 + 2
+        # 续跑：案例池已归零不再派案例会话，报告会话一次收尾，不重复办理既有案例
+        assert llm.calls == 5 + 1
         assert set(run_events(storage_for(self.db_session), self.run_id)) == saved_event_ids
         fetched = fetch_diagnosis_payload(storage_for(self.db_session), self.run_id)
         assert fetched is not None and fetched["diagnosis"] == "ok"

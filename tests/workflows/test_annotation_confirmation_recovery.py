@@ -15,11 +15,12 @@ from src.case_pool import CasePool
 from src.config import settings
 from src.event_bus import Message
 from src.storage.models import (
+    Agent,
+    Case,
     ChapterAnnotation,
     CompleteEvent,
     EventDeclaration,
     EventForeshadowingAction,
-    Execution,
     GraphFact,
 )
 from src.work.annotation_work import annotation_work_id
@@ -32,7 +33,7 @@ from tests.workflows.test_annotation_work_pipeline import ProgramModel
 
 def _run_executions(run_id: str):
     """本 run 真实尝试的执行选择器（执行行直接携带运行归属）"""
-    return select(Execution.execution_id).where(Execution.run_id == run_id)
+    return select(Agent.id).where(Agent.run_id == run_id)
 
 
 def _run_products(db_session, run_id: str) -> list[ChapterAnnotation]:
@@ -96,27 +97,24 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
     assert len(states) == len(products) == 1
     assert states[0].state == "saved"
     assert states[0].invocation_id == interrupted[0]
-    assert products[0].execution_id == interrupted[0]
+    assert products[0].agent_id == interrupted[0]
     pool = CasePool(run_id)
     pool.load_storage(storage_for(db_session))
     records = pool.search()
     # 「建一个事件进一个池」：声明案例随 write_event 自动登记为 event 案例，另有一行已承诺
     promised = [record for record in records if record["promised"]]
     assert len(records) == 2 and len(promised) == 1
-    deliveries = pool.deliveries[states[0].invocation_id]
-    # 承诺痕迹随成功保存落库，写入交付按真实调用记录
-    writes = [item for item in deliveries if item["is_write"]]
-    assert len(writes) == 1 and writes[0]["tool_name"] == "write_metrics"
+    assert pool.promises_for(states[0].invocation_id) == [promised[0]["case_id"]]
     declaration = db_session.scalar(select(EventDeclaration).where(EventDeclaration.record_id == products[0].record_id))
     assert declaration.title == "确认旧信" and declaration.status == "ongoing"
     assert (
-        db_session.scalar(select(CompleteEvent).where(CompleteEvent.producer_execution_id.in_(_run_executions(run_id))))
+        db_session.scalar(select(CompleteEvent).where(CompleteEvent.producer_agent_id.in_(_run_executions(run_id))))
         is None
     )
     actions = list(
         db_session.scalars(
             select(EventForeshadowingAction).where(
-                EventForeshadowingAction.producer_execution_id.in_(_run_executions(run_id))
+                EventForeshadowingAction.producer_agent_id.in_(_run_executions(run_id))
             )
         )
     )
@@ -129,7 +127,7 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
     assert reinforce.target_declaration_id is None
     plotline = db_session.scalar(
         select(GraphFact).where(
-            GraphFact.direct_producer_execution_id.in_(_run_executions(run_id)),
+            GraphFact.direct_producer_agent_id.in_(_run_executions(run_id)),
             GraphFact.plotline_subject_title.is_not(None),
         )
     )
@@ -229,18 +227,11 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
     target = next(record for record in records if record["description"] == "乙章独占线索")
     # 承诺即解决：承诺痕迹落库；未产生写交付，支持条目 adopted=False
     assert target["promised"] is True
-    from src.storage.models import CaseEntry
 
-    supports = list(
-        db_session.scalars(
-            select(CaseEntry).where(CaseEntry.case_id == target["case_id"], CaseEntry.adopted.is_not(None))
-        )
-    )
-    assert len(supports) == 1 and supports[0].adopted is False
-    children = list(db_session.scalars(select(CaseEntry).where(CaseEntry.parent_entry_id == supports[0].entry_id)))
-    assert [child.tool_name for child in children] == ["promise_case"]
+    row = db_session.get(Case, target["case_id"])
+    assert row.status == "resolved" and row.promised_agent_id is not None
     assert len(records) == 2
-    assert any("码=实体无引用" in record["description"] for record in records)
+    assert any("实体尚无正式引用" in record["description"] for record in records)
 
 
 @pytest.mark.asyncio
@@ -252,20 +243,27 @@ async def test_resume_threshold_change_clears_discarded_chapter_lanes(
     novel_id, run_id = create_run_with_chunks(db_session, texts=["长章原文。"])
     cancelled: list[bool] = []
 
-    async def cancel_on_first_save(event) -> None:
-        if event.action == "work_saved":
-            cancelled.append(True)
+    from src.storage.access import AnnotationAccess
+    original_save = AnnotationAccess.save
+    monkeypatch.setattr(settings.models.model_pool[0], "max_in_flight", 1)
+
+    def cancel_on_first_save(access, request):
+        result = original_save(access, request)
+        cancelled.append(True)
+        return result
 
     # 第一次运行在首个角色保存后取消：本章缺少必需角色，从未出章末核对凭据
     first = ProgramModel('metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()')
-    with patch("src.model_pool.llm.build_chat_model", return_value=first):
+    with (
+        patch("src.model_pool.llm.build_chat_model", return_value=first),
+        patch.object(AnnotationAccess, "save", cancel_on_first_save),
+    ):
         with pytest.raises(asyncio.CancelledError):
             await run_annotate(
                 run_id,
                 storage_for(db_session),
                 novel_id=novel_id,
                 is_cancelled=lambda: bool(cancelled),
-                emitter=cancel_on_first_save,
             )
     assert cancelled
     db_session.expire_all()

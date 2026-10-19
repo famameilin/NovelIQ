@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 
 from src.audit.queries import fetch_agent_turns
 from src.config import settings
-from src.storage.models import ChapterAnnotation, Execution
+from src.storage.models import Agent, ChapterAnnotation
 from src.work.chapter_pool import PipelineWorkFailed
 from src.work.queries import chapter_annotations, fetch_annotation_role_records
 from src.workflows.annotate import run_annotate
@@ -44,7 +44,7 @@ async def test_missing_completion_keeps_history_variables_and_invocation(db_sess
     assert model.calls == 3 and factory.call_count == 1
     db_session.expire_all()
     turns = fetch_agent_turns(storage_for(db_session), run)
-    assert len(turns) == 3 and len({turn.execution_id for turn in turns}) == 1
+    assert len(turns) == 3 and len({turn.agent_id for turn in turns}) == 1
     output = chapter_annotations(storage_for(db_session), run)[0]
     assert output.payload["metrics"]["summary"] == "原文行动"
 
@@ -76,13 +76,13 @@ async def test_budget_exhaustion_is_not_retried_and_keeps_audit(db_session, monk
     db_session.expire_all()
     turns = fetch_agent_turns(storage_for(db_session), run)
     assert turns and factory.call_count == model.calls == len(turns)
-    assert len({turn.execution_id for turn in turns}) == len(turns)
+    assert len({turn.agent_id for turn in turns}) == len(turns)
     assert (
         db_session.scalar(
             select(func.count())
             .select_from(ChapterAnnotation)
-            .join(Execution, Execution.execution_id == ChapterAnnotation.execution_id)
-            .where(Execution.run_id == run)
+            .join(Agent, Agent.id == ChapterAnnotation.agent_id)
+            .where(Agent.run_id == run)
         )
         == 0
     )
