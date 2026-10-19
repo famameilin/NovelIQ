@@ -41,7 +41,7 @@ class NarrativeScenario:
     run_id: str
     task_id: str
     session_id: str
-    execution_id: str
+    agent_id: str
     declarations: dict[int, str]
     events: dict[int, str]
     arcs: dict[str, str]
@@ -52,7 +52,7 @@ def _fixture(session) -> NarrativeScenario:
     novel, run = create_run_with_chunks(
         session, texts=[f"第{i}章原文" for i in range(1, 9)], chapter_ids=list(range(1, 9))
     )
-    session_id, execution_id = add_diagnosis_context(session, run)
+    session_id, agent_id = add_diagnosis_context(session, run)
     declarations: dict[int, str] = {}
     executions: dict[int, str] = {}
     for chapter in range(1, 9):
@@ -71,7 +71,7 @@ def _fixture(session) -> NarrativeScenario:
             payoff_likelihood="high" if chapter == 2 else None,
         )
     session.flush()
-    draft, _meta = identity_every_declaration(session, run, context=(session_id, execution_id))
+    draft, _meta = identity_every_declaration(session, run, context=(session_id, agent_id))
     mapping = {key: item.event_id for item in draft.events.values() for key in item.declaration_ids}
     events = {chapter: mapping[declarations[chapter]] for chapter in range(1, 9)}
     close_structure(session, draft, evidence_paragraph_id=0)
@@ -96,7 +96,7 @@ def _fixture(session) -> NarrativeScenario:
     actions = {
         "setup": add_foreshadowing_action(
             session,
-            producer_execution_id=executions[2],
+            producer_agent_id=executions[2],
             source_declaration_id=declarations[2],
             target_declaration_id=declarations[2],
             paragraph=first_paragraph(session, run, chapter_id=2),
@@ -107,7 +107,7 @@ def _fixture(session) -> NarrativeScenario:
     for chapter, action in ((5, "reinforce"), (8, "payoff")):
         actions[action] = add_foreshadowing_action(
             session,
-            producer_execution_id=executions[chapter],
+            producer_agent_id=executions[chapter],
             source_declaration_id=declarations[2],
             target_declaration_id=declarations[chapter],
             paragraph=first_paragraph(session, run, chapter_id=chapter),
@@ -121,7 +121,7 @@ def _fixture(session) -> NarrativeScenario:
         run_id=run,
         task_id=task_for_run(run, session),
         session_id=session_id,
-        execution_id=execution_id,
+        agent_id=agent_id,
         declarations=declarations,
         events=events,
         arcs={"mystery": arc},
@@ -332,7 +332,7 @@ def test_action_save_accepts_earlier_saved_work_endpoints(db_session):
     stored = list(
         db_session.scalars(
             select(EventForeshadowingAction).where(
-                EventForeshadowingAction.producer_execution_id == annotation_execution
+                EventForeshadowingAction.producer_agent_id == annotation_execution
             )
         )
     )

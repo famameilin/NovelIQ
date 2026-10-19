@@ -41,6 +41,7 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
     annotation_repo = SimpleNamespace(graph=object())
 
     with patch("src.api.services.results_queries.graph.graph_projection") as graph_repository:
+        graph_repository.return_value.resolve_chapter_boundary.return_value = SimpleNamespace(chapter_id=3)
         graph_repository.return_value.fetch_changes.return_value = ([row], 1)
 
         payload = _fetch_graph_changes_page(fixture_id(__name__, "run-1"), annotation_repo, changes_limit=20)
@@ -59,9 +60,10 @@ def test_graph_changes_page_exposes_typed_presentation_fields() -> None:
 
 def test_graph_changes_cursor_round_trip() -> None:
     """验证合法游标可往返解析"""
-    assert _decode_graph_changes_cursor(_encode_graph_changes_cursor(12)) == 12
-    assert _decode_graph_changes_cursor(None) == 0
-    assert _decode_graph_changes_cursor("") == 0
+    cursor = _encode_graph_changes_cursor(12, {"run_id": "r", "boundary_chapter_id": 3})
+    assert _decode_graph_changes_cursor(cursor, {"run_id": "r"}) == (12, 3)
+    assert _decode_graph_changes_cursor(None, {}) == (0, None)
+    assert _decode_graph_changes_cursor("", {}) == (0, None)
 
 
 @pytest.mark.parametrize("raw_payload", ["[1, 2, 3]", '"not-a-dict"', "42", "null"])
@@ -70,7 +72,7 @@ def test_graph_changes_cursor_rejects_non_dict_payload(raw_payload: str) -> None
     encoded = urlsafe_b64encode(raw_payload.encode("utf-8")).decode("ascii").rstrip("=")
 
     with pytest.raises(ValueError, match="invalid graph changes cursor"):
-        _decode_graph_changes_cursor(encoded)
+        _decode_graph_changes_cursor(encoded, {})
 
 
 def test_graph_changes_page_clamps_limit_and_passes_offset() -> None:
@@ -98,29 +100,40 @@ def test_graph_changes_page_clamps_limit_and_passes_offset() -> None:
 
     # 超上限的 changes_limit 必须被钳制到 200
     with patch("src.api.services.results_queries.graph.graph_projection") as graph_repository:
+        graph_repository.return_value.resolve_chapter_boundary.return_value = SimpleNamespace(chapter_id=3)
         graph_repository.return_value.fetch_changes.return_value = ([row], 1)
         _fetch_graph_changes_page(fixture_id(__name__, "run-1"), annotation_repo, changes_limit=500)
         graph_repository.return_value.fetch_changes.assert_called_once_with(
-            fixture_id(__name__, "run-1"), chapter_id=None, offset=0, limit=200
+            fixture_id(__name__, "run-1"), chapter_id=3, offset=0, limit=200
         )
 
     # cursor 解码出的 offset 必须透传给 fetch_changes
     with patch("src.api.services.results_queries.graph.graph_projection") as graph_repository:
+        graph_repository.return_value.resolve_chapter_boundary.return_value = SimpleNamespace(chapter_id=3)
         graph_repository.return_value.fetch_changes.return_value = ([row], 10)
-        cursor = _encode_graph_changes_cursor(5)
+        cursor = _encode_graph_changes_cursor(
+            5,
+            {
+                "run_id": fixture_id(__name__, "run-1"),
+                "chapter_id": None,
+                "boundary_chapter_id": 3,
+                "limit": 2,
+            },
+        )
         _fetch_graph_changes_page(
             fixture_id(__name__, "run-1"), annotation_repo, changes_cursor=cursor, changes_limit=2
         )
         graph_repository.return_value.fetch_changes.assert_called_once_with(
-            fixture_id(__name__, "run-1"), chapter_id=None, offset=5, limit=2
+            fixture_id(__name__, "run-1"), chapter_id=3, offset=5, limit=2
         )
 
     # 下限钳制：changes_limit=0 → 1
     with patch("src.api.services.results_queries.graph.graph_projection") as graph_repository:
+        graph_repository.return_value.resolve_chapter_boundary.return_value = SimpleNamespace(chapter_id=3)
         graph_repository.return_value.fetch_changes.return_value = ([row], 1)
         _fetch_graph_changes_page(fixture_id(__name__, "run-1"), annotation_repo, changes_limit=0)
         graph_repository.return_value.fetch_changes.assert_called_once_with(
-            fixture_id(__name__, "run-1"), chapter_id=None, offset=0, limit=1
+            fixture_id(__name__, "run-1"), chapter_id=3, offset=0, limit=1
         )
 
 
@@ -149,10 +162,28 @@ def test_graph_changes_page_rejects_out_of_range_cursor() -> None:
     )
     annotation_repo = SimpleNamespace(graph=object())
     with patch("src.api.services.results_queries.graph.graph_projection") as graph_repository:
+        graph_repository.return_value.resolve_chapter_boundary.return_value = SimpleNamespace(chapter_id=3)
         graph_repository.return_value.fetch_changes.return_value = ([row], 1)
         with pytest.raises(ValueError, match="out of range"):
             _fetch_graph_changes_page(
                 fixture_id(__name__, "run-1"),
                 annotation_repo,
-                changes_cursor=_encode_graph_changes_cursor(10),
+                changes_cursor=_encode_graph_changes_cursor(
+                    10,
+                    {
+                        "run_id": fixture_id(__name__, "run-1"),
+                        "chapter_id": None,
+                        "boundary_chapter_id": 3,
+                        "limit": 200,
+                    },
+                ),
             )
+
+
+def test_graph_changes_cursor_rejects_other_run_or_chapter():
+    context = {"run_id":"r", "chapter_id":None, "limit":2}
+    cursor = _encode_graph_changes_cursor(2, {**context, "boundary_chapter_id":3})
+    for changed in ({**context, "run_id":"other"}, {**context, "chapter_id":2}):
+        with pytest.raises(ValueError, match="invalid graph changes cursor"):
+            _decode_graph_changes_cursor(cursor, changed)
+    assert _decode_graph_changes_cursor(cursor, context) == (2, 3)

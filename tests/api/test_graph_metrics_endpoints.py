@@ -69,7 +69,8 @@ def test_graph_metrics_returns_pagerank_hits_communities(api_client: TestClient,
     body = response.json()
     assert body["unavailable_reason"] is None
     algorithm = body["algorithm"]
-    assert algorithm["version"].startswith("graph-metrics")
+    assert algorithm["name"] == "graph-metrics"
+    assert "version" not in algorithm
     assert algorithm["graph"]["node_count"] >= 3
     pagerank = body["pagerank"]
     assert len(pagerank) >= 3

@@ -12,7 +12,7 @@ from tests.support.storage_fixtures import fixture_id, storage_factory, task_for
 
 
 def _persisted_message_count(db_session, run_id: str) -> int:
-    """按真实路由列统计 run 内已保存的展示消息（run 归属在 event_outbox 宽行）"""
+    """按真实路由列统计 run 内已保存的展示消息（run 归属在 agent_outbox 宽行）"""
     from src.storage.models import EventOutbox
 
     return int(
@@ -49,7 +49,7 @@ async def test_send_before_connect_is_buffered_and_replayed() -> None:
     """连接建立前发送的事件必须入缓冲，late-joiner 可回放"""
     manager = EventManager()
     try:
-        await manager.send("task-1", "stage_start", {"stage": "annotate"})
+        await manager.send("task-1", "llm_thinking", {"stage": "annotate"})
         await manager.send("task-1", "llm_output", {"content": "你好"})
 
         queue = await manager.connect("task-1")
@@ -57,7 +57,7 @@ async def test_send_before_connect_is_buffered_and_replayed() -> None:
         while not queue.empty():
             messages.append(await queue.get())
 
-        assert [m["type"] for m in messages] == ["stage_start", "llm_output"]
+        assert [m["type"] for m in messages] == ["llm_thinking", "llm_output"]
         assert messages[1]["data"]["content"] == "你好"
     finally:
         manager.reset_for_testing()
@@ -126,7 +126,7 @@ async def test_send_assigns_monotonic_seq_per_task() -> None:
     """每条消息按 task_id 独立分配从 1 开始的单调递增 seq"""
     manager = EventManager()
     try:
-        await manager.send("task-1", "stage_start", {"stage": "annotate"})
+        await manager.send("task-1", "llm_thinking", {"stage": "annotate"})
         await manager.send("task-1", "llm_output", {"content": "第一段"})
         await manager.send("task-2", "message", {"content": "另一任务"})
 
@@ -194,11 +194,11 @@ async def test_clear_buffer_drops_replayed_events_but_keeps_connection() -> None
         await manager.send("task-1", "task_complete", {"message": "上一轮完成"})
 
         manager.clear_buffer("task-1")
-        await manager.send("task-1", "stage_start", {"stage": "preprocess"})
+        await manager.send("task-1", "llm_thinking", {"stage": "preprocess"})
 
         # 已连接客户端实时收到全部消息（清空只影响缓冲回放）
         assert (await queue.get())["type"] == "task_complete"
-        assert (await queue.get())["type"] == "stage_start"
+        assert (await queue.get())["type"] == "llm_thinking"
         await manager.disconnect("task-1", queue)
 
         # 重连客户端只回放清空后的事件，上一轮终态不再出现
@@ -208,7 +208,7 @@ async def test_clear_buffer_drops_replayed_events_but_keeps_connection() -> None
             messages.append(await queue2.get())
         await manager.disconnect("task-1", queue2)
 
-        assert [m["type"] for m in messages] == ["stage_start"]
+        assert [m["type"] for m in messages] == ["llm_thinking"]
     finally:
         manager.reset_for_testing()
 
@@ -415,14 +415,14 @@ async def test_resume_preserves_saved_work_display_but_filters_persisted_old_ter
         )
         await manager.send(task_id, "task_cancelled", {"message_id": "old-stop:" + run_id})
         await manager.restart_display(task_id)
-        await manager.send(task_id, "stage_start", {"message_id": "new-stage:" + run_id, "stage": "annotate"})
+        await manager.send(task_id, "llm_thinking", {"message_id": "new-stage:" + run_id, "stage": "annotate"})
         restarted = EventManager(outbox=outbox)
         try:
             replay = await restarted.replay(task_id, 0)
             assert "task_cancelled" not in {message["type"] for message in replay}
             output = next(message for message in replay if message["type"] == "llm_output")
             assert output["data"]["content"] == "保留完成章"
-            assert replay[-1]["type"] == "stage_start"
+            assert replay[-1]["type"] == "llm_thinking"
         finally:
             restarted.reset_for_testing()
     finally:

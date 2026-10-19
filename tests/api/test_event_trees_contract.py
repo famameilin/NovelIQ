@@ -15,11 +15,11 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
-from src.event_trees.read.organization import CONTRACT_VERSION, EventTreeQuery, RunRequiresRebuildError
+from src.event_trees.read.organization import EventTreeQuery
 from src.storage import new_id
 from src.storage.models import (
     DiagnosisReport,
-    EventRevision,
+    EventDeclarationBinding,
     NarrativeLink,
     Paragraph,
     SourceEvidence,
@@ -47,9 +47,9 @@ class EventTreeScenario:
     run_id: str
     task_id: str
     session_id: str
-    execution_id: str
+    agent_id: str
     events: dict[str, str]
-    revisions: dict[str, str]
+    bindings: dict[str, str]
     declarations: dict[str, str]
     arcs: dict[str, str]
     outcomes: dict[str, str]
@@ -73,7 +73,7 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
     novel_id, run_id = create_run_with_chunks(session, texts=TEXTS, chapter_ids=[1, 2, 3], title="Event Tree Contract")
     set_run_status(session, run_id, "completed")
     paragraphs = _paragraphs(session, run_id)
-    session_id, execution_id = add_diagnosis_context(session, run_id)
+    session_id, agent_id = add_diagnosis_context(session, run_id)
     annotations: dict[int, str] = {}
     declarations: dict[str, str] = {}
 
@@ -153,7 +153,7 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
             [declarations["p3"]],
             [declarations["p6"]],
         ],
-        context=(session_id, execution_id),
+        context=(session_id, agent_id),
     )
     mapping = {key: item.event_id for item in draft.events.values() for key in item.declaration_ids}
     events = {
@@ -262,14 +262,18 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
             evidence=_identity_evidence(),
         )
     publish_draft(session, run_id, draft)
-    revisions = {
-        row.declaration_id: row.revision_id
-        for row in session.scalars(select(EventRevision).where(EventRevision.event_id.in_(list(events.values()))))
+    bindings = {
+        row.declaration_id: row.binding_id
+        for row in session.scalars(
+            select(EventDeclarationBinding).where(
+                EventDeclarationBinding.event_id.in_(list(events.values()))
+            )
+        )
     }
     actions = {
         "f1": add_foreshadowing_action(
             session,
-            producer_execution_id=execution_id,
+            producer_agent_id=agent_id,
             source_declaration_id=declarations["p1"],
             paragraph=paragraphs[1],
             action_type="setup",
@@ -277,7 +281,7 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
         ),
         "f2": add_foreshadowing_action(
             session,
-            producer_execution_id=execution_id,
+            producer_agent_id=agent_id,
             source_declaration_id=declarations["p1"],
             target_declaration_id=declarations["p3"],
             paragraph=paragraphs[3],
@@ -291,9 +295,9 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
         run_id=run_id,
         task_id=task_for_run(run_id, session),
         session_id=session_id,
-        execution_id=execution_id,
+        agent_id=agent_id,
         events=events,
-        revisions={key: revisions[declarations[key]] for key in ("p1", "p4", "p2", "p5", "p3", "p6")},
+        bindings={key: bindings[declarations[key]] for key in ("p1", "p4", "p2", "p5", "p3", "p6")},
         declarations=declarations,
         arcs=arcs,
         outcomes=outcomes,
@@ -304,7 +308,6 @@ def _seed_scenario(session: Any) -> EventTreeScenario:
 def _seed_legacy_run(session: Any) -> tuple[str, str]:
     novel_id, run_id = create_run_with_chunks(session, texts=["旧契约章节。"], chapter_ids=[1], title="Legacy Run")
     set_run_status(session, run_id, "completed")
-    add_annotation_source(session, run_id, 1, role="event", contract_version="event-tree-2026-10-13")
     session.commit()
     return novel_id, run_id
 
@@ -334,7 +337,6 @@ def test_list_payload_fields_counts_and_top_level_pagination(api_client, db_sess
     assert set(body) == {
         "organization_status",
         "run_id",
-        "contract_version",
         "chapters",
         "counts",
         "arcs",
@@ -346,7 +348,6 @@ def test_list_payload_fields_counts_and_top_level_pagination(api_client, db_sess
         "foreshadowing_actions",
         "next_cursor",
     }
-    assert body["contract_version"] == CONTRACT_VERSION
     assert body["run_id"] == scenario.run_id
     assert [row["chapter_id"] for row in body["chapters"]] == [1, 2, 3]
     assert body["counts"] == {
@@ -420,13 +421,11 @@ def test_current_annotation_does_not_hide_old_diagnosis_contract(db_session):
     db_session.add(
         DiagnosisReport(
             report_id=new_id(),
-            session_id=session_id,
-            contract_version="event-tree-2026-10-13",
+            agent_id=session_id,
         )
     )
     db_session.flush()
-    with pytest.raises(RunRequiresRebuildError):
-        EventTreeQuery(storage_for(db_session), run_id).fetch()
+    assert EventTreeQuery(storage_for(db_session), run_id).fetch()["organization_status"] == "ready"
 
 
 def test_cursor_rejects_other_run_and_tampered_context(api_client, db_session):
@@ -436,7 +435,7 @@ def test_cursor_rejects_other_run_and_tampered_context(api_client, db_session):
     rejected = api_client.get(_url(other), params=_params(other, limit=1, cursor=first["next_cursor"]))
     assert rejected.status_code == 400
     data = json.loads(base64.urlsafe_b64decode(first["next_cursor"].encode()).decode())
-    data["query"][2] = "nodes"
+    data["query"][1] = "nodes"
     tampered = base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
     assert api_client.get(_url(scenario), params=_params(scenario, limit=1, cursor=tampered)).status_code == 400
 
@@ -461,12 +460,10 @@ def test_detail_same_shape_dto_children_characters_arcs_ancestry_revision(api_cl
         "evidence_scope",
         "source_chapters",
         "ancestry",
-        "revision_id",
         "relations",
     }
     assert detail["kind"] == "event" and detail["run_id"] == scenario.run_id
     assert detail["summary"] == "概要第二版" and detail["progress"] == "已确认新版进展"
-    assert detail["revision_id"] == scenario.revisions["p4"]
     # 直接子事件不含孙事件；卡片逐级进入
     assert [row["event_id"] for row in detail["direct_children"]] == [scenario.events["e2"]]
     assert all(set(row) == {"event_id", "title", "event_type", "status"} for row in detail["direct_children"])
@@ -482,7 +479,7 @@ def test_detail_same_shape_dto_children_characters_arcs_ancestry_revision(api_cl
 
     grandchild = api_client.get(f"{_url(scenario)}/nodes/{scenario.events['e3']}", params=_params(scenario)).json()
     assert grandchild["ancestry"] == [scenario.events["e1"], scenario.events["e2"]]
-    assert grandchild["revision_id"] == scenario.revisions["p5"] and grandchild["summary"] == "线索记录的初始概要"
+    assert grandchild["summary"] == "线索记录的初始概要"
     child = api_client.get(f"{_url(scenario)}/nodes/{scenario.events['e2']}", params=_params(scenario)).json()
     assert [row["event_id"] for row in child["direct_children"]] == [scenario.events["e3"]]
 
@@ -580,19 +577,17 @@ def test_source_rejects_declaration_from_other_run(api_client, db_session):
     assert response.status_code == 404
 
 
-def test_legacy_run_requires_rebuild_on_all_endpoints(api_client, db_session):
+def test_run_without_outputs_is_pending_and_unknown_detail_is_404(api_client, db_session):
     scenario = _seed_scenario(db_session)
     novel_id, run_id = _seed_legacy_run(db_session)
     params = {"task_id": task_for_run(run_id, db_session)}
-    for url in (
-        f"/api/novels/{novel_id}/event-trees",
-        f"/api/novels/{novel_id}/event-trees/nodes/{scenario.events['e1']}",
-        f"/api/novels/{novel_id}/event-trees/nodes/{scenario.events['e1']}/source",
-    ):
-        response = api_client.get(url, params=params)
-        assert response.status_code == 400, url
-        assert response.json()["detail"]["code"] == "RUN_REQUIRES_REBUILD"
-        assert "重建" in response.json()["detail"]["message"]
+    response = api_client.get(f"/api/novels/{novel_id}/event-trees", params=params)
+    assert response.status_code == 200
+    assert response.json()["organization_status"] == "pending_diagnosis"
+    response = api_client.get(
+        f"/api/novels/{novel_id}/event-trees/nodes/{scenario.events['e1']}", params=params
+    )
+    assert response.status_code == 404
 
 
 def test_list_has_no_search_contract(api_client, db_session):
@@ -649,22 +644,24 @@ def test_corrupt_saved_contract_is_rejected_without_get_repair(api_client, db_se
     db_session.expire_all()
     # 读取不修补已保存对象：缺失的来源仍在原处缺失
     if invalid == "missing_binding":
-        assert db_session.get(EventRevision, scenario.revisions["p2"]) is not None
+        assert db_session.get(EventDeclarationBinding, scenario.bindings["p2"]) is not None
     elif invalid == "missing_link_evidence":
         assert not list(db_session.scalars(select(SourceEvidence).where(SourceEvidence.narrative_link_id == link_id)))
     else:
         assert not list(db_session.scalars(select(SourceEvidence).where(SourceEvidence.declaration_id == orphan)))
 
 
-def test_declaration_source_and_export_also_reject_legacy_run(api_client, db_session):
+def test_empty_run_source_unknown_and_export_pending(api_client, db_session):
     novel_id, run_id = _seed_legacy_run(db_session)
-    params = {"task_id": task_for_run(run_id, db_session), "kind": "declaration"}
-    response = api_client.get(f"/api/novels/{novel_id}/event-trees/nodes/missing/source", params=params)
-    assert response.status_code == 400
-    assert response.json()["detail"]["code"] == "RUN_REQUIRES_REBUILD"
-    exported = api_client.get(f"/api/novels/{novel_id}/results", params={"task_id": task_for_run(run_id, db_session)})
-    assert exported.status_code == 400
-    assert exported.json()["detail"]["code"] == "RUN_REQUIRES_REBUILD"
+    params = {"task_id": task_for_run(run_id, db_session)}
+    response = api_client.get(
+        f"/api/novels/{novel_id}/event-trees/nodes/missing/source",
+        params={**params, "kind": "declaration"},
+    )
+    assert response.status_code == 404
+    exported = api_client.get(f"/api/novels/{novel_id}/results", params=params)
+    assert exported.status_code == 409
+    assert "尚无已完成章节图数据" in exported.json()["detail"]
 
 
 def test_incoming_relation_locator_preserves_direction(api_client, db_session):
@@ -681,8 +678,7 @@ def test_incoming_relation_locator_preserves_direction(api_client, db_session):
 def test_cross_chapter_source_keeps_prior_revision_evidence(api_client, db_session):
     scenario = _seed_scenario(db_session)
     # 当前版本在第二章时，首版声明仍授权读取第一章
-    detail = api_client.get(f"{_url(scenario)}/nodes/{scenario.events['e1']}", params=_params(scenario)).json()
-    assert detail["revision_id"] == scenario.revisions["p4"]
+    api_client.get(f"{_url(scenario)}/nodes/{scenario.events['e1']}", params=_params(scenario)).json()
     response = api_client.get(
         f"{_url(scenario)}/nodes/{scenario.events['e1']}/source", params=_params(scenario, chapter_id=1)
     )
@@ -692,14 +688,15 @@ def test_cross_chapter_source_keeps_prior_revision_evidence(api_client, db_sessi
 def test_export_preserves_formal_events_declarations_and_version_sources(db_session):
     scenario = _seed_scenario(db_session)
     exported = EventTreeQuery(storage_for(db_session), scenario.run_id).export()
-    assert {row["event_id"] for row in exported["event_records"]} == set(scenario.events.values())
-    assert all(row["problem"] and row["current_revision_id"] for row in exported["event_records"])
+    assert {row["event_id"] for row in exported["complete_events"]} == set(scenario.events.values())
+    assert all(row["problem"] and row["summary"] for row in exported["complete_events"])
     assert {row["declaration_id"] for row in exported["declarations"]} == set(scenario.declarations.values())
     assert all(row["declaration_id"] and row["evidence"] for row in exported["declarations"])
     assert len(exported["containments"]) == 2
-    assert {row["revision_id"] for row in exported["revisions"]} == set(scenario.revisions.values())
+    assert {row["declaration_id"] for row in exported["declaration_bindings"]} == set(scenario.declarations.values())
+    assert "revisions" not in exported
     assert all(
-        row["source_operation_id"] and row["source_execution_id"] and row["evidence"] for row in exported["revisions"]
+        row["annotation_id"] and row["producer_agent_id"] and row["evidence"] for row in exported["declarations"]
     )
     # 同一结果有两个来源，且同一大事件形成两个结果，两项独立依据均保留
     links = exported["event_outcome_links"]

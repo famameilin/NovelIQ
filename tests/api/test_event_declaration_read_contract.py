@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import select
 
 from src.event_trees.read.forest import EventForestQuery
-from src.event_trees.read.organization import CONTRACT_VERSION, EventTreeQuery, RunRequiresRebuildError
+from src.event_trees.read.organization import EventTreeQuery
 from src.metrics.queries.plotline import PlotlineQuery
 from src.storage.models import ChapterAnnotation
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -33,7 +33,7 @@ TEXTS = ["开始营救", "继续营救", "成功营救"]
 
 def _fixture(session, *, published=True):
     novel_id, run_id = create_run_with_chunks(session, texts=TEXTS, chapter_ids=[1, 2, 3])
-    session_id, execution_id = add_diagnosis_context(session, run_id)
+    session_id, agent_id = add_diagnosis_context(session, run_id)
     declarations: list[str] = []
     annotation_executions: list[str] = []
     for chapter in range(1, 4):
@@ -60,7 +60,7 @@ def _fixture(session, *, published=True):
         session.commit()
         return novel_id, run_id, declarations, None, annotation_executions
     draft, _meta = identity_every_declaration(
-        session, run_id, groups=[declarations], context=(session_id, execution_id)
+        session, run_id, groups=[declarations], context=(session_id, agent_id)
     )
     close_structure(
         session, draft, evidence_paragraph_id=int(first_paragraph(session, run_id, chapter_id=1).paragraph_id)
@@ -69,7 +69,7 @@ def _fixture(session, *, published=True):
     event_id = next(iter(draft.events))
     add_foreshadowing_action(
         session,
-        producer_execution_id=annotation_executions[0],
+        producer_agent_id=annotation_executions[0],
         source_declaration_id=declarations[0],
         paragraph=first_paragraph(session, run_id, chapter_id=1),
         action_type="setup",
@@ -101,7 +101,7 @@ def test_chapter_relation_proposals_stay_audit_sources_before_publication(db_ses
     annotation_execution = annotation_executions[0]
     add_declaration_relation(
         db_session,
-        producer_execution_id=annotation_execution,
+        producer_agent_id=annotation_execution,
         source_declaration_id=source,
         target_declaration_id=target,
         paragraph=first_paragraph(db_session, run_id, chapter_id=1),
@@ -114,7 +114,7 @@ def test_chapter_relation_proposals_stay_audit_sources_before_publication(db_ses
     assert exported["declaration_relations"][0]["source_declaration_id"] == source
 
 
-def test_one_formal_event_retains_three_stages_and_participants(db_session):
+def test_one_formal_event_retains_three_chapter_sources_and_participants(db_session):
     _, run_id, declarations, event_id, _ = _fixture(db_session)
     query = EventTreeQuery(storage_for(db_session), run_id)
     assert [row["event_id"] for row in query.fetch()["events"]] == [event_id]
@@ -122,14 +122,14 @@ def test_one_formal_event_retains_three_stages_and_participants(db_session):
     assert detail["summary"] == "成功营救" and detail["status"] == "resolved"
     assert detail["source_chapters"] == [1, 2, 3]
     exported = query.export()
-    assert {item["entity"]["name"] for row in exported["revisions"] for item in row["participants"]} == {
+    assert {item["entity"]["name"] for row in exported["declarations"] for item in row["participants"]} == {
         "营救者1",
         "营救者2",
         "营救者3",
     }
     assert "processes" not in exported and "process_structures" not in exported
     assert {row["declaration_id"] for row in exported["declaration_bindings"]} == set(declarations)
-    assert len(exported["revisions"]) == 3
+    assert len(exported["declarations"]) == 3
     assert exported["foreshadowing_actions"][0]["root_event_id"] == event_id
 
 
@@ -140,8 +140,9 @@ def test_forest_and_timeline_use_formal_event_and_preserve_reading_cutoff(db_ses
     last = forest.fetch_snapshot(run_id, chapter_id=3)
     assert [row.event_id for row in first.event_nodes] == [event_id]
     assert first.event_nodes[0].description == "开始营救"
-    assert last.event_nodes[0].description == "成功营救"
-    assert declarations[0] not in first.derived_event_order
+    assert last.event_nodes[-1].description == "成功营救"
+    assert [row.declaration_id for row in last.event_nodes] == declarations
+    assert first.derived_event_order == [declarations[0]]
     changes = PlotlineQuery(storage_for(db_session), run_id).fetch(through_chapter_id=1)["changes"]
     assert changes[0]["source_event_ids"] == [event_id]
 
@@ -174,25 +175,18 @@ def test_missing_binding_and_mixed_source_contract_are_rejected(db_session):
     db_session.flush()
     with pytest.raises(ValueError, match="身份绑定"):
         EventTreeQuery(storage_for(db_session), run_id).fetch()
-    # 混用旧契约标记的运行必须从原文重建，不接受读取层转换
-    db_session.get(ChapterAnnotation, record_id).contract_version = "event-tree-2026-10-13"
-    db_session.flush()
-    with pytest.raises(RunRequiresRebuildError):
-        EventTreeQuery(storage_for(db_session), run_id).fetch()
+    assert "contract_version" not in ChapterAnnotation.__table__.columns
     assert orphan not in declarations
 
 
-def test_old_publication_contract_marker_is_rejected(db_session):
+def test_publication_does_not_require_independent_contract_marker(db_session):
     _, run_id, _, _, _ = _fixture(db_session)
-    from src.storage.models import DiagnosisReport, Execution
+    from src.storage.models import Agent, DiagnosisReport
 
     report = db_session.scalars(
         select(DiagnosisReport)
-        .join(Execution, Execution.execution_id == DiagnosisReport.session_id)
-        .where(Execution.session_run_id == run_id)
+        .join(Agent, Agent.id == DiagnosisReport.agent_id)
+        .where(Agent.run_id == run_id)
     ).one()
-    assert report.contract_version == CONTRACT_VERSION
-    report.contract_version = "event-tree-2026-10-13"
-    db_session.flush()
-    with pytest.raises(RunRequiresRebuildError):
-        EventTreeQuery(storage_for(db_session), run_id).fetch()
+    assert "contract_version" not in report.__table__.columns
+    assert EventTreeQuery(storage_for(db_session), run_id).fetch()["organization_status"] == "ready"
