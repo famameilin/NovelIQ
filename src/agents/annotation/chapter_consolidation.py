@@ -12,7 +12,7 @@ from src.fact_graph.read.references import EntityReferenceProjection
 from src.fact_graph.read.storage_projection import graph_projection
 from src.storage import Storage
 from src.storage.records.models import ChapterAnnotationRecord as ChapterAnnotation
-from src.storage.records.models import DeclarationParticipantRecord as DeclarationParticipant
+from src.storage.records.models import EventParticipantRecord as EventParticipant
 from src.storage.records.models import GraphEntityRecord as GraphEntity
 from src.utils.identity import stable_digest
 from src.work.policy import completed_chapters
@@ -69,7 +69,7 @@ def case_spec(item: dict[str, Any]) -> tuple[str, str]:
 
 
 def consolidate_chapter(
-    session: Storage, run_id: str, chapter_id: int, cases: CasePool, *, recheck: bool = False
+    session: Storage, run_id: str, chapter_id: int, cases: CasePool, *, author: str, recheck: bool = False
 ) -> dict[str, Any]:
     """在调用方短事务中保存一次来源绑定的结论；案例、回执和完成凭据一起提交
 
@@ -136,23 +136,29 @@ def consolidate_chapter(
         record = records_by_record.get(str(record_id))
         return int(record.chapter_id) if record is not None else None
 
-    declarations = list(session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_7(records_by_record))
-    declaration_chapter = {str(row.declaration_id): record_chapter(str(row.record_id)) for row in declarations}
-    declaration_evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    participants_by_declaration: dict[str, list[DeclarationParticipant]] = defaultdict(list)
-    if declarations:
-        declaration_ids = [str(row.declaration_id) for row in declarations]
-        for evidence in session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_8(declaration_ids):
-            declaration_evidence[str(evidence.declaration_id)].append(
+    annotation_events = list(
+        session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_7(records_by_record)
+    )
+    annotation_event_chapter = {
+        str(row.event_id): record_chapter(str(row.annotation_record_id)) for row in annotation_events
+    }
+    annotation_event_evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    participants_by_annotation_event: dict[str, list[EventParticipant]] = defaultdict(list)
+    if annotation_events:
+        source_event_ids = [str(row.event_id) for row in annotation_events]
+        for evidence in session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_8(source_event_ids):
+            annotation_event_evidence[str(evidence.complete_event_id)].append(
                 {
-                    "chapter_id": declaration_chapter.get(str(evidence.declaration_id)),
+                    "chapter_id": annotation_event_chapter.get(str(evidence.complete_event_id)),
                     "paragraph_id": int(evidence.paragraph_id),
                     "char_start": int(evidence.start_char),
                     "char_end": int(evidence.end_char),
                 }
             )
-        for participant in session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_9(declaration_ids):
-            participants_by_declaration[str(participant.declaration_id)].append(participant)
+        for participant in session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_9(
+            source_event_ids
+        ):
+            participants_by_annotation_event[str(participant.event_id)].append(participant)
     dialogues = list(session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_10(valid_executions))
     paragraph_rows = list(
         session.reads.agents_annotation_chapter_consolidation_consolidate_chapter_11(chapter_id, run_id)
@@ -181,7 +187,7 @@ def consolidate_chapter(
     lookup_ids = set(entity_ids)
     lookup_ids.update(
         str(participant.entity_id)
-        for participants in participants_by_declaration.values()
+        for participants in participants_by_annotation_event.values()
         for participant in participants
     )
     entity_names: dict[str, GraphEntity] = {}
@@ -229,12 +235,12 @@ def consolidate_chapter(
                     for item in fact_evidence.get(str(fact.GraphFact.graph_fact_id), [])
                 ],
             )
-    for declaration in declarations:
-        node_evidence = declaration_evidence.get(str(declaration.declaration_id), [])
-        for participant in participants_by_declaration.get(str(declaration.declaration_id), []):
+    for annotation_event in annotation_events:
+        node_evidence = annotation_event_evidence.get(str(annotation_event.event_id), [])
+        for participant in participants_by_annotation_event.get(str(annotation_event.event_id), []):
             identifier = str(participant.entity_id)
             referenced.add(identifier)
-            if declaration_chapter.get(str(declaration.declaration_id)) == chapter_id:
+            if annotation_event_chapter.get(str(annotation_event.event_id)) == chapter_id:
                 name, entity_type = entity_label(identifier)
                 if identifier not in projection.entities:
                     issue(identifier, name, entity_type, "dangling_participant", node_evidence)
@@ -249,10 +255,8 @@ def consolidate_chapter(
             issue(identifier, entity.name, entity.entity_type, "unreferenced_entity", evidence_by_entity[identifier])
     import json
 
-    from src.storage import new_id
     from src.storage.records.cases import CaseSave
 
-    author = new_id()
     cases.begin(author)
     registered = [
         cases.register_case(case_type=kind, description=description, author=author)
@@ -265,7 +269,7 @@ def consolidate_chapter(
             {
                 "created_case_ids": [item["case_id"] for item in registered],
                 "registrations": {item["case_id"]: item for item in registered},
-                "promises": [],
+                "submissions": [],
             },
             ensure_ascii=False,
         ),

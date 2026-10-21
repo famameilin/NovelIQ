@@ -48,8 +48,8 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             }
         ]
 
-    def declaration_reference_id(identifier: str) -> str:
-        """把模型的声明引用解析成来源 UUID，el 局部键按角色命名空间解析"""
+    def annotation_event_reference_id(identifier: str) -> str:
+        """把模型的事件引用解析成来源 UUID，el 局部键按角色命名空间解析"""
         value = unicodedata.normalize("NFC", str(identifier)).strip()
         prefix = f"{ledger.role}{ROLE_NAMESPACE_SEP}"
         el = value if value.startswith(prefix) else namespace_event_el(ledger.role, value)
@@ -61,16 +61,19 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
                 return str(node_id)
         return value
 
-    def require_declaration(identifier: str) -> dict[str, Any]:
-        node_id = declaration_reference_id(identifier)
+    def require_annotation_event(identifier: str) -> dict[str, Any]:
+        node_id = annotation_event_reference_id(identifier)
         value = agent.event_trees.read(node_id)
         if execution.event_reads.get(node_id) != value:
-            raise ValueError(f"declaration_id={identifier} 尚未读取当前内容，请先 read_event")
+            raise ValueError(f"event_id={identifier} 尚未读取当前内容，请先 read_event")
         if value["producer_agent_id"] != author and not value["saved"]:
-            raise ValueError(f"declaration_id={identifier} 所属执行尚未保存")
+            raise ValueError(f"event_id={identifier} 所属执行尚未保存")
         # 允许读取后文上下文不等于允许把后文事件记成本章已经披露的变化
         if query_service.chapter_orders[value["chapter_id"]] > query_service.current_chapter_order:
-            raise ValueError(f"declaration_id={identifier} 来源章晚于当前章，不能写入本章变化")
+            raise ValueError(f"event_id={identifier} 来源章晚于当前章，不能写入本章变化")
+        endpoint = value["content"]["to_chapter_id"]
+        if query_service.chapter_orders[endpoint] > query_service.current_chapter_order:
+            raise ValueError(f"event_id={identifier} 终点章节晚于当前章")
         return value
 
     @tool
@@ -81,7 +84,7 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         evidence: int,
         before: str | None = None,
         subject_id: str | None = None,
-        declaration_id: str | None = None,
+        event_id: str | None = None,
     ) -> str:
         """记录本章明确的问题推进、目标改变或线索揭示；附真实段号与前后状态，不能把实体登记当推进"""
 
@@ -89,10 +92,10 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             raise ValueError("情节推进需要非空主体、描述和变化后的状态，前后不能相同")
         if ledger.role not in {"annotation", "event"}:
             raise ValueError("情节推进由事件角色写入")
-        # 冻结载荷 event_id 仅为内部来源别名，落库写 source_declaration_id
-        event_node_id = declaration_reference_id(declaration_id) if declaration_id else None
+        # 冻结载荷 event_id 仅为内部来源别名，落库写 source_event_id
+        event_node_id = annotation_event_reference_id(event_id) if event_id else None
         if event_node_id:
-            require_declaration(event_node_id)
+            require_annotation_event(event_node_id)
         known = {
             item["operation"]["subject_id"]
             for owner, contribution in agent.fact_graph.contributions.items()
@@ -141,28 +144,28 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
 
     @tool
     def write_foreshadowing_action(
-        source_declaration_id: str,
+        source_event_id: str,
         action_type: Literal["reinforce", "payoff"],
         evidence: int,
-        target_declaration_id: str | None = None,
+        target_event_id: str | None = None,
     ) -> str:
-        """引用已埋伏笔（is_foreshadow_setup=True 的树根声明）记录强化或疑似回收；
+        """引用已埋伏笔（is_foreshadow_setup=True 的树根事件）记录强化或疑似回收；
         action_type 取 'reinforce'（强化）或 'payoff'（疑似回收）英文常量；
-        引用前须先 read_event 读取声明；正式事件身份在诊断发布时绑定"""
+        引用前须先 read_event 读取事件"""
         if ledger.role not in {"annotation", "event"}:
             raise ValueError("伏笔动作由事件角色写入")
-        root_id = declaration_reference_id(source_declaration_id)
-        root = require_declaration(source_declaration_id)
+        root_id = annotation_event_reference_id(source_event_id)
+        root = require_annotation_event(source_event_id)
         if not root["content"]["is_foreshadow_setup"]:
             raise ValueError(
-                f"source_declaration_id={source_declaration_id} 不是伏笔根（is_foreshadow_setup=False）："
+                f"source_event_id={source_event_id} 不是伏笔根（is_foreshadow_setup=False）："
                 "伏笔来源只接受 write_event(isforeshadowing=True) 种下的树根，"
                 "普通事件树根不能作伏笔来源；请改用 read_event 回执里"
-                " is_foreshadow_setup=True 的 declaration_id，或跳过本动作"
+                " is_foreshadow_setup=True 的 event_id，或跳过本动作"
             )
-        target_id = declaration_reference_id(target_declaration_id) if target_declaration_id else None
-        if target_declaration_id:
-            require_declaration(target_declaration_id)
+        target_id = annotation_event_reference_id(target_event_id) if target_event_id else None
+        if target_event_id:
+            require_annotation_event(target_event_id)
         evidence_rows = current_evidence(evidence)
         # 内部动作容器保留来源别名；正式 event_id 只由诊断发布填入
         identifier = agent.event_trees.write_action(
@@ -190,7 +193,7 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         event_reads=execution.event_reads,
         entity_ids=ledger.shared_entity_ids,
         case_reads=execution.case_reads,
-        resolve_event=declaration_reference_id,
+        resolve_event=annotation_event_reference_id,
     )
     shared.extend(build_case_tools(agent.case_pool, author, on_claim=on_claim))
 
@@ -208,8 +211,18 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         confidence: str | None = None,
         characters: list[dict[str, Any]] | None = None,
     ) -> str:
-        """保存本章事件声明，回执只发放声明身份；全书事件由诊断确认后发布"""
+        """创建正式事件并返回事件身份，起止章节缺省当前章，终点不得晚于当前章"""
+        start = ledger.current_chapter_id if from_chapter_id is None else from_chapter_id
+        end = ledger.current_chapter_id if to_chapter_id is None else to_chapter_id
+        orders = query_service.chapter_orders
+        if start not in orders or end not in orders or orders[start] > orders[end]:
+            raise ValueError("事件起止章节必须属于本运行且顺序有效")
+        if orders[end] > query_service.current_chapter_order:
+            raise ValueError("标注事件不能引用未来章节")
         record = ledger.apply_event(
+        from_chapter_id: int | None = None,
+        to_chapter_id: int | None = None,
+        reason: str | None = None,
             el=el,
             title=title,
             problem=problem,
@@ -224,11 +237,14 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             if characters is not None
             else None,
         )
+            from_chapter_id=from_chapter_id,
+            to_chapter_id=to_chapter_id,
+            reason=reason,
         agent.event_trees.sync(author, ledger.current_chapter_id, ledger.bound_payloads.get("events", []))
         content = ledger.event_content(el=el, isroot="/" not in el)
-        declaration_id = content["declaration_id"]
-        read = agent.event_trees.read(declaration_id)
-        execution.event_reads[declaration_id] = read
+        event_id = content["event_id"]
+        read = agent.event_trees.read(event_id)
+        execution.event_reads[event_id] = read
 
         # 登记进全书共享案例池（case_type=event），诊断期按事件并发派工时据此取材
         agent.case_pool.register_event_case(
@@ -256,18 +272,18 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             if relation_type is not None or change_kind is not None:
                 raise ValueError("事件关联不接受 relation_type/change_kind")
             if not reason or not reason.strip() or evidence is None:
-                raise ValueError("声明关联建议必须给原文理由和本章段首evidence")
-            source_node = declaration_reference_id(source_id)
-            target_node = declaration_reference_id(target_id)
-            require_declaration(source_node)
-            require_declaration(target_node)
+                raise ValueError("事件关联建议必须给原文理由和本章段首evidence")
+            source_node = annotation_event_reference_id(source_id)
+            target_node = annotation_event_reference_id(target_id)
+            require_annotation_event(source_node)
+            require_annotation_event(target_node)
 
             identifier = execution.identifier(execution.call_id, kind)
-            ledger.events.apply_declaration_relation(
+            ledger.events.apply_annotation_event_relation(
                 ledger,
-                source_kind="declaration",
+                source_kind="event",
                 source_id=source_node,
-                target_kind="declaration",
+                target_kind="event",
                 target_id=target_node,
                 relation_type=kind,
                 reason=reason,

@@ -198,11 +198,14 @@ def build_annotation_tools(
         status: str,
         evidence: int,
         progress: str | None = None,
+        from_chapter_id: int | None = None,
+        to_chapter_id: int | None = None,
+        reason: str | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
         characters: list[ParticipantArg] | None = None,
     ) -> str:
-        """声明本章事件；问题、概要、类型、状态及真实证据必填，引用不是正式event_id"""
+        """创建正式事件；问题、概要、类型、状态及真实证据必填，起止章节缺省当前章"""
         record = ledger.apply_event(
             el=el,
             title=title,
@@ -212,6 +215,9 @@ def build_annotation_tools(
             status=status,
             evidence=evidence,
             progress=progress,
+            from_chapter_id=from_chapter_id,
+            to_chapter_id=to_chapter_id,
+            reason=reason,
             isforeshadowing=isforeshadowing,
             confidence=confidence,
             characters=characters,

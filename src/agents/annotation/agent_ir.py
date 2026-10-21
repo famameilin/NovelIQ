@@ -215,6 +215,9 @@ class AgentEvent:
     summary: str
     event_type: str
     status: str
+    from_chapter_id: int | None = None
+    to_chapter_id: int | None = None
+    reason: str | None = None
     progress: str | None = None
     isforeshadowing: bool = False
     confidence: str | None = None
@@ -234,6 +237,9 @@ class AgentEvent:
             "event_type": self.event_type,
             "status": self.status,
             "progress": self.progress,
+            "from": self.from_chapter_id,
+            "to": self.to_chapter_id,
+            "reason": self.reason,
             "isforeshadowing": self.isforeshadowing,
             "confidence": self.confidence,
             "type": self.node_type,

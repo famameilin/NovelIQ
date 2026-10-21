@@ -52,7 +52,7 @@ class EventBindingStateContext(Protocol):
     # 跨章引用只接受这里的已确认身份，不接受迟到 invocation 或未确认内容
     text_references: dict[str, Any]
     confirmed_complete_event_index: dict[str, dict[str, Any]]
-    confirmed_declaration_ids: set[str]
+    confirmed_source_event_ids: set[str]
     confirmed_containment_parents: dict[str, str]
 
 
@@ -74,7 +74,7 @@ class EventBindingState:
     domain_payloads: dict[str, Any] = field(default_factory=dict)
     bound_payloads: dict[str, Any] = field(default_factory=dict)
     # 完整事件域：EventNode 继续保存过程，下列对象是完整事件及其关联的
-    # 本 work 挂起记录（局部键 → 声明；随正式贡献冻结、保存、确认与回滚）
+    # 本 work 挂起记录（局部键 → 事件；随正式贡献冻结、保存、确认与回滚）
     complete_events: dict[str, dict[str, Any]] = field(default_factory=dict)
     containments: dict[str, dict[str, Any]] = field(default_factory=dict)
     ownerships: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -120,21 +120,22 @@ class EventBindingState:
         status: str,
         evidence: int | None = None,
         progress: str | None = None,
+        from_chapter_id: int | None = None,
+        to_chapter_id: int | None = None,
+        reason: str | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
         characters: list[ParticipantArg] | None = None,
     ) -> str:
-        """登记事件级章内声明，局部路径不产生全书包含或阶段关系"""
+        """登记不可变事件及独立章节范围，局部路径不生成包含关系"""
         isroot = EL_PATH_SEP not in el
         record = self._event_record(el, isroot=isroot)
         ctx._require_writable(record)
         tree_key, _, node_key = el.partition(EL_PATH_SEP)
         node_key = node_key or RESERVED_ROOT_KEY
         tree_id = self._tree_id(ctx, tree_key)
-        declaration_id = self._node_id(ctx, tree_key, node_key)
-        existing = next(
-            (item for item in self.bound_payloads.get("events", []) if item.node_id == declaration_id), None
-        )
+        event_id = self._node_id(ctx, tree_key, node_key)
+        existing = next((item for item in self.bound_payloads.get("events", []) if item.node_id == event_id), None)
         paragraph_id = self._event_evidence_paragraph_id(ctx, evidence, record=record, existing=existing)
         if isforeshadowing and confidence is None:
             raise AnnotationStageRejection(
@@ -144,9 +145,12 @@ class EventBindingState:
                 code="missing",
                 expected="high / medium / low",
             )
-        declaration = BoundEvent(
-            node_id=declaration_id,
-            declaration_id=declaration_id,
+        annotation_event = BoundEvent(
+            node_id=event_id,
+            event_id=event_id,
+            from_chapter_id=ctx.current_chapter_id if from_chapter_id is None else from_chapter_id,
+            to_chapter_id=ctx.current_chapter_id if to_chapter_id is None else to_chapter_id,
+            reason=reason,
             title=title,
             problem=problem,
             summary=summary,
@@ -154,7 +158,7 @@ class EventBindingState:
             status=cast(Literal["ongoing", "resolved"], status),
             progress=progress,
             description=summary,
-            tree_id=declaration_id,
+            tree_id=event_id,
             parent_node_id=None,
             cause_role="root",
             evidence_paragraph_id=paragraph_id,
@@ -163,26 +167,26 @@ class EventBindingState:
             payoff_likelihood=confidence,
         )
         if existing is not None:
-            if existing.model_dump(exclude={"participants"}) != declaration.model_dump(exclude={"participants"}):
+            if existing.model_dump(exclude={"participants"}) != annotation_event.model_dump(exclude={"participants"}):
                 raise AnnotationStageRejection(
-                    f"declaration_id={declaration_id} 声明内容不可改写",
+                    f"event_id={event_id} 事件内容不可改写",
                     record=record,
                     field="summary",
                     code="immutable",
-                    expected="复用已接受声明及其原始字段，不覆盖来源",
+                    expected="复用已接受事件及其原始字段，不覆盖来源",
                 )
         else:
             events = list(self.bound_payloads.get("events", []))
             for other in events:
                 if other.evidence_paragraph_id == paragraph_id and other.summary == summary:
                     raise AnnotationStageRejection(
-                        f"声明与 {other.declaration_id} 同源重复",
+                        f"事件与 {other.event_id} 同源重复",
                         record=record,
                         field="summary",
-                        code="duplicate_declaration",
-                        expected=f"引用已有 declaration_id={other.declaration_id}",
+                        code="duplicate_annotation_event",
+                        expected=f"引用已有 event_id={other.event_id}",
                     )
-            events.append(declaration)
+            events.append(annotation_event)
             self.bound_payloads["events"] = events
             self.domain_payloads["events"] = events
         tree = self.event_trees.setdefault(
@@ -195,14 +199,14 @@ class EventBindingState:
                 "isforeshadowing": False,
             },
         )
-        tree["nodes"][node_key] = declaration_id
+        tree["nodes"][node_key] = event_id
         tree["isforeshadowing"] = bool(tree["isforeshadowing"] or isforeshadowing)
-        # 路径保留为来源地址，不承诺先声明树根或由先后关系形成父级
-        tree.setdefault("root_node_id", declaration_id)
+        # 路径保留为来源地址，不承诺先事件树根或由先后关系形成父级
+        tree.setdefault("root_node_id", event_id)
         self.tree_key_index[tree_key] = tree_id
-        self.authorized_event_ids.add(declaration_id)
+        self.authorized_event_ids.add(event_id)
         if characters is not None:
-            self._apply_participants(ctx, node_record=record, node_id=declaration_id, characters=characters)
+            self._apply_participants(ctx, node_record=record, node_id=event_id, characters=characters)
         return record
 
     def _event_record(self, el: str, *, isroot: bool) -> str:
@@ -270,9 +274,9 @@ class EventBindingState:
         self._discard_resubmitted_pending(written)
 
     def _flush_pending_children(self, ctx: EventBindingStateContext, tree_key: str) -> None:
-        """声明可以独立提交，来源局部键不依赖另一项声明先创建"""
+        """事件可以独立提交，来源局部键不依赖另一项事件先创建"""
         if self.pending_child_events:
-            raise ValueError("新声明契约不接受旧过程挂起记录")
+            raise ValueError("新事件契约不接受旧过程挂起记录")
 
     def is_pending_child(self, record: str) -> bool:
         """用于判断该生产记录键是否仍在暂挂子事件缓冲里（树根未建，调用期未落账）"""
@@ -411,11 +415,11 @@ class EventBindingState:
             )
 
     # ------------------------------------------------------------------
-    # 章级声明只记录候选关系，正式事件身份和结构由诊断发布
+    # 章级事件只记录候选关系，正式事件身份和结构由诊断发布
     # ------------------------------------------------------------------
 
-    def _resolve_declaration_ref(self, ctx: EventBindingStateContext, ref: str, *, record: str, field: str) -> str:
-        """把本 work 局部键或已读取、已保存声明引用解析成 declaration_id"""
+    def _resolve_annotation_event_ref(self, ctx: EventBindingStateContext, ref: str, *, record: str, field: str) -> str:
+        """把本 work 局部键或已读取、已保存事件引用解析成 event_id"""
         cleaned = unicodedata.normalize("NFC", str(ref)).strip()
         tree_key, _, node_key = cleaned.partition(EL_PATH_SEP)
         active_tree_key = tree_key.strip()
@@ -431,17 +435,17 @@ class EventBindingState:
                 return str(tree["root_node_id"])
         if cleaned in self.authorized_event_ids:
             return cleaned
-        if cleaned in ctx.confirmed_declaration_ids:
+        if cleaned in ctx.confirmed_source_event_ids:
             return cleaned
         raise AnnotationStageRejection(
-            f"声明身份不存在: {ref}",
+            f"事件身份不存在: {ref}",
             record=record,
             field=field,
-            code="unknown_declaration",
-            expected="本 work 已落账声明的局部键或 declaration_id，或本 run 已确认 declaration_id",
+            code="unknown_annotation_event",
+            expected="本 work 已落账事件的局部键或 event_id，或本 run 已确认 event_id",
         )
 
-    def apply_declaration_relation(
+    def apply_annotation_event_relation(
         self,
         ctx: EventBindingStateContext,
         *,
@@ -454,7 +458,7 @@ class EventBindingState:
         evidence: int | None = None,
         source_operation_id: str,
     ) -> str:
-        """write_link 只登记声明之间的候选关系，正式关系由诊断确认发布"""
+        """write_link 显式建立事件包含或语义关系"""
         record = f"event_relation/{source_operation_id}"
         ctx._require_writable(record)
         if not relation_type.strip() or not source_operation_id.strip():
@@ -475,11 +479,43 @@ class EventBindingState:
                 actual=reason,
                 expected="原文支持的非空理由",
             )
-        if source_kind != "declaration" or target_kind != "declaration":
-            raise ValueError("标注只能提交声明间关系建议")
-        resolved_source = self._resolve_declaration_ref(ctx, source_id, record=record, field="source_id")
-        resolved_target = self._resolve_declaration_ref(ctx, target_id, record=record, field="target_id")
+        if source_kind != "event" or target_kind != "event":
+            raise ValueError("标注只能提交事件间关系建议")
+        resolved_source = self._resolve_annotation_event_ref(ctx, source_id, record=record, field="source_id")
+        resolved_target = self._resolve_annotation_event_ref(ctx, target_id, record=record, field="target_id")
         evidence_paragraph_id = self._event_evidence_paragraph_id(ctx, evidence, record=record)
+        if relation_type == "contains":
+            relation_id = self._identifier(ctx.run_scope, ctx.work_id, "contain", source_operation_id)
+            candidate = {
+                "link_id": relation_id,
+                "parent_event_id": resolved_source,
+                "child_event_id": resolved_target,
+                "reason": reason,
+                "source_operation_id": source_operation_id,
+                "record": record,
+                "evidence_paragraph_id": evidence_paragraph_id,
+            }
+            prior = self.containments.get(relation_id)
+            if prior is not None:
+                if prior != candidate:
+                    raise ValueError("同一包含操作的内容不可改写")
+                return record
+            parents = dict(ctx.confirmed_containment_parents)
+            for edge in self.containments.values():
+                parents[edge["child_event_id"]] = edge["parent_event_id"]
+            if resolved_target in parents:
+                raise ValueError("子事件已有其他直接父")
+            cursor = resolved_source
+            seen: set[str] = set()
+            while True:
+                if cursor == resolved_target or cursor in seen:
+                    raise ValueError("包含关系形成环")
+                seen.add(cursor)
+                if cursor not in parents:
+                    break
+                cursor = parents[cursor]
+            self.containments[relation_id] = candidate
+            return record
         for item in self.relations:
             if item["source_operation_id"] == source_operation_id:
                 same = (
@@ -530,7 +566,7 @@ class EventBindingState:
         }
 
     def event_content(self, ctx: EventBindingStateContext, *, el: str, isroot: bool) -> dict[str, Any]:
-        """回显声明业务字段和来源身份；内部来源容器不代表正式事件结构"""
+        """回显事件业务字段和来源身份；内部来源容器不代表正式事件结构"""
         cleaned = unicodedata.normalize("NFC", el).strip()
         tree_key, _, node_key = cleaned.partition(EL_PATH_SEP)
         tree_key_clean = tree_key.strip()
@@ -545,8 +581,11 @@ class EventBindingState:
             raise AnnotationInvariantError(f"write_event 回显需要账本内事件树: {tree_key}")
         event = self._bound_event(str(tree["nodes"][node_key.strip() or RESERVED_ROOT_KEY]))
         content: dict[str, Any] = {
-            "declaration_id": event.declaration_id,
-            "id": event.declaration_id,
+            "event_id": event.event_id,
+            "from": event.from_chapter_id,
+            "to": event.to_chapter_id,
+            "reason": event.reason,
+            "id": event.event_id,
             "title": event.title,
             "problem": event.problem,
             "summary": event.summary,

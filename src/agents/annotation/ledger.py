@@ -79,12 +79,12 @@ class AnnotationToolLedger:
     # 本章已写出的记录键集合（程序面每次调用成功即登记）：push_case 的 record_id
     # 按它校验，模型只能指向真实产出
     written_record_keys: set[str] = field(default_factory=set)
-    # 收尾声明：唯一 finish 置位后由系统冻结当前章
+    # 收尾事件：唯一 finish 置位后由系统冻结当前章
     chapter_finished: bool = False
     # 完整事件跨章引用授权面：work 开始时从本 run 已确认（confirm）状态装载；
     # 快照/回滚随账本深拷贝一并覆盖
     confirmed_complete_event_index: dict[str, dict[str, Any]] = field(default_factory=dict)
-    confirmed_declaration_ids: set[str] = field(default_factory=set)
+    confirmed_source_event_ids: set[str] = field(default_factory=set)
     confirmed_containment_parents: dict[str, str] = field(default_factory=dict)
 
     work_id: str = ""
@@ -378,6 +378,9 @@ class AnnotationToolLedger:
         status: str,
         evidence: int | None = None,
         progress: str | None = None,
+        from_chapter_id: int | None = None,
+        to_chapter_id: int | None = None,
+        reason: str | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
         characters: list[ParticipantArg] | None = None,
@@ -392,6 +395,9 @@ class AnnotationToolLedger:
             status=status,
             evidence=evidence,
             progress=progress,
+            from_chapter_id=from_chapter_id,
+            to_chapter_id=to_chapter_id,
+            reason=reason,
             isforeshadowing=isforeshadowing,
             confidence=confidence,
             characters=characters,

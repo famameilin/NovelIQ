@@ -45,8 +45,9 @@ _AGENT_REFERENCE_SCOPE_TEXT: str = (
     "search_graph 预览继续按字符预算分页；"
     "用 next_offset/next_relation_offset 续页，事件可按 chapter_id/tree_id 筛选，实体可按 entity_type 筛选。\n"
     "- read_event(node_id=...) / read_entity(entity_id=...) 读取完整详情；图树读取不替代原文授权。\n"
-    "- event(el,title,problem,summary,event_type,status,evidence,progress=None) 写章级事件声明。"
-    "回执 declaration_id 不是正式event_id；包含和因果用 write_link 提交显式建议，不按调用顺序生成。\n"
+    "- event(el,title,problem,summary,event_type,status,evidence,progress=None) 写事件。"
+    "回执 event_id 是正式事件身份；from_chapter_id/to_chapter_id 记录起止章节，缺省当前章。"
+    "包含用 write_link(kind=contains) 显式建立，因果独立记录。\n"
     "- write_link 使用实际读回的 source_id/target_id；foreshadowing 保持独立照应边，不自动合树。\n"
     "- pending(case_type,description)/push_case(case_type,description) 显式归入人物/关系/对话/事件之一；"
     "- promise_case 只填真实 case_id."
@@ -74,7 +75,7 @@ _AGENT_CONSTRUCTOR_ORDER: tuple[str, ...] = (
 def agent_gap(agent: AgentAnnotation, *, candidate_total: int) -> dict[str, Any]:
     """回报当前职责的实际缺口，不补造指标或对话判定"""
     if agent.role not in {"annotation", "metric"}:
-        # 实体 agent 与事件 agent 的完整性口径只有"声明了收尾"；候选与指标不属于它们
+        # 实体 agent 与事件 agent 的完整性口径只有"完成了收尾"；候选与指标不属于它们
         return {"finished": agent.finished, "missing_candidates": [], "missing_metric": False}
     judged = {item.candidate_index for item in agent.dialogues}
     return {

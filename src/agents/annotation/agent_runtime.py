@@ -293,8 +293,8 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
                     if key in actual:
                         receipt[key] = actual[key]
                 content = actual.get("content") or {}
-                if plan.tool == "write_event" and content.get("declaration_id"):
-                    receipt["ref"].update(declaration_id=content["declaration_id"])
+                if plan.tool == "write_event" and content.get("event_id"):
+                    receipt["ref"].update(event_id=content["event_id"])
         return self._finish_call(
             name,
             op_index=op_index,

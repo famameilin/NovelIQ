@@ -121,7 +121,7 @@ def _function_parameters(function: Any) -> list[tuple[str, str]]:
 
 
 def _schema_parameters(tool: Any, *, extra: tuple[str, ...] = ()) -> list[tuple[str, str]]:
-    """用于从 args_schema 取参数清单（必填与默认值由字段自己声明，不手抄）
+    """用于从 args_schema 取参数清单（必填与默认值由字段自己事件，不手抄）
 
     必填排在可选之前（Python 调用面的写法）；extra：schema 之外的调用面参数（检索的
     fields/limit 由程序面投影层消费，不在工具 schema 里），一律按可选渲染。
@@ -243,12 +243,12 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
     "from_entity": f"关系起点{ENTITY_REF_FIELD_HINT}",
     "to_entity": f"关系终点{ENTITY_REF_FIELD_HINT}",
     "speaker": f"说话人{ENTITY_REF_FIELD_HINT}",
-    "el": "事件声明的本章局部键，形如 e1；斜杠仅局部寻址，不表示包含",
+    "el": "事件事件的本章局部键，形如 e1；斜杠仅局部寻址，不表示包含",
     "query": "检索原文的关键词，多词任一命中；% 匹配任意长度，_ 匹配单个字符",
-    "search_events.isforeshadowing": "只看伏笔根声明（True）或只看非伏笔根（False），不填返回全部；"
+    "search_events.isforeshadowing": "只看伏笔根事件（True）或只看非伏笔根（False），不填返回全部；"
     "伏笔根 = write_event(isforeshadowing=True) 种下的树根，伏笔动作的引用来源只在其中",
-    "search_events.compact": "紧凑索引模式：每条只回声明 id、章号、标题、类型、状态、保存态与伏笔标记，"
-    "每页最多 100 条；用于通览全书声明，详情仍用 read_event",
+    "search_events.compact": "紧凑索引模式：每条只回事件 id、章号、标题、类型、状态、保存态与伏笔标记，"
+    "每页最多 100 条；用于通览全书事件，详情仍用 read_event",
     "evidence": "本章事件所在段落的段首号（整数），不是引文",
     "read_chapter_text.paragraph_id": "本章正文段首可见号，由引擎换算为全局段落号",
     "read_text.paragraph_id": "全局段落号，跨章检索命中时照抄 paragraph_ids 中的值",
@@ -261,11 +261,11 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
     "event.event_type": "简短事件类型，不是main/secondary",
     "event.status": "ongoing 或 resolved，章节结束不代表事件解决",
     "event.progress": "本章明确推进，可空；不得编造结局",
-    "declaration_id": "章级事件声明来源身份，由 event 回执或 kind=declaration 检索获得，不是正式 event_id",
-    "source_declaration_id": "伏笔来源声明身份，只接受伏笔树根：write_event(isforeshadowing=True) 种下的那棵树的根"
-    "（read_event 回执 is_foreshadow_setup=True）；普通事件树根不算，须先读取该声明核对",
+    "event_id": "章级事件事件来源身份，由 event 回执或 kind=annotation_event 检索获得，不是正式 event_id",
+    "source_event_id": "伏笔来源事件身份，只接受伏笔树根：write_event(isforeshadowing=True) 种下的那棵树的根"
+    "（read_event 回执 is_foreshadow_setup=True）；普通事件树根不算，须先读取该事件核对",
     "action_type": "伏笔动作类型：写英文常量 'reinforce'（强化）或 'payoff'（疑似回收），不写中文词",
-    "target_declaration_id": "强化或回收所指声明身份，可空；填写时须先读取该声明",
+    "target_event_id": "强化或回收所指事件身份，可空；填写时须先读取该事件",
     "characters": '[{"name": 正文名字, "entity_type": 实体大类, "role": 参与角色, "narrative_role": 叙事功能, '
     '"action": 做了什么, "emotion": -2..2 整数}, …]；'
     "role/narrative_role/action/emotion 都可省略或写偏：role 缺省按实体登记类型取"
@@ -307,7 +307,7 @@ AGENT_CONTRACT_TEXT: str = (
     '  for candidate in graph_page["entities"]:\n'
     '      entity_detail = read_entity(entity_id=candidate["id"])\n'
     '  for item in events_page["events"]:\n'
-    '      detail = read_event(node_id=item["declaration_id"], kind="declaration")\n'
+    '      detail = read_event(node_id=item["event_id"], kind="event")\n'
     "  后续翻页沿用原 query/筛选条件，offset 填上一页 next_offset；None 表示没有下一页。\n"
     "- 变量：程序里赋的变量在本章后续程序里保留；构造器与检索的返回值都能用变量承接。\n"
     "  工具名与基础函数名全部保留，不得作为变量（如 entity/event/metric/finish、len）；"

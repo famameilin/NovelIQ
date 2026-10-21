@@ -3,12 +3,12 @@
 
 核心合同: 写入面为五个领域工具（write_entity / write_metrics / write_event /
 write_relation / write_dialogue），实体与事件节点用模型自定的 el 局部键寻址、
-写入即生效并返回真实回执（{status: written, record}）；领域没有结束声明，
+写入即生效并返回真实回执（{status: written, record}）；领域没有结束事件，
 finish 与无工具响应是等价的结束请求；程序在批次完成后检查并冻结当前 work。
 完整参数和完整结果只进入审计库，不回到模型上下文。
 
-事件声明来源身份为 declaration_id，正式 event_id 由诊断发布生成；局部 el 只用于
-本 work 寻址，不表达包含结构或调用顺序。伏笔与情节推进只引用来源声明。
+事件事件来源身份为 event_id，正式 event_id 由诊断发布生成；局部 el 只用于
+本 work 寻址，不表达包含结构或调用顺序。伏笔与情节推进只引用来源事件。
 
 """
 
@@ -30,7 +30,7 @@ from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError
 
-# 领域写入工具表：正式写入工具集合与失败归因共用同一份声明
+# 领域写入工具表：正式写入工具集合与失败归因共用同一份事件
 _DOMAIN_WRITE_TOOLS: dict[str, tuple[str, ...]] = {
     "entities": ("write_entity",),
     "metrics": ("write_metrics",),
@@ -44,7 +44,7 @@ _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
 )
 # 收尾在同回合写入处理完后统一校验，正式与连续性信封各自实现冻结边界
 FINISH_TOOL_NAME: str = "finish"
-# 五域固定遍历顺序：工具面排序、缺内容提醒与写入计数共用（无逐域结束声明）
+# 五域固定遍历顺序：工具面排序、缺内容提醒与写入计数共用（无逐域结束事件）
 _DOMAIN_ORDER = ("entities", "metrics", "events", "relations", "dialogues")
 # 事件根节点在章内局部键空间里的固定名字（子事件键不得占用）；权威定义在 schema
 _ROOT_NODE_KEY = RESERVED_ROOT_KEY
@@ -140,7 +140,7 @@ def _norm_graph_name(name: str) -> str:
 
 
 def _forbid_undeclared_args(tool_candidate: Any) -> None:
-    """用于让写入类工具拒绝未声明参数
+    """用于让写入类工具拒绝未事件参数
 
     langchain 由函数签名生成的参数模型默认 extra=ignore：模型多写的字段被静默丢弃，
     例如把 isforeshadowing 写到子事件上仍报 staged，语义丢失却看不出错。收紧为整条

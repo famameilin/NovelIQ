@@ -258,6 +258,9 @@ def _event_write_args(
         "el": namespace_event_el(book.role, item.el),
         "title": item.title,
         "problem": item.problem,
+        "from_chapter_id": item.from_chapter_id,
+        "to_chapter_id": item.to_chapter_id,
+        "reason": item.reason,
         "summary": item.summary,
         "event_type": item.event_type,
         "status": item.status,
@@ -451,13 +454,16 @@ def build_agent_constructors(
         problem: str,
         summary: str,
         event_type: str,
+        from_chapter_id: int | None = None,
+        to_chapter_id: int | None = None,
+        reason: str | None = None,
         status: str,
         evidence: int,
         progress: str | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
     ) -> _ConstructorCall:
-        """声明本章一个事件；局部键仅寻址，不以调用顺序推导包含或阶段"""
+        """创建事件；局部键仅寻址，章节范围缺省当前章，包含关系显式建立"""
         record = _record_of(agent, f"event/{el}")
         normalized_el = _normalize_el(el, record=record)
         existing = agent.event_keys().get(normalized_el)
@@ -467,6 +473,9 @@ def build_agent_constructors(
                 record=record,
                 field="confidence",
                 code="missing_field",
+            from_chapter_id=from_chapter_id,
+            to_chapter_id=to_chapter_id,
+            reason=reason,
                 expected="high / medium / low",
             )
         item = AgentEvent(
@@ -487,12 +496,12 @@ def build_agent_constructors(
             evidence=normalize_evidence(evidence, record=record, paragraph_text_by_id=book.paragraph_text_by_id),
         )
         if existing is not None and existing.to_dict() != item.to_dict():
-            raise ValueError(f"event/{normalized_el} 声明内容不可改写")
+            raise ValueError(f"event/{normalized_el} 事件内容不可改写")
         return _ConstructorCall(
             record=record,
             tool="write_event",
             args=_event_write_args(book, item),
-            ref={"kind": "declaration", "el": item.el},
+            ref={"kind": "event", "el": item.el},
             commit=lambda: _put_by(agent.events, item, key=lambda current: current.el),
         )
 
@@ -720,7 +729,7 @@ def build_agent_constructors(
         evidence: int,
         before: str | None = None,
         subject_id: str | None = None,
-        declaration_id: str | None = None,
+        event_id: str | None = None,
     ) -> _ConstructorCall:
         """记录有原文依据的问题推进、目标改变或线索揭示
 
@@ -734,7 +743,7 @@ def build_agent_constructors(
             "evidence": evidence,
             "before": before,
             "subject_id": subject_id,
-            "declaration_id": declaration_id,
+            "event_id": event_id,
         }
         return _ConstructorCall(
             record=_record_of(agent, "plotline"),
@@ -745,17 +754,17 @@ def build_agent_constructors(
         )
 
     def foreshadow_action(
-        source_declaration_id: str, action_type: str, evidence: int, target_declaration_id: str | None = None
+        source_event_id: str, action_type: str, evidence: int, target_event_id: str | None = None
     ) -> _ConstructorCall:
-        """引用已埋伏笔的 declaration_id 记录强化或回收：先 read_event 读取声明；
-        source_declaration_id 须是伏笔树根（isforeshadowing=True 声明的根，
+        """引用已埋伏笔的 event_id 记录强化或回收：先 read_event 读取事件；
+        source_event_id 须是伏笔树根（isforeshadowing=True 事件的根，
         read_event 回执 is_foreshadow_setup=True），普通事件树根拒收；action_type 写英文常量
-        'reinforce'（强化）或 'payoff'（疑似回收）；埋设随声明自动记录"""
+        'reinforce'（强化）或 'payoff'（疑似回收）；埋设随事件自动记录"""
         args = {
-            "source_declaration_id": source_declaration_id,
+            "source_event_id": source_event_id,
             "action_type": action_type,
             "evidence": evidence,
-            "target_declaration_id": target_declaration_id,
+            "target_event_id": target_event_id,
         }
         return _ConstructorCall(
             record=_record_of(agent, "foreshadow_action"),

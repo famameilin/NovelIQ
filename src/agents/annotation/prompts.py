@@ -17,9 +17,9 @@ def _read_prompt_text(filename: str) -> str:
 
 ANNOTATION_SCOPE_POLICY = (
     "\n事件职责（event）：同时记录正文明确的问题推进、目标改变、线索揭示，"
-    "调用 plotline 并提供前后状态与本章段首证据，关联声明填 declaration_id。"
-    "伏笔强化或回收先读取声明，再调用 foreshadow_action，填写 source_declaration_id、"
-    "target_declaration_id；照应边不能判回收，埋设随声明自动保存。\n"
+    "调用 plotline 并提供前后状态与本章段首证据，关联事件填 event_id。"
+    "伏笔强化或回收先读取事件，再调用 foreshadow_action，填写 source_event_id、"
+    "target_event_id；照应边不能判回收，埋设随事件自动保存。\n"
     "\n统一判据：\n"
     "- 人物：有姓名、代号、独立行动或实际发言的都登记；匿名行动者或说话人按正文称谓登记，"
     "不编造姓名。无独立行动的路人、士兵等背景群体不登记；代词和泛泛称呼不单独建实体。\n"
@@ -49,7 +49,7 @@ AGENT_ROLE_SCOPES: dict[str, str] = {
     "event": (
         '<RoleScope role="事件与参与者">\n'
         "你负责这一章的两个域：\n"
-        "- event 与 participants：有正文依据的事件写完整声明并填写参与者；使用 event 入口逐条写入，"
+        "- event 与 participants：有正文依据的事件写完整事件并填写参与者；使用 event 入口逐条写入，"
         "参与者引用直接写正文名字与大类，运行时自动登记，无需先 entity()；原文锚点由既有引擎完成。\n"
         "- plotline 与 foreshadow_action：保存本章明确的情节推进及伏笔强化/疑似回收，不用实体首次登记冒充推进。\n"
         "实体间的关系边、对话判定、段落标签与章级指标都不属于你。\n"
@@ -61,7 +61,7 @@ AGENT_ROLE_SCOPES: dict[str, str] = {
         "- dialogue：<DialogueCandidates> 表里的候选逐条判定，一条不落；\n"
         "- label：本章自选 2~3 段的整段情绪标签；\n"
         "- metric：章级摘要与叙事指标。\n"
-        "实体间的关系边与事件树构造都不属于你。\n"
+        "可引用截至当前章已保存事件增量构建跨章树，包含须单父无环；实体关系由其他职责负责。\n"
         "</RoleScope>"
     ),
 }
@@ -135,7 +135,7 @@ __all__ = [
 ]
 
 AGENT_SYSTEM_PROMPT += (
-    "\nevent 写本章事件级声明（标题、问题、概要、类型、推进、状态、证据）。"
-    "全书身份、阶段与包含由诊断确认后一次发布；不按动作拆分过程。"
-    "标注阶段不要调用完整事件、过程归属或 submit_events 类工具。"
+    "\nevent 写本章事件级事件（标题、问题、概要、类型、推进、状态、证据）。"
+    "标注创建章内小树，也可用已保存事件增量建跨章父树；诊断继续全书组织与核查。"
+    "事件正文与起止章节不可改写；父子事件独立记录范围，已有子树只能整体挂入父事件。"
 )

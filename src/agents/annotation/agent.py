@@ -118,8 +118,10 @@ class WorkExecution:
 
         ledger = self.ledger
         return {
-            "declaration_contributions": {
-                key: value for key, value in ledger.events.contribution_payloads().items() if key == "relations"
+            "annotation_event_contributions": {
+                key: value
+                for key, value in ledger.events.contribution_payloads().items()
+                if key in {"relations", "containments"}
             },
             "metrics": ledger.metrics_payload.model_dump(mode="json") if ledger.metrics_payload else None,
             "events": [value.model_dump(mode="json") for value in ledger.bound_payloads.get("events", [])],
@@ -356,8 +358,8 @@ class AnnotationAgent:
                                 content=AGENT_SYSTEM_PROMPT
                                 + (
                                     "\n全书图树案例共享；finish 只完成自己的标注。push_case(case_type,description)"
-                                    " 归入人物/关系/对话/事件，promise_case 只填真实 case_id。跨章连接用 write_li"
-                                    "nk 引用已实际读取且已保存的声明；未保存端点不能连接。"
+                                    " 归入人物/关系/对话/事件，claim_case 只填真实 case_id。跨章连接用 write_li"
+                                    "nk 引用已实际读取且已保存的事件；未保存端点不能连接。"
                                 )
                             ),
                             HumanMessage(
@@ -478,7 +480,8 @@ class AnnotationAgent:
                 finished = execution.finished
                 try:
                     args = tool.args_schema.model_validate(call.get("args", {})).model_dump(exclude_unset=True)
-                    execution.ledger.confirmed_declaration_ids = self.event_trees.confirmed_declaration_ids()
+                    execution.ledger.confirmed_source_event_ids = self.event_trees.confirmed_source_event_ids()
+                    execution.ledger.confirmed_containment_parents = self.event_trees.confirmed_containment_parents()
                     result = tool.func(**args)
                     self.event_trees.sync(
                         author, execution.ledger.current_chapter_id, execution.ledger.bound_payloads.get("events", [])

@@ -16,7 +16,7 @@ SearchLimit = Annotated[int, Field(ge=1, le=20)]
 # 紧凑索引只回一行式字段，单页体量小，允许到 100 条（详情预览仍限 20，由工具内校验）
 EventSearchLimit = Annotated[int, Field(ge=1, le=100)]
 SearchOffset = Annotated[int, Field(ge=0)]
-ObjectKind = Literal["declaration", "event", "arc", "outcome"]
+ObjectKind = Literal["event", "arc", "outcome"]
 
 
 def _search_page(values: list[Any], *, offset: int, limit: int, budget: int) -> tuple[list[Any], int | None]:
@@ -54,15 +54,15 @@ def build_state_read_tools(
         tree_id: str | None = None,
         limit: EventSearchLimit = 5,
         offset: SearchOffset = 0,
-        kind: ObjectKind = "declaration",
+        kind: ObjectKind = "event",
         isforeshadowing: bool | None = None,
         compact: bool = False,
     ) -> str:
         """按条数分页读取简洁索引，除末页外返回 limit 条；详情用 read_event，续页用 next_offset；
-        isforeshadowing=True 只返回伏笔根声明（False 只返回非伏笔根），不填不过滤；
-        compact=True 读取紧凑索引（声明附章号与伏笔标记，诊断对象返回简洁索引行），每页最多 100 条；
+        isforeshadowing=True 只返回伏笔根事件（False 只返回非伏笔根），不填不过滤；
+        compact=True 读取紧凑索引（事件附章号与伏笔标记，诊断对象返回简洁索引行），每页最多 100 条；
         compact=False 的详情预览每页最多 20 条"""
-        if kind != "declaration":
+        if kind != "event":
             if organization is None:
                 raise ValueError(f"本执行不提供 kind={kind} 的诊断对象")
             if not compact and limit > 20:
@@ -89,7 +89,9 @@ def build_state_read_tools(
         if compact:
             previews = [
                 {
-                    "declaration_id": value["declaration_id"],
+                    "event_id": value["event_id"],
+                    "from": value["content"].get("from", value["content"].get("from_chapter_id")),
+                    "to": value["content"].get("to", value["content"].get("to_chapter_id")),
                     "chapter_id": value["chapter_id"],
                     "saved": value["saved"],
                     "is_foreshadow_setup": value["content"]["is_foreshadow_setup"],
@@ -102,7 +104,9 @@ def build_state_read_tools(
         else:
             previews = [
                 {
-                    "declaration_id": value["declaration_id"],
+                    "event_id": value["event_id"],
+                    "from": value["content"].get("from", value["content"].get("from_chapter_id")),
+                    "to": value["content"].get("to", value["content"].get("to_chapter_id")),
                     "chapter_id": value["chapter_id"],
                     "saved": value["saved"],
                     "is_foreshadow_setup": value["content"]["is_foreshadow_setup"],
@@ -135,9 +139,9 @@ def build_state_read_tools(
         )
 
     @tool
-    def read_event(node_id: str, kind: ObjectKind = "declaration") -> str:
-        """按实际身份读取详情；kind 须与来源一致，声明 declaration_id 与正式 event_id 不混用"""
-        if kind != "declaration":
+    def read_event(node_id: str, kind: ObjectKind = "event") -> str:
+        """按实际事件身份读取详情，叙事线与结果使用各自 kind"""
+        if kind != "event":
             if organization is None:
                 raise ValueError(f"本执行不提供 kind={kind} 的诊断对象")
             value = organization.read(kind, node_id)
@@ -248,11 +252,10 @@ def build_case_tools(
 
     @tool
     def search_cases(case_type: str | None = None, unresolved_only: bool = False) -> str:
-        """读取当前 run 的案例 ID、说明与是否已被承诺（promised）；promised=false 即尚未解决；
-        case_type=event 只返回声明事件案例；unresolved_only=true 只返回尚未承诺的案例"""
+        """读取当前 run 的案例 ID、说明及 claimed/submitted；unresolved_only=true 只返回未提交案例"""
         cases = pool.search(case_type=case_type)
         if unresolved_only:
-            cases = [case for case in cases if not case["promised"]]
+            cases = [case for case in cases if not case["submitted"]]
         if case_view is not None:
             cases = [case_view(case) for case in cases]
         return json.dumps(cases, ensure_ascii=False)
