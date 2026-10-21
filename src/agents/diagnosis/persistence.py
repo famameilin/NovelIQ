@@ -52,7 +52,7 @@ def _verify_replay(session: Storage, run_id: str, report: Any, analysis: AgentAn
         raise ValueError("已发布诊断与冻结贡献不一致，禁止覆盖")
     organization = cast(NarrativeOrganization, analysis.narrative_organization)
     if (
-        report.identity_snapshot != organization.identity_snapshot
+        report.content_snapshot != organization.content_snapshot
         or report.structure_snapshot != organization.structure_snapshot
     ):
         raise ValueError("已发布诊断的冻结快照与本次提交不一致，禁止覆盖")
@@ -129,7 +129,7 @@ def save_diagnosis_result(
     """诊断 Agent 保存实际诊断结果，并把案例采纳绑定到正式报告身份"""
     import json
 
-    from src.event_trees.organization import run_declaration_ids, validate_organization
+    from src.event_trees.organization import validate_organization
     from src.storage import new_id
     from src.storage.records.cases import CaseSave
     from src.storage.records.diagnosis_save import DiagnosisReportSave
@@ -166,7 +166,7 @@ def save_diagnosis_result(
     record = {
         "report_id": report_id,
         "agent_id": organization.source_agent_id,
-        "identity_snapshot": organization.identity_snapshot,
+        "content_snapshot": organization.content_snapshot,
         "structure_snapshot": organization.structure_snapshot,
         **{key: getattr(analysis, key) for key in keys},
     }
@@ -221,7 +221,6 @@ def save_diagnosis_result(
         record,
         tuple(assessments),
         organization.model_dump_json(),
-        frozenset(run_declaration_ids(session, run_id)),
         facts,
         updates,
         cases,

@@ -10,25 +10,9 @@ from src.event_trees.organization import NarrativeDescription, NarrativeTitle, O
 
 
 class WriteItem(BaseModel):
-    """禁止静默丢弃未声明字段，保留原文证据的原类型"""
+    """禁止静默丢弃未事件字段，保留原文证据的原类型"""
 
-    model_config = ConfigDict(extra="forbid")
-
-
-class IdentityItem(WriteItem):
-    operation: Literal["identity"]
-    key: str = Field(
-        description="本执行的局部键：同一执行内唯一（不随章节、批次重置），重试沿用同一键；建议由声明 id 派生"
-    )
-    title: str
-    problem: str
-    summary: str
-    event_type: str
-    status: Literal["ongoing", "resolved"]
-    declaration_ids: list[str] = Field(min_length=1)
-    reason: str = Field(min_length=1)
-    evidence: list[OrganizationEvidence]
-    progress: str | None = None
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class EventItem(WriteItem):
@@ -41,7 +25,8 @@ class EventItem(WriteItem):
     status: Literal["ongoing", "resolved"]
     evidence: list[OrganizationEvidence]
     progress: str | None = None
-    compared_event_ids: list[str]
+    from_chapter_id: int = Field(alias="from")
+    to_chapter_id: int = Field(alias="to")
     reason: str = Field(min_length=1)
 
 
@@ -51,12 +36,6 @@ class ContainmentItem(WriteItem):
     child_event_id: str
     reason: str = Field(min_length=1)
     evidence: list[OrganizationEvidence]
-
-
-class DeclarationReviewItem(WriteItem):
-    operation: Literal["declaration_review"]
-    declaration_ids: list[str] = Field(min_length=1)
-    reason: str = Field(min_length=1)
 
 
 class RelationItem(WriteItem):
@@ -71,18 +50,9 @@ class RelationItem(WriteItem):
     evidence: list[OrganizationEvidence]
 
 
-class ComparisonItem(WriteItem):
-    operation: Literal["compare"]
-    source_declaration_id: str
-    target_declaration_ids: list[str] = Field(min_length=1)
-    disposition: Literal["same_event", "independent", "related"]
-    reason: str = Field(min_length=1)
-    evidence: list[OrganizationEvidence]
-
-
 class RetractItem(WriteItem):
     operation: Literal["retract"]
-    kind: Literal["identity", "contain", "relation"]
+    kind: Literal["contain", "relation"]
     identifier: str
     reason: str = Field(min_length=1)
     evidence: list[OrganizationEvidence]
@@ -141,15 +111,7 @@ class OutcomeLinkItem(WriteItem):
 
 
 EventWriteItem = Annotated[
-    IdentityItem
-    | EventItem
-    | ContainmentItem
-    | DeclarationReviewItem
-    | ComparisonItem
-    | RetractItem
-    | RelationItem
-    | ReviewItem
-    | StructureReviewItem,
+    EventItem | ContainmentItem | RetractItem | RelationItem | ReviewItem | StructureReviewItem,
     Field(discriminator="operation"),
 ]
 ArcWriteItem = Annotated[ArcItem | ArcLinkItem, Field(discriminator="operation")]

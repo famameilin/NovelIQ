@@ -114,12 +114,10 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
                     raise ValueError(f"诊断工具定义冲突: {name}")
                 definitions[name] = definition
             functions[tool.name] = {"description": tool.description, "parameters": schema}
-        # 业务函数返回值与 execute_code 回执分开声明，登记身份仍沿用原领域返回类型
+        # 业务函数返回值与 execute_code 回执分开事件，登记身份仍沿用原领域返回类型
         result_types = {
             "write_event": {
-                "event": {"status": "written", "event_id": "真实事件ID", "declaration_ids": ["真实声明ID"]},
-                "identity": {"event_id": "候选事件ID", "declaration_ids": ["来源声明ID"]},
-                "declaration_review": None,
+                "event": {"status": "written", "event_id": "真实事件ID"},
                 "contain": None,
                 "relation": "真实关系ID",
                 "review": None,

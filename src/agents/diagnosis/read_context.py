@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -64,7 +65,7 @@ class DiagnosisTextQuery:
         return {"chapter_id": row.chapter_id, "paragraph_id": row.paragraph_id, "text": row.text}
 
 
-class DiagnosisDeclarationSource:
+class DiagnosisAnnotationEventSource:
     """共享入口读取不可变章级来源，不暴露过程及 owner 身份"""
 
     def __init__(self, draft: EventOrganizationDraft) -> None:
@@ -74,24 +75,64 @@ class DiagnosisDeclarationSource:
         self, query: str, *, chapter_id: int | None, tree_id: str | None, isforeshadowing: bool | None = None
     ) -> list[str]:
         if tree_id is not None:
-            raise ValueError("声明没有正式事件树身份，请按 chapter_id 或正文词检索")
+            raise ValueError("事件没有正式事件树身份，请按 chapter_id 或正文词检索")
         return [
             key
-            for key, item in self.draft._declarations().items()
-            if (chapter_id is None or item["chapter_id"] == chapter_id)
-            and (isforeshadowing is None or bool(item["is_foreshadow_setup"]) == isforeshadowing)
+            for key, item in self.draft._all_events().items()
+            if (chapter_id is None or item.get("from", item.get("from_chapter_id")) == chapter_id)
+            and (isforeshadowing is None or bool(item.get("is_foreshadowing_root")) == isforeshadowing)
             and (query.casefold() in " ".join(str(item[field]) for field in ("title", "problem", "summary")).casefold())
         ]
 
-    def read(self, declaration_id: str) -> dict[str, Any]:
-        item = self.draft.read_declarations([declaration_id])["items"][0]
+    def read(self, event_id: str) -> dict[str, Any]:
+        item = self.draft.read_events([event_id])[0]
+        return self._record(event_id, item)
+
+    def search_page(
+        self, query: str, *, chapter_id: int | None, tree_id: str | None,
+        isforeshadowing: bool | None, offset: int, limit: int,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        "一次装载事件与结构，索引和本页详情使用同一快照"
+        if tree_id is not None:
+            raise ValueError("事件没有正式事件树身份，请按 chapter_id 或正文词检索")
+        by_id, parents = self.draft.read_view()
+        identifiers = [
+            key for key, item in by_id.items()
+            if (chapter_id is None or item.get("from", item.get("from_chapter_id")) == chapter_id)
+            and (isforeshadowing is None or bool(item.get("is_foreshadowing_root")) == isforeshadowing)
+            and query.casefold() in " ".join(str(item[field]) for field in ("title", "problem", "summary")).casefold()
+        ]
+        children: dict[str, list[str]] = {}
+        for child, parent in parents.items():
+            children.setdefault(parent, []).append(child)
+        return identifiers, [
+            self._record(key, {**by_id[key], **self.draft._event_hierarchy(key, parents),
+                               "direct_child_event_ids": children.get(key, [])})
+            for key in identifiers[offset:offset + limit]
+        ]
+
+    @staticmethod
+    def _record(event_id: str, item: dict[str, Any]) -> dict[str, Any]:
         return {
-            "declaration_id": declaration_id,
-            "node_id": declaration_id,
-            "chapter_id": item["chapter_id"],
+            **item,
+            "event_id": event_id,
+            "node_id": event_id,
+            "chapter_id": item.get("from", item.get("from_chapter_id")),
+            **{
+                key: item[key]
+                for key in (
+                    "parent_event_id",
+                    "top_level_event_id",
+                    "is_top_level",
+                    "ancestor_event_ids",
+                    "direct_child_event_ids",
+                )
+                if key in item
+            },
             "saved": True,
             "content": {
                 **item,
+                "is_foreshadow_setup": bool(item.get("is_foreshadowing_root")),
                 "description": item["summary"],
                 "evidence_paragraph_id": item["evidence"][0]["paragraph_id"],
             },
@@ -106,12 +147,8 @@ class DiagnosisOrganizationSource:
 
     def _rows(self, kind: ObjectKind) -> list[dict[str, Any]]:
         if kind == "event":
-            by_id = self.draft._all_events()
-            return (
-                self.draft.read_events(list(by_id))
-                if len(by_id) <= 100 and by_id
-                else [item for identifier in by_id for item in self.draft.read_events([identifier])]
-            )
+            by_id, parents = self.draft.read_view()
+            return [{**item, **self.draft._event_hierarchy(key, parents)} for key, item in by_id.items()]
         if kind == "arc":
             return [item.model_dump(mode="json") for item in self.draft.arcs.values()]
         if kind == "outcome":
@@ -122,7 +159,7 @@ class DiagnosisOrganizationSource:
         self, kind: ObjectKind, query: str, *, chapter_id: int | None, tree_id: str | None
     ) -> list[dict[str, Any]]:
         if tree_id is not None:
-            raise ValueError("声明和正式事件不接受旧 tree_id；请明确 kind")
+            raise ValueError("事件和正式事件不接受旧 tree_id；请明确 kind")
         rows = self._rows(kind)
         return [
             {
@@ -188,13 +225,22 @@ class DiagnosisGraphSource:
     def __init__(self, session: Storage, run_id: str) -> None:
         self.session, self.run_id = (session, run_id)
         self._view: Any = None
+        self._lock = threading.RLock()
+
+    def refresh(self) -> None:
+        "使下一次读取重新装载正式图谱"
+        with self._lock:
+            self._view = None
 
     def _load(self) -> Any:
-        if self._view is None:
-            from src.fact_graph.read import KnowledgeGraphAuthorityService
+        with self._lock:
+            if self._view is None:
+                from src.fact_graph.read import KnowledgeGraphAuthorityService
 
-            self._view = KnowledgeGraphAuthorityService.from_session(self.session).build_level1_snapshot(self.run_id)
-        return self._view
+                self._view = KnowledgeGraphAuthorityService.from_session(self.session).build_level1_snapshot(
+                    self.run_id,
+                )
+            return self._view
 
     @property
     def entity_names(self) -> dict[str, str]:

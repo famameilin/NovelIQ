@@ -28,25 +28,17 @@ review/link/contain/compare 成功也返回 None，以 failed 判断拒绝。wri
   返回 taken 说明已被其他执行承诺，改取下一件；搜不到未承诺案例时调用 finish。
 - 一切案例写入都必须带 caseid=所办案例的真实 case_id；未承诺的案例不能写入。
   被拒项按回执点名索引与原因改判后重新提交，不得覆盖其他作者的已接受候选。
-- 事件案例：根据说明检索并读取对应声明：
-  - declaration_id 只表示不可变来源，event_id 是身份判断后运行时发放的唯一正式候选身份。
-  - search_events/read_event(kind="declaration") 读取声明，kind="event" 读取正式候选事件与
-    已保存目录；搜索分页除末页外返回 limit 条，按 next_offset 续读；来源必须按完整真实 ID 引用。
-  - write_event(operation="declaration_review") 核对本案例声明的事实并核验原始内容一致性；
-    operation="compare" 与更晚声明的配对提交 same_event/independent/related（source 取配对中
-    更早一端），附理由和逐字证据；operation="identity" 提交同一实际事件的全部 declaration_ids、
-    确认全书事件 title/problem/event_type 及概要、状态，章级正文保留原声明；
-    单项独立事件也明确提交一个声明的身份；identity/event 的 key 在同一执行内必须唯一，
-    不随章节、批次重置，重试沿用同一键。章级来源按真实章节顺序读取；
-    原声明概要、参与者、动作及情绪由运行时原样保留。
-  - 声明若已被既有事件认领（本案例或其他案例提交），复用该事件并在来源比较中处置，
-    不重复建立身份、不复制事件、不改变既有身份组及原声明。
-  - 结构判断：operation="structure_review" 对事件配对提交 contains/part_of/related/independent；
-    operation="review" 按当前正文核对事件；独立事件才能用 operation="contain" 组成更大事件，
-    单直接父、无环；需要跨章父事件时用 operation="event" 建立有独立问题与证据的父事件，
-    必须明确 compared_event_ids 覆盖当前目录。
-  - operation="relation" 只写有依据的其他关系，不以关系偷换身份/包含；原文冲突用 push_case 登记案例
-    通过案例池办理；operation="retract" 仅明确撤回自己提交的候选，原操作继续留在审计。
+- 事件案例：说明中的 event_id 是正式事件身份，案例 ID 与事件 ID 不同。
+  - search_events/read_event(kind="event") 读取本 run 的事件正文、起止章节、包含结构与证据；
+    搜索按 next_offset 续读。保存过的章级事件正文与范围不可改写。
+  - 需要更大的事件树时，operation="event" 按正文、理由与证据创建上层事件，填写起止章节 from/to；
+    key 在同一执行内唯一，重试沿用同一键。同一 key 不可改写内容，不要求与全部目录逐一比较身份。
+  - operation="contain" 显式挂接 parent_event_id/child_event_id，只有一个直接父且不能成环；
+    既有子树保持原结构，父子事件各自记录独立范围，不要求父范围包住子范围。
+  - operation="structure_review" 核查配对的 contains/part_of/related/independent；operation="review" 核查事件。
+  - operation="relation" 写有原文依据的其他关系；operation="retract" 仅撤回自己尚未保存的 contain/relation。
+  - 无父事件在正式保存时进入案例池；已有案例须领取并显式提交，挂入父树不撤销、不自动解决案例。
+  - 原文冲突和其他待办使用 push_case 登记，通过案例池办理。
 - 人物案例：write_entity(name=..., entity_type=..., el=...) 补登记或更新实体（tags/description/
   representative 按需）；关系案例：write_relation(from_entity=..., to_entity=..., relation_type=...)
   登记有依据的关系；对话案例：write_dialogue(candidate_index=读取目录中的真实序号, verdict=...,

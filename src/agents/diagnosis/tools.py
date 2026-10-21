@@ -21,7 +21,7 @@ from src.storage import Storage
 from .evidence import DiagnosisEvidenceLedger
 from .inputs import ArcWriteItem, EventWriteItem, OutcomeWriteItem, WriteItem
 from .read_context import (
-    DiagnosisDeclarationSource,
+    DiagnosisAnnotationEventSource,
     DiagnosisGraphSource,
     DiagnosisOrganizationSource,
     DiagnosisTextAccess,
@@ -130,10 +130,8 @@ def build_diagnosis_tools(
                 "identity": draft.identity,
                 "event": draft.event,
                 "contain": draft.contain,
-                "declaration_review": draft.review_declarations,
                 "relation": draft.relate_events,
                 "review": draft.review_events,
-                "compare": draft.compare_declarations,
                 "retract": draft.retract,
                 "structure_review": draft.structure_review,
             },
@@ -175,7 +173,7 @@ def build_diagnosis_tools(
     def read_metrics() -> str:
         """读真实聚合指标与转折、高张力、伏笔、关系变化、图谱统计素材；不重算指标或吞系统故障
 
-        伏笔条目的 declaration_id 是来源声明，事件关联只能用同一项的 event_id；event_id 为空表示尚无正式事件身份
+        伏笔条目的 event_id 是来源事件，事件关联只能用同一项的 event_id；event_id 为空表示尚无正式事件身份
         """
         from src.diagnosis.queries import DiagnosisQueries
 
@@ -218,8 +216,8 @@ def build_diagnosis_tools(
     access = DiagnosisTextAccess(run_id)
     query = DiagnosisTextQuery(session, run_id, text_search)
     state_tools = build_state_read_tools(
-        DiagnosisGraphSource(session, run_id),
-        DiagnosisDeclarationSource(draft),
+        graph_source if graph_source is not None else DiagnosisGraphSource(session, run_id),
+        DiagnosisAnnotationEventSource(draft),
         event_reads={},
         entity_ids=set(),
         case_reads=[],

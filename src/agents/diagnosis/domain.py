@@ -79,8 +79,9 @@ class DiagnosisDomain:
         self.read_sessions: dict[str, Storage] = {}
         self.ledgers: dict[str, DiagnosisEvidenceLedger] = {}
         self.draft = EventOrganizationDraft(session, run_id, agent_id)
-        self.sources = self.draft._declarations()
-        self.source_hash = snapshot_digest(self.sources)
+        self.lock = self.draft.lock
+        self.draft.cache_reads = True
+        self.graph_sources: list[DiagnosisGraphSource] = []
         self.case_pool = CasePool(run_id)
         self.case_pool.load_storage(session)
         # 续跑：把会话保存（每会话做完保存一次）留下的组织行水合进内存后继续
@@ -109,39 +110,12 @@ class DiagnosisDomain:
             if role == "report":
                 self._save_report_progress(author)
                 return
-            writers = {key: value for key, value in self.case_writers.items() if key == author}
-            graph = self._case_graph()
-            facts, updates = _save_case_writes(
-                self.session, self.run_id, "", graph=graph, writers=writers, candidates=self._case_dialogue_candidates()
-            )
-            contribution = CaseSave(
-                self.run_id,
-                author,
-                json.dumps(
-                    {
-                        "created_case_ids": sorted(self.case_pool.created.get(author, set())),
-                        "registrations": {
-                            key: self.case_pool.cases[key]
-                            for key in sorted(self.case_pool.registrations.get(author, set()))
-                        },
-                        "promises": self.case_pool.promises_for(author),
-                    },
-                    ensure_ascii=False,
-                ),
-            )
-            organization = {
-                name: {
-                    str(index): item.model_dump(mode="json")
-                    for index, item in enumerate(getattr(self.draft, name).values())
-                }
-                for name in (
-                    "events",
-                    "containments",
-                    "relations",
-                    "reviewed_events",
-                    "declaration_reviews",
-                    "declaration_comparisons",
-                    "structure_reviews",
+            with self.lock:
+                writers = {key: value for key, value in self.case_writers.items() if key == author}
+                graph = self._case_graph()
+                facts, updates = _save_case_writes(
+                    self.session, self.run_id, "", graph=graph, writers=writers,
+                    candidates=self._case_dialogue_candidates(),
                 )
             }
             self.session.diagnosis.save_session(
@@ -162,34 +136,8 @@ class DiagnosisDomain:
             self.session_saved.add(author)
 
     def case_counts(self) -> tuple[int, int]:
-        "案例池进度：(待办案例, 已承诺案例)；待办归零即停止派发"
-        promised = sum(1 for value in self.case_pool.case_runtime.values() if value["promised"])
-        return len(self.case_pool.case_runtime) - promised, promised
-
-    def _promote_unbound_declarations(self) -> None:
-        """报告保存前把未被诊断认领的章级写入按其自身内容补成正式事件"""
-        bound = {identifier for event in self.draft.events.values() for identifier in event.declaration_ids}
-        for declaration_id, row in self.sources.items():
-            if declaration_id in bound:
-                continue
-            evidence = [BoundOrganizationEvidence(**payload) for payload in row["evidence"]]
-            event_id = self.draft._identifier("event_identity", self.run_id, declaration_id)
-            self.draft.events[event_id] = CompleteEventDraft(
-                event_id=event_id,
-                local_key=row["local_key"],
-                title=row["title"],
-                problem=row["problem"],
-                summary=row["summary"],
-                event_type=row["event_type"],
-                status=row["status"],
-                progress=row["progress"],
-                declaration_ids=[declaration_id],
-                reason="诊断未合并该章级写入，按自身内容成为正式事件",
-                source_hashes={declaration_id: row["source_hash"]},
-                first_text_position=self.draft._first_position(evidence),
-                evidence=evidence,
-                producer_agent_id=row["producer_agent_id"],
-            )
+        "案例池进度：(可领案例, 已提交案例)，仅有可领案例时派发"
+        return self.case_pool.counts()
 
     def _save_report_progress(self, author: str) -> None:
         """报告会话收尾保存：快照校验、叙事组织与全书报告同一事务入库
@@ -198,8 +146,6 @@ class DiagnosisDomain:
         案例交付与正式报告绑定走既有保存链，重投只核验不改写已保存结果。
         """
         reports = [(anchor, data["analysis"]) for anchor, data in self.reports.items() if "analysis" in data]
-        if snapshot_digest(self.draft._declarations()) != self.source_hash:
-            raise ValueError("原始声明清单已改变，禁止保存")
         self.draft.agent_id = author
         if not reports:
             raise ValueError("报告会话结束但没有提交报告：write_diagnosis 必须提交且只能提交一次")
@@ -208,7 +154,6 @@ class DiagnosisDomain:
         anchor, payload = reports[0]
         if self.report_bindings.get(anchor) != self._narrative_snapshot():
             raise ValueError("报告绑定的叙事快照已改变，禁止保存：报告提交后不得再改叙事组织")
-        self._promote_unbound_declarations()
         organization = self.draft.finish()
         analysis = AgentAnalysis.model_validate(
             {
@@ -216,11 +161,6 @@ class DiagnosisDomain:
                 "novel_id": self.novel_id,
                 "foreshadow_expectation": DiagnosisQueries(self.session).calculate_foreshadow_expectation(
                     self.run_id,
-                    declaration_bindings={
-                        declaration: event.event_id
-                        for event in self.draft.events.values()
-                        for declaration in event.declaration_ids
-                    },
                 ),
                 "narrative_organization": organization.model_dump(mode="json"),
             }
