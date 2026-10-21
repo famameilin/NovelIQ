@@ -33,10 +33,10 @@ def test_fixed_results_match_declaration_contract(api_client, db_session, monkey
         )
     baseline = json.loads((Path(__file__).parent / "fixtures/module_results_baseline.json").read_text(encoding="utf-8"))
     events = actual["event-trees"]
-    assert events["counts"]["all_events"] == 9 and events["counts"]["declarations"] == 10
-    assert next(item for item in events["events"] if item["title"] == "踏入江湖")["status"] == "resolved"
+    assert events["counts"]["all_events"] == 10 and "declarations" not in events["counts"]
+    assert next(item for item in events["events"] if item["title"] == "踏入江湖")["status"] == "ongoing"
     exported = actual["export"]["event_trees"]
-    assert len(exported["declaration_bindings"]) == 10 and len(exported["declarations"]) == 10
+    assert "declaration_bindings" not in exported and "declarations" not in exported
     assert "processes" not in exported and "process_structures" not in exported
     changed = differences(baseline["responses"], actual)
     assert not changed, "\n".join(changed)

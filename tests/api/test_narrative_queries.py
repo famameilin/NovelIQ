@@ -72,7 +72,7 @@ def _fixture(session) -> NarrativeScenario:
         )
     session.flush()
     draft, _meta = identity_every_declaration(session, run, context=(session_id, agent_id))
-    mapping = {key: item.event_id for item in draft.events.values() for key in item.declaration_ids}
+    mapping = {key: key for key in draft.events}
     events = {chapter: mapping[declarations[chapter]] for chapter in range(1, 9)}
     close_structure(session, draft, evidence_paragraph_id=0)
     arc = draft.register_arc(
@@ -97,8 +97,8 @@ def _fixture(session) -> NarrativeScenario:
         "setup": add_foreshadowing_action(
             session,
             producer_agent_id=executions[2],
-            source_declaration_id=declarations[2],
-            target_declaration_id=declarations[2],
+            source_event_id=declarations[2],
+            target_event_id=declarations[2],
             paragraph=first_paragraph(session, run, chapter_id=2),
             action_type="setup",
             operation_order=1,
@@ -108,8 +108,8 @@ def _fixture(session) -> NarrativeScenario:
         actions[action] = add_foreshadowing_action(
             session,
             producer_agent_id=executions[chapter],
-            source_declaration_id=declarations[2],
-            target_declaration_id=declarations[chapter],
+            source_event_id=declarations[2],
+            target_event_id=declarations[chapter],
             paragraph=first_paragraph(session, run, chapter_id=chapter),
             action_type=action,
             operation_order=1,
@@ -172,18 +172,17 @@ def test_tree_reads_complete_event_without_process_or_search_projection(db_sessi
     query = EventTreeQuery(storage_for(db_session), scenario.run_id)
     overview = query.fetch()
     assert overview["counts"]["all_events"] == 8
-    assert overview["counts"]["declarations"] == 8
+    assert "declarations" not in overview["counts"]
     assert "matches" not in overview
     owner = scenario.events[2]
-    assert owner != scenario.declarations[2]
+    assert owner == scenario.declarations[2]
     detail = query.detail(owner)
     assert detail["event_type"] == "行动"
     assert [item["arc_id"] for item in detail["arcs"]] == [scenario.arcs["mystery"]]
     assert detail["arcs"][0]["evidence"][0]["paragraph_id"] == 1
     assert detail["direct_children"] == []
     assert query.export()["counts"] == overview["counts"]
-    with pytest.raises(LookupError, match="NODE_NOT_FOUND"):
-        query.detail(scenario.declarations[2])
+    assert query.detail(scenario.declarations[2])["event_id"] == owner
     with pytest.raises(TypeError):
         query.fetch(q="藏起旧信")
 
@@ -229,7 +228,7 @@ def test_complete_event_evidence_and_process_source_keep_actual_identity(db_sess
     assert "第5章原文" in source.text
     process_source = api_client.get(
         f"/api/novels/{scenario.novel_id}/event-trees/nodes/{scenario.declarations[5]}/source",
-        params={"task_id": scenario.task_id, "kind": "declaration"},
+        params={"task_id": scenario.task_id, "kind": "event"},
     )
     assert process_source.status_code == 200
     assert process_source.json()["chapter_id"] == 5
@@ -288,7 +287,7 @@ def test_action_save_rejects_future_endpoints(db_session, future_endpoint):
         json.dumps({"nodes": {}, "connections": {}, "actions": {new_id(): action}}),
         "{}",
     )
-    source_field = "source_declaration_id" if future_endpoint == "root_event_id" else "target_declaration_id"
+    source_field = "source_event_id" if future_endpoint == "root_event_id" else "target_event_id"
     with pytest.raises(ValueError, match=source_field + ".*来源章晚于"):
         EventWriter(run).save_work(db_session, frozen, record_id)
 
@@ -331,13 +330,11 @@ def test_action_save_accepts_earlier_saved_work_endpoints(db_session):
     EventWriter(run).save_work(db_session, frozen, record_id)
     stored = list(
         db_session.scalars(
-            select(EventForeshadowingAction).where(
-                EventForeshadowingAction.producer_agent_id == annotation_execution
-            )
+            select(EventForeshadowingAction).where(EventForeshadowingAction.producer_agent_id == annotation_execution)
         )
     )
     assert [item.action_type for item in stored] == ["payoff"]
-    assert stored[0].source_declaration_id == declarations[5]
+    assert stored[0].source_event_id == declarations[5]
 
 
 def test_source_rejects_mismatched_text_hash(db_session):

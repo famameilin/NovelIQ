@@ -121,8 +121,8 @@ def test_fetch_timeline_data_reuses_independent_plotline_contract(db_session) ->
     # 跨树链路的活动观察沿用正式列：这里显式置一条为非活动/已过期
     inactive_link = db_session.execute(
         select(NarrativeLink).where(
-            NarrativeLink.semantic_source_declaration_id == eid2,
-            NarrativeLink.semantic_target_declaration_id == palace_root,
+            NarrativeLink.semantic_source_event_id == eid2,
+            NarrativeLink.semantic_target_event_id == palace_root,
         )
     ).scalar_one()
     inactive_link.is_active = False
@@ -150,18 +150,7 @@ def test_fetch_timeline_data_reuses_independent_plotline_contract(db_session) ->
     assert len(timeline_data["chapters"]) == 2
     assert timeline_data["total"] == 1
     assert timeline_data["changes"][0]["action"] == "setup"
-    from sqlalchemy import distinct
-
-    from src.storage.models import CompleteEvent, EventDeclarationBinding
-
-    bound_events = list(
-        db_session.scalars(
-            select(distinct(CompleteEvent.event_id))
-            .join(EventDeclarationBinding, EventDeclarationBinding.event_id == CompleteEvent.event_id)
-            .where(EventDeclarationBinding.declaration_id == eid1)
-        )
-    )
-    assert timeline_data["changes"][0]["source_event_ids"] == bound_events
+    assert timeline_data["changes"][0]["source_event_ids"] == [eid1]
     assert "causal_edges" not in timeline_data
 
 
@@ -771,7 +760,7 @@ def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeyp
     tree = results_data["event_trees"]
     assert tree == EventTreeQuery(storage_for(db_session), run_id).export()
     assert tree["counts"]["all_events"] == 2
-    assert tree["counts"]["declarations"] == 2
+    assert "declarations" not in tree["counts"]
     assert event_id in [entry["event_id"] for entry in tree["details"]]
     assert "event_forest" not in results_data
 
