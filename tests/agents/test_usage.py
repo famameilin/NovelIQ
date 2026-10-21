@@ -1,5 +1,6 @@
 """Agent 模型用量审计测试"""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -163,10 +164,11 @@ def test_estimate_agent_token_usage_returns_estimated_records_per_ai_message() -
     assert len(estimates) == 2
     for estimate in estimates:
         assert estimate.estimated is True
-        assert estimate.cache_read_tokens == 0
+        assert estimate.cache_read_tokens is None
         assert estimate.cost is None
-        assert estimate.prompt_tokens == count_tokens("你好，请分析这段内容\n\nok")
         assert estimate.total_tokens == estimate.prompt_tokens + estimate.completion_tokens
+    assert estimates[0].prompt_tokens >= count_tokens("你好，请分析这段内容")
+    assert estimates[1].prompt_tokens > estimates[0].prompt_tokens + estimates[0].completion_tokens
     assert estimates[0].completion_tokens == count_tokens("分析结果")
     assert estimates[1].completion_tokens == count_tokens("最终结论")
 
@@ -205,7 +207,7 @@ def test_turn_usage_records_estimates_missing_usage() -> None:
     assert usage is not None
     assert usage["prompt_tokens"] >= 0
     assert usage["completion_tokens"] > 0
-    assert usage["cache_read_tokens"] == 0
+    assert usage["cache_read_tokens"] is None
     assert usage["cost"] is None
     assert usage["accounting_source"] == "estimated"
 
@@ -234,3 +236,65 @@ def test_turn_usage_records_keeps_reported_usage() -> None:
     assert usage["cost"] == 0.42
     assert usage["accounting_source"] == "reported"
     assert usage["reasoning_tokens"] == 5
+
+
+def test_estimation_includes_tool_code_history_and_bound_tool_catalog() -> None:
+    from src.agents.turn_observer import _usage_for_turn
+
+    response = AIMessage(content="", tool_calls=[{
+        "id": "call", "name": "execute_code", "args": {"code": "print('evidence')" * 100},
+    }])
+    simple = _usage_for_turn([HumanMessage(content="办案例")], AIMessage(content=""))
+    usage = _usage_for_turn([HumanMessage(content="办案例")], response, tool_schema_tokens=500)
+    repeated = _usage_for_turn([HumanMessage(content="办案例"), response], response, tool_schema_tokens=500)
+    assert usage["completion_tokens"] > 0
+    assert usage["prompt_tokens"] == simple["prompt_tokens"] + 500
+    assert repeated["prompt_tokens"] >= usage["prompt_tokens"] + usage["completion_tokens"]
+
+
+def test_provider_catalog_reaches_estimated_turn_usage() -> None:
+    from src.agents.stream_audit import ModelCallTiming, _provider_request_metadata
+    from src.agents.turn_observer import AgentTurnObserver, _usage_for_turn
+
+    model = SimpleNamespace(bound=SimpleNamespace(model_name="test"), kwargs={"tools": [{
+        "type": "function", "function": {
+            "name": "execute_code", "description": "真实工具目录与参数" * 200,
+            "parameters": {"type": "object", "properties": {"code": {"type": "string"}}},
+        },
+    }]})
+    recorder = MagicMock()
+    observer = AgentTurnObserver(recorder, invocation_id=1, context={})
+    messages = [HumanMessage(content="办理案例")]
+    response = AIMessage(content="", tool_calls=[{
+        "name": "execute_code", "args": {"code": "claim_random_case()"}, "id": "call",
+    }])
+    observer.begin_provider_turn(
+        context_summary={}, request_messages=messages,
+        provider_request=_provider_request_metadata(model, attempt=1), started_ns=1,
+    )
+    observer.complete_provider_turn(response_message=response, timing=ModelCallTiming(model_ms=10))
+    usage = recorder.finish_turn.call_args.kwargs["token_usage"]
+    assert usage["prompt_tokens"] > _usage_for_turn(messages, response)["prompt_tokens"] + 200
+    assert usage["completion_tokens"] > 0 and usage["accounting_source"] == "estimated"
+    assert usage["cost"] is None
+
+
+def test_nested_tool_wall_time_includes_outer_interval_without_summing_inner_time() -> None:
+    from src.agents.stream_audit import ModelCallTiming
+    from src.agents.turn_observer import AgentTurnObserver
+
+    recorder = MagicMock()
+    observer = AgentTurnObserver(recorder, invocation_id=1, context={})
+    observer.begin_provider_turn(context_summary={}, request_messages=[], provider_request={}, started_ns=1)
+    observer.complete_provider_turn(
+        response_message=AIMessage(content="", tool_calls=[{
+            "name": "execute_code", "args": {"code": "claim_random_case()"}, "id": "outer",
+        }]), timing=ModelCallTiming(model_ms=10),
+    )
+    for name, start, duration in (("claim_random_case", 200, 30), ("execute_code", 100, 200)):
+        observer.record_tool_call(
+            call_index=0, tool_name=name, request_args={}, response={}, receipt={}, error=None,
+            tool_duration_ms=duration, started_ns=start * 1_000_000,
+        )
+    observer.close_turn()
+    assert recorder.update_turn_timings.call_args.kwargs["tool_wall_ms"] == 200
