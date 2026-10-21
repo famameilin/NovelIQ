@@ -66,14 +66,12 @@ class DiagnosisQueries:
         return fetch_foreshadowing_trees(self.session, run_id)
 
     def fetch_foreshadowing_sources(self, run_id: str) -> list[dict[str, Any]]:
-        """读取诊断尚未发布时的来源声明与明确动作，不借正式树伪造事件身份"""
+        """读取诊断尚未发布时的来源事件与明确动作，不借正式树伪造事件身份"""
         return fetch_foreshadowing_sources(self.session, run_id)
 
-    def calculate_foreshadow_expectation(
-        self, run_id: str, *, declaration_bindings: dict[str, str] | None = None
-    ) -> float | None:
+    def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
         """读取伏笔线程生命周期聚合预期"""
-        return calculate_foreshadow_expectation(self.session, run_id, declaration_bindings=declaration_bindings)
+        return calculate_foreshadow_expectation(self.session, run_id)
 
     def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[tuple[int, str]]:
         """读取章节标注中的转折时刻"""

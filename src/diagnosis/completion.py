@@ -17,7 +17,7 @@ def has_diagnosis_data(session: Storage, run_id: str) -> bool:
         return False
     # 正式组织必须已发布：本 run 存在完整事件（生产者执行属于本 run），且报告冻结了身份与结构快照
     published = session.reads.final_diagnosis_completion_has_diagnosis_data_1(run_id)
-    if published is None or report.identity_snapshot is None or report.structure_snapshot is None:
+    if published is None or report.content_snapshot is None or report.structure_snapshot is None:
         return False
 
     def _has_cast(cast_role: str) -> bool:

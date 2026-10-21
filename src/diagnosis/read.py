@@ -1,7 +1,7 @@
 """诊断结果查询及归一化；返回领域读模型
 
 读侧从 diagnosis_reports 报告头及 agent_assessments 的标签/名单/评分条目重组，
-novel_id 从运行取，foreshadow_expectation 从正式伏笔链与阶段声明绑定投影；
+novel_id 从运行取，foreshadow_expectation 从正式伏笔链与阶段事件绑定投影；
 对 API 的中文字段语义、空值与顺序保持不变。
 """
 
@@ -24,14 +24,6 @@ from src.diagnosis.read_models import DiagnosisReadResult
 from src.diagnosis.vocabulary import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
 from src.storage import Storage
 from src.utils.parsing import parse_int_field, parse_json_field
-
-
-def _declaration_bindings(session: Storage, run_id: str) -> dict[str, str]:
-    """正式声明绑定：阶段版本绑定声明，完整事件→声明，供伏笔预期沿绑定取事件身份"""
-    return {
-        str(_stored_row_1.declaration_id): str(_stored_row_1.event_id)
-        for _stored_row_1 in session.reads.final_diagnosis_read_declaration_bindings_1(run_id)
-    }
 
 
 def fetch_diagnosis_payload(session: Storage, run_id: str) -> dict[str, Any] | None:
@@ -59,9 +51,7 @@ def fetch_diagnosis_payload(session: Storage, run_id: str) -> dict[str, Any] | N
     payload: dict[str, Any] = {
         "run_id": run_id,
         "novel_id": session.reads.diagnosis_read_fetch_diagnosis_payload_1(run_id),
-        "foreshadow_expectation": calculate_foreshadow_expectation(
-            session, run_id, declaration_bindings=_declaration_bindings(session, run_id)
-        ),
+        "foreshadow_expectation": calculate_foreshadow_expectation(session, run_id),
         "arc_scores": arc_scores,
         "genre_labels": _labels("genre_label"),
         "style_labels": _labels("style_label"),
