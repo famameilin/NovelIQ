@@ -27,8 +27,8 @@ class EntitySnapshotRow:
     entity_type: str
     tags: list[str]
     attributes: dict[str, Any]
-    first_seen_chapter: int
-    last_seen_chapter: int
+    first_seen_chapter: int | None
+    last_seen_chapter: int | None
     state_chapter_id: int | None
     state: dict[str, Any]
 
@@ -37,7 +37,7 @@ class EntitySnapshotRow:
 class RelationSnapshotRow:
     "用于返回目标章节边界的稳定关系状态"
 
-    chapter_id: int
+    chapter_id: int | None
     relation_id: str
     from_entity_id: str
     to_entity_id: str
@@ -49,8 +49,8 @@ class RelationSnapshotRow:
     attributes: dict[str, Any]
     is_active: bool
     changes: list[dict[str, Any]]
-    first_seen_chapter: int
-    last_seen_chapter: int
+    first_seen_chapter: int | None
+    last_seen_chapter: int | None
 
 
 @dataclass(frozen=True, slots=True)

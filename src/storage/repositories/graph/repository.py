@@ -254,6 +254,8 @@ class GraphRepository(BaseRepository[GraphFact]):
                 relation = relations.get(str(fact.relation_id))
                 if relation is None:
                     continue
+                if chapter_id is None:
+                    folded.unscoped_entities.update((str(relation.from_entity_id), str(relation.to_entity_id)))
                 change_kind = str(fact.relation_change_kind or "assert")
                 if change_kind not in {"retract", "break"}:
                     support_counts[str(fact.relation_id)] = support_counts.get(str(fact.relation_id), 0) + 1
@@ -296,6 +298,8 @@ class GraphRepository(BaseRepository[GraphFact]):
             if entity is None:
                 continue
             entity_id = str(fact.entity_id)
+            if chapter_id is None:
+                folded.unscoped_entities.add(entity_id)
             name = str(entity.canonical_name)
             entity_type = str(entity.entity_type)
             # 引用身份确认（tags_submitted=False）不产生状态与变化；无字段更新按实体操作折叠
@@ -389,7 +393,7 @@ class GraphRepository(BaseRepository[GraphFact]):
         return folded
 
     def _latest_entity_states(
-        self, folded: _FoldedGraph, boundary: ChapterBoundary
+        self, folded: _FoldedGraph, boundary: ChapterBoundary, *, include_unscoped: bool = False,
     ) -> dict[str, tuple[int, _EntityStateBucket]]:
         latest: dict[str, tuple[int, _EntityStateBucket]] = {}
         for (chapter_id, entity_id), bucket in folded.entity_states.items():
@@ -399,23 +403,26 @@ class GraphRepository(BaseRepository[GraphFact]):
             current = latest.get(entity_id)
             if current is None or folded.order_map.get(current[0], 0) < order:
                 latest[entity_id] = (chapter_id, bucket)
+        if include_unscoped:
+            latest.update({key: (0, bucket) for (chapter, key), bucket in folded.entity_states.items() if chapter == 0})
         return latest
 
-    def fetch_entity_snapshots(self, boundary: ChapterBoundary) -> list[EntitySnapshotRow]:
+    def fetch_entity_snapshots(
+        self, boundary: ChapterBoundary, *, include_unscoped: bool = False,
+    ) -> list[EntitySnapshotRow]:
         "用于选择目标章节以前最近状态并继承无变化实体"
         folded = self._fold_graph(boundary.run_id)
         entities = {
             str(row.entity_id): row
             for row in self.session.execute(select(GraphEntity).where(GraphEntity.run_id == boundary.run_id)).scalars()
         }
-        latest = self._latest_entity_states(folded, boundary)
+        latest = self._latest_entity_states(folded, boundary, include_unscoped=include_unscoped)
         result: list[EntitySnapshotRow] = []
         for entity_id in sorted(entities):
             span = folded.entity_spans.get(entity_id)
-            if span is None:
-                continue
-            first_order = folded.order_map.get(span[0], 0)
-            if first_order == 0 or first_order > boundary.chapter_order:
+            unscoped = include_unscoped and entity_id in folded.unscoped_entities
+            first_order = folded.order_map.get(span[0], 0) if span else 0
+            if not unscoped and (first_order == 0 or first_order > boundary.chapter_order):
                 continue
             entity = entities[entity_id]
             state = latest.get(entity_id)
@@ -426,16 +433,16 @@ class GraphRepository(BaseRepository[GraphFact]):
                     entity_type=str(entity.entity_type),
                     tags=list(state[1].state.get("tags", [])) if state else [],
                     attributes=dict(state[1].state.get("attributes", {})) if state else {},
-                    first_seen_chapter=span[0],
-                    last_seen_chapter=span[1],
-                    state_chapter_id=state[0] if state else None,
+                    first_seen_chapter=span[0] if span else None,
+                    last_seen_chapter=span[1] if span else None,
+                    state_chapter_id=(state[0] or None) if state else None,
                     state=dict(state[1].state) if state else {},
                 )
             )
         return result
 
     def _latest_relation_states(
-        self, folded: _FoldedGraph, boundary: ChapterBoundary
+        self, folded: _FoldedGraph, boundary: ChapterBoundary, *, include_unscoped: bool = False,
     ) -> dict[str, tuple[int, _RelationStateBucket]]:
         latest: dict[str, tuple[int, _RelationStateBucket]] = {}
         for (chapter_id, relation_id), bucket in folded.relation_states.items():
@@ -445,10 +452,14 @@ class GraphRepository(BaseRepository[GraphFact]):
             current = latest.get(relation_id)
             if current is None or folded.order_map.get(current[0], 0) < order:
                 latest[relation_id] = (chapter_id, bucket)
+        if include_unscoped:
+            latest.update({
+                key: (0, bucket) for (chapter, key), bucket in folded.relation_states.items() if chapter == 0
+            })
         return latest
 
     def fetch_relation_snapshots(
-        self, boundary: ChapterBoundary, *, active_only: bool = True
+        self, boundary: ChapterBoundary, *, active_only: bool = True, include_unscoped: bool = False,
     ) -> list[RelationSnapshotRow]:
         "用于选择目标章节以前最近关系状态并过滤活动状态"
         folded = self._fold_graph(boundary.run_id)
@@ -458,17 +469,19 @@ class GraphRepository(BaseRepository[GraphFact]):
         }
         relations = {str(row.relation_id): row for row in self.session.execute(select(GraphRelation)).scalars()}
         result: list[RelationSnapshotRow] = []
-        for relation_id, (chapter_id, bucket) in self._latest_relation_states(folded, boundary).items():
+        for relation_id, (chapter_id, bucket) in self._latest_relation_states(
+            folded, boundary, include_unscoped=include_unscoped,
+        ).items():
             if active_only and not bucket.is_active:
                 continue
             relation = relations.get(relation_id)
             if relation is None:
                 continue
 
-            span = folded.relation_spans.get(relation_id, (chapter_id, chapter_id))
+            span = folded.relation_spans.get(relation_id)
             result.append(
                 RelationSnapshotRow(
-                    chapter_id=chapter_id,
+                    chapter_id=chapter_id or None,
                     relation_id=relation_id,
                     from_entity_id=str(relation.from_entity_id),
                     to_entity_id=str(relation.to_entity_id),
@@ -487,8 +500,8 @@ class GraphRepository(BaseRepository[GraphFact]):
                         )
                         for change in bucket.changes
                     ],
-                    first_seen_chapter=span[0],
-                    last_seen_chapter=span[1],
+                    first_seen_chapter=span[0] if span else None,
+                    last_seen_chapter=span[1] if span else None,
                 )
             )
         return result
@@ -596,20 +609,22 @@ class GraphRepository(BaseRepository[GraphFact]):
         return changes[offset:end], total
 
     def fetch_latest_entity_rows(self, run_id: str, *, entity_type: str | None = None) -> list[EntitySnapshotRow]:
-        "用于读取当前章节边界的实体状态"
+        "当前全书状态包含无章节归属的正式事实"
         boundary = self.resolve_persisted_boundary(run_id)
         if boundary is None:
             return []
         return [
             row
-            for row in self.fetch_entity_snapshots(boundary)
+            for row in self.fetch_entity_snapshots(boundary, include_unscoped=True)
             if (entity_type is None or row.entity_type == entity_type)
         ]
 
     def fetch_latest_relations(self, run_id: str, *, active_only: bool = True) -> list[RelationSnapshotRow]:
-        "用于读取当前章节边界的关系状态"
+        "当前全书关系包含无章节归属的正式事实"
         boundary = self.resolve_persisted_boundary(run_id)
-        return [] if boundary is None else self.fetch_relation_snapshots(boundary, active_only=active_only)
+        return [] if boundary is None else self.fetch_relation_snapshots(
+            boundary, active_only=active_only, include_unscoped=True,
+        )
 
     def fetch_relation_history(self, run_id: str) -> list[RelationSnapshotRow]:
         "按章节顺序读取关系历史，共享一次折叠结果，避免逐状态重建全图"
@@ -693,3 +708,4 @@ class _FoldedGraph:
     relation_states: dict[tuple[int, str], _RelationStateBucket] = field(default_factory=dict)
     entity_spans: dict[str, tuple[int, int]] = field(default_factory=dict)
     relation_spans: dict[str, tuple[int, int]] = field(default_factory=dict)
+    unscoped_entities: set[str] = field(default_factory=set)
