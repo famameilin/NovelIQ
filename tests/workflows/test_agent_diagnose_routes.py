@@ -66,35 +66,11 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
                 "    case = cases[0]\n"
                 '    promise_case(case_id=case["case_id"])\n'
                 "    page = search_events(limit=20)\n"
-                '    declaration = ""\n'
                 '    for item in page["events"]:\n'
-                '        if item["title"] in case["description"]:\n'
-                '            declaration = item["declaration_id"]\n'
-                '    source = read_event(node_id=declaration)["content"]\n'
-                '    evidence = [{"paragraph_id":source["evidence"][0]["paragraph_id"]}]\n'
-                '    own = write_event(items=[{"operation":"identity", "key":declaration, '
-                '"title":source["title"], "problem":source["problem"], "summary":source["summary"], '
-                '"event_type":source["event_type"], "status":source["status"], '
-                '"declaration_ids":[declaration], "reason":"依据当前章声明核对身份", "evidence":evidence}], '
-                'caseid=case["case_id"])["results"][0]["event_id"]\n'
-                '    write_event(items=[{"operation":"declaration_review", "declaration_ids":[declaration], '
-                '"reason":"逐项核对已保存章节声明"}], caseid=case["case_id"])\n'
-                "    targets = []\n"
-                '    for item in page["events"]:\n'
-                '        if item["chapter_id"] > source["chapter_id"]:\n'
-                '            targets = targets + [item["declaration_id"]]\n'
-                "    if targets:\n"
-                '        write_event(items=[{"operation":"compare", "source_declaration_id":declaration, '
-                '"target_declaration_ids":targets, "disposition":"independent", '
-                '"reason":"本测试各章问题明确独立", "evidence":evidence}], caseid=case["case_id"])\n'
-                "    pairs = []\n"
-                '    for item in search_events(kind="event", limit=20)["events"]:\n'
-                '        if item["event_id"] != own:\n'
-                '            pairs = pairs + [{"operation":"structure_review", "source_event_id":own, '
-                '"target_event_id":item["event_id"], "disposition":"independent", '
-                '"reason":"本测试各事件没有包含或因果关系", "evidence":evidence}]\n'
-                "    if pairs:\n"
-                '        write_event(items=pairs, caseid=case["case_id"])\n'
+                '        if item["event_id"] in case["description"]:\n'
+                '            write_event(items=[{"operation":"review", "event_ids":[item["event_id"]], '
+                '"reason":"核查原文与事件"}], caseid=case["case_id"])\n'
+                '    submit_case(case_id=case["case_id"])\n'
                 "else:\n"
                 "    finish()"
             )
@@ -238,54 +214,10 @@ class TestDiagnosisRoutes:
         self._register_event_cases()
 
     def _register_event_cases(self) -> None:
-        """声明落地即登记事件案例（生产由标注工具登记、章保存落库）：诊断期按案例自取办理"""
-        from sqlalchemy import select
+        "按已保存根事件登记案例"
+        from src.storage.repositories.case_writes import CaseWritesRepository
 
-        from src.case_pool import CasePool
-        from src.case_pool.contributions import CaseContribution
-        from src.storage.models import ChapterAnnotation, EventDeclaration
-        from tests.support.chapter_annotation_helpers import _create_work_identity
-
-        _work_id, author = _create_work_identity(self.db_session, run_id=self.run_id, chapter_id=1, role="event")
-        pool = CasePool(self.run_id)
-        pool.begin(author)
-        rows = self.db_session.execute(
-            select(
-                EventDeclaration.declaration_id,
-                EventDeclaration.title,
-                EventDeclaration.summary,
-                EventDeclaration.status,
-                ChapterAnnotation.chapter_id,
-            )
-            .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
-            .where(ChapterAnnotation.run_id == self.run_id)
-        ).all()
-        for _declaration_id, title, summary, _status, _chapter_id in rows:
-            pool.register_event_case(
-                title=title,
-                summary=summary,
-                author=author,
-            )
-        assert (
-            pool.save_work(
-                storage_for(self.db_session),
-                CaseContribution(
-                    self.run_id,
-                    author,
-                    json.dumps(
-                        {
-                            "created_case_ids": sorted(pool.created.get(author, set())),
-                            "registrations": {
-                                key: pool.cases[key] for key in sorted(pool.registrations.get(author, set()))
-                            },
-                            "promises": [],
-                        },
-                        ensure_ascii=False,
-                    ),
-                ),
-            )
-            == []
-        )
+        CaseWritesRepository(self.run_id).register_event_roots(self.db_session)
         self.db_session.commit()
 
     def test_fetch_pivot_blocks(self) -> None:

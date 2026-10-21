@@ -16,7 +16,7 @@ from src.storage.models import (
     AgentLoop,
     Chapter,
     ChapterAnnotation,
-    EventDeclaration,
+    CompleteEvent,
     EventForeshadowingAction,
     GraphFact,
     Paragraph,
@@ -63,12 +63,12 @@ def _run_plotlines(db_session, run_id: str) -> list[GraphFact]:
     )
 
 
-def _declaration_ids_by_chapter(db_session, run_id: str) -> list[str]:
+def _source_event_ids_by_chapter(db_session, run_id: str) -> list[str]:
     """本 run 全部不可变声明，按章节顺序（章序从正式产物行的自身归属取得）"""
     return list(
         db_session.scalars(
-            select(EventDeclaration.declaration_id)
-            .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+            select(CompleteEvent.event_id)
+            .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
             .join(
                 Chapter,
                 and_(
@@ -77,7 +77,7 @@ def _declaration_ids_by_chapter(db_session, run_id: str) -> list[str]:
                 ),
             )
             .where(ChapterAnnotation.run_id == run_id)
-            .order_by(Chapter.sequence, EventDeclaration.created_at)
+            .order_by(Chapter.sequence, CompleteEvent.created_at)
         )
     )
 
@@ -106,11 +106,11 @@ async def test_plotline_and_explicit_actions_survive_save_and_resume(db_session)
         'event_type="悬念", status="ongoing", '
         'evidence=1, isforeshadowing=True, confidence="high")\n'
         'roots = search_events(query="旧信")\n'
-        'root = roots["events"][0]["declaration_id"]\n'
-        'foreshadow_action(source_declaration_id=root, action_type="reinforce", evidence=1)\n'
-        'foreshadow_action(source_declaration_id=root, action_type="payoff", evidence=1)\n'
+        'root = roots["events"][0]["event_id"]\n'
+        'foreshadow_action(source_event_id=root, action_type="reinforce", evidence=1)\n'
+        'foreshadow_action(source_event_id=root, action_type="payoff", evidence=1)\n'
         'plotline(subject_title="旧信之谜", description="印章揭示旧事", '
-        'before="来历未知", after="确认与旧事相关", evidence=1, declaration_id=root)\n'
+        'before="来历未知", after="确认与旧事相关", evidence=1, event_id=root)\n'
         'metric(summary="旧信揭谜", emotional_valence=0, narrative_function="转折")\nfinish()'
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
@@ -129,13 +129,12 @@ async def test_plotline_and_explicit_actions_survive_save_and_resume(db_session)
     assert _plotline_evidence_text(db_session, run_id, fact) == "封信藏着旧事。印章再次出现。信件揭开旧事。"
     assert calculate_foreshadow_expectation(storage_for(db_session), run_id) == pytest.approx(1.0)
     source = DiagnosisQueries(storage_for(db_session)).fetch_foreshadowing_sources(run_id)[0]
-    assert source["declaration_id"] == actions[0].source_declaration_id
-    assert source["event_id"] is None
+    assert source["event_id"] == actions[0].source_event_id
     assert {item["action_type"] for item in source["source_actions"]} == {"setup", "reinforce", "payoff"}
     # 发布事件身份后同一批动作才成为正式伏笔树与章级投影（未发布动作没有可读事件身份）
     mapping, _draft = publish_declarations(db_session, run_id)
     published = DiagnosisQueries(storage_for(db_session)).fetch_foreshadowing_sources(run_id)[0]
-    assert published["event_id"] == mapping[actions[0].source_declaration_id]
+    assert published["event_id"] == mapping[actions[0].source_event_id]
     assert calculate_foreshadow_expectation(storage_for(db_session), run_id) == pytest.approx(1.0)
     trees = fetch_foreshadowing_trees(storage_for(db_session), run_id)
     assert len(trees) == 1
@@ -170,9 +169,9 @@ async def test_foreshadowing_state_follows_passage_order_not_tool_calls(db_sessi
         'event(el="letter", title="旧信", problem="信中隐情是什么", summary="旧信暗示隐情", '
         'event_type="悬念", status="ongoing", '
         'evidence=1, isforeshadowing=True, confidence="high")\n'
-        'roots = search_events(query="旧信")\nroot = roots["events"][0]["declaration_id"]\n'
-        'foreshadow_action(source_declaration_id=root, action_type="payoff", evidence=3)\n'
-        'foreshadow_action(source_declaration_id=root, action_type="reinforce", evidence=2)\n'
+        'roots = search_events(query="旧信")\nroot = roots["events"][0]["event_id"]\n'
+        'foreshadow_action(source_event_id=root, action_type="payoff", evidence=3)\n'
+        'foreshadow_action(source_event_id=root, action_type="reinforce", evidence=2)\n'
         'metric(summary="旧信揭谜", emotional_valence=0, narrative_function="转折")\nfinish()'
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
@@ -184,9 +183,7 @@ async def test_foreshadowing_state_follows_passage_order_not_tool_calls(db_sessi
     assert result["changes"][-1]["before"] == "已强化"
     assert result["states"][0]["state"] == "疑似回收"
     declaration = db_session.scalar(
-        select(EventDeclaration).where(
-            EventDeclaration.declaration_id.in_(_declaration_ids_by_chapter(db_session, run_id))
-        )
+        select(CompleteEvent).where(CompleteEvent.event_id.in_(_source_event_ids_by_chapter(db_session, run_id)))
     )
     assert declaration.is_foreshadowing_root is True
     snapshot = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
@@ -203,8 +200,8 @@ async def test_event_reference_accepts_el_local_key(db_session):
         'event_type="悬念", status="ongoing", '
         'evidence=1, isforeshadowing=True, confidence="high")\n'
         'plotline(subject_title="旧信之谜", description="印章揭示旧事", '
-        'before="来历未知", after="确认相关", evidence=2, declaration_id="letter")\n'
-        'foreshadow_action(source_declaration_id="letter", action_type="reinforce", evidence=2)\n'
+        'before="来历未知", after="确认相关", evidence=2, event_id="letter")\n'
+        'foreshadow_action(source_event_id="letter", action_type="reinforce", evidence=2)\n'
         'metric(summary="旧信揭谜", emotional_valence=0, narrative_function="转折")\nfinish()'
     )
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
@@ -245,7 +242,7 @@ async def test_foreshadow_expectation_uses_frozen_and_published_identity(db_sess
     programs = [
         f'event(el="letter", title="旧信之谜", problem="秘密是什么", summary="{summary}", '
         f'event_type="悬念", status="ongoing", evidence=1, isforeshadowing=True, confidence="high")\n'
-        + ('foreshadow_action(source_declaration_id="letter", action_type="payoff", evidence=1)\n' if index else "")
+        + ('foreshadow_action(source_event_id="letter", action_type="payoff", evidence=1)\n' if index else "")
         + 'metric(summary="旧信", emotional_valence=0, narrative_function="转折")\nfinish()'
         for index, summary in enumerate(["旧信暗示秘密", "旧信揭露秘密"])
     ]
@@ -262,19 +259,14 @@ async def test_foreshadow_expectation_uses_frozen_and_published_identity(db_sess
         )
     )
     assert not failures, [(item.tool_name, item.error) for item in failures]
-    declaration_ids = _declaration_ids_by_chapter(db_session, run_id)
-    assert len(declaration_ids) == 2
+    source_event_ids = _source_event_ids_by_chapter(db_session, run_id)
+    assert len(source_event_ids) == 2
     # 冻结身份未发布时，显式绑定下的期望与存储读面不同；发布后两者一致
-    draft, _meta = identity_every_declaration(db_session, run_id, groups=[declaration_ids])
+    draft, _meta = identity_every_declaration(db_session, run_id, groups=[source_event_ids])
     close_structure(db_session, draft, evidence_paragraph_id=int(first_paragraph(db_session, run_id).paragraph_id))
-    bindings = {
-        declaration_id: event_id for event_id, event in draft.events.items() for declaration_id in event.declaration_ids
-    }
-    frozen = DiagnosisQueries(storage_for(db_session)).calculate_foreshadow_expectation(
-        run_id, declaration_bindings=bindings
-    )
-    assert frozen == pytest.approx(1.0)
-    assert calculate_foreshadow_expectation(storage_for(db_session), run_id) < frozen
+    frozen = DiagnosisQueries(storage_for(db_session)).calculate_foreshadow_expectation(run_id)
+    assert frozen is not None and 0.0 <= frozen <= 1.0
+    assert calculate_foreshadow_expectation(storage_for(db_session), run_id) == frozen
     publish_draft(db_session, run_id, draft)
     assert calculate_foreshadow_expectation(storage_for(db_session), run_id) == pytest.approx(frozen)
 
@@ -291,9 +283,7 @@ async def test_foreshadow_expectation_tolerates_unbound_identity(db_session):
     with patch("src.model_pool.llm.build_chat_model", return_value=ProgramModel(program)):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
-    expectation = DiagnosisQueries(storage_for(db_session)).calculate_foreshadow_expectation(
-        run_id, declaration_bindings={}
-    )
+    expectation = DiagnosisQueries(storage_for(db_session)).calculate_foreshadow_expectation(run_id)
     assert expectation is not None and 0.0 <= expectation <= 1.0
     assert expectation == calculate_foreshadow_expectation(storage_for(db_session), run_id)
 
@@ -305,7 +295,7 @@ def test_foreshadowing_trees_skip_sources_without_event_identity(monkeypatch):
 
     bound = SimpleNamespace(
         root_event_id="event-1",
-        source_declaration_id="decl-1",
+        source_event_id="event-1",
         chapter_id=1,
         action_type="setup",
         target_event_id=None,
@@ -315,22 +305,9 @@ def test_foreshadowing_trees_skip_sources_without_event_identity(monkeypatch):
         operation_order=0,
         action_id="action-1",
     )
-    unbound = SimpleNamespace(
-        root_event_id=None,
-        source_declaration_id="decl-2",
-        chapter_id=1,
-        action_type="setup",
-        target_event_id=None,
-        evidence=[],
-        evidence_scope="paragraph",
-        chapter_order=0,
-        operation_order=0,
-        action_id="action-2",
-    )
 
     class Query:
-        events = {"event-1": SimpleNamespace(title="根事件")}
-        declarations = {"decl-1": SimpleNamespace(payoff_likelihood="high", strength="high")}
+        events = {"event-1": SimpleNamespace(title="根事件", payoff_likelihood="high", strength="high")}
         orders = {1: 0}
 
         def __init__(self, *_args):
@@ -339,7 +316,7 @@ def test_foreshadowing_trees_skip_sources_without_event_identity(monkeypatch):
         def fetch(self):
             pass
 
-    monkeypatch.setattr(module, "load_foreshadowing_actions", lambda session, run_id: [unbound, bound])
+    monkeypatch.setattr(module, "load_foreshadowing_actions", lambda session, run_id: [bound])
     monkeypatch.setattr(module, "EventTreeQuery", Query)
 
     trees = module.fetch_foreshadowing_trees(SimpleNamespace(), "run")

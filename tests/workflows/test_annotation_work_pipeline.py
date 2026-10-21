@@ -16,8 +16,8 @@ from src.storage.models import (
     AgentLoop,
     Case,
     ChapterAnnotation,
+    CompleteEvent,
     DialogueRecord,
-    EventDeclaration,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -335,19 +335,11 @@ async def test_recovery_discards_partial_roles_and_keeps_completed_chapter(db_se
         (item.chapter_id, item.role): item for item in fetch_annotation_role_records(storage_for(db_session), run_id)
     }
     assert refreshed[(complete.chapter_id, complete.role)].invocation_id == retained_invocation
-    current_event = refreshed[(partial_event.chapter_id, partial_event.role)]
-    assert current_event.invocation_id != old_event_invocation
-    record_id = db_session.scalar(
-        select(ChapterAnnotation.record_id).where(ChapterAnnotation.agent_id == current_event.invocation_id)
-    )
-    declaration = db_session.scalar(select(EventDeclaration).where(EventDeclaration.record_id == record_id))
-    assert declaration is not None and declaration.title == "独立事件"
-    # 废弃章的旧尝试随整章废弃一并清理（含其模型调用行），现存执行 = 短章 1 + 重建的 3 条 lane
-    assert _agent_execution_count(db_session, run_id) == 7
-    metric_rows = db_session.execute(
-        select(ChapterAnnotation.role, ChapterAnnotation.summary).where(ChapterAnnotation.run_id == run_id)
-    ).all()
-    assert all(summary is None for role, summary in metric_rows if role in {"entity", "event"})
+    assert refreshed[(partial_event.chapter_id, partial_event.role)].invocation_id == old_event_invocation
+    assert {
+        row.id: (row.description, row.promised_agent_id)
+        for row in db_session.scalars(select(Case).where(Case.run_id == run_id))
+    } == cases_before
 
 
 @pytest.mark.asyncio
@@ -418,7 +410,7 @@ async def test_save_failure_rolls_back_all_business_and_releases_case(db_session
     run_records = select(ChapterAnnotation.record_id).where(ChapterAnnotation.agent_id.in_(run_executions))
     assert (
         db_session.scalar(
-            select(func.count()).select_from(EventDeclaration).where(EventDeclaration.record_id.in_(run_records))
+            select(func.count()).select_from(CompleteEvent).where(CompleteEvent.annotation_record_id.in_(run_records))
         )
         == 0
     )
@@ -530,10 +522,10 @@ async def test_program_can_read_shared_nodes_claim_case_and_save_cross_chapter_l
 cases = search_cases()
 promise_case(case_id=cases[0]["case_id"])
 page = search_events(query="拾得")
-source = page["events"][0]["declaration_id"]
+source = page["events"][0]["event_id"]
 created = event(el="t1", evidence=1, title="读懂旧信", problem="旧信有何用途",
                 summary="读懂旧信", event_type="发现", status="resolved")
-write_link(source_id=source, target_id=created["ref"]["declaration_id"],
+write_link(source_id=source, target_id=created["ref"]["event_id"],
            kind="foreshadowing", reason="旧信内容得以解释", evidence=1, caseid=cases[0]["case_id"])
 metric(summary="读信", emotional_valence=0, narrative_function="铺垫")
 finish()
@@ -545,7 +537,7 @@ finish()
     db_session.expire_all()
     pool = CasePool(run_id)
     pool.load_storage(storage_for(db_session))
-    resolved = [record for record in pool.search() if record["promised"]]
+    resolved = [record for record in pool.search() if record["submitted"]]
     assert len(resolved) == 1
     row = db_session.get(Case, resolved[0]["case_id"])
     assert row.status == "resolved" and row.promised_agent_id is not None
@@ -583,11 +575,11 @@ async def test_read_authorization_survives_failed_call_rollback(db_session, conf
         " target_id='00000000-0000-0000-0000-000000000000', kind='causal',"
         " reason='无效引用制造一次失败回滚', evidence=1)\n"
         "page = search_events(query='拾得')\n"
-        "source = page['events'][0]['declaration_id']\n"
+        "source = page['events'][0]['event_id']\n"
         "detail = read_event(node_id=source)\n"
         "created = event(el='t1', evidence=1, title='读懂旧信', problem='旧信有何用途',"
         " summary='读懂旧信', event_type='发现', status='resolved')\n"
-        "write_link(source_id=source, target_id=created['ref']['declaration_id'],"
+        "write_link(source_id=source, target_id=created['ref']['event_id'],"
         " kind='foreshadowing', reason='旧信内容得以解释', evidence=1)\n"
         "metric(summary='读信', emotional_valence=0, narrative_function='铺垫')\n"
         "finish()"

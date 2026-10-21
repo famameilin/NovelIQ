@@ -19,7 +19,6 @@ from src.storage.models import (
     Case,
     ChapterAnnotation,
     CompleteEvent,
-    EventDeclaration,
     EventForeshadowingAction,
     GraphFact,
 )
@@ -54,8 +53,8 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
         'event(el="e1", title="确认旧信", problem="旧信是否可靠", summary="张三确认旧信内容", '
         'event_type="核查", status="ongoing", evidence=1, isforeshadowing=True, confidence="high")\n'
         'plotline(subject_title="旧信真伪", description="确认内容", before="未知", after="可靠", '
-        'evidence=1, declaration_id="e1")\n'
-        'foreshadow_action(source_declaration_id="e1", action_type="reinforce", evidence=1)\n'
+        'evidence=1, event_id="e1")\n'
+        'foreshadow_action(source_event_id="e1", action_type="reinforce", evidence=1)\n'
         'metric(summary="已核查正文", emotional_valence=0, '  # 同一程序文本
         'narrative_function="铺垫", caseid=cases[0]["cas'  # 同一程序文本
         'e_id"])\n'  # 同一程序文本
@@ -104,8 +103,10 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
     # 「建一个事件进一个池」：声明案例随 write_event 自动登记为 event 案例，另有一行已承诺
     promised = [record for record in records if record["promised"]]
     assert len(records) == 2 and len(promised) == 1
-    assert pool.promises_for(states[0].invocation_id) == [promised[0]["case_id"]]
-    declaration = db_session.scalar(select(EventDeclaration).where(EventDeclaration.record_id == products[0].record_id))
+    assert pool.submissions_for(states[0].invocation_id) == [promised[0]["case_id"]]
+    declaration = db_session.scalar(
+        select(CompleteEvent).where(CompleteEvent.annotation_record_id == products[0].record_id)
+    )
     assert declaration.title == "确认旧信" and declaration.status == "ongoing"
     assert (
         db_session.scalar(select(CompleteEvent).where(CompleteEvent.producer_agent_id.in_(_run_executions(run_id))))
@@ -120,18 +121,18 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
     )
     assert {action.action_type for action in actions} == {"setup", "reinforce"}
     # 写事件自带 setup 指向本声明；程序显式提交的 reinforce 只给来源，不指定目标
-    assert all(action.source_declaration_id == declaration.declaration_id for action in actions)
+    assert all(action.source_event_id == declaration.event_id for action in actions)
     setup = next(action for action in actions if action.action_type == "setup")
     reinforce = next(action for action in actions if action.action_type == "reinforce")
-    assert setup.target_declaration_id == declaration.declaration_id
-    assert reinforce.target_declaration_id is None
+    assert setup.target_event_id == declaration.event_id
+    assert reinforce.target_event_id is None
     plotline = db_session.scalar(
         select(GraphFact).where(
             GraphFact.direct_producer_agent_id.in_(_run_executions(run_id)),
             GraphFact.plotline_subject_title.is_not(None),
         )
     )
-    assert plotline.declaration_id == declaration.declaration_id and plotline.business_call_id is not None
+    assert plotline.event_id == declaration.event_id and plotline.business_call_id is not None
 
 
 @pytest.mark.asyncio
@@ -226,7 +227,7 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
     records = pool.search()
     target = next(record for record in records if record["description"] == "乙章独占线索")
     # 承诺即解决：承诺痕迹落库；未产生写交付，支持条目 adopted=False
-    assert target["promised"] is True
+    assert target["submitted"] is True
 
     row = db_session.get(Case, target["case_id"])
     assert row.status == "resolved" and row.promised_agent_id is not None

@@ -51,35 +51,9 @@ def _publish_one_event_per_declaration(
     draft = EventOrganizationDraft(storage_for(db_session), run_id, session_id)
     draft.fixture_session = db_session
     draft.case_id, draft.producer_agent_id = report_case_anchor(run_id), agent_id
-    rows = {row["declaration_id"]: row for row in draft.read_declarations(declarations)["items"]}
+    from src.event_trees.diagnosis_persistence import hydrate_draft_from_run
 
-    def source_evidence(declaration_id: str) -> list[OrganizationEvidence]:
-        return [OrganizationEvidence(paragraph_id=row["paragraph_id"]) for row in rows[declaration_id]["evidence"]]
-
-    for index, declaration_id in enumerate(declarations):
-        row = rows[declaration_id]
-        draft.identity(
-            key=f"event-{index + 1}",
-            title=row["title"],
-            problem=row["problem"],
-            summary=row["summary"],
-            event_type=row["event_type"],
-            status=row["status"],
-            progress=row["progress"],
-            declaration_ids=[declaration_id],
-            reason="读取夹具显式指定本声明组成一个事件身份",
-            evidence=source_evidence(declaration_id),
-        )
-    for index, source in enumerate(declarations):
-        for target in declarations[index + 1 :]:
-            draft.compare_declarations(
-                source_declaration_id=source,
-                target_declaration_ids=[target],
-                disposition="independent",
-                reason="读取夹具显式判定两条声明为独立事件",
-                evidence=source_evidence(source),
-            )
-    draft.review_declarations(list(declarations), reason="读取夹具已逐项核对不可变声明与原文")
+    hydrate_draft_from_run(storage_for(db_session), run_id, draft)
     events = list(draft.events)
     structure_evidence = [OrganizationEvidence(paragraph_id=evidence_paragraph_id)]
     for index, source in enumerate(events):
