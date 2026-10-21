@@ -39,7 +39,7 @@ def contribution(run, author, case_id, *, promise=False):
         json.dumps(
             {
                 "registrations": {case_id: {"case_type": "event", "description": "核对原文冲突"}},
-                "promises": [case_id] if promise else [],
+                "submissions": [case_id] if promise else [],
             }
         ),
     )
@@ -154,7 +154,7 @@ def test_concurrent_promises_preserve_first_committed_owner(db_session, identiti
     barrier = Barrier(2)
 
     def promise(owner):
-        request = CaseSave(run_id, owner, json.dumps({"registrations": {}, "promises": [case_id]}))
+        request = CaseSave(run_id, owner, json.dumps({"registrations": {}, "submissions": [case_id]}))
         with factory() as session:
             barrier.wait(timeout=5)
             try:

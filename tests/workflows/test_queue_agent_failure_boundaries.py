@@ -49,9 +49,7 @@ class _MemorySessions:
 
     def expect_attempt(self, work_id: str, invocation_id: str, *, role: str = "entity") -> None:
         """模拟派发期已登记的事实：真实尝试行，以及保存事务将写入的正式产物"""
-        self.executions[invocation_id] = SimpleNamespace(
-            agent_id=invocation_id, run_id="run", chapter_id=1, role=role
-        )
+        self.executions[invocation_id] = SimpleNamespace(agent_id=invocation_id, run_id="run", chapter_id=1, role=role)
         self.attempt = (work_id, invocation_id)
 
     def __call__(self) -> Any:
@@ -221,7 +219,6 @@ async def test_cancel_after_real_finish_before_audit_barrier_never_starts_save(m
         async def _save(self, *args: Any) -> None:
             saved.append(True)
 
-    bus.handle("sse.show", "sse:run", _ignore)
     bus.handle("audit.barrier", "audit:run", barrier)
     bus.unhandle("agent.cancel", "agent:run")
     bus.handle("agent.cancel", "agent:run", cancel)
@@ -288,7 +285,7 @@ async def test_cancel_during_commit_retains_original_save_and_confirmation(monke
 async def test_provider_timeout_returns_retry_with_own_contributions_removed(monkeypatch: Any) -> None:
     bus = EventBus()
     agent = _agent(bus, _MemorySessions(), monkeypatch)
-    for topic, address in (("queue.started", "queue:run"), ("sse.show", "sse:run"), ("audit.barrier", "audit:run")):
+    for topic, address in (("queue.started", "queue:run"), ("audit.barrier", "audit:run")):
         bus.handle(topic, address, _ignore)
 
     class FailedGraph:
@@ -310,8 +307,7 @@ async def test_dependency_failure_is_not_model_retry_and_stops_work_pool(monkeyp
     _model_pool(monkeypatch)
     sessions = _MemorySessions()
     agent = _agent(bus, sessions, monkeypatch)
-    for topic, address in (("sse.show", "sse:run"), ("audit.barrier", "audit:run")):
-        bus.handle(topic, address, _ignore)
+    bus.handle("audit.barrier", "audit:run", _ignore)
     attempts = []
 
     class FailedGraph:
@@ -383,9 +379,10 @@ async def test_committed_work_confirmation_recovers_current_author_and_retains_o
         agent.event_trees.begin(key)
         agent.case_pool.begin(key)
     case = agent.case_pool.push("character", "已核查案例", author)
-    agent.case_pool.promise(case["case_id"], author)
+    agent.case_pool.claim(case["case_id"], author)
+    agent.case_pool.submit(case["case_id"], author)
     other_case = agent.case_pool.push("character", "其他 work 的案例", other)
-    agent.case_pool.promise(other_case["case_id"], other)
+    agent.case_pool.claim(other_case["case_id"], other)
     snapshots = (
         {
             "author": author,
@@ -399,7 +396,7 @@ async def test_committed_work_confirmation_recovers_current_author_and_retains_o
         {
             "author": author,
             "registrations": {case["case_id"]: case},
-            "promises": agent.case_pool.promises_for(author),
+            "submissions": agent.case_pool.submissions_for(author),
         },
     )
     for domain, snapshot in zip((agent.fact_graph, agent.event_trees, agent.case_pool), snapshots, strict=True):

@@ -96,7 +96,9 @@ async def test_annotation_role_runs_real_program_and_saves_one_product(db_sessio
     assert is_annotate_complete(storage_for(db_session), run_id)
     states = fetch_annotation_role_records(storage_for(db_session), run_id)
     assert [(item.role, item.state) for item in states] == [("annotation", "saved")]
-    assert not [event for event in events if event.action == "progress" and event.current is not None]
+    confirmed = [event for event in events if event.sub_stage == "confirmed_chapters"]
+    assert [(event.current, event.total, event.unit) for event in confirmed] == [(1, 1, "章")]
+    assert any(event.action == "work_saved" for event in events)
     views = chapter_annotations(storage_for(db_session), run_id)
     assert len(views) == 1
     assert views[0].payload["metrics"]["summary"] == "出门"
@@ -288,6 +290,7 @@ async def test_later_chapter_saves_while_earlier_model_is_running(db_session, co
     order = []
 
     from src.storage.access import AnnotationAccess
+
     original_save = AnnotationAccess.save
     loop = asyncio.get_running_loop()
 
@@ -309,7 +312,7 @@ async def test_later_chapter_saves_while_earlier_model_is_running(db_session, co
 
 
 @pytest.mark.asyncio
-async def test_recovery_discards_partial_roles_and_keeps_completed_chapter(db_session, monkeypatch):
+async def test_recovery_rejects_rewriting_saved_events_and_keeps_completed_chapter(db_session, monkeypatch):
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 2)
     novel_id, run_id = create_run_with_chunks(db_session, texts=["短", "长章原文。"], chapter_ids=[1, 2])
     model = RoleModel("")
@@ -326,11 +329,17 @@ async def test_recovery_discards_partial_roles_and_keeps_completed_chapter(db_se
     db_session.execute(delete(ChapterAnnotation).where(ChapterAnnotation.agent_id == lost.invocation_id))
     db_session.commit()
     calls = model.calls
+    from src.storage.models import Case
+
+    cases_before = {
+        row.id: (row.description, row.promised_agent_id)
+        for row in db_session.scalars(select(Case).where(Case.run_id == run_id))
+    }
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
+        with pytest.raises(ValueError, match="已保存事件不可局部改写"):
+            await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
-    assert model.calls - calls == 3
-    # 章×角色才是稳定身份：重建后执行号必须换、身份键不变
+    assert model.calls == calls
     refreshed = {
         (item.chapter_id, item.role): item for item in fetch_annotation_role_records(storage_for(db_session), run_id)
     }
@@ -360,9 +369,7 @@ async def test_recovery_discards_chapter_with_only_executions(db_session, monkey
     db_session.expire_all()
     # 失败轮次留下真实执行行，长章一行产物都没有
     stale = db_session.scalar(
-        select(func.count())
-        .select_from(Agent)
-        .where(Agent.run_id == run_id, Agent.status == "error")
+        select(func.count()).select_from(Agent).where(Agent.run_id == run_id, Agent.status == "error")
     )
     assert stale >= 1
     assert not [item for item in fetch_annotation_role_records(storage_for(db_session), run_id) if item.chapter_id == 2]
@@ -416,15 +423,11 @@ async def test_save_failure_rolls_back_all_business_and_releases_case(db_session
     )
     assert (
         db_session.scalar(
-            select(func.count())
-            .select_from(GraphFact)
-            .where(GraphFact.direct_producer_agent_id.in_(run_executions))
+            select(func.count()).select_from(GraphFact).where(GraphFact.direct_producer_agent_id.in_(run_executions))
         )
         == 0
     )
-    assert (
-        db_session.scalar(select(func.count()).select_from(Case).where(Case.run_id == run_id)) == 0
-    )
+    assert db_session.scalar(select(func.count()).select_from(Case).where(Case.run_id == run_id)) == 0
     assert aborted and not any(MODEL_CAPACITY.snapshot().values())
     assert _agent_execution_count(db_session, run_id) == 1
 
@@ -520,7 +523,7 @@ async def test_program_can_read_shared_nodes_claim_case_and_save_cross_chapter_l
             else:
                 self.code = """
 cases = search_cases()
-promise_case(case_id=cases[0]["case_id"])
+claim_case(case_id=cases[0]["case_id"])
 page = search_events(query="拾得")
 source = page["events"][0]["event_id"]
 created = event(el="t1", evidence=1, title="读懂旧信", problem="旧信有何用途",
@@ -528,6 +531,7 @@ created = event(el="t1", evidence=1, title="读懂旧信", problem="旧信有何
 write_link(source_id=source, target_id=created["ref"]["event_id"],
            kind="foreshadowing", reason="旧信内容得以解释", evidence=1, caseid=cases[0]["case_id"])
 metric(summary="读信", emotional_valence=0, narrative_function="铺垫")
+submit_case(case_id=cases[0]["case_id"])
 finish()
 """
             return await super().ainvoke(messages)
@@ -544,14 +548,11 @@ finish()
     links = list(
         db_session.scalars(
             select(NarrativeLink).where(
-                NarrativeLink.producer_agent_id.in_(
-                    select(Agent.id).where(Agent.run_id == run_id)
-                )
+                NarrativeLink.producer_agent_id.in_(select(Agent.id).where(Agent.run_id == run_id))
             )
         )
     )
     assert [link.relation_type for link in links] == ["foreshadowing"]
-
 
 
 @pytest.mark.asyncio
@@ -599,9 +600,7 @@ async def test_read_authorization_survives_failed_call_rollback(db_session, conf
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     db_session.expire_all()
     links = list(
-        db_session.scalars(
-            select(NarrativeLink).where(NarrativeLink.producer_agent_id.in_(_run_execution_ids(run_id)))
-        )
+        db_session.scalars(select(NarrativeLink).where(NarrativeLink.producer_agent_id.in_(_run_execution_ids(run_id))))
     )
     assert [link.relation_type for link in links] == ["foreshadowing"]
 

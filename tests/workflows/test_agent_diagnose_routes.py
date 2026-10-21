@@ -64,7 +64,7 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
                 "cases = search_cases(unresolved_only=True)\n"
                 "if cases:\n"
                 "    case = cases[0]\n"
-                '    promise_case(case_id=case["case_id"])\n'
+                '    claim_case(case_id=case["case_id"])\n'
                 "    page = search_events(limit=20)\n"
                 '    for item in page["events"]:\n'
                 '        if item["event_id"] in case["description"]:\n'
@@ -136,6 +136,7 @@ class TestDiagnosisRoutes:
         paragraph_repo.insert_paragraphs(self.run_id, spans)
         # 主题三表契约：模型契约 + 每段一行状态 + 完整分布
         from tests.support.storage_fixtures import save_topic_artifact
+
         save_topic_artifact(self.run_id, 1)
         paragraph_repo.insert_topic_model_run(
             self.run_id,
@@ -285,7 +286,7 @@ class TestDiagnosisRoutes:
         assert saved_event_ids
         pool = CasePool(self.run_id)
         pool.load_storage(storage_for(self.db_session))
-        promised = [item for item in pool.search() if item["promised"]]
+        promised = [item for item in pool.search() if item["submitted"]]
         assert len(promised) == len(saved_event_ids)
 
         with patch("src.model_pool.llm.build_chat_model", return_value=llm):

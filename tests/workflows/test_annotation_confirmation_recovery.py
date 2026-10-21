@@ -48,7 +48,7 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
     model = ProgramModel(
         'pending(case_type="character", description="核查旧信")\n'
         "cases = search_cases()\n"
-        'promise_case(case_id=cases[0]["case_id"])\n'
+        'claim_case(case_id=cases[0]["case_id"])\n'
         "read_text(paragraph_id=0)\n"
         'event(el="e1", title="确认旧信", problem="旧信是否可靠", summary="张三确认旧信内容", '
         'event_type="核查", status="ongoing", evidence=1, isforeshadowing=True, confidence="high")\n'
@@ -58,6 +58,7 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
         'metric(summary="已核查正文", emotional_valence=0, '  # 同一程序文本
         'narrative_function="铺垫", caseid=cases[0]["cas'  # 同一程序文本
         'e_id"])\n'  # 同一程序文本
+        'submit_case(case_id=cases[0]["case_id"])\n'
         "finish()"
     )
     original_confirm = CasePool.confirm
@@ -101,7 +102,7 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
     pool.load_storage(storage_for(db_session))
     records = pool.search()
     # 「建一个事件进一个池」：声明案例随 write_event 自动登记为 event 案例，另有一行已承诺
-    promised = [record for record in records if record["promised"]]
+    promised = [record for record in records if record["submitted"]]
     assert len(records) == 2 and len(promised) == 1
     assert pool.submissions_for(states[0].invocation_id) == [promised[0]["case_id"]]
     declaration = db_session.scalar(
@@ -110,7 +111,7 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
     assert declaration.title == "确认旧信" and declaration.status == "ongoing"
     assert (
         db_session.scalar(select(CompleteEvent).where(CompleteEvent.producer_agent_id.in_(_run_executions(run_id))))
-        is None
+        == declaration
     )
     actions = list(
         db_session.scalars(
@@ -164,7 +165,7 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
                 code = (
                     'entity(id="a1", name="乙章人物", entity_type="character", evidence=1)\n'
                     'pending(case_type="relation", description="乙章独占线索")\n'
-                    'cases = search_cases()\npromise_case(case_id=cases[0]["case_id"])'
+                    'cases = search_cases()\nclaim_case(case_id=cases[0]["case_id"])'
                 )
             else:
                 other_ready.set()
@@ -172,6 +173,7 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
                 code = (
                     "cases = search_cases()\n"
                     'metric(summary="乙章完成", emotional_valence=0, narrative_function="铺垫")\n'
+                    'submit_case(case_id=cases[0]["case_id"])\n'
                     "finish()"
                 )
             return AIMessage(
@@ -245,6 +247,7 @@ async def test_resume_threshold_change_clears_discarded_chapter_lanes(
     cancelled: list[bool] = []
 
     from src.storage.access import AnnotationAccess
+
     original_save = AnnotationAccess.save
     monkeypatch.setattr(settings.models.model_pool[0], "max_in_flight", 1)
 
