@@ -67,6 +67,21 @@ class EventBus:
     def unhandle(self, topic: str, target: str) -> None:
         self._handlers.pop((topic, target), None)
 
+    def has_handler(self, topic: str, target: str) -> bool:
+        return (topic, target) in self._handlers
+
+    async def deliver(self, message: Message) -> Any:
+        """交付通知但不缓存回执，背压只等待接收方接管"""
+        self._bind_loop()
+        handler = self._handlers.get((message.topic, message.target))
+        if handler is None:
+            raise MissingSubscriber(f"未注册必需接收者: {message.topic}/{message.target}")
+        return await handler(message)
+
+    def release_run(self, run_id: str) -> None:
+        """只回收指定运行已经结束的业务请求"""
+        self._requests = {key: task for key, task in self._requests.items() if key[3] != run_id or not task.done()}
+
     async def request(self, message: Message) -> Any:
         """同一请求的重复投递共用结果；取消调用方不取消已开始的保存"""
         self._bind_loop()
