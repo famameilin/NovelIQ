@@ -18,6 +18,7 @@ from src.audit.module import AuditMessages
 from src.case_pool import CasePool
 from src.case_pool.contributions import CaseContribution
 from src.event_bus import EventBus, Message
+from src.event_bus.notifications import StreamEvent
 from src.event_trees.contributions import EventContribution
 from src.event_trees.trees import CONTRIBUTION_KEYS, EventTrees
 from src.fact_graph.contributions import FactContribution
@@ -56,9 +57,9 @@ class WorkExecution:
     event_reads: dict[str, dict[str, Any]] = field(default_factory=dict)
     case_reads: list[dict[str, Any]] = field(default_factory=list)
     case_save_warnings: list[dict[str, Any]] = field(default_factory=list)
-
     committed_cases: list[dict[str, Any]] = field(default_factory=list)
     case_check: Callable[[], list[str]] = lambda: []
+
     identifiers: dict[tuple, str] = field(default_factory=dict)
 
     def identifier(self, *key) -> str:
@@ -85,8 +86,8 @@ class WorkExecution:
     def validate(self) -> list[str]:
         """返回当前 work 的完整性缺口；不改变写入状态，也不关闭写面"""
         missing: list[str] = []
-        ledger = self.ledger
         missing.extend(self.case_check())
+        ledger = self.ledger
         if ledger.role in {"annotation", "metric"}:
             if ledger.metrics_payload is None:
                 missing.append("metrics")
@@ -189,8 +190,8 @@ class AnnotationAgent:
                         self.run_id,
                         message.payload["chapter_id"],
                         self.case_pool,
-                        recheck=bool(message.payload.get("recheck", False)),
                         author=author,
+                        recheck=bool(message.payload.get("recheck", False)),
                     )
                     pass
                     return result
@@ -284,12 +285,12 @@ class AnnotationAgent:
 
             async def emit(event: Any) -> None:
                 nonlocal stream_sequence
-                stream_sequence += 1
                 event.model_id = payload["model_id"]
                 event.reservation_id = payload["reservation_id"]
-                await self.bus.request(
+                stream_sequence += 1
+                await self.bus.deliver(
                     Message(
-                        topic="sse.show",
+                        topic="analysis.activity",
                         source=self.address,
                         target=f"activity:{self.run_id}",
                         run_id=self.run_id,
@@ -300,8 +301,10 @@ class AnnotationAgent:
                     )
                 )
 
-            from src.sse.events import StreamEvent
+            from src.event_bus.notifications import StreamEvent
 
+            await emit(StreamEvent(action="activity", stage="annotate", sub_stage=payload["role"],
+                chapter_id=payload["chapter_id"], activity="starting"))
             await emit(
                 StreamEvent(
                     action="work_reset", stage="annotate", sub_stage=payload["role"], chapter_id=payload["chapter_id"]
@@ -445,6 +448,10 @@ class AnnotationAgent:
                     invocation_id=execution.invocation_id,
                 )
             )
+            await self.bus.deliver(Message(topic="analysis.activity", source=self.address,
+                target=f"activity:{self.run_id}", run_id=self.run_id, work_id=receipt.work_id,
+                invocation_id=invocation_id, payload=StreamEvent(action="activity", stage="annotate",
+                    activity="cancelled" if isinstance(exc, asyncio.CancelledError) else "error", message=str(exc))))
             if isinstance(exc, asyncio.CancelledError):
                 raise
             from .errors import AnnotationBudgetExhaustedError, AnnotationRetryableError
@@ -512,12 +519,17 @@ class AnnotationAgent:
 
     async def save(self, message: Message) -> str:
         execution = self._execution(message)
+        await self.bus.deliver(Message(topic="analysis.activity", source=self.address,
+            target=f"activity:{self.run_id}", run_id=self.run_id, work_id=message.work_id,
+            invocation_id=message.invocation_id, payload=StreamEvent(action="activity", stage="annotate",
+                activity="saving")))
         return await asyncio.to_thread(self._save, execution, message.payload)
 
     def _save(self, execution: WorkExecution, storage: Storage) -> str:
         if not execution.finished or execution.persistence is None:
             raise ValueError("只有完成完整性检查并冻结的 work 可以保存")
         result = storage.annotations.save(execution.persistence)
+        execution.committed_cases = result.get("committed_cases", [])
         execution.case_save_warnings = result["warnings"]
         self.case_pool.save_warnings[execution.invocation_id] = deepcopy(result["warnings"])
         return result["annotation_id"]
@@ -529,21 +541,23 @@ class AnnotationAgent:
     async def confirm(self, message: Message) -> None:
         execution = self._execution(message)
         async with self.lock:
-        execution.committed_cases = result.get("committed_cases", [])
             self.fact_graph.confirm(execution.invocation_id)
             self.event_trees.confirm(execution.invocation_id)
+            self.case_pool.merge_committed(execution.committed_cases)
             self.case_pool.confirm(execution.invocation_id)
             execution.saved = True
+        await self.bus.deliver(Message(topic="analysis.activity", source=self.address,
+            target=f"activity:{self.run_id}", run_id=self.run_id, work_id=message.work_id,
+            invocation_id=message.invocation_id, payload=StreamEvent(action="work_saved", stage="annotate")))
 
     async def saved_progress(self, message: Message) -> None:
         """队列交付已确认章进度，由 Agent 向展示模块发送自身工作事实"""
-        from src.sse.events import StreamEvent
+        from src.event_bus.notifications import StreamEvent
 
         execution = self._execution(message)
         if not execution.saved:
             raise ValueError(f"work_id={execution.work_id} 尚未确认保存，不能展示保存进度")
         payload, progress = execution.receipt.payload, message.payload
-            self.case_pool.merge_committed(execution.committed_cases)
         current, total = progress["current"], progress["total"]
         for event in (
             StreamEvent(
@@ -561,9 +575,9 @@ class AnnotationAgent:
                 message=f"{payload['chapter_label']} {payload['role']} 已保存",
             ),
         ):
-            await self.bus.request(
+            await self.bus.deliver(
                 Message(
-                    topic="sse.show",
+                    topic="analysis.activity",
                     source=self.address,
                     target=f"activity:{self.run_id}",
                     run_id=self.run_id,
@@ -772,12 +786,12 @@ class AnnotationAgent:
     async def recover(self, message: Message) -> None:
         """业务恢复由 agent 发起，域各自恢复贡献，历史审计不成为读取授权"""
         if message.payload.get("mode") == "chapter_reset":
-            from src.sse.events import StreamEvent
+            from src.event_bus.notifications import StreamEvent
 
             for chapter_id in message.payload["chapter_ids"]:
-                await self.bus.request(
+                await self.bus.deliver(
                     Message(
-                        topic="sse.show",
+                        topic="analysis.activity",
                         source=self.address,
                         target=f"activity:{self.run_id}",
                         run_id=self.run_id,

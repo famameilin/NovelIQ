@@ -53,3 +53,20 @@ async def run_cancellable[T](
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def finish_thread_step[T](awaitable: Awaitable[T]) -> T:
+    """等待当前线程处理单元真实结束后兑现取消，不中断其保存收尾"""
+    task = asyncio.ensure_future(awaitable)
+    cancellation: asyncio.CancelledError | None = None
+    while True:
+        try:
+            result = await asyncio.shield(task)
+            break
+        except asyncio.CancelledError as exc:
+            if task.cancelled():
+                raise
+            cancellation = exc
+    if cancellation is not None:
+        raise cancellation
+    return result

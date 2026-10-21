@@ -157,8 +157,7 @@ class StreamChunkAggregator:
         self._content_parts: list[str] = []
         self._reasoning_parts: list[str] = []
         self._tool_call_chunks: list[dict[str, Any]] = []
-        # 按工具名记录已推送 started 事件（断流重试后 index 相同但工具名不同时
-        # 客户端仍能收到 started 事件）
+        # 工具通知按实际调用身份去重
         self._announced_tools: set[str] = set(announced_tools or ())
         self._skip_output_prefix = skip_output_prefix
         self._usage_metadata: dict[str, Any] = {}
@@ -210,17 +209,23 @@ class StreamChunkAggregator:
         reasoning = extract_reasoning_content(chunk)
         if reasoning:
             self._reasoning_parts.append(reasoning)
+            if self._stream is not None:
+                try:
+                    await self._stream.thinking(reasoning)
+                except Exception as exc:
+                    raise StreamEmitError(f"推理通知交付失败: {exc}") from exc
 
         raw_tool_chunks = getattr(chunk, "tool_call_chunks", None) or []
         announced_name: str | None = None
         for raw in raw_tool_chunks:
             name = raw.get("name") or ""
-            if name and name not in self._announced_tools:
-                self._announced_tools.add(name)
+            call_id = raw.get("id") or ""
+            if name and call_id and call_id not in self._announced_tools:
+                self._announced_tools.add(call_id)
                 announced_name = name
                 if self._stream is not None:
                     try:
-                        await self._stream.tool_call_started(name)
+                        await self._stream.tool_call_started(name, tool_call_id=call_id)
                     except Exception as exc:
                         raise StreamEmitError(f"SSE 推送工具调用失败: {exc}") from exc
         if raw_tool_chunks:

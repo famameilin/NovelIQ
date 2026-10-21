@@ -24,7 +24,7 @@ from src.agents.stream_aggregator import (
 )
 from src.agents.stream_audit import ModelCallTiming, _provider_request_metadata
 from src.agents.stream_errors import StreamEmitError
-from src.sse.events import StreamEvent, StreamEventAction
+from src.event_bus.notifications import StreamEvent, StreamEventAction
 
 _MAX_TOOL_SUMMARY_CHARS = 200
 
@@ -254,33 +254,33 @@ class AgentStream:
         self._stream_id = stream_id or f"{sub_stage or 'agent'}-{chapter_id}"
 
     async def thinking(self, text: str) -> None:
-        """发送思考/推理状态事件（仅状态消息，不推送推理 token 内容）"""
+        """发送实际推理内容或调用状态文字"""
         await self._emit("thinking", text)
 
     async def output(self, text: str) -> None:
         """发送模型正式输出事件"""
         await self._emit("output", text)
 
-    async def tool_call_started(self, name: str, args_summary: str = "") -> None:
+    async def tool_call_started(self, name: str, args_summary: str = "", *, tool_call_id: str = "") -> None:
         """发送工具调用开始事件"""
         message = f"正在调用工具 {name}"
         if args_summary:
             message = f"{message}：{args_summary}"
-        await self._emit_tool(name, "started", message)
+        await self._emit_tool(name, "started", message, tool_call_id)
 
-    async def tool_call_succeeded(self, name: str, summary: str = "") -> None:
+    async def tool_call_succeeded(self, name: str, summary: str = "", *, tool_call_id: str = "") -> None:
         """发送工具执行成功事件"""
         message = f"工具 {name} 执行成功"
         if summary:
             message = f"{message}：{_truncate(summary)}"
-        await self._emit_tool(name, "success", message)
+        await self._emit_tool(name, "success", message, tool_call_id)
 
-    async def tool_call_failed(self, name: str, error: str = "") -> None:
+    async def tool_call_failed(self, name: str, error: str = "", *, tool_call_id: str = "") -> None:
         """发送工具执行失败事件"""
         message = f"工具 {name} 执行失败"
         if error:
             message = f"{message}：{_truncate(error)}"
-        await self._emit_tool(name, "failed", message)
+        await self._emit_tool(name, "failed", message, tool_call_id)
 
     async def _emit(self, action: StreamEventAction, text: str) -> None:
         if not text:
@@ -295,10 +295,11 @@ class AgentStream:
             )
         )
 
-    async def _emit_tool(self, name: str, status: str, message: str) -> None:
+    async def _emit_tool(self, name: str, status: str, message: str, tool_call_id: str) -> None:
         await self._emitter(
             StreamEvent(
                 action="tool_call",
+                tool_call_id=tool_call_id,
                 content=name,
                 message=message,
                 status=status,
@@ -478,9 +479,9 @@ async def emit_tool_results(stream: AgentStream, tool_messages: list[Any]) -> No
         text = str(content)
         is_failed = text.startswith("Error:") or '"error"' in text or "执行失败" in text or "校验失败" in text
         if is_failed:
-            await stream.tool_call_failed(name, text)
+            await stream.tool_call_failed(name, text, tool_call_id=getattr(message, "tool_call_id", ""))
         else:
-            await stream.tool_call_succeeded(name, text)
+            await stream.tool_call_succeeded(name, text, tool_call_id=getattr(message, "tool_call_id", ""))
 
 
 __all__ = [

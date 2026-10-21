@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from src.event_bus import EventBus, Message
+from src.event_bus.notifications import StreamEvent
 from src.model_pool.capacity import ModelElectionPool
 from src.model_pool.contracts import SelectionRequest, SelectionResult
 from src.storage import new_id
@@ -37,9 +38,9 @@ class DiagnosisWorkContext:
     initial_messages: list[Any]
     completion_check: Callable[[], list[str]]
     max_rounds: int
-
     claimed_count: Callable[[], int] = lambda: 0
     unsubmitted_count: Callable[[], int] = lambda: 0
+
 
 class DiagnosisWorkDomain(Protocol):
     """领域只暴露会话上下文、案例池进度、会话保存与报告结果"""
@@ -121,22 +122,51 @@ class DiagnosisWorkScheduler:
             raise asyncio.CancelledError("诊断已取消")
         future: asyncio.Future[SelectionResult] = asyncio.get_running_loop().create_future()
         self._waiting[key] = future
-        await self.bus.request(
-            Message(
-                topic="pool.enqueue",
-                source=f"queue:{self.run_id}",
-                target=self.pool.address,
-                run_id=self.run_id,
-                work_id=key,
-                payload=SelectionRequest(self.run_id, key),
-            )
-        )
-        selected = await future
-        self._waiting.pop(key, None)
-        progress = SessionProgress(key=key, role=role, agent_id=new_id())
-        observer = self.observer_factory(progress)
-        release_capacity = False
+        queued_ns = time.perf_counter_ns()
+        selected: SelectionResult | None = None
+        progress: SessionProgress | None = None
+        observer: Any = None
+        saved = False
+        incomplete_error: RuntimeError | None = None
+        timings: dict[str, float] = {}
+
+        async def finish(status: str, error: str | None = None) -> None:
+            recorder = getattr(observer, "_recorder", None)
+            audit_context = getattr(observer, "_context", None)
+            if recorder is not None and isinstance(audit_context, dict):
+                recorder.finish_invocation(
+                    **audit_context, status=status, final_error=error, runtime_timings=timings,
+                )
+                await self.audit_barrier()
+
         try:
+            await self.bus.request(
+                Message(topic="pool.enqueue", source=f"queue:{self.run_id}", target=self.pool.address,
+                        run_id=self.run_id, work_id=key, payload=SelectionRequest(self.run_id, key))
+            )
+            selected = await future
+            self._waiting.pop(key, None)
+            timings["queue_wait_ms"] = round((time.perf_counter_ns() - queued_ns) / 1_000_000, 3)
+            if role == "case" and self.domain.case_counts()[0] == 0:
+                return
+            progress = SessionProgress(key=key, role=role, agent_id=new_id())
+            session_model_id = selected.model_id
+            session_reservation_id = selected.reservation_id
+
+            async def activity(event: StreamEvent) -> None:
+                event.stage, event.sub_stage = "diagnose", role
+                event.model_id, event.reservation_id = session_model_id, session_reservation_id
+                case_pool = getattr(self.domain, "case_pool", None)
+                if case_pool is not None and role == "case":
+                    event.details = {"case_ids": case_pool.claims_for(progress.agent_id),
+                        "unsubmitted_case_ids": case_pool.unsubmitted_for(progress.agent_id)}
+                if self.bus.has_handler("analysis.activity", f"activity:{self.run_id}"):
+                    await self.bus.deliver(Message(topic="analysis.activity", source="diagnosis",
+                        target=f"activity:{self.run_id}", run_id=self.run_id, work_id=key,
+                        invocation_id=progress.agent_id, payload=event))
+
+            await activity(StreamEvent(action="activity", activity="starting"))
+            observer = self.observer_factory(progress)
             context = self.domain.build_session_context(role, progress.agent_id, observer)
             llm = self.llm_factory(selected.model_id)
             work_stream = None
@@ -191,28 +221,50 @@ class DiagnosisWorkScheduler:
             if role == "case" and context.unsubmitted_count():
                 incomplete_error = RuntimeError("案例会话结束仍有未提交领取，保存已通过校验的产物后停止本轮诊断")
             await self.audit_barrier()
-            await asyncio.to_thread(self.domain.save_session_progress, progress.agent_id, role)
-            # 成功出口同样登记执行终态：执行行不能停在 running 等孤儿清扫反推
-            audit_context = getattr(observer, "_context", None)
-            if recorder is not None and isinstance(audit_context, dict):
-                recorder.finish_invocation(**audit_context, status="success")
-                await self.audit_barrier()
-            # 回合用尽（halted）不中断整轮：已提交内容保留、未办案例留给其他会话
-            release_capacity = True
-        except asyncio.CancelledError:
+            await activity(StreamEvent(action="activity", activity="saving"))
+            started_ns = time.perf_counter_ns()
+            transaction = asyncio.create_task(
+                asyncio.to_thread(self.domain.save_session_progress, progress.agent_id, role)
+            )
+            cancellation: asyncio.CancelledError | None = None
+            try:
+                while True:
+                    try:
+                        await asyncio.shield(transaction)
+                        break
+                    except asyncio.CancelledError as exc:
+                        cancellation = exc
+            finally:
+                timings["save_ms"] = round((time.perf_counter_ns() - started_ns) / 1_000_000, 3)
+            saved = True
+            await activity(StreamEvent(action="work_saved"))
+            if incomplete_error is not None:
+                raise incomplete_error
+            if cancellation is not None:
+                raise cancellation
+        except BaseException as exc:
+            if progress is not None:
+                await activity(
+                    StreamEvent(
+                        action="activity",
+                        activity="cancelled" if isinstance(exc, asyncio.CancelledError) else "error",
+                        message=str(exc),
+                    )
+                )
+            if progress is not None and not saved:
+                abort = getattr(self.domain, "abort_session", None)
+                if abort is not None:
+                    abort(progress.agent_id)
+            successful = saved and incomplete_error is None
+            await finish("success" if successful else "error", None if successful else str(exc) or type(exc).__name__)
             raise
-        except Exception as exc:
-            recorder = getattr(observer, "_recorder", None)
-            audit_context = getattr(observer, "_context", None)
-            if recorder is not None and isinstance(audit_context, dict):
-                recorder.finish_invocation(**audit_context, status="error", final_error=str(exc))
-                await self.audit_barrier()
-            progress.physical_sequence = int(getattr(observer, "_turn_counter", progress.physical_sequence))
-            progress.audit_sequence = int(getattr(recorder, "sequence", progress.audit_sequence))
-            raise
+        else:
+            await finish("success")
         finally:
-            # 只有会话正常结束归还容量；失败与取消由池退出一次性归还
-            if release_capacity:
+            if selected is None and future.done() and not future.cancelled():
+                selected = future.result()
+            if selected is not None:
+                self._waiting.pop(key, None)
                 await self.bus.request(
                     Message(
                         topic="pool.feedback",
@@ -253,12 +305,12 @@ class DiagnosisWorkScheduler:
                 task.cancel()
             await asyncio.gather(work_task, pool_task, assignments_task, return_exceptions=True)
             self.pool.close()
+            await self.pool.notify_capacity()
+            self._waiting.clear()
             self.bus.unsubscribe(self.pool.assignment_topic, assignments)
 
     async def _run_work(self) -> Any:
         tasks: set[asyncio.Task[None]] = set()
-        else:
-            await finish("success")
         serial = 0
         try:
             while True:
@@ -280,7 +332,7 @@ class DiagnosisWorkScheduler:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
-        await self._wave([(self.report_key, "report")])
-        return self.domain.analysis_result()
         if self.domain.case_counts()[0]:
             raise RuntimeError("案例池仍有待领案例，禁止启动报告")
+        await self._wave([(self.report_key, "report")])
+        return self.domain.analysis_result()

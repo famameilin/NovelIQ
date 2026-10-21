@@ -191,12 +191,16 @@ async def run_diagnosis_agent(
     stream: AgentStream | None = None,
     audit_recorder: Any | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    bus: Any = None,
+    emitter: Any = None,
 ) -> AgentAnalysis:
     """正式入口只派发诊断work；旧契约由领域入口拒绝，不回退单会话生产"""
     from src.audit.module import AuditModule
     from src.event_bus import EventBus
+    from src.event_bus.activity import ActivityRelay
 
-    bus = EventBus()
+    bus = bus or EventBus()
+    activity = ActivityRelay(bus, run_id, emitter)
     audit = AuditModule(bus, run_id, get_storage_factory()) if audit_recorder is None else None
     try:
         return await _run_diagnosis_agent(
@@ -212,5 +216,6 @@ async def run_diagnosis_agent(
             bus=bus,
         )
     finally:
+        activity.close()
         if audit is not None:
             await audit.close()
