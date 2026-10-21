@@ -15,7 +15,7 @@ from src.storage.records.models import GraphFactRecord
 
 
 def test_every_table_has_one_uuid_primary_key():
-    assert len(Base.metadata.tables) == 32
+    assert len(Base.metadata.tables) == 30
     for table in Base.metadata.tables.values():
         keys = list(table.primary_key.columns)
         assert len(keys) == 1, table.name

@@ -96,7 +96,7 @@ def _retract_relation(
         node_id = new_id()
         events.append(
             BoundEvent(
-                declaration_id=node_id,
+                event_id=node_id,
                 node_id=node_id,
                 tree_id=f"tree-{uuid7()}",
                 parent_node_id=None,
@@ -109,6 +109,8 @@ def _retract_relation(
                 description="本章人物动态",
                 evidence_paragraph_id=paragraph_id,
                 participants=participants,
+                from_chapter_id=1,
+                to_chapter_id=1,
             )
         )
 

@@ -46,7 +46,7 @@ def contribution(run, author, case_id, *, promise=False):
 
 
 def test_exact_physical_schema(db_session):
-    assert len(Base.metadata.tables) == 32
+    assert len(Base.metadata.tables) == 30
     assert set(Run.__table__.c.keys()) == {"id", "novelid", "taskid", "status", "lda_completed", "w2v_completed"}
     assert set(Agent.__table__.c.keys()) == {"id", "run_id", "type", "status"}
     assert set(Case.__table__.c.keys()) == {

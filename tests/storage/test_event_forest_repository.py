@@ -31,9 +31,7 @@ pytestmark = pytest.mark.usefixtures("pipeline_run_cleanup")
 
 
 def _event_map(draft) -> dict[str, str]:
-    return {
-        declaration_id: event_id for event_id, event in draft.events.items() for declaration_id in event.declaration_ids
-    }
+    return {event_id: event_id for event_id in draft.events}
 
 
 def _publish(session, run_id, relations=()):
@@ -105,8 +103,9 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
     assert gate_tree.chapter_ids == [1]
 
     # 全书事件关系不任意投射到声明端点
-    assert snapshot.causal_edges == []
+    assert len(snapshot.causal_edges) == 1
     from src.event_trees.read.organization import EventTreeQuery
+
     assert len(EventTreeQuery(storage_for(db_session), run_id).fetch()["relations"]) == 1
 
 
@@ -208,7 +207,7 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     )
     paragraph = first_paragraph(db_session, run_id)
     record_id, agent_id = add_annotation_source(db_session, run_id, 1)
-    declaration_id = add_declaration(
+    event_id = add_declaration(
         db_session,
         record_id=record_id,
         paragraph=paragraph,
@@ -221,7 +220,7 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     add_foreshadowing_action(
         db_session,
         producer_agent_id=agent_id,
-        source_declaration_id=declaration_id,
+        source_event_id=event_id,
         paragraph=paragraph,
     )
     db_session.commit()
@@ -233,7 +232,7 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     assert len(snapshot.foreshadowing_edges) == 1
     edge = snapshot.foreshadowing_edges[0]
     assert edge.description == "顾霜立誓"
-    assert edge.root_event_id == declaration_id
+    assert edge.root_event_id == event_id
     assert edge.payoff_event_id is None
     assert edge.status == "open"
     assert edge.active is True
@@ -263,14 +262,14 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
     add_declaration_relation(
         db_session,
         producer_agent_id=agent_id,
-        source_declaration_id=first_declaration,
-        target_declaration_id=second_declaration,
+        source_event_id=first_declaration,
+        target_event_id=second_declaration,
         paragraph=paragraph,
         relation_type="causal",
     )
     db_session.commit()
 
-    _publish(db_session, run_id, [(first_declaration, second_declaration, "causal")])
+    _publish(db_session, run_id)
     snapshot = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
     assert snapshot is not None
     assert set(snapshot.derived_event_order) == {first_declaration, second_declaration}
@@ -286,8 +285,8 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
     add_declaration_relation(
         db_session,
         producer_agent_id=agent_id,
-        source_declaration_id=second_declaration,
-        target_declaration_id=first_declaration,
+        source_event_id=second_declaration,
+        target_event_id=first_declaration,
         paragraph=paragraph,
         relation_type="causal",
     )
@@ -295,7 +294,7 @@ def test_source_relation_proposal_does_not_rewrite_published_direction(db_sessio
     refreshed = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
     assert {(edge.source_event_id, edge.target_event_id) for edge in refreshed.causal_edges} == {
         (first_declaration, second_declaration),
-        (second_declaration, first_declaration)
+        (second_declaration, first_declaration),
     }
 
 

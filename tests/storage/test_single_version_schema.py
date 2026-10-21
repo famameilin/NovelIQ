@@ -27,12 +27,12 @@ def isolated_schema(monkeypatch):
         engine.dispose()
 
 
-def test_empty_schema_initializes_exactly_32_single_uuid_tables(monkeypatch):
+def test_empty_schema_initializes_exactly_30_single_uuid_tables(monkeypatch):
     with isolated_schema(monkeypatch) as (engine, schema):
         db.init_db()
         inspector = inspect(engine)
         assert set(inspector.get_table_names(schema=schema)) == set(Base.metadata.tables)
-        assert len(Base.metadata.tables) == 32
+        assert len(Base.metadata.tables) == 30
         for table in Base.metadata.tables.values():
             assert len(table.primary_key.columns) == 1
             assert str(next(iter(table.primary_key.columns)).type.compile(dialect=engine.dialect)) == "UUID"
@@ -60,9 +60,9 @@ def test_old_stage_structure_refused_before_creating_tables_or_changing_data(mon
         "ALTER TABLE event_records ADD COLUMN current_revision_id uuid",
         "ALTER TABLE event_records ALTER COLUMN summary DROP NOT NULL",
         "ALTER TABLE event_records ALTER COLUMN summary TYPE integer USING NULL",
-        "ALTER TABLE event_declaration_bindings DROP CONSTRAINT uq_event_declaration_bindings_declaration",
-        "ALTER TABLE event_declaration_bindings DROP CONSTRAINT event_declaration_bindings_declaration_id_fkey",
-        "ALTER TABLE event_declarations DROP CONSTRAINT ck_event_declarations_payoff_likelihood",
+        "ALTER TABLE event_records DROP CONSTRAINT uq_complete_events_producer_local_key",
+        "ALTER TABLE event_records DROP CONSTRAINT complete_events_producer_fkey",
+        "ALTER TABLE event_records DROP CONSTRAINT ck_events_payoff",
     ],
 )
 def test_mixed_fields_and_missing_constraints_are_refused_without_repair(monkeypatch, alter):

@@ -82,7 +82,7 @@ def test_35_tables_have_independent_uuid_primary_keys(isolated_storage):
     inspector = inspect(engine)
     tables = inspector.get_table_names(schema=schema)
     assert set(tables) == set(Base.metadata.tables)
-    assert len(tables) == 32
+    assert len(tables) == 30
     for table in tables:
         primary = inspector.get_pk_constraint(table, schema=schema)["constrained_columns"]
         assert len(primary) == 1, table
@@ -209,12 +209,14 @@ def prepared_annotation(prepared_chapter):
     }
     content = {
         "node_id": event_id,
+        "from_chapter_id": 1,
+        "to_chapter_id": 1,
         "title": "进门",
         "problem": "谁进入房间",
         "summary": "张三进入房间",
         "event_type": "plot",
         "status": "ongoing",
-        "progress": 0,
+        "progress": "进入房间",
         "is_foreshadow_setup": False,
         "payoff_likelihood": None,
         "evidence_paragraph_id": 1,
@@ -263,7 +265,7 @@ def _counts_for_run(engine, schema, run_id):
                 "graph_entities",
                 "graph_facts",
                 "graph_fact_entity_tags",
-                "event_declarations",
+                "event_records",
                 "event_participants",
                 "paragraph_evidence",
                 "graph_dialogues",
@@ -290,7 +292,7 @@ def test_complete_annotation_and_replay_preserve_identifiers(prepared_annotation
     assert graph.entity_id_for_key(entity_key("张三", "character")) == entity_id
     restored = graph.load_saved_work(storage, request.record["agent_id"], request.record["record_id"])
     assert restored["entity_references"][0]["entity_id"] == entity_id
-    assert storage.narrative.declaration_record_source(request.record["record_id"]).run_id == run_id
+    assert storage.narrative.annotation_record_source(request.record["record_id"]).run_id == run_id
 
 
 def test_last_annotation_component_failure_rolls_back_every_component(prepared_annotation, isolated_storage):
@@ -322,6 +324,7 @@ def test_topic_facts_commit_together_and_failed_distribution_rolls_back(prepared
         "artifact_key": "test",
     }
     from tests.support.storage_fixtures import save_topic_artifact
+
     save_topic_artifact(run_id, 2)
     with pytest.raises(ValueError, match="实际模型"):
         storage.paragraphs.save_topics(
@@ -329,10 +332,7 @@ def test_topic_facts_commit_together_and_failed_distribution_rolls_back(prepared
         )
     with engine.connect() as connection:
         assert (
-            connection.scalar(
-                text(f"SELECT lda_completed FROM {schema}.runs WHERE id=:run"), {"run": run_id}
-            )
-            is False
+            connection.scalar(text(f"SELECT lda_completed FROM {schema}.runs WHERE id=:run"), {"run": run_id}) is False
         )
     assert (
         storage.paragraphs.save_topics(
@@ -355,8 +355,6 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
             "containments",
             "relations",
             "reviewed_events",
-            "declaration_reviews",
-            "declaration_comparisons",
             "structure_reviews",
             "arcs",
             "outcomes",
@@ -371,7 +369,6 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
         {"report_id": report_id, "agent_id": session_id},
         (),
         json.dumps(organization),
-        frozenset(),
         (),
         ({"candidate_key": "missing"},),
         (),
@@ -387,8 +384,6 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
             == 0
         )
     assert storage.diagnosis.save_report(replace(request, dialogue_updates=()))["report_id"] == report_id
-
-
 
 
 def test_domain_reads_restore_saved_graph_and_declarations(prepared_annotation):
@@ -428,7 +423,7 @@ def test_audit_uuid_identifiers_and_sse_replay(prepared_annotation):
         turn_id=call_id, call_index=0, tool_name="read", request_args={}, response={"ok": True}
     )
     storage.audit.finish_turn(
-        call_id, raw_response={"ok": True},  error=None, timing={}, timing_notes=[], token_usage=None
+        call_id, raw_response={"ok": True}, error=None, timing={}, timing_notes=[], token_usage=None
     )
     from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls, fetch_token_usage_stats
 
@@ -445,8 +440,6 @@ def test_audit_uuid_identifiers_and_sse_replay(prepared_annotation):
 
     repository = SseMessageRepository(lambda: storage)
     assert repository.replay(task_id, after_seq=0)
-
-
 
 
 def test_result_and_diagnosis_queries_consume_storage_interfaces(prepared_annotation):
@@ -472,8 +465,6 @@ def test_default_workflow_factories_return_storage_without_connecting():
     service = AnalysisService(SimpleNamespace(), SimpleNamespace())
     assert isinstance(service.session_factory(), Storage)
     assert isinstance(EnvironmentInitializer().session_factory(), Storage)
-
-
 
 
 @pytest.mark.asyncio
@@ -533,8 +524,6 @@ async def test_formal_annotation_pipeline_commits_and_restores_without_model_rep
         assert model.calls == 1
     finally:
         MODEL_CAPACITY.reset()
-
-
 
 
 def test_schema_guard_rejects_existing_composite_key_without_changing_it(isolated_storage):

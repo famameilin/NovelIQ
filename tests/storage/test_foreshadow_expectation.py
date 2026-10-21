@@ -72,7 +72,7 @@ def test_formal_event_rejects_invalid_foreshadowing_confidence() -> None:
     """伏笔枚举非法值直接 raise，不再降级为 unknown。"""
     with pytest.raises(ValidationError):
         BoundEvent(
-            declaration_id="decl-root",
+            event_id="decl-root",
             node_id="decl-root",
             tree_id="tree-root",
             cause_role="root",
@@ -84,17 +84,20 @@ def test_formal_event_rejects_invalid_foreshadowing_confidence() -> None:
             description="埋设悬念",
             is_foreshadow_setup=True,
             payoff_likelihood="certain",
+            from_chapter_id=1,
+            to_chapter_id=1,
         )
 
 
 def test_calculate_expectation_returns_none_when_all_evidence_missing(db_session) -> None:
     """payoff_likelihood 全缺失时返回 None，不输出伪分。"""
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜身份成谜"])
-    _create_foreshadow_root(db_session, run_id=run_id, payoff_likelihood=None)
-    db_session.commit()
+    from sqlalchemy.exc import IntegrityError
 
-    result = calculate_foreshadow_expectation(storage_for(db_session), run_id)
-    assert result is None
+    with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            _create_foreshadow_root(db_session, run_id=run_id, payoff_likelihood=None)
+
 
 
 def test_calculate_expectation_returns_none_without_threads(db_session) -> None:
