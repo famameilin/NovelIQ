@@ -1,4 +1,4 @@
-"""从程序构造器至正式事务验证事件身份、跨章版本、包含及实际过程"""
+"""从程序构造器至正式事务验证事件身份、跨章范围与包含结构"""
 
 from __future__ import annotations
 
@@ -28,6 +28,10 @@ from tests.support.storage_fixtures import natural_record, storage_factory, stor
 
 
 def execution_for(agent, session, chapter_id):
+    from src.event_bus.activity import ActivityRelay
+
+    if not agent.bus.has_handler("analysis.activity", f"activity:{agent.run_id}"):
+        ActivityRelay(agent.bus, agent.run_id, None)
     chapter = natural_record(session, Chapter, {"run_id": agent.run_id, "chapter_id": chapter_id})
     # 段落终点是读取投影：与生产派发同口径投影出 local_end_char
     paragraphs = [
@@ -73,7 +77,13 @@ def execution_for(agent, session, chapter_id):
     agent.fact_graph.begin(invocation, chapter.sequence, "event")
     agent.event_trees.begin(invocation)
     agent.case_pool.begin(invocation)
-    query = SimpleNamespace(chapter_orders={1: 1, 2: 2}, current_chapter_order=chapter.sequence)
+    query = SimpleNamespace(
+        chapter_orders={
+            row.chapter_id: row.sequence
+            for row in session.scalars(select(Chapter).where(Chapter.run_id == agent.run_id))
+        },
+        current_chapter_order=chapter.sequence,
+    )
     tools = {tool.name: tool for tool in build_work_tools(agent, execution, query)}
 
     async def invoke(tool_map, call):
@@ -90,9 +100,7 @@ async def save_and_confirm(agent, session, execution):
     agent.freeze(execution)
     # 无 relationship：真实尝试 → 正式记录按依赖分层 flush
     payload = execution.receipt.payload
-    session.add(
-        Agent(id=execution.invocation_id, run_id=agent.run_id, type=payload["role"], status="success")
-    )
+    session.add(Agent(id=execution.invocation_id, run_id=agent.run_id, type=payload["role"], status="success"))
     session.flush()
     identifier = agent._save(execution, storage_for(session))
     session.commit()
@@ -167,7 +175,7 @@ async def test_annotation_declarations_then_diagnosis_once_publication(db_sessio
         assert not result.get("failed"), result
         assert result["written_refs"][0]["ref"]["event_id"]
         await save_and_confirm(agent, db_session, execution)
-        assert run_events(storage_for(db_session), run_id) == {}
+        assert len(run_events(storage_for(db_session), run_id)) == 2
         assert EventTreeQuery(storage_for(db_session), run_id).fetch()["organization_status"] == "pending_diagnosis"
         draft, _meta = identity_every_declaration(db_session, run_id)
         close_structure(db_session, draft, evidence_paragraph_id=0)

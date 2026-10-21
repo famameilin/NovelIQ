@@ -299,9 +299,10 @@ async def test_aggregator_merges_text_and_reasoning_and_tool_calls() -> None:
         }
     ]
     assert len(message.tool_calls) == 1
-    # 推理 token 只聚合不推送；工具调用以 tool_call 事件推送
+    # 推理内容与正式输出分别通知，工具调用保留实际身份
     assert events == [
         ("output", "章节", ""),
+        ("thinking", "先分析", ""),
         ("output", "开始了", ""),
         ("tool_call", "resolve_case", "started"),
     ]
@@ -857,12 +858,12 @@ async def test_cancel_interrupts_real_rate_limit_cooldown_without_another_reques
 
 
 @pytest.mark.asyncio
-async def test_aggregator_announces_tool_by_name_across_retries() -> None:
-    """重试后 index 相同但工具名不同时补发 started 事件（按名抑制）"""
+async def test_aggregator_announces_each_real_tool_identity_across_retries() -> None:
+    """同一调用只宣布一次，不同调用即使工具同名也分别通知"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
-    # 首次尝试已宣布 write_metrics（index 0），重试改调 finish（同一 index）
-    aggregator = StreamChunkAggregator(stream, announced_tools={"write_metrics"})
+    # 首次尝试与重试使用不同的实际调用身份
+    aggregator = StreamChunkAggregator(stream, announced_tools={"previous-call"})
     await aggregator.add_chunk(
         AIMessageChunk(
             content="",
@@ -871,15 +872,15 @@ async def test_aggregator_announces_tool_by_name_across_retries() -> None:
     )
     assert events == [("tool_call", "finish", "started")]
 
-    # 同一工具名不再重复宣布（无论 index 是否变化）
-    aggregator2 = StreamChunkAggregator(stream, announced_tools={"finish"})
+    # 不同实际调用不能因工具同名而合并
+    aggregator2 = StreamChunkAggregator(stream, announced_tools={"c1"})
     await aggregator2.add_chunk(
         AIMessageChunk(
             content="",
             tool_call_chunks=[{"name": "finish", "args": "{}", "id": "c2", "index": 1}],
         )
     )
-    assert events == [("tool_call", "finish", "started")]
+    assert events == [("tool_call", "finish", "started"), ("tool_call", "finish", "started")]
 
 
 @pytest.mark.asyncio

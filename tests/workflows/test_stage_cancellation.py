@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from src.utils.cancellation import check_cancelled, run_cancellable
+from src.utils.cancellation import check_cancelled, finish_thread_step, run_cancellable
 
 
 def test_check_cancelled_allows_absent_and_false_signal() -> None:
@@ -56,3 +56,44 @@ async def test_run_cancellable_propagates_original_failure() -> None:
 
     with pytest.raises(ValueError, match="boom"):
         await run_cancellable(failing(), lambda: False, poll_seconds=0.001)
+
+
+@pytest.mark.asyncio
+async def test_repeated_cancel_waits_for_real_thread_unit_to_finish():
+    import threading
+
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release, saved = threading.Event(), threading.Event()
+
+    def processing():
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(2)
+        saved.set()
+        return "saved"
+
+    task = asyncio.create_task(finish_thread_step(asyncio.to_thread(processing)))
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        for _ in range(2):
+            task.cancel()
+            await asyncio.sleep(0.01)
+            assert not task.done() and not saved.is_set()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 2)
+        assert saved.is_set()
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_thread_step_returns_actual_result_and_failure():
+    assert await finish_thread_step(asyncio.to_thread(lambda: "done")) == "done"
+
+    def failing():
+        raise ValueError("真实处理失败")
+
+    with pytest.raises(ValueError, match="真实处理失败"):
+        await finish_thread_step(asyncio.to_thread(failing))

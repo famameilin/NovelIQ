@@ -156,6 +156,9 @@ class _FinishGraph:
 
 
 def _agent(bus: EventBus, sessions: Any, monkeypatch: Any) -> AnnotationAgent:
+    from src.event_bus.activity import ActivityRelay
+
+    ActivityRelay(bus, "run", None)
     monkeypatch.setattr("src.agents.annotation.agent.AuditMessages", _NoDatabaseAudit)
     monkeypatch.setattr("src.agents.annotation.agent.AgentTurnObserver", _NoDatabaseAudit)
     monkeypatch.setattr(
