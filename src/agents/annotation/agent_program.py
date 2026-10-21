@@ -50,8 +50,10 @@ _AGENT_REFERENCE_SCOPE_TEXT: str = (
     "包含用 write_link(kind=contains) 显式建立，因果独立记录。\n"
     "- write_link 使用实际读回的 source_id/target_id；foreshadowing 保持独立照应边，不自动合树。\n"
     "- pending(case_type,description)/push_case(case_type,description) 显式归入人物/关系/对话/事件之一；"
-    "- promise_case 只填真实 case_id."
-    "所有调用可传 caseid，须先认领；关联失败仅 warning。\n"
+    "- claim_case(case_id) 指定领取，claim_random_case() 随机领取；每次最多持有一件未提交案例。"
+    "办完后 submit_case(case_id)，允许核查后无需修改；提交回执最多附带三件未预占候选。"
+    "下次正常推理可选熟悉候选指定领取，无合适候选或被占用就随机领取，不单独增加选案回合。"
+    "业务调用可传 caseid，须先认领；领取与提交仅按各自签名传参。\n"
     "- finish(caseid=None) 仅请求结束，同模型本轮不调用工具；程序缺项提示后继续同一会话。\n"
     "- entity/event 不要求指标或对话；annotation/metric 必须提交实际指标并逐条判定全部对话候选。\n\n"
 )

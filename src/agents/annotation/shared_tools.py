@@ -84,8 +84,16 @@ def build_state_read_tools(
             )
         if not compact and limit > 20:
             raise ValueError(f"limit={limit} 越界：详情预览每页最多 20 条，精简一页请用 compact=True（最多 100 条）")
-        identifiers = events.search_ids(query, chapter_id=chapter_id, tree_id=tree_id, isforeshadowing=isforeshadowing)
-        reads = [events.read(identifier) for identifier in identifiers[offset : offset + limit]]
+        if callable(getattr(type(events), "search_page", None)):
+            identifiers, reads = events.search_page(
+                query, chapter_id=chapter_id, tree_id=tree_id, isforeshadowing=isforeshadowing,
+                offset=offset, limit=limit,
+            )
+        else:
+            identifiers = events.search_ids(
+                query, chapter_id=chapter_id, tree_id=tree_id, isforeshadowing=isforeshadowing,
+            )
+            reads = [events.read(identifier) for identifier in identifiers[offset : offset + limit]]
         if compact:
             previews = [
                 {
@@ -93,6 +101,11 @@ def build_state_read_tools(
                     "from": value["content"].get("from", value["content"].get("from_chapter_id")),
                     "to": value["content"].get("to", value["content"].get("to_chapter_id")),
                     "chapter_id": value["chapter_id"],
+                    **{
+                        key: value[key]
+                        for key in ("parent_event_id", "top_level_event_id", "is_top_level", "ancestor_event_ids")
+                        if key in value
+                    },
                     "saved": value["saved"],
                     "is_foreshadow_setup": value["content"]["is_foreshadow_setup"],
                     "title": value["content"]["title"][:60],
@@ -108,6 +121,11 @@ def build_state_read_tools(
                     "from": value["content"].get("from", value["content"].get("from_chapter_id")),
                     "to": value["content"].get("to", value["content"].get("to_chapter_id")),
                     "chapter_id": value["chapter_id"],
+                    **{
+                        key: value[key]
+                        for key in ("parent_event_id", "top_level_event_id", "is_top_level", "ancestor_event_ids")
+                        if key in value
+                    },
                     "saved": value["saved"],
                     "is_foreshadow_setup": value["content"]["is_foreshadow_setup"],
                     "evidence_paragraph_id": value["content"]["evidence_paragraph_id"],
@@ -228,7 +246,7 @@ def build_case_tools(
     on_claim: Callable[[], None] | None = None,
     case_view: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> list[Any]:
-    """案例池登记、接手承诺与检索共用实现，作者是实际执行身份（真实执行号或程序 work 身份）"""
+    """案例登记、独占领取、提交与检索，作者使用实际执行身份"""
 
     @tool
     def push_case(
@@ -242,13 +260,29 @@ def build_case_tools(
         return json.dumps(pool.push(case_type, description, author), ensure_ascii=False)
 
     @tool
-    def promise_case(case_id: str) -> str:
-        """接手承诺一个真实案例：承诺即视为解决，随后由你调用写入工具完成处置；
-        已被他人承诺返回 taken；只填 search_cases 返回的真实 case_id"""
-        result = pool.promise(case_id, author)
-        if result["status"] == "promised" and on_claim is not None:
+    def claim_random_case() -> str:
+        """随机独占领取一件案例，返回 claimed；已有未提交领取时返回原案例，池空返回 empty"""
+        with pool.lock:
+            already_owned = set(pool.claims_for(author))
+            result = pool.claim_random(author)
+        if result["status"] == "claimed" and result["case_id"] not in already_owned and on_claim is not None:
             on_claim()
         return json.dumps(result, ensure_ascii=False)
+
+    @tool
+    def claim_case(case_id: str) -> str:
+        """指定独占领取真实案例；自己持有返回 claimed 或 submitted，他人持有返回 taken"""
+        with pool.lock:
+            already_owned = case_id in pool.claims_for(author)
+            result = pool.claim(case_id, author)
+        if result["status"] == "claimed" and not already_owned and on_claim is not None:
+            on_claim()
+        return json.dumps(result, ensure_ascii=False)
+
+    @tool
+    def submit_case(case_id: str) -> str:
+        """提交自己持有的案例并返回最多三件未预占候选，允许核查后无需修改；正式保存后持久化完成"""
+        return json.dumps(pool.submit(case_id, author), ensure_ascii=False)
 
     @tool
     def search_cases(case_type: str | None = None, unresolved_only: bool = False) -> str:
@@ -260,7 +294,7 @@ def build_case_tools(
             cases = [case_view(case) for case in cases]
         return json.dumps(cases, ensure_ascii=False)
 
-    return [push_case, promise_case, search_cases]
+    return [push_case, claim_case, claim_random_case, submit_case, search_cases]
 
 
 def build_finish_tool(request_end: Callable[[], dict[str, Any]]) -> Any:

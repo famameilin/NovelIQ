@@ -84,7 +84,9 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
         visible_tools.extend(
             by_name[name]
             for name in (
-                "promise_case",
+                "claim_case",
+                "claim_random_case",
+                "submit_case",
                 "search_cases",
                 "search_events",
                 "search_graph",
@@ -161,6 +163,13 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
         warnings = [warning for item in receipts if isinstance(item, dict) for warning in item.get("warnings", [])]
         if warnings:
             body["warnings"] = warnings
+        cases = [
+            {"tool": op["tool_name"], "result": op["case_receipt"]}
+            for op in self.ops
+            if op["program_id"] == self._program_id and "case_receipt" in op
+        ]
+        if cases:
+            body["cases"] = cases
         if any(
             op["program_id"] == self._program_id and op["tool_name"] == FINISH_TOOL_NAME and op["status"] == "success"
             for op in self.ops
@@ -169,14 +178,7 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
         return body
 
     async def _dispatch(self, name: str, args: dict[str, Any], *, line: int | None) -> Any:
-        """用于执行程序里的一次调用（构造器与工具同一条路径、同一套回执与审计）
-
-        每个名字走同样的步骤：寻址换算 → （构造器）当场校验成待写记录 → 经生产单条事务
-        边界执行 → 落产出记录 → 收尾（op 记录 + 审计行各写一次）。回执只有三种：
-        写成了 {status:"written", record, ref}、读到了数据本身（检索）、被拒
-        {status:"rejected", record, field, code, expected, message}——不因为"这次调的是
-        构造器还是工具"而换一套形状。
-        """
+        """执行构造器或工具，逐操作校验并审计，案例领取与提交保留实际状态"""
         op_index = self._next_op_index(line=line)
         started_ns = time.perf_counter_ns()
         if self.ledger.chapter_finished:
@@ -217,7 +219,9 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
                 )
         target = name if plan is None else plan.tool
         exec_args = dict(business_args if plan is None else plan.args)
-        if caseid is not None or "caseid" in call_args:
+        if "caseid" in call_args or (
+            caseid is not None and target not in {"claim_case", "claim_random_case", "submit_case"}
+        ):
             exec_args["caseid"] = caseid
         if plan is not None and target is None:
             # 只落产出记录的构造器（label）：标签与章级指标同属一个域，单独一条写不出去
@@ -328,6 +332,8 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
             call_args=call_args,
             error=error,
         )
+        if status == "success" and name in {"claim_case", "claim_random_case", "submit_case"}:
+            self.ops[-1]["case_receipt"] = receipt
         self._record_audit(
             name,
             args=call_args,

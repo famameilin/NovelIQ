@@ -57,6 +57,8 @@ class WorkExecution:
     case_reads: list[dict[str, Any]] = field(default_factory=list)
     case_save_warnings: list[dict[str, Any]] = field(default_factory=list)
 
+    committed_cases: list[dict[str, Any]] = field(default_factory=list)
+    case_check: Callable[[], list[str]] = lambda: []
     identifiers: dict[tuple, str] = field(default_factory=dict)
 
     def identifier(self, *key) -> str:
@@ -84,6 +86,7 @@ class WorkExecution:
         """返回当前 work 的完整性缺口；不改变写入状态，也不关闭写面"""
         missing: list[str] = []
         ledger = self.ledger
+        missing.extend(self.case_check())
         if ledger.role in {"annotation", "metric"}:
             if ledger.metrics_payload is None:
                 missing.append("metrics")
@@ -175,9 +178,8 @@ class AnnotationAgent:
         from .chapter_consolidation import consolidate_chapter
 
         async with self.lock:
-            snapshot = self.case_pool.snapshot(f"chapter:{message.payload['chapter_id']}")
-            executions = set(self.case_pool.executions)
-            warnings = deepcopy(self.case_pool.save_warnings)
+            author = new_id()
+            snapshot = self.case_pool.snapshot(author)
             try:
 
                 def save() -> dict[str, Any]:
@@ -188,6 +190,7 @@ class AnnotationAgent:
                         message.payload["chapter_id"],
                         self.case_pool,
                         recheck=bool(message.payload.get("recheck", False)),
+                        author=author,
                     )
                     pass
                     return result
@@ -201,8 +204,6 @@ class AnnotationAgent:
                     result = await transaction
             except BaseException:
                 self.case_pool.restore(snapshot)
-                self.case_pool.executions = executions
-                self.case_pool.save_warnings = warnings
                 raise
             if result["status"] == "saved":
                 self.case_pool.confirm_pending(result["author"])
@@ -284,11 +285,13 @@ class AnnotationAgent:
             async def emit(event: Any) -> None:
                 nonlocal stream_sequence
                 stream_sequence += 1
+                event.model_id = payload["model_id"]
+                event.reservation_id = payload["reservation_id"]
                 await self.bus.request(
                     Message(
                         topic="sse.show",
                         source=self.address,
-                        target=f"sse:{self.run_id}",
+                        target=f"activity:{self.run_id}",
                         run_id=self.run_id,
                         work_id=receipt.work_id,
                         invocation_id=invocation_id,
@@ -526,6 +529,7 @@ class AnnotationAgent:
     async def confirm(self, message: Message) -> None:
         execution = self._execution(message)
         async with self.lock:
+        execution.committed_cases = result.get("committed_cases", [])
             self.fact_graph.confirm(execution.invocation_id)
             self.event_trees.confirm(execution.invocation_id)
             self.case_pool.confirm(execution.invocation_id)
@@ -539,6 +543,7 @@ class AnnotationAgent:
         if not execution.saved:
             raise ValueError(f"work_id={execution.work_id} 尚未确认保存，不能展示保存进度")
         payload, progress = execution.receipt.payload, message.payload
+            self.case_pool.merge_committed(execution.committed_cases)
         current, total = progress["current"], progress["total"]
         for event in (
             StreamEvent(
@@ -560,7 +565,7 @@ class AnnotationAgent:
                 Message(
                     topic="sse.show",
                     source=self.address,
-                    target=f"sse:{self.run_id}",
+                    target=f"activity:{self.run_id}",
                     run_id=self.run_id,
                     work_id=execution.work_id,
                     invocation_id=execution.invocation_id,
@@ -652,16 +657,7 @@ class AnnotationAgent:
                     {key: value for key, value in self.event_trees.connections.items() if value["author"] == author}
                 ),
             },
-            "cases": {
-                "created_case_ids": sorted(self.case_pool.created.get(author, set())),
-                "registrations": deepcopy(
-                    {
-                        identifier: self.case_pool.cases[identifier]
-                        for identifier in self.case_pool.registrations.get(author, set())
-                    }
-                ),
-                "promises": self.case_pool.promises_for(author),
-            },
+            "cases": self.case_pool.contribution(author),
         }
         for node in contributions["events"]["nodes"].values():
             for participant in node["content"]["participants"]:
@@ -694,7 +690,6 @@ class AnnotationAgent:
         from src.storage.records.cases import CaseSave
         from src.storage.records.events import EventSave
         from src.storage.records.facts import FactSave
-
 
         metrics = output["metrics"]
         record = {
@@ -784,7 +779,7 @@ class AnnotationAgent:
                     Message(
                         topic="sse.show",
                         source=self.address,
-                        target=f"sse:{self.run_id}",
+                        target=f"activity:{self.run_id}",
                         run_id=self.run_id,
                         message_id=f"{message.message_id}:chapter:{chapter_id}",
                         payload=StreamEvent(action="chapter_reset", stage="annotate", chapter_id=chapter_id),

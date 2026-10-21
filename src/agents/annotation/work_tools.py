@@ -22,10 +22,16 @@ from .tools import _forbid_undeclared_args
 def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any]:
     ledger = execution.ledger
     author = execution.invocation_id
+    execution.case_check = lambda: (
+        ["仍有已领取但未提交案例，请先办理并 submit_case"] if agent.case_pool.unsubmitted_for(author) else []
+    )
     tools = [
         candidate
         for candidate in build_annotation_tools(query_service, ledger)
-        if candidate.name not in {"push_case", "finish", "write_event", "write_link"}
+        if candidate.name not in {
+            "push_case", "claim_case", "claim_random_case", "submit_case", "search_cases",
+            "finish", "write_event", "write_link",
+        }
     ]
 
     def current_evidence(visible_id: int) -> list[dict[str, Any]]:
@@ -207,6 +213,9 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         status: str,
         evidence: int,
         progress: str | None = None,
+        from_chapter_id: int | None = None,
+        to_chapter_id: int | None = None,
+        reason: str | None = None,
         isforeshadowing: bool = False,
         confidence: str | None = None,
         characters: list[dict[str, Any]] | None = None,
@@ -220,9 +229,6 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         if orders[end] > query_service.current_chapter_order:
             raise ValueError("标注事件不能引用未来章节")
         record = ledger.apply_event(
-        from_chapter_id: int | None = None,
-        to_chapter_id: int | None = None,
-        reason: str | None = None,
             el=el,
             title=title,
             problem=problem,
@@ -231,27 +237,21 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
             status=status,
             evidence=evidence,
             progress=progress,
+            from_chapter_id=from_chapter_id,
+            to_chapter_id=to_chapter_id,
+            reason=reason,
             isforeshadowing=isforeshadowing,
             confidence=confidence,
             characters=TypeAdapter(list[ParticipantArg]).validate_python(characters)
             if characters is not None
             else None,
         )
-            from_chapter_id=from_chapter_id,
-            to_chapter_id=to_chapter_id,
-            reason=reason,
         agent.event_trees.sync(author, ledger.current_chapter_id, ledger.bound_payloads.get("events", []))
         content = ledger.event_content(el=el, isroot="/" not in el)
         event_id = content["event_id"]
         read = agent.event_trees.read(event_id)
         execution.event_reads[event_id] = read
 
-        # 登记进全书共享案例池（case_type=event），诊断期按事件并发派工时据此取材
-        agent.case_pool.register_event_case(
-            title=read["content"]["title"],
-            summary=read["content"]["summary"],
-            author=author,
-        )
         return json.dumps(
             {"status": "written", "record": record, "content": read},
             ensure_ascii=False,
@@ -357,5 +357,6 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         _forbid_undeclared_args(candidate)
         from src.case_pool.tool_binding import bind_caseid
 
-        bind_caseid(candidate)
+        if candidate.name not in {"claim_case", "claim_random_case", "submit_case"}:
+            bind_caseid(candidate)
     return tools

@@ -94,14 +94,11 @@ def _sync_entity_ref(ref: dict[str, Any], production_receipt: Any) -> None:
 
 
 def _tool_receipt(name: str, payload: Any) -> Any:
-    """用于把一次工具调用的产出收敛成程序面回执
-
-    检索类的产出就是数据本身（程序要拿它绑变量、遍历、取长度），套信封会毁掉读的语义，
-    所以原样返回；其余工具（案例/finish）统一成 {status, record, ref}——工具自己那套
-    {"accepted": ...} 是生产层的回执，不会漏到程序面。
-    """
+    """读取与案例领取、提交保留实际结果，其他工具统一为写入回执"""
     if name in _READ_TOOL_NAMES:
         return payload if payload is not None else {}
+    if name in {"claim_case", "claim_random_case", "submit_case"}:
+        return payload
     body: dict[str, Any] = payload if isinstance(payload, dict) else {}
     if str(body.get("status") or "") == "written":
         return {**body, "ref": dict(body.get("ref") or {})}
@@ -258,12 +255,12 @@ def _event_write_args(
         "el": namespace_event_el(book.role, item.el),
         "title": item.title,
         "problem": item.problem,
-        "from_chapter_id": item.from_chapter_id,
-        "to_chapter_id": item.to_chapter_id,
-        "reason": item.reason,
         "summary": item.summary,
         "event_type": item.event_type,
         "status": item.status,
+        "from_chapter_id": item.from_chapter_id,
+        "to_chapter_id": item.to_chapter_id,
+        "reason": item.reason,
         "progress": item.progress,
         "evidence": item.evidence[0].paragraph_id,
     }
@@ -454,12 +451,12 @@ def build_agent_constructors(
         problem: str,
         summary: str,
         event_type: str,
-        from_chapter_id: int | None = None,
-        to_chapter_id: int | None = None,
-        reason: str | None = None,
         status: str,
         evidence: int,
         progress: str | None = None,
+        from_chapter_id: int | None = None,
+        to_chapter_id: int | None = None,
+        reason: str | None = None,
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
     ) -> _ConstructorCall:
@@ -473,12 +470,12 @@ def build_agent_constructors(
                 record=record,
                 field="confidence",
                 code="missing_field",
-            from_chapter_id=from_chapter_id,
-            to_chapter_id=to_chapter_id,
-            reason=reason,
                 expected="high / medium / low",
             )
         item = AgentEvent(
+            from_chapter_id=from_chapter_id,
+            to_chapter_id=to_chapter_id,
+            reason=reason,
             el=normalized_el,
             isroot=EL_PATH_SEP not in normalized_el,
             description=_require_text(summary, record=record, field_name="summary"),
