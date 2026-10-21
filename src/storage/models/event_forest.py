@@ -1,8 +1,4 @@
-"""
-章级事件声明、全书完整事件与来源归属模型
-
-章级正文与章节归属从原声明读取，全书正文由真实诊断执行提交
-"""
+"标注与诊断共用的事件及参与者模型"
 
 from __future__ import annotations
 
@@ -22,73 +18,29 @@ EVENT_STATUSES = ("ongoing", "resolved")
 PAYOFF_LIKELIHOODS = ("high", "medium", "low")
 
 
-class EventDeclaration(Base):
-    "章级事件声明表（不可变）"
-
-    __tablename__ = "event_declarations"
-    __table_args__ = (
-        UniqueConstraint("record_id", "local_key", name="uq_event_declarations_record_local_key"),
-        CheckConstraint(
-            "payoff_likelihood IS NULL OR payoff_likelihood IN ('high', 'medium', 'low')",
-            name="ck_event_declarations_payoff_likelihood",
-        ),
-        Index("idx_event_declarations_record", "record_id"),
-        {"comment": "事件声明表：不可变章级声明及伏笔属性（来源归属从标注记录取得）"},
-    )
-
-    declaration_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), primary_key=True, comment="声明主键（uuid）", default=new_id, autoincrement=False
-    )
-    record_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("agent_annotations.record_id", ondelete="RESTRICT", name="event_declarations_record_fkey"),
-        nullable=False,
-        comment="来源标注记录",
-    )
-    local_key: Mapped[str] = mapped_column(String(255), nullable=False, comment="真实 EL 本地地址")
-    title: Mapped[str] = mapped_column(String, nullable=False, comment="事件标题")
-    problem: Mapped[str] = mapped_column(String, nullable=False, comment="事件问题")
-    summary: Mapped[str] = mapped_column(String, nullable=False, comment="事件概要（description 读投影）")
-    event_type: Mapped[str] = mapped_column(String, nullable=False, comment="事件类型")
-    status: Mapped[str] = mapped_column(String(16), nullable=False, comment="声明状态（ongoing/resolved）")
-    progress: Mapped[str | None] = mapped_column(String, nullable=True, comment="进展")
-    is_foreshadowing_root: Mapped[bool] = mapped_column(
-        nullable=False, default=False, comment="是否伏笔根（区分非伏笔与未给 likelihood 的伏笔）"
-    )
-    payoff_likelihood: Mapped[str | None] = mapped_column(
-        String(20), nullable=True, comment="兑现可能性（high/medium/low，仅伏笔声明非空）"
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="创建时间")
-
-    def __repr__(self) -> str:
-        return f"<EventDeclaration(declaration_id={self.declaration_id}, title={self.title})>"
-
-
-class DeclarationParticipant(Base):
-    "声明参与者：实体引用与事件中角色（名字/类型读实体，不复制）"
+class EventParticipant(Base):
+    "事件参与者：实体引用与事件中角色（名字/类型读实体，不复制）"
 
     __tablename__ = "event_participants"
     __table_args__ = (
-        UniqueConstraint("declaration_id", "participant_ordinal", name="uq_declaration_participants_ordinal"),
-        UniqueConstraint("declaration_id", "entity_id", name="uq_declaration_participants_entity"),
-        {"comment": "声明参与者表：参与实体与叙事角色/动作/情绪（动态观测只关联本行）"},
+        UniqueConstraint("event_id", "participant_ordinal", name="uq_event_participants_ordinal"),
+        UniqueConstraint("event_id", "entity_id", name="uq_event_participants_entity"),
+        {"comment": "事件参与者表：参与实体与叙事角色/动作/情绪（动态观测只关联本行）"},
     )
 
     participant_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, comment="参与者主键（uuid）", default=new_id, autoincrement=False
     )
-    declaration_id: Mapped[str] = mapped_column(
+    event_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey(
-            "event_declarations.declaration_id", ondelete="CASCADE", name="declaration_participants_declaration_fkey"
-        ),
+        ForeignKey("event_records.event_id", ondelete="CASCADE", name="event_participants_annotation_event_fkey"),
         nullable=False,
-        comment="所属声明",
+        comment="所属事件",
     )
     participant_ordinal: Mapped[int] = mapped_column(Integer, nullable=False, comment="参与者序号（0 起）")
     entity_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("graph_entities.entity_id", ondelete="RESTRICT", name="declaration_participants_entity_fkey"),
+        ForeignKey("graph_entities.entity_id", ondelete="RESTRICT", name="event_participants_entity_fkey"),
         nullable=False,
         comment="参与实体",
     )
@@ -98,17 +50,24 @@ class DeclarationParticipant(Base):
     emotion: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="情绪（-2..2 整数分值）")
 
     def __repr__(self) -> str:
-        return f"<DeclarationParticipant(participant_id={self.participant_id}, role={self.role})>"
+        return f"<EventParticipant(participant_id={self.participant_id}, role={self.role})>"
 
 
 class CompleteEvent(Base):
-    "完整事件表：身份、真实生产者与同一性理由（source_work 从 producer 推导）"
+    "标注和诊断创建的不可变事件"
 
     __tablename__ = "event_records"
     __table_args__ = (
         UniqueConstraint("producer_agent_id", "local_key", name="uq_complete_events_producer_local_key"),
         Index("idx_complete_events_producer", "producer_agent_id"),
-        {"comment": "完整事件表：正式身份（真实成功生产尝试 + 本地稳定键）与同一性理由"},
+        Index("idx_events_annotation", "annotation_record_id"),
+        CheckConstraint("status IN ('ongoing', 'resolved')", name="ck_events_status"),
+        CheckConstraint(
+            "(is_foreshadowing_root AND payoff_likelihood IS NOT NULL AND payoff_likelihood IN ('high','medium','low'))"
+            " OR (NOT is_foreshadowing_root AND payoff_likelihood IS NULL)",
+            name="ck_events_payoff",
+        ),
+        {"comment": "完整事件表：真实生产者、局部稳定键、正文与章节范围"},
     )
 
     event_id: Mapped[str] = mapped_column(
@@ -121,7 +80,15 @@ class CompleteEvent(Base):
         comment="真实成功生产尝试（整轮 session 从 producer→work→session 推导）",
     )
     local_key: Mapped[str] = mapped_column(String(255), nullable=False, comment="同 work 重试沿用的局部稳定键")
-    identity_reason: Mapped[str] = mapped_column(String, nullable=False, comment="同一身份判断理由")
+    annotation_record_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("agent_annotations.record_id", ondelete="RESTRICT"), nullable=True
+    )
+    from_chapter_id: Mapped[int] = mapped_column("from", Integer, nullable=False)
+    to_chapter_id: Mapped[int] = mapped_column("to", Integer, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String, nullable=True, comment="事件创建理由")
+    is_foreshadowing_root: Mapped[bool] = mapped_column(nullable=False, default=False)
+    payoff_likelihood: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow)
     title: Mapped[str] = mapped_column(String, nullable=False, comment="全书事件标题")
     problem: Mapped[str] = mapped_column(String, nullable=False, comment="全书事件问题")
     summary: Mapped[str] = mapped_column(String, nullable=False, comment="全书事件概要")
@@ -131,21 +98,3 @@ class CompleteEvent(Base):
 
     def __repr__(self) -> str:
         return f"<CompleteEvent(event_id={self.event_id}, local_key={self.local_key})>"
-
-
-class EventDeclarationBinding(Base):
-    "不可变章级声明与全书完整事件的身份归属"
-
-    __tablename__ = "event_declaration_bindings"
-    __table_args__ = (
-        UniqueConstraint("declaration_id", name="uq_event_declaration_bindings_declaration"),
-        Index("idx_event_declaration_bindings_event", "event_id"),
-    )
-
-    binding_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=new_id)
-    event_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("event_records.event_id", ondelete="CASCADE"), nullable=False
-    )
-    declaration_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("event_declarations.declaration_id", ondelete="RESTRICT"), nullable=False
-    )

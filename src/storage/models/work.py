@@ -142,7 +142,7 @@ class DiagnosisReport(Base):
     narrative_arc_type: Mapped[str | None] = mapped_column(String(10), nullable=True, comment="叙事弧类型短标签")
     focus_structure: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="重点结构")
     theme_color: Mapped[str | None] = mapped_column(String(16), nullable=True, comment="主题色（十六进制）")
-    identity_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True, comment="身份核对冻结承诺")
+    content_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True, comment="内容核对冻结承诺")
     structure_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True, comment="结构核对冻结承诺")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="创建时间")
 

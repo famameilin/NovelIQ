@@ -7,7 +7,7 @@ creation_agent_id 是原标注来源，current_attribution_agent_id 是当前归
 直接落列（读投影不依赖审计表与 work）；speaker_entity_id 真实 FK→同 run 角色；
 tone/is_inner_monologue 为当前归因具名列。
 
-两个事件引用（声明/完整事件）互斥；声明发布后通过声明归属取得完整事件，不回填另一个 ID。
+关联事件直接引用正式事件身份。
 """
 
 from __future__ import annotations
@@ -35,10 +35,6 @@ class DialogueRecord(Base):
             name="dialogue_records_chapter_fkey",
         ),
         CheckConstraint("start_char < end_char", name="ck_dialogue_records_char_order"),
-        CheckConstraint(
-            "related_declaration_id IS NULL OR related_complete_event_id IS NULL",
-            name="ck_dialogue_records_event_refs_exclusive",
-        ),
         {"comment": "对话记录表：定位事实与当前归因（原文读取投影，candidate_key 身份算法不改）"},
     )
 
@@ -72,17 +68,11 @@ class DialogueRecord(Base):
     )
     tone: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="语气")
     is_inner_monologue: Mapped[bool] = mapped_column(nullable=False, default=False, comment="是否内心独白")
-    related_declaration_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("event_declarations.declaration_id", ondelete="RESTRICT", name="dialogue_records_declaration_fkey"),
-        nullable=True,
-        comment="关联章级声明（与完整事件引用互斥）",
-    )
     related_complete_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
         ForeignKey("event_records.event_id", ondelete="RESTRICT", name="dialogue_records_event_fkey"),
         nullable=True,
-        comment="关联完整事件（与声明引用互斥）",
+        comment="关联事件",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=naive_utcnow, comment="创建时间")
     updated_at: Mapped[datetime] = mapped_column(

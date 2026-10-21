@@ -27,17 +27,6 @@ BEGIN
     RETURN v_run;
 END
 $dc$ LANGUAGE plpgsql""",
-    """CREATE OR REPLACE FUNCTION dc_declaration_run_id(p_declaration_id uuid) RETURNS uuid AS $dc$
-DECLARE
-    v_run uuid;
-BEGIN
-    SELECT dc_agent_run_id(ca.agent_id) INTO v_run
-      FROM event_declarations d
-      JOIN agent_annotations ca ON ca.record_id = d.record_id
-     WHERE d.declaration_id = p_declaration_id;
-    RETURN v_run;
-END
-$dc$ LANGUAGE plpgsql""",
     """CREATE OR REPLACE FUNCTION dc_complete_event_run_id(p_event_id uuid) RETURNS uuid AS $dc$
 DECLARE
     v_run uuid;
@@ -119,12 +108,12 @@ BEGIN
         RETURN NULL;
     END IF;
     WITH RECURSIVE up AS (
-        SELECT NEW.contained_parent_id AS id, 1 AS depth
-        UNION ALL
-        SELECT l.contained_parent_id, up.depth + 1
+        SELECT NEW.contained_parent_id AS id
+        UNION
+        SELECT l.contained_parent_id
           FROM event_links l
           JOIN up ON l.contained_child_id = up.id
-         WHERE l.contained_child_id IS NOT NULL AND up.depth < 4096
+         WHERE l.contained_child_id IS NOT NULL
     )
     SELECT up.id INTO v_found FROM up WHERE up.id = NEW.contained_child_id LIMIT 1;
     IF v_found IS NOT NULL THEN
@@ -178,7 +167,7 @@ $dc$ LANGUAGE plpgsql""",
     AFTER INSERT OR UPDATE ON event_groups
     FOR EACH ROW EXECUTE FUNCTION dc_narrative_group_parent_chain()""",
     """CREATE OR REPLACE FUNCTION dc_source_evidence_owner_run(
-    p_graph_fact_id uuid, p_declaration_id uuid, p_complete_event_id uuid, p_narrative_group_id uuid,
+    p_graph_fact_id uuid, p_complete_event_id uuid, p_narrative_group_id uuid,
     p_narrative_link_id uuid, p_foreshadow_action_id uuid, p_check_id uuid
 ) RETURNS uuid AS $dc$
 DECLARE
@@ -186,13 +175,11 @@ DECLARE
 BEGIN
     IF p_graph_fact_id IS NOT NULL THEN
         SELECT COALESCE(dc_agent_run_id(gf.direct_producer_agent_id),
-            (SELECT dc_declaration_run_id(dp.declaration_id)
+            (SELECT dc_complete_event_run_id(dp.event_id)
              FROM event_participants dp WHERE dp.participant_id = gf.participant_id))
           INTO v_run
           FROM graph_facts gf
          WHERE gf.graph_fact_id = p_graph_fact_id;
-    ELSIF p_declaration_id IS NOT NULL THEN
-        v_run := dc_declaration_run_id(p_declaration_id);
     ELSIF p_complete_event_id IS NOT NULL THEN
         v_run := dc_complete_event_run_id(p_complete_event_id);
     ELSIF p_narrative_group_id IS NOT NULL THEN
@@ -216,11 +203,12 @@ DECLARE
     v_len integer;
 BEGIN
     v_run := dc_source_evidence_owner_run(
-        NEW.graph_fact_id, NEW.declaration_id, NEW.complete_event_id, NEW.narrative_group_id,
+        NEW.graph_fact_id, NEW.complete_event_id, NEW.narrative_group_id,
         NEW.narrative_link_id, NEW.foreshadow_action_id, NEW.check_id);
     IF v_run IS NULL THEN
         RETURN NEW;
     END IF;
+    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.related_complete_event_id), '证据相关事件');
     SELECT length(p.text) INTO v_len
       FROM paragraphs p
      WHERE p.run_id = v_run AND p.paragraph_id = NEW.paragraph_id;
@@ -250,24 +238,23 @@ $dc$ LANGUAGE plpgsql""",
     """CREATE TRIGGER trg_dc_graph_relation_same_run
     AFTER INSERT OR UPDATE ON graph_relations
     FOR EACH ROW EXECUTE FUNCTION dc_graph_relation_same_run()""",
-    """CREATE OR REPLACE FUNCTION dc_declaration_participant_same_run() RETURNS trigger AS $dc$
+    """CREATE OR REPLACE FUNCTION dc_event_participant_same_run() RETURNS trigger AS $dc$
 BEGIN
     PERFORM dc_require_same_run(
-        dc_declaration_run_id(NEW.declaration_id), dc_entity_run_id(NEW.entity_id), '声明参与者实体');
+        dc_complete_event_run_id(NEW.event_id), dc_entity_run_id(NEW.entity_id), '事件参与者实体');
     RETURN NULL;
 END
 $dc$ LANGUAGE plpgsql""",
-    """DROP TRIGGER IF EXISTS trg_dc_declaration_participant_same_run ON event_participants""",
-    """CREATE TRIGGER trg_dc_declaration_participant_same_run
+    """DROP TRIGGER IF EXISTS trg_dc_event_participant_same_run ON event_participants""",
+    """CREATE TRIGGER trg_dc_event_participant_same_run
     AFTER INSERT OR UPDATE ON event_participants
-    FOR EACH ROW EXECUTE FUNCTION dc_declaration_participant_same_run()""",
+    FOR EACH ROW EXECUTE FUNCTION dc_event_participant_same_run()""",
     """CREATE OR REPLACE FUNCTION dc_dialogue_same_run() RETURNS trigger AS $dc$
 DECLARE
     v_run uuid;
 BEGIN
     v_run := dc_agent_run_id(NEW.creation_agent_id);
     PERFORM dc_require_same_run(v_run, dc_entity_run_id(NEW.speaker_entity_id), '对话说话人');
-    PERFORM dc_require_same_run(v_run, dc_declaration_run_id(NEW.related_declaration_id), '对话关联声明');
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.related_complete_event_id), '对话关联事件');
     RETURN NULL;
 END
@@ -310,8 +297,8 @@ DECLARE
     v_run uuid;
 BEGIN
     v_run := dc_agent_run_id(NEW.producer_agent_id);
-    PERFORM dc_require_same_run(v_run, dc_declaration_run_id(NEW.source_declaration_id), '伏笔来源声明');
-    PERFORM dc_require_same_run(v_run, dc_declaration_run_id(NEW.target_declaration_id), '伏笔目标声明');
+    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.source_event_id), '伏笔来源事件');
+    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.target_event_id), '伏笔目标事件');
     RETURN NULL;
 END
 $dc$ LANGUAGE plpgsql""",
@@ -319,26 +306,13 @@ $dc$ LANGUAGE plpgsql""",
     """CREATE TRIGGER trg_dc_foreshadow_action_same_run
     AFTER INSERT OR UPDATE ON event_foreshadowing_actions
     FOR EACH ROW EXECUTE FUNCTION dc_foreshadow_action_same_run()""",
-    """CREATE OR REPLACE FUNCTION dc_event_declaration_binding_same_run() RETURNS trigger AS $dc$
-BEGIN
-    PERFORM dc_require_same_run(
-        dc_complete_event_run_id(NEW.event_id), dc_declaration_run_id(NEW.declaration_id), '完整事件绑定声明');
-    RETURN NULL;
-END
-$dc$ LANGUAGE plpgsql""",
-    """DROP TRIGGER IF EXISTS trg_dc_event_declaration_binding_same_run ON event_declaration_bindings""",
-    """CREATE TRIGGER trg_dc_event_declaration_binding_same_run
-    AFTER INSERT OR UPDATE ON event_declaration_bindings
-    FOR EACH ROW EXECUTE FUNCTION dc_event_declaration_binding_same_run()""",
     """CREATE OR REPLACE FUNCTION dc_narrative_link_same_run() RETURNS trigger AS $dc$
 DECLARE
     v_run uuid;
 BEGIN
     v_run := dc_agent_run_id(NEW.producer_agent_id);
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.semantic_source_event_id), '链路源端事件');
-    PERFORM dc_require_same_run(v_run, dc_declaration_run_id(NEW.semantic_source_declaration_id), '链路源端声明');
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.semantic_target_event_id), '链路目标端事件');
-    PERFORM dc_require_same_run(v_run, dc_declaration_run_id(NEW.semantic_target_declaration_id), '链路目标端声明');
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.contained_child_id), '包含子端事件');
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.contained_parent_id), '包含父端事件');
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.member_event_id), '事件—线成员事件');
@@ -357,11 +331,8 @@ DECLARE
 BEGIN
     v_run := dc_agent_run_id(NEW.producer_agent_id);
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.reviewed_event_id), '核对事件');
-    PERFORM dc_require_same_run(v_run, dc_declaration_run_id(NEW.reviewed_declaration_id), '核对声明');
-    PERFORM dc_require_same_run(v_run, dc_declaration_run_id(NEW.source_declaration_id), '声明对源端');
-    PERFORM dc_require_same_run(v_run, dc_declaration_run_id(NEW.target_declaration_id), '声明对目标端');
-    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.source_event_id), '结构对源端');
-    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.target_event_id), '结构对目标端');
+    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.source_event_id), '事件对源端');
+    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.target_event_id), '事件对目标端');
     RETURN NULL;
 END
 $dc$ LANGUAGE plpgsql""",
@@ -375,9 +346,10 @@ DECLARE
 BEGIN
     v_run := COALESCE(
         dc_agent_run_id(NEW.direct_producer_agent_id),
-        (SELECT dc_declaration_run_id(dp.declaration_id)
+        (SELECT dc_complete_event_run_id(dp.event_id)
          FROM event_participants dp WHERE dp.participant_id = NEW.participant_id));
     PERFORM dc_require_same_run(v_run, dc_entity_run_id(NEW.entity_id), '图谱事实实体');
+    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.event_id), '情节推进来源事件');
     IF NEW.relation_id IS NOT NULL THEN
         PERFORM dc_require_same_run(
             v_run,
@@ -442,6 +414,43 @@ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION dc_topic_distributio
     """DROP TRIGGER IF EXISTS trg_dc_metric_topic_distribution ON paragraph_metrics""",
     """CREATE CONSTRAINT TRIGGER trg_dc_metric_topic_distribution AFTER INSERT OR UPDATE ON paragraph_metrics
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION dc_topic_distribution()""",
+    """CREATE OR REPLACE FUNCTION dc_event_source_and_range() RETURNS trigger AS $dc$
+DECLARE
+    v_run uuid;
+    v_from_sequence integer;
+    v_to_sequence integer;
+    v_source_agent uuid;
+    v_source_run uuid;
+    v_source_sequence integer;
+BEGIN
+    IF TG_OP = 'UPDATE' AND NEW IS DISTINCT FROM OLD THEN
+        RAISE EXCEPTION '已保存事件不可改写' USING ERRCODE = 'check_violation';
+    END IF;
+    v_run := dc_agent_run_id(NEW.producer_agent_id);
+    SELECT sequence INTO v_from_sequence FROM chapters WHERE run_id = v_run AND chapter_id = NEW."from";
+    SELECT sequence INTO v_to_sequence FROM chapters WHERE run_id = v_run AND chapter_id = NEW."to";
+    IF v_from_sequence IS NULL OR v_to_sequence IS NULL THEN
+        RAISE EXCEPTION '事件起止章节必须属于生产者所在运行' USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    IF v_from_sequence > v_to_sequence THEN
+        RAISE EXCEPTION '事件起始章节不得晚于结束章节' USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.annotation_record_id IS NOT NULL THEN
+        SELECT a.agent_id, a.run_id, c.sequence INTO v_source_agent, v_source_run, v_source_sequence
+          FROM agent_annotations a JOIN chapters c ON c.run_id = a.run_id AND c.chapter_id = a.chapter_id
+         WHERE a.record_id = NEW.annotation_record_id;
+        IF v_source_agent IS DISTINCT FROM NEW.producer_agent_id OR v_source_run IS DISTINCT FROM v_run THEN
+            RAISE EXCEPTION '事件标注来源必须属于同一真实生产执行' USING ERRCODE = 'foreign_key_violation';
+        END IF;
+        IF v_to_sequence > v_source_sequence THEN
+            RAISE EXCEPTION '标注事件范围不得超过来源标注章节' USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END $dc$ LANGUAGE plpgsql""",
+    """DROP TRIGGER IF EXISTS trg_dc_event_source_and_range ON event_records""",
+    """CREATE TRIGGER trg_dc_event_source_and_range BEFORE INSERT OR UPDATE ON event_records
+FOR EACH ROW EXECUTE FUNCTION dc_event_source_and_range()""",
 )
 
 

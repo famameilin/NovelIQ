@@ -124,7 +124,7 @@ class GraphFact(Base):
             # 实体引用/更新形状
             "(direct_producer_agent_id IS NOT NULL AND entity_id IS NOT NULL AND operation_order IS NOT NULL"
             " AND relation_id IS NULL AND participant_id IS NULL"
-            " AND business_call_id IS NULL AND declaration_id IS NULL"
+            " AND business_call_id IS NULL AND event_id IS NULL"
             " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
             " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
             " AND relation_change_kind IS NULL AND identity_kind IS NULL AND reason IS NULL)"
@@ -132,7 +132,7 @@ class GraphFact(Base):
             " OR (direct_producer_agent_id IS NOT NULL AND relation_id IS NOT NULL"
             " AND operation_order IS NOT NULL AND relation_change_kind IS NOT NULL"
             " AND entity_id IS NULL AND participant_id IS NULL"
-            " AND business_call_id IS NULL AND declaration_id IS NULL"
+            " AND business_call_id IS NULL AND event_id IS NULL"
             " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
             " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
             " AND description_action IS NULL AND description_value IS NULL"
@@ -140,7 +140,7 @@ class GraphFact(Base):
             # 人物动态观测形状
             " OR (participant_id IS NOT NULL AND direct_producer_agent_id IS NULL"
             " AND operation_order IS NULL AND relation_id IS NULL AND entity_id IS NULL"
-            " AND business_call_id IS NULL AND declaration_id IS NULL"
+            " AND business_call_id IS NULL AND event_id IS NULL"
             " AND plotline_subject_id IS NULL AND plotline_subject_title IS NULL"
             " AND plotline_description IS NULL AND plotline_before IS NULL AND plotline_after IS NULL"
             " AND description_action IS NULL AND description_value IS NULL"
@@ -214,11 +214,11 @@ class GraphFact(Base):
         nullable=True,
         comment="人物动态观测的源参与者（唯一）",
     )
-    declaration_id: Mapped[str | None] = mapped_column(
+    event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("event_declarations.declaration_id", ondelete="RESTRICT", name="graph_facts_declaration_fkey"),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="graph_facts_annotation_event_fkey"),
         nullable=True,
-        comment="情节推进的可选来源声明",
+        comment="情节推进的可选来源事件",
     )
     description_action: Mapped[str | None] = mapped_column(
         String(10), nullable=True, comment="description 操作（omit/set/clear）"

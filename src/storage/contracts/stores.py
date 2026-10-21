@@ -1,4 +1,4 @@
-"按职责声明数据访问能力，不导入数据库实现"
+"按职责事件数据访问能力，不导入数据库实现"
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from src.storage.records.graph import (
 from src.storage.records.inputs import ChapterRecord as ChapterData
 from src.storage.records.inputs import ChunkRecord as Chunk
 from src.storage.records.inputs import ParagraphRecord as ParagraphSpan
-from src.storage.records.models import ChapterRecord, EventDeclarationRecord, GraphEntityRecord
+from src.storage.records.models import ChapterRecord, CompleteEventRecord, GraphEntityRecord
 from src.storage.records.paragraph import ParagraphCurveRow, ParagraphMetricRow
 from src.storage.records.sentinels import UNSET as _UNSET
 from src.storage.records.topic import TopicModelRunContract
@@ -269,7 +269,7 @@ class AnnotationStore(Protocol):
         "本运行对话记录：run/章是创建时自落归属，内容按章节区间精确切片"
         ...
 
-    def fetch_foreshadowing_roots(self, run_id: str, *, ordered: bool = False) -> list[EventDeclarationRecord]:
+    def fetch_foreshadowing_roots(self, run_id: str, *, ordered: bool = False) -> list[CompleteEventRecord]:
         "Annotation 数据访问"
         ...
 
@@ -277,7 +277,7 @@ class AnnotationStore(Protocol):
         "伏笔语义链路读投影；ordered 时按目标事件来源章序排序（无证据章的链路排后）"
         ...
 
-    def fetch_event_records(self, run_id: str, event_ids: set[str]) -> list[EventDeclarationRecord]:
+    def fetch_event_records(self, run_id: str, event_ids: set[str]) -> list[CompleteEventRecord]:
         "Annotation 数据访问"
         ...
 
@@ -490,7 +490,7 @@ class ForestStore(Protocol):
         ...
 
     def fetch_nodes(self, run_id: str, max_chapter_order: int):
-        "本 run 在阅读截点内的章级声明，按章序与声明身份稳定排序"
+        "本 run 在阅读截点内的章级事件，按章序与事件身份稳定排序"
         ...
 
     def fetch_outputs(self, annotation_ids: set[str]):
@@ -506,5 +506,5 @@ class ForestStore(Protocol):
         ...
 
     def fetch_foreshadow_edges(self, run_id: str):
-        "伏笔语义链路：来源/目标都必须是完整事件，声明身份不回填冒充"
+        "伏笔语义链路：来源/目标都必须是完整事件，事件身份不回填冒充"
         ...

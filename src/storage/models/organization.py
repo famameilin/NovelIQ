@@ -36,28 +36,28 @@ class NarrativeLink(Base):
         ),
         CheckConstraint(
             # 语义/因果形状
-            "((semantic_source_event_id IS NOT NULL)::int + (semantic_source_declaration_id IS NOT NULL)::int = 1"
-            " AND (semantic_target_event_id IS NOT NULL)::int + (semantic_target_declaration_id IS NOT NULL)::int = 1"
+            "(semantic_source_event_id IS NOT NULL"
+            " AND semantic_target_event_id IS NOT NULL"
             " AND relation_type IS NOT NULL AND source_operation_local_key IS NOT NULL"
             " AND contained_child_id IS NULL AND contained_parent_id IS NULL"
             " AND member_event_id IS NULL AND arc_group_id IS NULL AND arc_role IS NULL"
             " AND outcome_group_id IS NULL)"
             " OR (contained_child_id IS NOT NULL AND contained_parent_id IS NOT NULL"
             " AND contained_child_id <> contained_parent_id"
-            " AND semantic_source_event_id IS NULL AND semantic_source_declaration_id IS NULL"
-            " AND semantic_target_event_id IS NULL AND semantic_target_declaration_id IS NULL"
+            " AND semantic_source_event_id IS NULL"
+            " AND semantic_target_event_id IS NULL"
             " AND relation_type IS NULL AND source_operation_local_key IS NULL"
             " AND member_event_id IS NULL AND arc_group_id IS NULL AND arc_role IS NULL"
             " AND outcome_group_id IS NULL AND is_active IS NULL AND expired_at IS NULL AND cause_role IS NULL)"
             " OR (member_event_id IS NOT NULL AND arc_group_id IS NOT NULL AND arc_role IS NOT NULL"
-            " AND semantic_source_event_id IS NULL AND semantic_source_declaration_id IS NULL"
-            " AND semantic_target_event_id IS NULL AND semantic_target_declaration_id IS NULL"
+            " AND semantic_source_event_id IS NULL"
+            " AND semantic_target_event_id IS NULL"
             " AND relation_type IS NULL AND source_operation_local_key IS NULL"
             " AND contained_child_id IS NULL AND contained_parent_id IS NULL AND outcome_group_id IS NULL"
             " AND is_active IS NULL AND expired_at IS NULL AND cause_role IS NULL)"
             " OR (member_event_id IS NOT NULL AND outcome_group_id IS NOT NULL"
-            " AND semantic_source_event_id IS NULL AND semantic_source_declaration_id IS NULL"
-            " AND semantic_target_event_id IS NULL AND semantic_target_declaration_id IS NULL"
+            " AND semantic_source_event_id IS NULL"
+            " AND semantic_target_event_id IS NULL"
             " AND relation_type IS NULL AND source_operation_local_key IS NULL"
             " AND contained_child_id IS NULL AND contained_parent_id IS NULL AND arc_group_id IS NULL"
             " AND arc_role IS NULL AND is_active IS NULL AND expired_at IS NULL AND cause_role IS NULL)",
@@ -117,29 +117,13 @@ class NarrativeLink(Base):
         Uuid(as_uuid=False),
         ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_source_event_fkey"),
         nullable=True,
-        comment="语义关系源端（完整事件，与声明端点恰一）",
-    )
-    semantic_source_declaration_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey(
-            "event_declarations.declaration_id", ondelete="RESTRICT", name="narrative_links_source_declaration_fkey"
-        ),
-        nullable=True,
-        comment="语义关系源端（声明，与事件端点恰一）",
+        comment="语义关系源端（完整事件，与事件端点恰一）",
     )
     semantic_target_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
         ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_target_event_fkey"),
         nullable=True,
-        comment="语义关系目标端（完整事件，与声明端点恰一）",
-    )
-    semantic_target_declaration_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey(
-            "event_declarations.declaration_id", ondelete="RESTRICT", name="narrative_links_target_declaration_fkey"
-        ),
-        nullable=True,
-        comment="语义关系目标端（声明，与事件端点恰一）",
+        comment="语义关系目标端（完整事件，与事件端点恰一）",
     )
     relation_type: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="语义关系类型码")
     source_operation_local_key: Mapped[str | None] = mapped_column(
@@ -239,25 +223,16 @@ class NarrativeGroup(Base):
 
 
 class OrganizationCheck(Base):
-    "组织核对表（四类互斥形状）"
+    "单事件核对与事件结构对判断"
 
     __tablename__ = "event_checks"
     __table_args__ = (
         CheckConstraint(
             "(reviewed_event_id IS NOT NULL AND snapshot_hash IS NOT NULL AND disposition IS NULL"
-            " AND reviewed_declaration_id IS NULL AND source_declaration_id IS NULL AND target_declaration_id IS NULL"
-            " AND source_event_id IS NULL AND target_event_id IS NULL)"
-            " OR (reviewed_declaration_id IS NOT NULL AND snapshot_hash IS NOT NULL AND disposition IS NULL"
-            " AND reviewed_event_id IS NULL AND source_declaration_id IS NULL AND target_declaration_id IS NULL"
-            " AND source_event_id IS NULL AND target_event_id IS NULL)"
-            " OR (source_declaration_id IS NOT NULL AND target_declaration_id IS NOT NULL"
-            " AND disposition IS NOT NULL AND snapshot_hash IS NULL"
-            " AND reviewed_event_id IS NULL AND reviewed_declaration_id IS NULL"
             " AND source_event_id IS NULL AND target_event_id IS NULL)"
             " OR (source_event_id IS NOT NULL AND target_event_id IS NOT NULL"
-            " AND snapshot_hash IS NOT NULL AND disposition IS NOT NULL"
-            " AND reviewed_event_id IS NULL AND reviewed_declaration_id IS NULL"
-            " AND source_declaration_id IS NULL AND target_declaration_id IS NULL)",
+            " AND source_event_id <> target_event_id AND snapshot_hash IS NOT NULL"
+            " AND disposition IN ('contains','part_of','related','independent') AND reviewed_event_id IS NULL)",
             name="ck_organization_checks_shape",
         ),
         Index(
@@ -267,19 +242,6 @@ class OrganizationCheck(Base):
             postgresql_where=sql_text("reviewed_event_id IS NOT NULL"),
         ),
         Index(
-            "uq_organization_checks_declaration",
-            "reviewed_declaration_id",
-            unique=True,
-            postgresql_where=sql_text("reviewed_declaration_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_organization_checks_declaration_pair",
-            "source_declaration_id",
-            "target_declaration_id",
-            unique=True,
-            postgresql_where=sql_text("source_declaration_id IS NOT NULL"),
-        ),
-        Index(
             "uq_organization_checks_event_pair",
             "source_event_id",
             "target_event_id",
@@ -287,7 +249,7 @@ class OrganizationCheck(Base):
             postgresql_where=sql_text("source_event_id IS NOT NULL"),
         ),
         Index("idx_organization_checks_producer", "producer_agent_id"),
-        {"comment": "组织核对表：单事件/单声明核对与声明对/结构对判断四类互斥形状"},
+        {"comment": "组织核对表：单事件核对和事件结构对判断"},
     )
 
     check_id: Mapped[str] = mapped_column(
@@ -305,30 +267,6 @@ class OrganizationCheck(Base):
         ForeignKey("event_records.event_id", ondelete="CASCADE", name="organization_checks_event_fkey"),
         nullable=True,
         comment="被核对事件（单事件核对）",
-    )
-    reviewed_declaration_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey(
-            "event_declarations.declaration_id", ondelete="CASCADE", name="organization_checks_declaration_fkey"
-        ),
-        nullable=True,
-        comment="被核对声明（单声明核对）",
-    )
-    source_declaration_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey(
-            "event_declarations.declaration_id", ondelete="RESTRICT", name="organization_checks_source_declaration_fkey"
-        ),
-        nullable=True,
-        comment="声明对来源（保持原最早锚点定向）",
-    )
-    target_declaration_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey(
-            "event_declarations.declaration_id", ondelete="RESTRICT", name="organization_checks_target_declaration_fkey"
-        ),
-        nullable=True,
-        comment="声明对目标",
     )
     source_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
@@ -350,7 +288,7 @@ class OrganizationCheck(Base):
 
 
 class EventForeshadowingAction(Base):
-    "伏笔动作事实：来源/目标声明真实 FK（root/target 完整事件按绑定投影，不复制）"
+    "伏笔动作事实：来源事件与目标事件直接引用"
 
     __tablename__ = "event_foreshadowing_actions"
     __table_args__ = (
@@ -361,7 +299,7 @@ class EventForeshadowingAction(Base):
             "source_operation_local_key",
             unique=True,
         ),
-        Index("idx_event_foreshadowing_actions_source_declaration", "source_declaration_id"),
+        Index("idx_event_foreshadowing_actions_source_annotation_event", "source_event_id"),
         {"comment": "伏笔动作表：setup/reinforce/payoff 动作事实（evidence_scope=paragraph 为生成合同）"},
     )
 
@@ -377,21 +315,17 @@ class EventForeshadowingAction(Base):
     source_operation_local_key: Mapped[str] = mapped_column(String(128), nullable=False, comment="实际操作身份")
     operation_order: Mapped[int] = mapped_column(Integer, nullable=False, comment="执行内操作顺序")
     action_type: Mapped[str] = mapped_column(String(16), nullable=False, comment="动作类型（setup/reinforce/payoff）")
-    source_declaration_id: Mapped[str] = mapped_column(
+    source_event_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey(
-            "event_declarations.declaration_id", ondelete="RESTRICT", name="event_foreshadowing_actions_source_fkey"
-        ),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="event_foreshadowing_actions_source_fkey"),
         nullable=False,
-        comment="来源声明",
+        comment="来源事件",
     )
-    target_declaration_id: Mapped[str | None] = mapped_column(
+    target_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey(
-            "event_declarations.declaration_id", ondelete="RESTRICT", name="event_foreshadowing_actions_target_fkey"
-        ),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="event_foreshadowing_actions_target_fkey"),
         nullable=True,
-        comment="目标声明（无目标为空）",
+        comment="目标事件（无目标为空）",
     )
 
     def __repr__(self) -> str:
@@ -399,13 +333,13 @@ class EventForeshadowingAction(Base):
 
 
 class SourceEvidence(Base):
-    "原文证据表（九个所有者恰一；每个所有者分支 (owner,ordinal) 唯一）"
+    "原文证据表：六类所有者恰一，各所有者内证据序号唯一"
 
     __tablename__ = "paragraph_evidence"
     __table_args__ = (
         CheckConstraint("start_char < end_char", name="ck_source_evidence_char_order"),
         CheckConstraint(
-            "(graph_fact_id IS NOT NULL)::int + (declaration_id IS NOT NULL)::int "
+            "(graph_fact_id IS NOT NULL)::int "
             "+ (complete_event_id IS NOT NULL)::int + (narrative_group_id IS NOT NULL)::int "
             "+ (narrative_link_id IS NOT NULL)::int + (foreshadow_action_id IS NOT NULL)::int "
             "+ (check_id IS NOT NULL)::int = 1",
@@ -417,13 +351,6 @@ class SourceEvidence(Base):
             "ordinal",
             unique=True,
             postgresql_where=sql_text("graph_fact_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_source_evidence_declaration",
-            "declaration_id",
-            "ordinal",
-            unique=True,
-            postgresql_where=sql_text("declaration_id IS NOT NULL"),
         ),
         Index(
             "uq_source_evidence_complete_event",
@@ -481,12 +408,6 @@ class SourceEvidence(Base):
         ForeignKey("graph_facts.graph_fact_id", ondelete="CASCADE", name="source_evidence_graph_fact_fkey"),
         nullable=True,
         comment="所有者：图谱事实",
-    )
-    declaration_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("event_declarations.declaration_id", ondelete="CASCADE", name="source_evidence_declaration_fkey"),
-        nullable=True,
-        comment="所有者：章级声明",
     )
     complete_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
