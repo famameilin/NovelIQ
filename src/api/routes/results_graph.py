@@ -190,20 +190,20 @@ async def get_event_source_chapter(
     )
 
 
-@event_forest_router.get("/{novel_id}/event-forest/chapters/{chapter_id}/nodes/{declaration_id}")
+@event_forest_router.get("/{novel_id}/event-forest/chapters/{chapter_id}/nodes/{event_id}")
 async def get_chapter_event(
     novel_id: str,
     chapter_id: int,
-    declaration_id: str,
+    event_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
 ) -> dict:
-    "读取当前章声明自身正文和完整事件归属"
+    "读取当前章事件自身正文和完整事件归属"
     from src.event_trees.read.organization import EventTreeQuery
 
     _require_readable_run_status(_require_run_for_novel(session, novel_id, run_id))
     try:
-        return EventTreeQuery(session, run_id).chapter_detail(chapter_id, declaration_id)
+        return EventTreeQuery(session, run_id).chapter_detail(chapter_id, event_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

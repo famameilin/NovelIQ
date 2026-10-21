@@ -1,4 +1,4 @@
-"""正式事件只读入口；声明来源只用于审计，新旧契约禁止混读"""
+"""正式事件只读入口；事件来源只用于审计，新旧契约禁止混读"""
 
 from __future__ import annotations
 
@@ -58,22 +58,17 @@ async def get_event_tree_source(
     session: SessionDep,
     run_id: RunDep,
     chapter_id: int | None = None,
-    kind: Literal["event", "declaration"] = "event",
+    kind: Literal["event"] = "event",
 ) -> dict[str, Any]:
     try:
         query = _query(session, novel_id, run_id)
-        if kind == "event":
-            evidence = query.detail(node_id)["evidence"]
-        else:
-            evidence = query.declaration_source(node_id)
+        evidence = query.detail(node_id)["evidence"]
         source = read_evidence_source(session, run_id, evidence, chapter_id)
         # 全章正文供阅读，准确证据单独返回，不能把正文段落数组伪装成全部证据
         source["evidence"] = evidence
         source["evidence_scope"] = (
             "paragraph" if evidence and all(item.get("paragraph_id") is not None for item in evidence) else "chapter"
         )
-        if kind == "declaration":
-            source["locator"] = query.declaration_locator(node_id)
         return source
     except (ValueError, LookupError) as error:
         raise _error(error) from error

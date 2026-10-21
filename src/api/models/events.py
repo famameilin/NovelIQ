@@ -5,14 +5,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EventNodeResponse(BaseModel):
     """事件节点（含树结构字段）"""
 
-    declaration_id: str
-    event_id: str | None
+    model_config = ConfigDict(populate_by_name=True)
+    event_id: str
+    from_chapter_id: int = Field(alias="from")
+    to_chapter_id: int = Field(alias="to")
     chapter_id: int = Field(gt=0)
     chapter_order: int = Field(gt=0)
     description: str
