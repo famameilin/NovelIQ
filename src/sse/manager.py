@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from src.sse.persistence import SseMessageRepository
-from src.sse.state import DisplayState
+from src.sse.projection import AnalysisProjection
 
 _MAX_BUFFER_SIZE = 256
 
@@ -38,7 +38,7 @@ class EventManager:
         self._buffers: dict[str, deque[dict[str, Any]]] = {}
         self._seq_counters: dict[str, int] = {}
         self._messages: dict[str, dict[str, dict[str, Any]]] = {}
-        self._display_states: dict[str, DisplayState] = {}
+        self._projections: dict[str, AnalysisProjection] = {}
         self._cleanup_task: asyncio.Task[None] | None = None
 
     async def connect(
@@ -60,14 +60,12 @@ class EventManager:
         # 1) 避免并发 append 使迭代中的 deque 被修改（RuntimeError: deque mutated during iteration）
         # 2) 保证"先入缓冲后注册"或"先注册后实时推送"的严格时序，杜绝同一消息回放+实时双投
         async with self._locks[task_id]:
-            state = await self._display_state(task_id)
             self._connections[task_id].append(queue)
             self._last_activity[task_id] = time.monotonic()
             buffered = [
                 msg
                 for msg in self._buffers.get(task_id, ())
                 if (last_seq is None or msg.get("seq", 0) > last_seq)
-                and state.accepts(msg["type"], msg["data"], msg["seq"])
             ]
 
         # 锁外回放：asyncio.Queue 无界 put 不会真正阻塞，但避免在锁内 await
@@ -88,6 +86,8 @@ class EventManager:
                 task_id
                 for task_id, last_time in self._last_activity.items()
                 if current_time - last_time > self._idle_timeout
+                and not self._connections.get(task_id)
+                and not self._locks[task_id].locked()
             ]
             for task_id in idle_ids:
                 await self.disconnect_all(task_id)
@@ -118,14 +118,7 @@ class EventManager:
         if task_id in self._seq_counters:
             del self._seq_counters[task_id]
         self._messages.pop(task_id, None)
-        self._display_states.pop(task_id, None)
-
-    async def _display_state(self, task_id: str) -> DisplayState:
-        if task_id not in self._display_states:
-            self._display_states[task_id] = (
-                await asyncio.to_thread(self._outbox.display_state, task_id) if self._outbox else DisplayState()
-            )
-        return self._display_states[task_id]
+        self._projections.pop(task_id, None)
 
     async def restart_display(self, task_id: str) -> None:
         """恢复当前分析时保存实际重置事实，保留各 work 展示和原始消息游标"""
@@ -136,47 +129,63 @@ class EventManager:
         if task_id in self._buffers:
             self._buffers[task_id].clear()
 
-    async def send(self, task_id: str, event_type: str, data: dict[str, Any]) -> None:
-        """发送消息到该 task_id 的所有 SSE 连接，并写入缓冲（无连接也缓冲）"""
-        self._last_activity[task_id] = time.monotonic()
-        if task_id not in self._buffers:
-            self._buffers[task_id] = deque(maxlen=self._buffer_size)
-            # 纯 API 任务（从未 connect 过、无 SSE 连接）也会产生缓冲条目，
-            # 必须在此确保 idle cleanup 协程在运行，否则该条目永不回收
-            self._start_cleanup_task()
-
-        data = {**data, "message_id": data.get("message_id") or uuid4().hex}
-        message_id = data["message_id"]
-        async with self._locks.setdefault(task_id, asyncio.Lock()):
-            state = await self._display_state(task_id)
-            seen = self._messages.setdefault(task_id, {})
-            message = seen.get(message_id)
-            if message is None:
-                if not state.accepts(event_type, data):
-                    return
-                seq = (
-                    await asyncio.to_thread(self._outbox.reserve_sequence, task_id, message_id)
-                    if self._outbox is not None
-                    else self._seq_counters.get(task_id, 0) + 1
-                )
-                self._seq_counters[task_id] = max(seq, self._seq_counters.get(task_id, 0))
-                message = {"type": event_type, "data": data, "seq": seq}
-                state.observe(event_type, data, seq)
-                seen[message_id] = message
-                self._buffers[task_id].append(message)
-                for queue in list(self._connections.get(task_id, ())):
-                    if queue.full():
-                        await self.disconnect(task_id, queue)
-                        while not queue.empty():
-                            queue.get_nowait()
-                        queue.put_nowait({"type": "reconnect_required", "data": {"reason": "backpressure"}})
-                    else:
-                        queue.put_nowait(message)
-            elif message["type"] != event_type or message["data"] != data:
-                raise ValueError(f"展示消息身份冲突: {message_id}")
-            # 实时缓存和发送在保存之前，保存失败也能以原游标重放、重投递
+    async def _projection(self, task_id: str) -> AnalysisProjection:
+        if task_id not in self._projections:
+            projection = AnalysisProjection()
             if self._outbox is not None:
-                await asyncio.to_thread(self._outbox.emit, task_id, event_type, data, sequence=message["seq"])
+                while True:
+                    page = await asyncio.to_thread(self._outbox.replay, task_id, projection.cursor)
+                    if not page:
+                        break
+                    for message in page:
+                        projection.apply(message["type"], message["data"], int(message["seq"]))
+            self._projections[task_id] = projection
+        return self._projections[task_id]
+
+    async def connect_snapshot(self, task_id: str) -> tuple[asyncio.Queue, dict[str, Any]]:
+        """快照与订阅登记共用持久发送锁，增量严格接续快照游标"""
+        async with self._locks.setdefault(task_id, asyncio.Lock()):
+            projection = await self._projection(task_id)
+            queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=self._buffer_size)
+            self._connections.setdefault(task_id, []).append(queue)
+            self._last_activity[task_id] = time.monotonic()
+            self._start_cleanup_task()
+            return queue, projection.snapshot()
+
+    async def send(self, task_id: str, event_type: str, data: dict[str, Any]) -> None:
+        """事务确认后才更新投影、缓存及推送，游标采用存储返回值"""
+        data = {**data, "message_id": data.get("message_id") or uuid4().hex}
+        async with self._locks.setdefault(task_id, asyncio.Lock()):
+            projection = await self._projection(task_id)
+            seen = self._messages.setdefault(task_id, {})
+            previous = seen.get(data["message_id"])
+            if previous is not None:
+                if previous["type"] != event_type or previous["data"] != data:
+                    raise ValueError(f"展示消息身份冲突: {data['message_id']}")
+                return
+            if self._outbox is not None:
+                message = await asyncio.to_thread(self._outbox.emit, task_id, event_type, data)
+            else:
+                message = {"type": event_type, "data": data, "seq": projection.cursor + 1}
+            seq = int(message["seq"])
+            if seq <= projection.cursor:
+                return
+            projection.apply(event_type, data, seq)
+            self._seq_counters[task_id] = seq
+            self._last_activity[task_id] = time.monotonic()
+            seen[data["message_id"]] = message
+            while len(seen) > self._buffer_size:
+                del seen[next(iter(seen))]
+            self._buffers.setdefault(task_id, deque(maxlen=self._buffer_size)).append(message)
+            self._start_cleanup_task()
+            for queue in list(self._connections.get(task_id, ())):
+                if queue.full():
+                    await self.disconnect(task_id, queue)
+                    while not queue.empty():
+                        queue.get_nowait()
+                    queue.put_nowait({"type": "reconnect_required", "data": {"reason": "backpressure"}})
+                else:
+                    queue.put_nowait(message)
 
     @property
     def is_durable(self) -> bool:
@@ -190,19 +199,18 @@ class EventManager:
         # 持久页和缓存必须与发送共享同一快照边界
         # 否则查询短页期间的并发发送可能淘汰缓存中段，再以更高游标跳过尚未回放的持久消息
         async with self._locks.setdefault(task_id, asyncio.Lock()):
-            state = await self._display_state(task_id)
             stored = await asyncio.to_thread(self._outbox.replay, task_id, after_seq) if self._outbox else []
             cached = [
                 message
                 for message in self._buffers.get(task_id, ())
-                if message["seq"] > after_seq and state.accepts(message["type"], message["data"], message["seq"])
+                if message["seq"] > after_seq
             ]
             # 单页持久重放还有后续页时，不能越过它直接推送更高缓存游标
             ceiling = stored[-1]["seq"] if len(stored) >= 128 else float("inf")
             merged = {
                 message["seq"]: message
                 for message in [*stored, *cached]
-                if message["seq"] <= ceiling and state.accepts(message["type"], message["data"], message["seq"])
+                if message["seq"] <= ceiling
             }
             return [merged[seq] for seq in sorted(merged)]
 
@@ -226,7 +234,7 @@ class EventManager:
         self._buffers.clear()
         self._seq_counters.clear()
         self._messages.clear()
-        self._display_states.clear()
+        self._projections.clear()
 
     def reset_for_testing(self) -> None:
         """
@@ -244,7 +252,7 @@ class EventManager:
         self._buffers.clear()
         self._seq_counters.clear()
         self._messages.clear()
-        self._display_states.clear()
+        self._projections.clear()
 
 
 event_manager = EventManager()
