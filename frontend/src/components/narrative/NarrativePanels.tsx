@@ -29,7 +29,7 @@ export function FloatingDetail({ title, children, onClose, inline = false }: { t
   return inline ? panel : createPortal(panel, document.body);
 }
 
-type EvidenceLocation = { id: string; kind?: "event" | "declaration"; evidence_scope: "chapter" | "paragraph"; anchor_paragraph_ids: number[]; chapter_id?: number; evidence: Array<Record<string, unknown>> };
+type EvidenceLocation = { id: string; kind?: "event"; evidence_scope: "chapter" | "paragraph"; anchor_paragraph_ids: number[]; chapter_id?: number; evidence: Array<Record<string, unknown>> };
 export function NarrativeReader({ novelId, runId, page, location, throughChapterId, onClose }: { novelId: string; runId: string; page: "timeline" | "event-trees"; location: EvidenceLocation; throughChapterId?: number; onClose: () => void }) {
   const [opener] = useState(() => document.activeElement as HTMLElement | null);
   const reader = useRef<HTMLDivElement>(null);

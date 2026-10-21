@@ -7,11 +7,11 @@ function bookWith(relations: EventTreeListResponse["relations"]): EventTreeListR
   return {
     run_id: "run-curve",
     chapters: [{ chapter_id: 1, title: "第 1 章", chapter_order: 1 }],
-    counts: { top_level_events: 2, child_events: 0, all_events: 2, declarations: 3, outcomes: 1, event_outcome_links: 1, arcs: 1, event_arc_links: 2, relations: relations.length, foreshadowing_actions: 0 },
+    counts: { top_level_events: 2, child_events: 0, all_events: 2, outcomes: 1, event_outcome_links: 1, arcs: 1, event_arc_links: 2, relations: relations.length, foreshadowing_actions: 0 },
     arcs: [{ arc_id: "arc-1", parent_arc_id: null, kind: "main", title: "主线", objective: "目标" }],
     events: [
-      { event_id: "ev-1", title: "前事", summary: "", event_type: "推进", status: "进行中", first_text_position: 100, chapter_id: 1, chapter_order: 1 },
-      { event_id: "ev-2", title: "后事", summary: "", event_type: "推进", status: "进行中", first_text_position: 900, chapter_id: 1, chapter_order: 1 },
+      { event_id: "ev-1", title: "前事", summary: "", from: 1, to: 1, event_type: "推进", status: "进行中", first_text_position: 100, chapter_id: 1, chapter_order: 1 },
+      { event_id: "ev-2", title: "后事", summary: "", from: 1, to: 1, event_type: "推进", status: "进行中", first_text_position: 900, chapter_id: 1, chapter_order: 1 },
     ],
     outcomes: [{ outcome_id: "oc-1", title: "结果", description: "说明", first_text_position: 500 }],
     event_arc_links: [

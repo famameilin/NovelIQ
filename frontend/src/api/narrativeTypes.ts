@@ -32,7 +32,7 @@ export interface PlotlineTimelineResponse {
   distribution: Array<{ chapter_id: number; chapter_order: number; dimension: PlotlineDimension; count: number }>;
 }
 
-/* ===== 事件声明与统一正式身份契约 =====
+/* ===== 统一事件与包含树契约 =====
  * 列表仅 events（顶层大事件）分页，其余字段每页完整；
  * 子事件不经列表下发，通过事件详情卡的 direct_children 逐级访问 */
 export interface EventTreeChapter { chapter_id: number; title: string; chapter_order: number }
@@ -40,7 +40,6 @@ export interface EventTreeCounts {
   top_level_events: number;
   child_events: number;
   all_events: number;
-  declarations: number;
   outcomes: number;
   event_outcome_links: number;
   arcs: number;
@@ -50,6 +49,8 @@ export interface EventTreeCounts {
 }
 export interface EventTreeArc { arc_id: string; parent_arc_id: string | null; kind: string; title: string; objective: string }
 export interface EventTreeEvent {
+  from: number;
+  to: number;
   event_id: string;
   title: string;
   summary: string;
@@ -100,6 +101,8 @@ export interface EventTreeListResponse {
   next_cursor: string | null;
 }
 export interface EventCardDetail {
+  from: number;
+  to: number;
   kind: "event";
   event_id: string;
   run_id: string;
@@ -118,14 +121,7 @@ export interface EventCardDetail {
   relations: EventRelationItem[];
 }
 export interface NarrativeSource {
-  locator?: EventRelationItem["locator"] | {
-    target_kind: "declaration";
-    target_id: string;
-    top_level_event_id: null;
-    ancestor_event_ids: [];
-    evidence_position: number | null;
-    title: string;
-  };
+  locator?: EventRelationItem["locator"];
   evidence?: Array<Record<string, unknown>>;
   evidence_scope?: "chapter" | "paragraph";
   chapter_id: number;
@@ -134,10 +130,11 @@ export interface NarrativeSource {
 }
 
 export interface ChapterEventDetail {
+  from: number;
+  to: number;
   run_id: string;
   chapter_id: number;
-  declaration_id: string;
-  event_id: string | null;
+  event_id: string;
   title: string;
   problem: string;
   summary: string;

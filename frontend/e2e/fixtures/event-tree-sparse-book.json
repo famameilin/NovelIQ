@@ -137,7 +137,6 @@
     "top_level_events": 156,
     "child_events": 0,
     "all_events": 156,
-    "declarations": 156,
     "outcomes": 8,
     "event_outcome_links": 17,
     "arcs": 8,
@@ -356,7 +355,9 @@
       "status": "resolved",
       "first_text_position": 454,
       "chapter_id": 1,
-      "chapter_order": 1
+      "chapter_order": 1,
+      "from": 1,
+      "to": 1
     },
     {
       "event_id": "5d2dc114-71f9-5e82-97e2-ef386ccdbf4f",
@@ -366,7 +367,9 @@
       "status": "resolved",
       "first_text_position": 1436,
       "chapter_id": 1,
-      "chapter_order": 1
+      "chapter_order": 1,
+      "from": 1,
+      "to": 1
     },
     {
       "event_id": "344a80e5-0dea-55e6-889c-9f4adb1780b7",
@@ -376,7 +379,9 @@
       "status": "resolved",
       "first_text_position": 4175,
       "chapter_id": 2,
-      "chapter_order": 2
+      "chapter_order": 2,
+      "from": 2,
+      "to": 2
     },
     {
       "event_id": "ac19f3f4-eb28-5067-86a1-fbad14d4ddf8",
@@ -386,7 +391,9 @@
       "status": "resolved",
       "first_text_position": 4669,
       "chapter_id": 2,
-      "chapter_order": 2
+      "chapter_order": 2,
+      "from": 2,
+      "to": 2
     },
     {
       "event_id": "1de56ef8-673d-59b8-b382-8ec881a67930",
@@ -396,7 +403,9 @@
       "status": "resolved",
       "first_text_position": 6417,
       "chapter_id": 3,
-      "chapter_order": 3
+      "chapter_order": 3,
+      "from": 3,
+      "to": 3
     },
     {
       "event_id": "d7883d8e-31ee-592b-91bb-90d60dd811ba",
@@ -406,7 +415,9 @@
       "status": "resolved",
       "first_text_position": 6995,
       "chapter_id": 3,
-      "chapter_order": 3
+      "chapter_order": 3,
+      "from": 3,
+      "to": 3
     },
     {
       "event_id": "9c9c82da-d9c4-5484-b94e-eb1c89586ce7",
@@ -416,7 +427,9 @@
       "status": "resolved",
       "first_text_position": 7923,
       "chapter_id": 3,
-      "chapter_order": 3
+      "chapter_order": 3,
+      "from": 3,
+      "to": 3
     },
     {
       "event_id": "79a54cc0-206a-563d-9e53-09fdaa59f9de",
@@ -426,7 +439,9 @@
       "status": "ongoing",
       "first_text_position": 8319,
       "chapter_id": 3,
-      "chapter_order": 3
+      "chapter_order": 3,
+      "from": 3,
+      "to": 3
     },
     {
       "event_id": "b155c4d8-991e-5933-b4dc-81baa5389a09",
@@ -436,7 +451,9 @@
       "status": "ongoing",
       "first_text_position": 8422,
       "chapter_id": 3,
-      "chapter_order": 3
+      "chapter_order": 3,
+      "from": 3,
+      "to": 3
     },
     {
       "event_id": "c151ab80-6c0f-54e2-a103-f40e4cfec4ba",
@@ -446,7 +463,9 @@
       "status": "ongoing",
       "first_text_position": 8856,
       "chapter_id": 4,
-      "chapter_order": 4
+      "chapter_order": 4,
+      "from": 4,
+      "to": 4
     },
     {
       "event_id": "c25c2f4c-62d5-5bf9-8e5b-ca7de234cc87",
@@ -456,7 +475,9 @@
       "status": "resolved",
       "first_text_position": 9817,
       "chapter_id": 4,
-      "chapter_order": 4
+      "chapter_order": 4,
+      "from": 4,
+      "to": 4
     },
     {
       "event_id": "6ed309b4-cff7-5886-ab34-7246934d5ba8",
@@ -466,7 +487,9 @@
       "status": "ongoing",
       "first_text_position": 10409,
       "chapter_id": 4,
-      "chapter_order": 4
+      "chapter_order": 4,
+      "from": 4,
+      "to": 4
     },
     {
       "event_id": "08e6b1e5-c7d4-5a9f-9095-bcce440c98d0",
@@ -476,7 +499,9 @@
       "status": "resolved",
       "first_text_position": 12208,
       "chapter_id": 4,
-      "chapter_order": 4
+      "chapter_order": 4,
+      "from": 4,
+      "to": 4
     },
     {
       "event_id": "1a14e899-6d0b-5f86-9459-fb5f6b012319",
@@ -486,7 +511,9 @@
       "status": "ongoing",
       "first_text_position": 12667,
       "chapter_id": 4,
-      "chapter_order": 4
+      "chapter_order": 4,
+      "from": 4,
+      "to": 4
     },
     {
       "event_id": "3dd815e7-da90-5dbe-a789-fb80730f61b5",
@@ -496,7 +523,9 @@
       "status": "ongoing",
       "first_text_position": 13085,
       "chapter_id": 5,
-      "chapter_order": 5
+      "chapter_order": 5,
+      "from": 5,
+      "to": 5
     },
     {
       "event_id": "2850355e-09a0-557b-9af3-ff80ee9777d3",
@@ -506,7 +535,9 @@
       "status": "ongoing",
       "first_text_position": 13284,
       "chapter_id": 5,
-      "chapter_order": 5
+      "chapter_order": 5,
+      "from": 5,
+      "to": 5
     },
     {
       "event_id": "fae8988a-b9bd-5839-bf0a-732e378d674e",
@@ -516,7 +547,9 @@
       "status": "ongoing",
       "first_text_position": 13757,
       "chapter_id": 5,
-      "chapter_order": 5
+      "chapter_order": 5,
+      "from": 5,
+      "to": 5
     },
     {
       "event_id": "56c4b8bc-ac9f-5d74-b8ff-472cba782cfa",
@@ -526,7 +559,9 @@
       "status": "resolved",
       "first_text_position": 14613,
       "chapter_id": 5,
-      "chapter_order": 5
+      "chapter_order": 5,
+      "from": 5,
+      "to": 5
     },
     {
       "event_id": "77ae49c9-0f70-52a0-adfd-fc9391224765",
@@ -536,7 +571,9 @@
       "status": "resolved",
       "first_text_position": 15295,
       "chapter_id": 5,
-      "chapter_order": 5
+      "chapter_order": 5,
+      "from": 5,
+      "to": 5
     },
     {
       "event_id": "0df021c1-26ea-52a8-9984-1e18e2aea621",
@@ -546,7 +583,9 @@
       "status": "resolved",
       "first_text_position": 15651,
       "chapter_id": 5,
-      "chapter_order": 5
+      "chapter_order": 5,
+      "from": 5,
+      "to": 5
     },
     {
       "event_id": "4708c129-b88f-5817-91fa-229781e33551",
@@ -556,7 +595,9 @@
       "status": "resolved",
       "first_text_position": 15865,
       "chapter_id": 5,
-      "chapter_order": 5
+      "chapter_order": 5,
+      "from": 5,
+      "to": 5
     },
     {
       "event_id": "415a27f2-6c7e-5629-9725-b71e465244bb",
@@ -566,7 +607,9 @@
       "status": "resolved",
       "first_text_position": 16559,
       "chapter_id": 6,
-      "chapter_order": 6
+      "chapter_order": 6,
+      "from": 6,
+      "to": 6
     },
     {
       "event_id": "f012195c-8f46-51b6-bd0a-50be3789a9c3",
@@ -576,7 +619,9 @@
       "status": "resolved",
       "first_text_position": 17784,
       "chapter_id": 6,
-      "chapter_order": 6
+      "chapter_order": 6,
+      "from": 6,
+      "to": 6
     },
     {
       "event_id": "41233e8a-5aec-5cdb-a294-9238422db2e9",
@@ -586,7 +631,9 @@
       "status": "ongoing",
       "first_text_position": 18140,
       "chapter_id": 6,
-      "chapter_order": 6
+      "chapter_order": 6,
+      "from": 6,
+      "to": 6
     },
     {
       "event_id": "450bb7d1-2385-5dab-b0de-1355be509395",
@@ -596,7 +643,9 @@
       "status": "resolved",
       "first_text_position": 18441,
       "chapter_id": 6,
-      "chapter_order": 6
+      "chapter_order": 6,
+      "from": 6,
+      "to": 6
     },
     {
       "event_id": "e3a2965b-4f52-5191-8aa9-37f8b8c63207",
@@ -606,7 +655,9 @@
       "status": "ongoing",
       "first_text_position": 18945,
       "chapter_id": 6,
-      "chapter_order": 6
+      "chapter_order": 6,
+      "from": 6,
+      "to": 6
     },
     {
       "event_id": "ddb3cd22-a1ab-5f21-b1e6-f2efd8bc1b1a",
@@ -616,7 +667,9 @@
       "status": "resolved",
       "first_text_position": 19201,
       "chapter_id": 7,
-      "chapter_order": 7
+      "chapter_order": 7,
+      "from": 7,
+      "to": 7
     },
     {
       "event_id": "d773707d-7795-5bcd-864e-2d2db40c2c7b",
@@ -626,7 +679,9 @@
       "status": "resolved",
       "first_text_position": 20564,
       "chapter_id": 7,
-      "chapter_order": 7
+      "chapter_order": 7,
+      "from": 7,
+      "to": 7
     },
     {
       "event_id": "44473ca3-1c09-5dfe-a53e-35fb107bad7e",
@@ -636,7 +691,9 @@
       "status": "resolved",
       "first_text_position": 21020,
       "chapter_id": 7,
-      "chapter_order": 7
+      "chapter_order": 7,
+      "from": 7,
+      "to": 7
     },
     {
       "event_id": "99714227-7439-5bd7-ab05-60643ee28602",
@@ -646,7 +703,9 @@
       "status": "ongoing",
       "first_text_position": 21529,
       "chapter_id": 7,
-      "chapter_order": 7
+      "chapter_order": 7,
+      "from": 7,
+      "to": 7
     },
     {
       "event_id": "c582a42e-bd9a-5c2f-8e88-90b5d5e28ea1",
@@ -656,7 +715,9 @@
       "status": "resolved",
       "first_text_position": 21699,
       "chapter_id": 8,
-      "chapter_order": 8
+      "chapter_order": 8,
+      "from": 8,
+      "to": 8
     },
     {
       "event_id": "7ed1bc67-0323-5410-8ea2-e9b215645ed8",
@@ -666,7 +727,9 @@
       "status": "ongoing",
       "first_text_position": 22198,
       "chapter_id": 8,
-      "chapter_order": 8
+      "chapter_order": 8,
+      "from": 8,
+      "to": 8
     },
     {
       "event_id": "172c7c8f-289c-5713-96f6-34157f4762aa",
@@ -676,7 +739,9 @@
       "status": "ongoing",
       "first_text_position": 22937,
       "chapter_id": 8,
-      "chapter_order": 8
+      "chapter_order": 8,
+      "from": 8,
+      "to": 8
     },
     {
       "event_id": "65695d19-dab6-55e1-926c-8ec762295414",
@@ -686,7 +751,9 @@
       "status": "resolved",
       "first_text_position": 23577,
       "chapter_id": 8,
-      "chapter_order": 8
+      "chapter_order": 8,
+      "from": 8,
+      "to": 8
     },
     {
       "event_id": "ec127c51-6741-54fa-be19-e05011eb1e0c",
@@ -696,7 +763,9 @@
       "status": "resolved",
       "first_text_position": 24182,
       "chapter_id": 9,
-      "chapter_order": 9
+      "chapter_order": 9,
+      "from": 9,
+      "to": 9
     },
     {
       "event_id": "dd3aab7c-0894-5a81-a249-11e83230e980",
@@ -706,7 +775,9 @@
       "status": "resolved",
       "first_text_position": 24423,
       "chapter_id": 9,
-      "chapter_order": 9
+      "chapter_order": 9,
+      "from": 9,
+      "to": 9
     },
     {
       "event_id": "f6a3092c-1a66-5184-8817-6deca084562b",
@@ -716,7 +787,9 @@
       "status": "ongoing",
       "first_text_position": 25573,
       "chapter_id": 9,
-      "chapter_order": 9
+      "chapter_order": 9,
+      "from": 9,
+      "to": 9
     },
     {
       "event_id": "ce246d75-5b71-52bf-ba62-321f40cbb376",
@@ -726,7 +799,9 @@
       "status": "resolved",
       "first_text_position": 26413,
       "chapter_id": 9,
-      "chapter_order": 9
+      "chapter_order": 9,
+      "from": 9,
+      "to": 9
     },
     {
       "event_id": "84b1bc08-d84e-52f4-b49a-cea91bc2a052",
@@ -736,7 +811,9 @@
       "status": "ongoing",
       "first_text_position": 27177,
       "chapter_id": 9,
-      "chapter_order": 9
+      "chapter_order": 9,
+      "from": 9,
+      "to": 9
     },
     {
       "event_id": "d7b01d10-3dd8-5549-acc8-cafb9e1d980f",
@@ -746,7 +823,9 @@
       "status": "resolved",
       "first_text_position": 27516,
       "chapter_id": 10,
-      "chapter_order": 10
+      "chapter_order": 10,
+      "from": 10,
+      "to": 10
     },
     {
       "event_id": "35360813-6835-582c-8a8b-e0620b7c5d56",
@@ -756,7 +835,9 @@
       "status": "resolved",
       "first_text_position": 28200,
       "chapter_id": 10,
-      "chapter_order": 10
+      "chapter_order": 10,
+      "from": 10,
+      "to": 10
     },
     {
       "event_id": "ef0707e1-4cb6-5012-a987-f8ca32c6a777",
@@ -766,7 +847,9 @@
       "status": "ongoing",
       "first_text_position": 28577,
       "chapter_id": 10,
-      "chapter_order": 10
+      "chapter_order": 10,
+      "from": 10,
+      "to": 10
     },
     {
       "event_id": "5dad6178-7886-51ce-98aa-6ccc50c3a267",
@@ -776,7 +859,9 @@
       "status": "resolved",
       "first_text_position": 29503,
       "chapter_id": 10,
-      "chapter_order": 10
+      "chapter_order": 10,
+      "from": 10,
+      "to": 10
     },
     {
       "event_id": "fc64bc4a-bbf1-597d-8007-c7f3b1af7933",
@@ -786,7 +871,9 @@
       "status": "resolved",
       "first_text_position": 30560,
       "chapter_id": 11,
-      "chapter_order": 11
+      "chapter_order": 11,
+      "from": 11,
+      "to": 11
     },
     {
       "event_id": "da6dd812-5c4a-5f2d-95d8-dc31dbffdd71",
@@ -796,7 +883,9 @@
       "status": "resolved",
       "first_text_position": 31543,
       "chapter_id": 11,
-      "chapter_order": 11
+      "chapter_order": 11,
+      "from": 11,
+      "to": 11
     },
     {
       "event_id": "1fbf2d75-4289-5d6e-860a-2db22958ff22",
@@ -806,7 +895,9 @@
       "status": "ongoing",
       "first_text_position": 32297,
       "chapter_id": 11,
-      "chapter_order": 11
+      "chapter_order": 11,
+      "from": 11,
+      "to": 11
     },
     {
       "event_id": "b451db5f-0b99-51cc-bf20-6eccdd98fa6c",
@@ -816,7 +907,9 @@
       "status": "ongoing",
       "first_text_position": 33961,
       "chapter_id": 12,
-      "chapter_order": 12
+      "chapter_order": 12,
+      "from": 12,
+      "to": 12
     },
     {
       "event_id": "70a81c08-1a0c-5f19-b716-e143e202658a",
@@ -826,7 +919,9 @@
       "status": "resolved",
       "first_text_position": 34144,
       "chapter_id": 12,
-      "chapter_order": 12
+      "chapter_order": 12,
+      "from": 12,
+      "to": 12
     },
     {
       "event_id": "3bc6256d-b299-51e5-95cf-e02b6e596b8b",
@@ -836,7 +931,9 @@
       "status": "resolved",
       "first_text_position": 34986,
       "chapter_id": 12,
-      "chapter_order": 12
+      "chapter_order": 12,
+      "from": 12,
+      "to": 12
     },
     {
       "event_id": "5d94057e-ca58-5446-9b4d-8785a0c5c200",
@@ -846,7 +943,9 @@
       "status": "ongoing",
       "first_text_position": 36535,
       "chapter_id": 12,
-      "chapter_order": 12
+      "chapter_order": 12,
+      "from": 12,
+      "to": 12
     },
     {
       "event_id": "f505cf03-781e-5eb5-bf1e-6ec4d10b6053",
@@ -856,7 +955,9 @@
       "status": "ongoing",
       "first_text_position": 36623,
       "chapter_id": 12,
-      "chapter_order": 12
+      "chapter_order": 12,
+      "from": 12,
+      "to": 12
     },
     {
       "event_id": "9687ce04-a971-5e7b-9d2f-04b2015e0697",
@@ -866,7 +967,9 @@
       "status": "resolved",
       "first_text_position": 36792,
       "chapter_id": 13,
-      "chapter_order": 13
+      "chapter_order": 13,
+      "from": 13,
+      "to": 13
     },
     {
       "event_id": "5269b09c-3b2a-5276-b1b6-6e20115ff3aa",
@@ -876,7 +979,9 @@
       "status": "ongoing",
       "first_text_position": 39455,
       "chapter_id": 13,
-      "chapter_order": 13
+      "chapter_order": 13,
+      "from": 13,
+      "to": 13
     },
     {
       "event_id": "680da11a-5a4f-5fc1-925d-1ef85e28f24c",
@@ -886,7 +991,9 @@
       "status": "resolved",
       "first_text_position": 41248,
       "chapter_id": 13,
-      "chapter_order": 13
+      "chapter_order": 13,
+      "from": 13,
+      "to": 13
     },
     {
       "event_id": "3cc3275b-d22a-594e-aef2-5bb8c731e29f",
@@ -896,7 +1003,9 @@
       "status": "ongoing",
       "first_text_position": 41503,
       "chapter_id": 13,
-      "chapter_order": 13
+      "chapter_order": 13,
+      "from": 13,
+      "to": 13
     },
     {
       "event_id": "c783c28f-e26e-5009-8b4e-a83237ff5172",
@@ -906,7 +1015,9 @@
       "status": "ongoing",
       "first_text_position": 41952,
       "chapter_id": 14,
-      "chapter_order": 14
+      "chapter_order": 14,
+      "from": 14,
+      "to": 14
     },
     {
       "event_id": "4774b956-2ed3-529d-b9d8-27cb1e52e870",
@@ -916,7 +1027,9 @@
       "status": "resolved",
       "first_text_position": 43550,
       "chapter_id": 14,
-      "chapter_order": 14
+      "chapter_order": 14,
+      "from": 14,
+      "to": 14
     },
     {
       "event_id": "577b6fb1-1ddb-5486-86a9-b022d9acdcea",
@@ -926,7 +1039,9 @@
       "status": "resolved",
       "first_text_position": 44422,
       "chapter_id": 14,
-      "chapter_order": 14
+      "chapter_order": 14,
+      "from": 14,
+      "to": 14
     },
     {
       "event_id": "3841a711-5e51-5ab9-9af0-8f77ec8760ad",
@@ -936,7 +1051,9 @@
       "status": "ongoing",
       "first_text_position": 45603,
       "chapter_id": 14,
-      "chapter_order": 14
+      "chapter_order": 14,
+      "from": 14,
+      "to": 14
     },
     {
       "event_id": "2cba426e-7d05-5a6d-90c8-d0da72ff108a",
@@ -946,7 +1063,9 @@
       "status": "resolved",
       "first_text_position": 47114,
       "chapter_id": 15,
-      "chapter_order": 15
+      "chapter_order": 15,
+      "from": 15,
+      "to": 15
     },
     {
       "event_id": "c19d0de3-95cd-56ba-86e8-68bceeac5bd4",
@@ -956,7 +1075,9 @@
       "status": "resolved",
       "first_text_position": 47595,
       "chapter_id": 15,
-      "chapter_order": 15
+      "chapter_order": 15,
+      "from": 15,
+      "to": 15
     },
     {
       "event_id": "5e9a772b-9144-5135-b17d-136be04bf741",
@@ -966,7 +1087,9 @@
       "status": "ongoing",
       "first_text_position": 48866,
       "chapter_id": 15,
-      "chapter_order": 15
+      "chapter_order": 15,
+      "from": 15,
+      "to": 15
     },
     {
       "event_id": "185a00ae-4751-53b7-abb1-b1a5c7d6fccc",
@@ -976,7 +1099,9 @@
       "status": "ongoing",
       "first_text_position": 49649,
       "chapter_id": 15,
-      "chapter_order": 15
+      "chapter_order": 15,
+      "from": 15,
+      "to": 15
     },
     {
       "event_id": "16c2e808-9026-52d6-92ea-bd636a73f04b",
@@ -986,7 +1111,9 @@
       "status": "ongoing",
       "first_text_position": 49790,
       "chapter_id": 15,
-      "chapter_order": 15
+      "chapter_order": 15,
+      "from": 15,
+      "to": 15
     },
     {
       "event_id": "002782b3-3874-57b3-8402-3ee38d301600",
@@ -996,7 +1123,9 @@
       "status": "ongoing",
       "first_text_position": 50685,
       "chapter_id": 15,
-      "chapter_order": 15
+      "chapter_order": 15,
+      "from": 15,
+      "to": 15
     },
     {
       "event_id": "d64f9f47-e48f-5955-9ac2-19605b02eb48",
@@ -1006,7 +1135,9 @@
       "status": "ongoing",
       "first_text_position": 51096,
       "chapter_id": 15,
-      "chapter_order": 15
+      "chapter_order": 15,
+      "from": 15,
+      "to": 15
     },
     {
       "event_id": "41357eb5-d342-57cb-bd06-388e778a32af",
@@ -1016,7 +1147,9 @@
       "status": "resolved",
       "first_text_position": 51382,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "6ad4357f-3faa-5bff-9386-3b2d904062ff",
@@ -1026,7 +1159,9 @@
       "status": "resolved",
       "first_text_position": 51749,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "2fff4a41-eeb0-599f-ab61-bfe2762d8b58",
@@ -1036,7 +1171,9 @@
       "status": "resolved",
       "first_text_position": 52324,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "0a322e63-8ee6-502c-a648-2d74df2bf96f",
@@ -1046,7 +1183,9 @@
       "status": "ongoing",
       "first_text_position": 52631,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "557cac90-547e-5e62-a338-5120092bd113",
@@ -1056,7 +1195,9 @@
       "status": "resolved",
       "first_text_position": 52767,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "1d25d8d6-7ec3-5d02-8e04-17970c1ae5d4",
@@ -1066,7 +1207,9 @@
       "status": "ongoing",
       "first_text_position": 53553,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "a403b138-5a60-5508-ad78-559403e45129",
@@ -1076,7 +1219,9 @@
       "status": "resolved",
       "first_text_position": 54020,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "8f02f8e0-ceb5-501c-bc2f-613043b8aba3",
@@ -1086,7 +1231,9 @@
       "status": "ongoing",
       "first_text_position": 55035,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "60110df9-85ae-52e4-84c2-2278c7507b99",
@@ -1096,7 +1243,9 @@
       "status": "ongoing",
       "first_text_position": 55331,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "468c2894-efbe-57e6-8749-fc8e21a5ea69",
@@ -1106,7 +1255,9 @@
       "status": "ongoing",
       "first_text_position": 55852,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "26770a45-a958-51c6-90c8-987a2ecd0173",
@@ -1116,7 +1267,9 @@
       "status": "ongoing",
       "first_text_position": 55960,
       "chapter_id": 16,
-      "chapter_order": 16
+      "chapter_order": 16,
+      "from": 16,
+      "to": 16
     },
     {
       "event_id": "bed23710-e2f1-5f1f-a91c-2eef2483da69",
@@ -1126,7 +1279,9 @@
       "status": "resolved",
       "first_text_position": 56792,
       "chapter_id": 17,
-      "chapter_order": 17
+      "chapter_order": 17,
+      "from": 17,
+      "to": 17
     },
     {
       "event_id": "bd1da3e3-1589-5932-870f-0f76d8ae3ea8",
@@ -1136,7 +1291,9 @@
       "status": "ongoing",
       "first_text_position": 57484,
       "chapter_id": 17,
-      "chapter_order": 17
+      "chapter_order": 17,
+      "from": 17,
+      "to": 17
     },
     {
       "event_id": "6c02f386-0f9a-57f4-9890-2f9abd19cfd5",
@@ -1146,7 +1303,9 @@
       "status": "resolved",
       "first_text_position": 58439,
       "chapter_id": 17,
-      "chapter_order": 17
+      "chapter_order": 17,
+      "from": 17,
+      "to": 17
     },
     {
       "event_id": "2aa1bfe9-a7e7-5069-b17a-126a4086bb94",
@@ -1156,7 +1315,9 @@
       "status": "ongoing",
       "first_text_position": 58825,
       "chapter_id": 17,
-      "chapter_order": 17
+      "chapter_order": 17,
+      "from": 17,
+      "to": 17
     },
     {
       "event_id": "bdae8373-65c9-598d-b1b4-840c958d843e",
@@ -1166,7 +1327,9 @@
       "status": "ongoing",
       "first_text_position": 58969,
       "chapter_id": 17,
-      "chapter_order": 17
+      "chapter_order": 17,
+      "from": 17,
+      "to": 17
     },
     {
       "event_id": "ba9f2a0c-13e4-515f-8135-287dfc66ce96",
@@ -1176,7 +1339,9 @@
       "status": "resolved",
       "first_text_position": 59685,
       "chapter_id": 17,
-      "chapter_order": 17
+      "chapter_order": 17,
+      "from": 17,
+      "to": 17
     },
     {
       "event_id": "709cd26e-2926-5f48-a229-f6fe21deb750",
@@ -1186,7 +1351,9 @@
       "status": "ongoing",
       "first_text_position": 59861,
       "chapter_id": 17,
-      "chapter_order": 17
+      "chapter_order": 17,
+      "from": 17,
+      "to": 17
     },
     {
       "event_id": "fabbdb98-e765-5756-af8a-072d060bbb99",
@@ -1196,7 +1363,9 @@
       "status": "ongoing",
       "first_text_position": 60107,
       "chapter_id": 17,
-      "chapter_order": 17
+      "chapter_order": 17,
+      "from": 17,
+      "to": 17
     },
     {
       "event_id": "4a3e5d99-0461-54cd-8ee2-62d792df773b",
@@ -1206,7 +1375,9 @@
       "status": "ongoing",
       "first_text_position": 60333,
       "chapter_id": 17,
-      "chapter_order": 17
+      "chapter_order": 17,
+      "from": 17,
+      "to": 17
     },
     {
       "event_id": "d5154560-a327-5e68-bcb2-b9f368c276ea",
@@ -1216,7 +1387,9 @@
       "status": "ongoing",
       "first_text_position": 60893,
       "chapter_id": 18,
-      "chapter_order": 18
+      "chapter_order": 18,
+      "from": 18,
+      "to": 18
     },
     {
       "event_id": "61e24007-a674-5705-8c03-cdb773b08d12",
@@ -1226,7 +1399,9 @@
       "status": "ongoing",
       "first_text_position": 61439,
       "chapter_id": 18,
-      "chapter_order": 18
+      "chapter_order": 18,
+      "from": 18,
+      "to": 18
     },
     {
       "event_id": "c58f8c59-cd52-5ef3-8cd5-566dfacdb724",
@@ -1236,7 +1411,9 @@
       "status": "resolved",
       "first_text_position": 63581,
       "chapter_id": 18,
-      "chapter_order": 18
+      "chapter_order": 18,
+      "from": 18,
+      "to": 18
     },
     {
       "event_id": "be4eac90-8128-5457-ae18-ac228afc78b0",
@@ -1246,7 +1423,9 @@
       "status": "resolved",
       "first_text_position": 63744,
       "chapter_id": 18,
-      "chapter_order": 18
+      "chapter_order": 18,
+      "from": 18,
+      "to": 18
     },
     {
       "event_id": "715afbf2-e022-5518-9e7d-97e8398822a0",
@@ -1256,7 +1435,9 @@
       "status": "ongoing",
       "first_text_position": 64446,
       "chapter_id": 18,
-      "chapter_order": 18
+      "chapter_order": 18,
+      "from": 18,
+      "to": 18
     },
     {
       "event_id": "1fceb5f8-b7cb-5622-a942-3be9a83e317d",
@@ -1266,7 +1447,9 @@
       "status": "ongoing",
       "first_text_position": 64679,
       "chapter_id": 18,
-      "chapter_order": 18
+      "chapter_order": 18,
+      "from": 18,
+      "to": 18
     },
     {
       "event_id": "cf462d9f-c106-57f5-9fa8-0ae598cd7e37",
@@ -1276,7 +1459,9 @@
       "status": "ongoing",
       "first_text_position": 69352,
       "chapter_id": 19,
-      "chapter_order": 19
+      "chapter_order": 19,
+      "from": 19,
+      "to": 19
     },
     {
       "event_id": "9f50ea7c-46c3-594b-bd51-fe747eaeb959",
@@ -1286,7 +1471,9 @@
       "status": "ongoing",
       "first_text_position": 70210,
       "chapter_id": 19,
-      "chapter_order": 19
+      "chapter_order": 19,
+      "from": 19,
+      "to": 19
     },
     {
       "event_id": "ce3f6535-4438-52a8-8181-c2ac697d1969",
@@ -1296,7 +1483,9 @@
       "status": "ongoing",
       "first_text_position": 70801,
       "chapter_id": 19,
-      "chapter_order": 19
+      "chapter_order": 19,
+      "from": 19,
+      "to": 19
     },
     {
       "event_id": "1678e357-ddf2-5c26-805e-31c308d14c90",
@@ -1306,7 +1495,9 @@
       "status": "ongoing",
       "first_text_position": 71292,
       "chapter_id": 19,
-      "chapter_order": 19
+      "chapter_order": 19,
+      "from": 19,
+      "to": 19
     },
     {
       "event_id": "d217dfbf-8ae0-5cbe-bfcd-f02bf44a2ddf",
@@ -1316,7 +1507,9 @@
       "status": "ongoing",
       "first_text_position": 71734,
       "chapter_id": 19,
-      "chapter_order": 19
+      "chapter_order": 19,
+      "from": 19,
+      "to": 19
     },
     {
       "event_id": "537b183d-2a5a-5ec7-9386-41361a1e6cde",
@@ -1326,7 +1519,9 @@
       "status": "ongoing",
       "first_text_position": 73756,
       "chapter_id": 19,
-      "chapter_order": 19
+      "chapter_order": 19,
+      "from": 19,
+      "to": 19
     },
     {
       "event_id": "41e23323-b855-54e0-a158-ed80d2d79fb7",
@@ -1336,7 +1531,9 @@
       "status": "ongoing",
       "first_text_position": 74585,
       "chapter_id": 19,
-      "chapter_order": 19
+      "chapter_order": 19,
+      "from": 19,
+      "to": 19
     },
     {
       "event_id": "2e88d36a-2840-5ca0-8ee6-dc3af1343dda",
@@ -1346,7 +1543,9 @@
       "status": "ongoing",
       "first_text_position": 75020,
       "chapter_id": 19,
-      "chapter_order": 19
+      "chapter_order": 19,
+      "from": 19,
+      "to": 19
     },
     {
       "event_id": "c5c2fe33-bcbe-566d-b069-fc78fc5339b2",
@@ -1356,7 +1555,9 @@
       "status": "ongoing",
       "first_text_position": 76103,
       "chapter_id": 20,
-      "chapter_order": 20
+      "chapter_order": 20,
+      "from": 20,
+      "to": 20
     },
     {
       "event_id": "fcbda152-4072-5571-854f-9a15679d08fc",
@@ -1366,7 +1567,9 @@
       "status": "ongoing",
       "first_text_position": 77354,
       "chapter_id": 20,
-      "chapter_order": 20
+      "chapter_order": 20,
+      "from": 20,
+      "to": 20
     },
     {
       "event_id": "8c56cfea-de38-5416-842a-b4deb2536347",
@@ -1376,7 +1579,9 @@
       "status": "resolved",
       "first_text_position": 78401,
       "chapter_id": 20,
-      "chapter_order": 20
+      "chapter_order": 20,
+      "from": 20,
+      "to": 20
     },
     {
       "event_id": "59904e4f-b725-5d21-a05a-a65c838824aa",
@@ -1386,7 +1591,9 @@
       "status": "ongoing",
       "first_text_position": 79191,
       "chapter_id": 20,
-      "chapter_order": 20
+      "chapter_order": 20,
+      "from": 20,
+      "to": 20
     },
     {
       "event_id": "ac06988b-8c31-5965-8c10-5e759d678d0e",
@@ -1396,7 +1603,9 @@
       "status": "ongoing",
       "first_text_position": 79759,
       "chapter_id": 20,
-      "chapter_order": 20
+      "chapter_order": 20,
+      "from": 20,
+      "to": 20
     },
     {
       "event_id": "cfca154a-a0b5-5c5d-8f30-9be1e161b4d3",
@@ -1406,7 +1615,9 @@
       "status": "ongoing",
       "first_text_position": 79950,
       "chapter_id": 20,
-      "chapter_order": 20
+      "chapter_order": 20,
+      "from": 20,
+      "to": 20
     },
     {
       "event_id": "acb4bb18-bf98-587f-af1b-dd02ff1985f9",
@@ -1416,7 +1627,9 @@
       "status": "ongoing",
       "first_text_position": 80214,
       "chapter_id": 20,
-      "chapter_order": 20
+      "chapter_order": 20,
+      "from": 20,
+      "to": 20
     },
     {
       "event_id": "410564a5-1bf9-5df7-afd9-3dd12e7bcb67",
@@ -1426,7 +1639,9 @@
       "status": "resolved",
       "first_text_position": 80571,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "98e14180-32e8-53f0-a68c-cf5e7263da9d",
@@ -1436,7 +1651,9 @@
       "status": "ongoing",
       "first_text_position": 80667,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "2936d6bc-28cd-5b2f-b7fd-89a819e27064",
@@ -1446,7 +1663,9 @@
       "status": "resolved",
       "first_text_position": 81374,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "661da569-cb29-5ead-af76-1694f04e5b38",
@@ -1456,7 +1675,9 @@
       "status": "ongoing",
       "first_text_position": 81583,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "cd97c0e7-b71b-5f6a-bebd-f788642a429b",
@@ -1466,7 +1687,9 @@
       "status": "ongoing",
       "first_text_position": 81583,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "2a4809ed-d392-5a60-b5dc-ae468f74f08e",
@@ -1476,7 +1699,9 @@
       "status": "ongoing",
       "first_text_position": 82188,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "5cada3bd-665b-5ddc-be73-b5305a248a05",
@@ -1486,7 +1711,9 @@
       "status": "ongoing",
       "first_text_position": 82408,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "7a3328ba-0254-5ccd-88ca-b55425c57f8d",
@@ -1496,7 +1723,9 @@
       "status": "resolved",
       "first_text_position": 82942,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "b9d45a11-9fd1-505c-bf1c-c8c46f139f6b",
@@ -1506,7 +1735,9 @@
       "status": "ongoing",
       "first_text_position": 83101,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "a8062c25-d09d-5322-9948-1f60e7f45e79",
@@ -1516,7 +1747,9 @@
       "status": "ongoing",
       "first_text_position": 83209,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "590a8857-d58c-5461-9744-b100f2a0b95e",
@@ -1526,7 +1759,9 @@
       "status": "ongoing",
       "first_text_position": 83446,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "16f603e0-15e2-5b82-bf3a-d16dfce6752b",
@@ -1536,7 +1771,9 @@
       "status": "ongoing",
       "first_text_position": 84219,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "3d29a595-2263-5c35-b698-95102f8e42f4",
@@ -1546,7 +1783,9 @@
       "status": "ongoing",
       "first_text_position": 84611,
       "chapter_id": 21,
-      "chapter_order": 21
+      "chapter_order": 21,
+      "from": 21,
+      "to": 21
     },
     {
       "event_id": "34be663a-33cc-5c3a-81c9-60cbe576ea97",
@@ -1556,7 +1795,9 @@
       "status": "resolved",
       "first_text_position": 85262,
       "chapter_id": 22,
-      "chapter_order": 22
+      "chapter_order": 22,
+      "from": 22,
+      "to": 22
     },
     {
       "event_id": "fd386cfb-a988-595d-9625-74248d11a384",
@@ -1566,7 +1807,9 @@
       "status": "ongoing",
       "first_text_position": 86546,
       "chapter_id": 22,
-      "chapter_order": 22
+      "chapter_order": 22,
+      "from": 22,
+      "to": 22
     },
     {
       "event_id": "8ba46567-5fa2-5e07-8838-33c153e3e66e",
@@ -1576,7 +1819,9 @@
       "status": "ongoing",
       "first_text_position": 87466,
       "chapter_id": 22,
-      "chapter_order": 22
+      "chapter_order": 22,
+      "from": 22,
+      "to": 22
     },
     {
       "event_id": "e69647d8-bdbf-5ed5-a040-6cb84cd8de16",
@@ -1586,7 +1831,9 @@
       "status": "ongoing",
       "first_text_position": 87749,
       "chapter_id": 22,
-      "chapter_order": 22
+      "chapter_order": 22,
+      "from": 22,
+      "to": 22
     },
     {
       "event_id": "626c916b-6c28-5733-a73f-ed36af726f73",
@@ -1596,7 +1843,9 @@
       "status": "ongoing",
       "first_text_position": 88748,
       "chapter_id": 22,
-      "chapter_order": 22
+      "chapter_order": 22,
+      "from": 22,
+      "to": 22
     },
     {
       "event_id": "0bea4a51-735b-5190-a2ba-19b2fc5444c7",
@@ -1606,7 +1855,9 @@
       "status": "ongoing",
       "first_text_position": 90049,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "fec39bbc-5311-518a-b8d5-42c979edc12a",
@@ -1616,7 +1867,9 @@
       "status": "ongoing",
       "first_text_position": 90935,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "85eb984a-7694-59d3-9cda-4f935a0de28e",
@@ -1626,7 +1879,9 @@
       "status": "ongoing",
       "first_text_position": 91269,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "9d3c3697-04d3-54f3-8230-80f4ce6b5d8d",
@@ -1636,7 +1891,9 @@
       "status": "resolved",
       "first_text_position": 91618,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "875a5c8c-3e11-5199-a86d-ed1ee7d276a5",
@@ -1646,7 +1903,9 @@
       "status": "resolved",
       "first_text_position": 92184,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "cfa1597a-fe0e-5b96-893a-aef3246f20b2",
@@ -1656,7 +1915,9 @@
       "status": "resolved",
       "first_text_position": 92404,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "42ae0c05-ee60-5cce-ba34-a21e4b4e3620",
@@ -1666,7 +1927,9 @@
       "status": "ongoing",
       "first_text_position": 92688,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "a5635e2f-d1bd-56d7-aec8-db74a8784edc",
@@ -1676,7 +1939,9 @@
       "status": "ongoing",
       "first_text_position": 93286,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "db6fbaba-247b-5c41-ba82-dc301d7a344e",
@@ -1686,7 +1951,9 @@
       "status": "ongoing",
       "first_text_position": 93872,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "3dd507fb-3a81-5ef8-a551-c36d2ea99806",
@@ -1696,7 +1963,9 @@
       "status": "ongoing",
       "first_text_position": 94022,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "43c622b9-784d-5306-bf44-88a2c751807d",
@@ -1706,7 +1975,9 @@
       "status": "ongoing",
       "first_text_position": 94397,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "97475659-8c03-5410-85fe-91f1790dbcfd",
@@ -1716,7 +1987,9 @@
       "status": "ongoing",
       "first_text_position": 94436,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "c530a1b0-8b40-5711-a7ee-6a33029a6c3e",
@@ -1726,7 +1999,9 @@
       "status": "ongoing",
       "first_text_position": 94728,
       "chapter_id": 23,
-      "chapter_order": 23
+      "chapter_order": 23,
+      "from": 23,
+      "to": 23
     },
     {
       "event_id": "7b42b354-1d02-57ef-a744-be1dbdd096d1",
@@ -1736,7 +2011,9 @@
       "status": "ongoing",
       "first_text_position": 100242,
       "chapter_id": 25,
-      "chapter_order": 25
+      "chapter_order": 25,
+      "from": 25,
+      "to": 25
     },
     {
       "event_id": "10a82a0d-acaf-5d58-871d-8cdc8900e253",
@@ -1746,7 +2023,9 @@
       "status": "ongoing",
       "first_text_position": 100927,
       "chapter_id": 25,
-      "chapter_order": 25
+      "chapter_order": 25,
+      "from": 25,
+      "to": 25
     },
     {
       "event_id": "3fe7cd7f-936c-521d-bab7-fea0a8ae1281",
@@ -1756,7 +2035,9 @@
       "status": "ongoing",
       "first_text_position": 101968,
       "chapter_id": 25,
-      "chapter_order": 25
+      "chapter_order": 25,
+      "from": 25,
+      "to": 25
     },
     {
       "event_id": "f5da6318-130a-50df-9fc4-94110b72fec5",
@@ -1766,7 +2047,9 @@
       "status": "ongoing",
       "first_text_position": 102552,
       "chapter_id": 25,
-      "chapter_order": 25
+      "chapter_order": 25,
+      "from": 25,
+      "to": 25
     },
     {
       "event_id": "66873696-a585-519a-9b6e-f3b6d931a1ed",
@@ -1776,7 +2059,9 @@
       "status": "resolved",
       "first_text_position": 104030,
       "chapter_id": 25,
-      "chapter_order": 25
+      "chapter_order": 25,
+      "from": 25,
+      "to": 25
     },
     {
       "event_id": "d5095891-46d0-5862-bbbd-19a2adc10b59",
@@ -1786,7 +2071,9 @@
       "status": "ongoing",
       "first_text_position": 104664,
       "chapter_id": 25,
-      "chapter_order": 25
+      "chapter_order": 25,
+      "from": 25,
+      "to": 25
     },
     {
       "event_id": "e3aa79e8-c707-5b08-990a-1c9edddab1f7",
@@ -1796,7 +2083,9 @@
       "status": "ongoing",
       "first_text_position": 105065,
       "chapter_id": 25,
-      "chapter_order": 25
+      "chapter_order": 25,
+      "from": 25,
+      "to": 25
     },
     {
       "event_id": "93705a8f-bf28-5416-98f2-1d687ac22acf",
@@ -1806,7 +2095,9 @@
       "status": "ongoing",
       "first_text_position": 105891,
       "chapter_id": 25,
-      "chapter_order": 25
+      "chapter_order": 25,
+      "from": 25,
+      "to": 25
     },
     {
       "event_id": "082b905d-7289-5f11-84a6-fabfd787750d",
@@ -1816,7 +2107,9 @@
       "status": "resolved",
       "first_text_position": 106558,
       "chapter_id": 26,
-      "chapter_order": 26
+      "chapter_order": 26,
+      "from": 26,
+      "to": 26
     },
     {
       "event_id": "ba84dd6f-154a-5842-beb8-47b1ac59b21c",
@@ -1826,7 +2119,9 @@
       "status": "ongoing",
       "first_text_position": 107545,
       "chapter_id": 26,
-      "chapter_order": 26
+      "chapter_order": 26,
+      "from": 26,
+      "to": 26
     },
     {
       "event_id": "0ae23c56-5898-54e6-80d4-7898bf95b236",
@@ -1836,7 +2131,9 @@
       "status": "resolved",
       "first_text_position": 107649,
       "chapter_id": 26,
-      "chapter_order": 26
+      "chapter_order": 26,
+      "from": 26,
+      "to": 26
     },
     {
       "event_id": "2934f4f0-a175-5819-be9d-6c9ece61fae2",
@@ -1846,7 +2143,9 @@
       "status": "resolved",
       "first_text_position": 107785,
       "chapter_id": 26,
-      "chapter_order": 26
+      "chapter_order": 26,
+      "from": 26,
+      "to": 26
     },
     {
       "event_id": "378b6876-e145-5243-bcdc-d096e2d4fa70",
@@ -1856,7 +2155,9 @@
       "status": "resolved",
       "first_text_position": 108030,
       "chapter_id": 26,
-      "chapter_order": 26
+      "chapter_order": 26,
+      "from": 26,
+      "to": 26
     },
     {
       "event_id": "f4b18c6e-660d-5def-9712-2cef46bb6ea4",
@@ -1866,7 +2167,9 @@
       "status": "ongoing",
       "first_text_position": 108648,
       "chapter_id": 26,
-      "chapter_order": 26
+      "chapter_order": 26,
+      "from": 26,
+      "to": 26
     },
     {
       "event_id": "108e61f0-ed9b-5698-b2f0-d563dc74257e",
@@ -1876,7 +2179,9 @@
       "status": "resolved",
       "first_text_position": 109589,
       "chapter_id": 26,
-      "chapter_order": 26
+      "chapter_order": 26,
+      "from": 26,
+      "to": 26
     },
     {
       "event_id": "f8cf6a9e-0015-5fa9-8e6f-48394c1a3cbe",
@@ -1886,7 +2191,9 @@
       "status": "ongoing",
       "first_text_position": 109856,
       "chapter_id": 26,
-      "chapter_order": 26
+      "chapter_order": 26,
+      "from": 26,
+      "to": 26
     },
     {
       "event_id": "47e19884-cdbb-5452-b598-8f29ada0e268",
@@ -1896,7 +2203,9 @@
       "status": "resolved",
       "first_text_position": 110033,
       "chapter_id": 26,
-      "chapter_order": 26
+      "chapter_order": 26,
+      "from": 26,
+      "to": 26
     },
     {
       "event_id": "2eff3987-cca6-5017-be55-478d4725f1f8",
@@ -1906,7 +2215,9 @@
       "status": "ongoing",
       "first_text_position": 110415,
       "chapter_id": 26,
-      "chapter_order": 26
+      "chapter_order": 26,
+      "from": 26,
+      "to": 26
     }
   ],
   "outcomes": [

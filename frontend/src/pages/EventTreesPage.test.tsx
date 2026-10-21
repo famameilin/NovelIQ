@@ -13,18 +13,17 @@ afterEach(() => vi.restoreAllMocks());
 const url = "/novels/novel-1/event-trees?task_id=task-a";
 const key = "novel-1:run-a:event-trees";
 
-it("事件声明保存但诊断未发布时显示阶段提示", async () => {
+it("诊断未发布时仍展示已保存事件树", async () => {
   api.mockImplementation(async (path, config) => {
     const response = narrativeResponse(String(path), new URLSearchParams(Object.entries(config?.params ?? {}).map(([name, value]) => [name, String(value)])));
     if (String(path).endsWith("/event-trees")) {
-      response.data = { ...tree, organization_status: "pending_diagnosis", events: [], next_cursor: null,
-        counts: { ...tree.counts, top_level_events: 0, child_events: 0, all_events: 0 } };
+      response.data = { ...tree, organization_status: "pending_diagnosis", next_cursor: null };
     }
     return { data: response.data, status: response.status } as never;
   });
   renderNarrative(url);
-  expect(await screen.findByText("事件声明已保存，等待诊断确认全书事件树")).toBeInTheDocument();
-  expect(screen.queryByLabelText("事件树画布")).not.toBeInTheDocument();
+  expect(await screen.findByLabelText("事件树画布")).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: eventA.title })).toBeInTheDocument();
   expect(screen.queryByText(/需要从原文重建/)).not.toBeInTheDocument();
 });
 

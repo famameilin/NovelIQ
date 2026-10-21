@@ -9,6 +9,7 @@ interface EventCardProps {
   novelId: string;
   runId: string;
   eventId: string;
+  chapters: Array<{ chapter_id: number; title: string }>;
   position: CardPoint;
   zIndex: number;
   frameHeight: number;
@@ -26,7 +27,7 @@ function characterName(item: Record<string, unknown>): string {
 }
 
 /** 统一事件卡：大事件与子事件共用同一模板、内容结构与操作 */
-export function EventCard({ novelId, runId, eventId, position, zIndex, frameHeight, toneVar, onClose, onOpenChild, onDrag, onOpenReader }: EventCardProps) {
+export function EventCard({ novelId, runId, eventId, chapters, position, zIndex, frameHeight, toneVar, onClose, onOpenChild, onDrag, onOpenReader }: EventCardProps) {
   const detail = useQuery({ queryKey: ["event-card", novelId, runId, eventId], queryFn: ({ signal }) => getEventTreeNode(novelId, runId, eventId, signal), retry: false, staleTime: 60_000 });
   const drag = useRef<{ pointerId: number; startX: number; startY: number; origin: CardPoint } | null>(null);
   const title = detail.data?.title ?? "事件详情";
@@ -73,6 +74,7 @@ export function EventCard({ novelId, runId, eventId, position, zIndex, frameHeig
         <p className="m-0 mb-3 whitespace-pre-wrap">{detail.data.summary || "暂无概要"}</p>
         <hr className="my-2 border-0 border-t" style={{ borderColor: "color-mix(in srgb, currentColor 18%, transparent)" }} />
         <dl className="m-0 grid grid-cols-[76px_1fr] gap-y-1">
+          <dt className="opacity-60">章节范围</dt><dd className="m-0">{chapters.find(chapter => chapter.chapter_id === detail.data.from)?.title ?? "未知章节"} 至 {chapters.find(chapter => chapter.chapter_id === detail.data.to)?.title ?? "未知章节"}</dd>
           <dt className="opacity-60">事件类型</dt><dd className="m-0">{detail.data.event_type || "未标注"}</dd>
           <dt className="opacity-60">所属主线</dt><dd className="m-0">{detail.data.arcs.length ? detail.data.arcs.map(arc => arc.title).join(" / ") : "无关联叙事线"}</dd>
           <dt className="opacity-60">涉及人物</dt><dd className="m-0">{detail.data.characters.length ? detail.data.characters.map(characterName).join(" / ") : "未记录"}</dd>

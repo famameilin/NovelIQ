@@ -1,6 +1,6 @@
 import { buildScaleBook } from "../src/mocks/eventTreeScale";
 import { test, expect, type Page } from "@playwright/test";
-import { narrativeResponse } from "../src/mocks/narrativeData";
+import { tree, treeDetail, narrativeResponse } from "../src/mocks/narrativeData";
 
 const novelId = "narrative-fixture", taskId = "task-a";
 const url = (page: "timeline" | "event-trees") => `/novels/${novelId}/${page}?task_id=${taskId}`;
@@ -202,6 +202,7 @@ for (const { scale, width, height } of [
         const arc = book.arcs.find(item => item.arc_id === link.arc_id)!;
         return { arc_id: arc.arc_id, title: arc.title, kind: arc.kind, role: link.role, reason: link.reason };
       });
+      return route.fulfill({ json: { ...treeDetail(event), arcs } });
     });
     await page.goto(url("event-trees"));
     const canvas = page.getByLabel("事件树画布");
@@ -287,4 +288,21 @@ test("旧过程参数不触发事件定位、开卡或原文请求", async ({ pa
   await expect(page.locator("[data-event-card]")).toHaveCount(0);
   await expect(page.locator("[data-event-marker][data-selected]")).toHaveCount(0);
   expect(detailRequests).toEqual([]);
+});
+
+
+test("诊断报告前显示已保存事件及独立章节范围", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installFixtures(page);
+  await page.route(`**/api/novels/${novelId}/event-trees?*`, route => route.fulfill({
+    json: { ...tree, organization_status: "pending_diagnosis" },
+  }));
+  await page.goto(url("event-trees"));
+  await page.getByLabel("事件树画布").getByRole("button", { name: "最初的信", exact: true }).click();
+  const card = page.getByRole("dialog", { name: "事件详情：最初的信" });
+  await expect(card).toContainText("章节范围");
+  await expect(card).toContainText("章节 1 至 章节 3");
+  await card.getByRole("button", { name: "阅读原文" }).click();
+  await expect(page.getByRole("dialog", { name: "章节原文" })).toContainText("原文 1");
+  await page.screenshot({ path: testInfo.outputPath("saved-tree-before-report.png"), animations: "disabled" });
 });

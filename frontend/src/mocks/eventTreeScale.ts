@@ -16,7 +16,7 @@ export function buildScaleBook({ chapters, eventsPerChapter, arcs, outcomes }: S
     for (let index = 0; index < eventsPerChapter; index++) {
       position += 100;
       events.push({
-        event_id: `ev-${chapter}-${index}`,
+        event_id: `ev-${chapter}-${index}`, from: chapter, to: chapter,
         title: `第 ${chapter} 章事件 ${index}`,
         summary: `概要 ${chapter}-${index}`,
         event_type: "推进",
@@ -36,7 +36,7 @@ export function buildScaleBook({ chapters, eventsPerChapter, arcs, outcomes }: S
     chapters: chapterList,
     counts: {
       top_level_events: events.length, child_events: 0, all_events: events.length,
-      declarations: 0, outcomes: outcomeList.length, event_outcome_links: eventOutcomeLinks.length,
+      outcomes: outcomeList.length, event_outcome_links: eventOutcomeLinks.length,
       arcs: arcList.length, event_arc_links: eventArcLinks.length, relations: 0, foreshadowing_actions: 0,
     },
     arcs: arcList,

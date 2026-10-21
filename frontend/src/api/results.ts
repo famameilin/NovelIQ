@@ -135,7 +135,7 @@ export async function getTimelineChange(novelId: string, taskId: string, changeI
   return data;
 }
 
-export async function getNarrativeSource(novelId: string, taskId: string, context: { page: "timeline" | "event-trees"; id: string; chapterId?: number; throughChapterId?: number; kind?: "event" | "declaration" }, signal?: AbortSignal): Promise<NarrativeSource> {
+export async function getNarrativeSource(novelId: string, taskId: string, context: { page: "timeline" | "event-trees"; id: string; chapterId?: number; throughChapterId?: number; kind?: "event" }, signal?: AbortSignal): Promise<NarrativeSource> {
   const resource = context.page === "timeline" ? "changes" : "nodes";
   const { data } = await apiClient.get<NarrativeSource>(`/api/novels/${novelId}/${context.page}/${resource}/${encodeURIComponent(context.id)}/source`, { params: { task_id: taskId, ...definedParams({ chapter_id: context.chapterId, through_chapter_id: context.throughChapterId, kind: context.kind }) }, signal });
   return data;
@@ -192,9 +192,9 @@ export async function getTopicEmotion(
 }
 
 /** 当前章详情按原声明身份读取，全书归属仅作为关联信息 */
-export async function getChapterEventDetail(novelId: string, taskId: string, chapterId: number, declarationId: string): Promise<import("./narrativeTypes").ChapterEventDetail> {
+export async function getChapterEventDetail(novelId: string, taskId: string, chapterId: number, eventId: string): Promise<import("./narrativeTypes").ChapterEventDetail> {
   const { data } = await apiClient.get<import("./narrativeTypes").ChapterEventDetail>(
-    `/api/novels/${novelId}/event-forest/chapters/${chapterId}/nodes/${encodeURIComponent(declarationId)}`,
+    `/api/novels/${novelId}/event-forest/chapters/${chapterId}/nodes/${encodeURIComponent(eventId)}`,
     { params: { task_id: taskId } },
   );
   return data;
