@@ -40,13 +40,22 @@ async def lifespan(app: FastAPI):
 
     pass
     event_manager.configure_outbox(SseMessageRepository(lambda: get_storage_factory()()))
-    try:
-        from src.api.dependencies import get_task_manager, get_task_service
+    from src.sse.notification_consumer import NotificationConsumer
+    from src.workflows.dependencies import publish_initial_capacity
 
+    notifications = NotificationConsumer.for_application(event_manager)
+    app.state.notifications = notifications
+    await publish_initial_capacity()
+    try:
+        from src.workflows.dependencies import get_analysis_service
+
+        orphan_repo = get_storage_factory()().runs
+        orphans = orphan_repo.get_by_status("running") + orphan_repo.get_by_status("cancelling")
         failed_count, cancelled_count = recover_orphaned_runs()
-        scheduled_pending_count, cancelled_pending_count = await resume_pending_tasks(
-            get_task_service(), get_task_manager()
-        )
+        from src.workflows.startup_recovery import notify_recovered_runs
+
+        await notify_recovered_runs(orphans)
+        scheduled_pending_count, cancelled_pending_count = await resume_pending_tasks(get_analysis_service())
         if failed_count > 0:
             logger.info(f"Successfully failed {failed_count} running task(s) left by the previous process")
         if cancelled_count > 0:
@@ -70,7 +79,10 @@ async def lifespan(app: FastAPI):
         logger.info("FastAPI application shutting down...")
         try:
             from src.sse.manager import event_manager
+            from src.workflows.dependencies import get_task_manager
 
+            await get_task_manager().shutdown()
+            await notifications.close()
             await event_manager.shutdown()
         except Exception as exc:
             logger.warning(f"Failed to cleanly shut down runtime singletons: {exc}")

@@ -19,7 +19,7 @@ from src.storage import get_storage_factory
 router = APIRouter()
 
 
-def _task_run_belongs_to_novel(task_id: str, novel_id: str) -> bool:
+def _task_run_belongs_to_novel(task_id: str, novel_id: str) -> dict[str, Any] | None:
     """
     校验 SSE 目标任务存在且属于当前小说
 
@@ -30,25 +30,55 @@ def _task_run_belongs_to_novel(task_id: str, novel_id: str) -> bool:
         session_factory = get_storage_factory()
         session = session_factory()
         run = session.runs.get_run_by_task_id(task_id)
-        return run is not None and run.get("novel_id") == novel_id
+        return run if run is not None and run.get("novel_id") == novel_id else None
     except Exception:
-        return False
+        return None
 
 
 @router.get("/novels/{novel_id}/events/tasks/{task_id}")
 async def sse_endpoint(novel_id: str, task_id: str, request: Request) -> EventSourceResponse:
     """SSE 端点：获取任务状态和模型输出"""
-    if not _task_run_belongs_to_novel(task_id, novel_id):
+    run = _task_run_belongs_to_novel(task_id, novel_id)
+    if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在或不属于该小说")
-    last_seq = _resolve_last_seq(request)
-    queue = await event_manager.connect(task_id, last_seq=last_seq)
+    consumer = getattr(request.app.state, "notifications", None)
+    if consumer is not None:
+        await consumer.watch(run["run_id"], task_id, terminal=run["status"] in {"completed", "failed", "cancelled"})
+    queue, snapshot = await event_manager.connect_snapshot(task_id)
+    snapshot["task_id"] = task_id
+    consumer = getattr(request.app.state, "notifications", None)
+    snapshot["sync_pending"] = bool(consumer and consumer.pending(task_id))
 
     async def event_generator() -> Any:
-        cursor = last_seq or 0
+        cursor = int(snapshot["cursor"])
+        last_sync = None
         try:
+            yield {"event": "snapshot", "id": str(cursor), "data": json.dumps(snapshot, ensure_ascii=False)}
             while True:
+                consumer = getattr(request.app.state, "notifications", None)
+                warning = consumer.errors.get(task_id) if consumer is not None else None
+                sync_pending = bool((consumer and consumer.pending(task_id)) or not queue.empty())
+                sync = (warning, sync_pending)
+                if sync != last_sync:
+                    yield {"event": "notification_status", "data": json.dumps(
+                        {"task_id": task_id, "warning": warning, "sync_pending": sync_pending}, ensure_ascii=False
+                    )}
+                    last_sync = sync
                 if await request.is_disconnected():
                     break
+                if not queue.empty():
+                    pending = queue.get_nowait()
+                    if pending.get("type") == "reconnect_required":
+                        yield {"event": "reconnect_required", "data": json.dumps(pending["data"])}
+                        break
+                    if int(pending.get("seq", 0)) > cursor:
+                        cursor = int(pending["seq"])
+                        yield {
+                            "event": pending["type"],
+                            "id": str(cursor),
+                            "data": json.dumps(pending["data"], ensure_ascii=False),
+                        }
+                    continue
                 messages = await event_manager.replay(task_id, cursor)
                 for message in messages:
                     sequence = int(message["seq"])
@@ -80,6 +110,8 @@ async def sse_endpoint(novel_id: str, task_id: str, request: Request) -> EventSo
             raise
         finally:
             await event_manager.disconnect(task_id, queue)
+            if consumer is not None:
+                consumer.unwatch(task_id)
 
     return EventSourceResponse(event_generator())
 
