@@ -26,7 +26,10 @@ it("图谱事实入口避开旧筛选，退出映射保留入口截点", async (
   localStorage.setItem("novel-1:run-a:timeline", JSON.stringify({ cutoff: 1, q: "旧筛选", dimension: "character", window: 8 }));
   renderNarrative("/novels/novel-1/timeline?task_id=task-a&through_chapter_id=3&source_fact_id=fact-3");
   await waitFor(() => expect(screen.getByRole("dialog", { name: "变化详情" })).toHaveTextContent("信件线索 3"));
-  expect(api.mock.calls.some(([, config]) => config?.params?.source_fact_id === "fact-3" && config.params.q === "" && config.params.dimension === undefined && config.params.window_start_chapter_id === undefined)).toBe(true);
+  expect(api.mock.calls.some(([, config]) => {
+    const params = (config as { params?: Record<string, unknown> } | undefined)?.params ?? {};
+    return params.source_fact_id === "fact-3" && params.q === "" && params.dimension === undefined && params.window_start_chapter_id === undefined;
+  })).toBe(true);
   await userEvent.click(screen.getByRole("button", { name: "显示全部变化" }));
   expect(screen.getByRole("combobox", { name: "阅读截点" })).toHaveValue("3");
   expect(JSON.parse(localStorage.getItem("novel-1:run-a:timeline")!).cutoff).toBe(3);

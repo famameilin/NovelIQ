@@ -38,8 +38,11 @@ it("完整消费分页，只为顶层事件绘制入口，结果和叙事线不�
   expect(screen.queryByRole("button", { name: /缩放|适应|力导向/ })).not.toBeInTheDocument();
   const calls = api.mock.calls.filter(([path]) => String(path).endsWith("/event-trees"));
   expect(calls).toHaveLength(2);
-  expect(calls[1][1]?.params.cursor).toBe("second");
-  calls.forEach(([, config]) => expect(Object.keys(config!.params).sort()).toEqual(config!.params.cursor ? ["cursor", "limit", "task_id"] : ["limit", "task_id"]));
+  expect((calls[1][1] as { params: { cursor?: string } } | undefined)?.params.cursor).toBe("second");
+  calls.forEach(([, config]) => {
+    const params = (config as { params: { cursor?: string } } | undefined)?.params ?? { cursor: undefined };
+    expect(Object.keys(params).sort()).toEqual(params.cursor ? ["cursor", "limit", "task_id"] : ["limit", "task_id"]);
+  });
 });
 
 it("统一事件卡逐级打开直接子事件，父卡保留且独立关闭", async () => {
@@ -132,5 +135,5 @@ it("关系直接引用正式事件，打开事件卡后原文使用事件本身�
   await userEvent.click(within(child).getByRole("button", { name: /原文/ }));
   const reader = await screen.findByRole("dialog", { name: "章节原文" });
   await waitFor(() => expect(reader).toHaveTextContent("原文 1"));
-  expect(api.mock.calls.filter(([path]) => String(path).includes("child%3Aa/source")).some(([, config]) => config!.params.kind === "event")).toBe(true);
+  expect(api.mock.calls.filter(([path]) => String(path).includes("child%3Aa/source")).some(([, config]) => (config as { params: { kind?: string } } | undefined)?.params.kind === "event")).toBe(true);
 });

@@ -50,7 +50,10 @@ it("全书总览最多 20 章一屏，翻页浏览其余章节且不推进阅读
 
 it("章节聚合浮层独立读取全部分页，并保留主体与搜索条件", async () => {
   const records = Array.from({ length: 83 }, (_, index) => ({ ...changes[1], plotline_change_id: `dense-${index}`, title: `密集变化 ${index + 1}` }));
-  const api = vi.spyOn(apiClient, "get").mockImplementation(async (_url, config) => ({ data: { ...timeline(2), changes: config?.params?.cursor ? records.slice(80) : records.slice(0, 80), total: 83, next_cursor: config?.params?.cursor ? null : "chapter-next" } } as AxiosResponse));
+  const api = vi.spyOn(apiClient, "get").mockImplementation(async (_url, config) => {
+    const cursor = (config as { params?: { cursor?: string } } | undefined)?.params?.cursor;
+    return { data: { ...timeline(2), changes: cursor ? records.slice(80) : records.slice(0, 80), total: 83, next_cursor: cursor ? null : "chapter-next" } } as AxiosResponse;
+  });
   const onSelect = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   render(<QueryClientProvider client={client}><ChapterChanges novelId="novel-1" runId="run-a" group={{ chapterId: 2, chapterOrder: 2, dimension: "plot" }} subject="letter" q="线索" onClose={vi.fn()} onSelect={onSelect} /></QueryClientProvider>);
