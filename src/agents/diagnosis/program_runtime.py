@@ -66,24 +66,14 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         "执行前检查整段语法白名单；禁止 import、try/except、其他属性访问、文件/网络访问；"
         "可调用函数只有目录列出的工具、基础函数与 range。\n"
         "工具返回实际 JSON 对象/列表，ID 工具返回实际 ID 字符串；变量跨程序保留。\n"
-        "write_event 的成功身份用 result['results'][0]['event_id'] 读取；"
-        "write_arc/write_outcome 的登记身份用 result['results'][0] 读取，完整示例见系统提示词。\n"
-        "同一程序可读取、创建子父事件、登记关联和提交报告，不等待模型下一轮搬运 ID。\n"
+        "同一程序可连续读取和写入，不等待模型下一轮搬运 ID。\n"
         "所有函数参数以以下真实 schema 为准；evidence 是 paragraph_id/quote/occurrence 对象列表，"
         "不是段号整数。只使用原工具返回的真实 ID 和段号。\n"
         "每项校验、案例关联、审计独立执行；被拒操作不生效，成功操作保留。"
         "批量 write 的 results 与 items 按原顺序对应，被拒项为 None；failed 点名索引、源码行和原因。\n"
-        "write_diagnosis 只写报告字段，不复制叙事组织草稿；narrative_organization、"
-        "novel_id 和 foreshadow_expectation 由运行时在最终保存时绑定。\n"
         "函数赋值接收该函数真实返回值：批量 write 用 results/failed，不存在 written 键。"
         "reads/written 只属于 execute_code 外层回执，不能拿它们索引函数返回值；print 输出在 printed。"
         "review/link 的成功结果也是 None，以 failed 的索引判断失败，不把 None 一律当拒绝。\n"
-        "案例处置写入复用标注语义：write_entity(name,entity_type,el,tags?,description?,"
-        "representative?) 补签或更新实体；"
-        "write_relation(from_entity,to_entity,relation_type) 登记人物关系（同一人物边承载身份归并）；"
-        "write_dialogue(candidate_index,verdict,speaker?,tone?) 按候选号判定说话人；"
-        "对话候选号从读取工具返回的正式对话目录取得；"
-        "案例写入一律带 caseid=所办案例的真实 ID（先 promise_case 接手）。\n"
         "finish() 可放在程序内，仅请求执行完本程序后的完整性检查；"
         "无工具回复或外层 finish() 也请求同一检查。\n"
     )
@@ -102,6 +92,11 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         self._pending_end = False
         self._end_requested = False
         self._written: list[dict[str, Any]] = []
+        self._timings: dict[str, dict[str, float]] = {}
+
+    def record_timing(self, name: str, category: str, elapsed_ns: int) -> None:
+        "记录单项工具的锁等待或执行耗时，仅用于审计"
+        self._timings.setdefault(name, {})[category + "_ms"] = round(elapsed_ns / 1_000_000, 3)
 
     def build_tool(self) -> Any:
         """目录由原工具 schema 生成，避免把标注面的 evidence 整数口径带入诊断"""
@@ -155,7 +150,8 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
                 "next_relation_offset": "关系下一页偏移或null",
             },
             "read_entity": {"id": "实体ID", "name": "规范名", "entity_type": "大类", "attributes": "属性对象"},
-            "search_cases": [{"case_id": "真实案例ID", "case_type": "四类之一", "promised": "是否已承诺"}],
+            "search_cases": [{"case_id": "真实案例ID", "case_type": "四类之一",
+                              "claimed": "是否已领取", "submitted": "是否已提交"}],
             "read_metrics": {
                 "aggregate": "全局指标",
                 "pivots": ["转折点"],
@@ -166,7 +162,12 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
                 "graph_signals": "图谱统计",
             },
             "read_topics": {"topics": [{"topic_id": "真实主题ID", "words": "主题词", "label": "标签"}]},
-            "promise_case": {"status": "promised 或 taken", "case_id": "真实案例ID"},
+            "claim_case": {"status": "claimed、submitted 或 taken", "case_id": "真实案例ID"},
+            "claim_random_case": {"status": "claimed 或 empty", "case_id": "成功时的真实案例ID",
+                           "case_type": "四类之一", "description": "案例说明"},
+            "submit_case": {"status": "submitted", "case_id": "已提交案例ID",
+                            "candidates": [{"case_id": "可领案例ID", "case_type": "四类之一",
+                                            "description": "案例说明"}]},
             "push_case": {"case_id": "真实案例ID"},
             "finish": {"status": "end_requested"},
         }
@@ -176,10 +177,33 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         if "write_diagnosis" in functions:
             functions["write_diagnosis"]["returns"] = {"status": "written", "record": "diagnosis_report"}
         catalog = {"functions": functions, "$defs": definitions}
+        instructions = self.contract_text
+        if "write_event" in functions:
+            instructions += "write_event 的成功身份用 result['results'][0]['event_id'] 读取。\n"
+        if "write_entity" in functions:
+            instructions += (
+                "案例处置写入复用标注语义：write_entity(name,entity_type,el,tags?,description?,"
+                "representative?) 补签或更新实体；"
+                "write_relation(from_entity,to_entity,relation_type) 登记人物关系（同一人物边承载身份归并）；"
+                "write_dialogue(candidate_index,verdict,speaker?,tone?) 按候选号判定说话人；"
+                "对话候选号从读取工具返回的正式对话目录取得。\n"
+            )
+        if "claim_random_case" in functions:
+            instructions += (
+                "案例写入一律带 caseid=所办案例的真实 ID，先 claim_case 或 claim_random_case，办完 submit_case。\n"
+                "提交回执的 candidates 最多三件且不预占；下次正常推理可指定领取熟悉案例，"
+                "没有合适候选或返回 taken 时随机领取，不强制另开选案回合。\n"
+            )
+        if "write_diagnosis" in functions:
+            instructions += (
+                "write_arc/write_outcome 的登记身份用 result['results'][0] 读取。\n"
+                "write_diagnosis 只写报告字段，不复制叙事组织草稿；narrative_organization、"
+                "novel_id 和 foreshadow_expectation 由运行时在最终保存时绑定。\n"
+            )
         return StructuredTool.from_function(
             coroutine=self.execute,
             name=PROGRAM_TOOL_NAME,
-            description=self.contract_text + json.dumps(catalog, ensure_ascii=False, separators=(",", ":")),
+            description=instructions + json.dumps(catalog, ensure_ascii=False, separators=(",", ":")),
         )
 
     def _reset_program_state(self) -> None:
@@ -233,6 +257,7 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
     ) -> Any:
         op_index = self._next_op_index(line=line)
         started_ns = time.perf_counter_ns()
+        self._timings.pop(name, None)
         # call_id 是业务事实的全局唯一实际地址：诊断前缀 + 执行身份 + 程序内序号
         identity = f"{self.invocation_id}-" if self.invocation_id else ""
         call_id = f"diagnosis-{identity}{self._program_id}-op{op_index}"
@@ -276,6 +301,7 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
                 tool_name=name,
                 request_args={
                     **args,
+                    "_timing": self._timings.pop(name, {}),
                     "_tool_call_id": call_id,
                     "_program": {
                         "program_id": self._program_id,

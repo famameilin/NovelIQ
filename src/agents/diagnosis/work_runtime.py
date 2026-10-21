@@ -1,14 +1,9 @@
-"""诊断会话运行：持续补位派发案例会话直到案例池归零，报告会话收尾
-
-没有派发单元、没有排队：案例会话各自领取模型池容量并自行 search_cases 取未承诺案例，
-promise 接手后直接写入完成；会话用尽自身上限即结束，空出的并发位立即由新会话接手剩余案例。
-案例池归零后，由一个报告会话完成叙事组织与全书报告。
-每个会话做完自行保存一次：案例会话存案例产物，报告会话存叙事组织与报告。
-"""
+"""按待领数量补位案例会话，全部保存后启动报告会话"""
 
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -43,6 +38,8 @@ class DiagnosisWorkContext:
     completion_check: Callable[[], list[str]]
     max_rounds: int
 
+    claimed_count: Callable[[], int] = lambda: 0
+    unsubmitted_count: Callable[[], int] = lambda: 0
 
 class DiagnosisWorkDomain(Protocol):
     """领域只暴露会话上下文、案例池进度、会话保存与报告结果"""
@@ -148,9 +145,7 @@ class DiagnosisWorkScheduler:
 
                 # 流作用域=会话角色（case/report），各会话的并行流由各自 stream_id 区分
                 async def emit(event: Any) -> None:
-                    event.sub_stage, event.invocation_id = role, progress.agent_id
-                    event.stage = "diagnose"
-                    await self.stream._emitter(event)
+                    await activity(event)
 
                 work_stream = AgentStream(emit, sub_stage=role, stream_id=progress.agent_id)
             # 会话图按标注三节点族构建（复用 annotation/agent_graph 的同一图结构）
@@ -191,7 +186,10 @@ class DiagnosisWorkScheduler:
             progress.audit_sequence = int(getattr(recorder, "sequence", progress.audit_sequence))
             if final_state.get("error"):
                 raise RuntimeError(str(final_state["error"]))
-            # 会话做完保存一次：案例与报告产物随各自会话落库，失败轮次不重做已保存内容
+            if role == "case" and final_state.get("halted") and context.claimed_count() == 0:
+                raise RuntimeError("案例会话回合已耗尽且没有新增领取，停止本轮诊断")
+            if role == "case" and context.unsubmitted_count():
+                incomplete_error = RuntimeError("案例会话结束仍有未提交领取，保存已通过校验的产物后停止本轮诊断")
             await self.audit_barrier()
             await asyncio.to_thread(self.domain.save_session_progress, progress.agent_id, role)
             # 成功出口同样登记执行终态：执行行不能停在 running 等孤儿清扫反推
@@ -222,7 +220,7 @@ class DiagnosisWorkScheduler:
                         target=self.pool.address,
                         run_id=self.run_id,
                         work_id=key,
-                        invocation_id=progress.agent_id,
+                        invocation_id=progress.agent_id if progress is not None else "",
                         payload={"reservation_id": selected.reservation_id, "outcome": "released"},
                     )
                 )
@@ -258,19 +256,25 @@ class DiagnosisWorkScheduler:
             self.bus.unsubscribe(self.pool.assignment_topic, assignments)
 
     async def _run_work(self) -> Any:
-        # 案例池未归零就持续补位派发：会话用尽回合结束、空出并发位时立即由新会话接手剩余案例
         tasks: set[asyncio.Task[None]] = set()
+        else:
+            await finish("success")
         serial = 0
         try:
             while True:
-                while len(tasks) < self.case_sessions and self.domain.case_counts()[0] > 0:
+                available = min(self.case_sessions - len(tasks), self.domain.case_counts()[0])
+                for _ in range(available):
                     serial += 1
                     tasks.add(asyncio.create_task(self._session(f"case:{serial}", "case")))
                 if not tasks:
                     break
                 done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                for task in done:
-                    task.result()
+                results = await asyncio.gather(*done, return_exceptions=True)
+                errors = [result for result in results if isinstance(result, BaseException)]
+                if len(errors) == 1:
+                    raise errors[0]
+                if errors:
+                    raise BaseExceptionGroup("案例会话同时失败", errors)
         except BaseException:
             for task in tasks:
                 task.cancel()
@@ -278,3 +282,5 @@ class DiagnosisWorkScheduler:
             raise
         await self._wave([(self.report_key, "report")])
         return self.domain.analysis_result()
+        if self.domain.case_counts()[0]:
+            raise RuntimeError("案例池仍有待领案例，禁止启动报告")

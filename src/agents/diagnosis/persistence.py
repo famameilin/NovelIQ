@@ -205,11 +205,7 @@ def save_diagnosis_result(
             run_id,
             author,
             json.dumps(
-                {
-                    "created_case_ids": sorted(case_pool.created.get(author, set())),
-                    "registrations": {key: case_pool.cases[key] for key in case_pool.registrations.get(author, set())},
-                    "promises": case_pool.promises_for(author),
-                },
+                case_pool.contribution(author),
                 ensure_ascii=False,
             ),
         )

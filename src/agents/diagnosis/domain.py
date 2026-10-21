@@ -1,9 +1,9 @@
-"""诊断会话管理案例承诺、生产者写入与报告保存"""
+"""诊断会话管理案例领取与提交、生产者写入与报告保存"""
 
 from __future__ import annotations
 
 import json
-import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -14,8 +14,6 @@ from src.diagnosis.queries import DiagnosisQueries
 from src.diagnosis.schema import AgentAnalysis
 from src.event_trees.diagnosis_persistence import hydrate_draft_from_run
 from src.event_trees.organization import (
-    BoundOrganizationEvidence,
-    CompleteEventDraft,
     EventOrganizationDraft,
     record_payloads,
     snapshot_digest,
@@ -27,12 +25,13 @@ from .evidence import DiagnosisEvidenceLedger
 from .persistence import save_diagnosis_result
 from .program_runtime import DiagnosisProgramRuntime
 from .prompts import build_diagnosis_system_prompt
+from .read_context import DiagnosisGraphSource
 from .tools import build_diagnosis_tools
 from .work_runtime import DiagnosisWorkContext
 
 
 class CaseWriteBinding:
-    "案例写入前核验承诺，账本与正式结果只归属真实生产者"
+    "案例写入前核验领取，账本与正式结果只归属真实生产者"
 
     def __init__(self, resolve: Callable[[str], tuple[Any, str]], draft: EventOrganizationDraft) -> None:
         self._resolve = resolve
@@ -43,7 +42,7 @@ class CaseWriteBinding:
         if not isinstance(caseid, str) or not caseid:
             raise ValueError(
                 "本次写入缺少 caseid：请填所办案例的真实 ID（search_cases 取未解决案例，"
-                "promise_case 接手后带回执中的 case_id）"
+                "claim_case 接手后带回执中的 case_id）"
             )
         writer, invocation = self._resolve(caseid)
         self._draft.producer_agent_id = invocation
@@ -75,7 +74,6 @@ class DiagnosisDomain:
     ) -> None:
         self.session, self.run_id, self.novel_id, self.agent_id = session, run_id, novel_id, agent_id
         self.novel_title, self.model_id = novel_title, model_id
-        self.lock = threading.RLock()
         self.read_sessions: dict[str, Storage] = {}
         self.ledgers: dict[str, DiagnosisEvidenceLedger] = {}
         self.draft = EventOrganizationDraft(session, run_id, agent_id)
@@ -87,6 +85,7 @@ class DiagnosisDomain:
         # 续跑：把会话保存（每会话做完保存一次）留下的组织行水合进内存后继续
         hydrate_draft_from_run(session, run_id, self.draft)
         self.session_saved: set[str] = set()
+        self.case_sessions: set[str] = set()
         self._analysis: AgentAnalysis | None = None
         self.reports: dict[str, dict[str, Any]] = {}
         self.report_anchor = stable_digest(run_id, "diagnosis_report")
@@ -104,7 +103,7 @@ class DiagnosisDomain:
 
         from .persistence import _save_case_writes
 
-        with self.lock:
+        with self.draft.publication_lock:
             if author in self.session_saved:
                 return
             if role == "report":
@@ -117,23 +116,36 @@ class DiagnosisDomain:
                     self.session, self.run_id, "", graph=graph, writers=writers,
                     candidates=self._case_dialogue_candidates(),
                 )
-            }
-            self.session.diagnosis.save_session(
+                contribution = CaseSave(
+                    self.run_id, author, json.dumps(self.case_pool.contribution(author), ensure_ascii=False),
+                )
+                organization = {
+                    name: {
+                        str(index): item.model_dump(mode="json")
+                        for index, item in enumerate(getattr(self.draft, name).values())
+                    }
+                    for name in ("events", "containments", "relations", "reviewed_events", "structure_reviews")
+                }
+            saved = self.session.diagnosis.save_session(
                 DiagnosisSessionSave(
                     self.run_id,
                     author,
                     json.dumps(organization, ensure_ascii=False),
-                    frozenset(self.sources),
                     facts,
                     updates,
                     (contribution,),
                 )
             )
-            self.case_pool.confirm(author)
-            for key, (_writer, invocation) in writers.items():
-                graph.confirm(invocation)
-                self.case_writers.pop(key, None)
-            self.session_saved.add(author)
+            with self.lock:
+                self.case_pool.merge_committed(saved["committed_cases"])
+                self.case_pool.confirm(author)
+                for key, (_writer, invocation) in writers.items():
+                    graph.confirm(invocation)
+                    self.case_writers.pop(key, None)
+                self.session_saved.add(author)
+                self.draft.refresh_read_cache()
+                for source in self.graph_sources:
+                    source.refresh()
 
     def case_counts(self) -> tuple[int, int]:
         "案例池进度：(可领案例, 已提交案例)，仅有可领案例时派发"
@@ -145,6 +157,7 @@ class DiagnosisDomain:
         报告写入时绑定叙事快照，保存时快照必须仍然一致；报告未提交即本轮失败。
         案例交付与正式报告绑定走既有保存链，重投只核验不改写已保存结果。
         """
+        self._require_cases_saved()
         reports = [(anchor, data["analysis"]) for anchor, data in self.reports.items() if "analysis" in data]
         self.draft.agent_id = author
         if not reports:
@@ -177,6 +190,15 @@ class DiagnosisDomain:
         self._analysis = analysis
         self.session_saved.add(author)
 
+    def _require_cases_saved(self) -> None:
+        "报告只能读取已保存且没有待办的案例结果"
+        if self.case_counts()[0]:
+            raise ValueError("案例池仍有待领案例，禁止进入或发布报告")
+        if self.case_pool.unsubmitted_for():
+            raise ValueError("案例池仍有已领取但未提交案例，禁止进入或发布报告")
+        if self.case_sessions - self.session_saved:
+            raise ValueError("案例会话尚未全部保存，禁止进入或发布报告")
+
     def analysis_result(self) -> AgentAnalysis:
         """报告会话保存后的正式诊断结果；未保存即不可读"""
         if self._analysis is None:
@@ -184,15 +206,18 @@ class DiagnosisDomain:
         return self._analysis
 
     def _resolve_case(self, author: str, caseid: str) -> tuple[Any, str]:
-        """案例写入来源：必须是本会话已承诺的案例（接手即承诺，先承诺后写入）"""
+        """案例写入必须属于本会话已领取且尚未提交的案例"""
         if caseid not in self.case_pool.cases:
             raise ValueError(f"caseid={caseid!r} 不属于当前 run 的案例池；请取 search_cases 返回的真实 ID")
-        runtime = self.case_pool.case_runtime.get(caseid) or {}
-        if not runtime.get("promised"):
-            raise ValueError("该案例尚未 promise：先 promise_case(case_id=...) 接手，再调用写入完成它")
+        with self.case_pool.lock:
+            runtime = dict(self.case_pool.case_runtime.get(caseid) or {})
+        if runtime.get("owner") is None:
+            raise ValueError("该案例尚未 claim：先 claim_case(case_id=...) 接手，再调用写入完成它")
         owner = runtime.get("owner")
         if owner is not None and owner != author:
-            raise ValueError("该案例已由其他执行承诺；请改取其他未承诺案例")
+            raise ValueError("该案例已由其他执行领取；请改取其他可领案例")
+        if runtime.get("submitted"):
+            raise ValueError("该案例已经 submit，禁止继续写入")
         invocation = author
         return self._case_writer(invocation), invocation
 
@@ -250,10 +275,10 @@ class DiagnosisDomain:
         return list(self._case_dialogue_value)
 
     def _unresolved_totals(self) -> dict[str, int]:
-        """会话起始只见未承诺案例计数：案例清单由会话自行 search 取"""
+        """会话起始只见可领案例计数"""
         totals: dict[str, int] = {}
         for case in self.case_pool.search():
-            if not case["promised"]:
+            if not case["submitted"] and not case["claimed"]:
                 totals[str(case["case_type"])] = totals.get(str(case["case_type"]), 0) + 1
         return totals
 
@@ -264,7 +289,7 @@ class DiagnosisDomain:
         ]
 
     def build_session_context(self, role: str, agent_id: str, observer: Any) -> DiagnosisWorkContext:
-        with self.lock:
+        with self.draft.publication_lock, self.lock:
             return self._build_session_context_locked(role, agent_id, observer)
 
     def _build_session_context_locked(self, role: str, invocation: str, observer: Any) -> DiagnosisWorkContext:
@@ -277,6 +302,7 @@ class DiagnosisDomain:
         case_binding: CaseWriteBinding | None = None
         report: dict[str, Any] = {}
         if role == "report":
+            self._require_cases_saved()
             self.reports[self.report_anchor] = report
             # 报告会话的叙事与报告写入以报告锚点为来源，随会话固定
             self.draft.producer_agent_id = invocation
@@ -312,10 +338,13 @@ class DiagnosisDomain:
                 ],
             }
         else:
+            self.case_sessions.add(invocation)
             case_binding = CaseWriteBinding(
                 resolve=lambda caseid: self._resolve_case(invocation, caseid), draft=self.draft
             )
             material = {"unresolved_case_totals": self._unresolved_totals()}
+        graph_source = DiagnosisGraphSource(self.session, self.run_id)
+        self.graph_sources.append(graph_source)
         tools = build_diagnosis_tools(
             self.read_sessions[invocation],
             self.run_id,
@@ -327,6 +356,7 @@ class DiagnosisDomain:
             agent_id=invocation,
             case_binding=case_binding,
             case_writes_graph=self._case_graph() if case_binding is not None else None,
+            graph_source=graph_source,
         )
         for tool in tools:
             if tool.name != "write_diagnosis":
@@ -341,11 +371,34 @@ class DiagnosisDomain:
             tool.func = write_report
         for tool in tools:
             original_function = tool.func
-            if original_function is not None:
+            if original_function is not None and tool.name in {
+                "claim_random_case", "claim_case", "submit_case", "push_case", "search_cases",
+            }:
 
-                def locked_tool(*args: Any, _function: Any = original_function, **kwargs: Any) -> Any:
-                    with self.lock:
-                        return _function(*args, **kwargs)
+                def case_tool(*args: Any, _function: Any = original_function, _name: str = tool.name,
+                              **kwargs: Any) -> Any:
+                    waiting = time.perf_counter_ns()
+                    with self.case_pool.lock:
+                        started = time.perf_counter_ns()
+                        try:
+                            return _function(*args, **kwargs)
+                        finally:
+                            program.record_timing(_name, "lock_wait", started - waiting)
+                            program.record_timing(_name, "execution", time.perf_counter_ns() - started)
+
+                tool.func = case_tool
+            elif original_function is not None and tool.name.startswith("write_"):
+
+                def locked_tool(*args: Any, _function: Any = original_function, _name: str = tool.name,
+                                **kwargs: Any) -> Any:
+                    waiting = time.perf_counter_ns()
+                    with self.draft.publication_lock, self.lock:
+                        started = time.perf_counter_ns()
+                        try:
+                            return _function(*args, **kwargs)
+                        finally:
+                            program.record_timing(_name, "lock_wait", started - waiting)
+                            program.record_timing(_name, "execution", time.perf_counter_ns() - started)
 
                 tool.func = locked_tool
         program = DiagnosisProgramRuntime(
@@ -357,8 +410,12 @@ class DiagnosisDomain:
 
         def complete() -> list[str]:
             if role != "report":
-                return []
+                unfinished = self.case_pool.unsubmitted_for(invocation)
+                if unfinished:
+                    return [f"仍有未提交案例 {unfinished}，请先办理并 submit_case"]
+                return ["仍有可领案例，请用 claim_random_case() 领取并继续办理"] if self.case_counts()[0] else []
             try:
+                self._require_cases_saved()
                 ledger.require_evidence()
                 analysis = AgentAnalysis.model_validate(report.get("analysis", {}))
                 expected = {
@@ -374,53 +431,63 @@ class DiagnosisDomain:
 
         max_rounds = settings.models.diagnosis.max_iterations
         messages = self._session_messages(role, material)
-        return DiagnosisWorkContext(program, messages, lambda: self._complete_locked(complete), max_rounds)
+        return DiagnosisWorkContext(
+            program, messages, lambda: self._complete_locked(complete), max_rounds,
+            lambda: len(self.case_pool.claims_for(invocation)),
+            lambda: len(self.case_pool.unsubmitted_for(invocation)),
+        )
 
     def _complete_locked(self, check: Any) -> list[str]:
-        with self.lock:
+        with self.draft.publication_lock, self.lock:
             return check()
 
     def close(self) -> None:
         "释放领域持有的无连接读取入口"
         with self.lock:
             self.read_sessions.clear()
+            self.graph_sources.clear()
+
+    def abort_session(self, author: str) -> None:
+        "释放失败会话的未保存领取、提交与事实贡献，保留案例登记"
+        self.case_pool.abandon(author)
+        with self.draft.publication_lock, self.lock:
+            if author not in self.session_saved and self._case_graph_value is not None:
+                self._case_graph_value.rollback(author)
 
     def retain_pending_cases(self, error: BaseException) -> None:
         """失败或取消只短事务保留登记，不采用交付、不重写已保存产物
 
-        会话完成的保存已经落库、不再回退；未保存会话只保留案例登记（不落承诺与
+        会话完成的保存已经落库、不再回退；未保存会话只保留案例登记（不落提交与
         交付），其案例按未解决留给续跑的会话重办。
         """
         from src.case_pool.contributions import CaseContribution
 
-        with self.lock:
+        with self.draft.publication_lock, self.lock:
+            with self.case_pool.lock:
+                authors = sorted(self.case_pool.registrations)
             contributions = [
                 CaseContribution(
                     self.run_id,
                     author,
                     json.dumps(
-                        {
-                            "created_case_ids": sorted(self.case_pool.created.get(author, set())),
-                            "registrations": {
-                                key: self.case_pool.cases[key]
-                                for key in sorted(self.case_pool.registrations.get(author, set()))
-                            },
-                            "promises": [],
-                        },
+                        {**self.case_pool.contribution(author), "submissions": []},
                         ensure_ascii=False,
                     ),
                 )
-                for author in sorted(self.case_pool.executions)
+                for author in authors
                 if author not in self.case_pool.saved and self.case_pool.registrations.get(author)
             ]
-            if not contributions:
-                return
-            self.session.diagnosis.retain_pending(self.run_id, self.agent_id, tuple(contributions))
+            try:
+                if contributions:
+                    self.session.diagnosis.retain_pending(self.run_id, self.agent_id, tuple(contributions))
+            finally:
+                for author in authors:
+                    self.case_pool.abandon(author)
 
     def _narrative_snapshot(self) -> str:
         return snapshot_digest(
             {
-                "identity": self.draft.identity_digest(),
+                "identity": self.draft.content_digest(),
                 "structure": self.draft.structure_digest(),
                 **{
                     name: record_payloads(getattr(self.draft, name).values())

@@ -33,7 +33,7 @@ WRITE_NAMES = frozenset(
     {"write_diagnosis", "write_event", "write_arc", "write_outcome", "write_entity", "write_relation", "write_dialogue"}
 )
 
-#: 案例写入先核验承诺，读取与报告收尾不关联案例
+#: 案例写入先核验领取，读取与报告收尾不关联案例
 CASE_WRITE_NAMES = frozenset(
     {"write_event", "write_arc", "write_outcome", "write_entity", "write_relation", "write_dialogue"}
 )
@@ -57,7 +57,7 @@ def _write_items(items: Sequence[WriteItem], handlers: dict[str, Any]) -> str:
 
 
 def _case_write_tools(query: Any, binding: Any, graph: Any) -> list[Any]:
-    """人物/关系/对话案例处置复用标注语义写入原形，核验 caseid 承诺后使用当前生产者账本与图作者"""
+    """人物/关系/对话案例处置复用标注语义写入原形，核验 caseid 领取后使用当前生产者账本与图作者"""
     from src.agents.diagnosis.case_write_tools import build_case_write_tools
 
     built = build_case_write_tools(query, binding)
@@ -108,6 +108,7 @@ def build_diagnosis_tools(
     case_binding: Any = None,
     case_writes_graph: Any | None = None,
     case_view: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    graph_source: DiagnosisGraphSource | None = None,
 ) -> list[Any]:
     """装配真实诊断身份：角色裁剪写入面，案例写入保留显式 caseid 关联"""
     from src.case_pool import CasePool
@@ -123,11 +124,10 @@ def build_diagnosis_tools(
 
     @tool
     def write_event(items: Annotated[list[EventWriteItem], Field(min_length=1, max_length=300)]) -> str:
-        """批量提交声明核对、完整事件身份判断、跨章事件、显式包含/其他关系或事件核对"""
+        """批量提交事件核对、完整事件身份判断、跨章事件、显式包含/其他关系或事件核对"""
         return _write_items(
             items,
             {
-                "identity": draft.identity,
                 "event": draft.event,
                 "contain": draft.contain,
                 "relation": draft.relate_events,
@@ -229,7 +229,10 @@ def build_diagnosis_tools(
         *build_search_tools(query, access),
         read_text,
         *state_tools,
-        *build_case_tools(case_pool, author, case_view=case_view),
+        *[
+            candidate for candidate in build_case_tools(case_pool, author, case_view=case_view)
+            if role != "report" or candidate.name == "search_cases"
+        ],
         build_finish_tool(lambda: {"status": "end_requested"}),
     ]
     if role == "report":
@@ -237,7 +240,7 @@ def build_diagnosis_tools(
     else:
         tools = [write_event, *common]
         if case_binding is not None and case_writes_graph is not None:
-            # 三类案例处置复用标注语义写入原形；caseid 核验承诺，来源与账本归属当前生产者
+            # 三类案例处置复用标注语义写入原形；caseid 核验领取，来源与账本归属当前生产者
             tools.extend(_case_write_tools(query, case_binding, case_writes_graph))
 
     from src.case_pool.tool_binding import bind_caseid
@@ -245,5 +248,6 @@ def build_diagnosis_tools(
     for candidate in tools:
         _forbid_undeclared_args(candidate)
         prepare = case_binding.select if case_binding is not None and candidate.name in CASE_WRITE_NAMES else None
-        bind_caseid(candidate, prepare=prepare)
+        if candidate.name not in {"claim_case", "claim_random_case", "submit_case"}:
+            bind_caseid(candidate, prepare=prepare)
     return tools
