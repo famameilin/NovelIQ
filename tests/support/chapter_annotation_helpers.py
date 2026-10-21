@@ -147,9 +147,7 @@ def _create_work_identity(session: Any, *, run_id: str, chapter_id: int, role: s
     """
     work_id = annotation_work_id(run_id, chapter_id, role)
     invocation = new_id()
-    session.add(
-        Agent(id=invocation, run_id=run_id, type=role, status="running")
-    )
+    session.add(Agent(id=invocation, run_id=run_id, type=role, status="running"))
     session.flush()
     return work_id, invocation
 
@@ -312,7 +310,9 @@ def make_bound_event(
         event_type=event_type,
         status=status,
         progress=progress,
-        declaration_id=node_id,
+        event_id=node_id,
+        from_chapter_id=1,
+        to_chapter_id=1,
     )
 
 
@@ -734,8 +734,8 @@ def commit_test_resolution(
                 link_id=link_id,
                 producer_agent_id=invocation,
                 reason=reason,
-                semantic_source_declaration_id=source_id,
-                semantic_target_declaration_id=target_id,
+                semantic_source_event_id=source_id,
+                semantic_target_event_id=target_id,
                 relation_type=link_type,
                 source_operation_local_key=f"fixture-link/{link_id}"[:128],
             )
@@ -822,7 +822,7 @@ def commit_test_event_link(
 
 def confirm_test_work(session: Any, run_id: str, *, create_missing: bool = False) -> None:
     """只读查询夹具显式构造实际保存标注，不再设置发布 hash"""
-    from src.storage.models import EventDeclaration, GraphEntity
+    from src.storage.models import CompleteEvent, GraphEntity
 
     saved = {
         int(chapter_id)
@@ -846,8 +846,8 @@ def confirm_test_work(session: Any, run_id: str, *, create_missing: bool = False
         )
         event_exists = (
             session.execute(
-                select(EventDeclaration.declaration_id)
-                .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+                select(CompleteEvent.event_id)
+                .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
                 .where(ChapterAnnotation.run_id == run_id)
             ).first()
             is not None

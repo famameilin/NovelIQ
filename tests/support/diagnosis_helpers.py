@@ -20,42 +20,9 @@ def declaration_event_draft(session, run_id, *, groups=None):
     draft.fixture_session = session
     draft.case_id = report_case_anchor(run_id)
     draft.producer_agent_id = agent_id
-    declarations = list(draft._declarations().values())
-    by_id = {row["declaration_id"]: row for row in declarations}
-    # 显式分组之外的同 run 声明各自独立成组：身份候选必须覆盖全部声明才能通过保存校验
-    explicit = [list(group) for group in (groups or [])]
-    grouped = {identifier for group in explicit for identifier in group}
-    groups = explicit + [[row["declaration_id"]] for row in declarations if row["declaration_id"] not in grouped]
-    membership = {identifier: index for index, group in enumerate(groups) for identifier in group}
-    for group in groups:
-        row, current = by_id[group[0]], by_id[group[-1]]
-        identifier = group[0]
-        evidence = [OrganizationEvidence(paragraph_id=item["paragraph_id"]) for item in row["evidence"]]
-        draft.identity(
-            key=identifier,
-            title=row["title"],
-            problem=row["problem"],
-            summary=current["summary"],
-            event_type=row["event_type"],
-            status=current["status"],
-            progress=current["progress"],
-            declaration_ids=group,
-            reason="读取夹具显式指定本组声明组成一个事件身份",
-            evidence=evidence,
-        )
-        draft.review_declarations(group, reason="读取夹具已逐项核对不可变声明与原文")
-    for index, row in enumerate(declarations):
-        for target in declarations[index + 1 :]:
-            target_id = target["declaration_id"]
-            draft.compare_declarations(
-                source_declaration_id=row["declaration_id"],
-                target_declaration_ids=[target_id],
-                disposition="same_event"
-                if membership[row["declaration_id"]] == membership[target_id]
-                else "independent",
-                reason="读取夹具按显式分组核对两项声明身份",
-                evidence=[OrganizationEvidence(paragraph_id=row["evidence"][0]["paragraph_id"])],
-            )
+    from src.event_trees.diagnosis_persistence import hydrate_draft_from_run
+
+    hydrate_draft_from_run(storage_for(session), run_id, draft)
     return draft
 
 

@@ -73,7 +73,7 @@ def persist_observed_characters(
         node_id = new_id()
         events.append(
             BoundEvent(
-                declaration_id=node_id,
+                event_id=node_id,
                 title=f"{observation.character}{observation.action}",
                 problem="能否完成本项行动",
                 summary=f"{observation.character}{observation.action}",
@@ -95,6 +95,8 @@ def persist_observed_characters(
                         emotion=observation.emotion,
                     )
                 ],
+                from_chapter_id=1,
+                to_chapter_id=1,
             )
         )
     annotation = BoundChapterAnnotation(

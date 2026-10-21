@@ -101,7 +101,7 @@ def insert_report_fixture(session, run_id: str, session_id: str, analysis: Agent
             narrative_arc_type=analysis.narrative_arc_type,
             focus_structure=analysis.focus_structure,
             theme_color=analysis.theme_color,
-            identity_snapshot=organization.identity_snapshot if organization is not None else None,
+            content_snapshot=organization.content_snapshot if organization is not None else None,
             structure_snapshot=organization.structure_snapshot if organization is not None else None,
         )
     )
@@ -194,6 +194,7 @@ def save_topic_artifact(run_id, num_topics):
     "生成测试运行私有的小型 LDA 产物"
     from src.config.paths import resolve_model_dir
     from src.topic import LDAConfig, LDATrainer
+
     trainer = LDATrainer(LDAConfig(num_topics=num_topics, passes=1, iterations=1))
     model = trainer.train([["山门", "寻找", "人物"], ["拔剑", "行动", "人物"]], filter_extremes=False)
     trainer.save_model(model, resolve_model_dir(run_id))
@@ -204,6 +205,7 @@ def save_word2vec_artifact(run_id, row):
     from gensim.models import Word2Vec
 
     from src.config.paths import resolve_run_model_dir
+
     path = resolve_run_model_dir(run_id, "word2vec")
     path.mkdir(parents=True, exist_ok=True)
     words = [f"词{index}" for index in range(row["vocabulary_size"])]

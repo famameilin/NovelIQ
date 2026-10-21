@@ -26,9 +26,9 @@ from src.storage.models import (
     Agent,
     Chapter,
     ChapterAnnotation,
-    DeclarationParticipant,
-    EventDeclaration,
+    CompleteEvent,
     EventForeshadowingAction,
+    EventParticipant,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -48,7 +48,7 @@ __all__ = [
     "TimelineContractScenario",
     "create_timeline_contract_scenario",
     "create_chapter_annotation_source",
-    "declaration_id_for_event",
+    "event_id_for_event",
     "entity_id_for",
     "graph_change_names",
     "graph_change_tuples",
@@ -116,9 +116,7 @@ def create_chapter_annotation_source(
     if chapter is None or chapter.text is None:
         raise ValueError(f"章节没有原文: run_id={run_id} chapter_id={chapter_id}")
     agent_id, record_id = new_id(), new_id()
-    session.add(
-        Agent(id=agent_id, run_id=run_id, type=role, status="success")
-    )
+    session.add(Agent(id=agent_id, run_id=run_id, type=role, status="success"))
     session.flush()
     session.add(
         ChapterAnnotation(
@@ -138,7 +136,7 @@ def create_chapter_annotation_source(
     return record_id, agent_id
 
 
-def declaration_id_for_event(run_id: str, work_id: str, node_key: str, *, tree_key: str | None = None) -> str:
+def event_id_for_event(run_id: str, work_id: str, node_key: str, *, tree_key: str | None = None) -> str:
     """事件声明的正式铸造口径（与标注写面的节点身份规则同一编码）"""
     return fixture_id(run_id, work_id, "event_node", tree_key or node_key, node_key)
 
@@ -160,7 +158,7 @@ def save_event_declaration(
     payoff_likelihood: str | None = None,
     evidence_paragraph_id: int | None = None,
     participants: list[dict[str, Any]] | None = None,
-    declaration_id: str | None = None,
+    event_id: str | None = None,
 ) -> str:
     """按正式声明形状写入章级声明、声明参与者与原文证据，返回声明身份
 
@@ -173,16 +171,14 @@ def save_event_declaration(
     if not paragraphs:
         raise ValueError(f"章节没有段落: run_id={run_id} chapter_id={chapter_id}")
     paragraph = next((row for row in paragraphs if row.paragraph_id == evidence_paragraph_id), paragraphs[0])
-    agent_id = session.scalar(
-        select(ChapterAnnotation.agent_id).where(ChapterAnnotation.record_id == record_id)
-    )
+    agent_id = session.scalar(select(ChapterAnnotation.agent_id).where(ChapterAnnotation.record_id == record_id))
     if agent_id is None:
         raise ValueError(f"声明必须引用本 run 已保存的标注记录: record_id={record_id}")
-    identifier = fixture_id(run_id, record_id, "declaration", declaration_id or local_key)
+    identifier = fixture_id(run_id, record_id, "declaration", event_id or local_key)
     session.add(
-        EventDeclaration(
-            declaration_id=identifier,
-            record_id=record_id,
+        CompleteEvent(
+            event_id=identifier,
+            annotation_record_id=record_id,
             local_key=local_key[:255],
             title=title,
             problem=problem,
@@ -192,6 +188,9 @@ def save_event_declaration(
             progress=progress,
             is_foreshadowing_root=is_foreshadowing_root,
             payoff_likelihood=payoff_likelihood,
+            producer_agent_id=session.get(ChapterAnnotation, record_id).agent_id,
+            from_chapter_id=session.get(ChapterAnnotation, record_id).chapter_id,
+            to_chapter_id=session.get(ChapterAnnotation, record_id).chapter_id,
         )
     )
     registered: set[str] = set()
@@ -204,9 +203,9 @@ def save_event_declaration(
         action = item.get("action")
         emotion = item.get("emotion")
         session.add(
-            DeclarationParticipant(
+            EventParticipant(
                 participant_id=participant_id,
-                declaration_id=identifier,
+                event_id=identifier,
                 participant_ordinal=ordinal,
                 entity_id=entity_id,
                 role=str(item.get("role") or "主体"),
@@ -236,7 +235,7 @@ def save_event_declaration(
             paragraph_id=paragraph.paragraph_id,
             start_char=0,
             end_char=len(paragraph.text),
-            declaration_id=identifier,
+            complete_event_id=identifier,
         )
     )
     if is_foreshadowing_root:
@@ -250,8 +249,8 @@ def save_event_declaration(
                 source_operation_local_key=operation[:128],
                 operation_order=0,
                 action_type="setup",
-                source_declaration_id=identifier,
-                target_declaration_id=identifier,
+                source_event_id=identifier,
+                target_event_id=identifier,
             )
         )
         session.add(
@@ -421,9 +420,7 @@ def persist_timeline_chapter(
             record_id=record_id,
             chapter_id=chapter_id,
             local_key=node_key,
-            declaration_id=declaration_id_for_event(
-                run_id, work_id, node_key, tree_key=str(spec.get("tree_id") or node_key)
-            ),
+            event_id=event_id_for_event(run_id, work_id, node_key, tree_key=str(spec.get("tree_id") or node_key)),
             title=str(spec.get("title") or spec["description"]),
             problem=str(spec.get("problem") or "明确事件问题"),
             summary=str(spec.get("summary") or spec["description"]),

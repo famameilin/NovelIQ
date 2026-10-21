@@ -116,15 +116,15 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
     )
     from sqlalchemy import select
 
-    from src.storage.models import ChapterAnnotation, EventDeclaration
+    from src.storage.models import ChapterAnnotation, CompleteEvent
     from tests.support import diagnosis_helpers
 
     # 声明身份是铸造 uuid，场景中的 node_id 是本地键；分组按本地键解析到正式声明身份
     declaration_of = {
-        str(local_key): str(declaration_id)
-        for declaration_id, local_key in session.execute(
-            select(EventDeclaration.declaration_id, EventDeclaration.local_key)
-            .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+        str(local_key): str(event_id)
+        for event_id, local_key in session.execute(
+            select(CompleteEvent.event_id, CompleteEvent.local_key)
+            .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
             .where(ChapterAnnotation.run_id == scenario.run_id)
         )
     }
@@ -137,11 +137,15 @@ def prepare_scenario(session: Any, monkeypatch: Any) -> Any:
         ],
     )
     local_key_of = {identifier: key for key, identifier in declaration_of.items()}
-    created = {
-        local_key_of[identifier]: event.event_id
-        for event in draft.events.values()
-        for identifier in event.declaration_ids
-    }
+    created = {local_key_of[identifier]: identifier for identifier in draft.events}
+    from src.event_trees.organization import OrganizationEvidence
+
+    draft.contain(
+        parent_event_id=created["arch-root"],
+        child_event_id=created["arch-follow"],
+        reason="后续行动属于初入事件",
+        evidence=[OrganizationEvidence(paragraph_id=1)],
+    )
     _seed_complete_event_contract(draft, created)
     diagnosis_helpers.persist_event_draft(session, draft)
     monkeypatch.setattr(settings.topic_model, "min_paragraph_train_tokens", 1)
@@ -216,6 +220,7 @@ def _seed_complete_event_contract(draft: Any, created: dict[str, str]) -> None:
             evidence=evidence(paragraph),
         )
     from src.case_pool import CasePool
+
     CasePool(draft.run_id).save_pending(draft.session, [("event", "原文对入行年数说法不一")], author="program")
 
 

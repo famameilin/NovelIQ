@@ -16,6 +16,9 @@ from src.work.annotation_work import WorkReceipt, annotation_work_id
 
 def _work_tools_context(query_service: Any, ledger: Any) -> tuple[Any, Any, Any]:
     """用于按当前 work 协议装配 build_work_tools 所需的 agent/execution 上下文"""
+    if not isinstance(getattr(query_service, "chapter_orders", None), dict):
+        query_service.chapter_orders = {ledger.current_chapter_id: ledger.current_chapter_order or 1}
+        query_service.current_chapter_order = ledger.current_chapter_order or 1
     invocation = new_id()
     work = WorkReceipt(
         annotation_work_id(ledger.run_scope, ledger.current_chapter_id, ledger.role),

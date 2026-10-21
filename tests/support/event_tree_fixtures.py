@@ -19,8 +19,8 @@ from src.storage.models import (
     Agent,
     Chapter,
     ChapterAnnotation,
-    DeclarationParticipant,
-    EventDeclaration,
+    CompleteEvent,
+    EventParticipant,
     GraphEntity,
     NarrativeLink,
     Paragraph,
@@ -85,9 +85,7 @@ def add_annotation_source(
 ) -> tuple[str, str]:
     """建立一份真实标注来源链（执行行直接带 run/章/角色），返回 (record_id, agent_id)"""
     agent_id = new_id()
-    session.add(
-        Agent(id=agent_id, run_id=run_id, type=role, status="success")
-    )
+    session.add(Agent(id=agent_id, run_id=run_id, type=role, status="success"))
     session.flush()
     record_id = new_id()
     session.add(
@@ -116,7 +114,7 @@ def add_declaration(
     status: str = "ongoing",
     progress: str | None = None,
     is_foreshadowing_root: bool = False,
-    payoff_likelihood: str | None = None,
+    payoff_likelihood: str | None = "medium",
     participants: tuple[tuple[str, str], ...] = (),
     local_key: str | None = None,
 ) -> str:
@@ -129,12 +127,15 @@ def add_declaration(
         if start < 0:
             raise ValueError(f"声明引文不在段落原文中: phrase={phrase!r}")
         end = start + len(phrase)
-    declaration_id = new_id()
+    event_id = new_id()
     session.add(
-        EventDeclaration(
-            declaration_id=declaration_id,
-            record_id=record_id,
-            local_key=local_key or f"el-{declaration_id}",
+        CompleteEvent(
+            event_id=event_id,
+            annotation_record_id=record_id,
+            producer_agent_id=session.get(ChapterAnnotation, record_id).agent_id,
+            from_chapter_id=paragraph.chapter_id,
+            to_chapter_id=paragraph.chapter_id,
+            local_key=local_key or f"el-{event_id}",
             title=title or (phrase or text[:12]),
             problem=problem,
             summary=summary if summary is not None else text,
@@ -142,7 +143,7 @@ def add_declaration(
             status=status,
             progress=progress,
             is_foreshadowing_root=is_foreshadowing_root,
-            payoff_likelihood=payoff_likelihood,
+            payoff_likelihood=payoff_likelihood if is_foreshadowing_root else None,
         )
     )
     session.flush()
@@ -153,27 +154,27 @@ def add_declaration(
             paragraph_id=int(paragraph.paragraph_id),
             start_char=start,
             end_char=end,
-            declaration_id=declaration_id,
+            complete_event_id=event_id,
         )
     )
     for ordinal, (name, role) in enumerate(participants):
         session.add(
-            DeclarationParticipant(
+            EventParticipant(
                 participant_id=new_id(),
-                declaration_id=declaration_id,
+                event_id=event_id,
                 participant_ordinal=ordinal,
                 entity_id=ensure_character(session, run_id=str(paragraph.run_id), name=name),
                 role=role,
             )
         )
     session.flush()
-    return declaration_id
+    return event_id
 
 
 def add_diagnosis_context(session: Session, run_id: str) -> tuple[str, str]:
     "登记报告 Agent，返回组织写出者与审计身份"
     agent_id = new_id()
-    session.add(Agent(id=agent_id,run_id=run_id,type="report",status="running"))
+    session.add(Agent(id=agent_id, run_id=run_id, type="report", status="running"))
     session.flush()
     return agent_id, agent_id
 
@@ -192,37 +193,10 @@ def identity_every_declaration(
     # 报告级组织单元：案例锚与生产 report 单元同源，调用来源是本次报告角色尝试
     draft.case_id = report_case_anchor(run_id)
     draft.producer_agent_id = agent_id
-    rows = list(draft._declarations().values())
-    by_id = {row["declaration_id"]: row for row in rows}
-    groups = groups if groups is not None else [[row["declaration_id"]] for row in rows]
-    membership = {identifier: index for index, group in enumerate(groups) for identifier in group}
-    for group in groups:
-        current = by_id[group[-1]]
-        draft.identity(
-            key=group[0],
-            title=current["title"],
-            problem=current["problem"],
-            summary=current["summary"],
-            event_type=current["event_type"],
-            status=current["status"],
-            progress=current["progress"],
-            declaration_ids=list(group),
-            reason="夹具显式判断本组声明组成一个事件身份",
-            evidence=[
-                OrganizationEvidence(paragraph_id=item["paragraph_id"]) for item in row_evidence(by_id[group[0]])
-            ],
-        )
-        draft.review_declarations(list(group), reason="夹具已逐项核对不可变声明与原文")
-    for index, row in enumerate(rows):
-        for target in rows[index + 1 :]:
-            source_id, target_id = row["declaration_id"], target["declaration_id"]
-            draft.compare_declarations(
-                source_declaration_id=source_id,
-                target_declaration_ids=[target_id],
-                disposition="same_event" if membership[source_id] == membership[target_id] else "independent",
-                reason="夹具按显式分组核对两项声明身份",
-                evidence=[OrganizationEvidence(paragraph_id=row_evidence(row)[0]["paragraph_id"])],
-            )
+    from src.event_trees.diagnosis_persistence import hydrate_draft_from_run
+
+    hydrate_draft_from_run(storage_for(session), run_id, draft)
+    membership = {identifier: identifier for identifier in draft.events}
     return draft, {"membership": membership, "session_id": session_id, "agent_id": agent_id}
 
 
@@ -281,7 +255,7 @@ def publish_draft(
     save_diagnosis_events(session, run_id, organization, report_id)
     save_organization(session, run_id, organization, report_id)
     session.flush()
-    return {declaration_id: item.event_id for item in organization.events for declaration_id in item.declaration_ids}
+    return {item.event_id: item.event_id for item in organization.events}
 
 
 def publish_declarations(
@@ -306,8 +280,8 @@ def add_declaration_relation(
     session: Session,
     *,
     producer_agent_id: str,
-    source_declaration_id: str,
-    target_declaration_id: str,
+    source_event_id: str,
+    target_event_id: str,
     paragraph: Paragraph,
     relation_type: str = "reference",
     reason: str = "章级关系建议",
@@ -320,8 +294,8 @@ def add_declaration_relation(
             link_id=link_id,
             producer_agent_id=producer_agent_id,
             reason=reason,
-            semantic_source_declaration_id=source_declaration_id,
-            semantic_target_declaration_id=target_declaration_id,
+            semantic_source_event_id=source_event_id,
+            semantic_target_event_id=target_event_id,
             relation_type=relation_type,
             source_operation_local_key=operation_key or f"proposal-{link_id}",
         )
@@ -345,10 +319,10 @@ def add_foreshadowing_action(
     session: Session,
     *,
     producer_agent_id: str,
-    source_declaration_id: str,
+    source_event_id: str,
     paragraph: Paragraph,
     action_type: str = "setup",
-    target_declaration_id: str | None = None,
+    target_event_id: str | None = None,
     operation_key: str | None = None,
     operation_order: int = 0,
 ) -> str:
@@ -363,8 +337,8 @@ def add_foreshadowing_action(
             source_operation_local_key=operation_key or f"action-{action_id}",
             operation_order=operation_order,
             action_type=action_type,
-            source_declaration_id=source_declaration_id,
-            target_declaration_id=target_declaration_id,
+            source_event_id=source_event_id,
+            target_event_id=target_event_id,
         )
     )
     session.flush()
