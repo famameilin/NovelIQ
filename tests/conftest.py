@@ -103,7 +103,7 @@ def test_database_schema() -> str:
 
 
 def _create_all_orm_tables(engine) -> None:
-    """与生产 init_db 同口径：建全部 32 张基表并安装领域约束触发器"""
+    """与生产 init_db 同口径：建全部 30 张基表并安装领域约束触发器"""
     from src.storage.constraints import install_domain_constraints
 
     Base.metadata.create_all(bind=engine)
@@ -300,16 +300,33 @@ def api_client(setup_test_database: None, monkeypatch) -> Generator[TestClient, 
     event_manager.reset_for_testing()
 
     monkeypatch.setattr("src.workflows.service.AnalysisService._schedule_task_execution", lambda *args, **kwargs: None)
-    client = TestClient(app)
-    try:
-        yield client
-    finally:
+    from contextlib import asynccontextmanager
+
+    from src.event_bus import EVENT_BUS
+    from src.sse.notification_consumer import NotificationConsumer
+    from src.sse.persistence import SseMessageRepository
+    from src.storage import get_storage_factory
+
+    @asynccontextmanager
+    async def notification_runtime(application):
+        event_manager.configure_outbox(SseMessageRepository(get_storage_factory()))
+        notifications = NotificationConsumer(EVENT_BUS, event_manager)
+        application.state.notifications = notifications
         try:
-            client.close()
+            yield
         finally:
-            get_task_manager().reset_for_testing()
-            event_manager.reset_for_testing()
-            _reset_backend_db_singletons()
+            await notifications.close()
+            await event_manager.shutdown()
+
+    # 接口测试装配真实通知消费者，不恢复其他用例留下的任务
+    monkeypatch.setattr(app.router, "lifespan_context", notification_runtime)
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        get_task_manager().reset_for_testing()
+        event_manager.reset_for_testing()
+        _reset_backend_db_singletons()
 
 
 @pytest.fixture(autouse=True)

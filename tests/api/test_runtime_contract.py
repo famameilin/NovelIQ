@@ -103,29 +103,33 @@ async def test_terminal_persistence_failure_is_reported():
         await AnalysisErrorHandler(MagicMock(), TaskManager()).handle_success("task", "novel", 0, None, storage, "run")
 
 
-async def test_model_stream_drops_progress_and_keeps_real_agent_identity():
-    manager = TaskManager()
-    bus = AnalysisEventBus("task", manager)
-    with patch("src.sse.manager.event_manager.send", new_callable=AsyncMock) as send:
-        await bus.emit(StreamEvent(stage="annotate", action="progress", current=1, total=2))
-        send.assert_not_called()
-        await bus.emit(
-            StreamEvent(
-                stage="annotate",
-                sub_stage="event",
-                action="output",
-                content="正文",
-                invocation_id="agent",
-                stream_id="stream",
-            )
-        )
-        data = send.call_args.kwargs["data"]
-        assert data["invocation_id"] == "agent" and data["agent_type"] == "event"
-        assert not {"stage", "sub_stage", "current", "total", "percent", "sub_percent"} & data.keys()
+async def test_model_stream_and_progress_share_bus_and_keep_real_identity():
+    from src.event_bus import EventBus
+
+    messages = []
+    runtime = EventBus()
+
+    async def receive(message):
+        messages.append(message)
+
+    runtime.handle("analysis.notification", "notifications", receive)
+    bus = AnalysisEventBus("task", run_id="run", bus=runtime)
+    await bus.emit(StreamEvent(stage="annotate", action="progress", current=1, total=2))
+    await bus.emit(StreamEvent(stage="annotate", sub_stage="event", action="output", content="正文",
+        invocation_id="agent", stream_id="stream"))
+    assert [message.payload["type"] for message in messages] == ["stage_progress", "llm_output"]
+    assert messages[0].payload["data"]["current"] == 1
+    data = messages[1].payload["data"]
+    assert data["invocation_id"] == "agent" and data["agent_type"] == "event"
+    assert data["stage"] == "annotate" and data["run_id"] == "run"
 
 
 async def test_stage_execution_order_uses_formal_outputs(db_session):
     service = AnalysisService(MagicMock(), TaskManager(), session_factory=lambda: storage_for(db_session))
+    from src.event_bus import EventBus
+
+    runtime = EventBus()
+    runtime.handle("analysis.notification", "notifications", AsyncMock())
     order = []
     for name in ("preprocess", "annotate", "linguistic", "aggregate", "topic_model", "diagnose"):
 
@@ -134,7 +138,7 @@ async def test_stage_execution_order_uses_formal_outputs(db_session):
 
         setattr(service.stage_executor, f"run_{name}", record)
     await service._execute_analysis_stages(
-        AnalysisEventBus("task", TaskManager()),
+        AnalysisEventBus("task", bus=runtime),
         storage_for(db_session),
         "run",
         None,

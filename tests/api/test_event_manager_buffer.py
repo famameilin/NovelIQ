@@ -242,7 +242,7 @@ async def test_concurrent_connect_and_send_no_duplicate_or_mutation_error() -> N
 
 
 @pytest.mark.asyncio
-async def test_failed_persistence_replays_actual_cache_with_same_cursor_and_identity():
+async def test_failed_persistence_keeps_cursor_until_commit_and_reuses_identity():
     class DelayedOutbox:
         def __init__(self):
             self.rows = []
@@ -252,15 +252,15 @@ async def test_failed_persistence_replays_actual_cache_with_same_cursor_and_iden
             return 41
 
         def display_state(self, task_id):
-            from src.sse.state import DisplayState
+            return None
 
-            return DisplayState()
-
-        def emit(self, task_id, event_type, data, *, sequence):
+        def emit(self, task_id, event_type, data):
+            sequence = 41
             if self.failed:
                 raise RuntimeError("保存延迟")
             if not self.rows:
                 self.rows.append({"seq": sequence, "type": event_type, "data": data})
+            return self.rows[0]
 
         def replay(self, task_id, after_seq):
             return [row for row in self.rows if row["seq"] > after_seq]
@@ -272,7 +272,8 @@ async def test_failed_persistence_replays_actual_cache_with_same_cursor_and_iden
     try:
         with pytest.raises(RuntimeError, match="保存延迟"):
             await manager.send("task", "llm_output", data)
-        assert (await manager.replay("task", 0))[0]["seq"] == 41
+        assert await manager.replay("task", 0) == []
+        assert (await manager.connect_snapshot("task"))[1]["cursor"] == 0
         outbox.failed = False
         await manager.send("task", "llm_output", data)
         await manager.send("task", "llm_output", data)
@@ -288,8 +289,6 @@ async def test_replay_short_page_and_concurrent_send_keep_all_persisted_sequence
     """短页查询期间发送超过缓存容量，客户端仍能逐页收到全部持久消息"""
     from copy import deepcopy
 
-    from src.sse.state import DisplayState
-
     class ConcurrentOutbox:
         def __init__(self):
             self.rows = []
@@ -299,9 +298,10 @@ async def test_replay_short_page_and_concurrent_send_keep_all_persisted_sequence
             self.release = asyncio.Event()
             self.sent_during_snapshot = asyncio.Event()
             self.querying = False
+            self.release.set()
 
         def display_state(self, task_id):
-            return DisplayState()
+            return None
 
         def reserve_sequence(self, task_id, message_id):
             if self.querying:
@@ -309,8 +309,11 @@ async def test_replay_short_page_and_concurrent_send_keep_all_persisted_sequence
             self.seq += 1
             return self.seq
 
-        def emit(self, task_id, event_type, data, *, sequence):
-            self.rows.append({"type": event_type, "data": deepcopy(data), "seq": sequence})
+        def emit(self, task_id, event_type, data):
+            sequence = self.reserve_sequence(task_id, data["message_id"])
+            row = {"type": event_type, "data": deepcopy(data), "seq": sequence}
+            self.rows.append(row)
+            return row
 
         def replay(self, task_id, after_seq):
             snapshot = [deepcopy(row) for row in self.rows if row["seq"] > after_seq][:128]
@@ -333,6 +336,8 @@ async def test_replay_short_page_and_concurrent_send_keep_all_persisted_sequence
     try:
         for index in range(10):
             await manager.send("task", "llm_output", {"content": f"initial-{index}"})
+        outbox.ready.clear()
+        outbox.release.clear()
         pending = asyncio.create_task(manager.replay("task", 0))
         await asyncio.wait_for(outbox.ready.wait(), timeout=1)
         sender = asyncio.create_task(send_many())
@@ -386,7 +391,7 @@ async def test_postgres_outbox_keeps_generated_sequence_across_reversed_save_and
 
 
 @pytest.mark.asyncio
-async def test_resume_preserves_saved_work_display_but_filters_persisted_old_terminal(db_session):
+async def test_resume_keeps_history_and_snapshot_uses_latest_lifecycle(db_session):
     from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -419,7 +424,8 @@ async def test_resume_preserves_saved_work_display_but_filters_persisted_old_ter
         restarted = EventManager(outbox=outbox)
         try:
             replay = await restarted.replay(task_id, 0)
-            assert "task_cancelled" not in {message["type"] for message in replay}
+            assert "task_cancelled" in {message["type"] for message in replay}
+            assert (await restarted.connect_snapshot(task_id))[1]["status"] == "pending"
             output = next(message for message in replay if message["type"] == "llm_output")
             assert output["data"]["content"] == "保留完成章"
             assert replay[-1]["type"] == "llm_thinking"
@@ -430,7 +436,7 @@ async def test_resume_preserves_saved_work_display_but_filters_persisted_old_ter
 
 
 @pytest.mark.asyncio
-async def test_reset_filters_old_invocation_after_restart_without_deleting_message_history(db_session):
+async def test_reset_preserves_independent_execution_history_after_restart(db_session):
     from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -489,11 +495,11 @@ async def test_reset_filters_old_invocation_after_restart_without_deleting_messa
                 {**base, "invocation_id": fixture_id(__name__, "old"), "message_id": "late-reset:" + run_id},
             )
             replay = await restarted.replay(task_id, 0)
-            assert [message["data"]["invocation_id"] for message in replay] == [
-                fixture_id(__name__, "new"),
-                fixture_id(__name__, "new"),
-            ]
-            assert _persisted_message_count(db_session, run_id) == 4
+            assert len(replay) == 6
+            snapshot = (await restarted.connect_snapshot(task_id))[1]
+            assert snapshot["executions"][fixture_id(__name__, "new")]["output"] == "新执行"
+            assert snapshot["executions"][fixture_id(__name__, "old")]["output"] == "旧执行迟到旧执行"
+            assert _persisted_message_count(db_session, run_id) == 6
         finally:
             restarted.reset_for_testing()
     finally:
@@ -501,9 +507,9 @@ async def test_reset_filters_old_invocation_after_restart_without_deleting_messa
 
 
 @pytest.mark.asyncio
-async def test_sse_module_ignores_old_execution_and_retired_reset():
+async def test_activity_relay_keeps_parallel_and_finished_execution_facts():
     from src.event_bus import EventBus, Message
-    from src.sse.consumer import SSEModule
+    from src.event_bus.activity import ActivityRelay
     from src.sse.events import StreamEvent
 
     bus = EventBus()
@@ -512,12 +518,12 @@ async def test_sse_module_ignores_old_execution_and_retired_reset():
     async def emit(event):
         shown.append(event)
 
-    module = SSEModule(bus, "run", emit)
+    module = ActivityRelay(bus, "run", emit)
 
     async def send(action, invocation, content=""):
         await module.show(
             Message(
-                "sse.show",
+                "analysis.activity",
                 "agent",
                 module.address,
                 "run",
@@ -538,6 +544,8 @@ async def test_sse_module_ignores_old_execution_and_retired_reset():
         assert [(event.action, event.invocation_id) for event in shown] == [
             ("work_reset", "old"),
             ("work_reset", "new"),
+            ("output", "old"),
+            ("work_reset", "old"),
             ("output", "new"),
         ]
     finally:
@@ -545,7 +553,7 @@ async def test_sse_module_ignores_old_execution_and_retired_reset():
 
 
 @pytest.mark.asyncio
-async def test_chapter_reset_retires_old_lanes_but_keeps_other_chapters_after_restart(db_session):
+async def test_chapter_reset_preserves_actual_history_without_conflating_executions(db_session):
     from src.sse.persistence import SseMessageRepository
     from src.storage.db import get_session_factory
     from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -595,7 +603,9 @@ async def test_chapter_reset_retires_old_lanes_but_keeps_other_chapters_after_re
             replay = await restarted.replay(task_id, 0)
             assert [message["data"]["content"] for message in replay if message["type"] == "llm_output"] == [
                 "complete",
+                "old-event",
                 "new-annotation",
+                "迟到旧角色",
             ]
         finally:
             restarted.reset_for_testing()

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.dependencies import get_task_manager, get_task_service
+from src.api.dependencies import get_task_service
 from src.api.exceptions import NovelNotFoundError
 from src.api.routes import analysis as analysis_mod
 from src.storage import new_id
@@ -31,7 +31,6 @@ class TestTestDatabaseIsolation:
 
 class TestRunTimestampContract:
     """运行时间戳口径回归：无时区列统一 naive UTC，序列化带 Z 后缀"""
-
 
 
 class TestAnalysis:
@@ -72,7 +71,6 @@ class TestAnalysis:
         data = status_response.json()
         assert data["novel_id"] == novel_id
         assert data["task_id"] == task_id
-
 
     def test_get_task_status_returns_404_when_db_record_missing(self, api_client: TestClient):
         """测试 DB-only 查询模式下，任务不存在时返回 404"""
@@ -196,10 +194,6 @@ class TestAnalysis:
         assert delete_data["deleted_ids"] == [task_id]
         assert delete_data["failed_count"] == 0
 
-
-
-
-
     def test_resume_cancelled_task_allowed(self, api_client: TestClient):
         """验证 cancelled 任务可以继续分析并重置运行态"""
         with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as f:
@@ -216,7 +210,7 @@ class TestAnalysis:
         task_id = service.create_task(novel_id)
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
-            run_repo.update_run_task_fields(run_repo.get_run_by_task_id(task_id)['run_id'], status='cancelled')
+            run_repo.update_run_task_fields(run_repo.get_run_by_task_id(task_id)["run_id"], status="cancelled")
             session.commit()
         with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
             resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
@@ -229,9 +223,6 @@ class TestAnalysis:
             run = RunRepository(session).get_run_by_task_id(task_id)
             session.commit()
         assert run is not None
-
-
-
 
     @pytest.mark.asyncio
     async def test_resume_pending_tasks_reschedules_pending_runs(self, api_client: TestClient):
@@ -264,8 +255,10 @@ class TestAnalysis:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
         with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule):
-            scheduled_count, cancelled_count = await main_mod.resume_pending_tasks(
-                get_task_service(), get_task_manager()
+            from src.workflows.dependencies import get_analysis_service
+
+            scheduled_count, cancelled_count = api_client.portal.call(
+                main_mod.resume_pending_tasks, get_analysis_service()
             )
         assert scheduled_count == len(scheduled_calls)
         assert cancelled_count == 0
@@ -317,8 +310,10 @@ class TestAnalysis:
             patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", new=_record_schedule),
             patch.object(analysis_mod.AnalysisService, "resume_task", new=_resume_or_skip),
         ):
-            scheduled_count, cancelled_count = await main_mod.resume_pending_tasks(
-                get_task_service(), get_task_manager()
+            from src.workflows.dependencies import get_analysis_service
+
+            scheduled_count, cancelled_count = api_client.portal.call(
+                main_mod.resume_pending_tasks, get_analysis_service()
             )
         assert cancelled_count == 0
         assert scheduled_count == len(scheduled_calls)
