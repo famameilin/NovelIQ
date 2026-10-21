@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,9 +62,9 @@ vi.mock("react-router-dom", () => ({
 
 vi.mock("framer-motion", () => ({
   motion: new Proxy(
-    {},
+    {} as Record<string, ReturnType<typeof motionElement>>,
     {
-      get: (_target, key: string) => motionElement(key),
+      get: (target, key: string) => target[key] ?? (target[key] = motionElement(key)),
     },
   ),
 }));
@@ -96,9 +96,12 @@ vi.mock("@/api/analysis", () => ({
 }));
 
 vi.mock("@/hooks/useAnalysisStatus", () => ({
-  useAnalysisStatus: () => ({
-    isConnected: false,
-  }),
+  useAnalysisStatus: (novelId: string | null, taskId: string | null) => {
+    const query = useQuery({queryKey: ["task-status", novelId, taskId],
+      queryFn: () => getTaskStatusMock(novelId, taskId), enabled: !!novelId && !!taskId});
+    return {isConnected: false, query, status: query.data?.status ?? null,
+      snapshotReady: true, projectionSynced: true};
+  },
 }));
 
 vi.mock("@/components/layout/PageContainer", () => ({
@@ -298,6 +301,7 @@ describe("NovelDetailPage", () => {
       expect(invalidateQueriesSpy).toHaveBeenCalledWith({ queryKey: ["tasks", "novel-1"] });
     });
     expect(createAnalysisTaskMock).toHaveBeenCalledTimes(1);
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/analysis/task-new");
   });
 
   it("失败任务重试应走继续任务接口", async () => {
@@ -317,6 +321,7 @@ describe("NovelDetailPage", () => {
       expect(invalidateQueriesSpy).toHaveBeenCalledWith({ queryKey: ["tasks", "novel-1"] });
     });
     expect(resumeAnalysisTaskMock).toHaveBeenCalledTimes(1);
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/analysis/task-failed");
   });
 
   it("删除当前任务后应清理 URL 中的 task_id", async () => {
@@ -440,7 +445,7 @@ describe("NovelDetailPage", () => {
     });
   });
 
-  it("运行中任务应先显示进度态且不提前请求结果接口", async () => {
+  it("运行任务自动进入分析页，不嵌入工作台或请求结果", async () => {
     currentSearchParams = "task_id=task-running";
     useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
     getTaskStatusMock.mockResolvedValue({
@@ -453,11 +458,12 @@ describe("NovelDetailPage", () => {
 
     renderNovelDetailPage();
 
-    expect(await screen.findByTestId("analysis-progress-panel")).toBeInTheDocument();
+    await waitFor(()=>expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/analysis/task-running",{replace:true}));
+    expect(screen.queryByTestId("analysis-progress-panel")).not.toBeInTheDocument();
     expect(getDashboardTabMock).not.toHaveBeenCalled();
   });
 
-  it("已失败任务应显示友好失败提示而非数据加载失败", async () => {
+  it("失败任务自动进入分析页，不请求结果接口", async () => {
     currentSearchParams = "task_id=task-failed";
     useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
     getTaskStatusMock.mockResolvedValue({
@@ -482,9 +488,23 @@ describe("NovelDetailPage", () => {
     renderNovelDetailPage();
 
     await waitFor(() => {
-      expect(screen.getByText("分析任务已失败")).toBeInTheDocument();
-      expect(screen.getByText(/请重新发起分析/)).toBeInTheDocument();
+      expect(navigateMock).toHaveBeenCalledWith('/novels/novel-1/analysis/task-failed',{replace:true});
+      expect(getDashboardTabMock).not.toHaveBeenCalled();
       expect(screen.queryByText("数据加载失败")).not.toBeInTheDocument();
     });
+  });
+  it("完成任务留在结果页，移除手动跳转分析页入口",async()=>{
+    currentSearchParams="task_id=task-ready";
+    renderNovelDetailPage();
+    await waitFor(()=>expect(getDashboardTabMock).toHaveBeenCalledWith('novel-1','task-ready'));
+    expect(screen.queryByRole('button',{name:'查看分析任务'})).toBeNull();
+    expect(navigateMock).not.toHaveBeenCalledWith('/novels/novel-1/analysis/task-ready',expect.anything());
+  });
+  it('不带任务的小说地址保留选择入口，不被先前任务带走',async()=>{
+    useNovelStore.setState({currentNovelId:'novel-1',currentTaskId:'task-old'});
+    renderNovelDetailPage();
+    expect(await screen.findByRole('button',{name:'开始分析'})).toBeInTheDocument();
+    expect(getTaskStatusMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 });

@@ -69,5 +69,6 @@ export const routeNameMap: Record<string, string> = {
 
 // eslint-disable-next-line react-refresh/only-export-components -- helper co-located with component
 export function getBreadcrumbLabel(path: string): string {
+  if (path.startsWith("/analysis/")) return "分析任务详情";
   return routeNameMap[path] || path;
 }

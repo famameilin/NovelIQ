@@ -14,7 +14,7 @@
  * “运行中”计数仅统计真正执行中的 running/cancelling，避免把可恢复的 pending 任务误标成运行中
  */
 import { useState, useRef, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { Trash2, ChevronDown, Plus } from "lucide-react";
@@ -27,6 +27,7 @@ import { cn } from "@/lib/cn";
 import { taskStatusConfig } from "@/lib/utils";
 import { getAnalysisTasks, cancelAnalysisTask, batchDeleteTasks } from "@/api/analysis";
 import type { AnalysisTask } from "@/api/types";
+import { taskPagePath } from "@/lib/analysisTaskRoutes";
 
 export interface NovelHeaderProps {
   title: string;
@@ -60,6 +61,7 @@ export function NovelHeader({
   className,
 }: NovelHeaderProps) {
   const routeParams = useParams<{ novelId: string }>();
+  const navigate = useNavigate();
   const novelId = novelIdProp ?? routeParams.novelId;
   const { currentTaskId, setTask } = useNovelStore();
   const queryClient = useQueryClient();
@@ -93,8 +95,11 @@ export function NovelHeader({
   const currentTaskDisplay = getCurrentTaskDisplay(tasks, currentTaskId);
 
   const handleSelect = (taskId: string) => {
+    const task = tasks.find(item => item.task_id === taskId);
+    if (!novelId || !task) return;
     setTask(taskId);
     setTaskPanelOpen(false);
+    navigate(taskPagePath(novelId, taskId, task.status));
   };
 
   const handleCancel = async (taskId: string) => {

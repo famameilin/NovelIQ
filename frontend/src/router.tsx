@@ -6,6 +6,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 // 懒加载页面组件
 const HomePage = lazy(() => import("@/pages/HomePage").then((m) => ({ default: m.HomePage })));
 const NovelDetailPage = lazy(() => import("@/pages/NovelDetailPage").then((m) => ({ default: m.NovelDetailPage })));
+const AnalysisTaskPage = lazy(() => import("@/pages/AnalysisTaskPage").then((m) => ({ default: m.AnalysisTaskPage })));
 const CurvesPage = lazy(() => import("@/pages/CurvesPage").then((m) => ({ default: m.CurvesPage })));
 const CharactersPage = lazy(() => import("@/pages/CharactersPage").then((m) => ({ default: m.CharactersPage })));
 const GraphPage = lazy(() => import("@/pages/GraphPage").then((m) => ({ default: m.GraphPage })));
@@ -59,6 +60,7 @@ export const router = createBrowserRouter([
   {
     element: <AppLayout mode="default" />,
     children: [
+      { path: "/novels/:novelId/analysis/:taskId", element: withSuspense(AnalysisTaskPage) },
       { path: "/dev/components", element: withSuspense(ComponentShowcase) },
       { path: "/settings", element: withSuspense(SettingsPage) },
     ],

@@ -61,7 +61,7 @@ export function TopBar() {
       breadcrumbItems.push({
         id: `novel-${novelId}`,
         label: novel.title,
-        href: `${basePath}${taskQuery}`,
+        href: currentPath.startsWith("/analysis/") ? basePath : `${basePath}${taskQuery}`,
       });
 
       if (currentPath && currentPath !== "") {

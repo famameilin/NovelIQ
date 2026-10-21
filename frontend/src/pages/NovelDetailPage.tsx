@@ -8,15 +8,13 @@ import {
   createAnalysisTask,
   resumeAnalysisTask,
   batchDeleteTasks,
-  cancelAnalysisTask,
-  getTaskStatus,
 } from "@/api/analysis";
 import { getDashboardTab, tabQueryKey } from "@/api/tabs";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { useStreamStore } from "@/store/streamStore";
-import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
+import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
@@ -25,7 +23,7 @@ import { ScoreOverviewCard } from "@/components/common/ScoreOverviewCard";
 import { DimensionMiniCard } from "@/components/common/DimensionMiniCard";
 import { NarrativeStructureBar } from "@/components/common/NarrativeStructureBar";
 import { MiniCurvePreview } from "@/components/charts/MiniCurvePreview";
-import { AnalysisProgressPanel } from "@/components/analysis/AnalysisProgressPanel";
+import { analysisTaskPath } from "@/lib/analysisTaskRoutes";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -99,9 +97,9 @@ function EmptyTaskPrompt({ onAnalyze, isAnalyzing }: {
         </svg>
       </div>
       <div className="text-center">
-        <h3 className="text-lg font-semibold text-text">尚未分析</h3>
+        <h3 className="text-lg font-semibold text-text">选择任务或开始分析</h3>
         <p className="mt-1 text-sm text-text-muted">
-          点击下方按钮开始对这本小说进行量化分析
+          从上方选择已有任务，或开始一次新的量化分析
         </p>
       </div>
       <Button onClick={() => onAnalyze()} disabled={isAnalyzing}>
@@ -129,10 +127,11 @@ export function NovelDetailPage() {
 
   // 小说作用域任务守卫——跨小说切换后 store 中旧小说的任务
   // 不得用于新小说的 SSE/查询，也不得回写固化成新小说 URL（模式同 GraphPage）
-  const { storeTaskId, urlTaskSyncRef } = useNovelScopedTask(novelId, urlTaskId);
+  const { storeTaskId: scopedTaskId, urlTaskSyncRef } = useNovelScopedTask(novelId, urlTaskId);
+  const storeTaskId = urlTaskId && scopedTaskId === urlTaskId ? scopedTaskId : null;
 
   // 使用 useAnalysisStatus hook 进行轮询并同步进度到 store
-  useAnalysisStatus(novelId ?? null, storeTaskId, {
+  const analysis = useAnalysisStatus(novelId ?? null, storeTaskId, {
     enabled: !!novelId && !!storeTaskId,
     onRunning: () => {
       setIsStartingTask(false);
@@ -153,42 +152,29 @@ export function NovelDetailPage() {
     },
   });
 
-  // 把 store 的当前任务反映到 URL；写回前加小说作用域守卫：
-  // 旧小说的 task_id 不得固化进新小说 URL，未同步进 store 的 deep-link 也不得被旧 store 状态覆盖
+  // 无任务地址保留选择入口，明确指定的任务按实际状态分流
   useEffect(() => {
-    if (!novelId) return;
-    if (!storeTaskId) {
-      // 任务已被删除/尚未选择：清掉 URL 上残留的 task_id；
-      // 若 URL 上的 task_id 还是未同步的 deep-link，则等待同步后再处理
-      if (urlTaskId && urlTaskSyncRef.current === urlTaskId) {
-        return;
-      }
+    if (!novelId || !urlTaskId) return;
+    if (scopedTaskId !== urlTaskId && urlTaskSyncRef.current === urlTaskId) return;
+    if (!scopedTaskId) {
       navigate(`/novels/${novelId}`, { replace: true });
       return;
     }
-    if (!shouldWriteBackTaskUrl(urlTaskId, storeTaskId, urlTaskSyncRef)) {
-      return;
+    if (scopedTaskId !== urlTaskId) return;
+    urlTaskSyncRef.current = null;
+    if (analysis.status && analysis.status !== "completed" && !analysis.query.isError) {
+      navigate(analysisTaskPath(novelId, scopedTaskId), {replace: true});
     }
-    navigate(`/novels/${novelId}?task_id=${storeTaskId}`, { replace: true });
-  }, [navigate, novelId, storeTaskId, urlTaskId, urlTaskSyncRef]);
+  }, [navigate, novelId, scopedTaskId, urlTaskId, urlTaskSyncRef, analysis.status, analysis.query.isError]);
 
   // 并行拉取数据
   const enabled = !!novelId && !!storeTaskId;
-  const taskStatusQuery = useQuery({
-    queryKey: ["task-status", novelId, storeTaskId],
-    queryFn: () => getTaskStatus(novelId!, storeTaskId!),
-    enabled,
-    staleTime: 5 * 1000,
-    // 活跃期每 3 秒轮询一次，终态后停止轮询；taskId 不变时靠轮询刷新缓存的终态
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "pending" || status === "running" || status === "cancelling" ? 3000 : false;
-    },
-  });
-  const taskStatus = taskStatusQuery.data?.status;
+  const taskStatusQuery = analysis.query;
+  const taskStatus = analysis.status;
   const isTaskActivelyProcessing =
     taskStatus === "pending" || taskStatus === "running" || taskStatus === "cancelling";
-  const canRequestResults = enabled && taskStatusQuery.isSuccess && !isTaskActivelyProcessing;
+  const canRequestResults = enabled && taskStatus === "completed" && analysis.projectionSynced;
+  const showTaskSummary = !!storeTaskId && !canRequestResults;
   const effectiveIsAnalyzing = isStartingTask || isTaskActivelyProcessing;
   const isTaskBusy = isStartingTask || isTaskActivelyProcessing;
 
@@ -202,11 +188,12 @@ export function NovelDetailPage() {
       const newTaskId = result.task_id;
       setTask(newTaskId);
       toast.info("分析任务已创建，正在执行...");
+      navigate(analysisTaskPath(novelId, newTaskId));
     } catch {
       setIsStartingTask(false);
       toast.error("创建分析任务失败");
     }
-  }, [novelId, isTaskBusy, queryClient, setTask]);
+  }, [novelId, isTaskBusy, queryClient, setTask, navigate]);
 
   /** 继续失败/待处理/已取消任务：调用 resumeAnalysisTask → 刷新任务列表与状态 → 保持 task_id 不变 */
   const handleResumeTask = useCallback(async (taskId: string) => {
@@ -218,16 +205,16 @@ export function NovelDetailPage() {
       const result = await resumeAnalysisTask(novelId, normalizedTaskId);
       queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
       queryClient.invalidateQueries({ queryKey: ["task-status", novelId, normalizedTaskId] });
-      // resume 是同 task_id 开新轮，必须清空旧轮 SSE 数据
-      // （setTask 对同 id 幂等，store 不会自动重置）
+      // 恢复后重新订阅快照，保留已选执行的详情
       useStreamStore.getState().resetStreamForTask(result.task_id);
       setTask(result.task_id);
       toast.info("继续分析任务已启动...");
+      navigate(analysisTaskPath(novelId, result.task_id));
     } catch {
       setIsStartingTask(false);
       toast.error("继续分析失败");
     }
-  }, [novelId, isTaskBusy, queryClient, setTask]);
+  }, [novelId, isTaskBusy, queryClient, setTask, navigate]);
 
   const handleDeleteTask = useCallback(async () => {
     if (!novelId || !currentTaskId) return;
@@ -248,17 +235,6 @@ export function NovelDetailPage() {
       toast.error("删除任务失败");
     }
   }, [novelId, currentTaskId, setTask, queryClient]);
-
-  const handleCancelTask = useCallback(async (taskId: string) => {
-    if (!novelId) return;
-    try {
-      await cancelAnalysisTask(novelId, taskId);
-      toast.success("任务取消请求已发送");
-      queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
-    } catch {
-      toast.error("取消任务失败");
-    }
-  }, [novelId, queryClient]);
 
   // 拉取小说信息用于展示标题
   const novelQuery = useQuery({
@@ -313,21 +289,19 @@ export function NovelDetailPage() {
         <EmptyTaskPrompt onAnalyze={handleCreateTask} isAnalyzing={isStartingTask} />
       )}
 
-      {/* 分析进行中时，只显示进度面板并隐藏其他内容 */}
-      {effectiveIsAnalyzing && storeTaskId && (
-        <motion.div className="flex min-h-0 flex-1 flex-col">
-          <AnalysisProgressPanel
-            taskId={storeTaskId}
-            onCancel={() => handleCancelTask(storeTaskId)}
-          />
+      {/* 状态核对与通知同步期间保持结果门禁 */}
+      {showTaskSummary && storeTaskId && (
+        <motion.div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
+          <h2 className="text-lg font-medium text-text">{taskStatusQuery.isError ? "任务状态读取失败" : taskStatus === "completed" ? "正在同步最终执行记录" : "正在核对任务状态"}</h2>
+          {taskStatusQuery.isError && <Button variant="outline" onClick={() => taskStatusQuery.refetch()}>重试</Button>}
         </motion.div>
       )}
 
       {/* 仅在未分析中时显示加载骨架屏 */}
-      {!effectiveIsAnalyzing && isLoading && storeTaskId && <SkeletonGrid />}
+      {!showTaskSummary && isLoading && storeTaskId && <SkeletonGrid />}
 
       {/* 仅在未分析中时显示错误状态 */}
-      {!effectiveIsAnalyzing && analysisNotComplete && !isLoading && storeTaskId && (
+      {!showTaskSummary && analysisNotComplete && !isLoading && storeTaskId && (
         <AnalysisNotCompleteState
           title={analysisFailed ? "分析任务已失败" : "分析尚未完成"}
           description={
@@ -340,7 +314,7 @@ export function NovelDetailPage() {
       )}
 
       {/* 仅在未分析中时显示其他错误状态 */}
-      {!effectiveIsAnalyzing && hasAnyError && !analysisNotComplete && !isLoading && storeTaskId && (
+      {!showTaskSummary && hasAnyError && !analysisNotComplete && !isLoading && storeTaskId && (
         <div className="flex h-64 flex-col items-center justify-center gap-3">
           <p className="text-sm text-text-muted">数据加载失败</p>
           <Button variant="ghost" size="sm" onClick={retryAll}>
@@ -350,7 +324,7 @@ export function NovelDetailPage() {
       )}
 
       {/* 仅在未分析中时显示主内容 */}
-      {!effectiveIsAnalyzing && dashboard && !isLoading && storeTaskId && (
+      {!showTaskSummary && dashboard && !isLoading && storeTaskId && (
         <AnalysisWorkspace.Tabs defaultValue="dashboard">
           <AnalysisWorkspace.Tab value="dashboard" label="仪表盘">
             <div className="h-full min-h-0 overflow-y-auto pr-1">
