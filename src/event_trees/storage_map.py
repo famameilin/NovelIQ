@@ -1,4 +1,4 @@
-"章级声明、全书事件及其来源归属的存储映射"
+"章级事件、全书事件及其来源归属的存储映射"
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ if TYPE_CHECKING:
     from src.storage import Storage
 
 
-def run_declaration_ids(session: Storage, run_id: Any) -> Any:
-    """本 run 的章级声明：记录自身带运行归属"""
-    return session.narrative.run_declaration_ids(run_id)
+def run_annotation_event_ids(session: Storage, run_id: Any) -> Any:
+    """本 run 的章级事件：记录自身带运行归属"""
+    return session.narrative.run_annotation_event_ids(run_id)
 
 
 def run_events(session: Storage, run_id: Any) -> Any:
@@ -18,14 +18,14 @@ def run_events(session: Storage, run_id: Any) -> Any:
     return session.narrative.run_events(run_id)
 
 
-def declaration_sources(session: Storage, record_ids: Any) -> Any:
-    """声明的来源章节：记录自身的章归属与 chapters，返回 record_id→(章号, 章序)"""
-    return session.narrative.declaration_sources(record_ids)
+def annotation_sources(session: Storage, record_ids: Any) -> Any:
+    """事件的来源章节：记录自身的章归属与 chapters，返回 record_id→(章号, 章序)"""
+    return session.narrative.annotation_sources(record_ids)
 
 
-def declaration_record_source(session: Storage, record_id: Any) -> Any:
-    """声明来源记录的真实上下文：执行号、run_id、章号、章序（不存在返回 None）"""
-    return session.narrative.declaration_record_source(record_id)
+def annotation_record_source(session: Storage, record_id: Any) -> Any:
+    """事件来源记录的真实上下文：执行号、run_id、章号、章序（不存在返回 None）"""
+    return session.narrative.annotation_record_source(record_id)
 
 
 def dialogue_candidate_rows(session: Storage, run_id: Any) -> Any:
@@ -81,11 +81,6 @@ def fetch_evidence(session: Storage, owner_column: Any, owner_ids: Any) -> Any:
 def write_evidence_rows(session: Storage, owner: Any, evidence: Any) -> Any:
     """证据逐条按原顺序写入 paragraph_evidence；owner 恰一由目标表 CHECK 保证"""
     return session.narrative.write_evidence_rows(owner, evidence)
-
-
-def declaration_bindings(session: Storage, event_ids: Any) -> Any:
-    "读取完整事件的全部声明归属"
-    return session.narrative.declaration_bindings(event_ids)
 
 
 def run_execution_ids(session: Storage, run_id: str) -> list[str]:

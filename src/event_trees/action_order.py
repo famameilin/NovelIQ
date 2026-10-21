@@ -1,4 +1,4 @@
-"""伏笔动作按原文位置排列，正式事件身份沿声明归属取得"""
+"""伏笔动作直接引用事件并按原文位置排列"""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from src.storage import Storage
 
 @dataclass(frozen=True)
 class ForeshadowingActionRow:
-    """伏笔动作只读行：动作事实 + 来源章序 + 有序原文证据 + 声明绑定的正式事件身份"""
+    """伏笔动作只读行：事件端点、来源章序与有序原文证据"""
 
     action_id: str
     action_type: str
-    source_declaration_id: str
-    target_declaration_id: str | None
+    source_event_id: str
+    target_event_id: str | None
     producer_agent_id: str
     source_operation_id: str
     operation_order: int
@@ -24,9 +24,10 @@ class ForeshadowingActionRow:
     chapter_order: int | None
     evidence: list[dict[str, Any]] = field(default_factory=list)
     evidence_scope: str = "paragraph"
-    # 以下为读取投影：来源/目标声明绑定的完整事件，未发布保持空
-    root_event_id: str | None = None
-    target_event_id: str | None = None
+
+    @property
+    def root_event_id(self) -> str:
+        return self.source_event_id
 
 
 class ForeshadowingActionLike(Protocol):
@@ -52,17 +53,13 @@ class ForeshadowingActionLike(Protocol):
 
 
 def load_foreshadowing_actions(session: Storage, run_id: str) -> list[ForeshadowingActionRow]:
-    """本 run 的伏笔动作行：来源或目标声明属于本 run；绑定未发布时事件身份为空"""
-    declarations = smap.run_declaration_ids(session, run_id)
-    if not declarations:
+    """读取本运行伏笔动作及其直接事件端点"""
+    annotation_events = smap.run_annotation_event_ids(session, run_id)
+    if not annotation_events:
         return []
-    action_rows = list(session.reads.event_trees_action_order_load_foreshadowing_actions_1(declarations))
+    action_rows = list(session.reads.event_trees_action_order_load_foreshadowing_actions_1(annotation_events))
     if not action_rows:
         return []
-    bindings = {
-        row.declaration_id: row.event_id
-        for row in session.reads.event_trees_action_order_load_foreshadowing_actions_2(declarations, run_id)
-    }
     evidence = smap.fetch_evidence(session, "foreshadow_action_id", [row.action_id for row in action_rows])
     result: list[ForeshadowingActionRow] = []
     for row in action_rows:
@@ -72,18 +69,14 @@ def load_foreshadowing_actions(session: Storage, run_id: str) -> list[Foreshadow
             ForeshadowingActionRow(
                 action_id=row.action_id,
                 action_type=row.action_type,
-                source_declaration_id=row.source_declaration_id,
-                target_declaration_id=row.target_declaration_id,
+                source_event_id=row.source_event_id,
+                target_event_id=row.target_event_id,
                 producer_agent_id=row.producer_agent_id,
                 source_operation_id=row.source_operation_local_key,
                 operation_order=int(row.operation_order),
                 chapter_id=chapter_id,
                 chapter_order=chapter_order,
                 evidence=smap.evidence_payloads(session, run_id, evidence.get(row.action_id, [])),
-                root_event_id=bindings.get(row.source_declaration_id),
-                target_event_id=(
-                    bindings.get(row.target_declaration_id) if row.target_declaration_id is not None else None
-                ),
             )
         )
     return sorted(result, key=action_order)

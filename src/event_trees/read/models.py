@@ -11,10 +11,11 @@ from typing import Any
 class EventNodeRow:
     """返回章节事件节点"""
 
-    declaration_id: str
-    event_id: str | None
+    event_id: str
     chapter_id: int
     chapter_order: int
+    from_chapter_id: int
+    to_chapter_id: int
     description: str
     participants: list[dict[str, Any]]
     anchor_paragraph_ids: list[int]

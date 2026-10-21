@@ -1,8 +1,8 @@
-"章节边界内的原声明节点与原声明关系投影"
+"章节边界内的原事件节点与原事件关系投影"
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from src.event_trees.action_order import action_order, load_foreshadowing_actions
 from src.event_trees.read.models import (
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 class EventForestQuery:
-    "章节节点使用自身声明身份，完整事件仅作为全书归属"
+    "章节节点使用自身事件身份，完整事件仅作为全书归属"
 
     def __init__(self, session: Storage) -> None:
         self.session = session
@@ -59,7 +59,7 @@ class EventForestQuery:
         )
 
     def fetch_event_nodes(self, run_id: str, *, max_chapter_order: int) -> list[EventNodeRow]:
-        "读取章节边界内的原声明，不用全书正文覆盖章级正文"
+        """章级投影只纳入本章标注的单章事件与章内包含边"""
         query = EventTreeQuery(self.session, run_id)
         query.fetch()
         chapter_id = next(
@@ -67,58 +67,73 @@ class EventForestQuery:
         )
         boundary = self.resolve_chapter_boundary(run_id, chapter_id=chapter_id) if chapter_id is not None else None
         projection = EntityReferenceProjection.load(self.session, run_id, boundary=boundary)
-        nodes: list[EventNodeRow] = []
-        for source in query.declarations.values():
-            if source.chapter_order is None or source.chapter_order > max_chapter_order:
-                continue
-            binding = query.bindings.get(source.declaration_id)
-            evidence = list(source.evidence)
-            if source.chapter_id is None or any(item["chapter_id"] != source.chapter_id for item in evidence):
-                raise ValueError("章级声明证据与自身章节不一致")
-            positions = [item["char_start"] for item in evidence if item.get("char_start") is not None]
-            ends = [item["char_end"] for item in evidence if item.get("char_end") is not None]
-            nodes.append(
+        sources = {
+            event.event_id: event
+            for event in query.events.values()
+            if event.annotation_record_id is not None
+            and event.chapter_id is not None
+            and event.chapter_order is not None
+            and event.chapter_order <= max_chapter_order
+            and event.from_chapter_id == event.chapter_id
+            and event.to_chapter_id == event.chapter_id
+        }
+        parents = {
+            child: link.contained_parent_id
+            for child, link in query.parent_of.items()
+            if child in sources
+            and link.contained_parent_id in sources
+            and sources[child].chapter_id == sources[link.contained_parent_id].chapter_id
+        }
+
+        def root_of(identifier: str) -> str:
+            while identifier in parents:
+                identifier = parents[identifier]
+            return identifier
+
+        result = []
+        for ordinal, event in enumerate(
+            sorted(sources.values(), key=lambda item: (item.chapter_order or 0, item.char_start, item.event_id))
+        ):
+            if any(ref["chapter_id"] != event.chapter_id for ref in event.evidence):
+                raise ValueError("章级事件证据与自身章节不一致")
+            result.append(
                 EventNodeRow(
-                    declaration_id=source.declaration_id,
-                    event_id=binding.event_id if binding else None,
-                    chapter_id=source.chapter_id,
-                    chapter_order=source.chapter_order,
-                    description=source.summary,
-                    participants=projection.participants(source.participants),
-                    anchor_paragraph_ids=sorted(
-                        {item["paragraph_id"] for item in evidence if item.get("paragraph_id") is not None}
-                    ),
-                    char_start=min(positions, default=source.char_start),
-                    char_end=max(ends, default=source.char_end),
-                    evidence=evidence,
+                    event_id=event.event_id,
+                    chapter_id=cast(int, event.chapter_id),
+                    chapter_order=cast(int, event.chapter_order),
+                    from_chapter_id=event.from_chapter_id,
+                    to_chapter_id=event.to_chapter_id,
+                    description=event.summary,
+                    participants=projection.participants(event.participants),
+                    anchor_paragraph_ids=sorted({ref["paragraph_id"] for ref in event.evidence}),
+                    char_start=event.char_start,
+                    char_end=event.char_end,
+                    evidence=list(event.evidence),
                     causal_event_refs=[],
-                    tree_id=source.declaration_id,
-                    cause_role="root",
-                    parent_event_id=None,
-                    evidence_scope="paragraph"
-                    if all(item.get("paragraph_id") is not None for item in evidence)
-                    else "chapter",
-                    payload_path=source.payload_path,
-                    event_ordinal=0,
+                    tree_id=root_of(event.event_id),
+                    cause_role="root" if event.event_id not in parents else "main",
+                    parent_event_id=parents.get(event.event_id),
+                    evidence_scope="paragraph",
+                    payload_path=event.payload_path,
+                    event_ordinal=ordinal,
                 )
             )
-        nodes.sort(key=lambda row: (row.chapter_order, row.char_start, row.declaration_id))
-        return nodes
+        return result
 
     def fetch_snapshot(self, run_id: str, *, chapter_id: int | None = None) -> EventForestSnapshot | None:
-        "读取指定章节边界内的节点与原声明关系"
+        "读取指定章节边界内的节点与原事件关系"
         boundary = self.resolve_chapter_boundary(run_id, chapter_id=chapter_id)
         if boundary is None:
             return None
         nodes = self.fetch_event_nodes(run_id, max_chapter_order=boundary.chapter_order)
-        by_id = {row.declaration_id: row for row in nodes}
+        by_id = {row.event_id: row for row in nodes}
         query = EventTreeQuery(self.session, run_id)
         query.fetch()
         visible_relations = [
             row
-            for row in query.declaration_relations
-            if row.source_kind == "declaration"
-            and row.target_kind == "declaration"
+            for row in query.relations
+            if row.source_kind == "event"
+            and row.target_kind == "event"
             and row.source_id in by_id
             and row.target_id in by_id
             and all(query.orders[item["chapter_id"]] <= boundary.chapter_order for item in row.evidence)
@@ -142,16 +157,14 @@ class EventForestQuery:
             if (
                 action.chapter_order is not None
                 and action.chapter_order <= boundary.chapter_order
-                and action.source_declaration_id in by_id
+                and action.source_event_id in by_id
             ):
-                by_root.setdefault(action.source_declaration_id, []).append(action)
+                by_root.setdefault(action.source_event_id, []).append(action)
         threads = []
         for root_id, actions in by_root.items():
             latest = actions[-1]
             payoff = (
-                latest.target_declaration_id
-                if latest.action_type == "payoff" and latest.target_declaration_id in by_id
-                else None
+                latest.target_event_id if latest.action_type == "payoff" and latest.target_event_id in by_id else None
             )
             status = {"setup": "open", "reinforce": "reinforced", "payoff": "likely_paid_off"}[latest.action_type]
             threads.append(
@@ -171,19 +184,19 @@ class EventForestQuery:
             chapter_id=boundary.chapter_id,
             chapter_order=boundary.chapter_order,
             visible_through_chapter_order=boundary.chapter_order,
-            derived_event_order=[row.declaration_id for row in nodes],
+            derived_event_order=[row.event_id for row in nodes],
             event_nodes=nodes,
             event_trees=[
                 EventTreeRow(
-                    tree_id=row.declaration_id,
-                    root_event_id=row.declaration_id,
-                    main_chain=[row.declaration_id],
+                    tree_id=root,
+                    root_event_id=root,
+                    main_chain=[root],
                     secondary_groups=[],
-                    chapter_ids=[row.chapter_id],
-                    char_start=row.char_start,
-                    char_end=row.char_end,
+                    chapter_ids=sorted({node.chapter_id for node in nodes if node.tree_id == root}),
+                    char_start=min(node.char_start for node in nodes if node.tree_id == root),
+                    char_end=max(node.char_end for node in nodes if node.tree_id == root),
                 )
-                for row in nodes
+                for root in dict.fromkeys(node.tree_id for node in nodes)
             ],
             causal_edges=edges,
             foreshadowing_edges=threads,

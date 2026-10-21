@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, cast
 
 from src.storage import Storage
 
@@ -11,8 +11,6 @@ from .organization import (
     BoundOrganizationEvidence,
     CompleteEventDraft,
     ContainmentDraft,
-    DeclarationComparisonDraft,
-    DeclarationReviewDraft,
     EventOrganizationDraft,
     EventReviewDraft,
     RelationDraft,
@@ -39,34 +37,30 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
     if not rows:
         return
     dicts = _run_event_dicts(session, run_id)
-    bindings = smap.declaration_bindings(session, list(rows))
-    declarations = draft._declarations()
     snapshot = session.diagnosis.session_rows(run_id)
     event_evidence = smap.fetch_evidence(session, "complete_event_id", list(rows))
     for event_id, row in rows.items():
         data = dicts[event_id]
-        sources = bindings.get(event_id) or []
-        declaration_ids = [item.declaration_id for item in sources]
         payloads = _evidence_payloads(session, run_id, event_evidence.get(event_id, []))
         draft.events[event_id] = CompleteEventDraft(
             event_id=event_id,
             local_key=row.local_key,
-            title=data["title"],
-            problem=data["problem"],
-            summary=data["summary"],
-            event_type=data["event_type"],
-            status=data["status"],
-            progress=data["progress"],
-            declaration_ids=list(declaration_ids),
-            reason=row.identity_reason,
-            source_hashes={
-                declaration: declarations[declaration]["source_hash"]
-                for declaration in declaration_ids
-                if declaration in declarations
-            },
+            title=row.title,
+            problem=row.problem,
+            summary=row.summary,
+            event_type=row.event_type,
+            status=cast(Literal["ongoing", "resolved"], row.status),
+            progress=row.progress,
+            reason=row.reason,
+            annotation_record_id=row.annotation_record_id,
+            from_chapter_id=row.from_chapter_id,
+            to_chapter_id=row.to_chapter_id,
+            is_foreshadowing_root=row.is_foreshadowing_root,
+            payoff_likelihood=row.payoff_likelihood,
             first_text_position=data["first_text_position"],
             evidence=[BoundOrganizationEvidence(**payload) for payload in payloads],
             producer_agent_id=row.producer_agent_id,
+            participants=data["participants"],
         )
     link_rows = snapshot["links"]
     link_evidence = smap.fetch_evidence(session, "narrative_link_id", [row.link_id for row in link_rows])
@@ -84,6 +78,7 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
                 producer_agent_id=link.producer_agent_id,
             )
         elif link.semantic_source_event_id is not None and link.semantic_target_event_id is not None:
+            draft.saved_relation_ids.add(link.link_id)
             draft.relations[link.link_id] = RelationDraft(
                 relation_id=link.link_id,
                 source_kind="event",
@@ -92,7 +87,8 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
                 target_id=link.semantic_target_event_id,
                 relation_type=link.relation_type or "",
                 reason=link.reason,
-                source_operation_id=link.source_operation_local_key or "",
+                source_operation_id=link.source_operation_local_key,
+                is_active=link.is_active,
                 evidence=bound,
                 producer_agent_id=link.producer_agent_id,
             )
@@ -109,24 +105,6 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
                 reason=check.reason,
                 snapshot_hash=check.snapshot_hash or "",
                 producer_agent_id=check.producer_agent_id,
-            )
-        elif check.reviewed_declaration_id is not None:
-            draft.declaration_reviews[check.reviewed_declaration_id] = DeclarationReviewDraft(
-                declaration_id=check.reviewed_declaration_id,
-                source_hash=check.snapshot_hash or "",
-                reason=check.reason,
-                producer_agent_id=check.producer_agent_id,
-            )
-        elif check.source_declaration_id is not None and check.target_declaration_id is not None:
-            draft.declaration_comparisons[(check.source_declaration_id, check.target_declaration_id)] = (
-                DeclarationComparisonDraft(
-                    source_declaration_id=check.source_declaration_id,
-                    target_declaration_ids=[check.target_declaration_id],
-                    disposition=_checked_disposition(check.disposition, ("same_event", "independent", "related")),
-                    reason=check.reason,
-                    evidence=bound_check,
-                    producer_agent_id=check.producer_agent_id,
-                )
             )
         elif check.source_event_id is not None and check.target_event_id is not None:
             key = (

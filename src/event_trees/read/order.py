@@ -9,14 +9,14 @@ if TYPE_CHECKING:
     pass
 
 
-def formal_event_ordinals(declarations: Iterable[Any]) -> dict[str, int]:
-    "同记录声明按真实创建时间与本地地址排序，不虚构写入序号"
+def formal_event_ordinals(annotation_events: Iterable[Any]) -> dict[str, int]:
+    "同记录事件按真实创建时间与本地地址排序，不虚构写入序号"
     rows = sorted(
-        declarations,
+        annotation_events,
         key=lambda row: (
             str(getattr(row, "created_at", "") or ""),
             getattr(row, "local_key", "") or "",
-            getattr(row, "declaration_id", ""),
+            getattr(row, "event_id", ""),
         ),
     )
-    return {row.declaration_id: ordinal for ordinal, row in enumerate(rows)}
+    return {row.event_id: ordinal for ordinal, row in enumerate(rows)}

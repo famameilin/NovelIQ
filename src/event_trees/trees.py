@@ -1,4 +1,4 @@
-"""不可变章级事件声明及其显式候选关系，正式事件由诊断一次发布"""
+"""不可变章级事件事件及其显式候选关系，正式事件由诊断一次发布"""
 
 from __future__ import annotations
 
@@ -66,13 +66,16 @@ class EventTrees:
                 raise ValueError(f"node_id={identifier} 已属于其他或已保存执行")
             if current is not None:
                 immutable = {
-                    "declaration_id",
+                    "event_id",
                     "title",
                     "problem",
                     "summary",
                     "event_type",
                     "status",
                     "progress",
+                    "from_chapter_id",
+                    "to_chapter_id",
+                    "reason",
                     "evidence_paragraph_id",
                     "is_foreshadow_setup",
                     "payoff_likelihood",
@@ -95,6 +98,7 @@ class EventTrees:
                 if current is not None and current["content"] != content:
                     raise ValueError(f"{key}={identifier} 业务内容冲突")
                 target[identifier] = {"author": author, "content": deepcopy(content)}
+        self._parents()
 
     def confirmed_complete_event_index(self, *, through_paragraph_id: int | None = None) -> dict[str, dict[str, Any]]:
         "按真实原文可见范围读取已确认全书事件"
@@ -107,20 +111,21 @@ class EventTrees:
             value["producer_agent_id"] = self.complete_events[identifier]["author"]
         if through_paragraph_id is not None:
             result = {
-                identifier: value for identifier, value in result.items()
+                identifier: value
+                for identifier, value in result.items()
                 if type(value.get("evidence_paragraph_id")) is int
                 and 0 <= value["evidence_paragraph_id"] <= through_paragraph_id
             }
         return result
 
-    def confirmed_declaration_ids(self) -> set[str]:
-        """本 run 已确认的章级声明来源，供跨章候选关系和伏笔引用授权"""
+    def confirmed_source_event_ids(self) -> set[str]:
+        """本 run 已确认的章级事件来源，供跨章候选关系和伏笔引用授权"""
         return {key for key, value in self.nodes.items() if value["author"] in self.saved}
 
     def confirmed_containment_parents(self) -> dict[str, str]:
         """本 run 已确认包含关系（child_event_id → parent_event_id）"""
         return {
-            key: str(value["content"]["parent_event_id"])
+            str(value["content"]["child_event_id"]): str(value["content"]["parent_event_id"])
             for key, value in self.containments.items()
             if value["author"] in self.saved
         }
@@ -156,6 +161,14 @@ class EventTrees:
             if child in parents and parents[child] != parent:
                 raise ValueError(f"node_id={child} 已有父节点={parents[child]}，不能连接父节点={parent}")
             parents[child] = parent
+        for value in self.containments.values():
+            edge = value["content"]
+            child, parent = edge["child_event_id"], edge["parent_event_id"]
+            if child not in self.nodes or parent not in self.nodes:
+                raise ValueError("包含关系端点不存在")
+            if child in parents and parents[child] != parent:
+                raise ValueError("子事件已有其他直接父")
+            parents[child] = parent
         for child in parents:
             seen: set[str] = set()
             current = child
@@ -174,8 +187,8 @@ class EventTrees:
         return {
             "run_id": self.run_id,
             "node_id": node_id,
-            "declaration_id": node_id,
-            "kind": "declaration",
+            "event_id": node_id,
+            "kind": "event",
             "producer_agent_id": node["author"],
             "chapter_id": node["chapter_id"],
             "saved": node["author"] in self.saved,
@@ -424,17 +437,17 @@ class EventTrees:
         self._parents()
 
     def load_saved_work(self, session: Any, agent_id: str, annotation_id: str) -> dict[str, Any]:
-        """锁外取得已保存执行的原始声明、实际有效动作与来源候选关系"""
+        """锁外取得已保存执行的原始事件、实际有效动作与来源候选关系"""
         from src.event_trees import storage_map as smap
 
         record = session.reads.event_trees_trees_load_saved_work_1(annotation_id)
         if record is None or record.agent_id != agent_id:
             raise ValueError(f"事件保存身份不一致: {agent_id}")
         author = agent_id
-        declarations = list(session.reads.event_trees_trees_load_saved_work_2(annotation_id))
-        declaration_ids = [row.declaration_id for row in declarations]
+        annotation_events = list(session.reads.event_trees_trees_load_saved_work_2(annotation_id))
+        source_event_ids = [row.event_id for row in annotation_events]
         participant_rows = (
-            list(session.reads.event_trees_trees_load_saved_work_3(declaration_ids)) if declaration_ids else []
+            list(session.reads.event_trees_trees_load_saved_work_3(source_event_ids)) if source_event_ids else []
         )
         names: dict[str, str] = {}
         if participant_rows:
@@ -442,22 +455,25 @@ class EventTrees:
                 row.entity_id: row.canonical_name
                 for row in session.reads.event_trees_trees_load_saved_work_6(participant_rows)
             }
-        evidence = smap.fetch_evidence(session, "declaration_id", declaration_ids)
-        source = smap.declaration_record_source(session, annotation_id)
+        evidence = smap.fetch_evidence(session, "complete_event_id", source_event_ids)
+        source = smap.annotation_record_source(session, annotation_id)
         chapter_id = source.chapter_id if source is not None else None
         nodes: dict[str, Any] = {}
-        for row in declarations:
-            payloads = smap.evidence_payloads(session, self.run_id, evidence.get(row.declaration_id, []))
+        for row in annotation_events:
+            payloads = smap.evidence_payloads(session, self.run_id, evidence.get(row.event_id, []))
             content = {
-                "declaration_id": row.declaration_id,
-                "node_id": row.declaration_id,
+                "event_id": row.event_id,
+                "node_id": row.event_id,
                 "title": row.title,
                 "problem": row.problem,
                 "summary": row.summary,
                 "event_type": row.event_type,
                 "status": row.status,
                 "progress": row.progress,
-                "tree_id": row.declaration_id,
+                "from_chapter_id": row.from_chapter_id,
+                "to_chapter_id": row.to_chapter_id,
+                "reason": row.reason,
+                "tree_id": row.event_id,
                 "parent_node_id": None,
                 "cause_role": "root",
                 "description": row.summary,
@@ -471,20 +487,20 @@ class EventTrees:
                         "emotion": item.emotion,
                     }
                     for item in participant_rows
-                    if item.declaration_id == row.declaration_id
+                    if item.event_id == row.event_id
                 ],
                 "is_foreshadow_setup": bool(row.is_foreshadowing_root),
                 "payoff_likelihood": row.payoff_likelihood,
             }
-            nodes[row.declaration_id] = {"author": author, "chapter_id": chapter_id, "content": deepcopy(content)}
+            nodes[row.event_id] = {"author": author, "chapter_id": chapter_id, "content": deepcopy(content)}
         actions: dict[str, Any] = {}
         action_rows = list(session.reads.event_trees_trees_load_saved_work_4(agent_id)) if annotation_id else []
         action_evidence = smap.fetch_evidence(session, "foreshadow_action_id", [row.action_id for row in action_rows])
         for row in action_rows:
             actions[row.action_id] = {
                 "author": author,
-                "root_event_id": row.source_declaration_id,
-                "target_event_id": row.target_declaration_id,
+                "root_event_id": row.source_event_id,
+                "target_event_id": row.target_event_id,
                 "action_type": row.action_type,
                 "chapter_id": chapter_id,
                 "source_operation_id": row.source_operation_local_key,
@@ -496,16 +512,30 @@ class EventTrees:
                 "author": author,
                 "content": {
                     "relation_id": row.link_id,
-                    "source_kind": "declaration",
-                    "source_id": row.semantic_source_declaration_id,
-                    "target_kind": "declaration",
-                    "target_id": row.semantic_target_declaration_id,
+                    "source_kind": "event",
+                    "source_id": row.semantic_source_event_id,
+                    "target_kind": "event",
+                    "target_id": row.semantic_target_event_id,
                     "relation_type": row.relation_type,
                     "reason": row.reason,
                     "source_operation_id": row.source_operation_local_key,
                 },
             }
             for row in session.reads.event_trees_trees_load_saved_work_5(agent_id)
+            if row.semantic_source_event_id is not None
+        }
+        containments = {
+            row.link_id: {
+                "author": author,
+                "content": {
+                    "link_id": row.link_id,
+                    "parent_event_id": row.contained_parent_id,
+                    "child_event_id": row.contained_child_id,
+                    "reason": row.reason,
+                },
+            }
+            for row in session.reads.event_trees_trees_load_saved_work_5(agent_id)
+            if row.contained_child_id is not None
         }
         return {
             "author": author,
@@ -514,6 +544,7 @@ class EventTrees:
             "actions": actions,
             **{key: {} for key in CONTRIBUTION_KEYS},
             "relations": relations,
+            "containments": containments,
         }
 
     def recover_work(self, snapshot: dict[str, Any]) -> None:
