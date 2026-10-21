@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from src.storage.models import Agent, AgentLoop, ToolCall
 from src.storage.models.base import naive_utcnow
-from src.storage.records.audit_documents import encode_document, encode_text_document
+from src.storage.records.audit_documents import decode_document, encode_document, encode_text_document
 
 _TIMING_COLUMNS = {
     "ttft": "ttft_ms",
@@ -159,6 +159,19 @@ class AuditRepository:
         if row.status not in {"running", status}:
             raise RuntimeError("Agent 已有不同终态")
         row.status = status
+        timings = context.get("runtime_timings") or {}
+        error = context.get("final_error")
+        if timings or error:
+            call = self._session.scalar(
+                select(AgentLoop).where(AgentLoop.agent_id == agent_id)
+                .order_by(AgentLoop.turn_index.desc()).limit(1).with_for_update()
+            )
+            if call is not None:
+                notes = decode_document(call.timing_notes_bytes) if call.timing_notes_bytes else []
+                additions = [f"runtime:{name}={value}" for name, value in sorted(timings.items())]
+                if error:
+                    additions.append(f"invocation_error:{error}")
+                call.timing_notes_bytes = encode_document(list(dict.fromkeys([*notes, *additions])))
         self._session.flush()
 
     @staticmethod

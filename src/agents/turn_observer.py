@@ -106,11 +106,15 @@ def _serialize_request_messages(messages: list[Any]) -> list[dict[str, Any]]:
     return serialized
 
 
-def _usage_for_turn(request_messages: list[Any], response_message: Any) -> dict[str, Any] | None:
+def _usage_for_turn(
+    request_messages: list[Any], response_message: Any, *, tool_schema_tokens: int = 0,
+) -> dict[str, Any] | None:
     """用于优先取 Provider 用量，缺失时按本地估算兜底"""
     usage = extract_agent_token_usage(response_message)
     if usage is None:
-        estimates = estimate_agent_token_usage([*request_messages, response_message])
+        estimates = estimate_agent_token_usage(
+            [*request_messages, response_message], tool_schema_tokens=tool_schema_tokens,
+        )
         # 估算列表按消息链中的 AI 消息顺序排列，本回合响应是链上最后一个 AI 消息
         usage = estimates[-1] if estimates else None
     if usage is None:
@@ -147,6 +151,7 @@ class AgentTurnObserver:
         self._pending_turn_id: str | None = None
         self._pending_started_ns: int | None = None
         self._pending_request_messages: list[Any] = []
+        self._pending_tool_schema_tokens = 0
 
     def begin_provider_turn(
         self,
@@ -173,6 +178,7 @@ class AgentTurnObserver:
         )
         self._pending_started_ns = started_ns
         self._pending_request_messages = list(request_messages)
+        self._pending_tool_schema_tokens = int((request.get("parameters") or {}).get("tool_schema_tokens") or 0)
 
     def complete_provider_turn(self, *, response_message: Any, timing: ModelCallTiming) -> None:
         """用于收口成功的物理 Provider 请求并激活其工具审计上下文"""
@@ -191,7 +197,9 @@ class AgentTurnObserver:
                 "model_ms": timing.model_ms,
             },
             timing_notes=list(timing.timing_notes),
-            token_usage=_usage_for_turn(self._pending_request_messages, response_message),
+            token_usage=_usage_for_turn(
+                self._pending_request_messages, response_message, tool_schema_tokens=self._pending_tool_schema_tokens,
+            ),
         )
         self._pending_turn_id = None
         self._pending_started_ns = None
@@ -224,7 +232,9 @@ class AgentTurnObserver:
                 "model_ms": timing.model_ms,
             },
             timing_notes=list(timing.timing_notes) + ["provider_request_failed"],
-            token_usage=_usage_for_turn(self._pending_request_messages, response),
+            token_usage=_usage_for_turn(
+                self._pending_request_messages, response, tool_schema_tokens=self._pending_tool_schema_tokens,
+            ),
         )
         self._pending_turn_id = None
         self._pending_started_ns = None
@@ -257,8 +267,10 @@ class AgentTurnObserver:
             error=error,
             tool_duration_ms=tool_duration_ms,
         )
-        if self._active_tool_first_ns is None:
-            self._active_tool_first_ns = started_ns
+        self._active_tool_first_ns = min(
+            self._active_tool_first_ns if self._active_tool_first_ns is not None else started_ns,
+            started_ns,
+        )
         self._active_tool_last_ns = max(
             self._active_tool_last_ns or 0,
             started_ns + int(tool_duration_ms or 0) * 1_000_000,

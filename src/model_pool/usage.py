@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -107,31 +108,34 @@ def extract_agent_token_usage(message: Any) -> AgentTokenUsage | None:
     )
 
 
-def estimate_agent_token_usage(messages: list[Any]) -> list[AgentTokenUsage]:
-    """在 Provider 未返回用量时为每个 AI 响应按消息文本估算 Token 数
-
-    估算口径: prompt 用 tiktoken 计数（中文 cl100k_base 按 2 字符/token 兜底），
-    completion 按响应文本计数，缓存命中记 0（无缓存证据 = 全量计费），费用留 NULL
-    """
-    prompt_parts = [
-        str(getattr(message, "content", "") or "") for message in messages if getattr(message, "type", None) != "ai"
-    ]
-    prompt_tokens = count_tokens("\n\n".join(prompt_parts))
+def estimate_agent_token_usage(messages: list[Any], *, tool_schema_tokens: int = 0) -> list[AgentTokenUsage]:
+    """按每次响应之前的完整消息、工具目录与实际响应估算，缓存和费用保持未知"""
+    history_tokens = max(0, tool_schema_tokens)
     estimated: list[AgentTokenUsage] = []
     for message in messages:
-        if getattr(message, "type", None) != "ai":
-            continue
-        completion_tokens = count_tokens(str(getattr(message, "content", "") or ""))
-        estimated.append(
-            AgentTokenUsage(
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=prompt_tokens + completion_tokens,
-                cache_read_tokens=0,
-                cost=None,
-                estimated=True,
+        content = getattr(message, "content", "") or ""
+        text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, separators=(",", ":"))
+        additional = getattr(message, "additional_kwargs", None) or {}
+        calls = getattr(message, "tool_calls", None) or additional.get("tool_calls")
+        parts = [text]
+        if calls:
+            parts.append(json.dumps(calls, ensure_ascii=False, separators=(",", ":"), default=str))
+        reasoning = additional.get("reasoning_content")
+        if reasoning:
+            parts.append(str(reasoning))
+        message_tokens = count_tokens("\n".join(parts))
+        if getattr(message, "type", None) == "ai":
+            estimated.append(
+                AgentTokenUsage(
+                    prompt_tokens=history_tokens,
+                    completion_tokens=message_tokens,
+                    total_tokens=history_tokens + message_tokens,
+                    estimated=True,
+                )
             )
-        )
+        routing = {key: value for key in ("type", "name", "tool_call_id")
+                   if (value := getattr(message, key, None)) is not None}
+        history_tokens += message_tokens + count_tokens(json.dumps(routing, separators=(",", ":")))
     return estimated
 
 

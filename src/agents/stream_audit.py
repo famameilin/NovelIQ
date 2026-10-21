@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from src.utils.token_counter import count_tokens
+
 
 @dataclass(frozen=True, slots=True)
 class ModelCallTiming:
@@ -112,6 +114,8 @@ def _provider_request_metadata(model: Any, *, attempt: int) -> dict[str, Any]:
         "extra_body": {"think": thinking},
         "tool_names": tool_names,
         "tool_contract_fingerprint": tool_contract_fingerprint,
+        "tool_schema_tokens": count_tokens(json.dumps(tools, ensure_ascii=False, separators=(",", ":"), default=str))
+        if tools else 0,
     }
     canonical = json.dumps(parameters, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
     return {
