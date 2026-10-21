@@ -1,5 +1,6 @@
 /** 任务状态与按真实模型流分组的有界输出 */
 import { create } from "zustand";
+import { emptyAnalysisProjection, mergeAnalysisNotice, type AnalysisProjection, type AnalysisNotice, type ExecutionRecord } from "./analysisProjection";
 import { appConfig } from "@/config";
 import type { TaskStatus } from "@/api/types";
 import type { StreamEventData, ToolCallStatus } from "@/api/streamTypes";
@@ -12,6 +13,10 @@ export interface LLMStreamGroup {
 }
 const _MAX_BLOCKS_PER_GROUP = 100;
 interface StreamState {
+  projection: AnalysisProjection; snapshotReady: boolean; notificationWarning: string | null;
+  selectedInvocation: string | null; pinnedExecution: ExecutionRecord | null;
+  applyNotice: (taskId: string, type: string, data: unknown, seq?: number) => void;
+  selectExecution: (id: string | null) => void;
   isConnected: boolean; currentTaskId: string | null; status: TaskStatus | null;
   llmOutputs: Map<string, LLMStreamGroup>; activeStreamSelections: Map<string, string>;
   error: string | null; resumeEpoch: number;
@@ -155,14 +160,34 @@ function _trimBlocks(blocks: StreamBlock[]): StreamBlock[] {
   }
   return blocks.slice(-_MAX_BLOCKS_PER_GROUP);
 }
-const empty = () => ({isConnected: false, currentTaskId: null, status: null,
+const empty = () => ({projection: emptyAnalysisProjection(), snapshotReady: false, notificationWarning: null as string | null,
+  selectedInvocation: null as string | null, pinnedExecution: null as ExecutionRecord | null, isConnected: false, currentTaskId: null, status: null,
   llmOutputs: new Map<string, LLMStreamGroup>(), activeStreamSelections: new Map<string, string>(), error: null});
 export const useStreamStore = create<StreamState>((set) => ({
   ...empty(), resumeEpoch: 0,
+  selectExecution: (id) => set((state) => ({selectedInvocation: id, pinnedExecution: id ? state.projection.executions[id] ?? null : null})),
+  applyNotice: (taskId, type, raw, seq) => set((state) => {
+    if (state.currentTaskId !== taskId) return {};
+    if (!raw || typeof raw !== "object") return {};
+    const data = raw as AnalysisNotice;
+    if (data.task_id && data.task_id !== taskId) return {};
+    if (type === "notification_status") {
+      const sync = raw as {warning: string | null; sync_pending: boolean};
+      return {notificationWarning: sync.warning, projection: {...state.projection, sync_pending: sync.sync_pending}};
+    }
+    const projection = type === "snapshot" ? raw as AnalysisProjection
+      : mergeAnalysisNotice(state.projection, type, data, seq ?? state.projection.cursor);
+    return {projection, snapshotReady: state.snapshotReady || type === "snapshot",
+      pinnedExecution: (state.selectedInvocation && projection.executions[state.selectedInvocation]) || state.pinnedExecution,
+      error: projection.error};
+  }),
   setConnected: (isConnected) => set({isConnected}),
   setStatus: (status) => set({status}),
   setTaskId: (currentTaskId) => set((state) => state.currentTaskId === currentTaskId ? {} : {...empty(), currentTaskId}),
-  resetStreamForTask: (currentTaskId) => set((state) => ({...empty(), currentTaskId, resumeEpoch: state.resumeEpoch + 1})),
+  resetStreamForTask: (currentTaskId) => set((state) => ({
+    ...(state.currentTaskId === currentTaskId ? {} : empty()),
+    currentTaskId, snapshotReady: false, resumeEpoch: state.resumeEpoch + 1,
+  })),
   setError: (error) => set({error}), reset: () => set(empty()),
   setActiveStreamSelection: (scope, groupKey) => set((state) => {
     const activeStreamSelections = new Map(state.activeStreamSelections);
