@@ -14,7 +14,8 @@ from loguru import logger
 from src.agents.stream import AgentStream
 from src.config.analysis_logger import AnalysisLogger
 from src.diagnosis.schema import AgentAnalysis
-from src.sse.events import StreamEvent
+from src.event_bus import EventBus
+from src.event_bus.notifications import StreamEvent
 from src.storage import Storage
 from src.work.queries import is_annotate_complete
 
@@ -51,6 +52,7 @@ async def run_diagnose(
     analysis_logger: AnalysisLogger | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    bus: EventBus | None = None,
 ) -> AgentAnalysis:
     """
     执行诊断流程（诊断 Agent 工具化自主取证）
@@ -93,6 +95,8 @@ async def run_diagnose(
         novel_id=novel_id,
         novel_title=novel_title,
         stream=agent_stream,
+        bus=bus,
+        emitter=emitter,
         is_cancelled=is_cancelled,
     )
 

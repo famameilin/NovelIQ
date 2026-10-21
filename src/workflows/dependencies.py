@@ -23,6 +23,14 @@ _analysis_service: AnalysisService | None = None
 _task_application_service: TaskApplicationService | None = None
 
 
+async def publish_initial_capacity() -> None:
+    """在恢复任务之前发布进程模型容量"""
+    from src.event_bus import EVENT_BUS
+    from src.model_pool.capacity import publish_capacity
+
+    await publish_capacity(EVENT_BUS)
+
+
 def configure(run_completed_callback: Callable[[str], None] | None = None) -> None:
     """登记 run 收口回调（api 装配时调用；回调属读侧，装配前登记）"""
     global _run_completed_callback
@@ -58,5 +66,7 @@ def get_task_application_service() -> TaskApplicationService:
     """任务应用服务单例（取消/删除/恢复的状态机入口）"""
     global _task_application_service
     if _task_application_service is None:
-        _task_application_service = TaskApplicationService(get_task_service(), get_task_manager())
+        _task_application_service = TaskApplicationService(
+            get_task_service(), get_task_manager(), get_analysis_service()
+        )
     return _task_application_service

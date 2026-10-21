@@ -15,8 +15,8 @@ from src.audit.module import AuditModule
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
 from src.event_bus import EventBus, Message
-from src.sse.consumer import SSEModule
-from src.sse.events import StreamEvent
+from src.event_bus.activity import ActivityRelay
+from src.event_bus.notifications import StreamEvent
 from src.storage import Storage, get_storage_factory
 from src.work.annotation_work import WorkReceipt, annotation_work_id, required_roles
 from src.work.chapter_pool import ChapterWorkerPool
@@ -77,6 +77,7 @@ async def run_annotate(
     novel_title: str | None = None,
     use_context_enhancement: bool = True,
     is_cancelled: Callable[[], bool] | None = None,
+    bus: EventBus | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
     """完成章节保留；未完成章节全部角色先丢弃，再按当前输入与阈值重建"""
@@ -88,10 +89,10 @@ async def run_annotate(
     total = len(retained | {item.payload["chapter_id"] for item in work})
     if not total:
         return (0, 0, 0)
-    bus = EventBus()
+    bus = bus or EventBus()
     agent = AnnotationAgent(bus, run_id, factory, novel_id=novel_id)
     audit = AuditModule(bus, run_id, factory)
-    sse = SSEModule(bus, run_id, emitter)
+    activity = ActivityRelay(bus, run_id, emitter)
     pool = ChapterWorkerPool(max_attempts=settings.models.annotation.total_attempts)
     try:
         recovery_session = factory()
@@ -147,6 +148,9 @@ async def run_annotate(
             progress_session = factory()
             states = await asyncio.to_thread(fetch_annotation_role_records, progress_session, run_id)
             completed = completed_chapters(states)
+            if emitter:
+                await emitter(StreamEvent(action="progress", stage="annotate", sub_stage="confirmed_chapters",
+                    current=len(completed), total=total, unit="章", message="必需角色正式保存确认"))
             chapter_id = receipt.payload["chapter_id"]
             if chapter_id in completed and chapter_id not in retained:
                 await consolidate(chapter_id)
@@ -171,5 +175,5 @@ async def run_annotate(
         try:
             await audit.close()
         finally:
-            sse.close()
+            activity.close()
             agent.close()

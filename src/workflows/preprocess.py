@@ -20,7 +20,8 @@ from typing import Any
 from loguru import logger
 
 from src.config import settings
-from src.sse.events import StreamEvent
+from src.event_bus import EventBus
+from src.event_bus.notifications import StreamEvent
 from src.storage import Storage, get_storage_factory
 from src.storage.records.paragraph import ParagraphMetricRow
 from src.text_processing.models import ParagraphSpan
@@ -38,6 +39,7 @@ async def run_preprocess(
     metadata_path: Path | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    bus: EventBus | None = None,
 ) -> tuple[int, int, float]:
     """执行预处理流程。Args: source_path/run_id/session/metadata_path  Returns: (总块数, 总字符数, 耗时s)"""
     from src.utils.cancellation import check_cancelled
@@ -52,6 +54,17 @@ async def run_preprocess(
         return (0, 0, 0.0)
     check_cancelled(is_cancelled)
     docs = ingest_path(source_path, metadata_path)
+    if emitter:
+        await emitter(
+            StreamEvent(
+                action="progress",
+                sub_stage="原文读取",
+                status="completed",
+                unit="文件",
+                current=len(docs),
+                total=len(docs),
+            )
+        )
     if not docs:
         logger.warning(f"no documents found source={source_path}")
         return (0, 0, 0.0)
@@ -64,12 +77,34 @@ async def run_preprocess(
     all_chunks, all_chapters = await chunk_documents_with_chapters(normalized_texts)
     total_chapters = len(all_chunks)
     total_chars = sum(len(chunk.text) for chunk in all_chunks)
+    if emitter:
+        await emitter(
+            StreamEvent(
+                action="progress",
+                sub_stage="章节识别",
+                status="completed",
+                unit="章",
+                current=len(all_chapters),
+                total=len(all_chapters),
+            )
+        )
     logger.info(f"chunked {total_chapters} chunks total_chars={total_chars}")
     chapter_repo = session.chapters
     chapter_repo.insert_chapters(run_id, all_chapters)
     logger.info(f"inserted {len(all_chapters)} chapters into db (run_id={run_id})")
     chapter_repo.insert_chapter_texts(run_id, all_chunks)
     logger.info(f"inserted {total_chapters} chunks into db (run_id={run_id})")
+    if emitter:
+        await emitter(
+            StreamEvent(
+                action="progress",
+                sub_stage="章节入库",
+                status="completed",
+                unit="章",
+                current=len(all_chapters),
+                total=len(all_chapters),
+            )
+        )
     spans = split_chunk_paragraphs(all_chunks, max_chars=settings.paragraphs.max_chars)
     tokenized: list[list[str]] = [tokenize(span.text) for span in spans]
     spans = [replace(span, token_count=len(tokens)) for span, tokens in zip(spans, tokenized, strict=True)]
@@ -81,7 +116,7 @@ async def run_preprocess(
         _insert_paragraph_curves(session, run_id, spans)
     if settings.models.paragraph_embedding.semantic_enabled:
         logger.info("generating paragraph embeddings for semantic text retrieval")
-        await _generate_paragraph_embeddings(session, run_id, emitter=emitter, is_cancelled=is_cancelled)
+        await _generate_paragraph_embeddings(session, run_id, emitter=emitter, is_cancelled=is_cancelled, bus=bus)
     elapsed = time.time() - start_time
     logger.info(f"preprocess completed chunks={total_chapters} chars={total_chars} time={elapsed:.2f}s")
     logger.info("\n=== Preprocess Statistics ===")
@@ -192,6 +227,7 @@ async def _generate_paragraph_embeddings(
     run_id: str,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    bus: EventBus | None = None,
 ) -> int:
     """为 paragraphs 生成 embedding 落库；从 paragraphs 读不重切段，0行跳过。
     RAG 粒度固定自然段(仅 paragraph)。Args: session/run_id/emitter  Returns: embedding 数量
@@ -208,7 +244,7 @@ async def _generate_paragraph_embeddings(
     from src.event_bus import EventBus
 
     pass
-    audit_bus = EventBus()
+    audit_bus = bus or EventBus()
     audit = AuditModule(audit_bus, run_id, get_storage_factory())
     try:
         try:

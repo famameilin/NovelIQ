@@ -14,7 +14,7 @@ from collections.abc import Callable
 from loguru import logger
 
 from src.config import settings
-from src.sse.manager import event_manager
+from src.event_bus import EVENT_BUS, EventBus
 from src.storage import Storage, get_storage_factory
 from src.storage.task_status import TaskStatus
 from src.work.task_manager import TaskManager
@@ -37,13 +37,18 @@ TASK_KIND_REANALYSIS = "reanalysis"
 
 class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
     def __init__(
-        self, task_service: TaskService, task_manager: TaskManager, session_factory: Callable[[], Storage] | None = None
+        self,
+        task_service: TaskService,
+        task_manager: TaskManager,
+        session_factory: Callable[[], Storage] | None = None,
+        bus: EventBus = EVENT_BUS,
     ):
         self.task_service = task_service
         self.task_manager = task_manager
         self.session_factory = session_factory or get_storage_factory()
         self.env_initializer = EnvironmentInitializer(self.session_factory)
-        self.stage_executor = StageExecutor()
+        self.bus = bus
+        self.stage_executor = StageExecutor(bus)
         self.error_handler = AnalysisErrorHandler(task_service=task_service, task_manager=task_manager)
 
     def _build_reanalysis_skip_stages(self, request: ReanalyzeRequest | None) -> dict[str, bool]:
@@ -100,10 +105,22 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         """
         统一调度入口：按任务类型构建参数后直接创建执行协程
         """
+        skip_states: dict[str, str] = {}
+
+        def record_skip_states(skips: dict[str, bool], excluded: dict[str, bool] | None = None) -> dict[str, bool]:
+            for key, skip in skips.items():
+                if skip:
+                    stage = key.removeprefix("skip_").replace("_", "-")
+                    skip_states[stage] = "not_in_scope" if excluded and excluded[key] else "completed"
+                    if (stage == "linguistic" and not settings.linguistic.ltp.enabled
+                        and not (excluded and excluded[key])):
+                        skip_states[stage] = "disabled"
+            return skips
+
         if task_kind == TASK_KIND_ANALYSIS:
 
             def skip_stages_builder(session: Storage, run_id: str) -> dict[str, bool]:
-                return self.env_initializer.check_stage_completion_status(session, run_id)
+                return record_skip_states(self.env_initializer.check_stage_completion_status(session, run_id))
 
             def pre_execute_hook(novel_id: str, skip_stages: dict[str, bool]) -> bool:
                 if self._check_all_stages_completed(skip_stages):
@@ -120,9 +137,11 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
 
             def skip_stages_builder(session: Storage, run_id: str) -> dict[str, bool]:
                 if not resume:
-                    return dict(skip_stages)
+                    return record_skip_states(dict(skip_stages), skip_stages)
                 completed = self.env_initializer.check_stage_completion_status(session, run_id)
-                return {name: skip or completed[name] for name, skip in skip_stages.items()}
+                return record_skip_states(
+                    {name: skip or completed[name] for name, skip in skip_stages.items()}, skip_stages
+                )
 
             num_topics = request.num_topics if request else settings.topic_model.num_topics
             log_prefix = "Reanalysis"
@@ -137,6 +156,7 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
                 num_topics=num_topics,
                 log_prefix=log_prefix,
                 pre_execute_hook=hook,
+                skip_states=skip_states,
             )
         )
         self.task_manager.store_asyncio_task(task_id, task)
@@ -150,6 +170,10 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         novel = self.task_service.get_novel(novel_id)
         task_id = self.task_service.create_task(novel_id)
         self.task_manager.create_task(task_id, novel_id)
+        task = self.task_service.get_task(task_id)
+        await AnalysisEventBus(task_id, run_id=task["run_id"], bus=self.bus).notify(
+            "task_state", {"status": "pending"}
+        )
         self._schedule_task_execution(task_id, novel, TASK_KIND_ANALYSIS, None)
         return task_id
 
@@ -172,7 +196,8 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         if task_info is None:
             self.task_manager.create_task(task_id, novel_id)
         self.task_manager.update_task(task_id, status=TaskStatus.PENDING)
-        await event_manager.restart_display(task_id)
+        notifier = AnalysisEventBus(task_id, run_id=task["run_id"], bus=self.bus)
+        await notifier.notify("task_reset", {"status": "pending"})
         self._schedule_task_execution(task_id, novel, TASK_KIND_ANALYSIS, None, resume=True)
         return task_id
 
@@ -180,6 +205,10 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         novel = self.task_service.get_novel(novel_id)
         task_id = self.task_service.create_task(novel_id)
         self.task_manager.create_task(task_id, novel_id)
+        task = self.task_service.get_task(task_id)
+        await AnalysisEventBus(task_id, run_id=task["run_id"], bus=self.bus).notify(
+            "task_state", {"status": "pending"}
+        )
         self._schedule_task_execution(task_id, novel, TASK_KIND_REANALYSIS, request)
         return task_id
 
@@ -191,6 +220,7 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         num_topics: int,
         log_prefix: str = "Analysis",
         pre_execute_hook: Callable[[str, dict[str, bool]], bool] | None = None,
+        skip_states: dict[str, str] | None = None,
     ) -> None:
         "领取任务并执行正式分析链"
         start = time.time()
@@ -204,12 +234,15 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
             novel_id, source_path, title, session, analysis_logger, run_id = (
                 self.env_initializer.init_analysis_environment(task_id, novel)
             )
+            bus = AnalysisEventBus(task_id, run_id=run_id, bus=self.bus)
+            await bus.notify("task_state", {"status": "running"})
             skip_stages = skip_stages_builder(session, run_id)
             if pre_execute_hook and pre_execute_hook(novel_id, skip_stages):
+                await bus.emit_task_complete()
                 return
-            bus = AnalysisEventBus(task_id, self.task_manager)
             await self._execute_analysis_stages(
-                bus, session, run_id, source_path, novel_id, title, analysis_logger, skip_stages, num_topics
+                bus, session, run_id, source_path, novel_id, title, analysis_logger, skip_stages, num_topics,
+                skip_states=skip_states,
             )
             await self.error_handler.handle_success(
                 task_id, novel_id, time.time() - start, analysis_logger, session, run_id, bus=bus, log_prefix=log_prefix
@@ -221,6 +254,9 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
                 )
             else:
                 self.task_manager.cancel_completed_task(task_id)
+                task = self.task_service.get_task(task_id)
+                notifier = AnalysisEventBus(task_id, run_id=task["run_id"], bus=self.bus)
+                await notifier.emit_task_cancelled()
         except Exception as exc:
             if session and run_id:
                 await self.error_handler.handle_failure(
@@ -236,6 +272,11 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
                 )
             else:
                 self._write_failure_to_db(task_id, str(exc))
+                task = self.task_service.get_task(task_id)
+                notifier = AnalysisEventBus(task_id, run_id=task["run_id"], bus=self.bus)
+                await notifier.emit_task_error(str(exc))
         finally:
             if analysis_logger:
                 analysis_logger.close()
+            if run_id:
+                self.bus.release_run(run_id)

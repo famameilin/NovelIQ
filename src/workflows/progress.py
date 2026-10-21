@@ -1,67 +1,57 @@
-"任务状态与模型通信事件出口"
+"""把工作流事实交付消息总线，不直接调用 SSE 管理器"""
 
 from __future__ import annotations
 
-from src.sse.events import StreamEvent, StreamMessageType
-from src.work.task_manager import TaskManager
+from uuid import uuid4
 
-__all__ = ["AnalysisEventBus", "StreamEvent", "StreamMessageType"]
+from src.event_bus import EVENT_BUS, EventBus, Message
+from src.event_bus.notifications import StreamEvent
 
-
-_ACTION_TO_SSE_EVENT = {"output": "llm_output", "thinking": "llm_thinking", "tool_call": "tool_call"}
+_ACTIONS = {
+    "output": "llm_output",
+    "thinking": "llm_thinking",
+    "tool_call": "tool_call",
+    "work_reset": "work_reset",
+    "work_saved": "work_saved",
+    "chapter_reset": "chapter_reset",
+    "activity": "agent_activity",
+    "stage_state": "stage_state",
+    "progress": "stage_progress",
+}
 
 
 class AnalysisEventBus:
-    """发送任务终态与模型通信，并缓存模型输出"""
+    def __init__(self, task_id: str, *, run_id: str = "", bus: EventBus = EVENT_BUS):
+        self.task_id, self.run_id, self.bus = task_id, run_id, bus
 
-    def __init__(self, task_id: str, task_manager: TaskManager) -> None:
-        self.task_id = task_id
-        self.task_manager = task_manager
+    async def notify(self, event_type: str, data: dict) -> None:
+        await self.bus.deliver(
+            Message(
+                topic="analysis.notification",
+                source="workflow",
+                target="notifications",
+                run_id=self.run_id,
+                message_id=data.get("message_id") or uuid4().hex,
+                payload={"task_id": self.task_id, "type": event_type, "data": data},
+            )
+        )
 
     async def emit(self, event: StreamEvent) -> None:
-        "发送模型通信，不保存运行进度"
-        if event.action not in {"output", "thinking", "tool_call"}:
-            return
-        from src.sse.manager import event_manager
-
-        data = {
-            key: value
-            for key, value in event.to_dict().items()
-            if key not in {"stage", "sub_stage", "current", "total", "percent", "sub_percent"}
-        }
+        data = event.to_dict()
+        data["run_id"] = self.run_id
         data["agent_type"] = event.sub_stage
-        await event_manager.send(task_id=self.task_id, event_type=_ACTION_TO_SSE_EVENT[event.action], data=data)
-        if event.action == "output":
-            self.task_manager.append_llm_output(self.task_id, event.content)
-
-    # 阶段级事件
+        if event.action in {"start", "complete"}:
+            if event.sub_stage:
+                data["status"] = "completed" if event.action == "complete" else "running"
+                await self.notify("stage_progress", data)
+            return
+        await self.notify(_ACTIONS.get(event.action, event.action), data)
 
     async def emit_task_complete(self) -> None:
-        """发送任务完成事件（使用 task_complete SSE 事件类型）"""
-        from src.sse.manager import event_manager
-
-        await event_manager.send(
-            task_id=self.task_id,
-            event_type=StreamMessageType.task_complete.value,
-            data={"status": "completed"},
-        )
+        await self.notify("task_complete", {"status": "completed"})
 
     async def emit_task_error(self, error: str, stage: str = "failed") -> None:
-        """发送任务错误事件"""
-        from src.sse.manager import event_manager
-
-        await event_manager.send(
-            task_id=self.task_id,
-            event_type=StreamMessageType.task_error.value,
-            data={"status": "failed"},
-        )
+        await self.notify("task_error", {"status": "failed", "error": error, "stage": stage})
 
     async def emit_task_cancelled(self) -> None:
-        """发送任务取消事件"""
-        from src.sse.manager import event_manager
-
-        await event_manager.send(
-            task_id=self.task_id,
-            event_type=StreamMessageType.task_cancelled.value,
-            data={"status": "cancelled"},
-        )
+        await self.notify("task_cancelled", {"status": "cancelled"})

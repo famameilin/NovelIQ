@@ -16,9 +16,9 @@ from typing import Any
 
 from loguru import logger
 
+from src.event_bus.notifications import StreamEvent
 from src.fact_graph.errors import GraphReadinessError
 from src.metrics.queries.aggregate import query_aggregate_metrics
-from src.sse.events import StreamEvent
 from src.storage import Storage
 from src.work.queries import is_annotate_complete
 
@@ -172,7 +172,13 @@ async def run_aggregate(
     from src.metrics.queries.global_stats import save_global_stats
 
     check_cancelled(is_cancelled)
+    if emitter:
+        await emitter(StreamEvent(action="progress", sub_stage="全书统计", status="saving"))
     global_stats = save_global_stats(session, run_id)
+    if emitter:
+        await emitter(
+            StreamEvent(action="progress", sub_stage="全书统计", status="completed", message="汇总结果已保存")
+        )
     logger.info(f"inserted {len(global_stats)} global stats")
 
     logger.info("Computing aggregate metrics...")

@@ -55,13 +55,15 @@ class TaskApplicationService:
     说明: 面向 API 编排任务恢复、取消、删除等跨 DB/运行态的流程
     """
 
-    def __init__(self, task_service: TaskService, task_manager: TaskManager):
+    def __init__(
+        self, task_service: TaskService, task_manager: TaskManager, analysis_service: AnalysisService | None = None
+    ):
         """
         初始化任务应用服务
         """
         self.task_service = task_service
         self.task_manager = task_manager
-        self.analysis_service = AnalysisService(task_service, task_manager)
+        self.analysis_service = analysis_service or AnalysisService(task_service, task_manager)
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
         """
@@ -102,6 +104,9 @@ class TaskApplicationService:
         "直接取消当前进程的任务或终止待执行任务"
         task = resolve_task_for_novel(self.task_service, novel_id, task_id)
         raise_cancel_not_allowed(task["status"])
+        from src.workflows.progress import AnalysisEventBus
+
+        notifier = AnalysisEventBus(task_id, run_id=task["run_id"], bus=self.analysis_service.bus)
         if task["status"] == "pending":
             if not get_storage_factory()().runs.cancel_pending_run(task["run_id"]):
                 current = resolve_task_for_novel(self.task_service, novel_id, task_id)
@@ -110,10 +115,12 @@ class TaskApplicationService:
                     raise TaskApplicationError(reason="invalid_state", message="任务状态已变化")
                 return await self.cancel_task(novel_id, task_id)
             self.task_manager.cancel_task(task_id)
+            await notifier.emit_task_cancelled()
             return {"task_id": task_id, "status": "cancelled"}
         item = self.task_manager.get_task(task_id)
         if not item or not item.asyncio_task or item.asyncio_task.done():
             raise TaskApplicationError(reason="invalid_state", message="当前进程没有该任务的执行对象")
+        await notifier.notify("task_state", {"status": "cancelling"})
         item.asyncio_task.cancel()
         await asyncio.gather(item.asyncio_task, return_exceptions=True)
         return {"task_id": task_id, "status": "cancelled"}

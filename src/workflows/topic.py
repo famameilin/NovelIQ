@@ -19,7 +19,7 @@ from loguru import logger
 
 from src.config import settings
 from src.config.paths import resolve_model_dir, resolve_project_root
-from src.sse.events import StreamEvent
+from src.event_bus.notifications import StreamEvent
 from src.storage import Storage
 from src.topic import (
     INFERENCE_COMPLETE,
@@ -143,7 +143,25 @@ async def run_topic_model(
 
     logger.info(f"Training LDA model with {_num_topics} topics...")
     check_cancelled(is_cancelled)
-    topic_model = trainer.train(valid_docs, filter_extremes=False)
+    if emitter:
+        await emitter(
+            StreamEvent(
+                action="progress",
+                sub_stage="语料准备",
+                status="completed",
+                current=len(valid_docs),
+                total=len(valid_docs),
+                unit="段落",
+            )
+        )
+        await emitter(StreamEvent(action="progress", sub_stage="主题训练", status="running", message="训练进度未记录"))
+    import asyncio
+
+    from src.utils.cancellation import finish_thread_step
+
+    topic_model = await finish_thread_step(asyncio.to_thread(trainer.train, valid_docs, filter_extremes=False))
+    if emitter:
+        await emitter(StreamEvent(action="progress", sub_stage="主题训练", status="completed"))
     logger.info(f"LDA model trained with {topic_model.num_topics} topics")
     logger.info(f"Model trained. Inferring topics for {total_paragraphs} paragraphs...")
 
@@ -204,6 +222,8 @@ async def run_topic_model(
     # （train(filter_extremes=False) 已在调用处固定），不再作为参数副本存储
     parameters = dict(config.to_parameters_dict())
 
+    if emitter:
+        await emitter(StreamEvent(action="progress", sub_stage="主题结果保存", status="saving"))
     paragraph_repo.save_topics(
         run_id,
         model={
@@ -219,6 +239,17 @@ async def run_topic_model(
         inferences=inference_rows,
         topics=topic_rows,
     )
+    if emitter:
+        await emitter(
+            StreamEvent(
+                action="progress",
+                sub_stage="主题结果保存",
+                status="completed",
+                current=complete_count,
+                total=total_paragraphs,
+                unit="段落",
+            )
+        )
     logger.info(f"inserted {len(topic_rows)} topic assignments for {complete_count}/{total_paragraphs} paragraphs")
 
     logger.info("\n=== Topic Summary ===")

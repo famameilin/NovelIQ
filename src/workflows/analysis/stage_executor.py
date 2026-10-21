@@ -14,7 +14,8 @@ from pathlib import Path
 
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
-from src.sse.events import StreamEvent
+from src.event_bus import EventBus
+from src.event_bus.notifications import StreamEvent
 from src.storage import Storage
 
 CancellationCheck = Callable[[], bool]
@@ -22,6 +23,9 @@ CancellationCheck = Callable[[], bool]
 
 class StageExecutor:
     """分析阶段执行服务"""
+
+    def __init__(self, bus: EventBus | None = None):
+        self.bus = bus
 
     async def run_preprocess(
         self,
@@ -35,6 +39,7 @@ class StageExecutor:
         from src.workflows import run_preprocess
 
         await run_preprocess(
+            bus=self.bus,
             source_path=source_path,
             run_id=run_id,
             session=session,
@@ -61,6 +66,7 @@ class StageExecutor:
             analysis_logger=analysis_logger,
             novel_id=novel_id,
             novel_title=novel_title,
+            bus=self.bus,
             emitter=emitter,
             is_cancelled=is_cancelled,
         )
@@ -127,6 +133,7 @@ class StageExecutor:
             run_id=run_id,
             session=session,
             analysis_logger=analysis_logger,
+            bus=self.bus,
             emitter=emitter,
             is_cancelled=is_cancelled,
         )

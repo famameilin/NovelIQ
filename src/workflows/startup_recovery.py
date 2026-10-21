@@ -7,9 +7,7 @@ from typing import TYPE_CHECKING
 from src.storage import get_storage
 
 if TYPE_CHECKING:
-    from src.work.task_manager import TaskManager
     from src.workflows.service import AnalysisService
-    from src.workflows.tasks import TaskService
 
 
 def recover_orphaned_runs() -> tuple[int, int]:
@@ -25,13 +23,23 @@ def recover_orphaned_runs() -> tuple[int, int]:
     return (failed_count, cancelled_count)
 
 
-async def resume_pending_tasks(task_service: TaskService, task_manager: TaskManager) -> tuple[int, int]:
+async def resume_pending_tasks(service: AnalysisService) -> tuple[int, int]:
     """把 DB 中可恢复的 pending 任务重新接回执行器
 
     Returns:
         tuple[int, int]: (scheduled_count, cancelled_count)
     """
-    from src.workflows.service import AnalysisService
-
-    service: AnalysisService = AnalysisService(task_service, task_manager)
     return await service.recover_pending_tasks()
+
+
+async def notify_recovered_runs(runs: list[dict]) -> None:
+    """发布启动时实际收口的运行事实，不修补历史消息"""
+    from src.event_bus import EVENT_BUS, Message
+
+    for run in runs:
+        cancelled = run["status"] == "cancelling"
+        await EVENT_BUS.deliver(Message(topic="analysis.notification", source="startup", target="notifications",
+            run_id=run["run_id"], payload={"task_id": run["task_id"],
+                "type": "task_cancelled" if cancelled else "task_error",
+                "data": {"status": "cancelled" if cancelled else "failed",
+                         "error": None if cancelled else "上次进程退出，执行未完成"}}))

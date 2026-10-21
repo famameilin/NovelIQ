@@ -34,12 +34,13 @@ from gensim.models import KeyedVectors, Word2Vec
 from loguru import logger
 
 from src.config import settings
+from src.event_bus.notifications import StreamEvent
 from src.lexicons.constants import LEXICON_FILES
 from src.linguistic import TrainResult
 from src.linguistic.queries import fetch_paragraph_labels
-from src.sse.events import StreamEvent
 from src.storage import Storage
 from src.storage.contracts.stores import LinguisticStore, ParagraphStore
+from src.utils.cancellation import finish_thread_step
 
 
 async def run_linguistic(
@@ -101,6 +102,7 @@ async def run_linguistic(
 
         last_id: int | None = None
         first_batch = True
+        saved_paragraphs = 0
         while True:
             check_cancelled(is_cancelled)
             batch = paragraph_repo.fetch_paragraph_rows_batch(run_id, after_id=last_id, limit=batch_size)
@@ -113,7 +115,7 @@ async def run_linguistic(
             # 128 段/批的 cws/pos/ner/dep/sdp 是重 CPU 同步调用，直接在事件循环上
             # 跑会冻结整个 API（状态端点/SSE 全部无响应）。批间 await 串行化模型
             # 访问，无并发推理风险。
-            results = await asyncio.to_thread(analyze_paragraph_batch, [row.text for row in batch])
+            results = await finish_thread_step(asyncio.to_thread(analyze_paragraph_batch, [row.text for row in batch]))
 
             feature_rows: list[dict] = []
             entity_rows: list[dict] = []
@@ -210,6 +212,18 @@ async def run_linguistic(
             )
             logger.info(f"固定短语落库：{len(phrase_rows)} 行（词表 {fixed_phrase_key}）")
             first_batch = False
+            saved_paragraphs += len(batch)
+            if emitter:
+                await emitter(
+                    StreamEvent(
+                        action="progress",
+                        sub_stage="语言特征保存",
+                        current=saved_paragraphs,
+                        total=total_paragraphs,
+                        unit="段落",
+                        status="running",
+                    )
+                )
 
         logger.info(f"LTP 全库完成：段落={total_paragraphs} 词法特征段落={total_feature_paragraphs}")
 
@@ -249,15 +263,23 @@ async def run_linguistic(
 
         # Word2Vec 训练（gensim CPU 重活，分钟级）同样移出事件循环；
         # 编排器 session 只被本协程使用，跨线程顺序访问安全（事件循环 await 期间不触碰）
-        train_result, pos_rows_count = await asyncio.to_thread(
-            _train_and_build,
-            run_id,
-            ling_repo,
-            token_sequences,
-            paragraph_tokens,
-            pretrained_vectors=pretrained_vectors,
-            pretrained_source=str(pretrained_path),
+        if emitter:
+            await emitter(
+                StreamEvent(action="progress", sub_stage="词向量训练", status="running", message="训练进度未记录")
+            )
+        train_result, pos_rows_count = await finish_thread_step(
+            asyncio.to_thread(
+                _train_and_build,
+                run_id,
+                ling_repo,
+                token_sequences,
+                paragraph_tokens,
+                pretrained_vectors=pretrained_vectors,
+                pretrained_source=str(pretrained_path),
+            )
         )
+        if emitter:
+            await emitter(StreamEvent(action="progress", sub_stage="词向量训练", status="completed"))
         logger.info(
             f"Word2Vec 预训练微调：vocab={train_result.vocabulary_size} "
             f"dim={train_result.embedding_dimension} pos_vectors={pos_rows_count}"
