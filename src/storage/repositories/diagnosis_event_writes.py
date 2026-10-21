@@ -1,4 +1,4 @@
-"诊断会话与报告共用的事件、声明归属及核对行保存"
+"诊断会话与报告共用的事件、包含关系及核对记录保存"
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from src.storage.models import (
     DIAGNOSIS_ROLES,
     Agent,
     CompleteEvent,
-    EventDeclarationBinding,
-    GraphFact,
     NarrativeLink,
     OrganizationCheck,
     SourceEvidence,
@@ -25,10 +23,10 @@ from src.storage.repositories.queries import event_trees_organization as _org_qu
 
 
 def _run_foreshadowing_actions(session, run_id):
-    declarations = smap.run_declaration_ids(session, run_id)
+    annotation_events = smap.run_annotation_event_ids(session, run_id)
     return (
-        list(_org_queries.event_trees_organization_run_foreshadowing_actions_1(session, declarations))
-        if declarations
+        list(_org_queries.event_trees_organization_run_foreshadowing_actions_1(session, annotation_events))
+        if annotation_events
         else []
     )
 
@@ -40,38 +38,35 @@ def _key(session, model, primary_key, **identity):
     return str(row_id) if row_id is not None else new_id()
 
 
-def _write_evidence_rows_once(session: Session, owner: dict[str, Any], evidence: list[Any]) -> None:
-    """证据行不重复写入：同一所有者已有证据时整批跳过（会话保存与报告保存共用）"""
-    if not evidence:
-        return
+def _write_evidence_rows_once(
+    session: Session, owner: dict[str, Any], evidence: list[Any], *, existing: bool = False
+) -> None:
+    "同一所有者重投时核对完整有序证据"
     column, target = next(iter(owner.items()))
-    existing = session.scalar(
-        select(SourceEvidence.evidence_id).where(getattr(SourceEvidence, column) == target).limit(1)
-    )
-    if existing is None:
+    rows = smap.fetch_evidence(session, getattr(SourceEvidence, column), [target]).get(target, [])
+    if rows or existing:
+        actual = [(row.paragraph_id, row.start_char, row.end_char, row.related_complete_event_id) for row in rows]
+        incoming = [
+            ref if isinstance(ref, dict) else vars(ref) if not hasattr(ref, "model_dump") else ref.model_dump()
+            for ref in evidence
+        ]
+        wanted = [
+            (ref["paragraph_id"], ref.get("char_start", 0), ref["char_end"], ref.get("event_id")) for ref in incoming
+        ]
+        if actual != wanted:
+            raise ValueError(f"已保存证据与重投内容不一致: {column}={target}")
+    else:
         _write_evidence_rows(session, owner, evidence)
 
 
-def _save_bindings(session: Session, run_id: str, events: Any) -> dict[str, str]:
-    "保存全部声明归属，拒绝跨运行和身份冲突"
-    declarations = smap.run_declaration_ids(session, run_id)
-    bindings: dict[str, str] = {}
-    for item in events:
-        for declaration_id in item.declaration_ids:
-            if declaration_id not in declarations:
-                raise ValueError("事件来源声明不属于本运行")
-            previous = session.scalar(
-                select(EventDeclarationBinding).where(EventDeclarationBinding.declaration_id == declaration_id)
-            )
-            if previous is not None and previous.event_id != item.event_id:
-                raise ValueError("声明已归属其他完整事件")
-            if declaration_id in bindings and bindings[declaration_id] != item.event_id:
-                raise ValueError("声明不能同时归属两个完整事件")
-            bindings[declaration_id] = item.event_id
-            if previous is None:
-                session.add(EventDeclarationBinding(event_id=item.event_id, declaration_id=declaration_id))
-    session.flush()
-    return bindings
+def _existing_matches(session: Session, model: Any, identifier: str, expected: dict[str, Any]) -> bool:
+    "同一身份的已保存内容必须与重投字段一致"
+    row = session.get(model, identifier)
+    if row is None:
+        return False
+    if any(getattr(row, field) != value for field, value in expected.items()):
+        raise ValueError(f"已保存组织记录与重投内容不一致: {identifier}")
+    return True
 
 
 def _diagnosis_execution_ids(session: Session, run_id: str) -> list[str]:
@@ -89,18 +84,15 @@ def _referenced_event_ids(draft: Any, owned: set[str]) -> set[str]:
     owned_events = [item for item in draft.events.values() if item.producer_agent_id in owned]
     owned_containments = [item for item in draft.containments.values() if item.producer_agent_id in owned]
     owned_relations = [item for item in draft.relations.values() if item.producer_agent_id in owned]
-    owned_comparisons = [item for item in draft.declaration_comparisons.values() if item.producer_agent_id in owned]
     owned_structure_reviews = [item for item in draft.structure_reviews.values() if item.producer_agent_id in owned]
-    referenced: set[str] = {
-        item.event_id for item in draft.reviewed_events.values() if item.producer_agent_id in owned
-    }
+    referenced: set[str] = {item.event_id for item in draft.reviewed_events.values() if item.producer_agent_id in owned}
     for edge in owned_containments:
         referenced.update((edge.parent_event_id, edge.child_event_id))
     for relation in owned_relations:
         referenced.update((relation.source_id, relation.target_id))
     for review in owned_structure_reviews:
         referenced.update((review.source_event_id, review.target_event_id))
-    for records in (owned_events, owned_containments, owned_relations, owned_comparisons, owned_structure_reviews):
+    for records in (owned_events, owned_containments, owned_relations, owned_structure_reviews):
         referenced.update(_evidence_event_refs(records))
     return referenced
 
@@ -132,14 +124,43 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
     if events:
         for item in events:
             if item.event_id in existing:
+                smap.assert_event_matches(
+                    session,
+                    item.event_id,
+                    {
+                        field: getattr(item, field)
+                        for field in (
+                            "producer_agent_id",
+                            "local_key",
+                            "annotation_record_id",
+                            "from_chapter_id",
+                            "to_chapter_id",
+                            "reason",
+                            "title",
+                            "problem",
+                            "summary",
+                            "event_type",
+                            "status",
+                            "progress",
+                            "is_foreshadowing_root",
+                            "payoff_likelihood",
+                        )
+                    },
+                    item.evidence,
+                )
                 continue
             session.add(
                 CompleteEvent(
                     event_id=item.event_id,
                     producer_agent_id=item.producer_agent_id,
                     local_key=item.local_key,
-                    identity_reason=item.reason,
                     title=item.title,
+                    reason=item.reason,
+                    annotation_record_id=item.annotation_record_id,
+                    from_chapter_id=item.from_chapter_id,
+                    to_chapter_id=item.to_chapter_id,
+                    is_foreshadowing_root=item.is_foreshadowing_root,
+                    payoff_likelihood=item.payoff_likelihood,
                     problem=item.problem,
                     summary=item.summary,
                     event_type=item.event_type,
@@ -148,8 +169,6 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
                 )
             )
             _write_evidence_rows_once(session, {"complete_event_id": item.event_id}, item.evidence)
-        session.flush()
-        _save_bindings(session, run_id, events)
         session.flush()
     for edge in draft.containments.values():
         if edge.producer_agent_id not in owned:
@@ -161,7 +180,18 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
             contained_parent_id=edge.parent_event_id,
             contained_child_id=edge.child_event_id,
         )
-        if session.get(NarrativeLink, link_id) is not None:
+        if _existing_matches(
+            session,
+            NarrativeLink,
+            link_id,
+            {
+                "producer_agent_id": edge.producer_agent_id,
+                "reason": edge.reason,
+                "contained_child_id": edge.child_event_id,
+                "contained_parent_id": edge.parent_event_id,
+            },
+        ):
+            _write_evidence_rows_once(session, {"narrative_link_id": link_id}, edge.evidence, existing=True)
             continue
         session.add(
             NarrativeLink(
@@ -176,7 +206,23 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
     for relation in draft.relations.values():
         if relation.producer_agent_id not in owned:
             continue
-        if session.get(NarrativeLink, relation.relation_id) is not None:
+        if _existing_matches(
+            session,
+            NarrativeLink,
+            relation.relation_id,
+            {
+                "producer_agent_id": relation.producer_agent_id,
+                "reason": relation.reason,
+                "semantic_source_event_id": relation.source_id,
+                "semantic_target_event_id": relation.target_id,
+                "relation_type": relation.relation_type,
+                "source_operation_local_key": relation.source_operation_id,
+                "is_active": relation.is_active,
+            },
+        ):
+            _write_evidence_rows_once(
+                session, {"narrative_link_id": relation.relation_id}, relation.evidence, existing=True
+            )
             continue
         session.add(
             NarrativeLink(
@@ -187,7 +233,7 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
                 semantic_target_event_id=relation.target_id,
                 relation_type=relation.relation_type,
                 source_operation_local_key=relation.source_operation_id,
-                is_active=True,
+                is_active=relation.is_active,
             )
         )
         _write_evidence_rows_once(session, {"narrative_link_id": relation.relation_id}, relation.evidence)
@@ -197,12 +243,22 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
 
 
 def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
-    """会话产出的四类核对行（单事件/单声明/声明对/事件对）；已存在不改写"""
+    """会话产出的单事件核对与事件结构对判断"""
     for event_review in draft.reviewed_events.values():
         if event_review.producer_agent_id not in owned:
             continue
         check_id = _key(session, OrganizationCheck, "check_id", reviewed_event_id=event_review.event_id)
-        if session.get(OrganizationCheck, check_id) is not None:
+        if _existing_matches(
+            session,
+            OrganizationCheck,
+            check_id,
+            {
+                "producer_agent_id": event_review.producer_agent_id,
+                "reason": event_review.reason,
+                "reviewed_event_id": event_review.event_id,
+                "snapshot_hash": event_review.snapshot_hash,
+            },
+        ):
             continue
         session.add(
             OrganizationCheck(
@@ -213,47 +269,6 @@ def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
                 snapshot_hash=event_review.snapshot_hash,
             )
         )
-    for declaration_review in draft.declaration_reviews.values():
-        if declaration_review.producer_agent_id not in owned:
-            continue
-        check_id = _key(
-            session, OrganizationCheck, "check_id", reviewed_declaration_id=declaration_review.declaration_id
-        )
-        if session.get(OrganizationCheck, check_id) is not None:
-            continue
-        session.add(
-            OrganizationCheck(
-                check_id=check_id,
-                producer_agent_id=declaration_review.producer_agent_id,
-                reason=declaration_review.reason,
-                reviewed_declaration_id=declaration_review.declaration_id,
-                snapshot_hash=declaration_review.source_hash,
-            )
-        )
-    for comparison in draft.declaration_comparisons.values():
-        if comparison.producer_agent_id not in owned:
-            continue
-        for target_id in comparison.target_declaration_ids:
-            check_id = _key(
-                session,
-                OrganizationCheck,
-                "check_id",
-                source_declaration_id=comparison.source_declaration_id,
-                target_declaration_id=target_id,
-            )
-            if session.get(OrganizationCheck, check_id) is not None:
-                continue
-            session.add(
-                OrganizationCheck(
-                    check_id=check_id,
-                    producer_agent_id=comparison.producer_agent_id,
-                    reason=comparison.reason,
-                    source_declaration_id=comparison.source_declaration_id,
-                    target_declaration_id=target_id,
-                    disposition=comparison.disposition,
-                )
-            )
-            _write_evidence_rows_once(session, {"check_id": check_id}, comparison.evidence)
     for structure_review in draft.structure_reviews.values():
         if structure_review.producer_agent_id not in owned:
             continue
@@ -264,7 +279,20 @@ def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
             source_event_id=structure_review.source_event_id,
             target_event_id=structure_review.target_event_id,
         )
-        if session.get(OrganizationCheck, check_id) is not None:
+        if _existing_matches(
+            session,
+            OrganizationCheck,
+            check_id,
+            {
+                "producer_agent_id": structure_review.producer_agent_id,
+                "reason": structure_review.reason,
+                "source_event_id": structure_review.source_event_id,
+                "target_event_id": structure_review.target_event_id,
+                "disposition": structure_review.disposition,
+                "snapshot_hash": structure_review.snapshot_hash,
+            },
+        ):
+            _write_evidence_rows_once(session, {"check_id": check_id}, structure_review.evidence, existing=True)
             continue
         session.add(
             OrganizationCheck(
@@ -289,7 +317,7 @@ def _session_executions(session: Session, agent_id: str) -> list[str]:
 
 
 def save_diagnosis_events(session: Session, run_id: str, organization: Any, report_id: str) -> None:
-    """只绑定本次原始来源，不更新旧结果、不在保存事务里推断语义"""
+    """保存事件与组织贡献，重投时核对不可变内容"""
     agent_id = organization.source_agent_id
     if not agent_id:
         raise ValueError("事件保存缺少真实诊断会话身份")
@@ -308,13 +336,42 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
     )
     for item in organization.events:
         if item.event_id in existing_events:
+            smap.assert_event_matches(
+                session,
+                item.event_id,
+                {
+                    field: getattr(item, field)
+                    for field in (
+                        "producer_agent_id",
+                        "local_key",
+                        "annotation_record_id",
+                        "from_chapter_id",
+                        "to_chapter_id",
+                        "reason",
+                        "title",
+                        "problem",
+                        "summary",
+                        "event_type",
+                        "status",
+                        "progress",
+                        "is_foreshadowing_root",
+                        "payoff_likelihood",
+                    )
+                },
+                item.evidence,
+            )
             continue
         session.add(
             CompleteEvent(
                 event_id=item.event_id,
                 producer_agent_id=item.producer_agent_id,
                 local_key=item.local_key,
-                identity_reason=item.reason,
+                annotation_record_id=item.annotation_record_id,
+                from_chapter_id=item.from_chapter_id,
+                to_chapter_id=item.to_chapter_id,
+                is_foreshadowing_root=item.is_foreshadowing_root,
+                payoff_likelihood=item.payoff_likelihood,
+                reason=item.reason,
                 title=item.title,
                 problem=item.problem,
                 summary=item.summary,
@@ -324,9 +381,7 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
             )
         )
         _write_evidence_rows_once(session, {"complete_event_id": item.event_id}, item.evidence)
-    # 完整事件先落库，供声明归属的 event_id 外键引用
-    session.flush()
-    bindings = _save_bindings(session, run_id, organization.events)
+    # 完整事件先落库，供事件归属的 event_id 外键引用
     session.flush()
     for edge in organization.containments:
         link_id = _key(
@@ -336,7 +391,18 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
             contained_parent_id=edge.parent_event_id,
             contained_child_id=edge.child_event_id,
         )
-        if session.get(NarrativeLink, link_id) is not None:
+        if _existing_matches(
+            session,
+            NarrativeLink,
+            link_id,
+            {
+                "producer_agent_id": edge.producer_agent_id,
+                "reason": edge.reason,
+                "contained_child_id": edge.child_event_id,
+                "contained_parent_id": edge.parent_event_id,
+            },
+        ):
+            _write_evidence_rows_once(session, {"narrative_link_id": link_id}, edge.evidence, existing=True)
             continue
         session.add(
             NarrativeLink(
@@ -349,7 +415,23 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
         )
         _write_evidence_rows_once(session, {"narrative_link_id": link_id}, edge.evidence)
     for relation in organization.relations:
-        if session.get(NarrativeLink, relation.relation_id) is not None:
+        if _existing_matches(
+            session,
+            NarrativeLink,
+            relation.relation_id,
+            {
+                "producer_agent_id": relation.producer_agent_id,
+                "reason": relation.reason,
+                "semantic_source_event_id": relation.source_id,
+                "semantic_target_event_id": relation.target_id,
+                "relation_type": relation.relation_type,
+                "source_operation_local_key": relation.source_operation_id,
+                "is_active": relation.is_active,
+            },
+        ):
+            _write_evidence_rows_once(
+                session, {"narrative_link_id": relation.relation_id}, relation.evidence, existing=True
+            )
             continue
         session.add(
             NarrativeLink(
@@ -361,14 +443,12 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
                 relation_type=relation.relation_type,
                 source_operation_local_key=relation.source_operation_id,
                 # 新断言的真实活动状态；原始断言存在性不由本表重复表达
-                is_active=True,
+                is_active=relation.is_active,
             )
         )
         _write_evidence_rows_once(session, {"narrative_link_id": relation.relation_id}, relation.evidence)
     session.flush()
     _save_reviews(session, organization)
-    _assert_foreshadowing_bound(session, run_id, bindings)
-    _assert_fact_declarations_bound(session, agent_id, bindings)
     session.flush()
 
 
@@ -376,7 +456,17 @@ def _save_reviews(session: Session, organization: Any) -> None:
     """组织核对逐对象/逐对落库；同一对象只接受一个被接受判断；已存在的行不改写"""
     for event_review in organization.reviewed_events:
         check_id = _key(session, OrganizationCheck, "check_id", reviewed_event_id=event_review.event_id)
-        if session.get(OrganizationCheck, check_id) is not None:
+        if _existing_matches(
+            session,
+            OrganizationCheck,
+            check_id,
+            {
+                "producer_agent_id": event_review.producer_agent_id,
+                "reason": event_review.reason,
+                "reviewed_event_id": event_review.event_id,
+                "snapshot_hash": event_review.snapshot_hash,
+            },
+        ):
             continue
         session.add(
             OrganizationCheck(
@@ -387,43 +477,6 @@ def _save_reviews(session: Session, organization: Any) -> None:
                 snapshot_hash=event_review.snapshot_hash,
             )
         )
-    for declaration_review in organization.declaration_reviews:
-        check_id = _key(
-            session, OrganizationCheck, "check_id", reviewed_declaration_id=declaration_review.declaration_id
-        )
-        if session.get(OrganizationCheck, check_id) is not None:
-            continue
-        session.add(
-            OrganizationCheck(
-                check_id=check_id,
-                producer_agent_id=declaration_review.producer_agent_id,
-                reason=declaration_review.reason,
-                reviewed_declaration_id=declaration_review.declaration_id,
-                snapshot_hash=declaration_review.source_hash,
-            )
-        )
-    for comparison in organization.declaration_comparisons:
-        for target_id in comparison.target_declaration_ids:
-            check_id = _key(
-                session,
-                OrganizationCheck,
-                "check_id",
-                source_declaration_id=comparison.source_declaration_id,
-                target_declaration_id=target_id,
-            )
-            if session.get(OrganizationCheck, check_id) is not None:
-                continue
-            session.add(
-                OrganizationCheck(
-                    check_id=check_id,
-                    producer_agent_id=comparison.producer_agent_id,
-                    reason=comparison.reason,
-                    source_declaration_id=comparison.source_declaration_id,
-                    target_declaration_id=target_id,
-                    disposition=comparison.disposition,
-                )
-            )
-            _write_evidence_rows_once(session, {"check_id": check_id}, comparison.evidence)
     for structure_review in organization.structure_reviews:
         check_id = _key(
             session,
@@ -432,7 +485,20 @@ def _save_reviews(session: Session, organization: Any) -> None:
             source_event_id=structure_review.source_event_id,
             target_event_id=structure_review.target_event_id,
         )
-        if session.get(OrganizationCheck, check_id) is not None:
+        if _existing_matches(
+            session,
+            OrganizationCheck,
+            check_id,
+            {
+                "producer_agent_id": structure_review.producer_agent_id,
+                "reason": structure_review.reason,
+                "source_event_id": structure_review.source_event_id,
+                "target_event_id": structure_review.target_event_id,
+                "disposition": structure_review.disposition,
+                "snapshot_hash": structure_review.snapshot_hash,
+            },
+        ):
+            _write_evidence_rows_once(session, {"check_id": check_id}, structure_review.evidence, existing=True)
             continue
         session.add(
             OrganizationCheck(
@@ -447,29 +513,3 @@ def _save_reviews(session: Session, organization: Any) -> None:
         )
         _write_evidence_rows_once(session, {"check_id": check_id}, structure_review.evidence)
     session.flush()
-
-
-def _assert_foreshadowing_bound(session: Session, run_id: str, bindings: dict[str, str]) -> None:
-    """伏笔动作的来源/目标声明必须取得正式事件身份，未绑定前保留声明身份不回填"""
-    for action in _run_foreshadowing_actions(session, run_id):
-        if action.source_declaration_id not in bindings:
-            raise ValueError("伏笔来源未得到完整事件身份确认")
-        if action.target_declaration_id is not None and action.target_declaration_id not in bindings:
-            raise ValueError("伏笔来源未得到完整事件身份确认")
-
-
-def _assert_fact_declarations_bound(session: Session, agent_id: str, bindings: dict[str, str]) -> None:
-    """情节推进经声明引用取得正式事件；没有绑定的声明不能被伪装成正式事件"""
-    executions = _session_executions(session, agent_id)
-    if not executions:
-        return
-    declarations = set(
-        session.scalars(
-            select(GraphFact.declaration_id).where(
-                GraphFact.direct_producer_agent_id.in_(executions),
-                GraphFact.declaration_id.is_not(None),
-            )
-        )
-    )
-    if declarations - set(bindings):
-        raise ValueError("情节推进来源未得到完整事件身份确认")

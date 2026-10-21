@@ -14,8 +14,6 @@ from src.storage.models import (
     ChapterAnnotation,
     CompleteEvent,
     DialogueRecord,
-    EventDeclaration,
-    EventDeclarationBinding,
     Paragraph,
     SourceEvidence,
 )
@@ -28,11 +26,11 @@ def run_execution_ids(run_id: str) -> Select:
     return select(Agent.id).where(or_(Agent.run_id == run_id, Agent.run_id == run_id))
 
 
-def run_declaration_ids(session: Session, run_id: str) -> set[str]:
-    "本 run 的章级声明：记录自身带运行归属"
+def run_annotation_event_ids(session: Session, run_id: str) -> set[str]:
+    "本 run 的章级事件：记录自身带运行归属"
     stmt = (
-        select(EventDeclaration.declaration_id)
-        .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+        select(CompleteEvent.event_id)
+        .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
         .where(ChapterAnnotation.run_id == run_id)
     )
     return set(session.scalars(stmt))
@@ -44,8 +42,8 @@ def run_events(session: Session, run_id: str) -> dict[str, CompleteEvent]:
     return {row.event_id: row for row in session.scalars(stmt)}
 
 
-def declaration_sources(session: Session, record_ids: set[str]) -> dict[str, NamedRecord]:
-    "声明的来源章节：记录自身的章归属与 chapters，返回 record_id→(章号, 章序)"
+def annotation_sources(session: Session, record_ids: set[str]) -> dict[str, NamedRecord]:
+    "事件的来源章节：记录自身的章归属与 chapters，返回 record_id→(章号, 章序)"
     if not record_ids:
         return {}
     rows = session.execute(
@@ -61,8 +59,8 @@ def declaration_sources(session: Session, record_ids: set[str]) -> dict[str, Nam
     }
 
 
-def declaration_record_source(session: Session, record_id: str) -> NamedRecord | None:
-    "声明来源记录的真实上下文：执行号、run_id、章号、章序（不存在返回 None）"
+def annotation_record_source(session: Session, record_id: str) -> NamedRecord | None:
+    "事件来源记录的真实上下文：执行号、run_id、章号、章序（不存在返回 None）"
     row = session.execute(
         select(ChapterAnnotation.agent_id, ChapterAnnotation.run_id, ChapterAnnotation.chapter_id, Chapter.sequence)
         .join(
@@ -264,12 +262,33 @@ def write_evidence_rows(session: Session, owner: dict[str, Any], evidence: list[
         )
 
 
-def declaration_bindings(session: Session, event_ids: list[str]) -> dict[str, list[EventDeclarationBinding]]:
-    "按完整事件返回全部声明归属"
-    grouped: dict[str, list[EventDeclarationBinding]] = {}
-    if event_ids:
-        for row in session.scalars(
-            select(EventDeclarationBinding).where(EventDeclarationBinding.event_id.in_(event_ids))
-        ):
-            grouped.setdefault(row.event_id, []).append(row)
-    return grouped
+def validate_event_range(
+    session: Session, run_id: str, from_chapter_id: int, to_chapter_id: int, visible_through: int | None = None
+) -> None:
+    "校验同运行真实起止章节与可见章序"
+    rows = session.scalars(
+        select(Chapter).where(Chapter.run_id == run_id, Chapter.chapter_id.in_({from_chapter_id, to_chapter_id}))
+    )
+    chapters = {row.chapter_id: row for row in rows}
+    if set(chapters) != {from_chapter_id, to_chapter_id}:
+        raise ValueError("事件起止章节不属于本运行")
+    if chapters[from_chapter_id].sequence > chapters[to_chapter_id].sequence:
+        raise ValueError("事件起止章节顺序倒置")
+    if visible_through is not None and chapters[to_chapter_id].sequence > visible_through:
+        raise ValueError("事件终点章节晚于当前可见章节")
+
+
+def assert_event_matches(session: Session, event_id: str, expected: dict[str, Any], evidence: list[Any]) -> None:
+    "已保存事件正文、范围、生产者和有序证据必须与冻结贡献完全一致"
+    row = session.get(CompleteEvent, event_id)
+    if row is None or any(getattr(row, field) != value for field, value in expected.items()):
+        raise ValueError(f"事件身份与冻结内容不一致: {event_id}")
+    refs = fetch_evidence(session, SourceEvidence.complete_event_id, [event_id]).get(event_id, [])
+    incoming = [
+        item if isinstance(item, dict) else item.model_dump() if hasattr(item, "model_dump") else vars(item)
+        for item in evidence
+    ]
+    actual = [(ref.paragraph_id, ref.start_char, ref.end_char, ref.related_complete_event_id) for ref in refs]
+    wanted = [(ref["paragraph_id"], ref.get("char_start", 0), ref["char_end"], ref.get("event_id")) for ref in incoming]
+    if actual != wanted:
+        raise ValueError(f"事件原文证据与冻结贡献不一致: {event_id}")

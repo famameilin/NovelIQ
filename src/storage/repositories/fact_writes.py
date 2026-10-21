@@ -122,7 +122,7 @@ class FactWriter:
                 operation_order=index,
                 effective_chapter_id=effective_chapter_id,
                 business_call_id=str(item["source_operation_id"]),
-                declaration_id=item.get("event_id"),
+                event_id=item.get("event_id"),
                 plotline_subject_id=str(operation["subject_id"]),
                 plotline_subject_title=str(operation["subject_title"]),
                 plotline_description=str(operation["description"]),
@@ -183,16 +183,16 @@ class FactWriter:
     def discard_storage(self, session: Any, execution_ids: set[str]) -> None:
         from sqlalchemy import delete, select
 
-        from src.storage.models import ChapterAnnotation, DeclarationParticipant, EventDeclaration, GraphFact
+        from src.storage.models import ChapterAnnotation, CompleteEvent, EventParticipant, GraphFact
 
         ordered = sorted(execution_ids)
         session.execute(delete(GraphFact).where(GraphFact.direct_producer_agent_id.in_(ordered)))
         session.execute(
             delete(GraphFact).where(
                 GraphFact.participant_id.in_(
-                    select(DeclarationParticipant.participant_id)
-                    .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
-                    .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+                    select(EventParticipant.participant_id)
+                    .join(CompleteEvent, CompleteEvent.event_id == EventParticipant.event_id)
+                    .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
                     .where(ChapterAnnotation.agent_id.in_(ordered))
                 )
             )

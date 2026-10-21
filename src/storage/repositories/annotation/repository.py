@@ -8,9 +8,9 @@ from src.storage.models import (
     Agent,
     Chapter,
     ChapterAnnotation,
-    DeclarationParticipant,
+    CompleteEvent,
     DialogueRecord,
-    EventDeclaration,
+    EventParticipant,
     GraphEntity,
     GraphFact,
     NarrativeLink,
@@ -143,23 +143,23 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
             for record, _sequence, content in self.session.execute(statement).all()
         ]
 
-    def _declaration_statement(self, run_id: str) -> Select:
-        "本运行的章级声明：记录自身带运行归属（agent_annotations.run_id）"
+    def _annotation_event_statement(self, run_id: str) -> Select:
+        "本运行的章级事件：记录自身带运行归属（agent_annotations.run_id）"
         return (
-            select(EventDeclaration)
-            .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+            select(CompleteEvent)
+            .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
             .where(ChapterAnnotation.run_id == run_id)
         )
 
-    def fetch_foreshadowing_roots(self, run_id: str, *, ordered: bool = False) -> list[EventDeclaration]:
-        statement = self._declaration_statement(run_id).where(EventDeclaration.is_foreshadowing_root.is_(True))
+    def fetch_foreshadowing_roots(self, run_id: str, *, ordered: bool = False) -> list[CompleteEvent]:
+        statement = self._annotation_event_statement(run_id).where(CompleteEvent.is_foreshadowing_root.is_(True))
         if ordered:
             statement = statement.join(
                 Chapter,
                 (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
-            ).order_by(Chapter.sequence, EventDeclaration.declaration_id)
+            ).order_by(Chapter.sequence, CompleteEvent.event_id)
         else:
-            statement = statement.order_by(EventDeclaration.declaration_id)
+            statement = statement.order_by(CompleteEvent.event_id)
         return list(self.session.scalars(statement))
 
     def _semantic_foreshadowing_links(self, run_id: str) -> list[NarrativeLink]:
@@ -225,14 +225,14 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
             )
         return rows
 
-    def fetch_event_records(self, run_id: str, event_ids: set[str]) -> list[EventDeclaration]:
+    def fetch_event_records(self, run_id: str, event_ids: set[str]) -> list[CompleteEvent]:
         if not event_ids:
             return []
         return list(
             self.session.scalars(
-                self._declaration_statement(run_id)
-                .where(EventDeclaration.declaration_id.in_(event_ids))
-                .order_by(EventDeclaration.declaration_id)
+                self._annotation_event_statement(run_id)
+                .where(CompleteEvent.event_id.in_(event_ids))
+                .order_by(CompleteEvent.event_id)
             )
         )
 
@@ -269,8 +269,8 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         elif shape == "participant":
             shape_filter = GraphFact.participant_id.is_not(None)
             producer_filter = GraphFact.participant_id.in_(
-                select(DeclarationParticipant.participant_id).where(
-                    DeclarationParticipant.declaration_id.in_(self._run_declaration_ids(run_id))
+                select(EventParticipant.participant_id).where(
+                    EventParticipant.event_id.in_(self._run_annotation_event_ids(run_id))
                 )
             )
         else:
@@ -301,32 +301,32 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
             return self._attach_participant_observations(run_id, rows)
         return rows
 
-    def _run_declaration_ids(self, run_id: str):
-        "本运行章级声明的 id 选择器（记录自身带运行归属）"
+    def _run_annotation_event_ids(self, run_id: str):
+        "本运行章级事件的 id 选择器（记录自身带运行归属）"
         return (
-            select(EventDeclaration.declaration_id)
-            .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+            select(CompleteEvent.event_id)
+            .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
             .where(ChapterAnnotation.run_id == run_id)
         )
 
     def _attach_participant_observations(self, run_id: str, rows: list[GraphFactRow]) -> list[GraphFactRow]:
-        "人物动态观测：实体/角色/动作/情绪从声明的参与者行读取（不复制三态值）"
+        "人物动态观测：实体/角色/动作/情绪从事件的参与者行读取（不复制三态值）"
         participant_ids = [row.fact.participant_id for row in rows if row.fact.participant_id is not None]
         if not participant_ids:
             return rows
         participant_statement = (
             select(
-                DeclarationParticipant.participant_id,
-                DeclarationParticipant.entity_id,
+                EventParticipant.participant_id,
+                EventParticipant.entity_id,
                 GraphEntity.canonical_name,
                 GraphEntity.entity_type,
-                DeclarationParticipant.role,
-                DeclarationParticipant.narrative_role,
-                DeclarationParticipant.action,
-                DeclarationParticipant.emotion,
+                EventParticipant.role,
+                EventParticipant.narrative_role,
+                EventParticipant.action,
+                EventParticipant.emotion,
             )
-            .join(GraphEntity, GraphEntity.entity_id == DeclarationParticipant.entity_id)
-            .where(DeclarationParticipant.participant_id.in_(participant_ids))
+            .join(GraphEntity, GraphEntity.entity_id == EventParticipant.entity_id)
+            .where(EventParticipant.participant_id.in_(participant_ids))
         )
         participants = {str(row.participant_id): row for row in self.session.execute(participant_statement).all()}
         chapter_by_participant = self._participant_chapter_ids(run_id, set(participants))
@@ -355,15 +355,15 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         return result
 
     def _participant_chapter_ids(self, run_id: str, participant_ids: set[str]) -> dict[str, int]:
-        "参与者所属章节：声明→来源记录（记录自身带运行归属），不按当前章替代"
+        "参与者所属章节：事件→来源记录（记录自身带运行归属），不按当前章替代"
         if not participant_ids:
             return {}
         statement = (
-            select(DeclarationParticipant.participant_id, ChapterAnnotation.chapter_id)
-            .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
-            .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+            select(EventParticipant.participant_id, ChapterAnnotation.chapter_id)
+            .join(CompleteEvent, CompleteEvent.event_id == EventParticipant.event_id)
+            .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
             .where(
-                DeclarationParticipant.participant_id.in_(list(participant_ids)),
+                EventParticipant.participant_id.in_(list(participant_ids)),
                 ChapterAnnotation.run_id == run_id,
             )
         )

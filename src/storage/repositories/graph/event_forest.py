@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from src.storage.models import (
     Chapter,
     ChapterAnnotation,
-    EventDeclaration,
+    CompleteEvent,
     NarrativeLink,
 )
 from src.storage.repositories.narrative_records import run_execution_ids
@@ -42,25 +42,25 @@ class EventForestRecords:
         return list(self.session.execute(stmt).all())
 
     def fetch_nodes(self, run_id: str, max_chapter_order: int):
-        "本 run 在阅读截点内的章级声明，按章序与声明身份稳定排序"
+        "本 run 在阅读截点内的章级事件，按章序与事件身份稳定排序"
         stmt = (
             select(
-                EventDeclaration.declaration_id.label("event_id"),
-                EventDeclaration.declaration_id,
-                EventDeclaration.record_id,
-                EventDeclaration.local_key,
-                EventDeclaration.title,
-                EventDeclaration.problem,
-                EventDeclaration.summary,
-                EventDeclaration.event_type,
-                EventDeclaration.status,
-                EventDeclaration.progress,
-                EventDeclaration.is_foreshadowing_root,
-                EventDeclaration.payoff_likelihood,
+                CompleteEvent.event_id.label("event_id"),
+                CompleteEvent.event_id,
+                CompleteEvent.annotation_record_id,
+                CompleteEvent.local_key,
+                CompleteEvent.title,
+                CompleteEvent.problem,
+                CompleteEvent.summary,
+                CompleteEvent.event_type,
+                CompleteEvent.status,
+                CompleteEvent.progress,
+                CompleteEvent.is_foreshadowing_root,
+                CompleteEvent.payoff_likelihood,
                 ChapterAnnotation.chapter_id.label("chapter_id"),
                 Chapter.sequence.label("chapter_order"),
             )
-            .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+            .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
             .join(
                 Chapter,
                 (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
@@ -69,7 +69,7 @@ class EventForestRecords:
                 ChapterAnnotation.run_id == run_id,
                 Chapter.sequence <= max_chapter_order,
             )
-            .order_by(Chapter.sequence, EventDeclaration.declaration_id)
+            .order_by(Chapter.sequence, CompleteEvent.event_id)
         )
         return list(self.session.execute(stmt).all())
 
@@ -131,28 +131,33 @@ class EventForestRecords:
     def fetch_foreshadow_roots(self, run_id: str, chapter_ids: set[int]):
         rows = list(
             self.session.scalars(
-                select(EventDeclaration)
-                .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+                select(CompleteEvent)
+                .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
                 .join(
                     Chapter,
                     (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
                 )
                 .where(
                     ChapterAnnotation.run_id == run_id,
-                    EventDeclaration.is_foreshadowing_root.is_(True),
+                    CompleteEvent.is_foreshadowing_root.is_(True),
                 )
-                .order_by(Chapter.sequence, EventDeclaration.declaration_id)
+                .order_by(Chapter.sequence, CompleteEvent.event_id)
             )
         )
         if not chapter_ids:
             return rows
-        return [row for row in rows if self._declaration_chapter(row.record_id) in chapter_ids]
+        return [
+            row
+            for row in rows
+            if row.annotation_record_id is not None
+            and self._annotation_event_chapter(row.annotation_record_id) in chapter_ids
+        ]
 
-    def _declaration_chapter(self, record_id: str) -> int | None:
+    def _annotation_event_chapter(self, record_id: str) -> int | None:
         return self.session.scalar(
             select(ChapterAnnotation.chapter_id).where(ChapterAnnotation.record_id == record_id).limit(1)
         )
 
     def fetch_foreshadow_edges(self, run_id: str):
-        "伏笔语义链路：来源/目标都必须是完整事件，声明身份不回填冒充"
+        "伏笔语义链路：来源/目标都必须是完整事件，事件身份不回填冒充"
         return self._semantic_links(run_id, relation_type="foreshadowing")
