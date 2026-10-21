@@ -5,7 +5,7 @@
 - 实体/关系状态按贡献顺序在读取侧折叠（不写第二份状态缓存；折叠口径与
   field/before/after 一致）
 - 原文证据按 paragraph_evidence 的 owner 序号读取，文本哈希从正式原文切片计算
-- 伏笔动作使用 event_trees.action_order 的正式读投影（声明绑定事件身份）
+- 伏笔动作使用 event_trees.action_order 的正式读投影（事件绑定事件身份）
 """
 
 from __future__ import annotations
@@ -48,7 +48,6 @@ class PlotlineQuery:
             for index, row in enumerate(rows)
         ]
         self.orders: dict[int, int] = {row["chapter_id"]: row["order"] for row in self.chapters}
-        self._declaration_events = self._fetch_declaration_event_bindings()
 
     def _cutoff(self, chapter_id: int | None) -> int:
         if chapter_id is None:
@@ -56,13 +55,6 @@ class PlotlineQuery:
         if chapter_id not in self.orders:
             raise ValueError(f"正文阅读章节不存在: {chapter_id}")
         return self.orders[chapter_id]
-
-    def _fetch_declaration_event_bindings(self) -> dict[str, str]:
-        """声明绑定的完整事件：由真实版本的声明分支与真实生产执行投影"""
-        return {
-            str(row.declaration_id): str(row.event_id)
-            for row in self.session.reads.final_metrics_queries_plotline_bindings(self.run_id)
-        }
 
     def _evidence_by_owner(self, owner_column, owner_ids: Sequence[int | str]) -> dict[str, list[dict[str, Any]]]:
         """按所有者读取有序原文证据；所有者身份是 uuid 或图谱事实流水（BIGINT）"""
@@ -132,7 +124,7 @@ class PlotlineQuery:
         """按贡献顺序折叠实体状态，产出每个事实的字段 before/after（旧状态缓存列的读投影）
 
         - 实体形状：description 与代表标记按 omit/set/clear 三态、标签按 tags_submitted 投影
-        - 人物观测形状：动作/情绪/叙事功能从声明的参与者行读取，保留贡献顺序
+        - 人物观测形状：动作/情绪/叙事功能从事件的参与者行读取，保留贡献顺序
         - 不生成变化的固定规则：同值、内部计数/类型/代表标记更新，以及描述与标签的首次登记
           （首次登记不是剧情推进；行为/情绪/叙事作用允许以空 before 首次出现）
         """
@@ -232,11 +224,11 @@ class PlotlineQuery:
             else:
                 dimension, subject = "plot", fact["plotline_subject_id"]
                 event_id: str | None = None
-                if fact.get("declaration_id") is not None:
+                if fact.get("event_id") is not None:
                     if self.organization_status != "ready":
                         continue
-                    event_id = self._declaration_events.get(str(fact["declaration_id"]))
-                    # 显式引用声明的事实按声明绑定投影正式事件；绑定缺失才是数据不一致
+                    event_id = str(fact["event_id"])
+                    # 显式引用事件的事实按事件绑定投影正式事件；绑定缺失才是数据不一致
                     if event_id is None:
                         raise ValueError(f"情节推进 {fact['graph_fact_id']} 未绑定正式事件")
                 name, title = fact.get("plotline_subject_title"), fact.get("plotline_description")
@@ -266,7 +258,7 @@ class PlotlineQuery:
             )
         actions = load_foreshadowing_actions(self.session, self.run_id) if self.organization_status == "ready" else []
         actions = [row for row in actions if row.chapter_id in chapter_ids]
-        # 正式伏笔端点已在发布事务绑定，读取时不再用声明寻找另一个 owner
+        # 正式伏笔端点已在发布事务绑定，读取时不再用事件寻找另一个 owner
         visible_events = {
             event_id
             for event_id, row in self.events.items()
@@ -285,7 +277,7 @@ class PlotlineQuery:
                     action_row.action_id,
                     "foreshadowing",
                     root.event_id,
-                    cast(str, root.title),
+                    root.title,
                     after,
                     cast(int, action_row.chapter_id),
                     before,

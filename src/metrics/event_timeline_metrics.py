@@ -167,7 +167,7 @@ def build_event_timeline_plan(
         out_degree_by_event[edge.source_event_id] = out_degree_by_event.get(edge.source_event_id, 0) + 1
         in_degree_by_event[edge.target_event_id] = in_degree_by_event.get(edge.target_event_id, 0) + 1
 
-    node_by_event_id: dict[str, Any] = {n.declaration_id: n for n in forest_snapshot.event_nodes}
+    node_by_event_id: dict[str, Any] = {n.event_id: n for n in forest_snapshot.event_nodes}
 
     raw_nodes: list[EventTimelineNodeDTO] = []
     scores: list[float] = []

@@ -216,7 +216,7 @@ class FactGraph:
                 plotline_ops.append(
                     {
                         "source_operation_id": str(row.business_call_id),
-                        "event_id": row.declaration_id,
+                        "event_id": row.event_id,
                         "operation": {
                             "subject_id": str(row.plotline_subject_id),
                             "subject_title": str(row.plotline_subject_title),
