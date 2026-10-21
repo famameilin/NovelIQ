@@ -15,6 +15,7 @@ import asyncio
 import random
 import time
 from collections import deque
+from typing import Any
 from uuid import uuid4
 
 from loguru import logger
@@ -28,6 +29,7 @@ class ModelCapacity:
 
     def __init__(self) -> None:
         self._reserved: dict[str, dict[str, str]] = {}
+        self._positions: dict[str, dict[str, Any]] = {}
 
     def snapshot(self) -> dict[str, int]:
         """各模型当前占用，供选举的空位过滤与「并发为空」判定"""
@@ -37,9 +39,17 @@ class ModelCapacity:
                 counts[model_id] = counts.get(model_id, 0) + 1
         return counts
 
-    def reserve(self, owner: str, reservation_id: str, model_id: str) -> None:
+    def reserve(self, owner: str, reservation_id: str, model_id: str, *, run_id: str = "", work_id: str = "") -> None:
         """派发选举成功即预留容量位（占用 +1）"""
+        if reservation_id in self._positions:
+            return
+        used = {item["slot"] for item in self._positions.values() if item["model_id"] == model_id}
+        slot = 0
+        while slot in used:
+            slot += 1
         self._reserved.setdefault(owner, {})[reservation_id] = model_id
+        self._positions[reservation_id] = {"owner": owner, "reservation_id": reservation_id,
+            "model_id": model_id, "slot": slot, "run_id": run_id, "work_id": work_id}
 
     def release(self, owner: str, reservation_id: str | None = None) -> int:
         """归还该归属的一笔或全部预留（幂等），返回归还笔数"""
@@ -48,9 +58,13 @@ class ModelCapacity:
             return 0
         if reservation_id is None:
             count = len(reservations)
+            for key in reservations:
+                self._positions.pop(key, None)
             del self._reserved[owner]
             return count
         removed = reservations.pop(reservation_id, None)
+        if removed is not None:
+            self._positions.pop(reservation_id, None)
         if not reservations:
             del self._reserved[owner]
         return 1 if removed is not None else 0
@@ -58,9 +72,25 @@ class ModelCapacity:
     def reset(self) -> None:
         """清空容量账本（测试隔离用）"""
         self._reserved.clear()
+        self._positions.clear()
+
+    def details(self) -> dict[str, Any]:
+        """只提供模型容量与位置事实，不读取业务输入"""
+        from src.config import settings
+
+        models = [{"model_id": item.model_id, "capacity": item.max_in_flight} for item in settings.models.model_pool]
+        return {"models": models, "seats": [{key: value for key, value in seat.items() if key != "owner"}
+                                             for seat in self._positions.values()]}
 
 
 MODEL_CAPACITY = ModelCapacity()
+
+
+async def publish_capacity(bus: EventBus, *, source: str = "model-capacity", run_id: str = "") -> None:
+    """发布容量账本的当前事实，不向业务层返回通知持久化错误"""
+    if bus.has_handler("analysis.capacity", "notifications"):
+        await bus.deliver(Message(topic="analysis.capacity", source=source, target="notifications",
+            run_id=run_id, payload=MODEL_CAPACITY.details()))
 
 
 class ModelElectionExhausted(RuntimeError):
@@ -129,6 +159,7 @@ class ModelElectionPool:
             return
         _, model_id = self.reservations.pop(message.work_id)
         MODEL_CAPACITY.release(self.address, reservation_id)
+        await self.notify_capacity()
         if message.payload["outcome"] == "retry":
             failures = self.failures.setdefault(message.work_id, {})
             failures[model_id] = failures.get(model_id, 0) + 1
@@ -185,7 +216,10 @@ class ModelElectionPool:
                         selection_error = exc
                 if model_id is not None:
                     reservation_id = uuid4().hex
-                    MODEL_CAPACITY.reserve(self.address, reservation_id, model_id)
+                    MODEL_CAPACITY.reserve(
+                        self.address, reservation_id, model_id, run_id=self.run_id, work_id=receipt.work_id
+                    )
+                    await self.notify_capacity()
                     self.reservations[receipt.work_id] = (reservation_id, model_id)
                     selected_attempt = attempts if resumed else attempts + 1
                     self.attempts[receipt.work_id] = selected_attempt
@@ -229,6 +263,9 @@ class ModelElectionPool:
                 await asyncio.wait_for(self._wake.wait(), self.poll_seconds)
             except TimeoutError:
                 pass
+
+    async def notify_capacity(self) -> None:
+        await publish_capacity(self.bus, source=self.address, run_id=self.run_id)
 
     def stop_elections(self) -> None:
         """停止产生新预留，已有执行的反馈仍可归还容量"""

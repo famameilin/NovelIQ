@@ -232,6 +232,7 @@ class ChapterWorkerPool:
             model_task.cancel()
             await asyncio.gather(assignment_task, model_task, return_exceptions=True)
             models.close()
+            await models.notify_capacity()
             bus.unsubscribe(models.assignment_topic, assignments)
             bus.unhandle("queue.started", address)
 
