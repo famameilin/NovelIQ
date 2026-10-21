@@ -10,30 +10,40 @@ from src.storage.repositories import narrative_records as _records
 
 @plain_inputs
 class NarrativeAccess:
+    def validate_event_range(
+        self, run_id: str, from_chapter_id: int, to_chapter_id: int, visible_through: int | None = None
+    ) -> None:
+        from src.storage.repositories.narrative_records import validate_event_range
+
+        return self._runner.run(
+            lambda session: validate_event_range(session, run_id, from_chapter_id, to_chapter_id, visible_through),
+            read_only=True,
+        )
+
     def __init__(self, runner):
         self._runner = runner
 
     def check_contribution(self, request) -> bool:
-        "在包内读取并核对声明关系与有序证据"
-        from src.storage.repositories.declaration_writes import check_declaration_contribution
+        "在包内读取并核对事件关系与有序证据"
+        from src.storage.repositories.event_contributions import check_annotation_event_contribution
 
-        return self._runner.run(lambda session: check_declaration_contribution(session, request), read_only=True)
+        return self._runner.run(lambda session: check_annotation_event_contribution(session, request), read_only=True)
 
-    def run_declaration_ids(self, run_id: Any) -> Any:
-        "本 run 的章级声明：记录自身带运行归属"
-        return self._runner.run(lambda session: _records.run_declaration_ids(session, run_id), read_only=True)
+    def run_annotation_event_ids(self, run_id: Any) -> Any:
+        "本 run 的章级事件：记录自身带运行归属"
+        return self._runner.run(lambda session: _records.run_annotation_event_ids(session, run_id), read_only=True)
 
     def run_events(self, run_id: Any) -> Any:
         "本 run 的完整事件：经真实生产执行取得运行归属"
         return self._runner.run(lambda session: _records.run_events(session, run_id), read_only=True)
 
-    def declaration_sources(self, record_ids: Any) -> Any:
-        "声明的来源章节：记录自身的章归属与 chapters，返回 record_id→(章号, 章序)"
-        return self._runner.run(lambda session: _records.declaration_sources(session, record_ids), read_only=True)
+    def annotation_sources(self, record_ids: Any) -> Any:
+        "事件的来源章节：记录自身的章归属与 chapters，返回 record_id→(章号, 章序)"
+        return self._runner.run(lambda session: _records.annotation_sources(session, record_ids), read_only=True)
 
-    def declaration_record_source(self, record_id: Any) -> Any:
-        "声明来源记录的真实上下文：执行号、run_id、章号、章序（不存在返回 None）"
-        return self._runner.run(lambda session: _records.declaration_record_source(session, record_id), read_only=True)
+    def annotation_record_source(self, record_id: Any) -> Any:
+        "事件来源记录的真实上下文：执行号、run_id、章号、章序（不存在返回 None）"
+        return self._runner.run(lambda session: _records.annotation_record_source(session, record_id), read_only=True)
 
     def dialogue_candidate_rows(self, run_id: Any) -> Any:
         "对话候选目录：按章序与候选键稳定排序，正文从所属章节区间投影"
@@ -83,13 +93,10 @@ class NarrativeAccess:
         "按所有者列批量读取证据行，返回 owner→有序证据"
         if owner_column not in {
             "graph_fact_id",
-            "declaration_id",
             "complete_event_id",
             "narrative_group_id",
             "narrative_link_id",
             "foreshadow_action_id",
-            "conflict_id",
-            "claim_id",
             "check_id",
         }:
             raise ValueError("无效的证据所有者类型")
@@ -101,10 +108,6 @@ class NarrativeAccess:
     def write_evidence_rows(self, owner: Any, evidence: Any) -> Any:
         "证据逐条按原顺序写入 paragraph_evidence；owner 恰一由目标表 CHECK 保证"
         return self._runner.run(lambda session: _records.write_evidence_rows(session, owner, evidence), read_only=False)
-
-    def declaration_bindings(self, event_ids: Any) -> Any:
-        "读取完整事件的全部声明归属"
-        return self._runner.run(lambda session: _records.declaration_bindings(session, event_ids), read_only=True)
 
     def execution_ids(self, run_id: str) -> list[str]:
         "本 run 的直接执行及整轮会话身份列表"

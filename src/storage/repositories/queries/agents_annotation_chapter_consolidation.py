@@ -9,9 +9,9 @@ from src.storage.models import (
     Case,
     Chapter,
     ChapterAnnotation,
-    DeclarationParticipant,
+    CompleteEvent,
     DialogueRecord,
-    EventDeclaration,
+    EventParticipant,
     GraphEntity,
     GraphFact,
     Paragraph,
@@ -22,11 +22,7 @@ PROGRAM_CODE = "chapter_consolidation"
 
 
 def agents_annotation_chapter_consolidation_eligible_chapters_1(_session, run_id):
-    return _session.execute(
-        select(ChapterAnnotation.chapter_id).where(
-            ChapterAnnotation.run_id == run_id
-        )
-    )
+    return _session.execute(select(ChapterAnnotation.chapter_id).where(ChapterAnnotation.run_id == run_id))
 
 
 def agents_annotation_chapter_consolidation_consolidate_chapter_1(_session, run_id):
@@ -73,17 +69,17 @@ def agents_annotation_chapter_consolidation_consolidate_chapter_6(_session, fact
 
 
 def agents_annotation_chapter_consolidation_consolidate_chapter_7(_session, records_by_record):
-    return _session.scalars(select(EventDeclaration).where(EventDeclaration.record_id.in_(list(records_by_record))))
-
-
-def agents_annotation_chapter_consolidation_consolidate_chapter_8(_session, declaration_ids):
-    return _session.scalars(select(SourceEvidence).where(SourceEvidence.declaration_id.in_(declaration_ids)))
-
-
-def agents_annotation_chapter_consolidation_consolidate_chapter_9(_session, declaration_ids):
     return _session.scalars(
-        select(DeclarationParticipant).where(DeclarationParticipant.declaration_id.in_(declaration_ids))
+        select(CompleteEvent).where(CompleteEvent.annotation_record_id.in_(list(records_by_record)))
     )
+
+
+def agents_annotation_chapter_consolidation_consolidate_chapter_8(_session, source_event_ids):
+    return _session.scalars(select(SourceEvidence).where(SourceEvidence.complete_event_id.in_(source_event_ids)))
+
+
+def agents_annotation_chapter_consolidation_consolidate_chapter_9(_session, source_event_ids):
+    return _session.scalars(select(EventParticipant).where(EventParticipant.event_id.in_(source_event_ids)))
 
 
 def agents_annotation_chapter_consolidation_consolidate_chapter_10(_session, valid_executions):

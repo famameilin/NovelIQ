@@ -8,10 +8,10 @@ from src.storage.models import (
     Agent,
     Chapter,
     ChapterAnnotation,
-    DeclarationParticipant,
+    CompleteEvent,
     DiagnosisReport,
-    EventDeclaration,
     EventForeshadowingAction,
+    EventParticipant,
     GraphEntity,
     GraphFact,
     NarrativeGroup,
@@ -37,11 +37,11 @@ def event_trees_organization_run_annotation_records_1(_session, run_id):
     return _session.execute(stmt).all()
 
 
-def event_trees_organization_run_foreshadowing_actions_1(_session, declarations):
+def event_trees_organization_run_foreshadowing_actions_1(_session, annotation_events):
     stmt = select(EventForeshadowingAction).where(
         or_(
-            EventForeshadowingAction.source_declaration_id.in_(declarations),
-            EventForeshadowingAction.target_declaration_id.in_(declarations),
+            EventForeshadowingAction.source_event_id.in_(annotation_events),
+            EventForeshadowingAction.target_event_id.in_(annotation_events),
         )
     )
     return _session.scalars(stmt.order_by(EventForeshadowingAction.operation_order, EventForeshadowingAction.action_id))
@@ -63,35 +63,35 @@ def event_trees_organization_parents_1(_session, value_1):
     return _session.scalars(stmt)
 
 
-def event_trees_organization_declaration_rows_1(_session, declaration_ids):
+def event_trees_organization_annotation_event_rows_1(_session, source_event_ids):
     return _session.scalars(
-        select(DeclarationParticipant)
-        .where(DeclarationParticipant.declaration_id.in_(declaration_ids))
-        .order_by(DeclarationParticipant.declaration_id, DeclarationParticipant.participant_ordinal)
+        select(EventParticipant)
+        .where(EventParticipant.event_id.in_(source_event_ids))
+        .order_by(EventParticipant.event_id, EventParticipant.participant_ordinal)
     )
 
 
-def event_trees_organization_declaration_rows_2(_session, declaration_ids, value_1):
+def event_trees_organization_annotation_event_rows_2(_session, source_event_ids, value_1):
     return _session.scalars(
         select(NarrativeLink)
         .where(
             NarrativeLink.producer_agent_id.in_(smap.run_execution_ids(value_1)),
-            NarrativeLink.semantic_source_declaration_id.is_not(None),
-            NarrativeLink.semantic_target_declaration_id.is_not(None),
+            NarrativeLink.semantic_source_event_id.is_not(None),
+            NarrativeLink.semantic_target_event_id.is_not(None),
             or_(
-                NarrativeLink.semantic_source_declaration_id.in_(declaration_ids),
-                NarrativeLink.semantic_target_declaration_id.in_(declaration_ids),
+                NarrativeLink.semantic_source_event_id.in_(source_event_ids),
+                NarrativeLink.semantic_target_event_id.in_(source_event_ids),
             ),
         )
         .order_by(NarrativeLink.link_id)
     )
 
 
-def event_trees_organization_declaration_rows_3(_session, records):
-    return _session.scalars(select(EventDeclaration).where(EventDeclaration.record_id.in_(list(records))))
+def event_trees_organization_annotation_event_rows_3(_session, records):
+    return _session.scalars(select(CompleteEvent).where(CompleteEvent.annotation_record_id.in_(list(records))))
 
 
-def event_trees_organization_declaration_rows_4(_session, participant_rows):
+def event_trees_organization_annotation_event_rows_4(_session, participant_rows):
     return _session.scalars(
         select(GraphEntity).where(GraphEntity.entity_id.in_({row.entity_id for row in participant_rows}))
     )

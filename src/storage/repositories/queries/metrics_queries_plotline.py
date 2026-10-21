@@ -16,7 +16,7 @@ def metrics_queries_plotline_init_1(_session, run_id):
 
 
 def metrics_queries_plotline_evidence_by_owner_1(_session, owner_column, owner_ids, value_1):
-    if owner_column not in {"graph_fact_id", "foreshadow_action_id", "declaration_id"}:
+    if owner_column not in {"graph_fact_id", "foreshadow_action_id", "complete_event_id"}:
         raise ValueError("无效的固定查询种类")
     owner_column = getattr(SourceEvidence, owner_column)
     statement = (

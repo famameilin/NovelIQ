@@ -6,9 +6,9 @@ from sqlalchemy import select, text
 
 from src.storage.models import (
     ChapterAnnotation,
-    DeclarationParticipant,
-    EventDeclaration,
+    CompleteEvent,
     EventForeshadowingAction,
+    EventParticipant,
     GraphEntity,
     NarrativeLink,
 )
@@ -25,17 +25,17 @@ def event_trees_trees_save_work_2(_session, annotation_id):
 
 
 def event_trees_trees_save_work_3(_session, action):
-    return _session.get(EventDeclaration, action["root_event_id"])
+    return _session.get(CompleteEvent, action["root_event_id"])
 
 
 def event_trees_trees_save_work_4(_session, endpoint_id):
-    return _session.get(EventDeclaration, endpoint_id)
+    return _session.get(CompleteEvent, endpoint_id)
 
 
 def event_trees_trees_discard_storage_1(_session, execution_ids):
     return _session.execute(
-        select(EventDeclaration.declaration_id).where(
-            EventDeclaration.record_id.in_(
+        select(CompleteEvent.event_id).where(
+            CompleteEvent.annotation_record_id.in_(
                 select(ChapterAnnotation.record_id).where(ChapterAnnotation.agent_id.in_(sorted(execution_ids)))
             )
         )
@@ -47,14 +47,14 @@ def event_trees_trees_load_saved_work_1(_session, annotation_id):
 
 
 def event_trees_trees_load_saved_work_2(_session, annotation_id):
-    return _session.scalars(select(EventDeclaration).where(EventDeclaration.record_id == annotation_id))
+    return _session.scalars(select(CompleteEvent).where(CompleteEvent.annotation_record_id == annotation_id))
 
 
-def event_trees_trees_load_saved_work_3(_session, declaration_ids):
+def event_trees_trees_load_saved_work_3(_session, source_event_ids):
     return _session.scalars(
-        select(DeclarationParticipant)
-        .where(DeclarationParticipant.declaration_id.in_(declaration_ids))
-        .order_by(DeclarationParticipant.declaration_id, DeclarationParticipant.participant_ordinal)
+        select(EventParticipant)
+        .where(EventParticipant.event_id.in_(source_event_ids))
+        .order_by(EventParticipant.event_id, EventParticipant.participant_ordinal)
     )
 
 
@@ -68,7 +68,6 @@ def event_trees_trees_load_saved_work_5(_session, agent_id):
     return _session.scalars(
         select(NarrativeLink).where(
             NarrativeLink.producer_agent_id == agent_id,
-            NarrativeLink.semantic_source_declaration_id.is_not(None),
         )
     )
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from src.storage.models import AnalysisAssessment, DeclarationParticipant, DialogueRecord, EventDeclaration, Paragraph
+from src.storage.models import AnalysisAssessment, CompleteEvent, DialogueRecord, EventParticipant, Paragraph
 
 
 def work_queries_paragraph_labels_1(_session, record_ids):
@@ -15,19 +15,19 @@ def work_queries_paragraph_labels_1(_session, record_ids):
     )
 
 
-def work_queries_declaration_projections_1(_session, declarations):
+def work_queries_annotation_event_projections_1(_session, annotation_events):
     return _session.scalars(
-        select(DeclarationParticipant)
-        .where(DeclarationParticipant.declaration_id.in_([item.declaration_id for item in declarations]))
-        .order_by(DeclarationParticipant.declaration_id, DeclarationParticipant.participant_ordinal)
+        select(EventParticipant)
+        .where(EventParticipant.event_id.in_([item.event_id for item in annotation_events]))
+        .order_by(EventParticipant.event_id, EventParticipant.participant_ordinal)
     )
 
 
-def work_queries_declaration_projections_2(_session, record_ids):
+def work_queries_annotation_event_projections_2(_session, record_ids):
     return _session.scalars(
-        select(EventDeclaration)
-        .where(EventDeclaration.record_id.in_(record_ids))
-        .order_by(EventDeclaration.created_at, EventDeclaration.declaration_id)
+        select(CompleteEvent)
+        .where(CompleteEvent.annotation_record_id.in_(record_ids))
+        .order_by(CompleteEvent.created_at, CompleteEvent.event_id)
     )
 
 
@@ -39,18 +39,18 @@ def work_queries_dialogue_projections_1(_session, execution_ids):
     )
 
 
-def work_queries_character_observations_1(_session, record_by_declaration):
+def work_queries_character_observations_1(_session, record_by_annotation_event):
     return _session.scalars(
-        select(DeclarationParticipant)
-        .where(DeclarationParticipant.declaration_id.in_(list(record_by_declaration)))
-        .order_by(DeclarationParticipant.declaration_id, DeclarationParticipant.participant_ordinal)
+        select(EventParticipant)
+        .where(EventParticipant.event_id.in_(list(record_by_annotation_event)))
+        .order_by(EventParticipant.event_id, EventParticipant.participant_ordinal)
     )
 
 
 def work_queries_character_observations_2(_session, record_ids):
     return _session.execute(
-        select(EventDeclaration.declaration_id, EventDeclaration.record_id).where(
-            EventDeclaration.record_id.in_(record_ids)
+        select(CompleteEvent.event_id, CompleteEvent.annotation_record_id).where(
+            CompleteEvent.annotation_record_id.in_(record_ids)
         )
     ).all()
 

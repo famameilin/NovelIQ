@@ -138,32 +138,15 @@ class DialogueRecordRecord:
     speaker_entity_id: str | None
     tone: str | None
     is_inner_monologue: bool
-    related_declaration_id: str | None
     related_complete_event_id: str | None
     created_at: datetime
     updated_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
-class EventDeclarationRecord:
-    declaration_id: str
-    record_id: str
-    local_key: str
-    title: str
-    problem: str
-    summary: str
-    event_type: str
-    status: str
-    progress: str | None
-    is_foreshadowing_root: bool
-    payoff_likelihood: str | None
-    created_at: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class DeclarationParticipantRecord:
+class EventParticipantRecord:
     participant_id: str
-    declaration_id: str
+    event_id: str
     participant_ordinal: int
     entity_id: str
     role: str
@@ -177,20 +160,19 @@ class CompleteEventRecord:
     event_id: str
     producer_agent_id: str
     local_key: str
-    identity_reason: str
+    annotation_record_id: str | None
+    from_chapter_id: int
+    to_chapter_id: int
+    reason: str | None
+    is_foreshadowing_root: bool
+    payoff_likelihood: str | None
+    created_at: datetime
     title: str
     problem: str
     summary: str
     event_type: str
     status: str
     progress: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class EventDeclarationBindingRecord:
-    binding_id: str
-    event_id: str
-    declaration_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,7 +204,7 @@ class GraphFactRecord:
     entity_id: str | None
     relation_id: str | None
     participant_id: str | None
-    declaration_id: str | None
+    event_id: str | None
     description_action: str | None
     description_value: str | None
     representative_action: str | None
@@ -287,9 +269,7 @@ class NarrativeLinkRecord:
     producer_agent_id: str
     reason: str
     semantic_source_event_id: str | None
-    semantic_source_declaration_id: str | None
     semantic_target_event_id: str | None
-    semantic_target_declaration_id: str | None
     relation_type: str | None
     source_operation_local_key: str | None
     annotation_local_key: str | None
@@ -324,9 +304,6 @@ class OrganizationCheckRecord:
     producer_agent_id: str
     reason: str
     reviewed_event_id: str | None
-    reviewed_declaration_id: str | None
-    source_declaration_id: str | None
-    target_declaration_id: str | None
     source_event_id: str | None
     target_event_id: str | None
     snapshot_hash: str | None
@@ -340,8 +317,8 @@ class EventForeshadowingActionRecord:
     source_operation_local_key: str
     operation_order: int
     action_type: str
-    source_declaration_id: str
-    target_declaration_id: str | None
+    source_event_id: str
+    target_event_id: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,7 +330,6 @@ class SourceEvidenceRecord:
     end_char: int
     related_complete_event_id: str | None
     graph_fact_id: str | None
-    declaration_id: str | None
     complete_event_id: str | None
     narrative_group_id: str | None
     narrative_link_id: str | None
@@ -500,7 +476,7 @@ class DiagnosisReportRecord:
     narrative_arc_type: str | None
     focus_structure: str | None
     theme_color: str | None
-    identity_snapshot: str | None
+    content_snapshot: str | None
     structure_snapshot: str | None
     created_at: datetime
 

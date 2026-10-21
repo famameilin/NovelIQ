@@ -23,12 +23,8 @@ def _run_purge_predicates(run_id: str) -> dict[str, Any]:
     agents = ids("agent", "id", tables["agent"].c.run_id == run_id)
     annotations = ids("agent_annotations", "record_id", tables["agent_annotations"].c.run_id == run_id)
     reports = ids("diagnosis_reports", "report_id", tables["diagnosis_reports"].c.agent_id.in_(agents))
-    declarations = ids(
-        "event_declarations", "declaration_id", tables["event_declarations"].c.record_id.in_(annotations)
-    )
-    participants = ids(
-        "event_participants", "participant_id", tables["event_participants"].c.declaration_id.in_(declarations)
-    )
+    events = ids("event_records", "event_id", tables["event_records"].c.producer_agent_id.in_(agents))
+    participants = ids("event_participants", "participant_id", tables["event_participants"].c.event_id.in_(events))
     facts = ids(
         "graph_facts",
         "graph_fact_id",
@@ -63,8 +59,7 @@ def _run_purge_predicates(run_id: str) -> dict[str, Any]:
                 tables["agent_assessments"].c.record_id.in_(annotations),
                 tables["agent_assessments"].c.report_id.in_(reports),
             ),
-            "event_declarations": tables["event_declarations"].c.record_id.in_(annotations),
-            "event_participants": tables["event_participants"].c.declaration_id.in_(declarations),
+            "event_participants": tables["event_participants"].c.event_id.in_(events),
             "graph_facts": tables["graph_facts"].c.graph_fact_id.in_(facts),
             "graph_fact_entity_tags": tables["graph_fact_entity_tags"].c.graph_fact_id.in_(facts),
         }
@@ -78,11 +73,9 @@ def _run_purge_predicates(run_id: str) -> dict[str, Any]:
     ]:
         predicates[name] = tables[name].c.producer_agent_id.in_(agents)
     events = ids("event_records", "event_id", predicates["event_records"])
-    predicates["event_declaration_bindings"] = tables["event_declaration_bindings"].c.event_id.in_(events)
     evidence = tables["paragraph_evidence"].c
     predicates["paragraph_evidence"] = or_(
         evidence.graph_fact_id.in_(facts),
-        evidence.declaration_id.in_(declarations),
         evidence.complete_event_id.in_(events),
         evidence.narrative_group_id.in_(ids("event_groups", "group_id", predicates["event_groups"])),
         evidence.narrative_link_id.in_(ids("event_links", "link_id", predicates["event_links"])),

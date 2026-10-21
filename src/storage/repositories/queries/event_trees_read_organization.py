@@ -8,10 +8,9 @@ from src.storage.models import (
     Agent,
     Chapter,
     ChapterAnnotation,
-    DeclarationParticipant,
+    CompleteEvent,
     DiagnosisReport,
-    EventDeclaration,
-    EventDeclarationBinding,
+    EventParticipant,
     GraphEntity,
     NarrativeGroup,
     NarrativeLink,
@@ -60,28 +59,20 @@ def event_trees_read_organization_load_containments_1(_session, value_1):
     )
 
 
-def event_trees_read_organization_declaration_participants_1(_session, declaration_ids):
+def event_trees_read_organization_annotation_event_participants_1(_session, source_event_ids):
     return _session.scalars(
-        select(DeclarationParticipant)
-        .where(DeclarationParticipant.declaration_id.in_(declaration_ids))
-        .order_by(DeclarationParticipant.declaration_id, DeclarationParticipant.participant_ordinal)
+        select(EventParticipant)
+        .where(EventParticipant.event_id.in_(source_event_ids))
+        .order_by(EventParticipant.event_id, EventParticipant.participant_ordinal)
     )
 
 
-def event_trees_read_organization_declaration_participants_2(_session, rows):
+def event_trees_read_organization_annotation_event_participants_2(_session, rows):
     return _session.scalars(select(GraphEntity).where(GraphEntity.entity_id.in_({row.entity_id for row in rows})))
 
 
-def event_trees_read_organization_load_declarations_1(_session, records):
-    return _session.scalars(select(EventDeclaration).where(EventDeclaration.record_id.in_(list(records))))
-
-
-def event_trees_read_organization_load_bindings_1(_session, event_ids):
-    return _session.scalars(
-        select(EventDeclarationBinding)
-        .where(EventDeclarationBinding.event_id.in_(event_ids))
-        .order_by(EventDeclarationBinding.event_id, EventDeclarationBinding.declaration_id)
-    )
+def event_trees_read_organization_load_annotation_events_1(_session, records):
+    return _session.scalars(select(CompleteEvent).where(CompleteEvent.annotation_record_id.in_(list(records))))
 
 
 def event_trees_read_organization_load_organization_1(_session, producer_executions):

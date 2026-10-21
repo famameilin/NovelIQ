@@ -19,9 +19,9 @@ def event_trees_diagnosis_persistence_session_executions_2(_session, run_id):
     return _session.scalars(select(Agent.id).where(Agent.run_id == run_id, Agent.type.in_(DIAGNOSIS_ROLES)))
 
 
-def event_trees_diagnosis_persistence_assert_fact_declarations_bound_1(_session, executions):
+def event_trees_diagnosis_persistence_assert_fact_annotation_events_bound_1(_session, executions):
     return _session.scalars(
-        select(GraphFact.declaration_id).where(
-            GraphFact.direct_producer_agent_id.in_(executions), GraphFact.declaration_id.is_not(None)
+        select(GraphFact.event_id).where(
+            GraphFact.direct_producer_agent_id.in_(executions), GraphFact.event_id.is_not(None)
         )
     )

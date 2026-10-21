@@ -9,9 +9,7 @@ from src.storage.models import (
     Agent,
     ChapterAnnotation,
     CompleteEvent,
-    DeclarationParticipant,
-    EventDeclaration,
-    EventDeclarationBinding,
+    EventParticipant,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -26,18 +24,18 @@ def final_metrics_queries_plotline_fetch_facts_1(_session, chapter_ids, value_1)
             Agent.id.label("author_agent_id"),
             Agent.type.label("role"),
             GraphFact.operation_order,
-            GraphFact.declaration_id,
+            GraphFact.event_id,
             GraphFact.participant_id,
-            DeclarationParticipant.entity_id.label("subject_entity_id"),
+            EventParticipant.entity_id.label("subject_entity_id"),
             GraphEntity.canonical_name.label("entity_name"),
-            DeclarationParticipant.narrative_role,
-            DeclarationParticipant.action,
-            DeclarationParticipant.emotion,
+            EventParticipant.narrative_role,
+            EventParticipant.action,
+            EventParticipant.emotion,
         )
-        .join(DeclarationParticipant, DeclarationParticipant.participant_id == GraphFact.participant_id)
-        .join(GraphEntity, GraphEntity.entity_id == DeclarationParticipant.entity_id)
-        .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
-        .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+        .join(EventParticipant, EventParticipant.participant_id == GraphFact.participant_id)
+        .join(GraphEntity, GraphEntity.entity_id == EventParticipant.entity_id)
+        .join(CompleteEvent, CompleteEvent.event_id == EventParticipant.event_id)
+        .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
         .join(Agent, Agent.id == ChapterAnnotation.agent_id)
         .where(
             GraphFact.participant_id.is_not(None),
@@ -61,7 +59,7 @@ def final_metrics_queries_plotline_direct_facts(_session, run_id, chapter_ids):
             GraphFact.operation_order,
             GraphFact.entity_id,
             GraphFact.relation_id,
-            GraphFact.declaration_id,
+            GraphFact.event_id,
             GraphFact.plotline_subject_id,
             GraphFact.plotline_subject_title,
             GraphFact.plotline_description,
@@ -96,15 +94,3 @@ def final_metrics_queries_plotline_direct_facts(_session, run_id, chapter_ids):
         )
     )
     return _session.execute(direct_statement).mappings().all()
-
-
-def final_metrics_queries_plotline_bindings(_session, run_id):
-    statement = (
-        select(EventDeclarationBinding.declaration_id, CompleteEvent.event_id)
-        .join(CompleteEvent, CompleteEvent.event_id == EventDeclarationBinding.event_id)
-        .where(
-            EventDeclarationBinding.declaration_id.is_not(None),
-            CompleteEvent.producer_agent_id.in_(select(Agent.id).where(Agent.run_id == run_id).correlate(None)),
-        )
-    )
-    return _session.execute(statement).all()

@@ -13,8 +13,8 @@ from src.storage.models import (
     Agent,
     Chapter,
     ChapterAnnotation,
-    DeclarationParticipant,
-    EventDeclaration,
+    CompleteEvent,
+    EventParticipant,
     FactEntityTag,
     GraphEntity,
     GraphFact,
@@ -145,17 +145,17 @@ class GraphRepository(BaseRepository[GraphFact]):
             self.session.execute(
                 select(
                     GraphFact,
-                    DeclarationParticipant.entity_id,
-                    DeclarationParticipant.narrative_role,
-                    DeclarationParticipant.action,
-                    DeclarationParticipant.emotion,
+                    EventParticipant.entity_id,
+                    EventParticipant.narrative_role,
+                    EventParticipant.action,
+                    EventParticipant.emotion,
                     Agent.id,
                     ChapterAnnotation.chapter_id,
                     Agent.type,
                 )
-                .join(DeclarationParticipant, DeclarationParticipant.participant_id == GraphFact.participant_id)
-                .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
-                .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+                .join(EventParticipant, EventParticipant.participant_id == GraphFact.participant_id)
+                .join(CompleteEvent, CompleteEvent.event_id == EventParticipant.event_id)
+                .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
                 .join(Agent, Agent.id == ChapterAnnotation.agent_id)
                 .where(GraphFact.participant_id.is_not(None), ChapterAnnotation.run_id == run_id)
             )

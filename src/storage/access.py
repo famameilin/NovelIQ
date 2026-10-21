@@ -25,7 +25,7 @@ from src.storage.records.graph import (
 from src.storage.records.inputs import ChapterRecord as ChapterData
 from src.storage.records.inputs import ChunkRecord as Chunk
 from src.storage.records.inputs import ParagraphRecord as ParagraphSpan
-from src.storage.records.models import ChapterRecord, EventDeclarationRecord, GraphEntityRecord
+from src.storage.records.models import ChapterRecord, CompleteEventRecord, GraphEntityRecord
 from src.storage.records.paragraph import ParagraphCurveRow, ParagraphMetricRow
 from src.storage.records.sentinels import UNSET as _UNSET
 from src.storage.records.topic import TopicModelRunContract
@@ -489,7 +489,7 @@ class AnnotationAccess:
         return self._runner.run(lambda session: save_consolidation(session, request))
 
     def save(self, request):
-        "标注记录、事实、声明、对话、标签和案例在同一事务内提交"
+        "标注记录、事实、事件、对话、标签和案例在同一事务内提交"
         from src.storage.repositories.annotation_writes import save_annotation
 
         return self._runner.run(lambda session: save_annotation(session, request))
@@ -530,7 +530,7 @@ class AnnotationAccess:
             lambda _session: _AnnotationRepository(_session).fetch_dialogue_records(run_id), read_only=True
         )
 
-    def fetch_foreshadowing_roots(self, run_id: str, *, ordered: bool = False) -> list[EventDeclarationRecord]:
+    def fetch_foreshadowing_roots(self, run_id: str, *, ordered: bool = False) -> list[CompleteEventRecord]:
         "Annotation 数据访问"
         return self._runner.run(
             lambda _session: _AnnotationRepository(_session).fetch_foreshadowing_roots(run_id, ordered=ordered),
@@ -544,7 +544,7 @@ class AnnotationAccess:
             read_only=True,
         )
 
-    def fetch_event_records(self, run_id: str, event_ids: set[str]) -> list[EventDeclarationRecord]:
+    def fetch_event_records(self, run_id: str, event_ids: set[str]) -> list[CompleteEventRecord]:
         "Annotation 数据访问"
         return self._runner.run(
             lambda _session: _AnnotationRepository(_session).fetch_event_records(run_id, event_ids), read_only=True
@@ -944,7 +944,7 @@ class ForestAccess:
         )
 
     def fetch_nodes(self, run_id: str, max_chapter_order: int):
-        "本 run 在阅读截点内的章级声明，按章序与声明身份稳定排序"
+        "本 run 在阅读截点内的章级事件，按章序与事件身份稳定排序"
         return self._runner.run(
             lambda _session: _EventForestRecords(_session).fetch_nodes(run_id, max_chapter_order), read_only=True
         )
@@ -971,7 +971,7 @@ class ForestAccess:
         )
 
     def fetch_foreshadow_edges(self, run_id: str):
-        "伏笔语义链路：来源/目标都必须是完整事件，声明身份不回填冒充"
+        "伏笔语义链路：来源/目标都必须是完整事件，事件身份不回填冒充"
         return self._runner.run(
             lambda _session: _EventForestRecords(_session).fetch_foreshadow_edges(run_id), read_only=True
         )

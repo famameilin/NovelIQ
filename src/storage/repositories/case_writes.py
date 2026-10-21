@@ -20,6 +20,53 @@ class CaseWritesRepository:
     def rows(self, session):
         return list(session.scalars(select(Case).where(Case.run_id == self.run_id).order_by(Case.id)))
 
+    def register_event_roots(self, session) -> list[dict[str, Any]]:
+        "事件与包含边保存后，在同一事务登记尚无父事件的根案例"
+        from src.storage.ids import new_id
+        from src.storage.models import CompleteEvent, NarrativeLink
+        from src.storage.records.cases import root_event_case_description
+        from src.storage.repositories.narrative_records import run_execution_ids
+
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": f"fact_graph:{self.run_id}"}
+        )
+        session.flush()
+        roots = session.scalars(
+            select(CompleteEvent).where(
+                CompleteEvent.producer_agent_id.in_(run_execution_ids(self.run_id)),
+                ~select(NarrativeLink.link_id)
+                .where(NarrativeLink.contained_child_id == CompleteEvent.event_id)
+                .exists(),
+            )
+        )
+        existing = {(row.type, row.description) for row in self.rows(session)}
+        for event in roots:
+            description = root_event_case_description(event.event_id)
+            if ("event", description) in existing:
+                continue
+            session.add(
+                Case(
+                    id=new_id(),
+                    run_id=self.run_id,
+                    type="event",
+                    description=description,
+                    status="pending",
+                    producer_agent_id=event.producer_agent_id,
+                )
+            )
+            existing.add(("event", description))
+        session.flush()
+        return [
+            {
+                "case_id": row.id,
+                "case_type": row.type,
+                "description": row.description,
+                "submitted": row.status == "resolved",
+                "owner": row.promised_agent_id,
+            }
+            for row in self.rows(session)
+        ]
+
     def save_work(self, session, contribution, *, adopted_output_id: str | None = None) -> list[dict[str, Any]]:
         "案例与承诺随调用方正式保存事务提交"
         if contribution.run_id != self.run_id:

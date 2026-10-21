@@ -13,7 +13,6 @@ class DiagnosisReportSave:
     report: dict
     assessments: tuple[dict, ...]
     organization_json: str
-    declaration_ids: frozenset[str]
     facts: tuple[FactSave, ...]
     dialogue_updates: tuple[dict, ...]
     cases: tuple[CaseSave, ...]
@@ -24,7 +23,6 @@ class DiagnosisSessionSave:
     run_id: str
     agent_id: str
     organization_json: str
-    declaration_ids: frozenset[str]
     facts: tuple[FactSave, ...]
     dialogue_updates: tuple[dict, ...]
     cases: tuple[CaseSave, ...]

@@ -18,3 +18,8 @@ class CaseSave:
     def snapshot(self) -> dict[str, Any]:
         "解码产生独立容器，防止保存期间被业务修改"
         return json.loads(self.snapshot_json)
+
+
+def root_event_case_description(event_id: str) -> str:
+    "自动根案例的稳定文字描述包含完整事件身份"
+    return f"请处理事件 {event_id} 的建树与核查事项"

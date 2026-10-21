@@ -9,10 +9,10 @@ from src.storage.models import (
     AnalysisAssessment,
     Chapter,
     ChapterAnnotation,
-    DeclarationParticipant,
+    CompleteEvent,
     DiagnosisReport,
     DialogueRecord,
-    EventDeclaration,
+    EventParticipant,
     FactEntityTag,
     GraphEntity,
     GraphFact,
@@ -24,9 +24,9 @@ from src.storage.models import (
 def fact_graph_graph_execution_entities_1(_session, run_id):
     run_executions = select(Agent.id).where(or_(Agent.run_id == run_id, Agent.run_id == run_id))
     return _session.scalars(
-        select(DeclarationParticipant.entity_id)
-        .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
-        .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+        select(EventParticipant.entity_id)
+        .join(CompleteEvent, CompleteEvent.event_id == EventParticipant.event_id)
+        .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
         .where(ChapterAnnotation.agent_id.in_(run_executions))
     )
 
@@ -94,9 +94,9 @@ def fact_graph_graph_rebuild_storage_3(_session, value_1):
 def fact_graph_graph_rebuild_storage_4(_session, value_1):
     run_executions = select(Agent.id).where(or_(Agent.run_id == value_1, Agent.run_id == value_1))
     return _session.scalars(
-        select(DeclarationParticipant.entity_id)
-        .join(EventDeclaration, EventDeclaration.declaration_id == DeclarationParticipant.declaration_id)
-        .join(ChapterAnnotation, ChapterAnnotation.record_id == EventDeclaration.record_id)
+        select(EventParticipant.entity_id)
+        .join(CompleteEvent, CompleteEvent.event_id == EventParticipant.event_id)
+        .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
         .where(ChapterAnnotation.agent_id.in_(run_executions))
     )
 

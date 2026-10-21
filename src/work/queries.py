@@ -2,7 +2,7 @@
 
 完成判定直接读产物行——agent_annotations 自带 run/章/角色与真实执行号；章级结果
 从正式关系投影重组（agent_annotations 正式头与具名指标、agent_assessments
-段落情绪、event_declarations/event_participants、graph_dialogues），
+段落情绪、event_annotation_events/event_participants、graph_dialogues），
 不落通用 payload JSON 列。
 """
 
@@ -52,15 +52,15 @@ def _paragraph_labels(session: Storage, record_ids: list[str]) -> dict[str, list
     return grouped
 
 
-def _declaration_projections(session: Storage, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
-    """章级事件：不可变声明正文 + 参与者（实体名字/类型从实体行读取，不复制）"""
-    declarations = list(session.reads.work_queries_declaration_projections_2(record_ids))
+def _annotation_event_projections(session: Storage, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """章级事件：不可变事件正文 + 参与者（实体名字/类型从实体行读取，不复制）"""
+    annotation_events = list(session.reads.work_queries_annotation_event_projections_2(record_ids))
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    if not declarations:
+    if not annotation_events:
         return grouped
     participants: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in session.reads.work_queries_declaration_projections_1(declarations):
-        participants[row.declaration_id].append(
+    for row in session.reads.work_queries_annotation_event_projections_1(annotation_events):
+        participants[row.event_id].append(
             {
                 "entity_id": row.entity_id,
                 "role": row.role,
@@ -69,20 +69,22 @@ def _declaration_projections(session: Storage, record_ids: list[str]) -> dict[st
                 "emotion": row.emotion,
             }
         )
-    for declaration in declarations:
-        grouped[declaration.record_id].append(
+    for annotation_event in annotation_events:
+        grouped[annotation_event.annotation_record_id].append(
             {
-                "declaration_id": declaration.declaration_id,
-                "local_key": declaration.local_key,
-                "title": declaration.title,
-                "problem": declaration.problem,
-                "summary": declaration.summary,
-                "event_type": declaration.event_type,
-                "status": declaration.status,
-                "progress": declaration.progress,
-                "is_foreshadowing_root": declaration.is_foreshadowing_root,
-                "payoff_likelihood": declaration.payoff_likelihood,
-                "participants": participants.get(declaration.declaration_id, []),
+                "event_id": annotation_event.event_id,
+                "local_key": annotation_event.local_key,
+                "from": annotation_event.from_chapter_id,
+                "to": annotation_event.to_chapter_id,
+                "title": annotation_event.title,
+                "problem": annotation_event.problem,
+                "summary": annotation_event.summary,
+                "event_type": annotation_event.event_type,
+                "status": annotation_event.status,
+                "progress": annotation_event.progress,
+                "is_foreshadowing_root": annotation_event.is_foreshadowing_root,
+                "payoff_likelihood": annotation_event.payoff_likelihood,
+                "participants": participants.get(annotation_event.event_id, []),
             }
         )
     return grouped
@@ -107,19 +109,19 @@ def _dialogue_projections(session: Storage, execution_ids: list[str]) -> dict[st
 
 
 def _character_observations(session: Storage, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
-    """人物动态观测：只关联原声明参与者（三态至少一项非空即承载一次观测）"""
-    declarations = session.reads.work_queries_character_observations_2(record_ids)
-    if not declarations:
+    """人物动态观测：只关联原事件参与者（三态至少一项非空即承载一次观测）"""
+    annotation_events = session.reads.work_queries_character_observations_2(record_ids)
+    if not annotation_events:
         return {}
-    record_by_declaration = {row.declaration_id: row.record_id for row in declarations}
+    record_by_annotation_event = {row.event_id: row.annotation_record_id for row in annotation_events}
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in session.reads.work_queries_character_observations_1(record_by_declaration):
+    for row in session.reads.work_queries_character_observations_1(record_by_annotation_event):
         if row.narrative_role is None and row.action is None and (row.emotion is None):
             continue
-        grouped[record_by_declaration[row.declaration_id]].append(
+        grouped[record_by_annotation_event[row.event_id]].append(
             {
                 "participant_id": row.participant_id,
-                "declaration_id": row.declaration_id,
+                "event_id": row.event_id,
                 "entity_id": row.entity_id,
                 "role": row.role,
                 "narrative_role": row.narrative_role,
@@ -152,7 +154,7 @@ def chapter_annotations(session: Storage, run_id: str) -> list[ChapterAnnotation
     sequence = repository.fetch_chapter_sequence_map(run_id)
     record_ids = [record.record_id for record in records]
     labels_by_record = _paragraph_labels(session, record_ids)
-    declarations_by_record = _declaration_projections(session, record_ids)
+    annotation_events_by_record = _annotation_event_projections(session, record_ids)
     dialogues_by_execution = _dialogue_projections(session, [record.agent_id for record in records])
     observations_by_record = _character_observations(session, record_ids)
     results: list[ChapterAnnotationView] = []
@@ -175,7 +177,9 @@ def chapter_annotations(session: Storage, run_id: str) -> list[ChapterAnnotation
                 "labels": labels_by_record.get(metric.record_id, []),
             }
         }
-        payload["events"] = [value for record in ordered for value in declarations_by_record.get(record.record_id, [])]
+        payload["events"] = [
+            value for record in ordered for value in annotation_events_by_record.get(record.record_id, [])
+        ]
         payload["dialogues"] = [
             value for record in ordered for value in dialogues_by_execution.get(record.agent_id, [])
         ]

@@ -10,10 +10,10 @@ from src.storage.models import (
     Case,
     Chapter,
     ChapterAnnotation,
-    DeclarationParticipant,
+    CompleteEvent,
     DialogueRecord,
-    EventDeclaration,
     EventForeshadowingAction,
+    EventParticipant,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -65,11 +65,11 @@ def agents_annotation_agent_query_4(_session, message_invocation_id):
 
 
 def agents_annotation_agent_query_5(_session, participant_fact):
-    return _session.get(DeclarationParticipant, participant_fact.participant_id)
+    return _session.get(EventParticipant, participant_fact.participant_id)
 
 
 def agents_annotation_agent_query_6(_session, participant):
-    return _session.get(EventDeclaration, participant.declaration_id)
+    return _session.get(CompleteEvent, participant.event_id)
 
 
 def agents_annotation_agent_query_7(_session, participant):
