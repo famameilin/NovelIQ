@@ -1,4 +1,4 @@
-"案例写入上下文只校验承诺，不关联业务结果"
+"案例写入上下文只校验领取，不关联业务结果"
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from pydantic import Field, create_model
 
 
 def bind_caseid(tool: Any, prepare: Callable[[Any], None] | None = None) -> Any:
-    "写入前核验案例承诺，工具结果保持业务原形"
+    "写入前核验案例领取，工具结果保持业务原形"
     tool.args_schema = create_model(
         f"{tool.name}CaseArgs",
         __base__=tool.args_schema,
-        caseid=(Any, Field(default=None, description="本次办理案例的真实 ID；案例写入前核验承诺")),
+        caseid=(Any, Field(default=None, description="本次办理案例的真实 ID；案例写入前核验领取")),
     )
     original_func, original_coroutine = tool.func, tool.coroutine
 

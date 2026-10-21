@@ -1,10 +1,10 @@
-"七字段案例的登记与承诺保存"
+"七字段案例的登记与提交保存"
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from src.storage.models import Agent, Case
@@ -68,7 +68,7 @@ class CaseWritesRepository:
         ]
 
     def save_work(self, session, contribution, *, adopted_output_id: str | None = None) -> list[dict[str, Any]]:
-        "案例与承诺随调用方正式保存事务提交"
+        "案例登记与办结随调用方正式保存事务提交"
         if contribution.run_id != self.run_id:
             raise ValueError("案例贡献不属于当前运行")
         producer = session.get(Agent, contribution.author) if contribution.author else None
@@ -98,10 +98,10 @@ class CaseWritesRepository:
                 or row.description != case["description"]
             ):
                 raise ValueError("案例身份与已保存的案例内容或运行不一致")
-        promises = snapshot.get("promises", [])
-        if promises and producer is None:
-            raise ValueError("承诺案例必须有本运行的真实 Agent")
-        for case_id in promises:
+        submissions = snapshot.get("submissions", [])
+        if submissions and producer is None:
+            raise ValueError("提交案例必须有本运行的真实 Agent")
+        for case_id in submissions:
             result = session.execute(
                 update(Case)
                 .where(Case.id == case_id, Case.run_id == self.run_id, Case.status == "pending")
@@ -110,6 +110,6 @@ class CaseWritesRepository:
             if result.rowcount == 0:
                 row = session.get(Case, case_id, populate_existing=True)
                 if row is None or row.run_id != self.run_id or row.promised_agent_id != contribution.author:
-                    raise ValueError("案例已由其他 Agent 承诺或不属于当前运行")
+                    raise ValueError("案例已由其他 Agent 提交或不属于当前运行")
         session.flush()
         return []

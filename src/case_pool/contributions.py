@@ -1,4 +1,4 @@
-"案例登记与承诺的冻结保存请求"
+"案例登记与提交的冻结保存请求"
 
 from __future__ import annotations
 
