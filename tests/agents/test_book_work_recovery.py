@@ -192,22 +192,23 @@ def test_single_work_case_recovery_restores_own_exclusion_and_preserves_other_ow
     pool.begin(other)
     own = pool.push("character", "Own case", saved)
     external = pool.push("character", "Other case", other)
-    pool.promise(own["case_id"], saved)
+    pool.claim(own["case_id"], saved)
+    pool.submit(own["case_id"], saved)
 
-    pool.promise(external["case_id"], other)
+    pool.claim(external["case_id"], other)
     snapshot = {
         "author": saved,
         "registrations": {own["case_id"]: own},
-        "promises": pool.promises_for(saved),
+        "submissions": pool.submissions_for(saved),
     }
     pool.confirm(saved)
     pool.recover_work(snapshot)
     pool.recover_work(snapshot)
     assert pool.case_runtime[own["case_id"]]["owner"] == saved
-    assert pool.case_runtime[own["case_id"]]["promised"] is True
+    assert pool.case_runtime[own["case_id"]]["submitted"] is True
     assert pool.case_runtime[external["case_id"]]["owner"] == other
-    assert pool.case_runtime[external["case_id"]]["promised"] is True
-    assert pool.promises_for(saved) == [own["case_id"]]
+    assert pool.case_runtime[external["case_id"]]["submitted"] is False
+    assert pool.submissions_for(saved) == [own["case_id"]]
     pool.confirm(saved)
     # 确认只标记保存完成：承诺与归属不退回
     assert pool.case_runtime[own["case_id"]]["owner"] == saved
@@ -226,23 +227,23 @@ def test_full_case_restore_is_idempotent_and_forgets_discarded_contributions(db_
     # (run, chapter, role) 唯一，因此两个作者落在两章
     a, b = new_id(), new_id()
     for author, _chapter_id in ((a, 1), (b, 2)):
-        db_session.add(
-            Agent(id=author, run_id=run_id, type="annotation", status="success")
-        )
+        db_session.add(Agent(id=author, run_id=run_id, type="annotation", status="success"))
     db_session.flush()
     pool = CasePool(run_id)
     pool.begin(a)
     pool.begin(b)
     first = pool.push("character", "Actual case", a)
     second = pool.push("character", "Second case", b)
-    assert pool.promise(first["case_id"], a)["status"] == "promised"
-    assert pool.promise(second["case_id"], b)["status"] == "promised"
+    assert pool.claim(first["case_id"], a)["status"] == "claimed"
+    assert pool.claim(second["case_id"], b)["status"] == "claimed"
+    pool.submit(first["case_id"], a)
+    pool.submit(second["case_id"], b)
 
     def contribution(author):
         snapshot = {
             "created_case_ids": sorted(pool.created.get(author, set())),
             "registrations": {key: pool.cases[key] for key in pool.registrations[author]},
-            "promises": pool.promises_for(author),
+            "submissions": pool.submissions_for(author),
         }
         return CaseContribution(run_id, author, json.dumps(snapshot, ensure_ascii=False))
 
@@ -254,10 +255,11 @@ def test_full_case_restore_is_idempotent_and_forgets_discarded_contributions(db_
     restored.restore_storage(storage_for(db_session), set())
     restored.restore_storage(storage_for(db_session), set())
     # 承诺痕迹随交付重建：每作者 = 承诺行 + 写交付行
-    assert restored.promises_for(a) == [first["case_id"]] and restored.promises_for(b) == [second["case_id"]]
-    assert restored.case_runtime[first["case_id"]]["promised"] is True
-    assert restored.case_runtime[second["case_id"]]["promised"] is True
+    assert restored.submissions_for(a) == [first["case_id"]] and restored.submissions_for(b) == [second["case_id"]]
+    assert restored.case_runtime[first["case_id"]]["submitted"] is True
+    assert restored.case_runtime[second["case_id"]]["submitted"] is True
     from src.storage.repositories.annotation_recovery import prune_cases
+
     prune_cases(db_session, run_id, {b})
     db_session.commit()
     restored.restore_storage(storage_for(db_session), {b})

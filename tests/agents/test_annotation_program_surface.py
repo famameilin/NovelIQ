@@ -94,7 +94,9 @@ def test_catalog_is_current_formal_tool_surface() -> None:
         "write_relation",
         "write_dialogue",
         "push_case",
-        "promise_case",
+        "claim_case",
+        "claim_random_case",
+        "submit_case",
         "search_cases",
         "search_events",
         "search_graph",
@@ -110,8 +112,30 @@ def test_catalog_is_current_formal_tool_surface() -> None:
     for name in ("entity", "relation", "event", "participants", "dialogue", "label", "metric", "pending"):
         assert name + "(" in program_tool.description
     assert "search_pool(" not in program_tool.description
-    assert "promise_case(" in program_tool.description
+    assert "claim_case(" in program_tool.description
     assert "limit" in program_tool.description
+
+
+async def test_case_program_preserves_claim_status_and_exposes_submission_candidates():
+    runtime, _, _ = _surface(_ledger())
+    first = json.loads(await runtime.execute(
+        'a = push_case(case_type="event", description="检查第一件")\n'
+        'b = push_case(case_type="event", description="检查第二件")\n'
+        'claimed = claim_case(case_id=a["ref"]["case_id"])\n'
+        'submitted = submit_case(case_id=claimed["case_id"])',
+        "outer-case-context",
+    ))
+    assert not first.get("failed"), first
+    assert runtime.env["claimed"]["status"] == "claimed"
+    assert runtime.env["submitted"]["status"] == "submitted"
+    offered = runtime.env["submitted"]["candidates"]
+    assert offered and first["cases"][-1]["result"]["candidates"] == offered
+    second = json.loads(await runtime.execute(
+        'next_case = claim_case(case_id=submitted["candidates"][0]["case_id"])\n'
+        'submit_case(case_id=next_case["case_id"])'
+    ))
+    assert not second.get("failed"), second
+    assert second["cases"][-1]["result"]["candidates"] == []
 
 
 @pytest.mark.parametrize("empty", [False, True])

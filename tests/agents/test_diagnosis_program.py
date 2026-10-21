@@ -146,14 +146,12 @@ finish()
 REPORT_PROGRAM = """
 read_topics()
 parents = search_events(kind="event", query="寻路与照明", limit=20)
-case = push_case(case_type="relation", description="核对寻路与照明的关联")
-promise_case(case_id=case["case_id"])
 arc = write_arc(items=[{"operation":"arc", "key":"journey", "kind":"main", "title":"寻路线", "objective":"找到路",
-    "role":"主线", "reason":"围绕寻路持续推进", "evidence":[{"paragraph_id":0}]}], caseid=case["case_id"])
+    "role":"主线", "reason":"围绕寻路持续推进", "evidence":[{"paragraph_id":0}]}])
 outcome = write_outcome(items=[{"operation":"outcome", "key":"light", "title":"获得照明", "description":"点灯带来照明",
     "evidence":[{"paragraph_id":0}]}])
 write_arc(items=[{"operation":"link", "event_id":parents["events"][0]["event_id"], "arc_id":arc["results"][0],
-    "role":"推进", "reason":"寻路推进目标", "evidence":[{"paragraph_id":0}]}], caseid=case["case_id"])
+    "role":"推进", "reason":"寻路推进目标", "evidence":[{"paragraph_id":0}]}])
 write_outcome(items=[{"operation":"link", "event_id":parents["events"][0]["event_id"],
     "outcome_id":outcome["results"][0], "reason":"寻路中点灯形成照明", "evidence":[{"paragraph_id":0}]}])
 write_diagnosis(analysis={"diagnosis":"寻路与照明相互关联", "topic_labels":{}})
@@ -209,6 +207,8 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         turns = sum(1 for message in messages if isinstance(message, AIMessage))
         if payload["role"] == "report":
             code = REPORT_PROGRAM
+        elif len(model.requests) >= 4:
+            code = CLOSE_PROGRAM
         elif turns == 0:
             code = FIRST_CASE_PROGRAM
         elif turns == 1:
@@ -233,7 +233,7 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         domain=domain,
     )
     assert model.bound == ["execute_code", "finish"]
-    assert len(model.requests) == 4
+    assert len(model.requests) == 5
     assert result.diagnosis == "寻路与照明相互关联"
     organization = result.narrative_organization
     assert len(organization.events) == 3
@@ -242,22 +242,20 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         event.event_id for event in organization.events
     }
     report = draft.fixture_session.scalars(
-        select(DiagnosisReport)
-        .join(Agent, Agent.id == DiagnosisReport.agent_id)
-        .where(Agent.run_id == draft.run_id)
+        select(DiagnosisReport).join(Agent, Agent.id == DiagnosisReport.agent_id).where(Agent.run_id == draft.run_id)
     ).one()
     turns = fetch_agent_turns(storage_for(draft.fixture_session), draft.run_id)
     assert report.agent_id in {turn.agent_id for turn in turns}
-    assert len(run_events(storage_for(draft.fixture_session), draft.run_id)) == 2
+    assert len(run_events(storage_for(draft.fixture_session), draft.run_id)) == 3
     # 案例写入按案例登记真实执行；两件事件案例均已接手承诺
     event_cases = {case["case_id"] for case in domain.case_pool.search() if case["case_type"] == "event"}
-    assert len(event_cases) == 2
+    assert len(event_cases) == 3
     reloaded = CasePool(draft.run_id)
     reloaded.load_storage(storage_for(draft.fixture_session))
     assert {case["case_id"] for case in reloaded.search() if case["submitted"]} >= event_cases
     turns = fetch_agent_turns(storage_for(draft.fixture_session), draft.run_id)
-    assert len(turns) == 4
-    assert len({turn.agent_id for turn in turns}) == 2
+    assert len(turns) == 5
+    assert len({turn.agent_id for turn in turns}) == 3
     assert all(turn.task_type == "diagnosis" for turn in turns)
     assert all(turn.error is None and turn.turn_ms is not None for turn in turns)
     # 成功会话的执行行同样写终态：执行行不能停在 running
@@ -267,7 +265,14 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         )
     )
     assert settled and all(row.status == "success" for row in settled)
+    for row in settled:
+        final_turn = max((turn for turn in turns if turn.agent_id == row.id), key=lambda turn: turn.turn_index)
+        assert any(note.startswith("runtime:queue_wait_ms=") for note in final_turn.timing_notes)
+        assert any(note.startswith("runtime:save_ms=") for note in final_turn.timing_notes)
     operations = fetch_run_tool_calls(storage_for(draft.fixture_session), draft.run_id)
+    promises = [operation for operation in operations if operation.tool_name == "claim_case"]
+    assert promises and all({"lock_wait_ms", "execution_ms"} <= operation.executed_args["_timing"].keys()
+                            for operation in promises)
     refused = [operation for operation in operations if operation.error is not None]
     assert refused == [], [(operation.tool_name, operation.error) for operation in refused]
     outer = [
@@ -275,7 +280,7 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         for operation in operations
         if operation.tool_name == "execute_code"
     ]
-    assert len(outer) == 4
+    assert len(outer) == 5
     assert all('"progress"' not in value and '"remaining"' not in value for value in outer)
 
 
@@ -302,8 +307,8 @@ async def test_case_write_tool_lands_in_case_ledger_of_promised_case(declaration
             f'write_entity(name="顾霜", entity_type="character", el="p1", caseid={other["case_id"]!r})'
         )
     )
-    assert unpromised["status"] == "partial" and "尚未 promise" in unpromised["failed"][0]["message"]
-    domain.case_pool.promise(case["case_id"], fixture_id(__name__, "case-session-a"))
+    assert unpromised["status"] == "partial" and "尚未 claim" in unpromised["failed"][0]["message"]
+    domain.case_pool.claim(case["case_id"], fixture_id(__name__, "case-session-a"))
     applied = json.loads(
         await context.program.execute(
             f'write_entity(name="顾霜", entity_type="character", el="p1", caseid={case["case_id"]!r})'
@@ -313,9 +318,9 @@ async def test_case_write_tool_lands_in_case_ledger_of_promised_case(declaration
     assert "case_link" not in applied["written"][0]["result"]
     ledger, invocation = domain.case_writers[fixture_id(__name__, "case-session-a")]
     assert [op["name"] for op in ledger.graph.contributions[invocation]["entity_ops"]] == ["顾霜"]
-    assert domain.case_pool.promises_for(fixture_id(__name__, "case-session-a")) == [case["case_id"]]
+    assert domain.case_pool.claims_for(fixture_id(__name__, "case-session-a")) == [case["case_id"]]
+    assert domain.case_pool.submissions_for(fixture_id(__name__, "case-session-a")) == []
     assert not hasattr(domain.case_pool, "deliveries")
-
 
 
 async def test_partial_program_keeps_success_and_rejected_operation_has_no_candidate(declaration_case):
@@ -388,9 +393,9 @@ async def test_report_event_index_compact_page_allows_one_hundred(declaration_ca
     )
     assert receipt["status"] == "partial"
     assert [item["message"] for item in receipt["failed"]] == [
-        "limit=100 越界：详情预览每页最多 20 条，紧凑索引请用 compact=True（最多 100 条）"
+        "limit=100 越界：详情预览每页最多 20 条，精简一页请用 compact=True（最多 100 条）"
     ]
-    assert runtime.env["page"]["total"] == 0 and runtime.env["page"]["events"] == []
+    assert runtime.env["page"]["total"] == 2 and len(runtime.env["page"]["events"]) == 2
 
 
 async def test_partial_program_outer_audit_is_error_and_keeps_full_receipt_in_same_session():
@@ -530,7 +535,7 @@ async def test_batch_items_have_distinct_audit_ids_and_rejected_case_has_no_deli
     )
     program = (
         'page = search_events(limit=2)\ncase = push_case(case_type="event", description="核对事件身份")\n'
-        'promise_case(case_id=case["case_id"])\nresult = write_event(items=['
+        'claim_case(case_id=case["case_id"])\nresult = write_event(items=['
         + identity_item("a", 0)
         + ","
         + identity_item("bad", 0, invalid=True)
@@ -546,7 +551,8 @@ async def test_batch_items_have_distinct_audit_ids_and_rejected_case_has_no_deli
     assert [bool(row["error"]) for row in rows] == [False, True, False]
     assert [row["request_args"]["_program"]["item_index"] for row in rows] == [0, 1, 2]
     assert len({row["request_args"]["_tool_call_id"] for row in rows}) == 3
-    assert pool.promises_for(author) == [runtime.env["case"]["case_id"]]
+    assert pool.claims_for(author) == [runtime.env["case"]["case_id"]]
+    assert pool.submissions_for(author) == []
     assert not hasattr(pool, "deliveries")
     assert "case_link" not in rows[1]["receipt"]
     assert runtime.env["result"]["results"][1] is None

@@ -32,13 +32,17 @@ def _materials():
 
 
 def test_role_faces_expose_only_their_writes():
+    from src.agents.diagnosis.program_runtime import DiagnosisProgramRuntime
+    from src.agents.diagnosis.prompts import build_diagnosis_system_prompt
+
     case_tools = _build_tools()
     assert {"write_event", "push_case"} <= set(case_tools)
     assert {"write_arc", "write_outcome", "write_diagnosis", "read_metrics", "read_topics"}.isdisjoint(case_tools)
     report_tools = _build_tools(role="report")
     assert {"write_arc", "write_outcome", "write_diagnosis", "read_metrics", "read_topics"} <= set(report_tools)
-    assert {"write_event"}.isdisjoint(report_tools)
-    # 共享目录两个角色都有：搜索/读取、案例工具与 finish
+    assert {"write_event", "push_case", "claim_case", "claim_random_case", "submit_case"}.isdisjoint(report_tools)
+    assert "claim_random_case" in case_tools
+    # 两个角色共享读取与结束工具
     shared = {
         "search_text",
         "read_text",
@@ -47,10 +51,16 @@ def test_role_faces_expose_only_their_writes():
         "search_graph",
         "read_entity",
         "search_cases",
-        "promise_case",
         "finish",
     }
     assert shared <= set(case_tools) and shared <= set(report_tools)
+    report_catalog = DiagnosisProgramRuntime(list(report_tools.values())).build_tool().description
+    case_catalog = DiagnosisProgramRuntime(list(case_tools.values())).build_tool().description
+    assert "claim_case" not in report_catalog and "claim_random_case" not in report_catalog
+    assert "submit_case" not in report_catalog
+    assert "write_diagnosis" not in case_catalog
+    assert "write_diagnosis" not in build_diagnosis_system_prompt(role="case")
+    assert "claim_random_case" not in build_diagnosis_system_prompt(role="report")
 
 
 def test_case_write_channel_mounts_only_with_binding_and_requires_caseid():
@@ -150,7 +160,7 @@ def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_cas
             "from": 1,
             "to": 1,
             "reason": "批量测试明确判断独立事件",
-            "evidence": [{"paragraph_id": 0}],
+            "evidence": [{"paragraph_id": 999 if event_id == "missing" else 0}],
         }
 
     result = json.loads(

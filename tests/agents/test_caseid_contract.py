@@ -54,7 +54,7 @@ async def test_promised_case_keeps_business_output_without_child_entries(db_sess
             )
         )
         assert not result.get("warnings")
-        agent.case_pool.promise(caseid, author)
+        agent.case_pool.claim(caseid, author)
         result = json.loads(
             await runtime.execute(
                 'event(el="b", title="点灯", problem="行动目标", summary="点灯", '
@@ -63,6 +63,7 @@ async def test_promised_case_keeps_business_output_without_child_entries(db_sess
             )
         )
         assert not result.get("failed")
+        agent.case_pool.submit(caseid, author)
         await save_and_confirm(agent, db_session, execution)
         row = db_session.get(Case, caseid)
         assert row.status == "resolved" and row.promised_agent_id == author
@@ -78,12 +79,13 @@ def test_promise_tracks_owner_without_business_association():
     pool.begin("b")
     caseid = pool.push("dialogue", "核对说话人", "a")["case_id"]
     assert not hasattr(pool, "associate")
-    assert pool.promise(caseid, "a")["status"] == "promised"
+    assert pool.claim(caseid, "a")["status"] == "claimed"
     pool.rollback("a")
     assert caseid not in pool.cases
     pool.begin("a")
     caseid = pool.push("dialogue", "重新核对", "a")["case_id"]
-    pool.promise(caseid, "a")
+    pool.claim(caseid, "a")
+    pool.submit(caseid, "a")
     pool.confirm("a")
     pool.rollback("a")
     assert pool.case_runtime[caseid]["owner"] == "a"
@@ -104,10 +106,10 @@ async def test_declared_event_registers_plain_case_and_restores(db_session):
         assert agent.case_pool.search("event") == []
         event_id = next(iter(agent.event_trees.nodes))
         await save_and_confirm(agent, db_session, execution)
-        pool = CasePool(run)
-        pool.load_storage(storage_for(db_session))
         case = agent.case_pool.search("event")[0]
         assert event_id in case["description"] and case["case_id"] != event_id
+        pool = CasePool(run)
+        pool.load_storage(storage_for(db_session))
         assert pool.search("event")[0]["description"] == case["description"]
     finally:
         agent.close()

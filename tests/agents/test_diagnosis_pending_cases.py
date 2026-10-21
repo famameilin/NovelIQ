@@ -47,9 +47,7 @@ def real_author(session, run_id: str) -> str:
 def _reports(session, run_id: str) -> list[DiagnosisReport]:
     return list(
         session.scalars(
-            select(DiagnosisReport)
-            .join(Agent, Agent.id == DiagnosisReport.agent_id)
-            .where(Agent.run_id == run_id)
+            select(DiagnosisReport).join(Agent, Agent.id == DiagnosisReport.agent_id).where(Agent.run_id == run_id)
         )
     )
 
@@ -63,7 +61,7 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
     author = real_author(draft.fixture_session, draft.run_id)
     domain.case_pool.begin(author)
     case = domain.case_pool.push("relation", "核对寻路与照明的关联", author)
-    domain.case_pool.promise(case["case_id"], author)
+    domain.case_pool.claim(case["case_id"], author)
     error = asyncio.CancelledError("用户取消") if cancelled else RuntimeError("预算耗尽")
 
     async def fail(_scheduler):
@@ -83,12 +81,12 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
     pool = CasePool(draft.run_id)
     pool.load_storage(storage_for(draft.fixture_session))
     # 承诺随会话保存落库：本会话未保存时，续跑重建后按未解决（未承诺）重办
-    assert pool.case_runtime[case["case_id"]]["promised"] is False
+    assert pool.case_runtime[case["case_id"]]["submitted"] is False
     row = draft.fixture_session.get(Case, case["case_id"])
     assert row.producer_agent_id == author and row.status == "pending"
     assert not hasattr(pool, "deliveries")
     assert author not in domain.case_pool.saved
-    assert run_events(storage_for(draft.fixture_session), draft.run_id) == {}
+    assert len(run_events(storage_for(draft.fixture_session), draft.run_id)) == 2
     assert _reports(draft.fixture_session, draft.run_id) == []
     assert len(run_annotation_event_ids(storage_for(draft.fixture_session), draft.run_id)) == 2
 
@@ -143,11 +141,8 @@ def test_pending_registration_transaction_rolls_back_all_cases_on_storage_failur
     # retain 的短事务整体回滚：登记行与支持条目都不残留，只保留真实执行身份
     draft_case.fixture_session.expire_all()
     assert not list(
-        draft_case.fixture_session.scalars(
-            select(Case).where(Case.description.in_(["核查第0个节点", "核查第1个节点"]))
-        )
+        draft_case.fixture_session.scalars(select(Case).where(Case.description.in_(["核查第0个节点", "核查第1个节点"])))
     )
-
 
 
 def test_formal_output_adopts_real_child_delivery_without_fabricated_child_report(db_session):
@@ -196,7 +191,8 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
     domain.case_pool = pool
     pool.begin(author)
     case = pool.push("relation", "检查寻路与照明", author)
-    pool.promise(case["case_id"], author)
+    pool.claim(case["case_id"], author)
+    pool.submit(case["case_id"], author)
     frozen = CaseContribution(
         run_id,
         author,
@@ -204,7 +200,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
             {
                 "created_case_ids": [case["case_id"]],
                 "registrations": {case["case_id"]: case},
-                "promises": pool.promises_for(author),
+                "submissions": pool.submissions_for(author),
             },
             ensure_ascii=False,
         ),
@@ -217,7 +213,7 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
     assert row.status == "resolved" and row.promised_agent_id == author
     loaded = CasePool(run_id)
     loaded.load_storage(storage_for(db_session))
-    assert loaded.case_runtime[case["case_id"]]["promised"] is True
+    assert loaded.case_runtime[case["case_id"]]["submitted"] is True
     # 只有真实诊断报告被采纳，不伪造子报告
     reports = _reports(db_session, run_id)
     assert [row.report_id for row in reports] == [report_id]

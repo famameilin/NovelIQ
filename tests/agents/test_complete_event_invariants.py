@@ -47,6 +47,14 @@ def event(draft, key, child_ids=(), **kwargs):
         evidence=[OrganizationEvidence(paragraph_id=0)],
         **kwargs,
     )
+    for child in child_ids:
+        draft.contain(
+            parent_event_id=result["event_id"],
+            child_event_id=child,
+            reason="整体行动包含子事件",
+            evidence=[OrganizationEvidence(paragraph_id=0)],
+        )
+    return result["event_id"]
 
 
 def test_event_key_replay_is_idempotent_and_content_cannot_change(draft_case):
@@ -57,29 +65,35 @@ def test_event_key_replay_is_idempotent_and_content_cannot_change(draft_case):
         event(draft, "整体行动", progress="不可覆盖")
 
 
-def test_containment_cycle_rejected_at_submission_and_explicitly_retractable(draft_case):
+def test_containment_cycle_and_single_parent_rejected(draft_case):
     draft = draft_case
     children = list(draft._all_events())
     parent = event(draft, "整体行动", children)
     with pytest.raises(ValueError, match="成环"):
-        draft.contain(parent_event_id=child, child_event_id=parent, reason="反向包含候选", evidence=evidence)
-    assert len(draft.containments) == 1
-    draft.retract(kind="contain", identifier=f"{parent}/{child}", reason="明确撤回包含候选", evidence=evidence)
-    assert draft.containments == {}
-    assert draft._parents() == {}
+        draft.contain(
+            parent_event_id=children[0],
+            child_event_id=parent,
+            reason="环",
+            evidence=[OrganizationEvidence(paragraph_id=0)],
+        )
+    other = event(draft, "另一个整体")
+    with pytest.raises(ValueError, match="直接父"):
+        draft.contain(
+            parent_event_id=other,
+            child_event_id=children[0],
+            reason="双父",
+            evidence=[OrganizationEvidence(paragraph_id=0)],
+        )
 
 
-def test_changed_source_and_duplicate_frozen_event_rejected(draft_case):
-    from pydantic import ValidationError
-
-
+def test_only_own_unsaved_containment_can_be_retracted(draft_case):
     draft = draft_case
     child = next(iter(draft._all_events()))
     parent = event(draft, "整体行动", [child])
     draft.retract(
-        kind="identity",
-        identifier=identifier,
-        reason="撤回引用已改写来源的候选",
+        kind="contain",
+        identifier=f"{parent}/{child}",
+        reason="重新判断",
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )
     assert not draft.containments

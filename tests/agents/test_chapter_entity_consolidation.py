@@ -101,7 +101,7 @@ def _receipt_facts(db_session, run_id):
 
 
 def _program_registered_supports(db_session, run_id):
-    return list(db_session.scalars(select(Case).where(Case.run_id==run_id, Case.producer_agent_id.is_(None))))
+    return list(db_session.scalars(select(Case).where(Case.run_id == run_id, Case.producer_agent_id.is_(None))))
 
 
 def _program_case_ids(db_session, run_id) -> list[str]:
@@ -115,7 +115,10 @@ def _run_issue_cases(db_session, run_id):
 
 def _drop_program_receipt(db_session, run_id) -> None:
     from sqlalchemy import update
-    db_session.execute(update(ChapterAnnotation).where(ChapterAnnotation.run_id==run_id).values(consolidation_digest=None))
+
+    db_session.execute(
+        update(ChapterAnnotation).where(ChapterAnnotation.run_id == run_id).values(consolidation_digest=None)
+    )
     db_session.flush()
 
 
@@ -357,7 +360,6 @@ async def test_pending_failure_rolls_back_and_resume_retries_only_program(db_ses
     assert db_session.get(Case, case.id).status == "pending"
 
 
-
 @pytest.mark.asyncio
 async def test_completed_chapter_rechecks_source_receipt_without_reannotating(db_session) -> None:
     novel_id, run_id = create_run_with_chunks(db_session, texts=["张三出门。"])
@@ -390,7 +392,9 @@ def test_case_template_retains_location_reason_evidence_and_marks_long_name() ->
 def test_required_lane_must_be_saved_before_consolidation(db_session) -> None:
     _, run_id = create_run_with_chunks(db_session, texts=["原文。"])
     with pytest.raises(ValueError, match="必需角色"):
-        consolidate_chapter(storage_for(db_session), run_id, 1, CasePool(run_id))
+        consolidate_chapter(
+            storage_for(db_session), run_id, 1, CasePool(run_id), author=fixture_id(__name__, "program"),
+        )
 
 
 def test_ambiguous_representatives_and_participant_variants_are_preserved() -> None:
@@ -538,7 +542,9 @@ async def test_unregistered_participant_stays_and_enters_pending(db_session) -> 
     )
     _drop_program_receipt(db_session, run_id)
     db_session.commit()
-    result = consolidate_chapter(storage_for(db_session), run_id, 1, CasePool(run_id))
+    result = consolidate_chapter(
+        storage_for(db_session), run_id, 1, CasePool(run_id), author=fixture_id(__name__, "program"),
+    )
     db_session.commit()
     assert result["status"] == "saved" and result["issues"] == 1
     descriptions = [case.description for case in _run_issue_cases(db_session, run_id)]
@@ -578,9 +584,7 @@ async def test_dangling_relation_enters_pending_and_edge_survives(db_session) ->
         )
     )
     highest = db_session.scalar(
-        select(func.max(GraphFact.operation_order)).where(
-            GraphFact.direct_producer_agent_id == execution.id
-        )
+        select(func.max(GraphFact.operation_order)).where(GraphFact.direct_producer_agent_id == execution.id)
     )
     db_session.add(
         GraphFact(
@@ -592,7 +596,9 @@ async def test_dangling_relation_enters_pending_and_edge_survives(db_session) ->
     )
     _drop_program_receipt(db_session, run_id)
     db_session.commit()
-    result = consolidate_chapter(storage_for(db_session), run_id, 1, CasePool(run_id))
+    result = consolidate_chapter(
+        storage_for(db_session), run_id, 1, CasePool(run_id), author=fixture_id(__name__, "program"),
+    )
     db_session.commit()
     assert result["status"] == "saved" and result["issues"] == 1
     descriptions = [case.description for case in _run_issue_cases(db_session, run_id)]
@@ -663,8 +669,9 @@ async def test_agent_restores_case_memory_when_chapter_transaction_fails(db_sess
     )
 
     def fail(session, run_id, chapter_id, cases, **kwargs):
-        cases.begin(fixture_id(__name__, "program"))
-        cases.push("event", "模拟登记", fixture_id(__name__, "program"))
+        author = kwargs["author"]
+        cases.begin(author)
+        cases.push("event", "模拟登记", author)
         raise RuntimeError("故障")
 
     monkeypatch.setattr("src.agents.annotation.chapter_consolidation.consolidate_chapter", fail)
