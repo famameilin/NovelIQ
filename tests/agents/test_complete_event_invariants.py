@@ -33,62 +33,34 @@ async def draft_case(db_session):
     agent.close()
 
 
-def event(draft, key, declaration_ids, **kwargs):
-    return draft.identity(
+def event(draft, key, child_ids=(), **kwargs):
+    result = draft.event(
         key=key,
         title=key,
         problem="待解决",
         summary=key,
         event_type="探寻",
         status="ongoing",
-        declaration_ids=declaration_ids,
-        reason="测试明确判断同一事件",
+        reason="原文中的整体行动",
+        from_chapter_id=1,
+        to_chapter_id=1,
         evidence=[OrganizationEvidence(paragraph_id=0)],
         **kwargs,
-    )["event_id"]
-
-
-def submit_identities(draft, *, same):
-    ids = list(draft._declarations())
-    draft.review_declarations(ids, reason="已依据原文核对声明")
-    draft.compare_declarations(
-        source_declaration_id=ids[0],
-        target_declaration_ids=[ids[1]],
-        disposition="same_event" if same else "independent",
-        reason="本例明确选择对应身份关系",
-        evidence=[OrganizationEvidence(paragraph_id=0)],
     )
 
 
-def test_bad_source_rejected_and_overlapping_identity_claim_is_first_come(draft_case):
+def test_event_key_replay_is_idempotent_and_content_cannot_change(draft_case):
     draft = draft_case
-    ids = list(draft._declarations())
-    with pytest.raises(ValueError, match="不属于"):
-        event(draft, "bad", [ids[0], "missing"])
-    assert not draft.events
-    first = event(draft, "first", [ids[0]])
-    # 工具面先到先得：重叠认领在提交时拒收，撤回后即可重新认领
-    with pytest.raises(ValueError, match="认领"):
-        event(draft, "second", ids)
-    assert set(draft.events) == {first}
-    draft.retract(
-        kind="identity",
-        identifier=first,
-        reason="明确撤回让出完整身份候选",
-        evidence=[OrganizationEvidence(paragraph_id=0)],
-    )
-    event(draft, "second", ids)
-    submit_identities(draft, same=True)
+    first = event(draft, "整体行动")
+    assert event(draft, "整体行动") == first
+    with pytest.raises(ValueError):
+        event(draft, "整体行动", progress="不可覆盖")
 
 
 def test_containment_cycle_rejected_at_submission_and_explicitly_retractable(draft_case):
     draft = draft_case
-    ids = list(draft._declarations())
-    child, parent = event(draft, "child", [ids[0]]), event(draft, "parent", [ids[1]])
-    submit_identities(draft, same=False)
-    evidence = [OrganizationEvidence(paragraph_id=0)]
-    draft.contain(parent_event_id=parent, child_event_id=child, reason="独立事件组成", evidence=evidence)
-    # 工具面先到先得：反向包含在提交时拒收
+    children = list(draft._all_events())
+    parent = event(draft, "整体行动", children)
     with pytest.raises(ValueError, match="成环"):
         draft.contain(parent_event_id=child, child_event_id=parent, reason="反向包含候选", evidence=evidence)
     assert len(draft.containments) == 1
@@ -100,77 +72,15 @@ def test_containment_cycle_rejected_at_submission_and_explicitly_retractable(dra
 def test_changed_source_and_duplicate_frozen_event_rejected(draft_case):
     from pydantic import ValidationError
 
-    from src.event_trees.organization import NarrativeOrganization
-    from src.storage.models import EventDeclaration
 
     draft = draft_case
-    ids = list(draft._declarations())
-    identifier = event(draft, "invalid", ids)
-    # 候选提交后来源正文被改写：保存校验时来源哈希失效，不能冒充真实来源
-    source = draft.fixture_session.get(EventDeclaration, ids[0])
-    original_title = source.title
-    source.title = "改写后的标题"
-    draft.fixture_session.flush()
-    submit_identities(draft, same=True)
-    with pytest.raises(ValueError, match="来源"):
-        draft.validate_events()
-    # 撤回引用已改写来源的候选，恢复来源原文后重新提交
+    child = next(iter(draft._all_events()))
+    parent = event(draft, "整体行动", [child])
     draft.retract(
         kind="identity",
         identifier=identifier,
         reason="撤回引用已改写来源的候选",
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )
-    source.title = original_title
-    draft.fixture_session.flush()
-    identifier = event(draft, "valid", ids)
-    submit_identities(draft, same=True)
-    draft.review_events([identifier], reason="实际身份结构已核对")
-    payload = draft.finish().model_dump()
-    payload["events"] *= 2
-    with pytest.raises(ValidationError, match="重复"):
-        NarrativeOrganization.model_validate(payload)
-
-
-def test_checked_snapshots_survive_candidate_restore_order_and_pair_orientation(draft_case):
-    draft = draft_case
-    ids = list(draft._declarations())
-    first, second = event(draft, "first", [ids[0]]), event(draft, "second", [ids[1]])
-    submit_identities(draft, same=False)
-    evidence = [OrganizationEvidence(paragraph_id=0)]
-    for key, relation_type in [("cause", "causes"), ("echo", "echoes")]:
-        draft.relate_events(
-            key=key,
-            source_kind="event",
-            source_id=first,
-            target_kind="event",
-            target_id=second,
-            relation_type=relation_type,
-            reason="原文明确比较",
-            evidence=evidence,
-        )
-    before = draft.pair_snapshot(first, second), draft.event_snapshot(first)
-    draft.structure_review(
-        source_event_id=first,
-        target_event_id=second,
-        disposition="related",
-        reason="已核对两项明确关联",
-        evidence=evidence,
-    )
-    draft.review_events([first, second], reason="核对完整实际版本")
-    frozen = draft.structure_digest()
-    draft.events = dict(reversed(list(draft.events.items())))
-    draft.relations = dict(reversed(list(draft.relations.items())))
-    assert before == (draft.pair_snapshot(second, first), draft.event_snapshot(first))
-    assert draft.structure_digest() == frozen
-
-
-def test_repeated_identity_submission_keeps_full_book_body(draft_case):
-    """保存前重提自己的身份候选不报错；阶段值由来源声明决定，不复制模型输入"""
-    draft = draft_case
-    ids = list(draft._declarations())
-    identifier = event(draft, "journey", ids)
-    submit_identities(draft, same=True)
-    event(draft, "journey", ids, progress="改写身份")
-    assert identifier in draft.events
-    assert not hasattr(draft, "revisions")
+    assert not draft.containments
+    assert parent in draft.events

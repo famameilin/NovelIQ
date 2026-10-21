@@ -106,7 +106,9 @@ def test_duplicate_event_rejection_names_local_node_key() -> None:
             summary="李瑜推门",
             event_type="行动",
             status="ongoing",
-            declaration_id="node-2",
+            event_id="node-2",
+            from_chapter_id=1,
+            to_chapter_id=1,
         ),
         BoundEvent(
             node_id="node-2",
@@ -118,7 +120,9 @@ def test_duplicate_event_rejection_names_local_node_key() -> None:
             summary="李瑜推门",
             event_type="行动",
             status="ongoing",
-            declaration_id="node-2",
+            event_id="node-2",
+            from_chapter_id=1,
+            to_chapter_id=1,
         ),
     ]
     with pytest.raises(ValueError) as excinfo:

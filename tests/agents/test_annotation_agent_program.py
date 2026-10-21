@@ -346,7 +346,7 @@ async def test_eight_constructors_write_records_into_the_agent_and_shared_ledger
         status="ongoing",
         evidence=E_SHOUT,
     )
-    assert root_plan.ref == {"kind": "declaration", "el": "t1"}
+    assert root_plan.ref == {"kind": "event", "el": "t1"}
     assert root_plan.args["evidence"] == E_SHOUT
     child_plan = runtime.tools["event"](
         el="t1/e2",
@@ -357,7 +357,7 @@ async def test_eight_constructors_write_records_into_the_agent_and_shared_ledger
         status="ongoing",
         evidence=E_KNIFE,
     )
-    assert child_plan.ref == {"kind": "declaration", "el": "t1/e2"}
+    assert child_plan.ref == {"kind": "event", "el": "t1/e2"}
     assert child_plan.args["evidence"] == E_KNIFE
     participants_plan = runtime.tools["participants"](el="t1", items=[_CHARACTER_ITEM])
     assert participants_plan.ref == {"kind": "participants", "el": "t1", "count": 1}

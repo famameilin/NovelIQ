@@ -160,7 +160,9 @@ def test_single_work_tree_recovery_preserves_other_inflight_nodes():
         summary="Other",
         event_type="行动",
         status="ongoing",
-        declaration_id="other-node",
+        event_id="other-node",
+        from_chapter_id=1,
+        to_chapter_id=1,
     )
     trees.sync(fixture_id(__name__, "o1"), 3, [other])
     saved = other.model_copy(update={"node_id": "saved-node", "tree_id": "saved-tree"})
@@ -262,4 +264,4 @@ def test_full_case_restore_is_idempotent_and_forgets_discarded_contributions(db_
     assert [item["case_id"] for item in restored.search()] == [first["case_id"]]
     restored.begin(fixture_id(__name__, "later"))
     restored.rollback(fixture_id(__name__, "later"))
-    assert restored.search()[0]["promised"] is True
+    assert restored.search()[0]["submitted"] is True

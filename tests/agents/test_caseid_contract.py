@@ -8,7 +8,7 @@ from sqlalchemy import select
 from src.agents.annotation.agent import AnnotationAgent
 from src.case_pool import CasePool
 from src.event_bus import EventBus
-from src.storage.models import Case, EventDeclaration
+from src.storage.models import Case, CompleteEvent
 from tests.agents.test_complete_event_work import execution_for, save_and_confirm
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.storage_fixtures import storage_factory, storage_for
@@ -32,7 +32,9 @@ async def test_invalid_caseid_keeps_written_declaration(db_session, caseid):
         assert not receipt.get("warnings")
         assert "case_link" not in str(receipt)
         record_id = await save_and_confirm(agent, db_session, execution)
-        assert db_session.scalar(select(EventDeclaration).where(EventDeclaration.record_id == record_id)) is not None
+        assert (
+            db_session.scalar(select(CompleteEvent).where(CompleteEvent.annotation_record_id == record_id)) is not None
+        )
     finally:
         agent.close()
 
@@ -99,14 +101,14 @@ async def test_declared_event_registers_plain_case_and_restores(db_session):
             )
         )
         assert not result.get("failed")
-        case = agent.case_pool.search("event")[0]
-        assert set(case) == {"case_id", "case_type", "description", "promised"}
-        again = agent.case_pool.register_event_case(title="行动", summary="行动", author=execution.invocation_id)
-        assert again["case_id"] == case["case_id"]
+        assert agent.case_pool.search("event") == []
+        event_id = next(iter(agent.event_trees.nodes))
         await save_and_confirm(agent, db_session, execution)
         pool = CasePool(run)
         pool.load_storage(storage_for(db_session))
-        assert pool.search("event")[0]["description"] == "行动：行动"
+        case = agent.case_pool.search("event")[0]
+        assert event_id in case["description"] and case["case_id"] != event_id
+        assert pool.search("event")[0]["description"] == case["description"]
     finally:
         agent.close()
 

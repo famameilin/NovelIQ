@@ -13,7 +13,7 @@ import pytest
 from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
 from src.storage import new_id
-from src.storage.models import DeclarationParticipant
+from src.storage.models import EventParticipant
 from tests.agents.test_diagnosis_organization import organization_case as organization_case
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import (
@@ -71,13 +71,13 @@ def declaration_case(db_session):
 
 def test_declaration_index_keeps_paragraphs_and_detail_keeps_full_source(declaration_case):
     draft = declaration_case
-    identifiers = list(draft._declarations())
+    identifiers = list(draft._all_events())
     paragraph_id = first_paragraph(draft.fixture_session, draft.run_id).paragraph_id
     # 参与者是正式关系行：索引不携带无界人物列表，详情完整保留全部来源
     draft.fixture_session.add(
-        DeclarationParticipant(
+        EventParticipant(
             participant_id=new_id(),
-            declaration_id=identifiers[0],
+            event_id=identifiers[0],
             participant_ordinal=1,
             entity_id=ensure_character(draft.fixture_session, run_id=draft.run_id, name="贺重明"),
             role="旁观",
@@ -97,21 +97,21 @@ def test_declaration_index_keeps_paragraphs_and_detail_keeps_full_source(declara
     first = json.loads(tools["search_events"].invoke({"limit": 1}))
     assert first["total"] == 2 and first["next_offset"] == 1
     indexed = first["events"][0]
-    assert indexed["declaration_id"] == identifiers[0]
+    assert indexed["event_id"] == identifiers[0]
     assert "participants" not in indexed
     assert indexed["evidence"] == [{"paragraph_id": paragraph_id}]
     assert len(indexed["summary"]) <= 160
     second = json.loads(tools["search_events"].invoke({"offset": first["next_offset"], "limit": 1}))
-    assert second["next_offset"] is None and second["events"][0]["declaration_id"] == identifiers[1]
+    assert second["next_offset"] is None and second["events"][0]["event_id"] == identifiers[1]
     detail = json.loads(tools["read_event"].invoke({"node_id": identifiers[0]}))["content"]
     assert detail["summary"] == LONG_SUMMARY
     assert [item["action"] for item in detail["participants"]] == [None, "寻路" * 80]
-    assert detail["evidence"] == draft._declarations()[identifiers[0]]["evidence"]
+    assert detail["evidence"] == draft._all_events()[identifiers[0]]["evidence"]
     assert len(json.dumps(indexed)) < len(json.dumps(detail)) / 10
     # 读取不改变已保存声明关系
-    assert draft._declarations()[identifiers[0]]["participants"] == detail["participants"]
+    assert draft._all_events()[identifiers[0]]["participants"] == detail["participants"]
     # 索引段号仍经正式原文绑定，不借简洁读取绕过证据校验
-    source_evidence = draft._declarations()[identifiers[0]]["evidence"][0]
+    source_evidence = draft._all_events()[identifiers[0]]["evidence"][0]
     assert indexed["evidence"][0]["paragraph_id"] == source_evidence["paragraph_id"]
     bound = draft.bind_evidence([OrganizationEvidence(paragraph_id=source_evidence["paragraph_id"], quote="寻路")])[0]
     assert (bound.char_start, bound.char_end, bound.text_hash) == (
@@ -119,7 +119,7 @@ def test_declaration_index_keeps_paragraphs_and_detail_keeps_full_source(declara
         source_evidence["char_end"],
         source_evidence["text_hash"],
     )
-    with pytest.raises(ValueError, match="声明引用不属于本 run"):
+    with pytest.raises(ValueError, match="本任务事件不存在"):
         tools["read_event"].invoke({"node_id": "unknown-process"})
     with pytest.raises(ValueError, match="每页最多 20 条"):
         tools["search_events"].invoke({"limit": 21})
@@ -345,12 +345,12 @@ def test_diagnosis_reads_survive_interrupted_pipeline_commit(declaration_case, m
         with pytest.raises(InvalidRequestError, match="prepared"):
             pipeline.execute(text("SELECT 1"))
         # 修复契约：诊断读取不依赖管线会话
-        source = next(iter(domain.sources))
-        row = domain.draft.read_declarations([source])["items"][0]
-        assert row["declaration_id"] == source
+        source = next(iter(domain.draft._all_events()))
+        row = domain.draft.read_events([source])[0]
+        assert row["event_id"] == source
         # 反向对照：同一次声明读取走旧接线（draft 挂在管线会话上）必被中间态拒绝
         with pytest.raises(InvalidRequestError, match="prepared"):
-            draft.read_declarations([source])
+            draft.read_events([source])
     finally:
         domain.close()
         pipeline.rollback()

@@ -59,7 +59,7 @@ def test_complete_declaration_fields_round_trip_through_both_production_tools(pr
     result = _call(_tools(ledger, program=program), _args())
     event = ledger.bound_payloads["events"][0]
     assert result["status"] == "written"
-    assert event.declaration_id == event.node_id
+    assert event.event_id == event.node_id
     assert event.parent_node_id is None
     assert event.title == "进入山门"
     assert event.problem == "能否进入山门"
@@ -69,8 +69,8 @@ def test_complete_declaration_fields_round_trip_through_both_production_tools(pr
     assert event.progress == "甲进入山门"
     assert event.evidence_paragraph_id == 0
     content = result["content"]
-    assert content["declaration_id"] == event.declaration_id
-    assert "event_id" not in content
+    assert content["event_id"] == event.event_id
+    assert "declaration_id" not in content
 
 
 @pytest.mark.parametrize("field", ["title", "problem", "summary", "event_type", "status", "evidence"])
@@ -103,7 +103,7 @@ def test_local_path_and_call_order_never_form_parent_containment() -> None:
     assert len(events) == 2
     assert not ledger.pending_child_events
     assert all(event.parent_node_id is None for event in events)
-    assert len({event.declaration_id for event in events}) == 2
+    assert len({event.event_id for event in events}) == 2
 
 
 @pytest.mark.parametrize("entity_type", ["location", "organization"])

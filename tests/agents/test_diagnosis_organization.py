@@ -27,7 +27,6 @@ from src.storage.models import (
     Agent,
     CompleteEvent,
     DiagnosisReport,
-    EventDeclarationBinding,
     NarrativeGroup,
     NarrativeLink,
     OrganizationCheck,
@@ -66,7 +65,7 @@ class OrganizationCase:
         for chapter_id in range(1, chapters + 1):
             record_id, _agent_id = add_annotation_source(session, self.run_id, chapter_id, role="event")
             phrase = PHRASES[(chapter_id - 1) % len(PHRASES)]
-            declaration_id = add_declaration(
+            event_id = add_declaration(
                 session,
                 record_id=record_id,
                 paragraph=first_paragraph(session, self.run_id, chapter_id=chapter_id),
@@ -76,41 +75,17 @@ class OrganizationCase:
                 summary=f"章节概要{len(self.declarations)}",
                 event_type="身份确认",
             )
-            self.declarations.append(declaration_id)
+            self.declarations.append(event_id)
         session.flush()
 
 
 def identity_draft(session, case: OrganizationCase) -> EventOrganizationDraft:
-    """逐项提交身份判断、声明核对与来源比较"""
+    from src.event_trees.diagnosis_persistence import hydrate_draft_from_run
+
     draft = EventOrganizationDraft(storage_for(session), case.run_id, case.session_id)
     draft.fixture_session = session
-    draft.case_id = report_case_anchor(case.run_id)
     draft.producer_agent_id = case.agent_id
-    sources = list(draft._declarations().values())
-    for row in sources:
-        evidence = [OrganizationEvidence(paragraph_id=row["evidence"][0]["paragraph_id"])]
-        draft.identity(
-            key=row["declaration_id"],
-            title=row["title"],
-            problem=row["problem"],
-            summary=row["summary"],
-            event_type=row["event_type"],
-            status=row["status"],
-            progress=row["progress"],
-            declaration_ids=[row["declaration_id"]],
-            reason="本例按原文明确判断每项声明为一个事件身份",
-            evidence=evidence,
-        )
-        draft.review_declarations([row["declaration_id"]], reason="逐项核对不可变声明与原文")
-    for index, row in enumerate(sources):
-        for target in sources[index + 1 :]:
-            draft.compare_declarations(
-                source_declaration_id=row["declaration_id"],
-                target_declaration_ids=[target["declaration_id"]],
-                disposition="independent",
-                reason="本例各声明是独立问题",
-                evidence=[OrganizationEvidence(paragraph_id=row["evidence"][0]["paragraph_id"])],
-            )
+    hydrate_draft_from_run(storage_for(session), case.run_id, draft)
     return draft
 
 
@@ -224,7 +199,7 @@ def _fresh_draft(session, case: OrganizationCase) -> EventOrganizationDraft:
 
 
 def _submit_identity(draft, row, key: str) -> None:
-    draft.identity(
+    draft.event(
         key=key,
         title=row["title"],
         problem=row["problem"],
@@ -232,7 +207,8 @@ def _submit_identity(draft, row, key: str) -> None:
         event_type=row["event_type"],
         status=row["status"],
         progress=row["progress"],
-        declaration_ids=[row["declaration_id"]],
+        from_chapter_id=row["from"],
+        to_chapter_id=row["to"],
         reason="本例按原文明确判断每项声明为一个事件身份",
         evidence=[OrganizationEvidence(paragraph_id=row["evidence"][0]["paragraph_id"])],
     )
@@ -242,30 +218,26 @@ def test_identity_key_reuse_for_another_event_is_rejected(db_session):
     case = OrganizationCase(db_session)
     db_session.commit()
     draft = _fresh_draft(db_session, case)
-    rows = list(draft._declarations().values())
+    rows = list(draft._all_events().values())
     # 同一执行内局部键唯一：换声明复用同键拒收，同声明重发放行
     _submit_identity(draft, rows[0], "k1")
-    with pytest.raises(ValueError, match="局部键"):
+    with pytest.raises(ValueError, match="覆盖"):
         _submit_identity(draft, rows[1], "k1")
     _submit_identity(draft, rows[0], "k1")
     assert len(draft.events) == 1
 
 
-def test_identity_key_is_freed_after_retract(db_session):
+def test_event_cannot_be_retracted_or_key_freed(db_session):
     case = OrganizationCase(db_session)
-    db_session.commit()
     draft = _fresh_draft(db_session, case)
-    rows = list(draft._declarations().values())
-    _submit_identity(draft, rows[0], "k1")
-    occupied = next(iter(draft.events))
-    draft.retract(
-        kind="identity",
-        identifier=occupied,
-        reason="本例验证撤回后局部键重新可用",
-        evidence=[OrganizationEvidence(paragraph_id=rows[0]["evidence"][0]["paragraph_id"])],
-    )
-    _submit_identity(draft, rows[1], "k1")
-    assert len(draft.events) == 1
+    row = next(iter(draft._all_events().values()))
+    _submit_identity(draft, row, "k1")
+    event_id = next(iter(draft.events))
+    with pytest.raises(ValueError):
+        draft.retract(
+            kind="identity", identifier=event_id, reason="禁止撤销事件", evidence=[OrganizationEvidence(paragraph_id=0)]
+        )
+    assert event_id in draft.events
 
 
 def _second_producer(session, run_id: str) -> str:
@@ -281,7 +253,7 @@ def test_cross_session_references_persist_unstored_candidates(db_session):
     case = OrganizationCase(db_session)
     db_session.commit()
     draft = _fresh_draft(db_session, case)
-    rows = list(draft._declarations().values())
+    rows = list(draft._all_events().values())
     _submit_identity(draft, rows[0], "k1")
     _submit_identity(draft, rows[1], "k2")
     parent_id, child_id = sorted(draft.events)
@@ -313,22 +285,14 @@ def test_cross_session_references_persist_unstored_candidates(db_session):
     save_case_session_rows(db_session, case.run_id, case.agent_id, draft)
     db_session.commit()
     assert (
-        len(
-            list(
-                db_session.scalars(
-                    select(CompleteEvent).where(CompleteEvent.event_id.in_([parent_id, child_id]))
-                )
-            )
-        )
+        len(list(db_session.scalars(select(CompleteEvent).where(CompleteEvent.event_id.in_([parent_id, child_id])))))
         == 2
     )
     assert (
         len(
             list(
                 db_session.scalars(
-                    select(OrganizationCheck).where(
-                        OrganizationCheck.reviewed_event_id.in_([parent_id, child_id])
-                    )
+                    select(OrganizationCheck).where(OrganizationCheck.reviewed_event_id.in_([parent_id, child_id]))
                 )
             )
         )
@@ -340,14 +304,14 @@ def test_retract_blocked_when_other_execution_references_event(db_session):
     case = OrganizationCase(db_session)
     db_session.commit()
     draft = _fresh_draft(db_session, case)
-    rows = list(draft._declarations().values())
+    rows = list(draft._all_events().values())
     _submit_identity(draft, rows[0], "k1")
     minted = next(iter(draft.events))
     other = _second_producer(db_session, case.run_id)
     draft.producer_agent_id = other
     draft.review_events([minted], reason="复用其他执行建立的事件并完成核对")
     draft.producer_agent_id = case.agent_id
-    with pytest.raises(ValueError, match="其他执行引用"):
+    with pytest.raises(ValueError, match="只允许撤回"):
         draft.retract(
             kind="identity",
             identifier=minted,
@@ -357,25 +321,18 @@ def test_retract_blocked_when_other_execution_references_event(db_session):
     assert minted in draft.events
 
 
-def test_retract_clears_own_references_before_drop(db_session):
+def test_event_reference_remains_when_event_retraction_is_rejected(db_session):
     case = OrganizationCase(db_session)
-    db_session.commit()
     draft = _fresh_draft(db_session, case)
-    rows = list(draft._declarations().values())
-    _submit_identity(draft, rows[0], "k1")
-    minted = next(iter(draft.events))
-    draft.review_events([minted], reason="先核对再改判")
-    draft.retract(
-        kind="identity",
-        identifier=minted,
-        reason="本例验证撤回清掉自己的引用",
-        evidence=[OrganizationEvidence(paragraph_id=rows[0]["evidence"][0]["paragraph_id"])],
-    )
-    assert minted not in draft.events
-    assert minted not in draft.reviewed_events
-    save_case_session_rows(db_session, case.run_id, case.agent_id, draft)
-    db_session.commit()
-    assert db_session.get(CompleteEvent, minted) is None
+    row = next(iter(draft._all_events().values()))
+    _submit_identity(draft, row, "k1")
+    event_id = next(iter(draft.events))
+    draft.review_events([event_id], reason="核对正文")
+    with pytest.raises(ValueError):
+        draft.retract(
+            kind="identity", identifier=event_id, reason="禁止撤销事件", evidence=[OrganizationEvidence(paragraph_id=0)]
+        )
+    assert event_id in draft.events and event_id in draft.reviewed_events
 
 
 def test_complete_event_body_and_declaration_bindings_are_saved_independently(db_session, organization_case):
@@ -400,12 +357,7 @@ def test_complete_event_body_and_declaration_bindings_are_saved_independently(db
         if row.outcome_group_id is not None and row.member_event_id in event_ids
     ]
     assert len(outcome_links) == 2
-    bindings = list(
-        db_session.scalars(
-            select(EventDeclarationBinding).where(EventDeclarationBinding.event_id == event_ids[0])
-        )
-    )
-    assert {row.declaration_id for row in bindings} == set(draft.events[event_ids[0]].declaration_ids)
+    assert db_session.get(CompleteEvent, event_ids[0]).event_id == event_ids[0]
     from src.event_trees.organization import _run_event_dicts
 
     db_session.expire_all()
@@ -489,21 +441,16 @@ def test_cross_run_complete_event_is_rejected(db_session, organization_case):
         EventOrganizationDraft(storage_for(db_session), other.run_id).read_events([event_ids[0]])
 
 
-def test_event_reads_identify_declaration_ids_as_sources(organization_case):
-    case, _event_ids, draft = organization_case
-    with pytest.raises(ValueError, match="是声明身份"):
-        draft.read_events([case.declarations[0]])
-
-
+def test_saved_annotation_events_are_directly_readable(organization_case):
+    case, _, draft = organization_case
+    assert draft.read_events([case.declarations[0]])[0]["event_id"] == case.declarations[0]
 
 
 def _finalized_submission(session, case, draft, event_ids, *, diagnosis):
     """与正式报告保存同口径绑定运行时字段后提交，重投核验按正式合同字段比较"""
     from src.diagnosis.queries import DiagnosisQueries
 
-    bindings = {
-        declaration_id: event.event_id for event in draft.events.values() for declaration_id in event.declaration_ids
-    }
+    bindings = {event_id: event.event_id for event in draft.events.values() for event_id in event.source_event_ids}
     organization = _organized(draft, event_ids)
     return AgentAnalysis(
         novel_id=case.novel_id,
@@ -515,13 +462,9 @@ def _finalized_submission(session, case, draft, event_ids, *, diagnosis):
     )
 
 
-
-
 def _report_for(session, run_id: str) -> DiagnosisReport | None:
     return session.scalars(
-        select(DiagnosisReport)
-        .join(Agent, Agent.id == DiagnosisReport.agent_id)
-        .where(Agent.run_id == run_id)
+        select(DiagnosisReport).join(Agent, Agent.id == DiagnosisReport.agent_id).where(Agent.run_id == run_id)
     ).one_or_none()
 
 
@@ -553,7 +496,7 @@ def test_save_failure_rolls_back_report_and_organization(db_session):
     assert _report_for(db_session, case.run_id) is None
     from src.event_trees.storage_map import run_events
 
-    assert run_events(storage_for(db_session), case.run_id) == {}
+    assert set(run_events(storage_for(db_session), case.run_id)) == set(case.declarations)
 
 
 def test_diagnosis_uses_sources_without_contract_marker(db_session, organization_case):
@@ -586,7 +529,6 @@ def test_tools_expose_complete_events_and_remove_unique_primary_api(organization
         "write_event",
         "write_arc",
         "write_outcome",
-
         "read_metrics",
         "read_topics",
     } <= set(tools)
@@ -617,7 +559,7 @@ def test_declaration_rows_reads_evidence_in_one_batch(db_session, monkeypatch):
         return original(session, run_id, groups)
 
     monkeypatch.setattr(smap, "evidence_payload_groups", counting)
-    first = draft._declarations()
-    second = draft._declarations()
+    first = draft._all_events()
+    second = draft._all_events()
     assert first == second
     assert calls == [len(case.declarations), len(case.declarations)]

@@ -170,7 +170,7 @@ async def test_event_declarations_do_not_infer_containment_from_call_order() -> 
         assert json.loads(await tools["write_event"].ainvoke(call))["status"] == "written"
     declarations = ledger.bound_payloads["events"]
     assert len(declarations) == 3
-    assert len({event.declaration_id for event in declarations}) == 3
+    assert len({event.event_id for event in declarations}) == 3
     assert all(event.parent_node_id is None for event in declarations)
     assert ledger.events.contribution_payloads()["relations"] == {}
 

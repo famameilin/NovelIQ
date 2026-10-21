@@ -28,7 +28,7 @@ def _event(
 ) -> BoundEvent:
     """构造单根事件声明，正文各字段可单独给检索词"""
     return BoundEvent(
-        declaration_id=node_id,
+        event_id=node_id,
         node_id=node_id,
         tree_id=f"tree-{node_id}",
         parent_node_id=None,
@@ -41,6 +41,8 @@ def _event(
         description=description,
         evidence_paragraph_id=paragraph,
         participants=participants or [],
+        from_chapter_id=1,
+        to_chapter_id=1,
     )
 
 

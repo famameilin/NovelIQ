@@ -29,8 +29,8 @@ from src.storage.models import (
     Agent,
     Case,
     ChapterAnnotation,
-    DeclarationParticipant,
-    EventDeclaration,
+    CompleteEvent,
+    EventParticipant,
     GraphEntity,
     GraphFact,
     GraphRelation,
@@ -278,12 +278,10 @@ finish()
     assert snapshots["张三"].attributes["description"] == "另一份介绍"
 
     declaration = db_session.scalars(
-        select(EventDeclaration).where(EventDeclaration.record_id.in_([record.record_id for record in records]))
+        select(CompleteEvent).where(CompleteEvent.annotation_record_id.in_([record.record_id for record in records]))
     ).one()
     participants = list(
-        db_session.scalars(
-            select(DeclarationParticipant).where(DeclarationParticipant.declaration_id == declaration.declaration_id)
-        )
+        db_session.scalars(select(EventParticipant).where(EventParticipant.event_id == declaration.event_id))
     )
     projected = projection.participants(
         [
@@ -513,8 +511,10 @@ async def test_unregistered_participant_stays_and_enters_pending(db_session) -> 
         await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     declaration = db_session.scalars(
-        select(EventDeclaration).where(
-            EventDeclaration.record_id.in_([record.record_id for record in _annotation_records(db_session, run_id)])
+        select(CompleteEvent).where(
+            CompleteEvent.annotation_record_id.in_(
+                [record.record_id for record in _annotation_records(db_session, run_id)]
+            )
         )
     ).one()
     # 隔离测试直接构造未登记身份的参与者来源，验证核对登记案例且原样保留
@@ -528,9 +528,9 @@ async def test_unregistered_participant_stays_and_enters_pending(db_session) -> 
     )
     db_session.flush()
     db_session.add(
-        DeclarationParticipant(
+        EventParticipant(
             participant_id=fixture_id(__name__, "00000000-0000-0000-0000-0000000000dd"),
-            declaration_id=declaration.declaration_id,
+            event_id=declaration.event_id,
             participant_ordinal=0,
             entity_id=fixture_id(__name__, "00000000-0000-0000-0000-0000000000cc"),
             role="主体",
@@ -544,7 +544,7 @@ async def test_unregistered_participant_stays_and_enters_pending(db_session) -> 
     descriptions = [case.description for case in _run_issue_cases(db_session, run_id)]
     assert any("参与者尚未登记" in description for description in descriptions)
     assert not any("事件过程缺少起点" in description for description in descriptions)
-    kept = db_session.get(DeclarationParticipant, fixture_id(__name__, "00000000-0000-0000-0000-0000000000dd"))
+    kept = db_session.get(EventParticipant, fixture_id(__name__, "00000000-0000-0000-0000-0000000000dd"))
     assert kept is not None and kept.entity_id == fixture_id(__name__, "00000000-0000-0000-0000-0000000000cc")
 
 

@@ -157,12 +157,11 @@ def test_source_write_schemas_do_not_expose_formal_event_id_parameters() -> None
     """章级写入只引用声明，正式身份仅在诊断发布后存在"""
     _, program_tool, tools = _surface(_ledger())
     schemas = {tool.name: tool.args_schema.model_json_schema()["properties"] for tool in tools}
-    assert "declaration_id" in schemas["write_plotline"]
-    assert "event_id" not in schemas["write_plotline"]
-    assert {"source_declaration_id", "target_declaration_id"} <= set(schemas["write_foreshadowing_action"])
-    assert {"root_event_id", "target_event_id"}.isdisjoint(schemas["write_foreshadowing_action"])
-    assert "source_declaration_id" in program_tool.description
-    assert "target_declaration_id" in program_tool.description
+    assert "event_id" in schemas["write_plotline"]
+    assert {"source_event_id", "target_event_id"} <= set(schemas["write_foreshadowing_action"])
+    assert "root_event_id" not in schemas["write_foreshadowing_action"]
+    assert "source_event_id" in program_tool.description
+    assert "target_event_id" in program_tool.description
 
 
 @pytest.mark.asyncio

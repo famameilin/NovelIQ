@@ -18,7 +18,7 @@ from src.agents.diagnosis.work_runtime import DiagnosisWorkScheduler
 from src.audit.recorder import AgentAuditRecorder
 from src.case_pool import CasePool
 from src.case_pool.contributions import CaseContribution
-from src.event_trees.storage_map import run_declaration_ids, run_events
+from src.event_trees.storage_map import run_annotation_event_ids, run_events
 from src.storage import new_id
 from src.storage.models import Agent, Case, DiagnosisReport
 from tests.agents.test_complete_event_invariants import draft_case as draft_case
@@ -90,7 +90,7 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
     assert author not in domain.case_pool.saved
     assert run_events(storage_for(draft.fixture_session), draft.run_id) == {}
     assert _reports(draft.fixture_session, draft.run_id) == []
-    assert len(run_declaration_ids(storage_for(draft.fixture_session), draft.run_id)) == 2
+    assert len(run_annotation_event_ids(storage_for(draft.fixture_session), draft.run_id)) == 2
 
 
 @pytest.mark.parametrize("cancelled", [False, True])

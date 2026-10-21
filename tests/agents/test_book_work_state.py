@@ -30,7 +30,9 @@ def node(description: str = "事件") -> BoundEvent:
         summary=description,
         event_type="行动",
         status="ongoing",
-        declaration_id="node",
+        event_id="node",
+        from_chapter_id=1,
+        to_chapter_id=1,
     )
 
 
@@ -146,7 +148,7 @@ def test_case_exclusion_is_a_one_time_promise() -> None:
     pool.confirm(a)
     assert pool.promise(case["case_id"], b)["status"] == "taken"
     pool.rollback(b)
-    assert pool.search()[0]["promised"] is True
+    assert pool.search()[0]["submitted"] is True
 
 
 def test_role_finish_never_fills_metrics_or_skips_dialogue_candidates():

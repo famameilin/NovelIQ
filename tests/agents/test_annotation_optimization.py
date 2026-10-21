@@ -124,7 +124,9 @@ async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(mo
             summary=f"院门事件{index}" + "正文" * 1500,
             event_type="行动",
             status="ongoing",
-            declaration_id=f"node-{index:04d}",
+            event_id=f"node-{index:04d}",
+            from_chapter_id=1,
+            to_chapter_id=1,
         )
         for index in range(247)
     ]
@@ -144,12 +146,12 @@ async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(mo
     assert first["total"] == 247
     assert len(first["events"]) == 20 and first["next_offset"] == 20
     assert len(calls) == 20
-    assert set(execution.event_reads) == {item["declaration_id"] for item in first["events"]}
+    assert set(execution.event_reads) == {item["event_id"] for item in first["events"]}
     assert "node-0246" not in execution.event_reads
     next_page = json.loads(await tool.ainvoke({"query": "院门", "limit": 20, "offset": first["next_offset"]}))
-    assert first["events"][-1]["declaration_id"] != next_page["events"][0]["declaration_id"]
+    assert first["events"][-1]["event_id"] != next_page["events"][0]["event_id"]
     filtered = json.loads(await tool.ainvoke({"chapter_id": 12, "tree_id": "tree-2"}))
-    assert all(trees.read(item["declaration_id"])["content"]["tree_id"] == "tree-2" for item in filtered["events"])
+    assert all(trees.read(item["event_id"])["content"]["tree_id"] == "tree-2" for item in filtered["events"])
     assert json.loads(await tool.ainvoke({"chapter_id": 99}))["total"] == 0
     detail = json.loads(await runtime.tools["read_event"].ainvoke({"node_id": "node-0246"}))
     assert len(detail["content"]["description"]) > 3000
@@ -179,8 +181,10 @@ async def test_event_search_filters_foreshadow_roots_and_compacts_pages() -> Non
             summary=f"槐叶事件{index}",
             event_type="行动",
             status="ongoing",
-            declaration_id=f"node-{index:04d}",
+            event_id=f"node-{index:04d}",
             is_foreshadow_setup=index % 2 == 0,
+            from_chapter_id=1,
+            to_chapter_id=1,
         )
         for index in range(130)
     ]

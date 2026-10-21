@@ -82,7 +82,7 @@ def test_read_metrics_keeps_foreshadowing_and_does_not_turn_empty_data_into_fail
     repo = _materials()
     repo.fetch_pivot_blocks.return_value = []
     repo.fetch_high_tension_chunks.return_value = []
-    repo.fetch_foreshadowing_sources.return_value = [{"declaration_id": "actual-id", "summary": "庇护约定"}]
+    repo.fetch_foreshadowing_sources.return_value = [{"event_id": "actual-id", "summary": "庇护约定"}]
     with (
         patch("src.storage.access.StatisticsAccess.fetch_global_stats_dict") as stats,
         patch("src.diagnosis.queries.DiagnosisQueries", return_value=repo),
@@ -91,7 +91,7 @@ def test_read_metrics_keeps_foreshadowing_and_does_not_turn_empty_data_into_fail
         stats.return_value = {}
         data = json.loads(_build_tools(role="report")["read_metrics"].invoke({}))
     assert data["aggregate"] == {} and data["pivots"] == []
-    assert data["foreshadowing"] == [{"declaration_id": "actual-id", "summary": "庇护约定"}]
+    assert data["foreshadowing"] == [{"event_id": "actual-id", "summary": "庇护约定"}]
 
 
 def test_metric_service_failure_is_raised_without_fake_empty_signals():
@@ -136,18 +136,19 @@ def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_cas
             agent_id=fixture_id(__name__, "batch"),
         )
     }
-    ids = list(draft._declarations())
+    ids = list(draft._all_events())
 
-    def item(key, declaration_id):
+    def item(key, event_id):
         return {
-            "operation": "identity",
+            "operation": "event",
             "key": key,
             "title": "寻路",
             "problem": "能否找到路",
             "summary": "寻路",
             "event_type": "寻路",
             "status": "ongoing",
-            "declaration_ids": [declaration_id],
+            "from": 1,
+            "to": 1,
             "reason": "批量测试明确判断独立事件",
             "evidence": [{"paragraph_id": 0}],
         }

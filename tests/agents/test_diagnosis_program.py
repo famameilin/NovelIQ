@@ -19,7 +19,7 @@ from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls
 from src.audit.recorder import AgentAuditRecorder
 from src.event_bus import EventBus
-from src.event_trees.organization import EventOrganizationDraft, run_declaration_ids
+from src.event_trees.organization import EventOrganizationDraft, run_annotation_event_ids
 from src.event_trees.storage_map import run_events
 from src.storage.models import Agent, DiagnosisReport
 from src.utils.cancellation import run_cancellable
@@ -79,15 +79,21 @@ def _program_graph(model, runtime, *, observer=None, completion_check=lambda: []
 
 
 def identity_item(key, index, *, invalid=False):
-    reference = '"not-declared"' if invalid else f'page["events"][{index}]["declaration_id"]'
-    return (
-        '{"operation":"identity", "key":'
-        + json.dumps(key)
-        + ', "title":'
-        + json.dumps(key)
-        + ', "problem":"能否找到路", "summary":"寻路与点灯", "event_type":"寻路", "status":"ongoing", '
-        '"declaration_ids":[' + reference + '], "reason":"依据原文核对身份", '
-        '"evidence":[{"paragraph_id":0}]}'
+    return json.dumps(
+        {
+            "operation": "event",
+            "key": key,
+            "title": key,
+            "problem": "能否找到路",
+            "summary": "寻路与点灯",
+            "event_type": "寻路",
+            "status": "ongoing",
+            "from": 1,
+            "to": 1,
+            "reason": "原文中的整体事件",
+            "evidence": [{"paragraph_id": 999 if invalid else 0}],
+        },
+        ensure_ascii=False,
     )
 
 
@@ -99,52 +105,44 @@ def case_identity_item(key, reference):
         + ', "title":'
         + json.dumps(key)
         + ', "problem":"能否找到路", "summary":"寻路与点灯", "event_type":"寻路", "status":"ongoing", '
-        '"declaration_ids":[' + reference + '], "reason":"依据原文核对身份", '
+        '"source_event_ids":[' + reference + '], "reason":"依据原文核对身份", '
         '"evidence":[{"paragraph_id":0}]}'
     )
 
 
 #: 案例会话第一件案例：自取未承诺案例、接手承诺，随后直接写入完成
-FIRST_CASE_PROGRAM = (
-    "cases = search_cases(unresolved_only=True)\n"
-    "case = cases[0]\n"
-    'promise_case(case_id=case["case_id"])\n'
-    'declaration = search_events(limit=20)["events"][0]["declaration_id"]\n'
-    "page = search_events(limit=20)\n"
-    'write_event(items=[{"operation":"declaration_review", "declaration_ids":[declaration], '
-    '"reason":"按本章原文逐段核对"}], caseid=case["case_id"])\n'
-    "write_event(items=[" + case_identity_item("寻路", "declaration") + '], caseid=case["case_id"])\n'
-    'write_event(items=[{"operation":"compare", "source_declaration_id":page["events"][0]["declaration_id"], '
-    '"target_declaration_ids":[page["events"][1]["declaration_id"]], "disposition":"independent", '
-    '"reason":"寻路和照明各有独立问题", "evidence":[{"paragraph_id":0}]}], caseid=case["case_id"])'
-)
-#: 案例会话第二件案例：办理后按冻结前的实际版本核对并发起包含
-SECOND_CASE_PROGRAM = (
-    "cases = search_cases(unresolved_only=True)\n"
-    "case = cases[0]\n"
-    'promise_case(case_id=case["case_id"])\n'
-    'declaration = search_events(limit=20)["events"][1]["declaration_id"]\n'
-    'write_event(items=[{"operation":"declaration_review", "declaration_ids":[declaration], '
-    '"reason":"按本章原文逐段核对"}], caseid=case["case_id"])\n'
-    "own = write_event(items=["
-    + case_identity_item("寻路与照明", "declaration")
-    + '], caseid=case["case_id"])["results"][0]["event_id"]\n'
-    "child = None\n"
-    'for item in search_events(kind="event", limit=20)["events"]:\n'
-    '    if item["event_id"] != own:\n'
-    '        child = item["event_id"]\n'
-    'write_event(items=[{"operation":"review", "event_ids":[own], "reason":"核对本事件实际版本"}], '
-    'caseid=case["case_id"])\n'
-    'write_event(items=[{"operation":"contain", "parent_event_id":own, "child_event_id":child, '
-    '"reason":"寻路与照明行动包含寻路子问题", "evidence":[{"paragraph_id":0}]}, '
-    '{"operation":"structure_review", "source_event_id":own, "target_event_id":child, '
-    '"disposition":"contains", "reason":"按原文明确两事件的包含而非同一身份", '
-    '"evidence":[{"paragraph_id":0}]}], caseid=case["case_id"])\n'
-    'write_event(items=[{"operation":"review", "event_ids":[own, child], '
-    '"reason":"按冻结身份核对包含与原文"}], caseid=case["case_id"])'
-)
-#: 案例会话收尾：确认无未承诺案例后结束（承诺即解决，无需再核对完成度）
-CLOSE_PROGRAM = "cases = search_cases(unresolved_only=True)\nfinish()"
+FIRST_CASE_PROGRAM = """
+cases = search_cases(unresolved_only=True)
+case = cases[0]
+claim_case(case_id=case["case_id"])
+page = search_events(limit=20)
+write_event(items=[{
+    "operation":"review", "event_ids":[page["events"][0]["event_id"]],
+    "reason":"核查原文"}], caseid=case["case_id"])
+submit_case(case_id=case["case_id"])
+"""
+SECOND_CASE_PROGRAM = """
+cases = search_cases(unresolved_only=True)
+case = cases[0]
+claim_case(case_id=case["case_id"])
+page = search_events(limit=20)
+own = write_event(items=[{
+    "operation":"event", "key":"整体", "title":"寻路与照明", "problem":"能否寻路",
+    "summary":"寻路与照明", "event_type":"行动", "status":"ongoing", "from":1, "to":1,
+    "reason":"整体行动", "evidence":[{"paragraph_id":0}]}],
+    caseid=case["case_id"])["results"][0]["event_id"]
+for item in page["events"]:
+    write_event(items=[{
+        "operation":"contain", "parent_event_id":own, "child_event_id":item["event_id"],
+        "reason":"包含子事件", "evidence":[{"paragraph_id":0}]}], caseid=case["case_id"])
+submit_case(case_id=case["case_id"])
+"""
+CLOSE_PROGRAM = """
+for case in search_cases(unresolved_only=True):
+    claim_case(case_id=case["case_id"])
+    submit_case(case_id=case["case_id"])
+finish()
+"""
 REPORT_PROGRAM = """
 read_topics()
 parents = search_events(kind="event", query="寻路与照明", limit=20)
@@ -238,15 +236,11 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
     assert len(model.requests) == 4
     assert result.diagnosis == "寻路与照明相互关联"
     organization = result.narrative_organization
-    assert len(organization.events) == 2
-    declared = {identifier for event in organization.events for identifier in event.declaration_ids}
-    assert declared == run_declaration_ids(storage_for(draft.fixture_session), draft.run_id)
-    assert len(organization.declaration_reviews) == 2
-    assert len(organization.declaration_comparisons) == 1
-    assert len(organization.reviewed_events) == 2
-    assert len(organization.structure_reviews) == 1
-    edge = organization.containments[0]
-    assert {edge.parent_event_id, edge.child_event_id} == {event.event_id for event in organization.events}
+    assert len(organization.events) == 3
+    assert len(organization.containments) == 2
+    assert run_annotation_event_ids(storage_for(draft.fixture_session), draft.run_id) < {
+        event.event_id for event in organization.events
+    }
     report = draft.fixture_session.scalars(
         select(DiagnosisReport)
         .join(Agent, Agent.id == DiagnosisReport.agent_id)
@@ -260,7 +254,7 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
     assert len(event_cases) == 2
     reloaded = CasePool(draft.run_id)
     reloaded.load_storage(storage_for(draft.fixture_session))
-    assert {case["case_id"] for case in reloaded.search() if case["promised"]} >= event_cases
+    assert {case["case_id"] for case in reloaded.search() if case["submitted"]} >= event_cases
     turns = fetch_agent_turns(storage_for(draft.fixture_session), draft.run_id)
     assert len(turns) == 4
     assert len({turn.agent_id for turn in turns}) == 2
@@ -346,9 +340,9 @@ async def test_partial_program_keeps_success_and_rejected_operation_has_no_candi
     assert runtime.env["result"]["results"][1] is None and len(draft.events) == 1
     assert receipt["reads"][0]["result"]["total"] == 2
     assert set(receipt) <= {"status", "failed", "reads", "written", "variables"}
-    second = await runtime.execute('page2 = read_event(node_id=page["events"][1]["declaration_id"])')
+    second = await runtime.execute('page2 = read_event(node_id=page["events"][1]["event_id"])')
     assert json.loads(second)["status"] == "applied"
-    assert runtime.env["page2"]["declaration_id"] == runtime.env["page"]["events"][1]["declaration_id"]
+    assert runtime.env["page2"]["event_id"] == runtime.env["page"]["events"][1]["event_id"]
 
 
 async def test_case_warning_preserves_original_id_return_type(declaration_case):
