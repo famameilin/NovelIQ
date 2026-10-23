@@ -30,7 +30,7 @@ def domain_for(draft):
     return domain, author
 
 
-def test_case_completion_requires_empty_pool_and_report_cannot_start_early(draft_case):
+def test_case_completion_blocks_unsubmitted_claims_and_report_cannot_start_early(draft_case):
     domain, author = domain_for(draft_case)
     context = domain.build_session_context("case", author, None)
     assert context.completion_check()
@@ -196,7 +196,7 @@ async def test_candidates_support_next_normal_turn_and_taken_falls_back(draft_ca
 
 
 @pytest.mark.parametrize("first", [AIMessage(content="完成"), AIMessage(content="", tool_calls=[call("finish")])])
-async def test_early_end_keeps_same_case_session_until_pool_empty(draft_case, first):
+async def test_early_end_before_any_claim_is_rejected_while_cases_remain(draft_case, first):
     domain, author = domain_for(draft_case)
     context = domain.build_session_context("case", author, None)
     pending = domain.case_counts()[0]
@@ -215,3 +215,16 @@ async def test_early_end_keeps_same_case_session_until_pool_empty(draft_case, fi
     assert result["completion_ok"] and len(model.requests) == 2
     assert context.claimed_count() == pending
     assert any("仍有可领案例" in str(message.content) for message in model.requests[1])
+
+
+def test_case_session_may_end_after_its_claims_are_submitted(draft_case):
+    domain, author = domain_for(draft_case)
+    context = domain.build_session_context("case", author, None)
+    domain.case_pool.push("character", "核对顾霜的身份", author)
+    assert context.completion_check()
+    claimed = json.loads(context.program.tools["claim_random_case"].invoke({}))
+    assert claimed["status"] == "claimed"
+    assert context.completion_check()
+    context.program.tools["submit_case"].invoke({"case_id": claimed["case_id"]})
+    assert domain.case_counts()[0] > 0
+    assert context.completion_check() == []

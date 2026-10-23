@@ -27,7 +27,7 @@ def _locked[**P, T](method: Callable[Concatenate[CasePool, P], T]) -> Callable[C
 
 
 class CasePool:
-    "同进程同 run 共享案例与锁，每个执行最多持有一件未提交案例"
+    "同进程同 run 共享案例与锁，每件案例由单个执行独占领取"
 
     _instances: ClassVar[WeakValueDictionary[str, CasePool]] = WeakValueDictionary()
     _instances_lock: ClassVar = threading.RLock()
@@ -113,20 +113,14 @@ class CasePool:
         if runtime["owner"] is not None:
             status = "submitted" if runtime["submitted"] else "claimed"
             return {**self.cases[case_id], "status": status if runtime["owner"] == author else "taken"}
-        unfinished = self.unsubmitted_for(author)
-        if unfinished:
-            raise ValueError(f"请先 submit_case(case_id={unfinished[0]!r})，再领取下一件案例")
         runtime.update(owner=author)
         self.registrations[author].add(case_id)
         return {**self.cases[case_id], "status": "claimed"}
 
     @_locked
     def claim_random(self, author: str) -> dict[str, Any]:
-        "原子随机领取一件案例，已有未提交领取时返回原案例"
+        "原子随机领取一件尚未被持有的案例，池空返回 empty"
         self._require(author)
-        unfinished = self.unsubmitted_for(author)
-        if unfinished:
-            return {**self.cases[unfinished[0]], "status": "claimed"}
         pending = [key for key, runtime in self.case_runtime.items()
                    if not runtime["submitted"] and runtime["owner"] is None]
         return self.claim(random.choice(pending), author) if pending else {"status": "empty"}
@@ -141,7 +135,7 @@ class CasePool:
         runtime["submitted"] = True
         available = [key for key, value in self.case_runtime.items()
                      if not value["submitted"] and value["owner"] is None]
-        candidates = [dict(self.cases[key]) for key in random.sample(available, min(3, len(available)))]
+        candidates = [dict(self.cases[key]) for key in random.sample(available, min(10, len(available)))]
         return {**self.cases[case_id], "status": "submitted", "candidates": candidates}
 
     @_locked

@@ -413,7 +413,9 @@ class DiagnosisDomain:
                 unfinished = self.case_pool.unsubmitted_for(invocation)
                 if unfinished:
                     return [f"仍有未提交案例 {unfinished}，请先办理并 submit_case"]
-                return ["仍有可领案例，请用 claim_random_case() 领取并继续办理"] if self.case_counts()[0] else []
+                if not self.case_pool.claims_for(invocation) and self.case_counts()[0]:
+                    return ["仍有可领案例，请用 claim_random_case() 领取并继续办理"]
+                return []
             try:
                 self._require_cases_saved()
                 ledger.require_evidence()

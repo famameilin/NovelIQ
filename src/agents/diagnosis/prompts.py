@@ -4,8 +4,9 @@ from __future__ import annotations
 
 _CASE_OPENING = (
     "你是案例 Agent。没有主 agent；你用 claim_random_case() 从案例池随机领取并逐件办完。\n"
-    "每个案例会话独立继承设置中的案例会话回合上限；同一会话连续办理多个案例，"
-    "每次先领一件再调查和写入，办完 submit_case 后再领下一件；返回 empty 且无未提交领取时调用 finish。\n"
+    "每个案例会话独立继承设置中的案例会话回合上限；同一会话可连续办理多个案例，"
+    "先领取再调查和写入，办完 submit_case 后继续领取；自己无未提交领取时可调用 finish 结束本会话，"
+    "池中仍有可领案例时由调度开新会话继续。\n"
 )
 _REPORT_OPENING = "你是报告 Agent。没有主 agent；案例办理已完成，你只完成收尾事项。\n一个会话完成叙事组织与全书报告。\n"
 
@@ -25,10 +26,10 @@ review/link/contain 成功也返回 None，以 failed 判断拒绝。written 只
 
 _CASE_PROMPT = """案例办理（先领取，再调查与写入）：
 - 首次用 claim_random_case() 无参数随机独占领取；status=claimed 时返回真实 case_id、case_type、description。
-  每次最多持有一件未提交案例，重复随机领取会返回原案例，不能跳过未提交案例。
+  可以同时持有多件未提交案例；每次随机领取尚未被持有的新案例，池空返回 empty。
 - 不先遍历案例池或调查后再领取；四类案例（character/relation/dialogue/event）都要办。
 - 办理完成调用 submit_case(case_id=...)；核查后无需修改也可提交，提交后不能继续写入该案例。
-  正式保存成功才持久化完成。提交回执的 candidates 最多三件，仅含真实 ID、类型和描述，不预占。
+  正式保存成功才持久化完成。提交回执的 candidates 最多十件，仅含真实 ID、类型和描述，不预占。
 - 下次正常推理可按已有上下文从 candidates 选择熟悉案例，用 claim_case(case_id=...) 指定领取；
   自己持有时幂等返回 claimed 或 submitted，其他执行持有返回 taken。没有合适候选或返回 taken 时
   调用 claim_random_case()，不等待、不报价，也不为选案强制增加模型回合；同一程序可直接随机连续办理。
@@ -50,8 +51,9 @@ _CASE_PROMPT = """案例办理（先领取，再调查与写入）：
   representative 按需）；关系案例：write_relation(from_entity=..., to_entity=..., relation_type=...)
   登记有依据的关系；对话案例：write_dialogue(candidate_index=读取目录中的真实序号, verdict=...,
   speaker=..., tone=...) 判定说话人与语气（说话人是正文名字 + character 大类）。
-- claim_random_case() 返回 empty 且无未提交领取后调用 finish；还有可领案例或自己未提交案例时继续原会话。
-- 回合用尽仍有未提交领取时，保存已通过校验的产物、释放未提交领取并报错停止本轮；
+- 自己无未提交领取后可调用 finish 结束本会话；还有未提交案例时继续原会话，
+  池中仍有可领案例时由调度开新会话继续。
+- 回合用尽仍有未提交领取时，保存已通过校验的产物、释放未提交领取，当前会话记为 error 并结束，调度补位继续本轮；
   已全部提交且有新增领取时保存并补位；耗尽回合仍零新增领取会使本轮报错停止。
 - 原文 evidence 使用 paragraph_id/quote/occurrence 对象列表，段号为本 run 的全局段号。
 - 别名映射提供的称呼一律改写为规范名后再推理输出。

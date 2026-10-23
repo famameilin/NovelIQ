@@ -191,7 +191,7 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         if "claim_random_case" in functions:
             instructions += (
                 "案例写入一律带 caseid=所办案例的真实 ID，先 claim_case 或 claim_random_case，办完 submit_case。\n"
-                "提交回执的 candidates 最多三件且不预占；下次正常推理可指定领取熟悉案例，"
+                "提交回执的 candidates 最多十件且不预占；下次正常推理可指定领取熟悉案例，"
                 "没有合适候选或返回 taken 时随机领取，不强制另开选案回合。\n"
             )
         if "write_diagnosis" in functions:

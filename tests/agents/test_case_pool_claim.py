@@ -30,7 +30,8 @@ def test_threads_claim_each_case_once_across_pool_instances():
         claimed = []
         while (case := local.claim_random(author))["status"] == "claimed":
             claimed.append(case["case_id"])
-            local.submit(case["case_id"], author)
+        for case_id in claimed:
+            local.submit(case_id, author)
         return claimed
 
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -109,7 +110,7 @@ def test_case_tools_claim_without_arguments_and_do_not_repeat_claim_callback():
     assert not tools["claim_random_case"].args_schema.model_fields
     case = json.loads(tools["claim_random_case"].invoke({}))
     assert json.loads(tools["claim_case"].invoke({"case_id": case["case_id"]}))["status"] == "claimed"
-    assert json.loads(tools["claim_random_case"].invoke({}))["case_id"] == case["case_id"]
+    assert json.loads(tools["claim_random_case"].invoke({})) == {"status": "empty"}
     assert set(tools["claim_case"].args_schema.model_fields) == {"case_id"}
     assert set(tools["submit_case"].args_schema.model_fields) == {"case_id"}
     tools["submit_case"].invoke({"case_id": case["case_id"]})
@@ -117,20 +118,24 @@ def test_case_tools_claim_without_arguments_and_do_not_repeat_claim_callback():
     callback.assert_called_once()
 
 
-def test_submit_candidates_are_bounded_copies_and_do_not_reserve_cases():
+@pytest.mark.parametrize("available", [0, 4, 10, 16])
+def test_submit_candidates_are_bounded_copies_and_do_not_reserve_cases(available):
     pool = CasePool(new_id())
     pool.begin("a")
     pool.begin("b")
-    keys = {pool.push("event", f"核对{i}", "a")["case_id"] for i in range(8)}
+    keys = {pool.push("event", f"核对{i}", "a")["case_id"] for i in range(available + 2)}
     claimed = pool.claim_random("a")["case_id"]
     occupied = pool.claim_random("b")["case_id"]
     before = pool.counts()[0]
     result = pool.submit(claimed, "a")
-    assert len(result["candidates"]) == 3
+    expected = min(10, available)
+    assert len(result["candidates"]) == expected
     assert pool.counts()[0] == before
     offered = {row["case_id"] for row in result["candidates"]}
-    assert len(offered) == 3 and offered <= keys - {claimed, occupied}
+    assert len(offered) == expected and offered <= keys - {claimed, occupied}
     assert all(set(row) == {"case_id", "case_type", "description"} for row in result["candidates"])
+    if not offered:
+        return
     result["candidates"][0]["description"] = "不能改写案例"
     assert all(row["description"] != "不能改写案例" for row in pool.search())
     pool.submit(occupied, "b")
@@ -140,20 +145,24 @@ def test_submit_candidates_are_bounded_copies_and_do_not_reserve_cases():
     assert pool.claim_random("a")["case_id"] != target
 
 
-def test_unsubmitted_claim_requires_submission_and_is_not_frozen_as_completed():
+def test_multiple_unsubmitted_claims_are_exclusive_and_not_frozen_as_completed():
     pool = CasePool(new_id())
     pool.begin("a")
     pool.begin("b")
     first = pool.push("event", "第一件", "a")["case_id"]
     second = pool.push("event", "第二件", "a")["case_id"]
+    third = pool.push("event", "第三件", "a")["case_id"]
     pool.claim(first, "a")
-    with pytest.raises(ValueError, match="先 submit_case"):
-        pool.claim(second, "a")
+    assert pool.claim(second, "a")["status"] == "claimed"
+    assert pool.claim_random("a")["case_id"] == third
+    assert pool.claim_random("a")["status"] == "empty"
+    assert pool.unsubmitted_for("a") == sorted([first, second, third])
+    assert pool.claim(second, "b")["status"] == "taken"
     with pytest.raises(ValueError, match="只能提交"):
         pool.submit(first, "b")
     assert pool.contribution("a")["submissions"] == []
     pool.confirm("a")
-    assert pool.counts() == (2, 0)
+    assert pool.counts() == (3, 0)
     assert pool.claim(first, "b")["status"] == "claimed"
 
 
