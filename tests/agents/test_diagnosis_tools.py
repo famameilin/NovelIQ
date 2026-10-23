@@ -135,6 +135,27 @@ def test_report_requires_exactly_one_input_and_failed_patch_preserves_report():
     assert "end_requested" in tools["finish"].invoke({})
 
 
+def test_report_rejects_character_names_outside_run_roster():
+    tools = _build_tools(role="report", character_roster=["顾霜", "贺重明"])
+    with pytest.raises(ValueError, match="不是本 run 的正式角色") as rejected:
+        tools["write_diagnosis"].invoke(
+            {"analysis": {"arc_scores": {"开局": 6.0, "顾霜": 8.0}, "focus_characters": ["离火之源"]}}
+        )
+    assert "开局" in str(rejected.value) and "离火之源" in str(rejected.value)
+    assert "顾霜" in str(rejected.value)
+    receipt = json.loads(tools["write_diagnosis"].invoke(
+        {"analysis": {"arc_scores": {"顾霜": 8.0}, "focus_characters": ["顾霜"]}}
+    ))
+    assert receipt["status"] == "written"
+
+
+def test_report_checks_character_names_on_patch():
+    tools = _build_tools(role="report", character_roster=["顾霜"])
+    tools["write_diagnosis"].invoke({"analysis": {"arc_scores": {"顾霜": 8.0}}})
+    with pytest.raises(ValueError, match="不是本 run 的正式角色"):
+        tools["write_diagnosis"].invoke({"patch": {"main_characters": ["重明"]}})
+
+
 def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_case):
     draft = draft_case
     tools = {

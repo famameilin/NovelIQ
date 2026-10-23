@@ -32,7 +32,13 @@ class AgentAnalysis(BaseModel):
             "伏笔回收预期。该值由后端伏笔树根属性确定性计算，diagnosis LLM 不负责估算；持久化前会用 payload 值收口。"
         ),
     )
-    arc_scores: dict[str, float] = Field(default_factory=dict)
+    arc_scores: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "重点角色的弧线评分（0-10）：key 必须是本 run 正式角色的规范名，"
+            "不是章节/事件/剧情线标题，也不是实体 UUID"
+        ),
+    )
     genre_labels: list[str] = Field(default_factory=list)
     style_labels: list[str] = Field(default_factory=list)
     # 标签必须与本轮模型的实际 topic_id 一一对应
@@ -52,9 +58,13 @@ class AgentAnalysis(BaseModel):
         description="叙事弧类型短标签，4 字以内（如 三幕式/英雄之旅）；不写句子、不写箭头链",
     )
     focus_structure: FocusStructureType | None = None
-    focus_characters: list[str] = Field(default_factory=list)
-    main_characters: list[str] = Field(default_factory=list)
-    core_cast: list[str] = Field(default_factory=list)
+    focus_characters: list[str] = Field(
+        default_factory=list, description="焦点人物：每项必须是本 run 正式角色的规范名"
+    )
+    main_characters: list[str] = Field(
+        default_factory=list, description="主要人物：每项必须是本 run 正式角色的规范名"
+    )
+    core_cast: list[str] = Field(default_factory=list, description="核心阵容：每项必须是本 run 正式角色的规范名")
     theme_color: str | None = Field(
         default=None,
         description="小说主题色，十六进制格式，如 #4A90D9",

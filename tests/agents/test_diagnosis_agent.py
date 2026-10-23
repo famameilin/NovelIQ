@@ -27,7 +27,7 @@ def _analysis_payload() -> dict:
     return {
         "novel_id": fixture_id(__name__, "n1"),
         "foreshadow_expectation": 0.35,
-        "arc_scores": {"开局": 6.0, "发展": 7.5, "高潮": 8.0, "结局": 7.0, "顾霜": 8.0, "贺重明": 6.5},
+        "arc_scores": {"顾霜": 8.0, "贺重明": 6.5},
         "genre_labels": ["玄幻"],
         "style_labels": ["爽文"],
         "topic_labels": {"0": "成长", "1": "复仇"},
@@ -83,6 +83,7 @@ def build_graph(responses, *, maximum=5, observer=None, stream=None, retries=Non
         role="report",
         report_draft=report,
         agent_id=fixture_id(__name__, "diagnosis"),
+        character_roster=["顾霜", "贺重明"],
     )
     model = Replies(responses)
     ledger = AnnotationToolLedger(

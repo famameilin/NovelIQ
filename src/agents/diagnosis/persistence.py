@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import unicodedata
 from typing import Any, cast
 
 from loguru import logger
@@ -11,17 +10,15 @@ from src.diagnosis.schema import AgentAnalysis
 from src.event_trees.organization import NarrativeOrganization, snapshot_digest
 from src.storage import Storage
 
+from .roster import character_entity_ids, normalize_character_name
 
-def _character_entity_ids(session: Storage, run_id: str, names: list[str]) -> dict[str, str]:
+
+def _character_entity_ids(by_name: dict[str, str], names: list[str]) -> dict[str, str]:
     """诊断名单引用同 run 的正式 character；名称比较沿用 NFC/strip/casefold 身份合同"""
-    if not names:
-        return {}
-    rows = session.reads.agents_diagnosis_persistence_character_entity_ids_1(run_id)
-    by_name = {unicodedata.normalize("NFC", row.canonical_name).strip().casefold(): row.entity_id for row in rows}
     resolved: dict[str, str] = {}
     missing: list[str] = []
     for name in names:
-        entity_id = by_name.get(unicodedata.normalize("NFC", name).strip().casefold())
+        entity_id = by_name.get(normalize_character_name(name))
         if entity_id is None:
             missing.append(name)
         else:
@@ -181,7 +178,8 @@ def save_diagnosis_result(
         entry(ordinal=ordinal, style_label=label)
     for topic_id, label in analysis.topic_labels.items():
         entry(topic_id=int(topic_id), topic_label=label)
-    scores = _character_entity_ids(session, run_id, list(analysis.arc_scores))
+    by_name = character_entity_ids(session, run_id)
+    scores = _character_entity_ids(by_name, list(analysis.arc_scores))
     for name, score in analysis.arc_scores.items():
         entry(scored_entity_id=scores[name], character_score=float(score))
     for cast_role, members in (
@@ -189,7 +187,7 @@ def save_diagnosis_result(
         ("main", analysis.main_characters),
         ("core", analysis.core_cast),
     ):
-        resolved = _character_entity_ids(session, run_id, list(members))
+        resolved = _character_entity_ids(by_name, list(members))
         for ordinal, name in enumerate(members):
             entry(cast_role=cast_role, ordinal=ordinal, cast_entity_id=resolved[name])
     facts, updates = (

@@ -28,6 +28,7 @@ from .read_context import (
     DiagnosisTextQuery,
     graph_signals,
 )
+from .roster import character_names, normalize_character_name
 
 WRITE_NAMES = frozenset(
     {"write_diagnosis", "write_event", "write_arc", "write_outcome", "write_entity", "write_relation", "write_dialogue"}
@@ -109,6 +110,7 @@ def build_diagnosis_tools(
     case_writes_graph: Any | None = None,
     case_view: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     graph_source: DiagnosisGraphSource | None = None,
+    character_roster: Sequence[str] | None = None,
 ) -> list[Any]:
     """装配真实诊断身份：角色裁剪写入面，案例写入保留显式 caseid 关联"""
     from src.case_pool import CasePool
@@ -121,6 +123,44 @@ def build_diagnosis_tools(
         case_pool.load_storage(session)
     author = agent_id
     case_pool.begin(author)
+
+    roster = (
+        None
+        if character_roster is None
+        else {normalize_character_name(name): name for name in character_roster}
+    )
+
+    def validate_character_references(analysis: AgentAnalysis) -> None:
+        """弧线评分与人物名单只接受本 run 的正式角色规范名"""
+        nonlocal roster
+        references = {
+            "arc_scores": list(analysis.arc_scores),
+            "focus_characters": analysis.focus_characters,
+            "main_characters": analysis.main_characters,
+            "core_cast": analysis.core_cast,
+        }
+        if not any(references.values()):
+            return
+        if roster is None:
+            roster = character_names(session, run_id)
+        allowed = roster
+        unknown = {
+            field: [name for name in names if normalize_character_name(name) not in allowed]
+            for field, names in references.items()
+        }
+        unknown = {field: names for field, names in unknown.items() if names}
+        if not unknown:
+            return
+        known = sorted(allowed.values())
+        listing = "、".join(known[:100])
+        if not known:
+            listing = "本 run 尚无正式角色"
+        elif len(known) > 100:
+            listing += f"…（共 {len(known)} 个，完整名单用 search_graph(entity_type=\"character\") 分页读取）"
+        raise ValueError(
+            f"以下名字不是本 run 的正式角色，arc_scores 与人物名单只接受角色规范名: {unknown}；"
+            f"可用角色规范名: {listing}；核对后用 write_diagnosis(patch=...) 修正对应字段"
+        )
 
     @tool
     def write_event(items: Annotated[list[EventWriteItem], Field(min_length=1, max_length=300)]) -> str:
@@ -166,6 +206,7 @@ def build_diagnosis_tools(
             )
         if analysis is None:
             raise ValueError("诊断报告不能为空")
+        validate_character_references(analysis)
         report["analysis"] = analysis.model_dump(mode="json")
         return json.dumps({"status": "written", "record": "diagnosis_report"}, ensure_ascii=False)
 
