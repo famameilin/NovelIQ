@@ -13,6 +13,8 @@ from src.fact_graph.vocabulary import EntityType
 from src.storage.query_terms import query_search_terms, term_matches
 
 SearchLimit = Annotated[int, Field(ge=1, le=20)]
+# 关系分页条数独立于实体 limit：整图关系数远多于同名实体命中数，默认给到上限
+RelationLimit = Annotated[int, Field(ge=1, le=20)]
 # 紧凑索引只回一行式字段，单页体量小，允许到 100 条（详情预览仍限 20，由工具内校验）
 EventSearchLimit = Annotated[int, Field(ge=1, le=100)]
 SearchOffset = Annotated[int, Field(ge=0)]
@@ -176,9 +178,10 @@ def build_state_read_tools(
         entity_type: EntityType | None = None,
         limit: SearchLimit = 5,
         offset: SearchOffset = 0,
+        relation_limit: RelationLimit = 20,
         relation_offset: SearchOffset = 0,
     ) -> str:
-        """分页预览实体和命中端点的关系，两组续页独立，read_entity 读取完整属性
+        """分页预览实体和命中端点的关系，两组续页与条数独立，read_entity 读取完整属性
 
         query 按空白/标点拆分词项、任一命中实体名即召回（% 匹配任意长度、_ 匹配单字符），
         不填不按词项过滤。
@@ -205,7 +208,9 @@ def build_state_read_tools(
             if left in matching or right in matching
         ]
         entities_page, next_offset = _search_page(values, offset=offset, limit=limit, budget=2600)
-        relations_page, next_relation_offset = _search_page(relations, offset=relation_offset, limit=limit, budget=2600)
+        relations_page, next_relation_offset = _search_page(
+            relations, offset=relation_offset, limit=relation_limit, budget=2600
+        )
         entity_ids.update(value["id"] for value in entities_page)
         entity_ids.update(value[field] for value in relations_page for field in ("source_id", "target_id"))
         case_reads.extend([*entities_page, *relations_page])
@@ -224,14 +229,29 @@ def build_state_read_tools(
 
     @tool
     def read_entity(entity_id: str) -> str:
-        """按真实实体 UUID 读取规范名、类型与属性，不授权未读过的原文"""
+        """按真实实体 UUID 读取规范名、类型、属性与该实体已有关系，不授权未读过的原文"""
         key = graph.resolve_entity_id(entity_id, label="entity_id")
+        relations = [
+            {
+                "source_id": graph.entity_id_for_key(left),
+                "source_name": graph.entity_names[left],
+                "target_id": graph.entity_id_for_key(right),
+                "target_name": graph.entity_names[right],
+                "relation_type": kind,
+            }
+            for left, right, kind in sorted(graph.active_relations)
+            if key in {left, right}
+        ]
         value = {
             "id": entity_id,
             "name": graph.display_name(key),
             "entity_type": graph.entity_types[key],
             "attributes": graph.entity_attributes.get(key, {}),
+            "relations": relations,
         }
+        entity_ids.update(
+            {identifier for item in relations for identifier in (item["source_id"], item["target_id"]) if identifier}
+        )
         entity_ids.add(entity_id)
         case_reads.append(value)
         return json.dumps(value, ensure_ascii=False)
@@ -252,16 +272,16 @@ def build_case_tools(
     def push_case(
         case_type: Annotated[
             Literal["character", "relation", "dialogue", "event"],
-            Field(description="案例类型：人物/关系/对话/事件四类之一"),
+            Field(description="案例类型：character（人物）/ relation（关系）/ dialogue（对话）/ event（事件）"),
         ],
         description: str,
     ) -> str:
-        """登记非空、100字以内的文字案例并显式归入人物/关系/对话/事件之一"""
+        """登记非空、100字以内的文字案例；case_type 写英文常量 character/relation/dialogue/event"""
         return json.dumps(pool.push(case_type, description, author), ensure_ascii=False)
 
     @tool
     def claim_random_case() -> str:
-        """随机独占领取一件案例，返回 claimed；已有未提交领取时返回原案例，池空返回 empty"""
+        """随机独占领取一件尚未被持有的案例，返回 claimed；池空返回 empty"""
         with pool.lock:
             already_owned = set(pool.claims_for(author))
             result = pool.claim_random(author)
@@ -281,7 +301,7 @@ def build_case_tools(
 
     @tool
     def submit_case(case_id: str) -> str:
-        """提交自己持有的案例并返回最多三件未预占候选，允许核查后无需修改；正式保存后持久化完成"""
+        """提交自己持有的案例并返回最多十件未预占候选，允许核查后无需修改；正式保存后持久化完成"""
         return json.dumps(pool.submit(case_id, author), ensure_ascii=False)
 
     @tool

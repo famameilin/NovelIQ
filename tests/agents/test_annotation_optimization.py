@@ -248,6 +248,8 @@ async def test_graph_search_filters_relations_pages_and_reads_attributes_on_dema
     )
     assert first["entities"][-1]["id"] not in {item["id"] for item in second["entities"]}
     assert first["relations"][-1] not in second["relations"]
+    # 关系分页条数独立于实体 limit，默认一页多于实体默认的 5 条
+    assert len(first["relations"]) > 5
     locations = json.loads(await tool.ainvoke({"entity_type": "location"}))
     assert [item["name"] for item in locations["entities"]] == ["院门"]
     assert not locations["relations"]
@@ -255,6 +257,16 @@ async def test_graph_search_filters_relations_pages_and_reads_attributes_on_dema
         await runtime.tools["read_entity"].ainvoke({"entity_id": graph.entity_id("角色00", "character")})
     )
     assert detail["attributes"]["description"] == "原文" * 5000
+    assert detail["relations"] == [
+        {
+            "source_id": graph.entity_id("角色00", "character"),
+            "source_name": "角色00",
+            "target_id": graph.entity_id("角色01", "character"),
+            "target_name": "角色01",
+            "relation_type": "认识",
+        }
+    ]
+    assert graph.entity_id("角色01", "character") in execution.ledger.shared_entity_ids
 
 
 @pytest.mark.asyncio

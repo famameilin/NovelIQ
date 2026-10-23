@@ -148,7 +148,14 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
                 "next_offset": "实体下一页偏移或null",
                 "next_relation_offset": "关系下一页偏移或null",
             },
-            "read_entity": {"id": "实体ID", "name": "规范名", "entity_type": "大类", "attributes": "属性对象"},
+            "read_entity": {
+                "id": "实体ID",
+                "name": "规范名",
+                "entity_type": "大类",
+                "attributes": "属性对象",
+                "relations": [{"source_id": "实体ID", "source_name": "规范名",
+                               "target_id": "实体ID", "target_name": "规范名", "relation_type": "关系类型"}],
+            },
             "search_cases": [{"case_id": "真实案例ID", "case_type": "四类之一",
                               "claimed": "是否已领取", "submitted": "是否已提交"}],
             "read_metrics": {
