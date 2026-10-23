@@ -96,6 +96,10 @@ it("参考尺寸的120事件保持一屏纵向内容与完整首末文案", () =
   const layout = eventTreeLayout(book, 1352, 755);
   expect(layout.width).toBe(1352);
   expect(layout.anchorRowY).toBe(614);
+  expect(layout.arcAnchors.get("arc-0")!.x).toBeCloseTo(78.725);
+  expect(layout.arcAnchors.get("arc-6")!.x).toBeCloseTo(1273.275);
+  expect(layout.positions.get("ev-30-3")!.x).toBeCloseTo(377.3625);
+  expect(layout.positions.get("ev-30-3")!.y).toBe(134);
   expect(new Set([...layout.positions.values()].map(position => position.column))).toEqual(new Set([0]));
   for (const box of layout.outcomeBoxes.values()) {
     expect(box.left).toBeGreaterThanOrEqual(16);
@@ -167,7 +171,7 @@ it("完整长标题及说明决定上下文案间距和画布范围", () => {
   for (const point of layout.positions.values()) expect(point.y - MARKER_RADIUS).toBeGreaterThanOrEqual(layout.outcomeBandBottom + CONTENT_GAP);
 });
 
-it("宽桌面不拉大文案组间距或稀疏节点的纵向间距", () => {
+it("文案横向展开且稀疏节点保持紧凑的纵向间距", () => {
   const book = buildScaleBook({ chapters: 3, eventsPerChapter: 3, arcs: 3, outcomes: 3 });
   const layout = eventTreeLayout(book, 2400, 900);
   const anchors = [...layout.arcAnchors.values()];
@@ -175,13 +179,13 @@ it("宽桌面不拉大文案组间距或稀疏节点的纵向间距", () => {
   for (let index = 1; index < anchors.length; index++) {
     const gap = anchors[index].x - anchors[index].width / 2 - anchors[index - 1].x - anchors[index - 1].width / 2;
     expect(gap).toBeGreaterThanOrEqual(CONTENT_GAP);
-    expect(gap).toBeLessThanOrEqual(32);
   }
   for (let index = 1; index < outcomes.length; index++) {
     const gap = outcomes[index].left - outcomes[index - 1].left - outcomes[index - 1].width;
     expect(gap).toBeGreaterThanOrEqual(CONTENT_GAP);
-    expect(gap).toBeLessThanOrEqual(32);
   }
+  expect(anchors[0].x - anchors[0].width / 2).toBeCloseTo(CONTENT_GAP);
+  expect(anchors.at(-1)!.x + anchors.at(-1)!.width / 2).toBeCloseTo(2400 - CONTENT_GAP);
   const local = ["ev-1-0", "ev-2-0", "ev-3-0"].map(id => layout.positions.get(id)!);
   for (let index = 1; index < local.length; index++) {
     expect(local[index - 1].y - local[index].y).toBeGreaterThanOrEqual(28);

@@ -2,6 +2,7 @@ import type { EventTreeListResponse } from "@/api/narrativeTypes";
 
 export const MARKER_RADIUS = 6;
 export const CONTENT_GAP = 16;
+export const OUTCOME_STEM_GAP = 14;
 const MARKER_PITCH = 34;
 const CAPTION_GAP = CONTENT_GAP;
 const OUTCOME_TOP = 12;
@@ -20,8 +21,8 @@ const average = (values: number[], fallback: number) => values.length ? values.r
 
 /** 完整标题和说明参与尺寸计算，长说明通过横向扩展限制纵向占用 */
 function captionSize(title: string, description: string) {
-  const width = Math.ceil(Math.max(110, measureTextWidth(title, 16) * 1.05 / 2 + 12, measureTextWidth(description, 13) / 4 + 16));
-  const lines = (text: string, fontSize: number) => text.split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(measureTextWidth(line, fontSize) / (width - 8))), 0);
+  const width = Math.max(110, Math.min(200, Math.max(measureTextWidth(title, 16), measureTextWidth(description, 13))), measureTextWidth(title, 16) * 1.05 / 2 + 12, measureTextWidth(description, 13) / 4 + 16);
+  const lines = (text: string, fontSize: number) => text.split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(measureTextWidth(line, fontSize) / width)), 0);
   return { width, height: lines(title, 16) * 22 + 4 + lines(description, 13) * 18 };
 }
 
@@ -45,16 +46,10 @@ export function eventTreeLayout(book: EventTreeListResponse, availableWidth: num
   const outcomes = [...book.outcomes].sort((a, b) => earliestOutcome(a.outcome_id) - earliestOutcome(b.outcome_id) || (a.first_text_position ?? Infinity) - (b.first_text_position ?? Infinity) || a.outcome_id.localeCompare(b.outcome_id));
   const arcSizes = arcs.map(arc => captionSize(arc.title, arc.objective));
   const outcomeSizes = outcomes.map(outcome => captionSize(outcome.title, outcome.description));
-  const rowWidth = (sizes: typeof arcSizes) => sizes.reduce((sum, item) => sum + item.width, CONTENT_GAP * 2) + Math.max(0, sizes.length - 1) * CAPTION_GAP;
+  const edgeInset = Math.max(0, ...arcSizes.map(size => size.width), ...outcomeSizes.map(size => size.width)) / 2 + CONTENT_GAP;
+  const rowWidth = (sizes: typeof arcSizes) => Math.max(0, sizes.length - 1) * (Math.max(0, ...sizes.map(size => size.width)) + CAPTION_GAP) + edgeInset * 2;
   const regionWidth = Math.max(availableWidth, rowWidth(arcSizes), rowWidth(outcomeSizes));
-  const rowCenters = (sizes: typeof arcSizes) => {
-    let left = CONTENT_GAP + Math.max(0, (availableWidth - rowWidth(sizes)) / 2);
-    return sizes.map(size => {
-      const x = left + size.width / 2;
-      left += size.width + CAPTION_GAP;
-      return x;
-    });
-  };
+  const rowCenters = (sizes: typeof arcSizes) => sizes.map((_, index) => sizes.length < 2 ? regionWidth / 2 : edgeInset + index * (regionWidth - edgeInset * 2) / (sizes.length - 1));
   const anchorRowY = height - Math.max(141, 12 + 16 + Math.max(0, ...arcSizes.map(size => size.height)) + CONTENT_GAP);
   const arcAnchors = new Map<string, ArcAnchor>();
   const arcXs = rowCenters(arcSizes);
@@ -63,13 +58,16 @@ export function eventTreeLayout(book: EventTreeListResponse, availableWidth: num
   const outcomeXs = rowCenters(outcomeSizes);
   outcomes.forEach((outcome, index) => {
     const size = outcomeSizes[index], x = outcomeXs[index];
-    outcomeBoxes.set(outcome.outcome_id, { x, left: x - size.width / 2, top: OUTCOME_TOP + (index % 3) * 16, ...size });
+    outcomeBoxes.set(outcome.outcome_id, { x, left: x - size.width / 2, top: OUTCOME_TOP + (index % 3) * 24, ...size });
   });
   const outcomeBandBottom = Math.max(OUTCOME_TOP, ...[...outcomeBoxes.values()].map(box => box.top + box.height));
-  const middleTop = outcomeBandBottom + CONTENT_GAP + MARKER_RADIUS;
+  const middleTop = outcomeBandBottom + CONTENT_GAP + OUTCOME_STEM_GAP;
   const middleBottom = anchorRowY - 36;
   const verticalCapacity = Math.max(2, Math.floor((middleBottom - middleTop) / MARKER_PITCH) + 1);
   const unlinked = events.filter(event => !arcsByEvent.has(event.event_id) && !outcomesByEvent.has(event.event_id));
+  const linked = events.filter(event => arcsByEvent.has(event.event_id) || outcomesByEvent.has(event.event_id));
+  const linkedRank = new Map(linked.map((event, index) => [event.event_id, index]));
+  const continuous = linked.length > verticalCapacity;
   const unlinkedRank = new Map(unlinked.map((event, index) => [event.event_id, index]));
   const neutralColumns = Math.max(1, Math.ceil(unlinked.length / verticalCapacity));
   const groups = new Map<number, typeof events>();
@@ -97,13 +95,15 @@ export function eventTreeLayout(book: EventTreeListResponse, availableWidth: num
       const localTop = middleTop + ((groupIndex + column) % 4) * 14;
       const localHeight = Math.max(0, localBottom - localTop);
       const occupiedHeight = Math.min(localHeight, Math.max(0, count - 1) * MARKER_PITCH);
-      const y = localBottom - (localHeight - occupiedHeight) / 2 - progress * occupiedHeight;
-      const idealX = center + (column - (columns - 1) / 2) * MARKER_PITCH;
+      const order = linkedRank.get(event.event_id);
+      const continuousPosition = continuous && order != null;
+      const y = continuousPosition ? middleBottom - order / Math.max(1, linked.length - 1) * (middleBottom - middleTop) : localBottom - (localHeight - occupiedHeight) / 2 - progress * occupiedHeight;
+      const idealX = center + (continuousPosition ? 0 : (column - (columns - 1) / 2) * MARKER_PITCH);
       let x = Math.max(CONTENT_GAP + 14, Math.min(regionWidth - CONTENT_GAP - 14, idealX));
       const overlaps = (candidate: number) => placed.some(point => Math.abs(point.y - y) < 28 && Math.abs(point.x - candidate) < 28);
       let attempt = 0;
       while (overlaps(x)) {
-        const shift = (Math.floor(attempt / 2) + 1) * MARKER_PITCH * (attempt % 2 ? -1 : 1);
+        const shift = (Math.floor(attempt / 2) + 1) * (continuousPosition ? 28 : MARKER_PITCH) * (attempt % 2 ? -1 : 1);
         x = Math.max(CONTENT_GAP + 14, idealX + shift);
         attempt++;
       }
