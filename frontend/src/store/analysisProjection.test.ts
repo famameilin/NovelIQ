@@ -4,6 +4,14 @@ import {useStreamStore} from "./streamStore";
 
 describe("分析通知归并",()=>{
   beforeEach(()=>useStreamStore.getState().reset());
+  it("尝试失败后等待重选保持整项任务运行",()=>{
+    let p: ReturnType<typeof emptyAnalysisProjection>={...emptyAnalysisProjection(),status:"running"};
+    p=mergeAnalysisNotice(p,"agent_activity",{invocation_id:"first",activity:"error",message:"回合耗尽"},1);
+    p=mergeAnalysisNotice(p,"agent_activity",{invocation_id:"first",activity:"retry"},2);
+    expect(p.status).toBe("running");
+    expect(p.error).toBeNull();
+    expect(p.executions.first.activity).toBe("retry");
+  });
   it("同一增量不重复拼接，快照替换前缀",()=>{
     useStreamStore.getState().setTaskId("a");
     const snapshot=mergeAnalysisNotice(emptyAnalysisProjection(),"llm_output",{invocation_id:"agent",content:"前缀"},10);
