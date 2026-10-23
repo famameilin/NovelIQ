@@ -73,7 +73,10 @@ def call(name, args=None, id="call"):
     return {"name": name, "args": args or {}, "id": id, "type": "tool_call"}
 
 
-def build_graph(responses, *, maximum=5, observer=None, stream=None, retries=None, completion_check=None):
+def build_graph(
+    responses, *, maximum=5, observer=None, stream=None, retries=None, completion_check=None,
+    context_window_tokens=None,
+):
     """按生产会话图装配（程序面 execute_code + finish），finish 与无工具响应共用检查"""
     report = {}
     session = MagicMock()
@@ -107,6 +110,7 @@ def build_graph(responses, *, maximum=5, observer=None, stream=None, retries=Non
         ledger=ledger,
         agent=AgentAnnotation(role="event"),
         max_iterations=maximum,
+        context_window_tokens=context_window_tokens,
         observer=observer,
         stream=stream,
         retries=retries,

@@ -35,6 +35,10 @@ CONTENT_STALL_TIMEOUT_S = 150.0
 logger = logging.getLogger(__name__)
 
 
+class ModelRequestError(RuntimeError):
+    """模型请求处理结束后的服务故障，交给模型池重新选举"""
+
+
 # 瞬态错误类型名标记：openai/httpx 网络与限流异常按类名匹配
 _TRANSIENT_ERROR_MARKERS = (
     "timeout",
