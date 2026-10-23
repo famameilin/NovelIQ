@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from typing import Any
 
@@ -32,7 +33,12 @@ from .agent_constructors import (
     build_agent_constructors,
 )
 from .agent_ir import AgentAnnotation
-from .errors import AnnotationDependencyError, AnnotationInvariantError
+from .errors import (
+    AnnotationAuthorizationError,
+    AnnotationDependencyError,
+    AnnotationInputError,
+    AnnotationInvariantError,
+)
 from .tool_batch import _execute_call
 
 
@@ -132,7 +138,7 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
             self,
             extra_api=_AGENT_REFERENCE_SCOPE_TEXT,
             call_entries=[
-                (name, [*params, ("caseid", "Any = None")], description)
+                (name, [*params, ("caseid", "caseid: Any = None")], description)
                 for name, params, description in constructor_call_entries(self.api_entries)
             ],
         )
@@ -202,11 +208,17 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
         plan: _ConstructorCall | None = None
         if name in self._constructor_names:
             try:
+                try:
+                    signature = inspect.signature(self.tools[name])
+                    signature.bind_partial(**business_args)
+                    signature.bind(**business_args)
+                except TypeError as exc:
+                    raise AnnotationInputError(str(exc)) from exc
                 plan = self.tools[name](**business_args)
             except AnnotationInvariantError:
                 self._close_turn()
                 raise
-            except Exception as exc:
+            except (ValueError, AnnotationInputError, AnnotationAuthorizationError) as exc:
                 return self._finish_call(
                     name,
                     op_index=op_index,
@@ -258,22 +270,24 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
                     call_index=self._next_call_index(),
                     record_keys=self.ledger.written_record_keys,
                 )
-        except AnnotationDependencyError as exc:
+        except AnnotationInvariantError:
+            self._close_turn()
+            raise
+        except Exception as exc:
             # 内层调用不写审计，程序面必须记录失败的检索及源码行后再上抛
             self._finish_call(
                 name,
                 op_index=op_index,
                 line=line,
                 status="error",
-                receipt={"status": "error", "code": "dependency_unavailable", "message": str(exc)},
+                receipt={"status": "error", "message": str(exc),
+                         "code": "dependency_unavailable" if isinstance(exc, AnnotationDependencyError)
+                         else "internal_error"},
                 call_args=call_args,
                 error=str(exc),
                 started_ns=started_ns,
             )
             # 外层 execute_code 仍需写自己的失败审计，回合由外层最后闭合
-            raise
-        except AnnotationInvariantError:
-            self._close_turn()
             raise
         ok = str(entry.get("status") or "error") == "success"
         if ok and plan is not None:

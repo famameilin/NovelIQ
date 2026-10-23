@@ -15,7 +15,12 @@ from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.tools import _WRITE_TOOL_NAMES
 from src.agents.annotation.validation_errors import translate_write_validation_error
 
-from .errors import AnnotationDependencyError, AnnotationInvariantError
+from .errors import (
+    AnnotationAuthorizationError,
+    AnnotationDependencyError,
+    AnnotationInputError,
+    AnnotationInvariantError,
+)
 from .graph import (
     AnnotationGraphState,
     _failed_receipt,
@@ -214,7 +219,7 @@ async def _execute_call(
         )
     ledger_snapshot = ledger.snapshot()
     graph_snapshot = ledger.graph.snapshot() if ledger.graph is not None and ledger.invoke_tool is None else None
-    dependency_error: AnnotationDependencyError | None = None
+    dependency_error: Exception | None = None
     try:
         if stream is not None:
             await stream.tool_call_started(name)
@@ -240,7 +245,9 @@ async def _execute_call(
         status = "error"
         error = str(exc)
         receipt = json.loads(result)
-        if isinstance(exc, AnnotationDependencyError):
+        if isinstance(exc, AnnotationDependencyError) or not isinstance(
+            exc, (ValueError, AnnotationInputError, AnnotationAuthorizationError)
+        ):
             dependency_error = exc
     if record_keys is not None and status == "success" and isinstance(receipt, dict):
         written_record = receipt.get("record")

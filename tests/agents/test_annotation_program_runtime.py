@@ -44,6 +44,18 @@ async def _run(runtime: ProgramRuntime, code: str) -> dict[str, Any]:
     return json.loads(await runtime.execute(code))
 
 
+@pytest.mark.parametrize("error", [RuntimeError("构造器异常"), TypeError("构造器内部类型错误")])
+async def test_constructor_project_failure_is_not_returned_as_model_correction(error) -> None:
+    runtime = _runtime(_ledger())
+
+    def broken(**kwargs):
+        raise error
+
+    runtime.tools["entity"] = broken
+    with pytest.raises(type(error), match=str(error)):
+        await _run(runtime, 'entity(id="a1", name="顾霜", entity_type="character", evidence=1)')
+
+
 @pytest.mark.asyncio
 async def test_receipt_omits_success_record_content() -> None:
     ledger = _ledger()

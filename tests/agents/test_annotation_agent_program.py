@@ -156,7 +156,8 @@ async def _run(runtime: AgentProgramRuntime, code: str) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure_type", [EmbeddingConnectionError, EmbeddingTimeoutError, EmbeddingServiceError])
+@pytest.mark.parametrize("failure_type", [EmbeddingConnectionError, EmbeddingTimeoutError, EmbeddingServiceError,
+                                         RuntimeError, TypeError])
 async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(failure_type) -> None:
     """真实程序与工具边界：失败检索和 execute_code 都留审计，后续写入和 finish 不执行"""
     client = SimpleNamespace(get_embedding=AsyncMock(side_effect=failure_type("嵌入服务不可用")))
@@ -166,6 +167,8 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
 
     class FailingQuery(_QueryService):
         async def search_text(self, query, *, range_name, limit=50):
+            if failure_type in (RuntimeError, TypeError):
+                raise failure_type("项目检索异常")
             return await search.search(query, limit=limit)
 
     ledger = _ledger()
@@ -183,7 +186,7 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
     code = 'search_text(query="沈遥")\nentity(id="late", name="迟到", entity_type="character")\nfinish()'
     with (
         patch("src.storage.access.ParagraphAccess.search_paragraphs_by_keywords", return_value=[]),
-        pytest.raises(AnnotationDependencyError, match="嵌入服务不可用"),
+        pytest.raises(failure_type if failure_type in (RuntimeError, TypeError) else AnnotationDependencyError),
     ):
         await _execute_call(
             {"name": program.name, "id": "code", "args": {"code": code}},
@@ -196,10 +199,11 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
     assert [call["tool_name"] for call in calls] == ["search_text", "execute_code"]
     assert all(call["error"] for call in calls)
     assert calls[0]["request_args"]["_program"]["source_line"] == 1
-    assert calls[0]["receipt"]["code"] == "dependency_unavailable"
+    assert calls[0]["receipt"]["code"] == ("internal_error" if failure_type in (RuntimeError, TypeError)
+                                            else "dependency_unavailable")
     recorder.update_turn_timings.assert_called_once()
     assert not runtime.agent.entities and not ledger.chapter_finished
-    assert client.get_embedding.await_count == 1
+    assert client.get_embedding.await_count == (0 if failure_type in (RuntimeError, TypeError) else 1)
 
 
 def _failed_entry(receipt: dict[str, Any]) -> dict[str, Any]:
