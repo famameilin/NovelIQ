@@ -137,7 +137,7 @@ export function AgentOffice({models,seats,executions,selected,onSelect}:Props) {
           {island.places.filter(p=>p.row).map(chair)}
         </g>)}
       </g>
-      {models.map((model,i)=>{const p=point(layout.regions[i].x+70,40,65);return <text key={model.model_id} x={size.width/2+(p[0]-camera.x)*camera.scale} y={size.height/2+(p[1]-camera.y)*camera.scale} fill="hsl(var(--text))" fontSize={12} pointerEvents="none"><title>{model.model_id}</title>{model.model_id.length>24?`${model.model_id.slice(0,21)}…`:model.model_id} · {seats.filter(s=>s.model_id===model.model_id).length}/{model.capacity}</text>;})}
+      {models.map((model,i)=>{const p=point(layout.regions[i].x+70,40,65);return <text key={model.model_id} x={size.width/2+(p[0]-camera.x)*camera.scale} y={size.height/2+(p[1]-camera.y)*camera.scale} fill="hsl(var(--text))" fontSize={12} pointerEvents="none"><title>{model.model_id}</title>{model.model_id.length>32?`${model.model_id.slice(0,29)}…`:model.model_id} · {seats.filter(s=>s.model_id===model.model_id).length}/{model.capacity}</text>;})}
     </svg>
     <div className="flex items-center justify-between px-3 pb-3 text-xs text-text-muted"><span>滚轮缩放 · 拖动平移 · 点击工位查看</span><button type="button" className="text-primary" onClick={()=>setCamera(fit())}>复位视角</button></div>
   </div>;
