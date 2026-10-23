@@ -47,9 +47,9 @@ const viewFixture: SettingsViewResponse = {
     models: {
       model_pool: [
         { model_id: "text-model", base_url: "https://first.example/v1", api_key: "••••3456", weight: 1, max_in_flight: 8,
-          temperature: 0.7, top_p: 0.8, max_tokens: 131072 },
+          context_window_tokens: 128000, temperature: 0.7, top_p: 0.8, max_tokens: 131072 },
         { model_id: "second-model", base_url: "https://second.example/v1", api_key: "••••7890", weight: 3, max_in_flight: 2,
-          temperature: 0.3, top_p: 0.9, max_tokens: 4096 },
+          context_window_tokens: 64000, temperature: 0.3, top_p: 0.9, max_tokens: 4096 },
       ],
       diagnosis_model_id: "second-model",
       annotation: { timeout_s: 100 },
@@ -93,7 +93,8 @@ beforeEach(() => {
     const models = view.values.models as Record<string, unknown>;
     if (patch.model_pool) models.model_pool = patch.model_pool.map((entry) => ({
       model_id: entry.model_id, base_url: entry.base_url, weight: entry.weight,
-      max_in_flight: entry.max_in_flight, temperature: entry.temperature, top_p: entry.top_p,
+      max_in_flight: entry.max_in_flight, context_window_tokens: entry.context_window_tokens,
+      temperature: entry.temperature, top_p: entry.top_p,
       max_tokens: entry.max_tokens, api_key: "••••saved",
     }));
     if ("diagnosis_model_id" in patch) models.diagnosis_model_id = patch.diagnosis_model_id;
@@ -115,7 +116,7 @@ describe("SettingsPage", () => {
     expect(screen.queryByRole("button", { name: "添加供应方" })).not.toBeInTheDocument();
   });
 
-  it("编辑显示八个字段，采样参数随模型回显", async () => {
+  it("编辑显示模型字段，采样参数与上下文容量随模型回显", async () => {
     renderPage();
     await screen.findByRole("region", { name: "模型池" });
     const dialog = await editModel("second-model");
@@ -126,6 +127,7 @@ describe("SettingsPage", () => {
     expect(dialog.getByLabelText("温度")).toHaveValue(0.3);
     expect(dialog.getByLabelText("top_p")).toHaveValue(0.9);
     expect(dialog.getByLabelText("输出 Token 上限")).toHaveValue(4096);
+    expect(dialog.getByLabelText("上下文容量")).toHaveValue(64000);
     expect(dialog.getByLabelText("Key")).toHaveValue("");
     expect(dialog.getByLabelText("Key")).toHaveAttribute("placeholder", "已配置（••••7890），留空不修改");
   });
@@ -140,7 +142,7 @@ describe("SettingsPage", () => {
     expect(screen.getAllByText("50.0%")).toHaveLength(2);
   });
 
-  it("新增模型校验八个字段并通过环境接口保存", async () => {
+  it("新增模型校验必填字段并通过环境接口保存", async () => {
     renderPage();
     await screen.findByRole("region", { name: "模型池" });
     await userEvent.click(screen.getByRole("button", { name: "新增模型" }));
@@ -158,11 +160,13 @@ describe("SettingsPage", () => {
     fireEvent.change(dialog.getByLabelText("温度"), { target: { value: "0.3" } });
     fireEvent.change(dialog.getByLabelText("top_p"), { target: { value: "0.9" } });
     fireEvent.change(dialog.getByLabelText("输出 Token 上限"), { target: { value: "4096" } });
+    fireEvent.change(dialog.getByLabelText("上下文容量"), { target: { value: "32000" } });
     await userEvent.click(dialog.getByRole("button", { name: "添加" }));
     await userEvent.click(screen.getByRole("button", { name: "保存模型池" }));
     await waitFor(() => expect(updateModelEnvMock).toHaveBeenCalledWith({
       model_pool: expect.arrayContaining([{ model_id: "new-model", base_url: "https://new.example/v1", api_key: "sk-new-key",
-        weight: 2, max_in_flight: 4, temperature: 0.3, top_p: 0.9, max_tokens: 4096 }]),
+        weight: 2, max_in_flight: 4, context_window_tokens: 32000,
+        temperature: 0.3, top_p: 0.9, max_tokens: 4096 }]),
       diagnosis_model_id: "second-model",
     }));
     expect(updateSettingsMock).not.toHaveBeenCalled();
@@ -187,6 +191,10 @@ describe("SettingsPage", () => {
     fireEvent.change(dialog.getByLabelText("输出 Token 上限"), { target: { value: "0" } });
     await userEvent.click(dialog.getByRole("button", { name: "添加" }));
     expect(dialog.getByRole("alert")).toHaveTextContent("输出 Token 上限必须是正整数");
+    fireEvent.change(dialog.getByLabelText("输出 Token 上限"), { target: { value: "4096" } });
+    fireEvent.change(dialog.getByLabelText("上下文容量"), { target: { value: "0" } });
+    await userEvent.click(dialog.getByRole("button", { name: "添加" }));
+    expect(dialog.getByRole("alert")).toHaveTextContent("上下文容量必须是正整数");
   });
 
   it("编辑修改地址、ID和并发，留空 Key 不覆盖已保存值", async () => {
@@ -200,7 +208,7 @@ describe("SettingsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "保存模型池" }));
     await waitFor(() => expect(updateModelEnvMock).toHaveBeenCalledWith({
       model_pool: expect.arrayContaining([{ model_id: "renamed-model", original_model_id: "text-model",
-        base_url: "https://changed.example/v1", weight: 1, max_in_flight: 5,
+        base_url: "https://changed.example/v1", weight: 1, max_in_flight: 5, context_window_tokens: 128000,
         temperature: 0.7, top_p: 0.8, max_tokens: 131072 }]), diagnosis_model_id: "second-model",
     }));
     expect(JSON.stringify(updateModelEnvMock.mock.calls)).not.toContain("••••");

@@ -793,6 +793,7 @@ export interface ModelPoolEntry {
   api_key: string;
   weight: number;
   max_in_flight: number;
+  context_window_tokens: number;
   temperature: number;
   top_p: number;
   max_tokens: number;
@@ -805,6 +806,7 @@ export interface ModelPoolEntryUpdate {
   api_key?: string;
   weight: number;
   max_in_flight: number;
+  context_window_tokens: number;
   temperature: number;
   top_p: number;
   max_tokens: number;

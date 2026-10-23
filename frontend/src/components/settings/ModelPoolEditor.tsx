@@ -31,13 +31,15 @@ interface ModelForm {
   temperature: string;
   top_p: string;
   max_tokens: string;
+  context_window_tokens: string;
 }
 
-/** 模型级采样参数的表单元数据 */
-const SAMPLING_FIELDS = [
+/** 模型级参数的表单元数据 */
+const MODEL_PARAM_FIELDS = [
   { name: "temperature", label: "温度", min: 0, max: 2, step: "0.1" },
   { name: "top_p", label: "top_p", min: 0, max: 1, step: "0.05" },
   { name: "max_tokens", label: "输出 Token 上限", min: 1, max: null, step: "1" },
+  { name: "context_window_tokens", label: "上下文容量", min: 1, max: null, step: "1" },
 ] as const;
 
 interface ModelDialog {
@@ -55,8 +57,9 @@ function errorDetail(error: unknown): string {
 
 function initialDraft(entries: ModelPoolEntry[], diagnosisModelId: string | null): PoolDraft {
   return {
-    entries: entries.map(({ model_id, base_url, weight, max_in_flight, temperature, top_p, max_tokens }) => ({
-      model_id, base_url, weight, max_in_flight, temperature, top_p, max_tokens, original_model_id: model_id,
+    entries: entries.map(({ model_id, base_url, weight, max_in_flight, temperature, top_p, max_tokens, context_window_tokens }) => ({
+      model_id, base_url, weight, max_in_flight, temperature, top_p, max_tokens, context_window_tokens,
+      original_model_id: model_id,
     })),
     diagnosisModelId,
   };
@@ -108,6 +111,7 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
       weight: String(entry?.weight ?? 1), max_in_flight: String(entry?.max_in_flight ?? 8),
       temperature: String(entry?.temperature ?? 0.7), top_p: String(entry?.top_p ?? 0.8),
       max_tokens: String(entry?.max_tokens ?? 131072),
+      context_window_tokens: String(entry?.context_window_tokens ?? ""),
     } });
     setTestResult(null);
   };
@@ -138,18 +142,22 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
     const temperature = Number(form.temperature);
     const topP = Number(form.top_p);
     const maxTokens = Number(form.max_tokens);
+    const contextWindow = Number(form.context_window_tokens);
     if (!error && (!form.temperature.trim() || !Number.isFinite(temperature) || temperature < 0 || temperature > 2)) {
       error = "温度必须是 [0, 2] 内的数值";
     }
     if (!error && (!form.top_p.trim() || !Number.isFinite(topP) || topP < 0 || topP > 1)) error = "top_p 必须在 [0, 1] 内";
     if (!error && (!Number.isInteger(maxTokens) || maxTokens < 1)) error = "输出 Token 上限必须是正整数";
+    if (!error && (!form.context_window_tokens.trim() || !Number.isInteger(contextWindow) || contextWindow < 1)) {
+      error = "上下文容量必须是正整数";
+    }
     if (error) {
       setDialog({ ...dialog, error });
       return;
     }
     const nextEntry: ModelPoolEntryUpdate = {
       model_id: modelId, base_url: form.base_url.trim().replace(/\/+$/, ""), weight, max_in_flight: concurrency,
-      temperature, top_p: topP, max_tokens: maxTokens,
+      temperature, top_p: topP, max_tokens: maxTokens, context_window_tokens: contextWindow,
       ...(entry?.original_model_id ? { original_model_id: entry.original_model_id } : {}),
       ...(form.api_key ? { api_key: form.api_key } : {}),
     };
@@ -187,9 +195,10 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
     </div>
     {current.entries.length === 0 ? <p className="text-sm text-text-muted">暂无模型</p> : <table className="w-full table-fixed text-left text-sm">
       <thead className="text-text-muted"><tr className="border-b border-border">
-        <th className="w-[28%] py-2 font-normal">ID</th><th className="w-[32%] py-2 font-normal">URL</th>
-        <th className="w-[12%] py-2 font-normal">Key</th><th className="w-[10%] py-2 font-normal">权重</th>
-        <th className="w-[8%] py-2 font-normal">并发</th><th className="w-[10%] py-2"><span className="sr-only">操作</span></th>
+        <th className="w-[22%] py-2 font-normal">ID</th><th className="w-[28%] py-2 font-normal">URL</th>
+        <th className="w-[10%] py-2 font-normal">Key</th><th className="w-[9%] py-2 font-normal">权重</th>
+        <th className="w-[8%] py-2 font-normal">并发</th><th className="w-[12%] py-2 font-normal">上下文</th>
+        <th className="w-[11%] py-2"><span className="sr-only">操作</span></th>
       </tr></thead>
       <tbody>{current.entries.map((entry, index) => <tr key={entry.model_id} className="border-b border-border align-top">
         <td className="break-all py-3 pr-3 text-text">{entry.model_id}
@@ -201,6 +210,7 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
           {(entry.weight / weightScale / (totalWeight || 1) * 100).toFixed(1)}%
         </span></td>
         <td className="py-3 tabular-nums">{entry.max_in_flight}</td>
+        <td className="py-3 tabular-nums">{entry.context_window_tokens}</td>
         <td className="py-2"><div className="flex justify-end">
           <IconButton label={`编辑模型：${entry.model_id}`} disabled={save.isPending} onClick={() => openDialog(index)}><Pencil className="h-4 w-4" /></IconButton>
           <IconButton label={`删除模型：${entry.model_id}`} disabled={save.isPending || current.entries.length <= 1}
@@ -237,7 +247,7 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
               placeholder={field === "api_key" && savedKey ? `已配置（${savedKey}），留空不修改` : undefined}
               autoComplete={field === "api_key" ? "new-password" : "off"} />
           </div>)}
-          {SAMPLING_FIELDS.map((field) => <div key={field.name} className="space-y-1.5">
+          {MODEL_PARAM_FIELDS.map((field) => <div key={field.name} className="space-y-1.5">
             <label htmlFor={`pool-model-${field.name}`} className="text-sm text-text">{field.label}</label>
             <Input id={`pool-model-${field.name}`} type="number" value={dialog.form[field.name]}
               onChange={(event) => changeForm(field.name, event.target.value)} disabled={test.isPending}

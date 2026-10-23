@@ -95,9 +95,9 @@ const values: Record<string, unknown> = {
   models: {
     model_pool: [
       { model_id: "text-model", base_url: "https://api.example.com/v1", api_key: "••••3456", weight: 1, max_in_flight: 8,
-        temperature: 0.7, top_p: 0.8, max_tokens: 131072 },
+        context_window_tokens: 128000, temperature: 0.7, top_p: 0.8, max_tokens: 131072 },
       { model_id: "second-model", base_url: "https://second.example.com/v1", api_key: "••••7890", weight: 2, max_in_flight: 4,
-        temperature: 0.3, top_p: 0.9, max_tokens: 4096 },
+        context_window_tokens: 64000, temperature: 0.3, top_p: 0.9, max_tokens: 4096 },
     ],
     diagnosis_model_id: "second-model",
     annotation: {
