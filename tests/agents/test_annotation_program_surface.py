@@ -288,7 +288,14 @@ async def test_search_projection_keeps_source_capabilities_and_records_reads() -
     receipt = json.loads(await runtime.execute('hits = search_text(query="顾霜")'))
     results = json.loads(receipt["reads"][0]["result"])
     assert len(results) == 3
-    assert set(results[0]) == {"content", "truncated", "chapter_id", "paragraph_ids", "capability"}
+    assert set(results[0]) == {
+        "content",
+        "truncated",
+        "keyword_score",
+        "chapter_id",
+        "paragraph_ids",
+        "capability",
+    }
     assert results[0]["chapter_id"] == 2 and results[0]["paragraph_ids"] == [10]
     assert results[0]["capability"] == "other_text"
     assert ledger.authorized_text_paragraph_ids == {10, 11, 12, 13, 14}

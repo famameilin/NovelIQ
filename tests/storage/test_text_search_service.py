@@ -114,7 +114,7 @@ async def test_search_returns_separate_candidates_for_paragraphs_in_same_chapter
     assert by_paragraph[0].keyword_score == 2.0
     assert by_paragraph[1].excerpt == "顾霜独自离去。"
     assert by_paragraph[1].keyword_score == 1.0
-    # 排序：(-semantic_score, -keyword_score, paragraph_id)
+    # 排序：(-keyword_score, -semantic_score, paragraph_id)
     assert [candidate.paragraph_id for candidate in result] == [0, 1]
     assert all(candidate.chapter_id == 1 for candidate in result)
     # 坐标来自 paragraphs 事实源列
@@ -162,6 +162,40 @@ async def test_search_merges_keyword_and_semantic_scores_per_paragraph(db_sessio
     # 段落 1：只有 keyword 命中（顾霜），保持独立候选
     assert by_paragraph[1].keyword_score == 1.0
     assert by_paragraph[1].semantic_score is None
+
+
+@pytest.mark.asyncio
+async def test_search_ranks_keyword_hits_before_semantic_only_rows(db_session) -> None:
+    """关键词命中排在纯语义相近段落之前，语义分再高也不越到前面"""
+    _novel_id, run_id = create_run_with_chunks(
+        db_session,
+        texts=["林渡与顾霜并肩迎敌。\n顾霜独自离去。\n无关段落。"],
+        title="关键词优先排序",
+    )
+    _insert_paragraphs(db_session, run_id, ["林渡与顾霜并肩迎敌。\n顾霜独自离去。\n无关段落。"])
+    service = TextSearchService(storage_for(db_session), run_id=run_id, semantic_enabled=True)
+    service._embedding_client = AsyncMock()
+    semantic_rows = [
+        SimilarParagraphRow(
+            paragraph_id=2,
+            chapter_id=1,
+            paragraph_text="无关段落。",
+            local_start_char=19,
+            local_end_char=24,
+            global_start_char=19,
+            global_end_char=24,
+            similarity=0.99,
+        )
+    ]
+    with patch(
+        "src.storage.access.ParagraphAccess.search_similar_paragraphs",
+        return_value=semantic_rows,
+    ):
+        result = await service.search("林渡 顾霜")
+
+    assert [candidate.paragraph_id for candidate in result] == [0, 1, 2]
+    assert [candidate.keyword_score for candidate in result] == [2.0, 1.0, 0.0]
+    assert result[2].semantic_score == 0.99
 
 
 @pytest.mark.asyncio

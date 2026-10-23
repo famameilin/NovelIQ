@@ -28,7 +28,7 @@ _SEARCH_PROJECTIONS: dict[str, _SearchProjection] = {
     "search_text": _SearchProjection(
         collections=("",),
         fields=("content", "truncated", "keyword_score", "semantic_score", "chapter_id", "paragraph_ids", "capability"),
-        default_fields=("content", "truncated", "chapter_id", "paragraph_ids", "capability"),
+        default_fields=("content", "truncated", "keyword_score", "chapter_id", "paragraph_ids", "capability"),
         default_limit=3,
         max_limit=20,
     ),

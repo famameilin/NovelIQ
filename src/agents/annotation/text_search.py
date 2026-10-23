@@ -82,6 +82,7 @@ class TextSearchService:
 
         同章多个候选段落都是独立候选，不按 chunk 合并；
         仅当同一段落同时命中关键词与语义检索时合并为一条（两分取各自最优）。
+        关键词命中的段落排在语义相近段落之前，keyword_score 为 0 表示该段不含查询词。
         """
         normalized_query = query.strip()
         if not normalized_query:
@@ -170,8 +171,8 @@ class TextSearchService:
             )
         candidates.sort(
             key=lambda row: (
-                -(row.semantic_score or 0.0),
                 -row.keyword_score,
+                -(row.semantic_score or 0.0),
                 row.paragraph_id,
             )
         )
