@@ -5,8 +5,8 @@ agent 存活期间占用，任务排队与等待容量都不占位。容量位�
 stream 重试层，用量归 usage 回调）。
 
 账本以池子地址为归属：占用数就是账本里的预留条数，池子退出按归属一次性归还，账本里
-不存在无主条目。规则：本轮无自有预留、全进程无占用（并发为空）、选举仍不成功 ⇒ 报错
-停止，不静默空转。
+不存在无主条目。规则：本轮无自有预留、全进程无占用（并发为空）、且没有等待回升的
+健康分时，选举仍不成功 ⇒ 报错停止；健康分低于阈值时等待回升，不空转。
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from loguru import logger
 
 from src.event_bus import EventBus, Message
 from src.model_pool.contracts import SelectionRequest, SelectionResult
+from src.model_pool.health import DEFAULT_SCORE, MIN_SELECT_SCORE, MODEL_HEALTH
 
 
 class ModelCapacity:
@@ -98,14 +99,13 @@ class ModelElectionExhausted(RuntimeError):
 
 
 class ModelElectionPool:
-    """本轮模型池只发布选举结果，预算、失败权重和退避仅保留在内存"""
+    """发布选举结果，尝试次数、失败权重和退避仅保留在内存"""
 
     def __init__(
         self,
         bus: EventBus,
         run_id: str,
         *,
-        max_attempts: int,
         poll_seconds: float = 0.1,
         allowed_model_ids: frozenset[str] | None = None,
         fixed_model_id: str | None = None,
@@ -115,7 +115,6 @@ class ModelElectionPool:
         # 池子地址同时是容量预留的归属：close() 按它归还
         self.address = f"model_pool:{run_id}"
         self.assignment_topic = f"assignment:{run_id}"
-        self.max_attempts = max_attempts
         self.poll_seconds = poll_seconds
         self.allowed_model_ids = allowed_model_ids
         self.fixed_model_id = fixed_model_id
@@ -126,6 +125,7 @@ class ModelElectionPool:
         self.reservations: dict[str, tuple[str, str]] = {}
         self._wake = asyncio.Event()
         self.closed = False
+        self._health_log_at = 0.0
         bus.handle("pool.enqueue", self.address, self.enqueue)
         bus.handle("pool.feedback", self.address, self.feedback)
 
@@ -135,15 +135,15 @@ class ModelElectionPool:
             raise TypeError("模型池只接收 SelectionRequest")
         if (receipt.run_id, receipt.work_id) != (message.run_id, message.work_id) or receipt.run_id != self.run_id:
             raise ValueError("选举请求与消息身份不一致")
-        if receipt.resume_attempt is not None and not 1 <= receipt.resume_attempt <= self.max_attempts:
-            raise ValueError("恢复租约必须引用原有效尝试，不得重开预算")
+        if receipt.resume_attempt is not None and receipt.resume_attempt < 1:
+            raise ValueError("恢复租约必须引用正整数尝试号")
         previous_attempt = self.attempts.get(receipt.work_id)
         if (
             receipt.resume_attempt is not None
             and previous_attempt is not None
             and receipt.resume_attempt != previous_attempt
         ):
-            raise ValueError("恢复租约尝试号与原work不一致，禁止回退选举预算")
+            raise ValueError("恢复租约尝试号与原work不一致")
         if any(item.work_id == receipt.work_id for item in self.pending):
             return
         if self.attempts.get(receipt.work_id, 0):
@@ -159,14 +159,14 @@ class ModelElectionPool:
             return
         _, model_id = self.reservations.pop(message.work_id)
         MODEL_CAPACITY.release(self.address, reservation_id)
-        await self.notify_capacity()
         if message.payload["outcome"] == "retry":
             failures = self.failures.setdefault(message.work_id, {})
             failures[model_id] = failures.get(model_id, 0) + 1
             self.available_at[message.work_id] = (
-                time.monotonic() + min(30, 2 ** (self.attempts[message.work_id] - 1)) + random.uniform(0, 1)
+                time.monotonic() + min(30, 2 ** min(5, self.attempts[message.work_id] - 1)) + random.uniform(0, 1)
             )
         self._wake.set()
+        await self.notify_capacity()
 
     async def run(self) -> None:
         from src.config import settings
@@ -181,24 +181,28 @@ class ModelElectionPool:
                 resumed = receipt.resume_attempt is not None
                 if resumed:
                     attempts = int(receipt.resume_attempt or 0)
+                scores = MODEL_HEALTH.scores(item.model_id for item in settings.models.model_pool)
+                fixed_model_id = receipt.fixed_model_id or self.fixed_model_id
                 model_id = None
                 if (
                     receipt.work_id not in self.reservations
-                    and (resumed or attempts < self.max_attempts)
                     and time.monotonic() >= self.available_at.get(receipt.work_id, 0)
                     and selection_error is None
                 ):
                     try:
                         # 空位过滤读配置的 max_in_flight：容量热更新无需另立登记
-                        if self.fixed_model_id is not None:
+                        if fixed_model_id is not None:
                             selected = next(
-                                (item for item in settings.models.model_pool if item.model_id == self.fixed_model_id),
+                                (item for item in settings.models.model_pool if item.model_id == fixed_model_id),
                                 None,
                             )
                             if selected is None:
                                 raise ValueError("指定诊断模型不在模型池中")
-                            # 诊断显式选模不受标注权重影响，仍共用同一容量账本
-                            if MODEL_CAPACITY.snapshot().get(selected.model_id, 0) < selected.max_in_flight:
+                            # 诊断显式选模不受标注权重影响，仍共用同一容量账本与健康阈值
+                            if (
+                                MODEL_CAPACITY.snapshot().get(selected.model_id, 0) < selected.max_in_flight
+                                and scores.get(selected.model_id, DEFAULT_SCORE) >= MIN_SELECT_SCORE
+                            ):
                                 model_id = selected.model_id
                         else:
                             model_id = select_annotation_model(
@@ -210,6 +214,8 @@ class ModelElectionPool:
                                 ],
                                 in_flight=MODEL_CAPACITY.snapshot(),
                                 failures=self.failures.get(receipt.work_id, {}),
+                                scores=scores,
+                                min_score=MIN_SELECT_SCORE,
                             )
                     except Exception as exc:
                         # 配置故障不处罚模型，也不能中断已有预留的执行和保存确认
@@ -241,22 +247,38 @@ class ModelElectionPool:
                         )
                     )
                     continue
-                # 退避尚未到期不是选举失败；预留未被队列消费也仍然占用容量。
-                # 并发为空（账本无任何占用）且选举仍不成功 ⇒ 报错停止，不空转
+                # 退避未到期或健康分未回升都不是选举失败；并发为空时等待而不是空转
                 cooling = time.monotonic() < self.available_at.get(receipt.work_id, 0)
-                if (
-                    not self.reservations
-                    and not any(MODEL_CAPACITY.snapshot().values())
-                    and (selection_error is not None or not cooling)
-                ):
-                    if selection_error is not None:
-                        logger.error(
-                            "模型池选举失败，并发为空，停止分析: run_id={} work_id={} error={}",
+                no_usage = not self.reservations and not any(MODEL_CAPACITY.snapshot().values())
+                health_waiting = (
+                    scores.get(fixed_model_id, DEFAULT_SCORE) < MIN_SELECT_SCORE
+                    if fixed_model_id is not None
+                    else any(
+                        item.weight > 0
+                        and (self.allowed_model_ids is None or item.model_id in self.allowed_model_ids)
+                        and scores.get(item.model_id, DEFAULT_SCORE) < MIN_SELECT_SCORE
+                        for item in settings.models.model_pool
+                    )
+                )
+                if no_usage and selection_error is not None:
+                    logger.error(
+                        "模型池选举失败，并发为空，停止分析: run_id={} work_id={} error={}",
+                        self.run_id,
+                        receipt.work_id,
+                        selection_error,
+                    )
+                    raise selection_error
+                if no_usage and not cooling and health_waiting:
+                    now = time.monotonic()
+                    if now - self._health_log_at >= 60:
+                        self._health_log_at = now
+                        logger.warning(
+                            "模型池等待健康分回升: run_id={} scores={} 阈值={}",
                             self.run_id,
-                            receipt.work_id,
-                            selection_error,
+                            scores,
+                            MIN_SELECT_SCORE,
                         )
-                        raise selection_error
+                elif no_usage and not cooling:
                     raise ModelElectionExhausted(f"work_id={receipt.work_id} 无可选模型，尝试数={attempts}")
             self._wake.clear()
             try:

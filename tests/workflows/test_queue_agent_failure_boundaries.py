@@ -20,6 +20,7 @@ from src.agents.annotation.agent import AnnotationAgent, WorkExecution
 from src.agents.annotation.agent_ir import AgentAnnotation
 from src.agents.annotation.errors import AnnotationDependencyError
 from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.stream import ModelRequestError
 from src.case_pool import CasePool
 from src.config import settings
 from src.event_bus import EventBus, Message
@@ -165,7 +166,10 @@ def _agent(bus: EventBus, sessions: Any, monkeypatch: Any) -> AnnotationAgent:
         "src.model_pool.llm.build_chat_model",
         lambda *args, **kwargs: SimpleNamespace(model_name="fake"),
     )
-    monkeypatch.setattr("src.model_pool.configuration.load_task_config", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "src.model_pool.configuration.load_task_config",
+        lambda *args, **kwargs: SimpleNamespace(context_window_tokens=128000),
+    )
     monkeypatch.setattr("src.embedding.EmbeddingClient", lambda **kwargs: object())
     monkeypatch.setattr(
         "src.agents.annotation.queries.DatabaseAnnotationQueryService", lambda *args, **kwargs: object()
@@ -293,7 +297,7 @@ async def test_provider_timeout_returns_retry_with_own_contributions_removed(mon
 
     class FailedGraph:
         async def ainvoke(self, state: Any, config: Any = None) -> Any:
-            raise TimeoutError("供应商请求重试耗尽")
+            raise ModelRequestError("供应商请求重试耗尽")
 
     monkeypatch.setattr("src.agents.annotation.agent.build_agent_graph", lambda *args, **kwargs: FailedGraph())
     result = await agent.execute(
@@ -506,6 +510,10 @@ async def test_model_pool_exhaustion_never_sends_cancel_after_termination(monkey
     bus, actions = EventBus(), []
     _model_pool(monkeypatch)
     original_run, original_feedback = ModelElectionPool.run, ModelElectionPool.feedback
+    unavailable = []
+    monkeypatch.setattr(
+        "src.model_pool.selection.select_annotation_model", lambda *a, **k: None if unavailable else "test"
+    )
 
     async def run(pool: ModelElectionPool) -> None:
         try:
@@ -519,6 +527,7 @@ async def test_model_pool_exhaustion_never_sends_cancel_after_termination(monkey
         pool.available_at[message.work_id] = 0
 
     async def execute(message: Message) -> Any:
+        unavailable.append(True)
         return {"outcome": "retry", "invocation_id": "inv"}
 
     async def cancel(message: Message) -> None:
@@ -531,7 +540,7 @@ async def test_model_pool_exhaustion_never_sends_cancel_after_termination(monkey
     sessions = _MemorySessions()
     with pytest.raises(ModelElectionExhausted):
         await asyncio.wait_for(
-            ChapterWorkerPool(max_attempts=1, poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions),
+            ChapterWorkerPool(poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions),
             2,
         )
     assert actions == ["pool_ended"] and not any(MODEL_CAPACITY.snapshot().values())
@@ -543,6 +552,10 @@ async def test_any_model_pool_exit_avoids_post_termination_cancel(monkeypatch: A
     bus, actions = EventBus(), []
     _model_pool(monkeypatch)
     original_run, original_feedback = ModelElectionPool.run, ModelElectionPool.feedback
+    unavailable = []
+    monkeypatch.setattr(
+        "src.model_pool.selection.select_annotation_model", lambda *a, **k: None if unavailable else "test"
+    )
 
     async def run(pool: ModelElectionPool) -> None:
         try:
@@ -557,6 +570,7 @@ async def test_any_model_pool_exit_avoids_post_termination_cancel(monkeypatch: A
         pool.available_at[message.work_id] = 0
 
     async def execute(message: Message) -> Any:
+        unavailable.append(True)
         return {"outcome": "retry", "invocation_id": "inv"}
 
     async def cancel(message: Message) -> None:
@@ -569,7 +583,7 @@ async def test_any_model_pool_exit_avoids_post_termination_cancel(monkeypatch: A
     sessions = _MemorySessions()
     with pytest.raises(ValueError if exit_mode == "error" else PipelineWorkFailed):
         await asyncio.wait_for(
-            ChapterWorkerPool(max_attempts=1, poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions),
+            ChapterWorkerPool(poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions),
             2,
         )
     assert actions == ["pool_ended"] and not any(MODEL_CAPACITY.snapshot().values())

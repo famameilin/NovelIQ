@@ -32,8 +32,7 @@ class WorkSaveUnconfirmed(PipelineWorkFailed):
 class ChapterWorkerPool:
     """队列不选择模型、不扣重派预算、不计算退避、不操作域状态"""
 
-    def __init__(self, *, max_attempts: int = 3, poll_seconds: float = 0.1) -> None:
-        self.max_attempts = max_attempts
+    def __init__(self, *, poll_seconds: float = 0.1) -> None:
         self.poll_seconds = poll_seconds
         self.owner = f"worker:{uuid4().hex}"
         self.states: dict[str, str] = {}
@@ -53,7 +52,7 @@ class ChapterWorkerPool:
         run_id = work[0].run_id
         originals = {receipt.work_id: receipt for receipt in work}
         address = f"queue:{run_id}"
-        models = ModelElectionPool(bus, run_id, max_attempts=self.max_attempts, poll_seconds=self.poll_seconds)
+        models = ModelElectionPool(bus, run_id, poll_seconds=self.poll_seconds)
         assignments = bus.subscribe(models.assignment_topic)
         active: dict[str, asyncio.Task[bool]] = {}
         succeeded = 0

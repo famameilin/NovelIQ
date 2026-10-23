@@ -7,34 +7,33 @@ import math
 from collections.abc import Mapping
 
 from src.config.schemas.model import WeightedModelSettings
+from src.model_pool.health import DEFAULT_SCORE, MIN_SELECT_SCORE
 
 
 def select_annotation_model(
     key: str,
     pool: list[WeightedModelSettings],
     *,
-    previous_model_id: str | None = None,
     in_flight: Mapping[str, int] | None = None,
     failures: Mapping[str, int] | None = None,
+    scores: Mapping[str, float] | None = None,
+    min_score: float = MIN_SELECT_SCORE,
 ) -> str | None:
-    """尝试键决定加权选择；有其他可用模型时不重复失败的模型
+    """按配置权重除以一加失败次数选举有空位且健康分达标的模型
 
-    选举在模型池分发时刻发生——只在有空位的模型（在途任务数 < max_in_flight）中
-    加权选举，全部满位返回 None，任务留在队列；in_flight=None 时退化为无容量
-    过滤的纯加权选择。
+    全部满位或全部低于健康阈值时返回 None，健康分达标的失败模型保持参选资格
     """
     candidates = [item for item in pool if item.weight > 0]
     if not candidates:
         raise ValueError("模型池没有正权重的标注模型")
     if in_flight is not None:
         candidates = [item for item in candidates if in_flight.get(item.model_id, 0) < item.max_in_flight]
-        if not candidates:
-            return None
-    if failures is not None:
-        lowest = min(failures.get(item.model_id, 0) for item in candidates)
-        candidates = [item for item in candidates if failures.get(item.model_id, 0) == lowest]
-    elif previous_model_id is not None and any(item.model_id != previous_model_id for item in candidates):
-        candidates = [item for item in candidates if item.model_id != previous_model_id]
+    if scores is not None:
+        candidates = [
+            item for item in candidates if scores.get(item.model_id, DEFAULT_SCORE) >= min_score
+        ]
+    if not candidates:
+        return None
     effective = [item.weight / (1 + (failures or {}).get(item.model_id, 0)) for item in candidates]
     scale = max(effective)
     weights = [weight / scale for weight in effective]

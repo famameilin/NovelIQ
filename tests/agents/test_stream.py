@@ -11,11 +11,12 @@ from typing import Any
 import httpx
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
-from openai import RateLimitError
+from openai import AuthenticationError, BadRequestError, RateLimitError
 
 from src.agents.stream import (
     AgentStream,
     ContentStallTimeoutError,
+    ModelRequestError,
     _is_transient_model_error,
     _retry_backoff_seconds,
     emit_tool_results,
@@ -380,7 +381,7 @@ async def test_run_model_call_exhausts_stream_retries_and_raises() -> None:
     stream = AgentStream(emitter)
     model = _FlakyStreamingLLM([], fail_count=99)
 
-    with pytest.raises(ConnectionError, match="stream interrupted"):
+    with pytest.raises(ModelRequestError, match="stream interrupted"):
         await run_model_call(model, [AIMessage(content="问")], stream)
 
     assert len(model.captured_messages) == 3
@@ -395,7 +396,7 @@ async def test_run_model_call_content_stall_kills_silent_chunks_and_exhausts_ret
     stream = AgentStream(emitter)
     model = _EmptyChunkForeverLLM()
 
-    with pytest.raises(ContentStallTimeoutError, match="内容进度停摆"):
+    with pytest.raises(ModelRequestError, match="内容进度停摆"):
         await run_model_call(
             model,
             [AIMessage(content="问")],
@@ -559,7 +560,7 @@ async def test_run_model_call_total_attempts_one_disables_retries() -> None:
     stream = AgentStream(emitter)
     model = _FlakyStreamingLLM([], fail_count=99)
 
-    with pytest.raises(ConnectionError, match="stream interrupted"):
+    with pytest.raises(ModelRequestError, match="stream interrupted"):
         await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=1)
 
     assert len(model.captured_messages) == 1
@@ -693,7 +694,7 @@ async def test_run_model_call_retry_backoff_is_exponential_and_capped(monkeypatc
     model = _FlakyStreamingLLM([], fail_count=99)
     sleeps = _noop_sleep(monkeypatch)
 
-    with pytest.raises(ConnectionError, match="stream interrupted"):
+    with pytest.raises(ModelRequestError, match="stream interrupted"):
         await run_model_call(model, [AIMessage(content="问")], None, total_attempts=3)
 
     assert model.captured_messages == [[AIMessage(content="问")] for _ in range(3)]
@@ -731,6 +732,22 @@ class _RateLimitedStreamingLLM(_StreamingLLM):
             raise self.failures.pop(0)
         for chunk in self.chunks:
             yield chunk
+
+
+@pytest.mark.parametrize("error_class,status", [(AuthenticationError, 401), (BadRequestError, 400)])
+async def test_provider_rejection_returns_to_pool_but_audit_failure_stops(monkeypatch, error_class, status):
+    response = httpx.Response(status, request=httpx.Request("POST", "http://model.test/chat"))
+    failure = error_class("provider rejected request", response=response, body={})
+    sleeps = _noop_sleep(monkeypatch)
+    with pytest.raises(ModelRequestError) as error:
+        await run_model_call(_RateLimitedStreamingLLM([failure]), [], None, total_attempts=3)
+    assert error.value.__cause__ is failure and not sleeps
+
+    def fail_audit(*_):
+        raise TimeoutError("审计数据库超时")
+
+    with pytest.raises(TimeoutError, match="审计数据库超时"):
+        await run_model_call(_RateLimitedStreamingLLM([failure]), [], None, on_turn_failed=fail_audit)
 
 
 @pytest.mark.asyncio
@@ -771,7 +788,7 @@ async def test_rate_limit_is_bounded_by_two_retries_and_caller_budget(monkeypatc
     """耗尽后上抛原错误，即使调用方预算更大也不无限请求同一限流窗口"""
     model = _RateLimitedStreamingLLM([_rate_limit_error() for _ in range(5)])
     sleeps = _noop_sleep(monkeypatch)
-    with pytest.raises(RateLimitError):
+    with pytest.raises(ModelRequestError):
         await run_model_call(model, [HumanMessage(content="诊断")], None, total_attempts=total_attempts)
     assert len(model.captured_messages) == expected_calls
     assert sleeps == [60.0, 120.0][: expected_calls - 1]
@@ -780,14 +797,14 @@ async def test_rate_limit_is_bounded_by_two_retries_and_caller_budget(monkeypatc
 @pytest.mark.asyncio
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("code", ["AccountQuotaExceeded", "QuotaExceeded", "QuotaExceeded.AgentPlanQuotaExceeded"])
-async def test_quota_exhaustion_fails_once_without_cooldown_or_reselection(monkeypatch, code, nested):
-    """额度错误直接结束，且不进入标注层使用的瞬态 work 重派判据"""
+async def test_quota_exhaustion_returns_to_pool_without_request_cooldown(monkeypatch, code, nested):
+    """额度错误不原地重发，保留原异常并交回模型池"""
     failure = _rate_limit_error(code, nested=nested, retry_after="180")
     model = _RateLimitedStreamingLLM([failure])
     sleeps = _noop_sleep(monkeypatch)
     failed = []
     assert _is_transient_model_error(failure) is False
-    with pytest.raises(RateLimitError) as error:
+    with pytest.raises(ModelRequestError) as error:
         await run_model_call(
             model,
             [HumanMessage(content="诊断")],
@@ -795,7 +812,7 @@ async def test_quota_exhaustion_fails_once_without_cooldown_or_reselection(monke
             total_attempts=5,
             on_turn_failed=lambda error, timing, message: failed.append(error),
         )
-    assert error.value is failure and len(failed) == 1
+    assert error.value.__cause__ is failure and len(failed) == 1
     assert len(model.captured_messages) == 1 and sleeps == []
 
 

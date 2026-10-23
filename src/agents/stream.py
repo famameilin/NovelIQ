@@ -17,7 +17,9 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+from httpx import HTTPError
 from langchain_core.messages import AIMessage, HumanMessage
+from openai import APIError
 
 from src.agents.stream_aggregator import (
     StreamChunkAggregator,
@@ -149,7 +151,7 @@ def _is_transient_model_error(exc: BaseException) -> bool:
     （APIConnectionError/APITimeoutError/RateLimitError/ConnectError/ReadTimeout/
     RemoteProtocolError 等）；httpx 本地协议错误不在此列。
     """
-    # 配额耗尽只能等待额度恢复，不能按频率限流重发或重派整个 work
+    # 配额错误不在调用层原地重发，交给模型池处理
     code = _model_error_code(exc)
     if code in {"AccountQuotaExceeded", "QuotaExceeded", "SetLimitExceeded"} or code.startswith("QuotaExceeded."):
         return False
@@ -333,31 +335,9 @@ async def run_model_call(
     content_stall_timeout_s: float | None = None,
     clock_ns: Callable[[], int] = time.perf_counter_ns,
 ) -> AIMessage:
-    """
-    调用模型并返回完整 AIMessage
+    """流式请求模型并按物理请求记录审计，服务故障交回模型池
 
-    统一走 astream 流式聚合并推送事件（模型实例由 llm.py 以 streaming=True 构建）。
-    流式输出中途断流（astream 抛异常）时用同一 messages 重发当前模型请求，
-    total_attempts 表示总调用次数（重试次数 = total_attempts - 1），
-    total_attempts=1 时关闭重试；缺省对齐 settings.models.annotation.total_attempts
-    （默认 3 次，即最多重试 2 次）；
-    重试期间推送 thinking 事件，并跳过与上次已推送内容重叠的前缀，避免重复输出；
-    已失败尝试的用量与最终用量分别交给物理请求审计记账，避免跨请求混合。
-    耗尽后抛出最后一次异常。SSE 推送失败（StreamEmitError）不触发重试。
-    网络/限流等瞬态错误（_is_transient_model_error）与"响应不含任何工具调用"
-    均按调用层故障共用 total_attempts 预算退避重发。频率类 429
-    最多重试两次，完整遵守 Retry-After，缺失时分别冷却 60、120 秒；额度耗尽
-    直接失败。请求异常耗尽后原样上抛；空工具回复耗尽后抛 RuntimeError。
-    参数/鉴权等确定性错误直接失败。
-    流消费经内容进度看门狗包装（_guard_content_progress）："流块
-    持续到达而内容零增长"超过 content_stall_timeout_s（缺省
-    CONTENT_STALL_TIMEOUT_S，0/负值关闭）判死为 ContentStallTimeoutError，
-    按瞬态错误走同一重发预算。
-    无工具回复重发前调用 completion_hint 工厂取提示（整个 run_model_call
-    周期内只取一次、只注入一次），追加进重发请求让模型看到缺域清单；
-    工厂缺省或返回 None 时维持原样重发。
-    on_turn_started/on_turn_complete/on_turn_failed 以每次物理 Provider 请求为粒度回调，
-    供审计把成功、断流、空工具回复分别落库，绝不合并跨请求的计时或 token。
+    total_attempts 只约束当前请求重发；SSE、审计与项目自身异常直接上抛
     """
     from src.config import settings
 
@@ -416,6 +396,10 @@ async def run_model_call(
                 or (rate_limited and rate_limit_retries >= 2)
             ):
                 logger.warning("模型输出流中断且重试耗尽: error=%r", exc, exc_info=True)
+                if isinstance(exc, (APIError, HTTPError, ConnectionError, TimeoutError)) or _is_transient_model_error(
+                    exc
+                ):
+                    raise ModelRequestError(_format_turn_error(exc)) from exc
                 raise
             failed_attempt = total_attempts - retries_remaining
             retries_remaining -= 1
@@ -452,7 +436,7 @@ async def run_model_call(
                 on_turn_failed(error, timing, response)
             if retries_remaining <= 0:
                 logger.warning("模型调用未正常结束且重试已耗尽")
-                raise RuntimeError(f"{error}，重发后仍未恢复")
+                raise ModelRequestError(f"{error}，重发后仍未恢复")
             failed_attempt = total_attempts - retries_remaining
             retries_remaining -= 1
             _apply_completion_hint()

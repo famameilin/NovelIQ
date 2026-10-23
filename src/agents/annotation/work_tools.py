@@ -22,9 +22,6 @@ from .tools import _forbid_undeclared_args
 def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any]:
     ledger = execution.ledger
     author = execution.invocation_id
-    execution.case_check = lambda: (
-        ["仍有已领取但未提交案例，请先办理并 submit_case"] if agent.case_pool.unsubmitted_for(author) else []
-    )
     tools = [
         candidate
         for candidate in build_annotation_tools(query_service, ledger)
@@ -267,7 +264,13 @@ def build_work_tools(agent: Any, execution: Any, query_service: Any) -> list[Any
         reason: str | None = None,
         evidence: int | None = None,
     ) -> str:
-        """明确关联已实际读取的事件或实体 ID；伏笔照应不合树，关系变化须明确类型、方向和原因"""
+        """明确关联已实际读取的事件或实体 ID；伏笔照应不合树，关系变化须明确类型、方向和原因
+
+        causal/foreshadowing/contains 的两端是事件：先 read_event 读取，且必须给非空 reason 与
+        本章段首 evidence；same_entity/different_entity 固定用「同一人物」，两端须是 character；
+        relation_change 须给 change_kind 与非空 reason。实体端点用 search_graph/read_entity
+        读回的真实 UUID，本次 invocation 没读过的端点会被拒收。
+        """
         if kind in {"causal", "foreshadowing", "contains"}:
             if relation_type is not None or change_kind is not None:
                 raise ValueError("事件关联不接受 relation_type/change_kind")

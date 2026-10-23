@@ -1,15 +1,13 @@
-"""真实队列、审计和保存验证两种结束信号及预算终局"""
+"""真实队列、审计和保存验证两种结束信号及预算重选"""
 
 from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
-from sqlalchemy import func, select
 
 from src.audit.queries import fetch_agent_turns
 from src.config import settings
-from src.storage.models import Agent, ChapterAnnotation
-from src.work.chapter_pool import PipelineWorkFailed
+from src.model_pool.capacity import ModelElectionPool
 from src.work.queries import chapter_annotations, fetch_annotation_role_records
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -65,26 +63,23 @@ async def test_no_tool_after_complete_write_saves_without_finish(db_session):
     assert model.calls == 2
 
 
-async def test_budget_exhaustion_is_not_retried_and_keeps_audit(db_session, monkeypatch):
+async def test_budget_exhaustion_reselects_beyond_old_limit_and_keeps_audit(db_session, monkeypatch):
     monkeypatch.setattr(settings.models.annotation, "max_iterations", 1)
-    novel, run = create_run_with_chunks(db_session, texts=["原文行动。", "尚未开始。"], chapter_ids=[1, 2])
-    model = ProgramModel('metric(summary="行动", emotional_valence=0, narrative_function="铺垫")')
-    with patch("src.model_pool.llm.build_chat_model", return_value=model) as factory:
-        with pytest.raises(PipelineWorkFailed, match="budget_exhausted.*iterations_used=1.*iterations_limit=1"):
-            await run_annotate(run, storage_for(db_session), novel_id=novel)
-    # 即使其他 work 已在飞，各自最多调用一次；预算失败没有重新选模型
+    novel, run = create_run_with_chunks(db_session, texts=["原文行动。"])
+    models = [ProgramModel('metric(summary="行动", emotional_valence=0, narrative_function="铺垫")') for _ in range(4)]
+    models.append(ProgramModel('metric(summary="行动", emotional_valence=0, narrative_function="铺垫")\nfinish()'))
+    original_feedback = ModelElectionPool.feedback
+
+    async def feedback(pool, message):
+        await original_feedback(pool, message)
+        pool.available_at[message.work_id] = 0
+
+    monkeypatch.setattr(ModelElectionPool, "feedback", feedback)
+    with patch("src.model_pool.llm.build_chat_model", side_effect=models) as factory:
+        assert await run_annotate(run, storage_for(db_session), novel_id=novel) == (1, 0, 1)
     db_session.expire_all()
     turns = fetch_agent_turns(storage_for(db_session), run)
-    assert turns and factory.call_count == model.calls == len(turns)
-    assert len({turn.agent_id for turn in turns}) == len(turns)
-    assert (
-        db_session.scalar(
-            select(func.count())
-            .select_from(ChapterAnnotation)
-            .join(Agent, Agent.id == ChapterAnnotation.agent_id)
-            .where(Agent.run_id == run)
-        )
-        == 0
-    )
-    # 预算终局没有任何正式产物：未保存角色由缺行表达
-    assert fetch_annotation_role_records(storage_for(db_session), run) == []
+    assert factory.call_count == len(turns) == 5
+    assert len({turn.agent_id for turn in turns}) == 5
+    assert len(fetch_annotation_role_records(storage_for(db_session), run)) == 1
+    assert chapter_annotations(storage_for(db_session), run)[0].payload["metrics"]["summary"] == "行动"

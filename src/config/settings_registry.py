@@ -103,7 +103,7 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
             SettingFieldSpec(
                 path=("models", "annotation", "total_attempts"),
                 field_type="integer",
-                label="标注总尝试次数",
+                label="标注单次请求总尝试次数",
                 min_value=1,
             ),
             SettingFieldSpec(
@@ -130,14 +130,14 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
             SettingFieldSpec(
                 path=("models", "diagnosis", "max_iterations"),
                 field_type="integer",
-                label="诊断报告会话回合上限",
-                description="报告会话独立继承此上限，一个会话完成叙事组织与全书报告，用尽即结束",
+                label="诊断会话回合上限",
+                description="案例与报告会话分别使用此上限，用尽后交回模型池重新选举",
                 min_value=1,
             ),
             SettingFieldSpec(
                 path=("models", "diagnosis", "total_attempts"),
                 field_type="integer",
-                label="诊断总尝试次数",
+                label="诊断单次请求总尝试次数",
                 min_value=1,
             ),
             # ---- models.paragraph_embedding（段落嵌入）----

@@ -13,6 +13,8 @@ class SelectionRequest:
     work_id: str
     # 依赖屏障后只重获容量，不能计成失败重派或刷新逻辑执行
     resume_attempt: int | None = None
+    # 单条工作指定承载模型；不填时按池内权重选举
+    fixed_model_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -30,6 +30,27 @@ def test_weighted_assignment_is_stable_and_zero_weight_is_excluded() -> None:
     assert select_annotation_model("task", pool) == select_annotation_model("task", pool)
 
 
+def test_failed_model_keeps_its_reduced_weight_in_full_candidate_pool() -> None:
+    pool = _parse_model_pool([_entry("a", weight=3), _entry("b")])
+    selected = [select_annotation_model(str(index), pool, failures={"a": 2}) for index in range(4000)]
+    assert 0.45 < selected.count("a") / len(selected) < 0.55
+    assert select_annotation_model("alone", pool[:1], failures={"a": 1000}) == "a"
+
+
+def test_model_below_health_threshold_is_not_selected() -> None:
+    pool = _parse_model_pool([_entry("a"), _entry("b")])
+    selected = [
+        select_annotation_model(str(index), pool, scores={"a": 100, "b": 40})
+        for index in range(1000)
+    ]
+    assert set(selected) == {"a"}
+
+
+def test_all_models_below_health_threshold_returns_none() -> None:
+    pool = _parse_model_pool([_entry("a"), _entry("b")])
+    assert select_annotation_model("task", pool, scores={"a": 40, "b": 59.9}) is None
+
+
 @pytest.mark.parametrize(
     "pool",
     [

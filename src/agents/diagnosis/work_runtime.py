@@ -8,9 +8,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from src.agents.annotation.errors import AnnotationBudgetExhaustedError
+from src.agents.stream import ModelRequestError
 from src.event_bus import EventBus, Message
 from src.event_bus.notifications import StreamEvent
 from src.model_pool.capacity import ModelElectionPool
+from src.model_pool.configuration import model_context_window
 from src.model_pool.contracts import SelectionRequest, SelectionResult
 from src.storage import new_id
 
@@ -28,6 +31,8 @@ class SessionProgress:
     rounds: int = 0
     physical_sequence: int = 0
     audit_sequence: int = 0
+    model_id: str = ""
+    attempt_number: int = 1
 
 
 @dataclass
@@ -55,7 +60,7 @@ class DiagnosisWorkDomain(Protocol):
 
 
 class DiagnosisWorkScheduler:
-    """案例会话并发自取办理；容量沿用模型池既有选举，不另立并发闸"""
+    """案例会话按池内并发位自取办理，模型按会话选举；报告会话用指定诊断模型"""
 
     def __init__(
         self,
@@ -63,7 +68,7 @@ class DiagnosisWorkScheduler:
         run_id: str,
         domain: DiagnosisWorkDomain,
         bus: EventBus,
-        model_id: str,
+        model_id: str | None,
         llm_factory: Callable[[str], Any],
         observer_factory: Callable[[SessionProgress], Any],
         audit_barrier: Callable[[], Any],
@@ -80,13 +85,13 @@ class DiagnosisWorkScheduler:
         from src.utils.identity import stable_digest
 
         self.report_max_rounds = settings.models.diagnosis.max_iterations
-        entry = next((item for item in settings.models.model_pool if item.model_id == model_id), None)
         if case_sessions is None:
-            # 案例会话数=诊断模型的并发位：会话长活占用容量，不再按案例逐次选举
-            case_sessions = int(entry.max_in_flight) if entry is not None else 1
+            # 案例会话数=池内并发位之和：每个长活会话占一个容量位
+            case_sessions = sum(int(item.max_in_flight) for item in settings.models.model_pool if item.weight > 0)
         self.case_sessions = max(1, int(case_sessions))
+        self.model_id = model_id
         self.report_key = stable_digest(self.run_id, REPORT_SESSION_KEY)
-        self.pool = ModelElectionPool(bus, run_id, max_attempts=1, fixed_model_id=model_id)
+        self.pool = ModelElectionPool(bus, run_id)
         self._waiting: dict[str, asyncio.Future[SelectionResult]] = {}
 
     async def _assignments(self, queue: Any) -> None:
@@ -118,6 +123,12 @@ class DiagnosisWorkScheduler:
             future.set_result(selected)
 
     async def _session(self, key: str, role: str) -> None:
+        """同一工作按模型池结果重试，每次尝试使用独立执行身份"""
+        while await self._attempt(key, role):
+            pass
+
+    async def _attempt(self, key: str, role: str) -> bool:
+        """执行一次选举派发，返回是否需要重新选举"""
         if self.is_cancelled is not None and self.is_cancelled():
             raise asyncio.CancelledError("诊断已取消")
         future: asyncio.Future[SelectionResult] = asyncio.get_running_loop().create_future()
@@ -127,7 +138,8 @@ class DiagnosisWorkScheduler:
         progress: SessionProgress | None = None
         observer: Any = None
         saved = False
-        incomplete_error: RuntimeError | None = None
+        incomplete_error: AnnotationBudgetExhaustedError | None = None
+        retry = False
         timings: dict[str, float] = {}
 
         async def finish(status: str, error: str | None = None) -> None:
@@ -142,14 +154,17 @@ class DiagnosisWorkScheduler:
         try:
             await self.bus.request(
                 Message(topic="pool.enqueue", source=f"queue:{self.run_id}", target=self.pool.address,
-                        run_id=self.run_id, work_id=key, payload=SelectionRequest(self.run_id, key))
+                        run_id=self.run_id, work_id=key,
+                        payload=SelectionRequest(self.run_id, key,
+                                                 fixed_model_id=self.model_id if role == "report" else None))
             )
             selected = await future
             self._waiting.pop(key, None)
             timings["queue_wait_ms"] = round((time.perf_counter_ns() - queued_ns) / 1_000_000, 3)
             if role == "case" and self.domain.case_counts()[0] == 0:
-                return
-            progress = SessionProgress(key=key, role=role, agent_id=new_id())
+                return False
+            progress = SessionProgress(key=key, role=role, agent_id=new_id(), model_id=selected.model_id,
+                                       attempt_number=selected.attempt_number)
             session_model_id = selected.model_id
             session_reservation_id = selected.reservation_id
 
@@ -169,6 +184,7 @@ class DiagnosisWorkScheduler:
             observer = self.observer_factory(progress)
             context = self.domain.build_session_context(role, progress.agent_id, observer)
             llm = self.llm_factory(selected.model_id)
+            context_window_tokens = model_context_window(selected.model_id)
             work_stream = None
             if self.stream is not None:
                 from src.agents.stream import AgentStream
@@ -195,6 +211,7 @@ class DiagnosisWorkScheduler:
                 ledger=ledger,
                 agent=AgentAnnotation(role=role),
                 max_iterations=context.max_rounds,
+                context_window_tokens=context_window_tokens,
                 stream=work_stream,
                 observer=observer,
                 retries=self.model_retries,
@@ -216,10 +233,12 @@ class DiagnosisWorkScheduler:
             progress.audit_sequence = int(getattr(recorder, "sequence", progress.audit_sequence))
             if final_state.get("error"):
                 raise RuntimeError(str(final_state["error"]))
-            if role == "case" and final_state.get("halted") and context.claimed_count() == 0:
-                raise RuntimeError("案例会话回合已耗尽且没有新增领取，停止本轮诊断")
-            if role == "case" and context.unsubmitted_count():
-                incomplete_error = RuntimeError("案例会话结束仍有未提交领取，保存已通过校验的产物后停止本轮诊断")
+            if final_state.get("halted"):
+                incomplete_error = AnnotationBudgetExhaustedError("会话回合已耗尽，交回模型池重新选举")
+                if role != "case" or context.claimed_count() == 0:
+                    raise incomplete_error
+            if role == "case" and context.unsubmitted_count() and incomplete_error is None:
+                raise RuntimeError("完整性检查已结束但仍有未提交领取")
             await self.audit_barrier()
             await activity(StreamEvent(action="activity", activity="saving"))
             started_ns = time.perf_counter_ns()
@@ -238,10 +257,10 @@ class DiagnosisWorkScheduler:
                 timings["save_ms"] = round((time.perf_counter_ns() - started_ns) / 1_000_000, 3)
             saved = True
             await activity(StreamEvent(action="work_saved"))
-            if incomplete_error is not None:
-                raise incomplete_error
             if cancellation is not None:
                 raise cancellation
+            if incomplete_error is not None:
+                raise incomplete_error
         except BaseException as exc:
             if progress is not None:
                 await activity(
@@ -257,9 +276,14 @@ class DiagnosisWorkScheduler:
                     abort(progress.agent_id)
             successful = saved and incomplete_error is None
             await finish("success" if successful else "error", None if successful else str(exc) or type(exc).__name__)
+            if isinstance(exc, (ModelRequestError, AnnotationBudgetExhaustedError)):
+                await activity(StreamEvent(action="activity", activity="retry", message="等待模型池重新选举"))
+                retry = True
+                return True
             raise
         else:
             await finish("success")
+            return False
         finally:
             if selected is None and future.done() and not future.cancelled():
                 selected = future.result()
@@ -273,7 +297,8 @@ class DiagnosisWorkScheduler:
                         run_id=self.run_id,
                         work_id=key,
                         invocation_id=progress.agent_id if progress is not None else "",
-                        payload={"reservation_id": selected.reservation_id, "outcome": "released"},
+                        payload={"reservation_id": selected.reservation_id,
+                                 "outcome": "retry" if retry else "released"},
                     )
                 )
 

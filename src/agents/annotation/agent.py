@@ -58,7 +58,6 @@ class WorkExecution:
     case_reads: list[dict[str, Any]] = field(default_factory=list)
     case_save_warnings: list[dict[str, Any]] = field(default_factory=list)
     committed_cases: list[dict[str, Any]] = field(default_factory=list)
-    case_check: Callable[[], list[str]] = lambda: []
 
     identifiers: dict[tuple, str] = field(default_factory=dict)
 
@@ -86,7 +85,6 @@ class WorkExecution:
     def validate(self) -> list[str]:
         """返回当前 work 的完整性缺口；不改变写入状态，也不关闭写面"""
         missing: list[str] = []
-        missing.extend(self.case_check())
         ledger = self.ledger
         if ledger.role in {"annotation", "metric"}:
             if ledger.metrics_payload is None:
@@ -268,7 +266,8 @@ class AnnotationAgent:
         recorder = AuditMessages(self.bus, self.run_id, receipt.work_id, invocation_id, payload["role"])
         audit_id: int | None = None
         try:
-            model = build_chat_model("annotation", config=load_task_config("annotation", model_id=payload["model_id"]))
+            task_config = load_task_config("annotation", model_id=payload["model_id"])
+            model = build_chat_model("annotation", config=task_config)
             model_name = str(getattr(model, "model_name", None) or getattr(model, "model", "unknown"))
             audit_context = build_invocation_context(
                 run_id=self.run_id,
@@ -348,6 +347,7 @@ class AnnotationAgent:
                 ledger=ledger,
                 agent=execution.agent,
                 max_iterations=max_iterations,
+                context_window_tokens=task_config.context_window_tokens,
                 stream=stream,
                 observer=observer,
                 retries=settings.models.annotation.total_attempts,
@@ -364,8 +364,8 @@ class AnnotationAgent:
                                 content=AGENT_SYSTEM_PROMPT
                                 + (
                                     "\n全书图树案例共享；finish 只完成自己的标注。push_case(case_type,description)"
-                                    " 归入人物/关系/对话/事件，claim_case 只填真实 case_id。跨章连接用 write_li"
-                                    "nk 引用已实际读取且已保存的事件；未保存端点不能连接。"
+                                    " 的 case_type 写 character/relation/dialogue/event，claim_case 只填真实 case_"
+                                    "id。跨章连接用 write_link 引用已实际读取且已保存的事件；未保存端点不能连接。"
                                 )
                             ),
                             HumanMessage(
@@ -388,11 +388,11 @@ class AnnotationAgent:
             except AnnotationDependencyError:
                 raise
             except Exception as exc:
-                from src.agents.stream import _is_transient_model_error
+                from src.agents.stream import ModelRequestError
 
                 from .errors import AnnotationRetryableError
 
-                if _is_transient_model_error(exc):
+                if isinstance(exc, ModelRequestError):
                     raise AnnotationRetryableError(f"当前模型请求重试耗尽: {exc}") from exc
                 raise
             if state.get("error"):
@@ -454,12 +454,13 @@ class AnnotationAgent:
                     activity="cancelled" if isinstance(exc, asyncio.CancelledError) else "error", message=str(exc))))
             if isinstance(exc, asyncio.CancelledError):
                 raise
-            from .errors import AnnotationBudgetExhaustedError, AnnotationRetryableError
-
-            if isinstance(exc, AnnotationBudgetExhaustedError):
-                return {"outcome": "budget_exhausted", "invocation_id": invocation_id, "error": str(exc)}
+            from .errors import AnnotationRetryableError
             if not isinstance(exc, AnnotationRetryableError):
                 raise
+            await self.bus.deliver(Message(topic="analysis.activity", source=self.address,
+                target=f"activity:{self.run_id}", run_id=self.run_id, work_id=receipt.work_id,
+                invocation_id=invocation_id, payload=StreamEvent(action="activity", stage="annotate",
+                    activity="retry", message="等待模型池重新选举")))
             return {"outcome": "retry", "invocation_id": invocation_id, "error": str(exc)}
 
     async def invoke_tool(self, execution: WorkExecution, tools: dict[str, Any], call: dict[str, Any]) -> str:

@@ -23,8 +23,8 @@ class AnnotationDependencyError(AnnotationAgentError):
     """必需服务不可用，闭合审计后直接失败，不消耗模型修正或重派预算"""
 
 
-class AnnotationBudgetExhaustedError(AnnotationAgentError):
-    """当前会话回合耗尽，保留审计并终止 work，不重新执行模型"""
+class AnnotationBudgetExhaustedError(AnnotationRetryableError):
+    """当前会话回合耗尽，保留审计并交回模型池重选"""
 
 
 class AnnotationAuthorizationError(AnnotationAgentError):
