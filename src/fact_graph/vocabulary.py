@@ -217,7 +217,8 @@ DialogueParseStatus = Literal["paired_quote", "dialogue_line", "unclosed_quote"]
 _ACTOR_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.CHARACTER, EntityType.ORGANIZATION)
 _CHARACTER_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.CHARACTER,)
 _ORGANIZATION_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.ORGANIZATION,)
-_LOCATION_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.LOCATION,)
+# 位于 的目标端：纯地点，以及兼作所在场所的机构
+_PLACE_ENTITY_TYPES: tuple[EntityType, ...] = (EntityType.LOCATION, EntityType.ORGANIZATION)
 _POSITIONED_ENTITY_TYPES: tuple[EntityType, ...] = (
     EntityType.CHARACTER,
     EntityType.ITEM,
@@ -306,7 +307,7 @@ RELATION_DEFINITIONS: dict[str, RelationDefinition] = {
         "directionality": "directed",
         "semantics": "ordinary",
         "from_types": _POSITIONED_ENTITY_TYPES,
-        "to_types": _LOCATION_ENTITY_TYPES,
+        "to_types": _PLACE_ENTITY_TYPES,
     },
 }
 

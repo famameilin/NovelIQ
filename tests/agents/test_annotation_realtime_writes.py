@@ -988,6 +988,24 @@ async def test_name_reference_auto_registers_relation_endpoints() -> None:
 
 
 @pytest.mark.asyncio
+async def test_positioned_relation_accepts_organization_place() -> None:
+    """机构兼作所在场所：位于 的目标端接受 organization，与参与者地点角色同一口径"""
+    ledger = _ledger()
+    tools = _tools(ledger)
+    receipt = await _call(
+        tools,
+        "write_relation",
+        {
+            "from_entity": {"name": "顾霜", "entity_type": "character"},
+            "to_entity": {"name": "贺府", "entity_type": "organization"},
+            "relation_type": "位于",
+        },
+    )
+    assert receipt["status"] == "written"
+    assert ledger.graph.entity_type_by_key(entity_key("贺府", "organization")) == "organization"
+
+
+@pytest.mark.asyncio
 async def test_relation_rejects_undeclared_evidence_argument() -> None:
     """evidence 只收段首号：引文这类自由文本在参数校验处就被拒"""
     ledger = _ledger()
