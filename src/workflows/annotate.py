@@ -20,14 +20,21 @@ from src.event_bus.notifications import StreamEvent
 from src.storage import Storage, get_storage_factory
 from src.work.annotation_work import WorkReceipt, annotation_work_id, required_roles
 from src.work.chapter_pool import ChapterWorkerPool
-from src.work.policy import completed_chapters
+from src.work.policy import LANES, completed_chapters
 from src.work.queries import fetch_annotation_role_records
 
 
-def _load_work(session_factory: Callable[[], Storage], run_id: str) -> tuple[list[WorkReceipt], set[int]]:
+def _load_work(
+    session_factory: Callable[[], Storage], run_id: str
+) -> tuple[list[WorkReceipt], set[int], dict[int, set[str]]]:
     session = session_factory()
     chapters = session.reads.workflows_annotate_load_work_1(run_id)
-    complete = completed_chapters(fetch_annotation_role_records(session, run_id))
+    states = fetch_annotation_role_records(session, run_id)
+    complete = completed_chapters(states)
+    saved: dict[int, set[str]] = {}
+    for record in states:
+        if record.state == "saved":
+            saved.setdefault(int(record.chapter_id), set()).add(str(record.role))
     orders = [{"chapter_id": chapter.chapter_id, "sequence": chapter.sequence} for chapter in chapters]
     work: list[WorkReceipt] = []
     for chapter in chapters:
@@ -48,7 +55,10 @@ def _load_work(session_factory: Callable[[], Storage], run_id: str) -> tuple[lis
         ]
         if not paragraphs:
             raise ValueError(f"chapter_id={chapter.chapter_id} 缺少实际原文段落")
-        for role in required_roles(chapter.text, settings.models.annotation.sub_chunk_max_chars):
+        roles = required_roles(chapter.text, settings.models.annotation.sub_chunk_max_chars)
+        if saved.get(chapter.chapter_id, set()) & set(LANES):
+            roles = LANES
+        for role in roles:
             work.append(
                 WorkReceipt(
                     work_id=annotation_work_id(run_id, chapter.chapter_id, role),
@@ -66,7 +76,25 @@ def _load_work(session_factory: Callable[[], Storage], run_id: str) -> tuple[lis
                     },
                 )
             )
-    return (work, complete)
+    return (work, complete, saved)
+
+
+def _plan_work(work: list[WorkReceipt], saved: dict[int, set[str]]) -> tuple[list[WorkReceipt], list[int]]:
+    """未完成章按已保存角色保留产物：只重派缺失角色；角色集合不兼容的章整章重建"""
+    receipts_by_chapter: dict[int, list[WorkReceipt]] = {}
+    for receipt in work:
+        receipts_by_chapter.setdefault(int(receipt.payload["chapter_id"]), []).append(receipt)
+    planned: list[WorkReceipt] = []
+    rebuild: list[int] = []
+    for chapter_id, receipts in sorted(receipts_by_chapter.items()):
+        required = {str(receipt.payload["role"]) for receipt in receipts}
+        kept = saved.get(chapter_id, set())
+        if kept and kept <= required:
+            planned.extend(receipt for receipt in receipts if str(receipt.payload["role"]) not in kept)
+        else:
+            rebuild.append(chapter_id)
+            planned.extend(receipts)
+    return (planned, rebuild)
 
 
 async def run_annotate(
@@ -80,52 +108,42 @@ async def run_annotate(
     bus: EventBus | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
-    """完成章节保留；未完成章节全部角色先丢弃，再按当前输入与阈值重建"""
+    """完成章节保留；未完成章节保留已保存角色，只重派缺失角色，角色集合不兼容时整章重建"""
     del analysis_logger, use_context_enhancement, novel_title
     started_at = time.perf_counter()
     pass
     factory = get_storage_factory()
-    work, retained = await asyncio.to_thread(_load_work, factory, run_id)
+    work, retained, saved = await asyncio.to_thread(_load_work, factory, run_id)
     total = len(retained | {item.payload["chapter_id"] for item in work})
     if not total:
         return (0, 0, 0)
+    work, rebuild = _plan_work(work, saved)
     bus = bus or EventBus()
     agent = AnnotationAgent(bus, run_id, factory, novel_id=novel_id)
     audit = AuditModule(bus, run_id, factory)
     activity = ActivityRelay(bus, run_id, emitter)
-    pool = ChapterWorkerPool(max_attempts=settings.models.annotation.total_attempts)
+    pool = ChapterWorkerPool()
     try:
         recovery_session = factory()
-        try:
-            discard = sorted({item.payload["chapter_id"] for item in work})
+        await bus.request(
+            Message(
+                topic="agent.recover",
+                source=f"queue:{run_id}",
+                target=agent.address,
+                run_id=run_id,
+                payload={"session": recovery_session, "chapter_ids": rebuild},
+            )
+        )
+        if rebuild:
             await bus.request(
                 Message(
                     topic="agent.recover",
                     source=f"queue:{run_id}",
                     target=agent.address,
                     run_id=run_id,
-                    payload={"session": recovery_session, "chapter_ids": discard},
+                    payload={"mode": "chapter_reset", "chapter_ids": rebuild},
                 )
             )
-            pass
-            if work:
-                await bus.request(
-                    Message(
-                        topic="agent.recover",
-                        source=f"queue:{run_id}",
-                        target=agent.address,
-                        run_id=run_id,
-                        payload={
-                            "mode": "chapter_reset",
-                            "chapter_ids": sorted({item.payload["chapter_id"] for item in work}),
-                        },
-                    )
-                )
-        except BaseException:
-            pass
-            raise
-        finally:
-            pass
 
         async def consolidate(chapter_id: int, *, recheck: bool = False) -> None:
             await bus.request(Message(topic="audit.barrier", source=agent.address, target=audit.address, run_id=run_id))

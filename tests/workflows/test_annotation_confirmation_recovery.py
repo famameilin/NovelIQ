@@ -23,6 +23,7 @@ from src.storage.models import (
     GraphFact,
 )
 from src.work.annotation_work import annotation_work_id
+from src.work.policy import LANES
 from src.work.queries import fetch_annotation_role_records
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -238,10 +239,10 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
 
 
 @pytest.mark.asyncio
-async def test_resume_threshold_change_clears_discarded_chapter_lanes(
+async def test_resume_threshold_change_keeps_saved_lanes_and_dispatches_missing_roles(
     db_session: Session, monkeypatch: pytest.MonkeyPatch, configured_model_pool: None
 ) -> None:
-    """中断留下的未完成长章按新阈值只重建整章标注：恢复先清除旧车道展示再重跑"""
+    """中断留下的未完成章按新阈值保留已保存角色：只重派缺失车道并保留旧产物身份"""
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 2)
     novel_id, run_id = create_run_with_chunks(db_session, texts=["长章原文。"])
     cancelled: list[bool] = []
@@ -274,9 +275,10 @@ async def test_resume_threshold_change_clears_discarded_chapter_lanes(
     before = fetch_annotation_role_records(storage_for(db_session), run_id)
     # 只有已保存产物才有行：中断后长章三工位只留下一部分产物（pending 由缺行表达）
     assert 0 < len(before) < 3
-    assert {item.role for item in before} <= {"entity", "event", "metric"}
+    assert {item.role for item in before} <= set(LANES)
     saved_before = {item.role: item.invocation_id for item in before}
-    # 阈值放宽后本章只需整章标注：整章废弃重建，旧车道展示与旧产物身份都不保留
+    missing = set(LANES) - set(saved_before)
+    # 阈值放宽后已保存角色仍按车道保留：只重派缺失车道，不清除旧车道展示
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 100)
     shown = []
 
@@ -286,12 +288,14 @@ async def test_resume_threshold_change_clears_discarded_chapter_lanes(
     second = ProgramModel('metric(summary="重建原文", emotional_valence=0, narrative_function="铺垫")\nfinish()')
     with patch("src.model_pool.llm.build_chat_model", return_value=second):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id, emitter=emit) == (1, 0, 1)
-    assert second.calls == 1
-    resets = [event for event in shown if event.action == "chapter_reset"]
-    assert [event.chapter_id for event in resets] == [1]
-    assert shown.index(resets[0]) < next(index for index, event in enumerate(shown) if event.action == "work_reset")
-    assert [event.sub_stage for event in shown if event.action == "work_reset"] == ["annotation"]
+    assert second.calls == len(missing)
+    assert [event for event in shown if event.action == "chapter_reset"] == []
+    assert [event.sub_stage for event in shown if event.action == "work_reset"] == sorted(missing)
     db_session.expire_all()
     after = fetch_annotation_role_records(storage_for(db_session), run_id)
-    assert [(item.chapter_id, item.role, item.state) for item in after] == [(1, "annotation", "saved")]
-    assert after[0].invocation_id not in set(saved_before.values())
+    assert len(after) == len(LANES)
+    assert {(item.chapter_id, item.role, item.state) for item in after} == {
+        (1, role, "saved") for role in LANES
+    }
+    identities = {item.role: item.invocation_id for item in after}
+    assert {role: identities[role] for role in saved_before} == saved_before

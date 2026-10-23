@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 
 from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls
 from src.config import settings
@@ -312,48 +312,126 @@ async def test_later_chapter_saves_while_earlier_model_is_running(db_session, co
 
 
 @pytest.mark.asyncio
-async def test_recovery_rejects_rewriting_saved_events_and_keeps_completed_chapter(db_session, monkeypatch):
+async def test_resume_keeps_saved_lanes_and_reruns_missing_role(db_session, monkeypatch):
+    """角色 lane 失败后重跑：已保存角色产物保留，只重派缺失角色并补齐章末核对"""
+    import asyncio
+
+    from src.storage.access import AnnotationAccess
+
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 2)
     novel_id, run_id = create_run_with_chunks(db_session, texts=["短", "长章原文。"], chapter_ids=[1, 2])
-    model = RoleModel("")
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
-    db_session.expire_all()
-    states = fetch_annotation_role_records(storage_for(db_session), run_id)
-    complete = next(item for item in states if item.chapter_id == 1)
-    retained_invocation = complete.invocation_id
-    partial_event = next(item for item in states if item.role == "event")
-    old_event_invocation = partial_event.invocation_id
-    # 模拟整章部分角色产物丢失：只删该角色的正式产物（真实尝试由整章废弃清理）
-    lost = next(item for item in states if item.role == "metric")
-    db_session.execute(delete(ChapterAnnotation).where(ChapterAnnotation.agent_id == lost.invocation_id))
-    db_session.commit()
-    calls = model.calls
-    from src.storage.models import Case
+    event_saved = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    original_save = AnnotationAccess.save
 
-    cases_before = {
-        row.id: (row.description, row.promised_agent_id)
-        for row in db_session.scalars(select(Case).where(Case.run_id == run_id))
-    }
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
-        with pytest.raises(ValueError, match="已保存事件不可局部改写"):
+    def saved(access, request):
+        result = original_save(access, request)
+        record = request.record
+        if record["chapter_id"] == 2 and record["role"] == "event":
+            loop.call_soon_threadsafe(event_saved.set)
+        return result
+
+    class LaneFailingModel(RoleModel):
+        async def ainvoke(self, messages):
+            if 'role="metric"' in str(messages[1].content):
+                await asyncio.wait_for(event_saved.wait(), 30)
+                raise RuntimeError("模拟角色 lane 永久失败")
+            return await super().ainvoke(messages)
+
+    with (
+        patch("src.model_pool.llm.build_chat_model", return_value=LaneFailingModel("")),
+        patch.object(AnnotationAccess, "save", saved),
+    ):
+        with pytest.raises(RuntimeError, match="模拟角色 lane 永久失败"):
             await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
-    assert model.calls == calls
+    partial = fetch_annotation_role_records(storage_for(db_session), run_id)
+    event_row = next(item for item in partial if (item.chapter_id, item.role) == (2, "event"))
+    assert 2 not in completed_chapters(partial)
+
+    def chapter_events(invocation_id):
+        return set(
+            db_session.scalars(
+                select(CompleteEvent.event_id).where(
+                    CompleteEvent.annotation_record_id.in_(
+                        select(ChapterAnnotation.record_id).where(ChapterAnnotation.agent_id == invocation_id)
+                    )
+                )
+            )
+        )
+
+    kept_events = chapter_events(event_row.invocation_id)
+    assert kept_events
+
+    model = RoleModel("")
+    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
+    assert model.calls >= 1
+    db_session.expire_all()
     refreshed = {
         (item.chapter_id, item.role): item for item in fetch_annotation_role_records(storage_for(db_session), run_id)
     }
-    assert refreshed[(complete.chapter_id, complete.role)].invocation_id == retained_invocation
-    assert refreshed[(partial_event.chapter_id, partial_event.role)].invocation_id == old_event_invocation
-    assert {
-        row.id: (row.description, row.promised_agent_id)
-        for row in db_session.scalars(select(Case).where(Case.run_id == run_id))
-    } == cases_before
+    assert completed_chapters(refreshed.values()) == {1, 2}
+    assert refreshed[(2, "event")].invocation_id == event_row.invocation_id
+    assert chapter_events(event_row.invocation_id) == kept_events
+    assert is_annotate_complete(storage_for(db_session), run_id)
+
+
+@pytest.mark.asyncio
+async def test_resume_keeps_saved_roles_when_threshold_changes(db_session, monkeypatch):
+    """阈值变化后保留已保存角色，沿原角色集合补齐缺失工作"""
+    import asyncio
+
+    from src.storage.access import AnnotationAccess
+
+    monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 2)
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["短", "长章原文。"], chapter_ids=[1, 2])
+    event_saved = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    original_save = AnnotationAccess.save
+
+    def saved(access, request):
+        result = original_save(access, request)
+        record = request.record
+        if record["chapter_id"] == 2 and record["role"] == "event":
+            loop.call_soon_threadsafe(event_saved.set)
+        return result
+
+    class LaneFailingModel(RoleModel):
+        async def ainvoke(self, messages):
+            if 'role="metric"' in str(messages[1].content):
+                await asyncio.wait_for(event_saved.wait(), 30)
+                raise RuntimeError("模拟角色 lane 永久失败")
+            return await super().ainvoke(messages)
+
+    with (
+        patch("src.model_pool.llm.build_chat_model", return_value=LaneFailingModel("")),
+        patch.object(AnnotationAccess, "save", saved),
+    ):
+        with pytest.raises(RuntimeError, match="模拟角色 lane 永久失败"):
+            await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
+    db_session.expire_all()
+    before = {
+        (item.chapter_id, item.role): item.invocation_id
+        for item in fetch_annotation_role_records(storage_for(db_session), run_id)
+    }
+    assert (2, "event") in before
+    monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 100)
+    model = RoleModel("")
+    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
+    assert model.calls > 0
+    db_session.expire_all()
+    refreshed = fetch_annotation_role_records(storage_for(db_session), run_id)
+    after = {(item.chapter_id, item.role): item.invocation_id for item in refreshed}
+    assert all(after[key] == invocation for key, invocation in before.items())
+    assert completed_chapters(refreshed) == {1, 2}
+    assert (2, "annotation") not in after
 
 
 @pytest.mark.asyncio
 async def test_recovery_discards_chapter_with_only_executions(db_session, monkeypatch):
-    """只有失败执行行、尚无产物的章也必须随章级废弃清执行行：重派按 attempt=1 登记不得撞唯一约束"""
+    """只有失败执行行、尚无产物的章整章重建：失败执行行不阻挡重派，角色齐全后章完成"""
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 2)
     novel_id, run_id = create_run_with_chunks(db_session, texts=["短", "长章原文。"], chapter_ids=[1, 2])
 
@@ -373,7 +451,7 @@ async def test_recovery_discards_chapter_with_only_executions(db_session, monkey
     )
     assert stale >= 1
     assert not [item for item in fetch_annotation_role_records(storage_for(db_session), run_id) if item.chapter_id == 2]
-    # 旧枚举按产物行取章，长章不在废弃集 → 重派撞 uq_executions_annotation_attempt
+    # 旧轮次留下失败执行行，长章一行产物都没有 → 整章重建
     model = RoleModel("")
     with patch("src.model_pool.llm.build_chat_model", return_value=model):
         await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
