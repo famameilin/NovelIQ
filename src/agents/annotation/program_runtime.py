@@ -1681,7 +1681,12 @@ class RestrictedProgramRuntime:
                 raise ProgramFault("repr 需要 1 个参数", code="bad_call", line=line)
             return repr(values[0])[:2000]
         if name == "print":
-            rendered = " ".join(str(value) for value in values)[:2000]
+            rendered = " ".join(str(value) for value in values)
+            if len(rendered) > program_contract.PROGRAM_PRINT_MAX_CHARS:
+                rendered = (
+                    f"{rendered[: program_contract.PROGRAM_PRINT_MAX_CHARS]}"
+                    f"…[print 输出截断：原文共 {len(rendered)} 字符]"
+                )
             self.printed.append(rendered)
             if len(self.printed) > 50:
                 del self.printed[:-50]

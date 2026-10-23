@@ -320,10 +320,12 @@ def build_agent_constructors(
     ) -> _ConstructorCall:
         """登记本章的一个实体（id 是本章实体的局部键，name 照抄正文写法）
 
-        id 形如 a1/a2…，在本章内唯一；同 id 重写=更新该实体，引用实体一律写正文名字与大类，不写 id。
+        id 形如 a1/a2…，在本章内唯一；同 id 重写=更新该实体。已登记过的（name, entity_type）
+        再登记也是更新，不新建，跨章不必先读图防重。引用实体一律写正文名字与大类，不写 id。
         entity_type 取闭集 character/item/location/organization（有生命就是 character）。
         机构名称兼指所在场所时按 organization 登记，只有纯地理场所才用 location。
         evidence 写该名字出现段落的段首号（正文每段开头的 `N：` 里的 N）。
+        tags 最多 3 个、每个最多 5 个字。
         representative=True 表示该名字是同一个人物的规范写法（外号/别称登记时不写）；
         省略=保留现值，False=清除标记。
         """
@@ -399,6 +401,7 @@ def build_agent_constructors(
         """写一条闭合关系边（两端写正文名字与大类，运行时解析并自动登记，不判身份、不判别名）
 
         relation_type 取闭合关系类型表；方向与两端类型约束在参数说明里。
+        同 (起点,终点,类型) 重复写就是同一条边，不新增，跨章不必先读图防重。
         本章只确认局部关系（建边），不带 change_kind 关系变化——跨章关系变化由
         write_link 关联工具承担。
         正文只说见面/对峙这类没有闭合关系可表达的，宁缺勿滥——用 pending 登记。
@@ -460,7 +463,11 @@ def build_agent_constructors(
         isforeshadowing: bool = False,
         confidence: Confidence | None = None,
     ) -> _ConstructorCall:
-        """创建事件；局部键仅寻址，章节范围缺省当前章，包含关系显式建立"""
+        """创建事件；el 是本章局部键，同 el 只建一次、内容不可改写，改参与者用 participants
+
+        章节范围缺省当前章，包含关系显式建立（write_link kind=contains），因果独立记录；
+        回执 ref 为 {kind: event, el: …}。
+        """
         record = _record_of(agent, f"event/{el}")
         normalized_el = _normalize_el(el, record=record)
         existing = agent.event_keys().get(normalized_el)
@@ -493,7 +500,14 @@ def build_agent_constructors(
             evidence=normalize_evidence(evidence, record=record, paragraph_text_by_id=book.paragraph_text_by_id),
         )
         if existing is not None and existing.to_dict() != item.to_dict():
-            raise ValueError(f"event/{normalized_el} 事件内容不可改写")
+            constructed = "、".join(sorted(agent.event_keys())) or "（本 agent 还没有事件）"
+            raise _reject(
+                f"event/{normalized_el} 事件内容不可改写",
+                record=record,
+                field="el",
+                code="immutable",
+                expected=f"换一个新的 el 建该事件；只改参与者请用 participants(el=…)；已构造的 el：{constructed}",
+            )
         return _ConstructorCall(
             record=record,
             tool="write_event",
@@ -688,7 +702,7 @@ def build_agent_constructors(
         )
 
     def pending(case_type: str, description: str) -> _ConstructorCall:
-        """登记案例并显式归入人物/关系/对话/事件之一，只有 description 承载文字"""
+        """登记案例，case_type 写英文常量 character/relation/dialogue/event，只有 description 承载文字"""
         from src.case_pool import CASE_TYPES
 
         record = _record_of(agent, "pending")
@@ -781,6 +795,6 @@ def build_agent_constructors(
         "dialogue": (dialogue, "判定一条对话候选（candidate_index+verdict）"),
         "label": (label, "给一个段落打整段情绪标签（段首号）"),
         "metric": (metric, "提交本章摘要与叙事指标（整域一次提交）"),
-        "pending": (pending, "登记一个判不了的疑点（只填 description）"),
+        "pending": (pending, "登记一个判不了的疑点（case_type 与 description）"),
     }
     return [(name, functions[name][0], functions[name][1]) for name in _AGENT_CONSTRUCTOR_ORDER]

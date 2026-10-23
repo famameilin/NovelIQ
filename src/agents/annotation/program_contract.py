@@ -15,6 +15,8 @@ PROGRAM_MAX_OPS = 300
 PROGRAM_MAX_LOOP_ITEMS = 500
 PROGRAM_MAX_STEPS = 30000
 PROGRAM_DEADLINE_S = 600.0
+# print 单条回显上限：超出只显示前若干字符并标注原文字符数
+PROGRAM_PRINT_MAX_CHARS = 2000
 
 # 未进入执行就失败的错误码（程序一个字都没跑）：语义上是"拒绝本次提交"，与
 # 执行期中断（已成功的调用保留）分开表达

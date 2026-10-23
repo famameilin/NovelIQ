@@ -9,7 +9,11 @@ from enum import StrEnum
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
-from src.agents.annotation.program_contract import PROGRAM_MAX_CODE_CHARS, PROGRAM_MAX_OPS
+from src.agents.annotation.program_contract import (
+    PROGRAM_MAX_CODE_CHARS,
+    PROGRAM_MAX_OPS,
+    PROGRAM_PRINT_MAX_CHARS,
+)
 from src.agents.annotation.validation_errors import _STAGE_FIELD_EXPECTATIONS
 from src.event_trees.vocabulary import EventParticipantRole
 from src.fact_graph.inputs import EntityNameRef
@@ -243,13 +247,15 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
     "from_entity": f"关系起点{ENTITY_REF_FIELD_HINT}",
     "to_entity": f"关系终点{ENTITY_REF_FIELD_HINT}",
     "speaker": f"说话人{ENTITY_REF_FIELD_HINT}",
-    "el": "事件事件的本章局部键，形如 e1；斜杠仅局部寻址，不表示包含",
+    "el": "事件的本章局部键，形如 e1；同 el 只建一次、内容不可改写；斜杠仅局部寻址，不表示包含",
+    "entity.id": "实体的本章局部键，形如 a1；同 id 重写=更新该实体，已登记过的同名同类型再登记也是更新",
     "query": "检索原文的关键词，多词任一命中；% 匹配任意长度，_ 匹配单个字符",
     "search_events.isforeshadowing": "只看伏笔根事件（True）或只看非伏笔根（False），不填返回全部；"
     "伏笔根 = write_event(isforeshadowing=True) 种下的树根，伏笔动作的引用来源只在其中",
     "search_events.compact": "紧凑索引模式：每条只回事件 id、章号、标题、类型、状态、保存态与伏笔标记，"
     "每页最多 100 条；用于通览全书事件，详情仍用 read_event",
-    "evidence": "本章事件所在段落的段首号（整数），不是引文",
+    "search_graph.relation_limit": "关系分页条数（1..20，默认 20），与实体 limit 相互独立",
+    "evidence": "本章段首可见号（整数），不是引文；各调用说明里写了该填哪一段",
     "read_chapter_text.paragraph_id": "本章正文段首可见号，由引擎换算为全局段落号",
     "read_text.paragraph_id": "全局段落号，跨章检索命中时照抄 paragraph_ids 中的值",
     "pivot_moment": PIVOT_MOMENT_DESCRIPTION,
@@ -261,7 +267,7 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
     "event.event_type": "简短事件类型，不是main/secondary",
     "event.status": "ongoing 或 resolved，章节结束不代表事件解决",
     "event.progress": "本章明确推进，可空；不得编造结局",
-    "event_id": "章级事件事件来源身份，由 event 回执或 kind=annotation_event 检索获得，不是正式 event_id",
+    "event_id": "事件来源身份：本章事件填 event 回执的 ref.el，已保存事件填 search_events 的 event_id",
     "source_event_id": "伏笔来源事件身份，只接受伏笔树根：write_event(isforeshadowing=True) 种下的那棵树的根"
     "（read_event 回执 is_foreshadow_setup=True）；普通事件树根不算，须先读取该事件核对",
     "action_type": "伏笔动作类型：写英文常量 'reinforce'（强化）或 'payoff'（疑似回收），不写中文词",
@@ -285,8 +291,7 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
 # AGENT_CONTRACT_TEXT：本面的合同文案（模型在这个面只有 execute_code 与 finish
 # 两件工具，这份说明就是它读得到的全部合同）。
 AGENT_CONTRACT_TEXT: str = (
-    "执行一段 Python 程序，每次成功调用写入本次来源或候选记录，失败只作废那一条。"
-    "正式事件仍须诊断统一发布。\n"
+    "执行一段 Python 程序，每次成功调用写入本次来源或候选记录，失败只作废那一条。\n"
     "运行规则：\n"
     "- 对话序号：执行前预检可确定的 candidate_index 范围，越界时本程序不执行；动态返回值仍逐项校验。\n"
     "- 语法：变量赋值与等长解包、字典下标赋值、列表/字典/元组（含 * 与 ** 解包）、列表/字典推导式、下标与切片、"
@@ -303,7 +308,7 @@ AGENT_CONTRACT_TEXT: str = (
     "字典/列表一律写字面量（{…}/[…]），列表/字典推导式用于有界变换，循环一律用 for。\n"
     "- 检索结果自动出现在 reads；print 输出在 printed，不产生工具调用。具名调用示例：\n"
     '  events_page = search_events(query="院门", chapter_id=24, limit=5, offset=0)\n'
-    '  graph_page = search_graph(query="阿青", limit=5, offset=0, relation_offset=0)\n'
+    '  graph_page = search_graph(query="阿青", limit=5, offset=0, relation_limit=20, relation_offset=0)\n'
     '  for candidate in graph_page["entities"]:\n'
     '      entity_detail = read_entity(entity_id=candidate["id"])\n'
     '  for item in events_page["events"]:\n'
@@ -314,26 +319,30 @@ AGENT_CONTRACT_TEXT: str = (
     "实体详情用 entity_detail，事件详情用 event_detail，检索页用 graph_page/events_page。\n"
     "- 执行前检查整段语法白名单，禁用语法使本程序不执行；"
     "业务失败只作废该条调用、后面的语句继续执行；动态运行错误停止本程序、已成功的调用保留。\n"
-    f"- 上限：单个程序最多 {PROGRAM_MAX_CODE_CHARS} 字符、{PROGRAM_MAX_OPS} 条调用。\n"
+    f"- 上限：单个程序最多 {PROGRAM_MAX_CODE_CHARS} 字符、{PROGRAM_MAX_OPS} 条调用；"
+    f"单条 print 回显最多 {PROGRAM_PRINT_MAX_CHARS} 字符，超出只显示前段并标注原文长度。\n"
     "回执字段：\n"
     "- status：本次程序的整体结果。\n"
     "- applied：本程序成功的调用条数。\n"
     "- failed：失败清单，每条给 op（第几条调用）、line（源码行）、record、field、code、expected。\n"
     "- written：本程序成功的 record 键，直接照抄，不自行拼接。\n"
+    "- written_refs：本程序每条成功写入的 record 与 ref，跨程序引用照抄这里。\n"
     "- reads：本程序最近的读结果，正文可截短；references 保留全部 source_ref 与坐标，"
     "variables 给出仍可使用的原文引用变量，reads_omitted 是省略正文回显的实际条数。\n"
     "- progress：本 Agent 各类已写入记录的条数。\n"
+    "- finish：本程序调用了 finish 时为 {end_requested: true}，缺口在下一轮检查消息里点名。\n"
     "- error：程序在写完之前就失败时的错误详情（type 与 message）。\n"
     "- 单次调用：写类回 status=written 带 record 与 ref（ref 是该次的产出，如 push_case 的案例编号）；"
     "读类直接给数据；被拒一律 status=rejected 带 record/field/code/expected/message。\n"
     "写类调用的成功正文不回显：记录键看 written，进度看 progress，原文句柄看 references。\n"
     "工作方式：\n"
     "- 一次程序把本章该判的内容写完：同一段程序里连续调用多个构造器、写多条记录都可以。\n"
+    "- 同名同类型的实体再登记就是更新它，同端点同类型的关系再写就是同一条边：不必先读全图防重。\n"
     "- 判不了的用 pending 登记，不要硬套：正文只说见面、对峙这类没有闭合关系可表达的，宁缺勿滥。\n"
     "- reads 已经是本程序检索到的数据，不要用 print 或为看同一份结果反复检索；"
     "search_events 的节点列表在 events 字段，search_graph 的两组列表在 entities/relations 字段；"
     "failed 里那一条按 expected 当场改。\n"
-    "- 产出写完时调用 finish 收尾：收尾不减损已写入的记录，回执点名还缺什么，缺的当场补。\n\n"
+    "- 产出写完时调用 finish 收尾：收尾不减损已写入的记录；缺口由程序检查后在下一轮消息里点名。\n\n"
 )
 
 

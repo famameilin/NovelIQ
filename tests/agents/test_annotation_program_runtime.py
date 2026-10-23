@@ -146,6 +146,20 @@ async def test_common_methods_lambda_and_fstring_are_applied() -> None:
 
 
 @pytest.mark.asyncio
+async def test_long_print_output_is_truncated_with_marker() -> None:
+    """print 超出回显上限时保留前段并标注原文字符数"""
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        'text = "字"\n' "for step in range(12):\n" "    text = text + text\n" "print(text)",
+    )
+    assert receipt["status"] == "applied", receipt
+    printed = receipt["printed"][-1]
+    assert printed.startswith("字" * program_contract.PROGRAM_PRINT_MAX_CHARS)
+    assert printed.endswith("…[print 输出截断：原文共 4096 字符]")
+
+
+@pytest.mark.asyncio
 async def test_sorted_min_max_key_and_reverse_are_applied() -> None:
     ledger = _ledger()
     receipt = await _run(
