@@ -78,16 +78,13 @@ def retain_pending(session, run_id, agent_id, contributions):
 
 
 def session_rows(session, run_id):
-    from src.storage.models import DIAGNOSIS_ROLES, NarrativeLink, OrganizationCheck
+    from src.storage.models import DIAGNOSIS_ROLES, NarrativeLink
 
     executions = list(session.scalars(select(Agent).where(Agent.run_id == run_id, Agent.type.in_(DIAGNOSIS_ROLES))))
     identifiers = list(session.scalars(narrative_records.run_execution_ids(run_id)))
     return {
         "agent": executions,
         "links": list(session.scalars(select(NarrativeLink).where(NarrativeLink.producer_agent_id.in_(identifiers)))),
-        "checks": list(
-            session.scalars(select(OrganizationCheck).where(OrganizationCheck.producer_agent_id.in_(identifiers)))
-        ),
     }
 
 

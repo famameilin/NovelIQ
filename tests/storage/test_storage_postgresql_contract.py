@@ -354,8 +354,6 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
             "events",
             "containments",
             "relations",
-            "reviewed_events",
-            "structure_reviews",
             "arcs",
             "outcomes",
             "event_arc_links",

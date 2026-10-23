@@ -29,7 +29,6 @@ from src.storage.models import (
     DiagnosisReport,
     NarrativeGroup,
     NarrativeLink,
-    OrganizationCheck,
 )
 from src.storage.repositories.diagnosis_event_writes import save_case_session_rows, save_diagnosis_events
 from src.storage.repositories.organization_writes import save_organization
@@ -104,26 +103,6 @@ def organization_case(db_session):
     return case, event_ids, draft
 
 
-def _structure_reviews(draft):
-    ids = list(draft.events)
-    for index, source in enumerate(ids):
-        for target in ids[index + 1 :]:
-            disposition = (
-                "contains"
-                if (source, target) in draft.containments
-                else "part_of"
-                if (target, source) in draft.containments
-                else "independent"
-            )
-            draft.structure_review(
-                source_event_id=source,
-                target_event_id=target,
-                disposition=disposition,
-                reason="本测试按已明确声明的包含或独立关系完成比较",
-                evidence=[OrganizationEvidence(paragraph_id=0)],
-            )
-
-
 def _arc(draft, key="identity"):
     return draft.register_arc(
         key=key,
@@ -146,7 +125,6 @@ def _organized(draft, event_ids):
             reason="推动对应问题",
             evidence=[OrganizationEvidence(paragraph_id=0, quote="找回了身份")],
         )
-    draft.review_events(event_ids, reason="已核对各事件身份及结构，关联依据单独记录")
     outcome = draft.register_outcome(
         key="recognized",
         title="身份获确认",
@@ -160,7 +138,6 @@ def _organized(draft, event_ids):
             reason="对身份确认作出贡献",
             evidence=[OrganizationEvidence(paragraph_id=0, quote="找回了身份", event_id=event_id)],
         )
-    _structure_reviews(draft)
     return draft.finish()
 
 
@@ -241,7 +218,7 @@ def test_event_cannot_be_retracted_or_key_freed(db_session):
 
 
 def _second_producer(session, run_id: str) -> str:
-    "同轮另一个诊断执行身份（核对/关系行的真实生产者）"
+    "同轮另一个诊断执行身份，作为关系行的真实生产者"
     producer = new_id()
     session.add(Agent(id=producer, run_id=run_id, type="case", status="running"))
     session.flush()
@@ -265,7 +242,6 @@ def test_cross_session_references_persist_unstored_candidates(db_session):
         reason="其他执行判断的包含",
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )
-    draft.review_events([parent_id, child_id], reason="参考其他执行的事件完成核对")
     save_case_session_rows(db_session, case.run_id, other, draft)
     db_session.commit()
 
@@ -274,12 +250,8 @@ def test_cross_session_references_persist_unstored_candidates(db_session):
         saved = db_session.get(CompleteEvent, event_id)
         assert saved is not None and saved.producer_agent_id == case.agent_id
     assert len(list(db_session.scalars(select(NarrativeLink).where(NarrativeLink.contained_child_id == child_id)))) == 1
-    checks = list(
-        db_session.scalars(
-            select(OrganizationCheck).where(OrganizationCheck.reviewed_event_id.in_([parent_id, child_id]))
-        )
-    )
-    assert {row.producer_agent_id for row in checks} == {other}
+    links = list(db_session.scalars(select(NarrativeLink).where(NarrativeLink.contained_child_id == child_id)))
+    assert {row.producer_agent_id for row in links} == {other}
 
     save_case_session_rows(db_session, case.run_id, other, draft)
     save_case_session_rows(db_session, case.run_id, case.agent_id, draft)
@@ -292,11 +264,11 @@ def test_cross_session_references_persist_unstored_candidates(db_session):
         len(
             list(
                 db_session.scalars(
-                    select(OrganizationCheck).where(OrganizationCheck.reviewed_event_id.in_([parent_id, child_id]))
+                    select(NarrativeLink).where(NarrativeLink.contained_child_id == child_id)
                 )
             )
         )
-        == 2
+        == 1
     )
 
 
@@ -309,7 +281,11 @@ def test_retract_blocked_when_other_execution_references_event(db_session):
     minted = next(iter(draft.events))
     other = _second_producer(db_session, case.run_id)
     draft.producer_agent_id = other
-    draft.review_events([minted], reason="复用其他执行建立的事件并完成核对")
+    arc_id = _arc(draft)
+    draft.link_event_arc(
+        event_id=minted, arc_id=arc_id, role="推动", reason="复用其他执行的事件",
+        evidence=[OrganizationEvidence(paragraph_id=0)],
+    )
     draft.producer_agent_id = case.agent_id
     with pytest.raises(ValueError, match="只允许撤回"):
         draft.retract(
@@ -327,12 +303,11 @@ def test_event_reference_remains_when_event_retraction_is_rejected(db_session):
     row = next(iter(draft._all_events().values()))
     _submit_identity(draft, row, "k1")
     event_id = next(iter(draft.events))
-    draft.review_events([event_id], reason="核对正文")
     with pytest.raises(ValueError):
         draft.retract(
             kind="identity", identifier=event_id, reason="禁止撤销事件", evidence=[OrganizationEvidence(paragraph_id=0)]
         )
-    assert event_id in draft.events and event_id in draft.reviewed_events
+    assert event_id in draft.events
 
 
 def test_complete_event_body_and_declaration_bindings_are_saved_independently(db_session, organization_case):
@@ -372,14 +347,12 @@ def test_complete_event_body_and_declaration_bindings_are_saved_independently(db
     assert report is not None and report.agent_id == case.session_id
 
 
-def test_unreviewed_events_stay_readable_and_no_review_gate(organization_case):
+def test_events_can_be_saved_without_extra_review_records(organization_case):
     _case, event_ids, draft = organization_case
     assert draft.search_events(limit=1)["total"] == 3
-    draft.review_events(event_ids[:2], reason="暂无可证关联")
-    assert draft.search_events(unreviewed_only=True)["items"][0]["event_id"] == event_ids[2]
-    # 保存不因核对缺口被阻止
-    _structure_reviews(draft)
-    assert len(draft.finish().reviewed_events) == 2
+    organization = draft.finish()
+    assert len(organization.events) == len(event_ids)
+    assert not {"reviewed_events", "structure_reviews"} & organization.model_dump().keys()
 
 
 def test_evidence_uses_real_quote_and_rejects_model_coordinates(organization_case):
@@ -406,7 +379,6 @@ def test_save_revalidates_bound_source_hash(db_session, organization_case):
 
 def test_outcome_has_independent_identity_and_requires_each_relation(organization_case):
     _case, event_ids, draft = organization_case
-    draft.review_events(event_ids, reason="已核对")
     outcome = draft.register_outcome(
         key="identity",
         title="身份确认",
@@ -420,7 +392,6 @@ def test_outcome_has_independent_identity_and_requires_each_relation(organizatio
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )
     with pytest.raises(ValueError, match="贡献关系"):
-        _structure_reviews(draft)
         draft.finish()
     with pytest.raises(ValueError, match="顶层"):
         draft.link_event_outcome(
@@ -472,7 +443,6 @@ def test_save_failure_rolls_back_report_and_organization(db_session):
     case = OrganizationCase(db_session, chapters=1)
     db_session.commit()
     draft = identity_draft(db_session, case)
-    draft.review_events(list(draft.events), reason="核对")
     draft.register_arc(
         key="identity",
         kind="main",
@@ -482,7 +452,6 @@ def test_save_failure_rolls_back_report_and_organization(db_session):
         reason="原文依据",
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )
-    _structure_reviews(draft)
     analysis = AgentAnalysis(narrative_organization=draft.finish(), diagnosis="依据原文核对")
 
     def save_then_fail(session, current_run, organization, report_id):
@@ -501,8 +470,6 @@ def test_save_failure_rolls_back_report_and_organization(db_session):
 
 def test_diagnosis_uses_sources_without_contract_marker(db_session, organization_case):
     _case, event_ids, draft = organization_case
-    draft.review_events(event_ids, reason="已核对")
-    _structure_reviews(draft)
     db_session.flush()
     assert len(draft.finish().events) == len(event_ids)
 
@@ -533,18 +500,12 @@ def test_tools_expose_complete_events_and_remove_unique_primary_api(organization
         "read_topics",
     } <= set(tools)
     assert not {"assign_book_events", "reference_book_event", "event", "submit_diagnosis"} & set(tools)
-    assert '"written"' in tools["write_event"].invoke(
-        {
-            "items": [
-                {
-                    "operation": "review",
-                    "event_ids": event_ids,
-                    "reason": "已核对",
-                }
-            ]
-        }
-    )
-    assert draft.search_events(unreviewed_only=True)["total"] == 0
+    schema = tools["write_event"].args_schema.model_json_schema()
+    operations = schema["properties"]["items"]["items"]["discriminator"]["mapping"]
+    assert set(operations) == {"event", "contain", "relation", "retract"}
+    for operation in ("review", "structure_review"):
+        with pytest.raises(ValidationError):
+            tools["write_event"].invoke({"items": [{"operation": operation, "event_ids": event_ids}]})
 
 
 def test_declaration_rows_reads_evidence_in_one_batch(db_session, monkeypatch):

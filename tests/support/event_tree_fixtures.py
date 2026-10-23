@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
+from src.event_trees.organization import EventOrganizationDraft
 from src.storage import new_id
 from src.storage.models import (
     Agent,
@@ -204,35 +204,6 @@ def row_evidence(row: dict[str, Any]) -> list[dict[str, Any]]:
     return list(row["evidence"])
 
 
-def close_structure(
-    session: Session,
-    draft: EventOrganizationDraft,
-    *,
-    evidence_paragraph_id: int,
-) -> None:
-    """按草稿已提交的包含/关系逐对收口结构判断并核对全部事件（不保存）"""
-    events = sorted(draft.events)
-    for index, source in enumerate(events):
-        for target in events[index + 1 :]:
-            if (source, target) in draft.containments:
-                disposition = "contains"
-            elif (target, source) in draft.containments:
-                disposition = "part_of"
-            elif any({item.source_id, item.target_id} == {source, target} for item in draft.relations.values()):
-                disposition = "related"
-            else:
-                disposition = "independent"
-            draft.structure_review(
-                source_event_id=source,
-                target_event_id=target,
-                disposition=disposition,
-                reason="夹具按本例显式提交的包含/关系完成结构判断",
-                evidence=[OrganizationEvidence(paragraph_id=evidence_paragraph_id)],
-            )
-    for event_id in events:
-        draft.review_events([event_id], reason="夹具已核对正式身份与结构")
-
-
 def publish_draft(
     session: Session,
     run_id: str,
@@ -268,10 +239,6 @@ def publish_declarations(
 ) -> tuple[dict[str, str], EventOrganizationDraft]:
     """一步保存全部声明的独立/同组身份，返回 (声明→事件, 草稿)"""
     draft, _meta = identity_every_declaration(session, run_id, groups=groups)
-    paragraph_id = (
-        first_paragraph(session, run_id).paragraph_id if evidence_paragraph_id is None else evidence_paragraph_id
-    )
-    close_structure(session, draft, evidence_paragraph_id=int(paragraph_id))
     mapping = publish_draft(session, run_id, draft, diagnosis=diagnosis)
     return mapping, draft
 

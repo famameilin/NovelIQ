@@ -115,16 +115,6 @@ class EventOutcomeLinkDraft(OrganizationRecord):
     reason: str = Field(min_length=1)
 
 
-class EventReviewDraft(BaseModel):
-    """诊断产物的覆盖审计，不制造无原文依据的线或结果关联"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    event_id: str
-    reason: str = Field(min_length=1)
-    snapshot_hash: str = Field(min_length=1)
-    producer_agent_id: str
-
-
 class CompleteEventDraft(OrganizationRecord):
     """诊断待保存的完整事件；直接过程与子事件作为同一笔原子输入"""
 
@@ -152,14 +142,6 @@ class ContainmentDraft(OrganizationRecord):
     reason: str = Field(min_length=1)
 
 
-class StructureReviewDraft(OrganizationRecord):
-    source_event_id: str
-    target_event_id: str
-    disposition: Literal["contains", "part_of", "related", "independent"]
-    reason: str = Field(min_length=1)
-    snapshot_hash: str
-
-
 class RelationDraft(OrganizationRecord):
     relation_id: str
     source_kind: Literal["event"]
@@ -183,11 +165,9 @@ class NarrativeOrganization(BaseModel):
     event_arc_links: list[EventArcLinkDraft] = Field(default_factory=list)
     outcomes: list[EventOutcomeDraft] = Field(default_factory=list)
     event_outcome_links: list[EventOutcomeLinkDraft] = Field(default_factory=list)
-    reviewed_events: list[EventReviewDraft] = Field(default_factory=list)
     containments: list[ContainmentDraft] = Field(default_factory=list)
     content_snapshot: str | None = None
     structure_snapshot: str | None = None
-    structure_reviews: list[StructureReviewDraft] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_structure(self) -> NarrativeOrganization:
@@ -198,7 +178,6 @@ class NarrativeOrganization(BaseModel):
             (self.relations, {item.relation_id for item in self.relations}),
             (self.arcs, list(arcs)),
             (self.outcomes, list(outcomes)),
-            (self.reviewed_events, {item.event_id for item in self.reviewed_events}),
             (self.event_arc_links, {(item.event_id, item.arc_id) for item in self.event_arc_links}),
             (self.event_outcome_links, {(item.event_id, item.outcome_id) for item in self.event_outcome_links}),
         ):
@@ -360,7 +339,6 @@ class EventOrganizationDraft:
         self.content_snapshot: str | None = None
         self.structure_snapshot: str | None = None
         self.containments: dict[tuple[str, str], ContainmentDraft] = {}
-        self.structure_reviews: dict[tuple[str, str], StructureReviewDraft] = {}
         self.events: dict[str, CompleteEventDraft] = {}
         self.relations: dict[str, RelationDraft] = {}
         self.saved_relation_ids: set[str] = set()
@@ -368,7 +346,6 @@ class EventOrganizationDraft:
         self.event_arc_links: dict[tuple[str, str], EventArcLinkDraft] = {}
         self.outcomes: dict[str, EventOutcomeDraft] = {}
         self.event_outcome_links: dict[tuple[str, str], EventOutcomeLinkDraft] = {}
-        self.reviewed_events: dict[str, EventReviewDraft] = {}
 
     def _all_events(self) -> dict[str, dict[str, Any]]:
         return self.read_view()[0]
@@ -430,7 +407,6 @@ class EventOrganizationDraft:
         self,
         query: str = "",
         *,
-        unreviewed_only: bool = False,
         top_level_only: bool = False,
         offset: int = 0,
         limit: int = 50,
@@ -443,8 +419,7 @@ class EventOrganizationDraft:
         rows = [
             {**item, **self._event_hierarchy(key, parents)}
             for key, item in by_id.items()
-            if (not unreviewed_only or key not in self.reviewed_events)
-            and (not top_level_only or key not in parents)
+            if (not top_level_only or key not in parents)
             and (
                 not query
                 or query.casefold()
@@ -611,46 +586,7 @@ class EventOrganizationDraft:
         if previous is not None and previous.producer_agent_id != self.producer_agent_id:
             raise ValueError("不能覆盖其他生产者提交的包含候选，请引用原判断或显式交接")
         self.containments = {**self.containments, (parent_event_id, child_event_id): edge}
-        # 保留旧核对及其真实作者；屏障发现来源改变后回原案例，不丢失修正责任
 
-    def structure_review(
-        self,
-        *,
-        source_event_id: str,
-        target_event_id: str,
-        disposition: Literal["contains", "part_of", "related", "independent"],
-        reason: str,
-        evidence: list[OrganizationEvidence],
-    ) -> None:
-        self.read_events([source_event_id, target_event_id])
-        if source_event_id == target_event_id:
-            raise ValueError("同一正式事件不能与自身作结构比较")
-        bound = self.bind_evidence(evidence)
-        pair = min(source_event_id, target_event_id), max(source_event_id, target_event_id)
-        self.structure_reviews[pair] = StructureReviewDraft(
-            source_event_id=source_event_id,
-            target_event_id=target_event_id,
-            disposition=disposition,
-            reason=reason,
-            evidence=bound,
-            snapshot_hash=self.pair_snapshot(*pair),
-            **self._source(),
-        )
-
-    def pair_snapshot(self, source: str, target: str) -> str:
-        return snapshot_digest(
-            {
-                "events": [self._all_events()[key] for key in sorted((source, target))],
-                "containments": record_payloads(
-                    item
-                    for item in self.containments.values()
-                    if {item.parent_event_id, item.child_event_id} == {source, target}
-                ),
-                "relations": record_payloads(
-                    item for item in self.relations.values() if {item.source_id, item.target_id} == {source, target}
-                ),
-            }
-        )
 
     def validate_events(self, events: dict[str, CompleteEventDraft] | None = None) -> None:
         """校验事件章节身份、正文证据与包含端点"""
@@ -692,7 +628,6 @@ class EventOrganizationDraft:
             source_operation_id=key,
             **self._source(),
         )
-        # 核对快照故意保留，新增关系不能把原核对作者与剩余额度一起抹掉
         return relation_id
 
     def read_passages(self, paragraph_ids: list[int], offset: int = 0, limit: int = 10) -> dict[str, Any]:
@@ -787,16 +722,6 @@ class EventOrganizationDraft:
         self.arcs = candidates
         return arc_id
 
-    def review_events(self, event_ids: list[str], *, reason: str) -> None:
-        """核对正式产物；无可证关联时明确说明，禁止为了覆盖而编造关联"""
-        self.read_events(event_ids)
-        reviews = {
-            event_id: EventReviewDraft(
-                event_id=event_id, reason=reason, snapshot_hash=self.event_snapshot(event_id), **self._source()
-            )
-            for event_id in event_ids
-        }
-        self.reviewed_events.update(reviews)
 
     def link_event_arc(
         self, *, event_id: str, arc_id: str, role: str, reason: str, evidence: list[OrganizationEvidence]
@@ -871,7 +796,7 @@ class EventOrganizationDraft:
             raise ValueError("冲突主体类型无效")
 
     def read_draft(self, offset: int = 0, limit: int = 50) -> dict[str, Any]:
-        """分别分页检查组织事实和完整事件覆盖审计"""
+        """分页读取事件、关系、叙事线及结果"""
         _page_size(limit)
         if offset < 0:
             raise ValueError("offset 不能为负数")
@@ -882,7 +807,6 @@ class EventOrganizationDraft:
             "event_arc_links": list(self.event_arc_links.values()),
             "outcomes": list(self.outcomes.values()),
             "event_outcome_links": list(self.event_outcome_links.values()),
-            "reviewed_events": list(self.reviewed_events.values()),
         }
         return {
             **{
@@ -892,20 +816,6 @@ class EventOrganizationDraft:
             "totals": {name: len(values) for name, values in groups.items()},
         }
 
-    def event_snapshot(self, event_id: str) -> str:
-        return snapshot_digest(
-            {
-                "event": self._all_events()[event_id],
-                "containments": record_payloads(
-                    item
-                    for item in self.containments.values()
-                    if event_id in {item.parent_event_id, item.child_event_id}
-                ),
-                "relations": record_payloads(
-                    item for item in self.relations.values() if event_id in {item.source_id, item.target_id}
-                ),
-            }
-        )
 
     def content_digest(self) -> str:
         """按事件正文和章节范围计算保存快照"""
@@ -933,11 +843,9 @@ class EventOrganizationDraft:
             event_arc_links=list(self.event_arc_links.values()),
             outcomes=list(self.outcomes.values()),
             event_outcome_links=list(self.event_outcome_links.values()),
-            reviewed_events=list(self.reviewed_events.values()),
             containments=list(self.containments.values()),
             content_snapshot=self.content_snapshot,
             structure_snapshot=self.structure_snapshot,
-            structure_reviews=list(self.structure_reviews.values()),
         )
         validate_organization(self.session, self.run_id, result)
         return result
@@ -954,7 +862,7 @@ def _annotation_chapter_of_execution(session: Storage, agent_id: str) -> tuple[i
 
 
 def validate_organization(session: Storage, run_id: str, organization: NarrativeOrganization) -> None:
-    """保存前核对同 run 端点、独立结果及每项真实证据；核对覆盖缺口不作为保存条件"""
+    """保存前校验同 run 端点、独立结果及每项真实证据"""
     organization = NarrativeOrganization.model_validate(organization.model_dump())
     all_ids = set(_run_events(session, run_id))
     all_ids.update(item.event_id for item in organization.events)
@@ -962,11 +870,6 @@ def validate_organization(session: Storage, run_id: str, organization: Narrative
     draft.events = {item.event_id: item for item in organization.events}
     draft.containments = {(item.parent_event_id, item.child_event_id): item for item in organization.containments}
     draft.relations = {item.relation_id: item for item in organization.relations}
-    draft.reviewed_events = {item.event_id: item for item in organization.reviewed_events}
-    draft.structure_reviews = {
-        (min(item.source_event_id, item.target_event_id), max(item.source_event_id, item.target_event_id)): item
-        for item in organization.structure_reviews
-    }
     draft.validate_events()
     if draft.content_digest() != organization.content_snapshot:
         raise ValueError("身份快照与实际来源判断不一致")
@@ -990,7 +893,6 @@ def validate_organization(session: Storage, run_id: str, organization: Narrative
             organization.event_arc_links,
             organization.event_outcome_links,
             organization.containments,
-            organization.structure_reviews,
         )
         for item in records
         for ref in item.evidence

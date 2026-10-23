@@ -58,21 +58,6 @@ class RetractItem(WriteItem):
     evidence: list[OrganizationEvidence]
 
 
-class StructureReviewItem(WriteItem):
-    operation: Literal["structure_review"]
-    source_event_id: str
-    target_event_id: str
-    disposition: Literal["contains", "part_of", "related", "independent"]
-    reason: str = Field(min_length=1)
-    evidence: list[OrganizationEvidence]
-
-
-class ReviewItem(WriteItem):
-    operation: Literal["review"]
-    event_ids: list[str]
-    reason: str
-
-
 class ArcItem(WriteItem):
     operation: Literal["arc"]
     key: str
@@ -111,7 +96,7 @@ class OutcomeLinkItem(WriteItem):
 
 
 EventWriteItem = Annotated[
-    EventItem | ContainmentItem | RetractItem | RelationItem | ReviewItem | StructureReviewItem,
+    EventItem | ContainmentItem | RetractItem | RelationItem,
     Field(discriminator="operation"),
 ]
 ArcWriteItem = Annotated[ArcItem | ArcLinkItem, Field(discriminator="operation")]

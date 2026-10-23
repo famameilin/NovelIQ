@@ -26,8 +26,6 @@ from src.storage.models import (
 from src.workflows.annotate import run_annotate
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import (
-    close_structure,
-    first_paragraph,
     identity_every_declaration,
     publish_declarations,
     publish_draft,
@@ -263,7 +261,6 @@ async def test_foreshadow_expectation_uses_frozen_and_published_identity(db_sess
     assert len(source_event_ids) == 2
     # 冻结身份未发布时，显式绑定下的期望与存储读面不同；发布后两者一致
     draft, _meta = identity_every_declaration(db_session, run_id, groups=[source_event_ids])
-    close_structure(db_session, draft, evidence_paragraph_id=int(first_paragraph(db_session, run_id).paragraph_id))
     frozen = DiagnosisQueries(storage_for(db_session)).calculate_foreshadow_expectation(run_id)
     assert frozen is not None and 0.0 <= frozen <= 1.0
     assert calculate_foreshadow_expectation(storage_for(db_session), run_id) == frozen

@@ -26,7 +26,6 @@ from tests.support.event_tree_fixtures import (
     add_declaration,
     add_diagnosis_context,
     add_foreshadowing_action,
-    close_structure,
     first_paragraph,
     identity_every_declaration,
     publish_draft,
@@ -74,7 +73,6 @@ def _fixture(session) -> NarrativeScenario:
     draft, _meta = identity_every_declaration(session, run, context=(session_id, agent_id))
     mapping = {key: key for key in draft.events}
     events = {chapter: mapping[declarations[chapter]] for chapter in range(1, 9)}
-    close_structure(session, draft, evidence_paragraph_id=0)
     arc = draft.register_arc(
         key="mystery",
         kind="main",

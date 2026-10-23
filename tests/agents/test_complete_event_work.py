@@ -159,7 +159,7 @@ async def test_same_fact_cannot_be_recreated_as_second_declaration(db_session, r
 async def test_annotation_declarations_then_diagnosis_once_publication(db_session):
     from src.event_trees.read.organization import EventTreeQuery
     from src.event_trees.storage_map import run_annotation_event_ids, run_events
-    from tests.support.event_tree_fixtures import close_structure, identity_every_declaration, publish_draft
+    from tests.support.event_tree_fixtures import identity_every_declaration, publish_draft
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻找山门，点燃一盏灯。"])
     agent = AnnotationAgent(
@@ -178,7 +178,6 @@ async def test_annotation_declarations_then_diagnosis_once_publication(db_sessio
         assert len(run_events(storage_for(db_session), run_id)) == 2
         assert EventTreeQuery(storage_for(db_session), run_id).fetch()["organization_status"] == "pending_diagnosis"
         draft, _meta = identity_every_declaration(db_session, run_id)
-        close_structure(db_session, draft, evidence_paragraph_id=0)
         publish_draft(db_session, run_id, draft)
         assert len(run_events(storage_for(db_session), run_id)) == 2
         assert len(run_annotation_event_ids(storage_for(db_session), run_id)) == 2

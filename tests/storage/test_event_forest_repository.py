@@ -18,7 +18,6 @@ from tests.support.event_tree_fixtures import (
     add_declaration,
     add_declaration_relation,
     add_foreshadowing_action,
-    close_structure,
     first_paragraph,
     identity_every_declaration,
     paragraphs_of,
@@ -49,7 +48,6 @@ def _publish(session, run_id, relations=()):
             reason="本例明确判断两事件的关系",
             evidence=[OrganizationEvidence(paragraph_id=0)],
         )
-    close_structure(session, draft, evidence_paragraph_id=0)
     return publish_draft(session, run_id, draft)
 
 

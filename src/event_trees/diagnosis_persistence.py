@@ -1,8 +1,8 @@
-"按当前运行已保存的事件与核对记录恢复诊断草稿"
+"按当前运行已保存的事件与关系恢复诊断草稿"
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 from src.storage import Storage
 
@@ -12,20 +12,11 @@ from .organization import (
     CompleteEventDraft,
     ContainmentDraft,
     EventOrganizationDraft,
-    EventReviewDraft,
     RelationDraft,
-    StructureReviewDraft,
     _evidence_payloads,
     _run_event_dicts,
     _run_events,
 )
-
-
-def _checked_disposition(value: str | None, allowed: tuple[str, ...]) -> Any:
-    """水合核对行时只接受既有对判取值，未知取值直接拒绝"""
-    if value not in allowed:
-        raise ValueError(f"组织核对行的对判取值不受支持: {value!r}")
-    return value
 
 
 def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizationDraft) -> None:
@@ -91,32 +82,4 @@ def hydrate_draft_from_run(session: Storage, run_id: str, draft: EventOrganizati
                 is_active=link.is_active,
                 evidence=bound,
                 producer_agent_id=link.producer_agent_id,
-            )
-    check_rows = snapshot["checks"]
-    check_evidence = smap.fetch_evidence(session, "check_id", [row.check_id for row in check_rows])
-    for check in check_rows:
-        bound_check = [
-            BoundOrganizationEvidence(**payload)
-            for payload in _evidence_payloads(session, run_id, check_evidence.get(check.check_id, []))
-        ]
-        if check.reviewed_event_id is not None:
-            draft.reviewed_events[check.reviewed_event_id] = EventReviewDraft(
-                event_id=check.reviewed_event_id,
-                reason=check.reason,
-                snapshot_hash=check.snapshot_hash or "",
-                producer_agent_id=check.producer_agent_id,
-            )
-        elif check.source_event_id is not None and check.target_event_id is not None:
-            key = (
-                min(check.source_event_id, check.target_event_id),
-                max(check.source_event_id, check.target_event_id),
-            )
-            draft.structure_reviews[key] = StructureReviewDraft(
-                source_event_id=check.source_event_id,
-                target_event_id=check.target_event_id,
-                disposition=_checked_disposition(check.disposition, ("contains", "part_of", "related", "independent")),
-                reason=check.reason,
-                snapshot_hash=check.snapshot_hash or "",
-                evidence=bound_check,
-                producer_agent_id=check.producer_agent_id,
             )

@@ -124,7 +124,7 @@ class DiagnosisDomain:
                         str(index): item.model_dump(mode="json")
                         for index, item in enumerate(getattr(self.draft, name).values())
                     }
-                    for name in ("events", "containments", "relations", "reviewed_events", "structure_reviews")
+                    for name in ("events", "containments", "relations")
                 }
             saved = self.session.diagnosis.save_session(
                 DiagnosisSessionSave(

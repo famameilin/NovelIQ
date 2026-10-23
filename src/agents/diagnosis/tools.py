@@ -164,16 +164,14 @@ def build_diagnosis_tools(
 
     @tool
     def write_event(items: Annotated[list[EventWriteItem], Field(min_length=1, max_length=300)]) -> str:
-        """批量提交事件核对、完整事件身份判断、跨章事件、显式包含/其他关系或事件核对"""
+        """批量提交完整事件、显式包含、其他关系或撤回未保存关系"""
         return _write_items(
             items,
             {
                 "event": draft.event,
                 "contain": draft.contain,
                 "relation": draft.relate_events,
-                "review": draft.review_events,
                 "retract": draft.retract,
-                "structure_review": draft.structure_review,
             },
         )
 

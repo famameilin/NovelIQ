@@ -17,7 +17,6 @@ from tests.support.chapter_annotation_helpers import (
 from tests.support.event_tree_fixtures import (
     add_annotation_source,
     add_declaration,
-    close_structure,
     first_paragraph,
     identity_every_declaration,
     publish_draft,
@@ -87,7 +86,6 @@ def test_early_chapter_keeps_own_body_and_identity_with_empty_chapter_between(db
         to_chapter_id=35,
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )["event_id"]
-    close_structure(db_session, draft, evidence_paragraph_id=0)
     publish_draft(db_session, run, draft)
     set_run_status(db_session, run, "completed")
     db_session.commit()

@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from src.agents.diagnosis.persistence import save_diagnosis_result
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
+from src.event_trees.organization import EventOrganizationDraft
 from src.event_trees.read.forest import EventForestQuery
 from src.metrics.event_timeline_metrics import serialize_event_timeline_node
 from src.metrics.queries.timeline import build_event_timeline_plan
@@ -54,19 +54,6 @@ def _publish_one_event_per_declaration(
     from src.event_trees.diagnosis_persistence import hydrate_draft_from_run
 
     hydrate_draft_from_run(storage_for(db_session), run_id, draft)
-    events = list(draft.events)
-    structure_evidence = [OrganizationEvidence(paragraph_id=evidence_paragraph_id)]
-    for index, source in enumerate(events):
-        for target in events[index + 1 :]:
-            draft.structure_review(
-                source_event_id=source,
-                target_event_id=target,
-                disposition="independent",
-                reason="读取夹具显式判定两事件互不包含",
-                evidence=structure_evidence,
-            )
-    for event_id in events:
-        draft.review_events([event_id], reason="读取夹具已核对正式身份与结构")
     organization = draft.finish()
     save_diagnosis_result(
         storage_for(db_session),

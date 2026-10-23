@@ -73,7 +73,7 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         "批量 write 的 results 与 items 按原顺序对应，被拒项为 None；failed 点名索引、源码行和原因。\n"
         "函数赋值接收该函数真实返回值：批量 write 用 results/failed，不存在 written 键。"
         "reads/written 只属于 execute_code 外层回执，不能拿它们索引函数返回值；print 输出在 printed。"
-        "review/link 的成功结果也是 None，以 failed 的索引判断失败，不把 None 一律当拒绝。\n"
+        "link/contain 的成功结果也是 None，以 failed 的索引判断失败，不把 None 一律当拒绝。\n"
         "finish() 可放在程序内，仅请求执行完本程序后的完整性检查；"
         "无工具回复或外层 finish() 也请求同一检查。\n"
     )
@@ -115,7 +115,6 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
                 "event": {"status": "written", "event_id": "真实事件ID"},
                 "contain": None,
                 "relation": "真实关系ID",
-                "review": None,
             },
             "write_arc": {"arc": "真实叙事线ID", "link": None},
             "write_outcome": {"outcome": "真实结果ID", "link": None},

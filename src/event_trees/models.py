@@ -177,7 +177,7 @@ class ParticipantArg(EntityNameRef):
 
 
 class BoundEvent(StrictModel):
-    """不可变章级事件事件，事件来源键不代表全书正式事件身份"""
+    """不可变章级事件，来源键不表示包含结构或调用顺序"""
 
     event_id: str = Field(min_length=1)
     from_chapter_id: int

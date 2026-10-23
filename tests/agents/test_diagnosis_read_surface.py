@@ -20,7 +20,6 @@ from tests.support.event_tree_fixtures import (
     add_annotation_source,
     add_declaration,
     add_diagnosis_context,
-    close_structure,
     ensure_character,
     first_paragraph,
     identity_every_declaration,
@@ -135,7 +134,6 @@ def test_saved_nested_event_read_and_rejection_identify_actual_top_level(db_sess
         reason="原文中的父级问题",
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )
-    close_structure(db_session, draft, evidence_paragraph_id=0)
     publish_draft(db_session, case.run_id, draft)
     fresh = EventOrganizationDraft(storage_for(db_session), case.run_id, case.session_id)
     fresh.fixture_session = db_session
@@ -185,7 +183,6 @@ def test_saved_nested_event_read_and_rejection_identify_actual_top_level(db_sess
     assert f"parent_event_id={parent}" in rejected["failed"][0]["message"]
     assert f"top_level_event_id={root}" in rejected["failed"][0]["message"]
     assert not fresh.event_outcome_links
-    assert child not in fresh.reviewed_events and root not in fresh.reviewed_events
     tools["write_outcome"].invoke(
         {
             "items": [

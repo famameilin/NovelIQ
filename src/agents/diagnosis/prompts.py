@@ -20,7 +20,7 @@ min/max 另接受 key=lambda；
 禁止 import、try/except、装饰器、默认参数、其他属性访问。
 全部语法在执行前检查。工具真实 schema 和返回结构在 execute_code 目录中。
 批量 write 的 results 与 items 同序，被拒项为 None，failed 点名索引和原因；
-review/link/contain 成功也返回 None，以 failed 判断拒绝。written 只在程序外层回执，不能用它索引函数结果。
+link/contain 成功也返回 None，以 failed 判断拒绝。written 只在程序外层回执，不能用它索引函数结果。
 
 """
 
@@ -43,7 +43,6 @@ _CASE_PROMPT = """案例办理（先领取，再调查与写入）：
     key 在同一执行内唯一，重试沿用同一键。同一 key 不可改写内容，不要求与全部目录逐一比较身份。
   - operation="contain" 显式挂接 parent_event_id/child_event_id，只有一个直接父且不能成环；
     既有子树保持原结构，父子事件各自记录独立范围，不要求父范围包住子范围。
-  - operation="structure_review" 核查配对的 contains/part_of/related/independent；operation="review" 核查事件。
   - operation="relation" 写有原文依据的其他关系；operation="retract" 仅撤回自己尚未保存的 contain/relation。
   - 无父事件在正式保存时进入案例池；已有案例须领取并显式提交，挂入父树不撤销、不自动解决案例。
   - 原文冲突和其他待办使用 push_case 登记，通过案例池办理。

@@ -367,7 +367,6 @@ class TestStageCompleteChecks:
         from tests.support.event_tree_fixtures import (
             add_annotation_source,
             add_declaration,
-            close_structure,
             first_paragraph,
             identity_every_declaration,
         )
@@ -387,7 +386,6 @@ class TestStageCompleteChecks:
         )
         db_session.flush()
         draft, _meta = identity_every_declaration(db_session, run_id)
-        close_structure(db_session, draft, evidence_paragraph_id=paragraph.paragraph_id)
         organization = draft.finish()
         report_id = insert_report_fixture(
             db_session,

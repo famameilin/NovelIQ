@@ -59,7 +59,7 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
         self.calls += 1
         role = material["role"]
         if role == "case":
-            # 案例会话自取未承诺案例：接手承诺后直接写入完成；无未承诺案例即结束
+            # 案例会话自取未承诺案例：接手后读取事件并提交；无未承诺案例即结束
             code = (
                 "cases = search_cases(unresolved_only=True)\n"
                 "if cases:\n"
@@ -68,8 +68,7 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
                 "    page = search_events(limit=20)\n"
                 '    for item in page["events"]:\n'
                 '        if item["event_id"] in case["description"]:\n'
-                '            write_event(items=[{"operation":"review", "event_ids":[item["event_id"]], '
-                '"reason":"核查原文与事件"}], caseid=case["case_id"])\n'
+                '            read_event(node_id=item["event_id"], kind="event")\n'
                 '    submit_case(case_id=case["case_id"])\n'
                 "else:\n"
                 "    finish()"

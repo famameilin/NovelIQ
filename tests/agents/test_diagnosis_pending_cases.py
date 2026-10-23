@@ -151,7 +151,6 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
         add_annotation_source,
         add_declaration,
         add_diagnosis_context,
-        close_structure,
         first_paragraph,
         identity_every_declaration,
         publish_draft,
@@ -173,7 +172,6 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
     )
     db_session.commit()
     draft, _meta = identity_every_declaration(db_session, run_id, context=(session_id, agent_id))
-    close_structure(db_session, draft, evidence_paragraph_id=int(paragraph.paragraph_id))
     publish_draft(db_session, run_id, draft)
     db_session.commit()
     report_id = _reports(db_session, run_id)[0].report_id

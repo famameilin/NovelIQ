@@ -1,4 +1,4 @@
-"诊断会话与报告共用的事件、包含关系及核对记录保存"
+"诊断会话与报告共用的事件、包含及其他关系保存"
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from src.storage.models import (
     Agent,
     CompleteEvent,
     NarrativeLink,
-    OrganizationCheck,
     SourceEvidence,
 )
 from src.storage.repositories import narrative_records as smap
@@ -80,19 +79,16 @@ def _evidence_event_refs(records: list[Any]) -> set[str]:
 
 
 def _referenced_event_ids(draft: Any, owned: set[str]) -> set[str]:
-    "本生产者行引用到的事件 id：核对、结构对、包含、关系与证据引用"
+    "本生产者的包含、关系与证据引用到的事件身份"
     owned_events = [item for item in draft.events.values() if item.producer_agent_id in owned]
     owned_containments = [item for item in draft.containments.values() if item.producer_agent_id in owned]
     owned_relations = [item for item in draft.relations.values() if item.producer_agent_id in owned]
-    owned_structure_reviews = [item for item in draft.structure_reviews.values() if item.producer_agent_id in owned]
-    referenced: set[str] = {item.event_id for item in draft.reviewed_events.values() if item.producer_agent_id in owned}
+    referenced: set[str] = set()
     for edge in owned_containments:
         referenced.update((edge.parent_event_id, edge.child_event_id))
     for relation in owned_relations:
         referenced.update((relation.source_id, relation.target_id))
-    for review in owned_structure_reviews:
-        referenced.update((review.source_event_id, review.target_event_id))
-    for records in (owned_events, owned_containments, owned_relations, owned_structure_reviews):
+    for records in (owned_events, owned_containments, owned_relations):
         referenced.update(_evidence_event_refs(records))
     return referenced
 
@@ -238,74 +234,7 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
         )
         _write_evidence_rows_once(session, {"narrative_link_id": relation.relation_id}, relation.evidence)
     session.flush()
-    _save_session_checks(session, owned, draft)
     session.flush()
-
-
-def _save_session_checks(session: Session, owned: set[str], draft: Any) -> None:
-    """会话产出的单事件核对与事件结构对判断"""
-    for event_review in draft.reviewed_events.values():
-        if event_review.producer_agent_id not in owned:
-            continue
-        check_id = _key(session, OrganizationCheck, "check_id", reviewed_event_id=event_review.event_id)
-        if _existing_matches(
-            session,
-            OrganizationCheck,
-            check_id,
-            {
-                "producer_agent_id": event_review.producer_agent_id,
-                "reason": event_review.reason,
-                "reviewed_event_id": event_review.event_id,
-                "snapshot_hash": event_review.snapshot_hash,
-            },
-        ):
-            continue
-        session.add(
-            OrganizationCheck(
-                check_id=check_id,
-                producer_agent_id=event_review.producer_agent_id,
-                reason=event_review.reason,
-                reviewed_event_id=event_review.event_id,
-                snapshot_hash=event_review.snapshot_hash,
-            )
-        )
-    for structure_review in draft.structure_reviews.values():
-        if structure_review.producer_agent_id not in owned:
-            continue
-        check_id = _key(
-            session,
-            OrganizationCheck,
-            "check_id",
-            source_event_id=structure_review.source_event_id,
-            target_event_id=structure_review.target_event_id,
-        )
-        if _existing_matches(
-            session,
-            OrganizationCheck,
-            check_id,
-            {
-                "producer_agent_id": structure_review.producer_agent_id,
-                "reason": structure_review.reason,
-                "source_event_id": structure_review.source_event_id,
-                "target_event_id": structure_review.target_event_id,
-                "disposition": structure_review.disposition,
-                "snapshot_hash": structure_review.snapshot_hash,
-            },
-        ):
-            _write_evidence_rows_once(session, {"check_id": check_id}, structure_review.evidence, existing=True)
-            continue
-        session.add(
-            OrganizationCheck(
-                check_id=check_id,
-                producer_agent_id=structure_review.producer_agent_id,
-                reason=structure_review.reason,
-                source_event_id=structure_review.source_event_id,
-                target_event_id=structure_review.target_event_id,
-                disposition=structure_review.disposition,
-                snapshot_hash=structure_review.snapshot_hash,
-            )
-        )
-        _write_evidence_rows_once(session, {"check_id": check_id}, structure_review.evidence)
 
 
 def _session_executions(session: Session, agent_id: str) -> list[str]:
@@ -447,69 +376,4 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
             )
         )
         _write_evidence_rows_once(session, {"narrative_link_id": relation.relation_id}, relation.evidence)
-    session.flush()
-    _save_reviews(session, organization)
-    session.flush()
-
-
-def _save_reviews(session: Session, organization: Any) -> None:
-    """组织核对逐对象/逐对落库；同一对象只接受一个被接受判断；已存在的行不改写"""
-    for event_review in organization.reviewed_events:
-        check_id = _key(session, OrganizationCheck, "check_id", reviewed_event_id=event_review.event_id)
-        if _existing_matches(
-            session,
-            OrganizationCheck,
-            check_id,
-            {
-                "producer_agent_id": event_review.producer_agent_id,
-                "reason": event_review.reason,
-                "reviewed_event_id": event_review.event_id,
-                "snapshot_hash": event_review.snapshot_hash,
-            },
-        ):
-            continue
-        session.add(
-            OrganizationCheck(
-                check_id=check_id,
-                producer_agent_id=event_review.producer_agent_id,
-                reason=event_review.reason,
-                reviewed_event_id=event_review.event_id,
-                snapshot_hash=event_review.snapshot_hash,
-            )
-        )
-    for structure_review in organization.structure_reviews:
-        check_id = _key(
-            session,
-            OrganizationCheck,
-            "check_id",
-            source_event_id=structure_review.source_event_id,
-            target_event_id=structure_review.target_event_id,
-        )
-        if _existing_matches(
-            session,
-            OrganizationCheck,
-            check_id,
-            {
-                "producer_agent_id": structure_review.producer_agent_id,
-                "reason": structure_review.reason,
-                "source_event_id": structure_review.source_event_id,
-                "target_event_id": structure_review.target_event_id,
-                "disposition": structure_review.disposition,
-                "snapshot_hash": structure_review.snapshot_hash,
-            },
-        ):
-            _write_evidence_rows_once(session, {"check_id": check_id}, structure_review.evidence, existing=True)
-            continue
-        session.add(
-            OrganizationCheck(
-                check_id=check_id,
-                producer_agent_id=structure_review.producer_agent_id,
-                reason=structure_review.reason,
-                source_event_id=structure_review.source_event_id,
-                target_event_id=structure_review.target_event_id,
-                disposition=structure_review.disposition,
-                snapshot_hash=structure_review.snapshot_hash,
-            )
-        )
-        _write_evidence_rows_once(session, {"check_id": check_id}, structure_review.evidence)
     session.flush()

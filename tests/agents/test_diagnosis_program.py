@@ -116,9 +116,7 @@ cases = search_cases(unresolved_only=True)
 case = cases[0]
 claim_case(case_id=case["case_id"])
 page = search_events(limit=20)
-write_event(items=[{
-    "operation":"review", "event_ids":[page["events"][0]["event_id"]],
-    "reason":"核查原文"}], caseid=case["case_id"])
+read_event(node_id=page["events"][0]["event_id"], kind="event")
 submit_case(case_id=case["case_id"])
 """
 SECOND_CASE_PROGRAM = """
