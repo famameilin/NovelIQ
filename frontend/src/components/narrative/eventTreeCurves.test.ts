@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { EventTreeListResponse } from "@/api/narrativeTypes";
-import { MARKER_RADIUS, eventTreeLayout } from "./eventTreeLayout";
+import { MARKER_RADIUS, OUTCOME_STEM_GAP, eventTreeLayout } from "./eventTreeLayout";
 import { curveCrossesWindow, eventTreeCurves } from "./eventTreeCurves";
 
 function bookWith(relations: EventTreeListResponse["relations"]): EventTreeListResponse {
@@ -85,13 +85,13 @@ it("两端位于屏外但跨过视口的真实曲线仍绘制", () => {
   expect(curveCrossesWindow(1100, 1400, 0, 1000)).toBe(false);
 });
 
-it("结果曲线从标记顶缘接入结果说明底缘", () => {
+it("结果曲线从标记顶缘接入说明下方的连接端口", () => {
   const curve = curves.find(item => item.channel === "outcome")!;
   const box = layout.outcomeBoxes.get("oc-1")!;
   const position = layout.positions.get("ev-1")!;
   const [sx, sy, , , , , ex, ey] = numbers(curve.d);
   expect([sx, sy]).toEqual([position.x, position.y - MARKER_RADIUS]);
-  expect([ex, ey]).toEqual([box.x, box.top + box.height]);
+  expect([ex, ey]).toEqual([box.x, box.top + box.height + OUTCOME_STEM_GAP]);
 });
 
 it("短距离连接仍在两端之间上行，不回绕到叙事线锚点下方", () => {

@@ -1,5 +1,5 @@
 import type { EventTreeListResponse } from "@/api/narrativeTypes";
-import { MARKER_RADIUS, type EventTreeLayoutResult } from "./eventTreeLayout";
+import { MARKER_RADIUS, OUTCOME_STEM_GAP, type EventTreeLayoutResult } from "./eventTreeLayout";
 
 /** 画布曲线：端点停在标记边缘端口，同向同端点合并、反向独立 */
 export interface EventTreeCurve {
@@ -20,10 +20,10 @@ export function curveCrossesWindow(sourceX: number, targetX: number, left: numbe
 function anchorToEvent(anchor: { x: number; y: number }, event: { x: number; y: number }): string {
   const ay = anchor.y, ey = event.y + MARKER_RADIUS;
   const spread = ay - ey;
-  return `M ${anchor.x} ${ay} C ${anchor.x} ${ay - spread * 0.65}, ${event.x} ${ey + spread * 0.38}, ${event.x} ${ey}`;
+  return `M ${anchor.x} ${ay} C ${anchor.x} ${ay - spread * 0.9}, ${event.x} ${ey + spread * 0.06}, ${event.x} ${ey}`;
 }
 
-/** 事件到结果：从标记顶缘纵向接入结果说明的完整底缘，不穿过文字 */
+/** 从标记顶缘纵向接入结果说明下方的连接端口 */
 function eventToOutcome(event: { x: number; y: number }, outcome: { x: number; bottom: number }): string {
   const ey = event.y - MARKER_RADIUS, oy = outcome.bottom;
   const spread = ey - oy;
@@ -70,7 +70,7 @@ export function eventTreeCurves(book: EventTreeListResponse, layout: EventTreeLa
     const [eventId, outcomeId] = key.split("→");
     const position = layout.positions.get(eventId), box = layout.outcomeBoxes.get(outcomeId);
     if (!position || !box) continue;
-    curves.push({ d: eventToOutcome(position, { x: box.x, bottom: box.top + box.height }), kinds: ["结果关联"], relationIds: [`outcome:${outcomeId}:${eventId}`], sourceId: eventId, targetId: outcomeId, channel: "outcome" });
+    curves.push({ d: eventToOutcome(position, { x: box.x, bottom: box.top + box.height + OUTCOME_STEM_GAP }), kinds: ["结果关联"], relationIds: [`outcome:${outcomeId}:${eventId}`], sourceId: eventId, targetId: outcomeId, channel: "outcome" });
   }
 
   // 真实关系：只绘制两端都有展示身份的大事件；同向同端点合并，反向关系保持独立
