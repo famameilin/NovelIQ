@@ -174,7 +174,9 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         settings.models,
         "model_pool",
         [
-            WeightedModelSettings("test-model", "https://test.example/v1", "test-key", max_in_flight=1),
+            WeightedModelSettings(
+                "test-model", "https://test.example/v1", "test-key", context_window_tokens=128000, max_in_flight=1
+            ),
         ],
     )
     recorder = AgentAuditRecorder(

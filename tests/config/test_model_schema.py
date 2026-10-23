@@ -95,6 +95,7 @@ def _pool_entry(model_id: str = "a", **overrides: object) -> dict[str, object]:
         "api_key": f"key-{model_id}",
         "weight": 1,
         "max_in_flight": 2,
+        "context_window_tokens": 128000,
         **overrides,
     }
 
@@ -111,6 +112,15 @@ def test_parse_model_pool_reads_sampling_parameters_per_model() -> None:
 
     assert (pool[0].temperature, pool[0].top_p, pool[0].max_tokens) == (0.3, 0.9, 2048)
     assert (pool[1].temperature, pool[1].top_p, pool[1].max_tokens) == (0.7, 0.8, 131072)
+    assert pool[0].context_window_tokens == 128000
+
+
+def test_parse_model_pool_requires_context_window_tokens() -> None:
+    """上下文容量是模型池必填项"""
+    entry = _pool_entry()
+    entry.pop("context_window_tokens")
+    with pytest.raises(ValueError, match="上下文容量"):
+        _parse_model_pool([entry])
 
 
 @pytest.mark.parametrize(
@@ -125,6 +135,11 @@ def test_parse_model_pool_reads_sampling_parameters_per_model() -> None:
         {"max_tokens": 0},
         {"max_tokens": True},
         {"max_tokens": 1.5},
+        {"context_window_tokens": 0},
+        {"context_window_tokens": -1},
+        {"context_window_tokens": True},
+        {"context_window_tokens": "128k"},
+        {"context_window_tokens": 1.5},
         {"unknown_key": 1},
     ],
 )
@@ -169,6 +184,7 @@ def test_apply_model_environment_loads_pool_and_embedding(monkeypatch) -> None:
                 "api_key": "text-key",
                 "weight": 1,
                 "max_in_flight": 4,
+                "context_window_tokens": 128000,
                 "temperature": 0.3,
                 "top_p": 0.9,
                 "max_tokens": 2048,
@@ -208,6 +224,7 @@ def test_apply_model_environment_rewrites_loopback_for_docker(monkeypatch) -> No
                 "api_key": "text-key",
                 "weight": 1,
                 "max_in_flight": 4,
+                "context_window_tokens": 128000,
             }
         ],
         ModelEnvironment(

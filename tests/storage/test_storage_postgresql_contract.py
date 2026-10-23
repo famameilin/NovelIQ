@@ -510,7 +510,15 @@ async def test_formal_annotation_pipeline_commits_and_restores_without_model_rep
     monkeypatch.setattr(
         settings.models,
         "model_pool",
-        [WeightedModelSettings("storage-pipeline-test", "https://test.example/v1", "test-key", max_in_flight=1)],
+        [
+            WeightedModelSettings(
+                "storage-pipeline-test",
+                "https://test.example/v1",
+                "test-key",
+                context_window_tokens=128000,
+                max_in_flight=1,
+            )
+        ],
     )
     monkeypatch.setattr("src.model_pool.llm.build_chat_model", lambda *args, **kwargs: model)
     MODEL_CAPACITY.reset()

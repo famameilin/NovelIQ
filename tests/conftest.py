@@ -249,7 +249,9 @@ def configured_model_pool(monkeypatch) -> None:
         settings.models,
         "model_pool",
         [
-            WeightedModelSettings("test-model", "https://test.example/v1", "test-key", max_in_flight=2),
+            WeightedModelSettings(
+                "test-model", "https://test.example/v1", "test-key", context_window_tokens=128000, max_in_flight=2
+            ),
         ],
     )
     monkeypatch.setattr(settings.models, "diagnosis_model_id", "test-model")

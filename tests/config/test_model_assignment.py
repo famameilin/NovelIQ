@@ -17,6 +17,7 @@ def _entry(model_id: str = "a", **overrides: Any) -> dict[str, Any]:
         "api_key": f"key-{model_id}",
         "weight": 1,
         "max_in_flight": 2,
+        "context_window_tokens": 128000,
         **overrides,
     }
 
@@ -108,7 +109,8 @@ def test_empty_pool_and_removed_model_are_not_replaced(monkeypatch) -> None:
 
 
 def test_pool_repr_never_includes_api_key() -> None:
-    assert "secret" not in repr(WeightedModelSettings("a", "https://a.example/v1", "secret"))
+    entry = WeightedModelSettings("a", "https://a.example/v1", "secret", context_window_tokens=128000)
+    assert "secret" not in repr(entry)
 
 
 def test_no_separate_continuity_model() -> None:

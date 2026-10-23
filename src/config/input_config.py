@@ -19,6 +19,8 @@ class TaskModelConfig:
     thinking_enabled: bool = False
     thinking_budget_tokens: int | None = None
     max_tokens: int | None = None
+    # 上下文窗口容量：达到 90% 时压缩历史；None 表示不做容量压缩
+    context_window_tokens: int | None = None
     provider_id: str = "default"
     max_in_flight: int = 8
 

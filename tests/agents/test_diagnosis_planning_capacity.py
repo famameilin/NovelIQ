@@ -74,7 +74,7 @@ def test_create_diagnosis_domain_only_resolves_pool_entry(declaration_case, monk
     monkeypatch.setattr(
         settings.models,
         "model_pool",
-        [WeightedModelSettings("cap-model", "https://cap.example/v1", "cap-key")],
+        [WeightedModelSettings("cap-model", "https://cap.example/v1", "cap-key", context_window_tokens=128000)],
     )
     monkeypatch.setattr(settings.models, "diagnosis_model_id", "cap-model")
     created = domain_module.create_diagnosis_domain(
@@ -96,7 +96,11 @@ def test_case_session_count_follows_model_in_flight(monkeypatch):
     monkeypatch.setattr(
         settings.models,
         "model_pool",
-        [WeightedModelSettings("diag-model", "https://x.example/v1", "k", max_in_flight=3)],
+        [
+            WeightedModelSettings(
+                "diag-model", "https://x.example/v1", "k", context_window_tokens=128000, max_in_flight=3
+            )
+        ],
     )
 
     def build(**overrides):

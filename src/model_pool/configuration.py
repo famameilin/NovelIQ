@@ -49,4 +49,11 @@ def load_task_config(
         thinking_enabled=thinking_enabled,
         thinking_budget_tokens=None,
         max_tokens=selected.max_tokens,
+        context_window_tokens=selected.context_window_tokens,
     )
+
+
+def model_context_window(model_id: str) -> int | None:
+    """按模型标识读取池内上下文容量；不在池内时返回 None"""
+    entry = next((entry for entry in settings.models.model_pool if entry.model_id == model_id), None)
+    return entry.context_window_tokens if entry is not None else None

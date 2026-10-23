@@ -56,6 +56,7 @@ def _entry(model_id: str = "model-a", **overrides: Any) -> dict[str, Any]:
         "api_key": f"sk-{model_id}-1234",
         "weight": 1,
         "max_in_flight": 2,
+        "context_window_tokens": 128000,
         "temperature": 0.5,
         "top_p": 0.9,
         "max_tokens": 4096,
@@ -102,16 +103,20 @@ def test_diagnosis_budget_setting_is_editable_and_used_by_scheduler(isolated_set
         scheduler.pool.close()
 
 
-def test_pool_has_no_context_window_field_and_rejects_legacy_key(isolated_settings, api_client):
-    """该配置项全栈移除"""
+def test_pool_requires_context_window_and_roundtrips(isolated_settings, api_client):
+    """上下文容量随模型池保存并回显；普通设置 schema 不暴露模型池字段"""
     schema_paths = [item["path"] for item in api_client.get("/api/settings/schema").json()["fields"]]
     assert ["models", "model_pool", "context_window_tokens"] not in schema_paths
     response = api_client.put("/api/settings/env", json={"model_pool": [_entry(context_window_tokens=32768)]})
+    assert response.status_code == 200
+    assert response.json()["values"]["models"]["model_pool"][0]["context_window_tokens"] == 32768
+    missing = _entry()
+    missing.pop("context_window_tokens")
+    response = api_client.put("/api/settings/env", json={"model_pool": [missing]})
     assert response.status_code == 422
-    assert "context_window_tokens" in json.dumps(response.json())
-    response = api_client.put("/api/settings/env", json={"model_pool": [{**_entry(), "context_window_tokens": None}]})
+    response = api_client.put("/api/settings/env", json={"model_pool": [_entry(context_window_tokens=0)]})
     assert response.status_code == 422
-    assert api_client.get("/api/settings").json()["values"]["models"]["model_pool"] == []
+    assert api_client.get("/api/settings").json()["values"]["models"]["model_pool"][0]["context_window_tokens"] == 32768
 
 
 def test_pool_roundtrip_masks_keys_and_preserves_behavior_config(
@@ -135,12 +140,14 @@ def test_pool_roundtrip_masks_keys_and_preserves_behavior_config(
     assert not isolated_settings.exists()
     assert "DATABASE_PASSWORD=unrelated" in env_file.read_text(encoding="utf-8")
     assert json.loads(read_env_file(env_file)["MODEL_POOL"])[1]["max_in_flight"] == 1
+    assert json.loads(read_env_file(env_file)["MODEL_POOL"])[1]["context_window_tokens"] == 128000
     assert read_env_file(env_file)["DIAGNOSIS_MODEL_ID"] == "diagnostic"
     annotation = load_task_config("annotation", selection_key="task")
     diagnosis = load_task_config("diagnosis")
     assert (annotation.model, annotation.api_key, annotation.max_in_flight) == ("model-a", "sk-model-a-1234", 2)
     # 采样参数来自池内模型配置
     assert (annotation.temperature, annotation.top_p, annotation.max_tokens) == (0.5, 0.9, 4096)
+    assert annotation.context_window_tokens == 128000
     assert (diagnosis.model, diagnosis.base_url, diagnosis.max_in_flight) == (
         "diagnostic",
         "https://diagnostic.example/v1",

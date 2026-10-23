@@ -83,6 +83,7 @@ class ModelPoolEntryRequest(BaseModel):
     api_key: str | None = Field(default=None, repr=False)
     weight: StrictInt | StrictFloat = 1.0
     max_in_flight: StrictInt = 8
+    context_window_tokens: StrictInt = Field(ge=1, description="上下文窗口容量（Token）")
     temperature: StrictInt | StrictFloat = Field(default=0.7, description="采样温度，[0, 2]")
     top_p: StrictInt | StrictFloat = Field(default=0.8, description="核采样上限，[0, 1]")
     max_tokens: StrictInt = Field(default=131072, description="输出 Token 上限")

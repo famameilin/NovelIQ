@@ -322,7 +322,11 @@ def test_diagnosis_reads_survive_interrupted_pipeline_commit(declaration_case, m
     monkeypatch.setattr(
         settings.models,
         "model_pool",
-        [WeightedModelSettings("read-surface-model", "https://read.example/v1", "read-key")],
+        [
+            WeightedModelSettings(
+                "read-surface-model", "https://read.example/v1", "read-key", context_window_tokens=128000
+            )
+        ],
     )
     monkeypatch.setattr(settings.models, "diagnosis_model_id", "read-surface-model")
     from sqlalchemy.orm import sessionmaker

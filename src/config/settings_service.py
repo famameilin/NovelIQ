@@ -190,6 +190,7 @@ def _resolve_model_pool(model_pool: list[dict[str, Any]] | None) -> list[Any]:
                 "api_key": api_key,
                 "weight": entry["weight"],
                 "max_in_flight": entry["max_in_flight"],
+                "context_window_tokens": entry.get("context_window_tokens"),
                 "temperature": entry["temperature"],
                 "top_p": entry["top_p"],
                 "max_tokens": entry["max_tokens"],

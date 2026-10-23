@@ -12,7 +12,11 @@ from src.model_pool.configuration import load_task_config
 
 class TestDiagnosisConfig(unittest.TestCase):
     def test_load_diagnosis_config(self) -> None:
-        pool = [WeightedModelSettings("diagnosis", "https://diagnosis.example/v1", "test-key", max_in_flight=2)]
+        pool = [
+            WeightedModelSettings(
+                "diagnosis", "https://diagnosis.example/v1", "test-key", context_window_tokens=128000, max_in_flight=2
+            )
+        ]
         with (
             patch.object(settings.models, "model_pool", pool),
             patch.object(

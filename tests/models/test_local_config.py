@@ -24,6 +24,7 @@ class TestTaskModelConfigFromEnv(unittest.TestCase):
                         "api_key": "text-key",
                         "weight": 1,
                         "max_in_flight": 3,
+                        "context_window_tokens": 128000,
                     }
                 ]
             ),
