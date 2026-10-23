@@ -15,7 +15,7 @@ Once analysis completes, the frontend provides:
 - **Sentiment / pacing curves**: paragraph-level sentiment scoring and narrative pacing metrics, whole-book curves with switchable windows
 - **Character relationship graph**: annotation agents record characters, dialogue and relations chapter by chapter, merged across chapters into a network browsed as a force-directed graph
 - **Event timeline**: plot events presented along a timeline
-- **Event trees**: browse the event forest by chapter, follow main chains and supported secondary causes, and inspect source text
+- **Event trees**: inspect complete events, containment, causes and outcomes within a chapter range, with source evidence
 - **Topic distribution**: LDA topic modeling that detects topic shifts across the plot
 - **Linguistic features**: LTP lexical and syntactic analysis, lexical richness (TTR/MTLD), dialogue ratio, and more
 - **Diagnostic report**: an LLM quality assessment grounded in whole-book evidence, exportable as a single-file HTML
@@ -30,7 +30,7 @@ Once analysis completes, the frontend provides:
 | --- | --- |
 | ![Event forest](assets/screenshots/event-growth-forest-1440x900.png) | ![Causal structure within a tree](assets/screenshots/event-growth-tree-1440x900.png) |
 
-See [Project version and chapter/book results](docs/upgrades/RESULT-STRUCTURE.md) for the current result structure. The historical [0.1.1 upgrade guide](docs/upgrades/UPGRADE-0.1.1.md) and migration scripts apply only to their corresponding release checkout. Current results must be rebuilt from original input in an isolated run.
+Read the [0.3.0 upgrade guide](docs/upgrades/UPGRADE-0.3.0.md) before upgrading from 0.2.1. The entry point defaults to read-only preflight; conversion requires a backup, an isolated rehearsal and an explicit database name. This release includes a legacy-conversion exception. Results requiring reanalysis still come from original input through the formal pipeline. Historical migration scripts apply only to their matching release checkout.
 
 Stack: Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17 (pgvector); React 19 / Vite / ECharts / Tailwind CSS. LLMs go through an OpenAI-compatible interface (self-hosted or third-party, both work); lexical analysis and word vectors are local offline models.
 
@@ -70,7 +70,7 @@ Requires a local PostgreSQL 17 with the pgvector extension.
 ```powershell
 ./scripts/dev.ps1 setup        # install dependencies (uv)
 Copy-Item .env.example .env    # fill in database and model API keys
-./scripts/dev.ps1 api --port 8000   # first start creates the database and tables automatically
+./scripts/dev.ps1 api --port 8000   # initializes empty storage; existing structures must match the current models
 ```
 
 Frontend in another terminal:
@@ -83,91 +83,70 @@ npm run dev                    # http://localhost:5173, /api proxied to backend 
 
 ## System Layers
 
-| Layer | Directory | Key modules |
-|----|------|---------|
-| **API** | `src/api/routes` | `novels` (upload/tasks), `analysis`, `results`, `tabs` (one aggregation endpoint per frontend view, metrics computed inside the endpoint), `linguistic`, `timeline`, `settings`, `sse` |
-| **Service** | `src/api/services` | `analysis_service` (StageExecutor stage scheduling, cancel/delete state machine), `novel_service`, `metrics_service`, `results_export_service` (self-contained HTML report assembly), `event_manager`, `artifact_gc_service` |
-| **Workflow** | `src/workflows` | `run_preprocess` / `run_annotate` / `run_linguistic` / `run_aggregate` / `run_topic_model` / `run_diagnose` — business orchestration and persistence only, HTTP-agnostic |
-| **Domain** | `src/agents`, `src/metrics`, `src/linguistic`, `src/topic`, `src/lexicons`, `src/text_search`, `src/knowledge` | annotation/diagnosis agents and the fact graph, metric contracts and curves, LTP/Word2Vec, LDA, lexicons, retrieval, knowledge graph |
-| **Storage** | `src/storage/models` | ORM definitions for 36 tables, split by domain (graph / event_forest / agent_audit / continuity / analysis / rag …) |
+| Layer | Directory | Responsibility |
+| --- | --- | --- |
+| API | `src/api/routes`, `src/api/services` | HTTP endpoints, result queries, view data and HTML export |
+| Workflows | `src/workflows` | Task lifecycle, six-stage orchestration, recovery and cancellation |
+| Agents and domains | `src/agents`, `src/diagnosis`, `src/fact_graph`, `src/event_trees`, `src/case_pool` | Annotation, diagnosis, fact graphs, complete events and cases |
+| Quantitative analysis | `src/metrics`, `src/linguistic`, `src/topic`, `src/lexicons`, `src/text_processing` | Metrics, linguistic structure, topics, lexicons and text processing |
+| Execution and notifications | `src/work`, `src/model_pool`, `src/audit`, `src/event_bus`, `src/sse` | Work scheduling, model capacity and health scores, audit, persisted notifications and replay |
+| Storage | `src/storage` | 30 business tables, UUIDv7 primary keys, named read/write interfaces, transactions and domain constraints |
 
-Dependencies point one way: `Route → Service → StageExecutor → Workflow → Domain/Storage`; the reverse never happens. The full path of one request: `POST /api/novels/{id}/tasks` → `analysis_service` creates the `analysis_runs` row → StageExecutor calls each Workflow entry in turn → domain functions read and write the ORM → each stage-completion point pushes a milestone over SSE.
+Task requests enter workflow application services through the API. Stage orchestration calls agents and domains, and Storage persists their results. Activity notifications pass through EventBus; the SSE consumer persists them before delivery and supports cursor replay. The analysis workstation displays actual agent executions and model communication.
+
+The project release version is maintained only in `pyproject.toml`; health responses and OpenAPI read the same source. Graphs and event trees use real chapter identities and ordering, and whole-book results are isolated by run. The interface targets desktop use; the timeline and event tree keep independent interaction state.
 
 ## Analysis Pipeline
 
 ```mermaid
 flowchart LR
     A[Preprocess] --> B[Annotate] --> C[Linguistic] --> D[Aggregate] --> E[Topic Model] --> F[Diagnose]
-    A --- A1["encoding detection · chapter split\nparagraphs persisted · vector embedding"]
-    B --- B1["per-chapter LLM annotation\nfact-graph projection · full audit"]
-    C --- C1["LTP lexical/syntactic/semantic\nemotion event line · Word2Vec"]
-    D --- D1["sentiment/pacing curves\nglobal stats · quality gate"]
-    E --- E1["LDA trained and persisted\nfull paragraph-topic distribution"]
-    F --- F1["evidence first, then generate\ndiagnostic report"]
 ```
 
-| Stage | Entry point | Mechanism and output |
-|------|------|-----------|
-| **Preprocess** | `run_preprocess` | Encoding detection (utf-8 first, gb18030 / gbk fallback) → chapter splitting on heading lines (Chinese-numeral chapter numbers supported) → chapters and paragraphs persisted → paragraph vector embedding (pgvector). Splitting happens only here; every later stage shares the same paragraph boundaries |
-| **Annotate** | `run_annotate` | The heaviest stage of the book. A per-chapter annotation agent (round cap 15) submits the whole chapter in one `finish`: character entities, dialogue, relations, event tree, foreshadowing, metrics and sentence-level emotion labels. Graph-domain changes are persisted through fact-graph derivation (see "Fact Graph"), events land on their anchors (see "Event Tree"); cross-chapter context is carried by the persisted facts and stage summaries of earlier chapters |
-| **Linguistic** | `run_linguistic` | LTP segmentation, POS, dependency and semantic-role labeling; emotion event-line extraction (semantic-role driven); fixed-phrase hits; Word2Vec (off by default; once enabled in settings) initialized from pretrained vectors and fine-tuned per book, with the vector dimension taken from the pretrained file header |
-| **Aggregate** | `run_aggregate` | Paragraph-level scores aggregated into sentiment/pacing curves and global statistics; sentence-level emotion labels fit a ridge-regression boundary model per book, then scores are written back paragraph by paragraph; quality-gate report — missing aggregate data counts as a defect, "no data" ≠ "passing" |
-| **Topic model** | `run_topic_model` | LDA training and model persistence; the full paragraph-topic distribution lands in three tables (`topic_model_runs` / `paragraph_topics` / `paragraph_topic_inference`), and topic shifts are computed as Jensen-Shannon divergence on the response side |
-| **Diagnose** | `run_diagnose` | The diagnosis agent (round cap 30) gathers evidence before submitting; when validation rejects, `revise_finish` submits only the fields that need correction, and unsubmitted fields carry over from the last complete result |
+| Stage | Entry point | Processing and output |
+| --- | --- | --- |
+| Preprocess | `run_preprocess` | Encoding detection, chapter splitting, chapter and paragraph storage, and embeddings; later stages share the original paragraph boundaries |
+| Annotate | `run_annotate` | The chapter work pool schedules annotation or entity / event / metric roles to extract entities, relations, dialogue, complete events, foreshadowing and metrics; finish requests still require completeness checks and save confirmation |
+| Linguistic | `run_linguistic` | LTP tokens, dependency and semantic dependency arcs, phrase matches and emotion events; Word2Vec runs when enabled |
+| Aggregate | `run_aggregate` | Paragraph metrics, sentiment and pacing curves, global statistics and quality checks |
+| Topic model | `run_topic_model` | LDA training and model persistence; the run stores completion facts and `lda_paragraph_topics` stores paragraph topic distributions |
+| Diagnose | `run_diagnose` | Diagnosis roles gather evidence, handle cases and produce reports, with concurrency bounded by actual model-pool capacity |
 
-**Resume and cancellation** — Every stage persists on completion: reruns after an interruption or cancellation automatically skip finished stages, and you can explicitly rerun only selected stages; cancellation takes effect immediately and works reliably across processes.
+**Recovery and cancellation**: the database stores task states and stage completion facts. Resuming preserves saved annotation-role results. Workflows handle cancellation, failures and retries, and the workstation shows failure summaries, retries and work that did not execute.
 
-**Intra-chapter parallelism and the program face** — Annotation dispatches by chapter size: short chapters go to a single agent that annotates the whole chapter directly; long chapters (over `sub_chunk_max_chars`, default 5000 characters) split into three role-based agents — entity / event / metric — each holding the full chapter and running concurrently. The model-visible surface collapses into a single `execute_code(code)`: programs run statement by statement in a restricted AST interpreter, where retrieval, graph writes and event writes are all function calls inside the interpreter — one round submits a batch of operations instead of one tool call per round. Evidence reads only source text before the current chapter by default, preventing future-text leakage; the three role agents share one fact-graph and event-tree contract, and cross-agent disagreements go to the case pool for a unified ruling.
+**Concurrency and programs**: chapter size determines single-role or entity / event / metric work; actual concurrency follows model-pool capacity. Models batch reads and writes through `execute_code(code)` in a restricted interpreter with variables retained between programs. Programs reuse the original tool validation and reject imports, file access and network access. Model settings include context capacity, with conversation compaction when its conditions are met.
 
 ## Quantitative Methods
 
 - **Curves and smoothing** — Sentiment/pacing curves are plotted on character coordinates; smoothing uses robust LOWESS: tricube-kernel weighted local linear regression, three bisquare robust iterations to suppress outlier segments, and bandwidth doubling adaptively when a window lacks enough points. Smoothing anchors to the character positions of paragraph scores (paragraph length as sample weight).
 - **Per-book emotion calibration** — Paragraph emotion intensity is scored directly by the sentiment lexicon (negation handled as a shared computation layer, effective within sentence boundaries); the annotation agent picks emotion-bearing paragraphs per chapter as supervision, paragraph vectors across the book fit a linear boundary, and scores are written back per paragraph. With insufficient supervision (fewer than 2 labels, or all identical scores) the field stays empty rather than fabricated; and because each book fits its own scale, curves are not comparable across books.
-- **Topics and shifts** — gensim LDA persists a full-parameter snapshot, and the full paragraph-topic distribution (not argmax) lands in three tables; topic shift is the Jensen-Shannon divergence between adjacent window distributions.
+- **Topics and shifts** — gensim LDA persists model artifacts and paragraph topic distributions with their full weights; topic shifts use Jensen-Shannon divergence between adjacent windows.
 - **Narrative phases and tension** — Global/local peak detection divides the book into setup / development / climax / resolution; tension proxies (fuzzy-match density of combat words, exclamation/question density, dialogue ratio, average sentence length) are computed per phase.
 
-## Fact Graph
+## Fact Graph and Cases
 
-Cross-chapter characters, facts and relations live on one continuously evolving graph, written chapter by chapter by the annotation agents.
+Annotation agents register entities, relations, dialogue and facts in a shared graph scoped to the run. Entity references use source-text names and categories; reads support keyword search, field projection and pagination. Contributions retain their actual producing agent, with the existing save-confirmation and rollback chain handling failure and recovery.
 
-**Single write surface** — The run-level fact graph (FactGraph) is loaded from the database once when the first chapter agent starts; afterwards all chapter agents share that one in-memory graph. Graph-domain write tools update it immediately, and every graph query at runtime (`search_graph`, entity and relation validation) reads only the in-memory graph — the database takes part in persistence only. When a chapter completes, the persistence layer derives a new graph version from the op log and persists it; on interruption recovery the graph is reloaded.
-
-**Entity registration** — `write_entities` has append-and-update semantics: same-name entities merge into one entry, but an already-registered major category (character / location / organization …) cannot change — conflicts error out with a hint to use a distinguishing name. Tags keep order and dedupe; attributes merge by dict, with an explicit null deleting the old key.
-
-**Two-channel relations** — `write_relations` only asserts: new edges enter the graph with support +1, and existing edges return `skipped_existing` without double counting. Strengthening, weakening and severing always go through `resolve_fact_case`, with seven change kinds (assert / reinforce / refine / supersede / weaken / break / retract). `break` / `retract` require the target edge to be currently active, otherwise they error immediately — if severing a non-existent edge were silently accepted, the agent would spiral in "undo → recheck → nothing changed" loops.
-
-**Case closed loop** — Suspected issues are registered into the case pool (`case_pool_cases`): case_type, retrieval keys, description, plus two load-bearing fields — `target_key`, a stable target identifier, and `target_ref`, a read-authorization reference. When a later chapter resolves it via `resolve_fact_case`, the completing transaction first locks the case row, re-checks that the stable target is unchanged (guarding against concurrent drift), verifies through `target_ref` that what was read really is an authorized chapter, and only then writes `case_resolution_mappings`.
-
-**Op logs and replay** — Graph-domain changes accumulate three ordered logs per sub-chunk: `entity_ops` (append semantics), `relation_assert_ops` (fully refilled on every `write_relations`), `relation_change_ops` (carrying reason / case_id / change_kind / ordinal). Final state and logs are two channels: final state makes `search_graph` immediately visible; logs let persistence replay in submission order, with each fact in `graph_facts` and its before / after derived by the persistence layer against current database values. Replay order is fixed: all asserts first, then changes.
-
-**Normalization and defenses** — Entity names normalize to NFC + casefold as the matching key; relations build stable keys from bidirectionally normalized endpoints (unordered relations sort both ends into the key), history loading and runtime share the same key function, so repeated cross-chapter assertions never duplicate edges. Relations whose two endpoints normalize to the same name error out immediately — persistence would otherwise insert a self-loop row violating the distinct-endpoint constraint and blow up the completing transaction. Case-change endpoint keys are built from the names as passed, without secondary resolution — otherwise both endpoints collapse into the representative node within the same character component, the edge key to sever becomes self-referential, and the edge can never be deleted.
+Cases enter one pool with explicit `caseid` values and are handled through `claim_case`, `submit_case` and abandonment. A session can hold multiple cases. Claiming governs case handling and does not lock an event. Cases store registration and resolution state; business results retain their actual producer independently.
 
 ## Event Tree
 
-Events are declared in-chapter by the annotation agent (`create_event`); one tree corresponds to one chapter's causal narrative.
+`event_records` stores complete-event titles, problems, summaries, types, states, chapter ranges and actual producers. Participants and source evidence are stored separately. Annotation and diagnosis share formal event identities. Chapter reads use actual chapter boundaries, while cross-chapter results retain their source evidence.
 
-**Identity and anchors** — tree_id and event_id are server-generated UUIDs, never reordered and collision-free across sub-chunks. Every event lands source-text anchors: `anchor_paragraph_ids` (a set of paragraphs) + `char_start` / `char_end` (CHECK constraints keep the range valid) + `evidence`; the frontend timeline and later evidence retrieval both point back to the source text through this group of anchors.
+Containment, semantic links, plotlines and outcome organization use the formal domain interfaces. The desktop event tree displays related events as cards and relationship curves with detail and source-text inspection. The timeline independently presents plot order.
 
-**Tree-building protocol** — `create_event` atomically creates a single tree. Causal predecessors reference `cause_tree_id`: for trees already built this chapter, use the tree_id just returned by `create_event`; for earlier-plot trees, first retrieve an authorized tree via `search_event`; referencing a non-existent tree errors immediately, with a pointer in the message. The event domain closes explicitly: the final call passes `description=None` to close the event domain, closing the character dynamic-state (character_observations) domain at the same moment; after closing, no more events may be created.
+Initialization first checks existing tables, fields, types, keys and constraints without modifying them; incompatible structures are rejected. Routine data corrections regenerate results from original input. See the [0.3.0 upgrade guide](docs/upgrades/UPGRADE-0.3.0.md) for this release's legacy conversion scope, archives and reanalysis requirements.
 
-**Causal layering** — `cause_role` marks the event's role in the tree (root / main / secondary, CHECK constraint); `causal_event_refs` express cross-event causal references as global event_ids, materialized into `event_edges` at persistence.
+## Audit and Notifications
 
-**Edge lifecycle** — `event_edges` has exactly one type, `causal` (CHECK constraint), with `UNIQUE(run_id, source, target)` preventing duplicate edges; edges manage lifecycle via `is_active` + `expired_at` — when a causal conclusion is overturned by later plot, the edge expires rather than being deleted, keeping historical judgments auditable. Endpoints and chapters are both composite foreign keys (run_id + chapter_id), so references cannot drift out of this run.
+| Table | Granularity | Content |
+| --- | --- | --- |
+| `agent` | One actual agent execution | Run ownership, role and execution state |
+| `agent_loop` | One actual model request | Agent round or standalone-call identity, model, usage, cost, timing and communication documents |
+| `agent_toolcall` | One tool call | Arguments, executed arguments, response, receipt, error and duration |
+| `agent_outbox` | One activity notification | Idempotency key, run and chapter routing, actual message bytes and delivery time |
 
-**Idempotency** — Nodes and edges both persist under `UNIQUE(run_id, chapter_id, payload_path)`: one payload path within one chapter maps to exactly one row, so repeated submissions never double-persist.
-
-## Audit
-
-Four progressive layers, all fully persisted:
-
-| Table | Granularity | Recorded content |
-|----|------|---------|
-| `agent_invocations` | one annotation / diagnosis attempt | run_id, task_type (annotation / diagnosis), chapter_id, attempt_number, model_name, status (success / error), final_error, start/end times |
-| `agent_turns` | one model request round | complete request messages, raw response, context summary, status and errors; six per-round timing columns — TTFT, first visible token, reasoning, model, tool wall-clock, round total |
-| `agent_tool_calls` | one tool call | parsed and raw parameter strings, full result, model-facing receipt, independent status and duration |
-| `token_usage` | each API usage entry | bucketed by novel / chapter / task_type / call_type / model; five token classes prompt / completion / total / cache_read / reasoning plus cost; agent rounds map one-to-one to `agent_turns.id`, non-agent rows such as embeddings bucket separately; `accounting_source` distinguishes reported from estimated |
-
-Review and attribution treat the audit tables as the single authoritative source — application logs contain no agent-side statistics. Thinking time lives in the `agent_turns` timing columns, cost in `token_usage`, failed rounds pinpoint to `agent_tool_calls` status and error; any chapter's annotation can be replayed round by round from its invocation into a complete decision trace.
+Provider-reported usage and program estimates are recorded separately. Request, response and receipt documents support audit and display; the workstation reconstructs execution through persisted notifications and replay.
 
 ## License
 
