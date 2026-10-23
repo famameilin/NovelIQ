@@ -49,6 +49,29 @@ def test_case_completion_requires_empty_pool_and_report_cannot_start_early(draft
         domain.build_session_context("report", new_id(), None)
 
 
+def test_aborted_attempt_releases_own_case_without_blocking_later_report(draft_case):
+    domain, author = domain_for(draft_case)
+    failed = domain.build_session_context("case", author, None)
+    case = json.loads(failed.program.tools["claim_random_case"].invoke({}))
+    failed.program.tools["write_entity"].invoke({
+        "name": "失败尝试人物", "entity_type": "character", "el": "failed", "caseid": case["case_id"],
+    })
+    assert author in domain.case_writers
+    domain.abort_session(author)
+    assert author not in domain.case_writers
+    assert domain.case_pool.case_runtime[case["case_id"]]["owner"] is None
+
+    replacement = new_id()
+    draft_case.fixture_session.add(Agent(id=replacement, run_id=domain.run_id, type="case", status="running"))
+    draft_case.fixture_session.commit()
+    context = domain.build_session_context("case", replacement, None)
+    while (claimed := json.loads(context.program.tools["claim_random_case"].invoke({})))["status"] == "claimed":
+        context.program.tools["submit_case"].invoke({"case_id": claimed["case_id"]})
+    domain.save_session_progress(replacement, "case")
+    assert domain.case_counts()[0] == 0
+    domain.build_session_context("report", new_id(), None)
+
+
 def test_claim_does_not_wait_for_draft_or_publication_lock(draft_case):
     domain, author = domain_for(draft_case)
     context = domain.build_session_context("case", author, None)

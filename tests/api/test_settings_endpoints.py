@@ -167,6 +167,34 @@ def test_pool_roundtrip_masks_keys_and_preserves_behavior_config(
     assert not isolated_settings.exists()
 
 
+def test_cleared_diagnosis_model_falls_back_to_pool_election(isolated_settings: Path, api_client: TestClient) -> None:
+    from unittest.mock import MagicMock
+
+    from src.agents.diagnosis.work_runtime import DiagnosisWorkScheduler
+    from src.config import settings
+    from src.event_bus import EventBus
+
+    env_file = isolated_settings.parent / ".env"
+    _save_pool(api_client)
+    assert read_env_file(env_file)["DIAGNOSIS_MODEL_ID"] == "diagnostic"
+    api_client.put("/api/settings/env", json={"diagnosis_model_id": None}).raise_for_status()
+    assert "DIAGNOSIS_MODEL_ID" not in read_env_file(env_file)
+    assert settings.models.diagnosis_model_id is None
+    scheduler = DiagnosisWorkScheduler(
+        run_id="test",
+        domain=MagicMock(),
+        bus=EventBus(),
+        model_id=settings.models.diagnosis_model_id,
+        llm_factory=MagicMock(),
+        observer_factory=MagicMock(),
+        audit_barrier=MagicMock(),
+    )
+    # 诊断模型未指定：案例会话数取池内并发位之和，报告会话按池选举
+    assert scheduler.case_sessions == 2
+    assert scheduler.pool.fixed_model_id is None
+    scheduler.pool.close()
+
+
 def test_pool_reload_uses_only_the_new_environment_contract(isolated_settings: Path, api_client: TestClient) -> None:
     _save_pool(api_client)
     reloaded = Settings.from_config_dict({})

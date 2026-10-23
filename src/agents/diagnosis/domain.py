@@ -451,8 +451,20 @@ class DiagnosisDomain:
         "释放失败会话的未保存领取、提交与事实贡献，保留案例登记"
         self.case_pool.abandon(author)
         with self.draft.publication_lock, self.lock:
-            if author not in self.session_saved and self._case_graph_value is not None:
+            if author in self.session_saved:
+                return
+            self.case_sessions.discard(author)
+            self.case_writers.pop(author, None)
+            self.ledgers.pop(author, None)
+            self.read_sessions.pop(author, None)
+            if self._case_graph_value is not None:
                 self._case_graph_value.rollback(author)
+            for name in ("events", "containments", "relations", "arcs", "event_arc_links", "outcomes",
+                         "event_outcome_links"):
+                records = getattr(self.draft, name)
+                for key in [key for key, item in records.items() if item.producer_agent_id == author]:
+                    del records[key]
+            self.draft.refresh_read_cache()
 
     def retain_pending_cases(self, error: BaseException) -> None:
         """失败或取消只短事务保留登记，不采用交付、不重写已保存产物
@@ -500,13 +512,13 @@ class DiagnosisDomain:
 def create_diagnosis_domain(
     *, session: Storage, run_id: str, novel_id: str, agent_id: str, novel_title: str | None = None
 ) -> DiagnosisDomain:
-    """诊断只解析 diagnosis_model_id 对应的池条目并要求其存在（model_id 仅作审计/计数
-    标识），不读取任何窗口或容量数字。"""
+    """诊断解析 diagnosis_model_id 对应的池条目；未指定时每个会话由模型池选举，
+    model_id 仅作计数标识，不读取窗口或容量数字。"""
     from src.config import settings
 
     model_id = settings.models.diagnosis_model_id
     entry = next((item for item in settings.models.model_pool if item.model_id == model_id), None)
-    if model_id is None or entry is None:
+    if model_id is not None and entry is None:
         raise ValueError("诊断模型不在模型池中")
     return DiagnosisDomain(
         session=session,
@@ -514,5 +526,5 @@ def create_diagnosis_domain(
         novel_id=novel_id,
         agent_id=agent_id,
         novel_title=novel_title,
-        model_id=entry.model_id,
+        model_id=entry.model_id if entry is not None else "",
     )

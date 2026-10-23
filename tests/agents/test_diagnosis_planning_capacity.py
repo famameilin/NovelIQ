@@ -89,7 +89,34 @@ def test_create_diagnosis_domain_only_resolves_pool_entry(declaration_case, monk
     created.close()
 
 
-def test_case_session_count_follows_model_in_flight(monkeypatch):
+def test_create_diagnosis_domain_without_pinned_model_leaves_model_to_pool(declaration_case, monkeypatch):
+    from src.agents.diagnosis import domain as domain_module
+    from src.config import settings
+    from src.config.schemas.model import WeightedModelSettings
+
+    draft = declaration_case
+    monkeypatch.setattr(
+        settings.models,
+        "model_pool",
+        [
+            WeightedModelSettings("pool-a", "https://a.example/v1", "key-a", context_window_tokens=128000),
+            WeightedModelSettings("pool-b", "https://b.example/v1", "key-b", context_window_tokens=128000),
+        ],
+    )
+    monkeypatch.setattr(settings.models, "diagnosis_model_id", None)
+    created = domain_module.create_diagnosis_domain(
+        session=storage_for(draft.fixture_session),
+        run_id=draft.run_id,
+        novel_id=fixture_id(__name__, "test-novel"),
+        agent_id=new_id(),
+        novel_title=None,
+    )
+    # 未指定诊断模型时域不绑定模型，会话级模型由调度内的池选举给出
+    assert created.model_id == ""
+    created.close()
+
+
+def test_case_session_count_sums_pool_capacity(monkeypatch):
     from src.config import settings
     from src.config.schemas.model import WeightedModelSettings
 
@@ -99,7 +126,13 @@ def test_case_session_count_follows_model_in_flight(monkeypatch):
         [
             WeightedModelSettings(
                 "diag-model", "https://x.example/v1", "k", context_window_tokens=128000, max_in_flight=3
-            )
+            ),
+            WeightedModelSettings(
+                "aux-model", "https://y.example/v1", "k2", context_window_tokens=128000, max_in_flight=2
+            ),
+            WeightedModelSettings(
+                "off-model", "https://z.example/v1", "k3", context_window_tokens=128000, weight=0, max_in_flight=9
+            ),
         ],
     )
 
@@ -116,9 +149,44 @@ def test_case_session_count_follows_model_in_flight(monkeypatch):
         params.update(overrides)
         return DiagnosisWorkScheduler(**params)
 
-    assert build().case_sessions == 3
+    # 案例会话数=池内并发位之和，关闭权重的模型不计
+    assert build().case_sessions == 5
+    assert build(model_id=None).case_sessions == 5
     # 显式覆盖优先（测试与离线演练）
-    assert build(case_sessions=5).case_sessions == 5
+    assert build(case_sessions=2).case_sessions == 2
+
+
+def test_case_session_count_ignores_diagnosis_model(monkeypatch):
+    from src.config import settings
+    from src.config.schemas.model import WeightedModelSettings
+
+    monkeypatch.setattr(
+        settings.models,
+        "model_pool",
+        [
+            WeightedModelSettings(
+                "pool-a", "https://a.example/v1", "key-a", context_window_tokens=128000, max_in_flight=2
+            ),
+            WeightedModelSettings(
+                "pool-b", "https://b.example/v1", "key-b", context_window_tokens=128000, max_in_flight=2
+            ),
+        ],
+    )
+    monkeypatch.setattr(settings.models, "diagnosis_model_id", None)
+
+    scheduler = DiagnosisWorkScheduler(
+        run_id=fixture_id(__name__, "run"),
+        domain=None,
+        bus=EventBus(),
+        model_id=None,
+        llm_factory=lambda _model_id: None,
+        observer_factory=lambda _progress: None,
+        audit_barrier=lambda: None,
+    )
+    # 未指定诊断模型：案例会话仍按池内并发位之和运行，模型按会话选举
+    assert scheduler.case_sessions == 4
+    assert scheduler.pool.fixed_model_id is None
+    scheduler.pool.close()
 
 
 async def test_run_work_refills_case_sessions_continuously_until_pool_empty(monkeypatch):

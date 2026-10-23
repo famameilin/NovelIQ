@@ -113,7 +113,7 @@ async def _run_diagnosis_agent(
             domain_session = None
             raise
     model_id = settings.models.diagnosis_model_id
-    if not model_id:
+    if model_id is None and not any(entry.weight > 0 for entry in settings.models.model_pool):
         raise DiagnosisAgentRunError("请从模型池指定诊断模型")
 
     def observer_factory(progress: Any) -> Any:
@@ -123,8 +123,8 @@ async def _run_diagnosis_agent(
             run_id=run_id,
             task_type="diagnosis",
             agent_id=progress.agent_id,
-            attempt_number=1,
-            model=model_id,
+            attempt_number=progress.attempt_number,
+            model=progress.model_id or model_id or "",
             case_anchor=None,
             role=progress.role,
         )
