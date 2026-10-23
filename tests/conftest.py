@@ -198,16 +198,19 @@ def reset_backend_db_singletons_per_test(force_test_database_url: None) -> Gener
 
 @pytest.fixture(autouse=True)
 def reset_capacity_and_event_bus() -> Generator[None, None, None]:
-    """每个测试后重置模型池容量账本与事件总线单例。"""
+    """每个测试后重置模型池容量账本、健康分与事件总线单例。"""
     from src.event_bus import EVENT_BUS
     from src.model_pool.capacity import MODEL_CAPACITY
+    from src.model_pool.health import MODEL_HEALTH
 
     MODEL_CAPACITY.reset()
+    MODEL_HEALTH.reset()
     EVENT_BUS.reset()
     try:
         yield
     finally:
         MODEL_CAPACITY.reset()
+        MODEL_HEALTH.reset()
         EVENT_BUS.reset()
 
 

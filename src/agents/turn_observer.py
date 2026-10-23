@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage
 
 from src.agents.stream_aggregator import extract_reasoning_content
 from src.agents.stream_audit import ModelCallTiming
+from src.model_pool.health import MODEL_HEALTH
 from src.model_pool.usage import estimate_agent_token_usage, extract_agent_token_usage
 
 _FALLBACK_AI_MESSAGE = AIMessage(content="")
@@ -186,6 +187,9 @@ class AgentTurnObserver:
             raise RuntimeError("物理 Provider 请求尚未开始")
         turn_id = self._pending_turn_id
         started_ns = self._pending_started_ns
+        usage = _usage_for_turn(
+            self._pending_request_messages, response_message, tool_schema_tokens=self._pending_tool_schema_tokens,
+        )
         self._recorder.finish_turn(
             turn_id,
             raw_response=_serialize_ai_message(response_message),
@@ -197,10 +201,9 @@ class AgentTurnObserver:
                 "model_ms": timing.model_ms,
             },
             timing_notes=list(timing.timing_notes),
-            token_usage=_usage_for_turn(
-                self._pending_request_messages, response_message, tool_schema_tokens=self._pending_tool_schema_tokens,
-            ),
+            token_usage=usage,
         )
+        self._record_health(success=True, timing=timing, usage=usage)
         self._pending_turn_id = None
         self._pending_started_ns = None
         self._pending_request_messages = []
@@ -221,6 +224,9 @@ class AgentTurnObserver:
         if self._pending_turn_id is None:
             raise RuntimeError("物理 Provider 请求尚未开始")
         response = response_message if response_message is not None else _FALLBACK_AI_MESSAGE
+        usage = _usage_for_turn(
+            self._pending_request_messages, response, tool_schema_tokens=self._pending_tool_schema_tokens,
+        )
         self._recorder.finish_turn(
             self._pending_turn_id,
             raw_response=_serialize_ai_message(response),
@@ -232,13 +238,22 @@ class AgentTurnObserver:
                 "model_ms": timing.model_ms,
             },
             timing_notes=list(timing.timing_notes) + ["provider_request_failed"],
-            token_usage=_usage_for_turn(
-                self._pending_request_messages, response, tool_schema_tokens=self._pending_tool_schema_tokens,
-            ),
+            token_usage=usage,
         )
+        self._record_health(success=False, timing=timing, usage=usage)
         self._pending_turn_id = None
         self._pending_started_ns = None
         self._pending_request_messages = []
+
+    def _record_health(self, *, success: bool, timing: ModelCallTiming, usage: dict[str, Any] | None) -> None:
+        """把本次物理请求的成功、token 和耗时登记到模型健康分"""
+        model_id = str(self._context.get("model") or "")
+        MODEL_HEALTH.record_turn(
+            model_id,
+            success=success,
+            tokens=int((usage or {}).get("total_tokens") or 0),
+            model_ms=float(timing.model_ms or 0),
+        )
 
     def record_tool_call(
         self,
