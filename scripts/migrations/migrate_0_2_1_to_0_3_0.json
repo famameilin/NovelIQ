@@ -1,0 +1,4080 @@
+{
+  "source": {
+    "novels": {
+      "columns": {
+        "novel_id": {
+          "type": "varchar(8)",
+          "nullable": false
+        },
+        "filename": {
+          "type": "varchar(500)",
+          "nullable": true
+        },
+        "file_path": {
+          "type": "text",
+          "nullable": true
+        },
+        "title": {
+          "type": "varchar(500)",
+          "nullable": true
+        },
+        "author": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "file_size": {
+          "type": "integer",
+          "nullable": true
+        },
+        "upload_time": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "novel_id"
+      ],
+      "foreign_keys": []
+    },
+    "analysis_runs": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "novel_id": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "source_path": {
+          "type": "text",
+          "nullable": true
+        },
+        "title": {
+          "type": "varchar(500)",
+          "nullable": true
+        },
+        "author": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "status": {
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        "progress": {
+          "type": "double precision",
+          "nullable": false
+        },
+        "stage": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "sub_stage": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "current": {
+          "type": "integer",
+          "nullable": false
+        },
+        "total": {
+          "type": "integer",
+          "nullable": false
+        },
+        "message": {
+          "type": "text",
+          "nullable": true
+        },
+        "error": {
+          "type": "text",
+          "nullable": true
+        },
+        "task_kind": {
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        "request_payload": {
+          "type": "text",
+          "nullable": true
+        },
+        "cancel_requested": {
+          "type": "boolean",
+          "nullable": false
+        },
+        "worker_id": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "heartbeat_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "started_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "completed_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "updated_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "run_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "novel_id"
+          ],
+          "target_table": "novels",
+          "target_columns": [
+            "novel_id"
+          ]
+        }
+      ]
+    },
+    "analysis_outputs": {
+      "columns": {
+        "output_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "kind": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "role": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "payload": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "actual_input": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "invocation_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "work_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "output_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "annotation_work": {
+      "columns": {
+        "work_id": {
+          "type": "varchar(64)",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "role": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "invocation_id": {
+          "type": "varchar(64)",
+          "nullable": false
+        },
+        "state": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "saved_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "work_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "book_cases": {
+      "columns": {
+        "case_id": {
+          "type": "varchar(64)",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "description": {
+          "type": "text",
+          "nullable": false
+        },
+        "state": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "contributions": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "case_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "chapters": {
+      "columns": {
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "sequence": {
+          "type": "integer",
+          "nullable": false
+        },
+        "title": {
+          "type": "text",
+          "nullable": false
+        },
+        "display_title": {
+          "type": "text",
+          "nullable": false
+        },
+        "display_index_label": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "level": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "start_pos": {
+          "type": "integer",
+          "nullable": false
+        },
+        "end_pos": {
+          "type": "integer",
+          "nullable": false
+        },
+        "text": {
+          "type": "text",
+          "nullable": true
+        },
+        "char_offset": {
+          "type": "integer",
+          "nullable": true
+        },
+        "char_end_offset": {
+          "type": "integer",
+          "nullable": true
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "chapter_id",
+        "run_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "event_outbox": {
+      "columns": {
+        "event_id": {
+          "type": "varchar(64)",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "stream_id": {
+          "type": "bigint",
+          "nullable": false
+        },
+        "event_type": {
+          "type": "varchar(60)",
+          "nullable": false
+        },
+        "payload": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "published_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "event_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "global_stats": {
+      "columns": {
+        "stat_name": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "stat_value": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "stat_name",
+        "run_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "graph_entities": {
+      "columns": {
+        "entity_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "canonical_name": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "entity_type": {
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        "tags": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "attributes": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "first_seen_chapter": {
+          "type": "integer",
+          "nullable": false
+        },
+        "last_seen_chapter": {
+          "type": "integer",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "entity_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "model_turns": {
+      "columns": {
+        "id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "task_type": {
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        "call_type": {
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        "model": {
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        "execution_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "attempt_number": {
+          "type": "integer",
+          "nullable": true
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "work_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "role": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "turn_index": {
+          "type": "integer",
+          "nullable": true
+        },
+        "row_kind": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "status": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "error": {
+          "type": "text",
+          "nullable": true
+        },
+        "raw_response": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "context_summary": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "request_messages": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "timing_notes": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "ttft_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "first_visible_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "reasoning_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "model_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "tool_wall_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "turn_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "prompt_tokens": {
+          "type": "integer",
+          "nullable": true
+        },
+        "completion_tokens": {
+          "type": "integer",
+          "nullable": true
+        },
+        "total_tokens": {
+          "type": "integer",
+          "nullable": true
+        },
+        "cache_read_tokens": {
+          "type": "integer",
+          "nullable": true
+        },
+        "reasoning_tokens": {
+          "type": "integer",
+          "nullable": true
+        },
+        "cost": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "accounting_source": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "message_key": {
+          "type": "varchar(128)",
+          "nullable": true
+        },
+        "started_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "finished_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "topic_model_runs": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "model_key": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "library_version": {
+          "type": "varchar(64)",
+          "nullable": false
+        },
+        "pipeline_version": {
+          "type": "varchar(64)",
+          "nullable": false
+        },
+        "num_topics": {
+          "type": "integer",
+          "nullable": false
+        },
+        "parameters": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "dictionary_size": {
+          "type": "integer",
+          "nullable": false
+        },
+        "training_document_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "inference_paragraph_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "artifact_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "word2vec_model_runs": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "embedding_dimension": {
+          "type": "integer",
+          "nullable": false
+        },
+        "vocabulary_size": {
+          "type": "integer",
+          "nullable": false
+        },
+        "parameters": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "source_uri": {
+          "type": "text",
+          "nullable": true
+        },
+        "license_name": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "training_document_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "training_token_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "artifact_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "artifact_scope": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "agent_tool_calls": {
+      "columns": {
+        "id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "turn_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "tool_name": {
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        "call_index": {
+          "type": "integer",
+          "nullable": false
+        },
+        "request_args": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "raw_args": {
+          "type": "text",
+          "nullable": true
+        },
+        "response": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "receipt": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "status": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "error": {
+          "type": "text",
+          "nullable": true
+        },
+        "tool_duration_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "started_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "message_key": {
+          "type": "varchar(128)",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "turn_id"
+          ],
+          "target_table": "model_turns",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "dialogue_records": {
+      "columns": {
+        "dialogue_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "author_work_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "candidate_key": {
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        "content": {
+          "type": "text",
+          "nullable": false
+        },
+        "start": {
+          "type": "integer",
+          "nullable": false
+        },
+        "end": {
+          "type": "integer",
+          "nullable": false
+        },
+        "speaker": {
+          "type": "varchar(36)",
+          "nullable": true
+        },
+        "tone": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "is_inner_monologue": {
+          "type": "boolean",
+          "nullable": false
+        },
+        "confidence": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "event_id": {
+          "type": "varchar(36)",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "dialogue_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "chapter_id",
+            "run_id"
+          ],
+          "target_table": "chapters",
+          "target_columns": [
+            "chapter_id",
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "speaker"
+          ],
+          "target_table": "graph_entities",
+          "target_columns": [
+            "entity_id"
+          ]
+        }
+      ]
+    },
+    "entity_states": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "entity_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "state": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "changes": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "author_work_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id",
+        "chapter_id",
+        "entity_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "chapter_id",
+            "run_id"
+          ],
+          "target_table": "chapters",
+          "target_columns": [
+            "chapter_id",
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "entity_id"
+          ],
+          "target_table": "graph_entities",
+          "target_columns": [
+            "entity_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "event_nodes": {
+      "columns": {
+        "event_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "chapter_order": {
+          "type": "integer",
+          "nullable": false
+        },
+        "description": {
+          "type": "varchar",
+          "nullable": false
+        },
+        "participants": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "anchor_paragraph_ids": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "char_start": {
+          "type": "integer",
+          "nullable": false
+        },
+        "char_end": {
+          "type": "integer",
+          "nullable": false
+        },
+        "evidence": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "causal_event_refs": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "tree_id": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "cause_role": {
+          "type": "varchar(16)",
+          "nullable": false
+        },
+        "is_foreshadowing_root": {
+          "type": "boolean",
+          "nullable": false
+        },
+        "foreshadowing_status": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "payoff_likelihood": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "strength": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "annotation_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "source_kind": {
+          "type": "varchar(30)",
+          "nullable": false
+        },
+        "payload_path": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "author_work_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "producer_invocation_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "parent_node_id": {
+          "type": "varchar(36)",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "event_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "annotation_id"
+          ],
+          "target_table": "analysis_outputs",
+          "target_columns": [
+            "output_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "chapter_id",
+            "run_id"
+          ],
+          "target_table": "chapters",
+          "target_columns": [
+            "chapter_id",
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "graph_relations": {
+      "columns": {
+        "relation_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "from_entity_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "to_entity_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "directionality": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "relation_semantics": {
+          "type": "varchar(30)",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "relation_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "from_entity_id"
+          ],
+          "target_table": "graph_entities",
+          "target_columns": [
+            "entity_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "to_entity_id"
+          ],
+          "target_table": "graph_entities",
+          "target_columns": [
+            "entity_id"
+          ]
+        }
+      ]
+    },
+    "paragraphs": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "paragraph_index": {
+          "type": "integer",
+          "nullable": false
+        },
+        "source_paragraph_index": {
+          "type": "integer",
+          "nullable": false
+        },
+        "fragment_index": {
+          "type": "integer",
+          "nullable": false
+        },
+        "local_start_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "local_end_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "global_start_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "global_end_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "char_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "token_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "text": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id",
+        "paragraph_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "chapter_id",
+            "run_id"
+          ],
+          "target_table": "chapters",
+          "target_columns": [
+            "chapter_id",
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "event_edges": {
+      "columns": {
+        "edge_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "author_work_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "cause_role": {
+          "type": "varchar(16)",
+          "nullable": true
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "edge_type": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "source_event_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "target_event_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "source_chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "target_chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "is_active": {
+          "type": "boolean",
+          "nullable": false
+        },
+        "evidence": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "annotation_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "payload_path": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "expired_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "edge_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "annotation_id"
+          ],
+          "target_table": "analysis_outputs",
+          "target_columns": [
+            "output_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "source_chapter_id",
+            "run_id"
+          ],
+          "target_table": "chapters",
+          "target_columns": [
+            "chapter_id",
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "source_event_id"
+          ],
+          "target_table": "event_nodes",
+          "target_columns": [
+            "event_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "target_chapter_id",
+            "run_id"
+          ],
+          "target_table": "chapters",
+          "target_columns": [
+            "chapter_id",
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "target_event_id"
+          ],
+          "target_table": "event_nodes",
+          "target_columns": [
+            "event_id"
+          ]
+        }
+      ]
+    },
+    "graph_facts": {
+      "columns": {
+        "graph_fact_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "fact_id": {
+          "type": "varchar(128)",
+          "nullable": false
+        },
+        "fact_type": {
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        "subject_entity_id": {
+          "type": "varchar(36)",
+          "nullable": true
+        },
+        "predicate": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "object": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "value": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "participants": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "scope": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "story_time": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "assertion": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "confidence": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "content": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "effective_chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "source_kind": {
+          "type": "varchar(30)",
+          "nullable": false
+        },
+        "annotation_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "payload_path": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "author_work_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "event_id": {
+          "type": "varchar(36)",
+          "nullable": true
+        },
+        "evidence": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "graph_fact_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "annotation_id"
+          ],
+          "target_table": "analysis_outputs",
+          "target_columns": [
+            "output_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "chapter_id",
+            "run_id"
+          ],
+          "target_table": "chapters",
+          "target_columns": [
+            "chapter_id",
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "effective_chapter_id",
+            "run_id"
+          ],
+          "target_table": "chapters",
+          "target_columns": [
+            "chapter_id",
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "event_id"
+          ],
+          "target_table": "event_nodes",
+          "target_columns": [
+            "event_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "subject_entity_id"
+          ],
+          "target_table": "graph_entities",
+          "target_columns": [
+            "entity_id"
+          ]
+        }
+      ]
+    },
+    "paragraph_curves": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "pos_density": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "neg_density": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "net_density": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "smoothed_net_density": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "surface_tension": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "smoothed_surface_tension": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id",
+        "paragraph_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraphs",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "paragraph_embeddings": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "embedding_vector": {
+          "type": "vector",
+          "nullable": true
+        },
+        "embedding_model_key": {
+          "type": "varchar",
+          "nullable": true
+        },
+        "embedding_dimension": {
+          "type": "integer",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "run_id",
+        "paragraph_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraphs",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "paragraph_linguistic_features": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "ltp_token_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "tokens": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "word_length_counts": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "pos_counts": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "sentence_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "sentence_pattern_counts": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "dependency_arcs": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "dependency_node_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "dependency_root_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "dependency_depth_sum": {
+          "type": "integer",
+          "nullable": false
+        },
+        "dependency_depth_max": {
+          "type": "integer",
+          "nullable": false
+        },
+        "dependency_relation_counts": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "sdp_arcs": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "emotion_events": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "emotion_event_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "emotion_pos_event_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "emotion_neg_event_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "lexicon_pos_count": {
+          "type": "double precision",
+          "nullable": false
+        },
+        "lexicon_neg_count": {
+          "type": "double precision",
+          "nullable": false
+        },
+        "mneg_pos_count": {
+          "type": "double precision",
+          "nullable": false
+        },
+        "mneg_neg_count": {
+          "type": "double precision",
+          "nullable": false
+        },
+        "boundary_pos_score_sum": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "boundary_neg_score_sum": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id",
+        "paragraph_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraphs",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "paragraph_metrics": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "token_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "char_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "sentence_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "sentence_char_sum": {
+          "type": "double precision",
+          "nullable": false
+        },
+        "sentence_char_sum_sq": {
+          "type": "double precision",
+          "nullable": false
+        },
+        "positive_weight_sum": {
+          "type": "double precision",
+          "nullable": false
+        },
+        "negative_weight_sum": {
+          "type": "double precision",
+          "nullable": false
+        },
+        "fight_weight_sum": {
+          "type": "double precision",
+          "nullable": false
+        },
+        "exclaim_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "question_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "pause_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "dialogue_char_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "sensory_hit_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "imagery_hit_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "metaphor_sentence_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "body_reaction_hit_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "function_word_counts": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "semantic_category_counts": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "surface_tension_z": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "surface_tension": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id",
+        "paragraph_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraphs",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "paragraph_topic_inference": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "source_token_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "inference_token_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "inference_status": {
+          "type": "varchar(30)",
+          "nullable": false
+        },
+        "unavailable_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "distribution_sum": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id",
+        "paragraph_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraphs",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "topic_model_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "relation_states": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "relation_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "relation_type": {
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        "attributes": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "is_active": {
+          "type": "boolean",
+          "nullable": false
+        },
+        "changes": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "author_work_id": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id",
+        "chapter_id",
+        "relation_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "chapter_id",
+            "run_id"
+          ],
+          "target_table": "chapters",
+          "target_columns": [
+            "chapter_id",
+            "run_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "relation_id"
+          ],
+          "target_table": "graph_relations",
+          "target_columns": [
+            "relation_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "analysis_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "paragraph_entities": {
+      "columns": {
+        "id": {
+          "type": "bigint",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "surface_text": {
+          "type": "text",
+          "nullable": false
+        },
+        "raw_entity_type": {
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        "normalized_entity_type": {
+          "type": "varchar(50)",
+          "nullable": true
+        },
+        "local_start_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "local_end_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "confidence": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "source_kind": {
+          "type": "varchar(30)",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraph_linguistic_features",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraphs",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        }
+      ]
+    },
+    "paragraph_phrase_hits": {
+      "columns": {
+        "id": {
+          "type": "bigint",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "surface_text": {
+          "type": "text",
+          "nullable": false
+        },
+        "phrase_type": {
+          "type": "varchar(50)",
+          "nullable": true
+        },
+        "local_start_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "local_end_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "match_kind": {
+          "type": "varchar(30)",
+          "nullable": false
+        },
+        "lexicon_key": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "is_metric_hit": {
+          "type": "boolean",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraph_linguistic_features",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraphs",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        }
+      ]
+    },
+    "paragraph_pos_embeddings": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "pos_group": {
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        "embedding_vector": {
+          "type": "vector",
+          "nullable": true
+        },
+        "source_token_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "in_vocabulary_token_count": {
+          "type": "integer",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id",
+        "paragraph_id",
+        "pos_group"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraph_linguistic_features",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraphs",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "word2vec_model_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "paragraph_topics": {
+      "columns": {
+        "run_id": {
+          "type": "varchar(36)",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "topic_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "topic_weight": {
+          "type": "double precision",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "run_id",
+        "paragraph_id",
+        "topic_id"
+      ],
+      "foreign_keys": [
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraph_topic_inference",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id",
+            "paragraph_id"
+          ],
+          "target_table": "paragraphs",
+          "target_columns": [
+            "run_id",
+            "paragraph_id"
+          ]
+        },
+        {
+          "source_columns": [
+            "run_id"
+          ],
+          "target_table": "topic_model_runs",
+          "target_columns": [
+            "run_id"
+          ]
+        }
+      ]
+    }
+  },
+  "target": {
+    "novels": {
+      "columns": {
+        "novel_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "filename": {
+          "type": "varchar(500)",
+          "nullable": true
+        },
+        "file_path": {
+          "type": "text",
+          "nullable": true
+        },
+        "title": {
+          "type": "varchar(500)",
+          "nullable": true
+        },
+        "author": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "file_size": {
+          "type": "bigint",
+          "nullable": true
+        },
+        "upload_time": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "novel_id"
+      ]
+    },
+    "runs": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "novelid": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "taskid": {
+          "type": "varchar(8)",
+          "nullable": false
+        },
+        "status": {
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        "lda_completed": {
+          "type": "boolean",
+          "nullable": false
+        },
+        "w2v_completed": {
+          "type": "boolean",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "agent": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "type": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "status": {
+          "type": "varchar(20)",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "agent_outbox": {
+      "columns": {
+        "message_key": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "event_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "stream_id": {
+          "type": "bigint",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "event_type": {
+          "type": "varchar(60)",
+          "nullable": false
+        },
+        "emitted_bytes": {
+          "type": "bytea",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "published_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "event_id"
+      ]
+    },
+    "chapters": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "sequence": {
+          "type": "integer",
+          "nullable": false
+        },
+        "title": {
+          "type": "text",
+          "nullable": false
+        },
+        "display_title": {
+          "type": "text",
+          "nullable": false
+        },
+        "display_index_label": {
+          "type": "varchar(64)",
+          "nullable": true
+        },
+        "level": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "start_pos": {
+          "type": "integer",
+          "nullable": false
+        },
+        "end_pos": {
+          "type": "integer",
+          "nullable": false
+        },
+        "text": {
+          "type": "text",
+          "nullable": true
+        },
+        "char_offset": {
+          "type": "integer",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "global_stats": {
+      "columns": {
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "avg_mtld": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "avg_ttr": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "avg_sent_len": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "emotion_avg": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "lexicon_zero_hit_share": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "emotion_std": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "emotion_max": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "emotion_min": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "emotion_peak_chapter_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "emotion_min_chapter_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "rhythm_avg": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "rhythm_std": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "rhythm_max": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "rhythm_min": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "rhythm_peak_chapter_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "rhythm_min_chapter_id": {
+          "type": "integer",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "run_id"
+      ]
+    },
+    "graph_entities": {
+      "columns": {
+        "entity_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "canonical_name": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "entity_type": {
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "entity_id"
+      ]
+    },
+    "agent_annotations": {
+      "columns": {
+        "record_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "agent_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "role": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "consolidation_digest": {
+          "type": "text",
+          "nullable": true
+        },
+        "summary": {
+          "type": "varchar",
+          "nullable": true
+        },
+        "emotional_valence": {
+          "type": "integer",
+          "nullable": true
+        },
+        "narrative_function": {
+          "type": "varchar(50)",
+          "nullable": true
+        },
+        "pivot_moment": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "cliffhanger": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "saved_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "record_id"
+      ]
+    },
+    "agent_loop": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "model": {
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        "error": {
+          "type": "text",
+          "nullable": true
+        },
+        "started_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "finished_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "message_key": {
+          "type": "varchar(128)",
+          "nullable": true
+        },
+        "agent_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "turn_index": {
+          "type": "integer",
+          "nullable": true
+        },
+        "standalone_run_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "standalone_chapter_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "standalone_task_type": {
+          "type": "varchar(100)",
+          "nullable": true
+        },
+        "standalone_call_type": {
+          "type": "varchar(50)",
+          "nullable": true
+        },
+        "prompt_tokens": {
+          "type": "integer",
+          "nullable": true
+        },
+        "completion_tokens": {
+          "type": "integer",
+          "nullable": true
+        },
+        "cache_read_tokens": {
+          "type": "integer",
+          "nullable": true
+        },
+        "reasoning_tokens": {
+          "type": "integer",
+          "nullable": true
+        },
+        "accounting_source": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "reported_total_tokens": {
+          "type": "integer",
+          "nullable": true
+        },
+        "cost": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "ttft_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "first_visible_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "reasoning_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "model_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "tool_wall_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "request_messages_bytes": {
+          "type": "bytea",
+          "nullable": true
+        },
+        "raw_response_bytes": {
+          "type": "bytea",
+          "nullable": true
+        },
+        "context_observed_bytes": {
+          "type": "bytea",
+          "nullable": true
+        },
+        "timing_notes_bytes": {
+          "type": "bytea",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "case": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "type": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "description": {
+          "type": "text",
+          "nullable": false
+        },
+        "status": {
+          "type": "varchar(20)",
+          "nullable": false
+        },
+        "producer_agent_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "promised_agent_id": {
+          "type": "uuid",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "diagnosis_reports": {
+      "columns": {
+        "report_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "agent_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "diagnosis": {
+          "type": "text",
+          "nullable": true
+        },
+        "value_logic_type": {
+          "type": "varchar(50)",
+          "nullable": true
+        },
+        "value_logic_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "power_stance_score": {
+          "type": "integer",
+          "nullable": true
+        },
+        "power_stance_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "common_people_dignity": {
+          "type": "integer",
+          "nullable": true
+        },
+        "dignity_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "cultural_depth_score": {
+          "type": "integer",
+          "nullable": true
+        },
+        "cultural_depth_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "narrative_arc_type": {
+          "type": "varchar(10)",
+          "nullable": true
+        },
+        "focus_structure": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "theme_color": {
+          "type": "varchar(16)",
+          "nullable": true
+        },
+        "content_snapshot": {
+          "type": "text",
+          "nullable": true
+        },
+        "structure_snapshot": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "report_id"
+      ]
+    },
+    "event_groups": {
+      "columns": {
+        "group_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "producer_agent_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "title": {
+          "type": "varchar",
+          "nullable": false
+        },
+        "arc_kind": {
+          "type": "varchar(16)",
+          "nullable": true
+        },
+        "arc_objective": {
+          "type": "varchar",
+          "nullable": true
+        },
+        "arc_role": {
+          "type": "varchar",
+          "nullable": true
+        },
+        "arc_reason": {
+          "type": "varchar",
+          "nullable": true
+        },
+        "parent_arc_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "outcome_description": {
+          "type": "varchar",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "group_id"
+      ]
+    },
+    "graph_relations": {
+      "columns": {
+        "relation_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "from_entity_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "to_entity_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "relation_type": {
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "relation_id"
+      ]
+    },
+    "paragraphs": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "paragraph_index": {
+          "type": "integer",
+          "nullable": false
+        },
+        "source_paragraph_index": {
+          "type": "integer",
+          "nullable": false
+        },
+        "fragment_index": {
+          "type": "integer",
+          "nullable": false
+        },
+        "local_start_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "text": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "agent_assessments": {
+      "columns": {
+        "assessment_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "record_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "report_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "emotion": {
+          "type": "integer",
+          "nullable": true
+        },
+        "ordinal": {
+          "type": "integer",
+          "nullable": true
+        },
+        "genre_label": {
+          "type": "varchar(100)",
+          "nullable": true
+        },
+        "style_label": {
+          "type": "varchar(100)",
+          "nullable": true
+        },
+        "topic_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "topic_label": {
+          "type": "varchar(100)",
+          "nullable": true
+        },
+        "scored_entity_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "character_score": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "cast_role": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "cast_entity_id": {
+          "type": "uuid",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "assessment_id"
+      ]
+    },
+    "agent_toolcall": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "agentloop_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "tool_name": {
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        "call_index": {
+          "type": "integer",
+          "nullable": false
+        },
+        "error": {
+          "type": "text",
+          "nullable": true
+        },
+        "started_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "tool_duration_ms": {
+          "type": "integer",
+          "nullable": true
+        },
+        "message_key": {
+          "type": "varchar(128)",
+          "nullable": true
+        },
+        "raw_args_bytes": {
+          "type": "bytea",
+          "nullable": true
+        },
+        "executed_args_bytes": {
+          "type": "bytea",
+          "nullable": true
+        },
+        "response_observed_bytes": {
+          "type": "bytea",
+          "nullable": true
+        },
+        "receipt_observed_bytes": {
+          "type": "bytea",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "event_records": {
+      "columns": {
+        "event_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "producer_agent_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "local_key": {
+          "type": "varchar(255)",
+          "nullable": false
+        },
+        "annotation_record_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "from": {
+          "type": "integer",
+          "nullable": false
+        },
+        "to": {
+          "type": "integer",
+          "nullable": false
+        },
+        "reason": {
+          "type": "varchar",
+          "nullable": true
+        },
+        "is_foreshadowing_root": {
+          "type": "boolean",
+          "nullable": false
+        },
+        "payoff_likelihood": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "title": {
+          "type": "varchar",
+          "nullable": false
+        },
+        "problem": {
+          "type": "varchar",
+          "nullable": false
+        },
+        "summary": {
+          "type": "varchar",
+          "nullable": false
+        },
+        "event_type": {
+          "type": "varchar",
+          "nullable": false
+        },
+        "status": {
+          "type": "varchar(16)",
+          "nullable": false
+        },
+        "progress": {
+          "type": "varchar",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "event_id"
+      ]
+    },
+    "lda_paragraph_topics": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "topic_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "topic_weight": {
+          "type": "double precision",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "paragraph_features": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "feature_code": {
+          "type": "varchar(64)",
+          "nullable": false
+        },
+        "vector_value": {
+          "type": "vector",
+          "nullable": true
+        },
+        "scalar_value": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "count_value": {
+          "type": "integer",
+          "nullable": true
+        },
+        "in_vocabulary_token_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "paragraph_metrics": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "token_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "sentence_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "sentence_char_sum": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "sentence_char_sum_sq": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "positive_weight_sum": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "negative_weight_sum": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "fight_weight_sum": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "exclaim_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "question_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "pause_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "dialogue_char_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "sensory_hit_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "imagery_hit_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "metaphor_sentence_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "body_reaction_hit_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "metrics_created_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "preprocess_observed_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "linguistic_completed_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "phrase_completed_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "fw_之": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_其": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_者": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_也": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_所": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_以": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_而": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_与": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_则": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_乃": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_于": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_乎": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_矣": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_焉": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_哉": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_兮": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_尔": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_若": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_为": {
+          "type": "integer",
+          "nullable": true
+        },
+        "fw_何": {
+          "type": "integer",
+          "nullable": true
+        },
+        "semantic_combat": {
+          "type": "integer",
+          "nullable": true
+        },
+        "semantic_body": {
+          "type": "integer",
+          "nullable": true
+        },
+        "semantic_relation": {
+          "type": "integer",
+          "nullable": true
+        },
+        "semantic_faction": {
+          "type": "integer",
+          "nullable": true
+        },
+        "semantic_command": {
+          "type": "integer",
+          "nullable": true
+        },
+        "semantic_action": {
+          "type": "integer",
+          "nullable": true
+        },
+        "semantic_psychology": {
+          "type": "integer",
+          "nullable": true
+        },
+        "semantic_measure": {
+          "type": "integer",
+          "nullable": true
+        },
+        "semantic_emotion": {
+          "type": "integer",
+          "nullable": true
+        },
+        "semantic_color": {
+          "type": "integer",
+          "nullable": true
+        },
+        "boundary_pos_score_sum": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "boundary_neg_score_sum": {
+          "type": "double precision",
+          "nullable": true
+        },
+        "inference_token_count": {
+          "type": "integer",
+          "nullable": true
+        },
+        "inference_status": {
+          "type": "varchar(30)",
+          "nullable": true
+        },
+        "inference_error_text": {
+          "type": "text",
+          "nullable": true
+        },
+        "inference_created_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "paragraph_spans": {
+      "columns": {
+        "span_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "start_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "end_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "token_index": {
+          "type": "integer",
+          "nullable": true
+        },
+        "raw_pos": {
+          "type": "varchar(50)",
+          "nullable": true
+        },
+        "raw_entity_type": {
+          "type": "varchar(50)",
+          "nullable": true
+        },
+        "phrase_match_kind": {
+          "type": "varchar(30)",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "span_id"
+      ]
+    },
+    "event_checks": {
+      "columns": {
+        "check_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "producer_agent_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "reason": {
+          "type": "varchar",
+          "nullable": false
+        },
+        "reviewed_event_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "source_event_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "target_event_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "snapshot_hash": {
+          "type": "varchar(128)",
+          "nullable": true
+        },
+        "disposition": {
+          "type": "varchar(50)",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "check_id"
+      ]
+    },
+    "event_foreshadowing_actions": {
+      "columns": {
+        "action_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "producer_agent_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "source_operation_local_key": {
+          "type": "varchar(128)",
+          "nullable": false
+        },
+        "operation_order": {
+          "type": "integer",
+          "nullable": false
+        },
+        "action_type": {
+          "type": "varchar(16)",
+          "nullable": false
+        },
+        "source_event_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "target_event_id": {
+          "type": "uuid",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "action_id"
+      ]
+    },
+    "event_links": {
+      "columns": {
+        "link_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "producer_agent_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "reason": {
+          "type": "varchar",
+          "nullable": false
+        },
+        "semantic_source_event_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "semantic_target_event_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "relation_type": {
+          "type": "varchar(100)",
+          "nullable": true
+        },
+        "source_operation_local_key": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "annotation_local_key": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "is_active": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "expired_at": {
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        "cause_role": {
+          "type": "varchar(16)",
+          "nullable": true
+        },
+        "contained_child_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "contained_parent_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "member_event_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "arc_group_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "outcome_group_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "arc_role": {
+          "type": "varchar(50)",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "link_id"
+      ]
+    },
+    "event_participants": {
+      "columns": {
+        "participant_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "event_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "participant_ordinal": {
+          "type": "integer",
+          "nullable": false
+        },
+        "entity_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "role": {
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        "narrative_role": {
+          "type": "varchar(50)",
+          "nullable": true
+        },
+        "action": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "emotion": {
+          "type": "integer",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "participant_id"
+      ]
+    },
+    "graph_dialogues": {
+      "columns": {
+        "dialogue_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "chapter_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "creation_agent_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "candidate_key": {
+          "type": "varchar(100)",
+          "nullable": false
+        },
+        "start_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "end_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "current_attribution_agent_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "speaker_entity_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "tone": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "is_inner_monologue": {
+          "type": "boolean",
+          "nullable": false
+        },
+        "related_complete_event_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "dialogue_id"
+      ]
+    },
+    "paragraph_arcs": {
+      "columns": {
+        "arc_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "dependent_span_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "head_span_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "relation_code": {
+          "type": "varchar(50)",
+          "nullable": false
+        },
+        "source_ordinal": {
+          "type": "integer",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "arc_id"
+      ]
+    },
+    "graph_facts": {
+      "columns": {
+        "graph_fact_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "direct_producer_agent_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "operation_order": {
+          "type": "integer",
+          "nullable": true
+        },
+        "business_call_id": {
+          "type": "text",
+          "nullable": true
+        },
+        "effective_chapter_id": {
+          "type": "integer",
+          "nullable": true
+        },
+        "entity_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "relation_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "participant_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "event_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "description_action": {
+          "type": "varchar(10)",
+          "nullable": true
+        },
+        "description_value": {
+          "type": "text",
+          "nullable": true
+        },
+        "representative_action": {
+          "type": "varchar(10)",
+          "nullable": true
+        },
+        "representative_value": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "tags_submitted": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "relation_change_kind": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "identity_kind": {
+          "type": "varchar(20)",
+          "nullable": true
+        },
+        "reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "plotline_subject_id": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "plotline_subject_title": {
+          "type": "varchar(255)",
+          "nullable": true
+        },
+        "plotline_description": {
+          "type": "text",
+          "nullable": true
+        },
+        "plotline_before": {
+          "type": "text",
+          "nullable": true
+        },
+        "plotline_after": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "graph_fact_id"
+      ]
+    },
+    "graph_fact_entity_tags": {
+      "columns": {
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "graph_fact_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "tag_ordinal": {
+          "type": "integer",
+          "nullable": false
+        },
+        "tag": {
+          "type": "varchar(100)",
+          "nullable": false
+        }
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "paragraph_evidence": {
+      "columns": {
+        "evidence_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "ordinal": {
+          "type": "integer",
+          "nullable": false
+        },
+        "paragraph_id": {
+          "type": "integer",
+          "nullable": false
+        },
+        "start_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "end_char": {
+          "type": "integer",
+          "nullable": false
+        },
+        "related_complete_event_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "graph_fact_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "complete_event_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "narrative_group_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "narrative_link_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "foreshadow_action_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "check_id": {
+          "type": "uuid",
+          "nullable": true
+        }
+      },
+      "primary_key": [
+        "evidence_id"
+      ]
+    }
+  },
+  "target_constraints_sha256": "6e8bd0f776698547d1a2db15393d7cb86714ff7c5ae57d8ce00a565e8a52b69f",
+  "target_ddl_sha256": "1c162953e4acd8d8c4de5c2ae3832e31d82afe9e9e2c0362d17107341b723174"
+}
