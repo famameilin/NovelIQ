@@ -48,6 +48,11 @@ def annotation_chapter_of_execution(session: Storage, agent_id: Any) -> Any:
     return session.narrative.annotation_chapter_of_execution(agent_id)
 
 
+def annotation_chapters_of_executions(session: Storage, agent_ids: Any) -> Any:
+    """批量读取标注执行的来源章，返回 agent_id → (chapter_id, chapter_order)"""
+    return session.narrative.annotation_chapters_of_executions(agent_ids)
+
+
 def chapter_offsets(session: Storage, run_id: Any, chapter_ids: Any) -> Any:
     """章正文全文起点；空正文章节无切片，其段落也不存在证据"""
     return session.narrative.chapter_offsets(run_id, chapter_ids)

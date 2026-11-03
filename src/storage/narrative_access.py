@@ -65,6 +65,12 @@ class NarrativeAccess:
             lambda session: _records.annotation_chapter_of_execution(session, agent_id), read_only=True
         )
 
+    def annotation_chapters_of_executions(self, agent_ids: Any) -> Any:
+        "批量读取标注执行的来源章，返回 agent_id → (chapter_id, chapter_order)"
+        return self._runner.run(
+            lambda session: _records.annotation_chapters_of_executions(session, agent_ids), read_only=True
+        )
+
     def chapter_offsets(self, run_id: Any, chapter_ids: Any) -> Any:
         "章正文全文起点；空正文章节无切片，其段落也不存在证据"
         return self._runner.run(lambda session: _records.chapter_offsets(session, run_id, chapter_ids), read_only=True)

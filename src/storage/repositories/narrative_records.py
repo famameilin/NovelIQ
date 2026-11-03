@@ -138,6 +138,24 @@ def execution_in_run(session: Session, agent_id: str, run_id: str) -> bool:
     )
 
 
+def annotation_chapters_of_executions(session: Session, agent_ids: set[str]) -> dict[str, tuple[int, int]]:
+    "批量读取标注执行的来源章，返回 agent_id → (chapter_id, chapter_order)"
+    if not agent_ids:
+        return {}
+    rows = session.execute(
+        select(ChapterAnnotation.agent_id, ChapterAnnotation.chapter_id, Chapter.sequence)
+        .join(
+            Chapter,
+            (Chapter.run_id == ChapterAnnotation.run_id) & (Chapter.chapter_id == ChapterAnnotation.chapter_id),
+        )
+        .where(ChapterAnnotation.agent_id.in_(agent_ids))
+    ).all()
+    result: dict[str, tuple[int, int]] = {}
+    for row in rows:
+        result.setdefault(str(row.agent_id), (int(row.chapter_id), int(row.sequence)))
+    return result
+
+
 def annotation_chapter_of_execution(session: Session, agent_id: str) -> NamedRecord:
     "标注执行的来源章：章号取执行自身归属列，章序从 chapters 取得"
     row = session.execute(
