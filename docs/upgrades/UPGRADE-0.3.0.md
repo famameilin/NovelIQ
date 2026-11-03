@@ -1,12 +1,12 @@
 # 从 0.2.1 升级到 0.3.0
 
-入口：`scripts/migrations/migrate_0_2_1_to_0_3_0.py`。脚本默认只读预检，只有显式指定 `--apply --expect-database` 才执行数据库升级。
+入口：`scripts/migrations/migrate_0_2_1_to_0_3_0.py`。这是单文件入口，使用项目正常安装的依赖、ORM 和数据库配置模块。脚本默认只读预检，只有显式指定 `--apply --expect-database` 才执行数据库升级。
 
 本入口按本次明确允许的旧数据转换例外实现，不修改仓库默认的“数据处理只允许重建”约束，不在正式读写链增加旧格式兼容。
 
 ## 数据范围
 
-脚本以 0.2.1 发布标签中的实际 ORM 为源结构，以当前 0.3.0 ORM 为目标结构；两者均为 30 张业务表。配套 JSON 保存源表字段、类型、可空性、主键与外键目标，以及目标结构和约束摘要。项目版本仍只读取 `pyproject.toml`，不增加运行、模块或结果版本。
+脚本以 0.2.1 发布标签中的实际 ORM 为源结构，以项目 0.3.0 ORM 为目标结构；两者均为 30 张业务表。源结构的 373 列及其类型、可空性、主键和外键目标直接内置在入口中，目标结构及领域约束使用项目现有接口。运行不需要配套 JSON、其他迁移脚本、初始化脚本或 Git；项目版本仍只读取 `pyproject.toml`，不增加运行、模块或结果版本。
 
 执行时先将全部源表整体移动到归档 schema，保留原表 OID、记录、索引、序列和外键；再在原业务 schema 建立新表并转换。默认归档名为 `<业务schema>_pre_0_3_0`，长名称取业务 schema 前 50 个字符后加后缀，也可通过 `--archive-schema` 指定。已经存在的归档不会被覆盖。
 
@@ -30,12 +30,14 @@
 
 ## 使用
 
+唯一入口为 `scripts/migrations/migrate_0_2_1_to_0_3_0.py`，公共接口固定为 `main() → migrate(database_env, schema, apply, expect_database)`，另有可选 `archive_schema` 参数。统一约定见 [迁移入口说明](../../scripts/migrations/README.md)。
+
 从 0.3.0 发布代码运行。数据库连接使用 `.env` 中现有的平铺配置：`DATABASE_URL/USERNAME/PASSWORD` 或 `TEST_DATABASE_URL/USERNAME/PASSWORD`；schema 默认读取对应的 `DATABASE_SCHEMA` 或 `TEST_DATABASE_SCHEMA`，未配置时使用 `public`。
 
 先在隔离的 0.2.1 备份恢复库预检：
 
 ```powershell
-uv run python -m scripts.migrations.migrate_0_2_1_to_0_3_0 --database-env TEST_DATABASE --schema <业务schema> --report <新报告文件.json>
+python -m scripts.migrations.migrate_0_2_1_to_0_3_0 --database-env TEST_DATABASE --schema <业务schema> --report <新报告文件.json>
 ```
 
 核对 `source_row_counts`、`converted_rows`、`archived_items`、`requires_reanalysis` 和 `external_artifacts`。`ready: true` 表示只读预检通过；数据库约束仍会在实际执行事务中验证，不表示全部旧结果可在新合同下直接复用。
@@ -43,7 +45,7 @@ uv run python -m scripts.migrations.migrate_0_2_1_to_0_3_0 --database-env TEST_D
 执行前保留完整数据库备份和 0.2.1 发布代码，停止业务写入，并确认没有 `pending/running/cancelling` 任务或 `running` 模型调用。隔离演练和实际执行都要求明确匹配数据库名：
 
 ```powershell
-uv run python -m scripts.migrations.migrate_0_2_1_to_0_3_0 --database-env TEST_DATABASE --schema <业务schema> --apply --expect-database <测试数据库名> --report <新执行报告.json>
+python -m scripts.migrations.migrate_0_2_1_to_0_3_0 --database-env TEST_DATABASE --schema <业务schema> --apply --expect-database <测试数据库名> --report <新执行报告.json>
 ```
 
 实际发布时，将连接选择改为 `--database-env DATABASE`，同时明确填写实际 schema 和数据库名。脚本不会自动切换服务或重新运行分析。
@@ -67,7 +69,7 @@ uv run python -m scripts.migrations.migrate_0_2_1_to_0_3_0 --database-env TEST_D
 
 验证只操作隔离测试 schema，不执行现用数据库迁移，不重跑真实模型分析。
 
-发布前验证结果：
+0.3.0 发布前验证记录：
 
 | 检查 | 结果 |
 | --- | --- |
@@ -86,3 +88,9 @@ uv run python -m scripts.migrations.migrate_0_2_1_to_0_3_0 --database-env TEST_D
 全量测试前实测 CPU 19%、可用内存 14.06 GiB、显存 1591/12282 MiB；执行中复查 CPU 22%、可用内存 13.35 GiB、显存 1623/12282 MiB。前端全量测试使用 2 个 worker。
 
 本次没有执行现用数据库迁移、真实模型整书分析或正式数据重建验收；测试和构建结果不代表这些操作已完成。
+
+## 单文件入口回归
+
+移除配套文件依赖后，源结构内置值与 0.2.1 发布结构逐项一致。配套 JSON 实际不存在，禁止导入任何 `scripts.*` 模块的子进程仍能从项目目录以外调用入口并完成只读预检；正常使用的 ORM、约束、身份与连接配置继续从 `src` 取得。
+
+本次隔离 PostgreSQL 演练共 17 项检查通过，包含命令行、单文件调用、归档、数据转换、501 个段落及 1010 条特征的批量写入、幂等执行、并发保护、结构异常阻断与事务回滚。演练内部耗时 7.66 秒，含进程启动与清理共 9.04 秒，未超 30 秒限时。新入口的 compileall、Ruff、mypy 均通过；上表的全量回归属于发布前记录，本次未重跑全量测试或执行现用库迁移。
