@@ -9,8 +9,27 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
+from uuid import uuid4
 
+from src.config.input_config import DEFAULT_REASONING_EFFORT, ReasoningEffort
 from src.config.runtime_env import ModelEnvironment
+
+_ENTRY_IDENTITIES: dict[tuple[str, str], str] = {}
+
+
+def entry_identity(model_id: str, base_url: str) -> str:
+    """取池内条目的进程内身份；同一模型同一端点保持不变"""
+    key = (model_id, base_url)
+    identity = _ENTRY_IDENTITIES.get(key)
+    if identity is None:
+        identity = uuid4().hex
+        _ENTRY_IDENTITIES[key] = identity
+    return identity
+
+
+def reset_entry_identities() -> None:
+    """清空条目身份表（测试隔离用）"""
+    _ENTRY_IDENTITIES.clear()
 
 
 @dataclass
@@ -33,6 +52,12 @@ class WeightedModelSettings:
     max_in_flight: int = 8
 
 
+    @property
+    def entry_id(self) -> str:
+        """池内条目身份：同一模型挂多个端点时各自独立记账"""
+        return entry_identity(self.model_id, self.base_url)
+
+
 @dataclass
 class TaskModelSettings:
     """
@@ -41,6 +66,7 @@ class TaskModelSettings:
 
     timeout_s: float | None = None
     thinking: bool = False
+    reasoning_effort: ReasoningEffort = DEFAULT_REASONING_EFFORT
     max_iterations: int = 15
     total_attempts: int = 3
     # 标注期不能读取未来章节原文

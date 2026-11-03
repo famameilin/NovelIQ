@@ -300,8 +300,6 @@ class AnnotationAgent:
                     )
                 )
 
-            from src.event_bus.notifications import StreamEvent
-
             await emit(StreamEvent(action="activity", stage="annotate", sub_stage=payload["role"],
                 chapter_id=payload["chapter_id"], activity="starting"))
             await emit(

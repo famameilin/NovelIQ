@@ -133,8 +133,12 @@ def _receipt(role: str = "entity") -> WorkReceipt:
 
 
 def _model_pool(monkeypatch: Any) -> None:
-    monkeypatch.setattr(settings.models, "model_pool", [SimpleNamespace(model_id="test", max_in_flight=1, weight=1)])
-    monkeypatch.setattr("src.model_pool.selection.select_annotation_model", lambda *args, **kwargs: "test")
+    monkeypatch.setattr(
+        settings.models,
+        "model_pool",
+        [SimpleNamespace(entry_id="test-entry", model_id="test", max_in_flight=1, weight=1)],
+    )
+    monkeypatch.setattr("src.model_pool.selection.select_annotation_model", lambda *args, **kwargs: "test-entry")
 
 
 class _NoDatabaseAudit:
@@ -332,14 +336,13 @@ async def test_dependency_failure_is_not_model_retry_and_stops_work_pool(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_retry_feedback_preserves_pool_failure_weight_before_reselection(monkeypatch: Any) -> None:
-    bus, model_failures, attempts = EventBus(), [], []
+async def test_retry_feedback_triggers_reselection_before_continuing(monkeypatch: Any) -> None:
+    bus, attempts = EventBus(), []
     _model_pool(monkeypatch)
     original_feedback = ModelElectionPool.feedback
 
     def select(*args: Any, **kwargs: Any) -> str:
-        model_failures.append(dict(kwargs["failures"]))
-        return "test"
+        return "test-entry"
 
     async def feedback(pool: ModelElectionPool, message: Message) -> Any:
         await original_feedback(pool, message)
@@ -359,7 +362,7 @@ async def test_retry_feedback_preserves_pool_failure_weight_before_reselection(m
     bus.handle("agent.cancel", "agent:run", _ignore)
     sessions = _MemorySessions()
     assert await asyncio.wait_for(Pool(poll_seconds=0.005).run([_receipt()], bus=bus, session_factory=sessions), 2) == 1
-    assert attempts == [1, 2] and model_failures == [{}, {"test": 1}]
+    assert attempts == [1, 2]
     assert not any(MODEL_CAPACITY.snapshot().values())
 
 
@@ -512,7 +515,7 @@ async def test_model_pool_exhaustion_never_sends_cancel_after_termination(monkey
     original_run, original_feedback = ModelElectionPool.run, ModelElectionPool.feedback
     unavailable = []
     monkeypatch.setattr(
-        "src.model_pool.selection.select_annotation_model", lambda *a, **k: None if unavailable else "test"
+        "src.model_pool.selection.select_annotation_model", lambda *a, **k: None if unavailable else "test-entry"
     )
 
     async def run(pool: ModelElectionPool) -> None:
@@ -554,7 +557,7 @@ async def test_any_model_pool_exit_avoids_post_termination_cancel(monkeypatch: A
     original_run, original_feedback = ModelElectionPool.run, ModelElectionPool.feedback
     unavailable = []
     monkeypatch.setattr(
-        "src.model_pool.selection.select_annotation_model", lambda *a, **k: None if unavailable else "test"
+        "src.model_pool.selection.select_annotation_model", lambda *a, **k: None if unavailable else "test-entry"
     )
 
     async def run(pool: ModelElectionPool) -> None:
@@ -611,7 +614,7 @@ async def test_pool_configuration_fault_waits_for_reserved_work_save_before_exit
         if elections > 1:
             selection_failed.set()
             raise ValueError("模型池配置故障")
-        return "test"
+        return "test-entry"
 
     async def execute(message: Message) -> Any:
         executing.set()

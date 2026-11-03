@@ -16,6 +16,7 @@ import random
 import time
 from collections import deque
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from loguru import logger
@@ -23,6 +24,11 @@ from loguru import logger
 from src.event_bus import EventBus, Message
 from src.model_pool.contracts import SelectionRequest, SelectionResult
 from src.model_pool.health import DEFAULT_SCORE, MIN_SELECT_SCORE, MODEL_HEALTH
+
+
+def _entry_label(model_id: str, base_url: str) -> str:
+    """容量视图的展示名：同一模型挂多个端点时带出端点域名"""
+    return f"{model_id} · {urlsplit(base_url).hostname or base_url}"
 
 
 class ModelCapacity:
@@ -33,24 +39,33 @@ class ModelCapacity:
         self._positions: dict[str, dict[str, Any]] = {}
 
     def snapshot(self) -> dict[str, int]:
-        """各模型当前占用，供选举的空位过滤与「并发为空」判定"""
+        """各条目当前占用，供选举的空位过滤与「并发为空」判定"""
         counts: dict[str, int] = {}
         for reservations in self._reserved.values():
-            for model_id in reservations.values():
-                counts[model_id] = counts.get(model_id, 0) + 1
+            for entry_id in reservations.values():
+                counts[entry_id] = counts.get(entry_id, 0) + 1
         return counts
 
-    def reserve(self, owner: str, reservation_id: str, model_id: str, *, run_id: str = "", work_id: str = "") -> None:
-        """派发选举成功即预留容量位（占用 +1）"""
+    def reserve(
+        self,
+        owner: str,
+        reservation_id: str,
+        model_id: str,
+        entry_id: str,
+        *,
+        run_id: str = "",
+        work_id: str = "",
+    ) -> None:
+        """派发选举成功即预留容量位（占用 +1）；位号按条目身份分配"""
         if reservation_id in self._positions:
             return
-        used = {item["slot"] for item in self._positions.values() if item["model_id"] == model_id}
+        used = {item["slot"] for item in self._positions.values() if item["entry_id"] == entry_id}
         slot = 0
         while slot in used:
             slot += 1
-        self._reserved.setdefault(owner, {})[reservation_id] = model_id
+        self._reserved.setdefault(owner, {})[reservation_id] = entry_id
         self._positions[reservation_id] = {"owner": owner, "reservation_id": reservation_id,
-            "model_id": model_id, "slot": slot, "run_id": run_id, "work_id": work_id}
+            "model_id": model_id, "entry_id": entry_id, "slot": slot, "run_id": run_id, "work_id": work_id}
 
     def release(self, owner: str, reservation_id: str | None = None) -> int:
         """归还该归属的一笔或全部预留（幂等），返回归还笔数"""
@@ -76,10 +91,18 @@ class ModelCapacity:
         self._positions.clear()
 
     def details(self) -> dict[str, Any]:
-        """只提供模型容量与位置事实，不读取业务输入"""
+        """只提供条目容量与位置事实，不读取业务输入"""
         from src.config import settings
 
-        models = [{"model_id": item.model_id, "capacity": item.max_in_flight} for item in settings.models.model_pool]
+        models = [
+            {
+                "entry_id": item.entry_id,
+                "model_id": item.model_id,
+                "label": _entry_label(item.model_id, item.base_url),
+                "capacity": item.max_in_flight,
+            }
+            for item in settings.models.model_pool
+        ]
         return {"models": models, "seats": [{key: value for key, value in seat.items() if key != "owner"}
                                              for seat in self._positions.values()]}
 
@@ -120,7 +143,6 @@ class ModelElectionPool:
         self.fixed_model_id = fixed_model_id
         self.pending: deque[SelectionRequest] = deque()
         self.attempts: dict[str, int] = {}
-        self.failures: dict[str, dict[str, int]] = {}
         self.available_at: dict[str, float] = {}
         self.reservations: dict[str, tuple[str, str]] = {}
         self._wake = asyncio.Event()
@@ -157,11 +179,12 @@ class ModelElectionPool:
         owned = self.reservations.get(message.work_id)
         if owned is None or owned[0] != reservation_id:
             return
-        _, model_id = self.reservations.pop(message.work_id)
+        _, entry_id = self.reservations.pop(message.work_id)
         MODEL_CAPACITY.release(self.address, reservation_id)
+        if message.payload.get("success") is False:
+            # 最终未成功（预算耗尽、程序超时、非重试性失败）按条目记一次健康失败；取消不计
+            MODEL_HEALTH.record_turn(entry_id, success=False)
         if message.payload["outcome"] == "retry":
-            failures = self.failures.setdefault(message.work_id, {})
-            failures[model_id] = failures.get(model_id, 0) + 1
             self.available_at[message.work_id] = (
                 time.monotonic() + min(30, 2 ** min(5, self.attempts[message.work_id] - 1)) + random.uniform(0, 1)
             )
@@ -181,9 +204,9 @@ class ModelElectionPool:
                 resumed = receipt.resume_attempt is not None
                 if resumed:
                     attempts = int(receipt.resume_attempt or 0)
-                scores = MODEL_HEALTH.scores(item.model_id for item in settings.models.model_pool)
+                scores = MODEL_HEALTH.scores(item.entry_id for item in settings.models.model_pool)
                 fixed_model_id = receipt.fixed_model_id or self.fixed_model_id
-                model_id = None
+                selected_entry = None
                 if (
                     receipt.work_id not in self.reservations
                     and time.monotonic() >= self.available_at.get(receipt.work_id, 0)
@@ -200,12 +223,12 @@ class ModelElectionPool:
                                 raise ValueError("指定诊断模型不在模型池中")
                             # 诊断显式选模不受标注权重影响，仍共用同一容量账本与健康阈值
                             if (
-                                MODEL_CAPACITY.snapshot().get(selected.model_id, 0) < selected.max_in_flight
-                                and scores.get(selected.model_id, DEFAULT_SCORE) >= MIN_SELECT_SCORE
+                                MODEL_CAPACITY.snapshot().get(selected.entry_id, 0) < selected.max_in_flight
+                                and scores.get(selected.entry_id, DEFAULT_SCORE) >= MIN_SELECT_SCORE
                             ):
-                                model_id = selected.model_id
+                                selected_entry = selected
                         else:
-                            model_id = select_annotation_model(
+                            selected_id = select_annotation_model(
                                 stable_digest(receipt.work_id, attempts),
                                 [
                                     item
@@ -213,20 +236,31 @@ class ModelElectionPool:
                                     if self.allowed_model_ids is None or item.model_id in self.allowed_model_ids
                                 ],
                                 in_flight=MODEL_CAPACITY.snapshot(),
-                                failures=self.failures.get(receipt.work_id, {}),
                                 scores=scores,
                                 min_score=MIN_SELECT_SCORE,
                             )
+                            if selected_id is not None:
+                                selected_entry = next(
+                                    (item for item in settings.models.model_pool if item.entry_id == selected_id),
+                                    None,
+                                )
+                                if selected_entry is None:
+                                    raise ValueError("选举结果不在模型池中")
                     except Exception as exc:
                         # 配置故障不处罚模型，也不能中断已有预留的执行和保存确认
                         selection_error = exc
-                if model_id is not None:
+                if selected_entry is not None:
                     reservation_id = uuid4().hex
                     MODEL_CAPACITY.reserve(
-                        self.address, reservation_id, model_id, run_id=self.run_id, work_id=receipt.work_id
+                        self.address,
+                        reservation_id,
+                        selected_entry.model_id,
+                        selected_entry.entry_id,
+                        run_id=self.run_id,
+                        work_id=receipt.work_id,
                     )
                     await self.notify_capacity()
-                    self.reservations[receipt.work_id] = (reservation_id, model_id)
+                    self.reservations[receipt.work_id] = (reservation_id, selected_entry.entry_id)
                     selected_attempt = attempts if resumed else attempts + 1
                     self.attempts[receipt.work_id] = selected_attempt
                     self.pending.popleft()
@@ -240,7 +274,8 @@ class ModelElectionPool:
                             payload=SelectionResult(
                                 run_id=receipt.run_id,
                                 work_id=receipt.work_id,
-                                model_id=model_id,
+                                model_id=selected_entry.model_id,
+                                entry_id=selected_entry.entry_id,
                                 attempt_number=selected_attempt,
                                 reservation_id=reservation_id,
                             ),
@@ -250,13 +285,21 @@ class ModelElectionPool:
                 # 退避未到期或健康分未回升都不是选举失败；并发为空时等待而不是空转
                 cooling = time.monotonic() < self.available_at.get(receipt.work_id, 0)
                 no_usage = not self.reservations and not any(MODEL_CAPACITY.snapshot().values())
-                health_waiting = (
-                    scores.get(fixed_model_id, DEFAULT_SCORE) < MIN_SELECT_SCORE
+                fixed_entry = (
+                    next(
+                        (item for item in settings.models.model_pool if item.model_id == fixed_model_id),
+                        None,
+                    )
                     if fixed_model_id is not None
+                    else None
+                )
+                health_waiting = (
+                    scores.get(fixed_entry.entry_id, DEFAULT_SCORE) < MIN_SELECT_SCORE
+                    if fixed_entry is not None
                     else any(
                         item.weight > 0
                         and (self.allowed_model_ids is None or item.model_id in self.allowed_model_ids)
-                        and scores.get(item.model_id, DEFAULT_SCORE) < MIN_SELECT_SCORE
+                        and scores.get(item.entry_id, DEFAULT_SCORE) < MIN_SELECT_SCORE
                         for item in settings.models.model_pool
                     )
                 )

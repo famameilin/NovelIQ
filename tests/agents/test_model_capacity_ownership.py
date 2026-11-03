@@ -38,8 +38,19 @@ def _receipt(run_id: str = "run", work_id: str = "work") -> WorkReceipt:
     )
 
 
+def _model(model_id: str, *, max_in_flight: int = 1, weight: float = 1.0) -> SimpleNamespace:
+    """池内条目：身份与模型名分离，容量与健康分按条目身份记账"""
+    return SimpleNamespace(
+        model_id=model_id,
+        base_url=f"https://{model_id}.example/v1",
+        entry_id=f"entry-{model_id}",
+        max_in_flight=max_in_flight,
+        weight=weight,
+    )
+
+
 def _single_slot_pool(monkeypatch: Any) -> None:
-    monkeypatch.setattr(settings.models, "model_pool", [SimpleNamespace(model_id="test", max_in_flight=1, weight=1.0)])
+    monkeypatch.setattr(settings.models, "model_pool", [_model("test")])
 
 
 async def _enqueue(bus: EventBus, pool: ModelElectionPool) -> None:
@@ -57,25 +68,25 @@ async def _enqueue(bus: EventBus, pool: ModelElectionPool) -> None:
 
 def test_ledger_counts_and_returns_reservations() -> None:
     """占用数就是账本里的预留条数，归还按归属幂等"""
-    MODEL_CAPACITY.reserve("model_pool:a", "r1", "test")
-    MODEL_CAPACITY.reserve("model_pool:a", "r2", "test")
-    MODEL_CAPACITY.reserve("model_pool:b", "r3", "other")
+    MODEL_CAPACITY.reserve("model_pool:a", "r1", "test", "entry-test")
+    MODEL_CAPACITY.reserve("model_pool:a", "r2", "test", "entry-test")
+    MODEL_CAPACITY.reserve("model_pool:b", "r3", "other", "entry-other")
 
-    assert MODEL_CAPACITY.snapshot() == {"test": 2, "other": 1}
+    assert MODEL_CAPACITY.snapshot() == {"entry-test": 2, "entry-other": 1}
 
     assert MODEL_CAPACITY.release("model_pool:a", "r1") == 1
     assert MODEL_CAPACITY.release("model_pool:a", "r1") == 0
-    assert MODEL_CAPACITY.snapshot() == {"test": 1, "other": 1}
+    assert MODEL_CAPACITY.snapshot() == {"entry-test": 1, "entry-other": 1}
 
     assert MODEL_CAPACITY.release("model_pool:a") == 1
-    assert MODEL_CAPACITY.snapshot() == {"other": 1}
+    assert MODEL_CAPACITY.snapshot() == {"entry-other": 1}
 
 
 def test_close_returns_every_reservation_booked_under_pool_ownership() -> None:
     """池子退出按归属归还：即使预留没进池子自己的账，也不会留在全局账本上"""
     bus = EventBus()
     pool = ModelElectionPool(bus, fixture_id(__name__, "run"))
-    MODEL_CAPACITY.reserve(pool.address, "booked-directly", "test")
+    MODEL_CAPACITY.reserve(pool.address, "booked-directly", "test", "entry-test")
     assert any(MODEL_CAPACITY.snapshot().values())
 
     pool.close()
@@ -89,7 +100,7 @@ async def test_live_pool_occupancy_keeps_election_waiting(monkeypatch: Any) -> N
     _single_slot_pool(monkeypatch)
     bus = EventBus()
     other = ModelElectionPool(bus, "other", poll_seconds=0.001)
-    MODEL_CAPACITY.reserve(other.address, "busy", "test")
+    MODEL_CAPACITY.reserve(other.address, "busy", "test", "entry-test")
     pool = ModelElectionPool(bus, fixture_id(__name__, "run"), poll_seconds=0.001)
     assignments = bus.subscribe(pool.assignment_topic)
     await _enqueue(bus, pool)
@@ -118,11 +129,11 @@ async def test_pool_skips_model_below_health_threshold(monkeypatch: Any) -> None
         settings.models,
         "model_pool",
         [
-            SimpleNamespace(model_id="low", max_in_flight=1, weight=1.0),
-            SimpleNamespace(model_id="healthy", max_in_flight=1, weight=1.0),
+            _model("low"),
+            _model("healthy"),
         ],
     )
-    MODEL_HEALTH.record_turn("low", success=False)
+    MODEL_HEALTH.record_turn("entry-low", success=False)
     bus = EventBus()
     pool = ModelElectionPool(bus, fixture_id(__name__, "run"), poll_seconds=0.001)
     assignments = bus.subscribe(pool.assignment_topic)
@@ -142,7 +153,7 @@ async def test_pool_skips_model_below_health_threshold(monkeypatch: Any) -> None
 async def test_pool_waits_until_health_recovers(monkeypatch: Any) -> None:
     """全部模型低于阈值时等待回升，不报错退出；回升后继续派发"""
     _single_slot_pool(monkeypatch)
-    MODEL_HEALTH.record_turn("test", success=False)
+    MODEL_HEALTH.record_turn("entry-test", success=False)
     bus = EventBus()
     pool = ModelElectionPool(bus, fixture_id(__name__, "run"), poll_seconds=0.001)
     assignments = bus.subscribe(pool.assignment_topic)
@@ -152,7 +163,7 @@ async def test_pool_waits_until_health_recovers(monkeypatch: Any) -> None:
     await asyncio.sleep(0.05)
     assert not election.done()
 
-    MODEL_HEALTH.reset(["test"])
+    MODEL_HEALTH.reset(["entry-test"])
     message = await asyncio.wait_for(assignments.get(), 2)
     assert isinstance(message.payload, SelectionResult)
     assert message.payload.model_id == "test"
@@ -169,8 +180,8 @@ async def test_single_work_pinned_model_overrides_weighted_election(monkeypatch:
         settings.models,
         "model_pool",
         [
-            SimpleNamespace(model_id="weighted", max_in_flight=1, weight=1.0),
-            SimpleNamespace(model_id="pinned", max_in_flight=1, weight=0),
+            _model("weighted"),
+            _model("pinned", weight=0),
         ],
     )
     bus = EventBus()
@@ -190,7 +201,8 @@ async def test_single_work_pinned_model_overrides_weighted_election(monkeypatch:
     try:
         message = await asyncio.wait_for(assignments.get(), 2)
         assert message.payload.model_id == "pinned"
-        assert MODEL_CAPACITY.snapshot() == {"pinned": 1}
+        assert message.payload.entry_id == "entry-pinned"
+        assert MODEL_CAPACITY.snapshot() == {"entry-pinned": 1}
     finally:
         election.cancel()
         await asyncio.gather(election, return_exceptions=True)
@@ -204,8 +216,8 @@ async def test_simultaneous_requests_fill_every_model_slot(monkeypatch: Any) -> 
         settings.models,
         "model_pool",
         [
-            SimpleNamespace(model_id="m-a", max_in_flight=2, weight=1.0),
-            SimpleNamespace(model_id="m-b", max_in_flight=2, weight=1.0),
+            _model("m-a", max_in_flight=2),
+            _model("m-b", max_in_flight=2),
         ],
     )
     bus = EventBus()
@@ -227,7 +239,7 @@ async def test_simultaneous_requests_fill_every_model_slot(monkeypatch: Any) -> 
     try:
         results = [await asyncio.wait_for(assignments.get(), 2) for _ in range(4)]
         assert sorted(item.payload.model_id for item in results) == ["m-a", "m-a", "m-b", "m-b"]
-        assert MODEL_CAPACITY.snapshot() == {"m-a": 2, "m-b": 2}
+        assert MODEL_CAPACITY.snapshot() == {"entry-m-a": 2, "entry-m-b": 2}
     finally:
         election.cancel()
         await asyncio.gather(election, return_exceptions=True)
@@ -249,7 +261,7 @@ async def test_empty_slot_and_unavailable_model_stops_analysis(monkeypatch: Any)
     pool.close()
 
 
-async def test_reselection_keeps_identity_penalizes_once_and_has_no_attempt_limit(monkeypatch: Any) -> None:
+async def test_reselection_keeps_identity_and_has_no_attempt_limit(monkeypatch: Any) -> None:
     _single_slot_pool(monkeypatch)
     bus = EventBus()
     pool = ModelElectionPool(bus, fixture_id(__name__, "run"), poll_seconds=0.001)
@@ -264,7 +276,6 @@ async def test_reselection_keeps_identity_penalizes_once_and_has_no_attempt_limi
                                payload={"reservation_id": selected.reservation_id, "outcome": "retry"})
             await bus.request(feedback)
             await bus.request(feedback)
-            assert pool.failures == {"work": {"test": attempt}}
             pool.available_at["work"] = 0
             await _enqueue(bus, pool)
         assert not task.done()
@@ -280,14 +291,87 @@ async def test_retry_backoff_remains_bounded_at_large_attempt_numbers(monkeypatc
     bus = EventBus()
     pool = ModelElectionPool(bus, fixture_id(__name__, "run"))
     pool.attempts["work"] = 1000000
-    pool.reservations["work"] = ("reservation", "test")
-    MODEL_CAPACITY.reserve(pool.address, "reservation", "test")
+    pool.reservations["work"] = ("reservation", "entry-test")
+    MODEL_CAPACITY.reserve(pool.address, "reservation", "test", "entry-test")
     monkeypatch.setattr("src.model_pool.capacity.time.monotonic", lambda: 100)
     try:
         await pool.feedback(Message("pool.feedback", "queue:run", pool.address, pool.run_id, work_id="work",
                                     payload={"reservation_id": "reservation", "outcome": "retry"}))
         assert 130 <= pool.available_at["work"] <= 131
     finally:
+        pool.close()
+
+
+@pytest.mark.asyncio
+async def test_final_non_success_records_health_failure_for_selected_entry(monkeypatch: Any) -> None:
+    """最终未成功的尝试按条目记一次健康失败，成功与取消不记"""
+    _single_slot_pool(monkeypatch)
+    bus = EventBus()
+    pool = ModelElectionPool(bus, fixture_id(__name__, "run"))
+    pool.attempts["work"] = 1
+    try:
+        for reservation, success, expected in (
+            ("reservation-1", False, 1),
+            ("reservation-2", None, 1),
+            ("reservation-3", True, 1),
+            ("reservation-4", False, 2),
+        ):
+            pool.reservations["work"] = (reservation, "entry-test")
+            MODEL_CAPACITY.reserve(pool.address, reservation, "test", "entry-test")
+            await pool.feedback(
+                Message(
+                    "pool.feedback",
+                    "queue:run",
+                    pool.address,
+                    pool.run_id,
+                    work_id="work",
+                    payload={"reservation_id": reservation, "outcome": "released", "success": success},
+                )
+            )
+            assert MODEL_HEALTH.stats("entry-test")["failure_total"] == expected
+    finally:
+        pool.close()
+
+
+@pytest.mark.asyncio
+async def test_same_model_on_two_endpoints_reserves_capacity_separately(monkeypatch: Any) -> None:
+    """同一模型挂两个端点时按条目分别占用容量，并发上限为两条之和"""
+    monkeypatch.setattr(
+        settings.models,
+        "model_pool",
+        [
+            SimpleNamespace(model_id="same", base_url="https://a.example/v1", entry_id="entry-a",
+                            max_in_flight=1, weight=1.0),
+            SimpleNamespace(model_id="same", base_url="https://b.example/v1", entry_id="entry-b",
+                            max_in_flight=1, weight=1.0),
+        ],
+    )
+    bus = EventBus()
+    run_id = fixture_id(__name__, "run")
+    pool = ModelElectionPool(bus, run_id, poll_seconds=0.001)
+    assignments = bus.subscribe(pool.assignment_topic)
+    for index in range(3):
+        await bus.request(
+            Message(
+                topic="pool.enqueue",
+                source="queue:run",
+                target=pool.address,
+                run_id=run_id,
+                work_id=f"work:{index}",
+                payload=SelectionRequest(run_id, f"work:{index}"),
+            )
+        )
+    election = asyncio.create_task(pool.run())
+    try:
+        results = [await asyncio.wait_for(assignments.get(), 2) for _ in range(2)]
+        assert sorted(item.payload.entry_id for item in results) == ["entry-a", "entry-b"]
+        assert {item.payload.model_id for item in results} == {"same"}
+        assert MODEL_CAPACITY.snapshot() == {"entry-a": 1, "entry-b": 1}
+        await asyncio.sleep(0.05)
+        assert not election.done()
+    finally:
+        election.cancel()
+        await asyncio.gather(election, return_exceptions=True)
         pool.close()
 
 

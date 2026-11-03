@@ -22,33 +22,33 @@ def _entry(model_id: str = "a", **overrides: Any) -> dict[str, Any]:
     }
 
 
+def _ids(pool: list[WeightedModelSettings]) -> dict[str, str]:
+    return {item.model_id: item.entry_id for item in pool}
+
+
 def test_weighted_assignment_is_stable_and_zero_weight_is_excluded() -> None:
     pool = _parse_model_pool([_entry("a"), _entry("b", weight=3), _entry("disabled", weight=0)])
+    ids = _ids(pool)
     selections = [select_annotation_model(str(index), pool) for index in range(4000)]
-    assert "disabled" not in selections
-    assert 0.7 < selections.count("b") / len(selections) < 0.8
+    assert ids["disabled"] not in selections
+    assert 0.7 < selections.count(ids["b"]) / len(selections) < 0.8
     assert select_annotation_model("task", pool) == select_annotation_model("task", pool)
-
-
-def test_failed_model_keeps_its_reduced_weight_in_full_candidate_pool() -> None:
-    pool = _parse_model_pool([_entry("a", weight=3), _entry("b")])
-    selected = [select_annotation_model(str(index), pool, failures={"a": 2}) for index in range(4000)]
-    assert 0.45 < selected.count("a") / len(selected) < 0.55
-    assert select_annotation_model("alone", pool[:1], failures={"a": 1000}) == "a"
 
 
 def test_model_below_health_threshold_is_not_selected() -> None:
     pool = _parse_model_pool([_entry("a"), _entry("b")])
+    ids = _ids(pool)
     selected = [
-        select_annotation_model(str(index), pool, scores={"a": 100, "b": 40})
+        select_annotation_model(str(index), pool, scores={ids["a"]: 100, ids["b"]: 40})
         for index in range(1000)
     ]
-    assert set(selected) == {"a"}
+    assert set(selected) == {ids["a"]}
 
 
 def test_all_models_below_health_threshold_returns_none() -> None:
     pool = _parse_model_pool([_entry("a"), _entry("b")])
-    assert select_annotation_model("task", pool, scores={"a": 40, "b": 59.9}) is None
+    ids = _ids(pool)
+    assert select_annotation_model("task", pool, scores={ids["a"]: 40, ids["b"]: 59.9}) is None
 
 
 @pytest.mark.parametrize(
@@ -76,6 +76,8 @@ def test_invalid_pool_is_rejected(pool: list[dict[str, Any]]) -> None:
 
 
 def test_selected_models_use_their_own_credentials_and_concurrency(monkeypatch) -> None:
+    monkeypatch.setattr(settings.models.annotation, "reasoning_effort", "low")
+    monkeypatch.setattr(settings.models.diagnosis, "reasoning_effort", "max")
     monkeypatch.setattr(
         settings.models,
         "model_pool",
@@ -89,6 +91,8 @@ def test_selected_models_use_their_own_credentials_and_concurrency(monkeypatch) 
     )
     monkeypatch.setattr(settings.models, "diagnosis_model_id", "diagnostic")
     selected = load_task_config("annotation", model_id="b")
+    assert selected.reasoning_effort == "low"
+    assert load_task_config("diagnosis").reasoning_effort == "max"
     assert (selected.model, selected.base_url, selected.api_key, selected.max_in_flight) == (
         "b",
         "https://b.example/v1",

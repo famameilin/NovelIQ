@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 DEFAULT_SCORE = 100.0
 MIN_SELECT_SCORE = 60.0
 RECENT_WINDOW_SECONDS = 30 * 60
+#: 近期失败率按条目最近这么多次回合结算
+RECENT_FAILURE_TURNS = 10
 TOKEN_TOTAL_BASELINE = 2_000_000.0
 TOKEN_TURN_BASELINE = 20_000.0
 TIME_TURN_BASELINE_MS = 30_000.0
@@ -131,9 +133,12 @@ class ModelHealth:
         total_success = record.success_total / total_attempts if total_attempts else 1.0
         recent_attempts = len(recent)
         recent_successes = sum(1 for item in recent if item.success)
-        recent_failures = recent_attempts - recent_successes
         recent_success = recent_successes / recent_attempts if recent_attempts else 1.0
-        recent_failure = 1.0 - (recent_failures / recent_attempts if recent_attempts else 0.0)
+        failure_window = list(record.turns)[-RECENT_FAILURE_TURNS:]
+        failure_rate = (
+            sum(1 for item in failure_window if not item.success) / len(failure_window) if failure_window else 0.0
+        )
+        recent_failure = 1.0 - failure_rate
         total_token = 1.0 / (1.0 + record.tokens_total / TOKEN_TOTAL_BASELINE)
         avg_tokens = record.tokens_total / record.total_turns if record.total_turns else 0.0
         avg_token = 1.0 / (1.0 + avg_tokens / TOKEN_TURN_BASELINE)

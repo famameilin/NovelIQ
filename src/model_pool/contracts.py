@@ -19,10 +19,14 @@ class SelectionRequest:
 
 @dataclass(frozen=True)
 class SelectionResult:
-    """队列按结果组装执行信封，容量仍由模型池维护"""
+    """队列按结果组装执行信封，容量仍由模型池维护
+
+    model_id 是发给端点的模型名（也用于展示），entry_id 是池内条目身份（用于容量与健康分记账）。
+    """
 
     run_id: str
     work_id: str
     model_id: str
+    entry_id: str
     attempt_number: int
     reservation_id: str

@@ -61,7 +61,14 @@ def session_scheduler(
     async def request(message):
         if message.topic == "pool.enqueue":
             scheduler._waiting[message.work_id].set_result(
-                SelectionResult(scheduler.run_id, message.work_id, model, 1, "reservation")
+                SelectionResult(
+                    scheduler.run_id,
+                    message.work_id,
+                    model,
+                    entry_id="test-entry",
+                    attempt_number=1,
+                    reservation_id="reservation",
+                )
             )
 
     monkeypatch.setattr(scheduler.bus, "request", AsyncMock(side_effect=request))
@@ -241,7 +248,12 @@ async def test_exhausted_session_refills_released_case_without_cancelling_other_
     async def request(message):
         if message.topic == "pool.enqueue":
             scheduler._waiting[message.work_id].set_result(SelectionResult(
-                scheduler.run_id, message.work_id, "test", 1, new_id(),
+                scheduler.run_id,
+                message.work_id,
+                "test",
+                entry_id="test-entry",
+                attempt_number=1,
+                reservation_id=new_id(),
             ))
 
     monkeypatch.setattr(scheduler.bus, "request", AsyncMock(side_effect=request))
