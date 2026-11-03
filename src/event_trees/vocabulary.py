@@ -1,9 +1,4 @@
-"""
-事件值域：子事件在树内的位置、参与实体在事件里的角色，以及参与角色的归一
-
-事件专属值域随写入目标（事件树）同包；实体/关系/对话/指标值域在
-src/fact_graph/vocabulary.py。本模块只有标准库依赖。
-"""
+"""事件位置、参与功能、情绪与伏笔值域"""
 
 from __future__ import annotations
 
@@ -25,9 +20,7 @@ class EventChildType(StrEnum):
     SECONDARY = "secondary"
 
 
-# 事件树内部节点角色（一棵树 = 一个完整事件；根 = 触发该
-# 事件的第一个自立动作；main = 主因链上；secondary = 父的兄弟即次因分支）
-# 模型面 type 参数用 EventChildType（root 由 isroot=true 表达，不外露）
+# 事件内部原因角色；模型面只使用 EventChildType，不暴露该枚举
 EventCauseRole = Literal["root", "main", "secondary"]
 
 
@@ -65,3 +58,98 @@ def normalize_event_participant_role(value: object) -> EventParticipantRole | No
         return EventParticipantRole(text)
     except ValueError:
         return None
+
+
+class Confidence(StrEnum):
+    """伏笔的可能性档位
+
+    high=正文有明确指向该伏笔的表述；medium=有较明显的暗示但没有点明；
+    low=只是可疑的苗头，是否成立取决于后文。
+    """
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class RoleFunction(StrEnum):
+    """人物在当前叙事动作里承担的功能
+
+    主体=发起动作的人；客体=动作的承受者；发送者/接收者=信息传递的两端；
+    帮助者=协助主体的第三方；反对者=阻碍主体的第三方；见证者=在场但没有介入的人。
+    按这个动作里的作用判，不按全章戏份判。
+    """
+
+    SUBJECT = "主体"
+    OBJECT = "客体"
+    SENDER = "发送者"
+    RECEIVER = "接收者"
+    HELPER = "帮助者"
+    OPPONENT = "反对者"
+    WITNESS = "见证者"
+
+
+ROLE_FUNCTION_ALIASES: dict[str, str] = {
+    "主角": "主体",
+    "发起者": "主体",
+    "发起人": "主体",
+    "施动者": "主体",
+    "承受者": "客体",
+    "受动者": "客体",
+    "接受者": "接收者",
+    "协助者": "帮助者",
+    "支持者": "帮助者",
+    "阻碍者": "反对者",
+    "对抗者": "反对者",
+    "旁观者": "见证者",
+    "目击者": "见证者",
+    "在场者": "见证者",
+}
+
+
+def normalize_role_function(value: object) -> RoleFunction | None:
+    """用于把模型写的叙事功能词归一到 RoleFunction（缺省/未收录不拒绝）
+
+    同义词按 ROLE_FUNCTION_ALIASES 映射；未收录值收敛为主体并留给审计
+    （原始入参始终在 agent_toolcall.request_args 可查）。地点等事件专属角色词
+    不在此处理——那是字段误用，仍由调用方按原口径拒绝。
+    """
+    if value is None:
+        return None
+    if isinstance(value, RoleFunction):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = unicodedata.normalize("NFC", value).strip()
+    if not text:
+        return None
+    text = ROLE_FUNCTION_ALIASES.get(text, text)
+    try:
+        return RoleFunction(text)
+    except ValueError:
+        return RoleFunction.SUBJECT
+
+
+def clamp_emotion_score(value: object) -> int | None:
+    """用于把模型写的情绪分值收敛到 -2..2（越界按边界钳制，非数值记空）"""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = int(value.strip())
+        except ValueError:
+            return None
+    if not isinstance(value, (int, float)):
+        return None
+    return max(-2, min(2, round(value)))
+
+
+EMOTION_SCORE_DESCRIPTION = (
+    "情绪方向与强度分值，整数 -2..2（-2 强烈负面 / -1 轻微负面 / 0 中性 / 1 轻微正面 / 2 强烈正面）"
+)
+
+
+EVENT_ROLE_FIELD_HINT = "这个实体在这件事里起的作用，不是身份、称号"
+
+
+PERSON_ROLE_FIELD_HINT = "与 role 同一判断的叙事面"
