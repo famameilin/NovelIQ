@@ -1,5 +1,5 @@
 """
-LangGraph Agent 公共惰性入口
+Agent 公共惰性入口
 """
 
 from __future__ import annotations
