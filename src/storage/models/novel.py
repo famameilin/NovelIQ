@@ -27,6 +27,7 @@ class Novel(Base):
     title: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="书名")
     author: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="作者")
     file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="原始文件字节数")
+    word_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="正文非空白字符数")
     upload_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="上传时间")
 
     def __repr__(self) -> str:

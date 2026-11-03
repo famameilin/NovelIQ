@@ -260,6 +260,7 @@ class NovelRecord:
     title: str | None
     author: str | None
     file_size: int | None
+    word_count: int | None
     upload_time: datetime | None
 
 
