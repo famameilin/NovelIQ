@@ -13,15 +13,16 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from dotenv import load_dotenv
 from sqlalchemy import Connection, create_engine, inspect, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import SQLAlchemyError
 
-from src.config.runtime_env import DatabaseEnvironmentName
 from src.storage.database_url import resolve_database_url_from_env
 
+DatabaseEnvironmentName = Literal["DATABASE", "TEST_DATABASE"]
 VERSION = "0.1.1"
 REQUIRED_COLUMNS = {
     "analysis_runs": {"run_id", "status"},
@@ -233,10 +234,12 @@ def migrate(
 
 
 def main() -> int:
-    sys.stdout.reconfigure(encoding="utf-8")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-env", choices=("DATABASE", "TEST_DATABASE"), default="DATABASE")
-    parser.add_argument("--schema", default=os.environ.get("DATABASE_SCHEMA", "public"))
+    parser.add_argument("--schema", help="业务 schema，默认读取对应的 *_SCHEMA 或使用 public")
     parser.add_argument("--apply", action="store_true", help="通过检查后登记 0.1.1；默认仅检查")
     parser.add_argument("--expect-database", help="apply 时必须填写目标数据库名")
     args = parser.parse_args()
@@ -244,11 +247,11 @@ def main() -> int:
     try:
         report = migrate(
             database_env=cast(DatabaseEnvironmentName, args.database_env),
-            schema=args.schema,
+            schema=args.schema or os.environ.get(args.database_env + "_SCHEMA", "public"),
             apply=args.apply,
             expect_database=args.expect_database,
         )
-    except (RuntimeError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError, SQLAlchemyError) as exc:
         print(json.dumps({"version": VERSION, "error": str(exc)}, ensure_ascii=False, indent=2))
         return 2
     print(json.dumps(report, ensure_ascii=False, indent=2))
