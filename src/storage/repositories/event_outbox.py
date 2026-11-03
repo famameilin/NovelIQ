@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -106,3 +106,34 @@ def replay_candidates(session, run_id, after_seq, restart_sequence, chapter_rese
         .order_by(EventOutbox.stream_id)
         .limit(limit)
     ).all()
+
+
+_PROJECTION_STATE_EVENTS = (
+    "task_state",
+    "task_reset",
+    "task_complete",
+    "task_error",
+    "task_cancelled",
+    "stage_state",
+    "capacity",
+)
+
+
+def replay_tail(session, run_id, limit):
+    "启动投影只读取最近非思考消息与状态消息，不重放海量思考块"
+    latest = session.scalar(select(func.max(EventOutbox.stream_id)).where(EventOutbox.run_id == run_id)) or 0
+    columns = (EventOutbox.stream_id, EventOutbox.emitted_bytes)
+    state_rows = session.execute(
+        select(*columns)
+        .where(EventOutbox.run_id == run_id, EventOutbox.event_type.in_(_PROJECTION_STATE_EVENTS))
+        .order_by(EventOutbox.stream_id.desc())
+        .limit(512)
+    ).all()
+    tail_rows = session.execute(
+        select(*columns)
+        .where(EventOutbox.run_id == run_id, EventOutbox.event_type != "llm_thinking")
+        .order_by(EventOutbox.stream_id.desc())
+        .limit(limit)
+    ).all()
+    merged = {int(seq): blob for seq, blob in (*state_rows, *tail_rows)}
+    return ([(seq, merged[seq]) for seq in sorted(merged)], int(latest))
