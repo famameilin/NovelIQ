@@ -1,9 +1,8 @@
-"""发布升级默认只读预检，执行时完整归档原表并转换可可靠映射的数据"""
+"""单文件发布迁移入口，复用项目 ORM 与配置，默认只读预检"""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -12,14 +11,13 @@ from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from dotenv import load_dotenv
 from sqlalchemy import MetaData, UniqueConstraint, create_engine, inspect, text
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Connection, Engine, make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import NullPool
-from sqlalchemy.schema import CreateIndex, CreateTable
 
 _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
@@ -28,12 +26,314 @@ if str(_ROOT) not in sys.path:
 from src.config.project_version import project_version  # noqa: E402
 from src.storage.constraints import domain_constraint_statements  # noqa: E402
 from src.storage.database_url import resolve_database_url_from_env  # noqa: E402
-from src.storage.db import validate_existing_schema  # noqa: E402
 from src.storage.ids import new_id, new_task_id  # noqa: E402
 from src.storage.models import Base  # noqa: E402
 
+DatabaseEnvironmentName = Literal["DATABASE", "TEST_DATABASE"]
 _ROLES = {"solo": "annotation", "structure": "entity", "event": "event", "evidence": "metric"}
-_SIDECAR = Path(__file__).with_suffix(".json")
+_SOURCE_TABLES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
+    "novels": (
+        "novel_id:varchar(8)!|filename:varchar(500)|file_path:text|title:varchar(500)|author:varchar(255)|"
+        "file_size:integer|upload_time:timestamp without time zone",
+        ("novel_id",),
+        (),
+    ),
+    "analysis_runs": (
+        "run_id:varchar(36)!|novel_id:varchar(255)!|source_path:text|title:varchar(500)|author:varchar(255)|"
+        "status:varchar(50)!|progress:double precision!|stage:varchar(255)|sub_stage:varchar(255)|"
+        "current:integer!|total:integer!|message:text|error:text|task_kind:varchar(50)!|request_payload:text|"
+        "cancel_requested:boolean!|worker_id:varchar(255)|heartbeat_at:timestamp without time zone|"
+        "started_at:timestamp without time zone|completed_at:timestamp without time zone|"
+        "created_at:timestamp without time zone|updated_at:timestamp without time zone",
+        ("run_id",),
+        ("novel_id->novels.novel_id",),
+    ),
+    "analysis_outputs": (
+        "output_id:varchar(36)!|run_id:varchar(36)!|kind:varchar(20)!|chapter_id:integer|role:varchar(20)|"
+        "payload:jsonb!|actual_input:jsonb!|invocation_id:varchar(64)|work_id:varchar(64)|"
+        "created_at:timestamp without time zone!",
+        ("output_id",),
+        ("run_id->analysis_runs.run_id",),
+    ),
+    "annotation_work": (
+        "work_id:varchar(64)!|run_id:varchar(36)!|chapter_id:integer!|role:varchar(20)!|"
+        "invocation_id:varchar(64)!|state:varchar(20)!|saved_at:timestamp without time zone!",
+        ("work_id",),
+        ("run_id->analysis_runs.run_id",),
+    ),
+    "book_cases": (
+        "case_id:varchar(64)!|run_id:varchar(36)!|description:text!|state:varchar(20)!|contributions:jsonb!|"
+        "created_at:timestamp without time zone!",
+        ("case_id",),
+        ("run_id->analysis_runs.run_id",),
+    ),
+    "chapters": (
+        "chapter_id:integer!|sequence:integer!|title:text!|display_title:text!|"
+        "display_index_label:varchar(64)|level:varchar(20)!|start_pos:integer!|end_pos:integer!|text:text|"
+        "char_offset:integer|char_end_offset:integer|run_id:varchar(36)!",
+        ("chapter_id", "run_id"),
+        ("run_id->analysis_runs.run_id",),
+    ),
+    "event_outbox": (
+        "event_id:varchar(64)!|run_id:varchar(36)!|chapter_id:integer|stream_id:bigint!|"
+        "event_type:varchar(60)!|payload:jsonb!|created_at:timestamp without time zone!|"
+        "published_at:timestamp without time zone",
+        ("event_id",),
+        ("run_id->analysis_runs.run_id",),
+    ),
+    "global_stats": (
+        "stat_name:varchar(255)!|stat_value:double precision|run_id:varchar(36)!",
+        ("stat_name", "run_id"),
+        ("run_id->analysis_runs.run_id",),
+    ),
+    "graph_entities": (
+        "entity_id:varchar(36)!|run_id:varchar(36)!|canonical_name:varchar(255)!|entity_type:varchar(50)!|"
+        "tags:jsonb!|attributes:jsonb!|first_seen_chapter:integer!|last_seen_chapter:integer!|"
+        "created_at:timestamp without time zone!|updated_at:timestamp without time zone!",
+        ("entity_id",),
+        ("run_id->analysis_runs.run_id",),
+    ),
+    "model_turns": (
+        "id:integer!|run_id:varchar(36)!|task_type:varchar(100)!|call_type:varchar(50)!|model:varchar(100)!|"
+        "execution_id:varchar(64)|attempt_number:integer|chapter_id:integer|work_id:varchar(64)|"
+        "role:varchar(20)|turn_index:integer|row_kind:varchar(20)!|status:varchar(20)!|error:text|"
+        "raw_response:jsonb|context_summary:jsonb|request_messages:jsonb|timing_notes:jsonb|ttft_ms:integer|"
+        "first_visible_ms:integer|reasoning_ms:integer|model_ms:integer|tool_wall_ms:integer|turn_ms:integer|"
+        "prompt_tokens:integer|completion_tokens:integer|total_tokens:integer|cache_read_tokens:integer|"
+        "reasoning_tokens:integer|cost:double precision|accounting_source:varchar(20)!|"
+        "message_key:varchar(128)|started_at:timestamp without time zone!|"
+        "finished_at:timestamp without time zone",
+        ("id",),
+        ("run_id->analysis_runs.run_id",),
+    ),
+    "topic_model_runs": (
+        "run_id:varchar(36)!|model_key:varchar(255)!|library_version:varchar(64)!|"
+        "pipeline_version:varchar(64)!|num_topics:integer!|parameters:jsonb!|dictionary_size:integer!|"
+        "training_document_count:integer!|inference_paragraph_count:integer!|artifact_key:text!|"
+        "created_at:timestamp without time zone!",
+        ("run_id",),
+        ("run_id->analysis_runs.run_id",),
+    ),
+    "word2vec_model_runs": (
+        "run_id:varchar(36)!|embedding_dimension:integer!|vocabulary_size:integer!|parameters:jsonb!|"
+        "source_uri:text|license_name:varchar(255)|training_document_count:integer|"
+        "training_token_count:integer|artifact_key:text!|artifact_scope:varchar(20)!|"
+        "created_at:timestamp without time zone!",
+        ("run_id",),
+        ("run_id->analysis_runs.run_id",),
+    ),
+    "agent_tool_calls": (
+        "id:integer!|turn_id:integer!|tool_name:varchar(100)!|call_index:integer!|request_args:jsonb!|"
+        "raw_args:text|response:jsonb|receipt:jsonb|status:varchar(20)!|error:text|tool_duration_ms:integer|"
+        "started_at:timestamp without time zone!|message_key:varchar(128)",
+        ("id",),
+        ("turn_id->model_turns.id",),
+    ),
+    "dialogue_records": (
+        "dialogue_id:varchar(36)!|run_id:varchar(36)!|chapter_id:integer!|author_work_id:varchar(64)|"
+        "candidate_key:varchar(100)!|content:text!|start:integer!|end:integer!|speaker:varchar(36)|"
+        "tone:varchar(255)|is_inner_monologue:boolean!|confidence:varchar(20)!|event_id:varchar(36)|"
+        "created_at:timestamp without time zone!|updated_at:timestamp without time zone!",
+        ("dialogue_id",),
+        (
+            "chapter_id,run_id->chapters.chapter_id,run_id",
+            "run_id->analysis_runs.run_id",
+            "speaker->graph_entities.entity_id",
+        ),
+    ),
+    "entity_states": (
+        "run_id:varchar(36)!|chapter_id:integer!|entity_id:varchar(36)!|state:jsonb!|changes:jsonb!|"
+        "author_work_id:varchar(64)|created_at:timestamp without time zone!",
+        ("run_id", "chapter_id", "entity_id"),
+        (
+            "chapter_id,run_id->chapters.chapter_id,run_id",
+            "entity_id->graph_entities.entity_id",
+            "run_id->analysis_runs.run_id",
+        ),
+    ),
+    "event_nodes": (
+        "event_id:varchar(36)!|run_id:varchar(36)!|chapter_id:integer!|chapter_order:integer!|"
+        "description:varchar!|participants:jsonb!|anchor_paragraph_ids:jsonb!|char_start:integer!|"
+        "char_end:integer!|evidence:jsonb!|causal_event_refs:jsonb!|tree_id:varchar(255)!|"
+        "cause_role:varchar(16)!|is_foreshadowing_root:boolean!|foreshadowing_status:varchar(20)|"
+        "payoff_likelihood:varchar(20)|strength:varchar(20)|annotation_id:varchar(36)!|"
+        "source_kind:varchar(30)!|payload_path:varchar(255)!|author_work_id:varchar(64)|"
+        "producer_invocation_id:varchar(64)|parent_node_id:varchar(36)|"
+        "created_at:timestamp without time zone!",
+        ("event_id",),
+        (
+            "annotation_id->analysis_outputs.output_id",
+            "chapter_id,run_id->chapters.chapter_id,run_id",
+            "run_id->analysis_runs.run_id",
+        ),
+    ),
+    "graph_relations": (
+        "relation_id:varchar(36)!|run_id:varchar(36)!|from_entity_id:varchar(36)!|to_entity_id:varchar(36)!|"
+        "directionality:varchar(20)!|relation_semantics:varchar(30)!|created_at:timestamp without time zone!",
+        ("relation_id",),
+        (
+            "from_entity_id->graph_entities.entity_id",
+            "run_id->analysis_runs.run_id",
+            "to_entity_id->graph_entities.entity_id",
+        ),
+    ),
+    "paragraphs": (
+        "run_id:varchar(36)!|paragraph_id:integer!|chapter_id:integer!|paragraph_index:integer!|"
+        "source_paragraph_index:integer!|fragment_index:integer!|local_start_char:integer!|"
+        "local_end_char:integer!|global_start_char:integer!|global_end_char:integer!|char_count:integer!|"
+        "token_count:integer!|text:text!|created_at:timestamp without time zone!",
+        ("run_id", "paragraph_id"),
+        (
+            "chapter_id,run_id->chapters.chapter_id,run_id",
+            "run_id->analysis_runs.run_id",
+        ),
+    ),
+    "event_edges": (
+        "edge_id:varchar(36)!|author_work_id:varchar(64)|cause_role:varchar(16)|run_id:varchar(36)!|"
+        "edge_type:varchar(20)!|source_event_id:varchar(36)!|target_event_id:varchar(36)!|"
+        "source_chapter_id:integer!|target_chapter_id:integer!|is_active:boolean!|evidence:jsonb!|"
+        "annotation_id:varchar(36)!|payload_path:varchar(255)!|created_at:timestamp without time zone!|"
+        "expired_at:timestamp without time zone",
+        ("edge_id",),
+        (
+            "annotation_id->analysis_outputs.output_id",
+            "run_id->analysis_runs.run_id",
+            "source_chapter_id,run_id->chapters.chapter_id,run_id",
+            "source_event_id->event_nodes.event_id",
+            "target_chapter_id,run_id->chapters.chapter_id,run_id",
+            "target_event_id->event_nodes.event_id",
+        ),
+    ),
+    "graph_facts": (
+        "graph_fact_id:integer!|run_id:varchar(36)!|chapter_id:integer!|fact_id:varchar(128)!|"
+        "fact_type:varchar(100)!|subject_entity_id:varchar(36)|predicate:varchar(255)!|object:jsonb|"
+        "value:jsonb|participants:jsonb!|scope:varchar(255)!|story_time:jsonb|assertion:varchar(20)!|"
+        "confidence:varchar(20)!|content:jsonb!|effective_chapter_id:integer!|source_kind:varchar(30)!|"
+        "annotation_id:varchar(36)!|payload_path:varchar(255)!|author_work_id:varchar(64)|"
+        "event_id:varchar(36)|evidence:jsonb!|created_at:timestamp without time zone!",
+        ("graph_fact_id",),
+        (
+            "annotation_id->analysis_outputs.output_id",
+            "chapter_id,run_id->chapters.chapter_id,run_id",
+            "effective_chapter_id,run_id->chapters.chapter_id,run_id",
+            "event_id->event_nodes.event_id",
+            "run_id->analysis_runs.run_id",
+            "subject_entity_id->graph_entities.entity_id",
+        ),
+    ),
+    "paragraph_curves": (
+        "run_id:varchar(36)!|paragraph_id:integer!|pos_density:double precision|neg_density:double precision|"
+        "net_density:double precision|smoothed_net_density:double precision|surface_tension:double precision|"
+        "smoothed_surface_tension:double precision|created_at:timestamp without time zone!",
+        ("run_id", "paragraph_id"),
+        (
+            "run_id,paragraph_id->paragraphs.run_id,paragraph_id",
+            "run_id->analysis_runs.run_id",
+        ),
+    ),
+    "paragraph_embeddings": (
+        "run_id:varchar(36)!|paragraph_id:integer!|embedding_vector:vector|embedding_model_key:varchar|"
+        "embedding_dimension:integer|created_at:timestamp without time zone",
+        ("run_id", "paragraph_id"),
+        (
+            "run_id,paragraph_id->paragraphs.run_id,paragraph_id",
+            "run_id->analysis_runs.run_id",
+        ),
+    ),
+    "paragraph_linguistic_features": (
+        "run_id:varchar(36)!|paragraph_id:integer!|ltp_token_count:integer!|tokens:jsonb!|"
+        "word_length_counts:jsonb!|pos_counts:jsonb!|sentence_count:integer!|sentence_pattern_counts:jsonb!|"
+        "dependency_arcs:jsonb!|dependency_node_count:integer!|dependency_root_count:integer!|"
+        "dependency_depth_sum:integer!|dependency_depth_max:integer!|dependency_relation_counts:jsonb!|"
+        "sdp_arcs:jsonb!|emotion_events:jsonb!|emotion_event_count:integer!|emotion_pos_event_count:integer!|"
+        "emotion_neg_event_count:integer!|lexicon_pos_count:double precision!|"
+        "lexicon_neg_count:double precision!|mneg_pos_count:double precision!|"
+        "mneg_neg_count:double precision!|boundary_pos_score_sum:double precision|"
+        "boundary_neg_score_sum:double precision|created_at:timestamp without time zone!",
+        ("run_id", "paragraph_id"),
+        (
+            "run_id,paragraph_id->paragraphs.run_id,paragraph_id",
+            "run_id->analysis_runs.run_id",
+        ),
+    ),
+    "paragraph_metrics": (
+        "run_id:varchar(36)!|paragraph_id:integer!|token_count:integer!|char_count:integer!|"
+        "sentence_count:integer!|sentence_char_sum:double precision!|sentence_char_sum_sq:double precision!|"
+        "positive_weight_sum:double precision!|negative_weight_sum:double precision!|"
+        "fight_weight_sum:double precision!|exclaim_count:integer!|question_count:integer!|"
+        "pause_count:integer!|dialogue_char_count:integer!|sensory_hit_count:integer!|"
+        "imagery_hit_count:integer!|metaphor_sentence_count:integer!|body_reaction_hit_count:integer!|"
+        "function_word_counts:jsonb!|semantic_category_counts:jsonb!|surface_tension_z:double precision|"
+        "surface_tension:double precision|created_at:timestamp without time zone!",
+        ("run_id", "paragraph_id"),
+        (
+            "run_id,paragraph_id->paragraphs.run_id,paragraph_id",
+            "run_id->analysis_runs.run_id",
+        ),
+    ),
+    "paragraph_topic_inference": (
+        "run_id:varchar(36)!|paragraph_id:integer!|source_token_count:integer!|"
+        "inference_token_count:integer!|inference_status:varchar(30)!|unavailable_reason:text|"
+        "distribution_sum:double precision|created_at:timestamp without time zone!",
+        ("run_id", "paragraph_id"),
+        (
+            "run_id,paragraph_id->paragraphs.run_id,paragraph_id",
+            "run_id->topic_model_runs.run_id",
+        ),
+    ),
+    "relation_states": (
+        "run_id:varchar(36)!|chapter_id:integer!|relation_id:varchar(36)!|relation_type:varchar(100)!|"
+        "attributes:jsonb!|is_active:boolean!|changes:jsonb!|author_work_id:varchar(64)|"
+        "created_at:timestamp without time zone!",
+        ("run_id", "chapter_id", "relation_id"),
+        (
+            "chapter_id,run_id->chapters.chapter_id,run_id",
+            "relation_id->graph_relations.relation_id",
+            "run_id->analysis_runs.run_id",
+        ),
+    ),
+    "paragraph_entities": (
+        "id:bigint!|run_id:varchar(36)!|paragraph_id:integer!|surface_text:text!|"
+        "raw_entity_type:varchar(50)!|normalized_entity_type:varchar(50)|local_start_char:integer!|"
+        "local_end_char:integer!|confidence:double precision|source_kind:varchar(30)!|"
+        "created_at:timestamp without time zone!",
+        ("id",),
+        (
+            "run_id,paragraph_id->paragraph_linguistic_features.run_id,paragraph_id",
+            "run_id,paragraph_id->paragraphs.run_id,paragraph_id",
+        ),
+    ),
+    "paragraph_phrase_hits": (
+        "id:bigint!|run_id:varchar(36)!|paragraph_id:integer!|surface_text:text!|phrase_type:varchar(50)|"
+        "local_start_char:integer!|local_end_char:integer!|match_kind:varchar(30)!|lexicon_key:varchar(255)|"
+        "is_metric_hit:boolean!|created_at:timestamp without time zone!",
+        ("id",),
+        (
+            "run_id,paragraph_id->paragraph_linguistic_features.run_id,paragraph_id",
+            "run_id,paragraph_id->paragraphs.run_id,paragraph_id",
+        ),
+    ),
+    "paragraph_pos_embeddings": (
+        "run_id:varchar(36)!|paragraph_id:integer!|pos_group:varchar(50)!|embedding_vector:vector|"
+        "source_token_count:integer!|in_vocabulary_token_count:integer!|"
+        "created_at:timestamp without time zone!",
+        ("run_id", "paragraph_id", "pos_group"),
+        (
+            "run_id,paragraph_id->paragraph_linguistic_features.run_id,paragraph_id",
+            "run_id,paragraph_id->paragraphs.run_id,paragraph_id",
+            "run_id->word2vec_model_runs.run_id",
+        ),
+    ),
+    "paragraph_topics": (
+        "run_id:varchar(36)!|paragraph_id:integer!|topic_id:integer!|topic_weight:double precision!",
+        ("run_id", "paragraph_id", "topic_id"),
+        (
+            "run_id,paragraph_id->paragraph_topic_inference.run_id,paragraph_id",
+            "run_id,paragraph_id->paragraphs.run_id,paragraph_id",
+            "run_id->topic_model_runs.run_id",
+        ),
+    ),
+}
 _ARCHIVE_REASONS = {
     "event_nodes": "缺少完整事件的标题、问题、类型和生命周期状态，不能补造正文",
     "event_edges": "原事件未转为完整事件，保留原端点、证据和树关系",
@@ -81,38 +381,33 @@ def _type_name(column_type: Any, connection: Connection) -> str:
     return "double precision" if value == "float" else value
 
 
-def _target_contract(connection: Connection) -> dict[str, Any]:
-    return {
-        table.name: {
-            "columns": {
-                column.name: {"type": _type_name(column.type, connection), "nullable": column.nullable}
-                for column in table.columns
-            },
-            "primary_key": [column.name for column in table.primary_key],
-        }
-        for table in Base.metadata.sorted_tables
-    }
+def _source_contract() -> dict[str, Any]:
+    "展开内置源表的列、主键与外键事实，感叹号表示非空列"
+    result = {}
+    for name, (column_spec, primary_key, foreign_keys) in _SOURCE_TABLES.items():
+        columns = {}
+        for specification in column_spec.split("|"):
+            column_name, column_type = specification.split(":", 1)
+            columns[column_name] = {"type": column_type.removesuffix("!"), "nullable": not column_type.endswith("!")}
+        references = []
+        for specification in foreign_keys:
+            source, target = specification.split("->", 1)
+            target_table, target_columns = target.split(".", 1)
+            references.append(
+                {
+                    "source_columns": source.split(","),
+                    "target_table": target_table,
+                    "target_columns": target_columns.split(","),
+                }
+            )
+        result[name] = {"columns": columns, "primary_key": list(primary_key), "foreign_keys": references}
+    return result
 
 
-def _check_release(connection: Connection, manifest: dict[str, Any]) -> None:
-    "核对发布代码与随脚本保存的结构清单，拒绝随当前模型漂移"
+def _check_release() -> None:
+    "核对迁移入口对应的项目发布版本"
     if project_version() != "0.3.0":
         raise ValueError("此入口只用于项目 0.3.0 发布代码，请使用匹配发布的代码执行")
-    digest = hashlib.sha256("\n".join(domain_constraint_statements()).encode()).hexdigest()
-    statements = []
-    for table in Base.metadata.sorted_tables:
-        statements.append(str(CreateTable(table).compile(dialect=connection.dialect)))
-        statements.extend(
-            str(CreateIndex(index).compile(dialect=connection.dialect))
-            for index in sorted(table.indexes, key=lambda item: str(item.name))
-        )
-    ddl_digest = hashlib.sha256("\n".join(statements).encode()).hexdigest()
-    if (
-        _target_contract(connection) != manifest["target"]
-        or digest != manifest["target_constraints_sha256"]
-        or ddl_digest != manifest["target_ddl_sha256"]
-    ):
-        raise ValueError("当前 ORM 或领域约束与此迁移的目标清单不符，停止执行")
 
 
 def _catalog(connection: Connection, schema: str) -> dict[str, int]:
@@ -135,10 +430,10 @@ def _row_counts(connection: Connection, schema: str, tables: Mapping[str, Any]) 
     }
 
 
-def _check_source(connection: Connection, schema: str, manifest: dict[str, Any]) -> list[str]:
+def _check_source(connection: Connection, schema: str, source_contract: dict[str, Any]) -> list[str]:
     inspector = inspect(connection)
     existing = set(inspector.get_table_names(schema=schema))
-    expected = set(manifest["source"])
+    expected = set(source_contract)
     problems = []
     if expected - existing:
         problems.append(f"缺少源表: {sorted(expected - existing)}")
@@ -169,7 +464,7 @@ def _check_source(connection: Connection, schema: str, manifest: dict[str, Any])
         foreign_keys[row["source_table"]].append(
             {key: row[key] for key in ("source_columns", "target_table", "target_columns")}
         )
-    for name, contract in manifest["source"].items():
+    for name, contract in source_contract.items():
         if name not in existing:
             continue
         columns = {
@@ -778,7 +1073,7 @@ def _save_receipt(connection: Connection, archive: str, conversion: _Conversion,
     )
 
 
-def migrate(
+def _migrate(
     engine: Engine,
     *,
     apply: bool = False,
@@ -796,7 +1091,7 @@ def migrate(
         raise ValueError("此迁移只支持 PostgreSQL")
     if apply and (not expect_database or engine.url.database != expect_database):
         raise ValueError("--apply 必须提供与实际数据库名完全匹配的 --expect-database")
-    manifest = json.loads(_SIDECAR.read_text(encoding="utf-8"))
+    source_contract = _source_contract()
     isolation = "READ COMMITTED" if apply else "REPEATABLE READ"
     with engine.connect().execution_options(isolation_level=isolation) as connection, connection.begin():
         if not apply:
@@ -819,7 +1114,7 @@ def migrate(
             raise ValueError("缺少已安装的 vector 或 pg_trgm 扩展，请先准备数据库扩展")
         search_path = [schema, *sorted(set(extensions.values()) - {schema})]
         connection.execute(text("SET LOCAL search_path TO " + ",".join(_quote(name) for name in search_path)))
-        _check_release(connection, manifest)
+        _check_release()
         if (
             apply
             and not connection.execute(
@@ -830,7 +1125,6 @@ def migrate(
             raise ValueError("同一数据库与 schema 已有发布迁移正在执行")
         original_catalog = _catalog(connection, schema)
         if set(original_catalog) == set(Base.metadata.tables):
-            validate_existing_schema(connection, schema=schema)
             return {
                 "source_release": "0.2.1",
                 "target_release": "0.3.0",
@@ -841,7 +1135,7 @@ def migrate(
                 "applied": False,
                 "blocking_issues": [],
             }
-        issues = _check_source(connection, schema, manifest)
+        issues = _check_source(connection, schema, source_contract)
         if inspect(connection).has_schema(archive):
             issues.append(f"归档 schema 已存在，不能覆盖: {archive}")
         if not issues and apply:
@@ -854,7 +1148,7 @@ def migrate(
             )
             if _catalog(connection, schema) != original_catalog:
                 raise ValueError("获取停写锁期间源表目录发生变化，停止执行")
-            issues.extend(_check_source(connection, schema, manifest))
+            issues.extend(_check_source(connection, schema, source_contract))
         if not issues:
             active = list(
                 connection.execute(
@@ -909,7 +1203,6 @@ def migrate(
         if result["converted_rows"] != report["converted_rows"] or result["archived_items"] != report["archived_items"]:
             raise ValueError("停写保护下转换结果与预检不一致，停止执行")
         report.update(result)
-        validate_existing_schema(connection, schema=schema)
         connection.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
         if _row_counts(connection, archive, original_catalog) != counts:
             raise ValueError("原表归档前后记录数不一致，停止执行")
@@ -918,8 +1211,37 @@ def migrate(
         return report
 
 
+def migrate(
+    *,
+    database_env: DatabaseEnvironmentName,
+    schema: str,
+    apply: bool,
+    expect_database: str | None,
+    archive_schema: str | None = None,
+) -> dict[str, Any]:
+    """读取项目数据库配置并执行只读预检或单事务迁移"""
+    _quote(schema)
+    if apply and not expect_database:
+        raise ValueError("--apply 必须同时指定 --expect-database")
+    url = make_url(resolve_database_url_from_env(database_env))
+    if url.get_backend_name() != "postgresql" or not url.database:
+        raise ValueError("迁移脚本只支持已存在的 PostgreSQL 数据库")
+    if expect_database and url.database != expect_database:
+        raise ValueError("目标数据库名称与 --expect-database 不一致")
+    engine = create_engine(url, poolclass=NullPool, connect_args={"connect_timeout": 5})
+    try:
+        return _migrate(
+            engine, apply=apply, schema=schema, archive_schema=archive_schema, expect_database=expect_database
+        )
+    finally:
+        engine.dispose()
+
+
 def main() -> int:
     "解析显式执行参数，输出不含连接凭证的迁移报告"
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="完整归档原表并执行转换，默认只读预检")
     parser.add_argument("--database-env", choices=("DATABASE", "TEST_DATABASE"), default="DATABASE")
@@ -933,14 +1255,10 @@ def main() -> int:
     if args.report is not None and not args.report.parent.is_dir():
         parser.error("报告目录不存在，请先准备目录")
     load_dotenv(_ROOT / ".env")
-    engine = None
     try:
         schema = args.schema or os.environ.get(args.database_env + "_SCHEMA", "public")
-        engine = create_engine(
-            resolve_database_url_from_env(args.database_env), poolclass=NullPool, connect_args={"connect_timeout": 5}
-        )
         report = migrate(
-            engine,
+            database_env=cast(DatabaseEnvironmentName, args.database_env),
             apply=args.apply,
             schema=schema,
             archive_schema=args.archive_schema,
@@ -949,9 +1267,6 @@ def main() -> int:
     except (OSError, ValueError, RuntimeError, SQLAlchemyError) as error:
         print(json.dumps({"applied": False, "error": str(error)}, ensure_ascii=False, indent=2))
         return 2
-    finally:
-        if engine is not None:
-            engine.dispose()
     exit_code = 0 if report["ready"] else 2
     if args.report is not None:
         try:
