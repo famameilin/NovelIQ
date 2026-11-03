@@ -15,11 +15,23 @@ class InputDocument:
     genre: str | None = None
 
 
-def read_text_file(path: Path, encodings: Iterable[str] | None = None) -> str:
-    if encodings is None:
-        encodings = ("utf-8", "utf-8-sig", "gb18030", "gbk")
+SOURCE_ENCODINGS = ("utf-8", "utf-8-sig", "gb18030", "gbk")
+
+
+def decode_text_bytes(content: bytes, encodings: Iterable[str] | None = None) -> str:
+    "按候选编码解码文本内容，全部失败时抛 UnicodeDecodeError"
     last_error: Exception | None = None
-    for encoding in encodings:
+    for encoding in tuple(encodings) if encodings is not None else SOURCE_ENCODINGS:
+        try:
+            return content.decode(encoding)
+        except Exception as exc:
+            last_error = exc
+    raise UnicodeDecodeError(str(last_error), b"", 0, 0, "unable to decode") from last_error
+
+
+def read_text_file(path: Path, encodings: Iterable[str] | None = None) -> str:
+    last_error: Exception | None = None
+    for encoding in tuple(encodings) if encodings is not None else SOURCE_ENCODINGS:
         try:
             return path.read_text(encoding=encoding)
         except Exception as exc:
