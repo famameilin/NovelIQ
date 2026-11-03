@@ -1,12 +1,6 @@
-"""
-段落特征结果表 ORM 模型定义
+"""段落计算结果的封闭种类目录
 
-paragraph_features 是封闭种类的段落向量与标量计算结果唯一落点。
-
-feature_code 是封闭数学结果目录，不是任意属性名；三种值列（向量/标量/计数）
-恰一适用，不加可由 feature_code 还原的重复 kind/group 列；模型、维度与曲线
-参数从分析运行的运行级合同取得。
-"""
+每段每种结果唯一，向量、标量和计数值恰一适用"""
 
 from __future__ import annotations
 
@@ -66,7 +60,7 @@ class ParagraphFeature(Base):
             name="paragraph_features_paragraph_fkey",
         ),
         Index("idx_paragraph_features_code_paragraph", "run_id", "feature_code", "paragraph_id"),
-        {"comment": "段落特征结果表：封闭计算种类（语义/POS 向量、张力 z、LOWESS 平滑、句式计数）"},
+        {"comment": "段落特征结果表：封闭的向量、标量、语言结构和情绪对照统计"},
     )
 
     id: Mapped[str] = mapped_column(
@@ -78,8 +72,8 @@ class ParagraphFeature(Base):
     vector_value: Mapped[list[float] | None] = mapped_column(
         Vector(), nullable=True, comment="向量值（语义/POS 向量；列宽按运行模型合同解析）"
     )
-    scalar_value: Mapped[float | None] = mapped_column(Float, nullable=True, comment="标量值（张力 z/LOWESS 平滑）")
-    count_value: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="计数值（句式分类命中数）")
+    scalar_value: Mapped[float | None] = mapped_column(Float, nullable=True, comment="标量值（平滑结果或情绪对照计数）")
+    count_value: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="语言结构计数和分类计数")
     in_vocabulary_token_count: Mapped[int | None] = mapped_column(
         Integer, nullable=True, comment="POS 向量词表内 token 数（仅 pos_vector 行有值）"
     )
