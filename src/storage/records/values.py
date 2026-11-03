@@ -15,6 +15,13 @@ class NamedRecord:
     def __init__(self, values: Mapping[str, Any]) -> None:
         object.__setattr__(self, "_values", deepcopy(dict(values)))
 
+    @classmethod
+    def _from_detached(cls, values: dict[str, Any]) -> NamedRecord:
+        "接收包内已递归分离的独立字典"
+        result = cls.__new__(cls)
+        object.__setattr__(result, "_values", values)
+        return result
+
     def __getattr__(self, name: str) -> Any:
         try:
             return object.__getattribute__(self, "_values")[name]

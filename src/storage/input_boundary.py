@@ -18,6 +18,9 @@ from src.storage.detached import detached
 from src.storage.records.sentinels import UNSET
 from src.storage.records.values import NamedRecord
 
+#: 元素自身不可变的标量类型：整序列复制即可完成分离，无需逐元素递归
+_IMMUTABLE_SCALARS = frozenset({str, bool, int, float, bytes, date, datetime, Decimal, UUID})
+
 
 def plain(value):
     "校验后复制输入，后台操作不引用调用方的可变容器"
@@ -37,6 +40,8 @@ def plain(value):
     if isinstance(value, dict):
         return {plain(key): plain(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
+        if all(type(item) in _IMMUTABLE_SCALARS for item in value):
+            return type(value)(value)
         return type(value)(plain(item) for item in value)
     if is_dataclass(value) and not isinstance(value, type):
         return type(value)(**{field.name: plain(getattr(value, field.name)) for field in fields(value) if field.init})

@@ -18,9 +18,29 @@ from sqlalchemy.sql import ClauseElement
 from src.storage.records import models as records
 from src.storage.records.values import NamedRecord
 
+_IMMUTABLE_TYPES = frozenset({type(None), str, bool, int, float, bytes, date, datetime, Decimal})
+
 
 def detached(value: Any) -> Any:
     "ORM、Row 及其嵌套成员不得离开 Storage 的返回边界"
+    value_type = type(value)
+    if value_type in _IMMUTABLE_TYPES:
+        return value
+    if value_type is dict:
+        return {key: item if type(item) in _IMMUTABLE_TYPES else detached(item) for key, item in value.items()}
+    if value_type is list:
+        return [item if type(item) in _IMMUTABLE_TYPES else detached(item) for item in value]
+    if value_type is tuple:
+        return tuple(item if type(item) in _IMMUTABLE_TYPES else detached(item) for item in value)
+    if isinstance(value, (Row, RowMapping)):
+        mapping = value._mapping if isinstance(value, Row) else value
+        return NamedRecord._from_detached({
+            str(key): item if type(item) in _IMMUTABLE_TYPES else detached(item) for key, item in mapping.items()
+        })
+    if isinstance(value, NamedRecord):
+        return NamedRecord._from_detached({
+            key: item if type(item) in _IMMUTABLE_TYPES else detached(item) for key, item in value.items()
+        })
     if isinstance(value, (Session, Connection, Engine, ClauseElement)):
         raise TypeError("数据库资源或 SQL 表达式不能作为公开数据返回")
     if isinstance(value, (Result, ScalarResult, MappingResult)):
@@ -31,11 +51,6 @@ def detached(value: Any) -> Any:
             raise TypeError("映射类不能作为公开数据返回")
         record_type = getattr(records, type(value).__name__ + "Record")
         return record_type(**{prop.key: detached(getattr(value, prop.key)) for prop in state.mapper.column_attrs})
-    if isinstance(value, (Row, RowMapping)):
-        mapping = value._mapping if isinstance(value, Row) else value
-        return NamedRecord({str(key): detached(item) for key, item in mapping.items()})
-    if isinstance(value, NamedRecord):
-        return NamedRecord({key: detached(item) for key, item in value.items()})
     if isinstance(value, dict):
         return {key: detached(item) for key, item in value.items()}
     if isinstance(value, list):
