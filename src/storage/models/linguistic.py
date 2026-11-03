@@ -1,17 +1,22 @@
-"""
-语言结构关系 ORM 模型定义
+"""语言结构的词元、情绪观测、实体候选和短语区间
 
-词面从原文切片读取；POS/NER 归一由固定代码映射（
-固定映射）投影；LTP 词元数与完成事实从词元行/paragraph_metrics 读取；
-句式分类计数进 paragraph_features；情绪事件（谓词/持有者/对象/否定/程度词）
-从正式词元与弧投影。
-"""
+情绪持有者引用同运行同段词元，词面按原文区间读取"""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,14 +47,23 @@ class LinguisticSpan(Base):
             ondelete="CASCADE",
             name="linguistic_spans_paragraph_fkey",
         ),
-        Index(
-            "uq_linguistic_spans_token_index",
-            "run_id",
-            "paragraph_id",
-            "token_index",
-            unique=True,
-            postgresql_where=sql_text("token_index IS NOT NULL"),
+        UniqueConstraint(
+            "run_id", "paragraph_id", "token_index", name="uq_linguistic_spans_token_index",
         ),
+        ForeignKeyConstraint(
+            ["run_id", "paragraph_id", "emotion_holder_token_index"],
+            ["paragraph_spans.run_id", "paragraph_spans.paragraph_id", "paragraph_spans.token_index"],
+            deferrable=True,
+            initially="DEFERRED",
+            name="linguistic_spans_emotion_holder_fkey",
+        ),
+        CheckConstraint(
+            "(emotion_polarity IS NULL AND emotion_negated IS NULL AND emotion_holder_token_index IS NULL) OR "
+            "(token_index IS NOT NULL AND emotion_polarity IS NOT NULL "
+            "AND emotion_polarity IN ('positive', 'negative') AND emotion_negated IS NOT NULL)",
+            name="ck_linguistic_spans_emotion_observation",
+        ),
+        CheckConstraint("token_index IS NULL OR token_index >= 0", name="ck_linguistic_spans_token_nonneg"),
         Index(
             "uq_linguistic_spans_token_start",
             "run_id",
@@ -87,6 +101,10 @@ class LinguisticSpan(Base):
             postgresql_where=sql_text("phrase_match_kind IS NOT NULL"),
         ),
         Index("idx_linguistic_spans_run_para_start", "run_id", "paragraph_id", "start_char"),
+        Index(
+            "idx_linguistic_spans_emotion", "run_id", "paragraph_id", "token_index",
+            postgresql_where=sql_text("emotion_polarity IS NOT NULL"),
+        ),
         {"comment": "原文区间标注表：词元/NER/短语三类互斥形状（词面与归一类型读取投影）"},
     )
 
@@ -99,6 +117,11 @@ class LinguisticSpan(Base):
     end_char: Mapped[int] = mapped_column(Integer, nullable=False, comment="段内结束字符偏移")
     token_index: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="词元序号（0 起；词元分支）")
     raw_pos: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="LTP 原始 POS 标签（词元分支）")
+    emotion_polarity: Mapped[str | None] = mapped_column(String(8), nullable=True, comment="情绪谓词极性")
+    emotion_negated: Mapped[bool | None] = mapped_column(Boolean, nullable=True, comment="情绪谓词的语义否定观测")
+    emotion_holder_token_index: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="同段持有者词元序号（0 起）"
+    )
     raw_entity_type: Mapped[str | None] = mapped_column(
         String(50), nullable=True, comment="LTP 原始实体类型（NER 分支）"
     )
