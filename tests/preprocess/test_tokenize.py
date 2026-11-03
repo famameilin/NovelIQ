@@ -59,6 +59,13 @@ class TestTokenizer(unittest.TestCase):
         tokenizer.add_stopwords(["测试词1", "测试词2"])
         self.assertEqual(len(tokenizer.stopwords), initial_count + 2)
 
+    def test_shared_book_tokenization_matches_independent_inputs(self):
+        tokenizer = Tokenizer()
+        chapters = ["", "南京市长", "", "江大桥。", "A-", "B\r", "\n！第", "三章", ""]
+        actual_chapters, actual_book = tokenizer.tokenize_chapters_and_book(chapters)
+        self.assertEqual(actual_chapters, [tokenizer.tokenize(text) for text in chapters])
+        self.assertEqual(actual_book, tokenizer.tokenize("".join(chapters)))
+
 
 class TestTokenizeFunction(unittest.TestCase):
     def test_tokenize_function_handles_none(self):
