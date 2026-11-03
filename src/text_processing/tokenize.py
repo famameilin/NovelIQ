@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from bisect import bisect_right
+from itertools import accumulate
 from pathlib import Path
 
 from loguru import logger
@@ -102,6 +104,9 @@ class Tokenizer:
             import re
 
             tokens = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]+", text)
+        return self._filter_tokens(tokens, filter_stopwords)
+
+    def _filter_tokens(self, tokens: list[str], filter_stopwords: bool = False) -> list[str]:
         result = []
         for token in tokens:
             token = token.strip()
@@ -114,6 +119,47 @@ class Tokenizer:
             result.append(token)
         return result
 
+    def tokenize_with_word_lengths(self, text: str) -> tuple[list[str], int, int]:
+        """同时返回标准词元、去空白词数和未裁剪词长之和"""
+        if not self._jieba:
+            tokens = self.tokenize(text)
+            return tokens, len(tokens), sum(map(len, tokens))
+        raw_tokens = [word for word in self._jieba.cut(text) if word.strip()]
+        return self._filter_tokens(raw_tokens), len(raw_tokens), sum(map(len, raw_tokens))
+
+    def tokenize_chapters_and_book(self, chapters: list[str]) -> tuple[list[list[str]], list[str]]:
+        """共享章内分词，跨章词法块分别按章和全书口径计算"""
+        book = "".join(chapters)
+        if not self._jieba:
+            return [self.tokenize(text) for text in chapters], self.tokenize(book)
+
+        chapter_ends = list(accumulate(len(text) for text in chapters))
+        chapter_tokens: list[list[str]] = [[] for _ in chapters]
+        book_tokens: list[str] = []
+
+        def tokenize_parts(start: int, end: int, *, share_with_book: bool) -> None:
+            while start < end:
+                chapter = bisect_right(chapter_ends, start)
+                part_end = min(chapter_ends[chapter], end)
+                tokens = self.tokenize(book[start:part_end])
+                chapter_tokens[chapter].extend(tokens)
+                if share_with_book:
+                    book_tokens.extend(tokens)
+                start = part_end
+
+        cursor = 0
+        # Jieba 独立切分每个词法块，块外跨章的换行和空白会被过滤
+        for block in self._jieba.re_han_default.finditer(book):
+            start, end = block.span()
+            if chapter_ends[bisect_right(chapter_ends, start)] >= end:
+                continue
+            tokenize_parts(cursor, start, share_with_book=True)
+            tokenize_parts(start, end, share_with_book=False)
+            book_tokens.extend(self.tokenize(block.group()))
+            cursor = end
+        tokenize_parts(cursor, len(book), share_with_book=True)
+        return chapter_tokens, book_tokens
+
     def add_stopwords(self, words: list[str]) -> None:
         for word in words:
             self._stopwords.add(word)
@@ -124,6 +170,10 @@ class Tokenizer:
 
 
 _tokenizer: Tokenizer | None = None
+
+
+def is_tokenizer_initialized() -> bool:
+    return _tokenizer is not None
 
 
 def get_tokenizer(
