@@ -34,6 +34,10 @@ _REQUIRED_FEATURE_COLUMNS = {
 # pgvector 对 vector 类型的 HNSW 索引上限 2000 维
 _HNSW_MAX_VECTOR_DIM = 2000
 
+#: 建 HNSW 索引时的会话维护内存与并行 worker 数
+HNSW_BUILD_WORK_MEM = "1GB"
+HNSW_BUILD_PARALLEL_WORKERS = 4
+
 
 def _runtime_schema() -> str:
     """解析当前连接使用的安全 PostgreSQL schema"""
@@ -88,10 +92,11 @@ def _semantic_hnsw_index_name(embedding_dim: int) -> str:
     return f"idx_paragraph_features_semantic_hnsw_{embedding_dim}"
 
 
-def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
+def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int, *, build_index: bool = True) -> None:
     """准备原文自然段语义向量的检索索引（按实测维度）
 
-    只校验目标表/列就绪，并按维度建立语义向量的 HNSW 部分表达式索引；
+    只校验目标表/列就绪；build_index=True 时按维度建立语义向量的 HNSW 部分表达式索引，
+    批量写入期间传 False，写完后单独建索引。
     表结构不兼容（缺列/列类型不是 vector）时抛出 ValueError。
     """
     if embedding_dim <= 0:
@@ -121,6 +126,8 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
 
     # 固定维度表达式 + 覆盖该维度的部分索引谓词：
     # 只索引 semantic_vector 行且维度等于本维度，其它维度/POS 向量行不受影响
+    if not build_index:
+        return
     index_name = _semantic_hnsw_index_name(embedding_dim)
     predicate = f"feature_code = '{_FEATURE_SEMANTIC_VECTOR}' AND vector_dims(vector_value) = {embedding_dim}"
     if hnsw_index_uses_halfvec(embedding_dim):
@@ -137,7 +144,17 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
             f"((vector_value::vector({embedding_dim})) vector_cosine_ops) "
             f"WHERE {predicate}"
         )
+    # 建图按维护内存与并行 worker 加速：默认维护内存只有 64MB，图会反复落盘
+    session.execute(text(f"SET maintenance_work_mem = '{HNSW_BUILD_WORK_MEM}'"))
+    session.execute(text(f"SET max_parallel_maintenance_workers = {HNSW_BUILD_PARALLEL_WORKERS}"))
     session.execute(text(index_sql))
+
+
+def drop_paragraph_embeddings_index(session: Session, embedding_dim: int) -> None:
+    """删除按维度建立的语义向量 HNSW 索引，批量写入期间不再逐行维护索引图"""
+    schema = _runtime_schema()
+    index_name = _semantic_hnsw_index_name(embedding_dim)
+    session.execute(text(f"DROP INDEX IF EXISTS {schema}.{index_name}"))
 
 
 def _hnsw_index_exists(session: Session, schema: str) -> bool:
