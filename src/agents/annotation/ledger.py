@@ -9,15 +9,14 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.agents.annotation.event_inputs import ParticipantArg
 from src.agents.annotation.ir_contract import ROLE_NAMESPACE_SEP
-from src.event_trees.models import (
-    BoundEvent,
-    ParticipantArg,
-)
+from src.agents.annotation.output_models import BoundCharacterObservation
+from src.event_trees.models import BoundEvent
+from src.event_trees.vocabulary import Confidence
 from src.fact_graph.graph import FactGraph
 from src.fact_graph.inputs import (
     BoundRelationInput,
-    ChapterMetricsInput,
     ChapterParagraphInfo,
     DialogueCandidate,
     DialogueInput,
@@ -25,9 +24,8 @@ from src.fact_graph.inputs import (
     EntityInput,
     EntityNameRef,
 )
-from src.fact_graph.outputs import BoundCharacterObservation
-from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
-from src.fact_graph.vocabulary import Confidence, DialogueVerdict, EntityType, RelationType, Tone
+from src.fact_graph.vocabulary import DialogueVerdict, EntityType, RelationType, Tone
+from src.metrics.annotation_inputs import ChapterMetricsInput
 
 from .candidates import extract_dialogue_candidates
 from .errors import (
@@ -35,6 +33,7 @@ from .errors import (
     AnnotationProtocolError,
     AnnotationStageRejection,
 )
+from .roles import ROLE_WRITE_DOMAINS
 from .state_dialogue import DialogueEvidenceState
 from .state_entities import EntityRelationState
 from .state_events import EventBindingState
@@ -85,7 +84,6 @@ class AnnotationToolLedger:
     # 快照/回滚随账本深拷贝一并覆盖
     confirmed_complete_event_index: dict[str, dict[str, Any]] = field(default_factory=dict)
     confirmed_source_event_ids: set[str] = field(default_factory=set)
-    confirmed_containment_parents: dict[str, str] = field(default_factory=dict)
 
     work_id: str = ""
     invocation_id: str = ""
@@ -127,28 +125,12 @@ class AnnotationToolLedger:
         self.events.authorized_event_ids = value
 
     @property
-    def event_trees(self) -> dict[str, dict[str, Any]]:
-        return self.events.event_trees
+    def event_ids_by_el(self) -> dict[str, str]:
+        return self.events.event_ids_by_el
 
-    @event_trees.setter
-    def event_trees(self, value: dict[str, dict[str, Any]]) -> None:
-        self.events.event_trees = value
-
-    @property
-    def tree_key_index(self) -> dict[str, str]:
-        return self.events.tree_key_index
-
-    @tree_key_index.setter
-    def tree_key_index(self, value: dict[str, str]) -> None:
-        self.events.tree_key_index = value
-
-    @property
-    def pending_child_events(self) -> dict[str, list[dict[str, Any]]]:
-        return self.events.pending_child_events
-
-    @pending_child_events.setter
-    def pending_child_events(self, value: dict[str, list[dict[str, Any]]]) -> None:
-        self.events.pending_child_events = value
+    @event_ids_by_el.setter
+    def event_ids_by_el(self, value: dict[str, str]) -> None:
+        self.events.event_ids_by_el = value
 
     @property
     def observation_by_record(self) -> dict[str, BoundCharacterObservation]:
@@ -238,7 +220,7 @@ class AnnotationToolLedger:
         )
 
     def set_phase(self, phase: str) -> None:
-        """用于同步 LangGraph 和工具账本阶段"""
+        """同步会话与工具账本的执行阶段"""
         self.phase = phase
 
     def snapshot(self) -> dict[str, Any]:
@@ -304,12 +286,6 @@ class AnnotationToolLedger:
             rendered += f" 等 {len(rows)} 个"
         return rendered or "（本章还没有登记实体）"
 
-    def _tree_id(self, tree_key: str) -> str:
-        return self.events._tree_id(self, tree_key)
-
-    def _node_id(self, tree_key: str, node_key: str) -> str:
-        return self.events._node_id(self, tree_key, node_key)
-
     # ------------------------------------------------------------------
     # 实时写入：每个小调用即时落到目标结构，回执即当前真相
     # ------------------------------------------------------------------
@@ -318,6 +294,40 @@ class AnnotationToolLedger:
         """用于在每个写入入口统一校验阶段（章冻结后不再接受写入；诊断阶段承接案例处置写入）"""
         if self.phase not in {"chapter_open", "diagnosis_open"}:
             raise AnnotationProtocolError(f"阶段 {self.phase} 不允许写入正式标注")
+
+    def require_domain(self, domain: str) -> None:
+        """用于按角色职责拒绝越域写入"""
+        allowed = ROLE_WRITE_DOMAINS.get(self.role, frozenset())
+        if domain in allowed:
+            return
+        raise AnnotationStageRejection(
+            f"当前角色 {self.role} 不能写 {domain}",
+            record=domain,
+            field="role",
+            code="role_scope",
+            expected=f"该角色可写：{('、'.join(sorted(allowed)) or '无')}",
+        )
+
+    def progress_gaps(self) -> dict[str, int]:
+        """用于回执里的轻量缺口计数，不执行完整收尾检查"""
+        pending = self.dialogue.dialogue_ledger()["pending"]
+        queued_ids = {
+            str(event_id)
+            for item in self.events.queues.values()
+            for event_id in item.get("event_ids", [])
+        }
+        events = self.bound_payloads.get("events") or []
+        return {
+            "metrics_missing": int(self.role in {"annotation", "metric"} and self.metrics_payload is None),
+            "dialogue_pending": len(pending) if self.role in {"annotation", "metric"} else 0,
+            "events_unqueued": sum(1 for event in events if str(event.event_id) not in queued_ids),
+        }
+
+    def pop_warnings(self) -> list[dict[str, Any]]:
+        """用于取出并清空本次写入产生的非阻断提示"""
+        warnings = list(self.events.warnings)
+        self.events.warnings.clear()
+        return warnings
 
     def _bound_event(self, node_id: str) -> BoundEvent:
         return self.events._bound_event(node_id)
@@ -403,8 +413,8 @@ class AnnotationToolLedger:
             characters=characters,
         )
 
-    def _event_record(self, el: str, *, isroot: bool) -> str:
-        return self.events._event_record(el, isroot=isroot)
+    def _event_record(self, el: str) -> str:
+        return self.events._event_record(el)
 
     _IR_RECORD_RE = re.compile(r"([a-z_]+)/(entity|dialogue|relation|event)/(.+)")
 
@@ -412,13 +422,15 @@ class AnnotationToolLedger:
         """用于把模型面 IR 记录键规范成生产记录键（已是生产键的原样返回）
 
         agent 路径的 written_record_keys 混装两种键：构造器 plan 的 IR 键
-        （structure/entity/a1、event/t1、evidence/dialogue/3）与生产写入面的生产键
-        （entity/{name}、event:t1/root、dialogue/3）。bind_record_target 只认生产键，
+        （structure/entity/a1、event/t1、dialogue/3）与生产写入面的生产键
+        （entity/{name}、event:t1、dialogue/3）。bind_record_target 只认生产键，
         这里在工具入口统一翻译，两类消费点共用这一份规范。
         """
-        # 裸树键补全：树键在索引里时唯一指到它的根记录，统一补 /root
-        if key in self.tree_key_index:
-            return f"{key}/{RESERVED_ROOT_KEY}"
+        namespaced_el = f"{self.role}{ROLE_NAMESPACE_SEP}{key}"
+        if key in self.events.event_ids_by_el:
+            return key
+        if namespaced_el in self.events.event_ids_by_el:
+            return namespaced_el
         match = self._IR_RECORD_RE.fullmatch(key)
         if match is not None:
             role, domain, body = match.groups()
@@ -428,20 +440,13 @@ class AnnotationToolLedger:
             if domain == "dialogue":
                 return f"dialogue/{body}"
             if domain == "event":
-                # 非事件角色写树时的 IR 键（structure/event/t1）：树键按角色命名空间化
-                # 落库（namespace_event_el → structure:t1）
-                namespaced = f"{role}{ROLE_NAMESPACE_SEP}{body}"
-                return namespaced if EL_PATH_SEP in body else f"{namespaced}/{RESERVED_ROOT_KEY}"
+                return f"{role}{ROLE_NAMESPACE_SEP}{body}"
             if domain == "relation":
                 return self._production_relation_key(key, role, body)
             return key
         if key.startswith("event/"):
-            # 事件键翻译保留命名空间：多 Agent 事件树落库时树键按角色命名空间化
-            # （namespace_event_el：t1 → event:t1），节点 id 以命名空间树键参与
-            # stable_uuid；written 集合里的 "event/..." 只来自多 Agent 构造器日志。
             el = key.removeprefix("event/")
-            namespaced = f"event{ROLE_NAMESPACE_SEP}{el}"
-            return namespaced if EL_PATH_SEP in el else f"{namespaced}/{RESERVED_ROOT_KEY}"
+            return f"event{ROLE_NAMESPACE_SEP}{el}"
         return key
 
     def _production_relation_key(self, key: str, role: str, body: str) -> str:
@@ -480,12 +485,6 @@ class AnnotationToolLedger:
         names = [self.graph.display_name(entity_key) for entity_key in keys]
         return f"relation/{names[0]}-{names[1]}/{types.pop()}"
 
-    def _reconcile_pending_children(self) -> None:
-        return self.events._reconcile_pending_children()
-
-    def is_pending_child(self, record: str) -> bool:
-        return self.events.is_pending_child(record)
-
     # ------------------------------------------------------------------
     # 回执 content=本次写入的生效终值（服务端归一/端点解析已完成），带 run 级 uuid id
 
@@ -498,8 +497,8 @@ class AnnotationToolLedger:
     def dialogue_content(self, candidate_index: int) -> dict[str, Any]:
         return self.dialogue.dialogue_content(candidate_index)
 
-    def event_content(self, *, el: str, isroot: bool) -> dict[str, Any]:
-        return self.events.event_content(self, el=el, isroot=isroot)
+    def event_content(self, *, el: str) -> dict[str, Any]:
+        return self.events.event_content(self, el=el)
 
     # ------------------------------------------------------------------
     # 进度账本数据源：*_ledger() 供 graph 侧渲染【进度账本】注入块（局部键面，不露
@@ -529,54 +528,6 @@ class AnnotationToolLedger:
         )
         self.dialogue.bound_payloads.setdefault("dialogues", [])
         self.metrics.bound_payloads.setdefault("paragraph_labels", [])
-
-    def _chapter_write_records(self) -> list[dict[str, Any]]:
-        """用于收尾时把本章 的写入汇总成领域级审计记录"""
-        records: list[dict[str, Any]] = [
-            {
-                "chapter_id": self.current_chapter_id,
-                "domain": "entities",
-                "payload": EntityDirectoryInput(entities=list(self.written_entities.values())).model_dump(mode="json"),
-            }
-        ]
-        if self.metrics_payload is not None:
-            records.append(
-                {
-                    "chapter_id": self.current_chapter_id,
-                    "domain": "metrics",
-                    "payload": self.metrics_payload.model_dump(mode="json"),
-                }
-            )
-        records.append(
-            {
-                "chapter_id": self.current_chapter_id,
-                "domain": "events",
-                "payload": {
-                    "tool": "write_event",
-                    "trees": self._event_tree_records(),
-                    "character_observation_count": len(self.observation_by_record),
-                    "finalized": True,
-                },
-            }
-        )
-        records.append(
-            {
-                "chapter_id": self.current_chapter_id,
-                "domain": "relations",
-                "payload": [item.model_dump(mode="json") for item in self.written_relations.values()],
-            }
-        )
-        records.append(
-            {
-                "chapter_id": self.current_chapter_id,
-                "domain": "dialogues",
-                "payload": [item.model_dump(mode="json") for item in (self.domain_payloads.get("dialogues") or [])],
-            }
-        )
-        return records
-
-    def _event_tree_records(self) -> list[dict[str, Any]]:
-        return self.events._event_tree_records()
 
     def _written_counts(self) -> dict[str, int]:
         """用于收尾回执给出各域写入条数（模型面只需知道写了多少）"""
@@ -622,11 +573,7 @@ class AnnotationToolLedger:
         values/keys），逐条能反查回生产记录键；events 用树内节点反查模型面局部键
         （不露 uuid）。键/序失配时退回下标标签，点名失败不改变判重语义。
         """
-        node_labels = {
-            str(node_id): f"{tree_key}/{node_key}"
-            for tree_key, tree_id in self.tree_key_index.items()
-            for node_key, node_id in (self.event_trees.get(tree_id) or {}).get("nodes", {}).items()
-        }
+        node_labels = {identifier: el for el, identifier in self.event_ids_by_el.items()}
         observation_keys = list(self.observation_by_record)
         return {
             "character_observations": [

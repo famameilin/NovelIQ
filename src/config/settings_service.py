@@ -165,21 +165,28 @@ def apply_task_env_final(final: dict[str, str | None] | None, task_settings: tup
 
 
 def _resolve_model_pool(model_pool: list[dict[str, Any]] | None) -> list[Any]:
-    """校验池内模型编辑：同组不可重复编辑、改动已有模型须存在、Key 不接受打码值"""
+    """校验池内模型编辑：同一端点条目不可重复编辑、改动已有模型须存在、Key 不接受打码值"""
     if model_pool is None:
         return list(settings.models.model_pool)
 
-    saved_by_id = {entry.model_id: entry for entry in settings.models.model_pool}
+    saved_by_key = {(entry.model_id, entry.base_url): entry for entry in settings.models.model_pool}
     entries: list[dict[str, Any]] = []
-    origins: set[str] = set()
+    origins: set[tuple[str, str]] = set()
     for entry in model_pool:
-        original_id = (entry.get("original_model_id") or entry["model_id"]).strip()
-        if original_id in origins:
-            raise SettingsValidationError("同一已保存模型不能重复编辑")
-        origins.add(original_id)
-        saved = saved_by_id.get(original_id)
-        if entry.get("original_model_id") is not None and saved is None:
-            raise SettingsValidationError("要编辑的模型不存在，请重新加载设置")
+        current_key = (str(entry["model_id"]).strip(), str(entry["base_url"]).strip().rstrip("/"))
+        if entry.get("original_model_id") is not None:
+            original_key = (
+                str(entry["original_model_id"]).strip(),
+                str(entry.get("original_base_url") or "").strip().rstrip("/"),
+            )
+            if original_key in origins:
+                raise SettingsValidationError("同一已保存模型不能重复编辑")
+            origins.add(original_key)
+            saved = saved_by_key.get(original_key)
+            if saved is None:
+                raise SettingsValidationError("要编辑的模型不存在，请重新加载设置")
+        else:
+            saved = saved_by_key.get(current_key)
         api_key = entry.get("api_key") if entry.get("api_key") is not None else saved.api_key if saved else None
         if api_key and api_key.startswith(API_KEY_MASK_PREFIX):
             raise SettingsValidationError("模型 Key 不能使用打码值")

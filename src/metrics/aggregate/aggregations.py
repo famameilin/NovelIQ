@@ -17,7 +17,7 @@ from src.fact_graph.character_reference_policy import decide_character_reference
 from src.metrics.aggregate.algorithms import safe_ratio
 from src.metrics.style_metrics import mtld, ttr
 from src.metrics.values import read_emotion_score
-from src.text_processing.tokenize import tokenize
+from src.text_processing.tokenize import get_tokenizer
 
 
 @dataclass
@@ -60,7 +60,9 @@ def aggregate_chapter_metrics(
         if metric_row is None:
             continue
         chapter_id = int(paragraph_row.chapter_id)
-        accumulator = chapters_by_id.setdefault(chapter_id, ChapterAccumulator(chapter_id=chapter_id))
+        accumulator = chapters_by_id.get(chapter_id)
+        if accumulator is None:
+            accumulator = chapters_by_id[chapter_id] = ChapterAccumulator(chapter_id=chapter_id)
         accumulator.paragraph_count += 1
         accumulator.total_chars += int(paragraph_row.char_count)
         accumulator.total_tokens += int(metric_row.token_count)
@@ -76,16 +78,19 @@ def aggregate_chapter_metrics(
         accumulator.sentence_char_sum_sq += float(metric_row.sentence_char_sum_sq)
         accumulator.texts.append(str(paragraph_row.text))
 
+    chapter_texts = ["".join(accumulator.texts) for accumulator in chapters_by_id.values()]
+    chapter_tokens, book_tokens = get_tokenizer().tokenize_chapters_and_book(chapter_texts)
     chapters = [
-        build_chapter_summary(accumulator, annotations_by_chapter_id.get(accumulator.chapter_id))
-        for accumulator in chapters_by_id.values()
+        build_chapter_summary(accumulator, annotations_by_chapter_id.get(accumulator.chapter_id), tokens)
+        for accumulator, tokens in zip(chapters_by_id.values(), chapter_tokens, strict=True)
     ]
-    return {"chapters": chapters, "book": build_book_aggregate(chapters, chapters_by_id)}
+    return {"chapters": chapters, "book": build_book_aggregate(chapters, chapters_by_id, book_tokens)}
 
 
-def build_chapter_summary(accumulator: ChapterAccumulator, annotation: Any | None) -> dict[str, Any]:
+def build_chapter_summary(
+    accumulator: ChapterAccumulator, annotation: Any | None, tokens: list[str],
+) -> dict[str, Any]:
     """单章汇总载荷（TTR/MTLD 在本章拼接文本上计算）"""
-    tokens = tokenize("".join(accumulator.texts)) if accumulator.texts else []
     sentence_mean = safe_ratio(accumulator.sentence_char_sum, accumulator.sentence_count)
     sentence_var: float | None = None
     if accumulator.sentence_count > 0 and sentence_mean is not None:
@@ -133,6 +138,7 @@ def build_chapter_summary(accumulator: ChapterAccumulator, annotation: Any | Non
 def build_book_aggregate(
     chapter_metrics: list[dict[str, Any]],
     chapters_by_id: dict[int, ChapterAccumulator],
+    book_tokens: list[str],
 ) -> dict[str, Any]:
     """全书聚合载荷（比例分母只计有效章节，不用零值伪造）"""
     total_chapters = len(chapter_metrics)
@@ -149,9 +155,6 @@ def build_book_aggregate(
     sentence_count = sum(acc.sentence_count for acc in chapters_by_id.values())
     sentence_char_sum = sum(acc.sentence_char_sum for acc in chapters_by_id.values())
     sentence_char_sum_sq = sum(acc.sentence_char_sum_sq for acc in chapters_by_id.values())
-
-    book_text = "".join(text for acc in chapters_by_id.values() for text in acc.texts)
-    book_tokens = tokenize(book_text) if book_text else []
 
     sentence_mean = safe_ratio(sentence_char_sum, sentence_count)
     sentence_var: float | None = None
@@ -236,7 +239,8 @@ def aggregate_emotion_trend_windows(
     - 窗口载荷含 token_total，供调用方做加权展示平滑
     """
     metric_by_paragraph_id = {int(row.paragraph_id): row for row in metric_rows}
-    total_chars = sum(int(row.char_count) for row in paragraph_rows)
+    # 用同一全文坐标系的正文末端归一化，保留段落间的字符间隔
+    book_end = max((int(row.global_end_char) for row in paragraph_rows), default=0)
 
     entries: list[tuple[Any, Any, float]] = []
     for row in paragraph_rows:
@@ -244,7 +248,7 @@ def aggregate_emotion_trend_windows(
         if metric is None:
             continue
         midpoint = (int(row.global_start_char) + int(row.global_end_char)) / 2
-        position = midpoint / total_chars if total_chars > 0 else 0.0
+        position = midpoint / book_end if book_end > 0 else 0.0
         if range_start is not None:
             if range_end is None or position < range_start or position > range_end:
                 continue

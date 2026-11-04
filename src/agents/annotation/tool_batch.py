@@ -8,28 +8,45 @@ import json
 import time
 from typing import TYPE_CHECKING, Any, get_args
 
-from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.tools import _WRITE_TOOL_NAMES
 from src.agents.annotation.validation_errors import translate_write_validation_error
+from src.agents.loop import AgentState, tool_calls
+from src.agents.messages import ToolMessage
+from src.agents.program_runtime.contracts import ProgramExecutionTimeout
+from src.agents.tools import describe_argument_error
 
 from .errors import (
     AnnotationAuthorizationError,
     AnnotationDependencyError,
     AnnotationInputError,
     AnnotationInvariantError,
-)
-from .graph import (
-    AnnotationGraphState,
-    _failed_receipt,
-    _tool_calls,
+    AnnotationStageRejection,
 )
 
 if TYPE_CHECKING:
     from src.agents.stream import AgentStream
     from src.agents.turn_observer import AgentTurnObserver
+
+
+def _failed_receipt(name: str, error: str | BaseException, *, args: dict[str, Any] | None = None) -> str:
+    """用于构造单个调用失败时模型可见的独立回执
+
+    结构化拒绝（AnnotationStageRejection）只回 record/field/code/
+    expected 与可自纠说明；参数校验失败回字段级中文说明，不回英文样板。
+    """
+    if isinstance(error, AnnotationStageRejection):
+        return json.dumps(error.receipt(), ensure_ascii=False)
+    if isinstance(error, ValidationError) and name in _WRITE_TOOL_NAMES | {"anchor_record", "write_link"}:
+        translated = translate_write_validation_error(name, dict(args or {}), error)
+        return json.dumps(translated.receipt(), ensure_ascii=False)
+    detail = describe_argument_error(error) if isinstance(error, BaseException) else None
+    return json.dumps(
+        {"accepted": False, "tool": name, "error": f"参数不合法：{detail}" if detail else str(error)},
+        ensure_ascii=False,
+    )
 
 
 def _tool_batch_protocol_error(
@@ -70,11 +87,9 @@ def _coerce_nullish_write_args(tool: Any, args: dict[str, Any]) -> dict[str, Any
 
 
 async def _invoke_tool(tool_map: dict[str, Any], call: dict[str, Any]) -> str:
-    """用于按模型工具调用执行同步或异步 LangChain 工具
+    """校验参数后执行同步或异步工具，校验失败返回单条结构化拒绝回执
 
-    参数绑定发生在 langchain 工具 schema 层（先于函数体），该层的 pydantic 失败统一翻成
-    结构化拒绝回执（record/field/code/expected），只指向出错的那一条记录；
-    可空参数的 null 字面串在绑定前先按留空归一。
+    可空写入参数的 null 字面串在绑定前按留空归一
     """
     name = str(call.get("name"))
     candidate = tool_map.get(name)
@@ -194,7 +209,7 @@ async def _execute_call(
     call: dict[str, Any],
     *,
     tool_map: dict[str, Any],
-    ledger: AnnotationToolLedger,
+    ledger: AnnotationToolLedger | None,
     observer: AgentTurnObserver | None = None,
     stream: AgentStream | None = None,
     call_index: int,
@@ -209,6 +224,14 @@ async def _execute_call(
     """
     name = str(call.get("name"))
     started_ns = time.perf_counter_ns()
+    if call.get("argument_error"):
+        return await _failed_entry(
+            call,
+            str(call["argument_error"]),
+            index=call_index,
+            observer=observer,
+            stream=stream,
+        )
     if call.get("truncated"):
         return await _failed_entry(
             call,
@@ -217,31 +240,42 @@ async def _execute_call(
             observer=observer,
             stream=stream,
         )
-    ledger_snapshot = ledger.snapshot()
-    graph_snapshot = ledger.graph.snapshot() if ledger.graph is not None and ledger.invoke_tool is None else None
+    ledger_snapshot = ledger.snapshot() if ledger is not None else None
+    graph_snapshot = (
+        ledger.graph.snapshot()
+        if ledger is not None and ledger.graph is not None and ledger.invoke_tool is None
+        else None
+    )
     dependency_error: Exception | None = None
     try:
         if stream is not None:
             await stream.tool_call_started(name)
         result = (
             await ledger.invoke_tool(tool_map, call)
-            if ledger.invoke_tool is not None
+            if ledger is not None and ledger.invoke_tool is not None
             else await _invoke_tool(tool_map, call)
         )
         status = "success"
         error: str | None = None
         receipt = json.loads(result)
+    except ProgramExecutionTimeout as exc:
+        result = exc.receipt
+        receipt = json.loads(result)
+        status, error = "error", str(exc)
+        dependency_error = exc
     except AnnotationInvariantError:
         # 合同违反属不可恢复错误：先闭合回合审计计时再上抛，避免 agent_turns 行耗时字段永久为空
         if observer is not None:
             observer.close_turn()
         raise
     except Exception as exc:
-        ledger.restore(ledger_snapshot)
-        if graph_snapshot is not None and ledger.graph is not None:
+        if ledger is not None and ledger_snapshot is not None:
+            ledger.restore(ledger_snapshot)
+        if graph_snapshot is not None and ledger is not None and ledger.graph is not None:
             ledger.graph.restore(graph_snapshot)
-        ledger.errors.append(str(exc))
-        result = _failed_receipt(name, exc)
+        if ledger is not None:
+            ledger.errors.append(str(exc))
+        result = _failed_receipt(name, exc, args=dict(call.get("args") or {}))
         status = "error"
         error = str(exc)
         receipt = json.loads(result)
@@ -302,7 +336,7 @@ async def _execute_call(
 def _build_tool_batch_node(
     tools: list[Any],
     *,
-    ledger: AnnotationToolLedger,
+    ledger: AnnotationToolLedger | None,
     observer: AgentTurnObserver | None = None,
     stream: AgentStream | None = None,
     program_tool_name: str | None = None,
@@ -313,9 +347,9 @@ def _build_tool_batch_node(
     同批 finish 后仍执行剩余调用，再由程序检查完整性。
     """
 
-    async def tool_batch(state: AnnotationGraphState) -> dict[str, Any]:
+    async def tool_batch(state: AgentState) -> dict[str, Any]:
         """用于独立串行执行本回合全部小调用并按单次调用边界回滚"""
-        calls = _tool_calls(state)
+        calls = tool_calls(state)
         tool_map = {candidate.name: candidate for candidate in tools}
         allowed_tool_names = frozenset(tool_map)
         rendered: list[dict[str, Any]] = []
@@ -325,14 +359,15 @@ def _build_tool_batch_node(
                 allowed_tool_names=allowed_tool_names,
             )
             if protocol_error is not None:
-                ledger.errors.append(protocol_error)
+                if ledger is not None:
+                    ledger.errors.append(protocol_error)
                 for call_index, call in enumerate(calls):
                     rendered.append(
                         await _failed_entry(call, protocol_error, index=call_index, observer=observer, stream=stream)
                     )
                 if observer is not None:
                     observer.close_turn()
-                return {"messages": _tool_messages(rendered), "phase": ledger.phase}
+                return {"messages": _tool_messages(rendered), **({"phase": ledger.phase} if ledger is not None else {})}
         for call_index, call in enumerate(calls):
             name = str(call.get("name"))
             if program_tool_name is not None and name not in allowed_tool_names:
@@ -340,7 +375,8 @@ def _build_tool_batch_node(
                 # 不进写入面，回执只报事实：调用方式属提示词面（execute_code 的说明 +
                 # 系统提示词），不在回执里复述模型自己看得到的工具面。
                 error_text = f"本轮未开放工具: {[name]}"
-                ledger.errors.append(error_text)
+                if ledger is not None:
+                    ledger.errors.append(error_text)
                 rendered.append(
                     await _failed_entry(call, error_text, index=call_index, observer=observer, stream=stream)
                 )
@@ -358,7 +394,7 @@ def _build_tool_batch_node(
                     stream=stream,
                     call_index=call_index,
                     # 写入成功即登记当前 work 的记录键，供原文锚点使用
-                    record_keys=ledger.written_record_keys,
+                    record_keys=ledger.written_record_keys if ledger is not None else None,
                     program_meta=(
                         {
                             "program_id": None,
@@ -374,7 +410,7 @@ def _build_tool_batch_node(
             )
         if observer is not None:
             observer.close_turn()
-        return {"messages": _tool_messages(rendered), "phase": ledger.phase}
+        return {"messages": _tool_messages(rendered), **({"phase": ledger.phase} if ledger is not None else {})}
 
     return tool_batch
 

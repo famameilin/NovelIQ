@@ -11,13 +11,14 @@ from src.storage.models import (
     CompleteEvent,
     EventForeshadowingAction,
     EventParticipant,
+    NarrativeGroup,
     NarrativeLink,
     SourceEvidence,
 )
 from src.storage.records.events import EventSave as EventContribution
 from src.storage.records.evidence import evidence_for
 from src.storage.repositories import narrative_records as smap
-from src.storage.repositories.queries import event_trees_persistence as _queries
+from src.storage.repositories.queries import event_sources as _queries
 
 
 def save_annotation_event_contribution(session: Any, frozen: EventContribution, annotation_id: str) -> None:
@@ -39,10 +40,10 @@ def save_annotation_event_contribution(session: Any, frozen: EventContribution, 
         return result
 
     def annotation_event(identifier: str) -> CompleteEvent:
-        row = _queries.event_trees_persistence_annotation_event_1(session, identifier)
+        row = _queries.get_event(session, identifier)
         if row is None:
             raise ValueError(f"event_id={identifier} 未有效保存于本 run")
-        source = _queries.event_trees_persistence_annotation_event_2(session, row, run_id)
+        source = _queries.get_annotation_chapter(session, row, run_id)
         if source is None:
             raise ValueError(f"event_id={identifier} 未有效保存于本 run")
         if int(source.sequence) > frozen.chapter_order:
@@ -52,20 +53,51 @@ def save_annotation_event_contribution(session: Any, frozen: EventContribution, 
     for key in ("complete_events", "ownerships", "structures"):
         if payload.get(key):
             raise ValueError(f"标注不得保存诊断产物: {key}")
-    for item in content("containments"):
-        for identifier in (item["parent_event_id"], item["child_event_id"]):
+    from types import SimpleNamespace
+
+    from src.storage.repositories.queue_writes import _check_evidence, queue_graph, save_queues
+
+    for item in content("queues"):
+        for identifier in item["event_ids"]:
             annotation_event(identifier)
+    save_queues(
+        session,
+        run_id,
+        [SimpleNamespace(**{**item, "producer_agent_id": frozen.agent_id}) for item in content("queues")],
+    )
+    for item in content("queue_references"):
+        graph = queue_graph(session, run_id)
+        for key in (item["parent_tree_id"], item["child_tree_id"]):
+            if key not in graph.queues:
+                raise ValueError("父子引用端点必须是完整队列")
+            for identifier in graph.queues[key]:
+                annotation_event(identifier)
+        existing = session.scalar(
+            select(NarrativeLink).where(
+                NarrativeLink.parent_tree_id == item["parent_tree_id"],
+                NarrativeLink.child_tree_id == item["child_tree_id"],
+            )
+        )
+        if existing is not None:
+            if (
+                existing.link_id != item["link_id"]
+                or existing.producer_agent_id != frozen.agent_id
+                or existing.reason != item["reason"]
+            ):
+                raise ValueError("整队父子引用已由其他提交保存，不能覆盖原有判断")
+            _check_evidence(session, existing.link_id, item["evidence"])
+            continue
         session.add(
             NarrativeLink(
                 link_id=item["link_id"],
                 producer_agent_id=frozen.agent_id,
-                contained_parent_id=item["parent_event_id"],
-                contained_child_id=item["child_event_id"],
+                parent_tree_id=item["parent_tree_id"],
+                child_tree_id=item["child_tree_id"],
                 reason=item["reason"],
             )
         )
         session.flush()
-        smap.write_evidence_rows(session, {"narrative_link_id": item["link_id"]}, evidence(item, item["record"]))
+        smap.write_evidence_rows(session, {"narrative_link_id": item["link_id"]}, item["evidence"])
     for item in content("relations"):
         for side in ("source", "target"):
             if item[f"{side}_kind"] != "event":
@@ -88,6 +120,7 @@ def save_annotation_event_contribution(session: Any, frozen: EventContribution, 
             evidence(item, f"event_relation/{item['source_operation_id']}"),
         )
     session.flush()
+    queue_graph(session, run_id)
 
 
 def check_annotation_event_contribution(session: Any, frozen: EventContribution) -> bool:
@@ -99,12 +132,19 @@ def check_annotation_event_contribution(session: Any, frozen: EventContribution)
     owned_events = set(
         session.scalars(select(CompleteEvent.event_id).where(CompleteEvent.producer_agent_id == frozen.agent_id))
     )
+    queue_rows = list(
+        session.scalars(
+            select(NarrativeLink).where(
+                NarrativeLink.producer_agent_id == frozen.agent_id, NarrativeLink.tree_id.is_not(None)
+            )
+        )
+    )
     owned_links = set(
         session.scalars(select(NarrativeLink.link_id).where(NarrativeLink.producer_agent_id == frozen.agent_id))
     )
     expected_links = {
         entry["content"][field]
-        for key, field in (("relations", "relation_id"), ("containments", "link_id"))
+        for key, field in (("relations", "relation_id"), ("queue_references", "link_id"))
         for entry in payload.get(key, {}).values()
     }
     owned_actions = set(
@@ -116,10 +156,40 @@ def check_annotation_event_contribution(session: Any, frozen: EventContribution)
     )
     if (
         owned_events != set(payload.get("nodes", {}))
-        or owned_links != expected_links
+        or owned_links - {row.link_id for row in queue_rows} != expected_links
         or owned_actions != set(payload.get("actions", {}))
     ):
         return False
+    from src.storage.repositories.queue_writes import _check_evidence
+
+    actual_queues: dict[str, list] = {}
+    for row in queue_rows:
+        actual_queues.setdefault(row.tree_id, []).append(row)
+    tree_rows = {
+        row.group_id: row
+        for row in session.scalars(
+            select(NarrativeGroup).where(
+                NarrativeGroup.producer_agent_id == frozen.agent_id, NarrativeGroup.kind == "tree"
+            )
+        )
+    }
+    if set(actual_queues) | set(tree_rows) != set(payload.get("queues", {})):
+        return False
+    for key, entry in payload.get("queues", {}).items():
+        item = entry["content"]
+        tree = tree_rows.get(key)
+        if tree is None or tree.title != item["title"] or tree.description != item["description"]:
+            return False
+        rows = sorted(actual_queues.get(key, []), key=lambda row: row.position)
+        if [row.member_event_id for row in rows] != item["event_ids"]:
+            return False
+        try:
+            for row in rows:
+                if row.reason != item["reason"]:
+                    return False
+                _check_evidence(session, row.link_id, item["evidence"])
+        except ValueError:
+            return False
     for event_id, entry in payload.get("nodes", {}).items():
         content = entry["content"]
         refs = payload.get("process_evidence", {}).get(event_id) or evidence_for(
@@ -175,7 +245,7 @@ def check_annotation_event_contribution(session: Any, frozen: EventContribution)
             smap.assert_event_matches(session, event_id, expected, refs)
         except ValueError:
             return False
-    for key, id_field in (("relations", "relation_id"), ("containments", "link_id")):
+    for key, id_field in (("relations", "relation_id"), ("queue_references", "link_id")):
         for entry in payload.get(key, {}).values():
             item = entry["content"]
             identifier = item[id_field]
@@ -189,11 +259,16 @@ def check_annotation_event_contribution(session: Any, frozen: EventContribution)
                     source_operation_local_key=item["source_operation_id"],
                 )
             else:
-                expected.update(contained_parent_id=item["parent_event_id"], contained_child_id=item["child_event_id"])
+                expected.update(parent_tree_id=item["parent_tree_id"], child_tree_id=item["child_tree_id"])
             if row is None or any(getattr(row, field) != value for field, value in expected.items()):
                 return False
-            refs = payload.get("source_anchors", {}).get(item.get("record")) or evidence_for(
-                frozen.paragraphs, item["evidence_paragraph_id"]
+            refs = (
+                item["evidence"]
+                if key == "queue_references"
+                else (
+                    payload.get("source_anchors", {}).get(item.get("record"))
+                    or evidence_for(frozen.paragraphs, item["evidence_paragraph_id"])
+                )
             )
             stored = smap.fetch_evidence(session, SourceEvidence.narrative_link_id, [identifier])
             if [
@@ -210,7 +285,7 @@ def check_annotation_event_contribution(session: Any, frozen: EventContribution)
             "source_operation_local_key": str(item["source_operation_id"])[:128],
             "operation_order": int(item["operation_order"]),
             "action_type": item["action_type"],
-            "source_event_id": item["root_event_id"],
+            "source_event_id": item["source_event_id"],
             "target_event_id": item.get("target_event_id"),
         }
         if row is None or any(getattr(row, field) != value for field, value in expected.items()):

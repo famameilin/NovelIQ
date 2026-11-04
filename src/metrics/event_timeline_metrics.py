@@ -19,7 +19,7 @@ class EventTimelineNodeDTO:
     """事件时间轴中的事件树节点"""
 
     tree_id: str
-    root_event_id: str
+    entry_event_id: str
     title: str
     summary: str
     anchor_chapter_id: int
@@ -68,7 +68,7 @@ def serialize_event_timeline_node(node: EventTimelineNodeDTO) -> dict[str, Any]:
     """将事件时间轴节点序列化为 API 载荷"""
     return {
         "tree_id": node.tree_id,
-        "root_event_id": node.root_event_id,
+        "entry_event_id": node.entry_event_id,
         "title": node.title,
         "summary": node.summary,
         "anchor_chapter_id": node.anchor_chapter_id,
@@ -172,7 +172,7 @@ def build_event_timeline_plan(
     raw_nodes: list[EventTimelineNodeDTO] = []
     scores: list[float] = []
     for tree in forest_snapshot.event_trees:
-        root_node = node_by_event_id.get(tree.root_event_id)
+        root_node = node_by_event_id.get(tree.entry_event_id)
         if root_node is None:
             for eid in tree.main_chain:
                 if eid in node_by_event_id:
@@ -246,7 +246,7 @@ def build_event_timeline_plan(
         raw_nodes.append(
             EventTimelineNodeDTO(
                 tree_id=tree.tree_id,
-                root_event_id=tree.root_event_id,
+                entry_event_id=tree.entry_event_id,
                 title=title,
                 summary=summary,
                 anchor_chapter_id=anchor_chapter_id,
@@ -296,7 +296,7 @@ def build_event_timeline_plan(
         order_index: dict[str, int] = {eid: idx for idx, eid in enumerate(derived_event_order)}
         raw_nodes.sort(
             key=lambda x: (
-                order_index.get(x.root_event_id, order_index.get(x.tree_id, float("inf"))),
+                order_index.get(x.entry_event_id, order_index.get(x.tree_id, float("inf"))),
                 x.progress,
                 x.anchor_chapter_order,
                 x.char_start,

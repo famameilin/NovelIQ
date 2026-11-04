@@ -3,8 +3,8 @@
 import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
+from src.agents.annotation.event_inputs import ParticipantArg
 from src.agents.annotation.ledger import AnnotationToolLedger
-from src.event_trees.models import ParticipantArg
 from src.fact_graph.graph import FactGraph
 from src.fact_graph.inputs import EntityNameRef
 from src.fact_graph.vocabulary import DialogueVerdict, Tone
@@ -78,7 +78,7 @@ def test_event_participant_rejections_are_per_record_and_localized() -> None:
                 event_type="行动",
                 status="ongoing",
             )
-        assert error.value.record == f"t1/root/participant/{name}"
+        assert error.value.record == f"t1/participant/{name}"
         assert error.value.field == "role"
         assert error.value.code == "role_type_mismatch"
     assert ledger.bound_payloads["events"][0].participants == []

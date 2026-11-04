@@ -8,6 +8,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from ..tools import describe_argument_error
 from .errors import AnnotationStageRejection
 
 
@@ -118,41 +119,23 @@ def _project_payload(tool_name: str, payload: Any, *, fields: tuple[str, ...], l
     return projected
 
 
-def _failed_view(op: dict[str, Any]) -> dict[str, Any]:
-    """用于把逐 op 记录渲染成模型可见的失败清单（按 op 序号与源码行定位）
-
-    message 取结构化拒绝的原文（如端点类型不符时说明实际登记类型），是自纠的关键，
-    与原生路径的拒绝回执口径一致；成功记录不进本清单。
-    """
-    body: dict[str, Any] = {"op": op["op_index"], "line": op["source_line"], "tool": op["tool_name"]}
-    for key, source in (
-        ("record", "record"),
-        ("field", "field"),
-        ("actual", "actual"),
-        ("code", "error_code"),
-        ("expected", "expected"),
-        ("message", "message"),
-    ):
-        value = op.get(source)
-        if value is not None:
-            body[key] = value
-    return body
 
 
 def _call_rejection(name: str, exc: Exception, *, signature_hint: str) -> dict[str, Any]:
     """用于把构造器调用失败渲染成记录级拒绝回执（块面与章面共用）
 
     结构化拒绝（AnnotationStageRejection）带 record/field/code/expected 原样透传；
-    其余失败（多为参数名写错）给签名提示，让模型下一轮就能改对。
+    参数校验失败翻成字段级说明，其余失败（多为参数名写错）给签名提示。
     """
     if isinstance(exc, AnnotationStageRejection):
         return exc.receipt()
+    detail = describe_argument_error(exc)
     return {
         "status": "rejected",
         "record": name,
         "code": "invalid_call",
         "expected": signature_hint,
-        "message": f"{type(exc).__name__}: {exc}",
+        "message": f"参数不合法：{detail}" if detail else f"{type(exc).__name__}: {exc}",
     }
 
 

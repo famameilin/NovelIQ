@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.tools import tool
-
-from src.fact_graph.outputs import SourceReference
+from src.agents.tools import tool
+from src.text_processing.evidence import SourceReference
 from src.utils.identity import stable_digest, text_digest
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError, AnnotationStageRejection
@@ -51,7 +50,10 @@ def build_text_read_tool(query_service: AnnotationQueryService, ledger: TextRead
             for _ in range(occurrence):
                 start = content.find(quote, start + 1)
                 if start < 0:
-                    raise AnnotationInputError("quote 或 occurrence 不匹配原文")
+                    raise AnnotationInputError(
+                        f"quote 或 occurrence 不匹配原文（paragraph_id={paragraph_id}，"
+                        f"occurrence={occurrence}）；先不带 quote 读取该段确认原文，再按第几次出现填写"
+                    )
             end = start + len(quote)
         value = SourceReference(
             chapter_id=paragraph["chapter_id"],

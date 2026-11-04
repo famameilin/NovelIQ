@@ -198,6 +198,12 @@ class ParagraphAccess:
             lambda _session: _ParagraphRepository(_session).fetch_paragraph_rows(run_id), read_only=True
         )
 
+    def fetch_paragraph_texts(self, run_id: str) -> list[str]:
+        "读取指定运行的全部段落原文，按 paragraph_id 升序"
+        return self._runner.run(
+            lambda _session: _ParagraphRepository(_session).fetch_paragraph_texts(run_id), read_only=True
+        )
+
     def fetch_paragraph_rows_batch(
         self, run_id: str, *, chapter_id: int | None = None, after_id: int | None = None, limit: int | None = 128
     ) -> Sequence[NamedRecord]:
@@ -210,7 +216,8 @@ class ParagraphAccess:
         )
 
     def save_metrics(self, run_id, metrics, tension, function_words, semantic_categories):
-        "同一批指标、张力及分类观测作为完整操作提交"
+        "同一批指标、张力及分类观测作为完整操作提交，提交前刷新统计供后续读取选计划"
+        from src.storage.repositories.paragraph.metrics_ops import analyze_paragraph_statistics
         from src.storage.repositories.paragraph.writer import (
             insert_paragraph_function_word_counts,
             insert_paragraph_semantic_category_counts,
@@ -222,6 +229,7 @@ class ParagraphAccess:
             insert_paragraph_tension_observations(session, run_id, tension)
             insert_paragraph_function_word_counts(session, run_id, function_words)
             insert_paragraph_semantic_category_counts(session, run_id, semantic_categories)
+            analyze_paragraph_statistics(session)
             return result
 
         return self._runner.run(operation)
@@ -346,6 +354,12 @@ class ParagraphAccess:
         "段落主题序列数据：段落真实字符位置、章节序列与推断 token 数齐备"
         return self._runner.run(
             lambda _session: _ParagraphRepository(_session).fetch_paragraph_topic_rows(run_id), read_only=True
+        )
+
+    def fetch_paragraph_topic_distributions(self, run_id: str) -> Sequence[NamedRecord]:
+        "每段一行读取完整主题身份与权重"
+        return self._runner.run(
+            lambda session: _ParagraphRepository(session).fetch_paragraph_topic_distributions(run_id), read_only=True
         )
 
     def insert_paragraph_curves(self, run_id: str, rows: Sequence[ParagraphCurveRow]) -> int:
@@ -530,6 +544,12 @@ class AnnotationAccess:
             lambda _session: _AnnotationRepository(_session).fetch_dialogue_records(run_id), read_only=True
         )
 
+    def fetch_dialogue_observation_rows(self, run_id: str) -> list[NamedRecord]:
+        "按原有顺序读取对话归因、语气和正文切片长度"
+        return self._runner.run(
+            lambda _session: _AnnotationRepository(_session).fetch_dialogue_observation_rows(run_id), read_only=True
+        )
+
     def fetch_foreshadowing_roots(self, run_id: str, *, ordered: bool = False) -> list[CompleteEventRecord]:
         "Annotation 数据访问"
         return self._runner.run(
@@ -561,6 +581,12 @@ class AnnotationAccess:
         return self._runner.run(
             lambda _session: _AnnotationRepository(_session).fetch_graph_facts(run_id, content_kind=content_kind),
             read_only=True,
+        )
+
+    def fetch_character_observation_rows(self, run_id: str) -> list[NamedRecord]:
+        "读取章级人物观测所需字段并保持图事实顺序"
+        return self._runner.run(
+            lambda _session: _AnnotationRepository(_session).fetch_character_observation_rows(run_id), read_only=True
         )
 
 
@@ -818,9 +844,9 @@ class LinguisticAccess:
 
     def apply_mneg(self, rows):
         "保存正式语言阶段计算的情绪计数，不接受 SQL 表达式"
-        from src.storage.repositories.queries.workflows_linguistic import workflows_linguistic_apply_mneg_correction_1
+        from src.storage.repositories.queries.linguistic_writes import update_emotion_weights
 
-        return self._runner.run(lambda session: workflows_linguistic_apply_mneg_correction_1(session, rows))
+        return self._runner.run(lambda session: update_emotion_weights(session, rows))
 
     def insert_linguistic_features(
         self, run_id: str, rows: Sequence[dict[str, Any]], *, clear_first: bool = True
@@ -839,10 +865,21 @@ class LinguisticAccess:
             lambda _session: _LinguisticRepository(_session).has_linguistic_features(run_id), read_only=True
         )
 
-    def fetch_linguistic_sources(self, run_id: str) -> dict[str, Any]:
-        "按 3NF 前读取形状返回段落语言结构投影行"
+    def fetch_statistics_aggregates(self, run_id: str) -> dict[str, Any]:
+        "读取完整逐段统计的全书、章节及情绪汇总"
         return self._runner.run(
-            lambda _session: _LinguisticRepository(_session).fetch_linguistic_sources(run_id), read_only=True
+            lambda session: _LinguisticRepository(session).fetch_statistics_aggregates(run_id), read_only=True
+        )
+
+    def fetch_linguistic_sources(
+        self, run_id: str, *, after_id: int | None = None, limit: int | None = None
+    ) -> dict[str, Any]:
+        "读取语言完成段落及其词元、依存弧和句式观测"
+        return self._runner.run(
+            lambda session: _LinguisticRepository(session).fetch_linguistic_sources(
+                run_id, after_id=after_id, limit=limit
+            ),
+            read_only=True,
         )
 
     def insert_boundary_scores(self, run_id: str, rows: Sequence[tuple[int, float, float]]) -> int:
@@ -877,7 +914,7 @@ class LinguisticAccess:
         )
 
     def fetch_phrase_hits(self, run_id: str) -> Sequence[SimpleNamespace]:
-        "短语命中投影：词面按原文切片，is_metric_hit 由运行固定短语合同投影"
+        "短语命中投影：词面按原文切片，匹配方式随行返回"
         return self._runner.run(
             lambda _session: _LinguisticRepository(_session).fetch_phrase_hits(run_id), read_only=True
         )

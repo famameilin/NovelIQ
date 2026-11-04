@@ -7,22 +7,28 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from loguru import logger
 
+from src.agents.messages import SystemMessage, UserMessage
 from src.case_pool import CasePool
 from src.diagnosis.queries import DiagnosisQueries
 from src.diagnosis.schema import AgentAnalysis
 from src.event_trees.diagnosis_persistence import hydrate_draft_from_run
-from src.event_trees.organization import (
-    EventOrganizationDraft,
-    record_payloads,
-    snapshot_digest,
-)
+from src.event_trees.organization import EventOrganizationDraft
+from src.event_trees.organization_models import record_payloads, snapshot_digest
+from src.event_trees.queues import EVENT_LINE_MAX, EVENT_LINE_MIN, QueueGraph
 from src.storage import Storage
 from src.utils.identity import stable_digest
 
+from .event_lines import select_event_lines
 from .evidence import DiagnosisEvidenceLedger
 from .persistence import save_diagnosis_result
+from .policy import (
+    BOOK_ROOT_MIN_SHARE,
+    CASE_SESSION_CLAIM_BATCH,
+    EVENT_LINE_BROAD_SHARE,
+    EVENT_LINE_MAX_BROAD,
+)
 from .program_runtime import DiagnosisProgramRuntime
 from .prompts import build_diagnosis_system_prompt
 from .read_context import DiagnosisGraphSource
@@ -85,6 +91,7 @@ class DiagnosisDomain:
         # 续跑：把会话保存（每会话做完保存一次）留下的组织行水合进内存后继续
         hydrate_draft_from_run(session, run_id, self.draft)
         self.session_saved: set[str] = set()
+        self.session_committed: set[str] = set()
         self.case_sessions: set[str] = set()
         self._analysis: AgentAnalysis | None = None
         self.reports: dict[str, dict[str, Any]] = {}
@@ -106,6 +113,9 @@ class DiagnosisDomain:
         with self.draft.publication_lock:
             if author in self.session_saved:
                 return
+            if author in self.session_committed:
+                self._recover_committed_session(author)
+                return
             if role == "report":
                 self._save_report_progress(author)
                 return
@@ -113,18 +123,24 @@ class DiagnosisDomain:
                 writers = {key: value for key, value in self.case_writers.items() if key == author}
                 graph = self._case_graph()
                 facts, updates = _save_case_writes(
-                    self.session, self.run_id, "", graph=graph, writers=writers,
+                    self.session,
+                    self.run_id,
+                    "",
+                    graph=graph,
+                    writers=writers,
                     candidates=self._case_dialogue_candidates(),
                 )
                 contribution = CaseSave(
-                    self.run_id, author, json.dumps(self.case_pool.contribution(author), ensure_ascii=False),
+                    self.run_id,
+                    author,
+                    json.dumps(self.case_pool.contribution(author), ensure_ascii=False),
                 )
                 organization = {
                     name: {
                         str(index): item.model_dump(mode="json")
                         for index, item in enumerate(getattr(self.draft, name).values())
                     }
-                    for name in ("events", "containments", "relations")
+                    for name in ("events", "queues", "queue_references", "relations")
                 }
             saved = self.session.diagnosis.save_session(
                 DiagnosisSessionSave(
@@ -136,27 +152,41 @@ class DiagnosisDomain:
                     (contribution,),
                 )
             )
+            self.session_committed.add(author)
             with self.lock:
-                self.case_pool.merge_committed(saved["committed_cases"])
-                self.case_pool.confirm(author)
-                for key, (_writer, invocation) in writers.items():
-                    graph.confirm(invocation)
-                    self.case_writers.pop(key, None)
+                try:
+                    self.case_pool.merge_committed(saved["committed_cases"])
+                    self.case_pool.confirm(author)
+                    for key, (_writer, invocation) in writers.items():
+                        graph.confirm(invocation)
+                        self.case_writers.pop(key, None)
+                except Exception:
+                    self._recover_committed_session(author)
+                    return
                 self.session_saved.add(author)
                 self.draft.refresh_read_cache()
                 for source in self.graph_sources:
                     source.refresh()
+
+    def _recover_committed_session(self, author: str) -> None:
+        "只读恢复正式事件树与案例，确认故障不撤销已提交成果"
+        hydrate_draft_from_run(self.session, self.run_id, self.draft)
+        self.case_pool.recover_work(self.case_pool.load_saved_work(self.session, author, ""))
+        if self._case_graph_value is not None:
+            self._case_graph_value.confirm(author)
+        self.case_writers.pop(author, None)
+        self.draft.refresh_read_cache()
+        for source in self.graph_sources:
+            source.refresh()
+        self.session_saved.add(author)
+        self.draft.event_line_marks.pop(author, None)
 
     def case_counts(self) -> tuple[int, int]:
         "案例池进度：(可领案例, 已提交案例)，仅有可领案例时派发"
         return self.case_pool.counts()
 
     def _save_report_progress(self, author: str) -> None:
-        """报告会话收尾保存：快照校验、叙事组织与全书报告同一事务入库
-
-        报告写入时绑定叙事快照，保存时快照必须仍然一致；报告未提交即本轮失败。
-        案例交付与正式报告绑定走既有保存链，重投只核验不改写已保存结果。
-        """
+        """快照一致的事件树、结果与全书报告在同一事务中保存"""
         self._require_cases_saved()
         reports = [(anchor, data["analysis"]) for anchor, data in self.reports.items() if "analysis" in data]
         self.draft.agent_id = author
@@ -165,8 +195,8 @@ class DiagnosisDomain:
         if len(reports) != 1:
             raise ValueError("报告会话结束但提交了多份报告：write_diagnosis 只能提交一次")
         anchor, payload = reports[0]
-        if self.report_bindings.get(anchor) != self._narrative_snapshot():
-            raise ValueError("报告绑定的叙事快照已改变，禁止保存：报告提交后不得再改叙事组织")
+        if self.report_bindings.get(anchor) != self._report_snapshot():
+            raise ValueError("报告绑定的事件树与结果快照已改变，禁止保存：请核对后重新提交报告")
         organization = self.draft.finish()
         analysis = AgentAnalysis.model_validate(
             {
@@ -178,17 +208,29 @@ class DiagnosisDomain:
                 "narrative_organization": organization.model_dump(mode="json"),
             }
         )
-        save_diagnosis_result(
-            self.session,
-            self.run_id,
-            analysis,
-            case_pool=self.case_pool,
-            case_graph=self._case_graph(),
-            case_writers=self.case_writers,
-            case_candidates=self._case_dialogue_candidates(),
-        )
-        self._analysis = analysis
+
+        def committed() -> None:
+            self.session_committed.add(author)
+            self._analysis = analysis
+
+        try:
+            save_diagnosis_result(
+                self.session,
+                self.run_id,
+                analysis,
+                case_pool=self.case_pool,
+                case_graph=self._case_graph(),
+                case_writers=self.case_writers,
+                case_candidates=self._case_dialogue_candidates(),
+                on_committed=committed,
+            )
+        except Exception:
+            if author not in self.session_committed:
+                raise
+            self._recover_committed_session(author)
+            return
         self.session_saved.add(author)
+        self.draft.event_line_marks.pop(author, None)
 
     def _require_cases_saved(self) -> None:
         "报告只能读取已保存且没有待办的案例结果"
@@ -275,7 +317,7 @@ class DiagnosisDomain:
         return list(self._case_dialogue_value)
 
     def _unresolved_totals(self) -> dict[str, int]:
-        """会话起始只见可领案例计数"""
+        """会话起始提供可领案例计数"""
         totals: dict[str, int] = {}
         for case in self.case_pool.search():
             if not case["submitted"] and not case["claimed"]:
@@ -285,7 +327,7 @@ class DiagnosisDomain:
     def _session_messages(self, role: str, material: dict[str, Any]) -> list[Any]:
         return [
             SystemMessage(content=build_diagnosis_system_prompt(self.novel_title, role)),
-            HumanMessage(content=json.dumps({"role": role, "materials": material}, ensure_ascii=False)),
+            UserMessage(content=json.dumps({"role": role, "materials": material}, ensure_ascii=False)),
         ]
 
     def build_session_context(self, role: str, agent_id: str, observer: Any) -> DiagnosisWorkContext:
@@ -304,45 +346,48 @@ class DiagnosisDomain:
         if role == "report":
             self._require_cases_saved()
             self.reports[self.report_anchor] = report
-            # 报告会话的叙事与报告写入以报告锚点为来源，随会话固定
+            # 报告会话的结果与报告使用同一生产者身份
             self.draft.producer_agent_id = invocation
-            event_ids = list(self.draft.events)
-            rows = [
-                row
-                for start in range(0, len(event_ids), 100)
-                for row in self.draft.read_events(event_ids[start : start + 100])
-            ]
+            self._connect_book_line()
+            self._select_event_lines(invocation)
             material: dict[str, Any] = {
-                "catalog": [
-                    {
-                        "event_id": row["event_id"],
-                        "title": row["title"],
-                        "problem": row["problem"],
-                        "status": row["status"],
-                        "is_top_level": row["is_top_level"],
-                        "top_level_event_id": row["top_level_event_id"],
-                        "evidence": [
-                            {
-                                "paragraph_id": item["paragraph_id"],
-                                "quote": item.get("quote"),
-                                "occurrence": item.get("occurrence", 1),
-                            }
-                            for item in row.get("evidence", [])
-                        ],
-                    }
-                    for row in rows
-                ],
-                "arcs": [{"arc_id": item.arc_id, "title": item.title} for item in self.draft.arcs.values()],
                 "outcomes": [
                     {"outcome_id": item.outcome_id, "title": item.title} for item in self.draft.outcomes.values()
                 ],
+                "event_lines": self._event_line_material(),
             }
         else:
             self.case_sessions.add(invocation)
             case_binding = CaseWriteBinding(
                 resolve=lambda caseid: self._resolve_case(invocation, caseid), draft=self.draft
             )
-            material = {"unresolved_case_totals": self._unresolved_totals()}
+            claimed_cases: list[dict[str, Any]] = []
+            if self.case_counts()[0]:
+                self.case_pool.begin(invocation)
+                for _ in range(CASE_SESSION_CLAIM_BATCH):
+                    claimed = self.case_pool.claim_random(invocation)
+                    if claimed.get("status") != "claimed":
+                        break
+                    item = {
+                        "case_id": claimed["case_id"],
+                        "case_type": claimed["case_type"],
+                        "description": claimed["description"],
+                    }
+                    if claimed.get("tree_id"):
+                        item["tree_id"] = claimed["tree_id"]
+                    claimed_cases.append(item)
+            material = {
+                "unresolved_case_totals": self._unresolved_totals(),
+                "claimed_cases": claimed_cases,
+            }
+            if claimed_cases and all(item["case_type"] == "event" for item in claimed_cases):
+                material["event_case_batch"] = (
+                    "本会话领取的案例全部是事件案例；先用一个 execute_code 读完整批案例树的成员标题与范围，"
+                    "再用 search_events(query=成员标题中的关键词) 查回执 trees，按 tree_id、标题、成员数与起止章"
+                    "找内容包含案例树的已有树，读其成员核对后建立连接；"
+                    "同一批案例树同属一个更大事件且没有可挂的已有树时，才新建一棵事件树一次连接它们（至少两棵）；"
+                    "不为单棵案例树新建空壳父树。"
+                )
         graph_source = DiagnosisGraphSource(self.session, self.run_id)
         self.graph_sources.append(graph_source)
         tools = build_diagnosis_tools(
@@ -365,19 +410,33 @@ class DiagnosisDomain:
 
             def write_report(*args: Any, _original: Any = original, **kwargs: Any) -> Any:
                 result = _original(*args, **kwargs)
-                self.report_bindings[self.report_anchor] = self._narrative_snapshot()
+                self.report_bindings[self.report_anchor] = self._report_snapshot()
                 return result
 
             tool.func = write_report
         for tool in tools:
             original_function = tool.func
             if original_function is not None and tool.name in {
-                "claim_random_case", "claim_case", "submit_case", "push_case", "search_cases",
+                "claim_random_case",
+                "claim_case",
+                "submit_case",
+                "push_case",
+                "search_cases",
             }:
 
-                def case_tool(*args: Any, _function: Any = original_function, _name: str = tool.name,
-                              **kwargs: Any) -> Any:
+                def case_tool(
+                    *args: Any, _function: Any = original_function, _name: str = tool.name, **kwargs: Any
+                ) -> Any:
                     waiting = time.perf_counter_ns()
+                    if _name == "submit_case":
+                        with self.draft.publication_lock, self.lock, self.case_pool.lock:
+                            self.draft.producer_agent_id = invocation
+                            started = time.perf_counter_ns()
+                            try:
+                                return _function(*args, **kwargs)
+                            finally:
+                                program.record_timing(_name, "lock_wait", started - waiting)
+                                program.record_timing(_name, "execution", time.perf_counter_ns() - started)
                     with self.case_pool.lock:
                         started = time.perf_counter_ns()
                         try:
@@ -387,12 +446,16 @@ class DiagnosisDomain:
                             program.record_timing(_name, "execution", time.perf_counter_ns() - started)
 
                 tool.func = case_tool
-            elif original_function is not None and tool.name.startswith("write_"):
+            elif original_function is not None and (
+                tool.name.startswith("write_") or tool.name in {"read_event", "search_events"}
+            ):
 
-                def locked_tool(*args: Any, _function: Any = original_function, _name: str = tool.name,
-                                **kwargs: Any) -> Any:
+                def locked_tool(
+                    *args: Any, _function: Any = original_function, _name: str = tool.name, **kwargs: Any
+                ) -> Any:
                     waiting = time.perf_counter_ns()
                     with self.draft.publication_lock, self.lock:
+                        self.draft.producer_agent_id = invocation
                         started = time.perf_counter_ns()
                         try:
                             return _function(*args, **kwargs)
@@ -405,18 +468,26 @@ class DiagnosisDomain:
             tools,
             observer=observer,
             invocation_id=invocation,
-            dialogue_total=lambda: len(self._case_dialogue_candidates()),
         )
 
         def complete() -> list[str]:
+            self.draft.producer_agent_id = invocation
             if role != "report":
                 unfinished = self.case_pool.unsubmitted_for(invocation)
                 if unfinished:
                     return [f"仍有未提交案例 {unfinished}，请先办理并 submit_case"]
-                if not self.case_pool.claims_for(invocation) and self.case_counts()[0]:
-                    return ["仍有可领案例，请用 claim_random_case() 领取并继续办理"]
+                try:
+                    self.draft.queue_graph(require_complete=True)
+                except ValueError as exc:
+                    return [str(exc)]
                 return []
             try:
+                if report.get("stale"):
+                    raise ValueError("报告提交后又写入了事件或结果，请核对后用 write_diagnosis 重新提交")
+                self.draft.queue_graph(require_complete=True).require_event_lines(sorted(self.draft.event_line_ids))
+                missing_names = sorted(self.draft.event_line_ids - set(self.draft.line_names))
+                if missing_names:
+                    raise ValueError(f"事件线尚未命名：{missing_names}；请先调用 name_event_lines 命名全部事件线")
                 self._require_cases_saved()
                 ledger.require_evidence()
                 analysis = AgentAnalysis.model_validate(report.get("analysis", {}))
@@ -425,16 +496,23 @@ class DiagnosisDomain:
                 }
                 if {int(key) for key in analysis.topic_labels} != expected:
                     raise ValueError("报告主题键必须与真实主题数据完全一致")
-                if self.report_bindings.get(self.report_anchor) != self._narrative_snapshot():
-                    raise ValueError("报告绑定的叙事快照已改变，须明确核对后重新提交报告")
+                if self.report_bindings.get(self.report_anchor) != self._report_snapshot():
+                    raise ValueError("报告绑定的事件树与结果快照已改变，须明确核对后重新提交报告")
             except ValueError as exc:
                 return [str(exc)]
             return []
 
-        max_rounds = settings.models.diagnosis.max_iterations
+        max_rounds = (
+            settings.models.diagnosis.max_iterations
+            if role == "report"
+            else settings.models.annotation.max_iterations
+        )
         messages = self._session_messages(role, material)
         return DiagnosisWorkContext(
-            program, messages, lambda: self._complete_locked(complete), max_rounds,
+            program,
+            messages,
+            lambda: self._complete_locked(complete),
+            max_rounds,
             lambda: len(self.case_pool.claims_for(invocation)),
             lambda: len(self.case_pool.unsubmitted_for(invocation)),
         )
@@ -451,21 +529,27 @@ class DiagnosisDomain:
 
     def abort_session(self, author: str) -> None:
         "释放失败会话的未保存领取、提交与事实贡献，保留案例登记"
-        self.case_pool.abandon(author)
         with self.draft.publication_lock, self.lock:
-            if author in self.session_saved:
+            if author in self.session_saved or author in self.session_committed:
                 return
+            self.case_pool.abandon(author)
             self.case_sessions.discard(author)
             self.case_writers.pop(author, None)
             self.ledgers.pop(author, None)
             self.read_sessions.pop(author, None)
             if self._case_graph_value is not None:
                 self._case_graph_value.rollback(author)
-            for name in ("events", "containments", "relations", "arcs", "event_arc_links", "outcomes",
-                         "event_outcome_links"):
+            for name in (
+                "events",
+                "queue_references",
+                "relations",
+                "outcomes",
+                "queues",
+            ):
                 records = getattr(self.draft, name)
                 for key in [key for key, item in records.items() if item.producer_agent_id == author]:
                     del records[key]
+            self.draft.discard_event_line_marks(author)
             self.draft.refresh_read_cache()
 
     def retain_pending_cases(self, error: BaseException) -> None:
@@ -498,15 +582,137 @@ class DiagnosisDomain:
                 for author in authors:
                     self.case_pool.abandon(author)
 
-    def _narrative_snapshot(self) -> str:
+    def _connect_book_line(self) -> None:
+        """案例处理完后，把仍没有父树的事件树接到覆盖全书的已有根树，没有这样的树才新建"""
+        graph = self.draft.queue_graph(require_complete=True)
+        roots = list(graph.unparented)
+        if len(roots) < 2:
+            return
+        book_id = self._covering_root(graph, roots)
+        if book_id is None:
+            book_id = self.draft.queue(
+                event_ids=[],
+                tree_key="book-line",
+                title="全书事件线",
+                description="全书顶层事件树",
+            )
+        for tree_id in roots:
+            if tree_id == book_id:
+                continue
+            self.draft.reference(
+                parent_tree_id=book_id,
+                child_tree_id=tree_id,
+                reason="案例处理完后连接未归并事件树",
+                evidence=[],
+            )
+
+    def _covering_root(self, graph: QueueGraph, roots: list[str]) -> str | None:
+        """没有父树的事件树中事件覆盖达全覆盖阈值的最大者，没有返回 None"""
+        events = {key: value for key, value in self.draft.read_view()[0].items() if key in graph.event_tree}
+        if not events:
+            return None
+        best: str | None = None
+        best_count = 0
+        for tree_id in roots:
+            identifiers = [key for key in graph.tree_events(tree_id) if key in events]
+            if len(identifiers) <= best_count:
+                continue
+            if len(identifiers) / len(events) < BOOK_ROOT_MIN_SHARE:
+                continue
+            best, best_count = tree_id, len(identifiers)
+        return best
+
+    def _select_event_lines(self, invocation: str) -> None:
+        """选定 5–10 条事件线：全书主线最多一条，其余按增量覆盖补独立弧线"""
+        if self.draft.event_line_ids:
+            return
+        graph = self.draft.queue_graph(require_complete=True)
+        book_root = graph.unparented[0] if len(graph.unparented) == 1 else None
+        tree_sets = {
+            tree_id: frozenset(graph.tree_events(tree_id))
+            for tree_id in graph.queues
+            if tree_id != book_root
+        }
+        spans = {
+            tree_id: max(self.draft.events[event_id].to_chapter_id for event_id in events)
+            - min(self.draft.events[event_id].from_chapter_id for event_id in events)
+            for tree_id, events in tree_sets.items()
+            if events
+        }
+        book_span = (
+            max(item.to_chapter_id for item in self.draft.events.values())
+            - min(item.from_chapter_id for item in self.draft.events.values())
+            if self.draft.events
+            else 0
+        )
+        selected = select_event_lines(
+            tree_sets,
+            EVENT_LINE_MIN,
+            EVENT_LINE_MAX,
+            spans=spans,
+            broad_span=int(book_span * EVENT_LINE_BROAD_SHARE),
+            max_broad=EVENT_LINE_MAX_BROAD,
+        )
+        if len(selected) < EVENT_LINE_MIN:
+            raise ValueError(f"完整事件树不足 {EVENT_LINE_MIN} 棵，无法选定事件线")
+        for tree_id in selected:
+            self.draft.set_event_line(tree_id, True, author=invocation)
+        trees = {tree_id: set(graph.tree_events(tree_id)) for tree_id in selected}
+        tops = {
+            tree_id: {graph.queues[tree][0] for tree in graph.reachable(tree_id) if graph.queues[tree]}
+            for tree_id in selected
+        }
+        bottoms = {
+            tree_id: {graph.queues[tree][-1] for tree in graph.reachable(tree_id) if graph.queues[tree]}
+            for tree_id in selected
+        }
+        total = len(graph.event_tree)
+        covered = set().union(*trees.values())
+        size_sum = sum(len(events) for events in trees.values())
+        top_sum = sum(len(events) for events in tops.values())
+        top_union = set().union(*tops.values())
+        bottom_sum = sum(len(events) for events in bottoms.values())
+        bottom_union = set().union(*bottoms.values())
+        logger.info(
+            "事件线最优选择: selected={} coverage={:.4f} non_overlap={:.4f} "
+            "top_overlap={:.4f} bottom_overlap={:.4f}",
+            len(selected),
+            len(covered) / total if total else 0.0,
+            len(covered) / size_sum if size_sum else 0.0,
+            1 - len(top_union) / top_sum if top_sum else 0.0,
+            1 - len(bottom_union) / bottom_sum if bottom_sum else 0.0,
+        )
+
+    def _event_line_material(self) -> list[dict[str, Any]]:
+        """报告会话选定的全部事件线及其成员标题，供命名与报告"""
+        graph = self.draft.queue_graph(require_complete=True)
+        rows: list[dict[str, Any]] = []
+        for tree_id in sorted(self.draft.event_line_ids):
+            queue = self.draft.queues.get(tree_id)
+            events = [
+                self.draft.events[event_id]
+                for event_id in graph.tree_events(tree_id)
+                if event_id in self.draft.events
+            ]
+            rows.append(
+                {
+                    "tree_id": tree_id,
+                    "title": queue.title if queue is not None else "",
+                    "description": queue.description if queue is not None else "",
+                    "event_count": len(events),
+                    "from_chapter_id": min((item.from_chapter_id for item in events), default=None),
+                    "to_chapter_id": max((item.to_chapter_id for item in events), default=None),
+                    "event_titles": [item.title for item in events[:12]],
+                }
+            )
+        return rows
+
+    def _report_snapshot(self) -> str:
         return snapshot_digest(
             {
                 "identity": self.draft.content_digest(),
                 "structure": self.draft.structure_digest(),
-                **{
-                    name: record_payloads(getattr(self.draft, name).values())
-                    for name in ("arcs", "event_arc_links", "outcomes", "event_outcome_links")
-                },
+                **{name: record_payloads(getattr(self.draft, name).values()) for name in ("outcomes",)},
             }
         )
 

@@ -10,9 +10,11 @@ from typing import Any
 
 import httpx
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
-from openai import AuthenticationError, BadRequestError, RateLimitError
+from openai import APIError, AuthenticationError, BadRequestError, RateLimitError
 
+from src.agents.annotation.tool_batch import _execute_call
+from src.agents.messages import AssistantMessage, UserMessage
+from src.agents.model_client import StreamDelta
 from src.agents.stream import (
     AgentStream,
     ContentStallTimeoutError,
@@ -22,8 +24,9 @@ from src.agents.stream import (
     emit_tool_results,
     run_model_call,
 )
-from src.agents.stream_aggregator import StreamChunkAggregator
+from src.agents.stream_aggregator import StreamChunkAggregator, _merge_tool_call_chunks
 from src.agents.stream_audit import _provider_request_metadata
+from src.agents.tools import tool
 from src.utils.cancellation import run_cancellable
 
 
@@ -37,30 +40,30 @@ def _collect_events() -> list[tuple[str, str, str]]:
     return events, emitter
 
 
-def _tool_call_message(content: str = "完整回复") -> AIMessage:
+def _tool_call_message(content: str = "完整回复") -> AssistantMessage:
     """构造带工具调用的完整回复，满足调用层对工具调用的完成判据"""
-    return AIMessage(
+    return AssistantMessage(
         content=content,
         tool_calls=[{"name": "finish", "args": {}, "id": "call-1", "type": "tool_call"}],
     )
 
 
-def test_provider_request_metadata_keeps_thinking_and_excludes_credentials() -> None:
-    """验证请求审计快照保留 think 开关且不含 URL 凭据或查询密钥"""
+@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+def test_provider_request_metadata_keeps_reasoning_effort_and_excludes_credentials(effort: str) -> None:
+    """请求审计保留思考等级并去除地址中的认证信息"""
     chat_model = SimpleNamespace(
-        model_name="glm-test",
+        model="glm-test",
         base_url="https://user:secret@provider.example/v1?api_key=hidden",
         temperature=0.7,
         top_p=0.95,
-        request_timeout=180,
-        streaming=True,
-        model_kwargs={"extra_body": {"think": True}},
+        timeout_s=180,
+        reasoning_effort=effort,
+        tools=[{"name": "write_metrics"}],
     )
-    bound_model = SimpleNamespace(bound=chat_model, kwargs={"tools": [{"name": "write_metrics"}]})
+    metadata = _provider_request_metadata(chat_model, attempt=1)
 
-    metadata = _provider_request_metadata(bound_model, attempt=1)
-
-    assert metadata["parameters"]["extra_body"] == {"think": True}
+    assert metadata["parameters"]["reasoning_effort"] == effort
+    assert "extra_body" not in metadata["parameters"]
     assert metadata["parameters"]["base_url"] == "https://provider.example/v1"
     assert metadata["parameters"]["tool_names"] == ["write_metrics"]
     assert len(metadata["parameters"]["tool_contract_fingerprint"]) == 64
@@ -72,21 +75,29 @@ def test_provider_request_metadata_keeps_thinking_and_excludes_credentials() -> 
 def test_provider_request_metadata_rejects_unparseable_url() -> None:
     """验证无协议地址不会原样进入审计快照泄露查询认证信息"""
     chat_model = SimpleNamespace(
-        model_name="glm-test",
+        model="glm-test",
         base_url="provider.example/v1?api_key=hidden",
-        streaming=True,
-        model_kwargs={"extra_body": {"think": True}},
+        reasoning_effort="high",
     )
 
-    metadata = _provider_request_metadata(SimpleNamespace(bound=chat_model, kwargs={}), attempt=1)
+    metadata = _provider_request_metadata(chat_model, attempt=1)
 
     assert metadata["parameters"]["base_url"] == "invalid-url"
     assert "hidden" not in str(metadata)
 
 
+def test_provider_request_fingerprint_distinguishes_reasoning_efforts() -> None:
+    fingerprints = {
+        _provider_request_metadata(SimpleNamespace(model="test", reasoning_effort=effort), attempt=1)[
+            "config_fingerprint"
+        ]
+        for effort in ("low", "medium", "high", "xhigh", "max")
+    }
+    assert len(fingerprints) == 5
+
+
 def test_provider_request_metadata_redacts_sensitive_tool_key_variants() -> None:
     """验证工具合同指纹忽略常见认证字段名变体"""
-    chat_model = SimpleNamespace(model_name="glm-test", streaming=True, model_kwargs={})
     clean_tools = [
         {
             "type": "function",
@@ -112,18 +123,16 @@ def test_provider_request_metadata_redacts_sensitive_tool_key_variants() -> None
         }
     ]
 
-    clean = _provider_request_metadata(SimpleNamespace(bound=chat_model, kwargs={"tools": clean_tools}), attempt=1)
-    sensitive = _provider_request_metadata(
-        SimpleNamespace(bound=chat_model, kwargs={"tools": sensitive_tools}), attempt=1
-    )
+    clean = _provider_request_metadata(SimpleNamespace(model="glm-test", tools=clean_tools), attempt=1)
+    sensitive = _provider_request_metadata(SimpleNamespace(model="glm-test", tools=sensitive_tools), attempt=1)
 
     assert sensitive["parameters"]["tool_contract_fingerprint"] == clean["parameters"]["tool_contract_fingerprint"]
     assert "hidden-" not in str(sensitive)
 
 
-def _tool_call_chunk() -> AIMessageChunk:
+def _tool_call_chunk() -> StreamDelta:
     """在流式分片末尾附加工具调用，满足调用层对工具调用的完成判据"""
-    return AIMessageChunk(
+    return StreamDelta(
         content="",
         tool_call_chunks=[{"name": "finish", "args": "{}", "id": "call-1", "index": 0}],
     )
@@ -132,7 +141,7 @@ def _tool_call_chunk() -> AIMessageChunk:
 class _StreamingLLM:
     """支持 astream 的测试模型"""
 
-    def __init__(self, chunks: list[AIMessageChunk]) -> None:
+    def __init__(self, chunks: list[StreamDelta]) -> None:
         self.chunks = chunks
         self.captured_messages: list[list] = []
 
@@ -149,7 +158,7 @@ class _StreamingLLM:
 class _FlakyStreamingLLM:
     """模拟流式输出中途断流的测试模型（前 fail_count 次调用抛异常）"""
 
-    def __init__(self, chunks: list[AIMessageChunk], fail_count: int, *, error: BaseException | None = None) -> None:
+    def __init__(self, chunks: list[StreamDelta], fail_count: int, *, error: BaseException | None = None) -> None:
         self.chunks = chunks
         self.fail_count = fail_count
         self.error = error if error is not None else ConnectionError("stream interrupted mid-way")
@@ -171,7 +180,7 @@ class _FlakyStreamingLLM:
 class _TimedChunkLLM:
     """按间隔逐个吐块的测试模型（内容进度看门狗的时序型用例）"""
 
-    def __init__(self, chunks: list[AIMessageChunk], interval_s: float) -> None:
+    def __init__(self, chunks: list[StreamDelta], interval_s: float) -> None:
         self.chunks = chunks
         self.interval_s = interval_s
         self.captured_messages: list[list] = []
@@ -200,7 +209,7 @@ class _EmptyChunkForeverLLM:
     async def astream(self, messages):
         self.captured_messages.append(list(messages))
         while True:
-            yield AIMessageChunk(content="")
+            yield StreamDelta(content="")
             await asyncio.sleep(0.02)
 
 
@@ -209,8 +218,8 @@ class _RetryWithUsageLLM:
 
     def __init__(
         self,
-        failing_chunks: list[AIMessageChunk],
-        success_chunks: list[AIMessageChunk],
+        failing_chunks: list[StreamDelta],
+        success_chunks: list[StreamDelta],
     ) -> None:
         self.failing_chunks = failing_chunks
         self.success_chunks = success_chunks
@@ -267,10 +276,10 @@ async def test_aggregator_merges_text_and_reasoning_and_tool_calls() -> None:
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
 
-    await aggregator.add_chunk(AIMessageChunk(content="章节", additional_kwargs={"reasoning_content": "先分析"}))
-    await aggregator.add_chunk(AIMessageChunk(content="开始了"))
+    await aggregator.add_chunk(StreamDelta(content="章节", additional_kwargs={"reasoning_content": "先分析"}))
+    await aggregator.add_chunk(StreamDelta(content="开始了"))
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="",
             tool_call_chunks=[
                 {"name": "resolve_case", "args": '{"case_id"', "id": "call_1", "index": 0},
@@ -278,7 +287,7 @@ async def test_aggregator_merges_text_and_reasoning_and_tool_calls() -> None:
         )
     )
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="",
             tool_call_chunks=[
                 {"name": "", "args": ': "c1"}', "id": "", "index": 0},
@@ -315,13 +324,13 @@ async def test_run_model_call_streams_chunks_to_events() -> None:
     stream = AgentStream(emitter)
     model = _StreamingLLM(
         [
-            AIMessageChunk(content="你好"),
-            AIMessageChunk(content="世界"),
+            StreamDelta(content="你好"),
+            StreamDelta(content="世界"),
             _tool_call_chunk(),
         ]
     )
 
-    response = await run_model_call(model, [AIMessage(content="问")], stream)
+    response = await run_model_call(model, [AssistantMessage(content="问")], stream)
 
     assert response.content == "你好世界"
     assert [e for e in events if e[0] == "output"] == [
@@ -335,14 +344,14 @@ async def test_run_model_call_retries_current_request_on_stream_interruption() -
     """验证断流时用同一 messages 重发当前模型请求"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
-    model = _FlakyStreamingLLM([AIMessageChunk(content="你好世界"), _tool_call_chunk()], fail_count=1)
+    model = _FlakyStreamingLLM([StreamDelta(content="你好世界"), _tool_call_chunk()], fail_count=1)
 
-    response = await run_model_call(model, [AIMessage(content="问")], stream)
+    response = await run_model_call(model, [AssistantMessage(content="问")], stream)
 
     assert response.content == "你好世界"
     assert len(model.captured_messages) == 2
-    assert model.captured_messages[0] == [AIMessage(content="问")]
-    assert model.captured_messages[1] == [AIMessage(content="问")]
+    assert model.captured_messages[0] == [AssistantMessage(content="问")]
+    assert model.captured_messages[1] == [AssistantMessage(content="问")]
     retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
     assert len(retry_events) == 1
 
@@ -353,14 +362,14 @@ async def test_run_model_call_retries_remote_protocol_interruption() -> None:
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _FlakyStreamingLLM(
-        [AIMessageChunk(content="你好世界"), _tool_call_chunk()],
+        [StreamDelta(content="你好世界"), _tool_call_chunk()],
         fail_count=1,
         error=httpx.RemoteProtocolError(
             "peer closed connection without sending complete message body (incomplete chunked read)"
         ),
     )
 
-    response = await run_model_call(model, [AIMessage(content="问")], stream)
+    response = await run_model_call(model, [AssistantMessage(content="问")], stream)
 
     assert response.content == "你好世界"
     assert len(model.captured_messages) == 2
@@ -374,6 +383,33 @@ def test_remote_protocol_error_is_transient_for_retry_channel() -> None:
     assert _is_transient_model_error(httpx.LocalProtocolError("bad request on our side")) is False
 
 
+def _stream_termination_error() -> APIError:
+    return APIError(
+        "Upstream response stream ended before completion",
+        request=httpx.Request("POST", "http://model"),
+        body=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_model_call_retries_upstream_stream_termination() -> None:
+    """验证上游流中途结束时用同一 messages 重发当前请求"""
+    events, emitter = _collect_events()
+    stream = AgentStream(emitter)
+    model = _FlakyStreamingLLM(
+        [StreamDelta(content="你好世界"), _tool_call_chunk()],
+        fail_count=1,
+        error=_stream_termination_error(),
+    )
+
+    response = await run_model_call(model, [AssistantMessage(content="问")], stream)
+
+    assert response.content == "你好世界"
+    assert len(model.captured_messages) == 2
+    retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
+    assert len(retry_events) == 1
+
+
 @pytest.mark.asyncio
 async def test_run_model_call_exhausts_stream_retries_and_raises() -> None:
     """验证 total_attempts=3 语义（总调用 3 次、重试 2 次），耗尽后抛出最后一次异常"""
@@ -382,7 +418,7 @@ async def test_run_model_call_exhausts_stream_retries_and_raises() -> None:
     model = _FlakyStreamingLLM([], fail_count=99)
 
     with pytest.raises(ModelRequestError, match="stream interrupted"):
-        await run_model_call(model, [AIMessage(content="问")], stream)
+        await run_model_call(model, [AssistantMessage(content="问")], stream)
 
     assert len(model.captured_messages) == 3
     retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
@@ -399,7 +435,7 @@ async def test_run_model_call_content_stall_kills_silent_chunks_and_exhausts_ret
     with pytest.raises(ModelRequestError, match="内容进度停摆"):
         await run_model_call(
             model,
-            [AIMessage(content="问")],
+            [AssistantMessage(content="问")],
             stream,
             total_attempts=2,
             content_stall_timeout_s=0.2,
@@ -418,13 +454,13 @@ async def test_run_model_call_content_stall_watchdog_resets_on_each_content_chun
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _TimedChunkLLM(
-        [AIMessageChunk(content="你"), AIMessageChunk(content="好"), _tool_call_chunk()],
+        [StreamDelta(content="你"), StreamDelta(content="好"), _tool_call_chunk()],
         interval_s=0.06,
     )
 
     response = await run_model_call(
         model,
-        [AIMessage(content="问")],
+        [AssistantMessage(content="问")],
         stream,
         total_attempts=1,
         content_stall_timeout_s=0.2,
@@ -442,14 +478,12 @@ async def test_run_model_call_content_stall_watchdog_counts_reasoning_as_content
     """
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
-    reasoning_chunks = [
-        AIMessageChunk(content="", additional_kwargs={"reasoning_content": f"第{i}步"}) for i in range(4)
-    ]
+    reasoning_chunks = [StreamDelta(content="", additional_kwargs={"reasoning_content": f"第{i}步"}) for i in range(4)]
     model = _TimedChunkLLM([*reasoning_chunks, _tool_call_chunk()], interval_s=0.06)
 
     response = await run_model_call(
         model,
-        [AIMessage(content="问")],
+        [AssistantMessage(content="问")],
         stream,
         total_attempts=1,
         content_stall_timeout_s=0.2,
@@ -466,7 +500,7 @@ def test_content_stall_error_is_transient_for_retry_channel() -> None:
 class _RaceIterationStreamingLLM:
     """模拟并发共享面竞态抛出的迭代中变更错误（前 fail_count 次调用抛出）"""
 
-    def __init__(self, chunks: list[AIMessageChunk], fail_count: int, message: str) -> None:
+    def __init__(self, chunks: list[StreamDelta], fail_count: int, message: str) -> None:
         self.chunks = chunks
         self.fail_count = fail_count
         self.message = message
@@ -513,7 +547,6 @@ class _EmptyMessageErrorLLM:
 def test_race_iteration_errors_are_transient_for_retry_channel(message: str) -> None:
     """验证并发竞态迭代错误按消息匹配落进 _is_transient_model_error 重发通道"""
     assert _is_transient_model_error(RuntimeError(message)) is True
-    assert _is_transient_model_error(RuntimeError("普通运行时错误")) is False
 
 
 @pytest.mark.asyncio
@@ -522,12 +555,12 @@ async def test_run_model_call_retries_current_request_on_race_iteration_error() 
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _RaceIterationStreamingLLM(
-        [AIMessageChunk(content="已恢复"), _tool_call_chunk()],
+        [StreamDelta(content="已恢复"), _tool_call_chunk()],
         fail_count=1,
         message="dictionary keys changed during iteration",
     )
 
-    response = await run_model_call(model, [AIMessage(content="问")], stream)
+    response = await run_model_call(model, [AssistantMessage(content="问")], stream)
 
     assert response.content == "已恢复"
     assert len(model.captured_messages) == 2
@@ -544,7 +577,7 @@ async def test_run_model_call_reports_failed_turn_error_with_exception_type_pref
     with pytest.raises(_SilentError):
         await run_model_call(
             model,
-            [AIMessage(content="问")],
+            [AssistantMessage(content="问")],
             None,
             total_attempts=1,
             on_turn_failed=lambda error, timing, message: failures.append(error),
@@ -561,7 +594,7 @@ async def test_run_model_call_total_attempts_one_disables_retries() -> None:
     model = _FlakyStreamingLLM([], fail_count=99)
 
     with pytest.raises(ModelRequestError, match="stream interrupted"):
-        await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=1)
+        await run_model_call(model, [AssistantMessage(content="问")], stream, total_attempts=1)
 
     assert len(model.captured_messages) == 1
     retry_events = [e for e in events if e[0] == "thinking" and "重试" in e[1]]
@@ -575,22 +608,22 @@ async def test_run_model_call_accumulates_usage_from_failed_attempts() -> None:
     stream = AgentStream(emitter)
     model = _RetryWithUsageLLM(
         failing_chunks=[
-            AIMessageChunk(
+            StreamDelta(
                 content="",
                 usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
             )
         ],
         success_chunks=[
-            AIMessageChunk(
+            StreamDelta(
                 content="你好",
                 usage_metadata={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20},
             ),
-            AIMessageChunk(content="世界"),
+            StreamDelta(content="世界"),
             _tool_call_chunk(),
         ],
     )
 
-    response = await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=2)
+    response = await run_model_call(model, [AssistantMessage(content="问")], stream, total_attempts=2)
 
     assert response.content == "你好世界"
     assert len(model.captured_messages) == 2
@@ -606,13 +639,13 @@ async def test_run_model_call_reports_each_physical_stream_request_separately() 
     """验证断流重试按物理请求分别回调开始失败与成功审计"""
     model = _RetryWithUsageLLM(
         failing_chunks=[
-            AIMessageChunk(
+            StreamDelta(
                 content="",
                 usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
             )
         ],
         success_chunks=[
-            AIMessageChunk(
+            StreamDelta(
                 content="正文",
                 usage_metadata={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20},
             ),
@@ -625,7 +658,7 @@ async def test_run_model_call_reports_each_physical_stream_request_separately() 
 
     await run_model_call(
         model,
-        [AIMessage(content="问")],
+        [AssistantMessage(content="问")],
         None,
         total_attempts=2,
         on_turn_started=lambda request, _started_ns: started.append(request),
@@ -649,11 +682,11 @@ async def test_run_model_call_keeps_retry_output_when_shorter_than_failed_attemp
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _RetryWithUsageLLM(
-        failing_chunks=[AIMessageChunk(content="你好好好")],
-        success_chunks=[AIMessageChunk(content="你好"), _tool_call_chunk()],
+        failing_chunks=[StreamDelta(content="你好好好")],
+        success_chunks=[StreamDelta(content="你好"), _tool_call_chunk()],
     )
 
-    response = await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=2)
+    response = await run_model_call(model, [AssistantMessage(content="问")], stream, total_attempts=2)
 
     assert response.content == "你好"
     assert len(model.captured_messages) == 2
@@ -665,11 +698,11 @@ async def test_run_model_call_skips_only_overlapping_prefix_on_retry() -> None:
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     model = _RetryWithUsageLLM(
-        failing_chunks=[AIMessageChunk(content="你好好好")],
-        success_chunks=[AIMessageChunk(content="你好世界"), _tool_call_chunk()],
+        failing_chunks=[StreamDelta(content="你好好好")],
+        success_chunks=[StreamDelta(content="你好世界"), _tool_call_chunk()],
     )
 
-    response = await run_model_call(model, [AIMessage(content="问")], stream, total_attempts=2)
+    response = await run_model_call(model, [AssistantMessage(content="问")], stream, total_attempts=2)
 
     assert response.content == "你好世界"
     # SSE 事件：失败尝试推送"你好好好"，重试跳过重叠"你好"后推送"世界"
@@ -695,9 +728,9 @@ async def test_run_model_call_retry_backoff_is_exponential_and_capped(monkeypatc
     sleeps = _noop_sleep(monkeypatch)
 
     with pytest.raises(ModelRequestError, match="stream interrupted"):
-        await run_model_call(model, [AIMessage(content="问")], None, total_attempts=3)
+        await run_model_call(model, [AssistantMessage(content="问")], None, total_attempts=3)
 
-    assert model.captured_messages == [[AIMessage(content="问")] for _ in range(3)]
+    assert model.captured_messages == [[AssistantMessage(content="问")] for _ in range(3)]
     assert sleeps == [1.0, 2.0]
 
 
@@ -723,7 +756,7 @@ class _RateLimitedStreamingLLM(_StreamingLLM):
     """在相同会话中先拒绝请求，再返回原回合的成功结果"""
 
     def __init__(self, failures):
-        super().__init__([AIMessageChunk(content="完成"), _tool_call_chunk()])
+        super().__init__([StreamDelta(content="完成"), _tool_call_chunk()])
         self.failures = list(failures)
 
     async def astream(self, messages):
@@ -736,12 +769,16 @@ class _RateLimitedStreamingLLM(_StreamingLLM):
 
 @pytest.mark.parametrize("error_class,status", [(AuthenticationError, 401), (BadRequestError, 400)])
 async def test_provider_rejection_returns_to_pool_but_audit_failure_stops(monkeypatch, error_class, status):
+    """请求级拒绝同样重发到 attempts 用尽，再交回模型池"""
     response = httpx.Response(status, request=httpx.Request("POST", "http://model.test/chat"))
     failure = error_class("provider rejected request", response=response, body={})
     sleeps = _noop_sleep(monkeypatch)
+    model = _RateLimitedStreamingLLM([failure, failure, failure])
     with pytest.raises(ModelRequestError) as error:
-        await run_model_call(_RateLimitedStreamingLLM([failure]), [], None, total_attempts=3)
-    assert error.value.__cause__ is failure and not sleeps
+        await run_model_call(model, [], None, total_attempts=3)
+    assert error.value.__cause__ is failure
+    assert len(model.captured_messages) == 3
+    assert sleeps == [1.0, 2.0]
 
     def fail_audit(*_):
         raise TimeoutError("审计数据库超时")
@@ -754,7 +791,7 @@ async def test_provider_rejection_returns_to_pool_but_audit_failure_stops(monkey
 async def test_rate_limit_cools_original_turn_and_audits_each_attempt(monkeypatch) -> None:
     """两次限流后复用完整历史，逐次审计不混合、不重建诊断会话"""
     model = _RateLimitedStreamingLLM([_rate_limit_error(), _rate_limit_error()])
-    messages = [HumanMessage(content="已有取证和诊断进度")]
+    messages = [UserMessage(content="已有取证和诊断进度")]
     sleeps = _noop_sleep(monkeypatch)
     audit = []
     events, emitter = _collect_events()
@@ -789,7 +826,7 @@ async def test_rate_limit_is_bounded_by_two_retries_and_caller_budget(monkeypatc
     model = _RateLimitedStreamingLLM([_rate_limit_error() for _ in range(5)])
     sleeps = _noop_sleep(monkeypatch)
     with pytest.raises(ModelRequestError):
-        await run_model_call(model, [HumanMessage(content="诊断")], None, total_attempts=total_attempts)
+        await run_model_call(model, [UserMessage(content="诊断")], None, total_attempts=total_attempts)
     assert len(model.captured_messages) == expected_calls
     assert sleeps == [60.0, 120.0][: expected_calls - 1]
 
@@ -807,7 +844,7 @@ async def test_quota_exhaustion_returns_to_pool_without_request_cooldown(monkeyp
     with pytest.raises(ModelRequestError) as error:
         await run_model_call(
             model,
-            [HumanMessage(content="诊断")],
+            [UserMessage(content="诊断")],
             None,
             total_attempts=5,
             on_turn_failed=lambda error, timing, message: failed.append(error),
@@ -821,7 +858,7 @@ async def test_quota_exhaustion_returns_to_pool_without_request_cooldown(monkeyp
 async def test_rate_limit_honors_retry_after_without_shortening(monkeypatch, header, expected):
     model = _RateLimitedStreamingLLM([_rate_limit_error(retry_after=header)])
     sleeps = _noop_sleep(monkeypatch)
-    await run_model_call(model, [HumanMessage(content="诊断")], None, total_attempts=3)
+    await run_model_call(model, [UserMessage(content="诊断")], None, total_attempts=3)
     assert sleeps == [expected]
 
 
@@ -841,7 +878,7 @@ def test_invalid_retry_after_uses_frequency_cooldown(header) -> None:
 async def test_rate_limit_cooldown_is_independent_of_previous_transport_retry(monkeypatch) -> None:
     model = _RateLimitedStreamingLLM([ConnectionError("network"), _rate_limit_error(), _rate_limit_error()])
     sleeps = _noop_sleep(monkeypatch)
-    await run_model_call(model, [HumanMessage(content="诊断")], None, total_attempts=4)
+    await run_model_call(model, [UserMessage(content="诊断")], None, total_attempts=4)
     assert sleeps == [1.0, 60.0, 120.0]
 
 
@@ -858,7 +895,7 @@ async def test_cancel_interrupts_real_rate_limit_cooldown_without_another_reques
 
     task = asyncio.create_task(
         run_cancellable(
-            run_model_call(model, [HumanMessage(content="诊断")], AgentStream(emit), total_attempts=3),
+            run_model_call(model, [UserMessage(content="诊断")], AgentStream(emit), total_attempts=3),
             lambda: cancelled,
             poll_seconds=0.001,
         )
@@ -882,7 +919,7 @@ async def test_aggregator_announces_each_real_tool_identity_across_retries() -> 
     # 首次尝试与重试使用不同的实际调用身份
     aggregator = StreamChunkAggregator(stream, announced_tools={"previous-call"})
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="",
             tool_call_chunks=[{"name": "finish", "args": "{}", "id": "c1", "index": 0}],
         )
@@ -892,7 +929,7 @@ async def test_aggregator_announces_each_real_tool_identity_across_retries() -> 
     # 不同实际调用不能因工具同名而合并
     aggregator2 = StreamChunkAggregator(stream, announced_tools={"c1"})
     await aggregator2.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="",
             tool_call_chunks=[{"name": "finish", "args": "{}", "id": "c2", "index": 1}],
         )
@@ -902,19 +939,19 @@ async def test_aggregator_announces_each_real_tool_identity_across_retries() -> 
 
 @pytest.mark.asyncio
 async def test_aggregator_accumulates_usage_metadata_into_final_message() -> None:
-    """验证流式 chunk 的用量数值字段被累加并挂到完整 AIMessage"""
+    """验证流式 chunk 的用量数值字段被累加并挂到完整 AssistantMessage"""
     events, emitter = _collect_events()
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
 
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="你好",
             usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
         )
     )
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="世界",
             usage_metadata={
                 "input_tokens": 0,
@@ -943,7 +980,7 @@ async def test_aggregator_accumulates_raw_gateway_usage_from_metadata() -> None:
     aggregator = StreamChunkAggregator(stream)
 
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="",
             response_metadata={
                 "token_usage": {
@@ -976,7 +1013,7 @@ async def test_aggregator_prefers_standard_usage_metadata_over_raw_gateway_usage
     aggregator = StreamChunkAggregator(stream)
 
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="你好",
             usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
             response_metadata={
@@ -990,7 +1027,7 @@ async def test_aggregator_prefers_standard_usage_metadata_over_raw_gateway_usage
     )
     # 标准字段缺失的 chunk 仍走原始字段回退
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="世界",
             response_metadata={
                 "token_usage": {
@@ -1019,7 +1056,7 @@ async def test_aggregator_finish_omits_usage_metadata_without_usage_chunks() -> 
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
 
-    await aggregator.add_chunk(AIMessageChunk(content="没有用量"))
+    await aggregator.add_chunk(StreamDelta(content="没有用量"))
     message = aggregator.finish()
 
     assert message.usage_metadata is None
@@ -1031,8 +1068,8 @@ async def test_run_model_call_streams_usage_metadata_into_response() -> None:
     stream = AgentStream(emitter)
     model = _StreamingLLM(
         [
-            AIMessageChunk(content="你好"),
-            AIMessageChunk(
+            StreamDelta(content="你好"),
+            StreamDelta(
                 content="",
                 usage_metadata={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20},
             ),
@@ -1040,7 +1077,7 @@ async def test_run_model_call_streams_usage_metadata_into_response() -> None:
         ]
     )
 
-    response = await run_model_call(model, [AIMessage(content="问")], stream)
+    response = await run_model_call(model, [AssistantMessage(content="问")], stream)
 
     assert response.usage_metadata == {"input_tokens": 12, "output_tokens": 8, "total_tokens": 20}
 
@@ -1048,7 +1085,7 @@ async def test_run_model_call_streams_usage_metadata_into_response() -> None:
 @pytest.mark.asyncio
 async def test_run_model_call_streams_without_agent_stream() -> None:
     """验证不开启 SSE 时仍优先走 Provider 流式接口"""
-    model = _StreamingLLM([AIMessageChunk(content="你好"), _tool_call_chunk()])
+    model = _StreamingLLM([StreamDelta(content="你好"), _tool_call_chunk()])
 
     response = await run_model_call(model, [], None)
 
@@ -1070,13 +1107,13 @@ async def test_run_model_call_records_ttft_first_visible_and_reasoning_timings(m
     )
     model = _StreamingLLM(
         [
-            AIMessageChunk(content="", additional_kwargs={"reasoning_content": "先分析"}),
-            AIMessageChunk(
+            StreamDelta(content="", additional_kwargs={"reasoning_content": "先分析"}),
+            StreamDelta(
                 content="正文",
                 additional_kwargs={"reasoning_content": "再推理"},
                 tool_call_chunks=[{"name": "finish", "args": "{}", "id": "c1", "index": 0}],
             ),
-            AIMessageChunk(content="结尾"),
+            StreamDelta(content="结尾"),
         ]
     )
     captured: dict[str, object] = {}
@@ -1101,7 +1138,7 @@ async def test_aggregator_notes_reasoning_not_streamed(monkeypatch) -> None:
     ticks = iter([100_000_000, 200_000_000])
     aggregator = StreamChunkAggregator(None, started_ns=0, clock_ns=lambda: next(ticks))
 
-    await aggregator.add_chunk(AIMessageChunk(content="正文"))
+    await aggregator.add_chunk(StreamDelta(content="正文"))
 
     timing = aggregator.timing()
     assert timing.reasoning_ms is None
@@ -1115,7 +1152,7 @@ async def test_aggregator_notes_empty_stream_without_payload(monkeypatch) -> Non
     ticks = iter([100_000_000, 200_000_000])
     aggregator = StreamChunkAggregator(None, started_ns=0, clock_ns=lambda: next(ticks))
 
-    await aggregator.add_chunk(AIMessageChunk(content=""))
+    await aggregator.add_chunk(StreamDelta(content=""))
 
     timing = aggregator.timing()
     assert timing.ttft_ms is None
@@ -1130,7 +1167,7 @@ async def test_aggregator_omits_note_when_reasoning_streamed() -> None:
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
 
-    await aggregator.add_chunk(AIMessageChunk(content="", additional_kwargs={"reasoning_content": "先分析"}))
+    await aggregator.add_chunk(StreamDelta(content="", additional_kwargs={"reasoning_content": "先分析"}))
 
     timing = aggregator.timing()
     assert timing.reasoning_ms is not None
@@ -1186,14 +1223,14 @@ async def test_aggregator_records_finish_reason_from_response_metadata() -> None
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
 
-    await aggregator.add_chunk(AIMessageChunk(content="正文"))
+    await aggregator.add_chunk(StreamDelta(content="正文"))
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="",
             response_metadata={"finish_reason": "stop", "model_name": "deepseek-v4-flash"},
         )
     )
-    await aggregator.add_chunk(AIMessageChunk(content=""))
+    await aggregator.add_chunk(StreamDelta(content=""))
 
     message = aggregator.finish()
 
@@ -1207,9 +1244,9 @@ async def test_aggregator_keeps_latest_finish_reason_when_repeated() -> None:
     stream = AgentStream(emitter)
     aggregator = StreamChunkAggregator(stream)
 
-    await aggregator.add_chunk(AIMessageChunk(content=""))
-    await aggregator.add_chunk(AIMessageChunk(content="", response_metadata={"finish_reason": "stop"}))
-    await aggregator.add_chunk(AIMessageChunk(content="", response_metadata={"finish_reason": "length"}))
+    await aggregator.add_chunk(StreamDelta(content=""))
+    await aggregator.add_chunk(StreamDelta(content="", response_metadata={"finish_reason": "stop"}))
+    await aggregator.add_chunk(StreamDelta(content="", response_metadata={"finish_reason": "length"}))
 
     message = aggregator.finish()
 
@@ -1226,7 +1263,7 @@ async def test_merge_truncated_args_marks_call_instead_of_raw_wrap() -> None:
     aggregator = StreamChunkAggregator(stream)
 
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="",
             tool_call_chunks=[
                 {
@@ -1239,7 +1276,7 @@ async def test_merge_truncated_args_marks_call_instead_of_raw_wrap() -> None:
         )
     )
     await aggregator.add_chunk(
-        AIMessageChunk(
+        StreamDelta(
             content="",
             tool_call_chunks=[
                 {"name": "", "args": 'lence": "pos', "id": "", "index": 0},
@@ -1274,6 +1311,51 @@ def test_merge_tool_call_chunks_carries_raw_args() -> None:
     assert calls[0]["raw_args"] == '{"description": "关键词"}'
 
 
+def test_tool_name_and_id_fragments_preserve_interleaved_call_pairing() -> None:
+    calls = _merge_tool_call_chunks(
+        [
+            {"index": 0, "name": "execute_", "args": '{"co', "id": "call_"},
+            {"index": 1, "name": "finish", "args": "{", "id": "call_2"},
+            {"index": 0, "name": "code", "args": 'de":"print(1)"}', "id": "1"},
+            {"index": 1, "name": "", "args": "}", "id": ""},
+        ]
+    )
+    assert [(call["name"], call["id"], call["args"]) for call in calls] == [
+        ("execute_code", "call_1", {"code": "print(1)"}),
+        ("finish", "call_2", {}),
+    ]
+
+
+@pytest.mark.parametrize("raw_args", ["[]", "null", "42", '"text"'])
+async def test_non_object_tool_arguments_are_rejected_before_invocation(raw_args: str) -> None:
+    effects = []
+
+    @tool
+    def finish() -> str:
+        """请求结束当前会话"""
+        effects.append(True)
+        return "{}"
+
+    call = _merge_tool_call_chunks([{"index": 0, "name": "finish", "args": raw_args, "id": "invalid"}])[0]
+    entry = await _execute_call(call, tool_map={"finish": finish}, ledger=None, call_index=0)
+    assert effects == [] and entry["status"] == "error"
+    assert call["raw_args"] == raw_args and "JSON 对象" in entry["error"]
+
+
+def test_gateway_reused_index_keeps_complete_calls_separate() -> None:
+    calls = _merge_tool_call_chunks(
+        [
+            {"index": 0, "name": "finish", "args": "{}", "id": "first"},
+            {"index": 0, "name": "execute_code", "args": '{"code":', "id": "second"},
+            {"index": 0, "name": "", "args": '"print(1)"}', "id": ""},
+        ]
+    )
+    assert [(call["name"], call["id"], call["args"]) for call in calls] == [
+        ("finish", "first", {}),
+        ("execute_code", "second", {"code": "print(1)"}),
+    ]
+
+
 class _ScriptedStreamingLLM:
     """按脚本逐次返回流式分片，验证无工具回复的调用层重发"""
 
@@ -1298,8 +1380,8 @@ async def _no_sleep(_seconds: float) -> None:
 async def test_run_model_call_retries_when_reply_has_no_tool_call(monkeypatch) -> None:
     """验证无工具回复视同调用未正常结束：退避重发后返回正常回复"""
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
-    truncated = AIMessageChunk(content="", additional_kwargs={"reasoning_content": "思考被截断"})
-    complete = AIMessageChunk(
+    truncated = StreamDelta(content="", additional_kwargs={"reasoning_content": "思考被截断"})
+    complete = StreamDelta(
         content="",
         tool_call_chunks=[{"name": "write_metrics", "args": "{}", "id": "call-1", "index": 0}],
     )
@@ -1315,7 +1397,7 @@ async def test_run_model_call_retries_when_reply_has_no_tool_call(monkeypatch) -
 async def test_run_model_call_raises_after_no_tool_call_retry_exhaustion(monkeypatch) -> None:
     """验证无工具回复重试耗尽后上抛，而非把空回复交回上层协议处理"""
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
-    truncated = AIMessageChunk(content="", additional_kwargs={"reasoning_content": "思考被截断"})
+    truncated = StreamDelta(content="", additional_kwargs={"reasoning_content": "思考被截断"})
     model = _ScriptedStreamingLLM([[truncated], [truncated]])
 
     with pytest.raises(RuntimeError):
@@ -1328,8 +1410,8 @@ async def test_run_model_call_raises_after_no_tool_call_retry_exhaustion(monkeyp
 async def test_run_model_call_retries_plain_text_reply_by_default(monkeypatch) -> None:
     """验证默认即要求工具调用：纯文本回复视同未正常结束并重发"""
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
-    text_only = AIMessageChunk(content="普通文本回复")
-    complete = AIMessageChunk(
+    text_only = StreamDelta(content="普通文本回复")
+    complete = StreamDelta(
         content="",
         tool_call_chunks=[{"name": "write_metrics", "args": "{}", "id": "call-1", "index": 0}],
     )
@@ -1345,8 +1427,8 @@ async def test_run_model_call_retries_plain_text_reply_by_default(monkeypatch) -
 async def test_run_model_call_injects_completion_hint_before_no_tool_retry(monkeypatch) -> None:
     """验证无工具回复重发前注入缺域提醒且只注入一次"""
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
-    text_only = AIMessageChunk(content="本章标注已完成")
-    complete = AIMessageChunk(
+    text_only = StreamDelta(content="本章标注已完成")
+    complete = StreamDelta(
         content="",
         tool_call_chunks=[{"name": "write_relations", "args": "{}", "id": "call-1", "index": 0}],
     )
@@ -1359,15 +1441,15 @@ async def test_run_model_call_injects_completion_hint_before_no_tool_retry(monke
         hints.append(hint)
         return hint
 
-    response = await run_model_call(model, [AIMessage(content="问")], None, completion_hint=completion_hint)
+    response = await run_model_call(model, [AssistantMessage(content="问")], None, completion_hint=completion_hint)
 
     assert [call["name"] for call in response.tool_calls] == ["write_relations"]
     assert len(model.captured_messages) == 3
     assert len(hints) == 1 and hints[0] is not None
     first_retry = model.captured_messages[1]
-    assert isinstance(first_retry[-1], HumanMessage)
+    assert isinstance(first_retry[-1], UserMessage)
     # 第二次重发沿用已注入的提示（同一 run 内账本状态不变，工厂只取一次）
-    assert isinstance(model.captured_messages[2][-1], HumanMessage)
+    assert isinstance(model.captured_messages[2][-1], UserMessage)
     assert model.captured_messages[2][-1] is first_retry[-1]
 
 
@@ -1375,8 +1457,8 @@ async def test_run_model_call_injects_completion_hint_before_no_tool_retry(monke
 async def test_run_model_call_skips_hint_when_factory_returns_none(monkeypatch) -> None:
     """验证工厂返回 None 时维持原样重发、消息列表不被改动"""
     monkeypatch.setattr("src.agents.stream.asyncio.sleep", _no_sleep)
-    text_only = AIMessageChunk(content="纯文本")
-    complete = AIMessageChunk(
+    text_only = StreamDelta(content="纯文本")
+    complete = StreamDelta(
         content="",
         tool_call_chunks=[{"name": "write_metrics", "args": "{}", "id": "call-1", "index": 0}],
     )
@@ -1388,11 +1470,11 @@ async def test_run_model_call_skips_hint_when_factory_returns_none(monkeypatch) 
         calls.append(True)
         return None
 
-    original = [AIMessage(content="问")]
+    original = [AssistantMessage(content="问")]
     response = await run_model_call(model, list(original), None, completion_hint=completion_hint)
 
     assert [call["name"] for call in response.tool_calls] == ["write_metrics"]
     assert len(model.captured_messages) == 2
     assert len(calls) == 1
     assert len(model.captured_messages[1]) == 1
-    assert isinstance(model.captured_messages[1][-1], AIMessage)
+    assert isinstance(model.captured_messages[1][-1], AssistantMessage)

@@ -87,6 +87,19 @@ def _seed_completed_task_with_artifacts(novel_id: str, run_id: str) -> str:
     return task_id
 
 
+def _find_listed_novel(api_client: TestClient, novel_id: str) -> dict | None:
+    """跨页查找列表条目：上传时间含 NULL 时新记录不一定落在首页"""
+    page = 1
+    while True:
+        payload = api_client.get("/api/novels/", params={"page": page, "page_size": 100}).json()
+        for item in payload["items"]:
+            if item["novel_id"] == novel_id:
+                return item
+        if not payload["items"] or page >= payload["total_pages"]:
+            return None
+        page += 1
+
+
 class TestNovelUpload:
     """测试小说上传"""
 
@@ -128,6 +141,87 @@ class TestNovelUpload:
         detail = api_client.get(f"/api/novels/{novel_id}")
         assert detail.status_code == 200
         assert detail.json()["title"] == "重明传"
+
+    def test_upload_accepts_title_author_and_cover(self, api_client: TestClient):
+        """上传时填写书名、作者与封面，详情与封面接口都能读回"""
+        cover_bytes = b"\x89PNG\r\n\x1a\nnovel-cover"
+        response = api_client.post(
+            "/api/novels/upload",
+            files={
+                "file": ("original.txt", b"Test novel content\n" * 20, "text/plain"),
+                "cover": ("cover.png", cover_bytes, "image/png"),
+            },
+            data={"title": "雾港来信", "author": "虚构作者"},
+        )
+
+        assert response.status_code == 200
+        novel_id = response.json()["novel_id"]
+
+        detail = api_client.get(f"/api/novels/{novel_id}").json()
+        assert detail["title"] == "雾港来信"
+        assert detail["author"] == "虚构作者"
+
+        cover = api_client.get(f"/api/novels/{novel_id}/cover")
+        assert cover.status_code == 200
+        assert cover.headers["content-type"] == "image/png"
+        assert cover.content == cover_bytes
+
+        listed = _find_listed_novel(api_client, novel_id)
+        assert listed is not None
+        assert listed["word_count"] == 320
+
+    def test_upload_counts_non_whitespace_characters(self, api_client: TestClient):
+        """字数按非空白字符统计，换行与空格不计"""
+        response = api_client.post(
+            "/api/novels/upload",
+            files={"file": ("count.txt", "第一段。\n第二段！  \n".encode(), "text/plain")},
+        )
+
+        assert response.status_code == 200
+        novel_id = response.json()["novel_id"]
+        assert response.json()["word_count"] == 8
+        assert api_client.get(f"/api/novels/{novel_id}").json()["word_count"] == 8
+
+    def test_upload_rejects_unsupported_cover_type(self, api_client: TestClient):
+        """封面扩展名不在白名单时拒绝上传"""
+        response = api_client.post(
+            "/api/novels/upload",
+            files={
+                "file": ("cover_type.txt", b"content", "text/plain"),
+                "cover": ("cover.gif", b"GIF89a", "image/gif"),
+            },
+        )
+
+        assert response.status_code == 400
+
+    def test_cover_endpoint_returns_404_without_cover(self, api_client: TestClient):
+        """没有上传封面时封面接口返回 404"""
+        response = api_client.post(
+            "/api/novels/upload",
+            files={"file": ("no_cover.txt", b"content", "text/plain")},
+        )
+
+        assert response.status_code == 200
+        novel_id = response.json()["novel_id"]
+        assert api_client.get(f"/api/novels/{novel_id}/cover").status_code == 404
+
+    def test_delete_novel_removes_cover_file(self, api_client: TestClient):
+        """删除小说时一并删除已上传的封面文件"""
+        response = api_client.post(
+            "/api/novels/upload",
+            files={
+                "file": ("with_cover.txt", b"content", "text/plain"),
+                "cover": ("cover.jpg", b"jpeg-bytes", "image/jpeg"),
+            },
+        )
+
+        assert response.status_code == 200
+        novel_id = response.json()["novel_id"]
+        cover_path = Path("data/covers") / f"{novel_id}.jpg"
+        assert cover_path.is_file()
+
+        assert api_client.delete(f"/api/novels/{novel_id}").status_code == 200
+        assert not cover_path.exists()
 
     def test_delete_novel_cascades_tasks_and_artifacts(self, api_client: TestClient):
         """测试删除小说会级联删除其任务数据库数据与文件产物"""

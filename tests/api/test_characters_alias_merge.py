@@ -31,6 +31,15 @@ def test_character_emotion_preserves_numeric_graph_fact(db_session) -> None:
     from src.storage.repositories import AnnotationRepository
 
     repo = AnnotationRepository(db_session)
+    original = repo.fetch_graph_facts(run_id, content_kind="character_observation")
+    projected = repo.fetch_character_observation_rows(run_id)
+    fields = (
+        "chapter_id", "participant_entity_name", "participant_entity_type", "participant_narrative_role",
+        "participant_action", "participant_emotion",
+    )
+    assert [tuple(getattr(row, field) for field in fields) for row in projected] == [
+        tuple(getattr(row, field) for field in fields) for row in original if row.participant_entity_id is not None
+    ]
     assert fetch_chapter_characters_full(storage_for(repo.session), run_id)[0].emotion_score == -2
     result = _fetch_characters(run_id=run_id, annotation_repo=storage_for(repo.session), limit=None)
     assert result[0].avg_emotion_score == -2.0

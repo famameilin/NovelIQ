@@ -18,6 +18,7 @@ _ALLOWED = {
     "api": {
         "audit",
         "config",
+        "text_processing",
         "diagnosis",
         "event_trees",
         "fact_graph",
@@ -65,13 +66,13 @@ _ALLOWED = {
         "work",
     },
     "work": {"config", "event_bus", "model_pool", "storage", "utils"},
-    "model_pool": {"config", "embedding", "event_bus", "storage", "utils"},
+    "model_pool": {"config", "event_bus", "utils"},
     "embedding": {"config"},
     "audit": {"embedding", "event_bus", "storage", "utils"},
     "diagnosis": {"config", "event_trees", "fact_graph", "metrics", "storage", "topic", "utils"},
     "text_processing": {"lexicons", "utils"},
     "fact_graph": {"storage", "text_processing", "utils"},
-    "event_trees": {"fact_graph", "storage", "text_processing", "utils"},
+    "event_trees": {"storage", "text_processing", "utils"},
     "case_pool": {"storage", "utils"},
     "metrics": {"config", "event_trees", "fact_graph", "lexicons", "storage", "text_processing", "utils", "work"},
     "linguistic": {"config", "lexicons", "metrics", "storage", "text_processing"},
@@ -98,6 +99,57 @@ def test_modules_and_dependency_whitelist() -> None:
         if source != target and target not in _ALLOWED[source]:
             violations.append(f"{d.source}:{d.line} -> {d.target}")
     assert not violations, "\n".join(violations)
+
+
+def test_event_and_fact_domains_are_independent() -> None:
+    graph: dict[str, set[str]] = {}
+    for dependency in _project_dependencies() + reexport_dependencies(_ROOT):
+        graph.setdefault(dependency.source, set()).add(dependency.target)
+    for source, forbidden in (("src.event_trees", "src.fact_graph"), ("src.fact_graph", "src.event_trees")):
+        pending = [name for name in graph if name == source or name.startswith(source + ".")]
+        seen: set[str] = set()
+        while pending:
+            name = pending.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            assert name != forbidden and not name.startswith(forbidden + "."), (source, name)
+            pending.extend(graph.get(name, ()))
+
+
+def test_shared_interpreter_has_no_role_or_storage_dependencies() -> None:
+    violations = [
+        dependency
+        for dependency in _project_dependencies() + reexport_dependencies(_ROOT)
+        if dependency.source.startswith("src.agents.program_runtime.")
+        and not dependency.target.startswith(("src.agents.program_runtime", "src.agents.errors"))
+    ]
+    assert not violations, violations
+
+
+def test_model_pool_does_not_own_provider_clients_or_usage() -> None:
+    violations = [
+        dependency
+        for dependency in dependencies(_ROOT)
+        if dependency.source.startswith("src.model_pool.")
+        and dependency.target.startswith(("openai", "httpx", "src.agents", "src.audit", "src.storage"))
+    ]
+    assert not violations, violations
+
+
+def test_storage_read_contracts_have_semantic_typed_signatures() -> None:
+    for path in (_ROOT / "src/storage/readers").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for cls in (node for node in tree.body if isinstance(node, ast.ClassDef)):
+            for method in (node for node in cls.body if isinstance(node, ast.FunctionDef)):
+                if method.name.startswith("_"):
+                    continue
+                assert not method.name[-1].isdigit(), (path, method.name)
+                assert method.returns is not None, (path, method.name)
+                for argument in method.args.args[1:]:
+                    assert argument.annotation is not None and argument.arg != "value_1", (path, method.name)
+                annotations = [method.returns, *(argument.annotation for argument in method.args.args[1:])]
+                assert all("Any" not in ast.unparse(annotation) for annotation in annotations)
 
 
 def test_runtime_dependencies_have_no_cycles() -> None:
@@ -166,7 +218,7 @@ def test_model_pool_does_not_consume_business_envelopes() -> None:
 
 
 def test_deprecated_is_unreferenced() -> None:
-    """退役代码可以保留在仓库，正式执行链不得导入"""
+    """本地退役代码不得进入正式执行链"""
     assert not any(d.target == "deprecated" or d.target.startswith("deprecated.") for d in dependencies(_ROOT))
 
 
@@ -219,7 +271,7 @@ def test_reexport_parser_resolves_actual_definition(tmp_path: Path) -> None:
 def test_annotation_state_ownership_is_explicit() -> None:
     owner_fields = {
         "state_entities": {"written_entities", "written_relations", "entity_el_index"},
-        "state_events": {"event_trees", "pending_child_events", "observation_by_record"},
+        "state_events": {"event_ids_by_el", "observation_by_record"},
         "state_dialogue": {"source_anchors", "written_dialogues", "authorized_text_paragraph_ids"},
         "state_metrics": {"metrics_payload", "bound_payloads"},
     }

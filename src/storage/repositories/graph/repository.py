@@ -20,6 +20,7 @@ from src.storage.models import (
     GraphFact,
     GraphRelation,
 )
+from src.storage.read_scope import _read_projections
 from src.storage.records.graph import (
     ChapterBoundary,
     EntitySnapshotRow,
@@ -124,6 +125,17 @@ class GraphRepository(BaseRepository[GraphFact]):
 
     def _fold_graph(self, run_id: str) -> _FoldedGraph:
         "按原始贡献序折叠实体与关系状态；事实序 =（章序、角色序、执行、列表内序）"
+        cache = _read_projections.get()
+        key = (id(self.session.get_bind()), run_id, self.internal)
+        if cache is not None and key in cache:
+            return cache[key]
+        folded = self._build_folded_graph(run_id)
+        if cache is not None:
+            cache[key] = folded
+        return folded
+
+    def _build_folded_graph(self, run_id: str) -> _FoldedGraph:
+        "读取本运行贡献并折叠为章节状态与变化"
         chapters = self._chapter_rows(run_id)
         order_map = {int(chapter.chapter_id): int(chapter.sequence) for chapter in chapters}
         entities = {

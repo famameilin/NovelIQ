@@ -26,6 +26,7 @@ from src.storage.repositories.paragraph.metrics_ops import (
 from src.storage.repositories.paragraph.reader import (
     count_paragraphs,
     fetch_paragraph_rows_batch,
+    fetch_paragraph_texts,
     has_paragraphs,
 )
 from src.storage.repositories.paragraph.topic_ops import (
@@ -34,6 +35,7 @@ from src.storage.repositories.paragraph.topic_ops import (
     clear_paragraph_topics,
     fetch_chapter_inference_totals,
     fetch_chapter_topic_aggregates,
+    fetch_paragraph_topic_distributions,
     fetch_paragraph_topic_rows,
     fetch_paragraph_topics_agg,
     fetch_topic_emotion_aggregates,
@@ -68,6 +70,10 @@ class ParagraphRepository(BaseRepository[Paragraph]):
     def fetch_paragraph_rows(self, run_id: str) -> Sequence[Row]:
         "读取 run 的全部段落行，按 paragraph_id 升序"
         return self.fetch_paragraph_rows_batch(run_id, limit=None)
+
+    def fetch_paragraph_texts(self, run_id: str) -> list[str]:
+        "读取指定运行的全部段落原文，按 paragraph_id 升序"
+        return fetch_paragraph_texts(self.session, run_id)
 
     def fetch_paragraph_rows_batch(
         self,
@@ -182,6 +188,10 @@ class ParagraphRepository(BaseRepository[Paragraph]):
     def fetch_paragraph_topic_rows(self, run_id: str) -> Sequence[Row]:
         "段落主题序列数据：段落真实字符位置、章节序列与推断 token 数齐备"
         return fetch_paragraph_topic_rows(self.session, run_id)
+
+    def fetch_paragraph_topic_distributions(self, run_id: str) -> Sequence[Row]:
+        "每段一行读取完整主题身份与权重"
+        return fetch_paragraph_topic_distributions(self.session, run_id)
 
     # ------------------------------------------------------------------
 

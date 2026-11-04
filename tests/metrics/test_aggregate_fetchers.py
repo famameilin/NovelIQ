@@ -4,8 +4,35 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.api.exceptions import GraphReadinessError
-from src.metrics.queries.fetchers import fetch_character_data, fetch_relation_data
+from src.fact_graph.read.annotations import fetch_character_emotion_sequence
+from src.metrics.queries.fetchers import fetch_character_data, fetch_dialogue_data, fetch_relation_data
 from tests.support.storage_fixtures import fixture_id
+
+
+def test_character_emotions_preserve_chapter_order_when_rows_are_supplied():
+    rows = [
+        SimpleNamespace(chapter_id=40, value="a"),
+        SimpleNamespace(chapter_id=10, value="b"),
+        SimpleNamespace(chapter_id=40, value="c"),
+    ]
+    original = rows.copy()
+    session = SimpleNamespace(annotations=SimpleNamespace(fetch_chapter_sequence_map=lambda _run: {10: 2, 40: 1}))
+
+    result = fetch_character_emotion_sequence(session, "run", rows=rows)
+
+    assert result == [rows[0], rows[2], rows[1]]
+    assert rows == original
+
+
+def test_dialogue_tones_include_records_without_speakers():
+    records = [
+        SimpleNamespace(speaker_entity_id=None, tone="平静"),
+        SimpleNamespace(speaker_entity_id="person", tone=None),
+        SimpleNamespace(speaker_entity_id="person", tone="愤怒"),
+    ]
+    session = SimpleNamespace(annotations=SimpleNamespace(fetch_dialogue_observation_rows=lambda _run: records))
+
+    assert fetch_dialogue_data(session, "run").tones == ["平静", "愤怒"]
 
 
 class _DummyAnnotationRepo:
@@ -35,18 +62,16 @@ class _DummyAnnotationRepo:
         ]
 
 
-def test_fetch_character_data_uses_level1_canonical_entities_instead_of_graph_participants():
+def test_fetch_character_data_uses_canonical_entities_instead_of_graph_participants():
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
-    mock_service.build_level1_snapshot.return_value = SimpleNamespace(
-        canonical_entities=[
-            SimpleNamespace(name="主角", entity_type="character", status="active", primary_role_function="主体"),
-            SimpleNamespace(name="同伴", entity_type="character", status="active", primary_role_function="助手"),
-            SimpleNamespace(name="路人甲", entity_type="character", status="active", primary_role_function=None),
-            SimpleNamespace(name="旧敌", entity_type="character", status="inactive", primary_role_function="反对者"),
-            SimpleNamespace(name="古槐", entity_type="location", status="active", primary_role_function=None),
-        ],
-    )
+    mock_service.build_canonical_entities.return_value = [
+        SimpleNamespace(name="主角", entity_type="character", status="active", primary_role_function="主体"),
+        SimpleNamespace(name="同伴", entity_type="character", status="active", primary_role_function="助手"),
+        SimpleNamespace(name="路人甲", entity_type="character", status="active", primary_role_function=None),
+        SimpleNamespace(name="旧敌", entity_type="character", status="inactive", primary_role_function="反对者"),
+        SimpleNamespace(name="古槐", entity_type="location", status="active", primary_role_function=None),
+    ]
 
     with patch(
         "src.metrics.queries.fetchers.KnowledgeGraphAuthorityService.from_session",
@@ -55,7 +80,7 @@ def test_fetch_character_data_uses_level1_canonical_entities_instead_of_graph_pa
         data = fetch_character_data(annotation_repo, fixture_id(__name__, "run-1"))
 
     from_session.assert_called_once_with(annotation_repo.session)
-    mock_service.build_level1_snapshot.assert_called_once_with(fixture_id(__name__, "run-1"))
+    mock_service.build_canonical_entities.assert_called_once_with(fixture_id(__name__, "run-1"))
     assert data.characters == [
         ("主角", "主体", 1),
         ("同伴", "助手", 0),
@@ -92,12 +117,10 @@ def test_fetch_character_data_uses_explicit_resolved_graph_name():
         ],
     )
     mock_service = MagicMock()
-    mock_service.build_level1_snapshot.return_value = SimpleNamespace(
-        canonical_entities=[
-            SimpleNamespace(name="白芷", entity_type="character", status="active", primary_role_function="主体"),
-            SimpleNamespace(name="同伴", entity_type="character", status="active", primary_role_function="助手"),
-        ],
-    )
+    mock_service.build_canonical_entities.return_value = [
+        SimpleNamespace(name="白芷", entity_type="character", status="active", primary_role_function="主体"),
+        SimpleNamespace(name="同伴", entity_type="character", status="active", primary_role_function="助手"),
+    ]
 
     with patch(
         "src.metrics.queries.fetchers.KnowledgeGraphAuthorityService.from_session",
@@ -139,11 +162,9 @@ def test_fetch_character_data_skips_unresolved_reference_rows() -> None:
         ],
     )
     mock_service = MagicMock()
-    mock_service.build_level1_snapshot.return_value = SimpleNamespace(
-        canonical_entities=[
-            SimpleNamespace(name="汪淼", entity_type="character", status="active", primary_role_function="主体"),
-        ],
-    )
+    mock_service.build_canonical_entities.return_value = [
+        SimpleNamespace(name="汪淼", entity_type="character", status="active", primary_role_function="主体"),
+    ]
 
     with patch(
         "src.metrics.queries.fetchers.KnowledgeGraphAuthorityService.from_session",
@@ -270,5 +291,5 @@ def inject_annotation_read_rows(monkeypatch):
     )
     monkeypatch.setattr(
         "src.metrics.queries.fetchers.fetch_character_emotion_sequence",
-        lambda session, run_id: session.owner._emotion_rows,
+        lambda session, run_id, **_kwargs: session.owner._emotion_rows,
     )

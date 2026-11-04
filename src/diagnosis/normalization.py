@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any, Literal
 
 from src.fact_graph.character_reference_policy import filter_global_character_names
+
+
+def normalize_character_key(name: str) -> str:
+    """角色名身份比较沿用 NFC/strip/casefold 合同"""
+    return unicodedata.normalize("NFC", name).strip().casefold()
 
 
 def normalize_name_list(values: list[str] | None) -> list[str] | None:
@@ -132,5 +138,8 @@ def normalize_topic_label_input(values: object) -> dict[str, str]:
         topic_id = str(raw_id).strip()
         if not topic_id.isdecimal() or not isinstance(raw_label, str) or not raw_label.strip():
             raise ValueError("topic_labels must map non-negative topic IDs to non-empty labels")
-        normalized[str(int(topic_id))] = raw_label.strip()
+        key = str(int(topic_id))
+        if key in normalized:
+            raise ValueError(f"topic_labels 包含等价重复键: {key}")
+        normalized[key] = raw_label.strip()
     return normalized

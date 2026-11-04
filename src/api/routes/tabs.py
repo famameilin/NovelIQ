@@ -36,7 +36,7 @@ router = APIRouter(prefix="/novels/{novel_id}", tags=["tabs"])
 
 
 @router.get("/tabs/dashboard", response_model=DashboardTabResponse)
-async def get_dashboard_tab(
+def get_dashboard_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -49,7 +49,7 @@ async def get_dashboard_tab(
 
 
 @router.get("/tabs/rhythm", response_model=RhythmTabResponse)
-async def get_rhythm_tab(
+def get_rhythm_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -63,7 +63,7 @@ async def get_rhythm_tab(
 
 
 @router.get("/tabs/character-function", response_model=CharacterFunctionTabResponse)
-async def get_character_function_tab(
+def get_character_function_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -75,7 +75,7 @@ async def get_character_function_tab(
 
 
 @router.get("/tabs/graph-network", response_model=GraphNetworkTabResponse)
-async def get_graph_network_tab(
+def get_graph_network_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -88,7 +88,7 @@ async def get_graph_network_tab(
 
 
 @router.get("/tabs/topics-overview", response_model=TopicsOverviewTabResponse)
-async def get_topics_overview_tab(
+def get_topics_overview_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -100,7 +100,7 @@ async def get_topics_overview_tab(
 
 
 @router.get("/tabs/linguistic-entities", response_model=LinguisticEntitiesTabResponse)
-async def get_linguistic_entities_tab(
+def get_linguistic_entities_tab(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],

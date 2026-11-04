@@ -6,7 +6,6 @@ import pytest
 from sqlalchemy import select
 
 from src.diagnosis.queries import DiagnosisQueries
-from src.linguistic.completion import is_linguistic_complete
 from src.storage.models import Paragraph
 from src.storage.repositories import GraphRepository, ParagraphRepository, StatsRepository
 from src.topic.completion import is_topic_model_complete
@@ -32,7 +31,7 @@ def _retract_relation(
 ) -> None:
     """关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
     from src.agents.annotation.output_models import BoundChapterAnnotation
-    from src.fact_graph.inputs import ChapterMetricsInput
+    from src.metrics.annotation_inputs import ChapterMetricsInput
 
     commit_test_annotation(
         session,
@@ -89,44 +88,6 @@ def test_relation_history_reads_states_once_and_preserves_inactive_history(db_se
     assert repo.fetch_relation_changes(run_id, limit=1) == all_changes[:1]
     assert repo.fetch_relation_changes(run_id, limit=0) == []
 
-
-def _insert_completion(db_session, run_id: str, paragraph_id: int) -> None:
-    """写入单段语言处理完成标记（零词元同样算已完成）
-
-    完成行 FK 到 linguistic_runs 与运行合同，映射种子先落库再写完成行。
-    """
-    from src.storage.repositories.linguistic_repository import LinguisticRepository
-
-    repo = LinguisticRepository(db_session)
-    repo.insert_linguistic_features(
-        run_id,
-        [
-            {
-                "paragraph_id": paragraph_id,
-                "sentence_count": 0,
-                "dependency_depth_sum": 0,
-                "dependency_depth_max": 0,
-            }
-        ],
-        clear_first=False,
-    )
-    db_session.flush()
-
-
-def test_partial_linguistic_rows_are_not_a_completed_stage(db_session) -> None:
-    _, run_id = create_run_with_chunks(db_session, texts=["。", "！"], chapter_ids=[1, 2])
-    identifiers = list(
-        db_session.execute(
-            select(Paragraph.paragraph_id).where(Paragraph.run_id == run_id).order_by(Paragraph.paragraph_id),
-        ).scalars()
-    )
-    repo = StatsRepository(db_session)
-    assert not is_linguistic_complete(storage_for(repo.session), run_id)
-    _insert_completion(db_session, run_id, identifiers[0])
-    assert repo.has_linguistic_data(run_id)
-    assert not is_linguistic_complete(storage_for(repo.session), run_id)
-    _insert_completion(db_session, run_id, identifiers[1])
-    assert is_linguistic_complete(storage_for(repo.session), run_id)
 
 
 def test_topic_contract_and_partial_inference_or_distribution_cannot_be_reused(db_session) -> None:
@@ -206,3 +167,15 @@ def test_topic_rerun_writes_commit_against_deferred_constraints(db_session) -> N
     repo.insert_paragraph_topics(run_id, distribution)
     db_session.commit()
     assert is_topic_model_complete(storage_for(db_session), run_id)
+
+
+def test_topic_inference_insert_batches_below_parameter_limit() -> None:
+    """全书推断行按固定批大小提交，单条 INSERT 不越过 PostgreSQL 参数上限"""
+    from unittest.mock import MagicMock
+
+    from src.storage.repositories.paragraph.topic_ops import insert_paragraph_topic_inferences
+
+    session = MagicMock()
+    rows = [(index, 1, 1, "complete", None, 1.0) for index in range(12_001)]
+    assert insert_paragraph_topic_inferences(session, "run", rows) == 12_001
+    assert session.execute.call_count == 3

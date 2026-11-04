@@ -46,7 +46,7 @@ router = APIRouter()
 
 
 @router.get("/{novel_id}/topics")
-async def get_topics(
+def get_topics(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -59,7 +59,7 @@ async def get_topics(
 
 
 @router.get("/{novel_id}/topics/aggregate", response_model=TopicAggregateResponse | ChapterTopicAggregateResponse)
-async def get_topic_aggregate(
+def get_topic_aggregate(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -78,7 +78,7 @@ async def get_topic_aggregate(
 
 
 @router.get("/{novel_id}/topics/series", response_model=TopicSeriesResponse)
-async def get_topic_series(
+def get_topic_series(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -94,7 +94,7 @@ async def get_topic_series(
 
 
 @router.get("/{novel_id}/topics/shifts", response_model=TopicShiftResponse)
-async def get_topic_shifts(
+def get_topic_shifts(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -144,7 +144,7 @@ async def get_topic_shifts(
 
 
 @router.get("/{novel_id}/topics/emotion", response_model=TopicEmotionResponse)
-async def get_topic_emotion(
+def get_topic_emotion(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -161,7 +161,7 @@ async def get_topic_emotion(
 
 
 @router.get("/{novel_id}/diagnosis", response_model=DiagnosisResult)
-async def get_diagnosis(
+def get_diagnosis(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -181,7 +181,7 @@ async def get_diagnosis(
     "/{novel_id}/foreshadowing-trees",
     response_model=list[ForeshadowingTreeResponse],
 )
-async def get_foreshadowing_trees(
+def get_foreshadowing_trees(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],

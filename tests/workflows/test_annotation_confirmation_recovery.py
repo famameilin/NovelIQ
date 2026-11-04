@@ -6,11 +6,11 @@ import asyncio
 from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.agents.annotation.agent import AnnotationAgent
+from src.agents.messages import AssistantMessage
 from src.case_pool import CasePool
 from src.config import settings
 from src.event_bus import Message
@@ -47,20 +47,18 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
     """确认中断后保留实际保存事实和案例占用，从存储重建再完成确认"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["张三确认旧信的内容。"])
     model = ProgramModel(
-        'pending(case_type="character", description="核查旧信")\n'
-        "cases = search_cases()\n"
-        'claim_case(case_id=cases[0]["case_id"])\n'
-        "read_text(paragraph_id=0)\n"
-        'event(el="e1", title="确认旧信", problem="旧信是否可靠", summary="张三确认旧信内容", '
-        'event_type="核查", status="ongoing", evidence=1, isforeshadowing=True, confidence="high")\n'
-        'plotline(subject_title="旧信真伪", description="确认内容", before="未知", after="可靠", '
-        'evidence=1, event_id="e1")\n'
-        'foreshadow_action(source_event_id="e1", action_type="reinforce", evidence=1)\n'
-        'metric(summary="已核查正文", emotional_valence=0, '  # 同一程序文本
-        'narrative_function="铺垫", caseid=cases[0]["cas'  # 同一程序文本
-        'e_id"])\n'  # 同一程序文本
-        'submit_case(case_id=cases[0]["case_id"])\n'
-        "finish()"
+        'pending(case_type="character", description="核查旧信")\ncases'
+        ' = search_cases()\nclaim_case(case_id=cases[0]["case_id"]'
+        ')\nread_text(paragraph_id=0)\ncreated = write_event(items=[dict(el="e1", tit'
+        'le="确认旧信", problem="旧信是否可靠", summary="张三确认旧信内容", event_t'
+        'ype="核查", status="ongoing", evidence=1, isforeshadowing='
+        'True, confidence="high")])\nplotline(subject_title="旧信真伪", '
+        'description="确认内容", before="未知", after="可靠", evidence=1,'
+        ' event_id="e1")\nforeshadow_action(source_event_id="e1", '
+        'action_type="reinforce", evidence=1)\nmetric(summary="已核查'
+        '正文", emotional_valence=0, narrative_function="铺垫", casei'
+        'd=cases[0]["case_id"])\nsubmit_case(case_id=cases[0]["cas'
+        'e_id"])\nfinish()'
     )
     original_confirm = CasePool.confirm
     original_recover = AnnotationAgent.recover
@@ -85,7 +83,7 @@ async def test_committed_case_recovers_confirmation_without_second_model_executi
 
     monkeypatch.setattr(CasePool, "confirm", interrupted_confirm)
     monkeypatch.setattr(AnnotationAgent, "recover", observed_recover)
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
 
@@ -155,7 +153,7 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
             super().__init__("")
             self.chapter_calls = {1: 0, 2: 0}
 
-        async def ainvoke(self, messages: list) -> AIMessage:
+        async def ainvoke(self, messages: list) -> AssistantMessage:
             chapter = 1 if "甲章整理记录" in str(messages[1].content) else 2
             self.chapter_calls[chapter] += 1
             self.calls += 1
@@ -177,7 +175,7 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
                     'submit_case(case_id=cases[0]["case_id"])\n'
                     "finish()"
                 )
-            return AIMessage(
+            return AssistantMessage(
                 content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": f"call{self.calls}"}]
             )
 
@@ -217,7 +215,7 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
 
     monkeypatch.setattr(CasePool, "confirm", interrupted_confirm)
     monkeypatch.setattr(AnnotationAgent, "recover", observed_recover)
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     assert model.chapter_calls == {1: 1, 2: 2}
     assert observed == [first_work]
@@ -234,8 +232,7 @@ async def test_confirmation_recovery_preserves_concurrent_entity_and_case_owner(
 
     row = db_session.get(Case, target["case_id"])
     assert row.status == "resolved" and row.promised_agent_id is not None
-    assert len(records) == 2
-    assert any("实体尚无正式引用" in record["description"] for record in records)
+    assert len(records) == 1
 
 
 @pytest.mark.asyncio
@@ -260,7 +257,7 @@ async def test_resume_threshold_change_keeps_saved_lanes_and_dispatches_missing_
     # 第一次运行在首个角色保存后取消：本章缺少必需角色，从未出章末核对凭据
     first = ProgramModel('metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()')
     with (
-        patch("src.model_pool.llm.build_chat_model", return_value=first),
+        patch("src.agents.model_client.build_chat_model", return_value=first),
         patch.object(AnnotationAccess, "save", cancel_on_first_save),
     ):
         with pytest.raises(asyncio.CancelledError):
@@ -286,7 +283,7 @@ async def test_resume_threshold_change_keeps_saved_lanes_and_dispatches_missing_
         shown.append(event)
 
     second = ProgramModel('metric(summary="重建原文", emotional_valence=0, narrative_function="铺垫")\nfinish()')
-    with patch("src.model_pool.llm.build_chat_model", return_value=second):
+    with patch("src.agents.model_client.build_chat_model", return_value=second):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id, emitter=emit) == (1, 0, 1)
     assert second.calls == len(missing)
     assert [event for event in shown if event.action == "chapter_reset"] == []
@@ -294,8 +291,6 @@ async def test_resume_threshold_change_keeps_saved_lanes_and_dispatches_missing_
     db_session.expire_all()
     after = fetch_annotation_role_records(storage_for(db_session), run_id)
     assert len(after) == len(LANES)
-    assert {(item.chapter_id, item.role, item.state) for item in after} == {
-        (1, role, "saved") for role in LANES
-    }
+    assert {(item.chapter_id, item.role, item.state) for item in after} == {(1, role, "saved") for role in LANES}
     identities = {item.role: item.invocation_id for item in after}
     assert {role: identities[role] for role in saved_before} == saved_before

@@ -8,9 +8,9 @@ import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
 from src.agents.annotation.ledger import AnnotationToolLedger
+from src.event_trees.vocabulary import Confidence
 from src.fact_graph.graph import FactGraph
 from src.fact_graph.inputs import ChapterParagraphInfo
-from src.fact_graph.vocabulary import Confidence
 from tests.support.annotation_work_tools import build_annotation_tools
 
 
@@ -90,7 +90,7 @@ async def test_participants_use_names_and_types_for_independent_declarations() -
 
     child = await tools["write_event"].ainvoke(
         {
-            "el": "t1/e2",
+            "el": "e2",
             "characters": [
                 {
                     "name": "顾霜",
@@ -154,10 +154,10 @@ async def test_duplicate_el_binds_one_to_one_by_rejection() -> None:
 
 @pytest.mark.asyncio
 async def test_event_declarations_do_not_infer_containment_from_call_order() -> None:
-    """同一局部路径可以先子后根创建，每项声明仍保持独立来源"""
+    """同一执行内的引用 id 可按任意顺序创建，每次声明仍保持独立来源"""
     ledger = _ledger()
     tools = _tools(ledger)
-    for el, summary in (("t1/e2", "顾霜逼近"), ("t1", "顾霜喝止众人"), ("t1/e3", "旁人劝阻")):
+    for el, summary in (("e2", "顾霜逼近"), ("e1", "顾霜喝止众人"), ("e3", "旁人劝阻")):
         call = {
             "el": el,
             "title": summary,
@@ -236,14 +236,14 @@ async def test_characters_full_replacement_clears_stale_observations() -> None:
     root_event = next(event for event in ledger.bound_payloads["events"] if event.cause_role == "root")
     assert [ledger.graph.display_name(participant.entity) for participant in root_event.participants] == ["顾霜"]
     # 参与者记录键按模型提交的引用原样构造（：uuid id 引用即进键）
-    uuid_record = "t1/root/participant/顾霜"
+    uuid_record = "t1/participant/顾霜"
     assert list(ledger.observation_by_record) == [uuid_record]
     assert ledger.domain_payloads["character_observations"] == [ledger.observation_by_record[uuid_record]]
 
 
 @pytest.mark.asyncio
-async def test_foreshadow_root_low_confidence_written_as_payoff_likelihood() -> None:
-    """伏笔根 confidence=low 直接落 payoff_likelihood；缺 confidence 在根上拒绝"""
+async def test_foreshadow_event_low_confidence_written_as_payoff_likelihood() -> None:
+    """伏笔事件 confidence=low 直接落 payoff_likelihood；缺 confidence 在写入点拒绝"""
     ledger = _ledger()
     tools = _tools(ledger)
     await _write_entity(tools, name="顾霜", el="gushuang")
@@ -269,8 +269,6 @@ async def test_foreshadow_root_low_confidence_written_as_payoff_likelihood() -> 
     assert root_event.is_foreshadow_setup is True
     # StrictModel use_enum_values：载荷里按值存（Confidence 是 StrEnum，按值相等）
     assert root_event.payoff_likelihood == Confidence.LOW
-    tree = next(iter(ledger.event_trees.values()))
-    assert tree["isforeshadowing"] is True
 
     with pytest.raises(AnnotationStageRejection) as excinfo:
         await tools["write_event"].ainvoke(
@@ -285,14 +283,14 @@ async def test_foreshadow_root_low_confidence_written_as_payoff_likelihood() -> 
                 "evidence": 1,
             }
         )
-    assert excinfo.value.record == "t9/root"
+    assert excinfo.value.record == "t9"
     assert excinfo.value.field == "confidence"
     assert excinfo.value.code == "missing"
 
     receipt = json.loads(
         await tools["write_event"].ainvoke(
             {
-                "el": "t1/e2",
+                "el": "e2",
                 "isforeshadowing": True,
                 "confidence": "high",
                 "title": "顾霜离去",

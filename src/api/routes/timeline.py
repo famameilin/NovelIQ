@@ -27,7 +27,7 @@ def query_error(error: Exception) -> HTTPException:
 
 
 @router.get("/{novel_id}/timeline")
-async def get_timeline(
+def get_timeline(
     novel_id: str,
     session: SessionDep,
     run_id: RunDep,
@@ -40,10 +40,11 @@ async def get_timeline(
     cursor: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     source_fact_id: str | None = None,
+    meta_only: bool = False,
 ) -> dict[str, Any]:
     authorize(session, novel_id, run_id)
     try:
-        return PlotlineQuery(session, run_id).fetch(
+        return PlotlineQuery(session, run_id, cache=True).fetch(
             through_chapter_id=through_chapter_id,
             window_start_chapter_id=window_start_chapter_id,
             window_end_chapter_id=window_end_chapter_id,
@@ -53,24 +54,73 @@ async def get_timeline(
             cursor=cursor,
             limit=limit,
             source_fact_id=source_fact_id,
+            meta_only=meta_only,
+        )
+    except (ValueError, LookupError) as error:
+        raise query_error(error) from error
+
+
+@router.get("/{novel_id}/timeline/states")
+def get_timeline_states(
+    novel_id: str,
+    session: SessionDep,
+    run_id: RunDep,
+    through_chapter_id: int | None = None,
+    subject_id: str | None = None,
+    dimension: Literal["plot", "character", "relationship", "foreshadowing"] | None = None,
+    q: str = "",
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    summary: bool = False,
+) -> dict[str, Any]:
+    authorize(session, novel_id, run_id)
+    try:
+        return PlotlineQuery(session, run_id, cache=True).list_states(
+            through_chapter_id=through_chapter_id,
+            subject_id=subject_id,
+            dimension=dimension,
+            q=q,
+            cursor=cursor,
+            limit=limit,
+            summary=summary,
+        )
+    except (ValueError, LookupError) as error:
+        raise query_error(error) from error
+
+
+@router.get("/{novel_id}/timeline/subjects")
+def get_timeline_subjects(
+    novel_id: str,
+    session: SessionDep,
+    run_id: RunDep,
+    through_chapter_id: int | None = None,
+    dimension: Literal["plot", "character", "relationship", "foreshadowing"] | None = None,
+    q: str = "",
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> dict[str, Any]:
+    authorize(session, novel_id, run_id)
+    try:
+        return PlotlineQuery(session, run_id, cache=True).list_subjects(
+            through_chapter_id=through_chapter_id, dimension=dimension, q=q, cursor=cursor, limit=limit
         )
     except (ValueError, LookupError) as error:
         raise query_error(error) from error
 
 
 @router.get("/{novel_id}/timeline/changes/{change_id}")
-async def get_timeline_change(
+def get_timeline_change(
     novel_id: str, change_id: str, through_chapter_id: int, session: SessionDep, run_id: RunDep
 ) -> dict[str, Any]:
     authorize(session, novel_id, run_id)
     try:
-        return PlotlineQuery(session, run_id).detail(change_id, through_chapter_id)
+        return PlotlineQuery(session, run_id, cache=True).detail(change_id, through_chapter_id)
     except (ValueError, LookupError) as error:
         raise query_error(error) from error
 
 
 @router.get("/{novel_id}/timeline/changes/{change_id}/source")
-async def get_timeline_source(
+def get_timeline_source(
     novel_id: str,
     change_id: str,
     through_chapter_id: int,
@@ -80,7 +130,7 @@ async def get_timeline_source(
 ) -> dict[str, Any]:
     authorize(session, novel_id, run_id)
     try:
-        detail = PlotlineQuery(session, run_id).detail(change_id, through_chapter_id)
+        detail = PlotlineQuery(session, run_id, cache=True).detail(change_id, through_chapter_id)
         return read_evidence_source(session, run_id, detail["evidence"], chapter_id)
     except (ValueError, LookupError) as error:
         raise query_error(error) from error

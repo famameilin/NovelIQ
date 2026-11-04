@@ -1,4 +1,4 @@
-"""叙事线与全书结果的工具输入和正式草稿共用文字长度约束"""
+"""全书结果的工具输入和正式草稿共用文字长度约束"""
 
 import json
 from unittest.mock import MagicMock
@@ -6,13 +6,12 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from src.agents.diagnosis.inputs import ArcItem, OutcomeItem
+from src.agents.diagnosis.inputs import OutcomeItem
 from src.agents.diagnosis.prompts import build_diagnosis_system_prompt
 from src.agents.diagnosis.tools import build_diagnosis_tools
-from src.event_trees.organization import (
-    EventOrganizationDraft,
+from src.event_trees.organization import EventOrganizationDraft
+from src.event_trees.organization_models import (
     EventOutcomeDraft,
-    NarrativeArcDraft,
     NarrativeDescription,
     NarrativeTitle,
     OrganizationEvidence,
@@ -38,38 +37,32 @@ def test_symbols_spaces_letters_and_numbers_count_as_characters(text_type, limit
         TypeAdapter(text_type).validate_python("甲" * limit + extra)
 
 
-@pytest.mark.parametrize("model,text_field", [(ArcItem, "objective"), (OutcomeItem, "description")])
-def test_tool_input_models_reject_over_limit_fields(model, text_field):
+def test_tool_input_models_reject_over_limit_fields():
     payload = {
-        "operation": "arc" if model is ArcItem else "outcome",
+        "operation": "outcome",
         "key": "result",
         "title": "甲" * 6,
-        text_field: "乙" * 20,
+        "description": "乙" * 20,
         "evidence": [{"paragraph_id": 0}],
     }
-    if model is ArcItem:
-        payload.update(kind="main", role="主线", reason="原文依据")
-    assert model.model_validate(payload).title == payload["title"]
-    for field, limit in (("title", 6), (text_field, 20)):
+    assert OutcomeItem.model_validate(payload).title == payload["title"]
+    for field, limit in (("title", 6), ("description", 20)):
         with pytest.raises(ValidationError, match=f"最多{limit}字.*重写"):
-            model.model_validate({**payload, field: "甲" * (limit + 1)})
+            OutcomeItem.model_validate({**payload, field: "甲" * (limit + 1)})
 
 
-@pytest.mark.parametrize("model,text_field", [(NarrativeArcDraft, "objective"), (EventOutcomeDraft, "description")])
-def test_formal_draft_models_reject_over_limit_fields(model, text_field):
+def test_formal_draft_models_reject_over_limit_fields():
     payload = {
+        "outcome_id": "outcome",
+        "first_text_position": 0,
         "title": "甲" * 6,
-        text_field: "乙" * 20,
+        "description": "乙" * 20,
         "evidence": [{"paragraph_id": 0, "chapter_id": 1, "char_start": 0, "char_end": 1, "text_hash": "hash"}],
     }
-    if model is NarrativeArcDraft:
-        payload.update(arc_id="arc", kind="main", role="主线", reason="原文依据")
-    else:
-        payload.update(outcome_id="outcome", first_text_position=0)
-    assert model.model_validate(payload).title == payload["title"]
-    for field, limit in (("title", 6), (text_field, 20)):
+    assert EventOutcomeDraft.model_validate(payload).title == payload["title"]
+    for field, limit in (("title", 6), ("description", 20)):
         with pytest.raises(ValidationError, match=f"最多{limit}字.*重写"):
-            model.model_validate({**payload, field: "甲" * (limit + 1)})
+            EventOutcomeDraft.model_validate({**payload, field: "甲" * (limit + 1)})
 
 
 def test_real_tool_schema_and_prompt_expose_semantic_limits():
@@ -79,20 +72,16 @@ def test_real_tool_schema_and_prompt_expose_semantic_limits():
             storage_for(MagicMock()), fixture_id(__name__, "run"), role="report", case_pool=MagicMock()
         )
     }
-    for tool_name, model_name, text_field in (
-        ("write_arc", "ArcItem", "objective"),
-        ("write_outcome", "OutcomeItem", "description"),
-    ):
-        schema = tools[tool_name].args_schema.model_json_schema()
-        properties = schema["$defs"][model_name]["properties"]
-        assert "最多6字" in properties["title"]["description"]
-        assert "最多20字" in properties[text_field]["description"]
-        for field in ("title", text_field):
-            assert "不计算Unicode标点" in properties[field]["description"]
-            assert "maxLength" not in properties[field]
-        assert "超限精简后重写" in tools[tool_name].description
+    schema = tools["write_outcome"].args_schema.model_json_schema()
+    properties = schema["$defs"]["OutcomeItem"]["properties"]
+    assert "最多6字" in properties["title"]["description"]
+    assert "最多20字" in properties["description"]["description"]
+    for field in ("title", "description"):
+        assert "不计算Unicode标点" in properties[field]["description"]
+        assert "maxLength" not in properties[field]
+    assert "超限精简后重写" in tools["write_outcome"].description
     prompt = build_diagnosis_system_prompt(role="report")
-    assert "标题最多6字，目标或说明最多20字，不计算Unicode标点" in prompt
+    assert "标题最多6字，说明最多20字，不计算Unicode标点" in prompt
 
 
 @pytest.fixture
@@ -105,17 +94,11 @@ def text_limit_draft(db_session):
     return draft
 
 
-@pytest.mark.parametrize("kind", ["arc", "outcome"])
-def test_rejected_registration_and_tool_call_preserve_valid_draft(text_limit_draft, kind):
+def test_rejected_registration_and_tool_call_preserve_valid_draft(text_limit_draft):
     draft = text_limit_draft
-    text_field = "objective" if kind == "arc" else "description"
-    payload = {"key": "stable", "title": "身份确认", text_field: "找回身份，化解危机。"}
-    if kind == "arc":
-        payload.update(kind="main", role="主线", reason="原文依据")
-    register = draft.register_arc if kind == "arc" else draft.register_outcome
-    register(**payload, evidence=[OrganizationEvidence(paragraph_id=0)])
-    records = draft.arcs if kind == "arc" else draft.outcomes
-    before = {key: value.model_dump() for key, value in records.items()}
+    payload = {"key": "stable", "title": "身份确认", "description": "找回身份，化解危机。"}
+    draft.register_outcome(**payload, evidence=[OrganizationEvidence(paragraph_id=0)])
+    before = {key: value.model_dump() for key, value in draft.outcomes.items()}
     tools = {
         item.name: item
         for item in build_diagnosis_tools(
@@ -126,17 +109,18 @@ def test_rejected_registration_and_tool_call_preserve_valid_draft(text_limit_dra
             case_pool=MagicMock(),
         )
     }
-    for field, limit in (("title", 6), (text_field, 20)):
+    for field, limit in (("title", 6), ("description", 20)):
         invalid = {**payload, field: "甲" * (limit + 1)}
         with pytest.raises(ValidationError, match="重写"):
-            register(**invalid, evidence=[OrganizationEvidence(paragraph_id=0)])
+            draft.register_outcome(**invalid, evidence=[OrganizationEvidence(paragraph_id=0)])
         with pytest.raises(ValidationError, match="重写"):
-            tools[f"write_{kind}"].invoke(
-                {"items": [{**invalid, "operation": kind, "evidence": [{"paragraph_id": 0}]}]}
+            tools["write_outcome"].invoke(
+                {"items": [{**invalid, "operation": "outcome", "evidence": [{"paragraph_id": 0}]}]}
             )
-        current = draft.arcs if kind == "arc" else draft.outcomes
-        assert {key: value.model_dump() for key, value in current.items()} == before
+        assert {key: value.model_dump() for key, value in draft.outcomes.items()} == before
     accepted = json.loads(
-        tools[f"write_{kind}"].invoke({"items": [{**payload, "operation": kind, "evidence": [{"paragraph_id": 0}]}]})
+        tools["write_outcome"].invoke(
+            {"items": [{**payload, "operation": "outcome", "evidence": [{"paragraph_id": 0}]}]}
+        )
     )
     assert accepted["status"] == "written"

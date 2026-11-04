@@ -3,13 +3,13 @@
 覆盖 agent_program 的模型可见面与 "写入生效"口径：
 
 - 三个 agent 的模型可见面逐字相同（绑定面只有 execute_code + finish），程序目录 =
-  search_text + push_case + finish + 八类构造器，五个 write_* 既不在可见面也不在命名空间；
-- 八类构造器写入生效：构造器是纯校验器，运行时把那一笔经生产单条事务边界
+  search_text + push_case + finish + 构造器，五个 write_* 既不在可见面也不在命名空间；
+- 构造器写入生效：构造器是纯校验器，运行时把那一笔经生产单条事务边界
   （graph._execute_call）当场落库，**写入成功才**回 `{status:"written", record, ref}`
   并把记录放进 agent；共享章级账本（written_entities / entity_el_index /
-  tree_key_index / written_relations / written_dialogues / metrics_payload /
+  event_ids_by_el / written_relations / written_dialogues / metrics_payload /
   pushed_cases）当场可见；
-- el 按角色命名空间化（实体 entity:a1、事件 entity:t1 与 entity:t1/e2），
+- el 按角色命名空间化（实体 entity:a1、事件 entity:e1、entity:e2），
   三个 agent 的同名局部键不互相占用；同名实体由生产写入自己按名会合；
 - 失败（构造器校验或生产面拒绝）一律结构化回执 record/field/code/expected，且
   agent 的列表与共享账本都不变；
@@ -26,7 +26,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
 
 from src.agents.annotation.agent_ir import AgentAnnotation
 from src.agents.annotation.agent_program import agent_gap
@@ -35,11 +34,12 @@ from src.agents.annotation.errors import AnnotationDependencyError, AnnotationIn
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.text_search import TextSearchService
 from src.agents.annotation.tool_batch import _execute_call
+from src.agents.messages import AssistantMessage
 from src.agents.turn_observer import AgentTurnObserver
 from src.embedding import EmbeddingConnectionError, EmbeddingServiceError, EmbeddingTimeoutError
 from src.fact_graph.graph import FactGraph, entity_key
 from src.fact_graph.inputs import ChapterParagraphInfo
-from tests.support.annotation_work_tools import build_annotation_tools
+from tests.support.annotation_work_tools import build_program_annotation_tools as build_annotation_tools
 from tests.support.storage_fixtures import fixture_id, storage_for
 
 # 三段正文：¶1/¶2/¶3 各有一个引号对话候选，整章共 3 条候选（对话判定候选号 1..3）；
@@ -66,7 +66,7 @@ _CHARACTER_ITEM = {
     "emotion": -1,
 }
 
-# 八类构造器全部走一遍：每条都能当场落库（a3 是 organization，"敌对" 允许 character→organization）
+# 构造器全部走一遍：每条都能当场落库（a3 是 organization，"敌对" 允许 character→organization）
 _WRITE_EVERYTHING = (
     "entity(id='a1', name='沈遥', entity_type='character', evidence=1)\n"
     "entity(id='a2', name='长刀', entity_type='item', evidence=2)\n"
@@ -75,13 +75,12 @@ _WRITE_EVERYTHING = (
     "relation(from_entity={'name': '沈遥', 'entity_type': 'character'}, "
     "to_entity={'name': '剑宗', 'entity_type': 'organization'}, relation"
     "_type='敌对', evidence=2)\n"
-    "event(el='t1', evidence=1, title='沈遥喝止', problem='明确事件问题', summar"
-    "y='沈遥喝止', event_type='行动', status='ongoing')\n"
-    "event(el='t1/e2', evidence=2, title='转身', problem='明确事件问题', summa"
-    "ry='转身', event_type='行动', status='ongoing')\n"
-    "participants(el='t1', items=[{'name': '沈遥', 'entity_type': 'chara"
-    "cter', 'role': '主体', 'narrative_role': '主体', 'action': '喝止', 'emo"
-    "tion': -1}])\n"
+    "write_event(items=[dict(el='e1', evidence=1, title='沈遥喝止', problem='明确事件问题', "
+    "summary='沈遥喝止', event_type='行动', status='ongoing', characters=[{'name': "
+    "'沈遥', 'entity_type': 'character', 'role': '主体', 'narrative_role': '主体', "
+    "'action': '喝止', 'emotion': -1}]), "
+    "dict(el='e2', evidence=2, title='转身', problem='明确事件问题', summa"
+    "ry='转身', event_type='行动', status='ongoing')])\n"
     "dialogue(candidate_index=1, verdict='dialogue', speaker={'name': "
     "'沈遥', 'entity_type': 'character'}, tone='愤怒', evidence=1)\n"
     "label(paragraph_id=1, emotion=-1)\n"
@@ -156,8 +155,22 @@ async def _run(runtime: AgentProgramRuntime, code: str) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure_type", [EmbeddingConnectionError, EmbeddingTimeoutError, EmbeddingServiceError,
-                                         RuntimeError, TypeError])
+@pytest.mark.parametrize("previous_request", [False, True])
+async def test_failed_program_does_not_promote_finish(previous_request: bool) -> None:
+    ledger = _ledger()
+    runtime = _runtime(ledger)
+    ledger.end_requested = previous_request
+    receipt = await _run(runtime, "finish()\nvalue = undefined")
+    assert receipt["status"] == "runtime_error"
+    assert ledger.end_requested is previous_request
+    assert "finish" not in receipt
+    assert runtime.ops[0]["tool_name"] == "finish" and runtime.ops[0]["status"] == "success"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_type", [EmbeddingConnectionError, EmbeddingTimeoutError, EmbeddingServiceError, RuntimeError, TypeError]
+)
 async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(failure_type) -> None:
     """真实程序与工具边界：失败检索和 execute_code 都留审计，后续写入和 finish 不执行"""
     client = SimpleNamespace(get_embedding=AsyncMock(side_effect=failure_type("嵌入服务不可用")))
@@ -175,10 +188,10 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
     tools = {tool.name: tool for tool in build_annotation_tools(FailingQuery(), ledger)}
     recorder = MagicMock()
     recorder.start_turn.return_value = 1
-    observer = AgentTurnObserver(recorder, invocation_id=fixture_id(__name__, "1"), context={})
+    observer = AgentTurnObserver(recorder, invocation_id=fixture_id(__name__, "1"), context={}, entry_id="entry-test")
     observer.begin_provider_turn(context_summary={}, request_messages=[], provider_request={}, started_ns=1)
     observer.complete_provider_turn(
-        response_message=AIMessage(content="", tool_calls=[{"name": "execute_code", "args": {}, "id": "code"}]),
+        response_message=AssistantMessage(content="", tool_calls=[{"name": "execute_code", "args": {}, "id": "code"}]),
         timing=SimpleNamespace(ttft_ms=0, first_visible_ms=0, reasoning_ms=0, model_ms=0, timing_notes=[]),
     )
     runtime = _runtime(ledger, tool_map=tools, observer=observer)
@@ -199,8 +212,9 @@ async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(
     assert [call["tool_name"] for call in calls] == ["search_text", "execute_code"]
     assert all(call["error"] for call in calls)
     assert calls[0]["request_args"]["_program"]["source_line"] == 1
-    assert calls[0]["receipt"]["code"] == ("internal_error" if failure_type in (RuntimeError, TypeError)
-                                            else "dependency_unavailable")
+    assert calls[0]["receipt"]["code"] == (
+        "internal_error" if failure_type in (RuntimeError, TypeError) else "dependency_unavailable"
+    )
     recorder.update_turn_timings.assert_called_once()
     assert not runtime.agent.entities and not ledger.chapter_finished
     assert client.get_embedding.await_count == (0 if failure_type in (RuntimeError, TypeError) else 1)
@@ -242,50 +256,48 @@ def test_runtime_rejects_missing_work_finish_validation() -> None:
 
 
 # ----------------------------------------------------------------------
-# 二、八类构造器：成功路径（写入生效，agent 与共享账本同一条事实）
+# 二、构造器：成功路径（写入生效，agent 与共享账本同一条事实）
 
 
 @pytest.mark.asyncio
 async def test_eight_constructors_write_records_into_the_agent_and_shared_ledger() -> None:
-    """八类构造器逐一成功：记录当场进 agent 与共享章级账本，回执/进度逐域可见"""
+    """构造器逐一成功：记录当场进 agent 与共享章级账本，回执/进度逐域可见"""
     ledger = _ledger()
-    agent = AgentAnnotation(role="entity")
+    agent = AgentAnnotation(role="annotation")
     runtime = _runtime(ledger, agent)
 
     receipt = await _run(runtime, _WRITE_EVERYTHING)
 
-    # 八类构造器共 11 条（实体 3 + 关系 1 + 事件 2 + 参与者 1 + 对话 1 + 标签 1 + 指标 1 + 待决 1）
+    # 共 9 次调用（实体 3 + 关系 1 + 事件树 1 + 对话 1 + 标签 1 + 指标 1 + 待决 1），事件树含 2 个节点且自带参与者
     assert receipt["status"] == "applied"
-    assert receipt["applied"] == 11
+    assert receipt["applied"] == 9
     assert "failed" not in receipt
-    assert (
-        receipt["progress"]
-        == agent.counts()
-        == {
-            "entities": 3,
-            "relations": 1,
-            "events": 2,
-            "dialogues": 1,
-            "labels": 1,
-            "metrics": 1,
-            "pending": 1,
-            "plotlines": 0,
-            "foreshadow_actions": 0,
-        }
-    )
+    assert agent.counts() == {
+        "entities": 3,
+        "relations": 1,
+        "events": 2,
+        "dialogues": 1,
+        "labels": 1,
+        "metrics": 1,
+        "pending": 1,
+        "plotlines": 0,
+        "foreshadow_actions": 0,
+    }
+    progress = receipt["progress"]
+    assert {name: progress[name] for name in agent.counts()} == agent.counts()
+    assert progress["metrics_missing"] == 0
 
-    # 逐 op 记录：构造器名 + 角色命名空间化的记录键，全部成功
+    # 逐 op 记录：构造器名 + 角色命名空间化的记录键；事件树 op 记队首 el，逐节点记录进账本
     records = [op["record"] for op in runtime.ops]
     assert all(op["status"] == "success" for op in runtime.ops)
-    assert records[0] == "entity/a1"
-    assert "entity/relation/沈遥-剑宗" in records
-    assert "entity/event/t1" in records
-    assert "entity/event/t1/e2" in records
-    assert "entity/participants/t1" in records
-    assert "entity/dialogue/1" in records
-    assert "entity/label/1" in records
-    assert "entity/metric" in records
-    assert "entity/pending" in records
+    assert records[0] == "annotation/entity/a1"
+    assert "annotation/relation/沈遥-剑宗" in records
+    assert "e1" in records
+    assert {"annotation:e1", "annotation:e2"} <= ledger.written_record_keys
+    assert "annotation/dialogue/1" in records
+    assert "annotation/label/1" in records
+    assert "annotation/metric" in records
+    assert "annotation/pending" in records
 
     # agent 的产出记录
     assert [item.id for item in agent.entities] == ["a1", "a2", "a3"]
@@ -293,23 +305,21 @@ async def test_eight_constructors_write_records_into_the_agent_and_shared_ledger
     assert len(agent.relations) == 1
     assert len(agent.events) == 2
     assert [event.evidence_paragraph_id for event in ledger.bound_payloads["events"]] == [1, 2]
-    assert agent.event_keys()["t1"].participants[0].name == "沈遥"
+    assert agent.event_keys()["e1"].participants[0].name == "沈遥"
     assert agent.dialogues[0].speaker.name == "沈遥"
     assert [item.paragraph_id for item in agent.labels] == [1]
     assert agent.metric is not None and agent.metric.summary == "冲突"
     assert agent.pending[0].description == "长刀来路不明"
 
-    # 共享章级账本：实体 el 索引、事件树键索引、关系、对话、指标都当场可见
+    # 共享章级账本：实体 el 索引、事件引用索引、关系、对话、指标都当场可见
     assert set(ledger.written_entities) == {
         entity_key("沈遥", "character"),
         entity_key("长刀", "item"),
         entity_key("剑宗", "organization"),
     }
-    assert ledger.entity_el_index["entity:a1"] == entity_key("沈遥", "character")
-    assert ledger.entity_el_index["entity:a2"] == entity_key("长刀", "item")
-    assert "entity:t1" in ledger.tree_key_index
-    tree = ledger.event_trees[ledger.tree_key_index["entity:t1"]]
-    assert set(tree["nodes"]) == {"root", "e2"}
+    assert ledger.entity_el_index["annotation:a1"] == entity_key("沈遥", "character")
+    assert ledger.entity_el_index["annotation:a2"] == entity_key("长刀", "item")
+    assert {"annotation:e1", "annotation:e2"} <= set(ledger.event_ids_by_el)
     relation = ledger.written_relations[(entity_key("沈遥", "character"), entity_key("剑宗", "organization"))]
     assert relation.relation_type == "敌对"
     assert ledger.written_dialogues[1].speaker == "沈遥"
@@ -322,7 +332,7 @@ async def test_eight_constructors_write_records_into_the_agent_and_shared_ledger
 
     # 构造器直接调用只产出计划对象（纯校验），不改任何已落账状态
     entity_plan = runtime.tools["entity"](id="a1", name="沈遥", entity_type="character", evidence=E_PERSON)
-    assert entity_plan.record == "entity/a1"
+    assert entity_plan.record == "annotation/entity/a1"
     assert entity_plan.ref == {"kind": "entity", "id": "a1", "name": "沈遥", "entity_type": "character"}
     relation_plan = runtime.tools["relation"](
         from_entity={"name": "沈遥", "entity_type": "character"},
@@ -341,30 +351,6 @@ async def test_eight_constructors_write_records_into_the_agent_and_shared_ledger
         "to_entity": {"name": "剑宗", "entity_type": "organization"},
         "relation_type": "敌对",
     }
-    root_plan = runtime.tools["event"](
-        el="t1",
-        title="沈遥喝止",
-        problem="明确事件问题",
-        summary="沈遥喝止",
-        event_type="行动",
-        status="ongoing",
-        evidence=E_SHOUT,
-    )
-    assert root_plan.ref == {"kind": "event", "el": "t1"}
-    assert root_plan.args["evidence"] == E_SHOUT
-    child_plan = runtime.tools["event"](
-        el="t1/e2",
-        title="转身",
-        problem="明确事件问题",
-        summary="转身",
-        event_type="行动",
-        status="ongoing",
-        evidence=E_KNIFE,
-    )
-    assert child_plan.ref == {"kind": "event", "el": "t1/e2"}
-    assert child_plan.args["evidence"] == E_KNIFE
-    participants_plan = runtime.tools["participants"](el="t1", items=[_CHARACTER_ITEM])
-    assert participants_plan.ref == {"kind": "participants", "el": "t1", "count": 1}
     dialogue_plan = runtime.tools["dialogue"](
         candidate_index=1,
         verdict="dialogue",
@@ -380,7 +366,7 @@ async def test_eight_constructors_write_records_into_the_agent_and_shared_ledger
     pending_plan = runtime.tools["pending"](case_type="character", description="长刀来路不明")
     assert pending_plan.ref == {"kind": "pending"}
     # 直接调用没有落账：计数与计划调用前一致
-    assert agent.counts() == receipt["progress"]
+    assert {name: receipt["progress"][name] for name in agent.counts()} == agent.counts()
 
 
 @pytest.mark.asyncio
@@ -430,7 +416,7 @@ async def test_every_call_returns_one_of_the_three_receipt_shapes() -> None:
 
 
 # ----------------------------------------------------------------------
-# 三、八类构造器：拒绝路径（结构化拒绝且 agent 与共享账本都不变）
+# 三、构造器：拒绝路径（结构化拒绝且 agent 与共享账本都不变）
 
 
 @pytest.mark.asyncio
@@ -513,75 +499,64 @@ async def test_event_business_fields_are_rejected_without_writing(field: str, va
     }
     kwargs[field] = value
     args = ", ".join(f"{key}={item!r}" for key, item in kwargs.items())
-    entry = await _runtime_rejection(runtime, f"event({args})")
+    entry = await _runtime_rejection(runtime, f"write_event(items=[dict({args})])")
     assert entry["field"] == field
     assert not agent.events
     assert not ledger.bound_payloads.get("events")
 
 
 @pytest.mark.asyncio
-async def test_event_accepts_foreshadowing_property_on_child() -> None:
-    """任意有原文依据的实际过程可以埋设，根和子过程都保持准确身份"""
+async def test_event_accepts_foreshadowing_property() -> None:
+    """任意有原文依据的实际过程可以埋设，事件身份保持独立"""
     ledger = _ledger()
     agent = AgentAnnotation(role="event")
     runtime = _runtime(ledger, agent)
     receipt = await _run(
         runtime,
         (
-            "event(el='t1', evidence=2, title='转身', problem='明确事件问题', summary="
-            "'转身', event_type='行动', status='ongoing')\n"
-            "event(el='t1/e2', isforeshadowing=True, confidence='high', eviden"
+            "write_event(items=[dict(el='e1', evidence=2, title='转身', problem='明确事件问题', summary="
+            "'转身', event_type='行动', status='ongoing'), "
+            "dict(el='e2', isforeshadowing=True, confidence='high', eviden"
             "ce=2, title='发现线索', problem='明确事件问题', summary='发现线索', event_type="
-            "'行动', status='ongoing')"
+            "'行动', status='ongoing')])"
         ),
     )
     assert receipt.get("failed", []) == []
-    child = next(value for value in ledger.bound_payloads["events"] if value.is_foreshadow_setup)
-    assert child.cause_role == "root"
-    assert child.parent_node_id is None
-    assert child.payoff_likelihood == "high"
+    foreshadowing = next(value for value in ledger.bound_payloads["events"] if value.is_foreshadow_setup)
+    assert foreshadowing.cause_role == "root"
+    assert foreshadowing.parent_node_id is None
+    assert foreshadowing.payoff_likelihood == "high"
 
 
 @pytest.mark.asyncio
-async def test_participants_rejects_unknown_event_and_lands_partial_three_state() -> None:
-    """participants 引用不存在的事件 el 拒绝；三态只给一半照常落账
-
-    未登记实体引用一律拒绝（引用面不放开）；叙事功能近义词归一、emotion 钳制
-    在构造层完成，生产面按实体登记大类给 role 缺省。
-    """
+async def test_event_characters_normalize_and_reject_entity_id_shape() -> None:
+    """事件创建时写参与者：叙事功能近义词归一、emotion 钳制，参与者键只收名字与大类"""
     ledger = _ledger()
     agent = AgentAnnotation(role="event")
     runtime = _runtime(ledger, agent)
-    unknown = await _runtime_rejection(
-        runtime, 'participants(el="t9", items=[{"name": "沈遥", "entity_type": "character", "role": "主体"}])'
-    )
-    assert unknown["code"] == "unknown_reference"
-    assert unknown["field"] == "el"
     await _run(
         runtime,
         (
-            "event(el='t1', evidence=1, title='喝止', problem='明确事件问题', summary="
-            "'喝止', event_type='行动', status='ongoing')\n"
-            "entity(id='a1', name='沈遥', entity_type='character', evidence=1)"
-        ),
-    )
-    await _run(
-        runtime,
-        (
-            'participants(el="t1", items=[{"name": "沈遥", "entity_type": "chara'
-            'cter", "role": "主体", "narrative_role": "主角", "emotion": 9}])'
+            "write_event(items=[dict(el='t1', evidence=1, title='喝止', problem='明确事件问题', summary="
+            "'喝止', event_type='行动', status='ongoing', characters=[{'name': '沈遥', "
+            "'entity_type': 'character', 'role': '主体', 'narrative_role': '主角', 'action': '喝止', "
+            "'emotion': 9}])])"
         ),
     )
     (participant,) = agent.event_keys()["t1"].participants
     assert participant.role == "主体"
     assert participant.narrative_role == "主体"
     assert participant.emotion == 2
-    assert participant.action is None
+    assert participant.action == "喝止"
     unregistered = await _runtime_rejection(
-        runtime, 'participants(el="t1", items=[{"entity_id": "a9", "role": "主体"}])'
+        runtime,
+        (
+            "write_event(items=[dict(el='t2', evidence=1, title='喝止', problem='明确事件问题', summary="
+            "'喝止', event_type='行动', status='ongoing', characters=[{'entity_id': 'a9', 'role': '主体'}])])"
+        ),
     )
-    assert unregistered["code"] == "invalid_value"
-    assert unregistered["field"] == "participants[0]"
+    assert unregistered["code"] == "missing"
+    assert unregistered["field"] == "name"
 
 
 @pytest.mark.asyncio
@@ -591,12 +566,11 @@ async def test_dialogue_rejections_do_not_write() -> None:
     agent = AgentAnnotation(role="metric")
     runtime = _runtime(ledger, agent)
     out_of_range = await _run(runtime, 'dialogue(candidate_index=9, verdict="dialogue", evidence=1)')
-    assert out_of_range["status"] == "rejected"
+    assert out_of_range["status"] == "partial"
     assert out_of_range["applied"] == 0
-    assert out_of_range["error"]["type"] == "candidate_index_out_of_range"
-    assert "total=3" in out_of_range["error"]["message"]
-    assert "dialogue/9(candidate_index=9)" in out_of_range["error"]["message"]
-    assert runtime.ops == []
+    assert out_of_range["failed"][0]["code"] == "out_of_range"
+    assert out_of_range["failed"][0]["field"] == "candidate_index"
+    assert len(runtime.ops) == 1
     not_dialogue = await _runtime_rejection(
         runtime,
         'dialogue(candidate_index=1, verdict="not_dialogue", speaker={"name": "沈遥", "entity_type": "character"})',
@@ -651,40 +625,34 @@ async def test_metric_rejects_out_of_range_narrative_function() -> None:
 
 
 @pytest.mark.asyncio
-async def test_event_orphan_defers_until_root_arrives() -> None:
-    """子事件先于树根构造：树键在生产面校验，挂起而非拒绝
-
-    子事件写入即时生效（回执 written、构造器记入 plan），等根建好后按到达顺序
-    冲账进正式事件树；根始终不建时由 finish 拒绝收尾，不静默丢数据。
-    """
+async def test_events_written_in_separate_calls_do_not_require_root() -> None:
+    """每次写入直接以引用 id 生效，分开提交的事件各自成队列，不需要额外根"""
     ledger = _ledger()
     agent = AgentAnnotation(role="event")
     runtime = _runtime(ledger, agent)
     await _run(
         runtime,
         (
-            "event(el='t1/e2', evidence=2, title='转身', problem="  # 同一程序文本
+            "write_event(items=[dict(el='e2', evidence=2, title='转身', problem="  # 同一程序文本
             "'明确事件问题', summary='转身', event_type='行动', status='o"  # 同一程序文本
-            "ngoing')"  # 同一程序文本
+            "ngoing')])"  # 同一程序文本
         ),
     )
 
-    assert "t1/e2" in agent.event_keys()
-    # 构造器 el 经角色命名空间化后才进生产面：挂起键是 event:t1
-    assert ledger.pending_child_events == {}
+    assert "e2" in agent.event_keys()
     assert ledger.bound_payloads["events"][0].parent_node_id is None
+    assert "event:e2" in ledger.event_ids_by_el
 
     await _run(
         runtime,
         (
-            "event(el='t1', evidence=1, title='喝止', problem='明确"  # 同一程序文本
+            "write_event(items=[dict(el='e1', evidence=1, title='喝止', problem='明确"  # 同一程序文本
             "事件问题', summary='喝止', event_type='行动', status='ongo"  # 同一程序文本
-            "ing')"  # 同一程序文本
+            "ing')])"  # 同一程序文本
         ),
     )
-    tree = ledger.event_trees[ledger.tree_key_index["event:t1"]]
-    assert sorted(tree["nodes"]) == ["e2", "root"]
-    assert ledger.pending_child_events == {}
+    assert {"event:e1", "event:e2"} <= set(ledger.event_ids_by_el)
+    assert len(ledger.events.queues) == 2
 
 
 @pytest.mark.asyncio
@@ -709,7 +677,7 @@ async def test_entity_duplicate_el_is_rejected_by_production_without_trace() -> 
 async def test_dialogue_non_character_speaker_is_rejected_by_production() -> None:
     """说话人非 character：构造器放行、生产面以 not_character 拒绝，对话账本不动"""
     ledger = _ledger()
-    agent = AgentAnnotation(role="metric")
+    agent = AgentAnnotation(role="annotation")
     runtime = _runtime(ledger, agent)
     entry = await _runtime_rejection(
         runtime,
@@ -725,20 +693,19 @@ async def test_dialogue_non_character_speaker_is_rejected_by_production() -> Non
 
 
 @pytest.mark.asyncio
-async def test_participants_non_character_observation_is_ignored_by_production() -> None:
+async def test_event_characters_non_character_observation_is_ignored_by_production() -> None:
     """非 character 参与者带三态：生产面忽略三态、保留 entityid/role，不产人物动态状态"""
     ledger = _ledger()
-    agent = AgentAnnotation(role="event")
+    agent = AgentAnnotation(role="annotation")
     runtime = _runtime(ledger, agent)
     await _run(
         runtime,
         (
             "entity(id='a2', name='长刀', entity_type='item', evidence=2)\n"
-            "event(el='t1', evidence=1, title='喝止', problem='明确事件问题', summary="
-            "'喝止', event_type='行动', status='ongoing')\n"
-            "participants(el='t1', items=[{'name': '长刀', 'entity_type': 'item'"
-            ", 'role': '客体', 'narrative_role': '客体', 'action': '被喝', 'emotion'"
-            ": -1}])"
+            "write_event(items=[dict(el='t1', evidence=1, title='喝止', problem='明确事件问题', summary="
+            "'喝止', event_type='行动', status='ongoing', characters=[{'name': '长刀', "
+            "'entity_type': 'item', 'role': '客体', 'narrative_role': '客体', 'action': '被喝', "
+            "'emotion': -1}])])"
         ),
     )
     (ir_participant,) = agent.event_keys()["t1"].participants
@@ -748,44 +715,6 @@ async def test_participants_non_character_observation_is_ignored_by_production()
     assert (ledger.graph.display_name(participant.entity), participant.role) == ("长刀", "客体")
     assert (participant.narrative_role, participant.action, participant.emotion) == (None, None, None)
     assert ledger.observation_by_record == {}
-
-
-# ----------------------------------------------------------------------
-# 五、同 id 不互相占用：三个 agent 各用局部键，落库按角色命名空间化
-
-
-@pytest.mark.asyncio
-async def test_same_local_id_across_agents_does_not_collide() -> None:
-    """entity 与 event 各自的 a1 是两条实体：落库 el 不同名，互不占用"""
-    ledger = _ledger()
-    entity_lane = AgentAnnotation(role="entity")
-    event = AgentAnnotation(role="event")
-    entity_runtime = _runtime(ledger, entity_lane)
-    event_runtime = _runtime(ledger, event)
-    await _run(entity_runtime, 'entity(id="a1", name="沈遥", entity_type="character", evidence=1)')
-    await _run(event_runtime, 'entity(id="a1", name="长刀", entity_type="item", evidence=2)')
-    assert set(ledger.written_entities) == {entity_key("沈遥", "character"), entity_key("长刀", "item")}
-    assert ledger.entity_el_index == {
-        "entity:a1": entity_key("沈遥", "character"),
-        "event:a1": entity_key("长刀", "item"),
-    }
-
-
-@pytest.mark.asyncio
-async def test_same_name_across_agents_merges_into_one_entity() -> None:
-    """entity 与 event 各自的 a1 同名：生产面按名会合，账本里只有一条实体"""
-    ledger = _ledger()
-    entity_lane = AgentAnnotation(role="entity")
-    event = AgentAnnotation(role="event")
-    entity_runtime = _runtime(ledger, entity_lane)
-    event_runtime = _runtime(ledger, event)
-    await _run(entity_runtime, 'entity(id="a1", name="沈遥", entity_type="character", evidence=1)')
-    await _run(event_runtime, 'entity(id="a1", name="沈遥", entity_type="character", evidence=1)')
-    assert set(ledger.written_entities) == {entity_key("沈遥", "character")}
-    assert ledger.entity_el_index == {
-        "entity:a1": entity_key("沈遥", "character"),
-        "event:a1": entity_key("沈遥", "character"),
-    }
 
 
 # ----------------------------------------------------------------------
@@ -835,30 +764,186 @@ async def test_entity_same_id_rewrite_is_update_not_new_entry() -> None:
 
 
 @pytest.mark.asyncio
-async def test_event_same_el_rewrite_keeps_participants() -> None:
-    """事件同 el 重写保留已挂的参与者（只更新描述与伏笔属性）"""
+async def test_event_same_el_resubmission_is_idempotent_and_queue_appends() -> None:
+    """同一 el 原样重交不新增事件；同一次提交带上已有成员可把新事件接到该队列，新 id 另起一棵树"""
     ledger = _ledger()
     agent = AgentAnnotation(role="event")
     runtime = _runtime(ledger, agent)
-    await _run(
-        runtime,
-        (
-            "event(el='t1', evidence=1, title='喝止', problem='明确事件问题', summary="
-            "'喝止', event_type='行动', status='ongoing')\n"
-            "entity(id='a1', name='沈遥', entity_type='character', evidence=1)\n"
-            "participants(el='t1', items=[{'name': '沈遥', 'entity_type': 'chara"
-            "cter', 'role': '主体', 'narrative_role': '主体', 'action': '喝止', 'emo"
-            "tion': -1}])\n"
-            "event(el='t1', evidence=1, title='改述', problem='明确事件问题', summary="
-            "'改述', event_type='行动', status='ongoing')"
-        ),
+    tree_code = (
+        "write_event(items=[dict(el='e1', evidence=1, title='喝止', problem='明确事件问题', summary="
+        "'喝止', event_type='行动', status='ongoing', characters=[{'name': '沈遥', "
+        "'entity_type': 'character', 'role': '主体', 'narrative_role': '主体', "
+        "'action': '喝止', 'emotion': -1}])])"
     )
+    await _run(runtime, tree_code)
+    (queue_key,) = ledger.events.queues
+    repeated = await _run(runtime, tree_code)
+    assert repeated.get("failed", []) == []
     assert len(agent.events) == 1
-    assert agent.events[0].description == "喝止"
+    assert len(ledger.events.queues[queue_key]["event_ids"]) == 1
+
+    appended = await _run(
+        runtime,
+        "write_event(items=[dict(el='e1', evidence=1, title='喝止', problem='明确事件问题', summary="
+        "'喝止', event_type='行动', status='ongoing', characters=[{'name': '沈遥', "
+        "'entity_type': 'character', 'role': '主体', 'narrative_role': '主体', "
+        "'action': '喝止', 'emotion': -1}]), "
+        "dict(el='e2', evidence=2, title='转身', problem='明确事件问题', "
+        "summary='转身', event_type='行动', status='ongoing')])",
+    )
+    assert appended.get("failed", []) == []
+    assert sorted(item.el for item in agent.events) == ["e1", "e2"]
+    assert len(ledger.events.queues) == 1
+    assert len(ledger.events.queues[queue_key]["event_ids"]) == 2
+
+    separate = await _run(
+        runtime,
+        "write_event(items=[dict(el='e3', evidence=3, title='远走', problem='明确事件问题', summary="
+        "'远走', event_type='行动', status='ongoing')])",
+    )
+    assert separate.get("failed", []) == []
+    assert len(ledger.events.queues) == 2
+    assert "event:e1" in ledger.event_ids_by_el
+    assert "event:e3" in ledger.event_ids_by_el
+
+
+@pytest.mark.asyncio
+async def test_appending_member_to_empty_tree_keeps_reason_and_evidence() -> None:
+    ledger = _ledger()
+    agent = AgentAnnotation(role="event")
+    runtime = _runtime(ledger, agent)
+    created = await _run(runtime, "write_event(items=[], tree_key='saga', title='主线', description='主线总纲')")
+    assert created.get("failed", []) == []
+    (queue_key,) = ledger.events.queues
+    appended = await _run(
+        runtime,
+        f"write_event(tree_id={queue_key!r}, items=[dict(el='e1', evidence=1, title='喝止', "
+        "problem='明确事件问题', summary='喝止', event_type='行动', status='ongoing', "
+        "reason='以原文锚点为总纲')])",
+    )
+    assert appended.get("failed", []) == []
+    assert ledger.events.queues[queue_key]["reason"] == "以原文锚点为总纲"
+    assert ledger.events.queues[queue_key]["evidence"]
+
+
+@pytest.mark.asyncio
+async def test_batch_event_characters_land_on_registered_event() -> None:
+    """批量 write_event 的项内 characters 与事件同批落库并注册到构造表"""
+    ledger = _ledger()
+    agent = AgentAnnotation(role="event")
+    runtime = _runtime(ledger, agent)
+    receipt = await _run(
+        runtime,
+        "write_event(items=[dict(el='e1', title='喝止', problem='明确事件问题', "
+        "summary='喝止', event_type='行动', status='ongoing', evidence=1, "
+        "characters=[{'name': '沈遥', 'entity_type': 'character', 'role': '主体', "
+        "'narrative_role': '主体', 'action': '喝止', 'emotion': -1}])])",
+    )
+    assert receipt.get("failed", []) == []
+    assert [item.el for item in agent.events] == ["e1"]
     assert len(agent.events[0].participants) == 1
-    tree = ledger.event_trees[ledger.tree_key_index["event:t1"]]
-    assert set(tree["nodes"]) == {"root"}  # 重写没新建节点
-    assert len(ledger.observation_by_record) == 1  # 生产面的参与者动态状态原样保留
+    assert len(ledger.bound_payloads["events"]) == 1
+    assert set(ledger.event_ids_by_el) == {"event:e1"}
+
+
+@pytest.mark.asyncio
+async def test_batch_event_resubmission_is_idempotent_and_appends_extends_queue() -> None:
+    """多成员树重交不新增事件；带上已有成员可延长原队列，新 id 另起第二棵与第二条队列"""
+    ledger = _ledger()
+    agent = AgentAnnotation(role="annotation")
+    runtime = _runtime(ledger, agent)
+    code = (
+        "write_event(items=[dict(el='e1', title='喝止', problem='明确事件问题', "
+        "summary='喝止', event_type='行动', status='ongoing', evidence=1), "
+        "dict(el='e2', title='转身', problem='明确事件问题', summary='转身', "
+        "event_type='行动', status='ongoing', evidence=2)])"
+    )
+    first = await _run(runtime, code)
+    assert first.get("failed", []) == []
+    (queue_key,) = ledger.events.queues
+    members = list(ledger.events.queues[queue_key]["event_ids"])
+    assert len(members) == 2
+    again = await _run(runtime, code)
+    assert again.get("failed", []) == []
+    assert list(ledger.events.queues[queue_key]["event_ids"]) == members
+    assert len(agent.events) == 2
+
+    extended = await _run(
+        runtime,
+        "write_event(items=[dict(el='e1', title='喝止', problem='明确事件问题', "
+        "summary='喝止', event_type='行动', status='ongoing', evidence=1), "
+        "dict(el='e2', title='转身', problem='明确事件问题', summary='转身', "
+        "event_type='行动', status='ongoing', evidence=2), "
+        "dict(el='e3', title='追击', problem='明确事件问题', "
+        "summary='追击', event_type='行动', status='ongoing', evidence=3)])",
+    )
+    assert extended.get("failed", []) == []
+    assert len(ledger.events.queues) == 1
+    assert len(ledger.events.queues[queue_key]["event_ids"]) == 3
+    assert len(agent.events) == 3
+
+    separate = await _run(
+        runtime,
+        "write_event(items=[dict(el='e4', title='回望', problem='明确事件问题', "
+        "summary='回望', event_type='行动', status='ongoing', evidence=1), "
+        "dict(el='e5', title='远走', problem='明确事件问题', summary='远走', "
+        "event_type='行动', status='ongoing', evidence=2)])",
+    )
+    assert separate.get("failed", []) == []
+    assert len(ledger.events.queues) == 2
+    assert len(agent.events) == 5
+
+
+@pytest.mark.asyncio
+async def test_batch_event_registers_reference_id() -> None:
+    """批量写直接以引用 id 登记事件，参与者落在同一事件"""
+    ledger = _ledger()
+    agent = AgentAnnotation(role="event")
+    runtime = _runtime(ledger, agent)
+    receipt = await _run(
+        runtime,
+        "write_event(items=[dict(el='e1', title='喝止', problem='明确事件问题', "
+        "summary='喝止', event_type='行动', status='ongoing', evidence=1, "
+        "characters=[{'name': '沈遥', 'entity_type': 'character', 'role': '主体', "
+        "'narrative_role': '主体', 'action': '喝止', 'emotion': -1}])])",
+    )
+    assert receipt.get("failed", []) == []
+    assert [item.el for item in agent.events] == ["e1"]
+    assert len(agent.events[0].participants) == 1
+    assert len(ledger.bound_payloads["events"]) == 1
+    assert set(ledger.event_ids_by_el) == {"event:e1"}
+
+
+@pytest.mark.asyncio
+async def test_retract_accepts_local_el_and_lists_retractable_drafts() -> None:
+    """撤回队列可用局部 el；标识不可达时列出本执行可撤回的草稿"""
+    ledger = _ledger()
+    agent = AgentAnnotation(role="event")
+    runtime = _runtime(ledger, agent)
+    receipt = await _run(
+        runtime,
+        "write_event(items=[dict(el='t1', title='喝止', problem='明确事件问题', "
+        "summary='喝止', event_type='行动', status='ongoing', evidence=1)])",
+    )
+    assert receipt["applied"] == 1
+    assert len(ledger.events.queues) == 1
+    assert ledger.event_ids_by_el["event:t1"]
+    withdrawn = await _run(runtime, "retract_structure(kind='queue', identifier='t1', reason='误建', evidence=1)")
+    assert withdrawn["applied"] == 1
+    assert not ledger.events.queues
+    assert not ledger.bound_payloads.get("events")
+    assert not ledger.event_ids_by_el
+    assert agent.events == []
+    rebuilt = await _run(
+        runtime,
+        "write_event(items=[dict(el='t1', title='喝止', problem='明确事件问题', "
+        "summary='喝止', event_type='行动', status='ongoing', evidence=1)])",
+    )
+    assert rebuilt.get("failed", []) == []
+    assert [item.el for item in agent.events] == ["t1"]
+    missing = await _run(runtime, "retract_structure(kind='queue', identifier='t9', reason='误建', evidence=1)")
+    assert missing["status"] == "partial"
+    assert "可撤回的事件树" in missing["failed"][0]["message"]
 
 
 @pytest.mark.asyncio
@@ -950,3 +1035,20 @@ async def test_agent_gap_metric_agent_is_incomplete_without_finish_declaration(r
     assert gap["finished"] is False
     assert gap["missing_candidates"] == []
     assert gap["missing_metric"] is False
+
+
+@pytest.mark.asyncio
+async def test_write_tool_argument_error_names_field_in_chinese() -> None:
+    """参数校验失败回字段级中文说明，不回 pydantic 英文信封"""
+    ledger = _ledger()
+    runtime = _runtime(ledger)
+    receipt = _failed_entry(
+        await _run(
+            runtime,
+            "write_event(items=[dict(el='t1', evidence=1, title='点灯', problem='能否照明', "
+            "summary='点灯', event_type='行动', status='ongoing', participants=[])])",
+        )
+    )
+    assert "participants" in receipt["message"]
+    assert "validation error" not in receipt["message"].lower()
+    assert ledger.written_record_keys == set()

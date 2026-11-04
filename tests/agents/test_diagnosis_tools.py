@@ -1,17 +1,27 @@
 """诊断角色裁面（案例面/报告面）与共享工具的生产契约"""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from src.agents.diagnosis.case_write_tools import CASE_WRITE_TOOL_NAMES
+from src.agents.diagnosis.domain import DiagnosisDomain
 from src.agents.diagnosis.tools import build_diagnosis_tools
+from src.event_trees.organization_models import (
+    EventOutcomeDraft,
+    NarrativeOrganization,
+    OrganizationEvidence,
+)
 from tests.agents.test_complete_event_invariants import draft_case as draft_case
 from tests.support.storage_fixtures import fixture_id, storage_for
 
 
 def _build_tools(ledger=None, role="case", **kwargs):
+    if role == "report":
+        kwargs.setdefault("report_draft", {"topic_ids": set()})
     return {
         item.name: item
         for item in build_diagnosis_tools(
@@ -37,9 +47,10 @@ def test_role_faces_expose_only_their_writes():
 
     case_tools = _build_tools()
     assert {"write_event", "push_case"} <= set(case_tools)
-    assert {"write_arc", "write_outcome", "write_diagnosis", "read_metrics", "read_topics"}.isdisjoint(case_tools)
+    assert {"write_outcome", "write_diagnosis", "read_metrics", "read_topics"}.isdisjoint(case_tools)
     report_tools = _build_tools(role="report")
-    assert {"write_arc", "write_outcome", "write_diagnosis", "read_metrics", "read_topics"} <= set(report_tools)
+    assert {"write_outcome", "write_diagnosis", "read_metrics", "read_topics"} <= set(report_tools)
+    assert "write_arc" not in case_tools and "write_arc" not in report_tools
     assert {"write_event", "push_case", "claim_case", "claim_random_case", "submit_case"}.isdisjoint(report_tools)
     assert "claim_random_case" in case_tools
     # 两个角色共享读取与结束工具
@@ -59,8 +70,11 @@ def test_role_faces_expose_only_their_writes():
     assert "claim_case" not in report_catalog and "claim_random_case" not in report_catalog
     assert "submit_case" not in report_catalog
     assert "write_diagnosis" not in case_catalog
+    for removed in ("write_arc", "ArcItem", "ArcLinkItem", "parent_arc_id"):
+        assert removed not in report_catalog and removed not in case_catalog
     assert "write_diagnosis" not in build_diagnosis_system_prompt(role="case")
     assert "claim_random_case" not in build_diagnosis_system_prompt(role="report")
+    assert "write_arc" not in build_diagnosis_system_prompt(role="report")
 
 
 def test_case_write_channel_mounts_only_with_binding_and_requires_caseid():
@@ -69,6 +83,44 @@ def test_case_write_channel_mounts_only_with_binding_and_requires_caseid():
     case_tools = {name: tools[name] for name in CASE_WRITE_TOOL_NAMES if name in tools}
     assert set(case_tools) == set(CASE_WRITE_TOOL_NAMES)
     assert all("caseid" in tool.args_schema.model_fields for tool in case_tools.values())
+
+
+@pytest.mark.parametrize("field", ["arcs", "event_arc_links"])
+def test_report_organization_rejects_independent_arc_fields(field):
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        NarrativeOrganization.model_validate({field: []})
+
+
+@pytest.mark.parametrize("changed", ["content", "structure", "outcome"])
+def test_report_save_rejects_changed_event_tree_or_outcome_snapshot(changed):
+    evidence = [{"paragraph_id": 0, "chapter_id": 1, "char_start": 0, "char_end": 1, "text_hash": "hash"}]
+    identity = {"content": "event-content", "structure": "event-structure"}
+    draft = SimpleNamespace(
+        content_digest=lambda: identity["content"],
+        structure_digest=lambda: identity["structure"],
+        outcomes={
+            "result": EventOutcomeDraft(
+                outcome_id="result",
+                title="身份确认",
+                description="身份得到证实",
+                first_text_position=0,
+                evidence=evidence,
+            )
+        },
+        finish=MagicMock(side_effect=AssertionError("快照失配不能进入发布")),
+    )
+    domain = object.__new__(DiagnosisDomain)
+    domain.draft = draft
+    domain._require_cases_saved = MagicMock()
+    domain.reports = {"report": {"analysis": {"diagnosis": "综合报告"}}}
+    domain.report_bindings = {"report": domain._report_snapshot()}
+    if changed in identity:
+        identity[changed] = "changed"
+    elif changed == "outcome":
+        draft.outcomes["result"] = draft.outcomes["result"].model_copy(update={"description": "身份尚未确认"})
+    with pytest.raises(ValueError, match="快照已改变"):
+        domain._save_report_progress("report-author")
+    draft.finish.assert_not_called()
 
 
 def test_read_metrics_keeps_original_signals_and_named_material_fields():
@@ -143,9 +195,9 @@ def test_report_rejects_character_names_outside_run_roster():
         )
     assert "开局" in str(rejected.value) and "离火之源" in str(rejected.value)
     assert "顾霜" in str(rejected.value)
-    receipt = json.loads(tools["write_diagnosis"].invoke(
-        {"analysis": {"arc_scores": {"顾霜": 8.0}, "focus_characters": ["顾霜"]}}
-    ))
+    receipt = json.loads(
+        tools["write_diagnosis"].invoke({"analysis": {"arc_scores": {"顾霜": 8.0}, "focus_characters": ["顾霜"]}})
+    )
     assert receipt["status"] == "written"
 
 
@@ -156,7 +208,7 @@ def test_report_checks_character_names_on_patch():
         tools["write_diagnosis"].invoke({"patch": {"main_characters": ["重明"]}})
 
 
-def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_case):
+def test_write_event_rolls_back_whole_queue_when_member_source_is_invalid(draft_case):
     draft = draft_case
     tools = {
         item.name: item
@@ -171,7 +223,6 @@ def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_cas
 
     def item(key, event_id):
         return {
-            "operation": "event",
             "key": key,
             "title": "寻路",
             "problem": "能否找到路",
@@ -184,7 +235,7 @@ def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_cas
             "evidence": [{"paragraph_id": 999 if event_id == "missing" else 0}],
         }
 
-    result = json.loads(
+    with pytest.raises(ValueError):
         tools["write_event"].invoke(
             {
                 "items": [
@@ -194,10 +245,172 @@ def test_write_event_batch_rejects_invalid_source_but_keeps_good_items(draft_cas
                 ]
             }
         )
-    )
-    assert result["status"] == "partial" and result["failed"][0]["index"] == 1
-    assert result["results"][1] is None and len(draft.events) == 2
-    assert all(result["results"][index]["event_id"] in draft.events for index in (0, 2))
+    assert not draft.events and not draft.queues
     with pytest.raises(ValueError):
         tools["write_event"].invoke({"items": [{**item("extra", ids[0]), "invented": True}]})
-    assert len(draft.events) == 2
+    assert not draft.events and not draft.queues
+
+
+def test_report_write_rejects_contract_violations() -> None:
+    """报告写入点直接拒绝提示词承诺的全部硬约束"""
+    roster = ["顾霜", "贺重明", "甲", "乙", "丙", "丁"]
+    tools = _build_tools(role="report", character_roster=roster)
+    violations = [
+        ({"unknown_field": 1}, "Extra inputs"),
+        ({"arc_scores": {"顾霜": 11}}, "0–10"),
+        ({"arc_scores": {"顾霜": 8, " 顾霜 ": 7}}, "等价重复"),
+        (
+            {
+                "arc_scores": dict.fromkeys(roster, 5),
+                "main_characters": roster,
+            },
+            "最多 5",
+        ),
+        ({"main_characters": ["顾霜"]}, "必须同时出现在 arc_scores"),
+        (
+            {
+                "arc_scores": {"顾霜": 8, "贺重明": 7},
+                "focus_characters": ["顾霜", "贺重明"],
+                "focus_structure": "single",
+            },
+            "不一致",
+        ),
+        ({"focus_structure": "single"}, "focus_characters 为空"),
+        ({"theme_color": "blue"}, "theme_color"),
+        ({"narrative_arc_type": "  "}, "不能为空"),
+    ]
+    for payload, match in violations:
+        with pytest.raises(ValueError, match=match):
+            tools["write_diagnosis"].invoke({"analysis": payload})
+
+
+def test_report_write_requires_topics_read_and_exact_ids() -> None:
+    """未读主题先写、主题缺项或多项都在写入点拒绝"""
+    unread = _build_tools(role="report", report_draft={})
+    with pytest.raises(ValueError, match="read_topics"):
+        unread["write_diagnosis"].invoke({"analysis": {}})
+
+    tools = _build_tools(role="report", report_draft={"topic_ids": {0, 1}})
+    with pytest.raises(ValueError, match="缺少"):
+        tools["write_diagnosis"].invoke({"analysis": {"topic_labels": {"0": "成长"}}})
+    with pytest.raises(ValueError, match="多出"):
+        tools["write_diagnosis"].invoke({"analysis": {"topic_labels": {"0": "成长", "1": "复仇", "2": "冗余"}}})
+
+
+def test_report_write_canonicalizes_names_and_derives_focus_structure() -> None:
+    """等价写法按正式角色名落库，缺失的焦点结构按人数派生并在回执说明"""
+    tools = _build_tools(role="report", character_roster=["alice"])
+    receipt = json.loads(
+        tools["write_diagnosis"].invoke(
+            {"analysis": {"arc_scores": {"ALICE": 8}, "focus_characters": ["ALICE"]}}
+        )
+    )
+    assert receipt["status"] == "written"
+    assert receipt["canonicalized"] == {"ALICE": "alice"}
+    assert receipt["derived"] == {"focus_structure": "single"}
+    assert receipt["topic_gap"] == 0
+
+
+def test_writes_after_report_mark_it_stale_until_resubmission(draft_case) -> None:
+    """报告提交后再写事件：写入生效、报告立即失效；重新提交报告后清除"""
+    draft = draft_case
+    report = {"analysis": {}, "topic_ids": set()}
+    case_tools = {
+        item.name: item
+        for item in build_diagnosis_tools(
+            storage_for(draft.fixture_session),
+            draft.run_id,
+            organization_draft=draft,
+            report_draft=report,
+            agent_id=draft.agent_id,
+        )
+    }
+    item = {
+        "key": "stale-write",
+        "title": "回望",
+        "problem": "能否回头",
+        "summary": "回望",
+        "event_type": "行动",
+        "status": "ongoing",
+        "from": 1,
+        "to": 1,
+        "reason": "明确判断独立事件",
+        "evidence": [{"paragraph_id": 0}],
+    }
+    receipt = json.loads(case_tools["write_event"].invoke({"items": [item]}))
+    assert receipt["status"] == "written"
+    assert receipt["report_stale"] is True
+    assert report["stale"] is True
+    assert {"unparented_trees", "unassigned", "outcomes"} <= set(receipt["progress"])
+
+    report_tools = {
+        item.name: item
+        for item in build_diagnosis_tools(
+            storage_for(draft.fixture_session),
+            draft.run_id,
+            role="report",
+            organization_draft=draft,
+            report_draft=report,
+            agent_id=draft.agent_id,
+        )
+    }
+    written = json.loads(report_tools["write_diagnosis"].invoke({"analysis": {"diagnosis": "结构完整"}}))
+    assert written["status"] == "written"
+    assert "stale" not in report
+
+
+def test_last_case_submission_rejects_unpublished_cross_execution_references() -> None:
+    """最后一个案例提交前先拦截引用其他执行尚未正式保存的事件"""
+    from src.agents.diagnosis.tools import _validate_case_submission
+
+    case_pool = MagicMock()
+    case_pool.unsubmitted_for.return_value = ["case-1"]
+    draft = MagicMock()
+    draft.unpublished_references.return_value = ["event-9"]
+    with pytest.raises(ValueError, match="尚未正式保存"):
+        _validate_case_submission(case_pool, draft, "author", "case-1")
+
+
+def test_event_case_submission_allows_tree_without_parent() -> None:
+    """事件案例确认无真实包含关系时可直接提交"""
+    from src.agents.diagnosis.tools import _validate_case_submission
+    from src.storage.records.cases import event_tree_case_description
+
+    tree_id = "01a18db2-e32a-7a6e-9003-68f7ce25cae9"
+    case_pool = MagicMock()
+    case_pool.cases = {"case-1": {"case_type": "event", "description": event_tree_case_description(tree_id)}}
+    case_pool.unsubmitted_for.return_value = []
+    case_pool.case_runtime = {}
+    draft = MagicMock()
+    draft.queue_graph.return_value = SimpleNamespace(queues={tree_id: ("event-1",)}, parents={tree_id: []})
+    draft.unpublished_references.return_value = []
+    _validate_case_submission(case_pool, draft, "author", "case-1")
+
+
+def test_queue_write_allows_eleventh_structural_root(draft_case) -> None:
+    """归并阶段不限制结构入口数量"""
+    draft = draft_case
+    base = len(draft.queue_graph().unparented)
+    assert base == 5
+    allowed = 10 - base
+    for index in range(allowed + 1):
+        key = f"extra-{index}"
+        created = draft.event(
+            key=key,
+            title=f"独立事件{index}",
+            problem="是否独立",
+            summary=f"独立事件{index}",
+            event_type="行动",
+            status="ongoing",
+            reason="明确判断独立事件",
+            from_chapter_id=1,
+            to_chapter_id=1,
+            evidence=[OrganizationEvidence(paragraph_id=0)],
+        )
+        event_id = created["event_id"]
+        draft.queue(
+            event_ids=[event_id],
+            reason="父子顺序",
+            evidence=[OrganizationEvidence(paragraph_id=0)],
+        )
+    assert len(draft.queue_graph().unparented) == 11

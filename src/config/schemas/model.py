@@ -11,8 +11,12 @@ from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 from uuid import uuid4
 
-from src.config.input_config import DEFAULT_REASONING_EFFORT, ReasoningEffort
+from src.config.input_config import DEFAULT_REASONING_EFFORT, ReasoningEffort, validate_reasoning_effort
 from src.config.runtime_env import ModelEnvironment
+
+#: 标注与诊断会话的回合上限默认值
+ANNOTATION_MAX_ITERATIONS = 15
+DIAGNOSIS_MAX_ITERATIONS = 30
 
 _ENTRY_IDENTITIES: dict[tuple[str, str], str] = {}
 
@@ -51,7 +55,6 @@ class WeightedModelSettings:
     weight: float = 1.0
     max_in_flight: int = 8
 
-
     @property
     def entry_id(self) -> str:
         """池内条目身份：同一模型挂多个端点时各自独立记账"""
@@ -65,9 +68,8 @@ class TaskModelSettings:
     """
 
     timeout_s: float | None = None
-    thinking: bool = False
     reasoning_effort: ReasoningEffort = DEFAULT_REASONING_EFFORT
-    max_iterations: int = 15
+    max_iterations: int = ANNOTATION_MAX_ITERATIONS
     total_attempts: int = 3
     # 标注期不能读取未来章节原文
     allow_future_context: bool = False
@@ -101,7 +103,9 @@ class ModelsSettings:
     diagnosis_model_id: str | None = None
     annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
     paragraph_embedding: EmbeddingModelSettings = field(default_factory=EmbeddingModelSettings)
-    diagnosis: TaskModelSettings = field(default_factory=lambda: TaskModelSettings(max_iterations=15))
+    diagnosis: TaskModelSettings = field(
+        default_factory=lambda: TaskModelSettings(max_iterations=DIAGNOSIS_MAX_ITERATIONS)
+    )
 
 
 def _positive_integer(data: dict[str, Any], key: str, default: int) -> int:
@@ -195,8 +199,8 @@ def _parse_model_pool(value: Any) -> list[WeightedModelSettings]:
                 max_in_flight=concurrency,
             )
         )
-    if len({item.model_id for item in result}) != len(result):
-        raise ValueError("模型 ID 不能重复")
+    if len({(item.model_id, item.base_url) for item in result}) != len(result):
+        raise ValueError("同一模型与同一服务地址不能重复配置")
     if not any(item.weight > 0 for item in result):
         raise ValueError("至少一个模型的权重必须大于零")
     return result
@@ -254,13 +258,15 @@ def _normalize_model_base_url_for_docker(base_url: str | None) -> str | None:
     return _replace_url_hostname(parts, host_alias)
 
 
-def _parse_task_model_settings(data: dict[str, Any] | None, *, default_iterations: int = 15) -> TaskModelSettings:
+def _parse_task_model_settings(
+    data: dict[str, Any] | None, *, default_iterations: int = ANNOTATION_MAX_ITERATIONS
+) -> TaskModelSettings:
     """解析任务模型的非敏感行为参数"""
 
     json_data = data or {}
     return TaskModelSettings(
         timeout_s=json_data.get("timeout_s"),
-        thinking=json_data.get("thinking", False),
+        reasoning_effort=validate_reasoning_effort(json_data.get("reasoning_effort", DEFAULT_REASONING_EFFORT)),
         max_iterations=_positive_integer(json_data, "max_iterations", default_iterations),
         total_attempts=_positive_integer(json_data, "total_attempts", 3),
         allow_future_context=json_data.get("allow_future_context", False),
@@ -287,7 +293,7 @@ def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
         data = {}
     if "model_pool" in data or "diagnosis_model_id" in data:
         raise ValueError("模型池和诊断模型请通过模型池配置接口保存")
-    diagnosis = _parse_task_model_settings(data.get("diagnosis"))
+    diagnosis = _parse_task_model_settings(data.get("diagnosis"), default_iterations=DIAGNOSIS_MAX_ITERATIONS)
     return ModelsSettings(
         annotation=_parse_task_model_settings(data.get("annotation")),
         paragraph_embedding=_parse_embedding_model_settings(data.get("paragraph_embedding")),

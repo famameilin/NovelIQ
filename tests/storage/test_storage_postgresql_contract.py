@@ -222,7 +222,27 @@ def prepared_annotation(prepared_chapter):
         "evidence_paragraph_id": 1,
         "participants": [{"entity": entity_id, "role": "参与者"}],
     }
-    events = {"nodes": {event_id: {"author": author, "content": content}}, "actions": {}, "relations": {}}
+    events = {
+        "nodes": {event_id: {"author": author, "content": content}},
+        "actions": {},
+        "relations": {},
+        "queue_references": {},
+        "queues": {
+            event_id: {
+                "author": author,
+                "content": {
+                    "tree_id": event_id,
+                    "tree_key": None,
+                    "title": "完整行动",
+                    "description": "完整行动",
+                    "event_ids": [event_id],
+                    "reason": "完整行动",
+                    "producer_agent_id": author,
+                    "evidence": [{"paragraph_id": 1, "chapter_id": 1, "char_start": 0, "char_end": len(text_value)}],
+                },
+            }
+        },
+    }
     paragraphs = (EvidenceParagraph(1, 1, text_value, 0, len(text_value)),)
     case = CaseSave(run_id, author, json.dumps({"created_case_ids": [], "registrations": {}, "deliveries": []}))
     record = {
@@ -352,15 +372,14 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
         key: []
         for key in (
             "events",
-            "containments",
+            "queues",
+            "queue_references",
             "relations",
-            "arcs",
             "outcomes",
-            "event_arc_links",
-            "event_outcome_links",
         )
     }
     organization["source_agent_id"] = session_id
+    organization["event_line_ids"] = []
     request = DiagnosisReportSave(
         run_id,
         session_id,
@@ -381,7 +400,15 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
             )
             == 0
         )
-    assert storage.diagnosis.save_report(replace(request, dialogue_updates=()))["report_id"] == report_id
+    with pytest.raises(ValueError, match="事件线"):
+        storage.diagnosis.save_report(replace(request, dialogue_updates=()))
+    with engine.connect() as connection:
+        assert (
+            connection.scalar(
+                text(f"SELECT count(*) FROM {schema}.diagnosis_reports WHERE report_id=:id"), {"id": report_id}
+            )
+            == 0
+        )
 
 
 def test_domain_reads_restore_saved_graph_and_declarations(prepared_annotation):
@@ -469,8 +496,7 @@ def test_default_workflow_factories_return_storage_without_connecting():
 async def test_formal_annotation_pipeline_commits_and_restores_without_model_replay(
     prepared_chapter, isolated_storage, monkeypatch
 ):
-    from langchain_core.messages import AIMessage
-
+    from src.agents.messages import AssistantMessage
     from src.config import settings
     from src.config.schemas.model import WeightedModelSettings
     from src.model_pool.capacity import MODEL_CAPACITY
@@ -494,12 +520,13 @@ async def test_formal_annotation_pipeline_commits_and_restores_without_model_rep
             self.calls += 1
             assert self.calls == 1, "恢复不得重复调用模型"
             code = (
-                "entity(id='a1', name='张三', entity_type='character', evidence=1)\n"
-                "event(el='t1', evidence=1, title='张三进门', problem='能否进入',"
-                " summary='张三进门', event_type='行动', status='ongoing')\n"
-                "metric(summary='进门', emotional_valence=0, narrative_function='铺垫')\nfinish()"
+                "entity(id='a1', name='张三', entity_type='character', evid"
+                "ence=1)\ncreated = write_event(items=[dict(el='t1', evidence=1, title='张三进门"
+                "', problem='能否进入', summary='张三进门', event_type='行动', stat"
+                "us='ongoing')])\nmetric(summary='进门', emotional_valence=0, "
+                "narrative_function='铺垫')\nfinish()"
             )
-            return AIMessage(
+            return AssistantMessage(
                 content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "program-call"}]
             )
 
@@ -518,7 +545,7 @@ async def test_formal_annotation_pipeline_commits_and_restores_without_model_rep
             )
         ],
     )
-    monkeypatch.setattr("src.model_pool.llm.build_chat_model", lambda *args, **kwargs: model)
+    monkeypatch.setattr("src.agents.model_client.build_chat_model", lambda *args, **kwargs: model)
     MODEL_CAPACITY.reset()
     try:
         assert await run_annotate(run_id, storage, novel_id=novel_id) == (1, 0, 1)
@@ -530,40 +557,6 @@ async def test_formal_annotation_pipeline_commits_and_restores_without_model_rep
         assert model.calls == 1
     finally:
         MODEL_CAPACITY.reset()
-
-
-def test_schema_guard_rejects_existing_composite_key_without_changing_it(isolated_storage):
-    from src.storage.db import validate_existing_schema
-
-    _, engine, _, _ = isolated_storage
-    schema = "storage_old_" + token_hex(8)
-    created = False
-    try:
-        with engine.begin() as connection:
-            connection.execute(text(f"CREATE SCHEMA {schema}"))
-            created = True
-            connection.execute(
-                text(
-                    f"CREATE TABLE {schema}.chapters (run_id text, chapter_id integer,"
-                    " PRIMARY KEY (run_id, chapter_id))"
-                )
-            )
-            connection.execute(text(f"INSERT INTO {schema}.chapters VALUES ('old-run', 1)"))
-        legacy_engine = engine.execution_options(schema_translate_map={None: schema})
-        with pytest.raises(RuntimeError, match="从原始输入重建"):
-            validate_existing_schema(legacy_engine)
-        assert inspect(engine).get_pk_constraint("chapters", schema=schema)["constrained_columns"] == [
-            "run_id",
-            "chapter_id",
-        ]
-        with engine.connect() as connection:
-            row = connection.execute(text(f"SELECT run_id, chapter_id FROM {schema}.chapters")).one()
-            assert row.run_id == "old-run"
-            assert row.chapter_id == 1
-    finally:
-        if created:
-            with engine.begin() as connection:
-                connection.execute(text(f"DROP SCHEMA {schema} CASCADE"))
 
 
 @pytest.mark.asyncio

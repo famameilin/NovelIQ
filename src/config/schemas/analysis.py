@@ -33,7 +33,7 @@ class TopicShiftSettings:
 
     window_size: int = 10
     min_tokens_per_window: int = 50
-    score_threshold: float = 0.3
+    score_threshold: float = 0.08
     max_candidates: int = 50
 
 
@@ -147,7 +147,7 @@ def _parse_topic_shift_settings(data: dict[str, Any] | None) -> TopicShiftSettin
     min_tokens = data.get("min_tokens_per_window", 50)
     if isinstance(min_tokens, bool) or not isinstance(min_tokens, int) or min_tokens < 1:
         raise ValueError(f"topic_shift.min_tokens_per_window 必须是 ≥1 的整数，当前值: {min_tokens!r}")
-    threshold = data.get("score_threshold", 0.3)
+    threshold = data.get("score_threshold", 0.08)
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
         raise ValueError(f"topic_shift.score_threshold 必须是数值，当前值: {threshold!r}")
     if not 0 < threshold <= 1:

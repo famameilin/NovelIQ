@@ -1,5 +1,5 @@
 """
-章内 agent 程序运行时：八类构造器 + 检索/案例 + 收尾的执行面
+章内 agent 程序运行时：构造器 + 检索/案例 + 收尾的执行面
 """
 
 # ruff: noqa: E402 —— 文件末尾的 re-export 导入为有意的延迟导入。
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import time
 from typing import Any
 
@@ -19,9 +20,9 @@ from src.agents.annotation.catalog import (
 )
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.program import build_program_tool
-from src.agents.annotation.program_runtime import RestrictedProgramRuntime
 from src.agents.annotation.search_projection import _call_rejection, build_program_tools
-from src.agents.annotation.tools import FINISH_TOOL_NAME
+from src.agents.annotation.tools import FINISH_TOOL_NAME, tool_record_key
+from src.agents.program_runtime.interpreter import RestrictedProgramRuntime
 
 from .agent_constructors import (
     _ConstructorCall,
@@ -43,7 +44,7 @@ from .tool_batch import _execute_call
 
 
 class AgentProgramRuntime(RestrictedProgramRuntime):
-    """一个 agent 的程序面：八类构造器 + 检索/案例 + 收尾（绑定面只有 execute_code 与 finish）
+    """一个 agent 的程序面：构造器 + 检索/案例 + 收尾（绑定面只有 execute_code 与 finish）
 
     生命周期：一个 agent 建一次、跨回合复用（变量与逐 op 记录随之保留）。
     程序目录三个 agent 完全相同（AGENT_TOOL_NAMES + finish），域分工只写在职责文案里。
@@ -64,7 +65,7 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
         """用于绑定共享章级账本、生产工具表与本 agent 的产出记录
 
         模型可见面（绑定面）= [execute_code, finish]；execute_code 的程序目录 =
-        AGENT_TOOL_NAMES（检索/案例）+ 八类构造器 + finish。执行面（execution_tools）
+        AGENT_TOOL_NAMES（检索/案例）+ 构造器 + finish。执行面（execution_tools）
         是完整生产工具表——构造器编译出的那笔写入要经它落地，而正式写入工具不在模型可见面。
 
         write_lock：三个 agent 共享一个章级账本与一张事实图，账本快照/按条回滚
@@ -108,6 +109,8 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
             namespace,
             observer=observer,
             stream=stream,
+            record_key=tool_record_key,
+            signature_hint=lambda name: render_list_signature(name, call_parameters(name, namespace.get(name))),
         )
         # 执行面是完整生产工具表——构造器编译出的那笔写入要经它落地，而正式写入工具不在
         # 模型可见面。
@@ -127,8 +130,15 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
     async def execute(self, code: str, caseid: Any = None) -> str:
         """程序显式默认关联只在本次执行有效，内层传 None 可取消"""
         self._caseid_default = caseid
+        previous_end_request = self.ledger.end_requested
         try:
-            return await super().execute(code)
+            result = await super().execute(code)
+            if json.loads(result).get("status") in {"runtime_error", "rejected"}:
+                self.ledger.end_requested = previous_end_request
+            return result
+        except BaseException:
+            self.ledger.end_requested = previous_end_request
+            raise
         finally:
             self._caseid_default = None
 
@@ -144,8 +154,10 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
         )
 
     def _progress(self) -> dict[str, int]:
-        """用于回执 progress（本 agent 已构造的记录计数）"""
-        return self.agent.counts()
+        """用于回执 progress（本 agent 已构造的记录计数与本章剩余缺口）"""
+        progress = self.agent.counts()
+        progress.update(self.ledger.progress_gaps())
+        return progress
 
     def _receipt(
         self,
@@ -176,7 +188,7 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
         ]
         if cases:
             body["cases"] = cases
-        if any(
+        if status not in {"runtime_error", "rejected"} and any(
             op["program_id"] == self._program_id and op["tool_name"] == FINISH_TOOL_NAME and op["status"] == "success"
             for op in self.ops
         ):
@@ -280,15 +292,24 @@ class AgentProgramRuntime(RestrictedProgramRuntime):
                 op_index=op_index,
                 line=line,
                 status="error",
-                receipt={"status": "error", "message": str(exc),
-                         "code": "dependency_unavailable" if isinstance(exc, AnnotationDependencyError)
-                         else "internal_error"},
+                receipt={
+                    "status": "error",
+                    "message": str(exc),
+                    "code": "dependency_unavailable"
+                    if isinstance(exc, AnnotationDependencyError)
+                    else "internal_error",
+                },
                 call_args=call_args,
                 error=str(exc),
                 started_ns=started_ns,
             )
             # 外层 execute_code 仍需写自己的失败审计，回合由外层最后闭合
             raise
+        actual = entry.get("receipt")
+        if plan is not None and target == "write_event" and isinstance(actual, dict):
+            if actual.get("results"):
+                actual = actual["results"][0]
+            entry = {**entry, "receipt": actual}
         ok = str(entry.get("status") or "error") == "success"
         if ok and plan is not None:
             plan.commit()

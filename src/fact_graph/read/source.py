@@ -16,10 +16,10 @@ def read_evidence_source(
         chapter_id = next((item["chapter_id"] for item in evidence if "chapter_id" in item), None)
     if chapter_id not in allowed:
         raise LookupError("SOURCE_NOT_FOUND")
-    chapter = session.reads.fact_graph_read_source_read_evidence_source_1(chapter_id, run_id)
+    chapter = session.reads.text.get_source_chapter(chapter_id, run_id)
     if chapter is None:
         raise LookupError("SOURCE_NOT_FOUND")
-    paragraphs = list(session.reads.fact_graph_read_source_read_evidence_source_2(chapter_id, run_id))
+    paragraphs = list(session.reads.text.list_source_paragraphs(chapter_id, run_id))
     by_id = {paragraph.paragraph_id: paragraph for paragraph in paragraphs}
     for item in evidence:
         if item.get("chapter_id") != chapter_id or "paragraph_id" not in item:

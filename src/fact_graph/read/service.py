@@ -123,6 +123,14 @@ class KnowledgeGraphAuthorityService:
             graph_changes=self._build_graph_changes(changes),
         )
 
+    def build_canonical_entities(self, run_id: str) -> list[CanonicalEntity]:
+        """读取最新实体及其正式别名"""
+        self.assert_graph_ready(run_id)
+        entities = fetch_latest_entities(self._graph_repo, run_id)
+        relations = self._graph_repo.fetch_latest_relations(run_id, active_only=False)
+        resolution = self._build_alias_resolution(relations, entities)
+        return self._build_canonical_entities(entities, resolution=resolution)
+
     def build_representative_graph_view(self, run_id: str) -> GraphAuthorityView:
         """向聚合与诊断提供排除 same_character 边的最新图"""
         self.assert_graph_ready(run_id)

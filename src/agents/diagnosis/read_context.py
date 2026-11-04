@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from src.agents.annotation.shared_tools import ObjectKind
 from src.agents.annotation.text_search import TextSearchService
 from src.event_trees.organization import EventOrganizationDraft
-from src.fact_graph.outputs import SourceReference
+from src.event_trees.semantic import best_paragraph_rank, paragraph_ranks, ranked_keys
 from src.fact_graph.read.storage_projection import graph_projection
 from src.storage import Storage
+from src.storage.query_terms import query_search_terms, term_matches
+from src.text_processing.evidence import SourceReference
 
 
 @dataclass
@@ -59,7 +62,7 @@ class DiagnosisTextQuery:
                 await client.aclose()
 
     async def read_paragraph(self, paragraph_id: int, *, allow_future_context: bool) -> dict[str, Any]:
-        row = self.session.reads.work_queries_paragraph_record(self.run_id, paragraph_id)
+        row = self.session.reads.text.get_run_paragraph(self.run_id, paragraph_id)
         if row is None:
             raise ValueError(f"paragraph_id={paragraph_id} 不属于本 run")
         return {"chapter_id": row.chapter_id, "paragraph_id": row.paragraph_id, "text": row.text}
@@ -74,42 +77,162 @@ class DiagnosisAnnotationEventSource:
     def search_ids(
         self, query: str, *, chapter_id: int | None, tree_id: str | None, isforeshadowing: bool | None = None
     ) -> list[str]:
-        if tree_id is not None:
-            raise ValueError("事件没有正式事件树身份，请按 chapter_id 或正文词检索")
-        return [
-            key
-            for key, item in self.draft._all_events().items()
-            if (chapter_id is None or item.get("from", item.get("from_chapter_id")) == chapter_id)
-            and (isforeshadowing is None or bool(item.get("is_foreshadowing_root")) == isforeshadowing)
-            and (query.casefold() in " ".join(str(item[field]) for field in ("title", "problem", "summary")).casefold())
-        ]
+        identifiers, _ = self.search_page(
+            query, chapter_id=chapter_id, tree_id=tree_id, isforeshadowing=isforeshadowing, offset=0, limit=0
+        )
+        return identifiers
 
     def read(self, event_id: str) -> dict[str, Any]:
         item = self.draft.read_events([event_id])[0]
         return self._record(event_id, item)
 
     def search_page(
-        self, query: str, *, chapter_id: int | None, tree_id: str | None,
-        isforeshadowing: bool | None, offset: int, limit: int,
+        self,
+        query: str,
+        *,
+        chapter_id: int | None,
+        tree_id: str | None,
+        isforeshadowing: bool | None,
+        offset: int,
+        limit: int,
+        semantic_paragraph_ids: Sequence[int] | None = None,
     ) -> tuple[list[str], list[dict[str, Any]]]:
         "一次装载事件与结构，索引和本页详情使用同一快照"
-        if tree_id is not None:
-            raise ValueError("事件没有正式事件树身份，请按 chapter_id 或正文词检索")
         by_id, parents = self.draft.read_view()
-        identifiers = [
-            key for key, item in by_id.items()
-            if (chapter_id is None or item.get("from", item.get("from_chapter_id")) == chapter_id)
-            and (isforeshadowing is None or bool(item.get("is_foreshadowing_root")) == isforeshadowing)
-            and query.casefold() in " ".join(str(item[field]) for field in ("title", "problem", "summary")).casefold()
-        ]
+        terms = query_search_terms(query)
+        ranks = paragraph_ranks(semantic_paragraph_ids or [])
+        identifiers: list[str] = []
+        semantic_items: list[dict[str, Any]] = []
+        for key, item in by_id.items():
+            if chapter_id is not None and item.get("from", item.get("from_chapter_id")) != chapter_id:
+                continue
+            if not (
+                tree_id is None
+                or parents.event_tree.get(key) == tree_id
+                or (
+                    key in parents.event_tree
+                    and tree_id in parents.lines.get(parents.event_tree[key], set())
+                )
+            ):
+                continue
+            if isforeshadowing is not None and bool(item.get("is_foreshadowing_root")) != isforeshadowing:
+                continue
+            haystack = " ".join(str(item[field]) for field in ("title", "problem", "summary"))
+            if not terms or any(term_matches(term, haystack) for term in terms):
+                identifiers.append(key)
+            elif ranks and best_paragraph_rank(item, ranks) is not None:
+                semantic_items.append({**item, "event_id": key})
+        if ranks:
+            matched = set(identifiers)
+            identifiers.extend(
+                key
+                for key in ranked_keys(semantic_items, ranks, lambda item: item["event_id"])
+                if key not in matched
+            )
         children: dict[str, list[str]] = {}
-        for child, parent in parents.items():
-            children.setdefault(parent, []).append(child)
+        for members in parents.queues.values():
+            for child in members:
+                for parent in parents.event_parents(child):
+                    children.setdefault(parent, []).append(child)
         return identifiers, [
-            self._record(key, {**by_id[key], **self.draft._event_hierarchy(key, parents),
-                               "direct_child_event_ids": children.get(key, [])})
-            for key in identifiers[offset:offset + limit]
+            self._record(
+                key,
+                {
+                    **by_id[key],
+                    **self.draft._event_hierarchy(key, parents),
+                    "direct_child_event_ids": children.get(key, []),
+                },
+            )
+            for key in identifiers[offset : offset + limit]
         ]
+
+    def participant_names_for_paragraphs(self, paragraph_ids: Sequence[int]) -> list[str]:
+        "语义命中段落所属事件的参与者名字，按段落相似顺序去重"
+        ranks = paragraph_ranks(paragraph_ids)
+        if not ranks:
+            return []
+        by_id, _ = self.draft.read_view()
+        nodes = [
+            {**item, "event_id": key}
+            for key, item in by_id.items()
+            if best_paragraph_rank(item, ranks) is not None
+        ]
+        ordered = sorted(nodes, key=lambda item: (best_paragraph_rank(item, ranks), item["event_id"]))
+        names: list[str] = []
+        seen: set[str] = set()
+        for node in ordered:
+            for item in node.get("participants") or []:
+                entity = item.get("entity") if isinstance(item, dict) else None
+                name = entity.get("name") if isinstance(entity, dict) else entity
+                if isinstance(name, str) and name and name not in seen:
+                    seen.add(name)
+                    names.append(name)
+        return names
+
+    def search_trees(
+        self,
+        query: str,
+        *,
+        chapter_id: int | None = None,
+        tree_id: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        "按树标题、说明或成员标题召回事件树，空树同样可命中"
+        by_id, _ = self.draft.read_view()
+        graph = self.draft.queue_graph()
+        terms = query_search_terms(query)
+        if not terms and tree_id is None:
+            return []
+        rows: list[dict[str, Any]] = []
+        for identifier in graph.order:
+            queue = self.draft.queues.get(identifier)
+            if queue is None or (tree_id is not None and identifier != tree_id):
+                continue
+            members = list(graph.queues.get(identifier, ()))
+            if chapter_id is not None and not any(
+                by_id.get(event, {}).get("from", by_id.get(event, {}).get("from_chapter_id")) == chapter_id
+                for event in members
+            ):
+                continue
+            haystack = " ".join(
+                [queue.title, queue.description]
+                + [str(by_id[event].get("title", "")) for event in members if event in by_id]
+            )
+            if terms and not any(term_matches(term, haystack) for term in terms):
+                continue
+            spans = [
+                (by_id[event].get("from"), by_id[event].get("to")) for event in members if event in by_id
+            ]
+            froms = [value for value, _ in spans if value is not None]
+            tos = [value for _, value in spans if value is not None]
+            rows.append(
+                {
+                    "tree_id": identifier,
+                    "tree_key": queue.tree_key,
+                    "title": queue.title,
+                    "description": queue.description[:160],
+                    "event_count": len(members),
+                    "from": min(froms) if froms else None,
+                    "to": max(tos) if tos else None,
+                    "parent_tree_ids": list(graph.parents.get(identifier, ())),
+                    "child_tree_ids": list(graph.children.get(identifier, ())),
+                    "is_top_level": not graph.parents.get(identifier),
+                }
+            )
+        return rows[:limit]
+
+    def tree_ids_for_paragraphs(self, paragraph_ids: Sequence[int]) -> list[str]:
+        "语义命中段落所属事件树身份，按段落相似顺序去重"
+        ranks = paragraph_ranks(paragraph_ids)
+        if not ranks:
+            return []
+        by_id, parents = self.draft.read_view()
+        nodes = [
+            {**item, "event_id": key, "tree_id": parents.event_tree.get(key)}
+            for key, item in by_id.items()
+            if best_paragraph_rank(item, ranks) is not None
+        ]
+        return ranked_keys(nodes, ranks, lambda item: item["tree_id"])
 
     @staticmethod
     def _record(event_id: str, item: dict[str, Any]) -> dict[str, Any]:
@@ -121,15 +244,17 @@ class DiagnosisAnnotationEventSource:
             **{
                 key: item[key]
                 for key in (
-                    "parent_event_id",
-                    "top_level_event_id",
+                    "parent_event_ids",
+                    "event_line_ids",
+                    "tree_id",
+                    "queue_event_ids",
                     "is_top_level",
                     "ancestor_event_ids",
                     "direct_child_event_ids",
                 )
                 if key in item
             },
-            "saved": True,
+            "saved": bool(item.get("saved")),
             "content": {
                 **item,
                 "is_foreshadow_setup": bool(item.get("is_foreshadowing_root")),
@@ -149,8 +274,6 @@ class DiagnosisOrganizationSource:
         if kind == "event":
             by_id, parents = self.draft.read_view()
             return [{**item, **self.draft._event_hierarchy(key, parents)} for key, item in by_id.items()]
-        if kind == "arc":
-            return [item.model_dump(mode="json") for item in self.draft.arcs.values()]
         if kind == "outcome":
             return [item.model_dump(mode="json") for item in self.draft.outcomes.values()]
         raise ValueError(f"无诊断对象 kind={kind}")
@@ -172,7 +295,6 @@ class DiagnosisOrganizationSource:
                     if key
                     in {
                         "event_id",
-                        "arc_id",
                         "outcome_id",
                         "title",
                         "problem",
@@ -181,8 +303,9 @@ class DiagnosisOrganizationSource:
                         "subject_id",
                         "reason",
                         "status",
-                        "parent_event_id",
-                        "top_level_event_id",
+                        "parent_event_ids",
+                        "event_line_ids",
+                        "tree_id",
                         "is_top_level",
                     }
                 },
@@ -193,23 +316,13 @@ class DiagnosisOrganizationSource:
         ]
 
     def read(self, kind: ObjectKind, identifier: str) -> dict[str, Any]:
-        id_field = {"event": "event_id", "arc": "arc_id", "outcome": "outcome_id"}[kind]
+        id_field = {"event": "event_id", "outcome": "outcome_id"}[kind]
         item = next((row for row in self._rows(kind) if row[id_field] == identifier), None)
         if item is None:
             raise ValueError(f"kind={kind} 的本任务对象不存在: {identifier}")
         if kind == "event":
             item = {
                 **item,
-                "arc_links": [
-                    link.model_dump(mode="json")
-                    for link in self.draft.event_arc_links.values()
-                    if link.event_id == identifier
-                ],
-                "outcome_links": [
-                    link.model_dump(mode="json")
-                    for link in self.draft.event_outcome_links.values()
-                    if link.event_id == identifier
-                ],
                 "relations": [
                     link.model_dump(mode="json")
                     for link in self.draft.relations.values()

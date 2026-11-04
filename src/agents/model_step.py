@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from loguru import logger
 
 from src.agents.annotation.graph_texts import _turn_budget_reminder
@@ -22,6 +21,7 @@ from src.agents.context_compaction import (
     tool_schema_tokens,
 )
 from src.agents.loop import AgentState
+from src.agents.messages import AssistantMessage, UserMessage
 
 if TYPE_CHECKING:
     from src.agents.stream import AgentStream
@@ -69,13 +69,13 @@ def build_model_step(
                 started_ns=started_ns,
             )
 
-        def on_turn_complete(message: AIMessage, timing: Any) -> None:
+        def on_turn_complete(message: AssistantMessage, timing: Any) -> None:
             """用于收口成功的物理 Provider 请求审计"""
             if observer is None:
                 return
             observer.complete_provider_turn(response_message=message, timing=timing)
 
-        def on_turn_failed(error: str, timing: Any, message: AIMessage | None) -> None:
+        def on_turn_failed(error: str, timing: Any, message: AssistantMessage | None) -> None:
             """用于收口断流超时和无工具回复的物理 Provider 请求审计"""
             if observer is None:
                 return
@@ -94,9 +94,7 @@ def build_model_step(
 
         summary = state.get("compaction_summary")
         shadowed_count = int(state.get("shadowed_message_count") or 0)
-        # 图运行时当前流 langchain 消息，压缩边界按其类型识别
-        history = cast("list[BaseMessage]", state["messages"])
-        visible = build_visible_messages(history, summary=summary, shadowed_count=shadowed_count)
+        visible = build_visible_messages(state["messages"], summary=summary, shadowed_count=shadowed_count)
         request_messages = list(visible)
         compaction_state: dict[str, Any] = {}
         compaction_info: dict[str, Any] | None = None
@@ -105,8 +103,8 @@ def build_model_step(
             trigger_tokens, retain_tokens = context_limits(context_window_tokens)
             usage_tokens = measure_context_tokens(visible, tool_schema_tokens=schema_tokens)
             if usage_tokens >= trigger_tokens:
-                prefix, _ = split_prefix(history)
-                unshadowed = list(history[len(prefix) + shadowed_count :])
+                prefix, _ = split_prefix(state["messages"])
+                unshadowed = list(state["messages"][len(prefix) + shadowed_count :])
                 selection = select_compaction(unshadowed, retain_tokens=retain_tokens)
                 if selection is not None:
                     shadowed, kept = selection
@@ -146,7 +144,7 @@ def build_model_step(
                         "compaction_summary": framed,
                         "shadowed_message_count": shadowed_count + len(shadowed),
                     }
-                    request_messages = [*prefix, HumanMessage(content=framed), *kept]
+                    request_messages = [*prefix, UserMessage(content=framed), *kept]
                     compaction_info = {
                         "shadowed_messages": len(shadowed),
                         "retained_messages": len(kept),
@@ -174,7 +172,7 @@ def build_model_step(
         # 不写进请求消息链，本请求对模型可见的末条仍是状态消息链自身。
         if remaining_turns <= TURN_BUDGET_REMINDER_WINDOW:
             request_messages.append(
-                HumanMessage(
+                UserMessage(
                     content=_turn_budget_reminder(
                         remaining_turns,
                         total=max_iterations,

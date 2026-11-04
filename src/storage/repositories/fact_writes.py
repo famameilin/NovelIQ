@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy.orm import Session as Storage
 
 from src.storage.records.facts import FactSave as FactContribution
-from src.storage.repositories.queries import fact_graph_graph as _queries
+from src.storage.repositories.queries import graph_write_rows as _queries
 
 
 class FactWriter:
@@ -16,9 +16,9 @@ class FactWriter:
         "在跨域写入前先落实体身份行（事件参与者等外键依赖同一批身份）"
         from src.storage.models import GraphEntity
 
-        _queries.fact_graph_graph_ensure_entity_rows_1(session, self.run_scope)
+        _queries.lock_entity_registration(session, self.run_scope)
         for identifier, value in frozen.snapshot()["entities"].items():
-            if _queries.fact_graph_graph_ensure_entity_rows_2(session, identifier) is None:
+            if _queries.get_registered_entity(session, identifier) is None:
                 session.add(
                     GraphEntity(
                         entity_id=identifier,
@@ -34,9 +34,9 @@ class FactWriter:
         from src.storage.models import FactEntityTag, GraphFact, GraphRelation, SourceEvidence
         from src.storage.records.evidence import evidence_for
 
-        _queries.fact_graph_graph_save_work_1(session, self.run_scope)
+        _queries.lock_fact_contribution(session, self.run_scope)
         del annotation_id
-        execution = _queries.fact_graph_graph_save_work_2(session, frozen.agent_id)
+        execution = _queries.get_producer(session, frozen.agent_id)
         if execution is None or execution.run_id != self.run_scope:
             raise ValueError(f"事实贡献缺少真实执行身份: agent_id={frozen.agent_id}")
         effective_chapter_id = int(frozen.chapter_id) if frozen.chapter_id is not None else None
@@ -44,7 +44,7 @@ class FactWriter:
         agent_id = frozen.agent_id
         entities = contribution["entities"]
         self.ensure_entity_rows(session, frozen)
-        if _queries.fact_graph_graph_save_work_3(session, agent_id) is not None:
+        if _queries.find_producer_fact(session, agent_id) is not None:
             return
         operations: list[tuple[str, dict[str, Any]]] = []
         operations += [("entity", op) for op in contribution["entity_ops"]]
@@ -62,7 +62,7 @@ class FactWriter:
                 )
             elif kind == "entity":
                 entity_id = str(op["entity_id"])
-                entity = _queries.fact_graph_graph_save_work_4(session, entity_id)
+                entity = _queries.get_fact_entity(session, entity_id)
                 if entity is not None and op["name"] != entity.canonical_name:
                     entity.canonical_name = op["name"]
                 fields = op["submitted_fields"]
@@ -87,7 +87,7 @@ class FactWriter:
                 from_id = str(op["from_entity_id"])
                 to_id = str(op["to_entity_id"])
                 identifier = str(op["relation_id"])
-                if _queries.fact_graph_graph_save_work_5(session, identifier) is None:
+                if _queries.get_relation(session, identifier) is None:
                     session.add(
                         GraphRelation(
                             relation_id=identifier,
@@ -115,14 +115,17 @@ class FactWriter:
                 for ordinal, tag in enumerate(op.get("tags") or []):
                     session.add(FactEntityTag(graph_fact_id=fact.graph_fact_id, tag_ordinal=ordinal, tag=str(tag)))
             self._write_evidence(session, fact.graph_fact_id, SourceEvidence, evidence_for(frozen.paragraphs))
-        for index, item in enumerate(contribution.get("plotline_ops", [])):
+        plotline_ops = contribution.get("plotline_ops", [])
+        persisted_event_ids = self._persisted_event_ids(session, plotline_ops)
+        for index, item in enumerate(plotline_ops):
             operation = item["operation"]
+            event_id = item.get("event_id")
             fact = GraphFact(
                 direct_producer_agent_id=agent_id,
                 operation_order=index,
                 effective_chapter_id=effective_chapter_id,
                 business_call_id=str(item["source_operation_id"]),
-                event_id=item.get("event_id"),
+                event_id=event_id if event_id is None or str(event_id) in persisted_event_ids else None,
                 plotline_subject_id=str(operation["subject_id"]),
                 plotline_subject_title=str(operation["subject_title"]),
                 plotline_description=str(operation["description"]),
@@ -134,6 +137,21 @@ class FactWriter:
             self._write_evidence(session, fact.graph_fact_id, SourceEvidence, list(item.get("evidence") or []))
         session.flush()
         self.rebuild_storage(session, preserve=set(entities))
+
+    def _persisted_event_ids(self, session: Storage, plotline_ops: list[dict[str, Any]]) -> set[str]:
+        "返回本 run 已落库的事件身份；草稿事件未保存时情节推进只保留事实本身"
+        from sqlalchemy import select
+
+        from src.storage.models import CompleteEvent
+
+        referenced = {str(item["event_id"]) for item in plotline_ops if item.get("event_id")}
+        if not referenced:
+            return set()
+        rows = session.execute(
+            select(CompleteEvent.event_id).where(CompleteEvent.event_id.in_(referenced))
+        ).scalars()
+        return {str(value) for value in rows}
+
 
     @staticmethod
     def _write_evidence(
@@ -162,14 +180,14 @@ class FactWriter:
 
         run_entities = select(GraphEntity.entity_id).where(GraphEntity.run_id == self.run_scope)
         live_entities: set[str] = set(preserve or ())
-        live_entities.update(_queries.fact_graph_graph_rebuild_storage_2(session, self.run_scope))
-        live_relations = set(_queries.fact_graph_graph_rebuild_storage_3(session, self.run_scope))
-        for relation in _queries.fact_graph_graph_rebuild_storage_1(session, live_relations):
+        live_entities.update(_queries.list_fact_entity_ids(session, self.run_scope))
+        live_relations = set(_queries.list_fact_relation_ids(session, self.run_scope))
+        for relation in _queries.list_relation_endpoints(session, live_relations):
             live_entities.update((relation.from_entity_id, relation.to_entity_id))
-        live_entities.update(_queries.fact_graph_graph_rebuild_storage_4(session, self.run_scope))
-        live_entities.update(_queries.fact_graph_graph_rebuild_storage_5(session, self.run_scope))
-        live_entities.update(_queries.fact_graph_graph_rebuild_storage_6(session, self.run_scope))
-        live_entities.update(_queries.fact_graph_graph_rebuild_storage_7(session, self.run_scope))
+        live_entities.update(_queries.list_participant_entity_ids(session, self.run_scope))
+        live_entities.update(_queries.list_speaker_entity_ids(session, self.run_scope))
+        live_entities.update(_queries.list_cast_entity_ids(session, self.run_scope))
+        live_entities.update(_queries.list_scored_entity_ids(session, self.run_scope))
         session.execute(
             delete(GraphRelation).where(
                 GraphRelation.from_entity_id.in_(run_entities), GraphRelation.relation_id.not_in(live_relations)

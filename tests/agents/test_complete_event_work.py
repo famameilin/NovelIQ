@@ -119,7 +119,7 @@ async def save_and_confirm(agent, session, execution):
 
 def declaration_code(key, summary):
     return (
-        "event("
+        "created = write_event(items=[dict("
         + ", ".join(
             f"{name}={value!r}"
             for name, value in {
@@ -132,7 +132,7 @@ def declaration_code(key, summary):
                 "evidence": 1,
             }.items()
         )
-        + ")"
+        + ")])"
     )
 
 
@@ -159,9 +159,14 @@ async def test_same_fact_cannot_be_recreated_as_second_declaration(db_session, r
 async def test_annotation_declarations_then_diagnosis_once_publication(db_session):
     from src.event_trees.read.organization import EventTreeQuery
     from src.event_trees.storage_map import run_annotation_event_ids, run_events
-    from tests.support.event_tree_fixtures import identity_every_declaration, publish_draft
+    from tests.support.event_tree_fixtures import (
+        identity_every_declaration,
+        publish_draft,
+    )
 
-    novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻找山门，点燃一盏灯。"])
+    novel_id, run_id = create_run_with_chunks(
+        db_session, texts=["顾霜寻找山门，点燃一盏灯，打开旧信，核对地图，通知同伴。"]
+    )
     agent = AnnotationAgent(
         EventBus(), run_id, storage_factory(sessionmaker(bind=db_session.get_bind())), novel_id=novel_id
     )
@@ -169,18 +174,28 @@ async def test_annotation_declarations_then_diagnosis_once_publication(db_sessio
     try:
         result = json.loads(
             await runtime.execute(
-                declaration_code("search", "顾霜寻找山门") + "\n" + declaration_code("lamp", "顾霜点灯") + "\nfinish()"
+                "\n".join(
+                    declaration_code(key, title)
+                    for key, title in (
+                        ("search", "顾霜寻找山门"),
+                        ("lamp", "顾霜点灯"),
+                        ("letter", "打开旧信"),
+                        ("map", "核对地图"),
+                        ("notice", "通知同伴"),
+                    )
+                )
+                + "\nfinish()"
             )
         )
         assert not result.get("failed"), result
-        assert result["written_refs"][0]["ref"]["event_id"]
+        assert result["written_refs"]
         await save_and_confirm(agent, db_session, execution)
-        assert len(run_events(storage_for(db_session), run_id)) == 2
+        assert len(run_events(storage_for(db_session), run_id)) == 5
         assert EventTreeQuery(storage_for(db_session), run_id).fetch()["organization_status"] == "pending_diagnosis"
         draft, _meta = identity_every_declaration(db_session, run_id)
-        publish_draft(db_session, run_id, draft)
-        assert len(run_events(storage_for(db_session), run_id)) == 2
-        assert len(run_annotation_event_ids(storage_for(db_session), run_id)) == 2
+        publish_draft(db_session, run_id, draft, final=True, event_line_ids=list(draft.events))
+        assert len(run_events(storage_for(db_session), run_id)) == 5
+        assert len(run_annotation_event_ids(storage_for(db_session), run_id)) == 5
         assert EventTreeQuery(storage_for(db_session), run_id).fetch()["organization_status"] == "ready"
     finally:
         agent.close()
@@ -204,19 +219,24 @@ async def test_annotation_builds_cross_chapter_parent_and_preserves_promised_chi
         second, second_program = execution_for(agent, db_session, 29)
         rejected = json.loads(
             await second_program.execute(
-                'event(el="future", title="未来", problem="能否知晓后事", summary="后事", '
-                'event_type="行动", status="ongoing", evidence=1, from_chapter_id=11, to_chapter_id=35)'
+                'write_event(items=[dict(el="future", title="未来", problem="能否知晓后事", summary="后事", '
+                'event_type="行动", status="ongoing", evidence=1, from_chapter_id=11, to_chapter_id=35)])'
             )
         )
         assert rejected.get("failed"), rejected
         code = (
             f"claim_case(case_id={old_case['case_id']!r})\n"
-            'event(el="journey", title="入门后的调查", problem="能否查明", summary="顾霜入门后继续调查", '
-            'event_type="行动", status="ongoing", evidence=1, from_chapter_id=11, to_chapter_id=29)\n'
+            'write_event(items=[dict(el="journey", title="入门后的调查", problem="能否查明", '
+            'summary="顾霜入门后继续调查", '
+            'event_type="行动", status="ongoing", evidence=1, from_chapter_id=11, to_chapter_id=29)])\n'
             'page = search_events(query="入门后的调查")\n'
             'parent = page["events"][0]["event_id"]\n'
-            f"read_event(node_id={child!r})\n"
-            f'write_link(source_id=parent, target_id={child!r}, kind="contains", reason="入门属于调查过程", evidence=1)'
+            'parent_tree = page["events"][0]["tree_id"]\n'
+            "read_event(node_id=parent)\n"
+            f"child_read = read_event(node_id={child!r})\n"
+            'child_tree = child_read["tree_id"]\n'
+            f'write_link(source_id=parent_tree, target_id=child_tree, kind="parent_child",'
+            f' reason="入门属于调查过程", evidence=1)'
             f"\nsubmit_case(case_id={old_case['case_id']!r})"
         )
         result = json.loads(await second_program.execute(code))
@@ -225,12 +245,18 @@ async def test_annotation_builds_cross_chapter_parent_and_preserves_promised_chi
         parent = db_session.scalar(select(CompleteEvent).where(CompleteEvent.producer_agent_id == second.invocation_id))
         assert (parent.from_chapter_id, parent.to_chapter_id) == (11, 29)
         query = EventTreeQuery(storage_for(db_session), run)
-        assert [item["event_id"] for item in query.fetch()["events"]] == [parent.event_id]
+        book = query.fetch()
+        assert {item["event_id"] for item in book["events"]} == {parent.event_id, child}
+        parent_tree = next(item["tree_id"] for item in book["queues"] if item["event_ids"] == [parent.event_id])
+        child_tree = next(item["tree_id"] for item in book["queues"] if item["event_ids"] == [child])
+        assert book["event_line_ids"] == []
+        assert {item["event_ids"][0] for item in book["queues"]} == {parent.event_id, child}
+        assert parent_tree != parent.event_id and child_tree != child
         assert query.detail(parent.event_id)["direct_children"][0]["event_id"] == child
         assert query.chapter_detail(11, child)["event_id"] == child
         cases = {item["case_id"]: item for item in agent.case_pool.search()}
         assert cases[old_case["case_id"]]["submitted"] is True
         assert len(cases) == 2
-        assert parent.event_id in next(item["description"] for item in cases.values() if not item["submitted"])
+        assert parent_tree in next(item["description"] for item in cases.values() if not item["submitted"])
     finally:
         agent.close()

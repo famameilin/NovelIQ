@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.tools import StructuredTool
-
 from src.agents.annotation.catalog import call_api_text, tool_call_entries
-from src.agents.annotation.program_contract import PROGRAM_TOOL_NAME
+from src.agents.program_runtime.contracts import PROGRAM_TOOL_NAME
+from src.agents.tools import Tool
 
 if TYPE_CHECKING:
-    from src.agents.annotation.program_runtime import RestrictedProgramRuntime
+    from src.agents.program_runtime.interpreter import RestrictedProgramRuntime
 
 
 def build_program_tool(
@@ -35,10 +34,11 @@ def build_program_tool(
             [
                 *(call_entries or []),
                 *tool_call_entries(runtime.tool_list, descriptions=tool_descriptions),
-            ]
+            ],
+            write_receipt_names=frozenset(name for name, *_ in (call_entries or [])),
         )
     )
-    return StructuredTool.from_function(
+    return Tool.from_function(
         coroutine=runtime.execute,
         name=PROGRAM_TOOL_NAME,
         description=description,

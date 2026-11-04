@@ -229,12 +229,15 @@ def _fetch_graph_snapshot(
     }
 
 
-def compute_graph_metrics(run_id: str, session: Storage) -> dict[str, Any]:
+def compute_graph_metrics(
+    run_id: str, session: Storage, *, snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """图结构指标读取入口：取 /graph 同一快照，算法在 src.metrics.aggregate.algorithms"""
-    try:
-        snapshot = _fetch_graph_snapshot(run_id, session)
-    except LookupError as exc:
-        return _graph_metrics_unavailable(run_id, f"graph_snapshot_unavailable: {exc}")
+    if snapshot is None:
+        try:
+            snapshot = _fetch_graph_snapshot(run_id, session)
+        except LookupError as exc:
+            return _graph_metrics_unavailable(run_id, f"graph_snapshot_unavailable: {exc}")
     try:
         metrics = compute_graph_structure_metrics(snapshot)
     except InsufficientGraphNodesError as exc:

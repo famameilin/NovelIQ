@@ -8,19 +8,16 @@ from typing import Any, Literal, Protocol, cast
 
 from pydantic import ValidationError
 
-from src.event_trees.models import (
-    BoundEvent,
-    EventParticipantInput,
-    ParticipantArg,
-)
+from src.agents.annotation.event_inputs import ParticipantArg
+from src.agents.annotation.output_models import BoundCharacterObservation
+from src.event_trees.models import BoundEvent, EventParticipantInput
 from src.event_trees.vocabulary import (
+    Confidence,
     EventParticipantRole,
 )
 from src.fact_graph.graph import FactGraph
 from src.fact_graph.inputs import ChapterParagraphInfo
-from src.fact_graph.outputs import BoundCharacterObservation
-from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
-from src.fact_graph.vocabulary import Confidence, EntityType
+from src.fact_graph.vocabulary import EntityType
 from src.storage import new_id
 
 from .entity_refs import ensure_entity_ref
@@ -28,13 +25,36 @@ from .errors import (
     AnnotationInvariantError,
     AnnotationStageRejection,
 )
+from .ir_contract import ROLE_NAMESPACE_SEP
 from .validation_errors import _translate_record_validation
+
+
+def _validate_el(el: str, *, record: str) -> None:
+    """用于校验事件引用 id：非空、不含斜杠，整串只作引用不表示层级"""
+    expected = "本执行内你自定的引用 id（如 e1、e2）；不写斜杠、不写 root、不表示父子层级"
+    if not el:
+        raise AnnotationStageRejection(
+            "事件 el 不能为空",
+            record=record,
+            field="el",
+            code="bad_el",
+            expected=expected,
+        )
+    if "/" in el:
+        raise AnnotationStageRejection(
+            f"事件 el 只作引用 id：{el}",
+            record=record,
+            field="el",
+            code="bad_el",
+            expected=expected,
+        )
 
 
 class EventBindingStateContext(Protocol):
     """只开放此工作状态需要的上下文和引用能力"""
 
     def _require_writable(self, record: str) -> None: ...
+    def require_domain(self, domain: str) -> None: ...
     def _visible_global_pairs(self) -> list[tuple[int, int]]: ...
 
     role: str
@@ -53,12 +73,12 @@ class EventBindingStateContext(Protocol):
     text_references: dict[str, Any]
     confirmed_complete_event_index: dict[str, dict[str, Any]]
     confirmed_source_event_ids: set[str]
-    confirmed_containment_parents: dict[str, str]
 
 
 @dataclass(slots=True)
 class EventBindingState:
     identifiers: dict[tuple, str] = field(default_factory=dict)
+    warnings: list[dict[str, Any]] = field(default_factory=list)
 
     def _identifier(self, *key) -> str:
         """同一局部键复用已分配的 UUIDv7，身份不是局部键的编码"""
@@ -67,39 +87,21 @@ class EventBindingState:
         return self.identifiers[key]
 
     authorized_event_ids: set[str] = field(default_factory=set)
-    event_trees: dict[str, dict[str, Any]] = field(default_factory=dict)
-    tree_key_index: dict[str, str] = field(default_factory=dict)
-    pending_child_events: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    event_ids_by_el: dict[str, str] = field(default_factory=dict)
     observation_by_record: dict[str, BoundCharacterObservation] = field(default_factory=dict)
     domain_payloads: dict[str, Any] = field(default_factory=dict)
     bound_payloads: dict[str, Any] = field(default_factory=dict)
     # 完整事件域：EventNode 继续保存过程，下列对象是完整事件及其关联的
     # 本 work 挂起记录（局部键 → 事件；随正式贡献冻结、保存、确认与回滚）
     complete_events: dict[str, dict[str, Any]] = field(default_factory=dict)
-    containments: dict[str, dict[str, Any]] = field(default_factory=dict)
+    queue_references: dict[str, dict[str, Any]] = field(default_factory=dict)
+    queues: dict[str, dict[str, Any]] = field(default_factory=dict)
     ownerships: dict[str, dict[str, Any]] = field(default_factory=dict)
     relations: list[dict[str, Any]] = field(default_factory=list)
 
-    def _tree_id(self, ctx: EventBindingStateContext, tree_key: str) -> str:
-        """树身份绑定章与局部键，重试和乱序执行都得到同一 id"""
-        return self._identifier(ctx.run_scope, ctx.work_id or ctx.current_chapter_id, "event_tree", tree_key)
-
-    def _node_id(self, ctx: EventBindingStateContext, tree_key: str, node_key: str) -> str:
-        """节点身份绑定局部键，避免重投递产生另一组事件 id"""
-        return self._identifier(ctx.run_scope, ctx.work_id or ctx.current_chapter_id, "event_node", tree_key, node_key)
-
-    def _tree_by_key(self, tree_key: str, record: str) -> dict[str, Any]:
-        """用于按章内局部键读取已落账的事件树，未建树时给出可自纠报错"""
-        tree = self.event_trees.get(self.tree_key_index.get(tree_key, ""))
-        if tree is None:
-            raise AnnotationStageRejection(
-                f"树键未建: {tree_key}",
-                record=record,
-                field="el",
-                code="unknown_tree",
-                expected='先用 write_event(isroot=true, el="t1") 建树，子事件再用 t1/节点键（同轮先根后子即可）',
-            )
-        return tree
+    def _node_id(self, ctx: EventBindingStateContext, el: str) -> str:
+        """事件身份绑定本执行引用 id，重投递得到同一 id"""
+        return self._identifier(ctx.run_scope, ctx.work_id or ctx.current_chapter_id, "event_node", el)
 
     def _bound_event(self, node_id: str) -> BoundEvent:
         """用于在已落账事件里按节点 id 取节点对象（参与者挂在它上面）"""
@@ -107,6 +109,17 @@ class EventBindingState:
             if event.node_id == node_id:
                 return event
         raise AnnotationInvariantError(f"事件节点未落账: {node_id}")
+
+    def local_el_of(self, node_id: str) -> str | None:
+        """用于按事件 id 反查本账本的引用 id（去掉角色命名空间前缀）"""
+        for el, identifier in self.event_ids_by_el.items():
+            if identifier == node_id:
+                return el.split(ROLE_NAMESPACE_SEP, 1)[-1]
+        return None
+
+    def local_els(self) -> list[str]:
+        "本执行已写事件的引用 id"
+        return sorted(el.split(ROLE_NAMESPACE_SEP, 1)[-1] for el in self.event_ids_by_el)
 
     def apply_event(
         self,
@@ -128,13 +141,13 @@ class EventBindingState:
         characters: list[ParticipantArg] | None = None,
     ) -> str:
         """登记不可变事件及独立章节范围，局部路径不生成包含关系"""
-        isroot = EL_PATH_SEP not in el
-        record = self._event_record(el, isroot=isroot)
+        self.warnings.clear()
+        cleaned = unicodedata.normalize("NFC", el).strip()
+        record = self._event_record(cleaned)
         ctx._require_writable(record)
-        tree_key, _, node_key = el.partition(EL_PATH_SEP)
-        node_key = node_key or RESERVED_ROOT_KEY
-        tree_id = self._tree_id(ctx, tree_key)
-        event_id = self._node_id(ctx, tree_key, node_key)
+        ctx.require_domain("event")
+        _validate_el(cleaned, record=record)
+        event_id = self._node_id(ctx, cleaned)
         existing = next((item for item in self.bound_payloads.get("events", []) if item.node_id == event_id), None)
         paragraph_id = self._event_evidence_paragraph_id(ctx, evidence, record=record, existing=existing)
         if isforeshadowing and confidence is None:
@@ -144,6 +157,14 @@ class EventBindingState:
                 field="confidence",
                 code="missing",
                 expected="high / medium / low",
+            )
+        if not isforeshadowing and confidence is not None:
+            raise AnnotationStageRejection(
+                "isforeshadowing=false 时不能提供 confidence",
+                record=record,
+                field="confidence",
+                code="invalid_combination",
+                expected="非伏笔事件不填 confidence；伏笔根须 isforeshadowing=true 且给 confidence",
             )
         annotation_event = BoundEvent(
             node_id=event_id,
@@ -158,7 +179,7 @@ class EventBindingState:
             status=cast(Literal["ongoing", "resolved"], status),
             progress=progress,
             description=summary,
-            tree_id=event_id,
+            tree_id=None,
             parent_node_id=None,
             cause_role="root",
             evidence_paragraph_id=paragraph_id,
@@ -179,42 +200,29 @@ class EventBindingState:
             events = list(self.bound_payloads.get("events", []))
             for other in events:
                 if other.evidence_paragraph_id == paragraph_id and other.summary == summary:
+                    location = self.local_el_of(other.node_id) or other.event_id
                     raise AnnotationStageRejection(
                         f"事件与 {other.event_id} 同源重复",
                         record=record,
                         field="summary",
                         code="duplicate_annotation_event",
-                        expected=f"引用已有 event_id={other.event_id}",
+                        expected=(
+                            f"该事实已写在 {location}；继续追加新节点请沿用该树键，"
+                            "要改写先 retract_structure 撤回该队列"
+                        ),
                     )
             events.append(annotation_event)
             self.bound_payloads["events"] = events
             self.domain_payloads["events"] = events
-        tree = self.event_trees.setdefault(
-            tree_id,
-            {
-                "tree_id": tree_id,
-                "chapter_id": ctx.current_chapter_id,
-                "chapter_order": ctx.current_chapter_order,
-                "nodes": {},
-                "isforeshadowing": False,
-            },
-        )
-        tree["nodes"][node_key] = event_id
-        tree["isforeshadowing"] = bool(tree["isforeshadowing"] or isforeshadowing)
-        # 路径保留为来源地址，不承诺先事件树根或由先后关系形成父级
-        tree.setdefault("root_node_id", event_id)
-        self.tree_key_index[tree_key] = tree_id
+        self.event_ids_by_el[cleaned] = event_id
         self.authorized_event_ids.add(event_id)
         if characters is not None:
             self._apply_participants(ctx, node_record=record, node_id=event_id, characters=characters)
         return record
 
-    def _event_record(self, el: str, *, isroot: bool) -> str:
-        """用于把模型面 el 归一成记录键（根记录 = 树键/root）"""
-        cleaned = unicodedata.normalize("NFC", el).strip()
-        if isroot or EL_PATH_SEP not in cleaned:
-            return f"{cleaned}/{RESERVED_ROOT_KEY}"
-        return cleaned
+    def _event_record(self, el: str) -> str:
+        """事件记录键就是本执行引用 id"""
+        return unicodedata.normalize("NFC", el).strip()
 
     def _event_evidence_paragraph_id(
         self, ctx: EventBindingStateContext, evidence: int | None, *, record: str, existing: BoundEvent | None = None
@@ -246,42 +254,6 @@ class EventBindingState:
             )
         return visible_to_global[evidence]
 
-    def _discard_resubmitted_pending(
-        self,
-        written: set[tuple[str, str]],
-        *,
-        exclude_tree: str | None = None,
-    ) -> None:
-        """只核销节点键与描述完全一致的重提项，保留未写入项及其原有到达顺序"""
-        for tree_key, items in list(self.pending_child_events.items()):
-            if tree_key == exclude_tree:
-                continue
-            remaining = [item for item in items if (str(item["node_key"]), str(item["description"])) not in written]
-            if remaining:
-                self.pending_child_events[tree_key] = remaining
-            else:
-                del self.pending_child_events[tree_key]
-
-    def _reconcile_pending_children(self) -> None:
-        """收尾前核对实际已落账的子节点，清理早前错误桶中已被正确重提的挂起项"""
-        event_by_id = {str(event.node_id): event for event in self.bound_payloads.get("events") or []}
-        written = {
-            (str(node_key), event_by_id[str(node_id)].description)
-            for tree in self.event_trees.values()
-            for node_key, node_id in tree.get("nodes", {}).items()
-            if node_key != RESERVED_ROOT_KEY and str(node_id) in event_by_id
-        }
-        self._discard_resubmitted_pending(written)
-
-    def _flush_pending_children(self, ctx: EventBindingStateContext, tree_key: str) -> None:
-        """事件可以独立提交，来源局部键不依赖另一项事件先创建"""
-        if self.pending_child_events:
-            raise ValueError("新事件契约不接受旧过程挂起记录")
-
-    def is_pending_child(self, record: str) -> bool:
-        """用于判断该生产记录键是否仍在暂挂子事件缓冲里（树根未建，调用期未落账）"""
-        return any(str(item.get("record")) == record for items in self.pending_child_events.values() for item in items)
-
     def _apply_participants(
         self,
         ctx: EventBindingStateContext,
@@ -292,7 +264,7 @@ class EventBindingState:
     ) -> None:
         """用于把 characters 数组整体替换到指定节点的参与者列表
 
-        按登记类型分流：character 三态可空、给了就派生人物动态状态
+        按登记类型分流：character 三态必填并派生人物动态状态
         （人物榜/Greimas/实体状态注入的唯一数据源），role 缺省按登记类型取默认；
         非 character 不接受三态；同一实体在数组内只允许出现一次；
         旧记录键下的动态状态先清后建（替换语义）。
@@ -348,26 +320,55 @@ class EventBindingState:
                     code="role_type_mismatch",
                     expected="地点角色用于 location 或 organization 型实体（机构兼场所统一登记 organization）",
                 )
-            has_observation = any(value is not None for value in (arg.narrative_role, arg.action, arg.emotion))
             if actual_type == EntityType.CHARACTER.value:
-                # 合同放开：三态字段可空落账（不再要求必填），缺省由消费方按空处理
-                if arg.action is not None:
-                    self._reject_duplicate_observation(participant_record, entity_name, arg.action)
-                # 三态全空不产动态状态行：同一人物在多个事件上无动作参与是放开后的
-                # 正常形态，全空行既无信息量又会在收尾校验撞 (character, action=None) 重复语义；
-                # 参与者本身仍随事件落账，只是不进 character_observations
-                if has_observation:
-                    self.observation_by_record[participant_record] = BoundCharacterObservation(
-                        character=entity_name,
-                        role_function=arg.narrative_role,
-                        action=arg.action,
-                        emotion=arg.emotion,
+                missing = [
+                    name
+                    for name, value in (
+                        ("narrative_role", arg.narrative_role),
+                        ("action", arg.action),
+                        ("emotion", arg.emotion),
                     )
+                    if value is None
+                ]
+                if missing:
+                    raise AnnotationStageRejection(
+                        f"character 参与者必须同时提供 narrative_role/action/emotion，缺失: {', '.join(missing)}",
+                        record=participant_record,
+                        field=missing[0],
+                        code="missing",
+                        expected="三字段必填、不自动填默认值",
+                    )
+                observation_action = cast(str, arg.action)
+                self._reject_duplicate_observation(participant_record, entity_name, observation_action)
+                self.observation_by_record[participant_record] = BoundCharacterObservation(
+                    character=entity_name,
+                    role_function=arg.narrative_role,
+                    action=observation_action,
+                    emotion=arg.emotion,
+                )
                 narrative_role, action, emotion = arg.narrative_role, arg.action, arg.emotion
             else:
                 # 三态只服务人物动态状态，item/organization/location 无消费者；模型常给
                 # 非角色实体补动作，硬拒会连带丢掉整组参与者（含同组合法 character 条目）并烧尽回合，
                 # 故改为忽略三态、保留名字、大类与 role
+                ignored = [
+                    name
+                    for name, value in (
+                        ("narrative_role", arg.narrative_role),
+                        ("action", arg.action),
+                        ("emotion", arg.emotion),
+                    )
+                    if value is not None
+                ]
+                if ignored:
+                    self.warnings.append(
+                        {
+                            "record": participant_record,
+                            "field": "characters",
+                            "ignored": ignored,
+                            "message": f"{entity_name} 不是 character，三态字段不落账",
+                        }
+                    )
                 narrative_role, action, emotion = None, None, None
             try:
                 participants.append(
@@ -419,20 +420,14 @@ class EventBindingState:
     # ------------------------------------------------------------------
 
     def _resolve_annotation_event_ref(self, ctx: EventBindingStateContext, ref: str, *, record: str, field: str) -> str:
-        """把本 work 局部键或已读取、已保存事件引用解析成 event_id"""
+        """把本执行引用 id 或已读取、已保存事件引用解析成 event_id"""
         cleaned = unicodedata.normalize("NFC", str(ref)).strip()
-        tree_key, _, node_key = cleaned.partition(EL_PATH_SEP)
-        active_tree_key = tree_key.strip()
-        if active_tree_key not in self.tree_key_index:
-            active_tree_key = f"{ctx.role}:{active_tree_key}"
-        tree = self.event_trees.get(self.tree_key_index.get(active_tree_key, ""))
-        if tree is not None:
-            if node_key.strip():
-                node_id = tree["nodes"].get(node_key.strip())
-                if node_id is not None:
-                    return str(node_id)
-            else:
-                return str(tree["root_node_id"])
+        prefix = f"{ctx.role}{ROLE_NAMESPACE_SEP}"
+        namespaced = cleaned if cleaned.startswith(prefix) else f"{prefix}{cleaned}"
+        for candidate in (namespaced, cleaned):
+            identifier = self.event_ids_by_el.get(candidate)
+            if identifier is not None:
+                return identifier
         if cleaned in self.authorized_event_ids:
             return cleaned
         if cleaned in ctx.confirmed_source_event_ids:
@@ -484,38 +479,6 @@ class EventBindingState:
         resolved_source = self._resolve_annotation_event_ref(ctx, source_id, record=record, field="source_id")
         resolved_target = self._resolve_annotation_event_ref(ctx, target_id, record=record, field="target_id")
         evidence_paragraph_id = self._event_evidence_paragraph_id(ctx, evidence, record=record)
-        if relation_type == "contains":
-            relation_id = self._identifier(ctx.run_scope, ctx.work_id, "contain", source_operation_id)
-            candidate = {
-                "link_id": relation_id,
-                "parent_event_id": resolved_source,
-                "child_event_id": resolved_target,
-                "reason": reason,
-                "source_operation_id": source_operation_id,
-                "record": record,
-                "evidence_paragraph_id": evidence_paragraph_id,
-            }
-            prior = self.containments.get(relation_id)
-            if prior is not None:
-                if prior != candidate:
-                    raise ValueError("同一包含操作的内容不可改写")
-                return record
-            parents = dict(ctx.confirmed_containment_parents)
-            for edge in self.containments.values():
-                parents[edge["child_event_id"]] = edge["parent_event_id"]
-            if resolved_target in parents:
-                raise ValueError("子事件已有其他直接父")
-            cursor = resolved_source
-            seen: set[str] = set()
-            while True:
-                if cursor == resolved_target or cursor in seen:
-                    raise ValueError("包含关系形成环")
-                seen.add(cursor)
-                if cursor not in parents:
-                    break
-                cursor = parents[cursor]
-            self.containments[relation_id] = candidate
-            return record
         for item in self.relations:
             if item["source_operation_id"] == source_operation_id:
                 same = (
@@ -556,30 +519,44 @@ class EventBindingState:
         )
         return record
 
+    def drop_queue(self, queue_id: str) -> tuple[list[str], list[str]]:
+        """用于撤回本 work 的队列草稿及其成员事件，返回成员节点 id 与被删节点的命名空间 el"""
+        content = self.queues.pop(queue_id, None)
+        if content is None:
+            return [], []
+        members = set(content["event_ids"])
+        events = [item for item in self.bound_payloads.get("events", []) if item.node_id not in members]
+        self.bound_payloads["events"] = events
+        self.domain_payloads["events"] = events
+        dropped: list[str] = []
+        for record, event_id in list(self.event_ids_by_el.items()):
+            if event_id not in members:
+                continue
+            for stale in [key for key in self.observation_by_record if key.startswith(f"{record}/participant/")]:
+                del self.observation_by_record[stale]
+            del self.event_ids_by_el[record]
+            self.authorized_event_ids.discard(event_id)
+            dropped.append(record)
+        self._rebuild_observation_payload()
+        return sorted(members), dropped
+
     def contribution_payloads(self) -> dict[str, dict[str, Any]]:
         """整理本 work 的候选关系；非标注产物在保存面明确拒绝"""
         return {
+            "queues": {key: dict(item) for key, item in self.queues.items()},
             "complete_events": {str(item["event_id"]): dict(item) for item in self.complete_events.values()},
-            "containments": {key: dict(item) for key, item in self.containments.items()},
+            "queue_references": {key: dict(item) for key, item in self.queue_references.items()},
             "ownerships": {key: dict(item) for key, item in self.ownerships.items()},
             "relations": {str(item["relation_id"]): dict(item) for item in self.relations},
         }
 
-    def event_content(self, ctx: EventBindingStateContext, *, el: str, isroot: bool) -> dict[str, Any]:
-        """回显事件业务字段和来源身份；内部来源容器不代表正式事件结构"""
+    def event_content(self, ctx: EventBindingStateContext, *, el: str) -> dict[str, Any]:
+        """回显事件业务字段和来源身份"""
         cleaned = unicodedata.normalize("NFC", el).strip()
-        tree_key, _, node_key = cleaned.partition(EL_PATH_SEP)
-        tree_key_clean = tree_key.strip()
-        tree = self.event_trees.get(self.tree_key_index.get(tree_key_clean, ""))
-        if tree is None:
-            if tree_key_clean in self.pending_child_events:
-                # 树键校验下沉：暂挂子事件的回显即挂起状态本身
-                return {
-                    "deferred": True,
-                    "note": f"树 {tree_key_clean} 尚未建根：该子事件已挂起，根建好后自动生效",
-                }
-            raise AnnotationInvariantError(f"write_event 回显需要账本内事件树: {tree_key}")
-        event = self._bound_event(str(tree["nodes"][node_key.strip() or RESERVED_ROOT_KEY]))
+        event_id = self.event_ids_by_el.get(cleaned)
+        if event_id is None:
+            raise AnnotationInvariantError(f"write_event 回显需要账本内事件: {el}")
+        event = self._bound_event(event_id)
         content: dict[str, Any] = {
             "event_id": event.event_id,
             "from": event.from_chapter_id,
@@ -603,41 +580,6 @@ class EventBindingState:
             for p in event.participants
         ]
         return content
-
-    def _event_tree_records(self) -> list[dict[str, Any]]:
-        """用于按建树顺序汇总每棵树的结构（节点键与父子关系，不含真实 id）"""
-        trees: list[dict[str, Any]] = []
-        for tree_key, tree_id in self.tree_key_index.items():
-            tree = self.event_trees.get(tree_id) or {}
-            children: list[dict[str, Any]] = []
-            for node_key, node_id in tree.get("nodes", {}).items():
-                if node_key == RESERVED_ROOT_KEY:
-                    continue
-                event = self._bound_event(str(node_id))
-                children.append(
-                    {
-                        "node_key": node_key,
-                        "type": str(event.cause_role),
-                        "parent_node_key": self._node_key_of(tree, str(event.parent_node_id or "")),
-                    }
-                )
-            root_event = self._bound_event(str(tree.get("root_node_id") or ""))
-            trees.append(
-                {
-                    "tree_key": tree_key,
-                    "description": root_event.description,
-                    "isforeshadowing": bool(tree.get("isforeshadowing")),
-                    "children": children,
-                }
-            )
-        return trees
-
-    def _node_key_of(self, tree: dict[str, Any], node_id: str) -> str | None:
-        """用于按节点 id 反查章内节点键（审计记录不暴露真实 id）"""
-        for node_key, candidate in tree.get("nodes", {}).items():
-            if str(candidate) == node_id:
-                return str(node_key)
-        return None
 
     def fact_views(self, ctx: EventBindingStateContext) -> dict[str, Any]:
         """只返回事件与人物观察事实，参与者身份由本状态绑定"""

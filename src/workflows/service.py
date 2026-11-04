@@ -229,11 +229,15 @@ class AnalysisService(StageOrchestratorMixin, TerminalStateFallbackMixin):
         run_id = None
         bus = None
         try:
+            claim_started = time.perf_counter()
             if self._prepare_task_execution_claim(task_id) != "claimed":
                 return
+            logger.info("resume timing: claim={:.3f}s", time.perf_counter() - claim_started)
+            init_started = time.perf_counter()
             novel_id, source_path, title, session, analysis_logger, run_id = (
                 self.env_initializer.init_analysis_environment(task_id, novel)
             )
+            logger.info("resume timing: init_env={:.3f}s", time.perf_counter() - init_started)
             bus = AnalysisEventBus(task_id, run_id=run_id, bus=self.bus)
             await bus.notify("task_state", {"status": "running"})
             skip_stages = skip_stages_builder(session, run_id)

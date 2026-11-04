@@ -5,15 +5,14 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from langchain_core.messages import AIMessage
 
-from src.agents.annotation.agent_graph import build_agent_graph
-from src.agents.annotation.agent_ir import AgentAnnotation
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.shared_tools import build_case_tools, build_finish_tool
 from src.agents.annotation.work_tools import build_work_tools
 from src.agents.diagnosis import domain as domain_module
-from src.agents.diagnosis.program_runtime import bind_finish_ledger
+from src.agents.diagnosis.session_loop import build_diagnosis_loop
+from src.agents.messages import AssistantMessage
+from src.case_pool.policy import CASE_SESSION_CLAIM_BATCH
 from src.fact_graph.graph import FactGraph
 from src.storage import new_id
 from tests.agents.test_diagnosis_agent import Replies, call, run_graph
@@ -22,7 +21,11 @@ from tests.support.annotation_work_tools import _work_tools_context
 
 @pytest.fixture
 def case_domain(monkeypatch):
-    draft = SimpleNamespace(lock=threading.RLock(), publication_lock=threading.RLock())
+    draft = SimpleNamespace(
+        lock=threading.RLock(),
+        publication_lock=threading.RLock(),
+        queue_graph=lambda **_kwargs: SimpleNamespace(),
+    )
     monkeypatch.setattr(domain_module, "EventOrganizationDraft", lambda *_: draft)
     monkeypatch.setattr(domain_module, "hydrate_draft_from_run", lambda *_: None)
     monkeypatch.setattr(domain_module.DiagnosisDomain, "_case_graph", lambda _: None)
@@ -37,7 +40,11 @@ def case_domain(monkeypatch):
     monkeypatch.setattr(domain_module, "build_diagnosis_tools", tools)
     domain = domain_module.DiagnosisDomain(
         session=SimpleNamespace(cases=SimpleNamespace(rows=lambda _: [])),
-        run_id=new_id(), novel_id=new_id(), agent_id=new_id(), novel_title=None, model_id="test",
+        run_id=new_id(),
+        novel_id=new_id(),
+        agent_id=new_id(),
+        novel_title=None,
+        model_id="test",
     )
     author = new_id()
     context = domain.build_session_context("case", author, None)
@@ -55,9 +62,29 @@ def test_multiple_claims_must_all_submit_then_session_may_end(case_domain):
     assert any(second in message for message in context.completion_check())
     domain.case_pool.submit(second, author)
     assert context.completion_check() == []
-    third = domain.case_pool.claim_random(author)["case_id"]
-    assert context.completion_check()
-    domain.case_pool.submit(third, author)
+    assert domain.case_counts()[0] > 0
+
+
+def test_case_session_needs_no_minimum_submissions(case_domain):
+    domain, author, context = case_domain
+    for index in range(20):
+        domain.case_pool.push("event", f"批量核查{index}", author)
+    first = domain.case_pool.claim_random(author)["case_id"]
+    domain.case_pool.submit(first, author)
+    assert len(domain.case_pool.submissions_for(author)) == 1
+    assert domain.case_counts()[0] > 0
+    assert context.completion_check() == []
+
+
+def test_case_session_claims_initial_batch(case_domain):
+    domain, owner, _ = case_domain
+    for index in range(20):
+        domain.case_pool.push("event", f"预领取核查{index}", owner)
+    author = new_id()
+    context = domain.build_session_context("case", author, None)
+    assert context.claimed_count() == CASE_SESSION_CLAIM_BATCH
+    for case_id in domain.case_pool.claims_for(author):
+        domain.case_pool.submit(case_id, author)
     assert context.completion_check() == []
 
 
@@ -76,44 +103,58 @@ def test_submit_without_changes_blocks_later_writes_and_preserves_case_reads(cas
     assert any(row["case_id"] == case["case_id"] and row["submitted"] for row in rows)
 
 
-@pytest.mark.parametrize("already_submitted", [False, True])
 @pytest.mark.parametrize("signal", ["finish", "text"])
-async def test_end_signals_refused_before_any_claim_accepted_after_submission(
-    case_domain, already_submitted, signal
-):
+async def test_end_signal_allowed_while_pool_still_has_cases(case_domain, signal):
     domain, author, context = case_domain
-    if already_submitted:
-        case = domain.case_pool.claim_random(author)
-        domain.case_pool.submit(case["case_id"], author)
-    pending = domain.case_counts()[0]
-    first = AIMessage(content="完成") if signal == "text" else AIMessage(content="", tool_calls=[call("finish")])
-    code = "\n".join([
-        'case = claim_random_case()\nsubmit_case(case_id=case["case_id"])'
-    ] * pending) + "\nfinish()"
-    model = Replies([first, AIMessage(content="", tool_calls=[call("execute_code", {"code": code})])])
-    ledger = AnnotationToolLedger(
-        run_scope=domain.run_id, current_chapter_id=0, current_chapter_text="", allow_future_context=False,
+    first = (
+        AssistantMessage(content="完成")
+        if signal == "text"
+        else AssistantMessage(content="", tool_calls=[call("finish")])
     )
-    graph = build_agent_graph(
-        model, context.program.build_tool(), bind_finish_ledger(context.program.tools["finish"], ledger),
-        ledger=ledger, agent=AgentAnnotation(role="case"), max_iterations=context.max_rounds,
+    model = Replies([first])
+    graph = build_diagnosis_loop(
+        model,
+        context.program,
+        max_iterations=context.max_rounds,
         completion_check=context.completion_check,
     )
     result = await run_graph(graph)
-    assert result["completion_ok"] and len(model.requests) == (1 if already_submitted else 2)
-    if already_submitted:
-        assert domain.case_counts() == (pending, 1)
-    else:
-        assert any("仍有可领案例" in str(message.content) for message in model.requests[1])
-        assert domain.case_counts() == (0, 3)
+    assert result["completion_ok"] and len(model.requests) == 1
+    assert domain.case_counts()[0] > 0
+    assert context.unsubmitted_count() == 0
+
+
+async def test_unsubmitted_claim_blocks_end_signal(case_domain):
+    domain, author, context = case_domain
+    case = domain.case_pool.claim_random(author)
+    code = f'submit_case(case_id="{case["case_id"]}")\nfinish()'
+    model = Replies(
+        [
+            AssistantMessage(content="", tool_calls=[call("finish")]),
+            AssistantMessage(content="", tool_calls=[call("execute_code", {"code": code})]),
+        ]
+    )
+    graph = build_diagnosis_loop(
+        model,
+        context.program,
+        max_iterations=context.max_rounds,
+        completion_check=context.completion_check,
+    )
+    result = await run_graph(graph)
+    assert result["completion_ok"] and len(model.requests) == 2
+    assert any("仍有未提交案例" in str(message.content) for message in model.requests[1])
     assert context.unsubmitted_count() == 0
 
 
 def test_annotation_finish_keeps_existing_validation_when_cases_are_unsubmitted():
     run_id = new_id()
     ledger = AnnotationToolLedger(
-        run_scope=run_id, current_chapter_id=1, current_chapter_text="原文", allow_future_context=False,
-        graph=FactGraph(run_scope=run_id), role="entity",
+        run_scope=run_id,
+        current_chapter_id=1,
+        current_chapter_text="原文",
+        allow_future_context=False,
+        graph=FactGraph(run_scope=run_id),
+        role="entity",
     )
     agent, execution, query = _work_tools_context(SimpleNamespace(), ledger)
     tools = {tool.name: tool for tool in build_work_tools(agent, execution, query)}

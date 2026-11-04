@@ -6,7 +6,8 @@ import pytest
 
 from src.agents.annotation.agent import AnnotationAgent
 from src.event_bus import EventBus
-from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
+from src.event_trees.organization import EventOrganizationDraft
+from src.event_trees.organization_models import OrganizationEvidence
 from tests.agents.test_complete_event_work import declaration_code, execution_for, save_and_confirm
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import add_diagnosis_context, report_case_anchor
@@ -15,11 +16,24 @@ from tests.support.storage_fixtures import storage_factory, storage_for
 
 @pytest.fixture
 async def draft_case(db_session):
-    novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻路并点灯。"])
+    novel_id, run_id = create_run_with_chunks(
+        db_session, texts=["顾霜寻找山门，点燃一盏灯，打开旧信，核对地图，通知同伴。"]
+    )
     agent = AnnotationAgent(EventBus(), run_id, storage_factory(lambda: db_session), novel_id=novel_id)
     execution, runtime = execution_for(agent, db_session, 1)
     result = json.loads(
-        await runtime.execute(declaration_code("search", "寻路") + "\n" + declaration_code("lamp", "点灯"))
+        await runtime.execute(
+            "\n".join(
+                declaration_code(key, title)
+                for key, title in (
+                    ("search", "寻找山门"),
+                    ("lamp", "点燃灯火"),
+                    ("letter", "打开旧信"),
+                    ("map", "核对地图"),
+                    ("notice", "通知同伴"),
+                )
+            )
+        )
     )
     assert not result.get("failed"), result
     await save_and_confirm(agent, db_session, execution)
@@ -31,6 +45,13 @@ async def draft_case(db_session):
     draft.producer_agent_id = agent_id
     yield draft
     agent.close()
+
+
+def tree_for(draft, event_id: str) -> str:
+    for item in draft.queues.values():
+        if event_id in item.event_ids:
+            return item.tree_id
+    return draft.queue_graph().event_tree[event_id]
 
 
 def event(draft, key, child_ids=(), **kwargs):
@@ -47,10 +68,14 @@ def event(draft, key, child_ids=(), **kwargs):
         evidence=[OrganizationEvidence(paragraph_id=0)],
         **kwargs,
     )
+    tree_id = draft.queue(
+        event_ids=[result["event_id"]], reason="独立行动", evidence=[OrganizationEvidence(paragraph_id=0)]
+    )
     for child in child_ids:
-        draft.contain(
-            parent_event_id=result["event_id"],
-            child_event_id=child,
+        child_tree = tree_for(draft, child)
+        draft.reference(
+            parent_tree_id=tree_id,
+            child_tree_id=child_tree,
             reason="整体行动包含子事件",
             evidence=[OrganizationEvidence(paragraph_id=0)],
         )
@@ -65,36 +90,41 @@ def test_event_key_replay_is_idempotent_and_content_cannot_change(draft_case):
         event(draft, "整体行动", progress="不可覆盖")
 
 
-def test_containment_cycle_and_single_parent_rejected(draft_case):
+def test_queue_cycle_rejected_and_multiple_parents_preserved(draft_case):
     draft = draft_case
     children = list(draft._all_events())
     parent = event(draft, "整体行动", children)
+    parent_tree = tree_for(draft, parent)
+    children_tree = tree_for(draft, children[0])
     with pytest.raises(ValueError, match="成环"):
-        draft.contain(
-            parent_event_id=children[0],
-            child_event_id=parent,
+        draft.reference(
+            parent_tree_id=children_tree,
+            child_tree_id=parent_tree,
             reason="环",
             evidence=[OrganizationEvidence(paragraph_id=0)],
         )
     other = event(draft, "另一个整体")
-    with pytest.raises(ValueError, match="直接父"):
-        draft.contain(
-            parent_event_id=other,
-            child_event_id=children[0],
-            reason="双父",
-            evidence=[OrganizationEvidence(paragraph_id=0)],
-        )
+    other_tree = tree_for(draft, other)
+    draft.reference(
+        parent_tree_id=other_tree,
+        child_tree_id=children_tree,
+        reason="双父",
+        evidence=[OrganizationEvidence(paragraph_id=0)],
+    )
+    assert draft.queue_graph().event_parents(children[0]) == [parent, other]
 
 
-def test_only_own_unsaved_containment_can_be_retracted(draft_case):
+def test_only_own_unsaved_reference_can_be_retracted(draft_case):
     draft = draft_case
     child = next(iter(draft._all_events()))
     parent = event(draft, "整体行动", [child])
+    parent_tree = tree_for(draft, parent)
+    child_tree = tree_for(draft, child)
     draft.retract(
-        kind="contain",
-        identifier=f"{parent}/{child}",
+        kind="reference",
+        identifier=f"{parent_tree}/{child_tree}",
         reason="重新判断",
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )
-    assert not draft.containments
+    assert not draft.queue_references
     assert parent in draft.events

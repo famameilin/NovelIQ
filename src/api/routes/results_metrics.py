@@ -27,7 +27,7 @@ router = APIRouter()
 
 
 @router.get("/{novel_id}/metrics/narrative-structure")
-async def get_narrative_structure(
+def get_narrative_structure(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -40,7 +40,7 @@ async def get_narrative_structure(
 
 
 @router.get("/{novel_id}/metrics/emotion-stats")
-async def get_emotion_stats(
+def get_emotion_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -53,7 +53,7 @@ async def get_emotion_stats(
 
 
 @router.get("/{novel_id}/metrics/character-stats")
-async def get_character_stats(
+def get_character_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -66,7 +66,7 @@ async def get_character_stats(
 
 
 @router.get("/{novel_id}/metrics/style-stats")
-async def get_style_stats(
+def get_style_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -79,7 +79,7 @@ async def get_style_stats(
 
 
 @router.get("/{novel_id}/metrics/global-stats", response_model=GlobalStats)
-async def get_global_stats(
+def get_global_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],

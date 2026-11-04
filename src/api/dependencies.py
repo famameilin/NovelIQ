@@ -8,7 +8,7 @@ API 统一依赖注入模块
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -17,6 +17,7 @@ from fastapi import Depends, Query
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.services.metrics_service import MetricsService, get_metrics_service
 from src.storage import Storage, get_storage_factory
+from src.storage.read_scope import read_projection_scope
 from src.workflows import dependencies as workflows_deps
 from src.workflows.novels import NovelService
 from src.workflows.tasks import TaskService
@@ -27,7 +28,6 @@ READABLE_RUN_STATUSES = ("completed",)
 def require_run_for_novel(session: Storage, novel_id: str, run_id: str) -> dict[str, Any]:
     """校验 run_id 存在且属于当前小说"""
     run_repo = session.runs
-    session.reads.api_dependencies_require_run_for_novel_1(run_id)
     run = run_repo.get_run(run_id)
     if not run:
         raise NovelNotFoundError(novel_id=novel_id, message=f"运行记录不存在: {run_id}")
@@ -100,14 +100,15 @@ def get_task_manager():
     return workflows_deps.get_task_manager()
 
 
-def get_db_session() -> Generator[Storage, None, None]:
-    """提供普通 Storage 入口，连接生命周期由各操作管理"""
+async def get_db_session() -> AsyncGenerator[Storage, None]:
+    """提供请求内投影复用，连接生命周期由各操作管理"""
     session_factory = get_storage_factory()
     session = session_factory()
-    yield session
+    with read_projection_scope():
+        yield session
 
 
-async def resolve_run_id(
+def resolve_run_id(
     task_id: Annotated[str, Query(..., description="分析任务ID（8位短UUID）")],
     task_service: Annotated[TaskService, Depends(get_task_service)],
 ) -> str:

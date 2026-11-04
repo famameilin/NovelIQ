@@ -4,52 +4,13 @@
 
 from __future__ import annotations
 
-import unicodedata
 from enum import StrEnum
 from typing import Literal, TypedDict
 
-
-class NarrativeFunction(StrEnum):
-    """本章在叙事结构中的功能，只能取一个
-
-    冲突=已展开的矛盾在本章有一次正面交锋；铺垫=本章埋下后文要用的条件、线索或关系；
-    转折=本章改变了人物的处境、立场或认知。按本章最主要的作用判。
-    """
-
-    CONFLICT = "冲突"
-    SETUP = "铺垫"
-    TURNING_POINT = "转折"
-
-
-# 伏笔唯一的可能性词表：根事件的 confidence 与伏笔树根的 strength 共用同一取值域
+# 伏笔唯一的可能性词表：伏笔埋设事件的 confidence 与伏笔强度共用同一取值域
 # （落库列名 payoff_likelihood）。
-class Confidence(StrEnum):
-    """伏笔的可能性档位
-
-    high=正文有明确指向该伏笔的表述；medium=有较明显的暗示但没有点明；
-    low=只是可疑的苗头，是否成立取决于后文。
-    """
-
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
 
 
-class RoleFunction(StrEnum):
-    """人物在当前叙事动作里承担的功能
-
-    主体=发起动作的人；客体=动作的承受者；发送者/接收者=信息传递的两端；
-    帮助者=协助主体的第三方；反对者=阻碍主体的第三方；见证者=在场但没有介入的人。
-    按这个动作里的作用判，不按全章戏份判。
-    """
-
-    SUBJECT = "主体"
-    OBJECT = "客体"
-    SENDER = "发送者"
-    RECEIVER = "接收者"
-    HELPER = "帮助者"
-    OPPONENT = "反对者"
-    WITNESS = "见证者"
 
 
 class DialogueVerdict(StrEnum):
@@ -108,59 +69,10 @@ _TONE_CHINESE_WORDS = frozenset(member.value for member in Tone)
 
 # tone 严格口径：枚举外的值一律拒绝、不映射不放行；枚举含「其他」兜底，
 # 拒绝回执必须给出全词表与「其他」指引，让模型一次就能自纠。
-ROLE_FUNCTION_ALIASES: dict[str, str] = {
-    "主角": "主体",
-    "发起者": "主体",
-    "发起人": "主体",
-    "施动者": "主体",
-    "承受者": "客体",
-    "受动者": "客体",
-    "接受者": "接收者",
-    "协助者": "帮助者",
-    "支持者": "帮助者",
-    "阻碍者": "反对者",
-    "对抗者": "反对者",
-    "旁观者": "见证者",
-    "目击者": "见证者",
-    "在场者": "见证者",
-}
 
 
-def normalize_role_function(value: object) -> RoleFunction | None:
-    """用于把模型写的叙事功能词归一到 RoleFunction（缺省/未收录不拒绝）
-
-    同义词按 ROLE_FUNCTION_ALIASES 映射；未收录值收敛为主体并留给审计
-    （原始入参始终在 agent_toolcall.request_args 可查）。地点等事件专属角色词
-    不在此处理——那是字段误用，仍由调用方按原口径拒绝。
-    """
-    if value is None:
-        return None
-    if isinstance(value, RoleFunction):
-        return value
-    if not isinstance(value, str):
-        return None
-    text = unicodedata.normalize("NFC", value).strip()
-    if not text:
-        return None
-    text = ROLE_FUNCTION_ALIASES.get(text, text)
-    try:
-        return RoleFunction(text)
-    except ValueError:
-        return RoleFunction.SUBJECT
 
 
-def clamp_emotion_score(value: object) -> int | None:
-    """用于把模型写的情绪分值收敛到 -2..2（越界按边界钳制，非数值记空）"""
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, str):
-        try:
-            value = int(value.strip())
-        except ValueError:
-            return None
-    if not isinstance(value, (int, float)):
-        return None
-    return max(-2, min(2, round(value)))
 
 
 class RelationChangeKind(StrEnum):

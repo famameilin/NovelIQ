@@ -10,10 +10,8 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_core.utils.function_calling import convert_to_openai_tool
-
-from src.model_pool.usage import extract_agent_token_usage
+from src.agents.messages import AssistantMessage, Message, SystemMessage, UserMessage
+from src.audit.usage import extract_agent_token_usage
 from src.utils.token_counter import count_tokens
 
 # 请求 prompt 达到上下文容量的该比例即压缩
@@ -71,7 +69,7 @@ def message_tokens(message: Any) -> int:
     return count_tokens("\n".join(parts))
 
 
-def measure_context_tokens(messages: Sequence[BaseMessage], *, tool_schema_tokens: int = 0) -> int:
+def measure_context_tokens(messages: Sequence[Message], *, tool_schema_tokens: int = 0) -> int:
     """估算下一次请求的 prompt token；优先用最近一次 Provider 实际输入量作基数
 
     AI 回复上的 prompt_tokens 覆盖该回复之前的完整请求；该回复自身与其后追加的
@@ -79,7 +77,7 @@ def measure_context_tokens(messages: Sequence[BaseMessage], *, tool_schema_token
     """
     for index in range(len(messages) - 1, -1, -1):
         message = messages[index]
-        if not isinstance(message, AIMessage):
+        if not isinstance(message, AssistantMessage):
             continue
         usage = extract_agent_token_usage(message)
         if usage is None or usage.prompt_tokens <= 0:
@@ -88,16 +86,16 @@ def measure_context_tokens(messages: Sequence[BaseMessage], *, tool_schema_token
     return max(0, tool_schema_tokens) + sum(message_tokens(item) for item in messages)
 
 
-def split_prefix(messages: Sequence[BaseMessage]) -> tuple[list[BaseMessage], list[list[BaseMessage]]]:
+def split_prefix(messages: Sequence[Message]) -> tuple[list[Message], list[list[Message]]]:
     """拆成不可压缩前缀与 AI 消息开头的完整工具轮
 
     前缀是开头连续的非 AI 消息（系统提示与初始任务）；每个块从一条 AI 消息开始，
-    包含其后的全部 ToolMessage/HumanMessage。
+    包含其后的全部 ToolMessage/UserMessage。
     """
-    prefix: list[BaseMessage] = []
-    blocks: list[list[BaseMessage]] = []
+    prefix: list[Message] = []
+    blocks: list[list[Message]] = []
     for message in messages:
-        if isinstance(message, AIMessage):
+        if isinstance(message, AssistantMessage):
             blocks.append([message])
         elif blocks:
             blocks[-1].append(message)
@@ -107,11 +105,11 @@ def split_prefix(messages: Sequence[BaseMessage]) -> tuple[list[BaseMessage], li
 
 
 def build_visible_messages(
-    messages: Sequence[BaseMessage],
+    messages: Sequence[Message],
     *,
     summary: str | None,
     shadowed_count: int,
-) -> list[BaseMessage]:
+) -> list[Message]:
     """构造模型可见面：前缀 + 摘要 + 未遮蔽消息
 
     shadowed_count 从首个 AI 消息起按消息条数计数；调用方只累计整块条数。
@@ -120,16 +118,16 @@ def build_visible_messages(
     start = min(len(messages), len(prefix) + max(0, int(shadowed_count)))
     visible = list(prefix)
     if summary:
-        visible.append(HumanMessage(content=summary))
+        visible.append(UserMessage(content=summary))
     visible.extend(messages[start:])
     return visible
 
 
 def select_compaction(
-    messages: Sequence[BaseMessage],
+    messages: Sequence[Message],
     *,
     retain_tokens: int,
-) -> tuple[list[BaseMessage], list[BaseMessage]] | None:
+) -> tuple[list[Message], list[Message]] | None:
     """从最新块向前保留 retain_tokens，返回（被遮蔽消息，保留消息）
 
     至少保留最新块；块不足两个或没有可遮蔽内容时返回 None。
@@ -152,25 +150,25 @@ def select_compaction(
 
 
 def build_summary_messages(
-    prefix: Sequence[BaseMessage],
+    prefix: Sequence[Message],
     *,
     previous_summary: str | None,
-    shadowed: Sequence[BaseMessage],
-) -> list[BaseMessage]:
+    shadowed: Sequence[Message],
+) -> list[Message]:
     """构造摘要请求：系统头 + 初始任务 + 上一份摘要 + 被遮蔽历史 + 压缩指令"""
     system_head = next((message for message in prefix if isinstance(message, SystemMessage)), None)
-    initial_task = next((message for message in prefix if isinstance(message, HumanMessage)), None)
-    messages: list[BaseMessage] = []
+    initial_task = next((message for message in prefix if isinstance(message, UserMessage)), None)
+    messages: list[Message] = []
     if system_head is not None:
         messages.append(system_head)
     if initial_task is not None:
         messages.append(initial_task)
     if previous_summary:
-        messages.append(HumanMessage(content=previous_summary))
+        messages.append(UserMessage(content=previous_summary))
     messages.extend(shadowed)
-    if not messages or not isinstance(messages[0], (SystemMessage, HumanMessage)):
-        messages.insert(0, HumanMessage(content=_SYNTHETIC_USER_PREFIX))
-    messages.append(HumanMessage(content=COMPACTION_INSTRUCTION))
+    if not messages or not isinstance(messages[0], (SystemMessage, UserMessage)):
+        messages.insert(0, UserMessage(content=_SYNTHETIC_USER_PREFIX))
+    messages.append(UserMessage(content=COMPACTION_INSTRUCTION))
     return messages
 
 
@@ -179,9 +177,9 @@ def frame_summary(text: str) -> str:
     return f"{CHECKPOINT_PREAMBLE}\n<compacted-summary>\n{text.strip()}\n</compacted-summary>"
 
 
-def build_fallback_note(shadowed: Sequence[BaseMessage]) -> str:
+def build_fallback_note(shadowed: Sequence[Message]) -> str:
     """摘要不可用时的确定性说明；只报移除范围，不伪造摘要内容"""
-    turns = sum(1 for message in shadowed if isinstance(message, AIMessage))
+    turns = sum(1 for message in shadowed if isinstance(message, AssistantMessage))
     return (
         f"【上下文压缩】本次请求已移除最早的 {turns} 轮工具交互（共 {len(shadowed)} 条消息）；"
         "程序运行状态与已写入数据仍然保留。"
@@ -209,12 +207,10 @@ def tool_schema_tokens(tools: Sequence[Any]) -> int:
     if not tools:
         return 0
     try:
-        payload = [convert_to_openai_tool(tool) for tool in tools]
+        payload = [tool.provider_schema() for tool in tools]
     except (AttributeError, TypeError, ValueError):
         return 0
-    return count_tokens(
-        json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
-    )
+    return count_tokens(json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str))
 
 
 __all__ = [

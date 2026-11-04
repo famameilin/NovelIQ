@@ -12,7 +12,9 @@ from src.api.services.results_queries.paragraphs import (
     _fetch_paragraph_curves,
 )
 from src.api.services.results_queries.topics import _fetch_topics
+from src.metrics.queries.annotations import fetch_chapter_annotations_full
 from src.storage import Storage
+from src.text_processing.tokenize import reuse_token_blocks
 
 _DASHBOARD_WINDOW_PARAGRAPHS = 20
 
@@ -27,25 +29,34 @@ def build_dashboard_tab(
     """
     仪表盘 tab：四组聚合指标 + 章节汇总 + 主题词 + 诊断 + 情绪趋势一次拉取
 
-    聚合指标复用 MetricsService 缓存（300s）；情绪趋势固定全书窗口 20 段
-    （与原 NovelDetailPage 并发请求的参数一致）。
+    情绪趋势固定全书窗口 20 段
     """
     paragraph_repo = session.paragraphs
-    annotation_repo = session
+    annotation_rows = fetch_chapter_annotations_full(session, run_id, include_details=False)
 
-    narrative_structure, emotion_stats, character_stats, style_stats = metrics_service.get_aggregate_result(
-        run_id, session
-    )
+    with reuse_token_blocks():
+        narrative_structure, emotion_stats, character_stats, style_stats = metrics_service.compute_aggregate_result(
+            run_id, session, annotation_rows=annotation_rows
+        )
+        paragraph_rows = paragraph_repo.fetch_paragraph_rows(run_id)
+        metric_rows = paragraph_repo.fetch_paragraph_metrics(run_id)
+        chapter_metrics = _fetch_chapter_metrics(
+            run_id, paragraph_repo, session, run, paragraph_rows=paragraph_rows, metric_rows=metric_rows,
+            annotation_rows=annotation_rows,
+        )
     return {
         "run_id": run_id,
         "narrative_structure": narrative_structure,
         "emotion_stats": emotion_stats,
         "character_stats": character_stats,
         "style_stats": style_stats,
-        "chapter_metrics": _fetch_chapter_metrics(run_id, paragraph_repo, annotation_repo, run),
+        "chapter_metrics": chapter_metrics,
         "topics": _fetch_topics(run_id, paragraph_repo),
         "diagnosis": _fetch_diagnosis(run_id, novel_id, session),
-        "emotion_trend": _fetch_emotion_trend(run_id, paragraph_repo, None, None, _DASHBOARD_WINDOW_PARAGRAPHS),
+        "emotion_trend": _fetch_emotion_trend(
+            run_id, paragraph_repo, None, None, _DASHBOARD_WINDOW_PARAGRAPHS,
+            paragraph_rows=paragraph_rows, metric_rows=metric_rows,
+        ),
     }
 
 

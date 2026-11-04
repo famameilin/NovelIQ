@@ -26,7 +26,7 @@ class EventNodeResponse(BaseModel):
     causal_event_refs: list[str] = Field(default_factory=list)
     tree_id: str = Field(min_length=1)
     cause_role: Literal["root", "main", "secondary"]
-    parent_event_id: str | None = None
+    parent_event_ids: list[str] = Field(default_factory=list)
     evidence_scope: Literal["chapter", "paragraph"]
 
 
@@ -49,11 +49,42 @@ class EventTimelineCausalEdge(EventEdgeResponse):
     expired_at: datetime | None = None
 
 
-class ForeshadowingEdgeResponse(BaseModel):
-    """伏笔边（伏笔即事件树）"""
+class EventLocatorResponse(BaseModel):
+    """事件在原生队列和各事件线中的读取位置"""
 
-    root_event_id: str
+    event_id: str
+    title: str
     tree_id: str
+    event_line_ids: list[str]
+    evidence_position: int | None
+
+
+class ForeshadowingActionResponse(BaseModel):
+    """伏笔动作的事件端点与独立原文证据"""
+
+    action_id: str
+    action_type: Literal["setup", "reinforce", "payoff"]
+    endpoint_kind: Literal["event"]
+    source_event_id: str
+    target_event_id: str | None
+    source_locator: EventLocatorResponse
+    target_locator: EventLocatorResponse | None
+    chapter_id: int = Field(gt=0)
+    chapter_order: int = Field(gt=0)
+    source_operation_id: str
+    operation_order: int = Field(ge=0)
+    evidence: list[dict[str, Any]] = Field(min_length=1)
+    evidence_scope: Literal["chapter", "paragraph"]
+
+
+class ForeshadowingEdgeResponse(BaseModel):
+    """章节阅读边界内的伏笔跟踪轨迹"""
+
+    source_event_id: str
+    source_locator: EventLocatorResponse
+    target_event_id: str | None
+    target_locator: EventLocatorResponse | None
+    actions: list[ForeshadowingActionResponse]
     payoff_event_id: str | None = None
     first_chapter_id: int = Field(gt=0)
     last_chapter_id: int = Field(gt=0)
@@ -73,7 +104,7 @@ class EventTreeResponse(BaseModel):
     """一棵事件树（一棵树 = 一个完整事件）"""
 
     tree_id: str
-    root_event_id: str
+    entry_event_id: str
     main_chain: list[str]
     secondary_groups: list[EventSecondaryGroupResponse] = Field(default_factory=list)
     chapter_ids: list[int]
@@ -131,7 +162,7 @@ class EventTimelineNode(BaseModel):
     """事件时间轴节点（一树一节点）"""
 
     tree_id: str = Field(min_length=1)
-    root_event_id: str
+    entry_event_id: str
     title: str
     summary: str
     anchor_chapter_id: int = Field(gt=0)

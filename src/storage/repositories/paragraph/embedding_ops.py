@@ -6,11 +6,15 @@ from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+import numpy as np
+from loguru import logger
+from pgvector.psycopg import register_vector
 from pgvector.sqlalchemy import HALFVEC
-from sqlalchemy import cast, delete, func, insert, select
+from sqlalchemy import cast, delete, func, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
+from src.storage.ids import new_id
 from src.storage.models import Chapter, Paragraph, ParagraphFeature
 from src.storage.records.embedding_ops import ParagraphEmbeddingRow, SimilarParagraphRow
 from src.storage.repositories.paragraph.reader import join_chapter_body, paragraph_projection
@@ -18,6 +22,9 @@ from src.storage.vector_schema import hnsw_index_uses_halfvec
 
 #: 语义向量 feature_code（paragraph_features 封闭计算种类）
 FEATURE_SEMANTIC_VECTOR = "semantic_vector"
+
+#: 单次 COPY 写入行数上限：一次 COPY 整批向量会让协议缓冲随段落数线性膨胀
+_COPY_CHUNK_ROWS = 5000
 
 
 def insert_paragraph_embeddings(
@@ -50,20 +57,35 @@ def insert_paragraph_embeddings(
             f"无法登记运行模型合同 run_id={run_id}"
         )
     created_at = datetime.now(UTC).replace(tzinfo=None)
-    session.execute(
-        insert(ParagraphFeature),
-        [
-            {
-                "run_id": run_id,
-                "paragraph_id": row.paragraph_id,
-                "feature_code": FEATURE_SEMANTIC_VECTOR,
-                "vector_value": row.embedding_vector,
-                "created_at": created_at,
-            }
-            for row in materialized
-        ],
-    )
+    for start in range(0, len(materialized), _COPY_CHUNK_ROWS):
+        _copy_vector_rows(session, run_id, materialized[start : start + _COPY_CHUNK_ROWS], created_at)
+    logger.debug("copied {} paragraph embedding rows (run_id={})", len(materialized), run_id)
     return len(materialized)
+
+
+def _copy_vector_rows(
+    session: Session, run_id: str, rows: list[ParagraphEmbeddingRow], created_at: datetime
+) -> None:
+    "COPY 批量写入向量行；向量文本由服务端解析，主键在写入前生成"
+    driver_connection = session.connection().connection.driver_connection
+    if driver_connection is None:
+        raise RuntimeError("paragraph embedding 写入失败：数据库连接不可用")
+    register_vector(driver_connection)
+    with driver_connection.cursor() as cursor:
+        with cursor.copy(
+            "COPY paragraph_features (id, run_id, paragraph_id, feature_code, vector_value, created_at) FROM STDIN"
+        ) as copy:
+            for row in rows:
+                copy.write_row(
+                    (
+                        new_id(),
+                        run_id,
+                        row.paragraph_id,
+                        FEATURE_SEMANTIC_VECTOR,
+                        np.asarray(row.embedding_vector, dtype=np.float32),
+                        created_at,
+                    )
+                )
 
 
 def search_similar_paragraphs(

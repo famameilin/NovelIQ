@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
-from langchain_core.tools import tool
 from pydantic import Field
 
+from src.agents.tools import tool
 from src.fact_graph.vocabulary import EntityType
 from src.storage.query_terms import query_search_terms, term_matches
 
@@ -18,7 +19,15 @@ RelationLimit = Annotated[int, Field(ge=1, le=20)]
 # 紧凑索引只回一行式字段，单页体量小，允许到 100 条（详情预览仍限 20，由工具内校验）
 EventSearchLimit = Annotated[int, Field(ge=1, le=100)]
 SearchOffset = Annotated[int, Field(ge=0)]
-ObjectKind = Literal["event", "arc", "outcome"]
+ObjectKind = Literal["event", "outcome"]
+
+#: 单次查询拿去匹配相似段落的条数上限
+SEMANTIC_PARAGRAPH_LIMIT = 40
+
+
+def _normalized_name(value: str) -> str:
+    "实体名等价比较使用 NFC、去首尾空白并忽略大小写"
+    return unicodedata.normalize("NFC", value).strip().casefold()
 
 
 def _search_page(values: list[Any], *, offset: int, limit: int, budget: int) -> tuple[list[Any], int | None]:
@@ -46,8 +55,16 @@ def build_state_read_tools(
     case_reads: list[Any],
     resolve_event: Callable[[str], str],
     organization: Any = None,
+    semantic: Any = None,
 ) -> list[Any]:
     """同一份分页、授权及实体读取实现；数据来源由真实执行上下文装配"""
+
+    def semantic_paragraphs(query: str) -> tuple[list[int] | None, bool]:
+        "语义命中段落身份；第二个值为是否尝试过但不可用"
+        if semantic is None or not query.strip():
+            return None, False
+        identifiers = semantic.paragraph_ids(query, limit=SEMANTIC_PARAGRAPH_LIMIT)
+        return identifiers, identifiers is None
 
     @tool
     def search_events(
@@ -61,9 +78,13 @@ def build_state_read_tools(
         compact: bool = False,
     ) -> str:
         """按条数分页读取简洁索引，除末页外返回 limit 条；详情用 read_event，续页用 next_offset；
-        isforeshadowing=True 只返回伏笔根事件（False 只返回非伏笔根），不填不过滤；
+        isforeshadowing=True 只返回伏笔埋设事件（False 只返回非伏笔埋设事件），不填不过滤；
         compact=True 读取紧凑索引（事件附章号与伏笔标记，诊断对象返回简洁索引行），每页最多 100 条；
-        compact=False 的详情预览每页最多 20 条"""
+        compact=False 的详情预览每页最多 20 条；
+        query 按空白/标点拆分词项、任一命中即召回（% 匹配任意长度、_ 匹配单字符），
+        同时按语义相近原文追加召回；语义检索不可用时只按字面召回，回执带 semantic=unavailable；
+        query 非空或给 tree_id 时回执另带 trees：命中的事件树（含无成员的空树），
+        每行给 tree_id、标题、成员数、起止章、parent_tree_ids 与 child_tree_ids"""
         if kind != "event":
             if organization is None:
                 raise ValueError(f"本执行不提供 kind={kind} 的诊断对象")
@@ -86,14 +107,24 @@ def build_state_read_tools(
             )
         if not compact and limit > 20:
             raise ValueError(f"limit={limit} 越界：详情预览每页最多 20 条，精简一页请用 compact=True（最多 100 条）")
+        semantic_ids, degraded = semantic_paragraphs(query)
         if callable(getattr(type(events), "search_page", None)):
             identifiers, reads = events.search_page(
-                query, chapter_id=chapter_id, tree_id=tree_id, isforeshadowing=isforeshadowing,
-                offset=offset, limit=limit,
+                query,
+                chapter_id=chapter_id,
+                tree_id=tree_id,
+                isforeshadowing=isforeshadowing,
+                offset=offset,
+                limit=limit,
+                semantic_paragraph_ids=semantic_ids,
             )
         else:
             identifiers = events.search_ids(
-                query, chapter_id=chapter_id, tree_id=tree_id, isforeshadowing=isforeshadowing,
+                query,
+                chapter_id=chapter_id,
+                tree_id=tree_id,
+                isforeshadowing=isforeshadowing,
+                semantic_paragraph_ids=semantic_ids,
             )
             reads = [events.read(identifier) for identifier in identifiers[offset : offset + limit]]
         if compact:
@@ -103,11 +134,7 @@ def build_state_read_tools(
                     "from": value["content"].get("from", value["content"].get("from_chapter_id")),
                     "to": value["content"].get("to", value["content"].get("to_chapter_id")),
                     "chapter_id": value["chapter_id"],
-                    **{
-                        key: value[key]
-                        for key in ("parent_event_id", "top_level_event_id", "is_top_level", "ancestor_event_ids")
-                        if key in value
-                    },
+                    "tree_id": value.get("tree_id"),
                     "saved": value["saved"],
                     "is_foreshadow_setup": value["content"]["is_foreshadow_setup"],
                     "title": value["content"]["title"][:60],
@@ -123,11 +150,7 @@ def build_state_read_tools(
                     "from": value["content"].get("from", value["content"].get("from_chapter_id")),
                     "to": value["content"].get("to", value["content"].get("to_chapter_id")),
                     "chapter_id": value["chapter_id"],
-                    **{
-                        key: value[key]
-                        for key in ("parent_event_id", "top_level_event_id", "is_top_level", "ancestor_event_ids")
-                        if key in value
-                    },
+                    "tree_id": value.get("tree_id"),
                     "saved": value["saved"],
                     "is_foreshadow_setup": value["content"]["is_foreshadow_setup"],
                     "evidence_paragraph_id": value["content"]["evidence_paragraph_id"],
@@ -148,11 +171,19 @@ def build_state_read_tools(
             event_reads[value["node_id"]] = value
         case_reads.extend(page)
         next_offset = offset + len(page)
+        tree_search = getattr(events, "search_trees", None)
+        trees = (
+            tree_search(query, chapter_id=chapter_id, tree_id=tree_id, limit=10)
+            if callable(tree_search) and (query.strip() or tree_id is not None)
+            else None
+        )
         return json.dumps(
             {
                 "events": page,
                 "total": len(identifiers),
                 "next_offset": next_offset if next_offset < len(identifiers) else None,
+                **({"trees": trees} if trees is not None else {}),
+                **({"semantic": "unavailable"} if degraded else {}),
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -160,7 +191,7 @@ def build_state_read_tools(
 
     @tool
     def read_event(node_id: str, kind: ObjectKind = "event") -> str:
-        """按实际事件身份读取详情，叙事线与结果使用各自 kind"""
+        """按实际事件身份读取详情，结果使用 kind=outcome"""
         if kind != "event":
             if organization is None:
                 raise ValueError(f"本执行不提供 kind={kind} 的诊断对象")
@@ -184,15 +215,32 @@ def build_state_read_tools(
         """分页预览实体和命中端点的关系，两组续页与条数独立，read_entity 读取完整属性
 
         query 按空白/标点拆分词项、任一命中实体名即召回（% 匹配任意长度、_ 匹配单字符），
-        不填不按词项过滤。
+        同时按语义相近原文参与者的名字追加召回；语义检索不可用时只按字面召回，
+        回执带 semantic=unavailable；不填不按词项过滤。
         """
         terms = query_search_terms(query)
+        semantic_ids, degraded = semantic_paragraphs(query)
+        semantic_names: list[str] = []
+        if semantic_ids:
+            participant_names = getattr(events, "participant_names_for_paragraphs", None)
+            if callable(participant_names):
+                semantic_names = participant_names(semantic_ids)
+            else:
+                degraded = True
+        wanted_names = {_normalized_name(name) for name in semantic_names}
         matching = {
             key
             for key, name in graph.entity_names.items()
             if (not terms or any(term_matches(term, name) for term in terms))
             and (entity_type is None or str(graph.entity_types[key]) == entity_type)
         }
+        if wanted_names:
+            matching |= {
+                key
+                for key, name in graph.entity_names.items()
+                if _normalized_name(name) in wanted_names
+                and (entity_type is None or str(graph.entity_types[key]) == entity_type)
+            }
         values = [
             {"id": graph.entity_id_for_key(key), "name": name[:160], "entity_type": graph.entity_types[key]}
             for key, name in sorted(graph.entity_names.items())
@@ -222,6 +270,7 @@ def build_state_read_tools(
                 "total_relations": len(relations),
                 "next_offset": next_offset,
                 "next_relation_offset": next_relation_offset,
+                **({"semantic": "unavailable"} if degraded else {}),
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -265,6 +314,9 @@ def build_case_tools(
     *,
     on_claim: Callable[[], None] | None = None,
     case_view: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    before_submit: Callable[[str], None] | None = None,
+    semantic: Any = None,
+    semantic_tree_ids: Callable[[list[int]], list[str]] | None = None,
 ) -> list[Any]:
     """案例登记、独占领取、提交与检索，作者使用实际执行身份"""
 
@@ -301,17 +353,55 @@ def build_case_tools(
 
     @tool
     def submit_case(case_id: str) -> str:
-        """提交自己持有的案例并返回最多十件未预占候选，允许核查后无需修改；正式保存后持久化完成"""
+        """提交自己持有的案例并返回最多十件未预占候选；event 案例须先建立父子连接"""
+        if before_submit is not None:
+            before_submit(case_id)
         return json.dumps(pool.submit(case_id, author), ensure_ascii=False)
 
     @tool
-    def search_cases(case_type: str | None = None, unresolved_only: bool = False) -> str:
-        """读取当前 run 的案例 ID、说明及 claimed/submitted；unresolved_only=true 只返回未提交案例"""
+    def search_cases(
+        case_type: str | None = None,
+        unresolved_only: bool = False,
+        claimed_only: bool = False,
+        query: str = "",
+    ) -> str:
+        """读取当前 run 的案例 ID、说明及 claimed/submitted；unresolved_only=true 只返回未提交案例，
+        claimed_only=true 只返回本执行已领取且未提交的案例，用于一次取回整批待办；
+        query 按空白/标点拆分词项、任一命中案例说明即召回（% 匹配任意长度、_ 匹配单字符），
+        同时按语义相近原文所属事件树追加召回；query 非空时返回 {cases, semantic}，
+        语义检索不可用时只按字面召回并给出 semantic=unavailable"""
         cases = pool.search(case_type=case_type)
+        queried = bool(query.strip())
+        degraded = False
+        if queried:
+            terms = query_search_terms(query)
+            matched = [
+                case
+                for case in cases
+                if not terms or any(term_matches(term, case["description"]) for term in terms)
+            ]
+            seen = {case["case_id"] for case in matched}
+            if semantic is not None and semantic_tree_ids is not None:
+                paragraph_ids = semantic.paragraph_ids(query, limit=SEMANTIC_PARAGRAPH_LIMIT)
+                if paragraph_ids is None:
+                    degraded = True
+                elif paragraph_ids:
+                    trees = set(semantic_tree_ids(paragraph_ids))
+                    if trees:
+                        matched.extend(
+                            case for case in cases if case["case_id"] not in seen and case.get("tree_id") in trees
+                        )
+            cases = matched
         if unresolved_only:
             cases = [case for case in cases if not case["submitted"]]
+        if claimed_only:
+            owned = set(pool.claims_for(author))
+            cases = [case for case in cases if case["case_id"] in owned and not case["submitted"]]
         if case_view is not None:
             cases = [case_view(case) for case in cases]
+        if queried:
+            payload = {"cases": cases, **({"semantic": "unavailable"} if degraded else {})}
+            return json.dumps(payload, ensure_ascii=False)
         return json.dumps(cases, ensure_ascii=False)
 
     return [push_case, claim_case, claim_random_case, submit_case, search_cases]

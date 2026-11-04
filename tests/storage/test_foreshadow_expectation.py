@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from src.event_trees.models import BoundEvent
 from src.event_trees.read.foreshadowing import calculate_foreshadow_expectation
-from src.fact_graph.vocabulary import Confidence
+from src.event_trees.vocabulary import Confidence
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import (
     add_annotation_source,

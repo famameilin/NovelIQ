@@ -269,6 +269,8 @@ def test_emotion_trend_skips_paragraphs_without_metrics(api_client: TestClient, 
     assert len(payload) == 1
     assert payload[0]["paragraph_start"] == 0
     assert payload[0]["paragraph_end"] == 2
+    assert payload[0]["start_position"] == pytest.approx(2.5 / 16)
+    assert payload[0]["end_position"] == pytest.approx(14 / 16)
     assert payload[0]["pos_coverage"] == pytest.approx(1 / 2)
     assert payload[0]["pooled_pos_density"] == pytest.approx(2 / 6)
     assert payload[0]["neg_coverage"] == pytest.approx(1 / 2)

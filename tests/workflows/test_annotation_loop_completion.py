@@ -3,8 +3,8 @@
 from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage
 
+from src.agents.messages import AssistantMessage
 from src.audit.queries import fetch_agent_turns
 from src.config import settings
 from src.model_pool.capacity import ModelElectionPool
@@ -27,17 +27,17 @@ async def test_missing_completion_keeps_history_variables_and_invocation(db_sess
                 code = 'summary = "原文行动"'
             elif self.calls == 2:
                 if signal == "no_tool":
-                    return AIMessage(content="完成")
+                    return AssistantMessage(content="完成")
                 code = "finish()"
             else:
                 assert "metrics" in str(messages)
                 code = 'finish()\nmetric(summary=summary, emotional_valence=0, narrative_function="铺垫")'
-            return AIMessage(
+            return AssistantMessage(
                 content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": str(self.calls)}]
             )
 
     model = Model("")
-    with patch("src.model_pool.llm.build_chat_model", return_value=model) as factory:
+    with patch("src.agents.model_client.build_chat_model", return_value=model) as factory:
         assert await run_annotate(run, storage_for(db_session), novel_id=novel) == (1, 0, 1)
     assert model.calls == 3 and factory.call_count == 1
     db_session.expire_all()
@@ -54,11 +54,11 @@ async def test_no_tool_after_complete_write_saves_without_finish(db_session):
         async def ainvoke(self, messages):
             if self.calls == 1:
                 self.calls += 1
-                return AIMessage(content="完成")
+                return AssistantMessage(content="完成")
             return await super().ainvoke(messages)
 
     model = Model('metric(summary="行动", emotional_valence=0, narrative_function="铺垫")')
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run, storage_for(db_session), novel_id=novel) == (1, 0, 1)
     assert model.calls == 2
 
@@ -75,7 +75,7 @@ async def test_budget_exhaustion_reselects_beyond_old_limit_and_keeps_audit(db_s
         pool.available_at[message.work_id] = 0
 
     monkeypatch.setattr(ModelElectionPool, "feedback", feedback)
-    with patch("src.model_pool.llm.build_chat_model", side_effect=models) as factory:
+    with patch("src.agents.model_client.build_chat_model", side_effect=models) as factory:
         assert await run_annotate(run, storage_for(db_session), novel_id=novel) == (1, 0, 1)
     db_session.expire_all()
     turns = fetch_agent_turns(storage_for(db_session), run)

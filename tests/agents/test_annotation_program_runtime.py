@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from src.agents.annotation import program_contract
 from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.program_runtime import contracts as program_contract
 from src.fact_graph.graph import FactGraph, entity_key
 from src.fact_graph.inputs import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
@@ -73,13 +73,13 @@ async def test_json_literals_true_false_null_are_accepted() -> None:
     receipt = await _run(
         _runtime(ledger),
         (
-            "write_metrics(summary='伏笔埋设', emotional_valence=1, narrative_func"
-            "tion='铺垫', pivot_moment=false, cliffhanger=true)\n"
-            "write_entity(el='a1', name='顾霜', entity_type='character', descrip"
-            "tion=null)\n"
-            "write_event(el='t1', evidence=1, isforeshadowing=true, confidence"
-            "='low', title='埋设', problem='明确事件问题', summary='埋设', event_type='行"
-            "动', status='ongoing')"
+            "write_metrics(summary='伏笔埋设', emotional_valence=1, narra"
+            "tive_function='铺垫', pivot_moment=false, cliffhanger=true"
+            ")\nwrite_entity(el='a1', name='顾霜', entity_type='characte"
+            "r', description=null)\nwrite_event(items=[dict(el='t1', e"
+            "vidence=1, isforeshadowing=true, confidence='low', title"
+            "='埋设', problem='明确事件问题', summary='埋设', event_type='行动', "
+            "status='ongoing')])"
         ),
     )
     assert receipt["status"] == "applied"
@@ -87,7 +87,7 @@ async def test_json_literals_true_false_null_are_accepted() -> None:
     assert ledger.metrics_payload.cliffhanger is True
     assert ledger.metrics_payload.pivot_moment is False
     assert ledger.written_entities[entity_key("顾霜", "character")].description is None
-    assert next(iter(ledger.event_trees.values()))["isforeshadowing"] is True
+    assert any(event.is_foreshadow_setup for event in ledger.bound_payloads["events"])
 
 
 @pytest.mark.asyncio
@@ -96,16 +96,19 @@ async def test_json_literals_true_false_null_are_accepted() -> None:
     [
         ('write_entity(el="a1", name=unknown, entity_type="character")', "undefined_name"),
         ("import os", "unsupported_statement"),
-        ("value = {item for item in (1, 2)}", "unsupported_expression"),
+        ("from json import __loader__", "unsupported_statement"),
+        ("try:\n    value = 1\nexcept ValueError:\n    value = 2", "unsupported_statement"),
         ("value = (item for item in (1, 2))", "unsupported_expression"),
         ("value = object.attr", "unsupported_expression"),
         ("value = {'a': 1}.unknown()", "unsupported_expression"),
-        ("while True:\n    pass", "unsupported_statement"),
+        ("import json\nvalue = json.__doc__", "unsupported_expression"),
         ("write_entity = 1", "name_reserved"),
         ("len = 1", "name_reserved"),
         ("_tmp = 1", "name_reserved"),
         ("value = write_metrics(*[1])", "bad_call"),
         ("left, right = (1, 2, 3)", "bad_assignment"),
+        ("value = [1]\nvalue.append += 1", "bad_assignment"),
+        ("total += 1", "undefined_name"),
         ("first, *rest = (1, 2, 3)", "bad_assignment"),
         ("for item in 'abc':\n    pass", "unsupported_expression"),
         ("count = len(1)", "runtime_error"),
@@ -124,6 +127,23 @@ async def test_unsafe_or_invalid_programs_return_structured_errors(code: str, er
     assert receipt["error"]["type"] == error_code
     assert receipt["applied"] == 0
     assert ledger.written_entities == {}
+
+
+@pytest.mark.asyncio
+async def test_unsupported_attribute_is_named_in_receipt() -> None:
+    ledger = _ledger()
+    receipt = await _run(_runtime(ledger), 'value = {"a": 1}.unknown()')
+    assert receipt["status"] == "runtime_error"
+    assert ".unknown" in receipt["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_unimported_module_call_names_required_import() -> None:
+    ledger = _ledger()
+    receipt = await _run(_runtime(ledger), 'value = json.dumps({"a": 1})')
+    assert receipt["status"] == "runtime_error"
+    assert receipt["error"]["type"] == "unsupported_expression"
+    assert "import json" in receipt["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -146,12 +166,29 @@ async def test_common_methods_lambda_and_fstring_are_applied() -> None:
 
 
 @pytest.mark.asyncio
+async def test_augmented_assignment_updates_variables_and_dict_entries() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        "total = 0\n"
+        'notes = {"count": 0, "text": ""}\n'
+        "for step in range(4):\n"
+        "    total += step\n"
+        '    notes["count"] += 1\n'
+        '    notes["text"] += "x"\n'
+        "print(total, notes)",
+    )
+    assert receipt["status"] == "applied", receipt
+    assert receipt["printed"][-1] == "6 {'count': 4, 'text': 'xxxx'}"
+
+
+@pytest.mark.asyncio
 async def test_long_print_output_is_truncated_with_marker() -> None:
     """print 超出回显上限时保留前段并标注原文字符数"""
     ledger = _ledger()
     receipt = await _run(
         _runtime(ledger),
-        'text = "字"\n' "for step in range(12):\n" "    text = text + text\n" "print(text)",
+        'text = "字"\nfor step in range(12):\n    text = text + text\nprint(text)',
     )
     assert receipt["status"] == "applied", receipt
     printed = receipt["printed"][-1]
@@ -265,18 +302,17 @@ async def test_variables_persist_across_programs() -> None:
     second = await _run(
         runtime,
         (
-            "write_metrics(summary='离火反噬', emotional_valence=-2, narrative_fun"
-            "ction='转折')\n"
-            "write_event(el='t1', evidence=1, characters=[{'name': person['con"
-            "tent']['name'], 'entity_type': person['content']['entity_type'], "
-            "'role': '客体', 'narrative_role': '客体', 'action': '承受反噬', 'emotion'"
-            ": -2}], title='离火反噬', problem='明确事件问题', summary='离火反噬', event_typ"
-            "e='行动', status='ongoing')\n"
-            "for candidate in [1, 2]:\n"
-            "    write_dialogue(candidate_index=candidate, verdict='dialogue',"
-            " speaker={'name': person['content']['name'], 'entity_type': perso"
-            "n['content']['entity_type']})\n"
-            "finish()"
+            "write_metrics(summary='离火反噬', emotional_valence=-2, narr"
+            "ative_function='转折')\nwrite_event(items=[dict(el='t1', ev"
+            "idence=1, characters=[{'name': person['content']['name']"
+            ", 'entity_type': person['content']['entity_type'], 'role"
+            "': '客体', 'narrative_role': '客体', 'action': '承受反噬', 'emot"
+            "ion': -2}], title='离火反噬', problem='明确事件问题', summary='离火反"
+            "噬', event_type='行动', status='ongoing')])\nfor candidate i"
+            "n [1, 2]:\n    write_dialogue(candidate_index=candidate, "
+            "verdict='dialogue', speaker={'name': person['content']['"
+            "name'], 'entity_type': person['content']['entity_type']}"
+            ")\nfinish()"
         ),
     )
     assert second["status"] == "applied"
@@ -301,9 +337,6 @@ async def test_for_loop_iterates_dict_keys_in_insertion_order() -> None:
 async def test_limits_keep_applied_ops_and_allow_next_program(monkeypatch: pytest.MonkeyPatch) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
-    monkeypatch.setattr(program_contract, "PROGRAM_MAX_LOOP_ITEMS", 2)
-    loop = await _run(runtime, "for item in [1, 2, 3]:\n    pass")
-    assert loop["error"]["type"] == "loop_too_long" and loop["applied"] == 0
     monkeypatch.setattr(program_contract, "PROGRAM_MAX_OPS", 2)
     ops = await _run(
         runtime,
@@ -332,15 +365,14 @@ write_relation(
         ),
     )
     assert retry["applied"] == 1
-    monkeypatch.setattr(program_contract, "PROGRAM_MAX_STEPS", 3)
-    steps = await _run(runtime, "for item in [1, 2]:\n    pass")
-    assert steps["error"]["type"] == "too_many_steps"
 
 
 @pytest.mark.asyncio
-async def test_deadline_is_structured(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_deadline_ends_invocation_with_structured_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(program_contract, "PROGRAM_DEADLINE_S", -1.0)
-    receipt = await _run(_runtime(_ledger()), "value = 1")
+    with pytest.raises(program_contract.ProgramExecutionTimeout) as error:
+        await _run(_runtime(_ledger()), "value = 1")
+    receipt = json.loads(error.value.receipt)
     assert receipt["error"]["type"] == "deadline_exceeded"
     assert receipt["applied"] == 0
 
@@ -477,34 +509,35 @@ async def test_slice_step_zero_is_reported_as_program_fault() -> None:
 
 
 @pytest.mark.asyncio
-async def test_comprehension_result_respects_container_limit() -> None:
-    ledger = _ledger()
+async def test_comprehension_and_loop_exceed_old_limits() -> None:
+    runtime = _runtime(_ledger())
     receipt = await _run(
-        _runtime(ledger),
-        "values = [item for item in range(500) for other in range(2)]",
+        runtime,
+        "values = [item for item in range(600) for other in range(2)]\n"
+        "total = 0\nfor item in range(35000):\n    total = total + 1",
     )
-    assert receipt["status"] == "runtime_error"
-    assert receipt["error"]["type"] == "collection_too_long"
-    assert ledger.written_entities == {}
+    assert receipt["status"] == "applied", receipt
+    assert len(runtime.env["values"]) == 1200 and runtime.env["total"] == 35000
 
 
 @pytest.mark.asyncio
 async def test_anchor_accepts_bare_tree_key_as_root_record() -> None:
-    """裸树键补全：模型按自然形态拿树键当记录键时统一指到它的根记录"""
+    """引用 id 直接当记录键：模型拿本执行 el 绑定原文锚点"""
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
         runtime,
         (
-            "write_event(el='t1', evidence=1, title='顾霜拔剑', problem='明确事件问题', "
-            "summary='顾霜拔剑', event_type='行动', status='ongoing')\n"
-            "local = read_text(paragraph_id=1, quote='顾霜')\n"
-            "anchor_record(record_id='t1', source_ref=local['source_ref'])"
+            "write_event(items=[dict(el='t1', evidence=1, title='顾霜拔剑"
+            "', problem='明确事件问题', summary='顾霜拔剑', event_type='行动', st"
+            "atus='ongoing')])\nlocal = read_text(paragraph_id=1, quot"
+            "e='顾霜')\nanchor_record(record_id='t1', source_ref=local['"
+            "source_ref'])"
         ),
     )
 
     assert receipt["status"] == "applied", receipt
-    assert ledger.source_anchors["t1/root"]
+    assert ledger.source_anchors["annotation:t1"]
 
 
 @pytest.mark.asyncio
@@ -549,26 +582,24 @@ async def test_repeat_failed_batch_guard_hints_then_fails_program() -> None:
         'for value in [write_dialogue(candidate_index=99, verdict="not_dialogue")]:\n    pass',
     ],
 )
-async def test_dialogue_batch_out_of_range_is_rejected_before_any_write(code: str) -> None:
+async def test_dialogue_indices_are_validated_per_actual_call(code: str) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
         runtime,
-        'write_metrics(summary="尚未写入", emotional_valence=0, narrative_function="铺垫")\n' + code + "\nfinish()",
+        'write_metrics(summary="已接受指标", emotional_valence=0, narrative_function="铺垫")\n' + code,
     )
-    assert receipt["status"] == "rejected", receipt
-    assert receipt["applied"] == 0
-    assert receipt["error"]["type"] == "candidate_index_out_of_range"
-    assert "total=2" in receipt["error"]["message"]
-    assert "candidate_index=" in receipt["error"]["message"]
-    assert "line" in receipt["error"]
-    assert not ledger.written_dialogues and ledger.metrics_payload is None
-    assert runtime.ops == [] and runtime.env == {}
-    assert not ledger.chapter_finished
+    assert receipt["status"] == "partial", receipt
+    assert receipt["applied"] >= 1
+    assert receipt["failed"][0]["code"] == "out_of_range"
+    assert receipt["failed"][0]["field"] == "candidate_index"
+    assert ledger.metrics_payload.summary == "已接受指标"
+    assert set(ledger.written_dialogues) <= {1, 2}
+    assert runtime.ops and not ledger.chapter_finished
 
 
 @pytest.mark.asyncio
-async def test_dialogue_preflight_respects_branches_assignments_and_preserves_prior_state() -> None:
+async def test_dialogue_call_validation_respects_branches_assignments_and_preserves_prior_state() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
     await _run(runtime, 'indices = [1, 2]\nwrite_dialogue(candidate_index=1, verdict="not_dialogue")')
@@ -576,12 +607,12 @@ async def test_dialogue_preflight_respects_branches_assignments_and_preserves_pr
         runtime,
         'indices = [1, 99]\nfor index in indices:\n    write_dialogue(candidate_index=index, verdict="not_dialogue")',
     )
-    assert rejected["status"] == "rejected"
-    assert runtime.env["indices"] == [1, 2]
+    assert rejected["status"] == "partial"
+    assert runtime.env["indices"] == [1, 99]
     assert set(ledger.written_dialogues) == {1}
     repaired = await _run(
         runtime,
-        "for index in indices:\n"
+        "indices = [1, 2]\nfor index in indices:\n"
         "    if index in [1, 2]:\n"
         '        write_dialogue(candidate_index=index, verdict="not_dialogue")\n'
         'if False:\n    write_dialogue(candidate_index=99, verdict="not_dialogue")',
@@ -591,7 +622,7 @@ async def test_dialogue_preflight_respects_branches_assignments_and_preserves_pr
 
 
 @pytest.mark.asyncio
-async def test_dialogue_preflight_does_not_use_stale_values_from_unknown_tool_results() -> None:
+async def test_dialogue_call_validation_does_not_use_stale_values_from_unknown_tool_results() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
     await _run(runtime, "index = 99")
@@ -624,7 +655,7 @@ async def test_dynamic_candidate_value_is_checked_once_at_real_write_boundary() 
 
 
 @pytest.mark.asyncio
-async def test_dialogue_preflight_keeps_assignment_faults_at_original_execution_point() -> None:
+async def test_dialogue_call_validation_keeps_assignment_faults_at_original_execution_point() -> None:
     ledger = _ledger()
     runtime = _runtime(ledger)
     receipt = await _run(
@@ -637,3 +668,145 @@ async def test_dialogue_preflight_keeps_assignment_faults_at_original_execution_
     assert receipt["applied"] == 1
     assert ledger.metrics_payload is not None
     assert not ledger.written_dialogues
+
+
+@pytest.mark.asyncio
+async def test_program_can_import_whitelisted_modules() -> None:
+    ledger = _ledger()
+    runtime = _runtime(ledger)
+    receipt = await _run(
+        runtime,
+        "import json\n"
+        "from math import floor\n"
+        'payload = json.dumps({"count": floor(2.9)})\n'
+        "import unicodedata as ud\n"
+        'normalized = ud.normalize("NFC", "顾霜")\n'
+        "return [payload, normalized]",
+    )
+    assert receipt["status"] == "applied", receipt
+    assert receipt["result"] == ['{"count": 2}', "顾霜"]
+    assert runtime.env["json"].__name__ == "json"
+
+
+@pytest.mark.asyncio
+async def test_module_import_stays_bound_across_programs() -> None:
+    ledger = _ledger()
+    runtime = _runtime(ledger)
+    await _run(runtime, "import json")
+    receipt = await _run(runtime, "return json.dumps([1, 2])")
+    assert receipt["result"] == "[1, 2]"
+
+
+@pytest.mark.asyncio
+async def test_top_level_return_becomes_receipt_result() -> None:
+    ledger = _ledger()
+    receipt = await _run(_runtime(ledger), 'for item in [1, 2, 3]:\n    if item == 2:\n        return {"hit": item}')
+    assert receipt["status"] == "applied", receipt
+    assert receipt["result"] == {"hit": 2}
+
+
+@pytest.mark.asyncio
+async def test_unserializable_return_value_is_rejected() -> None:
+    ledger = _ledger()
+    receipt = await _run(_runtime(ledger), "return {1, 2}")
+    assert receipt["status"] == "runtime_error", receipt
+    assert receipt["error"]["type"] == "runtime_error"
+
+
+@pytest.mark.asyncio
+async def test_try_catches_runtime_error_and_reports_it() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        "page = {}\n"
+        "try:\n"
+        '    first = page["events"][0]\n'
+        "except Exception as error:\n"
+        '    first = error["type"]\n'
+        'write_metrics(summary="兜底", emotional_valence=0, narrative_function="铺垫")',
+    )
+    assert receipt["status"] == "applied", receipt
+    assert receipt["applied"] == 1
+    assert receipt["caught"][0]["type"] == "runtime_error"
+    assert ledger.metrics_payload.summary == "兜底"
+
+
+@pytest.mark.asyncio
+async def test_try_does_not_catch_call_shape_errors() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        "try:\n    value = sorted([1], key=1)\nexcept Exception:\n    value = []",
+    )
+    assert receipt["status"] == "runtime_error", receipt
+    assert receipt["error"]["type"] == "bad_call"
+
+
+@pytest.mark.asyncio
+async def test_finally_runs_when_return_leaves_try() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        "seen = []\ntry:\n    seen.append(1)\n    return seen\nfinally:\n    seen.append(2)",
+    )
+    assert receipt["result"] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_break_continue_and_while_control_flow() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        "kept = []\n"
+        "for item in [1, 2, 3, 4]:\n"
+        "    if item == 2:\n"
+        "        continue\n"
+        "    if item == 4:\n"
+        "        break\n"
+        "    kept.append(item)\n"
+        "count = 0\n"
+        "while count < 3:\n"
+        "    count = count + 1\n"
+        "return [kept, count]",
+    )
+    assert receipt["status"] == "applied", receipt
+    assert receipt["result"] == [[1, 3], 3]
+
+
+@pytest.mark.asyncio
+async def test_while_iteration_limit_is_structured_error() -> None:
+    ledger = _ledger()
+    receipt = await _run(_runtime(ledger), "count = 0\nwhile True:\n    count = count + 1")
+    assert receipt["status"] == "runtime_error", receipt
+    assert receipt["error"]["type"] == "runtime_error"
+
+
+@pytest.mark.asyncio
+async def test_break_outside_loop_is_structured_error() -> None:
+    ledger = _ledger()
+    receipt = await _run(_runtime(ledger), "break")
+    assert receipt["status"] == "runtime_error", receipt
+
+
+@pytest.mark.asyncio
+async def test_set_dict_keywords_repetition_and_function_key_are_supported() -> None:
+    ledger = _ledger()
+    receipt = await _run(
+        _runtime(ledger),
+        "names = {item for item in ['a', 'a', 'b']}\n"
+        "mapping = dict(count=len(names), label='-' * 3)\n"
+        "def by_count(row):\n"
+        "    return row['n']\n"
+        "rows = sorted([{'n': 2}, {'n': 1}], key=by_count)\n"
+        "return [sorted(names), mapping, rows[0]['n']]",
+    )
+    assert receipt["status"] == "applied", receipt
+    assert receipt["result"] == [["a", "b"], {"count": 2, "label": "---"}, 1]
+
+
+@pytest.mark.asyncio
+async def test_range_item_limit_is_structured_error() -> None:
+    ledger = _ledger()
+    receipt = await _run(_runtime(ledger), "values = range(1000001)")
+    assert receipt["status"] == "runtime_error", receipt
+    assert receipt["error"]["type"] == "runtime_error"

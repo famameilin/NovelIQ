@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Sequence
+from itertools import combinations
 from typing import Any
 
 import networkx as nx
@@ -151,6 +152,40 @@ def compute_graph_structure_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
     return metrics
 
 
+def _keyword_pagerank(cooccurrence: dict[tuple[str, str], int]) -> dict[str, float]:
+    """按共现边的首次出现顺序计算加权 PageRank"""
+    from scipy import sparse
+
+    nodes: dict[str, int] = {}
+    for left, right in cooccurrence:
+        if left not in nodes:
+            nodes[left] = len(nodes)
+        if right not in nodes:
+            nodes[right] = len(nodes)
+    size = len(nodes)
+    edge_count = len(cooccurrence)
+    left_indices = np.fromiter((nodes[left] for left, _ in cooccurrence), dtype=np.int64, count=edge_count)
+    right_indices = np.fromiter((nodes[right] for _, right in cooccurrence), dtype=np.int64, count=edge_count)
+    weights = np.fromiter(cooccurrence.values(), dtype=np.float64, count=edge_count)
+    matrix = sparse.coo_array(
+        (np.concatenate((weights, weights)),
+         (np.concatenate((left_indices, right_indices)), np.concatenate((right_indices, left_indices)))),
+        shape=(size, size),
+    ).tocsr()
+    row_sums = np.asarray(matrix.sum(axis=1)).reshape(-1)
+    row_sums[row_sums != 0] = 1.0 / row_sums[row_sums != 0]
+    matrix = sparse.csr_array(sparse.spdiags(row_sums.T, 0, *matrix.shape) @ matrix)
+    distribution = np.repeat(1.0 / size, size)
+    scores = distribution.copy()
+    dangling = np.where(row_sums == 0)[0]
+    for _ in range(100):
+        previous = scores
+        scores = 0.85 * (scores @ matrix + sum(scores[dangling]) * distribution) + (1.0 - 0.85) * distribution
+        if np.absolute(scores - previous).sum() < size * 1.0e-6:
+            return dict(zip(nodes, map(float, scores), strict=True))
+    raise nx.PowerIterationFailedConvergence(100)
+
+
 def compute_keywords(run_id: str, texts: Sequence[str], top_n: int = 10) -> dict[str, Any]:
     """段落全文的 TextRank 关键词（Top-N 词 + 权重）
 
@@ -178,14 +213,11 @@ def compute_keywords(run_id: str, texts: Sequence[str], top_n: int = 10) -> dict
     # 词共现图（窗口 5，滑动窗口内两两共现计数）
     cooccurrence: defaultdict[tuple[str, str], int] = defaultdict(int)
     for i in range(len(tokens) - WINDOW_SIZE + 1):
-        window = tokens[i : i + WINDOW_SIZE]
-        for j, first in enumerate(window):
-            for second in window[j + 1 :]:
-                if first != second:
-                    key = (first, second) if first < second else (second, first)
-                    cooccurrence[key] += 1
+        for first, second in combinations(tokens[i : i + WINDOW_SIZE], 2):
+            if first != second:
+                key = (first, second) if first < second else (second, first)
+                cooccurrence[key] += 1
 
-    graph = nx.Graph()
     if not cooccurrence:
         return {
             "run_id": run_id,
@@ -193,16 +225,13 @@ def compute_keywords(run_id: str, texts: Sequence[str], top_n: int = 10) -> dict
             "algorithm": algorithm,
             "unavailable_reason": "no_cooccurrence: 过滤停用词后无可建图词元",
         }
-    for (first, second), count in cooccurrence.items():
-        graph.add_edge(first, second, weight=count)
-
-    scores = nx.pagerank(graph, weight="weight")
+    scores = _keyword_pagerank(cooccurrence)
     ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)[:top_n]
     keywords = [{"word": word, "score": round(score, 6)} for word, score in ranked]
     return {
         "run_id": run_id,
         "keywords": keywords,
-        "algorithm": {**algorithm, "vocab_count": graph.number_of_nodes()},
+        "algorithm": {**algorithm, "vocab_count": len(scores)},
         "unavailable_reason": None,
     }
 

@@ -170,8 +170,6 @@ def annotation_chapter_of_execution(session: Session, agent_id: str) -> NamedRec
     if row is None:
         return NamedRecord({"chapter_id": None, "chapter_order": None})
     return NamedRecord({"chapter_id": int(row.chapter_id), "chapter_order": int(row.sequence)})
-
-
 def chapter_offsets(session: Session, run_id: str, chapter_ids: set[int]) -> dict[int, int]:
     "章正文全文起点；空正文章节无切片，其段落也不存在证据"
     if not chapter_ids:

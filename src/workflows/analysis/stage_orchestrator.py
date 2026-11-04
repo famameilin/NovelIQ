@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from loguru import logger
 
 from src.event_bus.notifications import StreamEvent
 from src.storage import Storage
@@ -79,8 +82,10 @@ class StageOrchestratorMixin(TaskClaimMixin):
                     status=state, message=reasons[state]))
                 continue
             await bus.emit(StreamEvent(action="stage_state", stage=stage, status="running"))
+            stage_started = time.perf_counter()
             try:
                 await action(self._make_stage_emitter(bus, stage))
+                logger.info("stage timing: {} {:.3f}s", stage, time.perf_counter() - stage_started)
             except BaseException as exc:
                 import asyncio
 

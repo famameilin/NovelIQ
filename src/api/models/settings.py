@@ -35,6 +35,7 @@ class SettingFieldSpecResponse(BaseModel):
     max_value: float | None = Field(default=None, description="数值上界")
     step: float | None = Field(default=None, description="数值步进")
     enum_values: list[str] = Field(default_factory=list, description="enum 类型的可选值")
+    enum_labels: dict[str, str] = Field(default_factory=dict, description="enum 可选值的展示名称")
     nullable: bool = Field(default=False, description="是否允许 null（如 timeout_s 未设置）")
     editable: bool = Field(default=True, description="是否可在运行时修改（False 仅展示说明）")
 
@@ -87,7 +88,9 @@ class ModelPoolEntryRequest(BaseModel):
     temperature: StrictInt | StrictFloat = Field(default=0.7, description="采样温度，[0, 2]")
     top_p: StrictInt | StrictFloat = Field(default=0.8, description="核采样上限，[0, 1]")
     max_tokens: StrictInt = Field(default=131072, description="输出 Token 上限")
+    # 编辑键：同一模型可挂多个端点，按（模型 ID，服务地址）定位已保存条目与 Key
     original_model_id: str | None = None
+    original_base_url: str | None = None
 
 
 class ModelEnvUpdateRequest(BaseModel):

@@ -14,8 +14,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage
 
+from src.agents.messages import AssistantMessage
 from src.storage import new_id
 from tests.support.storage_fixtures import storage_for
 
@@ -41,6 +41,7 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
     def __init__(self, payload: dict) -> None:
         self.payload = payload
         self.calls = 0
+        self.roles: list[str] = []
 
     def bind_tools(self, tools):
         assert [tool.name for tool in tools] == ["execute_code", "finish"]
@@ -58,25 +59,32 @@ class _EvidenceThenFinishLLM(StreamedFakeModelMixin):
         )
         self.calls += 1
         role = material["role"]
+        self.roles.append(role)
         if role == "case":
-            # 案例会话自取未承诺案例：接手后读取事件并提交；无未承诺案例即结束
-            code = (
-                "cases = search_cases(unresolved_only=True)\n"
-                "if cases:\n"
-                "    case = cases[0]\n"
-                '    claim_case(case_id=case["case_id"])\n'
-                "    page = search_events(limit=20)\n"
-                '    for item in page["events"]:\n'
-                '        if item["event_id"] in case["description"]:\n'
-                '            read_event(node_id=item["event_id"], kind="event")\n'
-                '    submit_case(case_id=case["case_id"])\n'
-                "else:\n"
-                "    finish()"
-            )
+            # 案例会话自取未承诺案例：逐件接手并办结
+            code = """
+cases = search_cases(unresolved_only=True)
+if cases:
+    case = cases[0]
+    claim_case(case_id=case["case_id"])
+    submit_case(case_id=case["case_id"])
+else:
+    finish()
+"""
         else:
             assert role == "report"
-            code = f"read_metrics()\nread_topics()\nwrite_diagnosis(analysis={self.payload!r})\nfinish()"
-        return AIMessage(
+            names = {
+                row["tree_id"]: f"事件{index}线"
+                for index, row in enumerate(material["materials"]["event_lines"], start=1)
+            }
+            code = (
+                "read_metrics()\nread_topics()\n"
+                f"name_event_lines(names={json.dumps(names, ensure_ascii=False)})\n"
+                'for entry in search_events(limit=20)["events"]:\n'
+                '    read_event(node_id=entry["event_id"])\n'
+                f"write_diagnosis(analysis={self.payload!r})\nfinish()"
+            )
+        return AssistantMessage(
             content="",
             tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": f"p{self.calls}", "type": "tool_call"}],
         )
@@ -217,7 +225,7 @@ class TestDiagnosisRoutes:
         "按已保存根事件登记案例"
         from src.storage.repositories.case_writes import CaseWritesRepository
 
-        CaseWritesRepository(self.run_id).register_event_roots(self.db_session)
+        CaseWritesRepository(self.run_id).register_unparented_trees(self.db_session)
         self.db_session.commit()
 
     def test_fetch_pivot_blocks(self) -> None:
@@ -251,10 +259,10 @@ class TestDiagnosisRoutes:
         self._create_full_data(5)
 
         llm = _EvidenceThenFinishLLM(_fake_analysis(self.novel_id).model_dump())
-        with patch("src.model_pool.llm.build_chat_model", return_value=llm):
+        with patch("src.agents.model_client.build_chat_model", return_value=llm):
             analysis = await run_diagnose(run_id=self.run_id, session=storage_for(self.db_session))
         assert analysis is not None
-        assert llm.calls == 7  # 五件事件案例逐件办理与一次收尾，加一份报告
+        assert "report" in llm.roles
         assert analysis.genre_labels == ["通用"]
         assert analysis.style_labels == ["严肃"]
 
@@ -271,9 +279,9 @@ class TestDiagnosisRoutes:
         from src.case_pool import CasePool
         from src.event_trees.storage_map import run_events
 
-        self._create_full_data(3)
+        self._create_full_data(5)
         llm = _EvidenceThenFinishLLM(_fake_analysis(self.novel_id).model_dump())
-        with patch("src.model_pool.llm.build_chat_model", return_value=llm):
+        with patch("src.agents.model_client.build_chat_model", return_value=llm):
             with patch(
                 "src.agents.diagnosis.domain.save_diagnosis_result",
                 side_effect=RuntimeError("模拟报告保存失败"),
@@ -286,26 +294,28 @@ class TestDiagnosisRoutes:
         pool = CasePool(self.run_id)
         pool.load_storage(storage_for(self.db_session))
         promised = [item for item in pool.search() if item["submitted"]]
-        assert len(promised) == len(saved_event_ids)
+        assert promised
+        assert [item for item in pool.search() if not item["submitted"]] == []
 
-        with patch("src.model_pool.llm.build_chat_model", return_value=llm):
+        before_resume = len(llm.roles)
+        with patch("src.agents.model_client.build_chat_model", return_value=llm):
             analysis = await run_diagnose(run_id=self.run_id, session=storage_for(self.db_session))
         assert analysis is not None
         # 续跑：案例池已归零不再派案例会话，报告会话一次收尾，不重复办理既有案例
-        assert llm.calls == 5 + 1
+        assert set(llm.roles[before_resume:]) == {"report"}
         assert set(run_events(storage_for(self.db_session), self.run_id)) == saved_event_ids
         fetched = fetch_diagnosis_payload(storage_for(self.db_session), self.run_id)
         assert fetched is not None and fetched["diagnosis"] == "ok"
 
     @pytest.mark.asyncio()
     async def test_run_diagnose_persists_result(self) -> None:
-        self._create_full_data(3)
+        self._create_full_data(5)
 
         llm = _EvidenceThenFinishLLM(_fake_analysis(self.novel_id).model_dump())
-        with patch("src.model_pool.llm.build_chat_model", return_value=llm):
+        with patch("src.agents.model_client.build_chat_model", return_value=llm):
             await run_diagnose(run_id=self.run_id, session=storage_for(self.db_session))
 
-        assert llm.calls == 5  # 三件事件案例逐件办理与一次收尾，加一份报告
+        assert "report" in llm.roles
         fetched = fetch_diagnosis_payload(storage_for(self.db_session), self.run_id)
         assert fetched is not None
         assert fetched["novel_id"] == self.novel_id

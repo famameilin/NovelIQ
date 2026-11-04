@@ -78,7 +78,7 @@ def _character_entity_ids(session, run_id: str, names: list[str]) -> dict[str, s
 def insert_report_fixture(session, run_id: str, session_id: str, analysis: AgentAnalysis) -> str:
     """写入正式诊断报告及标签/名单/评分条目；同一会话只允许一份报告"""
 
-    from src.storage.models import Agent, AnalysisAssessment, DiagnosisReport
+    from src.storage.models import Agent, AnalysisAssessment, DiagnosisReport, NarrativeGroup
 
     owner = session.get(Agent, session_id)
     if owner is None or owner.run_id != run_id:
@@ -107,6 +107,19 @@ def insert_report_fixture(session, run_id: str, session_id: str, analysis: Agent
     )
     # 报告行先落库：条目的 report_id 外键不靠 ORM 表排序保证
     session.flush()
+    if organization is not None and organization.event_line_ids:
+        selected = set(organization.event_line_ids)
+    else:
+        from src.storage.repositories.queue_writes import queue_graph
+
+        selected = set(queue_graph(session, run_id).unparented)
+    for tree in session.scalars(
+        select(NarrativeGroup).where(
+            NarrativeGroup.kind == "tree",
+            NarrativeGroup.producer_agent_id.in_(select(Agent.id).where(Agent.run_id == run_id)),
+        )
+    ):
+        tree.is_event_line = tree.group_id in selected
 
     def _assessment(**fields: Any) -> None:
         session.add(AnalysisAssessment(assessment_id=new_id(), report_id=report_id, **fields))

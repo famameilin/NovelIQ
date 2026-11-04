@@ -53,7 +53,8 @@ async def test_generate_paragraph_embeddings_uses_probed_dimension_for_schema_an
 
     with (
         patch("src.embedding.EmbeddingClient", return_value=mock_client) as mock_client_factory,
-        patch("src.storage.service.Storage.prepare_paragraph_vectors") as mock_ensure_paragraph_schema,
+        patch("src.storage.service.Storage.prepare_paragraph_vector_column") as mock_ensure_paragraph_schema,
+        patch("src.storage.service.Storage.build_paragraph_vector_index") as mock_build_vector_index,
         patch("src.storage.access.ParagraphAccess.insert_paragraph_embeddings") as mock_insert_paragraph_embeddings,
     ):
         inserted = await _generate_paragraph_embeddings(session=storage_for(db_session), run_id=run_id)
@@ -67,6 +68,10 @@ async def test_generate_paragraph_embeddings_uses_probed_dimension_for_schema_an
     # 建表列宽 = 探测值
     mock_ensure_paragraph_schema.assert_called_once()
     assert mock_ensure_paragraph_schema.call_args.args[0] == 1024
+    # 向量落库之后才建检索索引，写入期间不逐行维护索引图
+    mock_build_vector_index.assert_called_once()
+    assert mock_build_vector_index.call_args.args[0] == 1024
+    assert mock_insert_paragraph_embeddings.call_count == 1
     # embedding 行只携带 paragraph_id + 向量（身份以 paragraphs 表为准）
     paragraph_rows = mock_insert_paragraph_embeddings.call_args.args[1]
     assert [row.paragraph_id for row in paragraph_rows] == [0, 1]
@@ -84,7 +89,7 @@ async def test_generate_paragraph_embeddings_skips_when_no_paragraphs(db_session
 
     with (
         patch("src.embedding.EmbeddingClient", return_value=mock_client) as mock_client_factory,
-        patch("src.storage.service.Storage.prepare_paragraph_vectors") as mock_ensure_paragraph_schema,
+        patch("src.storage.service.Storage.prepare_paragraph_vector_column") as mock_ensure_paragraph_schema,
     ):
         inserted = await _generate_paragraph_embeddings(
             session=storage_for(db_session), run_id=fixture_id(__name__, "run-empty")
@@ -104,7 +109,7 @@ async def test_generate_paragraph_embeddings_fails_fast_when_embedding_client_in
 
     with (
         patch("src.embedding.EmbeddingClient", side_effect=ValueError("missing embedding config")),
-        patch("src.storage.service.Storage.prepare_paragraph_vectors") as mock_ensure_paragraph_schema,
+        patch("src.storage.service.Storage.prepare_paragraph_vector_column") as mock_ensure_paragraph_schema,
     ):
         with pytest.raises(RuntimeError, match="embedding client initialization failed"):
             await _generate_paragraph_embeddings(session=storage_for(db_session), run_id=run_id)

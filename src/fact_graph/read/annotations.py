@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from src.fact_graph.character_reference_policy import is_global_character_surface_name
 from src.fact_graph.read.references import EntityReferenceProjection
 from src.storage import Storage
@@ -14,7 +16,7 @@ def fetch_chapter_characters_full(session: Storage, run_id: str) -> list[Charact
     读面按观测口径剔除三态全空行（参与者本身不等于人物观测）。
     """
     rows: list[CharacterFactRow] = []
-    for fact in session.annotations.fetch_graph_facts(run_id, content_kind="character_observation"):
+    for fact in session.annotations.fetch_character_observation_rows(run_id):
         name = str(fact.participant_entity_name or "").strip()
         if fact.participant_entity_type != "character" or not is_global_character_surface_name(name):
             continue
@@ -43,11 +45,13 @@ def fetch_chapter_characters_full(session: Storage, run_id: str) -> list[Charact
     return rows
 
 
-def fetch_character_emotion_sequence(session: Storage, run_id: str) -> list[CharacterFactRow]:
+def fetch_character_emotion_sequence(
+    session: Storage, run_id: str, *, rows: Sequence[CharacterFactRow] | None = None,
+) -> list[CharacterFactRow]:
     """按章节顺序读取人物情绪事实序列"""
     sequence_map = session.annotations.fetch_chapter_sequence_map(run_id)
     return sorted(
-        fetch_chapter_characters_full(session, run_id),
+        rows if rows is not None else fetch_chapter_characters_full(session, run_id),
         key=lambda row: (sequence_map.get(row.chapter_id, row.chapter_id), row.chapter_id),
     )
 
@@ -61,7 +65,7 @@ def fetch_chapter_dialogues_full(session: Storage, run_id: str) -> list[Dialogue
     rows: list[DialogueFactRow] = []
     entities_by_id = session.annotations.fetch_entities_by_id(run_id)
     projection = EntityReferenceProjection.load(session, run_id)
-    for record in session.annotations.fetch_dialogue_records(run_id):
+    for record in session.annotations.fetch_dialogue_observation_rows(run_id):
         speaker_id = record.speaker_entity_id
         resolved_id = projection.resolution.resolve_entity_id(speaker_id)
         speaker_entity = entities_by_id.get(str(resolved_id)) if resolved_id is not None else None
@@ -94,7 +98,7 @@ def fetch_chapter_dialogues_full(session: Storage, run_id: str) -> list[Dialogue
                 chapter_id=int(record.chapter_id),
                 speaker=speaker_names,
                 speaker_references=speaker_references,
-                length=len(record.content),
+                length=int(record.content_length),
                 tone=record.tone,
             )
         )

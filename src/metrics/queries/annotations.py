@@ -39,17 +39,19 @@ def _fetch_paragraph_label_counts(session: Storage, record_ids: list[str]) -> di
         return {}
     return {
         str(row.record_id): int(row.label_count)
-        for row in session.reads.metrics_queries_annotations_fetch_paragraph_label_counts_1(record_ids)
+        for row in session.reads.metrics.list_output_label_counts(record_ids)
     }
 
 
-def fetch_chapter_annotations_full(session: Storage, run_id: str) -> list[ChapterAnnotationRow]:
+def fetch_chapter_annotations_full(
+    session: Storage, run_id: str, *, include_details: bool = True,
+) -> list[ChapterAnnotationRow]:
     """从正式章节标注记录展开完整章节标注
 
     只取角色集合与登记角色一致、且按标注合同完成的章节；具名指标取度量指标角色的
     正式记录，不做任何载荷兼容读取（未登记记录按缺省处理）。
     """
-    foreshadowing_by_chapter = read_foreshadowing(session, run_id)
+    foreshadowing_by_chapter = read_foreshadowing(session, run_id) if include_details else {}
     repository = session.annotations
     saved_records = repository.fetch_saved_outputs(run_id)
     roles = repository.fetch_role_records(run_id)
@@ -61,7 +63,10 @@ def fetch_chapter_annotations_full(session: Storage, run_id: str) -> list[Chapte
     for record in saved_records:
         records_by_chapter[record.chapter_id].append(record)
 
-    label_counts = _fetch_paragraph_label_counts(session, [record.record_id for record in saved_records])
+    label_counts = (
+        _fetch_paragraph_label_counts(session, [record.record_id for record in saved_records])
+        if include_details else {}
+    )
     rows: list[ChapterAnnotationRow] = []
     for chapter_id, records in records_by_chapter.items():
         saved_roles = {record.role for record in records if record.role is not None}
@@ -80,7 +85,9 @@ def fetch_chapter_annotations_full(session: Storage, run_id: str) -> list[Chapte
                 event_type=cast(str, metric.narrative_function),
                 pivot_moment=cast(bool, metric.pivot_moment),
                 cliffhanger=cast(bool, metric.cliffhanger),
-                coverage_warnings=paragraph_label_coverage_warnings(label_counts.get(metric.record_id, 0)),
+                coverage_warnings=(
+                    paragraph_label_coverage_warnings(label_counts.get(metric.record_id, 0)) if include_details else []
+                ),
                 **foreshadowing_by_chapter.get(chapter_id, {}),
             )
         )

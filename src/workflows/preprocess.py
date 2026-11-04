@@ -11,9 +11,10 @@ paragraph_embeddings，运行模型合同（模型 key + 实测维度）写 embe
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from src.config import settings
 from src.event_bus import EventBus
 from src.event_bus.notifications import StreamEvent
 from src.storage import Storage, get_storage_factory
+from src.storage.records.embedding_ops import ParagraphEmbeddingRow
 from src.storage.records.paragraph import ParagraphMetricRow
 from src.text_processing.models import ParagraphSpan
 from src.text_processing.paragraphs import chunk_documents_with_chapters, split_chunk_paragraphs
@@ -111,12 +113,16 @@ async def run_preprocess(
     paragraph_repo = session.paragraphs
     paragraph_repo.insert_paragraphs(run_id, spans)
     logger.info(f"inserted {len(spans)} paragraphs into db (run_id={run_id})")
-    if spans:
-        _insert_paragraph_metrics(session, run_id, spans, tokenized, lexicons)
-        _insert_paragraph_curves(session, run_id, spans)
-    if settings.models.paragraph_embedding.semantic_enabled:
-        logger.info("generating paragraph embeddings for semantic text retrieval")
-        await _generate_paragraph_embeddings(session, run_id, emitter=emitter, is_cancelled=is_cancelled, bus=bus)
+    await _run_paragraph_derivatives(
+        session=session,
+        run_id=run_id,
+        spans=spans,
+        tokenized=tokenized,
+        lexicons=lexicons,
+        emitter=emitter,
+        is_cancelled=is_cancelled,
+        bus=bus,
+    )
     elapsed = time.time() - start_time
     logger.info(f"preprocess completed chunks={total_chapters} chars={total_chars} time={elapsed:.2f}s")
     logger.info("\n=== Preprocess Statistics ===")
@@ -128,6 +134,75 @@ async def run_preprocess(
             StreamEvent(action="complete", stage="preprocess", current=1, total=1, percent=100.0, sub_percent=100.0)
         )
     return (total_chapters, total_chars, elapsed)
+
+
+async def _run_paragraph_derivatives(
+    *,
+    session: Storage,
+    run_id: str,
+    spans: list[ParagraphSpan],
+    tokenized: list[list[str]],
+    lexicons: dict[str, Any],
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None,
+    is_cancelled: Callable[[], bool] | None,
+    bus: EventBus | None,
+) -> None:
+    """段落指标/曲线与段落向量并行推进：两者只依赖段落事实源，写不同表
+
+    向量生成在事件循环上等待服务返回，指标与曲线在独立线程串行（曲线读取指标落库结果）；
+    向量列的建索引与向量落库留在生成完成后，避免与指标写入同时使用同一事务出口。
+    """
+    context: _ParagraphEmbeddingContext | None = None
+    if settings.models.paragraph_embedding.semantic_enabled:
+        logger.info("generating paragraph embeddings for semantic text retrieval")
+        context = await _prepare_paragraph_embedding(session, run_id, bus)
+
+    generate: asyncio.Task[list[Any]] | None = None
+    if context is not None:
+        generate = asyncio.create_task(
+            _generate_paragraph_embedding_rows(
+                context.client,
+                run_id,
+                ParagraphEmbeddingRow,
+                emitter=emitter,
+                is_cancelled=is_cancelled,
+            )
+        )
+
+    derivatives: asyncio.Task[None] | None = None
+    if spans:
+        derivatives = asyncio.create_task(
+            asyncio.to_thread(_insert_paragraph_derivatives, session, run_id, spans, tokenized, lexicons)
+        )
+
+    try:
+        if derivatives is not None:
+            await derivatives
+        rows = await generate if generate is not None else []
+    except BaseException:
+        for task in (derivatives, generate):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(
+            *(task for task in (derivatives, generate) if task is not None), return_exceptions=True
+        )
+        if context is not None:
+            await context.audit.close()
+        raise
+
+    if context is not None:
+        try:
+            await _store_paragraph_embeddings(session, run_id, context, rows, emitter=emitter)
+        finally:
+            await context.audit.close()
+
+
+def _insert_paragraph_derivatives(
+    session: Storage, run_id: str, spans: list[ParagraphSpan], tokenized: list[list[str]], lexicons: dict[str, Any]
+) -> None:
+    """段落指标与段落曲线串行写入，曲线以指标落库结果为输入"""
+    _insert_paragraph_metrics(session, run_id, spans, tokenized, lexicons)
+    _insert_paragraph_curves(session, run_id, spans)
 
 
 def _insert_paragraph_metrics(
@@ -147,17 +222,16 @@ def _insert_paragraph_metrics(
         写入的 ParagraphMetricRow 列表（基础计数与充分统计量；密度/张力等派生值
         由读取投影给出）
     """
-    from src.metrics.paragraph_metrics import compute_paragraph_metric_counts
+    from src.metrics.paragraph_metrics_pool import compute_paragraph_metric_counts_many
     from src.metrics.paragraph_surface_tension import (
         robust_standardize_components,
         surface_tension_components,
         surface_tension_z_value,
     )
 
-    counts_list = [
-        compute_paragraph_metric_counts(span.text, tokens, lexicons)
-        for span, tokens in zip(spans, tokenized, strict=True)
-    ]
+    counts_list = compute_paragraph_metric_counts_many(
+        [span.text for span in spans], tokenized, lexicons
+    )
     z_components = robust_standardize_components([surface_tension_components(counts) for counts in counts_list])
     weights = settings.metrics.surface_tension_weights
     rows: list[ParagraphMetricRow] = []
@@ -222,33 +296,31 @@ def _insert_paragraph_curves(session: Storage, run_id: str, spans: list[Paragrap
     return len(curve_rows)
 
 
-async def _generate_paragraph_embeddings(
-    session: Storage,
-    run_id: str,
-    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
-    is_cancelled: Callable[[], bool] | None = None,
-    bus: EventBus | None = None,
-) -> int:
-    """为 paragraphs 生成 embedding 落库；从 paragraphs 读不重切段，0行跳过。
-    RAG 粒度固定自然段(仅 paragraph)。Args: session/run_id/emitter  Returns: embedding 数量
-    """
-    from src.embedding import EmbeddingClient
-    from src.model_pool.usage import build_token_usage_callback
-    from src.storage.records.embedding_ops import ParagraphEmbeddingRow
+@dataclass
+class _ParagraphEmbeddingContext:
+    """一次段落向量生成的运行期上下文：客户端、审计与实测维度"""
 
-    paragraph_refs = session.paragraphs.fetch_paragraph_rows(run_id)
-    if not paragraph_refs:
-        logger.info("no paragraphs found for run_id={}, skip paragraph embeddings", run_id)
-        return 0
+    client: Any
+    audit: Any
+    embedding_dim: int
+
+
+async def _prepare_paragraph_embedding(
+    session: Storage, run_id: str, bus: EventBus | None
+) -> _ParagraphEmbeddingContext | None:
+    """向量生成前置：无段落直接跳过；建客户端、探测维度并准备向量列"""
     from src.audit.module import AuditModule
-    from src.event_bus import EventBus
+    from src.audit.usage import build_token_usage_callback
+    from src.embedding import EmbeddingClient
 
-    pass
+    if not session.paragraphs.fetch_paragraph_rows(run_id):
+        logger.info("no paragraphs found for run_id={}, skip paragraph embeddings", run_id)
+        return None
     audit_bus = bus or EventBus()
     audit = AuditModule(audit_bus, run_id, get_storage_factory())
     try:
         try:
-            novel_id = session.reads.workflows_preprocess_generate_paragraph_embeddings_1(run_id)
+            novel_id = session.reads.runs.find_novel_id(run_id)
             embedding_client = EmbeddingClient(
                 novel_id=novel_id if isinstance(novel_id, str) and novel_id else "unknown",
                 token_usage_callback=build_token_usage_callback(bus=audit_bus, run_id=run_id),
@@ -260,20 +332,52 @@ async def _generate_paragraph_embeddings(
                 f"{e}"
             ) from e
         embedding_dim = await embedding_client.detect_embedding_dimension()
-        session.prepare_paragraph_vectors(embedding_dim)
-        paragraph_rows = await _generate_paragraph_embedding_rows(
-            embedding_client, run_id, ParagraphEmbeddingRow, emitter=emitter, is_cancelled=is_cancelled
-        )
-        if paragraph_rows:
-            session.paragraphs.insert_paragraph_embeddings(run_id, paragraph_rows, embedding_dimension=embedding_dim)
-            logger.info("inserted {} paragraph embeddings into db (run_id={})", len(paragraph_rows), run_id)
-        if emitter:
-            await emitter(
-                StreamEvent(action="complete", stage="preprocess", message="向量嵌入生成完成", sub_percent=100.0)
-            )
-        return len(paragraph_rows)
-    finally:
+        session.prepare_paragraph_vector_column(embedding_dim)
+    except BaseException:
         await audit.close()
+        raise
+    return _ParagraphEmbeddingContext(client=embedding_client, audit=audit, embedding_dim=embedding_dim)
+
+
+async def _store_paragraph_embeddings(
+    session: Storage,
+    run_id: str,
+    context: _ParagraphEmbeddingContext,
+    rows: list[Any],
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+) -> int:
+    """段落向量落库并建立检索索引；索引在整批写入之后建，写入期间不维护索引图"""
+    if rows:
+        session.paragraphs.insert_paragraph_embeddings(run_id, rows, embedding_dimension=context.embedding_dim)
+        logger.info("inserted {} paragraph embeddings into db (run_id={})", len(rows), run_id)
+    session.build_paragraph_vector_index(context.embedding_dim)
+    if emitter:
+        await emitter(
+            StreamEvent(action="complete", stage="preprocess", message="向量嵌入生成完成", sub_percent=100.0)
+        )
+    return len(rows)
+
+
+async def _generate_paragraph_embeddings(
+    session: Storage,
+    run_id: str,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    bus: EventBus | None = None,
+) -> int:
+    """为 paragraphs 生成 embedding 落库；从 paragraphs 读不重切段，0行跳过。
+    RAG 粒度固定自然段(仅 paragraph)。Args: session/run_id/emitter  Returns: embedding 数量
+    """
+    context = await _prepare_paragraph_embedding(session, run_id, bus)
+    if context is None:
+        return 0
+    try:
+        rows = await _generate_paragraph_embedding_rows(
+            context.client, run_id, ParagraphEmbeddingRow, emitter=emitter, is_cancelled=is_cancelled
+        )
+        return await _store_paragraph_embeddings(session, run_id, context, rows, emitter=emitter)
+    finally:
+        await context.audit.close()
 
 
 async def _generate_paragraph_embedding_rows(

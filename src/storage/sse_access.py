@@ -1,7 +1,7 @@
 """实际展示消息的持久化接口"""
 
 from src.storage.input_boundary import plain_inputs
-from src.storage.repositories.event_outbox import OutboxRecords, replay_candidates
+from src.storage.repositories.event_outbox import OutboxRecords, replay_candidates, replay_tail
 
 
 @plain_inputs
@@ -36,3 +36,7 @@ class SseAccess:
             ),
             read_only=True,
         )
+
+    def replay_tail(self, run_id: str, limit: int = 4096):
+        "按运行读取最近消息与状态消息"
+        return self._runner.run(lambda session: replay_tail(session, run_id, limit), read_only=True)

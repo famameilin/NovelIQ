@@ -44,7 +44,7 @@ def fetch_annotation_role_records(session: Storage, run_id: str) -> list[Annotat
 def _paragraph_labels(session: Storage, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     """段落情绪标签：正式落点为 agent_assessments 的逐段情绪分支（按段号定序投影）"""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for _stored_row_1 in session.reads.work_queries_paragraph_labels_1(record_ids):
+    for _stored_row_1 in session.reads.annotations.list_output_paragraph_labels(record_ids):
         record_id = _stored_row_1.record_id
         paragraph_id = _stored_row_1.paragraph_id
         emotion = _stored_row_1.emotion
@@ -54,12 +54,12 @@ def _paragraph_labels(session: Storage, record_ids: list[str]) -> dict[str, list
 
 def _annotation_event_projections(session: Storage, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     """章级事件：不可变事件正文 + 参与者（实体名字/类型从实体行读取，不复制）"""
-    annotation_events = list(session.reads.work_queries_annotation_event_projections_2(record_ids))
+    annotation_events = list(session.reads.events.list_ordered_output_events(record_ids))
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     if not annotation_events:
         return grouped
     participants: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in session.reads.work_queries_annotation_event_projections_1(annotation_events):
+    for row in session.reads.events.list_annotation_participants(annotation_events):
         participants[row.event_id].append(
             {
                 "entity_id": row.entity_id,
@@ -93,7 +93,7 @@ def _annotation_event_projections(session: Storage, record_ids: list[str]) -> di
 def _dialogue_projections(session: Storage, execution_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     """对话：正式定位与当前归因（原文从章节区间读取，不复制正文）"""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in session.reads.work_queries_dialogue_projections_1(execution_ids):
+    for row in session.reads.annotations.list_ordered_dialogues(execution_ids):
         grouped[row.creation_agent_id].append(
             {
                 "dialogue_id": row.dialogue_id,
@@ -110,12 +110,12 @@ def _dialogue_projections(session: Storage, execution_ids: list[str]) -> dict[st
 
 def _character_observations(session: Storage, record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     """人物动态观测：只关联原事件参与者（三态至少一项非空即承载一次观测）"""
-    annotation_events = session.reads.work_queries_character_observations_2(record_ids)
+    annotation_events = session.reads.events.list_output_event_ids(record_ids)
     if not annotation_events:
         return {}
     record_by_annotation_event = {row.event_id: row.annotation_record_id for row in annotation_events}
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in session.reads.work_queries_character_observations_1(record_by_annotation_event):
+    for row in session.reads.events.list_character_observations(record_by_annotation_event):
         if row.narrative_role is None and row.action is None and (row.emotion is None):
             continue
         grouped[record_by_annotation_event[row.event_id]].append(

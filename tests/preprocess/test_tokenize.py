@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.text_processing.tokenize import Tokenizer, tokenize
+from src.text_processing.tokenize import Tokenizer, reuse_token_blocks, tokenize
 
 
 class TestTokenizer(unittest.TestCase):
@@ -65,6 +65,21 @@ class TestTokenizer(unittest.TestCase):
         actual_chapters, actual_book = tokenizer.tokenize_chapters_and_book(chapters)
         self.assertEqual(actual_chapters, [tokenizer.tokenize(text) for text in chapters])
         self.assertEqual(actual_book, tokenizer.tokenize("".join(chapters)))
+
+    def test_request_blocks_preserve_mixed_text_and_cross_chapter_boundaries(self):
+        tokenizer = Tokenizer()
+        tokenizer._stopwords = {"南京市", "的"}
+        chapters = ["", "南京市长", "江大桥。\r\n", "test-ABC 42", "\n", "南京市长江大桥！"]
+        expected = [tokenizer.tokenize(text, filter_stopwords=True) for text in chapters]
+        expected_lengths = [tokenizer.tokenize_with_word_lengths(text) for text in chapters]
+        expected_chapters, expected_book = tokenizer.tokenize_chapters_and_book(chapters)
+
+        with reuse_token_blocks():
+            self.assertEqual([tokenizer.tokenize(text, filter_stopwords=True) for text in chapters], expected)
+            self.assertEqual([tokenizer.tokenize_with_word_lengths(text) for text in chapters], expected_lengths)
+            self.assertEqual(tokenizer.tokenize_chapters_and_book(chapters), (expected_chapters, expected_book))
+
+        self.assertEqual(tokenizer.tokenize_chapters_and_book(chapters), (expected_chapters, expected_book))
 
 
 class TestTokenizeFunction(unittest.TestCase):

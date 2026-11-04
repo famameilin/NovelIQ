@@ -45,7 +45,7 @@ router = APIRouter()
 
 
 @router.get("/{novel_id}/graph", response_model=GraphSnapshotResponse)
-async def get_graph(
+def get_graph(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -69,7 +69,7 @@ async def get_graph(
 
 
 @router.get("/{novel_id}/graph/changes", response_model=GraphChangesResponse)
-async def get_graph_changes(
+def get_graph_changes(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -95,7 +95,7 @@ async def get_graph_changes(
 
 
 @router.get("/{novel_id}/graph/metrics", response_model=GraphMetricsResponse)
-async def get_graph_metrics(
+def get_graph_metrics(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -112,7 +112,7 @@ async def get_graph_metrics(
 
 
 @router.get("/{novel_id}/keywords", response_model=KeywordsResponse)
-async def get_keywords(
+def get_keywords(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -133,7 +133,7 @@ event_forest_router = APIRouter()
 
 
 @event_forest_router.get("/{novel_id}/event-forest", response_model=EventForestResponse)
-async def get_event_forest(
+def get_event_forest(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -154,14 +154,16 @@ async def get_event_forest(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if snapshot is None:
         raise HTTPException(status_code=404, detail="当前 run 尚无匹配的章节图数据")
-    return build_event_forest_response(snapshot)
+    from src.api.services.results_queries.event_trees import project_forest_entities
+
+    return build_event_forest_response(project_forest_entities(snapshot, session, run_id))
 
 
 @event_forest_router.get(
     "/{novel_id}/event-forest/chapters/{chapter_id}/source",
     response_model=EventSourceChapterResponse,
 )
-async def get_event_source_chapter(
+def get_event_source_chapter(
     novel_id: str,
     chapter_id: int,
     run_id: Annotated[str, Depends(resolve_run_id)],
@@ -170,10 +172,10 @@ async def get_event_source_chapter(
     """按需读取当前任务的一章原文，供事件树节点核对依据"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
-    chapter = session.reads.api_routes_results_graph_get_event_source_chapter_1(chapter_id, run_id)
+    chapter = session.reads.text.get_chapter(chapter_id, run_id)
     if chapter is None or chapter.text is None:
         raise HTTPException(status_code=404, detail="当前任务没有该章节原文")
-    paragraphs = list(session.reads.api_routes_results_graph_get_event_source_chapter_2(chapter_id, run_id))
+    paragraphs = list(session.reads.text.list_ordered_paragraphs(chapter_id, run_id))
     if not paragraphs:
         raise HTTPException(status_code=404, detail="当前任务没有该章节原文段落")
     return EventSourceChapterResponse(
@@ -191,7 +193,7 @@ async def get_event_source_chapter(
 
 
 @event_forest_router.get("/{novel_id}/event-forest/chapters/{chapter_id}/nodes/{event_id}")
-async def get_chapter_event(
+def get_chapter_event(
     novel_id: str,
     chapter_id: int,
     event_id: str,
@@ -199,11 +201,11 @@ async def get_chapter_event(
     session: Annotated[Storage, Depends(get_db_session)],
 ) -> dict:
     "读取当前章事件自身正文和完整事件归属"
-    from src.event_trees.read.organization import EventTreeQuery
+    from src.api.services.results_queries.event_trees import EventTreeReadService
 
     _require_readable_run_status(_require_run_for_novel(session, novel_id, run_id))
     try:
-        return EventTreeQuery(session, run_id).chapter_detail(chapter_id, event_id)
+        return EventTreeReadService(session, run_id).chapter_detail(chapter_id, event_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

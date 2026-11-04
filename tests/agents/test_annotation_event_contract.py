@@ -50,7 +50,12 @@ def _tools(ledger: AnnotationToolLedger, *, program: bool = False) -> dict[str, 
 
 
 def _call(tools: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
-    return json.loads(tools["write_event"].invoke(args))
+    writer = tools["write_event"]
+    if "items" in writer.args_schema.model_fields:
+        result = json.loads(writer.invoke({"items": [args]}))
+        assert result["tree_id"] != result["results"][0]["content"]["event_id"]
+        return result["results"][0]
+    return json.loads(writer.invoke(args))
 
 
 @pytest.mark.parametrize("program", [False, True])
@@ -94,14 +99,13 @@ def test_old_process_and_implicit_parent_contract_is_rejected(field: str, value:
     assert not ledger.bound_payloads.get("events")
 
 
-def test_local_path_and_call_order_never_form_parent_containment() -> None:
+def test_reference_id_and_call_order_never_form_parent_containment() -> None:
     ledger = _ledger()
     tools = _tools(ledger, program=True)
-    _call(tools, _args("t1/e2"))
-    _call(tools, _args("t1", title="追赶", summary="乙追来", evidence=2))
+    _call(tools, _args("e2"))
+    _call(tools, _args("e1", title="追赶", summary="乙追来", evidence=2))
     events = ledger.bound_payloads["events"]
     assert len(events) == 2
-    assert not ledger.pending_child_events
     assert all(event.parent_node_id is None for event in events)
     assert len({event.event_id for event in events}) == 2
 

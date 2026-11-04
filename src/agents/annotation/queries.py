@@ -38,11 +38,11 @@ class DatabaseAnnotationQueryService:
         self.current_first_paragraph_id = current_first_paragraph_id
         self.current_last_paragraph_id = current_last_paragraph_id
         with self._read_scope() as session:
-            current_chapter_sequence = session.reads.agents_annotation_queries_init_1(current_chapter_id, run_id)
+            current_chapter_sequence = session.reads.text.get_chapter_sequence(current_chapter_id, run_id)
             if current_chapter_sequence is None:
                 raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
             self.current_chapter_sequence = int(current_chapter_sequence)
-            chapter_ids = list(session.reads.agents_annotation_queries_init_2(run_id))
+            chapter_ids = list(session.reads.text.list_ordered_chapter_ids(run_id))
             if current_chapter_id not in chapter_ids:
                 raise ValueError(f"当前章节不存在: chapter_id={current_chapter_id}")
             self.current_chapter_order = chapter_ids.index(current_chapter_id) + 1
@@ -94,7 +94,7 @@ class DatabaseAnnotationQueryService:
 
         def read() -> dict:
             with self._read_scope() as session:
-                row = session.reads.agents_annotation_queries_read_1(paragraph_id, self.run_id)
+                row = session.reads.text.get_paragraph_with_chapter_sequence(paragraph_id, self.run_id)
                 if row is None:
                     raise ValueError("原文段落不属于当前分析")
                 if not allow_future_context and row.sequence > self.current_chapter_sequence:

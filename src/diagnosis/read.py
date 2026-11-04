@@ -28,29 +28,29 @@ from src.utils.parsing import parse_int_field, parse_json_field
 
 def fetch_diagnosis_payload(session: Storage, run_id: str) -> dict[str, Any] | None:
     """正式诊断报告的扁平投影；无报告返回 None（与旧产物读取语义一致）"""
-    report = session.reads.diagnosis_read_fetch_diagnosis_payload_2(run_id)
+    report = session.reads.diagnosis.get_latest_report(run_id)
     if report is None:
         return None
     report_id = report.report_id
 
     def _labels(column: Any) -> list[str]:
-        return list(session.reads.diagnosis_read_labels_1(column, report_id))
+        return list(session.reads.diagnosis.list_labels(column, report_id))
 
     def _members(cast_role: str) -> list[str]:
-        return list(session.reads.diagnosis_read_members_1(cast_role, report_id))
+        return list(session.reads.diagnosis.list_cast_names(cast_role, report_id))
 
     topic_labels = {
-        str(row.topic_id): row.topic_label for row in session.reads.diagnosis_read_fetch_diagnosis_payload_3(report_id)
+        str(row.topic_id): row.topic_label for row in session.reads.diagnosis.list_topic_assessments(report_id)
     }
     arc_scores = {
         str(_stored_row_2.canonical_name): float(_stored_row_2.character_score)
-        for _stored_row_2 in session.reads.diagnosis_read_fetch_diagnosis_payload_4(report_id)
+        for _stored_row_2 in session.reads.diagnosis.list_character_scores(report_id)
     }
     from src.event_trees.read.foreshadowing import calculate_foreshadow_expectation
 
     payload: dict[str, Any] = {
         "run_id": run_id,
-        "novel_id": session.reads.diagnosis_read_fetch_diagnosis_payload_1(run_id),
+        "novel_id": session.reads.runs.get_novel_id(run_id),
         "foreshadow_expectation": calculate_foreshadow_expectation(session, run_id),
         "arc_scores": arc_scores,
         "genre_labels": _labels("genre_label"),

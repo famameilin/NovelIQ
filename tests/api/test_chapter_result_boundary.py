@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy import select
 
-from src.event_trees.organization import OrganizationEvidence
+from src.event_trees.organization_models import OrganizationEvidence
 from src.event_trees.read.forest import EventForestQuery
 from src.event_trees.read.organization import EventTreeQuery
 from src.fact_graph.read.references import EntityReferenceProjection
@@ -86,6 +86,28 @@ def test_early_chapter_keeps_own_body_and_identity_with_empty_chapter_between(db
         to_chapter_id=35,
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )["event_id"]
+    roots = [independent]
+    for key in ("全书补充一", "全书补充二"):
+        roots.append(
+            draft.event(
+                key=key,
+                title=key,
+                problem="补充的整体问题",
+                summary=key,
+                event_type="调查",
+                status="ongoing",
+                reason="原文支持独立的整体问题",
+                from_chapter_id=11,
+                to_chapter_id=35,
+                evidence=[OrganizationEvidence(paragraph_id=0)],
+            )["event_id"]
+        )
+    for root in roots:
+        draft.queue(
+            event_ids=[root],
+            reason="独立行动",
+            evidence=[OrganizationEvidence(paragraph_id=0)],
+        )
     publish_draft(db_session, run, draft)
     set_run_status(db_session, run, "completed")
     db_session.commit()

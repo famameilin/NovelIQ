@@ -25,10 +25,6 @@ class ForeshadowingActionRow:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     evidence_scope: str = "paragraph"
 
-    @property
-    def root_event_id(self) -> str:
-        return self.source_event_id
-
 
 class ForeshadowingActionLike(Protocol):
     """动作排序消费的读取形状：动作事实行与事件树伏笔动作视图共用
@@ -57,14 +53,17 @@ def load_foreshadowing_actions(session: Storage, run_id: str) -> list[Foreshadow
     annotation_events = smap.run_annotation_event_ids(session, run_id)
     if not annotation_events:
         return []
-    action_rows = list(session.reads.event_trees_action_order_load_foreshadowing_actions_1(annotation_events))
+    action_rows = list(session.reads.events.list_related_foreshadowing_actions(annotation_events))
     if not action_rows:
         return []
     evidence = smap.fetch_evidence(session, "foreshadow_action_id", [row.action_id for row in action_rows])
+    payload_groups = smap.evidence_payload_groups(
+        session, run_id, [evidence.get(row.action_id, []) for row in action_rows]
+    )
+    contexts = smap.annotation_chapters_of_executions(session, {row.producer_agent_id for row in action_rows})
     result: list[ForeshadowingActionRow] = []
-    for row in action_rows:
-        source_context = smap.annotation_chapter_of_execution(session, row.producer_agent_id)
-        chapter_id, chapter_order = source_context.chapter_id, source_context.chapter_order
+    for row, payloads in zip(action_rows, payload_groups, strict=True):
+        chapter_id, chapter_order = contexts.get(str(row.producer_agent_id), (None, None))
         result.append(
             ForeshadowingActionRow(
                 action_id=row.action_id,
@@ -76,7 +75,7 @@ def load_foreshadowing_actions(session: Storage, run_id: str) -> list[Foreshadow
                 operation_order=int(row.operation_order),
                 chapter_id=chapter_id,
                 chapter_order=chapter_order,
-                evidence=smap.evidence_payloads(session, run_id, evidence.get(row.action_id, [])),
+                evidence=payloads,
             )
         )
     return sorted(result, key=action_order)

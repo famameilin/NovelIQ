@@ -120,6 +120,13 @@ def test_global_stats_and_completed_defaults(db_session, identities):
     assert db_session.get(GlobalStats, run.id) is not None
 
 
+def test_startup_sweep_closes_agents_left_running(db_session, identities):
+    runs, agents = identities
+    assert AuditRepository(db_session).close_running_agents() >= len(agents)
+    assert {row.status for row in agents} == {"error"}
+    assert AuditRepository(db_session).close_running_agents() == 0
+
+
 def test_audit_one_row_per_observation(db_session, identities):
     runs, agents = identities
     repo = AuditRepository(db_session)

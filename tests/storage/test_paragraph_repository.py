@@ -129,6 +129,8 @@ def test_insert_and_fetch_paragraphs(db_session) -> None:
 
     rows = repo.fetch_paragraph_rows(run_id)
     assert [row.paragraph_id for row in rows] == [0, 1, 2]
+    assert repo.fetch_paragraph_texts(run_id) == [row.text for row in rows]
+    assert repo.fetch_paragraph_texts(fixture_id(__name__, "no-such-run")) == []
     for i, (row, span) in enumerate(zip(rows, spans, strict=True)):
         assert row.chapter_id == span.chapter_id == 1
         assert row.paragraph_index == span.paragraph_index == i

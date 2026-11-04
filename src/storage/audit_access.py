@@ -168,3 +168,9 @@ class AuditAccess:
                 **_,
             )
         )
+
+    def close_running_agents(self) -> int:
+        "收口上次进程遗留的 running Agent 身份，返回条数"
+        return self._runner.run(
+            lambda session: AuditRepository(session).close_running_agents(), read_only=False
+        )

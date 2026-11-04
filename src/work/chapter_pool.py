@@ -87,6 +87,7 @@ class ChapterWorkerPool:
         async def attempt(receipt: WorkReceipt) -> bool:
             nonlocal stopping, terminal_failure
             outcome = "failed"
+            success: bool | None = False
             invocation_id = ""
             release_capacity = True
             try:
@@ -136,15 +137,19 @@ class ChapterWorkerPool:
                     await asyncio.shield(save_task)
                 except asyncio.CancelledError:
                     # 业务保存已开始，必须先核清实际结果再让取消离开该 work
+                    outcome, success = "cancelled", None
                     await save_task
                     raise
                 if model_ended:
                     return False
                 self.states[receipt.work_id] = "saved"
-                outcome = "saved"
+                outcome, success = "saved", True
                 if on_saved is not None:
                     await on_saved(receipt)
                 return True
+            except asyncio.CancelledError:
+                success = None
+                raise
             except WorkSaveUnconfirmed:
                 # 未确认结果仍保留预留位，分析故障退出时再由模型池统一关闭
                 release_capacity = False
@@ -160,7 +165,11 @@ class ChapterWorkerPool:
                             run_id=run_id,
                             work_id=receipt.work_id,
                             invocation_id=invocation_id,
-                            payload={"reservation_id": receipt.payload["reservation_id"], "outcome": outcome},
+                            payload={
+                                "reservation_id": receipt.payload["reservation_id"],
+                                "outcome": outcome,
+                                "success": success,
+                            },
                         )
                     )
 
@@ -200,6 +209,7 @@ class ChapterWorkerPool:
                         payload={
                             **original.payload,
                             "model_id": selected.model_id,
+                            "entry_id": selected.entry_id,
                             "attempt_number": selected.attempt_number,
                             "reservation_id": selected.reservation_id,
                         },

@@ -11,14 +11,13 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from langchain_core.messages import AIMessage
-
+from src.agents.messages import AssistantMessage
 from src.agents.stream_aggregator import extract_reasoning_content
 from src.agents.stream_audit import ModelCallTiming
+from src.audit.usage import estimate_agent_token_usage, extract_agent_token_usage
 from src.model_pool.health import MODEL_HEALTH
-from src.model_pool.usage import estimate_agent_token_usage, extract_agent_token_usage
 
-_FALLBACK_AI_MESSAGE = AIMessage(content="")
+_FALLBACK_AI_MESSAGE = AssistantMessage(content="")
 
 
 def build_invocation_context(
@@ -62,7 +61,7 @@ def _extract_finish_reason(message: Any) -> str:
 def _serialize_ai_message(message: Any) -> dict[str, Any]:
     """用于把单条模型回复压缩为审计可持久化结构（含正文与思考内容）"""
     payload: dict[str, Any] = {
-        "role": str(getattr(message, "type", "unknown")),
+        "role": {"assistant": "ai", "user": "human"}.get(message.role, message.role),
         "content": str(getattr(message, "content", "") or ""),
     }
     reasoning = extract_reasoning_content(message)
@@ -88,7 +87,7 @@ def _serialize_request_messages(messages: list[Any]) -> list[dict[str, Any]]:
         return serialized
     for message in messages:
         payload: dict[str, Any] = {
-            "role": str(getattr(message, "type", "unknown")),
+            "role": {"assistant": "ai", "user": "human"}.get(message.role, message.role),
             "content": str(getattr(message, "content", "") or ""),
         }
         name = getattr(message, "name", None)
@@ -108,13 +107,17 @@ def _serialize_request_messages(messages: list[Any]) -> list[dict[str, Any]]:
 
 
 def _usage_for_turn(
-    request_messages: list[Any], response_message: Any, *, tool_schema_tokens: int = 0,
+    request_messages: list[Any],
+    response_message: Any,
+    *,
+    tool_schema_tokens: int = 0,
 ) -> dict[str, Any] | None:
     """用于优先取 Provider 用量，缺失时按本地估算兜底"""
     usage = extract_agent_token_usage(response_message)
     if usage is None:
         estimates = estimate_agent_token_usage(
-            [*request_messages, response_message], tool_schema_tokens=tool_schema_tokens,
+            [*request_messages, response_message],
+            tool_schema_tokens=tool_schema_tokens,
         )
         # 估算列表按消息链中的 AI 消息顺序排列，本回合响应是链上最后一个 AI 消息
         usage = estimates[-1] if estimates else None
@@ -139,11 +142,19 @@ class AgentTurnObserver:
     审计调用流动，落库端不需要额外状态。
     """
 
-    def __init__(self, recorder: Any, *, invocation_id: int, context: dict[str, Any]) -> None:
-        """用于绑定审计库与本次尝试的运行元数据"""
+    def __init__(
+        self,
+        recorder: Any,
+        *,
+        invocation_id: int,
+        context: dict[str, Any],
+        entry_id: str,
+    ) -> None:
+        """用于绑定审计库、本次尝试的运行元数据与池内条目身份"""
         self._recorder = recorder
         self._invocation_id = invocation_id
         self._context = dict(context)
+        self._entry_id = entry_id
         self._turn_counter = 0
         self._active_turn_id: str | None = None
         self._active_started_ns: int | None = None
@@ -188,7 +199,9 @@ class AgentTurnObserver:
         turn_id = self._pending_turn_id
         started_ns = self._pending_started_ns
         usage = _usage_for_turn(
-            self._pending_request_messages, response_message, tool_schema_tokens=self._pending_tool_schema_tokens,
+            self._pending_request_messages,
+            response_message,
+            tool_schema_tokens=self._pending_tool_schema_tokens,
         )
         self._recorder.finish_turn(
             turn_id,
@@ -225,7 +238,9 @@ class AgentTurnObserver:
             raise RuntimeError("物理 Provider 请求尚未开始")
         response = response_message if response_message is not None else _FALLBACK_AI_MESSAGE
         usage = _usage_for_turn(
-            self._pending_request_messages, response, tool_schema_tokens=self._pending_tool_schema_tokens,
+            self._pending_request_messages,
+            response,
+            tool_schema_tokens=self._pending_tool_schema_tokens,
         )
         self._recorder.finish_turn(
             self._pending_turn_id,
@@ -246,10 +261,9 @@ class AgentTurnObserver:
         self._pending_request_messages = []
 
     def _record_health(self, *, success: bool, timing: ModelCallTiming, usage: dict[str, Any] | None) -> None:
-        """把本次物理请求的成功、token 和耗时登记到模型健康分"""
-        model_id = str(self._context.get("model") or "")
+        """把本次物理请求的成功、token 和耗时登记到条目健康分"""
         MODEL_HEALTH.record_turn(
-            model_id,
+            self._entry_id,
             success=success,
             tokens=int((usage or {}).get("total_tokens") or 0),
             model_ms=float(timing.model_ms or 0),

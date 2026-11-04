@@ -375,5 +375,5 @@ def fetch_paragraph_labels(session: Storage, run_id: str) -> list[dict[str, Any]
     条目行返回。
     """
 
-    rows = session.reads.linguistic_queries_fetch_paragraph_labels_1(run_id)
+    rows = session.reads.linguistic.list_paragraph_labels(run_id)
     return [{"paragraph_id": int(row.paragraph_id), "emotion": int(row.emotion)} for row in rows]

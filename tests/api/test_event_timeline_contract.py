@@ -10,9 +10,15 @@ def test_character_history_and_source_mapping(api_client, db_session):
     params = {"task_id": scenario.task_id}
     first = api_client.get(url, params=params).json()
     assert first["through_chapter_id"] == 1
-    assert all(item["subject_title"] != scenario.rival_name for item in first["subjects"])
+    # 主体与状态走独立分页来源，列表首屏不再携带全书主体
+    first_subjects = api_client.get(f"{url}/subjects", params={**params, "through_chapter_id": 1}).json()
+    assert all(item["subject_title"] != scenario.rival_name for item in first_subjects["subjects"])
+    assert "subjects" not in first
     third = api_client.get(url, params={**params, "through_chapter_id": 3}).json()
-    hero = next(item for item in third["states"] if item["subject_title"] == scenario.hero_name)
+    third_states = api_client.get(
+        f"{url}/states", params={**params, "through_chapter_id": 3, "dimension": "character"}
+    ).json()
+    hero = next(item for item in third_states["states"] if item["subject_title"] == scenario.hero_name)
     assert hero["state"]["action"] == "结盟" and hero["state"]["emotion"] == -2
     change = next(
         item for item in third["changes"] if item["subject_id"] == hero["subject_id"] and item["chapter_id"] == 3

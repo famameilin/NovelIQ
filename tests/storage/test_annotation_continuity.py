@@ -246,10 +246,9 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
     计数工厂挂在真实查询服务上，脚本化模型每次回话前现读 live——只要有一轮工具
     调用没归还连接，读数就不为 0。这条是"连接不再横跨模型延迟"的直接证据。
     """
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
-    from src.agents.annotation.agent_graph import build_agent_graph
+    from src.agents.annotation.agent_loop import build_agent_loop
     from src.agents.annotation.ledger import AnnotationToolLedger
+    from src.agents.messages import AssistantMessage, SystemMessage, UserMessage
     from src.fact_graph.graph import FactGraph
     from src.fact_graph.inputs import ChapterParagraphInfo
     from tests.support.annotation_work_tools import build_annotation_tools, build_program_test_runtime
@@ -286,7 +285,7 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
         async def ainvoke(self, messages):
             del messages
             live_at_model_reply.append(tracker.live)
-            return AIMessage(
+            return AssistantMessage(
                 content="",
                 tool_calls=[
                     {
@@ -303,18 +302,17 @@ async def test_graph_round_holds_no_query_connection_while_model_replies(db_sess
             )
 
     runtime = build_program_test_runtime(tools, ledger)
-    graph = build_agent_graph(
+    graph = build_agent_loop(
         _SearchThenFinishLLM(),
         runtime.build_tool(),
         runtime.finish_tool,
         ledger=ledger,
-        agent=runtime.agent,
         max_iterations=1,
         completion_check=lambda: [],
     )
-    state = await graph.ainvoke(
+    state = await graph.run(
         {
-            "messages": [SystemMessage(content="test"), HumanMessage(content="chunk")],
+            "messages": [SystemMessage(content="test"), UserMessage(content="chunk")],
             "phase": "chapter_open",
             "iterations": 0,
             "error": None,

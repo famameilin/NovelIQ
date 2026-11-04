@@ -24,7 +24,18 @@ def _work_tools_context(query_service: Any, ledger: Any) -> tuple[Any, Any, Any]
         annotation_work_id(ledger.run_scope, ledger.current_chapter_id, ledger.role),
         ledger.run_scope,
         "annotation",
-        {"chapter_id": ledger.current_chapter_id, "role": ledger.role},
+        {
+            "chapter_id": ledger.current_chapter_id,
+            "role": ledger.role,
+            "paragraphs": [
+                SimpleNamespace(paragraph_id=identifier, chapter_id=ledger.current_chapter_id, text=text)
+                for identifier, text in zip(
+                    ledger.paragraph_info.paragraph_ids, ledger.paragraph_info.texts, strict=True
+                )
+            ]
+            if ledger.paragraph_info is not None
+            else [],
+        },
     )
     execution = WorkExecution(work, invocation, ledger, AgentAnnotation(role=ledger.role))
     cases = CasePool(ledger.run_scope)
@@ -51,10 +62,12 @@ def build_annotation_tools(query_service: Any, ledger: Any) -> list[Any]:
     from src.agents.annotation.tool_factories import build_annotation_tools as build_domain_tools
 
     domain_tools = {tool.name: tool for tool in build_domain_tools(query_service, ledger)}
-    return [
-        domain_tools["write_event"] if tool.name == "write_event" else tool
-        for tool in build_work_tools(agent, execution, query)
-    ]
+    tools = build_work_tools(agent, execution, query)
+    for index, candidate in enumerate(tools):
+        if candidate.name == "write_event":
+            domain_tools["write_event"].program_tool = candidate
+            tools[index] = domain_tools["write_event"]
+    return tools
 
 
 def build_program_test_runtime(tools: list[Any], ledger: Any, **kwargs: Any) -> Any:
@@ -62,6 +75,8 @@ def build_program_test_runtime(tools: list[Any], ledger: Any, **kwargs: Any) -> 
     from src.agents.annotation.agent_runtime import AgentProgramRuntime
 
     agent = ledger.finish_work.__self__.agent
-    runtime = AgentProgramRuntime({tool.name: tool for tool in tools}, ledger, agent, **kwargs)
+    runtime = AgentProgramRuntime(
+        {tool.name: getattr(tool, "program_tool", tool) for tool in tools}, ledger, agent, **kwargs
+    )
     runtime.tools.update(runtime.execution_tools)
     return runtime

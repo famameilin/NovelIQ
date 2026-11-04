@@ -66,8 +66,17 @@ class Storage:
         self._runner.run(lambda session: session.execute(text("SELECT 1")).scalar_one(), read_only=True)
         return {"database": "connected", "pool": get_pool_status()}
 
-    def prepare_paragraph_vectors(self, embedding_dim: int) -> None:
-        "向量结构准备是完整独立操作，提交时机由 Storage 保证"
+    def prepare_paragraph_vector_column(self, embedding_dim: int) -> None:
+        "批量写入前校验向量列并移除检索索引，写入期间不逐行维护索引图"
+        from src.storage.vector_schema import drop_paragraph_embeddings_index, ensure_paragraph_embeddings_schema
+
+        self._runner.run(
+            lambda session: ensure_paragraph_embeddings_schema(session, embedding_dim, build_index=False)
+        )
+        self._runner.run(lambda session: drop_paragraph_embeddings_index(session, embedding_dim))
+
+    def build_paragraph_vector_index(self, embedding_dim: int) -> None:
+        "段落向量写入完成后按实测维度建立语义检索索引"
         from src.storage.vector_schema import ensure_paragraph_embeddings_schema
 
         self._runner.run(lambda session: ensure_paragraph_embeddings_schema(session, embedding_dim))

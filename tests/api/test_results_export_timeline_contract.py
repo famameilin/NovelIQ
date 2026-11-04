@@ -96,6 +96,14 @@ def test_fetch_timeline_data_reuses_independent_plotline_contract(db_session) ->
                 "tree_id": "strike",
                 "cause_role": "root",
             },
+            {
+                "description": "旁支线索浮现",
+                "participants": ["宫主"],
+                "evidence_paragraph_id": 2,
+                "node_id": fixture_id(__name__, "evt-export-branch-root"),
+                "tree_id": "branch",
+                "cause_role": "root",
+            },
         ],
     )
     from datetime import UTC, datetime
@@ -131,7 +139,12 @@ def test_fetch_timeline_data_reuses_independent_plotline_contract(db_session) ->
 
     from tests.support.diagnosis_helpers import declaration_event_draft, persist_event_draft
 
-    persist_event_draft(db_session, declaration_event_draft(db_session, run_id))
+    draft = declaration_event_draft(db_session, run_id)
+    persist_event_draft(db_session, draft)
+    from src.diagnosis.schema import AgentAnalysis
+    from tests.support.storage_fixtures import insert_report_fixture
+
+    insert_report_fixture(db_session, run_id, draft.agent_id, AgentAnalysis())
     chapter_repo = storage_for(db_session)
     stats_repo = storage_for(db_session)
 
@@ -145,7 +158,19 @@ def test_fetch_timeline_data_reuses_independent_plotline_contract(db_session) ->
     from src.metrics.queries.plotline import PlotlineQuery
 
     expected = PlotlineQuery(storage_for(db_session), run_id).fetch(through_chapter_id=2, limit=500)
-    assert timeline_data == expected
+    # 导出不分页也不裁剪：状态与主体保留全量，列表接口只回每维最近一个主体
+    for field in (
+        "run_id",
+        "organization_status",
+        "chapters",
+        "through_chapter_id",
+        "changes",
+        "total",
+        "distribution",
+    ):
+        assert timeline_data[field] == expected[field]
+    assert timeline_data["states"] == expected["states"]
+    assert timeline_data["subjects"] and "state_counts" not in timeline_data
     assert timeline_data["through_chapter_id"] == 2
     assert len(timeline_data["chapters"]) == 2
     assert timeline_data["total"] == 1
@@ -337,9 +362,6 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["导出测试。"])
     confirm_test_work(db_session, run_id)
-    from tests.support.diagnosis_helpers import declaration_event_draft, persist_event_draft
-
-    persist_event_draft(db_session, declaration_event_draft(db_session, run_id))
     db_session.commit()
     results_data, missing_fields, novel_name = fetch_all_results_data(
         novel_id=novel_id,
@@ -726,6 +748,30 @@ def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeyp
                 "tree_id": "gate",
                 "cause_role": "main",
             },
+            {
+                "description": "顾霜收剑",
+                "participants": ["顾霜"],
+                "evidence_paragraph_id": 1,
+                "node_id": fixture_id(__name__, "evt-export-gate-side"),
+                "tree_id": "side",
+                "cause_role": "root",
+            },
+            {
+                "description": "顾霜回望",
+                "participants": ["顾霜"],
+                "evidence_paragraph_id": 0,
+                "node_id": fixture_id(__name__, "evt-export-gate-echo"),
+                "tree_id": "echo",
+                "cause_role": "root",
+            },
+            {
+                "description": "顾霜下山",
+                "participants": ["顾霜"],
+                "evidence_paragraph_id": 1,
+                "node_id": fixture_id(__name__, "evt-export-gate-exit"),
+                "tree_id": "exit",
+                "cause_role": "root",
+            },
         ],
     )
     db_session.commit()
@@ -759,7 +805,7 @@ def test_fetch_all_results_data_emits_full_book_organization(db_session, monkeyp
 
     tree = results_data["event_trees"]
     assert tree == EventTreeQuery(storage_for(db_session), run_id).export()
-    assert tree["counts"]["all_events"] == 2
+    assert tree["counts"]["all_events"] == 5
     assert "declarations" not in tree["counts"]
     assert event_id in [entry["event_id"] for entry in tree["details"]]
     assert "event_forest" not in results_data
@@ -787,7 +833,8 @@ def test_fetch_all_results_data_emits_empty_organization_for_no_events(db_sessio
     )
 
     assert results_data["event_trees"]["counts"]["all_events"] == 0
-    assert results_data["event_trees"]["arcs"] == []
+    assert results_data["event_trees"]["queues"] == []
+    assert "arcs" not in results_data["event_trees"]
     assert results_data["event_trees"]["events"] == []
 
 

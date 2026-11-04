@@ -13,8 +13,19 @@ from typing import Any, ClassVar, Concatenate
 from weakref import WeakValueDictionary
 
 from src.case_pool.contributions import CaseContribution
+from src.case_pool.policy import event_case_tree_id
 from src.storage import Storage, new_id
 from src.storage.records.kinds import CASE_TYPES
+
+
+def _case_payload(case: dict[str, Any]) -> dict[str, Any]:
+    "案例公开形状：事件案例附带可直接引用的树身份"
+    result = dict(case)
+    if case["case_type"] == "event":
+        tree_id = event_case_tree_id(case["description"])
+        if tree_id is not None:
+            result["tree_id"] = tree_id
+    return result
 
 
 def _locked[**P, T](method: Callable[Concatenate[CasePool, P], T]) -> Callable[Concatenate[CasePool, P], T]:
@@ -87,7 +98,7 @@ class CasePool:
             self.case_runtime[case_id] = {"submitted": False, "owner": None}
             self.created[author].add(case_id)
         self.registrations[author].add(case_id)
-        return dict(self.cases[case_id])
+        return _case_payload(self.cases[case_id])
 
     def register_case(self, *, case_type: str, description: str, author: str) -> dict[str, Any]:
         "程序登记普通文字案例"
@@ -112,10 +123,10 @@ class CasePool:
         runtime = self.case_runtime[case_id]
         if runtime["owner"] is not None:
             status = "submitted" if runtime["submitted"] else "claimed"
-            return {**self.cases[case_id], "status": status if runtime["owner"] == author else "taken"}
+            return {**_case_payload(self.cases[case_id]), "status": status if runtime["owner"] == author else "taken"}
         runtime.update(owner=author)
         self.registrations[author].add(case_id)
-        return {**self.cases[case_id], "status": "claimed"}
+        return {**_case_payload(self.cases[case_id]), "status": "claimed"}
 
     @_locked
     def claim_random(self, author: str) -> dict[str, Any]:
@@ -129,14 +140,19 @@ class CasePool:
     def submit(self, case_id: str, author: str) -> dict[str, Any]:
         "持有者显式提交办结，正式保存前仍可随失败执行撤销"
         self._require(author)
-        runtime = self.case_runtime.get(case_id)
-        if runtime is None or runtime["owner"] != author:
-            raise ValueError("只能提交当前执行已领取的案例")
+        owned = "、".join(self.claims_for(author)) or "（无）"
+        if case_id not in self.cases:
+            raise ValueError(f"案例不属于当前运行：{case_id}；本执行已领取：{owned}")
+        runtime = self.case_runtime.get(case_id) or {"submitted": False, "owner": None}
+        if runtime["owner"] != author:
+            if runtime["owner"] is not None:
+                raise ValueError(f"案例 {case_id} 已由其他执行持有，不能由本执行提交；请改取其他可领案例")
+            raise ValueError(f"案例 {case_id} 尚未被本执行领取，请先 claim_case；本执行已领取：{owned}")
         runtime["submitted"] = True
         available = [key for key, value in self.case_runtime.items()
                      if not value["submitted"] and value["owner"] is None]
-        candidates = [dict(self.cases[key]) for key in random.sample(available, min(10, len(available)))]
-        return {**self.cases[case_id], "status": "submitted", "candidates": candidates}
+        candidates = [_case_payload(self.cases[key]) for key in random.sample(available, min(10, len(available)))]
+        return {**_case_payload(self.cases[case_id]), "status": "submitted", "candidates": candidates}
 
     @_locked
     def counts(self) -> tuple[int, int]:
@@ -241,7 +257,7 @@ class CasePool:
     @_locked
     def search(self, case_type: str | None = None) -> list[dict[str, Any]]:
         return [
-            {**case, "claimed": self.case_runtime[key]["owner"] is not None,
+            {**_case_payload(case), "claimed": self.case_runtime[key]["owner"] is not None,
              "submitted": bool(self.case_runtime[key]["submitted"])}
             for key, case in sorted(self.cases.items())
             if case_type is None or case["case_type"] == case_type

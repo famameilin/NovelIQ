@@ -1,9 +1,4 @@
-"""
-诊断 Agent 运行入口（LangGraph 工具化自主取证）
-
-审计: 每次诊断运行开启 agent_invocations 行，模型回合与工具调用通过
-AgentTurnObserver 写入独立短事务；失败路径同样保留完整审计记录。
-"""
+"""诊断 Agent 运行入口，保留模型回合、工具调用与失败审计"""
 
 from __future__ import annotations
 
@@ -12,10 +7,7 @@ from typing import Any
 
 from src.agents.stream import AgentStream
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import EventOrganizationDraft, NarrativeOrganization
 from src.storage import Storage, get_storage_factory
-
-from .evidence import DiagnosisEvidenceLedger
 
 
 class DiagnosisAgentRunError(RuntimeError):
@@ -25,49 +17,6 @@ class DiagnosisAgentRunError(RuntimeError):
 def _model_name(llm: Any) -> str | None:
     """用于从模型对象稳定读取审计用模型名"""
     return str(getattr(llm, "model_name", None) or getattr(llm, "model", "") or None) or None
-
-
-def _validate_topic_label_ids(
-    analysis: AgentAnalysis,
-    *,
-    expected_ids: set[int],
-) -> None:
-    """核对标签键与本轮模型实际 topic_id 完全一致"""
-    actual_ids = {int(topic_id) for topic_id in analysis.topic_labels}
-    if actual_ids != expected_ids:
-        raise ValueError(
-            "topic_labels IDs must match available topic data: "
-            f"expected {sorted(expected_ids)}, got {sorted(actual_ids)}"
-        )
-
-
-def _finalize_diagnosis_result(
-    analysis: AgentAnalysis,
-    *,
-    novel_id: str,
-    foreshadow_expectation: float | None,
-    organization: NarrativeOrganization | None = None,
-) -> AgentAnalysis:
-    """用于以运行元数据和伏笔 ledger 确定性收口诊断终态"""
-    payload = analysis.model_dump()
-    payload["novel_id"] = novel_id
-    payload["foreshadow_expectation"] = foreshadow_expectation
-    payload["narrative_organization"] = organization
-    return AgentAnalysis.model_validate(payload)
-
-
-def _validate_diagnosis_submission(
-    analysis: AgentAnalysis,
-    *,
-    expected_topic_ids: set[int],
-    evidence_ledger: DiagnosisEvidenceLedger,
-    organization_draft: EventOrganizationDraft | None = None,
-) -> None:
-    """用于同时校验诊断结果主题合同与工具取证来源"""
-    _validate_topic_label_ids(analysis, expected_ids=expected_topic_ids)
-    evidence_ledger.require_evidence()
-    if organization_draft is not None:
-        organization_draft.finish()
 
 
 async def _run_diagnosis_agent(
@@ -85,12 +34,12 @@ async def _run_diagnosis_agent(
     bus: Any = None,
 ) -> AgentAnalysis:
     """诊断只运行独立会话：案例会话自取办理，报告会话收尾，依赖与最终保存由领域完成"""
+    from src.agents.model_client import build_chat_model
     from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
     from src.audit.module import AuditMessages
     from src.config import settings
     from src.event_bus import EventBus, Message
     from src.model_pool.configuration import load_task_config
-    from src.model_pool.llm import build_chat_model
 
     from .work_runtime import DiagnosisWorkScheduler
 
@@ -129,7 +78,12 @@ async def _run_diagnosis_agent(
             role=progress.role,
         )
         local_id = recorder.start_invocation(**context)
-        observer = AgentTurnObserver(recorder, invocation_id=local_id, context=context)
+        observer = AgentTurnObserver(
+            recorder,
+            invocation_id=local_id,
+            context=context,
+            entry_id=progress.entry_id,
+        )
         observer._turn_counter = progress.physical_sequence
         return observer
 
@@ -144,10 +98,10 @@ async def _run_diagnosis_agent(
         domain=domain,
         bus=active_bus,
         model_id=model_id,
-        llm_factory=lambda selected: (
+        llm_factory=lambda entry_id: (
             llm
             if llm is not None
-            else build_chat_model("diagnosis", config=load_task_config("diagnosis", model_id=selected))
+            else build_chat_model("diagnosis", config=load_task_config("diagnosis", entry_id=entry_id))
         ),
         observer_factory=observer_factory,
         audit_barrier=barrier,

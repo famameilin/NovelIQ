@@ -78,6 +78,12 @@ def count_paragraphs(session: Session, run_id: str) -> int:
     return int(session.execute(statement).scalar_one() or 0)
 
 
+def fetch_paragraph_texts(session: Session, run_id: str) -> list[str]:
+    """按段落编号顺序读取指定运行的原文"""
+    statement = select(Paragraph.text).where(Paragraph.run_id == run_id).order_by(Paragraph.paragraph_id)
+    return list(session.scalars(statement))
+
+
 def fetch_paragraph_rows_batch(
     session: Session,
     run_id: str,

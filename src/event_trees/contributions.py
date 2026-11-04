@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from src.fact_graph.evidence import EvidenceParagraph
+from src.text_processing.evidence import EvidenceParagraph
 
 
 @dataclass(frozen=True, slots=True)

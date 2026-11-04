@@ -21,12 +21,12 @@ import unicodedata
 from collections.abc import Sequence
 from typing import Annotated, Any, Protocol
 
-from langchain_core.tools import tool
 from pydantic import ConfigDict, Field, create_model
 
+from src.agents.tools import tool
 from src.fact_graph.inputs import ChapterParagraphInfo
-from src.fact_graph.outputs import SourceReference, TextSearchResult
-from src.fact_graph.schema import EL_PATH_SEP, RESERVED_ROOT_KEY
+from src.fact_graph.outputs import TextSearchResult
+from src.text_processing.evidence import SourceReference
 
 from .errors import AnnotationAuthorizationError, AnnotationInputError
 
@@ -46,12 +46,6 @@ _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
 FINISH_TOOL_NAME: str = "finish"
 # 五域固定遍历顺序：工具面排序、缺内容提醒与写入计数共用（无逐域结束事件）
 _DOMAIN_ORDER = ("entities", "metrics", "events", "relations", "dialogues")
-# 事件根节点在章内局部键空间里的固定名字（子事件键不得占用）；权威定义在 schema
-_ROOT_NODE_KEY = RESERVED_ROOT_KEY
-# 局部键路径分隔符：子事件 el = "<树键>/<节点键>"；权威定义在 schema
-_EL_PATH_SEP = EL_PATH_SEP
-
-
 def _norm_entity_key(name: str, entity_type: object = "") -> str:
     """用于生成实体身份键（与 FactGraph 复合键同源：规范名+实体大类）"""
     from src.fact_graph.graph import entity_key
@@ -75,9 +69,9 @@ EventLocalKey = Annotated[
     Field(
         min_length=1,
         description=(
-            "本节点的层级局部键，由你指定：根事件 el=树键（如 t1），"
-            "子事件 el=树键/节点键（如 t1/e2，节点键不得占用 root）；"
-            "写入即生效，同轮后面的子事件和参与者引用直接可用"
+            "本事件在本执行内的引用 id，由你指定（如 e1、e2）；"
+            "整串就是一个 id，不表示父子层级或路径；"
+            "写入即生效，同轮后面的参与者、关联和案例引用直接可用"
         ),
     ),
 ]
@@ -98,13 +92,9 @@ def tool_record_key(tool_name: str, args: dict[str, Any]) -> str | None:
     if tool_name == "write_relation":
         return f"relation/{args.get('from_entity')}-{args.get('to_entity')}/{args.get('relation_type')}"
     if tool_name == "write_event":
-        el = str(args.get("el") or "")
-        if _EL_PATH_SEP not in el and not bool(args.get("isroot")):
-            # 子事件键写错形态时仍按原样回显，回执定位到被拒的那次调用
-            return el or "event"
-        if _EL_PATH_SEP in el:
-            return el
-        return f"{el}/{_ROOT_NODE_KEY}" if el else "event"
+        if isinstance(args.get("items"), list) and args["items"]:
+            args = args["items"][0]
+        return str(args.get("el") or "event")
     if tool_name in {"anchor_record", "write_link"}:
         return str(args.get("record_id") or tool_name)
     return None
@@ -140,12 +130,7 @@ def _norm_graph_name(name: str) -> str:
 
 
 def _forbid_undeclared_args(tool_candidate: Any) -> None:
-    """用于让写入类工具拒绝未事件参数
-
-    langchain 由函数签名生成的参数模型默认 extra=ignore：模型多写的字段被静默丢弃，
-    例如把 isforeshadowing 写到子事件上仍报 staged，语义丢失却看不出错。收紧为整条
-    拒绝后，多余字段名随结构化回执回到模型，一次改一处。
-    """
+    """写入工具拒绝未声明参数，并通过结构化回执返回多余字段"""
     schema = tool_candidate.args_schema
     if schema is None:
         return

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Literal, cast
 
 from src.api.models.events import (
@@ -44,7 +45,7 @@ def build_event_forest_response(snapshot: EventForestSnapshot) -> EventForestRes
                 causal_event_refs=node.causal_event_refs,
                 tree_id=node.tree_id,
                 cause_role=cast(Literal["root", "main", "secondary"], node.cause_role),
-                parent_event_id=node.parent_event_id,
+                parent_event_ids=node.parent_event_ids,
                 evidence_scope=cast(Literal["chapter", "paragraph"], node.evidence_scope),
             )
             for node in snapshot.event_nodes
@@ -52,7 +53,7 @@ def build_event_forest_response(snapshot: EventForestSnapshot) -> EventForestRes
         event_trees=[
             EventTreeResponse(
                 tree_id=tree.tree_id,
-                root_event_id=tree.root_event_id,
+                entry_event_id=tree.entry_event_id,
                 main_chain=tree.main_chain,
                 secondary_groups=[
                     EventSecondaryGroupResponse(
@@ -81,17 +82,7 @@ def build_event_forest_response(snapshot: EventForestSnapshot) -> EventForestRes
             for edge in snapshot.causal_edges
         ],
         foreshadowing_edges=[
-            ForeshadowingEdgeResponse(
-                root_event_id=fe.root_event_id,
-                tree_id=fe.tree_id,
-                payoff_event_id=fe.payoff_event_id,
-                first_chapter_id=fe.first_chapter_id,
-                last_chapter_id=fe.last_chapter_id,
-                description=fe.description,
-                status=fe.status,
-                active=fe.active,
-            )
-            for fe in snapshot.foreshadowing_edges
+            ForeshadowingEdgeResponse.model_validate(asdict(fe)) for fe in snapshot.foreshadowing_edges
         ],
     )
 
@@ -114,17 +105,5 @@ def serialize_snapshot_edges(
         )
         for e in snapshot.causal_edges
     ]
-    foreshadowing = [
-        ForeshadowingEdgeResponse(
-            root_event_id=e.root_event_id,
-            payoff_event_id=e.payoff_event_id,
-            first_chapter_id=e.first_chapter_id,
-            last_chapter_id=e.last_chapter_id,
-            tree_id=e.tree_id,
-            description=e.description,
-            status=e.status,
-            active=e.active,
-        )
-        for e in snapshot.foreshadowing_edges
-    ]
+    foreshadowing = [ForeshadowingEdgeResponse.model_validate(asdict(e)) for e in snapshot.foreshadowing_edges]
     return causal, foreshadowing

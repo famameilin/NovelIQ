@@ -32,3 +32,16 @@ class SseMessageRepository:
             payload = json.loads(bytes(row.emitted_bytes))
             messages.append({"type": payload["type"], "data": payload["data"], "seq": int(row.stream_id)})
         return messages
+
+    def replay_tail(self, task_id: str, *, limit: int = 4096) -> tuple[list[dict[str, Any]], int]:
+        "启动投影只取最近消息与状态消息，返回消息与当前最大游标"
+        storage = self.storage_factory()
+        run = storage.runs.get_run_by_task_id(task_id)
+        if run is None:
+            raise ValueError(f"SSE 任务不存在: {task_id}")
+        rows, latest = storage.sse.replay_tail(run["run_id"], limit)
+        messages: list[dict[str, Any]] = []
+        for seq, blob in rows:
+            payload = json.loads(bytes(blob))
+            messages.append({"type": payload["type"], "data": payload["data"], "seq": int(seq)})
+        return messages, int(latest)

@@ -11,6 +11,8 @@ class UploadResponse(BaseModel):
     novel_id: str
     filename: str
     status: str = "uploaded"
+    title: str | None = None
+    word_count: int | None = None
     message: str = "文件上传成功"
 
 

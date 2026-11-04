@@ -19,11 +19,11 @@ _EXPECTATION_STRENGTH_WEIGHT = {"high": 0.05, "medium": 0.0, "low": -0.05}
 
 
 def _foreshadowing_roots(session: Storage, run_id: str) -> tuple[list[CompleteEvent], dict[str, Any]]:
-    """本 run 的伏笔根事件及来源章信息，按真实章序与本地地址稳定排序"""
+    """本 run 的伏笔埋设事件及来源章信息，按真实章序与本地地址稳定排序"""
     annotation_events = smap.run_annotation_event_ids(session, run_id)
     if not annotation_events:
         return [], {}
-    rows = list(session.reads.event_trees_read_foreshadowing_foreshadowing_roots_1(annotation_events))
+    rows = list(session.reads.events.list_foreshadowing_roots(annotation_events))
     sources = smap.annotation_sources(session, {row.annotation_record_id for row in rows})
     rows.sort(
         key=lambda row: (
@@ -36,63 +36,57 @@ def _foreshadowing_roots(session: Storage, run_id: str) -> tuple[list[CompleteEv
 
 
 def foreshadowing_by_chapter(session: Storage, run_id: str) -> dict[int, dict[str, Any]]:
-    """章节伏笔投影引用已发布事件，不把来源事件作为事件暴露
-
-    动作事实携带来源事件列（root/target 事件身份是读投影），章号取动作真实来源章；
-    诊断发布前没有正式事件身份，描述回退来源事件标题、章号仍按真实来源投影，
-    事件身份保持空不回填冒充（与动作读取合同一致）。
-    """
-    query = EventTreeQuery(session, run_id)
-    query.fetch()
+    """按动作实际来源章节投影埋设事件与回收可能性"""
+    actions = load_foreshadowing_actions(session, run_id)
+    if not actions:
+        return {}
+    events = smap.run_events(session, run_id)
     by_chapter: dict[int, dict[str, Any]] = {}
-    for action in sorted(load_foreshadowing_actions(session, run_id), key=action_order):
+    for action in actions:
         if action.chapter_id is None:
             raise ValueError("伏笔动作缺少真实来源章")
-        annotation_event = query.events[action.source_event_id]
-        event = None if action.root_event_id is None else query.events[action.root_event_id]
+        annotation_event = events[action.source_event_id]
+        payoff_likelihood = annotation_event.payoff_likelihood
         by_chapter[action.chapter_id] = {
             "has_foreshadowing": True,
-            "is_strong_setup": annotation_event.strength == "high" if annotation_event.strength is not None else None,
-            "foreshadowing_desc": event.title if event is not None else annotation_event.title,
+            "is_strong_setup": payoff_likelihood == "high" if payoff_likelihood is not None else None,
+            "foreshadowing_desc": annotation_event.title,
             "why_unresolved_now": None,
-            "payoff_likelihood": annotation_event.payoff_likelihood,
-            "foreshadowing_root_event_id": None if action.action_type == "setup" or event is None else event.event_id,
+            "payoff_likelihood": payoff_likelihood,
+            "foreshadowing_source_event_id": action.source_event_id,
         }
     return by_chapter
 
 
 def fetch_foreshadowing_trees(session: Storage, run_id: str) -> list[ForeshadowingTreeView]:
-    """按正式事件聚合明确伏笔动作；没有正式事件身份的来源不进入树"""
+    """按埋设事件聚合动作，端点定位与动作原文证据分别保留"""
     query = EventTreeQuery(session, run_id)
-    query.fetch()
-    by_root: dict[str, list[ForeshadowingActionRow]] = {}
-    for action in sorted(load_foreshadowing_actions(session, run_id), key=action_order):
-        if action.root_event_id is None:
-            continue
-        by_root.setdefault(action.root_event_id, []).append(action)
+    payload = query.fetch()
+    by_source: dict[str, list[dict[str, Any]]] = {}
+    for action in payload["foreshadowing_actions"]:
+        by_source.setdefault(action["source_event_id"], []).append(action)
     result: list[ForeshadowingTreeView] = []
-    for event_id, actions in by_root.items():
+    for event_id, actions in by_source.items():
         event = query.events[event_id]
         first, latest = actions[0], actions[-1]
-        annotation_event = query.events[first.source_event_id]
-        chapters = sorted(
-            {row.chapter_id for row in actions if row.chapter_id is not None}, key=query.orders.__getitem__
-        )
-        status = {"setup": "open", "reinforce": "reinforced", "payoff": "likely_paid_off"}[latest.action_type]
+        chapters = sorted({row["chapter_id"] for row in actions}, key=query.orders.__getitem__)
+        status = {"setup": "open", "reinforce": "reinforced", "payoff": "likely_paid_off"}[latest["action_type"]]
         result.append(
             ForeshadowingTreeView(
-                root_event_id=event_id,
-                tree_id=event_id,
-                # 动作事实的真实生产者是标注 work（trees.save_work 写入），来源章随该 work 投影
-                first_chapter_id=cast(int, first.chapter_id),
-                last_chapter_id=cast(int, latest.chapter_id),
+                source_event_id=event_id,
+                source_locator=first["source_locator"],
+                target_event_id=latest["target_event_id"],
+                target_locator=latest["target_locator"],
+                actions=actions,
+                first_chapter_id=first["chapter_id"],
+                last_chapter_id=latest["chapter_id"],
                 anchor_chapter_ids=chapters,
                 description=event.title,
-                payoff_likelihood=annotation_event.payoff_likelihood,
-                strength=annotation_event.strength,
+                payoff_likelihood=event.payoff_likelihood,
+                strength=event.strength,
                 status=status,
                 active=status != "likely_paid_off",
-                latest_reason=query.events[latest.target_event_id].title if latest.target_event_id else None,
+                latest_reason=latest["target_locator"]["title"] if latest["target_locator"] else None,
                 latest_why_unresolved_now=None,
             )
         )

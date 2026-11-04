@@ -51,7 +51,9 @@ _STAGE_FIELD_EXPECTATIONS: dict[str, str] = {
     "speaker": "说话人写 {name: 正文名字, entity_type: character}，运行时自动登记",
     "candidate_index": "1 基候选序号（见 DialogueCandidates 表）",
     "el": "实体或事件声明的章内来源键（如 a1、e1），路径不表示包含",
-    "characters": "参与者数组，每项 {name, entity_type, role[, narrative_role, action, emotion]}，运行时自动登记",
+    "characters": (
+        "参与者数组，每项 {name, entity_type, role}；character 条目另须 narrative_role、action、emotion，运行时自动登记"
+    ),
     "labels": "段落情绪标签数组，每项 {paragraph_id, emotion}（paragraph_id 取段首可见号，即正文每段开头的 `N：`）",
     "paragraph_id": "段首可见号（正文每段开头的 `N：`）",
     "tags": f"字符串数组，{ENTITY_TAGS_RULE_TEXT}",
@@ -156,7 +158,7 @@ def translate_write_validation_error(
     args: dict[str, Any],
     exc: ValidationError,
 ) -> AnnotationStageRejection:
-    """用于把工具层 schema（langchain 参数绑定）失败翻成结构化拒绝回执
+    """将工具参数校验失败转换成结构化拒绝回执
 
     schema 层的失败发生在工具函数体之前，记录键只能从原始参数拼装。
     """

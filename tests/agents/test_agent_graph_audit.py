@@ -3,9 +3,9 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from langchain_core.messages import AIMessage
 from sqlalchemy.orm import sessionmaker
 
+from src.agents.messages import AssistantMessage
 from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
 from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls
 from src.audit.recorder import AgentAuditRecorder
@@ -30,12 +30,12 @@ def _new_audit_context(db_session) -> tuple[AgentAuditRecorder, AgentTurnObserve
         role="case",
     )
     invocation_id = recorder.start_invocation(**context)
-    observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=context)
+    observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=context, entry_id="entry-test")
     return recorder, observer, context, run_id
 
 
-def _program(code: str) -> AIMessage:
-    return AIMessage(content="", tool_calls=[call("execute_code", {"code": code})])
+def _program(code: str) -> AssistantMessage:
+    return AssistantMessage(content="", tool_calls=[call("execute_code", {"code": code})])
 
 
 @pytest.mark.parametrize("mode", ["success", "rejected_report", "budget", "no_tool"])
@@ -51,7 +51,7 @@ async def test_graph_audit_records_real_tools_and_closes_turns(db_session, mode)
     elif mode == "budget":
         responses, maximum = [_program("search_cases()")], 1
     elif mode == "no_tool":
-        responses = [AIMessage(content="缺报告"), _program(good)]
+        responses = [AssistantMessage(content="缺报告"), _program(good)]
     graph, model, _ = build_graph(responses, maximum=maximum, observer=observer)
     result = await run_graph(graph)
     recorder.finish_invocation(
@@ -68,9 +68,7 @@ async def test_graph_audit_records_real_tools_and_closes_turns(db_session, mode)
     else:
         assert result.get("completion_ok") is True
         report_rows = [row for row in rows if row.tool_name == "write_diagnosis"]
-        assert [bool(row.error) for row in report_rows] == (
-            [True, False] if mode == "rejected_report" else [False]
-        )
+        assert [bool(row.error) for row in report_rows] == ([True, False] if mode == "rejected_report" else [False])
 
 
 async def test_provider_failure_retains_audit(db_session):
@@ -88,7 +86,7 @@ async def test_provider_failure_retains_audit(db_session):
 async def test_transport_retry_is_audited_separately_from_model_round(db_session):
     recorder, observer, context, run_id = _new_audit_context(db_session)
     graph, model, _ = build_graph(responses=[], maximum=1, observer=observer, retries=2, completion_check=lambda: [])
-    model.ainvoke = AsyncMock(side_effect=[TimeoutError("provider timeout"), AIMessage(content="完成")])
+    model.ainvoke = AsyncMock(side_effect=[TimeoutError("provider timeout"), AssistantMessage(content="完成")])
     result = await run_graph(graph)
     recorder.finish_invocation(**context, status="success")
     db_session.rollback()

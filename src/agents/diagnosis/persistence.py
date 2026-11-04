@@ -1,13 +1,14 @@
-"""冻结诊断报告、叙事组织与案例贡献，交给 Storage 完整发布并确认内存状态"""
+"""冻结诊断报告、事件树、结果与案例贡献，完整发布后确认内存状态"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, cast
 
 from loguru import logger
 
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import NarrativeOrganization, snapshot_digest
+from src.event_trees.organization_models import NarrativeOrganization, snapshot_digest
 from src.storage import Storage
 
 from .roster import character_entity_ids, normalize_character_name
@@ -30,7 +31,7 @@ def _character_entity_ids(by_name: dict[str, str], names: list[str]) -> dict[str
 
 def _existing_report(session: Storage, run_id: str) -> Any:
     """本 run 的正式诊断报告（经整轮会话取得运行归属）；多份报告是数据错误"""
-    rows = list(session.reads.agents_diagnosis_persistence_existing_report_1(run_id))
+    rows = list(session.reads.diagnosis.list_run_reports(run_id))
     if len(rows) > 1:
         raise ValueError("同一运行存在多份正式诊断报告，禁止覆盖或挑选其中一份")
     return rows[0] if rows else None
@@ -39,7 +40,7 @@ def _existing_report(session: Storage, run_id: str) -> Any:
 def _verify_replay(session: Storage, run_id: str, report: Any, analysis: AgentAnalysis) -> None:
     """提交回执不明时只核验已发布结果：报告投影、冻结快照与正式事件身份必须一致"""
     from src.diagnosis.read import fetch_diagnosis_payload
-    from src.event_trees.organization import _run_events
+    from src.event_trees.organization_queries import _run_events
 
     stored = fetch_diagnosis_payload(session, run_id)
     comparable = set(AgentAnalysis.model_fields) - {"narrative_organization"}
@@ -53,9 +54,22 @@ def _verify_replay(session: Storage, run_id: str, report: Any, analysis: AgentAn
         or report.structure_snapshot != organization.structure_snapshot
     ):
         raise ValueError("已发布诊断的冻结快照与本次提交不一致，禁止覆盖")
-    saved = set(_run_events(session, run_id))
+    saved_rows = _run_events(session, run_id)
+    saved = set(saved_rows)
     if saved != {item.event_id for item in organization.events}:
         raise ValueError("已发布完整事件身份与本次提交不一致，禁止覆盖")
+    from src.event_trees import storage_map as smap
+
+    saved_trees = session.reads.events.list_execution_trees(smap.run_execution_ids(session, run_id))
+    if {row.group_id for row in saved_trees if row.is_event_line} != set(organization.event_line_ids):
+        raise ValueError("已发布事件线标记与冻结选择不一致，禁止覆盖")
+    saved_names = {
+        row.group_id: line_name
+        for row in saved_trees
+        if (line_name := getattr(row, "line_name", None)) is not None
+    }
+    if saved_names != organization.event_line_names:
+        raise ValueError("已发布事件线名称与冻结命名不一致，禁止覆盖")
 
 
 def _save_case_writes(
@@ -122,6 +136,7 @@ def save_diagnosis_result(
     case_graph=None,
     case_writers=None,
     case_candidates=None,
+    on_committed: Callable[[], None] | None = None,
 ) -> None:
     """诊断 Agent 保存实际诊断结果，并把案例采纳绑定到正式报告身份"""
     import json
@@ -133,13 +148,15 @@ def save_diagnosis_result(
 
     organization = analysis.narrative_organization
     if organization is None or not organization.source_agent_id:
-        raise ValueError("诊断结果缺少全书叙事组织或真实会话身份")
+        raise ValueError("诊断结果缺少事件树与结果或真实会话身份")
     existing = _existing_report(session, run_id)
     if existing is not None:
         _verify_replay(session, run_id, existing, analysis)
         from src.event_trees.read.organization import EventTreeQuery
 
         EventTreeQuery(session, run_id).fetch()
+        if on_committed is not None:
+            on_committed()
         if case_pool is not None:
             for author in sorted(case_pool.executions):
                 case_pool.confirm(author)
@@ -220,6 +237,8 @@ def save_diagnosis_result(
         cases,
     )
     result = session.diagnosis.save_report(request)
+    if on_committed is not None:
+        on_committed()
     if result["warnings"]:
         logger.warning("diagnosis case save warnings: {}", result["warnings"])
     if case_pool is not None:

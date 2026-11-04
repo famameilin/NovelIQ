@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.api.models.events import EventLocatorResponse, ForeshadowingActionResponse
+
 
 class StyleMetricBlock(BaseModel):
     """风格与密度指标块：章节汇总与全书聚合共用同一批字段"""
@@ -100,8 +102,8 @@ class ChapterAnnotation(BaseModel):
     foreshadowing_desc: str | None = None
     why_unresolved_now: str | None = None
     payoff_likelihood: str | None = None
-    # 非埋设章挂树时指向伏笔树根（埋设事件 id）
-    foreshadowing_root_event_id: str | None = None
+    # 伏笔动作引用的埋设事件身份
+    foreshadowing_source_event_id: str | None = None
     # 冻结时系统覆盖告警（如对话候选>0但载荷为空）
     coverage_warnings: list[str] = []
     characters: list[ChapterCharacter] = []
@@ -110,10 +112,13 @@ class ChapterAnnotation(BaseModel):
 
 
 class ForeshadowingTreeResponse(BaseModel):
-    """伏笔树结果视图（伏笔即事件树），供诊断 drill-down 和结果导出复用"""
+    """按埋设事件归组的伏笔轨迹，供诊断和导出复用"""
 
-    root_event_id: str
-    tree_id: str
+    source_event_id: str
+    source_locator: EventLocatorResponse
+    target_event_id: str | None
+    target_locator: EventLocatorResponse | None
+    actions: list[ForeshadowingActionResponse]
     first_chapter_id: int
     last_chapter_id: int
     anchor_chapter_ids: list[int] = []

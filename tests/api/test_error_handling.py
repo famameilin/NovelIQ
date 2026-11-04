@@ -38,7 +38,7 @@ class TestErrorHandling:
         错误详情只写日志，对外返回通用文案。
         """
         with patch(
-            "src.storage.read_access._LegacyReadAccess.api_main_health_check_1",
+            "src.storage.readers.system.SystemReads.check_connection",
             side_effect=RuntimeError("connection refused: postgres://user:secret@internal-host:5432/db"),
         ):
             response = api_client.get("/health")

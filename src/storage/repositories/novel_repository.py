@@ -24,6 +24,8 @@ class NovelRepository(BaseRepository):
         file_path: str,
         file_size: int,
         upload_time: datetime,
+        author: str | None = None,
+        word_count: int | None = None,
     ) -> None:
         self.session.add(
             Novel(
@@ -32,7 +34,9 @@ class NovelRepository(BaseRepository):
                 title=title,
                 file_path=file_path,
                 file_size=file_size,
+                word_count=word_count,
                 upload_time=upload_time,
+                author=author,
             )
         )
 

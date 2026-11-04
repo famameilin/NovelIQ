@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, func, insert, select, text
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,11 @@ from src.storage.repositories.metric_inputs import (
     char_count_projection,
     surface_tension_projection,
 )
+
+
+def analyze_paragraph_statistics(session: Session) -> None:
+    "刷新段落三表统计：新 run 的行数未知时读取会选到错误的连接方式"
+    session.execute(text("ANALYZE paragraph_metrics, paragraphs, paragraph_features"))
 
 
 def insert_paragraph_metrics(session: Session, run_id: str, rows: Sequence[ParagraphMetricRow]) -> int:

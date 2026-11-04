@@ -1,6 +1,8 @@
-"""伏笔树结果查询组装器（伏笔即事件树）"""
+"""伏笔轨迹与事件定位的响应装配"""
 
 from __future__ import annotations
+
+from dataclasses import asdict
 
 from src.api.models.responses import ForeshadowingTreeResponse
 from src.event_trees.read.foreshadowing import fetch_foreshadowing_trees
@@ -16,20 +18,4 @@ def _fetch_foreshadowing_trees(
     """
 
     rows = fetch_foreshadowing_trees(annotation_repo, run_id)
-    return [
-        ForeshadowingTreeResponse(
-            root_event_id=row.root_event_id,
-            tree_id=row.tree_id,
-            first_chapter_id=row.first_chapter_id,
-            last_chapter_id=row.last_chapter_id,
-            anchor_chapter_ids=row.anchor_chapter_ids,
-            description=row.description,
-            payoff_likelihood=row.payoff_likelihood,
-            strength=row.strength,
-            status=row.status,
-            active=row.active,
-            latest_reason=row.latest_reason,
-            latest_why_unresolved_now=row.latest_why_unresolved_now,
-        )
-        for row in rows
-    ]
+    return [ForeshadowingTreeResponse.model_validate(asdict(row)) for row in rows]

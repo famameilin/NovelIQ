@@ -93,29 +93,21 @@ def _provider_request_metadata(model: Any, *, attempt: int) -> dict[str, Any]:
 
     调用固定为流式传输（transport 恒为 "stream"）。
     """
-    bound_model = getattr(model, "bound", model)
-    model_kwargs = getattr(bound_model, "model_kwargs", None) or {}
-    extra_body = model_kwargs.get("extra_body") if isinstance(model_kwargs, Mapping) else None
-    if not isinstance(extra_body, Mapping):
-        extra_body = getattr(bound_model, "extra_body", None) or {}
-    binding_kwargs = getattr(model, "kwargs", None) or {}
-    tools = binding_kwargs.get("tools") if isinstance(binding_kwargs, Mapping) else None
+    tools = getattr(model, "tools", None)
     tool_names, tool_contract_fingerprint = _safe_tool_contract(tools)
-    thinking = bool(extra_body.get("think")) if isinstance(extra_body, Mapping) else False
     parameters: dict[str, Any] = {
-        "model": str(getattr(bound_model, "model_name", None) or getattr(bound_model, "model", "") or "unknown"),
-        "base_url": _safe_base_url(
-            getattr(bound_model, "base_url", None) or getattr(bound_model, "openai_api_base", None)
-        ),
-        "temperature": getattr(bound_model, "temperature", None),
-        "top_p": getattr(bound_model, "top_p", None),
-        "timeout_s": getattr(bound_model, "request_timeout", None) or getattr(bound_model, "timeout", None),
-        "streaming": bool(getattr(bound_model, "streaming", True)),
-        "extra_body": {"think": thinking},
+        "model": str(getattr(model, "model", None) or "unknown"),
+        "base_url": _safe_base_url(getattr(model, "base_url", None)),
+        "temperature": getattr(model, "temperature", None),
+        "top_p": getattr(model, "top_p", None),
+        "timeout_s": getattr(model, "timeout_s", None),
+        "streaming": True,
+        "reasoning_effort": getattr(model, "reasoning_effort", None),
         "tool_names": tool_names,
         "tool_contract_fingerprint": tool_contract_fingerprint,
         "tool_schema_tokens": count_tokens(json.dumps(tools, ensure_ascii=False, separators=(",", ":"), default=str))
-        if tools else 0,
+        if tools
+        else 0,
     }
     canonical = json.dumps(parameters, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
     return {

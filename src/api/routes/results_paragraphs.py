@@ -49,7 +49,7 @@ router = APIRouter()
     response_model=list[ParagraphCurvePoint],
     summary="段落曲线（§13.1，展示降采样可选）",
 )
-async def get_paragraph_curves(
+def get_paragraph_curves(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -71,7 +71,7 @@ async def get_paragraph_curves(
     response_model=list[EmotionTrendWindow],
     summary="情绪趋势窗口聚合（§13.1 展示层，缩放自适应窗口）",
 )
-async def get_emotion_trend(
+def get_emotion_trend(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     request: Request,
@@ -106,7 +106,7 @@ async def get_emotion_trend(
     response_model=ChapterMetricsResponse,
     summary="章节与全书汇总指标（§13.2）",
 )
-async def get_chapter_metrics(
+def get_chapter_metrics(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -125,7 +125,7 @@ async def get_chapter_metrics(
     "/{novel_id}/chapter-annotations",
     response_model=list[ChapterAnnotationResponse],
 )
-async def get_chapter_annotations(
+def get_chapter_annotations(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -143,7 +143,7 @@ async def get_chapter_annotations(
 
 
 @router.get("/{novel_id}/characters", response_model=list[CharacterStats])
-async def get_characters(
+def get_characters(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],

@@ -24,7 +24,7 @@ class ChapterAnnotationRow:
     why_unresolved_now: str | None = None
     payoff_likelihood: str | None = None
 
-    foreshadowing_root_event_id: str | None = None
+    foreshadowing_source_event_id: str | None = None
 
     coverage_warnings: list[str] = field(default_factory=list)
 
@@ -58,10 +58,13 @@ class DialogueFactRow:
 
 @dataclass(frozen=True)
 class ForeshadowingTreeView:
-    "用于向 API 与诊断暴露伏笔树汇总视图（伏笔即事件树）"
+    "按埋设事件归组的伏笔轨迹与端点定位"
 
-    root_event_id: str
-    tree_id: str
+    source_event_id: str
+    source_locator: dict[str, Any]
+    target_event_id: str | None
+    target_locator: dict[str, Any] | None
+    actions: list[dict[str, Any]]
     first_chapter_id: int
     last_chapter_id: int
     anchor_chapter_ids: list[int]

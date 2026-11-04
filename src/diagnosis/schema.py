@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.diagnosis.normalization import normalize_topic_label_input
+from src.diagnosis.normalization import normalize_character_key, normalize_topic_label_input
 from src.diagnosis.vocabulary import GENRE_LABEL_VALUES, STYLE_LABEL_VALUES
-from src.event_trees.organization import NarrativeOrganization
+from src.event_trees.organization_models import NarrativeOrganization
 from src.fact_graph.character_reference_policy import is_global_character_surface_name
 
 ValueLogicType = Literal["善义有价值", "强者为王", "混合型"]
@@ -35,8 +36,7 @@ class AgentAnalysis(BaseModel):
     arc_scores: dict[str, float] = Field(
         default_factory=dict,
         description=(
-            "重点角色的弧线评分（0-10）：key 必须是本 run 正式角色的规范名，"
-            "不是章节/事件/剧情线标题，也不是实体 UUID"
+            "重点角色的弧线评分（0-10）：key 必须是本 run 正式角色的规范名，不是章节/事件/剧情线标题，也不是实体 UUID"
         ),
     )
     genre_labels: list[str] = Field(default_factory=list)
@@ -58,12 +58,8 @@ class AgentAnalysis(BaseModel):
         description="叙事弧类型短标签，4 字以内（如 三幕式/英雄之旅）；不写句子、不写箭头链",
     )
     focus_structure: FocusStructureType | None = None
-    focus_characters: list[str] = Field(
-        default_factory=list, description="焦点人物：每项必须是本 run 正式角色的规范名"
-    )
-    main_characters: list[str] = Field(
-        default_factory=list, description="主要人物：每项必须是本 run 正式角色的规范名"
-    )
+    focus_characters: list[str] = Field(default_factory=list, description="焦点人物：每项必须是本 run 正式角色的规范名")
+    main_characters: list[str] = Field(default_factory=list, description="主要人物：每项必须是本 run 正式角色的规范名")
     core_cast: list[str] = Field(default_factory=list, description="核心阵容：每项必须是本 run 正式角色的规范名")
     theme_color: str | None = Field(
         default=None,
@@ -90,7 +86,7 @@ class AgentAnalysis(BaseModel):
         if v is not None:
             valid_types = ("善义有价值", "强者为王", "混合型")
             if v not in valid_types:
-                raise ValueError(f"value_logic_type must be one of {valid_types}, got: {v}")
+                raise ValueError(f"value_logic_type 只能是 {valid_types}，实际 {v}")
         return v
 
     @field_validator("genre_labels")
@@ -103,11 +99,13 @@ class AgentAnalysis(BaseModel):
             if not label or label in seen:
                 continue
             if label not in GENRE_LABEL_VALUES:
-                raise ValueError(f"genre_labels contains unsupported label: {label}")
+                raise ValueError(
+                    f"genre_labels 不支持标签 {label}；可用值：{'/'.join(GENRE_LABEL_VALUES)}"
+                )
             seen.add(label)
             normalized.append(label)
         if len(normalized) > 3:
-            raise ValueError("genre_labels cannot exceed 3 items")
+            raise ValueError("genre_labels 最多 3 项")
         return normalized
 
     @field_validator("style_labels")
@@ -120,11 +118,13 @@ class AgentAnalysis(BaseModel):
             if not label or label in seen:
                 continue
             if label not in STYLE_LABEL_VALUES:
-                raise ValueError(f"style_labels contains unsupported label: {label}")
+                raise ValueError(
+                    f"style_labels 不支持标签 {label}；可用值：{'/'.join(STYLE_LABEL_VALUES)}"
+                )
             seen.add(label)
             normalized.append(label)
         if len(normalized) > 3:
-            raise ValueError("style_labels cannot exceed 3 items")
+            raise ValueError("style_labels 最多 3 项")
         return normalized
 
     @field_validator("topic_labels", mode="before")
@@ -143,7 +143,7 @@ class AgentAnalysis(BaseModel):
             if not name or name in seen:
                 continue
             if not is_global_character_surface_name(name):
-                raise ValueError(f"diagnosis character list contains unresolved reference: {name}")
+                raise ValueError(f"diagnosis 角色名单含未解析引用：{name}（须用本 run 正式角色规范名）")
             seen.add(name)
             normalized.append(name)
         return normalized
@@ -158,7 +158,7 @@ class AgentAnalysis(BaseModel):
             if not name:
                 continue
             if not is_global_character_surface_name(name):
-                raise ValueError(f"arc_scores contains unresolved reference: {name}")
+                raise ValueError(f"arc_scores 含未解析引用：{name}（须用本 run 正式角色规范名）")
             score = float(raw_score)
             normalized[name] = score
         return normalized
@@ -191,3 +191,79 @@ class AgentAnalysis(BaseModel):
             "core_cast": list(self.core_cast),
             "theme_color": self.theme_color,
         }
+
+
+class AgentAnalysisSubmission(AgentAnalysis):
+    """报告写入面：拒绝未声明字段并执行提示词承诺的硬校验"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    @field_validator("theme_color", mode="before")
+    @classmethod
+    def reject_invalid_theme_color(cls, v: object) -> object:
+        if v is None:
+            return v
+        if not isinstance(v, str) or not re.match(r"^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$", v.strip()):
+            raise ValueError("theme_color 必须是 #RRGGBB 或 #RGB 十六进制颜色")
+        return v
+
+    @field_validator("narrative_arc_type")
+    @classmethod
+    def reject_empty_arc_type(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("narrative_arc_type 不能为空字符串")
+        return v
+
+    @field_validator("arc_scores", mode="before")
+    @classmethod
+    def reject_equivalent_score_keys(cls, values: object) -> object:
+        """原始键在基础规范化前先查等价重复"""
+        if isinstance(values, dict):
+            seen: dict[str, str] = {}
+            for name in values:
+                if not isinstance(name, str):
+                    continue
+                key = normalize_character_key(name)
+                if key in seen:
+                    raise ValueError(f"arc_scores 包含等价重复角色: {seen[key]} / {name}")
+                seen[key] = name
+        return values
+
+    @field_validator("arc_scores")
+    @classmethod
+    def validate_arc_scores_strict(cls, values: dict[str, float]) -> dict[str, float]:
+        seen: dict[str, str] = {}
+        for name, score in values.items():
+            key = normalize_character_key(name)
+            if key in seen:
+                raise ValueError(f"arc_scores 包含等价重复角色: {seen[key]} / {name}")
+            seen[key] = name
+            if not 0 <= score <= 10:
+                raise ValueError(f"arc_scores[{name}] 必须在 0–10 之间")
+        return values
+
+    @field_validator("focus_characters", "main_characters", "core_cast", mode="before")
+    @classmethod
+    def reject_equivalent_raw_role_names(cls, values: object) -> object:
+        """原始名单在基础规范化前先查等价重复"""
+        if isinstance(values, list):
+            seen: dict[str, str] = {}
+            for name in values:
+                if not isinstance(name, str):
+                    continue
+                key = normalize_character_key(name)
+                if key in seen:
+                    raise ValueError(f"角色名单包含等价重复: {seen[key]} / {name}")
+                seen[key] = name
+        return values
+
+    @field_validator("focus_characters", "main_characters", "core_cast")
+    @classmethod
+    def reject_equivalent_role_names(cls, values: list[str]) -> list[str]:
+        seen: dict[str, str] = {}
+        for name in values:
+            key = normalize_character_key(name)
+            if key in seen:
+                raise ValueError(f"角色名单包含等价重复: {seen[key]} / {name}")
+            seen[key] = name
+        return values

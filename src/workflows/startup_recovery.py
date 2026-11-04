@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from src.storage import get_storage
 
 if TYPE_CHECKING:
@@ -11,7 +13,7 @@ if TYPE_CHECKING:
 
 
 def recover_orphaned_runs() -> tuple[int, int]:
-    """收口上次进程遗留的运行中任务
+    """收口上次进程遗留的运行中任务与 Agent 身份
 
     Returns:
         tuple[int, int]: (failed_count, cancelled_count)
@@ -20,6 +22,9 @@ def recover_orphaned_runs() -> tuple[int, int]:
     repo = session.runs
     failed_count = repo.mark_running_as_failed()
     cancelled_count = repo.mark_cancelling_as_cancelled()
+    closed_agents = session.audit.close_running_agents()
+    if closed_agents > 0:
+        logger.info(f"Closed {closed_agents} agent row(s) left running by the previous process")
     return (failed_count, cancelled_count)
 
 

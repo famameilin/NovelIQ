@@ -32,6 +32,8 @@ from src.storage.models import (
     GraphEntity,
     GraphFact,
     GraphRelation,
+    NarrativeGroup,
+    NarrativeLink,
     Paragraph,
     SourceEvidence,
 )
@@ -236,6 +238,41 @@ def save_event_declaration(
             start_char=0,
             end_char=len(paragraph.text),
             complete_event_id=identifier,
+        )
+    )
+    tree_id = new_id()
+    session.add(
+        NarrativeGroup(
+            group_id=tree_id,
+            producer_agent_id=agent_id,
+            kind="tree",
+            title=title or identifier,
+            description=summary or identifier,
+            is_event_line=False,
+            tree_key=None,
+        )
+    )
+    session.flush()
+    link_id = new_id()
+    session.add(
+        NarrativeLink(
+            link_id=link_id,
+            producer_agent_id=agent_id,
+            reason="完整单事件树",
+            tree_id=tree_id,
+            member_event_id=identifier,
+            position=0,
+        )
+    )
+    session.flush()
+    session.add(
+        SourceEvidence(
+            evidence_id=new_id(),
+            ordinal=0,
+            paragraph_id=paragraph.paragraph_id,
+            start_char=0,
+            end_char=len(paragraph.text),
+            narrative_link_id=link_id,
         )
     )
     if is_foreshadowing_root:

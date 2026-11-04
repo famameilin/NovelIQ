@@ -1,8 +1,4 @@
-"""时间轴截点与独立事件树分页、完整事件身份及原文证据边界
-
-夹具自足：八章真实原文与八份章级声明（第二章为伏笔根），沿正式发布链生成完整
-事件与叙事线，伏笔动作按真实生产执行登记；证据坐标一律来自真实原文。
-"""
+"""时间轴截点、完整事件树成员及原文证据边界"""
 
 from __future__ import annotations
 
@@ -13,13 +9,13 @@ import pytest
 from sqlalchemy import select
 
 from src.event_trees.contributions import EventContribution
-from src.event_trees.organization import OrganizationEvidence
+from src.event_trees.organization_models import OrganizationEvidence
 from src.event_trees.read.organization import EventTreeQuery
-from src.fact_graph.evidence import EvidenceParagraph
 from src.metrics.queries.plotline import PlotlineQuery
 from src.storage import new_id
 from src.storage.models import EventForeshadowingAction
 from src.storage.repositories.event_writes import EventWriter
+from src.text_processing.evidence import EvidenceParagraph
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import (
     add_annotation_source,
@@ -43,7 +39,8 @@ class NarrativeScenario:
     agent_id: str
     declarations: dict[int, str]
     events: dict[int, str]
-    arcs: dict[str, str]
+    event_tree_ids: dict[str, str]
+    tree_id: str
     actions: dict[str, str]
 
 
@@ -73,24 +70,17 @@ def _fixture(session) -> NarrativeScenario:
     draft, _meta = identity_every_declaration(session, run, context=(session_id, agent_id))
     mapping = {key: key for key in draft.events}
     events = {chapter: mapping[declarations[chapter]] for chapter in range(1, 9)}
-    arc = draft.register_arc(
-        key="mystery",
-        kind="main",
-        title="追寻旧信",
-        objective="揭开旧事",
-        role="核心问题",
-        reason="信件推动调查",
-        evidence=[OrganizationEvidence(paragraph_id=1, quote="第2章原文")],
-    )
-    for chapter in range(1, 9):
-        draft.link_event_arc(
-            event_id=events[chapter],
-            arc_id=arc,
-            role="推动调查",
-            reason="行动推进信件谜题",
+    graph = draft.queue_graph()
+    event_tree_ids = {event_id: graph.event_tree[event_id] for event_id in events.values()}
+    tree = event_tree_ids[events[1]]
+    for chapter in range(2, 5):
+        draft.reference(
+            parent_tree_id=tree,
+            child_tree_id=event_tree_ids[events[chapter]],
+            reason="调查包含本次行动",
             evidence=[OrganizationEvidence(paragraph_id=chapter - 1)],
         )
-    publish_draft(session, run, draft)
+    publish_draft(session, run, draft, final=True, event_line_ids=[events[i] for i in (1, 5, 6, 7, 8)])
     actions = {
         "setup": add_foreshadowing_action(
             session,
@@ -122,7 +112,8 @@ def _fixture(session) -> NarrativeScenario:
         agent_id=agent_id,
         declarations=declarations,
         events=events,
-        arcs={"mystery": arc},
+        event_tree_ids=event_tree_ids,
+        tree_id=tree,
         actions=actions,
     )
 
@@ -176,8 +167,8 @@ def test_tree_reads_complete_event_without_process_or_search_projection(db_sessi
     assert owner == scenario.declarations[2]
     detail = query.detail(owner)
     assert detail["event_type"] == "行动"
-    assert [item["arc_id"] for item in detail["arcs"]] == [scenario.arcs["mystery"]]
-    assert detail["arcs"][0]["evidence"][0]["paragraph_id"] == 1
+    assert detail["event_line_ids"] == [scenario.tree_id]
+    assert "arcs" not in detail
     assert detail["direct_children"] == []
     assert query.export()["counts"] == overview["counts"]
     assert query.detail(scenario.declarations[2])["event_id"] == owner
@@ -185,27 +176,23 @@ def test_tree_reads_complete_event_without_process_or_search_projection(db_sessi
         query.fetch(q="藏起旧信")
 
 
-def test_tree_pages_top_events_and_keeps_all_relation_evidence(db_session, api_client):
+def test_tree_returns_all_members_and_keeps_containment_evidence(db_session, api_client):
     scenario = _fixture(db_session)
     query = EventTreeQuery(storage_for(db_session), scenario.run_id)
-    cursor = None
-    events, links = {}, set()
-    while True:
-        page = query.fetch(limit=2, cursor=cursor)
-        events.update((event["event_id"], event) for event in page["events"])
-        links.update((link["event_id"], link["arc_id"]) for link in page["event_arc_links"])
-        assert len(page["event_arc_links"]) == 8
-        assert page["counts"]["all_events"] == 8
-        cursor = page["next_cursor"]
-        if not cursor:
-            break
-    assert set(events) == set(query.events)
-    assert len(links) == 8
+    data = query.fetch()
+    assert {event["event_id"] for event in data["events"]} == set(query.events)
+    assert len(data["queue_references"]) == 3
+    assert set(data["event_line_ids"]) == {
+        scenario.event_tree_ids[scenario.events[i]] for i in (1, 5, 6, 7, 8)
+    }
+    assert {event_id for q in data["queues"] for event_id in q["event_ids"]} == set(query.events)
+    assert all(row["reason"] and row["evidence"] for row in data["queue_references"])
+    assert data["counts"]["all_events"] == 8
     response = api_client.get(f"/api/novels/{scenario.novel_id}/event-trees", params={"task_id": scenario.task_id})
     assert response.status_code == 200
     assert len(response.json()["events"]) == len(query.events)
     assert response.json()["next_cursor"] is None
-    with pytest.raises(ValueError, match="游标"):
+    with pytest.raises(TypeError):
         query.fetch(cursor="invalid-cursor")
 
 
@@ -216,8 +203,7 @@ def test_complete_event_evidence_and_process_source_keep_actual_identity(db_sess
     detail = query.detail(owner)
     assert detail["source_chapters"] == [5]
     assert detail["evidence_scope"] == "paragraph"
-    assert detail["arcs"][0]["arc_id"] == scenario.arcs["mystery"]
-    assert detail["arcs"][0]["reason"] == "行动推进信件谜题"
+    assert detail["event_line_ids"] == [scenario.event_tree_ids[owner]]
     source = api_client.get(
         f"/api/novels/{scenario.novel_id}/event-trees/nodes/{owner}/source", params={"task_id": scenario.task_id}
     )
@@ -254,15 +240,15 @@ def _future_action_case(session):
     return run, sources, declarations
 
 
-@pytest.mark.parametrize("future_endpoint", ["root_event_id", "target_event_id"])
+@pytest.mark.parametrize("future_endpoint", ["source_event_id", "target_event_id"])
 def test_action_save_rejects_future_endpoints(db_session, future_endpoint):
     run, sources, declarations = _future_action_case(db_session)
-    chapter = 1 if future_endpoint == "root_event_id" else 5
+    chapter = 1 if future_endpoint == "source_event_id" else 5
     record_id, annotation_execution = sources[chapter]
     paragraph = first_paragraph(db_session, run, chapter_id=chapter)
     action = {
         "source_operation_id": "invalid-future",
-        "root_event_id": declarations[5],
+        "source_event_id": declarations[5],
         "target_event_id": declarations[8] if future_endpoint == "target_event_id" else None,
         "action_type": "reinforce",
         "chapter_id": chapter,
@@ -285,8 +271,7 @@ def test_action_save_rejects_future_endpoints(db_session, future_endpoint):
         json.dumps({"nodes": {}, "connections": {}, "actions": {new_id(): action}}),
         "{}",
     )
-    source_field = "source_event_id" if future_endpoint == "root_event_id" else "target_event_id"
-    with pytest.raises(ValueError, match=source_field + ".*来源章晚于"):
+    with pytest.raises(ValueError, match=future_endpoint + ".*来源章晚于"):
         EventWriter(run).save_work(db_session, frozen, record_id)
 
 
@@ -302,7 +287,7 @@ def test_action_save_accepts_earlier_saved_work_endpoints(db_session):
     paragraph = first_paragraph(db_session, run, chapter_id=chapter)
     action = {
         "source_operation_id": "cross-chapter-payoff",
-        "root_event_id": declarations[5],
+        "source_event_id": declarations[5],
         "target_event_id": None,
         "action_type": "payoff",
         "chapter_id": chapter,

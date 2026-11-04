@@ -104,20 +104,20 @@ $dc$ LANGUAGE plpgsql""",
 DECLARE
     v_found uuid;
 BEGIN
-    IF NEW.contained_child_id IS NULL THEN
+    IF NEW.child_tree_id IS NULL THEN
         RETURN NULL;
     END IF;
     WITH RECURSIVE up AS (
-        SELECT NEW.contained_parent_id AS id
+        SELECT NEW.parent_tree_id AS id
         UNION
-        SELECT l.contained_parent_id
+        SELECT l.parent_tree_id
           FROM event_links l
-          JOIN up ON l.contained_child_id = up.id
-         WHERE l.contained_child_id IS NOT NULL
+          JOIN up ON l.child_tree_id = up.id
+         WHERE l.child_tree_id IS NOT NULL
     )
-    SELECT up.id INTO v_found FROM up WHERE up.id = NEW.contained_child_id LIMIT 1;
+    SELECT up.id INTO v_found FROM up WHERE up.id = NEW.child_tree_id LIMIT 1;
     IF v_found IS NOT NULL THEN
-        RAISE EXCEPTION '包含关系不得成环: child=%, parent=%', NEW.contained_child_id, NEW.contained_parent_id
+        RAISE EXCEPTION '包含关系不得成环: child=%, parent=%', NEW.child_tree_id, NEW.parent_tree_id
             USING ERRCODE = 'check_violation';
     END IF;
     RETURN NULL;
@@ -127,45 +127,51 @@ $dc$ LANGUAGE plpgsql""",
     """CREATE TRIGGER trg_dc_narrative_link_no_containment_cycle
     AFTER INSERT OR UPDATE ON event_links
     FOR EACH ROW EXECUTE FUNCTION dc_narrative_link_no_containment_cycle()""",
-    """CREATE OR REPLACE FUNCTION dc_narrative_group_parent_chain() RETURNS trigger AS $dc$
+    """CREATE OR REPLACE FUNCTION dc_tree_complete() RETURNS trigger AS $dc$
 DECLARE
-    v_found uuid;
+    v_tree uuid;
+    v_kind text;
+    v_count bigint;
+    v_min integer;
+    v_max integer;
 BEGIN
-    IF NEW.parent_arc_id IS NULL THEN
+    IF TG_OP = 'DELETE' THEN
+        v_tree := OLD.tree_id;
+        IF v_tree IS NOT NULL THEN
+            SELECT count(*), min(position), max(position)
+              INTO v_count, v_min, v_max
+              FROM event_links WHERE tree_id = v_tree;
+            IF v_count > 0 AND (v_min <> 0 OR v_max <> v_count - 1) THEN
+                RAISE EXCEPTION '事件树成员位置必须从 0 连续: %', v_tree
+                    USING ERRCODE = 'check_violation';
+            END IF;
+        END IF;
         RETURN NULL;
     END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM event_groups g WHERE g.group_id = NEW.parent_arc_id AND g.arc_kind IS NOT NULL
-    ) THEN
-        RAISE EXCEPTION '父线必须是有线形状的节点: parent=%', NEW.parent_arc_id
-            USING ERRCODE = 'check_violation';
-    END IF;
-    IF NEW.arc_kind IS NULL AND EXISTS (
-        SELECT 1 FROM event_groups c WHERE c.parent_arc_id = NEW.group_id
-    ) THEN
-        RAISE EXCEPTION '存在子线的节点不能改为结果形状: group_id=%', NEW.group_id
-            USING ERRCODE = 'check_violation';
-    END IF;
-    WITH RECURSIVE up AS (
-        SELECT NEW.parent_arc_id AS id, 1 AS depth
-        UNION ALL
-        SELECT g.parent_arc_id, up.depth + 1
-          FROM event_groups g
-          JOIN up ON g.group_id = up.id
-         WHERE g.parent_arc_id IS NOT NULL AND up.depth < 4096
-    )
-    SELECT up.id INTO v_found FROM up WHERE up.id = NEW.group_id LIMIT 1;
-    IF v_found IS NOT NULL THEN
-        RAISE EXCEPTION '叙事线父链不得成环: group_id=%', NEW.group_id
-            USING ERRCODE = 'check_violation';
-    END IF;
+    FOREACH v_tree IN ARRAY ARRAY[NEW.tree_id, NEW.parent_tree_id, NEW.child_tree_id]
+    LOOP
+        IF v_tree IS NULL THEN CONTINUE; END IF;
+        SELECT kind INTO v_kind FROM event_groups WHERE group_id = v_tree;
+        IF v_kind IS DISTINCT FROM 'tree' THEN
+            RAISE EXCEPTION '事件树身份不存在或不是树: %', v_tree
+                USING ERRCODE = 'foreign_key_violation';
+        END IF;
+        SELECT count(*), min(position), max(position)
+          INTO v_count, v_min, v_max
+          FROM event_links WHERE tree_id = v_tree;
+        IF v_count > 0 AND (v_min <> 0 OR v_max <> v_count - 1) THEN
+            RAISE EXCEPTION '事件树成员位置必须从 0 连续: %', v_tree
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END LOOP;
     RETURN NULL;
 END
 $dc$ LANGUAGE plpgsql""",
-    """DROP TRIGGER IF EXISTS trg_dc_narrative_group_parent_chain ON event_groups""",
-    """CREATE TRIGGER trg_dc_narrative_group_parent_chain
-    AFTER INSERT OR UPDATE ON event_groups
-    FOR EACH ROW EXECUTE FUNCTION dc_narrative_group_parent_chain()""",
+    """DROP TRIGGER IF EXISTS trg_dc_queue_complete ON event_links""",
+    """DROP TRIGGER IF EXISTS trg_dc_tree_complete ON event_links""",
+    """CREATE CONSTRAINT TRIGGER trg_dc_tree_complete
+    AFTER INSERT OR UPDATE OR DELETE ON event_links DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION dc_tree_complete()""",
     """CREATE OR REPLACE FUNCTION dc_source_evidence_owner_run(
     p_graph_fact_id uuid, p_complete_event_id uuid, p_narrative_group_id uuid,
     p_narrative_link_id uuid, p_foreshadow_action_id uuid, p_check_id uuid
@@ -313,11 +319,10 @@ BEGIN
     v_run := dc_agent_run_id(NEW.producer_agent_id);
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.semantic_source_event_id), '链路源端事件');
     PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.semantic_target_event_id), '链路目标端事件');
-    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.contained_child_id), '包含子端事件');
-    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.contained_parent_id), '包含父端事件');
-    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.member_event_id), '事件—线成员事件');
-    PERFORM dc_require_same_run(v_run, dc_group_run_id(NEW.arc_group_id), '事件—线叙事线');
-    PERFORM dc_require_same_run(v_run, dc_group_run_id(NEW.outcome_group_id), '事件—结果结果组');
+    PERFORM dc_require_same_run(v_run, dc_group_run_id(NEW.tree_id), '事件树身份');
+    PERFORM dc_require_same_run(v_run, dc_group_run_id(NEW.parent_tree_id), '父事件树');
+    PERFORM dc_require_same_run(v_run, dc_group_run_id(NEW.child_tree_id), '子事件树');
+    PERFORM dc_require_same_run(v_run, dc_complete_event_run_id(NEW.member_event_id), '树成员');
     RETURN NULL;
 END
 $dc$ LANGUAGE plpgsql""",
@@ -423,7 +428,7 @@ DECLARE
     v_source_run uuid;
     v_source_sequence integer;
 BEGIN
-    IF TG_OP = 'UPDATE' AND NEW IS DISTINCT FROM OLD THEN
+    IF TG_OP = 'UPDATE' AND to_jsonb(NEW) IS DISTINCT FROM to_jsonb(OLD) THEN
         RAISE EXCEPTION '已保存事件不可改写' USING ERRCODE = 'check_violation';
     END IF;
     v_run := dc_agent_run_id(NEW.producer_agent_id);

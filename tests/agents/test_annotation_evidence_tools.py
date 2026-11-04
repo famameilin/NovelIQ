@@ -3,8 +3,8 @@
 模型面为五个领域写工具（write_entity / write_metrics / write_event / write_relation /
 write_dialogue）+ 唯一 finish 收尾。写入一次一个语义单元、写入即生效并返回真实回执
 （{status: written, record}；实体另带 el 与 n），没有逐域 finish——收尾判定在本回合
-全部调用处理完后由账本执行；事件根/子/参与者折叠进单工具 write_event（el 层级键：
-根=树键 t1、子=t1/e2，树内先后=调用顺序），段落情绪标签并入 write_metrics.labels
+全部调用处理完后由账本执行；事件与参与者折叠进单工具 write_event（el 是本执行引用 id，
+一次提交一个队列，队列内先后=数组顺序），段落情绪标签并入 write_metrics.labels
 （{paragraph_id, emotion}），真实 uuid 不外露。
 """
 
@@ -78,7 +78,7 @@ def _graph_relation(
 
 
 def _find_tool(tools: list, name: str):
-    """按工具名取得 LangChain 测试工具"""
+    """按工具名取得测试工具"""
     return next(candidate for candidate in tools if candidate.name == name)
 
 
@@ -172,7 +172,7 @@ def _call_all(tools: list, calls: list[dict]) -> list:
 def _reject(tools: list, ledger: AnnotationToolLedger, name: str, args: dict) -> dict:
     """经生产路径（graph._invoke_tool）取单条记录的结构化拒绝回执
 
-    schema 层（langchain 参数绑定）失败只在 _invoke_tool 这条生产路径翻译成
+    schema 层参数绑定失败只在 _invoke_tool 这条生产路径翻译成
     AnnotationStageRejection，直接 .invoke 仍是裸 pydantic ValidationError。
     与 graph.tool_batch 同口径：执行前快照、失败后回滚——单条调用失败
     只回滚该调用自己，之前的成功写入原样保留（生产收尾前的直接调用测试走同一协议）。
@@ -581,7 +581,7 @@ def test_fact_endpoint_validation_moves_to_write_time() -> None:
         },
     )
     receipt_content = receipt.pop("content")
-    assert receipt == {"status": "written", "record": "t1/root"}
+    assert receipt == {"status": "written", "record": "t1"}
     assert receipt_content["characters"] == [
         {"entity": "山门", "role": "地点", "narrative_role": None, "action": None, "emotion": None}
     ]
@@ -642,7 +642,7 @@ def test_event_location_participant_role_rejects_character_endpoint() -> None:
         },
     )
     assert receipt["status"] == "rejected"
-    assert receipt["record"] == "t1/root/participant/顾霜"
+    assert receipt["record"] == "t1/participant/顾霜"
     assert receipt["code"] == "role_type_mismatch"
     assert receipt["field"] == "role"
     assert ledger.bound_payloads["events"][0].participants == []
@@ -791,7 +791,7 @@ def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
                 "evidence": 1,
             },
         )
-    assert excinfo.value.record == "t1/root"
+    assert excinfo.value.record == "t1"
     assert excinfo.value.field == "confidence"
     assert excinfo.value.code == "missing"
 
@@ -811,14 +811,14 @@ def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
         },
     )
     response_content = response.pop("content")
-    assert response == {"status": "written", "record": "t1/root"}
+    assert response == {"status": "written", "record": "t1"}
     assert response_content["isforeshadowing"] is True
     assert response_content["confidence"] == "medium"
     _call(
         tools,
         "write_event",
         {
-            "el": "t1/e1",
+            "el": "e1",
             "title": "身份线索再次出现",
             "problem": "明确事件问题",
             "summary": "身份线索再次出现",
@@ -828,10 +828,8 @@ def test_event_root_isforeshadowing_carries_confidence_on_root() -> None:
         },
     )
 
-    tree = next(iter(ledger.event_trees.values()))
-    assert tree["isforeshadowing"] is True
     stored = ledger.bound_payloads["events"]
-    root = next(node for node in stored if node.node_id == tree["root_node_id"])
+    root = next(node for node in stored if node.node_id == ledger.event_ids_by_el["t1"])
     assert root.is_foreshadow_setup is True
     assert root.payoff_likelihood == "medium"
     setup_kind_receipt = _reject(
@@ -1316,7 +1314,16 @@ def test_entity_name_reference_is_accepted_without_prior_registration() -> None:
         {
             "el": "t1",
             "evidence": 1,
-            "characters": [{"name": "顾霜", "entity_type": "character", "role": "主体"}],
+            "characters": [
+                {
+                    "name": "顾霜",
+                    "entity_type": "character",
+                    "role": "主体",
+                    "narrative_role": "主体",
+                    "action": "喝止",
+                    "emotion": -1,
+                }
+            ],
             "title": "顾霜喝止众人",
             "problem": "明确事件问题",
             "summary": "顾霜喝止众人",

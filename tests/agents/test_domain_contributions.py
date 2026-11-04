@@ -8,7 +8,7 @@ import pytest
 from src.case_pool.contributions import CaseContribution
 from src.event_trees.contributions import EventContribution
 from src.fact_graph.contributions import FactContribution
-from src.fact_graph.evidence import EvidenceParagraph
+from src.text_processing.evidence import EvidenceParagraph
 
 
 def test_saved_contributions_isolate_nested_input_and_readers():

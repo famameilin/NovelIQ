@@ -9,8 +9,7 @@ from __future__ import annotations
 import math
 
 from src.agents.annotation.output_models import BoundChapterAnnotation
-from src.fact_graph.inputs import ChapterMetricsInput
-from src.fact_graph.vocabulary import NarrativeFunction
+from src.metrics.annotation_inputs import ChapterMetricsInput, NarrativeFunction
 from src.storage import new_id
 from src.storage.repositories import (
     ChapterRepository,

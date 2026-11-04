@@ -161,7 +161,7 @@ def fetch_paragraph_topic_series(run_id: str, session: Storage) -> dict[str, Any
         }
 
     assert model_row is not None
-    rows = paragraph_repo.fetch_paragraph_topic_rows(run_id)
+    rows = paragraph_repo.fetch_paragraph_topic_distributions(run_id)
     num_topics = model_row.num_topics
     points: dict[int, dict[str, Any]] = {}
     for row in rows:
@@ -177,7 +177,8 @@ def fetch_paragraph_topic_series(run_id: str, session: Storage) -> dict[str, Any
                 "weights": [0.0] * num_topics,
             },
         )
-        point["weights"][int(row.topic_id)] = float(row.topic_weight)
+        for topic_id, weight in zip(row.topic_ids, row.topic_weights, strict=True):
+            point["weights"][int(topic_id)] = float(weight)
 
     ordered = sorted(points.values(), key=lambda p: (p["start_position"], p["paragraph_id"]))
     return {

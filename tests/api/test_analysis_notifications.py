@@ -56,6 +56,44 @@ async def test_close_flushes_accepted_activity_before_terminal(terminal):
 
 
 @pytest.mark.asyncio
+async def test_thinking_chunks_coalesce_and_do_not_block_agent_emit():
+    class BlockingMessages(DurableMessages):
+        def __init__(self):
+            super().__init__()
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def emit(self, task_id, event_type, data):
+            self.entered.set()
+            self.release.wait(2)
+            return super().emit(task_id, event_type, data)
+
+    repository = BlockingMessages()
+    bus, manager = EventBus(), EventManager(outbox=repository)
+    consumer = NotificationConsumer(bus, manager)
+    try:
+        chunks = [f"思考{i}" for i in range(40)]
+        for index, text in enumerate(chunks):
+            await asyncio.wait_for(
+                bus.deliver(Message(topic="analysis.notification", target="notifications", source="workflow",
+                    run_id="run", message_id=f"thinking-{index}",
+                    payload={"task_id": "task", "type": "llm_thinking",
+                             "data": {"invocation_id": "agent", "stream_id": "stream", "content": text}})),
+                0.5,
+            )
+        await asyncio.sleep(0.4)
+        assert repository.entered.is_set()
+        repository.release.set()
+        await consumer.close()
+        persisted = [row for row in repository.rows if row["type"] == "llm_thinking"]
+        assert 1 <= len(persisted) < len(chunks)
+        assert "".join(row["data"]["content"] for row in persisted) == "".join(chunks)
+    finally:
+        repository.release.set()
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_persistent_write_failure_warns_until_shutdown_deadline_without_acknowledgement():
     repository = DurableMessages()
     repository.fail = True

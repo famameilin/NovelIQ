@@ -80,7 +80,7 @@ async def start_reanalysis(
 
 
 @router.get("/{novel_id}/tasks", response_model=TaskListResponse)
-async def list_tasks(novel_id: str, task_service: TaskService = Depends(get_task_service)) -> TaskListResponse:
+def list_tasks(novel_id: str, task_service: TaskService = Depends(get_task_service)) -> TaskListResponse:
     """
     获取小说的所有任务列表
     """
@@ -113,7 +113,7 @@ async def delete_task(
 
 
 @router.get("/{novel_id}/tasks/{task_id}/status", response_model=StatusResponse)
-async def get_task_status(
+def get_task_status(
     novel_id: str,
     task_id: str,
     task_service: TaskService = Depends(get_task_service),

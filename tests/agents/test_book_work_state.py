@@ -95,7 +95,7 @@ def test_old_node_read_rejected_after_same_id_rebuilt() -> None:
     trees = EventTrees("run")
     trees.begin(fixture_id(__name__, "a1"))
     trees.sync(fixture_id(__name__, "a1"), 1, [node()])
-    stale = trees.read("node")
+    stale = trees.read("node", author=fixture_id(__name__, "a1"))
     trees.rollback(fixture_id(__name__, "a1"))
     trees.begin(fixture_id(__name__, "a2"))
     trees.sync(fixture_id(__name__, "a2"), 1, [node()])
@@ -103,34 +103,37 @@ def test_old_node_read_rejected_after_same_id_rebuilt() -> None:
     trees.begin(fixture_id(__name__, "b1"))
     child = node("子事件").model_copy(update={"node_id": "child", "tree_id": "child_tree"})
     trees.sync(fixture_id(__name__, "b1"), 2, [child])
-    reads = {"node": stale, "child": trees.read("child")}
+    reads = {"node": stale, "child": trees.read("child", author=fixture_id(__name__, "b1"))}
     with pytest.raises(
         ValueError, match=f"读取生产者={fixture_id(__name__, 'a1')} 当前生产者={fixture_id(__name__, 'a2')}"
     ):
         trees.connect(fixture_id(__name__, "b1"), "child", "node", "main", reads, {1})
     reads["node"] = trees.read("node")
     trees.connect(fixture_id(__name__, "b1"), "child", "node", "main", reads, {1})
-    assert trees.read("child")["content"]["tree_id"] == "child_tree"
-    assert trees.read("child")["content"]["parent_node_id"] is None
+    assert trees.read("child", author=fixture_id(__name__, "b1"))["content"]["tree_id"] == "child_tree"
+    assert trees.read("child", author=fixture_id(__name__, "b1"))["content"]["parent_node_id"] is None
 
 
 def test_changed_content_and_unsaved_foreign_endpoints_rejected() -> None:
     trees = EventTrees("run")
-    trees.begin(fixture_id(__name__, "a1"))
-    trees.sync(fixture_id(__name__, "a1"), 1, [node()])
-    read = trees.read("node")
+    a1, b1, c1 = (fixture_id(__name__, key) for key in ("a1", "b1", "c1"))
+    trees.begin(a1)
+    trees.sync(a1, 1, [node()])
+    read = trees.read("node", author=a1)
     with pytest.raises(ValueError, match="业务内容冲突"):
-        trees.sync(fixture_id(__name__, "a1"), 1, [node().model_copy(update={"is_foreshadow_setup": True})])
-    read["content"]["summary"] = "已过期内容"
-    trees.begin(fixture_id(__name__, "b1"))
+        trees.sync(a1, 1, [node().model_copy(update={"is_foreshadow_setup": True})])
+    trees.confirm(a1)
+    trees.begin(b1)
     child = node().model_copy(update={"node_id": "child"})
-    trees.sync(fixture_id(__name__, "b1"), 2, [child])
-    reads = {"node": read, "child": trees.read("child")}
+    trees.sync(b1, 2, [child])
+    child_read = trees.read("child", author=b1)
+    read["content"]["summary"] = "已过期内容"
     with pytest.raises(ValueError, match="内容已变化"):
-        trees.connect(fixture_id(__name__, "b1"), "child", "node", "main", reads, {1})
-    reads["node"] = trees.read("node")
-    with pytest.raises(ValueError, match="未成功保存"):
-        trees.connect(fixture_id(__name__, "b1"), "child", "node", "main", reads, {1})
+        trees.connect(b1, "child", "node", "main", {"node": read, "child": child_read}, {1})
+    trees.begin(c1)
+    trees.sync(c1, 3, [node("他方事件").model_copy(update={"node_id": "foreign"})])
+    with pytest.raises(ValueError, match="尚未保存"):
+        trees.read("foreign", author=b1)
 
 
 def test_case_exclusion_is_a_one_time_promise() -> None:
@@ -156,7 +159,7 @@ def test_role_finish_never_fills_metrics_or_skips_dialogue_candidates():
     from src.agents.annotation.agent import WorkExecution
     from src.agents.annotation.agent_ir import AgentAnnotation
     from src.agents.annotation.ledger import AnnotationToolLedger
-    from src.fact_graph.inputs import ChapterMetricsInput
+    from src.metrics.annotation_inputs import ChapterMetricsInput
     from src.work.annotation_work import WorkReceipt
 
     for role in ("entity", "event", "annotation", "metric"):
@@ -186,4 +189,4 @@ def test_duplicate_node_conflict_does_not_overwrite_original_content():
     trees.sync(fixture_id(__name__, "a1"), 1, [node()])
     with pytest.raises(ValueError, match="业务内容冲突"):
         trees.sync(fixture_id(__name__, "a1"), 1, [node("改写")])
-    assert trees.read("node")["content"]["description"] == "事件"
+    assert trees.read("node", author=fixture_id(__name__, "a1"))["content"]["description"] == "事件"

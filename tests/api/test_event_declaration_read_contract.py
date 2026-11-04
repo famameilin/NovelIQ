@@ -17,12 +17,15 @@ def test_annotation_event_is_formal_and_readable_without_diagnosis(db_session):
             )
         )
     query = EventTreeQuery(storage_for(db_session), run)
-    data = query.fetch(limit=1)
+    data = query.fetch()
     assert data["organization_status"] == "pending_diagnosis"
-    assert data["counts"]["all_events"] == 2 and len(data["events"]) == 1
-    second = query.fetch(cursor=data["next_cursor"], limit=1)
-    assert second["events"][0]["event_id"] == events[1]
-    assert second["next_cursor"] is None
+    assert data["counts"]["all_events"] == 2 and len(data["events"]) == 2
+    assert [event["event_id"] for event in data["events"]] == events
+    assert data["counts"]["trees"] == 2 and data["counts"]["event_lines"] == 0
+    tree_ids = {queue["tree_id"] for queue in data["queues"]}
+    assert len(tree_ids) == 2 and not tree_ids & set(events)
+    assert all(len(queue["event_ids"]) == 1 for queue in data["queues"])
+    assert data["next_cursor"] is None
     for chapter, event_id in enumerate(events, start=1):
         detail = query.chapter_detail(chapter, event_id)
         assert detail["event_id"] == event_id and detail["from"] == detail["to"] == chapter

@@ -6,17 +6,9 @@ from __future__ import annotations
 
 from pydantic import Field, model_validator
 
+from src.fact_graph.vocabulary import Tone
+
 from .schema import StrictModel
-from .vocabulary import RoleFunction, Tone
-
-
-class BoundCharacterObservation(StrictModel):
-    """用于保存从事件人物参与者派生的动态状态"""
-
-    character: str = Field(min_length=1)
-    role_function: RoleFunction | None = None
-    action: str | None = Field(default=None, min_length=1)
-    emotion: int | None = Field(default=None, ge=-2, le=2)
 
 
 class BoundDialogue(StrictModel):
@@ -55,20 +47,4 @@ class TextSearchResult(StrictModel):
             raise ValueError("TextSearchResult.paragraph_ids 不能为负数")
         if len(set(self.paragraph_ids)) != len(self.paragraph_ids):
             raise ValueError("TextSearchResult.paragraph_ids 不允许重复")
-        return self
-
-
-class SourceReference(StrictModel):
-    """跨章寻址只依赖已经存在的原文，不依赖其他 Agent 的产出"""
-
-    chapter_id: int = Field(gt=0)
-    paragraph_id: int = Field(ge=0)
-    char_start: int = Field(ge=0)
-    char_end: int = Field(gt=0)
-    text_hash: str
-
-    @model_validator(mode="after")
-    def validate_span(self) -> SourceReference:
-        if self.char_end <= self.char_start:
-            raise ValueError("原文引用必须是非空区间")
         return self

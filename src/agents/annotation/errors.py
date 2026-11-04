@@ -6,36 +6,30 @@ from __future__ import annotations
 
 from typing import Any
 
-
-class AnnotationAgentError(RuntimeError):
-    """用于统一章节标注 Agent 的基础异常"""
+from src.agents.errors import AgentError, AgentRetryableError
 
 
-class AnnotationRetryableError(AnnotationAgentError):
-    """用于标记模型工具图执行或修正耗尽类可重试错误"""
-
-
-class AnnotationInputError(AnnotationAgentError):
+class AnnotationInputError(AgentError):
     """用于标记章节输入与身份不合法的直接失败"""
 
 
-class AnnotationDependencyError(AnnotationAgentError):
+class AnnotationDependencyError(AgentError):
     """必需服务不可用，闭合审计后直接失败，不消耗模型修正或重派预算"""
 
 
-class AnnotationBudgetExhaustedError(AnnotationRetryableError):
+class AnnotationBudgetExhaustedError(AgentRetryableError):
     """当前会话回合耗尽，保留审计并交回模型池重选"""
 
 
-class AnnotationAuthorizationError(AnnotationAgentError):
+class AnnotationAuthorizationError(AgentError):
     """用于标记检索读取授权不合法的直接失败"""
 
 
-class AnnotationProtocolError(AnnotationRetryableError):
+class AnnotationProtocolError(AgentRetryableError):
     """用于标记 Agent 违反当前阶段工具时序的运行失败"""
 
 
-class AnnotationInvariantError(AnnotationAgentError):
+class AnnotationInvariantError(AgentError):
     """用于标记系统不变量被破坏（如已收尾但 ready_chapter 缺失），
     直接终止章节，不返回给模型修正"""
 

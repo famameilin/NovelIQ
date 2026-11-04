@@ -48,12 +48,11 @@ def test_fresh_event_drafts_allocate_distinct_uuid7_identities() -> None:
             )
         )
         assert receipt["status"] == "written"
-        tree = next(iter(ledger.event_trees.values()))
-        ids.append((tree["tree_id"], tree["root_node_id"]))
+        ids.append(ledger.event_ids_by_el["t1"])
     from uuid import UUID
 
     assert len(set(ids)) == 4
-    assert all(UUID(identifier).version == 7 for pair in ids for identifier in pair)
+    assert all(UUID(identifier).version == 7 for identifier in ids)
 
 
 def test_original_text_and_formal_payload_hash_preserve_whitespace_and_unicode() -> None:

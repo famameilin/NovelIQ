@@ -5,13 +5,15 @@ from __future__ import annotations
 import re
 import statistics
 from collections import Counter
+from collections.abc import Iterable
 
 import jieba
 
 from src.config import settings
 from src.text_processing.text_utils import tokenize_words
+from src.text_processing.tokenize import get_tokenizer, is_tokenizer_initialized
 
-from .lexicon_metrics import count_mixed_hits
+from .lexicon_metrics import GroupedMixedMatcher
 
 FUNCTION_WORDS = {
     "之",
@@ -138,29 +140,24 @@ def _load_semantic_categories() -> dict[str, list[str]]:
 def compute_category_density(
     texts: list[str],
 ) -> dict[str, float]:
-    """语义类别密度。"""
+    """统计各语义类别的词元密度"""
+    return _category_density((text, tokenize_words(text)) for text in texts if text)
+
+
+def _category_density(segmented: Iterable[tuple[str, list[str]]]) -> dict[str, float]:
     category_terms = _load_semantic_categories()
-
-    if not texts:
-        return dict.fromkeys(category_terms.keys(), 0.0)
-
     total_tokens = 0
     category_hits = dict.fromkeys(category_terms.keys(), 0)
+    matcher = GroupedMixedMatcher(category_terms)
 
-    for text in texts:
-        if not text:
-            continue
-
-        tokens = tokenize_words(text)
+    for text, tokens in segmented:
         total_tokens += len(tokens)
 
         if not tokens:
             continue
 
-        for category, terms in category_terms.items():
-            if not terms:
-                continue
-            category_hits[category] += count_mixed_hits(text, tokens, terms)
+        for category, hits in matcher.count(text, tokens).items():
+            category_hits[category] += hits
 
     if total_tokens == 0:
         return dict.fromkeys(category_terms.keys(), 0.0)
@@ -170,3 +167,26 @@ def compute_category_density(
         result[category] = min(hit_count / total_tokens, 1.0)
 
     return result
+
+
+def compute_word_style(texts: list[str]) -> tuple[float, dict[str, float]]:
+    """项目词典已加载时，平均词长与语义类别共享同一次切词"""
+    if not is_tokenizer_initialized():
+        return compute_avg_word_len(texts), compute_category_density(texts)
+
+    tokenizer = get_tokenizer()
+    word_count = 0
+    total_length = 0
+
+    def segmented() -> Iterable[tuple[str, list[str]]]:
+        nonlocal word_count, total_length
+        for text in texts:
+            if text:
+                tokens, count, length = tokenizer.tokenize_with_word_lengths(text)
+                word_count += count
+                total_length += length
+                yield text, tokens
+
+    densities = _category_density(segmented())
+    average_length = total_length / (word_count + 1e-6) if word_count else 0.0
+    return average_length, densities

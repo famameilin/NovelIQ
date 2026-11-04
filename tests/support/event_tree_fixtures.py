@@ -22,6 +22,7 @@ from src.storage.models import (
     CompleteEvent,
     EventParticipant,
     GraphEntity,
+    NarrativeGroup,
     NarrativeLink,
     Paragraph,
     SourceEvidence,
@@ -168,6 +169,34 @@ def add_declaration(
             )
         )
     session.flush()
+    producer_agent_id = session.get(ChapterAnnotation, record_id).agent_id
+    tree_id = new_id()
+    session.add(
+        NarrativeGroup(
+            group_id=tree_id,
+            producer_agent_id=producer_agent_id,
+            kind="tree",
+            title=title or (phrase or text[:12]),
+            description=summary if summary is not None else text,
+            is_event_line=False,
+            tree_key=None,
+        )
+    )
+    session.flush()
+    link_id = new_id()
+    session.add(
+        NarrativeLink(
+            link_id=link_id, producer_agent_id=producer_agent_id,
+            reason="本次完整提交的单事件树", tree_id=tree_id,
+            member_event_id=event_id, position=0,
+        )
+    )
+    session.flush()
+    session.add(SourceEvidence(
+        evidence_id=new_id(), ordinal=0, paragraph_id=int(paragraph.paragraph_id),
+        start_char=start, end_char=end, narrative_link_id=link_id,
+    ))
+    session.flush()
     return event_id
 
 
@@ -204,18 +233,43 @@ def row_evidence(row: dict[str, Any]) -> list[dict[str, Any]]:
     return list(row["evidence"])
 
 
+def select_event_lines(draft: EventOrganizationDraft, event_ids: list[str]) -> None:
+    """按入口事件或树身份标记事件线并补齐固定名称"""
+    author = draft.producer_agent_id or "fixture"
+    for identifier in event_ids:
+        if identifier in draft.queues:
+            draft.set_event_line(identifier, True, author=author)
+            continue
+        tree_id = next(
+            (key for key, item in draft.queues.items() if identifier in item.event_ids),
+            None,
+        )
+        if tree_id is None:
+            raise ValueError(f"事件线入口不属于草稿: {identifier}")
+        draft.set_event_line(tree_id, True, author=author)
+    draft.name_event_lines(
+        {tree_id: f"事件{index}线" for index, tree_id in enumerate(sorted(draft.event_line_ids), start=1)}
+    )
+
+
 def publish_draft(
     session: Session,
     run_id: str,
     draft: EventOrganizationDraft,
     *,
     diagnosis: str | None = None,
+    final: bool = False,
+    event_line_ids: list[str] | None = None,
 ) -> dict[str, str]:
-    """沿正式保存入口保存报告、完整事件与叙事组织，返回声明→事件映射"""
+    """保存案例结构供读取，最终报告须显式选择入口并通过统一校验"""
     from src.storage.repositories.diagnosis_event_writes import save_diagnosis_events
     from src.storage.repositories.organization_writes import save_organization
     from tests.support.storage_fixtures import insert_report_fixture
 
+    if not final:
+        return save_draft(session, run_id, draft)
+    if event_line_ids is not None:
+        select_event_lines(draft, event_line_ids)
     organization = draft.finish()
     report_id = insert_report_fixture(
         session,
@@ -225,8 +279,20 @@ def publish_draft(
     )
     save_diagnosis_events(session, run_id, organization, report_id)
     save_organization(session, run_id, organization, report_id)
+    from src.storage.repositories.queue_writes import save_event_line_flags
+
+    save_event_line_flags(session, run_id, organization.event_line_ids, organization.event_line_names)
     session.flush()
     return {item.event_id: item.event_id for item in organization.events}
+
+
+def save_draft(session: Session, run_id: str, draft: EventOrganizationDraft) -> dict[str, str]:
+    """保存案例结构；最终报告的事件线数量由 publish_draft 验证"""
+    from src.storage.repositories.diagnosis_event_writes import save_case_session_rows
+
+    save_case_session_rows(session, run_id, draft.producer_agent_id, draft)
+    session.flush()
+    return {item.event_id: item.event_id for item in draft.events.values()}
 
 
 def publish_declarations(
@@ -236,10 +302,11 @@ def publish_declarations(
     groups: list[list[str]] | None = None,
     evidence_paragraph_id: int | None = None,
     diagnosis: str | None = None,
+    final: bool = False,
 ) -> tuple[dict[str, str], EventOrganizationDraft]:
     """一步保存全部声明的独立/同组身份，返回 (声明→事件, 草稿)"""
     draft, _meta = identity_every_declaration(session, run_id, groups=groups)
-    mapping = publish_draft(session, run_id, draft, diagnosis=diagnosis)
+    mapping = publish_draft(session, run_id, draft, diagnosis=diagnosis, final=final)
     return mapping, draft
 
 

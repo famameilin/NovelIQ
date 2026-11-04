@@ -238,6 +238,9 @@ class LinguisticSpanRecord:
     end_char: int
     token_index: int | None
     raw_pos: str | None
+    emotion_polarity: str | None
+    emotion_negated: bool | None
+    emotion_holder_token_index: int | None
     raw_entity_type: str | None
     phrase_match_kind: str | None
     created_at: datetime
@@ -278,25 +281,23 @@ class NarrativeLinkRecord:
     is_active: bool | None
     expired_at: datetime | None
     cause_role: str | None
-    contained_child_id: str | None
-    contained_parent_id: str | None
+    child_tree_id: str | None
+    parent_tree_id: str | None
+    tree_id: str | None
     member_event_id: str | None
-    arc_group_id: str | None
-    outcome_group_id: str | None
-    arc_role: str | None
+    position: int | None
 
 
 @dataclass(frozen=True, slots=True)
 class NarrativeGroupRecord:
     group_id: str
     producer_agent_id: str
+    kind: str
     title: str
-    arc_kind: str | None
-    arc_objective: str | None
-    arc_role: str | None
-    arc_reason: str | None
-    parent_arc_id: str | None
-    outcome_description: str | None
+    description: str
+    is_event_line: bool
+    tree_key: str | None
+    line_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -28,6 +28,8 @@ class NovelAccess:
         file_path: str,
         file_size: int,
         upload_time: datetime,
+        author: str | None = None,
+        word_count: int | None = None,
     ) -> None:
         "登记上传结果并在返回前提交"
         self._runner.run(
@@ -38,6 +40,8 @@ class NovelAccess:
                 file_path=file_path,
                 file_size=file_size,
                 upload_time=upload_time,
+                author=author,
+                word_count=word_count,
             )
         )
 

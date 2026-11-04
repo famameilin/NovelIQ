@@ -28,8 +28,6 @@ class TaskModelConfig:
     timeout_s: float | None = None
     temperature: float = 0.7
     top_p: float = 0.8
-    thinking_enabled: bool = False
-    thinking_budget_tokens: int | None = None
     # 池内条目身份：容量与健康分按它记账，model 仍是发给端点的模型名
     entry_id: str | None = None
     reasoning_effort: ReasoningEffort = DEFAULT_REASONING_EFFORT
@@ -42,6 +40,7 @@ class TaskModelConfig:
     def validate(self) -> None:
         if self.timeout_s is not None and self.timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
+        validate_reasoning_effort(self.reasoning_effort)
         if self.base_url is None:
             raise ValueError("base_url 不能为空")
         if self.model is None:

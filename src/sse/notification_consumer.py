@@ -11,6 +11,10 @@ from loguru import logger
 from src.event_bus import EVENT_BUS, EventBus, Message
 from src.sse.manager import EventManager
 
+_THINKING_FLUSH_SECONDS = 0.25
+_MAX_OVERFLOW_EVENTS = 4096
+"""思考块合并写间隔与队列满时的溢出上限"""
+
 
 class NotificationConsumer:
     @classmethod
@@ -21,7 +25,6 @@ class NotificationConsumer:
     def __init__(self, bus: EventBus, manager: EventManager):
         self.bus, self.manager = bus, manager
         self.queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
-        self.locks: dict[str, asyncio.Lock] = {}
         self.workers: dict[str, asyncio.Task[None]] = {}
         self.routes: dict[str, str] = {}
         self.capacity: dict[str, Any] = {"models": [], "seats": []}
@@ -29,6 +32,10 @@ class NotificationConsumer:
         self.counts: dict[str, int] = {}
         self.observers: dict[str, int] = {}
         self.terminal: set[str] = set()
+        self.overflow: dict[str, list[dict[str, Any]]] = {}
+        self.thinking_parts: dict[tuple[str, str], list[str]] = {}
+        self.thinking_meta: dict[tuple[str, str], dict[str, Any]] = {}
+        self.thinking_timers: dict[tuple[str, str], asyncio.TimerHandle] = {}
         bus.handle("analysis.notification", "notifications", self.accept)
         bus.handle("analysis.capacity", "notifications", self.capacity_changed)
 
@@ -38,18 +45,61 @@ class NotificationConsumer:
             self.workers[task_id] = asyncio.create_task(self._consume(task_id))
         return self.queues[task_id]
 
-    async def enqueue(self, task_id: str, event_type: str, data: dict[str, Any]) -> None:
-        self.counts[task_id] = self.counts.get(task_id, 0) + 1
+    def _put(self, task_id: str, event_type: str, data: dict[str, Any]) -> None:
+        """入队永不等数据库或队列容量，满时进有界溢出缓冲"""
+        message = {
+            "type": event_type,
+            "data": {**data, "task_id": task_id, "message_id": data.get("message_id") or uuid4().hex},
+        }
+        queue = self._queue(task_id)
         try:
-            async with self.locks.setdefault(task_id, asyncio.Lock()):
-                await self._queue(task_id).put(
-                    {"type": event_type, "data": {
-                        **data, "task_id": task_id, "message_id": data.get("message_id") or uuid4().hex,
-                    }}
-                )
-        except BaseException:
-            self.counts[task_id] -= 1
-            raise
+            queue.put_nowait(message)
+        except asyncio.QueueFull:
+            overflow = self.overflow.setdefault(task_id, [])
+            if len(overflow) >= _MAX_OVERFLOW_EVENTS:
+                logger.warning("通知溢出缓冲已满，丢弃事件: task_id={} type={}", task_id, event_type)
+                return
+            overflow.append(message)
+        self.counts[task_id] = self.counts.get(task_id, 0) + 1
+
+    async def enqueue(self, task_id: str, event_type: str, data: dict[str, Any]) -> None:
+        self._flush_task_thinking(task_id)
+        self._put(task_id, event_type, data)
+
+    def _buffer_thinking(self, task_id: str, data: dict[str, Any]) -> None:
+        """思考块只进内存并定时合并，调用方不等待持久化"""
+        text = str(data.get("content") or "")
+        if not text:
+            return
+        key = (task_id, str(data.get("stream_id") or ""))
+        self.thinking_parts.setdefault(key, []).append(text)
+        self.thinking_meta[key] = data
+        if key not in self.thinking_timers:
+            loop = asyncio.get_running_loop()
+            self.thinking_timers[key] = loop.call_later(
+                _THINKING_FLUSH_SECONDS, self._flush_thinking_key, key
+            )
+
+    def _flush_thinking_key(self, key: tuple[str, str]) -> None:
+        handle = self.thinking_timers.pop(key, None)
+        if handle is not None:
+            handle.cancel()
+        parts = self.thinking_parts.pop(key, None)
+        meta = self.thinking_meta.pop(key, None)
+        if not parts or meta is None:
+            return
+        self._put(key[0], "llm_thinking", {**meta, "content": "".join(parts)})
+
+    def _flush_task_thinking(self, task_id: str) -> None:
+        for key in [item for item in self.thinking_parts if item[0] == task_id]:
+            self._flush_thinking_key(key)
+
+    def _flush_all_thinking(self) -> None:
+        for key in list(self.thinking_parts):
+            self._flush_thinking_key(key)
+        for handle in self.thinking_timers.values():
+            handle.cancel()
+        self.thinking_timers.clear()
 
     def pending(self, task_id: str) -> int:
         return self.counts.get(task_id, 0)
@@ -80,15 +130,16 @@ class NotificationConsumer:
         self.routes[message.run_id] = task_id
         if new_route and self.capacity["models"]:
             await self._capacity_for(message.run_id, task_id)
-        await self.enqueue(
-            task_id,
-            message.payload["type"],
-            {
-                **message.payload["data"],
-                "run_id": message.run_id,
-                "message_id": message.message_id,
-            },
-        )
+        event_type = message.payload["type"]
+        data = {
+            **message.payload["data"],
+            "run_id": message.run_id,
+            "message_id": message.message_id,
+        }
+        if event_type == "llm_thinking":
+            self._buffer_thinking(task_id, data)
+            return
+        await self.enqueue(task_id, event_type, data)
 
     async def _capacity_for(self, run_id: str, task_id: str, capacity: dict[str, Any] | None = None) -> None:
         capacity = capacity if capacity is not None else self.capacity
@@ -118,16 +169,21 @@ class NotificationConsumer:
     async def _consume(self, task_id: str) -> None:
         queue = self.queues[task_id]
         while True:
-            try:
-                message = await asyncio.wait_for(queue.get(), 60)
-            except TimeoutError:
-                self.queues.pop(task_id, None)
-                self.workers.pop(task_id, None)
-                self.counts.pop(task_id, None)
-                self.locks.pop(task_id, None)
-                if task_id not in self.observers:
-                    self.terminal.discard(task_id)
-                return
+            overflow = self.overflow.get(task_id)
+            from_queue = not overflow
+            if overflow:
+                message = overflow.pop(0)
+            else:
+                try:
+                    message = await asyncio.wait_for(queue.get(), 60)
+                except TimeoutError:
+                    self.queues.pop(task_id, None)
+                    self.workers.pop(task_id, None)
+                    self.counts.pop(task_id, None)
+                    self.overflow.pop(task_id, None)
+                    if task_id not in self.observers:
+                        self.terminal.discard(task_id)
+                    return
             try:
                 while True:
                     try:
@@ -151,14 +207,16 @@ class NotificationConsumer:
                         )
                         await asyncio.sleep(2)
             finally:
-                self.counts[task_id] -= 1
-                queue.task_done()
+                self.counts[task_id] = max(0, self.counts.get(task_id, 1) - 1)
+                if from_queue:
+                    queue.task_done()
 
     async def drain(self, task_id: str) -> None:
         if task_id in self.queues:
             await self.queues[task_id].join()
 
     async def close(self) -> None:
+        self._flush_all_thinking()
         try:
             await asyncio.wait_for(asyncio.gather(*(self.drain(task_id) for task_id in list(self.queues))), 5)
         except TimeoutError:

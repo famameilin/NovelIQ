@@ -68,11 +68,6 @@ async def _write_rejection(tools: dict[str, Any], name: str, args: dict) -> dict
     return exc_info.value.receipt()
 
 
-def _tree(ledger: AnnotationToolLedger, tree_key: str) -> dict[str, Any]:
-    """按章内局部键取已落账事件树（真实 uuid 只在账本内部）"""
-    return ledger.event_trees[ledger.tree_key_index[tree_key]]
-
-
 def _entity_id(name: str) -> str:
     """按 FactGraph 同款算法铸造实体 run 级 uuid（uuid5(run_scope+归一化名)）
 
@@ -157,7 +152,7 @@ async def test_missing_child_type_receipt_points_at_record_field() -> None:
         tools,
         "write_event",
         {
-            "el": "t1/e1",
+            "el": "e1",
             "title": "子事件",
             "problem": "明确事件问题",
             "summary": "子事件",
@@ -165,16 +160,16 @@ async def test_missing_child_type_receipt_points_at_record_field() -> None:
             "evidence": 1,
         },
     )
-    assert receipt["record"] == "t1/e1"
+    assert receipt["record"] == "e1"
     assert receipt["field"] == "event_type"
     assert receipt["code"] == "missing"
     assert receipt["expected"]
-    assert set(_tree(ledger, "t1")["nodes"]) == {"root"}
+    assert set(ledger.event_ids_by_el) == {"t1"}
 
 
 @pytest.mark.asyncio
 async def test_write_tool_schema_layer_failure_translated_via_invoke_tool() -> None:
-    """langchain 工具 schema 层的 pydantic 失败（先于函数体）同样翻成结构化拒绝
+    """工具 schema 层的 pydantic 失败（先于函数体）同样翻成结构化拒绝
 
     翻译汇点从 translate_event_validation_error 改为
     translate_write_validation_error（record 由原始参数拼装），不再抛裸 ValidationError。
@@ -184,7 +179,7 @@ async def test_write_tool_schema_layer_failure_translated_via_invoke_tool() -> N
     call = _write_call(
         "write_event",
         {
-            "el": "t1/e1",
+            "el": "e1",
             "problem": "明确事件问题",
             "summary": "子事件",
             "event_type": "行动",
@@ -197,7 +192,7 @@ async def test_write_tool_schema_layer_failure_translated_via_invoke_tool() -> N
         await _invoke_tool(tools, call)
     receipt = exc_info.value.receipt()
     assert "write_event" in str(exc_info.value)
-    assert receipt["record"] == "t1/e1"
+    assert receipt["record"] == "e1"
     assert receipt["field"] == "title"
     assert receipt["code"] == "missing"
     assert "https://" not in str(exc_info.value)
@@ -230,7 +225,7 @@ async def test_failed_record_keeps_prior_written_records_repairable() -> None:
             _write_call(
                 "write_event",
                 {
-                    "el": "t1/e1",
+                    "el": "e1",
                     "title": "子事件",
                     "problem": "明确事件问题",
                     "summary": "子事件",
@@ -240,13 +235,14 @@ async def test_failed_record_keeps_prior_written_records_repairable() -> None:
                 call_id="call-2",
             ),
         )
-    tree = _tree(ledger, "t1")
-    root_event = next(event for event in ledger.bound_payloads["events"] if event.node_id == tree["root_node_id"])
-    assert root_event.description == "根事件"
-    assert set(tree["nodes"]) == {"root"}
+    first_event = next(
+        event for event in ledger.bound_payloads["events"] if event.node_id == ledger.event_ids_by_el["t1"]
+    )
+    assert first_event.description == "根事件"
+    assert set(ledger.event_ids_by_el) == {"t1"}
     tools["write_event"].invoke(
         {
-            "el": "t1/e1",
+            "el": "e1",
             "title": "子事件",
             "problem": "明确事件问题",
             "summary": "子事件",
@@ -255,7 +251,7 @@ async def test_failed_record_keeps_prior_written_records_repairable() -> None:
             "evidence": 1,
         }
     )
-    assert set(_tree(ledger, "t1")["nodes"]) == {"root", "e1"}
+    assert set(ledger.event_ids_by_el) == {"t1", "e1"}
 
 
 # ---------------------------------------------------------------------------

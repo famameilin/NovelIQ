@@ -121,6 +121,7 @@ def get_settings_schema() -> SettingsSchemaResponse:
                 max_value=spec.max_value,
                 step=spec.step,
                 enum_values=list(spec.enum_values),
+                enum_labels=spec.enum_labels,
                 nullable=spec.nullable,
                 editable=spec.editable,
             )
@@ -160,7 +161,14 @@ def test_agent_model(task: str, request: AgentModelTestRequest | None = None) ->
         saved = settings.models.paragraph_embedding
     else:
         saved = next(
-            (entry for entry in settings.models.model_pool if request and entry.model_id == request.model_id), None
+            (
+                entry
+                for entry in settings.models.model_pool
+                if request
+                and entry.model_id == request.model_id
+                and (request.base_url is None or entry.base_url == request.base_url.rstrip("/"))
+            ),
+            None,
         )
     credentials = {"base_url": saved.base_url if saved else None, "api_key": saved.api_key if saved else None}
     base_url = (request.base_url if request and request.base_url else credentials["base_url"]) or ""

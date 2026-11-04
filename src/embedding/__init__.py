@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import Awaitable, Callable
 
+import numpy as np
 from loguru import logger
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, BadRequestError
 
@@ -19,11 +21,20 @@ EMBEDDING_RETRY_BASE_DELAY_S = 0.5
 # 状态码路径预算不变；嵌入请求只读幂等，重发无数据副作用
 EMBEDDING_CONNECTION_MAX_RETRIES = 3
 EMBEDDING_CONNECTION_RETRY_DELAY_S = 0.5
+# 同时在飞的批次请求数：服务端按槽位并行处理，串行发批会把往返延迟累加成墙钟
+EMBEDDING_BATCH_CONCURRENCY = 4
 
 # 查询侧嵌入按 Qwen3-Embedding 官方非对称检索配方加 instruct 前缀：
 # 检索文档侧（embed_texts）必须直发原文不加前缀，只有查询侧走 format_query_instruct；
 # 指令按官方建议写英文；换成对称嵌入模型时须移除前缀，否则相似度失真。
 QUERY_INSTRUCT_TASK = "Given a query about a novel, retrieve original novel passages relevant to the query"
+
+
+def _decode_embedding_payload(payload: str | list[float]) -> list[float]:
+    """解析服务返回的单个向量：base64 编码按 float32 解包，未编码时原样使用"""
+    if isinstance(payload, str):
+        return np.frombuffer(base64.b64decode(payload), dtype=np.float32).tolist()
+    return payload
 
 
 class EmbeddingServiceError(RuntimeError):
@@ -139,7 +150,7 @@ class EmbeddingClient:
                 response = await self._client.embeddings.create(
                     model=model_name,
                     input=text_input,
-                    encoding_format="float",
+                    encoding_format="base64",
                 )
                 return response
             except APITimeoutError as e:
@@ -210,7 +221,7 @@ class EmbeddingClient:
         try:
             response = await self._create_embeddings_with_retry(text)
 
-            embedding = response.data[0].embedding
+            embedding = _decode_embedding_payload(response.data[0].embedding)
             self._validate_embedding_dimension(embedding)
 
             if self._token_usage_callback and response.usage:
@@ -263,7 +274,7 @@ class EmbeddingClient:
             raise ValueError("embedding model is required")
 
         response = await self._create_embeddings_with_retry(probe_text)
-        embedding = response.data[0].embedding
+        embedding = _decode_embedding_payload(response.data[0].embedding)
         self._embedding_dim = len(embedding)
         return self._embedding_dim
 
@@ -300,81 +311,27 @@ class EmbeddingClient:
         valid_items = [(idx, text) for idx, text in enumerate(texts) if text and text.strip()]
         total_batches = (len(valid_items) + self._batch_size - 1) // self._batch_size if valid_items else 0
 
-        for batch_index, batch_start in enumerate(range(0, len(valid_items), self._batch_size), start=1):
-            batch_items = valid_items[batch_start : batch_start + self._batch_size]
-            batch_texts = [text for _, text in batch_items]
+        batches = [
+            valid_items[batch_start : batch_start + self._batch_size]
+            for batch_start in range(0, len(valid_items), self._batch_size)
+        ]
+        progress_lock = asyncio.Lock()
+        completed_batches = 0
 
-            self._log(
-                "info",
-                "embed_texts 批处理开始: model={} batch_size={} batch_start={}",
-                self._model,
-                len(batch_texts),
-                batch_start,
-            )
-
-            try:
-                response = await self._create_embeddings_with_retry(batch_texts)
-            except APITimeoutError as e:
-                self._log(
-                    "error",
-                    "embed_texts 超时错误: base_url={} error={}",
-                    self._base_url,
-                    str(e),
-                )
-                raise EmbeddingTimeoutError("embedding 服务请求超时，请检查服务响应") from e
-            except APIConnectionError as e:
-                self._log(
-                    "error",
-                    "embed_texts 连接错误: base_url={} error={}",
-                    self._base_url,
-                    str(e),
-                )
-                raise EmbeddingConnectionError(
-                    f"无法连接到 embedding 服务 ({self._base_url})，请检查服务是否启动"
-                ) from e
-            except Exception as e:
-                self._log(
-                    "error",
-                    "embed_texts 未知错误: {}",
-                    str(e),
-                )
-                raise
-
-            response_items = sorted(response.data, key=lambda item: getattr(item, "index", 0))
-            if len(response_items) != len(batch_items):
-                raise RuntimeError(
-                    f"embedding batch result count mismatch: expected {len(batch_items)}, got {len(response_items)}"
-                )
-
-            # 按 index 回填到原始位置（调用方无需感知批量请求模式）
-            for (original_idx, _), item in zip(batch_items, response_items, strict=True):
-                embedding = item.embedding
-                self._validate_embedding_dimension(embedding)
-                embeddings[original_idx] = embedding
-
-            if self._token_usage_callback and response.usage:
-                # provider 已返回 usage 时直接记实报（与单条 embedding 口径一致）
-                self._token_usage_callback(
-                    "embedding",
-                    self._model or "unknown",
-                    response.usage.prompt_tokens,
-                    response.usage.total_tokens,
-                    None,
-                    None,
-                )
-
-            self._log(
-                "info",
-                "embed_texts 批处理完成: batch_size={} prompt_tokens={} total_tokens={}",
-                "embed_texts batch complete batch_size={} prompt_tokens={} total_tokens={}",
-                len(batch_texts),
-                response.usage.prompt_tokens if response.usage else 0,
-                response.usage.total_tokens if response.usage else 0,
-            )
-            if progress_callback is not None:
-                progress_result = progress_callback(batch_index, total_batches, len(valid_items))
+        async def run_batch(batch_items: list[tuple[int, str]]) -> None:
+            nonlocal completed_batches
+            await self._embed_batch(batch_items, embeddings)
+            if progress_callback is None:
+                return
+            async with progress_lock:
+                completed_batches += 1
+                progress_result = progress_callback(completed_batches, total_batches, len(valid_items))
                 if progress_result is not None:
                     await progress_result
+
+        for wave_start in range(0, len(batches), EMBEDDING_BATCH_CONCURRENCY):
+            wave = batches[wave_start : wave_start + EMBEDDING_BATCH_CONCURRENCY]
+            await asyncio.gather(*(run_batch(batch_items) for batch_items in wave))
 
         for text in texts:
             if text and text.strip():
@@ -382,3 +339,73 @@ class EmbeddingClient:
             logger.warning("empty text provided for embedding")
 
         return embeddings
+
+    async def _embed_batch(self, batch_items: list[tuple[int, str]], embeddings: list[list[float]]) -> None:
+        """请求单批文本并按原始位置回填向量；异常按连接/超时/状态码分类抛给调用方"""
+        batch_texts = [text for _, text in batch_items]
+
+        self._log(
+            "info",
+            "embed_texts 批处理开始: model={} batch_size={}",
+            self._model,
+            len(batch_texts),
+        )
+
+        try:
+            response = await self._create_embeddings_with_retry(batch_texts)
+        except APITimeoutError as e:
+            self._log(
+                "error",
+                "embed_texts 超时错误: base_url={} error={}",
+                self._base_url,
+                str(e),
+            )
+            raise EmbeddingTimeoutError("embedding 服务请求超时，请检查服务响应") from e
+        except APIConnectionError as e:
+            self._log(
+                "error",
+                "embed_texts 连接错误: base_url={} error={}",
+                self._base_url,
+                str(e),
+            )
+            raise EmbeddingConnectionError(
+                f"无法连接到 embedding 服务 ({self._base_url})，请检查服务是否启动"
+            ) from e
+        except Exception as e:
+            self._log(
+                "error",
+                "embed_texts 未知错误: {}",
+                str(e),
+            )
+            raise
+
+        response_items = sorted(response.data, key=lambda item: getattr(item, "index", 0))
+        if len(response_items) != len(batch_items):
+            raise RuntimeError(
+                f"embedding batch result count mismatch: expected {len(batch_items)}, got {len(response_items)}"
+            )
+
+        # 按 index 回填到原始位置（调用方无需感知批量请求模式）
+        for (original_idx, _), item in zip(batch_items, response_items, strict=True):
+            embedding = _decode_embedding_payload(item.embedding)
+            self._validate_embedding_dimension(embedding)
+            embeddings[original_idx] = embedding
+
+        if self._token_usage_callback and response.usage:
+            # provider 已返回 usage 时直接记实报（与单条 embedding 口径一致）
+            self._token_usage_callback(
+                "embedding",
+                self._model or "unknown",
+                response.usage.prompt_tokens,
+                response.usage.total_tokens,
+                None,
+                None,
+            )
+
+        self._log(
+            "info",
+            "embed_texts 批处理完成: batch_size={} prompt_tokens={} total_tokens={}",
+            len(batch_texts),
+            response.usage.prompt_tokens if response.usage else 0,
+            response.usage.total_tokens if response.usage else 0,
+        )

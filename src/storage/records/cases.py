@@ -20,6 +20,6 @@ class CaseSave:
         return json.loads(self.snapshot_json)
 
 
-def root_event_case_description(event_id: str) -> str:
-    "自动根案例的稳定文字描述包含完整事件身份"
-    return f"请处理事件 {event_id} 的建树与核查事项"
+def event_tree_case_description(tree_id: str) -> str:
+    "未归并事件树案例的稳定描述包含正式树身份"
+    return f"请处理事件树 {tree_id} 的归并与核查事项"

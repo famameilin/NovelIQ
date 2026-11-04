@@ -147,7 +147,7 @@ class TextSearchService:
 
         chapter_by_paragraph = {
             int(row.paragraph_id): int(row.chapter_id)
-            for row in self._session.reads.final_agents_annotation_text_search_search_1(
+            for row in self._session.reads.text.list_search_hit_positions(
                 after_chapter_sequence, before_chapter_sequence, merged, self._run_id
             )
         }

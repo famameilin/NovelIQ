@@ -20,29 +20,40 @@ class CaseWritesRepository:
     def rows(self, session):
         return list(session.scalars(select(Case).where(Case.run_id == self.run_id).order_by(Case.id)))
 
-    def register_event_roots(self, session) -> list[dict[str, Any]]:
-        "事件与包含边保存后，在同一事务登记尚无父事件的根案例"
+    def register_unparented_trees(self, session) -> list[dict[str, Any]]:
+        "没有父树的事件树保存后，在同一事务登记未归并案例"
+        from sqlalchemy.orm import aliased
+
         from src.storage.ids import new_id
-        from src.storage.models import CompleteEvent, NarrativeLink
-        from src.storage.records.cases import root_event_case_description
+        from src.storage.models import NarrativeGroup, NarrativeLink
+        from src.storage.records.cases import event_tree_case_description
         from src.storage.repositories.narrative_records import run_execution_ids
 
         session.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": f"fact_graph:{self.run_id}"}
         )
         session.flush()
-        roots = session.scalars(
-            select(CompleteEvent).where(
-                CompleteEvent.producer_agent_id.in_(run_execution_ids(self.run_id)),
-                ~select(NarrativeLink.link_id)
-                .where(NarrativeLink.contained_child_id == CompleteEvent.event_id)
-                .exists(),
+        incoming = aliased(NarrativeLink)
+        trees = list(
+            session.scalars(
+                select(NarrativeGroup).where(
+                    NarrativeGroup.producer_agent_id.in_(run_execution_ids(self.run_id)),
+                    NarrativeGroup.kind == "tree",
+                    ~select(incoming.link_id).where(incoming.child_tree_id == NarrativeGroup.group_id).exists(),
+                )
             )
         )
-        existing = {(row.type, row.description) for row in self.rows(session)}
-        for event in roots:
-            description = root_event_case_description(event.event_id)
-            if ("event", description) in existing:
+        # 每棵悬空树最多登记两次：首次保存一次，办结仍未归并时补登一次
+        rows = self.rows(session)
+        existing = {(row.type, row.description) for row in rows if row.status == "pending"}
+        totals: dict[tuple[str, str], int] = {}
+        for row in rows:
+            key = (row.type, row.description)
+            totals[key] = totals.get(key, 0) + 1
+        for tree in trees:
+            description = event_tree_case_description(tree.group_id)
+            key = ("event", description)
+            if key in existing or totals.get(key, 0) >= 2:
                 continue
             session.add(
                 Case(
@@ -51,10 +62,11 @@ class CaseWritesRepository:
                     type="event",
                     description=description,
                     status="pending",
-                    producer_agent_id=event.producer_agent_id,
+                    producer_agent_id=tree.producer_agent_id,
                 )
             )
-            existing.add(("event", description))
+            existing.add(key)
+            totals[key] = totals.get(key, 0) + 1
         session.flush()
         return [
             {

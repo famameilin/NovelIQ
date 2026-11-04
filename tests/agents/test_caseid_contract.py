@@ -22,9 +22,11 @@ async def test_invalid_caseid_keeps_written_declaration(db_session, caseid):
     try:
         receipt = json.loads(
             await runtime.execute(
-                'event(el="t", title="行动", problem="行动目标", '  # 同一程序文本
-                'summary="行动", '
-                'event_type="行动", status="ongoing", evidence=1)',
+                (
+                    'created = write_event(items=[dict(el="t", title="行动", problem="行动目标", summ'
+                    'ary="行动", event_type="行动", status="ongoing", evidence=1)])'
+                    "\n"
+                ),
                 caseid,
             )
         )
@@ -48,8 +50,11 @@ async def test_promised_case_keeps_business_output_without_child_entries(db_sess
     try:
         result = json.loads(
             await runtime.execute(
-                'event(el="a", title="开门", problem="行动目标", summary="开门", '
-                'event_type="行动", status="ongoing", evidence=1)',
+                (
+                    'created = write_event(items=[dict(el="a", title="开门", problem="行动目标", summ'
+                    'ary="开门", event_type="行动", status="ongoing", evidence=1)])'
+                    "\n"
+                ),
                 caseid,
             )
         )
@@ -57,8 +62,11 @@ async def test_promised_case_keeps_business_output_without_child_entries(db_sess
         agent.case_pool.claim(caseid, author)
         result = json.loads(
             await runtime.execute(
-                'event(el="b", title="点灯", problem="行动目标", summary="点灯", '
-                'event_type="行动", status="ongoing", evidence=1)',
+                (
+                    'created = write_event(items=[dict(el="b", title="点灯", problem="行动目标", summ'
+                    'ary="点灯", event_type="行动", status="ongoing", evidence=1)])'
+                    "\n"
+                ),
                 caseid,
             )
         )
@@ -98,16 +106,18 @@ async def test_declared_event_registers_plain_case_and_restores(db_session):
     try:
         result = json.loads(
             await runtime.execute(
-                'event(el="t", title="行动", problem="行动目标", summary="行动", '
-                'event_type="行动", status="ongoing", evidence=1)'
+                'created = write_event(items=[dict(el="t", title="行动", problem="行动目标", summ'
+                'ary="行动", event_type="行动", status="ongoing", evidence=1)])'
+                "\n"
             )
         )
         assert not result.get("failed")
         assert agent.case_pool.search("event") == []
         event_id = next(iter(agent.event_trees.nodes))
+        tree_id = agent.event_trees.read(event_id, author=agent.event_trees.nodes[event_id]["author"])["tree_id"]
         await save_and_confirm(agent, db_session, execution)
         case = agent.case_pool.search("event")[0]
-        assert event_id in case["description"] and case["case_id"] != event_id
+        assert tree_id in case["description"] and case["case_id"] != tree_id
         pool = CasePool(run)
         pool.load_storage(storage_for(db_session))
         assert pool.search("event")[0]["description"] == case["description"]

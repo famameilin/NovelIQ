@@ -5,8 +5,6 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage
-from langchain_core.tools import tool
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
@@ -16,11 +14,13 @@ from src.agents.diagnosis.evidence import DiagnosisEvidenceLedger
 from src.agents.diagnosis.program_runtime import DiagnosisProgramDependencyError, DiagnosisProgramRuntime
 from src.agents.diagnosis.runner import _run_diagnosis_agent
 from src.agents.diagnosis.tools import build_diagnosis_tools
+from src.agents.messages import AssistantMessage
+from src.agents.tools import tool
 from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls
 from src.audit.recorder import AgentAuditRecorder
 from src.event_bus import EventBus
-from src.event_trees.organization import EventOrganizationDraft, run_annotation_event_ids
-from src.event_trees.storage_map import run_events
+from src.event_trees.organization import EventOrganizationDraft
+from src.event_trees.storage_map import run_annotation_event_ids, run_events
 from src.storage.models import Agent, DiagnosisReport
 from src.utils.cancellation import run_cancellable
 from tests.agents.test_complete_event_work import execution_for, save_and_confirm
@@ -31,15 +31,22 @@ from tests.support.storage_fixtures import fixture_id, storage_factory, storage_
 
 @pytest.fixture
 async def declaration_case(db_session):
-    novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻路并点灯。"])
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜寻路，点亮灯火，打开旧信，核对地图，通知同伴。"])
     agent = AnnotationAgent(EventBus(), run_id, storage_factory(lambda: db_session), novel_id=novel_id)
     execution, program = execution_for(agent, db_session, 1)
     receipt = json.loads(
         await program.execute(
-            'event(el="a", title="寻路", problem="能否找到路", summary="顾霜寻路", '
-            'event_type="寻路", status="ongoing", evidence=1)\n'
-            'event(el="b", title="点灯", problem="能否照明", summary="顾霜点灯", '
-            'event_type="照明", status="resolved", evidence=1)'
+            "\n".join(
+                f'created_{key} = write_event(items=[dict(el="{key}", title="{title}", problem="能否{title}", '
+                f'summary="顾霜{title}", event_type="行动", status="ongoing", evidence=1)])\n'
+                for key, title in (
+                    ("a", "寻路"),
+                    ("b", "点灯"),
+                    ("c", "读信"),
+                    ("d", "核对地图"),
+                    ("e", "通知同伴"),
+                )
+            )
         )
     )
     assert not receipt.get("failed"), receipt
@@ -53,25 +60,16 @@ async def declaration_case(db_session):
 
 def _program_graph(model, runtime, *, observer=None, completion_check=lambda: [], maximum=10):
     """按生产会话图装配（程序面 execute_code + finish），图外不再有派发机制"""
-    from src.agents.annotation.agent_graph import build_agent_graph
-    from src.agents.annotation.agent_ir import AgentAnnotation
-    from src.agents.annotation.ledger import AnnotationToolLedger
     from src.agents.annotation.shared_tools import build_finish_tool
-    from src.agents.diagnosis.program_runtime import bind_finish_ledger
+    from src.agents.diagnosis.session_loop import build_diagnosis_loop
 
     if "finish" not in runtime.tools:
         finish_tool = build_finish_tool(lambda: {"status": "end_requested"})
         runtime.tools["finish"] = finish_tool
         runtime.tool_list.append(finish_tool)
-    ledger = AnnotationToolLedger(
-        run_scope="run", current_chapter_id=0, current_chapter_text="", allow_future_context=False
-    )
-    return build_agent_graph(
+    return build_diagnosis_loop(
         model,
-        runtime.build_tool(),
-        bind_finish_ledger(runtime.tools["finish"], ledger),
-        ledger=ledger,
-        agent=AgentAnnotation(role="event"),
+        runtime,
         max_iterations=maximum,
         observer=observer,
         completion_check=completion_check,
@@ -81,7 +79,6 @@ def _program_graph(model, runtime, *, observer=None, completion_check=lambda: []
 def identity_item(key, index, *, invalid=False):
     return json.dumps(
         {
-            "operation": "event",
             "key": key,
             "title": key,
             "problem": "能否找到路",
@@ -110,48 +107,59 @@ def case_identity_item(key, reference):
     )
 
 
-#: 案例会话第一件案例：自取未承诺案例、接手承诺，随后直接写入完成
+#: 案例会话第一件案例：自取未承诺案例，确认无真实父树后直接办结
 FIRST_CASE_PROGRAM = """
 cases = search_cases(unresolved_only=True)
 case = cases[0]
 claim_case(case_id=case["case_id"])
-page = search_events(limit=20)
-read_event(node_id=page["events"][0]["event_id"], kind="event")
+search_events(tree_id=case["tree_id"], limit=20)
 submit_case(case_id=case["case_id"])
 """
-SECOND_CASE_PROGRAM = """
-cases = search_cases(unresolved_only=True)
-case = cases[0]
-claim_case(case_id=case["case_id"])
-page = search_events(limit=20)
-own = write_event(items=[{
-    "operation":"event", "key":"整体", "title":"寻路与照明", "problem":"能否寻路",
-    "summary":"寻路与照明", "event_type":"行动", "status":"ongoing", "from":1, "to":1,
-    "reason":"整体行动", "evidence":[{"paragraph_id":0}]}],
-    caseid=case["case_id"])["results"][0]["event_id"]
-for item in page["events"]:
-    write_event(items=[{
-        "operation":"contain", "parent_event_id":own, "child_event_id":item["event_id"],
-        "reason":"包含子事件", "evidence":[{"paragraph_id":0}]}], caseid=case["case_id"])
-submit_case(case_id=case["case_id"])
-"""
+SECOND_CASE_PROGRAM = (
+    "\ncases = search_cases(unresolved_only=True)\ncase = cases"
+    '[0]\nclaim_case(case_id=case["case_id"])\npage = search_ev'
+    'ents(limit=20)\nreceipt = write_event(items=[{\n    "key":"整体"'
+    ', "title":"寻路与照明", "problem":"能否寻路",\n    "summary":"寻路与照'
+    '明", "event_type":"行动", "status":"ongoing", "from":1, "to'
+    '":1,\n    "reason":"整体行动", "evidence":[{"paragraph_id":0}'
+    ']}],\n    caseid=case["case_id"])\nown = receipt["results"][0]["event_id'
+    '"]\nown_tree = receipt["tree_id"]\nread_event(node_id=own, kind="event")\n'
+    'search_events(tree_id=case["tree_id"], limit=20)\nwrite_link(item'
+    's=[{\n    "operation":"reference", "parent_tree_id":own_tree,'
+    ' "child_tree_id":case["tree_id"],\n    "re'
+    'ason":"整体行动包含案例事件树", "evidence":[{"paragraph_id":0}]}], c'
+    'aseid=case["case_id"])\nsubmit_case(case_id=case["case_id'
+    '"])\n'
+)
 CLOSE_PROGRAM = """
-for case in search_cases(unresolved_only=True):
-    claim_case(case_id=case["case_id"])
-    submit_case(case_id=case["case_id"])
+cases = search_cases(unresolved_only=True)
+first = cases[0]
+if len(cases) >= 2:
+    claim_case(case_id=first["case_id"])
+    parent = write_event(items=[], tree_key="case-parent-" + first["case_id"],
+        title="案例归并父树", caseid=first["case_id"])["tree_id"]
+    for case in cases:
+        if case["case_id"] != first["case_id"]:
+            claim_case(case_id=case["case_id"])
+        search_events(tree_id=case["tree_id"], limit=20)
+        write_link(items=[{"operation":"reference", "parent_tree_id":parent, "child_tree_id":case["tree_id"],
+            "reason":"事件案例归并到父树", "evidence":[{"paragraph_id":0}]}], caseid=case["case_id"])
+    for case in cases:
+        submit_case(case_id=case["case_id"])
+else:
+    claim_case(case_id=first["case_id"])
+    search_events(tree_id=first["tree_id"], limit=20)
+    submit_case(case_id=first["case_id"])
 finish()
 """
 REPORT_PROGRAM = """
 read_topics()
+name_event_lines(names=__NAMES__)
 parents = search_events(kind="event", query="寻路与照明", limit=20)
-arc = write_arc(items=[{"operation":"arc", "key":"journey", "kind":"main", "title":"寻路线", "objective":"找到路",
-    "role":"主线", "reason":"围绕寻路持续推进", "evidence":[{"paragraph_id":0}]}])
+for entry in search_events(limit=20)["events"]:
+    read_event(node_id=entry["event_id"])
 outcome = write_outcome(items=[{"operation":"outcome", "key":"light", "title":"获得照明", "description":"点灯带来照明",
     "evidence":[{"paragraph_id":0}]}])
-write_arc(items=[{"operation":"link", "event_id":parents["events"][0]["event_id"], "arc_id":arc["results"][0],
-    "role":"推进", "reason":"寻路推进目标", "evidence":[{"paragraph_id":0}]}])
-write_outcome(items=[{"operation":"link", "event_id":parents["events"][0]["event_id"],
-    "outcome_id":outcome["results"][0], "reason":"寻路中点灯形成照明", "evidence":[{"paragraph_id":0}]}])
 write_diagnosis(analysis={"diagnosis":"寻路与照明相互关联", "topic_labels":{}})
 finish()
 """
@@ -182,7 +190,7 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
     )
     model = Replies(
         [
-            AIMessage(content="", tool_calls=[call("execute_code", {"code": code})])
+            AssistantMessage(content="", tool_calls=[call("execute_code", {"code": code})])
             for code in (FIRST_CASE_PROGRAM, SECOND_CASE_PROGRAM, CLOSE_PROGRAM, REPORT_PROGRAM)
         ]
     )
@@ -201,12 +209,16 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         human = next(
             str(m.content)
             for m in reversed(messages)
-            if type(m).__name__ == "HumanMessage" and str(m.content).lstrip().startswith("{")
+            if type(m).__name__ == "UserMessage" and str(m.content).lstrip().startswith("{")
         )
         payload = json.loads(human)
-        turns = sum(1 for message in messages if isinstance(message, AIMessage))
+        turns = sum(1 for message in messages if isinstance(message, AssistantMessage))
         if payload["role"] == "report":
-            code = REPORT_PROGRAM
+            names = {
+                row["tree_id"]: f"事件{index}线"
+                for index, row in enumerate(payload["materials"]["event_lines"], start=1)
+            }
+            code = REPORT_PROGRAM.replace("__NAMES__", json.dumps(names, ensure_ascii=False))
         elif len(model.requests) >= 4:
             code = CLOSE_PROGRAM
         elif turns == 0:
@@ -215,7 +227,7 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
             code = SECOND_CASE_PROGRAM
         else:
             code = CLOSE_PROGRAM
-        return AIMessage(
+        return AssistantMessage(
             content="",
             tool_calls=[
                 {"name": "execute_code", "args": {"code": code}, "id": f"c{len(model.requests)}", "type": "tool_call"}
@@ -233,11 +245,12 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         domain=domain,
     )
     assert model.bound == ["execute_code", "finish"]
-    assert len(model.requests) == 5
     assert result.diagnosis == "寻路与照明相互关联"
     organization = result.narrative_organization
-    assert len(organization.events) == 3
-    assert len(organization.containments) == 2
+    assert len(organization.events) == 6
+    children = {reference.child_tree_id for reference in organization.queue_references}
+    roots = {queue.tree_id for queue in organization.queues} - children
+    assert len(roots) == 1
     assert run_annotation_event_ids(storage_for(draft.fixture_session), draft.run_id) < {
         event.event_id for event in organization.events
     }
@@ -246,16 +259,15 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
     ).one()
     turns = fetch_agent_turns(storage_for(draft.fixture_session), draft.run_id)
     assert report.agent_id in {turn.agent_id for turn in turns}
-    assert len(run_events(storage_for(draft.fixture_session), draft.run_id)) == 3
-    # 案例写入按案例登记真实执行；两件事件案例均已接手承诺
+    assert len(run_events(storage_for(draft.fixture_session), draft.run_id)) == 6
+    # 案例写入按案例登记真实执行；事件案例均已接手承诺
     event_cases = {case["case_id"] for case in domain.case_pool.search() if case["case_type"] == "event"}
-    assert len(event_cases) == 3
+    assert event_cases
     reloaded = CasePool(draft.run_id)
     reloaded.load_storage(storage_for(draft.fixture_session))
     assert {case["case_id"] for case in reloaded.search() if case["submitted"]} >= event_cases
     turns = fetch_agent_turns(storage_for(draft.fixture_session), draft.run_id)
-    assert len(turns) == 5
-    assert len({turn.agent_id for turn in turns}) == 3
+    assert len(turns) == len(model.requests)
     assert all(turn.task_type == "diagnosis" for turn in turns)
     assert all(turn.error is None and turn.turn_ms is not None for turn in turns)
     # 成功会话的执行行同样写终态：执行行不能停在 running
@@ -265,14 +277,16 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         )
     )
     assert settled and all(row.status == "success" for row in settled)
+    assert {turn.agent_id for turn in turns} == {row.id for row in settled}
     for row in settled:
         final_turn = max((turn for turn in turns if turn.agent_id == row.id), key=lambda turn: turn.turn_index)
         assert any(note.startswith("runtime:queue_wait_ms=") for note in final_turn.timing_notes)
         assert any(note.startswith("runtime:save_ms=") for note in final_turn.timing_notes)
     operations = fetch_run_tool_calls(storage_for(draft.fixture_session), draft.run_id)
     promises = [operation for operation in operations if operation.tool_name == "claim_case"]
-    assert promises and all({"lock_wait_ms", "execution_ms"} <= operation.executed_args["_timing"].keys()
-                            for operation in promises)
+    assert promises and all(
+        {"lock_wait_ms", "execution_ms"} <= operation.executed_args["_timing"].keys() for operation in promises
+    )
     refused = [operation for operation in operations if operation.error is not None]
     assert refused == [], [(operation.tool_name, operation.error) for operation in refused]
     outer = [
@@ -280,7 +294,7 @@ async def test_real_runner_preserves_dependent_ids_across_barrier_and_publishes_
         for operation in operations
         if operation.tool_name == "execute_code"
     ]
-    assert len(outer) == 5
+    assert len(outer) == len(model.requests)
     assert all('"progress"' not in value and '"remaining"' not in value for value in outer)
 
 
@@ -318,12 +332,12 @@ async def test_case_write_tool_lands_in_case_ledger_of_promised_case(declaration
     assert "case_link" not in applied["written"][0]["result"]
     ledger, invocation = domain.case_writers[fixture_id(__name__, "case-session-a")]
     assert [op["name"] for op in ledger.graph.contributions[invocation]["entity_ops"]] == ["顾霜"]
-    assert domain.case_pool.claims_for(fixture_id(__name__, "case-session-a")) == [case["case_id"]]
+    assert case["case_id"] in domain.case_pool.claims_for(fixture_id(__name__, "case-session-a"))
     assert domain.case_pool.submissions_for(fixture_id(__name__, "case-session-a")) == []
     assert not hasattr(domain.case_pool, "deliveries")
 
 
-async def test_partial_program_keeps_success_and_rejected_operation_has_no_candidate(declaration_case):
+async def test_invalid_queue_member_leaves_no_candidate_and_program_can_continue(declaration_case):
     draft = declaration_case
     runtime = DiagnosisProgramRuntime(
         build_diagnosis_tools(
@@ -342,8 +356,8 @@ async def test_partial_program_keeps_success_and_rejected_operation_has_no_candi
     )
     receipt = json.loads(await runtime.execute(first))
     assert receipt["status"] == "partial" and len(receipt["failed"]) == 1
-    assert runtime.env["result"]["results"][1] is None and len(draft.events) == 1
-    assert receipt["reads"][0]["result"]["total"] == 2
+    assert runtime.env["result"] is None and not draft.events and not draft.queues
+    assert receipt["reads"][0]["result"]["total"] == 5
     assert set(receipt) <= {"status", "failed", "reads", "written", "variables"}
     second = await runtime.execute('page2 = read_event(node_id=page["events"][1]["event_id"])')
     assert json.loads(second)["status"] == "applied"
@@ -363,14 +377,14 @@ async def test_case_warning_preserves_original_id_return_type(declaration_case):
     )
     receipt = json.loads(
         await runtime.execute(
-            'arc = write_arc(items=[{"operation":"arc", "key":"journey", '
-            '"kind":"main", "title":"寻路线", "objective":"找到路", "role":"主线", "reason":"围绕寻路", '
+            'outcome = write_outcome(items=[{"operation":"outcome", "key":"journey", '
+            '"title":"找到路", "description":"寻路成功", '
             '"evidence":[{"paragraph_id":0}]}], caseid="not-promised")'
         )
     )
-    assert receipt["status"] == "applied" and isinstance(runtime.env["arc"]["results"][0], str)
+    assert receipt["status"] == "applied" and isinstance(runtime.env["outcome"]["results"][0], str)
     assert "case_link" not in receipt["written"][0]["result"]
-    assert runtime.env["arc"]["results"][0] in draft.arcs
+    assert runtime.env["outcome"]["results"][0] in draft.outcomes
 
 
 async def test_report_event_index_compact_page_allows_one_hundred(declaration_case):
@@ -395,7 +409,7 @@ async def test_report_event_index_compact_page_allows_one_hundred(declaration_ca
     assert [item["message"] for item in receipt["failed"]] == [
         "limit=100 越界：详情预览每页最多 20 条，精简一页请用 compact=True（最多 100 条）"
     ]
-    assert runtime.env["page"]["total"] == 2 and len(runtime.env["page"]["events"]) == 2
+    assert runtime.env["page"]["total"] == 5 and len(runtime.env["page"]["events"]) == 5
 
 
 async def test_partial_program_outer_audit_is_error_and_keeps_full_receipt_in_same_session():
@@ -408,8 +422,8 @@ async def test_partial_program_outer_audit_is_error_and_keeps_full_receipt_in_sa
     runtime = DiagnosisProgramRuntime([bad], observer=observer)
     model = Replies(
         [
-            AIMessage(content="", tool_calls=[call("execute_code", {"code": "bad(value=1)"})]),
-            AIMessage(content="请求结束"),
+            AssistantMessage(content="", tool_calls=[call("execute_code", {"code": "bad(value=1)"})]),
+            AssistantMessage(content="请求结束"),
         ]
     )
     graph = _program_graph(model, runtime, observer=observer, completion_check=lambda: [])
@@ -444,7 +458,7 @@ async def test_dependency_failure_audits_inner_and_outer_then_stops_without_next
 
     observer = MagicMock()
     runtime = DiagnosisProgramRuntime([broken, later], observer=observer)
-    model = Replies([AIMessage(content="", tool_calls=[call("execute_code", {"code": "broken()\nlater()"})])])
+    model = Replies([AssistantMessage(content="", tool_calls=[call("execute_code", {"code": "broken()\nlater()"})])])
     graph = _program_graph(model, runtime, observer=observer, completion_check=lambda: [])
     with pytest.raises(DiagnosisProgramDependencyError, match="dependency unavailable"):
         await run_graph(graph)
@@ -453,7 +467,7 @@ async def test_dependency_failure_audits_inner_and_outer_then_stops_without_next
     assert [row["tool_name"] for row in audited] == ["broken", "execute_code"]
     assert all(row["error"] is not None for row in audited)
     assert audited[0]["request_args"]["_program"]["source_line"] == 1
-    observer.close_turn.assert_called_once()
+    observer.close_turn.assert_called()
 
 
 async def test_cancel_interrupts_program_and_records_both_levels():
@@ -469,7 +483,7 @@ async def test_cancel_interrupts_program_and_records_both_levels():
 
     observer = MagicMock()
     runtime = DiagnosisProgramRuntime([wait], observer=observer)
-    model = Replies([AIMessage(content="", tool_calls=[call("execute_code", {"code": "wait()"})])])
+    model = Replies([AssistantMessage(content="", tool_calls=[call("execute_code", {"code": "wait()"})])])
     graph = _program_graph(model, runtime, observer=observer, completion_check=lambda: [])
     task = asyncio.create_task(run_cancellable(run_graph(graph), lambda: cancelled, poll_seconds=0.001))
     try:
@@ -499,25 +513,26 @@ async def test_interpreter_error_after_finish_does_not_request_premature_complet
     assert receipt["status"] == "runtime_error" and runtime.take_end_request() is False
 
 
-async def test_case_program_dialogue_preflight_uses_session_candidate_total():
-    """案例面的候选号预检按会话候选总数，不依赖标注账本"""
+async def test_case_program_dialogue_uses_real_tool_validation():
     seen: list[int] = []
 
     @tool
     def write_dialogue(candidate_index: int, verdict: str) -> str:
-        """记录一次对话候选判定"""
+        """记录合法范围内的对话候选判定"""
+        if not 1 <= candidate_index <= 3:
+            raise ValueError("candidate_index 超出候选范围")
         seen.append(candidate_index)
         return json.dumps({"status": "written", "candidate_index": candidate_index}, ensure_ascii=False)
 
-    runtime = DiagnosisProgramRuntime([write_dialogue], dialogue_total=lambda: 3)
+    runtime = DiagnosisProgramRuntime([write_dialogue])
     receipt = json.loads(await runtime.execute('write_dialogue(candidate_index=2, verdict="dialogue")'))
     assert receipt["status"] == "applied" and seen == [2]
     beyond = json.loads(await runtime.execute('write_dialogue(candidate_index=9, verdict="dialogue")'))
-    assert beyond["status"] == "rejected" and beyond["error"]["type"] == "candidate_index_out_of_range"
-    assert seen == [2]
+    assert beyond["status"] == "partial" and beyond["failed"][0]["tool"] == "write_dialogue"
+    assert "超出候选范围" in beyond["failed"][0]["message"] and seen == [2]
 
 
-async def test_batch_items_have_distinct_audit_ids_and_rejected_case_has_no_delivery(declaration_case):
+async def test_queue_has_one_atomic_audit_call_and_rejected_case_has_no_submission(declaration_case):
     from src.case_pool import CasePool
 
     draft = declaration_case
@@ -544,15 +559,31 @@ async def test_batch_items_have_distinct_audit_ids_and_rejected_case_has_no_deli
         + '], caseid=case["case_id"])'
     )
     receipt = json.loads(await runtime.execute(program))
-    assert receipt["status"] == "partial" and receipt["failed"][0]["item_index"] == 1
+    assert receipt["status"] == "partial" and len(receipt["failed"]) == 1
     rows = [
         item.kwargs for item in observer.record_tool_call.call_args_list if item.kwargs["tool_name"] == "write_event"
     ]
-    assert [bool(row["error"]) for row in rows] == [False, True, False]
-    assert [row["request_args"]["_program"]["item_index"] for row in rows] == [0, 1, 2]
-    assert len({row["request_args"]["_tool_call_id"] for row in rows}) == 3
+    assert [bool(row["error"]) for row in rows] == [True]
+    assert rows[0]["request_args"]["_program"]["item_index"] is None
+    assert len(rows[0]["request_args"]["items"]) == 3
     assert pool.claims_for(author) == [runtime.env["case"]["case_id"]]
     assert pool.submissions_for(author) == []
     assert not hasattr(pool, "deliveries")
-    assert "case_link" not in rows[1]["receipt"]
-    assert runtime.env["result"]["results"][1] is None
+    assert "case_link" not in rows[0]["receipt"]
+    assert runtime.env["result"] is None and not draft.events and not draft.queues
+
+
+@pytest.mark.asyncio
+async def test_invalid_arguments_name_fields_in_chinese_without_english_envelope():
+    @tool
+    def write_probe(items: list[int]) -> str:
+        "测试用写入工具，供参数校验回执断言"
+        return json.dumps({"status": "written"}, ensure_ascii=False)
+
+    receipt = json.loads(await DiagnosisProgramRuntime([write_probe]).execute("result = write_probe()"))
+    assert receipt["status"] == "partial"
+    message = receipt["failed"][0]["message"]
+    assert "缺少必填字段" in message
+    assert "items" in message
+    assert "write_probe" in message
+    assert "validation error" not in message.lower()

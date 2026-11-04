@@ -48,7 +48,7 @@ def test_legacy_identity_and_event_facts_are_not_current_work_operations(db_sess
     """
 
     from src.agents.annotation.output_models import BoundChapterAnnotation
-    from src.fact_graph.inputs import ChapterMetricsInput
+    from src.metrics.annotation_inputs import ChapterMetricsInput
     from src.storage.models import ChapterAnnotation, Paragraph
     from tests.support.chapter_annotation_helpers import (
         character_fact,
@@ -180,7 +180,7 @@ def test_single_work_tree_recovery_preserves_other_inflight_nodes():
     }
     trees.recover_work(snapshot)
     trees.recover_work(snapshot)
-    assert trees.read("other-node")["saved"] is False
+    assert trees.read("other-node", author=fixture_id(__name__, "o1"))["saved"] is False
     assert trees.read("saved-node")["saved"] is True
     assert fixture_id(__name__, "o1") in trees.executions
 

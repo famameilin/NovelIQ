@@ -5,9 +5,9 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage
 from sqlalchemy import func, select
 
+from src.agents.messages import AssistantMessage
 from src.audit.queries import fetch_agent_turns, fetch_run_tool_calls
 from src.config import settings
 from src.fact_graph.graph import entity_key
@@ -22,7 +22,7 @@ from src.storage.models import (
     GraphFact,
     GraphRelation,
 )
-from src.storage.repositories.queries.audit_queries import run_agent_execution_ids
+from src.storage.repositories.queries.audit import run_agent_execution_ids
 from src.work.policy import completed_chapters
 from src.work.queries import chapter_annotations, fetch_annotation_role_records, is_annotate_complete
 from src.workflows.annotate import run_annotate
@@ -44,7 +44,7 @@ class ProgramModel(StreamedFakeModelMixin):
     async def ainvoke(self, messages):
         self.calls += 1
         code = self.code if isinstance(self.code, str) else self.code[self.calls - 1]
-        return AIMessage(
+        return AssistantMessage(
             content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": f"call{self.calls}"}]
         )
 
@@ -76,19 +76,19 @@ def _agent_execution_count(db_session, run_id: str) -> int:
 async def test_annotation_role_runs_real_program_and_saves_one_product(db_session, chapter_id) -> None:
     novel_id, run_id = create_run_with_chunks(db_session, texts=["张三出门。"], chapter_ids=[chapter_id])
     model = ProgramModel(
-        "entity(id='a1', name='张三', entity_type='chara"  # 同一程序文本
-        "cter', evidence=1)\nevent(el='t1', evidence=1,"  # 同一程序文本
-        " title='张三出门', problem='明确事件问题', summary='张三出"  # 同一程序文本
-        "门', event_type='行动', status='ongoing')\nmetric"  # 同一程序文本
-        "(summary='出门', emotional_valence=0, narrative"  # 同一程序文本
-        "_function='铺垫')\nfinish()"  # 同一程序文本
+        "entity(id='a1', name='张三', entity_type='character', evid"
+        "ence=1)\ncreated = write_event(items=[dict(el='t1', evidence=1, title='张三出门"
+        "', problem='明确事件问题', summary='张三出门', event_type='行动', st"
+        "atus='ongoing')])\nmetric(summary='出门', emotional_valence=0"
+        ", narrative_function='铺垫')\nfinish()"
+        # 同一程序文本
     )
     events = []
 
     async def emit(event):
         events.append(event)
 
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id, emitter=emit) == (1, 0, 1)
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     assert model.calls == 1
@@ -116,24 +116,26 @@ async def test_reverse_resubmission_of_bidirectional_relation_keeps_save_confirm
     zhang_id = entity_id(run_id, entity_key("张三", "character"))
     li_id = entity_id(run_id, entity_key("李四", "character"))
     first_code = (
-        "entity(id='a1', name='张三', entity_type='character', evidence=1)\n"
-        "entity(id='a2', name='李四', entity_type='character', evidence=1)\n"
-        "relation(from_entity={'name': '张三', 'entity_type': 'character'},"
-        " to_entity={'name': '李四', 'entity_type': 'character'}, relation_type='友情')\n"
-        "event(el='t1', evidence=1, title='同行', problem='明确事件问题',"
-        " summary='同行', event_type='行动', status='ongoing')\n"
-        "metric(summary='同行', emotional_valence=0, narrative_function='铺垫')\n"
-        "finish()"
+        "entity(id='a1', name='张三', entity_type='character', evid"
+        "ence=1)\nentity(id='a2', name='李四', entity_type='characte"
+        "r', evidence=1)\nrelation(from_entity={'name': '张三', 'ent"
+        "ity_type': 'character'}, to_entity={'name': '李四', 'entit"
+        "y_type': 'character'}, relation_type='友情')\ncreated = write_event("
+        "items=[dict(el='t1', evidence=1, title='同行', problem='明确事件问题', su"
+        "mmary='同行', event_type='行动', status='ongoing')])\nmetric(su"
+        "mmary='同行', emotional_valence=0, narrative_function='铺垫'"
+        ")\nfinish()"
     )
     second_code = (
-        "entity(id='a1', name='张三', entity_type='character', evidence=1)\n"
-        "entity(id='a2', name='李四', entity_type='character', evidence=1)\n"
-        "relation(from_entity={'name': '李四', 'entity_type': 'character'},"
-        " to_entity={'name': '张三', 'entity_type': 'character'}, relation_type='友情')\n"
-        "event(el='t1', evidence=1, title='比试', problem='明确事件问题',"
-        " summary='比试', event_type='行动', status='ongoing')\n"
-        "metric(summary='比试', emotional_valence=0, narrative_function='铺垫')\n"
-        "finish()"
+        "entity(id='a1', name='张三', entity_type='character', evid"
+        "ence=1)\nentity(id='a2', name='李四', entity_type='characte"
+        "r', evidence=1)\nrelation(from_entity={'name': '李四', 'ent"
+        "ity_type': 'character'}, to_entity={'name': '张三', 'entit"
+        "y_type': 'character'}, relation_type='友情')\ncreated = write_event("
+        "items=[dict(el='t1', evidence=1, title='比试', problem='明确事件问题', su"
+        "mmary='比试', event_type='行动', status='ongoing')])\nmetric(su"
+        "mmary='比试', emotional_valence=0, narrative_function='铺垫'"
+        ")\nfinish()"
     )
 
     class ChapterAwareModel(StreamedFakeModelMixin):
@@ -145,10 +147,12 @@ async def test_reverse_resubmission_of_bidirectional_relation_keeps_save_confirm
         async def ainvoke(self, messages):
             # 两章并发派发，按章原文判向；先写者落库方向为准，后写者换向提交
             code = second_code if "比试" in str(messages) else first_code
-            return AIMessage(content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call"}])
+            return AssistantMessage(
+                content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call"}]
+            )
 
     model = ChapterAwareModel()
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     db_session.expire_all()
     zhang_id = db_session.scalar(
@@ -180,22 +184,21 @@ async def test_next_provider_turn_persists_all_domain_facts(db_session) -> None:
     model = ProgramModel(
         [
             (
-                "entity(id='a1', name='张三', entity_type='chara"  # 同一程序文本
-                "cter', evidence=1)\nevent(el='t1', evidence=1,"  # 同一程序文本
-                " title='张三出门', problem='明确事件问题', summary='张三出"  # 同一程序文本
-                "门', event_type='行动', status='ongoing')\npartic"  # 同一程序文本
-                "ipants(el='t1', items=[{'name': '张三', 'entity"  # 同一程序文本
-                "_type': 'character', 'role': '主体', 'action': "  # 同一程序文本
-                "'出门', 'emotion': 1}])\ndialogue(candidate_inde"  # 同一程序文本
-                "x=1, verdict='dialogue', evidence=1, speaker="  # 同一程序文本
-                "{'name': '张三', 'entity_type': 'character'})\nm"  # 同一程序文本
-                "etric(summary='出门', emotional_valence=0, narr"  # 同一程序文本
-                "ative_function='铺垫')"  # 同一程序文本
+                "entity(id='a1', name='张三', entity_type='character', evid"
+                "ence=1)\ncreated = write_event(items=[dict(el='t1', evidence=1, title='张三出门"
+                "', problem='明确事件问题', summary='张三出门', event_type='行动', st"
+                "atus='ongoing', characters=[{'name': '张"
+                "三', 'entity_type': 'character', 'role': '主体', 'narrative_role': "
+                "'主体', 'action': '出门', 'emotion': 1}])])\ndialogue(candidate_index=1, verdic"
+                "t='dialogue', evidence=1, speaker={'name': '张三', 'entity"
+                "_type': 'character'})\nmetric(summary='出门', emotional_val"
+                "ence=0, narrative_function='铺垫')"
+                # 同一程序文本
             ),
             "finish()",
         ]
     )
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
     turns = fetch_agent_turns(storage_for(db_session), run_id)
@@ -215,17 +218,16 @@ async def test_current_work_validates_serialized_participant_fields_before_save(
     """生产调用经 JSON 变成字典后，参与者仍按当前类型校验并写入真实章产出"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["张三出门。"])
     model = ProgramModel(
-        "entity(id='a1', name='张三', entity_type='chara"  # 同一程序文本
-        "cter', evidence=1)\nevent(el='t1', evidence=1,"  # 同一程序文本
-        " title='张三出门', problem='明确事件问题', summary='张三出"  # 同一程序文本
-        "门', event_type='行动', status='ongoing')\npartic"  # 同一程序文本
-        "ipants(el='t1', items=[{'name': '张三', 'entity"  # 同一程序文本
-        "_type': 'character', 'role': '主体', 'action': "  # 同一程序文本
-        "'出门', 'emotion': 1}])\nmetric(summary='出门', em"  # 同一程序文本
-        "otional_valence=0, narrative_function='铺垫')\nf"  # 同一程序文本
-        "inish()"  # 同一程序文本
+        "entity(id='a1', name='张三', entity_type='character', evid"
+        "ence=1)\ncreated = write_event(items=[dict(el='t1', evidence=1, title='张三出门"
+        "', problem='明确事件问题', summary='张三出门', event_type='行动', st"
+        "atus='ongoing', characters=[{'name': '张"
+        "三', 'entity_type': 'character', 'role': '主体', 'narrative_role': "
+        "'主体', 'action': '出门', 'emotion': 1}])])\nmetric(summary='出门', emotional_val"
+        "ence=0, narrative_function='铺垫')\nfinish()"
+        # 同一程序文本
     )
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
     payload = chapter_annotations(storage_for(db_session), run_id)[0].payload
@@ -245,7 +247,7 @@ async def test_long_chapter_saves_three_lanes_without_chapter_finalize(db_sessio
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 2)
     novel_id, run_id = create_run_with_chunks(db_session, texts=["章中原文。"], chapter_ids=[1])
     model = ProgramModel('metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()')
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
     states = fetch_annotation_role_records(storage_for(db_session), run_id)
@@ -258,16 +260,26 @@ async def test_long_chapter_saves_three_lanes_without_chapter_finalize(db_sessio
 class RoleModel(ProgramModel):
     async def ainvoke(self, messages):
         text = str(messages[1].content)
+        case_code = (
+            "case = claim_random_case()\n"
+            'if case["status"] != "empty":\n'
+            '    if case["case_type"] == "event":\n'
+            '        parent = write_event(items=[], tree_key="case-parent", title="案例父树", '
+            'caseid=case["case_id"])["tree_id"]\n'
+            '        write_link(kind="parent_child", source_id=parent, target_id=case["tree_id"], '
+            'reason="案例归并", evidence=1, caseid=case["case_id"])\n'
+            '    submit_case(case_id=case["case_id"])\n'
+        )
         if 'role="entity"' in text:
-            self.code = 'entity(id="a1", name="张三", entity_type="character", evidence=1)\nfinish()'
+            self.code = case_code + 'entity(id="a1", name="张三", entity_type="character", evidence=1)\nfinish()'
         elif 'role="event"' in text:
-            self.code = (
-                "event(el='t1', evidence=1, title='独立事件', prob"  # 同一程序文本
-                "lem='明确事件问题', summary='独立事件', event_type='行动'"  # 同一程序文本
-                ", status='ongoing')\nfinish()"  # 同一程序文本
+            self.code = case_code + (
+                "created = write_event(items=[dict(el='t1', evidence=1, title='独立事件', probl"
+                "em='明确事件问题', summary='独立事件', event_type='行动', status='on"
+                "going')])\nfinish()"
             )
         else:
-            self.code = 'metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()'
+            self.code = case_code + 'metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()'
         return await super().ainvoke(messages)
 
 
@@ -303,7 +315,7 @@ async def test_later_chapter_saves_while_earlier_model_is_running(db_session, co
         return result
 
     with (
-        patch("src.model_pool.llm.build_chat_model", return_value=model),
+        patch("src.agents.model_client.build_chat_model", return_value=model),
         patch.object(AnnotationAccess, "save", saved),
     ):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
@@ -316,6 +328,7 @@ async def test_resume_keeps_saved_lanes_and_reruns_missing_role(db_session, monk
     """角色 lane 失败后重跑：已保存角色产物保留，只重派缺失角色并补齐章末核对"""
     import asyncio
 
+    from src.model_pool.health import MODEL_HEALTH
     from src.storage.access import AnnotationAccess
 
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 2)
@@ -339,11 +352,13 @@ async def test_resume_keeps_saved_lanes_and_reruns_missing_role(db_session, monk
             return await super().ainvoke(messages)
 
     with (
-        patch("src.model_pool.llm.build_chat_model", return_value=LaneFailingModel("")),
+        patch("src.agents.model_client.build_chat_model", return_value=LaneFailingModel("")),
         patch.object(AnnotationAccess, "save", saved),
     ):
         with pytest.raises(RuntimeError, match="模拟角色 lane 永久失败"):
             await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
+    # 失败回合已记入健康账本；本用例只验续跑补齐缺失角色，重置以免等待健康分回升
+    MODEL_HEALTH.reset()
     db_session.expire_all()
     partial = fetch_annotation_role_records(storage_for(db_session), run_id)
     event_row = next(item for item in partial if (item.chapter_id, item.role) == (2, "event"))
@@ -364,7 +379,7 @@ async def test_resume_keeps_saved_lanes_and_reruns_missing_role(db_session, monk
     assert kept_events
 
     model = RoleModel("")
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     assert model.calls >= 1
     db_session.expire_all()
@@ -382,6 +397,7 @@ async def test_resume_keeps_saved_roles_when_threshold_changes(db_session, monke
     """阈值变化后保留已保存角色，沿原角色集合补齐缺失工作"""
     import asyncio
 
+    from src.model_pool.health import MODEL_HEALTH
     from src.storage.access import AnnotationAccess
 
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 2)
@@ -405,11 +421,13 @@ async def test_resume_keeps_saved_roles_when_threshold_changes(db_session, monke
             return await super().ainvoke(messages)
 
     with (
-        patch("src.model_pool.llm.build_chat_model", return_value=LaneFailingModel("")),
+        patch("src.agents.model_client.build_chat_model", return_value=LaneFailingModel("")),
         patch.object(AnnotationAccess, "save", saved),
     ):
         with pytest.raises(RuntimeError, match="模拟角色 lane 永久失败"):
             await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
+    # 失败回合已记入健康账本；本用例只验续跑保留角色，重置以免等待健康分回升
+    MODEL_HEALTH.reset()
     db_session.expire_all()
     before = {
         (item.chapter_id, item.role): item.invocation_id
@@ -418,7 +436,7 @@ async def test_resume_keeps_saved_roles_when_threshold_changes(db_session, monke
     assert (2, "event") in before
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 100)
     model = RoleModel("")
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     assert model.calls > 0
     db_session.expire_all()
@@ -441,7 +459,7 @@ async def test_recovery_discards_chapter_with_only_executions(db_session, monkey
                 raise RuntimeError("模拟失败轮次：长章角色未产出")
             return await super().ainvoke(messages)
 
-    with patch("src.model_pool.llm.build_chat_model", return_value=FailingModel("")):
+    with patch("src.agents.model_client.build_chat_model", return_value=FailingModel("")):
         with pytest.raises(RuntimeError, match="模拟失败轮次"):
             await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
@@ -451,9 +469,12 @@ async def test_recovery_discards_chapter_with_only_executions(db_session, monkey
     )
     assert stale >= 1
     assert not [item for item in fetch_annotation_role_records(storage_for(db_session), run_id) if item.chapter_id == 2]
-    # 旧轮次留下失败执行行，长章一行产物都没有 → 整章重建
+    from src.model_pool.health import MODEL_HEALTH
+
+    # 恢复轮次使用健康模型桩，独立验证失败执行与正式产物的恢复边界
+    MODEL_HEALTH.reset()
     model = RoleModel("")
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
     assert completed_chapters(fetch_annotation_role_records(storage_for(db_session), run_id)) == {1, 2}
@@ -466,11 +487,13 @@ async def test_save_failure_rolls_back_all_business_and_releases_case(db_session
 
     novel_id, run_id = create_run_with_chunks(db_session, texts=["原文。"])
     model = ProgramModel(
-        "pending(case_type='character', description='待核查')\nevent(el='t1', evi"  # 同一程序文本
-        "dence=1, title='原文事件', problem='明确事件问题', summ"  # 同一程序文本
-        "ary='原文事件', event_type='行动', status='ongoing'"  # 同一程序文本
-        ")\nmetric(summary='原文', emotional_valence=0, n"  # 同一程序文本
-        "arrative_function='铺垫')\nfinish()"  # 同一程序文本
+        "pending(case_type='character', description='待核查')\ncreate"
+        "d = write_event(items=[dict(el='t1', evidence=1, title='原文事件', problem='明确"
+        "事件问题', summary='原文事件', event_type='行动', status='ongoing'"
+        ")])\nmetric(summary='原文', emotional_valence=0, narrative_fu"
+        "nction='铺垫')\ncase = claim_random_case()\nsubmit_case(case"
+        "_id=case['case_id'])\nfinish()"
+        # 同一程序文本
     )
     aborted = []
     original_abort = AnnotationAgent.abort
@@ -485,7 +508,7 @@ async def test_save_failure_rolls_back_all_business_and_releases_case(db_session
 
     monkeypatch.setattr(AnnotationAgent, "abort", abort)
     monkeypatch.setattr("src.storage.repositories.case_writes.CaseWritesRepository.save_work", fail_save)
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         with pytest.raises(RuntimeError, match="案例保存故障"):
             await run_annotate(run_id, storage_for(db_session), novel_id=novel_id)
     db_session.expire_all()
@@ -548,7 +571,7 @@ async def test_lost_commit_reply_verifies_actual_save_before_confirm(db_session,
         "src.workflows.annotate.get_storage_factory", lambda: lambda: Storage(_runner=OperationRunner(factory))
     )
     model = ProgramModel('metric(summary="原文", emotional_valence=0, narrative_function="铺垫")\nfinish()')
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     assert replies == ["lost"] and model.calls == 1
     assert not any(MODEL_CAPACITY.snapshot().values())
@@ -591,36 +614,41 @@ async def test_program_can_read_shared_nodes_claim_case_and_save_cross_chapter_l
         async def ainvoke(self, messages):
             if "拾得" in str(messages[1].content):
                 self.code = (
-                    "pending(case_type='character', description='旧信的用途')\nevent(el='t1', e"  # 同一程序文本
-                    "vidence=1, isforeshadowing=True, confidence='"  # 同一程序文本
-                    "high', title='拾得旧信', problem='明确事件问题', summar"  # 同一程序文本
-                    "y='拾得旧信', event_type='行动', status='ongoing')\n"  # 同一程序文本
-                    "metric(summary='拾信', emotional_valence=0, nar"  # 同一程序文本
-                    "rative_function='铺垫')\nfinish()"  # 同一程序文本
+                    "pending(case_type='character', description='旧信的用途')\npendi"
+                    "ng(case_type='character', description='旧信的来历')\ncase = claim_random_case()\n"
+                    "submit_case(case_id=case['case_id'])\ncrea"
+                    "ted = write_event(items=[dict(el='t1', evidence=1, isforeshadowing=True, c"
+                    "onfidence='high', title='拾得旧信', problem='明确事件问题', summar"
+                    "y='拾得旧信', event_type='行动', status='ongoing')])\nmetric(summ"
+                    "ary='拾信', emotional_valence=0, narrative_function='铺垫')\n"
+                    "finish()"
+                    # 同一程序文本
                 )
             else:
                 self.code = """
-cases = search_cases()
-claim_case(case_id=cases[0]["case_id"])
+cases = [item for item in search_cases(case_type="character", unresolved_only=True) if not item["claimed"]]
+chosen = cases[0]
+claim_case(case_id=chosen["case_id"])
 page = search_events(query="拾得")
 source = page["events"][0]["event_id"]
-created = event(el="t1", evidence=1, title="读懂旧信", problem="旧信有何用途",
-                summary="读懂旧信", event_type="发现", status="resolved")
-write_link(source_id=source, target_id=created["ref"]["event_id"],
-           kind="foreshadowing", reason="旧信内容得以解释", evidence=1, caseid=cases[0]["case_id"])
+read_event(node_id=source)
+created = write_event(items=[dict(el="t1", evidence=1, title="读懂旧信", problem="旧信有何用途",
+                summary="读懂旧信", event_type="发现", status="resolved")])
+write_link(source_id=source, target_id=created["results"][0]["content"]["event_id"],
+           kind="foreshadowing", reason="旧信内容得以解释", evidence=1, caseid=chosen["case_id"])
 metric(summary="读信", emotional_valence=0, narrative_function="铺垫")
-submit_case(case_id=cases[0]["case_id"])
+submit_case(case_id=chosen["case_id"])
 finish()
 """
             return await super().ainvoke(messages)
 
-    with patch("src.model_pool.llm.build_chat_model", return_value=SharedModel("")):
+    with patch("src.agents.model_client.build_chat_model", return_value=SharedModel("")):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     db_session.expire_all()
     pool = CasePool(run_id)
     pool.load_storage(storage_for(db_session))
     resolved = [record for record in pool.search() if record["submitted"]]
-    assert len(resolved) == 1
+    assert len(resolved) == 2
     row = db_session.get(Case, resolved[0]["case_id"])
     assert row.status == "resolved" and row.promised_agent_id is not None
     links = list(
@@ -630,7 +658,7 @@ finish()
             )
         )
     )
-    assert [link.relation_type for link in links] == ["foreshadowing"]
+    assert [link.relation_type for link in links if link.relation_type] == ["foreshadowing"]
 
 
 @pytest.mark.asyncio
@@ -643,26 +671,33 @@ async def test_read_authorization_survives_failed_call_rollback(db_session, conf
         db_session, texts=["张三拾得旧信。", "张三读懂旧信。"], chapter_ids=[1, 2]
     )
     first_code = (
-        "event(el='t1', evidence=1, isforeshadowing=True, confidence='"
-        "high', title='拾得旧信', problem='明确事件问题', summary="
-        "'拾得旧信', event_type='行动', status='ongoing')\n"
-        "metric(summary='拾信', emotional_valence=0, narrative_"
-        "function='铺垫')\nfinish()"
+        "created = write_event(items=[dict(el='t1', evidence=1, isforeshadowing=Tru"
+        "e, confidence='high', title='拾得旧信', problem='明确事件问题', su"
+        "mmary='拾得旧信', event_type='行动', status='ongoing')])\nmetric("
+        "summary='拾信', emotional_valence=0, narrative_function='铺"
+        "垫')\nfinish()"
     )
-    second_code = (
-        "rejected = write_link(source_id='00000000-0000-0000-0000-000000000000',"
-        " target_id='00000000-0000-0000-0000-000000000000', kind='causal',"
-        " reason='无效引用制造一次失败回滚', evidence=1)\n"
-        "page = search_events(query='拾得')\n"
-        "source = page['events'][0]['event_id']\n"
-        "detail = read_event(node_id=source)\n"
-        "created = event(el='t1', evidence=1, title='读懂旧信', problem='旧信有何用途',"
-        " summary='读懂旧信', event_type='发现', status='resolved')\n"
-        "write_link(source_id=source, target_id=created['ref']['event_id'],"
-        " kind='foreshadowing', reason='旧信内容得以解释', evidence=1)\n"
-        "metric(summary='读信', emotional_valence=0, narrative_function='铺垫')\n"
-        "finish()"
-    )
+    second_code = """
+rejected = write_link(source_id='00000000-0000-0000-0000-000000000000',
+                      target_id='00000000-0000-0000-0000-000000000000',
+                      kind='causal', reason='无效引用制造一次失败回滚', evidence=1)
+page = search_events(query='拾得')
+source = page['events'][0]['event_id']
+detail = read_event(node_id=source)
+created = write_event(items=[dict(el='t1', evidence=1, title='读懂旧信', problem='旧信有何用途',
+                summary='读懂旧信', event_type='发现', status='resolved')])
+write_link(source_id=source, target_id=created['results'][0]['content']['event_id'], kind='foreshadowing',
+           reason='旧信内容得以解释', evidence=1)
+metric(summary='读信', emotional_valence=0, narrative_function='铺垫')
+cases = search_cases(case_type='event', unresolved_only=True)
+case = cases[0]
+claim_case(case_id=case['case_id'])
+parent = write_event(items=[], tree_key='case-parent', title='案例父树')
+write_link(source_id=parent['tree_id'], target_id=case['tree_id'], kind='parent_child',
+           reason='事件案例归并', evidence=1, caseid=case['case_id'])
+submit_case(case_id=case['case_id'])
+finish()
+"""
 
     class ChapterAwareModel(StreamedFakeModelMixin):
         model_name = "test_model"
@@ -672,15 +707,17 @@ async def test_read_authorization_survives_failed_call_rollback(db_session, conf
 
         async def ainvoke(self, messages):
             code = second_code if "读懂" in str(messages) else first_code
-            return AIMessage(content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call"}])
+            return AssistantMessage(
+                content="", tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "call"}]
+            )
 
-    with patch("src.model_pool.llm.build_chat_model", return_value=ChapterAwareModel()):
+    with patch("src.agents.model_client.build_chat_model", return_value=ChapterAwareModel()):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     db_session.expire_all()
     links = list(
         db_session.scalars(select(NarrativeLink).where(NarrativeLink.producer_agent_id.in_(_run_execution_ids(run_id))))
     )
-    assert [link.relation_type for link in links] == ["foreshadowing"]
+    assert [link.relation_type for link in links if link.relation_type] == ["foreshadowing"]
 
 
 @pytest.mark.asyncio
@@ -689,9 +726,9 @@ async def test_same_batch_write_after_finish_is_saved_and_audited(db_session):
     model = ProgramModel(
         'metric(summary="原文", emotional_valence=0, nar'  # 同一程序文本
         'rative_function="铺垫")\nfinish()\npending(case_type="dialogue", descri'  # 同一程序文本
-        'ption="迟到")'  # 同一程序文本
+        'ption="迟到")\ncase = claim_random_case()\nsubmit_case(case_id=case["case_id"])'  # 同一程序文本
     )
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     assert model.calls == 1
     assert db_session.query(Case).filter(Case.run_id == run_id).count() == 1
@@ -704,7 +741,7 @@ async def test_same_batch_write_after_finish_is_saved_and_audited(db_session):
     assert program_call.error is None
     receipt = program_call.receipt_observed
     assert receipt["status"] == "applied"
-    assert receipt["applied"] == 3
+    assert receipt["applied"] == 5
 
 
 @pytest.mark.asyncio
@@ -712,21 +749,21 @@ async def test_runtime_name_references_auto_register_all_four_surfaces(db_sessio
     """真实保存链不先富登记，四个引用面会合到同一组正式实体"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["“去吧。”张三出门去山门找李四。"])
     model = ProgramModel(
-        "event(el='t1', evidence=1, title='张三出门', prob"  # 同一程序文本
-        "lem='明确事件问题', summary='张三出门', event_type='行动'"  # 同一程序文本
-        ", status='ongoing')\nparticipants(el='t1', ite"  # 同一程序文本
-        "ms=[{'name': '张三', 'entity_type': 'character'"  # 同一程序文本
-        ", 'role': '主体'}, {'name': '山门', 'entity_type'"  # 同一程序文本
-        ": 'organization', 'role': '地点'}])\nrelation(fr"  # 同一程序文本
-        "om_entity={'name': '张三', 'entity_type': 'char"  # 同一程序文本
-        "acter'}, to_entity={'name': '李四', 'entity_typ"  # 同一程序文本
-        "e': 'character'}, relation_type='盟友')\ndialogu"  # 同一程序文本
-        "e(candidate_index=1, verdict='dialogue', evid"  # 同一程序文本
-        "ence=1, speaker={'name': '张三', 'entity_type':"  # 同一程序文本
-        " 'character'})\nmetric(summary='出门', emotional"  # 同一程序文本
-        "_valence=0, narrative_function='铺垫')\nfinish()"  # 同一程序文本
+        "created = write_event(items=[dict(el='t1', evidence=1, title='张三出门', probl"
+        "em='明确事件问题', summary='张三出门', event_type='行动', status='on"
+        "going', characters=[{'name': '张三', 'ent"
+        "ity_type': 'character', 'role': '主体', 'narrative_role': '主体', "
+        "'action': '出门', 'emotion': 1}, {'name': '山门', 'e"
+        "ntity_type': 'organization', 'role': '地点'}])])\nrelation(fr"
+        "om_entity={'name': '张三', 'entity_type': 'character'}, to"
+        "_entity={'name': '李四', 'entity_type': 'character'}, rela"
+        "tion_type='盟友')\ndialogue(candidate_index=1, verdict='dia"
+        "logue', evidence=1, speaker={'name': '张三', 'entity_type'"
+        ": 'character'})\nmetric(summary='出门', emotional_valence=0"
+        ", narrative_function='铺垫')\nfinish()"
+        # 同一程序文本
     )
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
     entities = db_session.scalars(select(GraphEntity).where(GraphEntity.run_id == run_id)).all()

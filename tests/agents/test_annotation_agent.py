@@ -1,4 +1,4 @@
-"""章节级标注 Agent（agent 路径，程序面）LangGraph 与 Runner 测试
+"""章节级标注 Agent 的会话循环与运行入口测试
 
 agent 路径（单块章）的模型可见面=[execute_code, finish]，模型
 把工具调用写成 Python 程序提交；本文件按程序面驱动（_program_message），覆盖：
@@ -17,14 +17,13 @@ import unicodedata
 from uuid import NAMESPACE_DNS, uuid5
 
 import pytest
-from langchain_core.messages import AIMessage
 
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.output_models import BoundChapterAnnotation
-from src.agents.annotation.validation import validate_bound_annotation
+from src.agents.messages import AssistantMessage
 from src.fact_graph.graph import FactGraph
-from src.fact_graph.inputs import ChapterMetricsInput, ChapterParagraphInfo
-from src.fact_graph.outputs import BoundDialogue, BoundParagraphLabel
+from src.fact_graph.inputs import ChapterParagraphInfo
+from src.metrics.annotation_inputs import ChapterMetricsInput
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 
@@ -41,14 +40,14 @@ class _QueryService:
 class _SequenceLLM(StreamedFakeModelMixin):
     """按顺序返回 Agent 消息的测试模型（仅 ainvoke，无流式）"""
 
-    def __init__(self, responses: list[AIMessage]) -> None:
+    def __init__(self, responses: list[AssistantMessage]) -> None:
         """保存待返回的模型消息序列"""
         self.responses = list(responses)
         self.calls = 0
         self.captured_messages: list[list] = []
 
     def bind_tools(self, tools):
-        """满足 LangChain 模型绑定合同"""
+        """绑定会话允许的工具"""
         return self
 
     async def ainvoke(self, messages):
@@ -58,9 +57,9 @@ class _SequenceLLM(StreamedFakeModelMixin):
         return self.responses.pop(0)
 
 
-def _tool_message(calls: list[dict]) -> AIMessage:
+def _tool_message(calls: list[dict]) -> AssistantMessage:
     """构造带工具调用的模型回复"""
-    return AIMessage(content="", tool_calls=calls)
+    return AssistantMessage(content="", tool_calls=calls)
 
 
 def _write_call(
@@ -86,7 +85,7 @@ def _entity_id(name: str) -> str:
 # 程序面驱动：模型回复=一条 execute_code 调用，code 里的语句即工具调用
 
 
-def _program_message(code: str, call_id: str = "call-program") -> AIMessage:
+def _program_message(code: str, call_id: str = "call-program") -> AssistantMessage:
     """构造一条 execute_code 程序回复（程序内的语句即工具调用）"""
     return _tool_message([_write_call("execute_code", {"code": code}, call_id=call_id)])
 
@@ -154,7 +153,7 @@ def _finish_stmt() -> str:
     return "finish()"
 
 
-def _serial_program_messages() -> list[AIMessage]:
+def _serial_program_messages() -> list[AssistantMessage]:
     """构造三轮程序回复：实体+指标 → 事件树 → 对话+finish"""
     return [
         _program_message("\n".join([_entity_stmt(), _metrics_stmt()])),
@@ -235,48 +234,3 @@ async def test_entity_reregistration_same_content_is_idempotent() -> None:
     replay = await tools["write_entity"].ainvoke({"name": "顾霜", "entity_type": "character", "el": "顾霜"})
     assert json.loads(first) == json.loads(replay)
     assert len(ledger.graph.entity_ops) == 1
-
-
-def test_validate_bound_annotation_verifies_dialogue_original_text() -> None:
-    """验证对话原文位置与内容由系统绑定且可回查"""
-    annotation = _bound_annotation()
-    annotation.dialogues = [
-        BoundDialogue(
-            candidate_index=1,
-            candidate_key="dlg_1",
-            content="住手",
-            start=0,
-            end=2,
-        )
-    ]
-    with pytest.raises(ValueError):
-        validate_bound_annotation(
-            annotation,
-            chapter_id=1,
-            chapter_text="顾霜进入山门",
-        )
-
-
-def test_validate_bound_annotation_verifies_paragraph_label_membership() -> None:
-    """段落级监督：自选段标签复核改段落号归属（段号没有逐字复核的对象）"""
-    annotation = _bound_annotation()
-    paragraph_info = ChapterParagraphInfo(
-        paragraph_ids=[0, 1],
-        char_spans=[(0, 4), (4, 9)],
-        texts=["顾霜“住手”", "回荡"],
-    )
-    annotation.paragraph_labels = [BoundParagraphLabel(paragraph_id=0, emotion=0)]
-    validate_bound_annotation(
-        annotation,
-        chapter_id=1,
-        chapter_text="顾霜“住手”回荡",
-        paragraph_info=paragraph_info,
-    )
-    annotation.paragraph_labels = [BoundParagraphLabel(paragraph_id=9, emotion=0)]
-    with pytest.raises(ValueError):
-        validate_bound_annotation(
-            annotation,
-            chapter_id=1,
-            chapter_text="顾霜“住手”回荡",
-            paragraph_info=paragraph_info,
-        )

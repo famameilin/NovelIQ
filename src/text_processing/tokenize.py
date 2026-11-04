@@ -1,14 +1,29 @@
 from __future__ import annotations
 
 from bisect import bisect_right
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from itertools import accumulate
 from pathlib import Path
+from types import ModuleType
 
 from loguru import logger
 
 from src.lexicons.constants import LEXICON_FILES
 
 _LEXICON_DIR = Path("data/lexicons")
+_request_token_blocks: ContextVar[dict[str, tuple[str, ...]] | None] = ContextVar("request_token_blocks", default=None)
+
+
+@contextmanager
+def reuse_token_blocks() -> Iterator[None]:
+    """在单次计算内复用相同词法块的原始词元"""
+    token = _request_token_blocks.set({})
+    try:
+        yield
+    finally:
+        _request_token_blocks.reset(token)
 
 
 def _default_user_dict_path() -> Path:
@@ -49,7 +64,7 @@ class Tokenizer:
         self._stopwords_path = stopwords_path
         self._min_word_len = min_word_len
         self._stopwords: set[str] = set()
-        self._jieba = None
+        self._jieba: ModuleType | None = None
         self._load_jieba()
         self._load_stopwords()
         self._load_user_dict()
@@ -99,12 +114,31 @@ class Tokenizer:
         if not text or not text.strip():
             return []
         if self._jieba:
-            tokens = self._jieba.lcut(text)
+            tokens = self._jieba.lcut(text) if _request_token_blocks.get() is None else list(self._cut(text))
         else:
             import re
 
             tokens = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]+", text)
         return self._filter_tokens(tokens, filter_stopwords)
+
+    def _cut(self, text: str) -> Iterator[str]:
+        jieba = self._jieba
+        if jieba is None:
+            raise RuntimeError("分词器不可用")
+        blocks = _request_token_blocks.get()
+        if blocks is None:
+            yield from jieba.cut(text)
+            return
+        for block in jieba.re_han_default.split(text):
+            if not block:
+                continue
+            if jieba.re_han_default.fullmatch(block):
+                tokens = blocks.get(block)
+                if tokens is None:
+                    tokens = blocks[block] = tuple(jieba.cut(block))
+                yield from tokens
+            else:
+                yield from jieba.cut(block)
 
     def _filter_tokens(self, tokens: list[str], filter_stopwords: bool = False) -> list[str]:
         result = []
@@ -124,7 +158,7 @@ class Tokenizer:
         if not self._jieba:
             tokens = self.tokenize(text)
             return tokens, len(tokens), sum(map(len, tokens))
-        raw_tokens = [word for word in self._jieba.cut(text) if word.strip()]
+        raw_tokens = [word for word in self._cut(text) if word.strip()]
         return self._filter_tokens(raw_tokens), len(raw_tokens), sum(map(len, raw_tokens))
 
     def tokenize_chapters_and_book(self, chapters: list[str]) -> tuple[list[list[str]], list[str]]:

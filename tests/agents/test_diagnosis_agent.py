@@ -1,7 +1,7 @@
 """诊断报告写入与结束信号分离，真实回合预算及同会话补齐
 
 诊断会话图改用
-annotation/agent_graph.build_agent_graph 同一图结构，绑定面只有程序面
+annotation/agent_graph.build_agent_loop 同一图结构，绑定面只有程序面
 execute_code 与 finish；本文件断言的都仍是行为面（报告内容、同会话补齐与预算终止）。
 """
 
@@ -10,15 +10,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
 
-from src.agents.annotation.agent_graph import build_agent_graph
-from src.agents.annotation.agent_ir import AgentAnnotation
-from src.agents.annotation.ledger import AnnotationToolLedger
-from src.agents.diagnosis.program_runtime import DiagnosisProgramRuntime, bind_finish_ledger
-from src.agents.diagnosis.runner import _finalize_diagnosis_result, _validate_topic_label_ids
+from src.agents.diagnosis.program_runtime import DiagnosisProgramRuntime
+from src.agents.diagnosis.session_loop import build_diagnosis_loop
 from src.agents.diagnosis.tools import build_diagnosis_tools
-from src.diagnosis.schema import AgentAnalysis
+from src.agents.messages import AssistantMessage, UserMessage
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 from tests.support.storage_fixtures import fixture_id, storage_for
 
@@ -74,11 +70,17 @@ def call(name, args=None, id="call"):
 
 
 def build_graph(
-    responses, *, maximum=5, observer=None, stream=None, retries=None, completion_check=None,
+    responses,
+    *,
+    maximum=5,
+    observer=None,
+    stream=None,
+    retries=None,
+    completion_check=None,
     context_window_tokens=None,
 ):
     """按生产会话图装配（程序面 execute_code + finish），finish 与无工具响应共用检查"""
-    report = {}
+    report = {"topic_ids": {0, 1}}
     session = MagicMock()
     tools = build_diagnosis_tools(
         storage_for(session),
@@ -89,26 +91,19 @@ def build_graph(
         character_roster=["顾霜", "贺重明"],
     )
     model = Replies(responses)
-    ledger = AnnotationToolLedger(
-        run_scope=fixture_id(__name__, "run"), current_chapter_id=0, current_chapter_text="", allow_future_context=False
-    )
     runtime = DiagnosisProgramRuntime(tools, observer=observer)
 
     def check():
         try:
             if "analysis" not in report:
                 raise ValueError("缺少报告")
-            _validate_topic_label_ids(AgentAnalysis.model_validate(report["analysis"]), expected_ids={0, 1})
         except ValueError as exc:
             return [str(exc)]
         return []
 
-    graph = build_agent_graph(
+    graph = build_diagnosis_loop(
         model,
-        runtime.build_tool(),
-        bind_finish_ledger(runtime.tools["finish"], ledger),
-        ledger=ledger,
-        agent=AgentAnnotation(role="event"),
+        runtime,
         max_iterations=maximum,
         context_window_tokens=context_window_tokens,
         observer=observer,
@@ -120,22 +115,21 @@ def build_graph(
 
 
 async def run_graph(graph):
-    return await graph.ainvoke(
+    return await graph.run(
         {
-            "messages": [HumanMessage(content="诊断")],
+            "messages": [UserMessage(content="诊断")],
             "phase": "chapter_open",
             "iterations": 0,
             "error": None,
         },
-        config={"recursion_limit": 40},
     )
 
 
 async def test_report_then_both_end_signals_produce_same_result():
     graph, model, report = build_graph(
         [
-            AIMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
-            AIMessage(content="完成"),
+            AssistantMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
+            AssistantMessage(content="完成"),
         ]
     )
     result = await run_graph(graph)
@@ -148,7 +142,9 @@ async def test_report_then_both_end_signals_produce_same_result():
 async def test_writing_finish_inside_same_program_checks_final_batch_state():
     """finish 与业务写入同程序：整批执行完再检查，最终状态决定完整性"""
     code = f"{_analysis_code()}\nwrite_diagnosis(patch={{'diagnosis': '读取夹具补充概要'}})\nfinish()"
-    graph, model, report = build_graph([AIMessage(content="", tool_calls=[call("execute_code", {"code": code})])])
+    graph, model, report = build_graph(
+        [AssistantMessage(content="", tool_calls=[call("execute_code", {"code": code})])]
+    )
     result = await run_graph(graph)
     assert report["analysis"] and result["completion_ok"] is True and len(model.requests) == 1
 
@@ -156,9 +152,9 @@ async def test_writing_finish_inside_same_program_checks_final_batch_state():
 async def test_missing_report_continues_same_history_then_saves():
     graph, model, report = build_graph(
         [
-            AIMessage(content="完成"),
-            AIMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
-            AIMessage(content="完成"),
+            AssistantMessage(content="完成"),
+            AssistantMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
+            AssistantMessage(content="完成"),
         ]
     )
     result = await run_graph(graph)
@@ -169,8 +165,8 @@ async def test_missing_report_continues_same_history_then_saves():
 async def test_report_validation_rejection_preserves_last_valid_draft():
     graph, model, report = build_graph(
         [
-            AIMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
-            AIMessage(
+            AssistantMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
+            AssistantMessage(
                 content="",
                 tool_calls=[
                     call("execute_code", {"code": "write_diagnosis(patch={'power_stance_score': 99})\nfinish()"})
@@ -183,20 +179,14 @@ async def test_report_validation_rejection_preserves_last_valid_draft():
     assert len(model.requests) == 2
 
 
-async def test_topic_gap_can_be_repaired_after_no_tool_response():
+async def test_topic_gap_is_rejected_at_write_and_repaired_by_resubmission():
     payload = {**_analysis_payload(), "topic_labels": {"0": "成长"}}
+    repaired = {**_analysis_payload(), "topic_labels": {"0": "成长", "1": "复仇"}}
     graph, model, report = build_graph(
         [
-            AIMessage(content="", tool_calls=[call("execute_code", {"code": _report_code(payload)})]),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    call(
-                        "execute_code", {"code": "write_diagnosis(patch={'topic_labels': {'0': '成长', '1': '复仇'}})"}
-                    )
-                ],
-            ),
-            AIMessage(content="完成"),
+            AssistantMessage(content="", tool_calls=[call("execute_code", {"code": _report_code(payload)})]),
+            AssistantMessage(content="", tool_calls=[call("execute_code", {"code": _report_code(repaired)})]),
+            AssistantMessage(content="完成"),
         ]
     )
     result = await run_graph(graph)
@@ -207,39 +197,12 @@ async def test_topic_gap_can_be_repaired_after_no_tool_response():
 @pytest.mark.parametrize(
     "response",
     [
-        AIMessage(content="完成"),
-        AIMessage(content="", tool_calls=[call("execute_code", {"code": "finish()"})]),
-        AIMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
+        AssistantMessage(content="完成"),
+        AssistantMessage(content="", tool_calls=[call("execute_code", {"code": "finish()"})]),
+        AssistantMessage(content="", tool_calls=[call("execute_code", {"code": _analysis_code()})]),
     ],
 )
 async def test_final_round_without_complete_end_is_budget_exhausted(response):
     graph, model, report = build_graph([response], maximum=1)
     result = await run_graph(graph)
     assert result.get("halted") is True and len(model.requests) == 1
-
-
-def test_validate_topic_label_ids_rejects_mismatch() -> None:
-    """拒绝主题标签数量与实际主题数据不一致的诊断结果"""
-    analysis = AgentAnalysis.model_validate(_analysis_payload())
-
-    with pytest.raises(ValueError, match="IDs must match"):
-        _validate_topic_label_ids(analysis, expected_ids={0, 1, 8})
-
-    with pytest.raises(ValueError, match="valid dictionary"):
-        AgentAnalysis.model_validate({"topic_labels": ["成长", "复仇"]})
-
-
-def test_finalize_diagnosis_result_overrides_model_owned_runtime_fields() -> None:
-    """验证诊断终态由真实 novel_id 与伏笔 ledger 确定"""
-    payload = _analysis_payload()
-    payload["novel_id"] = "wrong"
-    payload["foreshadow_expectation"] = 0.99
-
-    finalized = _finalize_diagnosis_result(
-        AgentAnalysis.model_validate(payload),
-        novel_id=fixture_id(__name__, "novel-real"),
-        foreshadow_expectation=0.41,
-    )
-
-    assert finalized.novel_id == fixture_id(__name__, "novel-real")
-    assert finalized.foreshadow_expectation == 0.41

@@ -56,12 +56,12 @@ class AuditModule:
 
     def _skip_replayed(self, session: Storage, message: Message) -> bool:
         """按审计消息键幂等去重；start_turn 重放需先补回本地调用 id 映射"""
-        call_id = session.reads.audit_module_skip_replayed_1(message.message_id)
+        call_id = session.reads.audit.find_turn_message(message.message_id)
         if call_id is not None:
             if message.payload["method"] == "start_turn":
                 self.identifiers[message.invocation_id, "turn", message.payload["local_id"]] = str(call_id)
             return True
-        tool_id = session.reads.audit_module_skip_replayed_2(message.message_id)
+        tool_id = session.reads.audit.find_tool_message(message.message_id)
         return tool_id is not None
 
     def _save_fact(self, message: Message, recorder: AgentAuditRecorder) -> str | int | None:

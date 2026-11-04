@@ -161,7 +161,7 @@ def test_shifts_endpoint_detects_abrupt_change(api_client: TestClient, db_sessio
     # 窗口 3（章1 三段落 token=40）≥ 阈值 → 候选点位于章2 首段
     assert candidate["window_token_total"] == 40
     assert body["config"]["window_size"] == 3
-    assert body["config"]["score_threshold"] == 0.3
+    assert body["config"]["score_threshold"] == 0.08
 
 
 @pytest.mark.parametrize(

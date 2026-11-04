@@ -105,7 +105,7 @@ def fetch_token_usage_stats(session: Storage, run_id: str) -> dict[str, Any]:
     by_call_type = _fetch_usage_by_call_type(session, run_id)
     by_model = _fetch_usage_by_model(session, run_id)
     coverage_gaps = _detect_token_coverage_gaps(session, run_id)
-    sources = set(session.reads.audit_queries_fetch_token_usage_stats_1(run_id))
+    sources = set(session.reads.audit.list_accounting_sources(run_id))
     summary["accounting_method"] = "unknown" if not sources else "reported" if sources == {"reported"} else "estimated"
     summary["coverage_scope"] = "实际审计请求及已记录的非 Agent 调用；未记录链路不能推断完整"
     summary["coverage_status"] = "partial" if coverage_gaps else "unknown" if not sources else "recorded_calls"
@@ -120,7 +120,7 @@ def fetch_token_usage_stats(session: Storage, run_id: str) -> dict[str, Any]:
 
 def _fetch_usage_summary(session: Storage, run_id: str) -> dict[str, Any]:
     """获取使用量摘要"""
-    result = session.reads.audit_queries_fetch_usage_summary(run_id)
+    result = session.reads.audit.get_usage_summary(run_id)
     if result is None:
         return {"call_count": 0, "total_prompt_tokens": 0, "total_completion_tokens": 0, "total_tokens": 0}
     return {
@@ -133,7 +133,7 @@ def _fetch_usage_summary(session: Storage, run_id: str) -> dict[str, Any]:
 
 def _fetch_usage_by_task(session: Storage, run_id: str) -> dict[str, Any]:
     """按任务类型获取使用量"""
-    result = session.reads.audit_queries_fetch_usage_by_task(run_id)
+    result = session.reads.audit.list_usage_by_task(run_id)
     aggregated: dict[str, dict[str, int]] = {}
     for row in result:
         bucket = aggregated.setdefault(row.task_type, {"call_count": 0, "total_tokens": 0})
@@ -149,7 +149,7 @@ def _build_call_type_key(task_type: str, call_type: str) -> str:
 
 def _fetch_usage_by_call_type(session: Storage, run_id: str) -> dict[str, Any]:
     """按 task_type + call_type 获取使用量"""
-    result = session.reads.audit_queries_fetch_usage_by_call_type(run_id)
+    result = session.reads.audit.list_usage_by_call_type(run_id)
     aggregated: dict[str, dict[str, int]] = {}
     for row in result:
         key = _build_call_type_key(row.task_type, row.call_type)
@@ -161,7 +161,7 @@ def _fetch_usage_by_call_type(session: Storage, run_id: str) -> dict[str, Any]:
 
 def _fetch_usage_by_model(session: Storage, run_id: str) -> dict[str, Any]:
     """按模型获取使用量"""
-    result = session.reads.audit_queries_fetch_usage_by_model(run_id)
+    result = session.reads.audit.list_usage_by_model(run_id)
     return {
         row.model: {"call_count": int(row.call_count or 0), "total_tokens": int(row.total_tokens or 0)}
         for row in result
@@ -175,7 +175,7 @@ def _detect_token_coverage_gaps(session: Storage, run_id: str) -> list[str]:
     以及只能本地估算（非供应商实报）的行。
     """
     gaps: set[str] = set()
-    for row in session.reads.audit_queries_detect_token_coverage_gaps_1(run_id):
+    for row in session.reads.audit.list_token_coverage_gaps(run_id):
         gaps.add(_build_call_type_key(row.task_type, row.call_type))
     return sorted(gaps)
 
@@ -187,11 +187,11 @@ def fetch_agent_turns(session: Storage, run_id: str) -> list[AuditedTurn]:
     费用/五类计时/计时备注/四类文档都取自同一行的具名列；四个 bytes 列缺值表示
     当时没有该观察，不伪造空文档。
     """
-    calls = list(session.reads.audit_queries_fetch_agent_turns_2(run_id))
+    calls = list(session.reads.audit.list_run_turns(run_id))
     if not calls:
         return []
     execution_ids = {str(call.agent_id) for call in calls}
-    annotation_executions = set(session.reads.audit_queries_fetch_agent_turns_1(execution_ids))
+    annotation_executions = set(session.reads.audit.list_annotation_execution_ids(execution_ids))
     turns: list[AuditedTurn] = []
     for call in calls:
         agent_id = str(call.agent_id)
@@ -237,7 +237,7 @@ def fetch_run_tool_calls(session: Storage, run_id: str) -> list[AuditedToolCall]
     call_ids = [turn.call_id for turn in fetch_agent_turns(session, run_id)]
     if not call_ids:
         return []
-    rows = session.reads.audit_queries_fetch_run_tool_calls_1(call_ids)
+    rows = session.reads.audit.list_turn_tool_calls(call_ids)
     return [
         AuditedToolCall(
             tool_call_id=str(tool_call.agentloop_id),

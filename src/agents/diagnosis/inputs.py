@@ -1,4 +1,4 @@
-"""五个诊断写入面的严格单项契约，批量不改变领域校验"""
+"""诊断写入面的严格单项契约，批量不改变领域校验"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.event_trees.organization import NarrativeDescription, NarrativeTitle, OrganizationEvidence
+from src.event_trees.organization_models import NarrativeDescription, NarrativeTitle, OrganizationEvidence
 
 
 class WriteItem(BaseModel):
@@ -16,7 +16,6 @@ class WriteItem(BaseModel):
 
 
 class EventItem(WriteItem):
-    operation: Literal["event"]
     key: str = Field(description="本执行的局部键：同一执行内唯一（不随章节、批次重置），重试沿用同一键")
     title: str
     problem: str
@@ -30,12 +29,12 @@ class EventItem(WriteItem):
     reason: str = Field(min_length=1)
 
 
-class ContainmentItem(WriteItem):
-    operation: Literal["contain"]
-    parent_event_id: str
-    child_event_id: str
+class QueueReferenceItem(WriteItem):
+    operation: Literal["reference"]
+    parent_tree_id: str
+    child_tree_id: str
     reason: str = Field(min_length=1)
-    evidence: list[OrganizationEvidence]
+    evidence: list[OrganizationEvidence] = Field(default_factory=list)
 
 
 class RelationItem(WriteItem):
@@ -52,30 +51,9 @@ class RelationItem(WriteItem):
 
 class RetractItem(WriteItem):
     operation: Literal["retract"]
-    kind: Literal["contain", "relation"]
+    kind: Literal["queue", "reference", "relation"]
     identifier: str
     reason: str = Field(min_length=1)
-    evidence: list[OrganizationEvidence]
-
-
-class ArcItem(WriteItem):
-    operation: Literal["arc"]
-    key: str
-    kind: Literal["main", "subplot"]
-    title: NarrativeTitle
-    objective: NarrativeDescription
-    role: str
-    reason: str
-    evidence: list[OrganizationEvidence]
-    parent_arc_id: str | None = None
-
-
-class ArcLinkItem(WriteItem):
-    operation: Literal["link"]
-    event_id: str
-    arc_id: str
-    role: str
-    reason: str
     evidence: list[OrganizationEvidence]
 
 
@@ -87,17 +65,9 @@ class OutcomeItem(WriteItem):
     evidence: list[OrganizationEvidence]
 
 
-class OutcomeLinkItem(WriteItem):
-    operation: Literal["link"]
-    event_id: str
-    outcome_id: str
-    reason: str
-    evidence: list[OrganizationEvidence]
-
-
-EventWriteItem = Annotated[
-    EventItem | ContainmentItem | RetractItem | RelationItem,
+EventWriteItem = EventItem
+EventLinkWriteItem = Annotated[
+    QueueReferenceItem | RelationItem,
     Field(discriminator="operation"),
 ]
-ArcWriteItem = Annotated[ArcItem | ArcLinkItem, Field(discriminator="operation")]
-OutcomeWriteItem = Annotated[OutcomeItem | OutcomeLinkItem, Field(discriminator="operation")]
+OutcomeWriteItem = Annotated[OutcomeItem, Field(discriminator="operation")]

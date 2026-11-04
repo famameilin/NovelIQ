@@ -11,10 +11,9 @@ import json
 import logging
 import time
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import AIMessage, ToolCall, UsageMetadata
-
+from src.agents.messages import AssistantMessage
 from src.agents.stream_audit import ModelCallTiming
 from src.agents.stream_errors import StreamEmitError
 
@@ -25,12 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def extract_reasoning_content(chunk: Any) -> str:
-    """
-    从流式 chunk 探测推理 token（Qwen 系 reasoning_content 字段）
-
-    不同 langchain-openai 版本对额外字段的暴露位置不同，依次探测
-    additional_kwargs / response_metadata / 直接属性
-    """
+    """从流式增量的附加字段、元数据或直接属性读取思考内容"""
     additional = getattr(chunk, "additional_kwargs", None) or {}
     reasoning = additional.get("reasoning_content") or additional.get("reasoning") or ""
     if reasoning:
@@ -65,35 +59,44 @@ def _accumulate_usage_metadata(target: dict[str, Any], source: Mapping[str, Any]
 
 
 def _merge_tool_call_chunks(tool_call_chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    按 index 合并 langchain 流式工具调用增量，还原完整 tool_calls
+    """按调用索引拼接参数，保留无效参数原文并拒绝执行
 
-    OpenAI 兼容流式接口把工具调用拆成多个分片：name 首片完整、args 为 JSON 片段增量，
-    需要按 index 拼接后再解析。JSON 解析失败说明流被截断（Provider 丢尾包/模型截断），
-    被打断的调用打 truncated 标记并保留原文，供诊断与拒绝执行。
-    部分网关并发工具返回的 index 均为 0，需按 name/id 冲突自动分配新 index，
-    避免多个工具名串接成单条。
+    不同调用身份占用同一索引时分配独立位置，同一调用的名称分片继续拼接
     """
     merged: dict[int, dict[str, str]] = {}
+    active: dict[int, int] = {}
+    identities: dict[tuple[int, str], int] = {}
     for raw in tool_call_chunks:
-        index = int(raw.get("index", len(merged)))
-        # 若 index 已被不同 name 占用，分配新 index
+        source_index = int(raw.get("index", len(merged)))
+        index = active.get(source_index, source_index)
         raw_name = raw.get("name") or ""
-        if index in merged and raw_name and merged[index]["name"] and merged[index]["name"] != raw_name:
-            index = max(merged.keys()) + 1
-            # 同时检查新 index 是否仍冲突（极端情况）
-            while index in merged and merged[index]["name"] and merged[index]["name"] != raw_name:
-                index += 1
+        call_id = raw.get("id") or ""
+        identity = (source_index, call_id)
+        if call_id and identity in identities:
+            index = identities[identity]
+        elif index in merged and (
+            (call_id and merged[index]["id"] and call_id != merged[index]["id"])
+            or (raw_name and merged[index]["name"] and raw_name != merged[index]["name"])
+        ):
+            # 仅完整参数后的新身份另起调用，未完成参数中的名称和 ID 仍按分片拼接
+            try:
+                json.loads(merged[index]["args"])
+            except json.JSONDecodeError:
+                pass
+            else:
+                index = max(merged) + 1
+        active[source_index] = index
         entry = merged.setdefault(index, {"name": "", "args": "", "id": ""})
         name = raw_name
-        if name:
+        if name and entry["name"] != name:
             entry["name"] += name
         args = raw.get("args") or ""
         if args:
             entry["args"] += args
-        call_id = raw.get("id") or ""
-        if call_id:
+        if call_id and entry["id"] != call_id:
             entry["id"] += call_id
+        if entry["id"]:
+            identities[(source_index, entry["id"])] = index
 
     calls: list[dict[str, Any]] = []
     for index in sorted(merged):
@@ -121,21 +124,22 @@ def _merge_tool_call_chunks(tool_call_chunks: list[dict[str, Any]]) -> list[dict
                 }
             )
             continue
-        calls.append(
-            {
-                "name": entry["name"],
-                "args": parsed_args,
-                "raw_args": raw_args,
-                "id": entry["id"] or f"call_{index}",
-                "type": "tool_call",
-            }
-        )
+        call = {
+            "name": entry["name"],
+            "args": parsed_args if isinstance(parsed_args, dict) else {},
+            "raw_args": raw_args,
+            "id": entry["id"] or f"call_{index}",
+            "type": "tool_call",
+        }
+        if not isinstance(parsed_args, dict):
+            call["argument_error"] = "工具参数必须为 JSON 对象"
+        calls.append(call)
     return calls
 
 
 class StreamChunkAggregator:
     """
-    聚合 astream 的 AIMessageChunk，边聚合边推送事件并采集逐项计时
+    聚合 astream 的 StreamDelta，边聚合边推送事件并采集逐项计时
 
     文本 token → llm_output（output 块）
     工具名完整出现 → "正在调用工具 X"（tool_call 事件）
@@ -266,16 +270,16 @@ class StreamChunkAggregator:
         if not has_usage_metadata and isinstance(raw_usage, Mapping):
             _accumulate_usage_metadata(self._usage_metadata, raw_usage)
 
-    def finish(self) -> AIMessage:
-        """合并所有分片，构造与 ainvoke 等价的完整 AIMessage"""
+    def finish(self) -> AssistantMessage:
+        """合并所有分片，构造与 ainvoke 等价的完整 AssistantMessage"""
         content = "".join(self._content_parts)
         reasoning = "".join(self._reasoning_parts)
         tool_calls = _merge_tool_call_chunks(self._tool_call_chunks)
-        message = AIMessage(content=content)
+        message = AssistantMessage(content=content)
         if self._usage_metadata:
-            message.usage_metadata = cast(UsageMetadata, self._usage_metadata)
+            message.usage_metadata = self._usage_metadata
         if tool_calls:
-            message.tool_calls = cast(list[ToolCall], tool_calls)
+            message.tool_calls = tool_calls
         if reasoning:
             message.additional_kwargs["reasoning_content"] = reasoning
         if self._finish_reason is not None:

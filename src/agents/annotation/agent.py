@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
+from src.agents.messages import SystemMessage, UserMessage
 from src.agents.stream import AgentStream
 from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
 from src.audit.module import AuditMessages
@@ -22,15 +22,15 @@ from src.event_bus.notifications import StreamEvent
 from src.event_trees.contributions import EventContribution
 from src.event_trees.trees import CONTRIBUTION_KEYS, EventTrees
 from src.fact_graph.contributions import FactContribution
-from src.fact_graph.evidence import EvidenceParagraph
 from src.fact_graph.graph import FactGraph
 from src.fact_graph.identity import canonical_relation_key
 from src.storage import Storage, new_id
 from src.storage.records.evidence import EvidenceParagraph as StoredParagraph
+from src.text_processing.evidence import EvidenceParagraph
 from src.work.annotation_work import WorkReceipt
 
-from .agent_graph import build_agent_graph
 from .agent_ir import AgentAnnotation
+from .agent_loop import build_agent_loop
 from .agent_runtime import AgentProgramRuntime
 from .errors import AnnotationDependencyError, AnnotationInputError
 from .ledger import AnnotationToolLedger
@@ -103,8 +103,6 @@ class WorkExecution:
                     if index in pending
                 ]
                 missing.append(f"dialogue_candidates={pending} details={candidates}")
-        if ledger.pending_child_events:
-            missing.append(f"pending_events={ledger.pending_child_events}")
         ledger._ensure_domain_payloads()
         try:
             ledger.validate_work_endpoints()
@@ -123,7 +121,7 @@ class WorkExecution:
             "annotation_event_contributions": {
                 key: value
                 for key, value in ledger.events.contribution_payloads().items()
-                if key in {"relations", "containments"}
+                if key in {"relations", "queue_references", "queues"}
             },
             "metrics": ledger.metrics_payload.model_dump(mode="json") if ledger.metrics_payload else None,
             "events": [value.model_dump(mode="json") for value in ledger.bound_payloads.get("events", [])],
@@ -157,7 +155,11 @@ class AnnotationAgent:
         self.address = f"agent:{run_id}"
         self.fact_graph = fact_graph if fact_graph is not None else FactGraph(run_scope=run_id)
         self.event_trees = event_trees if event_trees is not None else EventTrees(run_id)
-        self.case_pool = case_pool if case_pool is not None else CasePool(run_id)
+        if case_pool is None:
+            self.case_pool = CasePool(run_id)
+            self.case_pool.load_storage(self.session_factory())
+        else:
+            self.case_pool = case_pool
         self.lock = asyncio.Lock()
         self.executions: dict[str, WorkExecution] = {}
         for topic, handler in (
@@ -168,54 +170,15 @@ class AnnotationAgent:
             ("agent.cancel", self.cancel),
             ("agent.abort", self.abort),
             ("agent.recover", self.recover),
-            ("agent.consolidate_chapter", self.consolidate_chapter),
         ):
             bus.handle(topic, self.address, handler)
 
-    async def consolidate_chapter(self, message: Message) -> dict[str, Any]:
-        """编排只派发，章末三域操作和事务由 Agent 在共享锁内执行"""
-        from .chapter_consolidation import consolidate_chapter
-
-        async with self.lock:
-            author = new_id()
-            snapshot = self.case_pool.snapshot(author)
-            try:
-
-                def save() -> dict[str, Any]:
-                    session = self.session_factory()
-                    result = consolidate_chapter(
-                        session,
-                        self.run_id,
-                        message.payload["chapter_id"],
-                        self.case_pool,
-                        author=author,
-                        recheck=bool(message.payload.get("recheck", False)),
-                    )
-                    pass
-                    return result
-
-                transaction = asyncio.create_task(asyncio.to_thread(save))
-                cancelled = False
-                try:
-                    result = await asyncio.shield(transaction)
-                except asyncio.CancelledError:
-                    cancelled = True
-                    result = await transaction
-            except BaseException:
-                self.case_pool.restore(snapshot)
-                raise
-            if result["status"] == "saved":
-                self.case_pool.confirm_pending(result["author"])
-            if cancelled:
-                raise asyncio.CancelledError
-            return result
-
     async def execute(self, message: Message) -> dict[str, Any]:
         from src.agents.annotation.queries import DatabaseAnnotationQueryService
+        from src.agents.model_client import build_chat_model
         from src.config import settings
         from src.embedding import EmbeddingClient
         from src.model_pool.configuration import load_task_config
-        from src.model_pool.llm import build_chat_model
 
         receipt = message.payload
         invocation_id = new_id()
@@ -266,7 +229,7 @@ class AnnotationAgent:
         recorder = AuditMessages(self.bus, self.run_id, receipt.work_id, invocation_id, payload["role"])
         audit_id: int | None = None
         try:
-            task_config = load_task_config("annotation", model_id=payload["model_id"])
+            task_config = load_task_config("annotation", entry_id=payload["entry_id"])
             model = build_chat_model("annotation", config=task_config)
             model_name = str(getattr(model, "model_name", None) or getattr(model, "model", "unknown"))
             audit_context = build_invocation_context(
@@ -279,7 +242,12 @@ class AnnotationAgent:
                 role=payload["role"],
             )
             audit_id = recorder.start_invocation(**audit_context)
-            observer = AgentTurnObserver(recorder, invocation_id=audit_id, context=audit_context)
+            observer = AgentTurnObserver(
+                recorder,
+                invocation_id=audit_id,
+                context=audit_context,
+                entry_id=task_config.entry_id or "",
+            )
             stream_sequence = 0
 
             async def emit(event: Any) -> None:
@@ -300,8 +268,15 @@ class AnnotationAgent:
                     )
                 )
 
-            await emit(StreamEvent(action="activity", stage="annotate", sub_stage=payload["role"],
-                chapter_id=payload["chapter_id"], activity="starting"))
+            await emit(
+                StreamEvent(
+                    action="activity",
+                    stage="annotate",
+                    sub_stage=payload["role"],
+                    chapter_id=payload["chapter_id"],
+                    activity="starting",
+                )
+            )
             await emit(
                 StreamEvent(
                     action="work_reset", stage="annotate", sub_stage=payload["role"], chapter_id=payload["chapter_id"]
@@ -332,18 +307,26 @@ class AnnotationAgent:
 
             def completion_check() -> list[str]:
                 missing = execution.validate()
+                try:
+                    self.event_trees.graph(execution.invocation_id, require_complete=True)
+                except ValueError as exc:
+                    missing.append(str(exc))
+                unfinished = self.case_pool.unsubmitted_for(invocation_id)
+                if unfinished:
+                    missing.append(f"仍有未提交案例 {unfinished}，请先办理并 submit_case")
+                if self.case_pool.counts()[0] and not self.case_pool.submissions_for(invocation_id):
+                    missing.append("池中仍有可领案例，请至少 claim_random_case() 领取并办结一条案例")
                 if not missing:
                     execution.finished = True
                     execution.agent.finished = True
                     ledger.chapter_finished = True
                 return missing
 
-            graph = build_agent_graph(
+            loop = build_agent_loop(
                 model,
                 program,
                 runtime.finish_tool,
                 ledger=ledger,
-                agent=execution.agent,
                 max_iterations=max_iterations,
                 context_window_tokens=task_config.context_window_tokens,
                 stream=stream,
@@ -355,7 +338,7 @@ class AnnotationAgent:
 
             scope = AGENT_ROLE_SCOPES.get(payload["role"], "独立完成本章实体关系、事件参与者、全部对话候选和指标")
             try:
-                state = await graph.ainvoke(
+                state = await loop.run(
                     {
                         "messages": [
                             SystemMessage(
@@ -366,7 +349,7 @@ class AnnotationAgent:
                                     "id。跨章连接用 write_link 引用已实际读取且已保存的事件；未保存端点不能连接。"
                                 )
                             ),
-                            HumanMessage(
+                            UserMessage(
                                 content=build_agent_message(
                                     role=payload["role"],
                                     paragraph_info=paragraph_info,
@@ -381,17 +364,15 @@ class AnnotationAgent:
                         "iterations": 0,
                         "error": None,
                     },
-                    config={"recursion_limit": 4 * max_iterations + 10},
                 )
             except AnnotationDependencyError:
                 raise
             except Exception as exc:
+                from src.agents.errors import AgentRetryableError
                 from src.agents.stream import ModelRequestError
 
-                from .errors import AnnotationRetryableError
-
                 if isinstance(exc, ModelRequestError):
-                    raise AnnotationRetryableError(f"当前模型请求重试耗尽: {exc}") from exc
+                    raise AgentRetryableError(f"当前模型请求重试耗尽: {exc}") from exc
                 raise
             if state.get("error"):
                 from .errors import AnnotationInvariantError
@@ -446,19 +427,41 @@ class AnnotationAgent:
                     invocation_id=execution.invocation_id,
                 )
             )
-            await self.bus.deliver(Message(topic="analysis.activity", source=self.address,
-                target=f"activity:{self.run_id}", run_id=self.run_id, work_id=receipt.work_id,
-                invocation_id=invocation_id, payload=StreamEvent(action="activity", stage="annotate",
-                    activity="cancelled" if isinstance(exc, asyncio.CancelledError) else "error", message=str(exc))))
+            await self.bus.deliver(
+                Message(
+                    topic="analysis.activity",
+                    source=self.address,
+                    target=f"activity:{self.run_id}",
+                    run_id=self.run_id,
+                    work_id=receipt.work_id,
+                    invocation_id=invocation_id,
+                    payload=StreamEvent(
+                        action="activity",
+                        stage="annotate",
+                        activity="cancelled" if isinstance(exc, asyncio.CancelledError) else "error",
+                        message=str(exc),
+                    ),
+                )
+            )
             if isinstance(exc, asyncio.CancelledError):
                 raise
-            from .errors import AnnotationRetryableError
-            if not isinstance(exc, AnnotationRetryableError):
+            from src.agents.errors import AgentRetryableError
+
+            if not isinstance(exc, AgentRetryableError):
                 raise
-            await self.bus.deliver(Message(topic="analysis.activity", source=self.address,
-                target=f"activity:{self.run_id}", run_id=self.run_id, work_id=receipt.work_id,
-                invocation_id=invocation_id, payload=StreamEvent(action="activity", stage="annotate",
-                    activity="retry", message="等待模型池重新选举")))
+            await self.bus.deliver(
+                Message(
+                    topic="analysis.activity",
+                    source=self.address,
+                    target=f"activity:{self.run_id}",
+                    run_id=self.run_id,
+                    work_id=receipt.work_id,
+                    invocation_id=invocation_id,
+                    payload=StreamEvent(
+                        action="activity", stage="annotate", activity="retry", message="等待模型池重新选举"
+                    ),
+                )
+            )
             return {"outcome": "retry", "invocation_id": invocation_id, "error": str(exc)}
 
     async def invoke_tool(self, execution: WorkExecution, tools: dict[str, Any], call: dict[str, Any]) -> str:
@@ -490,7 +493,6 @@ class AnnotationAgent:
                 try:
                     args = tool.args_schema.model_validate(call.get("args", {})).model_dump(exclude_unset=True)
                     execution.ledger.confirmed_source_event_ids = self.event_trees.confirmed_source_event_ids()
-                    execution.ledger.confirmed_containment_parents = self.event_trees.confirmed_containment_parents()
                     result = tool.func(**args)
                     self.event_trees.sync(
                         author, execution.ledger.current_chapter_id, execution.ledger.bound_payloads.get("events", [])
@@ -518,10 +520,17 @@ class AnnotationAgent:
 
     async def save(self, message: Message) -> str:
         execution = self._execution(message)
-        await self.bus.deliver(Message(topic="analysis.activity", source=self.address,
-            target=f"activity:{self.run_id}", run_id=self.run_id, work_id=message.work_id,
-            invocation_id=message.invocation_id, payload=StreamEvent(action="activity", stage="annotate",
-                activity="saving")))
+        await self.bus.deliver(
+            Message(
+                topic="analysis.activity",
+                source=self.address,
+                target=f"activity:{self.run_id}",
+                run_id=self.run_id,
+                work_id=message.work_id,
+                invocation_id=message.invocation_id,
+                payload=StreamEvent(action="activity", stage="annotate", activity="saving"),
+            )
+        )
         return await asyncio.to_thread(self._save, execution, message.payload)
 
     def _save(self, execution: WorkExecution, storage: Storage) -> str:
@@ -545,14 +554,20 @@ class AnnotationAgent:
             self.case_pool.merge_committed(execution.committed_cases)
             self.case_pool.confirm(execution.invocation_id)
             execution.saved = True
-        await self.bus.deliver(Message(topic="analysis.activity", source=self.address,
-            target=f"activity:{self.run_id}", run_id=self.run_id, work_id=message.work_id,
-            invocation_id=message.invocation_id, payload=StreamEvent(action="work_saved", stage="annotate")))
+        await self.bus.deliver(
+            Message(
+                topic="analysis.activity",
+                source=self.address,
+                target=f"activity:{self.run_id}",
+                run_id=self.run_id,
+                work_id=message.work_id,
+                invocation_id=message.invocation_id,
+                payload=StreamEvent(action="work_saved", stage="annotate"),
+            )
+        )
 
     async def saved_progress(self, message: Message) -> None:
         """队列交付已确认章进度，由 Agent 向展示模块发送自身工作事实"""
-        from src.event_bus.notifications import StreamEvent
-
         execution = self._execution(message)
         if not execution.saved:
             raise ValueError(f"work_id={execution.work_id} 尚未确认保存，不能展示保存进度")
@@ -651,12 +666,9 @@ class AnnotationAgent:
                     for key in CONTRIBUTION_KEYS
                 },
                 "process_evidence": {
-                    identifier: [
-                        ref.model_dump(mode="json") for ref in execution.ledger.source_anchors[f"{tree_key}/{node_key}"]
-                    ]
-                    for tree_key, tree_id in execution.ledger.tree_key_index.items()
-                    for node_key, identifier in execution.ledger.event_trees[tree_id]["nodes"].items()
-                    if f"{tree_key}/{node_key}" in execution.ledger.source_anchors
+                    record: [ref.model_dump(mode="json") for ref in refs]
+                    for record, refs in execution.ledger.source_anchors.items()
+                    if record in execution.ledger.events.event_ids_by_el
                 },
                 "source_anchors": {
                     key: [ref.model_dump(mode="json") for ref in values]
@@ -785,8 +797,6 @@ class AnnotationAgent:
     async def recover(self, message: Message) -> None:
         """业务恢复由 agent 发起，域各自恢复贡献，历史审计不成为读取授权"""
         if message.payload.get("mode") == "chapter_reset":
-            from src.event_bus.notifications import StreamEvent
-
             for chapter_id in message.payload["chapter_ids"]:
                 await self.bus.deliver(
                     Message(
@@ -826,11 +836,29 @@ class AnnotationAgent:
 
     def _recover(self, data: dict[str, Any]) -> None:
         """整章废弃按产物行与执行归属清理：产物、域事实与真实尝试一起退场"""
+        from loguru import logger
+
         storage = data["session"]
+        started = time.perf_counter()
         result = storage.annotations.discard_chapters(self.run_id, {int(chapter) for chapter in data["chapter_ids"]})
+        discarded = time.perf_counter()
         self.fact_graph.restore_storage(storage, result["records"])
+        facts_done = time.perf_counter()
         self.event_trees.restore_storage(storage, result["records"])
+        trees_done = time.perf_counter()
         self.case_pool.restore_storage(storage, result["execution_ids"])
+        finished = time.perf_counter()
+        logger.info(
+            "recovery timing: chapters={} records={} discard={:.3f}s facts={:.3f}s "
+            "events={:.3f}s cases={:.3f}s total={:.3f}s",
+            len(data["chapter_ids"]),
+            len(result["records"]),
+            discarded - started,
+            facts_done - discarded,
+            trees_done - facts_done,
+            finished - trees_done,
+            finished - started,
+        )
 
     def close(self) -> None:
         for topic in (
@@ -841,6 +869,5 @@ class AnnotationAgent:
             "agent.cancel",
             "agent.abort",
             "agent.recover",
-            "agent.consolidate_chapter",
         ):
             self.bus.unhandle(topic, self.address)

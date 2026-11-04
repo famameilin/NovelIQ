@@ -18,9 +18,9 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from httpx import HTTPError
-from langchain_core.messages import AIMessage, HumanMessage
 from openai import APIError
 
+from src.agents.messages import AssistantMessage, UserMessage
 from src.agents.stream_aggregator import (
     StreamChunkAggregator,
 )
@@ -58,7 +58,6 @@ _RACE_ITERATION_MESSAGES = (
     "dictionary keys changed during iteration",
     "deque mutated during iteration",
 )
-
 
 class ContentStallTimeoutError(TimeoutError):
     """用于标注"连接活着但内容零增长"的僵流形态
@@ -140,8 +139,14 @@ CompletionHintProvider = Callable[[], str | None]
 
 返回 None 表示不注入（调用方无上下文可提示）。提示会追加进重发的 messages
 列表（调用方须传自有副本），使重试物理请求的审计 request_messages 与实发一致；
-不写入 LangGraph 状态消息链。
+不写入会话状态消息链。
 """
+
+
+def _is_quota_error(exc: BaseException) -> bool:
+    """用于判定额度耗尽：重发无意义，直接交回模型池"""
+    code = _model_error_code(exc)
+    return code in {"AccountQuotaExceeded", "QuotaExceeded", "SetLimitExceeded"} or code.startswith("QuotaExceeded.")
 
 
 def _is_transient_model_error(exc: BaseException) -> bool:
@@ -152,8 +157,7 @@ def _is_transient_model_error(exc: BaseException) -> bool:
     RemoteProtocolError 等）；httpx 本地协议错误不在此列。
     """
     # 配额错误不在调用层原地重发，交给模型池处理
-    code = _model_error_code(exc)
-    if code in {"AccountQuotaExceeded", "QuotaExceeded", "SetLimitExceeded"} or code.startswith("QuotaExceeded."):
+    if _is_quota_error(exc):
         return False
     status = getattr(exc, "status_code", None)
     if status is None:
@@ -326,15 +330,15 @@ async def run_model_call(
     messages: list[Any],
     stream: AgentStream | None,
     *,
-    on_turn_complete: Callable[[AIMessage, ModelCallTiming], None] | None = None,
+    on_turn_complete: Callable[[AssistantMessage, ModelCallTiming], None] | None = None,
     on_turn_started: Callable[[dict[str, Any], int], None] | None = None,
-    on_turn_failed: Callable[[str, ModelCallTiming, AIMessage | None], None] | None = None,
+    on_turn_failed: Callable[[str, ModelCallTiming, AssistantMessage | None], None] | None = None,
     total_attempts: int | None = None,
     completion_hint: CompletionHintProvider | None = None,
     require_tool_call: bool = True,
     content_stall_timeout_s: float | None = None,
     clock_ns: Callable[[], int] = time.perf_counter_ns,
-) -> AIMessage:
+) -> AssistantMessage:
     """流式请求模型并按物理请求记录审计，服务故障交回模型池
 
     total_attempts 只约束当前请求重发；SSE、审计与项目自身异常直接上抛
@@ -353,7 +357,7 @@ async def run_model_call(
         hint_resolved = True
         hint = completion_hint()
         if hint:
-            messages.append(HumanMessage(content=hint))
+            messages.append(UserMessage(content=hint))
             logger.warning("无工具回复重发前注入补齐提示: hint_chars=%s", len(hint))
 
     retries_remaining = max(0, total_attempts - 1)
@@ -390,11 +394,8 @@ async def run_model_call(
             if status is None:
                 status = getattr(getattr(exc, "response", None), "status_code", None)
             rate_limited = status == 429
-            if (
-                retries_remaining <= 0
-                or not _is_transient_model_error(exc)
-                or (rate_limited and rate_limit_retries >= 2)
-            ):
+            # 流式调用失败即按 attempts 重发；额度耗尽重发无意义，直接交回模型池
+            if retries_remaining <= 0 or _is_quota_error(exc) or (rate_limited and rate_limit_retries >= 2):
                 logger.warning("模型输出流中断且重试耗尽: error=%r", exc, exc_info=True)
                 if isinstance(exc, (APIError, HTTPError, ConnectionError, TimeoutError)) or _is_transient_model_error(
                     exc

@@ -145,8 +145,39 @@ class FactGraph:
     def restore_storage(self, session: Any, records: list[Any]) -> None:
         self.contributions.clear()
         self.saved.clear()
+        entity_rows = list(session.reads.graph.list_run_entities(self.run_scope))
+        entity_names: dict[str, tuple[str, str]] = {
+            str(item.entity_id): (str(item.canonical_name), str(item.entity_type)) for item in entity_rows
+        }
+        for identifier, (name, kind) in entity_names.items():
+            self.entity_ids[entity_key(name, kind)] = identifier
+        relation_rows = list(session.reads.graph.list_relations())
+        relations = {str(item.relation_id): item for item in relation_rows}
+        from src.fact_graph.identity import canonical_relation_key
+
+        for relation in relations.values():
+            left, right, kind = canonical_relation_key(
+                relation.from_entity_id, relation.to_entity_id, str(relation.relation_type)
+            )
+            self.relation_ids[(str(left), str(right), kind)] = str(relation.relation_id)
+        agent_ids = [str(record.agent_id) for record in records]
+        facts_by_agent: dict[str, list[Any]] = {}
+        for fact in session.reads.graph.list_execution_facts(agent_ids):
+            facts_by_agent.setdefault(str(fact.direct_producer_agent_id), []).append(fact)
+        tag_map: dict[str, list[str]] = {}
+        for tag in session.reads.graph.list_fact_tags_for_executions(agent_ids):
+            tag_map.setdefault(str(tag.graph_fact_id), []).append(str(tag.tag))
         for record in records:
-            facts = self._read_execution_facts(session, agent_id=str(record.agent_id), chapter_id=record.chapter_id)
+            facts = self._read_execution_facts(
+                session,
+                agent_id=str(record.agent_id),
+                chapter_id=record.chapter_id,
+                entity_names=entity_names,
+                relations=relations,
+                fact_rows=facts_by_agent.get(str(record.agent_id), []),
+                tag_map=tag_map,
+                include_evidence=False,
+            )
             self.restore_work(
                 str(record.agent_id),
                 int(record.sequence),
@@ -155,18 +186,19 @@ class FactGraph:
                 facts["relation_assert_ops"],
                 facts["entity_references"],
                 facts["plotline_ops"],
+                fold=False,
             )
         self._fold()
 
     def load_saved_work(self, session: Any, agent_id: str, annotation_id: str) -> dict[str, Any]:
         """锁外读取当前执行的真实保存贡献，不读取或撤销其他执行"""
-        record = session.reads.fact_graph_graph_load_saved_work_1(annotation_id)
+        record = session.reads.annotations.get_saved_output(annotation_id)
         if record is None or record.agent_id != agent_id:
             raise ValueError(f"事实图保存身份不一致: {agent_id}")
-        execution = session.reads.fact_graph_graph_load_saved_work_2(agent_id)
+        execution = session.reads.annotations.get_execution(agent_id)
         if execution is None or execution.run_id != self.run_scope or record.chapter_id is None:
             raise ValueError(f"事实图保存身份不一致: {agent_id}")
-        chapter = session.reads.fact_graph_graph_load_saved_work_3(record.chapter_id, self.run_scope)
+        chapter = session.reads.text.get_execution_chapter(record.chapter_id, self.run_scope)
         detail = self._read_execution_facts(session, agent_id=agent_id, chapter_id=record.chapter_id)
         return {
             "author": agent_id,
@@ -176,29 +208,47 @@ class FactGraph:
         }
 
     def _read_execution_facts(
-        self, session: Any, *, agent_id: str, chapter_id: int | None
+        self,
+        session: Any,
+        *,
+        agent_id: str,
+        chapter_id: int | None,
+        entity_rows: list[Any] | None = None,
+        relation_rows: list[Any] | None = None,
+        entity_names: dict[str, tuple[str, str]] | None = None,
+        relations: dict[str, Any] | None = None,
+        fact_rows: list[Any] | None = None,
+        tag_map: dict[str, list[str]] | None = None,
+        include_evidence: bool = True,
     ) -> dict[str, list[dict[str, Any]]]:
         """按真实列形状把一次保存的事实读回内存贡献形态，供恢复与重折使用"""
-        rows = list(session.reads.fact_graph_graph_read_execution_facts_3(agent_id))
-        entity_names: dict[str, tuple[str, str]] = {
-            str(item.entity_id): (str(item.canonical_name), str(item.entity_type))
-            for item in session.reads.fact_graph_graph_read_execution_facts_4(self.run_scope)
-        }
-        for identifier, (name, kind) in entity_names.items():
-            self.entity_ids[entity_key(name, kind)] = identifier
-        relations = {str(item.relation_id): item for item in session.reads.fact_graph_graph_read_execution_facts_5()}
-        from src.fact_graph.identity import canonical_relation_key
+        rows = list(fact_rows) if fact_rows is not None else list(session.reads.graph.list_producer_facts(agent_id))
+        if entity_names is None:
+            if entity_rows is None:
+                entity_rows = list(session.reads.graph.list_run_entities(self.run_scope))
+            entity_names = {
+                str(item.entity_id): (str(item.canonical_name), str(item.entity_type)) for item in entity_rows
+            }
+            for identifier, (name, kind) in entity_names.items():
+                self.entity_ids[entity_key(name, kind)] = identifier
+        if relations is None:
+            if relation_rows is None:
+                relation_rows = list(session.reads.graph.list_relations())
+            relations = {str(item.relation_id): item for item in relation_rows}
+            from src.fact_graph.identity import canonical_relation_key
 
-        for relation in relations.values():
-            left, right, kind = canonical_relation_key(
-                relation.from_entity_id, relation.to_entity_id, str(relation.relation_type)
-            )
-            self.relation_ids[(str(left), str(right), kind)] = str(relation.relation_id)
-        tags_by_fact: dict[str, list[str]] = {}
-        for tag in session.reads.fact_graph_graph_read_execution_facts_1(rows):
-            tags_by_fact.setdefault(str(tag.graph_fact_id), []).append(str(tag.tag))
+            for relation in relations.values():
+                left, right, kind = canonical_relation_key(
+                    relation.from_entity_id, relation.to_entity_id, str(relation.relation_type)
+                )
+                self.relation_ids[(str(left), str(right), kind)] = str(relation.relation_id)
+        if tag_map is None:
+            tag_map = {}
+            for tag in session.reads.graph.list_execution_fact_tags(rows):
+                tag_map.setdefault(str(tag.graph_fact_id), []).append(str(tag.tag))
+        tags_by_fact = tag_map
         evidence_by_fact: dict[str, list[dict[str, Any]]] = {}
-        for evidence in session.reads.fact_graph_graph_read_execution_facts_2(rows):
+        for evidence in session.reads.graph.list_execution_fact_evidence(rows) if include_evidence else ():
             evidence_by_fact.setdefault(str(evidence.graph_fact_id), []).append(
                 {
                     "chapter_id": chapter_id,
@@ -297,6 +347,8 @@ class FactGraph:
         relation_ops: list[dict[str, Any]],
         entity_references: list[dict[str, Any]] | None = None,
         plotline_ops: list[dict[str, Any]] | None = None,
+        *,
+        fold: bool = True,
     ) -> None:
         self.contributions[agent_id] = {
             "sequence": sequence,
@@ -307,7 +359,8 @@ class FactGraph:
             "plotline_ops": deepcopy(plotline_ops or []),
         }
         self.saved.add(agent_id)
-        self._fold()
+        if fold:
+            self._fold()
 
     def _fold(self) -> None:
         """章序、角色序、操作序折叠，撤销不恢复整本书快照"""
@@ -365,7 +418,7 @@ class FactGraph:
 
     def load_registry(self, session: Any) -> None:
         """诊断期从存储恢复实体登记与活动关系（身份金链不得再造成孪生）"""
-        rows = list(session.reads.fact_graph_graph_load_registry_3(self.run_scope))
+        rows = list(session.reads.graph.list_registry_entities(self.run_scope))
         id_to_key: dict[str, str] = {}
         for row in rows:
             key = entity_key(row.canonical_name, row.entity_type)
@@ -375,13 +428,13 @@ class FactGraph:
             self.entity_tags[key] = []
             self.entity_attributes[key] = {}
             self.entity_ids[key] = str(row.entity_id)
-        facts = list(session.reads.fact_graph_graph_load_registry_4(self.run_scope))
+        facts = list(session.reads.graph.list_run_facts(self.run_scope))
         tags_by_fact: dict[str, list[str]] = {}
-        for tag in session.reads.fact_graph_graph_load_registry_1(facts):
+        for tag in session.reads.graph.list_registry_fact_tags(facts):
             tags_by_fact.setdefault(str(tag.graph_fact_id), []).append(str(tag.tag))
         for fact in facts:
             if fact.relation_id is not None:
-                relation = session.reads.fact_graph_graph_load_registry_2(fact)
+                relation = session.reads.graph.get_fact_relation(fact)
                 if relation is None:
                     continue
                 from src.fact_graph.identity import canonical_relation_key
@@ -731,4 +784,4 @@ __all__ = ["FactGraph"]
 
 
 def execution_entities(session: Any, run_id: str) -> set[str]:
-    return set(session.reads.fact_graph_graph_execution_entities_1(run_id))
+    return set(session.reads.graph.list_participating_entity_ids(run_id))

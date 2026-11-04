@@ -23,6 +23,7 @@ def _local_regression_fit(
     sample_w: np.ndarray,
     bandwidth: float,
     min_points: int,
+    geometry: list[tuple[np.ndarray, np.ndarray, np.ndarray]] | None = None,
 ) -> np.ndarray:
     """
     逐点加权局部线性回归（一次多项式），拟合值取 x_i 处的预测值
@@ -36,23 +37,26 @@ def _local_regression_fit(
     span = float(xa[-1] - xa[0])
     fitted = np.empty(n, dtype=np.float64)
     for i in range(n):
-        dx = xa - xa[i]
-        h = bandwidth
-        while True:
-            mask = np.abs(dx) <= h
-            # h <= 0 时窗口无法定义且 h *= 2.0 恒不变（死循环）：直接退出，
-            # 退化为当前点的局部窗口（后续加权均值分支返回原值，不伪造）
-            if int(mask.sum()) >= min_points or h >= span or h <= 0:
-                break
-            h *= 2.0
-        d = dx[mask]
-        ww = sample_w[mask] * _tricube_weights(d, h)
+        if geometry is None:
+            dx = xa - xa[i]
+            h = bandwidth
+            while True:
+                mask = np.abs(dx) <= h
+                if int(mask.sum()) >= min_points or h >= span or h <= 0:
+                    break
+                h *= 2.0
+            indices = mask
+            d = dx[mask]
+            kernel = _tricube_weights(d, h)
+        else:
+            indices, d, kernel = geometry[i]
+        ww = sample_w[indices] * kernel
         sw = float(ww.sum())
         if sw <= 0.0:
             # 窗口内有效权重为零（如样本权重全 0），返回原值，不伪造
             fitted[i] = ya[i]
             continue
-        yw = ya[mask]
+        yw = ya[indices]
         swd = float(ww @ d)
         swd2 = float(ww @ (d * d))
         swy = float(ww @ yw)
@@ -67,6 +71,30 @@ def _local_regression_fit(
         intercept = (swy - slope * swd) / (sw + 1e-12)
         fitted[i] = intercept
     return fitted
+
+
+def _prepare_regression_geometry(
+    xa: np.ndarray, bandwidth: float, min_points: int, *, max_entries: int = 2_000_000
+) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]] | None:
+    """为同次稳健迭代复用窗口与核权重，限制临时内存"""
+    span = float(xa[-1] - xa[0])
+    geometry: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+    total = 0
+    for position in xa:
+        dx = xa - position
+        h = bandwidth
+        while True:
+            mask = np.abs(dx) <= h
+            if int(mask.sum()) >= min_points or h >= span or h <= 0:
+                break
+            h *= 2.0
+        indices = np.flatnonzero(mask)
+        total += len(indices)
+        if total > max_entries:
+            return None
+        distances = dx[mask]
+        geometry.append((indices, distances, _tricube_weights(distances, h)))
+    return geometry
 
 
 def robust_local_regression(
@@ -101,7 +129,8 @@ def robust_local_regression(
     if n < min_points:
         return ya.tolist()
 
-    fitted = _local_regression_fit(xa, ya, sample_w, bandwidth, min_points)
+    geometry = _prepare_regression_geometry(xa, bandwidth, min_points) if robust_iters > 0 else None
+    fitted = _local_regression_fit(xa, ya, sample_w, bandwidth, min_points, geometry)
     if robust_iters > 0:
         for _ in range(robust_iters):
             residuals = ya - fitted
@@ -115,5 +144,5 @@ def robust_local_regression(
             scale = 6.0 * median_abs_residual + 1e-12
             u = residuals / scale
             robust_w = np.where(np.abs(u) < 1.0, (1.0 - u * u) ** 2, 0.0)
-            fitted = _local_regression_fit(xa, ya, sample_w * robust_w, bandwidth, min_points)
+            fitted = _local_regression_fit(xa, ya, sample_w * robust_w, bandwidth, min_points, geometry)
     return [float(value) for value in fitted]

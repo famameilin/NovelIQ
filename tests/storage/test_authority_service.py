@@ -47,7 +47,7 @@ def _retract_relation(
 ) -> None:
     """关系撤回经正式 work 保存入口写图事实（不手拼旧图行）"""
     from src.agents.annotation.output_models import BoundChapterAnnotation
-    from src.fact_graph.inputs import ChapterMetricsInput
+    from src.metrics.annotation_inputs import ChapterMetricsInput
 
     commit_test_annotation(
         session,

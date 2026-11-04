@@ -25,7 +25,7 @@ from src.api.services.results_export_service import (
     fetch_all_results_data,
     write_results_to_file,
 )
-from src.event_trees.read.organization import RunRequiresRebuildError
+from src.event_trees.read.organization_models import RunRequiresRebuildError
 from src.storage import Storage
 from src.workflows.novels import NovelService
 

@@ -18,13 +18,14 @@ from src.storage.models import (
 from src.storage.repositories import narrative_records as smap
 from src.storage.repositories.narrative_records import write_evidence_rows as _write_evidence_rows
 from src.storage.repositories.organization_writes import _require_report
-from src.storage.repositories.queries import event_trees_organization as _org_queries
+from src.storage.repositories.queries import events as _events_queries
+from src.utils.event_references import referenced_event_ids
 
 
 def _run_foreshadowing_actions(session, run_id):
     annotation_events = smap.run_annotation_event_ids(session, run_id)
     return (
-        list(_org_queries.event_trees_organization_run_foreshadowing_actions_1(session, annotation_events))
+        list(_events_queries.list_ordered_foreshadowing_actions(session, annotation_events))
         if annotation_events
         else []
     )
@@ -73,32 +74,12 @@ def _diagnosis_execution_ids(session: Session, run_id: str) -> list[str]:
     return list(session.scalars(select(Agent.id).where(Agent.run_id == run_id, Agent.type.in_(DIAGNOSIS_ROLES))))
 
 
-def _evidence_event_refs(records: list[Any]) -> set[str]:
-    "记录证据里引用的完整事件 id（证据行 related_complete_event_id 的外键面）"
-    return {ref.event_id for item in records for ref in item.evidence if getattr(ref, "event_id", None) is not None}
-
-
-def _referenced_event_ids(draft: Any, owned: set[str]) -> set[str]:
-    "本生产者的包含、关系与证据引用到的事件身份"
-    owned_events = [item for item in draft.events.values() if item.producer_agent_id in owned]
-    owned_containments = [item for item in draft.containments.values() if item.producer_agent_id in owned]
-    owned_relations = [item for item in draft.relations.values() if item.producer_agent_id in owned]
-    referenced: set[str] = set()
-    for edge in owned_containments:
-        referenced.update((edge.parent_event_id, edge.child_event_id))
-    for relation in owned_relations:
-        referenced.update((relation.source_id, relation.target_id))
-    for records in (owned_events, owned_containments, owned_relations):
-        referenced.update(_evidence_event_refs(records))
-    return referenced
-
-
 def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str, draft: Any) -> None:
     """按真实生产者幂等保存会话组织条目，不保存案例与结果的关联"""
     owned = {producer_agent_id}
     events = [item for item in draft.events.values() if item.producer_agent_id in owned]
-    # 引用即固化：本批行引用到、尚未落库的草稿候选（可能由其他会话铸造）随本批一并落库，署名保持真实生产者
-    referenced = sorted(_referenced_event_ids(draft, owned) - {item.event_id for item in events})
+    # 仅发布本执行事件，其他执行的引用必须已经正式保存
+    referenced = sorted(referenced_event_ids(draft, owned) - {item.event_id for item in events})
     existing = (
         set(
             session.scalars(
@@ -113,10 +94,7 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
     for event_id in referenced:
         if event_id in existing:
             continue
-        item = draft.events.get(event_id)
-        if item is None:
-            raise ValueError(f"被引用事件既不在草稿也不在库，无法落库: event_id={event_id}")
-        events.append(item)
+        raise ValueError(f"不能发布其他执行尚未正式保存的事件或队列: {event_id}")
     if events:
         for item in events:
             if item.event_id in existing:
@@ -166,15 +144,18 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
             )
             _write_evidence_rows_once(session, {"complete_event_id": item.event_id}, item.evidence)
         session.flush()
-    for edge in draft.containments.values():
+    from src.storage.repositories.queue_writes import queue_graph, save_queues
+
+    save_queues(session, run_id, [item for item in draft.queues.values() if item.producer_agent_id in owned])
+    for edge in draft.queue_references.values():
         if edge.producer_agent_id not in owned:
             continue
         link_id = _key(
             session,
             NarrativeLink,
             "link_id",
-            contained_parent_id=edge.parent_event_id,
-            contained_child_id=edge.child_event_id,
+            parent_tree_id=edge.parent_tree_id,
+            child_tree_id=edge.child_tree_id,
         )
         if _existing_matches(
             session,
@@ -183,8 +164,8 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
             {
                 "producer_agent_id": edge.producer_agent_id,
                 "reason": edge.reason,
-                "contained_child_id": edge.child_event_id,
-                "contained_parent_id": edge.parent_event_id,
+                "child_tree_id": edge.child_tree_id,
+                "parent_tree_id": edge.parent_tree_id,
             },
         ):
             _write_evidence_rows_once(session, {"narrative_link_id": link_id}, edge.evidence, existing=True)
@@ -194,8 +175,8 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
                 link_id=link_id,
                 producer_agent_id=edge.producer_agent_id,
                 reason=edge.reason,
-                contained_child_id=edge.child_event_id,
-                contained_parent_id=edge.parent_event_id,
+                child_tree_id=edge.child_tree_id,
+                parent_tree_id=edge.parent_tree_id,
             )
         )
         _write_evidence_rows_once(session, {"narrative_link_id": link_id}, edge.evidence)
@@ -234,7 +215,7 @@ def save_case_session_rows(session: Session, run_id: str, producer_agent_id: str
         )
         _write_evidence_rows_once(session, {"narrative_link_id": relation.relation_id}, relation.evidence)
     session.flush()
-    session.flush()
+    queue_graph(session, run_id)
 
 
 def _session_executions(session: Session, agent_id: str) -> list[str]:
@@ -312,13 +293,16 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
         _write_evidence_rows_once(session, {"complete_event_id": item.event_id}, item.evidence)
     # 完整事件先落库，供事件归属的 event_id 外键引用
     session.flush()
-    for edge in organization.containments:
+    from src.storage.repositories.queue_writes import queue_graph, save_queues
+
+    save_queues(session, run_id, organization.queues)
+    for edge in organization.queue_references:
         link_id = _key(
             session,
             NarrativeLink,
             "link_id",
-            contained_parent_id=edge.parent_event_id,
-            contained_child_id=edge.child_event_id,
+            parent_tree_id=edge.parent_tree_id,
+            child_tree_id=edge.child_tree_id,
         )
         if _existing_matches(
             session,
@@ -327,8 +311,8 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
             {
                 "producer_agent_id": edge.producer_agent_id,
                 "reason": edge.reason,
-                "contained_child_id": edge.child_event_id,
-                "contained_parent_id": edge.parent_event_id,
+                "child_tree_id": edge.child_tree_id,
+                "parent_tree_id": edge.parent_tree_id,
             },
         ):
             _write_evidence_rows_once(session, {"narrative_link_id": link_id}, edge.evidence, existing=True)
@@ -338,8 +322,8 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
                 link_id=link_id,
                 producer_agent_id=edge.producer_agent_id,
                 reason=edge.reason,
-                contained_child_id=edge.child_event_id,
-                contained_parent_id=edge.parent_event_id,
+                child_tree_id=edge.child_tree_id,
+                parent_tree_id=edge.parent_tree_id,
             )
         )
         _write_evidence_rows_once(session, {"narrative_link_id": link_id}, edge.evidence)
@@ -377,3 +361,4 @@ def save_diagnosis_events(session: Session, run_id: str, organization: Any, repo
         )
         _write_evidence_rows_once(session, {"narrative_link_id": relation.relation_id}, relation.evidence)
     session.flush()
+    queue_graph(session, run_id)

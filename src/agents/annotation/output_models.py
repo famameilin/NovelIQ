@@ -3,9 +3,20 @@
 from pydantic import Field
 
 from src.event_trees.models import BoundEvent
-from src.fact_graph.inputs import ChapterMetricsInput
-from src.fact_graph.outputs import BoundCharacterObservation, BoundDialogue, BoundParagraphLabel
+from src.event_trees.vocabulary import RoleFunction
+from src.fact_graph.outputs import BoundDialogue, BoundParagraphLabel
 from src.fact_graph.schema import StrictModel
+from src.metrics.annotation_inputs import ChapterMetricsInput
+
+
+class BoundCharacterObservation(StrictModel):
+    """用于保存从事件人物参与者派生的动态状态"""
+
+    character: str = Field(min_length=1)
+    role_function: RoleFunction | None = None
+    action: str | None = Field(default=None, min_length=1)
+    emotion: int | None = Field(default=None, ge=-2, le=2)
+
 
 
 class BoundChapterAnnotation(StrictModel):

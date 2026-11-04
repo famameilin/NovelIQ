@@ -16,12 +16,9 @@ from src.agents.diagnosis.persistence import save_diagnosis_result
 from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.diagnosis.schema import AgentAnalysis
 from src.event_trees import storage_map as smap
-from src.event_trees.organization import (
-    EventOrganizationDraft,
-    NarrativeOrganization,
-    OrganizationEvidence,
-    validate_organization,
-)
+from src.event_trees.organization import EventOrganizationDraft, validate_organization
+from src.event_trees.organization_models import NarrativeOrganization, OrganizationEvidence
+from src.event_trees.read.organization import EventTreeQuery
 from src.storage.ids import new_id
 from src.storage.models import (
     Agent,
@@ -30,7 +27,7 @@ from src.storage.models import (
     NarrativeGroup,
     NarrativeLink,
 )
-from src.storage.repositories.diagnosis_event_writes import save_case_session_rows, save_diagnosis_events
+from src.storage.repositories.diagnosis_event_writes import save_diagnosis_events
 from src.storage.repositories.organization_writes import save_organization
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import (
@@ -39,10 +36,10 @@ from tests.support.event_tree_fixtures import (
     add_diagnosis_context,
     first_paragraph,
     report_case_anchor,
+    select_event_lines,
 )
 from tests.support.storage_fixtures import storage_for
 
-CONTRACT = "event-tree-declarations-v1"
 TEXTS = ["顾霜找回了身份。贺重明证实身份。", "他说等待了十年。她说等待了十四年。"]
 PHRASES = ("找回了身份", "等待了十年", "贺重明")
 
@@ -63,7 +60,7 @@ class OrganizationCase:
         self.declarations: list[str] = []
         for chapter_id in range(1, chapters + 1):
             record_id, _agent_id = add_annotation_source(session, self.run_id, chapter_id, role="event")
-            phrase = PHRASES[(chapter_id - 1) % len(PHRASES)]
+            phrase = TEXTS[(chapter_id - 1) % len(TEXTS)][:3]
             event_id = add_declaration(
                 session,
                 record_id=record_id,
@@ -88,56 +85,33 @@ def identity_draft(session, case: OrganizationCase) -> EventOrganizationDraft:
     return draft
 
 
+def tree_of(draft, event_id: str) -> str:
+    return next(item.tree_id for item in draft.queues.values() if event_id in item.event_ids)
+
+
 @pytest.fixture
 def organization_case(db_session):
-    case = OrganizationCase(db_session, chapters=3)
+    case = OrganizationCase(db_session, chapters=6)
     db_session.commit()
     draft = identity_draft(db_session, case)
     event_ids = list(draft.events)
-    draft.contain(
-        parent_event_id=event_ids[0],
-        child_event_id=event_ids[2],
+    draft.reference(
+        parent_tree_id=tree_of(draft, event_ids[0]),
+        child_tree_id=tree_of(draft, event_ids[2]),
         reason="确认身份中的子问题",
         evidence=[OrganizationEvidence(paragraph_id=0, quote="找回了身份")],
     )
+    select_event_lines(draft, event_ids[1:])
     return case, event_ids, draft
 
 
-def _arc(draft, key="identity"):
-    return draft.register_arc(
-        key=key,
-        kind="main",
-        title="身份线",
-        objective="确认身份",
-        role="主线",
-        reason="围绕身份冲突持续发展",
-        evidence=[OrganizationEvidence(paragraph_id=0)],
-    )
-
-
 def _organized(draft, event_ids):
-    arc_a, arc_b = _arc(draft), _arc(draft, "relationship")
-    for arc in (arc_a, arc_b):
-        draft.link_event_arc(
-            event_id=event_ids[0],
-            arc_id=arc,
-            role="推动",
-            reason="推动对应问题",
-            evidence=[OrganizationEvidence(paragraph_id=0, quote="找回了身份")],
-        )
-    outcome = draft.register_outcome(
+    draft.register_outcome(
         key="recognized",
         title="身份获确认",
         description="两人的行动使身份得到确认",
         evidence=[OrganizationEvidence(paragraph_id=0, quote="证实身份")],
     )
-    for event_id in event_ids[:2]:
-        draft.link_event_outcome(
-            event_id=event_id,
-            outcome_id=outcome,
-            reason="对身份确认作出贡献",
-            evidence=[OrganizationEvidence(paragraph_id=0, quote="找回了身份", event_id=event_id)],
-        )
     return draft.finish()
 
 
@@ -150,21 +124,29 @@ def _save_report(session, run_id, organization):
     )
     save_diagnosis_events(session, run_id, organization, report_id)
     save_organization(session, run_id, organization, report_id)
+    from src.storage.repositories.queue_writes import save_event_line_flags
+
+    save_event_line_flags(session, run_id, organization.event_line_ids, organization.event_line_names)
     session.commit()
     return report_id
 
 
-def test_containment_second_parent_rejected_at_submission(organization_case):
+def test_multiple_parents_are_preserved_and_cycle_is_rejected(organization_case):
     _case, event_ids, draft = organization_case
-    # 工具面先到先得：子事件已有直接父时拒收第二个父包含
-    with pytest.raises(ValueError, match="直接父"):
-        draft.contain(
-            parent_event_id=event_ids[1],
-            child_event_id=event_ids[2],
-            reason="另一个父候选",
+    draft.reference(
+        parent_tree_id=tree_of(draft, event_ids[1]),
+        child_tree_id=tree_of(draft, event_ids[2]),
+        reason="第二个真实父级",
+        evidence=[OrganizationEvidence(paragraph_id=0)],
+    )
+    assert draft.queue_graph().event_parents(event_ids[2]) == event_ids[:2]
+    with pytest.raises(ValueError, match="成环"):
+        draft.reference(
+            parent_tree_id=tree_of(draft, event_ids[2]),
+            child_tree_id=tree_of(draft, event_ids[0]),
+            reason="非法闭环",
             evidence=[OrganizationEvidence(paragraph_id=0)],
         )
-    assert len(draft.containments) == 1
 
 
 def _fresh_draft(session, case: OrganizationCase) -> EventOrganizationDraft:
@@ -225,51 +207,27 @@ def _second_producer(session, run_id: str) -> str:
     return producer
 
 
-def test_cross_session_references_persist_unstored_candidates(db_session):
-    "其他会话引用未落库候选时，保存把候选一并落库且署名真实生产者"
+def test_other_producer_cannot_reference_unpublished_candidates(db_session):
     case = OrganizationCase(db_session)
     db_session.commit()
     draft = _fresh_draft(db_session, case)
     rows = list(draft._all_events().values())
     _submit_identity(draft, rows[0], "k1")
-    _submit_identity(draft, rows[1], "k2")
-    parent_id, child_id = sorted(draft.events)
-    other = _second_producer(db_session, case.run_id)
-    draft.producer_agent_id = other
-    draft.contain(
-        parent_event_id=parent_id,
-        child_event_id=child_id,
-        reason="其他执行判断的包含",
-        evidence=[OrganizationEvidence(paragraph_id=0)],
+    parent = next(iter(draft.events))
+    parent_tree = draft.queue(
+        event_ids=[parent], reason="完整队列", evidence=[OrganizationEvidence(paragraph_id=0)]
     )
-    save_case_session_rows(db_session, case.run_id, other, draft)
-    db_session.commit()
-
-    db_session.expire_all()
-    for event_id in (parent_id, child_id):
-        saved = db_session.get(CompleteEvent, event_id)
-        assert saved is not None and saved.producer_agent_id == case.agent_id
-    assert len(list(db_session.scalars(select(NarrativeLink).where(NarrativeLink.contained_child_id == child_id)))) == 1
-    links = list(db_session.scalars(select(NarrativeLink).where(NarrativeLink.contained_child_id == child_id)))
-    assert {row.producer_agent_id for row in links} == {other}
-
-    save_case_session_rows(db_session, case.run_id, other, draft)
-    save_case_session_rows(db_session, case.run_id, case.agent_id, draft)
-    db_session.commit()
-    assert (
-        len(list(db_session.scalars(select(CompleteEvent).where(CompleteEvent.event_id.in_([parent_id, child_id])))))
-        == 2
-    )
-    assert (
-        len(
-            list(
-                db_session.scalars(
-                    select(NarrativeLink).where(NarrativeLink.contained_child_id == child_id)
-                )
-            )
+    child_tree = draft.queue_graph().event_tree[rows[1]["event_id"]]
+    draft.producer_agent_id = _second_producer(db_session, case.run_id)
+    with pytest.raises(ValueError, match="已读取"):
+        draft.reference(
+            parent_tree_id=parent_tree,
+            child_tree_id=child_tree,
+            reason="不可借用未保存候选",
+            evidence=[OrganizationEvidence(paragraph_id=0)],
         )
-        == 1
-    )
+    assert not draft.queue_references
+    assert db_session.get(CompleteEvent, parent) is None
 
 
 def test_retract_blocked_when_other_execution_references_event(db_session):
@@ -281,9 +239,10 @@ def test_retract_blocked_when_other_execution_references_event(db_session):
     minted = next(iter(draft.events))
     other = _second_producer(db_session, case.run_id)
     draft.producer_agent_id = other
-    arc_id = _arc(draft)
-    draft.link_event_arc(
-        event_id=minted, arc_id=arc_id, role="推动", reason="复用其他执行的事件",
+    draft.register_outcome(
+        key="identity",
+        title="身份确认",
+        description="身份最终得到证实",
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )
     draft.producer_agent_id = case.agent_id
@@ -314,42 +273,33 @@ def test_complete_event_body_and_declaration_bindings_are_saved_independently(db
     case, event_ids, draft = organization_case
     organization = _organized(draft, event_ids)
     report_id = _save_report(db_session, case.run_id, organization)
-    arc_links = [
-        row
-        for row in db_session.scalars(select(NarrativeLink))
-        if row.arc_group_id is not None and row.member_event_id in event_ids
-    ]
-    assert len(arc_links) == 2
     outcomes = [
         row
         for row in db_session.scalars(select(NarrativeGroup))
-        if row.outcome_description is not None and row.producer_agent_id == draft.producer_agent_id
+        if row.kind == "outcome" and row.producer_agent_id == draft.producer_agent_id
     ]
     assert len(outcomes) == 1
-    outcome_links = [
-        row
-        for row in db_session.scalars(select(NarrativeLink))
-        if row.outcome_group_id is not None and row.member_event_id in event_ids
-    ]
-    assert len(outcome_links) == 2
+    assert "outcome_group_id" not in NarrativeLink.__table__.c
+    assert {"tree_id", "member_event_id", "parent_tree_id", "child_tree_id"} <= set(NarrativeLink.__table__.c.keys())
     assert db_session.get(CompleteEvent, event_ids[0]).event_id == event_ids[0]
-    from src.event_trees.organization import _run_event_dicts
+    from src.event_trees.organization_queries import _run_event_dicts
 
     db_session.expire_all()
     projected = _run_event_dicts(storage_for(db_session), case.run_id)[event_ids[0]]
     assert projected["summary"] == draft.events[event_ids[0]].summary
     assert projected["event_type"] == draft.events[event_ids[0]].event_type
     assert "current_revision_id" not in projected
-    assert organization.event_arc_links[0].evidence != organization.outcomes[0].evidence
+    assert "event_outcome_links" not in organization.model_dump()
     assert "memberships" not in organization.model_dump()
     assert "outcome_arc_links" not in organization.model_dump()
+    assert not {"arcs", "event_arc_links"} & organization.model_dump().keys()
     report = db_session.get(DiagnosisReport, report_id)
     assert report is not None and report.agent_id == case.session_id
 
 
 def test_events_can_be_saved_without_extra_review_records(organization_case):
     _case, event_ids, draft = organization_case
-    assert draft.search_events(limit=1)["total"] == 3
+    assert draft.search_events(limit=1)["total"] == len(event_ids)
     organization = draft.finish()
     assert len(organization.events) == len(event_ids)
     assert not {"reviewed_events", "structure_reviews"} & organization.model_dump().keys()
@@ -372,36 +322,26 @@ def test_save_revalidates_bound_source_hash(db_session, organization_case):
     case, event_ids, draft = organization_case
     organization = _organized(draft, event_ids)
     payload = organization.model_dump()
-    payload["event_arc_links"][0]["evidence"][0]["text_hash"] = "invented"
+    payload["outcomes"][0]["evidence"][0]["text_hash"] = "invented"
     with pytest.raises(ValueError, match="哈希"):
         validate_organization(storage_for(db_session), case.run_id, NarrativeOrganization.model_validate(payload))
 
 
-def test_outcome_has_independent_identity_and_requires_each_relation(organization_case):
+def test_outcome_has_independent_identity_and_own_text_evidence(organization_case):
     _case, event_ids, draft = organization_case
-    outcome = draft.register_outcome(
-        key="identity",
-        title="身份确认",
-        description="身份最终得到证实",
-        evidence=[OrganizationEvidence(paragraph_id=0)],
-    )
-    assert outcome == draft.register_outcome(
-        key="identity",
-        title="身份确认",
-        description="身份最终得到证实",
-        evidence=[OrganizationEvidence(paragraph_id=0)],
-    )
-    with pytest.raises(ValueError, match="贡献关系"):
-        draft.finish()
-    with pytest.raises(ValueError, match="顶层"):
-        draft.link_event_outcome(
-            event_id=event_ids[2],
-            outcome_id=outcome,
-            reason="子问题结束",
-            evidence=[OrganizationEvidence(paragraph_id=0)],
-        )
-    with pytest.raises(ValueError, match="limit"):
-        draft.link_event_outcome(event_id=event_ids[0], outcome_id=outcome, reason="形成结果", evidence=[])
+    args = {
+        "key": "identity",
+        "title": "身份确认",
+        "description": "身份最终得到证实",
+        "evidence": [OrganizationEvidence(paragraph_id=0)],
+    }
+    outcome = draft.register_outcome(**args)
+    assert outcome == draft.register_outcome(**args)
+    result = draft.finish()
+    assert result.outcomes[0].outcome_id == outcome
+    assert "event_outcome_links" not in result.model_dump()
+    with pytest.raises(ValidationError):
+        draft.register_outcome(**{**args, "evidence": [OrganizationEvidence(paragraph_id=0, event_id=event_ids[0])]})
 
 
 def test_cross_run_complete_event_is_rejected(db_session, organization_case):
@@ -440,16 +380,14 @@ def _report_for(session, run_id: str) -> DiagnosisReport | None:
 
 
 def test_save_failure_rolls_back_report_and_organization(db_session):
-    case = OrganizationCase(db_session, chapters=1)
+    case = OrganizationCase(db_session, chapters=5)
     db_session.commit()
     draft = identity_draft(db_session, case)
-    draft.register_arc(
+    select_event_lines(draft, case.declarations)
+    draft.register_outcome(
         key="identity",
-        kind="main",
         title="身份",
-        objective="找回身份",
-        role="主线",
-        reason="原文依据",
+        description="找回身份",
         evidence=[OrganizationEvidence(paragraph_id=0)],
     )
     analysis = AgentAnalysis(narrative_organization=draft.finish(), diagnosis="依据原文核对")
@@ -494,22 +432,21 @@ def test_tools_expose_complete_events_and_remove_unique_primary_api(organization
     assert {
         "write_diagnosis",
         "write_event",
-        "write_arc",
         "write_outcome",
         "read_metrics",
         "read_topics",
     } <= set(tools)
-    assert not {"assign_book_events", "reference_book_event", "event", "submit_diagnosis"} & set(tools)
+    assert not {"write_arc", "assign_book_events", "reference_book_event", "event", "submit_diagnosis"} & set(tools)
     schema = tools["write_event"].args_schema.model_json_schema()
-    operations = schema["properties"]["items"]["items"]["discriminator"]["mapping"]
-    assert set(operations) == {"event", "contain", "relation", "retract"}
+    assert "operation" not in schema["$defs"]["EventItem"]["properties"]
+    assert {"write_link", "retract_structure"} <= set(tools)
     for operation in ("review", "structure_review"):
         with pytest.raises(ValidationError):
             tools["write_event"].invoke({"items": [{"operation": operation, "event_ids": event_ids}]})
 
 
 def test_declaration_rows_reads_evidence_in_one_batch(db_session, monkeypatch):
-    case = OrganizationCase(db_session, chapters=3)
+    case = OrganizationCase(db_session, chapters=6)
     db_session.commit()
     draft = EventOrganizationDraft(storage_for(db_session), case.run_id, case.agent_id)
     calls: list[int] = []
@@ -524,3 +461,39 @@ def test_declaration_rows_reads_evidence_in_one_batch(db_session, monkeypatch):
     second = draft._all_events()
     assert first == second
     assert calls == [len(case.declarations), len(case.declarations)]
+
+
+def test_event_line_names_require_full_coverage_and_valid_shape(organization_case):
+    _case, _event_ids, draft = organization_case
+    selected = sorted(draft.event_line_ids)
+    with pytest.raises(ValueError, match="缺少"):
+        draft.name_event_lines({})
+    complete = dict.fromkeys(selected, "")
+    with pytest.raises(ValueError, match="1–5"):
+        draft.name_event_lines(complete)
+    with pytest.raises(ValueError, match="不得重复"):
+        draft.name_event_lines(dict.fromkeys(selected, "身份线"))
+    named = {tree_id: f"事件{index}线" for index, tree_id in enumerate(selected, 1)}
+    with pytest.raises(ValueError, match="多出"):
+        draft.name_event_lines({**named, "extra": "多余线"})
+    draft.line_names.clear()
+    with pytest.raises(ValueError, match="尚未命名"):
+        draft.finish()
+
+
+def test_saved_event_line_names_follow_the_selected_lines(organization_case, db_session):
+    case, event_ids, draft = organization_case
+    organization = _organized(draft, event_ids)
+    _save_report(db_session, case.run_id, organization)
+    db_session.expire_all()
+    executions = smap.run_execution_ids(storage_for(db_session), case.run_id)
+    rows = {
+        row.group_id: row.line_name
+        for row in db_session.scalars(
+            select(NarrativeGroup).where(NarrativeGroup.producer_agent_id.in_(executions))
+        )
+    }
+    assert {tree_id: name for tree_id, name in rows.items() if name is not None} == organization.event_line_names
+    payload = EventTreeQuery(storage_for(db_session), case.run_id).fetch()
+    projected = {queue["tree_id"]: queue["line_name"] for queue in payload["queues"] if queue["line_name"]}
+    assert projected == organization.event_line_names

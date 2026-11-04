@@ -8,13 +8,13 @@ Aggregate Metrics 数据提取模块
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from src.fact_graph.character_reference_policy import decide_character_reference
 from src.fact_graph.read import KnowledgeGraphAuthorityService
 from src.fact_graph.read.annotations import (
     fetch_chapter_characters_full,
-    fetch_chapter_dialogues_full,
     fetch_character_emotion_sequence,
 )
 from src.metrics.aggregate.types import (
@@ -31,6 +31,7 @@ from src.metrics.queries.annotations import fetch_chapter_annotations_full
 from src.metrics.values import read_emotion_score
 from src.storage import Storage
 from src.storage.contracts.stores import ChapterStore
+from src.storage.records.annotation import ChapterAnnotationRow
 
 if TYPE_CHECKING:
     pass
@@ -43,15 +44,15 @@ def _fetch_chapter_progress_map(session: Storage, run_id: str) -> dict[int, floa
     正文终点 = char_offset + 正文精确字符长度（读投影）；正文与起点同为空
     （成对约束），空章不参与。
     """
-    total = session.reads.metrics_queries_fetchers_fetch_chapter_progress_map_1(run_id)
+    total = session.reads.text.get_book_end_offset(run_id)
     if total is None or int(total) <= 0:
-        total = session.reads.metrics_queries_fetchers_fetch_chapter_progress_map_3(run_id)
+        total = session.reads.text.get_last_chapter_offset(run_id)
         if total is None or int(total) <= 0:
             return {}
         total_chars = float(int(total) + 1)
     else:
         total_chars = float(int(total))
-    rows = session.reads.metrics_queries_fetchers_fetch_chapter_progress_map_2(run_id)
+    rows = session.reads.text.list_chapter_offsets(run_id)
     progress: dict[int, float] = {}
     for _stored_row_1 in rows:
         chapter_id = _stored_row_1.chapter_id
@@ -80,12 +81,15 @@ def _resolve_aggregate_character_name(*, surface_name: str | None, resolved_glob
     return decision.resolved_global_name
 
 
-def fetch_annotation_data(annotation_repo: Storage, run_id: str) -> AnnotationData:
+def fetch_annotation_data(
+    annotation_repo: Storage, run_id: str, *, rows: Sequence[ChapterAnnotationRow] | None = None,
+) -> AnnotationData:
     """
     从章节正式标注的 chunks metrics 提取 chunk 粒度指标数据
 
     """
-    rows = fetch_chapter_annotations_full(annotation_repo, run_id)
+    if rows is None:
+        rows = fetch_chapter_annotations_full(annotation_repo, run_id, include_details=False)
     return AnnotationData(
         chapter_ids=[row.chapter_id for row in rows],
         event_types=[row.event_type or "铺垫" for row in rows],
@@ -140,10 +144,9 @@ def fetch_character_data(annotation_repo: Storage, run_id: str) -> CharacterData
     避免 aggregate character stats 依赖 graph participant state 过滤结果
     """
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo)
-    snapshot = authority_service.build_level1_snapshot(run_id)
     active_characters = [
         entity
-        for entity in snapshot.canonical_entities
+        for entity in authority_service.build_canonical_entities(run_id)
         if entity.entity_type == "character" and entity.status == "active"
     ]
     rows = fetch_chapter_characters_full(annotation_repo, run_id)
@@ -159,7 +162,7 @@ def fetch_character_data(annotation_repo: Storage, run_id: str) -> CharacterData
     for entity in active_characters:
         emotion_score = emotion_map.get(entity.name, 0)
         characters.append((entity.name, entity.primary_role_function or "其他", emotion_score))
-    char_emotion_rows = fetch_character_emotion_sequence(annotation_repo, run_id)
+    char_emotion_rows = fetch_character_emotion_sequence(annotation_repo, run_id, rows=rows)
     char_emotion_map: dict[str, list[float]] = {}
     for row in char_emotion_rows:
         canonical_name = _resolve_aggregate_character_name(
@@ -245,7 +248,7 @@ def fetch_dialogue_data(annotation_repo: Storage, run_id: str) -> DialogueData:
     按事实中的 chapter_id 展开语气类型用于聚合计算
 
     """
-    rows = fetch_chapter_dialogues_full(annotation_repo, run_id)
+    rows = annotation_repo.annotations.fetch_dialogue_observation_rows(run_id)
     tones = [row.tone for row in rows if row.tone is not None]
     return DialogueData(tones=tones)
 

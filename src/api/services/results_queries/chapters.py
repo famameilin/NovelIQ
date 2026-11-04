@@ -87,9 +87,9 @@ def _fetch_chapter_annotations(
                     if getattr(annotation_row, "payoff_likelihood", None)
                     else None
                 ),
-                foreshadowing_root_event_id=(
-                    str(annotation_row.foreshadowing_root_event_id)
-                    if getattr(annotation_row, "foreshadowing_root_event_id", None)
+                foreshadowing_source_event_id=(
+                    str(annotation_row.foreshadowing_source_event_id)
+                    if getattr(annotation_row, "foreshadowing_source_event_id", None)
                     else None
                 ),
                 coverage_warnings=list(getattr(annotation_row, "coverage_warnings", None) or []),

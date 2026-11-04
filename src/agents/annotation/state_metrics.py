@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from src.fact_graph.inputs import ChapterMetricsInput, ChapterParagraphInfo
+from src.fact_graph.inputs import ChapterParagraphInfo
 from src.fact_graph.outputs import BoundParagraphLabel
+from src.metrics.annotation_inputs import ChapterMetricsInput
 
 from .errors import (
     AnnotationInvariantError,
@@ -21,6 +22,8 @@ class ChapterMetricsStateContext(Protocol):
     """只开放此工作状态需要的上下文和引用能力"""
 
     def _require_writable(self, record: str) -> None: ...
+
+    def require_domain(self, domain: str) -> None: ...
 
     paragraph_info: ChapterParagraphInfo | None
 
@@ -39,6 +42,7 @@ class ChapterMetricsState:
         换回全局 paragraph_id（绑定载荷与持久化口径不变）。
         """
         ctx._require_writable("metrics")
+        ctx.require_domain("metrics")
         if payload.labels:
             visible_to_global = dict(self._visible_global_pairs(ctx)) if ctx.paragraph_info is not None else {}
             for label in payload.labels:

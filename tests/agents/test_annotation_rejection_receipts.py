@@ -9,11 +9,11 @@ import pytest
 
 from src.agents.annotation.errors import AnnotationStageRejection
 from src.agents.annotation.ledger import AnnotationToolLedger
+from src.agents.annotation.output_models import BoundCharacterObservation
 from src.agents.annotation.tool_batch import _invoke_tool
 from src.event_trees.models import BoundEvent
 from src.fact_graph.graph import FactGraph
 from src.fact_graph.inputs import BoundRelationInput, ChapterParagraphInfo, EntityDirectoryInput
-from src.fact_graph.outputs import BoundCharacterObservation
 from src.fact_graph.vocabulary import RelationType
 from tests.support.annotation_work_tools import build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
@@ -93,8 +93,7 @@ def test_duplicate_observation_rejection_names_records_and_values() -> None:
 def test_duplicate_event_rejection_names_local_node_key() -> None:
     """事件判重点名模型面局部键（树键/节点键），不露 uuid"""
     ledger = _ledger()
-    ledger.tree_key_index["t1"] = "tree-1"
-    ledger.event_trees["tree-1"] = {"nodes": {"root": "node-root", "e2": "node-2"}}
+    ledger.event_ids_by_el["t1"] = "node-2"
     ledger.events.bound_payloads["events"] = [
         BoundEvent(
             node_id="node-2",
@@ -128,7 +127,7 @@ def test_duplicate_event_rejection_names_local_node_key() -> None:
     with pytest.raises(ValueError) as excinfo:
         ledger._validate_domain_duplicates(_duplicate_payloads(ledger))
     message = str(excinfo.value)
-    assert "events 重复语义项: t1/e2 与 t1/e2" in message
+    assert "events 重复语义项: t1 与 t1" in message
     assert "node-2" not in message
 
 
@@ -169,24 +168,26 @@ async def test_write_duplicate_rejection_names_both_records_in_program_receipt()
     receipt = json.loads(
         await runtime.execute(
             "write_entity(el='a1', name='顾霜', entity_type='character')\n"
-            "write_event(el='t1', characters=[{'name': '顾霜', 'entity_type': 'c"
-            "haracter', 'action': '喝止'}], title='顾霜喝止', problem='明确事件问题', summ"
-            "ary='顾霜喝止', event_type='行动', status='ongoing', evidence=1)\n"
-            "write_event(el='t2', characters=[{'name': '顾霜', 'entity_type': 'c"
-            "haracter', 'action': '喝止'}], title='众人退下', problem='明确事件问题', summ"
-            "ary='众人退下', event_type='行动', status='ongoing', evidence=1)"
+            "write_event(items=[dict(el='t1', characters=[{'name': '顾霜', 'entity_type': 'c"
+            "haracter', 'role': '主体', 'narrative_role': '主体', 'action': '喝止', 'emotion': -1}], "
+            "title='顾霜喝止', problem='明确事件问题', summ"
+            "ary='顾霜喝止', event_type='行动', status='ongoing', evidence=1)])\n"
+            "write_event(items=[dict(el='t2', characters=[{'name': '顾霜', 'entity_type': 'c"
+            "haracter', 'role': '主体', 'narrative_role': '主体', 'action': '喝止', 'emotion': -1}], "
+            "title='众人退下', problem='明确事件问题', summ"
+            "ary='众人退下', event_type='行动', status='ongoing', evidence=1)])"
         )
     )
     assert receipt["status"] == "partial"
     (failed,) = receipt["failed"]
-    assert failed["record"] == "t2/root/participant/顾霜"
+    assert failed["record"] == "annotation:t2/participant/顾霜"
     assert failed["code"] == "duplicate_observation"
-    assert "t1/root/participant/顾霜(character=顾霜, action=喝止)" in failed["message"]
-    assert "t2/root/participant/顾霜(character=顾霜, action=喝止)" in failed["message"]
+    assert "annotation:t1/participant/顾霜(character=顾霜, action=喝止)" in failed["message"]
+    assert "annotation:t2/participant/顾霜(character=顾霜, action=喝止)" in failed["message"]
     assert "相撞" in failed["message"]
     assert "改写" not in failed["expected"]
-    assert set(ledger.tree_key_index) == {"t1"}
-    assert set(ledger.observation_by_record) == {"t1/root/participant/顾霜"}
+    assert set(ledger.event_ids_by_el) == {"annotation:t1"}
+    assert set(ledger.observation_by_record) == {"annotation:t1/participant/顾霜"}
 
 
 @pytest.mark.asyncio
@@ -213,7 +214,7 @@ async def test_schema_rejection_names_participant_key_and_submitted_value() -> N
     assert receipt["field"] == "emotion"
     assert "characters.0.emotion='愤怒'" in receipt["message"]
     assert "t1/participant/顾霜" in receipt["message"]
-    assert not ledger.tree_key_index
+    assert not ledger.event_ids_by_el
 
 
 def test_endpoint_type_rejection_names_record_and_field_value() -> None:

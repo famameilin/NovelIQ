@@ -33,7 +33,7 @@ def save_annotation(session, request: AnnotationSave):
         return {
             "annotation_id": existing.record_id,
             "warnings": [],
-            "committed_cases": CaseWritesRepository(record["run_id"]).register_event_roots(session),
+            "committed_cases": CaseWritesRepository(record["run_id"]).register_unparented_trees(session),
         }
     fact_writer.ensure_entity_rows(session, request.facts)
     session.add(ChapterAnnotation(**record))
@@ -49,5 +49,5 @@ def save_annotation(session, request: AnnotationSave):
 
     if not check_annotation_event_contribution(session, request.events):
         raise ValueError("标注保存结果与冻结事件贡献不一致")
-    committed_cases = CaseWritesRepository(record["run_id"]).register_event_roots(session)
+    committed_cases = CaseWritesRepository(record["run_id"]).register_unparented_trees(session)
     return {"annotation_id": record["record_id"], "warnings": warnings, "committed_cases": committed_cases}

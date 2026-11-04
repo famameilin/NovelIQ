@@ -8,26 +8,20 @@ import json
 import unicodedata
 from typing import Annotated, Any
 
-from langchain_core.tools import tool
 from pydantic import Field
 
-from src.event_trees.models import ParticipantArg
-from src.fact_graph.inputs import ChapterMetricsInput, EntityInput, EntityNameRef, ParagraphLabelInput
-from src.fact_graph.schema import (
+from src.agents.annotation.event_inputs import ParticipantArg
+from src.agents.tools import tool
+from src.event_trees.vocabulary import Confidence
+from src.fact_graph.inputs import EntityInput, EntityNameRef
+from src.fact_graph.schema import ENTITY_TAG_MAX_CHARS, ENTITY_TAG_MAX_COUNT, ENTITY_TAGS_RULE_TEXT
+from src.fact_graph.vocabulary import DialogueVerdict, EntityType, RelationType, Tone, relation_catalog_text
+from src.metrics.annotation_inputs import (
     CLIFFHANGER_DESCRIPTION,
-    ENTITY_TAG_MAX_CHARS,
-    ENTITY_TAG_MAX_COUNT,
-    ENTITY_TAGS_RULE_TEXT,
     PIVOT_MOMENT_DESCRIPTION,
-)
-from src.fact_graph.vocabulary import (
-    Confidence,
-    DialogueVerdict,
-    EntityType,
+    ChapterMetricsInput,
     NarrativeFunction,
-    RelationType,
-    Tone,
-    relation_catalog_text,
+    ParagraphLabelInput,
 )
 
 from .ledger import AnnotationToolLedger
@@ -201,8 +195,14 @@ def build_annotation_tools(
         from_chapter_id: int | None = None,
         to_chapter_id: int | None = None,
         reason: str | None = None,
-        isforeshadowing: bool = False,
-        confidence: Confidence | None = None,
+        isforeshadowing: Annotated[
+            bool,
+            Field(description="标记本事件埋设伏笔；为 True 时必须同时给 confidence，非伏笔事件保持 False"),
+        ] = False,
+        confidence: Annotated[
+            Confidence | None,
+            Field(description="伏笔置信度 high/medium/low；只与 isforeshadowing=True 成对，非伏笔事件不填"),
+        ] = None,
         characters: list[ParticipantArg] | None = None,
     ) -> str:
         """创建正式事件；问题、概要、类型、状态及真实证据必填，起止章节缺省当前章"""
@@ -222,8 +222,12 @@ def build_annotation_tools(
             confidence=confidence,
             characters=characters,
         )
-        content = ledger.event_content(el=el, isroot="/" not in el)
-        return json.dumps({"status": "written", "record": record, "content": content}, ensure_ascii=False)
+        content = ledger.event_content(el=el)
+        receipt: dict[str, Any] = {"status": "written", "record": record, "content": content}
+        warnings = ledger.pop_warnings()
+        if warnings:
+            receipt["warnings"] = warnings
+        return json.dumps(receipt, ensure_ascii=False)
 
     from .links import build_link_tools
 

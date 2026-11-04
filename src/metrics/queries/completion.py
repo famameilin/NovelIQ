@@ -11,6 +11,6 @@ from src.storage import Storage
 
 def is_aggregate_complete(session: Storage, run_id: str) -> bool:
     """检查聚合阶段是否完成（章节存在且正式聚合完成事实非空）。Args: session/run_id；Returns: 是否完成。"""
-    chapters_count = session.reads.metrics_queries_completion_is_aggregate_complete_2(run_id) or 0
-    aggregate_completed_at = session.reads.metrics_queries_completion_is_aggregate_complete_1(run_id)
+    chapters_count = session.reads.text.count_chapters(run_id) or 0
+    aggregate_completed_at = session.reads.metrics.find_global_stats(run_id)
     return chapters_count > 0 and aggregate_completed_at is not None

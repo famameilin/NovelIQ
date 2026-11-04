@@ -178,8 +178,17 @@ def test_fetch_foreshadowing_trees_preserves_status_field():
             assert run_id == fixture_id(__name__, "run-1")
             return [
                 ForeshadowingTreeView(
-                    root_event_id="evt-root-1",
-                    tree_id="tree-1",
+                    source_event_id="evt-root-1",
+                    source_locator={
+                        "event_id": "evt-root-1",
+                        "title": "黑伞",
+                        "tree_id": "tree-1",
+                        "event_line_ids": ["tree-1"],
+                        "evidence_position": 0,
+                    },
+                    target_event_id=None,
+                    target_locator=None,
+                    actions=[],
                     first_chapter_id=2,
                     last_chapter_id=5,
                     anchor_chapter_ids=[2, 5],
@@ -196,7 +205,7 @@ def test_fetch_foreshadowing_trees_preserves_status_field():
     rows = _fetch_foreshadowing_trees(fixture_id(__name__, "run-1"), DummyRepo())
 
     assert len(rows) == 1
-    assert rows[0].root_event_id == "evt-root-1"
+    assert rows[0].source_event_id == "evt-root-1"
     assert rows[0].status == "reinforced"
 
 
@@ -824,9 +833,9 @@ def test_fetch_chapter_annotations_builds_relations_from_export_authority_view()
     assert result[0].is_strong_setup is False
     assert result[0].why_unresolved_now is None
     # expected_payoff_family 无对应响应字段；按新合同换算为
-    # 保留字段 payoff_likelihood/foreshadowing_root_event_id 在无伏笔行时同样保持 None
+    # 无伏笔行不补造回收可能性或来源事件
     assert result[0].payoff_likelihood is None
-    assert result[0].foreshadowing_root_event_id is None
+    assert result[0].foreshadowing_source_event_id is None
     assert len(result[0].relations) == 1
     assert result[0].relations[0].from_char == "贺铮"
     assert result[0].relations[0].to_char == "伯安"

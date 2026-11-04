@@ -1,9 +1,10 @@
 """
-章内 agent 构造器：八类记录构造器、收尾工具与程序面回执 helper
+章内 agent 构造器：记录构造器、收尾工具与程序面回执 helper
 """
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -11,7 +12,6 @@ from typing import Any
 from pydantic import ValidationError
 
 from src.agents.annotation.agent_ir import (
-    CONFIDENCE_VALUES,
     DIALOGUE_VERDICTS,
     ENTITY_TYPES,
     NARRATIVE_FUNCTIONS,
@@ -29,6 +29,8 @@ from src.agents.annotation.agent_ir import (
     AgentRelation,
     normalize_evidence,
 )
+from src.agents.annotation.event_inputs import AnnotationEventItem
+from src.agents.annotation.ir_contract import ROLE_NAMESPACE_SEP
 from src.agents.annotation.ir_validation import (
     _reject,
     _require_enum,
@@ -38,26 +40,24 @@ from src.agents.annotation.ir_validation import (
     _require_score,
     _require_text,
     namespace_el,
-    namespace_event_el,
 )
+from src.agents.program_runtime.contracts import _READ_TOOL_NAMES
 from src.event_trees.vocabulary import (
     _EVENT_ONLY_ROLE_WORDS,
-    normalize_event_participant_role,
-)
-from src.fact_graph.inputs import EntityNameRef
-from src.fact_graph.schema import EL_PATH_SEP, ENTITY_TAG_MAX_CHARS, ENTITY_TAG_MAX_COUNT
-from src.fact_graph.vocabulary import (
-    Confidence,
-    DialogueVerdict,
-    EntityType,
-    NarrativeFunction,
-    RelationType,
-    Tone,
     clamp_emotion_score,
+    normalize_event_participant_role,
     normalize_role_function,
 )
+from src.fact_graph.inputs import EntityNameRef
+from src.fact_graph.schema import ENTITY_TAG_MAX_CHARS, ENTITY_TAG_MAX_COUNT
+from src.fact_graph.vocabulary import DialogueVerdict, EntityType, RelationType, Tone
+from src.metrics.annotation_inputs import NarrativeFunction
 
-from .program_contract import _READ_TOOL_NAMES
+
+def _record_of_role(role: str, field: str) -> str:
+    """用于在记录键里带上职责名（职责名与域同名时只保留一层前缀）"""
+    prefix = f"{role}/"
+    return field if field.startswith(prefix) else f"{prefix}{field}"
 
 
 def _record_of(agent: AgentAnnotation, field: str) -> str:
@@ -66,8 +66,7 @@ def _record_of(agent: AgentAnnotation, field: str) -> str:
     职责名与域同名时只保留一层前缀：事件 agent 的字段本就以 event/ 开头，再套职责名
     会渲染成 event/event/t1。
     """
-    prefix = f"{agent.role}/"
-    return field if field.startswith(prefix) else f"{prefix}{field}"
+    return _record_of_role(agent.role, field)
 
 
 def _written_receipt(record: str, ref: dict[str, Any]) -> dict[str, Any]:
@@ -139,18 +138,9 @@ def _put_by(items: list[Any], item: Any, *, key: Any) -> None:
     items.append(item)
 
 
-def _normalize_el(value: Any, *, record: str) -> str:
-    """用于校验事件 el 层级路径的形态（根=树键、子=树键/节点键）"""
-    text = _require_text(value, record=record, field_name="el")
-    if text.count(EL_PATH_SEP) > 1:
-        raise _reject(
-            f"el 的层级最多两层（树键/节点键）：{text}",
-            record=record,
-            field="el",
-            code="bad_el",
-            expected="根事件 el=树键（如 t1）；子事件 el=树键/节点键（如 t1/e2）",
-        )
-    return text
+def normalize_event_el(value: str) -> str:
+    "规整事件引用 id 的文本形态"
+    return unicodedata.normalize("NFC", str(value)).strip()
 
 
 def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) -> list[AgentParticipant]:
@@ -162,18 +152,18 @@ def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) ->
     """
     if raw is None:
         raise _reject(
-            "participants 需要参与者数组",
+            "characters 需要参与者数组",
             record=record,
-            field="participants",
+            field="characters",
             code="missing_field",
             expected='[{"name": 正文名字, "entity_type": 实体大类, "role": ..., "narrative_role": ..., '
             '"action": ..., "emotion": ...}]',
         )
     if not isinstance(raw, (list, tuple)) or not raw:
         raise _reject(
-            "participants 必须是非空数组",
+            "characters 必须是非空数组",
             record=record,
-            field="participants",
+            field="characters",
             code="invalid_value",
             expected='[{"name": 正文名字, "entity_type": 实体大类, "role": ...}]，至少一个参与者',
         )
@@ -183,15 +173,15 @@ def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) ->
         ref = _name_ref(
             {key: value for key, value in entry.items() if key not in {"role", "narrative_role", "action", "emotion"}},
             record=record,
-            field_name=f"participants[{index}]",
+            field_name=f"characters[{index}]",
         )
         narrative_role = entry.get("narrative_role")
         if isinstance(narrative_role, str) and narrative_role.strip() in _EVENT_ONLY_ROLE_WORDS:
             raise _reject(
-                f"participants[{index}].narrative_role 不接受 {narrative_role.strip()}: "
+                f"characters[{index}].narrative_role 不接受 {narrative_role.strip()}: "
                 "地点、行动者等只用于 role 字段；人物功能使用 主体/客体/发送者/接收者/帮助者/反对者/见证者",
                 record=record,
-                field=f"participants[{index}].narrative_role",
+                field=f"characters[{index}].narrative_role",
                 code="invalid_value",
                 expected="、".join(RUNTIME_ROLES),
             )
@@ -202,7 +192,7 @@ def _normalize_participants(raw: Any, *, record: str, book: _ConstructorBook) ->
                 role=normalize_event_participant_role(entry.get("role")),
                 narrative_role=normalize_role_function(narrative_role),
                 action=(
-                    _require_text(action, record=record, field_name=f"participants[{index}].action")
+                    _require_text(action, record=record, field_name=f"characters[{index}].action")
                     if (action := entry.get("action")) is not None
                     else None
                 ),
@@ -240,36 +230,154 @@ class _ConstructorBook:
     candidate_total: int
 
 
-def _event_write_args(
-    book: _ConstructorBook,
-    item: AgentEvent,
+def build_agent_event(
     *,
-    characters: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """用于把一条事件记录翻成 write_event 入参（el 按角色命名空间化）
+    record: str,
+    paragraph_text_by_id: dict[int, str],
+    el: str,
+    title: str,
+    problem: str,
+    summary: str,
+    event_type: str,
+    status: str,
+    evidence: int,
+    progress: str | None,
+    from_chapter_id: int | None,
+    to_chapter_id: int | None,
+    reason: str | None,
+    isforeshadowing: bool,
+    confidence: str | None,
+    participants: list[AgentParticipant],
+) -> AgentEvent:
+    """用于把一条已校验的事件入参翻成本 agent 的事件记录（构造器与批量写入共用映射）"""
+    return AgentEvent(
+        from_chapter_id=from_chapter_id,
+        to_chapter_id=to_chapter_id,
+        reason=reason,
+        el=el,
+        description=summary,
+        title=title,
+        problem=problem,
+        summary=summary,
+        event_type=event_type,
+        status=status,
+        progress=progress,
+        isforeshadowing=isforeshadowing,
+        confidence=confidence,
+        participants=participants,
+        evidence=normalize_evidence(evidence, record=record, paragraph_text_by_id=paragraph_text_by_id),
+    )
 
-    characters 省略=不动该节点已有参与者（生产口径：给出即整体替换、省略即保留），
-    所以 event 与 participants 两个构造器共用本函数。
+
+def register_agent_event(agent: AgentAnnotation, item: AgentEvent) -> None:
+    """用于把已落库的事件记录并入本 agent 的构造表"""
+    _put_by(agent.events, item, key=lambda current: current.el)
+
+
+def _event_business_fields(event: AgentEvent) -> tuple[Any, ...]:
+    """用于比对同一 el 重交时的业务字段（参与者与证据由事件账本单独校验）"""
+    return (
+        event.title,
+        event.problem,
+        event.summary,
+        event.event_type,
+        event.status,
+        event.progress,
+        event.from_chapter_id,
+        event.to_chapter_id,
+        event.reason,
+        event.isforeshadowing,
+        event.confidence,
+    )
+
+
+def _item_business_fields(item: AnnotationEventItem) -> tuple[Any, ...]:
+    """用于比对同一 el 重交时的业务字段（参与者与证据由事件账本单独校验）"""
+    return (
+        item.title,
+        item.problem,
+        item.summary,
+        item.event_type,
+        item.status,
+        item.progress,
+        item.from_chapter_id,
+        item.to_chapter_id,
+        item.reason,
+        item.isforeshadowing,
+        item.confidence,
+    )
+
+
+def build_batch_agent_events(
+    agent: AgentAnnotation,
+    *,
+    role: str,
+    paragraph_text_by_id: dict[int, str],
+    items: list[AnnotationEventItem],
+) -> list[AgentEvent]:
+    """用于把一次提交的事件入参注册成本 agent 的事件记录
+
+    el 是本次执行内的引用 id，去掉本角色前缀后作局部键；characters 缺省表示不带参与者。
+    已写入的 el 只接受与原记录一致的重复提交，本次提交内重复的 el 拒收。
     """
-    args: dict[str, Any] = {
-        "el": namespace_event_el(book.role, item.el),
-        "title": item.title,
-        "problem": item.problem,
-        "summary": item.summary,
-        "event_type": item.event_type,
-        "status": item.status,
-        "from_chapter_id": item.from_chapter_id,
-        "to_chapter_id": item.to_chapter_id,
-        "reason": item.reason,
-        "progress": item.progress,
-        "evidence": item.evidence[0].paragraph_id,
-    }
-    args["isforeshadowing"] = item.isforeshadowing
-    if item.confidence is not None:
-        args["confidence"] = item.confidence
-    if characters is not None:
-        args["characters"] = characters
-    return args
+    book = _ConstructorBook(agent=agent, role=role, paragraph_text_by_id=paragraph_text_by_id, candidate_total=0)
+    prefix = f"{role}{ROLE_NAMESPACE_SEP}"
+    built: list[AgentEvent] = []
+    submitted: set[str] = set()
+    existing = agent.event_keys()
+    for item in items:
+        text = normalize_event_el(item.el)
+        el = text[len(prefix) :] if text.startswith(prefix) else text
+        record = _record_of_role(role, f"event/{el}")
+        if el in submitted:
+            raise _reject(
+                f"event/{el} 在同一次提交里重复",
+                record=record,
+                field="el",
+                code="duplicate_annotation_event",
+                expected="同一次提交的 el 唯一",
+            )
+        submitted.add(el)
+        prior = existing.get(el)
+        if prior is not None:
+            if _event_business_fields(prior) != _item_business_fields(item):
+                raise _reject(
+                    f"event/{el} 已写入且内容不同",
+                    record=record,
+                    field="summary",
+                    code="immutable",
+                    expected="复用已写入事件与其原始字段；要改写先 retract_structure 撤回该队列再重建",
+                )
+            built.append(prior)
+            continue
+        if item.characters is not None:
+            participants = _normalize_participants(
+                [entry.model_dump(mode="json", exclude_none=True) for entry in item.characters],
+                record=record,
+                book=book,
+            )
+        else:
+            participants = []
+        event = build_agent_event(
+            record=record,
+            paragraph_text_by_id=paragraph_text_by_id,
+            el=el,
+            title=item.title,
+            problem=item.problem,
+            summary=item.summary,
+            event_type=item.event_type,
+            status=item.status,
+            evidence=item.evidence,
+            progress=item.progress,
+            from_chapter_id=item.from_chapter_id,
+            to_chapter_id=item.to_chapter_id,
+            reason=item.reason,
+            isforeshadowing=item.isforeshadowing,
+            confidence=item.confidence,
+            participants=participants,
+        )
+        built.append(event)
+    return built
 
 
 def _name_ref(value: Any, *, record: str, field_name: str) -> EntityNameRef:
@@ -446,125 +554,6 @@ def build_agent_constructors(
                     existing.to_entity.entity_type,
                 ),
             ),
-        )
-
-    def event(
-        el: str,
-        title: str,
-        problem: str,
-        summary: str,
-        event_type: str,
-        status: str,
-        evidence: int,
-        progress: str | None = None,
-        from_chapter_id: int | None = None,
-        to_chapter_id: int | None = None,
-        reason: str | None = None,
-        isforeshadowing: bool = False,
-        confidence: Confidence | None = None,
-    ) -> _ConstructorCall:
-        """创建事件；el 是本章局部键，同 el 只建一次、内容不可改写，改参与者用 participants
-
-        章节范围缺省当前章，包含关系显式建立（write_link kind=contains），因果独立记录；
-        回执 ref 为 {kind: event, el: …}。
-        """
-        record = _record_of(agent, f"event/{el}")
-        normalized_el = _normalize_el(el, record=record)
-        existing = agent.event_keys().get(normalized_el)
-        if isforeshadowing and confidence is None:
-            raise _reject(
-                "isforeshadowing=True 时 confidence 必填",
-                record=record,
-                field="confidence",
-                code="missing_field",
-                expected="high / medium / low",
-            )
-        item = AgentEvent(
-            from_chapter_id=from_chapter_id,
-            to_chapter_id=to_chapter_id,
-            reason=reason,
-            el=normalized_el,
-            isroot=EL_PATH_SEP not in normalized_el,
-            description=_require_text(summary, record=record, field_name="summary"),
-            title=_require_text(title, record=record, field_name="title"),
-            problem=_require_text(problem, record=record, field_name="problem"),
-            summary=_require_text(summary, record=record, field_name="summary"),
-            event_type=_require_text(event_type, record=record, field_name="event_type"),
-            status=_require_enum(status, ("ongoing", "resolved"), record=record, field_name="status"),
-            progress=_require_text(progress, record=record, field_name="progress") if progress is not None else None,
-            isforeshadowing=isforeshadowing,
-            confidence=_require_enum(confidence, CONFIDENCE_VALUES, record=record, field_name="confidence")
-            if confidence is not None
-            else None,
-            participants=list(existing.participants) if existing is not None else [],
-            evidence=normalize_evidence(evidence, record=record, paragraph_text_by_id=book.paragraph_text_by_id),
-        )
-        if existing is not None and existing.to_dict() != item.to_dict():
-            constructed = "、".join(sorted(agent.event_keys())) or "（本 agent 还没有事件）"
-            raise _reject(
-                f"event/{normalized_el} 事件内容不可改写",
-                record=record,
-                field="el",
-                code="immutable",
-                expected=f"换一个新的 el 建该事件；只改参与者请用 participants(el=…)；已构造的 el：{constructed}",
-            )
-        return _ConstructorCall(
-            record=record,
-            tool="write_event",
-            args=_event_write_args(book, item),
-            ref={"kind": "event", "el": item.el},
-            commit=lambda: _put_by(agent.events, item, key=lambda current: current.el),
-        )
-
-    def participants(el: str, items: list[dict[str, Any]]) -> _ConstructorCall:
-        """把一个事件节点的参与者整体设为 items（同一节点重写=整体替换）
-
-        items 每项 {name: 正文名字, entity_type: 大类, role: 主体/客体/接收者/帮助者/
-        反对者/见证者/地点, narrative_role: 叙事功能, action: 做了什么, emotion: -2..2 整数}。
-        四个描述字段均可省略或写偏：role 缺省按实体登记类型取默认（character→主体、
-        location→地点、其余→客体），叙事功能近义词自动归一，emotion 越界按边界收敛。
-        地点角色接受 location 与 organization 型端点（机构兼场所按 organization 登记即可当地点）。
-        """
-        record = _record_of(agent, f"participants/{el}")
-        normalized_el = _normalize_el(el, record=record)
-        target = agent.event_keys().get(normalized_el)
-        if target is None:
-            known = "、".join(sorted(agent.event_keys())) or "（本 agent 还没有事件）"
-            raise _reject(
-                f"participants 引用了本 agent 未构造的事件：{normalized_el}",
-                record=record,
-                field="el",
-                code="unknown_reference",
-                expected=f"先用 event(...) 建它，再挂参与者；已构造的 el：{known}",
-            )
-        normalized_participants = _normalize_participants(items, record=record, book=book)
-        characters: list[dict[str, Any]] = []
-        for participant in normalized_participants:
-            entry: dict[str, Any] = {
-                "name": participant.name,
-                "entity_type": participant.entity_type,
-                "role": participant.role,
-            }
-            if participant.narrative_role is not None:
-                entry["narrative_role"] = participant.narrative_role
-            if participant.action is not None:
-                entry["action"] = participant.action
-            if participant.emotion is not None:
-                entry["emotion"] = participant.emotion
-            characters.append(entry)
-
-        def commit() -> None:
-            """写入成功后才整体换掉该节点的参与者（被拒即整条作废，journal 不动）"""
-            target.participants = normalized_participants
-
-        # 参与者按生产口径整体替换该节点参与者列表（同 el 重写=更新语义）：描述与伏笔属性
-        # 从已落 journal 的节点记录原样带回，本构造器只改参与者这一项。
-        return _ConstructorCall(
-            record=record,
-            tool="write_event",
-            args=_event_write_args(book, target, characters=characters),
-            ref={"kind": "participants", "el": target.el, "count": len(normalized_participants)},
-            commit=commit,
         )
 
     def dialogue(
@@ -767,10 +756,9 @@ def build_agent_constructors(
     def foreshadow_action(
         source_event_id: str, action_type: str, evidence: int, target_event_id: str | None = None
     ) -> _ConstructorCall:
-        """引用已埋伏笔的 event_id 记录强化或回收：先 read_event 读取事件；
-        source_event_id 须是伏笔树根（isforeshadowing=True 事件的根，
-        read_event 回执 is_foreshadow_setup=True），普通事件树根拒收；action_type 写英文常量
-        'reinforce'（强化）或 'payoff'（疑似回收）；埋设随事件自动记录"""
+        """引用已埋伏笔的 event_id 记录强化或疑似回收，埋设随事件自动记录
+        先 read_event 核对 is_foreshadow_setup=True，可位于树内任意位置；目标可空，填写时须先读取
+        action_type 写 'reinforce'（强化）或 'payoff'（疑似回收），evidence 指本次动作原文"""
         args = {
             "source_event_id": source_event_id,
             "action_type": action_type,
@@ -790,8 +778,6 @@ def build_agent_constructors(
         "foreshadow_action": (foreshadow_action, "保存明确强化或疑似回收，照应边不等于动作"),
         "entity": (entity, "登记本章的一个实体（id 为本章实体局部键，name 照抄正文名字）"),
         "relation": (relation, "写一条闭合关系边（两端写正文名字与大类，运行时解析并自动登记）"),
-        "event": (event, "写一个事件节点（el 根=树键、子=树键/节点键）"),
-        "participants": (participants, "把一个事件节点的参与者整体设为 items（名字与大类由运行时解析并自动登记）"),
         "dialogue": (dialogue, "判定一条对话候选（candidate_index+verdict）"),
         "label": (label, "给一个段落打整段情绪标签（段首号）"),
         "metric": (metric, "提交本章摘要与叙事指标（整域一次提交）"),

@@ -1,9 +1,4 @@
-"""
-诊断工作流模块（LangGraph 诊断 Agent）
-
-诊断 agent 通过工具化自主取证（聚合指标/转折素材/人物/主题/图谱信号），
-最终产出诊断结果，不再预构建一次性大 payload
-"""
+"""通过诊断 Agent 自主取证并保存诊断结果"""
 
 from __future__ import annotations
 

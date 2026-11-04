@@ -118,6 +118,23 @@ def test_case_tools_claim_without_arguments_and_do_not_repeat_claim_callback():
     callback.assert_called_once()
 
 
+def test_search_cases_claimed_only_returns_current_owner_unsubmitted_cases():
+    pool = CasePool(new_id())
+    pool.begin("a")
+    pool.begin("b")
+    mine = pool.push("event", "我的待办", "a")["case_id"]
+    other = pool.push("event", "他人的待办", "a")["case_id"]
+    done = pool.push("character", "已办结", "a")["case_id"]
+    pool.claim(mine, "a")
+    pool.claim(other, "b")
+    pool.claim(done, "a")
+    pool.submit(done, "a")
+    tools = {tool.name: tool for tool in build_case_tools(pool, "a")}
+    rows = json.loads(tools["search_cases"].invoke({"claimed_only": True}))
+    assert [row["case_id"] for row in rows] == [mine]
+    assert rows[0]["claimed"] is True and rows[0]["submitted"] is False
+
+
 @pytest.mark.parametrize("available", [0, 4, 10, 16])
 def test_submit_candidates_are_bounded_copies_and_do_not_reserve_cases(available):
     pool = CasePool(new_id())
@@ -158,12 +175,28 @@ def test_multiple_unsubmitted_claims_are_exclusive_and_not_frozen_as_completed()
     assert pool.claim_random("a")["status"] == "empty"
     assert pool.unsubmitted_for("a") == sorted([first, second, third])
     assert pool.claim(second, "b")["status"] == "taken"
-    with pytest.raises(ValueError, match="只能提交"):
+    with pytest.raises(ValueError, match="已由其他执行持有"):
         pool.submit(first, "b")
     assert pool.contribution("a")["submissions"] == []
     pool.confirm("a")
     assert pool.counts() == (3, 0)
     assert pool.claim(first, "b")["status"] == "claimed"
+
+
+def test_submit_names_unclaimed_case_and_this_execution_claims():
+    pool = CasePool(new_id())
+    pool.begin("a")
+    pool.begin("b")
+    mine = pool.push("event", "核对事件", "a")["case_id"]
+    spare = pool.push("event", "核对另一件事", "a")["case_id"]
+    pool.claim(mine, "a")
+    with pytest.raises(ValueError) as unclaimed:
+        pool.submit(spare, "a")
+    assert spare in str(unclaimed.value)
+    assert mine in str(unclaimed.value)
+    with pytest.raises(ValueError) as missing:
+        pool.submit("not-a-case", "a")
+    assert mine in str(missing.value)
 
 
 def test_registry_does_not_retain_finished_run_objects():

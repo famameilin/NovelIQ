@@ -6,43 +6,20 @@ import json
 import time
 from typing import Any
 
-from langchain_core.tools import StructuredTool
-
+from src.agents.annotation.catalog import call_parameters, render_list_signature
 from src.agents.annotation.errors import AnnotationAuthorizationError, AnnotationDependencyError, AnnotationInputError
-from src.agents.annotation.program_contract import PROGRAM_TOOL_NAME
-from src.agents.annotation.program_runtime import RestrictedProgramRuntime
-from src.agents.annotation.tool_batch import _invoke_tool
+from src.agents.program_runtime.contracts import (
+    PROGRAM_MAX_RANGE_ITEMS,
+    PROGRAM_MAX_WHILE_ITERATIONS,
+    PROGRAM_TOOL_NAME,
+)
+from src.agents.program_runtime.interpreter import RestrictedProgramRuntime
+from src.agents.program_runtime.returns import TOOL_RETURN_SHAPES
+from src.agents.tools import Tool, describe_argument_error, invoke_tool
 
 from .tools import WRITE_NAMES
 
 _INPUT_ERRORS = (ValueError, AnnotationInputError, AnnotationAuthorizationError)
-
-
-def bind_finish_ledger(finish_tool: Any, ledger: Any) -> Any:
-    """通用 finish 只返回回执；诊断会话按标注三节点族运行时在批结算前登记结束请求
-
-    会话图复用 annotation 的 route/check 节点，结束信号读 ledger.end_requested：
-    程序面与原生 finish 共用同一工具对象，包一层让两条路径都登记，不改变工具回执与审计。
-    finish 是共享工具的同步实现（coroutine=None），同步/异步两条路径分置包装。
-    """
-    if finish_tool.coroutine is not None:
-        original = finish_tool.coroutine
-
-        async def request_end_async(*args: Any, **kwargs: Any) -> Any:
-            ledger.end_requested = True
-            return await original(*args, **kwargs)
-
-        finish_tool.coroutine = request_end_async
-        return finish_tool
-
-    original = finish_tool.func
-
-    def request_end(*args: Any, **kwargs: Any) -> Any:
-        ledger.end_requested = True
-        return original(*args, **kwargs)
-
-    finish_tool.func = request_end
-    return finish_tool
 
 
 class DiagnosisProgramDependencyError(AnnotationDependencyError):
@@ -53,19 +30,27 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
     """一个诊断执行复用一份变量环境；所有写入仍由原诊断工具维护内存草稿"""
 
     contract_text = (
-        "使用 execute_code(code=...) 提交受限 Python 程序。只支持赋值与等长解包、具名工具调用（可 ** 展开）、"
-        "列表/字典/元组（含 * 与 ** 解包）、列表/字典推导式、"
+        "使用 execute_code(code=...) 提交受限 Python 程序。只支持赋值与等长解包、"
+        "增量赋值（+= -= *= /= //= %=）、具名工具调用（可 ** 展开）、"
+        "列表/字典/元组/集合（含 * 与 ** 解包）、列表/字典/集合推导式、"
         "下标与切片、字典下标赋值、算术与比较、and/or/not、条件表达式、f-string、"
-        "无默认值位置参数的 lambda 与 def（可 return）、有界 for 和 if；"
+        "无默认值位置参数的 lambda 与 def（可 return）、for/while 与 if、try/except/else/finally、"
+        "break/continue、import；"
         "range(stop)/range(start,stop,step) 与基础函数（len/str/int/float/bool/min/max/abs/sum/sorted/enumerate/"
-        "isinstance/any/all/round/repr/print/list/dict/tuple/zip/reversed/format）"
-        "只接受位置参数，最多500项；sorted 另接受 key=lambda 与 reverse=bool，min/max 另接受 key=lambda；"
+        "isinstance/any/all/round/repr/print/list/dict/set/tuple/zip/reversed/format）"
+        "只接受位置参数（dict 另接受 k=v 关键字）；sorted 另接受 key=lambda 或 def 函数与 reverse=bool，"
+        "min/max 另接受 key=lambda 或 def 函数；"
         "内置容器与字符串方法（dict.get/keys/values/items/update、list.append/extend/insert/pop、"
         "str.split/strip/replace/join/find 等）可按属性调用；"
-        "列表拼接结果与字典新增键最多500项；业务工具仍只接受具名参数。"
-        "执行前检查整段语法白名单；禁止 import、try/except、其他属性访问、文件/网络访问；"
-        "可调用函数只有目录列出的工具、基础函数与 range。\n"
+        "import 只开放 json/unicodedata/math/collections/datetime，模块属性只允许调用放行函数；"
+        "except 不写类型或只写 Exception，只捕获运行期错误；"
+        "业务工具仍只接受具名参数。"
+        "执行前检查整段语法白名单；禁止其他属性访问、文件/网络访问；"
+        "可调用函数只有目录列出的工具、基础函数、range 与已导入模块的放行函数。"
+        f"range 与序列重复单项不超过 {PROGRAM_MAX_RANGE_ITEMS}，"
+        f"while 不超过 {PROGRAM_MAX_WHILE_ITERATIONS} 次。\n"
         "工具返回实际 JSON 对象/列表，ID 工具返回实际 ID 字符串；变量跨程序保留。\n"
+        "顶层 return 的值进入回执 result（只接受 JSON 可序列化值）；被 except 捕获的故障进回执 caught。\n"
         "同一程序可连续读取和写入，不等待模型下一轮搬运 ID。\n"
         "所有函数参数以以下真实 schema 为准；evidence 是 paragraph_id/quote/occurrence 对象列表，"
         "不是段号整数。只使用原工具返回的真实 ID 和段号。\n"
@@ -84,9 +69,13 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         *,
         observer: Any = None,
         invocation_id: str = "",
-        dialogue_total: Any = None,
     ) -> None:
-        super().__init__(tools, {tool.name: tool for tool in tools}, observer=observer, dialogue_total=dialogue_total)
+        super().__init__(
+            tools,
+            {tool.name: tool for tool in tools},
+            observer=observer,
+            signature_hint=lambda name: render_list_signature(name, call_parameters(name, self.tools.get(name))),
+        )
         # 执行身份随 call_id 固定进业务地址：business_call_id 唯一键是全局的
         self.invocation_id = invocation_id
         self._pending_end = False
@@ -111,12 +100,6 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
             functions[tool.name] = {"description": tool.description, "parameters": schema}
         # 业务函数返回值与 execute_code 回执分开事件，登记身份仍沿用原领域返回类型
         result_types = {
-            "write_event": {
-                "event": {"status": "written", "event_id": "真实事件ID"},
-                "contain": None,
-                "relation": "真实关系ID",
-            },
-            "write_arc": {"arc": "真实叙事线ID", "link": None},
             "write_outcome": {"outcome": "真实结果ID", "link": None},
         }
         for name, types in result_types.items():
@@ -128,64 +111,48 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
                 "result_by_operation": types,
                 "failed": [{"index": "被拒项索引", "message": "实际原因"}],
             }
-        read_types = {
-            "search_text": [{"content": "命中原文", "paragraph_ids": ["真实段号"], "chapter_id": "真实章号"}],
-            "read_text": {
-                "chapter_id": "真实章号",
-                "paragraph_id": "真实段号",
-                "char_start": "片段起点",
-                "char_end": "片段终点",
-                "content": "实际原文",
-                "source_ref": "证据来源ID",
-            },
-            "search_events": {"events": ["索引行"], "total": "命中总数", "next_offset": "下一页偏移或null"},
-            "read_event": {"kind": "读取对象类型", "evidence": ["原文证据"], "parent_event_id": "直接父事件或null"},
-            "search_graph": {
-                "entities": [{"id": "实体ID", "name": "规范名", "entity_type": "大类"}],
-                "relations": [{"source_id": "实体ID", "target_id": "实体ID", "relation_type": "关系类型"}],
-                "total_entities": "实体总数",
-                "total_relations": "关系总数",
-                "next_offset": "实体下一页偏移或null",
-                "next_relation_offset": "关系下一页偏移或null",
-            },
-            "read_entity": {
-                "id": "实体ID",
-                "name": "规范名",
-                "entity_type": "大类",
-                "attributes": "属性对象",
-                "relations": [{"source_id": "实体ID", "source_name": "规范名",
-                               "target_id": "实体ID", "target_name": "规范名", "relation_type": "关系类型"}],
-            },
-            "search_cases": [{"case_id": "真实案例ID", "case_type": "四类之一",
-                              "claimed": "是否已领取", "submitted": "是否已提交"}],
-            "read_metrics": {
-                "aggregate": "全局指标",
-                "pivots": ["转折点"],
-                "high_tension": ["高张力段"],
-                "foreshadowing": ["伏笔来源"],
-                "foreshadow_expectation": "伏笔回收预期",
-                "relation_changes": ["关系变化"],
-                "graph_signals": "图谱统计",
-            },
-            "read_topics": {"topics": [{"topic_id": "真实主题ID", "words": "主题词", "label": "标签"}]},
-            "claim_case": {"status": "claimed、submitted 或 taken", "case_id": "真实案例ID"},
-            "claim_random_case": {"status": "claimed 或 empty", "case_id": "成功时的真实案例ID",
-                           "case_type": "四类之一", "description": "案例说明"},
-            "submit_case": {"status": "submitted", "case_id": "已提交案例ID",
-                            "candidates": [{"case_id": "可领案例ID", "case_type": "四类之一",
-                                            "description": "案例说明"}]},
-            "push_case": {"case_id": "真实案例ID"},
-            "finish": {"status": "end_requested"},
-        }
-        for name, shape in read_types.items():
+        for name, shape in TOOL_RETURN_SHAPES.items():
             if name in functions:
                 functions[name]["returns"] = shape
+        if "write_link" in functions:
+            functions["write_link"]["returns"] = {
+                "status": "written 或 partial",
+                "results": "与 items 同序的结果数组",
+                "failed": [{"index": "被拒项索引", "message": "实际原因"}],
+                "progress": "事件线进度与会话草稿快照",
+                "report_stale": "报告草稿是否失效",
+            }
+        if "retract_structure" in functions:
+            functions["retract_structure"]["returns"] = {
+                "status": "written 或 partial",
+                "results": "与 items 同序的结果数组",
+                "failed": [{"index": "被拒项索引", "message": "实际原因"}],
+                "progress": "事件线进度与会话草稿快照",
+            }
+        if "write_event" in functions:
+            functions["write_event"]["returns"] = {
+                "status": "written",
+                "tree_id": "事件树独立ID",
+                "results": [{"status": "accepted_candidate", "event_id": "与 items 同序的真实成员ID"}],
+                "failed": [],
+            }
         if "write_diagnosis" in functions:
             functions["write_diagnosis"]["returns"] = {"status": "written", "record": "diagnosis_report"}
+        if "name_event_lines" in functions:
+            functions["name_event_lines"]["returns"] = {
+                "status": "written",
+                "record": "event_line_names",
+                "names": "与提交一致的 tree_id 到线名映射",
+                "progress": "事件线命名进度",
+                "report_stale": "报告草稿是否失效",
+            }
         catalog = {"functions": functions, "$defs": definitions}
         instructions = self.contract_text
         if "write_event" in functions:
-            instructions += "write_event 的成功身份用 result['results'][0]['event_id'] 读取。\n"
+            instructions += (
+                "write_event(items=[...]) 一次提交一棵完整有序事件树，每项是完整事件，不传 operation；"
+                "树身份读取 result['tree_id']，成员身份读取 result['results'][下标]['event_id']。\n"
+            )
         if "write_entity" in functions:
             instructions += (
                 "案例处置写入复用标注语义：write_entity(name,entity_type,el,tags?,description?,"
@@ -202,11 +169,11 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
             )
         if "write_diagnosis" in functions:
             instructions += (
-                "write_arc/write_outcome 的登记身份用 result['results'][0] 读取。\n"
-                "write_diagnosis 只写报告字段，不复制叙事组织草稿；narrative_organization、"
+                "write_outcome 的登记身份用 result['results'][0] 读取。\n"
+                "write_diagnosis 只写报告字段，不复制事件树与结果草稿；narrative_organization、"
                 "novel_id 和 foreshadow_expectation 由运行时在最终保存时绑定。\n"
             )
-        return StructuredTool.from_function(
+        return Tool.from_function(
             coroutine=self.execute,
             name=PROGRAM_TOOL_NAME,
             description=instructions + json.dumps(catalog, ensure_ascii=False, separators=(",", ":")),
@@ -221,7 +188,7 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         self._end_requested = self._pending_end
 
     def take_end_request(self) -> bool:
-        """只把已完成程序的结束请求交给图，不自行完成或保存诊断"""
+        """将已完成程序的结束请求交给会话循环"""
         requested = self._end_requested
         self._end_requested = False
         return requested
@@ -231,8 +198,12 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         return name == PROGRAM_TOOL_NAME and isinstance(error, DiagnosisProgramDependencyError)
 
     async def _dispatch(self, name: str, args: dict[str, Any], *, line: int | None) -> Any:
-        # 每个批量项仍是独立领域操作；先校验整批形状，执行失败不回滚其他成功项
-        if name in WRITE_NAMES and name != "write_diagnosis" and isinstance(args.get("items"), list):
+        # 事件列表是一棵完整事件树，其他工具的批量项各自独立
+        if (
+            name in WRITE_NAMES
+            and name not in {"write_diagnosis", "write_event"}
+            and isinstance(args.get("items"), list)
+        ):
             items = args["items"]
             schema = self.tools[name].args_schema
             try:
@@ -242,7 +213,7 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
             results: list[Any] = []
             failed: list[dict[str, Any]] = []
             for index, item in enumerate(items):
-                self._guard()
+                await self._checkpoint()
                 payload = await self._dispatch_single(name, {**args, "items": [item]}, line=line, item_index=index)
                 if payload is None:
                     results.append(None)
@@ -270,7 +241,7 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         error: BaseException | None = None
         payload: Any = None
         try:
-            raw = await _invoke_tool(self.tools, {"name": name, "args": args, "id": call_id})
+            raw = await invoke_tool(self.tools, {"name": name, "args": args, "id": call_id})
             try:
                 payload = json.loads(raw) if isinstance(raw, str) else raw
             except (ValueError, TypeError):
@@ -278,10 +249,15 @@ class DiagnosisProgramRuntime(RestrictedProgramRuntime):
         except BaseException as exc:
             error = exc
         error_text = (str(error) or type(error).__name__) if error is not None else None
+        argument_detail = describe_argument_error(error) if error is not None else None
+        if argument_detail is not None:
+            hint = self._signature_hint(name) if self._signature_hint is not None else ""
+            error_text = f"参数不合法：{argument_detail}" + (f"；正确参数：{hint}" if hint else "")
         receipt = (
             payload
             if error is None
             else {
+                "record": name,
                 "code": "invalid_arguments"
                 if isinstance(error, _INPUT_ERRORS)
                 else "dependency_unavailable"

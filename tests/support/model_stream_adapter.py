@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from langchain_core.messages import AIMessageChunk
+from src.agents.model_client import StreamDelta
 
 
 class StreamedFakeModelMixin:
@@ -24,7 +24,7 @@ class StreamedFakeModelMixin:
             }
             for index, call in enumerate(getattr(response, "tool_calls", None) or [])
         ]
-        yield AIMessageChunk(
+        yield StreamDelta(
             content=response.content if isinstance(response.content, str) else "",
             tool_call_chunks=tool_call_chunks,
             usage_metadata=getattr(response, "usage_metadata", None),

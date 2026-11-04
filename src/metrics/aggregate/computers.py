@@ -40,11 +40,10 @@ from ..narrative_metrics import (
     compute_middle_collapse_index,
 )
 from ..style_metrics_extra import (
-    compute_avg_word_len,
-    compute_category_density,
     compute_function_word_vector,
     compute_sent_len_std,
     compute_string_token_diversity,
+    compute_word_style,
 )
 from .types import (
     AnnotationData,
@@ -277,12 +276,13 @@ def compute_language_style_metrics(
 
 
     """
+    average_word_length, category_density = compute_word_style(text_data.texts)
     result: dict[str, Any] = {
         "tone_distribution": _compute_tone_distribution(dialogue_tones),
         "string_token_diversity": compute_string_token_diversity(text_data.all_tokens),
-        "avg_word_len": compute_avg_word_len(text_data.texts),
+        "avg_word_len": average_word_length,
         "sent_len_std": compute_sent_len_std(text_data.texts),
-        **{f"category_density_{k}": v for k, v in compute_category_density(text_data.texts).items()},
+        **{f"category_density_{k}": v for k, v in category_density.items()},
     }
     function_word_vector = compute_function_word_vector(text_data.texts)
     if function_word_vector is not None:

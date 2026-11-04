@@ -221,6 +221,12 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
             )
         return len(rows)
 
+    def fetch_statistics_aggregates(self, run_id: str) -> dict[str, Any]:
+        "读取已保存语言统计的全书、章节和情绪分组汇总"
+        from src.storage.repositories.queries.linguistic_statistics import fetch_statistics_aggregates
+
+        return fetch_statistics_aggregates(self.session, run_id)
+
     def has_linguistic_features(self, run_id: str) -> bool:
         "该 run 是否存在语言完成事实（零词元段落同样计入已完成）"
         return (
@@ -235,22 +241,27 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
             is not None
         )
 
-    def fetch_linguistic_sources(self, run_id: str) -> dict[str, Any]:
+    def fetch_linguistic_sources(
+        self, run_id: str, *, after_id: int | None = None, limit: int | None = None
+    ) -> dict[str, Any]:
         "按 3NF 前读取形状返回段落语言结构投影行"
-        metric_rows = (
-            self.session.execute(
-                select(
-                    ParagraphMetric.paragraph_id,
-                    ParagraphMetric.sentence_count,
-                    ParagraphMetric.boundary_pos_score_sum,
-                    ParagraphMetric.boundary_neg_score_sum,
-                )
-                .where(ParagraphMetric.run_id == run_id, ParagraphMetric.linguistic_completed_at.is_not(None))
-                .order_by(ParagraphMetric.paragraph_id)
+        statement = (
+            select(
+                ParagraphMetric.paragraph_id,
+                ParagraphMetric.sentence_count,
+                ParagraphMetric.boundary_pos_score_sum,
+                ParagraphMetric.boundary_neg_score_sum,
             )
-            .mappings()
-            .all()
+            .where(ParagraphMetric.run_id == run_id, ParagraphMetric.linguistic_completed_at.is_not(None))
+            .order_by(ParagraphMetric.paragraph_id)
         )
+        if after_id is not None:
+            statement = statement.where(ParagraphMetric.paragraph_id > after_id)
+        if limit is not None:
+            if limit < 1:
+                raise ValueError("每批段落数量必须大于 0")
+            statement = statement.limit(limit)
+        metric_rows = self.session.execute(statement).mappings().all()
         if not metric_rows:
             return {
                 "metric_rows": [],

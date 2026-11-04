@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-
 from src.agents.context_compaction import (
     build_fallback_note,
     build_summary_messages,
@@ -16,23 +14,24 @@ from src.agents.context_compaction import (
     select_compaction,
     split_prefix,
 )
+from src.agents.messages import AssistantMessage, SystemMessage, ToolMessage, UserMessage
 from tests.agents.test_diagnosis_agent import _analysis_payload, build_graph, call, run_graph
 
 
-def _ai(content: str = "", *, tool_calls=None, prompt_tokens: int | None = None) -> AIMessage:
+def _ai(content: str = "", *, tool_calls=None, prompt_tokens: int | None = None) -> AssistantMessage:
     usage = (
         {"input_tokens": prompt_tokens, "output_tokens": 10, "total_tokens": prompt_tokens + 10}
         if prompt_tokens is not None
         else None
     )
-    return AIMessage(content=content, tool_calls=tool_calls or [], usage_metadata=usage)
+    return AssistantMessage(content=content, tool_calls=tool_calls or [], usage_metadata=usage)
 
 
 def _tool(text: str = "ok") -> ToolMessage:
     return ToolMessage(content=text, tool_call_id="call-1")
 
 
-def _round(code: str, prompt_tokens: int) -> AIMessage:
+def _round(code: str, prompt_tokens: int) -> AssistantMessage:
     return _ai(
         tool_calls=[call("execute_code", {"code": code}, id=f"call-{prompt_tokens}")],
         prompt_tokens=prompt_tokens,
@@ -41,7 +40,7 @@ def _round(code: str, prompt_tokens: int) -> AIMessage:
 
 def test_measure_context_tokens_prefers_provider_prompt_tokens() -> None:
     first = _ai(tool_calls=[call("execute_code", {"code": "x"})], prompt_tokens=1000)
-    messages = [SystemMessage(content="sys"), HumanMessage(content="task"), first, _tool("receipt")]
+    messages = [SystemMessage(content="sys"), UserMessage(content="task"), first, _tool("receipt")]
     expected = 1000 + message_tokens(first) + message_tokens(messages[-1])
     assert measure_context_tokens(messages) == expected
 
@@ -49,7 +48,7 @@ def test_measure_context_tokens_prefers_provider_prompt_tokens() -> None:
 def test_measure_context_tokens_falls_back_to_local_estimate() -> None:
     messages = [
         SystemMessage(content="sys"),
-        HumanMessage(content="task"),
+        UserMessage(content="task"),
         _ai(tool_calls=[call("execute_code", {"code": "x"})]),
         _tool("receipt"),
     ]
@@ -62,7 +61,7 @@ def test_split_prefix_keeps_initial_task_and_tool_rounds() -> None:
     second = _ai(tool_calls=[call("execute_code", {"code": "b"})])
     messages = [
         SystemMessage(content="sys"),
-        HumanMessage(content="task"),
+        UserMessage(content="task"),
         first,
         _tool("a"),
         second,
@@ -79,7 +78,7 @@ def test_select_compaction_drops_oldest_whole_rounds_and_keeps_prefix() -> None:
     third = _ai(tool_calls=[call("execute_code", {"code": "c"})])
     messages = [
         SystemMessage(content="sys"),
-        HumanMessage(content="task"),
+        UserMessage(content="task"),
         first,
         _tool("a"),
         second,
@@ -98,9 +97,9 @@ def test_select_compaction_drops_oldest_whole_rounds_and_keeps_prefix() -> None:
 def test_build_visible_messages_inserts_summary_after_prefix() -> None:
     first = _ai(tool_calls=[call("execute_code", {"code": "a"})])
     second = _ai(content="tail")
-    messages = [SystemMessage(content="sys"), HumanMessage(content="task"), first, _tool("a"), second]
+    messages = [SystemMessage(content="sys"), UserMessage(content="task"), first, _tool("a"), second]
     visible = build_visible_messages(messages, summary="CHECKPOINT", shadowed_count=2)
-    assert visible[0].type == "system"
+    assert visible[0].role == "system"
     assert visible[1].content == "task"
     assert visible[2].content == "CHECKPOINT"
     assert visible[3] is second
@@ -108,20 +107,20 @@ def test_build_visible_messages_inserts_summary_after_prefix() -> None:
 
 def test_build_summary_messages_includes_system_task_previous_summary_and_shadowed() -> None:
     first = _ai(tool_calls=[call("execute_code", {"code": "a"})])
-    prefix = [SystemMessage(content="sys"), HumanMessage(content="task")]
+    prefix = [SystemMessage(content="sys"), UserMessage(content="task")]
     shadowed = [first, _tool("a")]
     built = build_summary_messages(prefix, previous_summary="PREV", shadowed=shadowed)
-    assert built[0].type == "system"
+    assert built[0].role == "system"
     assert built[1].content == "task"
     assert built[2].content == "PREV"
     assert built[3] is first
-    assert built[4].type == "tool"
+    assert built[4].role == "tool"
     assert "压缩引擎" in str(built[-1].content)
 
 
 def test_build_summary_messages_starts_with_user_turn_without_prefix() -> None:
     built = build_summary_messages([], previous_summary=None, shadowed=[_ai(content="a")])
-    assert built[0].type == "human"
+    assert built[0].role == "user"
     assert "压缩引擎" in str(built[-1].content)
 
 
@@ -139,11 +138,11 @@ def test_fallback_note_reports_removed_rounds() -> None:
 
 
 def test_response_text_extracts_text_blocks() -> None:
-    assert response_text(AIMessage(content="hello")) == "hello"
-    assert response_text(
-        AIMessage(content=[{"type": "text", "text": "a"}, {"type": "image", "url": "x"}])
-    ) == "a"
-    assert response_text(AIMessage(content="")) == ""
+    assert response_text(AssistantMessage(content="hello")) == "hello"
+    assert (
+        response_text(AssistantMessage(content=[{"type": "text", "text": "a"}, {"type": "image", "url": "x"}])) == "a"
+    )
+    assert response_text(AssistantMessage(content="")) == ""
 
 
 def test_context_limits_use_ninety_percent_trigger_and_sixteen_percent_tail() -> None:
@@ -156,7 +155,9 @@ async def test_graph_compacts_with_summary_before_main_request() -> None:
     responses = [
         _round("print('x' * 800)", 900),
         _round("print('y' * 800)", 900),
-        AIMessage(content=summary, usage_metadata={"input_tokens": 900, "output_tokens": 20, "total_tokens": 920}),
+        AssistantMessage(
+            content=summary, usage_metadata={"input_tokens": 900, "output_tokens": 20, "total_tokens": 920}
+        ),
         _round(good, 300),
     ]
     graph, model, _ = build_graph(responses, maximum=5, context_window_tokens=300)
@@ -185,7 +186,7 @@ async def test_graph_falls_back_when_summary_is_empty() -> None:
     responses = [
         _round("print('x' * 800)", 900),
         _round("print('y' * 800)", 900),
-        AIMessage(content="", usage_metadata={"input_tokens": 900, "output_tokens": 0, "total_tokens": 900}),
+        AssistantMessage(content="", usage_metadata={"input_tokens": 900, "output_tokens": 0, "total_tokens": 900}),
         _round(good, 300),
     ]
     graph, model, _ = build_graph(responses, maximum=5, context_window_tokens=300)

@@ -36,7 +36,9 @@ def test_health_version_reads_project_source(monkeypatch, unhealthy):
             raise RuntimeError("test unavailable")
 
     monkeypatch.setattr(
-        main, "get_storage", lambda: SimpleNamespace(reads=SimpleNamespace(api_main_health_check_1=check))
+        main,
+        "get_storage",
+        lambda: SimpleNamespace(reads=SimpleNamespace(system=SimpleNamespace(check_connection=check))),
     )
     monkeypatch.setattr(main, "get_pool_status", lambda: None)
     response = TestClient(main.app).get("/health")

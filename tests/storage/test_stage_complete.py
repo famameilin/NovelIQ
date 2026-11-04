@@ -386,7 +386,19 @@ class TestStageCompleteChecks:
         )
         db_session.flush()
         draft, _meta = identity_every_declaration(db_session, run_id)
-        organization = draft.finish()
+        from src.event_trees.organization_models import NarrativeOrganization
+
+        draft.validate_events()
+        organization = NarrativeOrganization(
+            source_agent_id=draft.agent_id,
+            events=list(draft.events.values()),
+            relations=list(draft.relations.values()),
+            outcomes=list(draft.outcomes.values()),
+            queues=list(draft.queues.values()),
+            queue_references=list(draft.queue_references.values()),
+            content_snapshot=draft.content_digest(),
+            structure_snapshot=draft.structure_digest(),
+        )
         report_id = insert_report_fixture(
             db_session,
             run_id,

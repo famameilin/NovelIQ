@@ -11,7 +11,7 @@ from tests.support.storage_fixtures import fixture_id
 def test_fetch_token_usage_stats_reports_unknown_without_rows() -> None:
     """验证无任何计账行时 summary 标记 unknown 且无缺口"""
     session = MagicMock()
-    session.reads.audit_queries_fetch_token_usage_stats_1.return_value = []
+    session.reads.audit.list_accounting_sources.return_value = []
     with (
         patch.object(
             metrics,
@@ -50,7 +50,7 @@ def test_fetch_token_usage_stats_reports_unknown_without_rows() -> None:
 def test_fetch_token_usage_stats_marks_partial_when_gaps_exist() -> None:
     """验证存在覆盖缺口时 coverage_status 标记 partial 并透出缺口桶"""
     session = MagicMock()
-    session.reads.audit_queries_fetch_token_usage_stats_1.return_value = []
+    session.reads.audit.list_accounting_sources.return_value = []
     with (
         patch.object(
             metrics,
@@ -116,13 +116,13 @@ def test_build_invocation_context_maps_annotation_to_agent_call_type() -> None:
 def test_fetch_usage_by_task_groups_current_task_buckets() -> None:
     """验证当前 token 统计任务桶按原始任务聚合"""
     session = MagicMock()
-    session.reads.audit_queries_fetch_token_usage_stats_1.return_value = []
+    session.reads.audit.list_accounting_sources.return_value = []
     execute_result = MagicMock()
     execute_result.fetchall.return_value = [
         SimpleNamespace(task_type="annotation", call_count=2, total_tokens=120),
         SimpleNamespace(task_type="diagnosis", call_count=1, total_tokens=30),
     ]
-    session.reads.audit_queries_fetch_usage_by_task.return_value = execute_result.fetchall.return_value
+    session.reads.audit.list_usage_by_task.return_value = execute_result.fetchall.return_value
 
     stats = metrics._fetch_usage_by_task(session, fixture_id(__name__, "run-1"))
 
@@ -135,8 +135,8 @@ def test_fetch_usage_by_task_groups_current_task_buckets() -> None:
 def test_detect_token_coverage_gaps_reports_unclosed_and_unaccounted_rows() -> None:
     """验证 running、缺计账与本地估算的回合按调用桶报缺口"""
     session = MagicMock()
-    session.reads.audit_queries_fetch_token_usage_stats_1.return_value = []
-    session.reads.audit_queries_detect_token_coverage_gaps_1.return_value = [
+    session.reads.audit.list_accounting_sources.return_value = []
+    session.reads.audit.list_token_coverage_gaps.return_value = [
         SimpleNamespace(task_type="annotation", call_type="agent"),
         SimpleNamespace(task_type="diagnosis", call_type="diagnosis"),
     ]

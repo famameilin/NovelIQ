@@ -8,6 +8,7 @@ from sqlalchemy import and_, select
 
 from src.agents.diagnosis.tools import build_diagnosis_tools
 from src.diagnosis.queries import DiagnosisQueries
+from src.diagnosis.schema import AgentAnalysis
 from src.event_trees.read.foreshadowing import calculate_foreshadow_expectation, fetch_foreshadowing_trees
 from src.event_trees.read.forest import EventForestQuery
 from src.metrics.queries.plotline import PlotlineQuery
@@ -30,7 +31,7 @@ from tests.support.event_tree_fixtures import (
     publish_declarations,
     publish_draft,
 )
-from tests.support.storage_fixtures import fixture_id, storage_for
+from tests.support.storage_fixtures import fixture_id, insert_report_fixture, storage_for
 from tests.workflows.test_annotation_work_pipeline import ProgramModel
 
 
@@ -100,18 +101,19 @@ def _plotline_evidence_text(db_session, run_id: str, fact: GraphFact) -> str:
 async def test_plotline_and_explicit_actions_survive_save_and_resume(db_session):
     novel_id, run_id = create_run_with_chunks(db_session, texts=["封信藏着旧事。印章再次出现。信件揭开旧事。"])
     model = ProgramModel(
-        'event(el="letter", title="旧信", problem="信中隐情是什么", summary="旧信暗示隐情", '
-        'event_type="悬念", status="ongoing", '
-        'evidence=1, isforeshadowing=True, confidence="high")\n'
-        'roots = search_events(query="旧信")\n'
-        'root = roots["events"][0]["event_id"]\n'
-        'foreshadow_action(source_event_id=root, action_type="reinforce", evidence=1)\n'
-        'foreshadow_action(source_event_id=root, action_type="payoff", evidence=1)\n'
-        'plotline(subject_title="旧信之谜", description="印章揭示旧事", '
-        'before="来历未知", after="确认与旧事相关", evidence=1, event_id=root)\n'
-        'metric(summary="旧信揭谜", emotional_valence=0, narrative_function="转折")\nfinish()'
+        'created = write_event(items=[dict(el="letter", title="旧信", problem="信中隐情是什'
+        '么", summary="旧信暗示隐情", event_type="悬念", status="ongoing",'
+        ' evidence=1, isforeshadowing=True, confidence="high")])\nro'
+        'ots = search_events(query="旧信")\nroot = roots["events"][0'
+        ']["event_id"]\nforeshadow_action(source_event_id=root, ac'
+        'tion_type="reinforce", evidence=1)\nforeshadow_action(sou'
+        'rce_event_id=root, action_type="payoff", evidence=1)\nplo'
+        'tline(subject_title="旧信之谜", description="印章揭示旧事", before'
+        '="来历未知", after="确认与旧事相关", evidence=1, event_id=root)\nmet'
+        'ric(summary="旧信揭谜", emotional_valence=0, narrative_funct'
+        'ion="转折")\nfinish()'
     )
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     assert model.calls == 1
@@ -130,7 +132,8 @@ async def test_plotline_and_explicit_actions_survive_save_and_resume(db_session)
     assert source["event_id"] == actions[0].source_event_id
     assert {item["action_type"] for item in source["source_actions"]} == {"setup", "reinforce", "payoff"}
     # 发布事件身份后同一批动作才成为正式伏笔树与章级投影（未发布动作没有可读事件身份）
-    mapping, _draft = publish_declarations(db_session, run_id)
+    mapping, _draft = publish_declarations(db_session, run_id, final=False)
+    insert_report_fixture(db_session, run_id, _draft.agent_id, AgentAnalysis())
     published = DiagnosisQueries(storage_for(db_session)).fetch_foreshadowing_sources(run_id)[0]
     assert published["event_id"] == mapping[actions[0].source_event_id]
     assert calculate_foreshadow_expectation(storage_for(db_session), run_id) == pytest.approx(1.0)
@@ -164,18 +167,21 @@ async def test_foreshadowing_state_follows_passage_order_not_tool_calls(db_sessi
         db_session, texts=["旧信留下隐情。\n\n印章再次出现。\n\n信件终于揭开旧事。"], chapter_ids=[1]
     )
     model = ProgramModel(
-        'event(el="letter", title="旧信", problem="信中隐情是什么", summary="旧信暗示隐情", '
-        'event_type="悬念", status="ongoing", '
-        'evidence=1, isforeshadowing=True, confidence="high")\n'
-        'roots = search_events(query="旧信")\nroot = roots["events"][0]["event_id"]\n'
-        'foreshadow_action(source_event_id=root, action_type="payoff", evidence=3)\n'
-        'foreshadow_action(source_event_id=root, action_type="reinforce", evidence=2)\n'
-        'metric(summary="旧信揭谜", emotional_valence=0, narrative_function="转折")\nfinish()'
+        'created = write_event(items=[dict(el="letter", title="旧信", problem="信中隐情是什'
+        '么", summary="旧信暗示隐情", event_type="悬念", status="ongoing",'
+        ' evidence=1, isforeshadowing=True, confidence="high")])\nro'
+        'ots = search_events(query="旧信")\nroot = roots["events"][0'
+        ']["event_id"]\nforeshadow_action(source_event_id=root, ac'
+        'tion_type="payoff", evidence=3)\nforeshadow_action(source'
+        '_event_id=root, action_type="reinforce", evidence=2)\nmet'
+        'ric(summary="旧信揭谜", emotional_valence=0, narrative_funct'
+        'ion="转折")\nfinish()'
     )
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
-    publish_declarations(db_session, run_id)
+    _mapping, draft = publish_declarations(db_session, run_id, final=False)
+    insert_report_fixture(db_session, run_id, draft.agent_id, AgentAnalysis())
     result = PlotlineQuery(storage_for(db_session), run_id).fetch()
     assert [item["action"] for item in result["changes"]] == ["setup", "reinforce", "payoff"]
     assert result["changes"][-1]["before"] == "已强化"
@@ -194,15 +200,16 @@ async def test_event_reference_accepts_el_local_key(db_session):
     """事件回执同时给出 el 与节点 UUID；用回执里的 el 局部键引用事件也应生效，不再只认 UUID"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["旧信暗示隐情。\n\n印章揭示旧事。"])
     model = ProgramModel(
-        'event(el="letter", title="旧信", problem="信中隐情是什么", summary="旧信暗示隐情", '
-        'event_type="悬念", status="ongoing", '
-        'evidence=1, isforeshadowing=True, confidence="high")\n'
-        'plotline(subject_title="旧信之谜", description="印章揭示旧事", '
-        'before="来历未知", after="确认相关", evidence=2, event_id="letter")\n'
-        'foreshadow_action(source_event_id="letter", action_type="reinforce", evidence=2)\n'
-        'metric(summary="旧信揭谜", emotional_valence=0, narrative_function="转折")\nfinish()'
+        'created = write_event(items=[dict(el="letter", title="旧信", problem="信中隐情是什'
+        '么", summary="旧信暗示隐情", event_type="悬念", status="ongoing",'
+        ' evidence=1, isforeshadowing=True, confidence="high")])\npl'
+        'otline(subject_title="旧信之谜", description="印章揭示旧事", befor'
+        'e="来历未知", after="确认相关", evidence=2, event_id="letter")\nf'
+        'oreshadow_action(source_event_id="letter", action_type="'
+        'reinforce", evidence=2)\nmetric(summary="旧信揭谜", emotional'
+        '_valence=0, narrative_function="转折")\nfinish()'
     )
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
     assert len(_run_plotlines(db_session, run_id)) == 1
@@ -219,13 +226,13 @@ async def test_independent_plotline_subject_needs_no_event_identity(db_session):
         'before="求入山门", after="寻访旧友", evidence=1)\n'
         'metric(summary="改换目标", emotional_valence=0, narrative_function="转折")\nfinish()'
     )
-    with patch("src.model_pool.llm.build_chat_model", return_value=model):
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     before = PlotlineQuery(storage_for(db_session), run_id).fetch()
     assert before["total"] == 1
     assert before["changes"][0]["subject_title"] == "寻友目标"
     assert before["changes"][0]["source_event_ids"] == []
-    publish_declarations(db_session, run_id)
+    publish_declarations(db_session, run_id, final=False)
     after = PlotlineQuery(storage_for(db_session), run_id).fetch()
     # 发布只改变组织状态：独立推进的读取结果与来源事件集合保持一致
     assert after["total"] == before["total"] == 1
@@ -238,13 +245,14 @@ async def test_foreshadow_expectation_uses_frozen_and_published_identity(db_sess
         db_session, texts=["旧信暗示秘密。", "旧信重现，秘密已经揭晓。"], chapter_ids=[1, 2]
     )
     programs = [
-        f'event(el="letter", title="旧信之谜", problem="秘密是什么", summary="{summary}", '
-        f'event_type="悬念", status="ongoing", evidence=1, isforeshadowing=True, confidence="high")\n'
+        f'created = write_event(items=[dict(el="letter", title="旧信之谜", problem="秘密是什么", summary="{summary}", '
+        f'event_type="悬念", status="ongoing", evidence=1, isforeshadowing=True, confidence="high")])\n'
         + ('foreshadow_action(source_event_id="letter", action_type="payoff", evidence=1)\n' if index else "")
+        + ("")
         + 'metric(summary="旧信", emotional_valence=0, narrative_function="转折")\nfinish()'
         for index, summary in enumerate(["旧信暗示秘密", "旧信揭露秘密"])
     ]
-    with patch("src.model_pool.llm.build_chat_model", return_value=ProgramModel(programs)):
+    with patch("src.agents.model_client.build_chat_model", return_value=ProgramModel(programs)):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (2, 0, 2)
     failures = list(
         db_session.scalars(
@@ -264,7 +272,7 @@ async def test_foreshadow_expectation_uses_frozen_and_published_identity(db_sess
     frozen = DiagnosisQueries(storage_for(db_session)).calculate_foreshadow_expectation(run_id)
     assert frozen is not None and 0.0 <= frozen <= 1.0
     assert calculate_foreshadow_expectation(storage_for(db_session), run_id) == frozen
-    publish_draft(db_session, run_id, draft)
+    publish_draft(db_session, run_id, draft, final=False)
     assert calculate_foreshadow_expectation(storage_for(db_session), run_id) == pytest.approx(frozen)
 
 
@@ -273,11 +281,13 @@ async def test_foreshadow_expectation_tolerates_unbound_identity(db_session):
     """身份覆盖缺口不阻止计算：未绑定事件身份的伏笔根按自身身份单独成组"""
     novel_id, run_id = create_run_with_chunks(db_session, texts=["旧信暗示秘密。"])
     program = (
-        'event(el="letter", title="旧信之谜", problem="秘密是什么", summary="旧信暗示秘密", '
-        'event_type="悬念", status="ongoing", evidence=1, isforeshadowing=True, confidence="high")\n'
-        'metric(summary="旧信", emotional_valence=0, narrative_function="转折")\nfinish()'
+        'created = write_event(items=[dict(el="letter", title="旧信之谜", problem="秘密是什'
+        '么", summary="旧信暗示秘密", event_type="悬念", status="ongoing",'
+        ' evidence=1, isforeshadowing=True, confidence="high")])\nme'
+        'tric(summary="旧信", emotional_valence=0, narrative_functi'
+        'on="转折")\nfinish()'
     )
-    with patch("src.model_pool.llm.build_chat_model", return_value=ProgramModel(program)):
+    with patch("src.agents.model_client.build_chat_model", return_value=ProgramModel(program)):
         assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
     db_session.expire_all()
     expectation = DiagnosisQueries(storage_for(db_session)).calculate_foreshadow_expectation(run_id)
@@ -285,23 +295,15 @@ async def test_foreshadow_expectation_tolerates_unbound_identity(db_session):
     assert expectation == calculate_foreshadow_expectation(storage_for(db_session), run_id)
 
 
-def test_foreshadowing_trees_skip_sources_without_event_identity(monkeypatch):
+def test_foreshadowing_trees_preserve_source_identity_and_location(monkeypatch):
     from types import SimpleNamespace
 
     from src.event_trees.read import foreshadowing as module
 
-    bound = SimpleNamespace(
-        root_event_id="event-1",
-        source_event_id="event-1",
-        chapter_id=1,
-        action_type="setup",
-        target_event_id=None,
-        evidence=[],
-        evidence_scope="paragraph",
-        chapter_order=0,
-        operation_order=0,
-        action_id="action-1",
-    )
+    bound = {
+        "source_event_id": "event-1", "chapter_id": 1, "action_type": "setup", "target_event_id": None,
+        "source_locator": {"event_id": "event-1", "tree_id": "tree-1"}, "target_locator": None,
+    }
 
     class Query:
         events = {"event-1": SimpleNamespace(title="根事件", payoff_likelihood="high", strength="high")}
@@ -311,11 +313,12 @@ def test_foreshadowing_trees_skip_sources_without_event_identity(monkeypatch):
             pass
 
         def fetch(self):
-            pass
+            return {"foreshadowing_actions": [bound]}
 
-    monkeypatch.setattr(module, "load_foreshadowing_actions", lambda session, run_id: [bound])
     monkeypatch.setattr(module, "EventTreeQuery", Query)
 
     trees = module.fetch_foreshadowing_trees(SimpleNamespace(), "run")
 
-    assert [tree.root_event_id for tree in trees] == ["event-1"]
+    assert [tree.source_event_id for tree in trees] == ["event-1"]
+    assert trees[0].source_locator["tree_id"] == "tree-1"
+    assert trees[0].target_locator is None

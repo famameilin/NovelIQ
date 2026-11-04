@@ -17,38 +17,34 @@ class _DummyTaskService:
         return self._db_task
 
 
-@pytest.mark.asyncio
-async def test_resolve_run_id_uses_in_memory_run_id():
+def test_resolve_run_id_uses_in_memory_run_id():
     service = _DummyTaskService(
         task={"task_id": "6b401f00", "run_id": fixture_id(__name__, "6b401f00-6d56-4aaa-a05a-95179e8b803a")},
         db_task=None,
     )
-    run_id = await resolve_run_id(task_id="6b401f00", task_service=service)
+    run_id = resolve_run_id(task_id="6b401f00", task_service=service)
     assert run_id == fixture_id(__name__, "6b401f00-6d56-4aaa-a05a-95179e8b803a")
 
 
-@pytest.mark.asyncio
-async def test_resolve_run_id_fallbacks_to_db_when_in_memory_run_id_missing():
+def test_resolve_run_id_fallbacks_to_db_when_in_memory_run_id_missing():
     service = _DummyTaskService(
         task={"task_id": "6b401f00", "novel_id": "2f6b72fc", "status": "completed"},
         db_task={"task_id": "6b401f00", "run_id": fixture_id(__name__, "6b401f00-6d56-4aaa-a05a-95179e8b803a")},
     )
-    run_id = await resolve_run_id(task_id="6b401f00", task_service=service)
+    run_id = resolve_run_id(task_id="6b401f00", task_service=service)
     assert run_id == fixture_id(__name__, "6b401f00-6d56-4aaa-a05a-95179e8b803a")
 
 
-@pytest.mark.asyncio
-async def test_resolve_run_id_raises_not_found_when_task_missing():
+def test_resolve_run_id_raises_not_found_when_task_missing():
     service = _DummyTaskService(task=None, db_task=None)
     with pytest.raises(NovelNotFoundError):
-        await resolve_run_id(task_id="6b401f00", task_service=service)
+        resolve_run_id(task_id="6b401f00", task_service=service)
 
 
-@pytest.mark.asyncio
-async def test_resolve_run_id_raises_incomplete_when_run_id_missing_everywhere():
+def test_resolve_run_id_raises_incomplete_when_run_id_missing_everywhere():
     service = _DummyTaskService(
         task={"task_id": "6b401f00", "novel_id": "2f6b72fc", "status": "completed"},
         db_task={"task_id": "6b401f00", "novel_id": "2f6b72fc", "status": "completed"},
     )
     with pytest.raises(NovelNotFoundError):
-        await resolve_run_id(task_id="6b401f00", task_service=service)
+        resolve_run_id(task_id="6b401f00", task_service=service)

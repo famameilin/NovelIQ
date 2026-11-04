@@ -44,10 +44,9 @@ def _retract_relation(
     关系变化是 agent_annotations 的事实图操作，经 agent._save
     与原文证据同事务落库；这里沿用同一入口，不手拼图事实行。
     """
-    from src.agents.annotation.output_models import BoundChapterAnnotation
+    from src.agents.annotation.output_models import BoundChapterAnnotation, BoundCharacterObservation
     from src.event_trees.models import EventParticipantInput
-    from src.fact_graph.inputs import ChapterMetricsInput
-    from src.fact_graph.outputs import BoundCharacterObservation
+    from src.metrics.annotation_inputs import ChapterMetricsInput
 
     entity_ops: list[dict] = []
     observations: list[BoundCharacterObservation] = []

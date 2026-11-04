@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from src.api.dependencies import get_novel_service
@@ -18,17 +21,34 @@ router = APIRouter(prefix="/novels", tags=["novels"])
 @router.post("/upload", response_model=UploadResponse)
 async def upload_novel(
     file: UploadFile = File(...),
+    title: str | None = Form(None),
+    author: str | None = Form(None),
+    cover: UploadFile | None = File(None),
     service: NovelService = Depends(get_novel_service),
 ) -> UploadResponse:
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="文件内容不能为空")
-    novel_id = await service.save_upload(content, file.filename or "unknown.txt")
-    return UploadResponse(novel_id=novel_id, filename=file.filename or "unknown.txt")
+    cover_content = await cover.read() if cover is not None else b""
+    filename = file.filename or "unknown.txt"
+    saved = await service.save_upload(
+        content,
+        filename,
+        title=title,
+        author=author,
+        cover_content=cover_content or None,
+        cover_suffix=Path(cover.filename or "").suffix if cover is not None else None,
+    )
+    return UploadResponse(
+        novel_id=saved.novel_id,
+        filename=filename,
+        title=saved.title,
+        word_count=saved.word_count,
+    )
 
 
 @router.get("/")
-async def list_novels(
+def list_novels(
     page: int = 1,
     page_size: int = 12,
     service: NovelService = Depends(get_novel_service),
@@ -57,7 +77,7 @@ async def list_novels(
 
 
 @router.get("/{novel_id}")
-async def get_novel(
+def get_novel(
     novel_id: str,
     service: NovelService = Depends(get_novel_service),
 ):
@@ -65,6 +85,19 @@ async def get_novel(
         return service.get_novel(novel_id)
     except NovelNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"小说不存在: {novel_id}") from exc
+
+
+@router.get("/{novel_id}/cover")
+def get_novel_cover(
+    novel_id: str,
+    service: NovelService = Depends(get_novel_service),
+):
+    "返回小说上传的封面图片"
+    service.get_novel(novel_id)
+    cover_path = service.find_cover(novel_id)
+    if cover_path is None:
+        raise HTTPException(status_code=404, detail=f"封面不存在: {novel_id}")
+    return FileResponse(cover_path)
 
 
 @router.delete("/{novel_id}")

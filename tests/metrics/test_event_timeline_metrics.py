@@ -1,18 +1,11 @@
-"""事件森林时间轴度量单元测试（一树一节点）
-
-标注来源链与章级声明由夹具按正式关系写入，完整事件
-经正式诊断发布链（EventOrganizationDraft → save_diagnosis_result）建立；断言只针对
-时间轴读面的行为与输出，不复制文案或数量形状。
-"""
+"""使用独立读取夹具验证事件森林时间轴度量"""
 
 from __future__ import annotations
 
 import pytest
 from sqlalchemy import select
 
-from src.agents.diagnosis.persistence import save_diagnosis_result
 from src.diagnosis.schema import AgentAnalysis
-from src.event_trees.organization import EventOrganizationDraft
 from src.event_trees.read.forest import EventForestQuery
 from src.metrics.event_timeline_metrics import serialize_event_timeline_node
 from src.metrics.queries.timeline import build_event_timeline_plan
@@ -21,8 +14,7 @@ from src.storage.models import Agent, Paragraph
 from src.storage.repositories import ChapterRepository
 from src.storage.repositories.paragraph import insert_paragraph_tension_observations
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
-from tests.support.event_tree_fixtures import report_case_anchor
-from tests.support.storage_fixtures import storage_for
+from tests.support.storage_fixtures import insert_report_fixture, storage_for
 from tests.support.timeline_contract_helpers import (
     create_chapter_annotation_source,
     save_event_declaration,
@@ -35,38 +27,18 @@ _THREE_TREE_PARTICIPANTS = [["顾霜"], ["顾霜", "苏映雪"], ["顾霜"]]
 _THREE_TREE_TENSIONS = [0.4, 0.9, 0.5]
 
 
-def _publish_one_event_per_declaration(
-    db_session,
-    *,
-    run_id: str,
-    declarations: list[str],
-    evidence_paragraph_id: int,
-    character_names: list[str],
-) -> None:
-    """经正式诊断发布链把每条声明收口为一个完整事件（互不包含、互不相同）"""
-    session_id = new_id()
-    agent_id = new_id()
-    db_session.add(Agent(id=session_id, run_id=run_id, type="report", status="running"))
-    db_session.add(Agent(id=agent_id, run_id=run_id, type="report", status="running"))
-    draft = EventOrganizationDraft(storage_for(db_session), run_id, session_id)
-    draft.fixture_session = db_session
-    draft.case_id, draft.producer_agent_id = report_case_anchor(run_id), agent_id
-    from src.event_trees.diagnosis_persistence import hydrate_draft_from_run
-
-    hydrate_draft_from_run(storage_for(db_session), run_id, draft)
-    organization = draft.finish()
-    save_diagnosis_result(
-        storage_for(db_session),
-        run_id,
+def _seed_read_report(db_session, *, run_id: str, character_names: list[str]) -> None:
+    """写入读取度量所需的角色评分"""
+    author = new_id()
+    db_session.add(Agent(id=author, run_id=run_id, type="report", status="running"))
+    db_session.flush()
+    insert_report_fixture(
+        db_session, run_id, author,
         AgentAnalysis(
-            narrative_organization=organization,
-            focus_characters=character_names[:1],
-            main_characters=list(character_names),
+            focus_characters=character_names[:1], main_characters=list(character_names),
             core_cast=list(character_names),
             arc_scores={name: 8.0 - index * 0.5 for index, name in enumerate(character_names)},
-            genre_labels=["通用"],
-            style_labels=["严肃"],
-            diagnosis="事件时间轴度量夹具诊断",
+            genre_labels=["通用"], style_labels=["严肃"], diagnosis="事件时间轴度量夹具诊断",
             focus_structure="single" if len(character_names) == 1 else "dual",
         ),
     )
@@ -84,7 +56,6 @@ def _build_forest(
     chapter_ids = list(range(1, len(texts) + 1))
     _, run_id = create_run_with_chunks(db_session, texts=texts, chapter_ids=chapter_ids, title=title)
     groups = participants_by_chapter or [["顾霜"] for _ in chapter_ids]
-    declarations: list[str] = []
     paragraph_ids: list[int] = []
     for index, chapter_id in enumerate(chapter_ids):
         record_id, _agent_id = create_chapter_annotation_source(db_session, run_id=run_id, chapter_id=chapter_id)
@@ -94,8 +65,7 @@ def _build_forest(
             .order_by(Paragraph.paragraph_id)
         )
         paragraph_ids.append(paragraph.paragraph_id)
-        declarations.append(
-            save_event_declaration(
+        save_event_declaration(
                 db_session,
                 run_id=run_id,
                 record_id=record_id,
@@ -105,16 +75,9 @@ def _build_forest(
                 problem=f"第{chapter_id}章事件问题",
                 summary=paragraph.text,
                 participants=[{"name": name, "entity_type": "character", "role": "主体"} for name in groups[index]],
-            )
         )
     character_names = sorted({name for group in groups for name in group})
-    _publish_one_event_per_declaration(
-        db_session,
-        run_id=run_id,
-        declarations=declarations,
-        evidence_paragraph_id=paragraph_ids[0],
-        character_names=character_names,
-    )
+    _seed_read_report(db_session, run_id=run_id, character_names=character_names)
     insert_paragraph_tension_observations(db_session, run_id, list(zip(paragraph_ids, tensions, strict=True)))
     db_session.commit()
     return run_id
@@ -200,8 +163,8 @@ def test_importance_score_formula(db_session) -> None:
         payload = serialize_event_timeline_node(node)
         assert payload["node_type"] == "event"
         assert payload["tree_id"] == node.tree_id
-        assert payload["root_event_id"] == node.root_event_id
-        assert payload["main_chain"] == [node.root_event_id]
+        assert payload["entry_event_id"] == node.entry_event_id
+        assert payload["main_chain"] == [node.entry_event_id]
         # 读面人物来自声明参与者，实体投影给出正式名字与角色大类
         expected = _THREE_TREE_PARTICIPANTS[node.anchor_chapter_id - 1]
         assert sorted(item["entity"]["name"] for item in payload["participants"]) == sorted(expected)

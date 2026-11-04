@@ -7,8 +7,6 @@ from __future__ import annotations
 import unicodedata
 from typing import Any
 
-from src.fact_graph.schema import EL_PATH_SEP
-
 from .errors import AnnotationStageRejection
 from .ir_contract import CASE_DESCRIPTION_MAX_CHARS, ROLE_NAMESPACE_SEP
 
@@ -24,10 +22,16 @@ def namespace_el(role: str, local_key: str) -> str:
 
 
 def namespace_event_el(role: str, el: str) -> str:
-    """用于把事件 el（树键/节点键）按角色命名空间化（只前缀树键，节点键原样）"""
-    tree_key, _, node_key = el.partition(EL_PATH_SEP)
-    namespaced = namespace_el(role, tree_key)
-    return f"{namespaced}{EL_PATH_SEP}{node_key}" if node_key else namespaced
+    """用于把事件引用 id 按角色命名空间化"""
+    return namespace_el(role, el)
+
+
+def namespace_event_el_once(role: str, el: str) -> str:
+    """用于把事件引用 id 按角色命名空间化，已带本角色前缀时原样返回"""
+    prefix = f"{role}{ROLE_NAMESPACE_SEP}"
+    if el.startswith(prefix):
+        return el
+    return namespace_event_el(role, el)
 
 
 def truncate_case_description(text: str) -> str:
@@ -97,9 +101,9 @@ def _require_name(value: Any, *, record: str, field_name: str) -> str:
     name 只用于落库时的实体登记与人类可读展示。
     """
     text = _require_text(value, record=record, field_name=field_name)
-    if EL_PATH_SEP in text:
+    if "/" in text:
         raise _reject(
-            f"{field_name} 不能包含斜杠（那是事件树层级键的分隔符）：{text}",
+            f"{field_name} 不能包含斜杠：{text}",
             record=record,
             field=field_name,
             code="invalid_value",
@@ -111,13 +115,13 @@ def _require_name(value: Any, *, record: str, field_name: str) -> str:
 def _require_local_key(value: Any, *, record: str, field_name: str) -> str:
     """用于校验模型自定的引用键（本 agent 局部 id：实体 a1/a2…、事件树键 t1）"""
     text = _require_text(value, record=record, field_name=field_name)
-    if EL_PATH_SEP in text or not all(char.isalnum() or char == "_" for char in text):
+    if "/" in text or not all(char.isalnum() or char == "_" for char in text):
         raise _reject(
             f"{field_name} 只能是字母/数字/下划线组成的引用键：{text}",
             record=record,
             field=field_name,
             code="invalid_value",
-            expected="你自定的短键（如 a1、a2、t1）；不要用空格、斜杠或汉字",
+            expected="你自定的短键（如 a1、a2、e1）；不要用空格、斜杠或汉字",
         )
     return text
 

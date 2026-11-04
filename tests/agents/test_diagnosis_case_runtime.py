@@ -1,6 +1,7 @@
 "案例会话调度、事务取消与批量读取"
 
 import asyncio
+import json
 import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -10,6 +11,7 @@ import pytest
 from src.agents.annotation.shared_tools import build_finish_tool, build_state_read_tools
 from src.agents.diagnosis.read_context import DiagnosisAnnotationEventSource
 from src.agents.diagnosis.work_runtime import DiagnosisWorkContext, DiagnosisWorkScheduler
+from src.agents.program_runtime.contracts import ProgramExecutionTimeout
 from src.agents.stream import ModelRequestError
 from src.case_pool import CasePool
 from src.event_bus import EventBus
@@ -20,8 +22,14 @@ from src.storage import new_id
 
 def scheduler_for(domain):
     return DiagnosisWorkScheduler(
-        run_id=new_id(), domain=domain, bus=EventBus(), model_id="test",
-        llm_factory=Mock(), observer_factory=Mock(), audit_barrier=AsyncMock(), case_sessions=3,
+        run_id=new_id(),
+        domain=domain,
+        bus=EventBus(),
+        model_id="test",
+        llm_factory=Mock(),
+        observer_factory=Mock(),
+        audit_barrier=AsyncMock(),
+        case_sessions=3,
     )
 
 
@@ -42,33 +50,35 @@ async def test_single_pending_case_starts_one_session(monkeypatch):
 
 
 def session_scheduler(
-    monkeypatch, *, state=None, pending_after_capacity=1, claimed=0, unsubmitted=0, save=None, model="test",
+    monkeypatch,
+    *,
+    state=None,
+    pending_after_capacity=1,
+    claimed=0,
+    unsubmitted=0,
+    save=None,
+    model="test",
+    completion=lambda: [],
 ):
     program = SimpleNamespace(build_tool=lambda: object(), tools={"finish": build_finish_tool(lambda: {})})
-    context = DiagnosisWorkContext(program, [], lambda: [], 15, lambda: claimed, lambda: unsubmitted)
+    context = DiagnosisWorkContext(program, [], completion, 15, lambda: claimed, lambda: unsubmitted)
     domain = SimpleNamespace(
         case_counts=lambda: (pending_after_capacity, 0),
         build_session_context=Mock(return_value=context),
-        save_session_progress=save or Mock(), abort_session=Mock(),
+        save_session_progress=save or Mock(),
+        abort_session=Mock(),
     )
     scheduler = scheduler_for(domain)
     recorder = Mock(sequence=0)
     observer = SimpleNamespace(_recorder=recorder, _context={"agent_id": "a"}, _turn_counter=0)
     scheduler.observer_factory.return_value = observer
-    graph = SimpleNamespace(ainvoke=AsyncMock(return_value=state or {"iterations": 1}))
-    monkeypatch.setattr("src.agents.annotation.agent_graph.build_agent_graph", lambda *a, **k: graph)
+    graph = SimpleNamespace(run=AsyncMock(return_value=state or {"iterations": 1}))
+    monkeypatch.setattr("src.agents.diagnosis.session_loop.build_diagnosis_loop", lambda *a, **k: graph)
 
     async def request(message):
         if message.topic == "pool.enqueue":
             scheduler._waiting[message.work_id].set_result(
-                SelectionResult(
-                    scheduler.run_id,
-                    message.work_id,
-                    model,
-                    entry_id="test-entry",
-                    attempt_number=1,
-                    reservation_id="reservation",
-                )
+                SelectionResult(scheduler.run_id, message.work_id, model, f"entry:{model}", 1, "reservation")
             )
 
     monkeypatch.setattr(scheduler.bus, "request", AsyncMock(side_effect=request))
@@ -91,8 +101,8 @@ async def test_session_runs_on_elected_model_and_reports_it_to_observer(monkeypa
 
     scheduler.observer_factory = Mock(side_effect=observer_factory)
     await scheduler._session("case:1", "case")
-    # 会话按模型池选举结果建模型、登记审计，不依赖固定的诊断模型
-    assert seen == {"llm": "pool-model-b", "observer": "pool-model-b"}
+    # 会话按模型池选举结果的条目身份建模型，审计登记用模型名
+    assert seen == {"llm": "entry:pool-model-b", "observer": "pool-model-b"}
     domain.save_session_progress.assert_called_once()
     assert recorder.finish_invocation.call_args.kwargs["status"] == "success"
 
@@ -102,11 +112,29 @@ async def test_case_session_elects_while_report_session_pins_diagnosis_model(mon
     scheduler.model_id = "pinned-model"
     await scheduler._session("case:1", "case")
     await scheduler._session(scheduler.report_key, "report")
-    enqueues = [
-        call.args[0] for call in scheduler.bus.request.call_args_list if call.args[0].topic == "pool.enqueue"
-    ]
+    enqueues = [call.args[0] for call in scheduler.bus.request.call_args_list if call.args[0].topic == "pool.enqueue"]
     # 案例会话按池选举承载模型，报告会话沿用指定诊断模型
     assert [message.payload.fixed_model_id for message in enqueues] == [None, "pinned-model"]
+
+
+async def test_halted_report_session_saves_when_completion_passes(monkeypatch):
+    """报告会话回合用尽但已收口：按已提交内容保存并记成功"""
+    scheduler, domain, recorder = session_scheduler(
+        monkeypatch, state={"iterations": 30, "halted": True}, completion=lambda: []
+    )
+    assert await scheduler._attempt(scheduler.report_key, "report") is False
+    domain.save_session_progress.assert_called_once()
+    assert recorder.finish_invocation.call_args.kwargs["status"] == "success"
+
+
+async def test_halted_report_session_retries_with_completion_gaps(monkeypatch):
+    """报告会话回合用尽且未收口：不保存半成品，带缺口交回模型池重新选举"""
+    scheduler, domain, recorder = session_scheduler(
+        monkeypatch, state={"iterations": 30, "halted": True}, completion=lambda: ["报告未提交"]
+    )
+    assert await scheduler._attempt(scheduler.report_key, "report") is True
+    domain.save_session_progress.assert_not_called()
+    assert "报告未提交" in recorder.finish_invocation.call_args.kwargs["final_error"]
 
 
 async def test_capacity_wait_ending_with_empty_pool_skips_model(monkeypatch):
@@ -119,23 +147,31 @@ async def test_capacity_wait_ending_with_empty_pool_skips_model(monkeypatch):
 
 
 @pytest.mark.parametrize("role", ["case", "report"])
-@pytest.mark.parametrize("failure", ["budget", "model"])
+@pytest.mark.parametrize("failure", ["budget", "model", "program_timeout"])
 async def test_failed_session_reselects_same_work_with_fresh_execution(monkeypatch, role, failure):
-    scheduler, domain, _ = session_scheduler(monkeypatch)
+    completion = (lambda: ["报告未提交"]) if (role, failure) == ("report", "budget") else (lambda: [])
+    scheduler, domain, _ = session_scheduler(monkeypatch, completion=completion)
     responses = [
-        {"iterations": 15, "halted": True} if failure == "budget" else ModelRequestError("鉴权失败"),
+        {
+            "budget": {"iterations": 15, "halted": True},
+            "model": ModelRequestError("鉴权失败"),
+            "program_timeout": ProgramExecutionTimeout(json.dumps({"error": {"type": "deadline_exceeded"}})),
+        }[failure],
         {"iterations": 1, "completion_ok": True},
     ]
-    graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=responses))
-    monkeypatch.setattr("src.agents.annotation.agent_graph.build_agent_graph", lambda *a, **k: graph)
+    graph = SimpleNamespace(run=AsyncMock(side_effect=responses))
+    monkeypatch.setattr("src.agents.diagnosis.session_loop.build_diagnosis_loop", lambda *a, **k: graph)
     scheduler.observer_factory.side_effect = lambda progress: SimpleNamespace(
-        _recorder=Mock(sequence=0), _context={"agent_id": progress.agent_id}, _turn_counter=0,
+        _recorder=Mock(sequence=0),
+        _context={"agent_id": progress.agent_id},
+        _turn_counter=0,
     )
     await scheduler._session("stable-work", role)
     messages = [call.args[0] for call in scheduler.bus.request.call_args_list]
     assert [message.work_id for message in messages if message.topic == "pool.enqueue"] == ["stable-work"] * 2
     assert [message.payload["outcome"] for message in messages if message.topic == "pool.feedback"] == [
-        "retry", "released",
+        "retry",
+        "released",
     ]
     identities = [call.args[0].agent_id for call in scheduler.observer_factory.call_args_list]
     assert len(set(identities)) == 2
@@ -146,8 +182,8 @@ async def test_failed_session_reselects_same_work_with_fresh_execution(monkeypat
 @pytest.mark.parametrize("error", [RuntimeError("项目异常"), TimeoutError("数据库超时")])
 async def test_project_exception_is_not_reclassified_as_model_retry(monkeypatch, error):
     scheduler, domain, _ = session_scheduler(monkeypatch)
-    graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=error))
-    monkeypatch.setattr("src.agents.annotation.agent_graph.build_agent_graph", lambda *a, **k: graph)
+    graph = SimpleNamespace(run=AsyncMock(side_effect=error))
+    monkeypatch.setattr("src.agents.diagnosis.session_loop.build_diagnosis_loop", lambda *a, **k: graph)
     with pytest.raises(type(error), match=str(error)):
         await scheduler._session("case:1", "case")
     assert scheduler.observer_factory.call_count == 1
@@ -166,7 +202,9 @@ async def test_exhausted_session_without_claim_retries_and_releases_capacity(mon
 
 async def test_exhausted_session_with_claim_saves_progress(monkeypatch):
     scheduler, domain, recorder = session_scheduler(
-        monkeypatch, state={"iterations": 15, "halted": True}, claimed=1,
+        monkeypatch,
+        state={"iterations": 15, "halted": True},
+        claimed=1,
     )
     await scheduler._attempt("case:1", "case")
     domain.save_session_progress.assert_called_once()
@@ -175,7 +213,10 @@ async def test_exhausted_session_with_claim_saves_progress(monkeypatch):
 
 async def test_exhausted_unsubmitted_claim_saves_valid_outputs_and_returns_for_refill(monkeypatch):
     scheduler, domain, recorder = session_scheduler(
-        monkeypatch, state={"iterations": 15, "halted": True}, claimed=1, unsubmitted=1,
+        monkeypatch,
+        state={"iterations": 15, "halted": True},
+        claimed=1,
+        unsubmitted=1,
     )
     await scheduler._attempt("case:1", "case")
     domain.save_session_progress.assert_called_once()
@@ -196,7 +237,10 @@ async def test_incomplete_session_without_exhausted_budget_still_reports_failure
 
 async def test_exhausted_unsubmitted_claim_does_not_hide_save_failure(monkeypatch):
     scheduler, domain, recorder = session_scheduler(
-        monkeypatch, state={"iterations": 15, "halted": True}, claimed=1, unsubmitted=1,
+        monkeypatch,
+        state={"iterations": 15, "halted": True},
+        claimed=1,
+        unsubmitted=1,
         save=Mock(side_effect=OSError("保存失败")),
     )
     with pytest.raises(OSError, match="保存失败"):
@@ -222,8 +266,12 @@ async def test_exhausted_session_refills_released_case_without_cancelling_other_
         started.append(author)
         program = SimpleNamespace(build_tool=lambda: object(), tools={"finish": build_finish_tool(lambda: {})})
         return DiagnosisWorkContext(
-            program, [], lambda: [], 15,
-            lambda: len(pool.claims_for(author)), lambda: len(pool.unsubmitted_for(author)),
+            program,
+            [],
+            lambda: [],
+            15,
+            lambda: len(pool.claims_for(author)),
+            lambda: len(pool.unsubmitted_for(author)),
         )
 
     def save(author, role):
@@ -231,14 +279,20 @@ async def test_exhausted_session_refills_released_case_without_cancelling_other_
         pool.confirm(author)
 
     domain = SimpleNamespace(
-        case_pool=pool, case_counts=pool.counts, build_session_context=context, save_session_progress=save,
-        abort_session=Mock(), analysis_result=lambda: "report",
+        case_pool=pool,
+        case_counts=pool.counts,
+        build_session_context=context,
+        save_session_progress=save,
+        abort_session=Mock(),
+        analysis_result=lambda: "report",
     )
     scheduler = scheduler_for(domain)
 
     def observer(progress):
         value = SimpleNamespace(
-            _recorder=Mock(sequence=0), _context={"agent_id": progress.agent_id}, _turn_counter=0,
+            _recorder=Mock(sequence=0),
+            _context={"agent_id": progress.agent_id},
+            _turn_counter=0,
         )
         observers[progress.agent_id] = value
         return value
@@ -247,14 +301,16 @@ async def test_exhausted_session_refills_released_case_without_cancelling_other_
 
     async def request(message):
         if message.topic == "pool.enqueue":
-            scheduler._waiting[message.work_id].set_result(SelectionResult(
-                scheduler.run_id,
-                message.work_id,
-                "test",
-                entry_id="test-entry",
-                attempt_number=1,
-                reservation_id=new_id(),
-            ))
+            scheduler._waiting[message.work_id].set_result(
+                SelectionResult(
+                    scheduler.run_id,
+                    message.work_id,
+                    "test",
+                    "entry:test",
+                    1,
+                    new_id(),
+                )
+            )
 
     monkeypatch.setattr(scheduler.bus, "request", AsyncMock(side_effect=request))
 
@@ -278,9 +334,9 @@ async def test_exhausted_session_refills_released_case_without_cancelling_other_
             pool.submit(case["case_id"], author)
             return {"iterations": 1, "completion_ok": True}
 
-        return SimpleNamespace(ainvoke=invoke)
+        return SimpleNamespace(run=invoke)
 
-    monkeypatch.setattr("src.agents.annotation.agent_graph.build_agent_graph", graph)
+    monkeypatch.setattr("src.agents.diagnosis.session_loop.build_diagnosis_loop", graph)
 
     async def report(sessions):
         assert sessions == [(scheduler.report_key, "report")]
@@ -311,7 +367,10 @@ async def test_repeated_cancellation_waits_for_save_and_propagates(monkeypatch, 
         committed.set()
 
     scheduler, domain, recorder = session_scheduler(
-        monkeypatch, claimed=1, unsubmitted=unsubmitted, save=save,
+        monkeypatch,
+        claimed=1,
+        unsubmitted=unsubmitted,
+        save=save,
         state={"iterations": 15, "halted": True},
     )
     task = asyncio.create_task(scheduler._attempt("case:1", "case"))
@@ -335,26 +394,46 @@ async def test_repeated_cancellation_waits_for_save_and_propagates(monkeypatch, 
 def test_search_page_builds_book_once_and_batches_positions():
     rows = {
         str(i): SimpleNamespace(
-            title=str(i), problem="problem", summary="summary", event_type="plot", status="ongoing",
-            progress="step", from_chapter_id=1, to_chapter_id=1, is_foreshadowing_root=False,
-        ) for i in range(10)
+            title=str(i),
+            problem="problem",
+            summary="summary",
+            event_type="plot",
+            status="ongoing",
+            progress="step",
+            from_chapter_id=1,
+            to_chapter_id=1,
+            is_foreshadowing_root=False,
+        )
+        for i in range(10)
     }
     reads = SimpleNamespace(
-        event_trees_organization_annotation_event_rows_1=lambda _: [],
-        event_trees_organization_parents_1=lambda _: [],
+        events=SimpleNamespace(
+            list_ordered_participants=lambda _: [],
+            list_parent_links=lambda _: [],
+            list_queue_links=lambda _: [],
+            list_queue_references=lambda _: [],
+            list_execution_trees=lambda _: [],
+        )
     )
-    draft = EventOrganizationDraft(SimpleNamespace(reads=reads), "run")
+    draft = EventOrganizationDraft(
+        SimpleNamespace(reads=reads, narrative=SimpleNamespace(execution_ids=lambda _: [])), "run"
+    )
     source = DiagnosisAnnotationEventSource(draft)
     tools = build_state_read_tools(
-        object(), source, event_reads={}, entity_ids=set(), case_reads=[], resolve_event=lambda key: key,
+        object(),
+        source,
+        event_reads={},
+        entity_ids=set(),
+        case_reads=[],
+        resolve_event=lambda key: key,
     )
     search = next(tool for tool in tools if tool.name == "search_events")
     evidence = [[{"paragraph_id": i, "char_start": 0}] for i in range(10)]
     with (
-        patch("src.event_trees.organization.smap.run_events", return_value=rows) as load,
-        patch("src.event_trees.organization.smap.fetch_evidence", return_value={}),
-        patch("src.event_trees.organization.smap.evidence_payload_groups", return_value=evidence),
-        patch("src.event_trees.organization._global_positions", return_value=dict.fromkeys(range(10), 0)) as positions,
+        patch("src.event_trees.storage_map.run_events", return_value=rows) as load,
+        patch("src.event_trees.storage_map.fetch_evidence", return_value={}),
+        patch("src.event_trees.storage_map.evidence_payload_groups", return_value=evidence),
+        patch("src.event_trees.storage_map.global_positions", return_value=dict.fromkeys(range(10), 0)) as positions,
     ):
         search.invoke({"query": "", "limit": 10})
     load.assert_called_once()

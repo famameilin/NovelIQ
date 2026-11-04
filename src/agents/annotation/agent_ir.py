@@ -1,7 +1,7 @@
 """章内三代理并发：单个 agent 的局部标注
 
 三个 agent 各持整章正文、各管一类产出、**互不通信**：结构 agent 交 entity/relation，
-事件 agent 交 event/participants，证据 agent 交 dialogue/label/metric/pending；
+事件 agent 用 write_event 提交整棵事件树（含参与者），证据 agent 交 dialogue/label/metric/pending；
 实体引用写正文名字与大类，由运行时解析并自动登记；事件用 el 路径，对话用候选号；
 每条记录自带 evidence=段首可见号，构造当场只校验"号在本章且存在"；
 闭集词表一律从 schema.py / tools.py 单源引用，本模块不复制任何词表。
@@ -17,19 +17,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.event_trees.vocabulary import (
+    Confidence,
     EventChildType,
     EventParticipantRole,
+    RoleFunction,
 )
 from src.fact_graph.inputs import EntityNameRef
-from src.fact_graph.vocabulary import (
-    RELATION_DEFINITIONS,
-    Confidence,
-    DialogueVerdict,
-    EntityType,
-    NarrativeFunction,
-    RoleFunction,
-    Tone,
-)
+from src.fact_graph.vocabulary import RELATION_DEFINITIONS, DialogueVerdict, EntityType, Tone
+from src.metrics.annotation_inputs import NarrativeFunction
 
 from .ir_validation import _reject, _require_paragraph_id
 
@@ -205,10 +200,9 @@ class AgentParticipant:
 
 @dataclass(slots=True)
 class AgentEvent:
-    """事件 agent 写的一个事件节点（el 层级路径表达树形，树内先后=调用顺序）"""
+    """事件 agent 写的一个事件（el 是本执行内的引用 id）"""
 
     el: str
-    isroot: bool
     description: str
     title: str
     problem: str
@@ -229,7 +223,6 @@ class AgentEvent:
         """用于渲染记录明细"""
         return {
             "el": self.el,
-            "isroot": self.isroot,
             "description": self.description,
             "title": self.title,
             "problem": self.problem,
@@ -317,8 +310,8 @@ class AgentPending:
 class AgentAnnotation:
     """一个 agent 的全部产出（构造器写入生效后落在它上面：本 agent 已写成的记录）
 
-    记录按"自然键"去重（实体=本 agent id、事件=el、对话=候选号、标签=段首号、指标=整域），
-    同键重写=更新语义，与正式写入同口径。
+    记录按"自然键"去重（实体=本 agent id、事件=el、对话=候选号、标签=段首号、指标=整域）；
+    实体、对话、标签同键重写=更新；事件同 el 只接受原样重交，新节点追加到本执行未保存的树。
     """
 
     role: str
@@ -336,11 +329,11 @@ class AgentAnnotation:
     finished: bool = False
 
     def event_keys(self) -> dict[str, AgentEvent]:
-        """用于取本 agent 已构造的事件表（participants 引用校验用）"""
+        """用于取本 agent 已构造的事件表（事件引用校验用）"""
         return {item.el: item for item in self.events}
 
     def entity_ids(self) -> dict[str, AgentEntity]:
-        """用于取本 agent 的实体引用表（relation/participants/dialogue/pending 引用校验用）"""
+        """用于取本 agent 的实体引用表（relation/dialogue/pending 引用校验用）"""
         return {item.id: item for item in self.entities}
 
     def counts(self) -> dict[str, int]:

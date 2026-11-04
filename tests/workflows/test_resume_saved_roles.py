@@ -20,13 +20,21 @@ def resume_inputs(monkeypatch):
         SimpleNamespace(chapter_id=1, sequence=1, text="短", display_index_label="一"),
         SimpleNamespace(chapter_id=2, sequence=2, text="长章原文。", display_index_label="二"),
     ]
-    storage = SimpleNamespace(reads=SimpleNamespace(
-        workflows_annotate_load_work_1=lambda _: chapters,
-        workflows_annotate_load_work_2=lambda chapter, _: [SimpleNamespace(
-            chapter_id=chapter.chapter_id, paragraph_id=chapter.chapter_id,
-            local_start_char=0, text=chapter.text,
-        )],
-    ))
+    storage = SimpleNamespace(
+        reads=SimpleNamespace(
+            text=SimpleNamespace(
+                list_ordered_run_chapters=lambda _: chapters,
+                list_work_paragraphs=lambda chapter, _: [
+                    SimpleNamespace(
+                        chapter_id=chapter.chapter_id,
+                        paragraph_id=chapter.chapter_id,
+                        local_start_char=0,
+                        text=chapter.text,
+                    )
+                ],
+            )
+        )
+    )
     monkeypatch.setattr(annotate, "fetch_annotation_role_records", lambda *_: list(states))
     return storage, states
 
@@ -50,7 +58,6 @@ async def test_resume_runs_only_missing_roles_and_never_discards_saved_chapter(r
     storage, states = resume_inputs
     monkeypatch.setattr(settings.models.annotation, "sub_chunk_max_chars", 100)
     monkeypatch.setattr(annotate, "get_storage_factory", lambda: lambda: storage)
-    monkeypatch.setattr(annotate, "eligible_chapters", lambda *_: set())
     agent = SimpleNamespace(address="annotation", close=Mock())
     audit = SimpleNamespace(address="audit", close=AsyncMock())
     activity = SimpleNamespace(close=Mock())

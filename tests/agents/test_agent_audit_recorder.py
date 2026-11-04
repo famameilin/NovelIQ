@@ -250,7 +250,6 @@ def test_update_turn_timings_writes_tool_wall_and_refreshes_finished_at(db_sessi
     recorder.finish_turn(
         call_id,
         raw_response={"role": "ai", "content": "输出"},
-
         error=None,
         timing={"model_ms": 100},
         timing_notes=[],
@@ -284,7 +283,6 @@ def test_finish_turn_splits_usage_reported_total_and_cost(db_session) -> None:
     recorder.finish_turn(
         call_id,
         raw_response={"role": "ai", "content": "输出"},
-
         error=None,
         timing={"model_ms": 100},
         timing_notes=[],
@@ -323,7 +321,6 @@ def test_finish_turn_estimated_usage_does_not_fake_reported_total(db_session) ->
     recorder.finish_turn(
         call_id,
         raw_response={"role": "ai", "content": "输出"},
-
         error=None,
         timing={"model_ms": 100},
         timing_notes=[],
@@ -357,7 +354,6 @@ def test_finish_turn_writes_raw_response_and_timing_notes_in_order(db_session) -
     recorder.finish_turn(
         call_id,
         raw_response={"role": "ai", "content": "输出"},
-
         error=None,
         timing={"model_ms": 900, "ttft_ms": 120},
         timing_notes=["provider_non_streaming", "provider_non_streaming"],
@@ -394,7 +390,6 @@ def test_record_tool_call_persists_args_result_receipt_and_duration(db_session) 
         request_args={"summary": "章节开端"},
         response={"accepted": True, "domain": "metrics", "revision": 1},
         receipt={"accepted": True, "domain": "metrics", "revision": 1},
-
         error=None,
         tool_duration_ms=42,
     )
@@ -430,7 +425,6 @@ def test_record_tool_call_persists_raw_args_as_observed_text(db_session) -> None
         raw_args=raw,
         response={"accepted": True},
         receipt={"accepted": True},
-
         error=None,
         tool_duration_ms=10,
     )
@@ -487,7 +481,6 @@ def test_failed_tool_call_recorded_with_error(db_session) -> None:
         request_args={"items": []},
         response={"accepted": False, "error": "参数非法"},
         receipt={"accepted": False, "error": "参数非法"},
-
         error="参数非法",
         tool_duration_ms=3,
     )
@@ -522,7 +515,6 @@ def test_prior_audit_rows_survive_later_audit_failure(db_session) -> None:
         recorder.finish_turn(
             call_id,
             raw_response={"role": "ai", "content": "输出"},
-
             error=None,
             timing={"model_ms": 100},
             timing_notes=[],
@@ -541,16 +533,18 @@ def test_observer_records_turn_and_tool_calls(db_session) -> None:
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
     context = _turn_context(run_id)
     recorder = AgentAuditRecorder(storage_factory(_session_factory(db_session)))
-    observer = AgentTurnObserver(recorder, invocation_id=fixture_id(__name__, "1"), context=context)
-    from langchain_core.messages import AIMessage
+    observer = AgentTurnObserver(
+        recorder, invocation_id=fixture_id(__name__, "1"), context=context, entry_id="entry-test"
+    )
+    from src.agents.messages import AssistantMessage
 
-    response = AIMessage(
+    response = AssistantMessage(
         content="",
         tool_calls=[{"name": "write_metrics", "args": {}, "id": "c1", "type": "tool_call"}],
     )
     observer.begin_provider_turn(
         context_summary={"phase": "chapter_open"},
-        request_messages=[AIMessage(content="问")],
+        request_messages=[AssistantMessage(content="问")],
         provider_request={"transport": "stream"},
         started_ns=0,
     )
@@ -561,7 +555,6 @@ def test_observer_records_turn_and_tool_calls(db_session) -> None:
         request_args={},
         response={"accepted": True, "domain": "metrics", "revision": 1},
         receipt={"accepted": True, "domain": "metrics", "revision": 1},
-
         error=None,
         tool_duration_ms=5,
         started_ns=1_000_000,
@@ -581,11 +574,10 @@ def test_observer_records_turn_and_tool_calls(db_session) -> None:
 
 def test_serialize_ai_message_preserves_reasoning_content() -> None:
     """验证回合原始响应序列化保留模型思考内容"""
-    from langchain_core.messages import AIMessage
-
+    from src.agents.messages import AssistantMessage
     from src.agents.turn_observer import _serialize_ai_message
 
-    message = AIMessage(
+    message = AssistantMessage(
         content="正文输出",
         additional_kwargs={"reasoning_content": "先分析后行动"},
     )
@@ -598,11 +590,10 @@ def test_serialize_ai_message_preserves_reasoning_content() -> None:
 
 def test_serialize_ai_message_reads_reasoning_from_metadata() -> None:
     """验证 Provider 把思考放在 response_metadata 时同样保留"""
-    from langchain_core.messages import AIMessage
-
+    from src.agents.messages import AssistantMessage
     from src.agents.turn_observer import _serialize_ai_message
 
-    message = AIMessage(
+    message = AssistantMessage(
         content="正文输出",
         response_metadata={"reasoning_content": "元数据思考"},
     )
@@ -614,11 +605,10 @@ def test_serialize_ai_message_reads_reasoning_from_metadata() -> None:
 
 def test_serialize_ai_message_preserves_finish_reason_from_kwargs() -> None:
     """验证聚合器挂载的 finish_reason 随回合审计序列化保留"""
-    from langchain_core.messages import AIMessage
-
+    from src.agents.messages import AssistantMessage
     from src.agents.turn_observer import _serialize_ai_message
 
-    message = AIMessage(content="", additional_kwargs={"finish_reason": "length"})
+    message = AssistantMessage(content="", additional_kwargs={"finish_reason": "length"})
 
     payload = _serialize_ai_message(message)
 
@@ -627,11 +617,10 @@ def test_serialize_ai_message_preserves_finish_reason_from_kwargs() -> None:
 
 def test_serialize_ai_message_reads_finish_reason_from_metadata() -> None:
     """验证非流式响应的 finish_reason 从 response_metadata 读取"""
-    from langchain_core.messages import AIMessage
-
+    from src.agents.messages import AssistantMessage
     from src.agents.turn_observer import _serialize_ai_message
 
-    message = AIMessage(content="", response_metadata={"finish_reason": "stop"})
+    message = AssistantMessage(content="", response_metadata={"finish_reason": "stop"})
 
     payload = _serialize_ai_message(message)
 
@@ -640,20 +629,22 @@ def test_serialize_ai_message_reads_finish_reason_from_metadata() -> None:
 
 def test_observer_persists_reasoning_content_into_raw_response_document(db_session) -> None:
     """验证每轮模型思考内容随原始响应文档落库"""
-    from langchain_core.messages import AIMessage
+    from src.agents.messages import AssistantMessage
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
     context = _turn_context(run_id)
     recorder = AgentAuditRecorder(storage_factory(_session_factory(db_session)))
-    observer = AgentTurnObserver(recorder, invocation_id=fixture_id(__name__, "1"), context=context)
-    response = AIMessage(
+    observer = AgentTurnObserver(
+        recorder, invocation_id=fixture_id(__name__, "1"), context=context, entry_id="entry-test"
+    )
+    response = AssistantMessage(
         content="正文",
         additional_kwargs={"reasoning_content": "思考过程"},
     )
 
     observer.begin_provider_turn(
         context_summary={"phase": "chapter_open"},
-        request_messages=[AIMessage(content="问")],
+        request_messages=[AssistantMessage(content="问")],
         provider_request={"transport": "stream"},
         started_ns=0,
     )
@@ -667,21 +658,23 @@ def test_observer_persists_reasoning_content_into_raw_response_document(db_sessi
 
 def test_observer_serializes_full_request_messages_into_turn(db_session) -> None:
     """验证观察器把完整请求消息序列化并随计时备注落库"""
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+    from src.agents.messages import AssistantMessage, SystemMessage, UserMessage
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
     context = _diagnosis_turn_context(run_id)
     recorder = AgentAuditRecorder(storage_factory(_session_factory(db_session)))
-    observer = AgentTurnObserver(recorder, invocation_id=fixture_id(__name__, "1"), context=context)
+    observer = AgentTurnObserver(
+        recorder, invocation_id=fixture_id(__name__, "1"), context=context, entry_id="entry-test"
+    )
 
     observer.begin_provider_turn(
         context_summary={"phase": "diagnosis"},
-        request_messages=[SystemMessage(content="sys"), HumanMessage(content="问")],
+        request_messages=[SystemMessage(content="sys"), UserMessage(content="问")],
         provider_request={"transport": "stream"},
         started_ns=0,
     )
     observer.complete_provider_turn(
-        response_message=AIMessage(content="答"),
+        response_message=AssistantMessage(content="答"),
         timing=ModelCallTiming(
             model_ms=250,
             timing_notes=("provider_non_streaming",),
@@ -707,16 +700,18 @@ def test_serialize_request_messages_returns_empty_list_without_messages() -> Non
 
 def test_observer_fail_provider_turn_keeps_real_request_messages(db_session) -> None:
     """验证失败的物理请求保存真实请求消息且计时备注带失败标记"""
-    from langchain_core.messages import HumanMessage, SystemMessage
+    from src.agents.messages import SystemMessage, UserMessage
 
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
     context = _diagnosis_turn_context(run_id)
     recorder = AgentAuditRecorder(storage_factory(_session_factory(db_session)))
-    observer = AgentTurnObserver(recorder, invocation_id=fixture_id(__name__, "1"), context=context)
+    observer = AgentTurnObserver(
+        recorder, invocation_id=fixture_id(__name__, "1"), context=context, entry_id="entry-test"
+    )
 
     observer.begin_provider_turn(
         context_summary={"phase": "diagnosis"},
-        request_messages=[SystemMessage(content="sys"), HumanMessage(content="问")],
+        request_messages=[SystemMessage(content="sys"), UserMessage(content="问")],
         provider_request={"transport": "stream"},
         started_ns=0,
     )
@@ -743,7 +738,9 @@ def test_observer_raises_when_tool_recorded_without_active_turn(db_session) -> N
     _novel_id, run_id = create_run_with_chunks(db_session, texts=["原文"])
     context = _turn_context(run_id)
     recorder = AgentAuditRecorder(storage_factory(_session_factory(db_session)))
-    observer = AgentTurnObserver(recorder, invocation_id=fixture_id(__name__, "999"), context=context)
+    observer = AgentTurnObserver(
+        recorder, invocation_id=fixture_id(__name__, "999"), context=context, entry_id="entry-test"
+    )
     with pytest.raises(RuntimeError):
         observer.record_tool_call(
             call_index=0,
@@ -751,15 +748,10 @@ def test_observer_raises_when_tool_recorded_without_active_turn(db_session) -> N
             request_args={},
             response=None,
             receipt=None,
-
             error=None,
             tool_duration_ms=1,
             started_ns=0,
         )
-
-
-
-
 
 
 def test_fetch_token_usage_stats_combines_agent_and_standalone_calls(db_session) -> None:
@@ -773,7 +765,6 @@ def test_fetch_token_usage_stats_combines_agent_and_standalone_calls(db_session)
     recorder.finish_turn(
         call_id,
         raw_response={},
-
         error=None,
         timing={"model_ms": 10},
         timing_notes=[],

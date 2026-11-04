@@ -13,8 +13,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
+
+from src.config.input_config import REASONING_EFFORT_LABELS, REASONING_EFFORTS
 
 SettingFieldType = Literal["number", "integer", "boolean", "enum", "string"]
 
@@ -46,6 +48,7 @@ class SettingFieldSpec:
     max_value: float | None = None
     step: float | None = None
     enum_values: tuple[str, ...] = ()
+    enum_labels: dict[str, str] = field(default_factory=dict)
     nullable: bool = False
     # 非可编辑字段（如建库维度类参数）不渲染输入控件也不提供恢复默认，
     # 机制保留作通用能力
@@ -93,7 +96,13 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 min_value=1,
                 nullable=True,
             ),
-            SettingFieldSpec(path=("models", "annotation", "thinking"), field_type="boolean", label="标注思考模式"),
+            SettingFieldSpec(
+                path=("models", "annotation", "reasoning_effort"),
+                field_type="enum",
+                label="标注思考等级",
+                enum_values=REASONING_EFFORTS,
+                enum_labels=REASONING_EFFORT_LABELS,
+            ),
             SettingFieldSpec(
                 path=("models", "annotation", "max_iterations"),
                 field_type="integer",
@@ -126,7 +135,13 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 min_value=1,
                 nullable=True,
             ),
-            SettingFieldSpec(path=("models", "diagnosis", "thinking"), field_type="boolean", label="诊断思考模式"),
+            SettingFieldSpec(
+                path=("models", "diagnosis", "reasoning_effort"),
+                field_type="enum",
+                label="诊断思考等级",
+                enum_values=REASONING_EFFORTS,
+                enum_labels=REASONING_EFFORT_LABELS,
+            ),
             SettingFieldSpec(
                 path=("models", "diagnosis", "max_iterations"),
                 field_type="integer",
@@ -231,7 +246,7 @@ SETTING_FIELDS: tuple[SettingFieldSpec, ...] = tuple(
                 label="主题变化分数阈值",
                 min_value=0,
                 max_value=1,
-                step=0.05,
+                step=0.01,
             ),
             SettingFieldSpec(
                 path=("topic_model", "topic_shift", "max_candidates"),

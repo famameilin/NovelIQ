@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
+from src.agents.messages import AssistantMessage, SystemMessage, UserMessage
 from src.agents.stream_audit import ModelCallTiming
 from src.agents.turn_observer import AgentTurnObserver, build_invocation_context
 from src.audit.queries import fetch_agent_turns
@@ -60,7 +60,7 @@ class _QueryService:
 class _SequenceLLM(StreamedFakeModelMixin):
     """按顺序返回 Agent 消息的测试模型（仅 ainvoke，无流式）"""
 
-    def __init__(self, responses: list[AIMessage]) -> None:
+    def __init__(self, responses: list[AssistantMessage]) -> None:
         """保存待返回的模型消息序列"""
         self.responses = list(responses)
         self.calls = 0
@@ -79,9 +79,9 @@ class _SequenceLLM(StreamedFakeModelMixin):
         return self.responses.pop(0)
 
 
-def _tool_message(calls: list[dict]) -> AIMessage:
+def _tool_message(calls: list[dict]) -> AssistantMessage:
     """构造带工具调用的模型回复"""
-    return AIMessage(content="", tool_calls=calls)
+    return AssistantMessage(content="", tool_calls=calls)
 
 
 def _write_call(name: str, args: dict, *, call_id: str) -> dict:
@@ -233,8 +233,8 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
         role="annotation",
     )
     invocation_id = recorder.start_invocation(**context)
-    observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=context)
-    request_messages = [SystemMessage(content="sys"), HumanMessage(content="标注")]
+    observer = AgentTurnObserver(recorder, invocation_id=invocation_id, context=context, entry_id="entry-test")
+    request_messages = [SystemMessage(content="sys"), UserMessage(content="标注")]
     base_request = {
         "request_index": 1,
         "attempt": 1,
@@ -242,7 +242,7 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
         "parameters": {
             "model": "test-model",
             "base_url": "https://provider.example/v1",
-            "extra_body": {"think": True},
+            "reasoning_effort": "high",
             "timeout_s": 180,
             "tool_names": ["write_metrics"],
             "tool_contract_fingerprint": "b" * 64,
@@ -258,7 +258,7 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
     observer.fail_provider_turn(
         error="stream interrupted",
         timing=ModelCallTiming(ttft_ms=20, model_ms=30),
-        response_message=AIMessage(
+        response_message=AssistantMessage(
             content="部分输出",
             usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
         ),
@@ -270,7 +270,7 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
         started_ns=2,
     )
     observer.complete_provider_turn(
-        response_message=AIMessage(
+        response_message=AssistantMessage(
             content="",
             tool_calls=[{"name": "write_metrics", "args": {}, "id": "call-1"}],
             additional_kwargs={"reasoning_content": "先核对原文"},
@@ -287,7 +287,7 @@ async def test_observer_records_each_physical_provider_request_separately(db_ses
     assert turns[0].context_summary["provider_request"]["attempt"] == 1
     assert turns[1].context_summary["provider_request"]["attempt"] == 2
     assert turns[0].context_summary["provider_request"]["config_fingerprint"] == "a" * 64
-    assert turns[0].context_summary["provider_request"]["parameters"]["extra_body"] == {"think": True}
+    assert turns[0].context_summary["provider_request"]["parameters"]["reasoning_effort"] == "high"
     assert "api_key" not in str(turns[0].context_summary["provider_request"])
     assert turns[0].timings["ttft"] == 20
     assert turns[1].timings["ttft"] == 10

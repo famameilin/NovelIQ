@@ -7,29 +7,32 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
 
-from src.agents.annotation import program_contract
 from src.agents.annotation.agent import WorkExecution
-from src.agents.annotation.agent_graph import build_agent_graph
 from src.agents.annotation.agent_ir import AgentAnnotation
+from src.agents.annotation.agent_loop import build_agent_loop
 from src.agents.annotation.agent_runtime import AgentProgramRuntime
 from src.agents.annotation.ledger import AnnotationToolLedger
 from src.agents.annotation.tool_batch import _build_tool_batch_node
 from src.agents.annotation.work_tools import build_work_tools
+from src.agents.messages import AssistantMessage, UserMessage
+from src.agents.program_runtime import contracts as program_contract
 from src.case_pool import CasePool
 from src.event_trees.models import BoundEvent
 from src.event_trees.trees import EventTrees
 from src.fact_graph.graph import FactGraph, entity_key
 from src.fact_graph.inputs import ChapterParagraphInfo, EntityInput
 from src.work.annotation_work import WorkReceipt
-from tests.support.annotation_work_tools import build_annotation_tools
+from tests.support.annotation_work_tools import build_program_annotation_tools as build_annotation_tools
 from tests.support.annotation_work_tools import build_program_test_runtime as ProgramRuntime
 from tests.support.model_stream_adapter import StreamedFakeModelMixin
 from tests.support.storage_fixtures import fixture_id
 
 
 class _QueryService:
+    chapter_orders = {24: 1}
+    current_chapter_order = 1
+
     async def search_text(self, query: str, *, range_name: str, limit: int = 50) -> list[Any]:
         return []
 
@@ -92,7 +95,21 @@ def _real_work_runtime(*, role: str = "event", observer: Any = None) -> tuple[An
     """直接装配发布全书状态的生产工具，避免领域隔离夹具掩盖暂挂回执错误"""
     ledger = _ledger()
     ledger.role = role
-    work = WorkReceipt("work", ledger.run_scope, "annotation", {"chapter_id": 24, "role": role})
+    work = WorkReceipt(
+        "work",
+        ledger.run_scope,
+        "annotation",
+        {
+            "chapter_id": 24,
+            "role": role,
+            "paragraphs": [
+                SimpleNamespace(paragraph_id=identifier, chapter_id=24, text=text)
+                for identifier, text in zip(
+                    ledger.paragraph_info.paragraph_ids, ledger.paragraph_info.texts, strict=True
+                )
+            ],
+        },
+    )
     execution = WorkExecution(work, "invocation", ledger, AgentAnnotation(role=role))
     cases, trees = CasePool(ledger.run_scope), EventTrees(ledger.run_scope)
     # 作者身份收敛为单字符串：真实执行号就是三域的贡献作者
@@ -130,14 +147,32 @@ async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(mo
         )
         for index in range(247)
     ]
+    tree_ids = [fixture_id(__name__, f"tree-{group}") for group in range(3)]
     trees.sync(fixture_id(__name__, "saved"), 12, nodes)
+    trees.sync_contributions(
+        fixture_id(__name__, "saved"),
+        {
+            "queues": {
+                tree_ids[group]: {
+                    "tree_id": tree_ids[group],
+                    "tree_key": None,
+                    "title": f"院门树{group}",
+                    "description": "院门事件树",
+                    "event_ids": [node.node_id for node in nodes[group::3]],
+                    "reason": "模型明确提交的队列顺序",
+                    "evidence": [{"paragraph_id": 201}],
+                }
+                for group in range(3)
+            },
+        },
+    )
     trees.confirm(fixture_id(__name__, "saved"))
     calls = []
     original_read = trees.read
 
-    def read(identifier: str) -> Any:
+    def read(identifier: str, **kwargs: Any) -> Any:
         calls.append(identifier)
-        return original_read(identifier)
+        return original_read(identifier, **kwargs)
 
     monkeypatch.setattr(trees, "read", read)
     tool = runtime.tools["search_events"]
@@ -150,8 +185,9 @@ async def test_event_search_pages_bound_payload_and_grant_only_returned_nodes(mo
     assert "node-0246" not in execution.event_reads
     next_page = json.loads(await tool.ainvoke({"query": "院门", "limit": 20, "offset": first["next_offset"]}))
     assert first["events"][-1]["event_id"] != next_page["events"][0]["event_id"]
-    filtered = json.loads(await tool.ainvoke({"chapter_id": 12, "tree_id": "tree-2"}))
-    assert all(trees.read(item["event_id"])["content"]["tree_id"] == "tree-2" for item in filtered["events"])
+    filtered = json.loads(await tool.ainvoke({"chapter_id": 12, "tree_id": tree_ids[2], "limit": 20}))
+    assert filtered["total"] == len(nodes[2::3])
+    assert {item["event_id"] for item in filtered["events"]} == {node.node_id for node in nodes[2::3][:20]}
     assert json.loads(await tool.ainvoke({"chapter_id": 99}))["total"] == 0
     detail = json.loads(await runtime.tools["read_event"].ainvoke({"node_id": "node-0246"}))
     assert len(detail["content"]["description"]) > 3000
@@ -303,47 +339,46 @@ async def test_failed_declaration_keeps_prior_source_and_does_not_add_node() -> 
     ledger = _ledger()
     runtime = _runtime(ledger, "event")
     await runtime.execute(
-        "event(el='e1', title='进入院门', problem='能否进入', summa"  # 同一程序文本
+        "write_event(items=[dict(el='e1', title='进入院门', problem='能否进入', summa"  # 同一程序文本
         "ry='进入院门', event_type='行动', status='ongoing', evid"  # 同一程序文本
-        "ence=2)"  # 同一程序文本
+        "ence=2)])"  # 同一程序文本
     )
     receipt = json.loads(
         await runtime.execute(
-            "event(el='e2', title='错误', problem='问题', summary='"  # 同一程序文本
+            "write_event(items=[dict(el='e2', title='错误', problem='问题', summary='"  # 同一程序文本
             "另一个声明', event_type='行动', status='ongoing', evidenc"  # 同一程序文本
-            "e=99)"  # 同一程序文本
+            "e=99)])"  # 同一程序文本
         )
     )
     assert receipt["status"] == "partial"
-    assert not ledger.pending_child_events
     assert len(ledger.bound_payloads["events"]) == 1
 
 
 @pytest.mark.asyncio
-async def test_agent_dialogue_preflight_rejects_entire_out_of_range_batch() -> None:
+async def test_agent_dialogue_keeps_success_before_out_of_range_call() -> None:
     ledger = _ledger(["“住手！”顾霜喝道。", "“退下。”众人散去。"])
     runtime = _runtime(ledger, "metric")
     body = json.loads(
         await runtime.execute('for index in [1, 99]:\n    dialogue(candidate_index=index, verdict="not_dialogue")')
     )
-    assert body["status"] == "rejected", body
-    assert body["error"]["type"] == "candidate_index_out_of_range"
-    assert "total=2" in body["error"]["message"]
-    assert not ledger.written_dialogues and not runtime.agent.dialogues
-    assert runtime.ops == [] and runtime.env == {}
+    assert body["status"] == "partial", body
+    assert body["failed"][0]["code"] == "out_of_range"
+    assert set(ledger.written_dialogues) == {1}
+    assert len(runtime.agent.dialogues) == 1 and runtime.env["index"] == 99
+    assert [op["status"] for op in runtime.ops] == ["success", "error"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("role", [None, "metric"])
-async def test_zero_candidate_preflight_reports_empty_range(role: str | None) -> None:
+async def test_zero_candidate_call_is_rejected_at_business_boundary(role: str | None) -> None:
     ledger = _ledger()
     runtime = _runtime(ledger, role)
     name = "write_dialogue" if role is None else "dialogue"
     body = json.loads(await runtime.execute(f'{name}(candidate_index=1, verdict="not_dialogue")'))
-    assert body["status"] == "rejected", body
-    assert "total=0" in body["error"]["message"]
-    assert "无可用候选" in body["error"]["message"]
-    assert not runtime.ops
+    assert body["status"] == "partial", body
+    assert body["failed"][0]["code"] == "out_of_range"
+    assert body["failed"][0]["field"] == "candidate_index"
+    assert len(runtime.ops) == 1 and not ledger.written_dialogues
 
 
 class _RecordingObserver:
@@ -391,7 +426,7 @@ async def test_capped_reads_keep_every_reference_and_persistent_variable(monkeyp
 
 
 class _Replies(StreamedFakeModelMixin):
-    def __init__(self, replies: list[AIMessage]) -> None:
+    def __init__(self, replies: list[AssistantMessage]) -> None:
         self.replies = replies
         self.requests = 0
         self.bound_names: list[str] = []
@@ -400,14 +435,14 @@ class _Replies(StreamedFakeModelMixin):
         self.bound_names = [str(tool.name) for tool in tools]
         return self
 
-    async def ainvoke(self, messages: list[Any]) -> AIMessage:
+    async def ainvoke(self, messages: list[Any]) -> AssistantMessage:
         reply = self.replies[self.requests]
         self.requests += 1
         return reply
 
 
-def _program_reply(code: str, identifier: str) -> AIMessage:
-    return AIMessage(
+def _program_reply(code: str, identifier: str) -> AssistantMessage:
+    return AssistantMessage(
         content="",
         tool_calls=[
             {
@@ -426,17 +461,16 @@ async def test_clean_agent_finish_stops_without_another_model_request(role: str)
     ledger = _ledger()
     runtime = _runtime(ledger, role)
     model = _Replies([_program_reply("finish()", "p1")])
-    graph = build_agent_graph(
+    graph = build_agent_loop(
         model,
         runtime.build_tool(),
         runtime.finish_tool,
         ledger=ledger,
-        agent=runtime.agent,
         max_iterations=5,
         completion_check=lambda: _complete(runtime),
     )
-    await graph.ainvoke(
-        {"messages": [HumanMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
+    await graph.run(
+        {"messages": [UserMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
     )
     assert model.requests == 1
 
@@ -449,33 +483,32 @@ async def test_finish_closes_work_after_rejected_optional_event() -> None:
         [
             _program_reply(
                 (
-                    "event(el='t1', evidence=1, title='', problem='明确事件问题', summary='举"
-                    "刀', event_type='行动', status='ongoing')\n"
+                    "write_event(items=[dict(el='t1', evidence=1, title='', problem='明确事件问题', summary='举"
+                    "刀', event_type='行动', status='ongoing')])\n"
                     "finish()"
                 ),
                 "p1",
             ),
             _program_reply(
                 (
-                    "event(el='t1', evidence=1, title='', problem='明确事件问题', summary='举"
-                    "刀', event_type='行动', status='ongoing')"
+                    "write_event(items=[dict(el='t1', evidence=1, title='', problem='明确事件问题', summary='举"
+                    "刀', event_type='行动', status='ongoing')])"
                 ),
                 "p2",
             ),
             _program_reply("finish()", "p3"),
         ]
     )
-    graph = build_agent_graph(
+    graph = build_agent_loop(
         model,
         runtime.build_tool(),
         runtime.finish_tool,
         ledger=ledger,
-        agent=runtime.agent,
         max_iterations=5,
         completion_check=lambda: _complete(runtime),
     )
-    await graph.ainvoke(
-        {"messages": [HumanMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
+    await graph.run(
+        {"messages": [UserMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
     )
     assert model.requests == 1
     assert ledger.chapter_finished
@@ -494,17 +527,16 @@ async def test_metric_finish_requires_its_own_metric() -> None:
             ),
         ]
     )
-    graph = build_agent_graph(
+    graph = build_agent_loop(
         model,
         runtime.build_tool(),
         runtime.finish_tool,
         ledger=ledger,
-        agent=runtime.agent,
         max_iterations=5,
         completion_check=lambda: _complete(runtime),
     )
-    await graph.ainvoke(
-        {"messages": [HumanMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
+    await graph.run(
+        {"messages": [UserMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
     )
     assert model.requests == 2
 
@@ -518,8 +550,8 @@ async def test_metric_finish_requires_its_own_metric() -> None:
             "name": "execute_code",
             "args": {
                 "code": (
-                    "event(el='t1', evidence=1, title='举刀', problem='明确事件问题', summary="
-                    "'举刀', event_type='行动', status='ongoing')"
+                    "write_event(items=[dict(el='t1', evidence=1, title='举刀', problem='明确事件问题', summary="
+                    "'举刀', event_type='行动', status='ongoing')])"
                 )
             },
         },
@@ -530,27 +562,26 @@ async def test_rejected_call_does_not_reopen_successfully_finished_work(failed_c
     runtime = _runtime(ledger, "event")
     model = _Replies(
         [
-            AIMessage(
+            AssistantMessage(
                 content="",
                 tool_calls=[
                     {**failed_call, "id": "bad", "type": "tool_call"},
                     {"name": "finish", "args": {}, "id": "f1", "type": "tool_call"},
                 ],
             ),
-            AIMessage(content="完成"),
+            AssistantMessage(content="完成"),
         ]
     )
-    graph = build_agent_graph(
+    graph = build_agent_loop(
         model,
         runtime.build_tool(),
         runtime.finish_tool,
         ledger=ledger,
-        agent=runtime.agent,
         max_iterations=5,
         completion_check=lambda: _complete(runtime),
     )
-    await graph.ainvoke(
-        {"messages": [HumanMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
+    await graph.run(
+        {"messages": [UserMessage(content="完成")], "phase": "chapter_open", "iterations": 0, "error": None}
     )
     assert model.requests == 1
     assert runtime.agent.finished is True
@@ -563,3 +594,21 @@ def _complete(runtime):
     if not missing:
         execution.finished = runtime.agent.finished = runtime.ledger.chapter_finished = True
     return missing
+
+
+@pytest.mark.asyncio
+async def test_finish_accepts_event_without_extra_root() -> None:
+    """单个事件直接以引用 id 写入，收尾检查不要求额外根"""
+    runtime, _, execution = _real_work_runtime(role="event")
+    item = {
+        "el": "e2",
+        "title": "转身",
+        "problem": "能否转身",
+        "summary": "转身",
+        "event_type": "行动",
+        "status": "ongoing",
+        "evidence": 1,
+    }
+    receipt = json.loads(await runtime.execute(f"write_event(items={[item]!r})"))
+    assert not receipt.get("failed"), receipt
+    assert not any("missing_root" in gap for gap in execution.validate())

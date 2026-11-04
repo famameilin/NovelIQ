@@ -1,5 +1,7 @@
 from src.metrics.aggregate.computers import compute_language_style_metrics
 from src.metrics.aggregate.types import TextData
+from src.metrics.style_metrics_extra import compute_avg_word_len, compute_category_density, compute_word_style
+from src.text_processing.tokenize import get_tokenizer
 
 
 def test_compute_language_style_metrics_tone_distribution_sums_to_one() -> None:
@@ -79,3 +81,9 @@ def test_compute_language_style_metrics_category_density_hits_multi_char_terms()
     assert result["category_density_measure"] > 0.0
     assert result["category_density_emotion"] > 0.0
     assert result["category_density_color"] > 0.0
+
+
+def test_shared_word_style_matches_independent_calculations() -> None:
+    get_tokenizer()
+    texts = ["", " \t", "长剑 ABC-123！\r\n剑客", "很爽，渡劫飞升。"]
+    assert compute_word_style(texts) == (compute_avg_word_len(texts), compute_category_density(texts))

@@ -24,6 +24,8 @@ class DialogueEvidenceStateContext(Protocol):
 
     def _require_writable(self, record: str) -> None: ...
 
+    def require_domain(self, domain: str) -> None: ...
+
     current_chapter_id: int
     graph: FactGraph | None
 
@@ -52,6 +54,7 @@ class DialogueEvidenceState:
         """用于按候选序号写入一条对话三态判断（同序号重写按更新语义）"""
         record = f"dialogue/{candidate_index}"
         ctx._require_writable(record)
+        ctx.require_domain("dialogue")
         candidate_by_index = dict(enumerate(self.dialogue_candidates, start=1))
         if candidate_index not in candidate_by_index:
             raise AnnotationStageRejection(

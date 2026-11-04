@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import func, select
 
-from src.event_trees.organization import OrganizationEvidence
+from src.event_trees.organization_models import OrganizationEvidence
 from src.event_trees.read.forest import EventForestQuery
 from src.storage.models import NarrativeLink
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
@@ -48,7 +48,7 @@ def _publish(session, run_id, relations=()):
             reason="本例明确判断两事件的关系",
             evidence=[OrganizationEvidence(paragraph_id=0)],
         )
-    return publish_draft(session, run_id, draft)
+    return publish_draft(session, run_id, draft, final=False)
 
 
 def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None:
@@ -89,14 +89,15 @@ def test_fetch_snapshot_returns_event_trees_and_causal_edges(db_session) -> None
     assert "顾霜拔剑" in nodes_by_desc
     assert nodes_by_desc["顾霜进入山门"].event_id == first_event
     assert nodes_by_desc["顾霜拔剑"].event_id == second_event
-    assert nodes_by_desc["顾霜进入山门"].tree_id == first_declaration
+    assert nodes_by_desc["顾霜进入山门"].tree_id != first_declaration
     assert nodes_by_desc["顾霜进入山门"].cause_role == "root"
 
     # 树视图：两棵树，因果边跨树；主链按原文顺序
     assert len(snapshot.event_trees) == 2
-    gate_tree = next(tree for tree in snapshot.event_trees if tree.tree_id == first_declaration)
-    assert gate_tree.root_event_id == first_declaration
-    assert gate_tree.main_chain == [first_declaration]
+    first_tree_id = nodes_by_desc["顾霜进入山门"].tree_id
+    gate_tree = next(tree for tree in snapshot.event_trees if tree.tree_id == first_tree_id)
+    assert gate_tree.entry_event_id == first_event
+    assert gate_tree.main_chain == [first_event]
     assert gate_tree.secondary_groups == []
     assert gate_tree.chapter_ids == [1]
 
@@ -183,16 +184,19 @@ def test_source_branch_markers_do_not_infer_formal_structure(db_session) -> None
     ]
     db_session.commit()
 
-    mapping, _draft = publish_declarations(db_session, run_id)
+    mapping, _draft = publish_declarations(db_session, run_id, final=False)
     snapshot = EventForestQuery(storage_for(db_session)).fetch_snapshot(run_id)
     assert snapshot is not None
     # 来源的旧树标记不能替代诊断对正式身份与包含关系的判断
     assert len(snapshot.event_trees) == 4
-    assert {tree.root_event_id for tree in snapshot.event_trees} == set(declarations)
-    assert all(tree.main_chain == [tree.root_event_id] and tree.secondary_groups == [] for tree in snapshot.event_trees)
+    assert {tree.entry_event_id for tree in snapshot.event_trees} == set(declarations)
+    assert all(
+        tree.main_chain == [tree.entry_event_id] and tree.secondary_groups == []
+        for tree in snapshot.event_trees
+    )
     assert snapshot.causal_edges == []
     nodes = {node.event_id: node for node in snapshot.event_nodes}
-    assert all(node.parent_event_id is None for node in nodes.values())
+    assert all(node.parent_event_ids == [] for node in nodes.values())
     assert all(node.evidence_scope == "paragraph" for node in nodes.values())
 
 
@@ -223,14 +227,14 @@ def test_fetch_snapshot_includes_foreshadowing_edges(db_session) -> None:
     )
     db_session.commit()
 
-    mapping, _draft = publish_declarations(db_session, run_id)
+    mapping, _draft = publish_declarations(db_session, run_id, final=False)
     repo = EventForestQuery(storage_for(db_session))
     snapshot = repo.fetch_snapshot(run_id)
     assert snapshot is not None
     assert len(snapshot.foreshadowing_edges) == 1
     edge = snapshot.foreshadowing_edges[0]
     assert edge.description == "顾霜立誓"
-    assert edge.root_event_id == event_id
+    assert edge.source_event_id == event_id
     assert edge.payoff_event_id is None
     assert edge.status == "open"
     assert edge.active is True
@@ -329,7 +333,7 @@ def test_fetch_snapshot_filters_by_chapter_id(db_session) -> None:
     )
     db_session.commit()
 
-    publish_declarations(db_session, run_id)
+    publish_declarations(db_session, run_id, final=False)
     repo = EventForestQuery(storage_for(db_session))
     # 只取第 1 章：只有 1 个事件节点
     snapshot_ch1 = repo.fetch_snapshot(run_id, chapter_id=1)

@@ -18,7 +18,7 @@ def build_name_resolution(
 ) -> dict[str, str]:
     """把别名角色名归一到代表角色名"""
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo)
-    entities = authority_service.build_export_view(run_id).canonical_entities
+    entities = authority_service.build_canonical_entities(run_id)
     preferred = set(preferred_names or [])
     name_resolution: dict[str, str] = {}
     for entity in entities:

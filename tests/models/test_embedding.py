@@ -1,13 +1,20 @@
+import base64
 import os
 import sys
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import numpy as np
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config import settings
 from src.embedding import EmbeddingClient
+
+
+def _encode_base64(vector: list[float]) -> str:
+    return base64.b64encode(np.asarray(vector, dtype=np.float32).tobytes()).decode("ascii")
 
 
 class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
@@ -179,6 +186,27 @@ class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(progress_calls, [(1, 2, total_texts), (2, 2, total_texts)])
+
+    @patch("src.embedding.AsyncOpenAI")
+    async def test_embed_texts_decodes_base64_payloads(self, mock_openai: MagicMock) -> None:
+        """服务端按 base64 编码返回向量时解包成浮点向量，维度取解包后的元素个数"""
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+
+        probe_response = MagicMock()
+        probe_response.data = [MagicMock(embedding=_encode_base64([0.25, 0.5, 0.75]))]
+        probe_response.usage = None
+
+        batch_response = MagicMock()
+        batch_response.data = [MagicMock(index=0, embedding=_encode_base64([1.5, -2.0, 0.5]))]
+        batch_response.usage = None
+
+        mock_client.embeddings.create = AsyncMock(side_effect=[probe_response, batch_response])
+
+        client = EmbeddingClient(base_url="http://test", model="test-model", api_key="test-key")
+
+        self.assertEqual(await client.detect_embedding_dimension(), 3)
+        self.assertEqual(await client.embed_texts(["文本"]), [[1.5, -2.0, 0.5]])
 
 
 if __name__ == "__main__":

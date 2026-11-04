@@ -9,12 +9,12 @@ from src.config.schemas import (
 from src.config.schemas.model import _parse_model_pool, apply_model_environment
 
 
-def test_diagnosis_budget_defaults_to_fifteen_and_inherits_configured_value() -> None:
+def test_diagnosis_budget_defaults_to_thirty_and_inherits_configured_value() -> None:
     from src.config.schemas.model import ModelsSettings
 
-    assert ModelsSettings().diagnosis.max_iterations == 15
-    assert _parse_models_settings({}).diagnosis.max_iterations == 15
-    assert _parse_models_settings({"diagnosis": {}}).diagnosis.max_iterations == 15
+    assert ModelsSettings().diagnosis.max_iterations == 30
+    assert _parse_models_settings({}).diagnosis.max_iterations == 30
+    assert _parse_models_settings({"diagnosis": {}}).diagnosis.max_iterations == 30
     for value in (3, 8, 20):
         assert _parse_models_settings({"diagnosis": {"max_iterations": value}}).diagnosis.max_iterations == value
 
@@ -50,19 +50,14 @@ def test_parse_embedding_model_settings_includes_runtime_parameters() -> None:
 
 
 def test_parse_task_model_settings_reads_agent_and_behavior_fields() -> None:
-    """验证任务级配置合并 thinking/Agent 参数
-
-    temperature/top_p/max_tokens 移入模型池配置，
-    任务级解析不再读取这些键（settings.json 中的残留值被静默忽略）。
-    streaming 键不再解析，流式固定开启。
-    """
+    """任务级配置包含思考等级与 Agent 行为参数"""
     settings = _parse_task_model_settings(
         {
             "timeout_s": 180,
             "temperature": 0.5,
             "top_p": 0.7,
             "max_tokens": 2048,
-            "thinking": True,
+            "reasoning_effort": "xhigh",
             "streaming": True,
             "max_iterations": 20,
             "total_attempts": 3,
@@ -71,7 +66,7 @@ def test_parse_task_model_settings_reads_agent_and_behavior_fields() -> None:
     )
 
     assert settings.timeout_s == 180
-    assert settings.thinking is True
+    assert settings.reasoning_effort == "xhigh"
     assert settings.max_iterations == 20
     assert settings.total_attempts == 3
     assert settings.allow_future_context is True
@@ -79,6 +74,41 @@ def test_parse_task_model_settings_reads_agent_and_behavior_fields() -> None:
     assert not hasattr(settings, "top_p")
     assert not hasattr(settings, "max_tokens")
     assert not hasattr(settings, "streaming")
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+def test_task_reasoning_effort_is_preserved(effort: str) -> None:
+    from src.config.input_config import TaskModelConfig
+
+    parsed = _parse_models_settings({"annotation": {"reasoning_effort": effort}})
+    assert parsed.annotation.reasoning_effort == effort
+    assert parsed.diagnosis.reasoning_effort == "high"
+    config = TaskModelConfig(model="test", base_url="https://test/v1", reasoning_effort=effort)
+    config.validate()
+
+
+def test_both_tasks_default_to_high_reasoning_effort() -> None:
+    from src.config.input_config import TaskModelConfig
+    from src.config.schemas.model import ModelsSettings
+
+    for models in (ModelsSettings(), _parse_models_settings({})):
+        assert models.annotation.reasoning_effort == models.diagnosis.reasoning_effort == "high"
+        assert not hasattr(models.annotation, "thinking")
+    config = TaskModelConfig()
+    assert config.reasoning_effort == "high"
+    assert not hasattr(config, "thinking_enabled")
+    assert not hasattr(config, "thinking_budget_tokens")
+
+
+@pytest.mark.parametrize("value", [True, False, None, "", "none", "minimal", "ultra", 1, [], {}])
+def test_invalid_reasoning_effort_is_rejected(value: object) -> None:
+    from src.config.input_config import TaskModelConfig
+
+    for task in ("annotation", "diagnosis"):
+        with pytest.raises(ValueError, match="reasoning_effort"):
+            _parse_models_settings({task: {"reasoning_effort": value}})
+    with pytest.raises(ValueError, match="reasoning_effort"):
+        TaskModelConfig(model="test", base_url="https://test/v1", reasoning_effort=value).validate()
 
 
 @pytest.mark.parametrize("field", ["max_iterations", "total_attempts"])
@@ -113,6 +143,21 @@ def test_parse_model_pool_reads_sampling_parameters_per_model() -> None:
     assert (pool[0].temperature, pool[0].top_p, pool[0].max_tokens) == (0.3, 0.9, 2048)
     assert (pool[1].temperature, pool[1].top_p, pool[1].max_tokens) == (0.7, 0.8, 131072)
     assert pool[0].context_window_tokens == 128000
+
+
+def test_parse_model_pool_accepts_same_model_on_different_endpoints() -> None:
+    """同一模型挂多个端点各自成为独立条目，只有同模型同地址才重复"""
+    pool = _parse_model_pool(
+        [
+            _pool_entry("a"),
+            _pool_entry("a", base_url="https://mirror.example/v1"),
+        ]
+    )
+
+    assert [item.model_id for item in pool] == ["a", "a"]
+    assert pool[0].entry_id != pool[1].entry_id
+    with pytest.raises(ValueError, match="服务地址"):
+        _parse_model_pool([_pool_entry("a"), _pool_entry("a")])
 
 
 def test_parse_model_pool_requires_context_window_tokens() -> None:

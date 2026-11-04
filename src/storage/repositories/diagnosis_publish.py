@@ -58,12 +58,17 @@ def save_report(session, request):
         warnings_by_author[frozen.author] = saved_warnings
         warnings.extend(saved_warnings)
     session.flush()
-    committed_cases = CaseWritesRepository(request.run_id).register_event_roots(session)
+    from src.storage.repositories.queue_writes import save_event_line_flags
+
+    line_names = getattr(organization, "event_line_names", {}) or {}
+    if not isinstance(line_names, dict):
+        line_names = dict(vars(line_names))
+    save_event_line_flags(session, request.run_id, organization.event_line_ids, line_names)
     return {
         "report_id": report_id,
         "warnings": warnings,
         "warnings_by_author": warnings_by_author,
-        "committed_cases": committed_cases,
+        "committed_cases": [],
     }
 
 
@@ -117,4 +122,5 @@ def save_session(session, request):
         if warnings:
             raise ValueError(f"案例会话交付未完整保存: {warnings}")
     session.flush()
-    return {"committed_cases": CaseWritesRepository(request.run_id).register_event_roots(session)}
+    committed_cases = CaseWritesRepository(request.run_id).register_unparented_trees(session)
+    return {"committed_cases": committed_cases}

@@ -114,7 +114,7 @@ async def health_check():
     logger.debug("Health check endpoint called")
     try:
         session = get_storage()
-        session.reads.api_main_health_check_1()
+        session.reads.system.check_connection()
         pool_status = get_pool_status()
         return {"status": "healthy", "service": "novel-qa-api", "version": project_version(), "pool": pool_status}
     except Exception as e:

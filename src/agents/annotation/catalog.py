@@ -9,23 +9,31 @@ from enum import StrEnum
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
-from src.agents.annotation.program_contract import (
+from src.agents.annotation.validation_errors import _STAGE_FIELD_EXPECTATIONS
+from src.agents.program_runtime.contracts import (
     PROGRAM_MAX_CODE_CHARS,
     PROGRAM_MAX_OPS,
+    PROGRAM_MAX_RANGE_ITEMS,
+    PROGRAM_MAX_WHILE_ITERATIONS,
+    PROGRAM_MODULES,
     PROGRAM_PRINT_MAX_CHARS,
 )
-from src.agents.annotation.validation_errors import _STAGE_FIELD_EXPECTATIONS
-from src.event_trees.vocabulary import EventParticipantRole
-from src.fact_graph.inputs import EntityNameRef
-from src.fact_graph.schema import (
-    CLIFFHANGER_DESCRIPTION,
-    ENTITY_REF_FIELD_HINT,
+from src.agents.program_runtime.returns import (
+    TOOL_RETURN_SHAPES,
+    WRITE_RECEIPT_NOTE,
+    render_return_note,
+)
+from src.event_trees.vocabulary import (
     EVENT_ROLE_FIELD_HINT,
     PERSON_ROLE_FIELD_HINT,
-    PIVOT_MOMENT_DESCRIPTION,
-    EntityRefType,
+    Confidence,
+    EventParticipantRole,
+    RoleFunction,
 )
-from src.fact_graph.vocabulary import Confidence, DialogueVerdict, RoleFunction, Tone, relation_catalog_text
+from src.fact_graph.inputs import EntityNameRef
+from src.fact_graph.schema import ENTITY_REF_FIELD_HINT, EntityRefType
+from src.fact_graph.vocabulary import DialogueVerdict, Tone, relation_catalog_text
+from src.metrics.annotation_inputs import CLIFFHANGER_DESCRIPTION, PIVOT_MOMENT_DESCRIPTION
 
 from .search_projection import (
     _PROJECTION_PARAMETER_LABELS,
@@ -187,12 +195,17 @@ def _parameter_notes(name: str, parameters: list[tuple[str, str]]) -> list[str]:
     return notes
 
 
-def call_api_text(entries: list[tuple[str, list[tuple[str, str]], str]]) -> str:
+def call_api_text(
+    entries: list[tuple[str, list[tuple[str, str]], str]],
+    *,
+    write_receipt_names: frozenset[str] = frozenset(),
+) -> str:
     """用于把一批可调用对象渲染成模型可见的 API 目录（本面唯一的渲染路径）
 
     entries = [(名字, 参数清单, 说明文本)]：参数清单分别从函数签名（构造器）与 args_schema
     （工具）读出，说明文本来自函数对象的 docstring 或本面的覆盖表——两类条目在这一层没有
     形态差别（模型面要的只是"这个参数是什么、取什么值"，由 _CALL_PARAMETER_NOTES 一行讲清）。
+    write_receipt_names：返回写入回执的构造器名字，目录里补一行统一回执形状。
     """
     blocks: list[str] = []
     for name, parameters, summary in entries:
@@ -201,6 +214,11 @@ def call_api_text(entries: list[tuple[str, list[tuple[str, str]], str]]) -> str:
         if notes:
             lines.append("参数说明：")
             lines.extend(notes)
+        shape = TOOL_RETURN_SHAPES.get(name)
+        if shape is not None:
+            lines.append(f"返回：{render_return_note(shape)}")
+        elif name in write_receipt_names:
+            lines.append(f"返回：{WRITE_RECEIPT_NOTE}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
@@ -243,15 +261,18 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
     **_STAGE_FIELD_EXPECTATIONS,
     "relation_type": "闭合关系类型（方向与两端实体类型约束如下）：\n" + relation_catalog_text(),
     "tone": _enum_parameter_note(Tone),
-    "confidence": _enum_parameter_note(Confidence),
+    "confidence": _enum_parameter_note(Confidence)
+    + "\n只与 isforeshadowing=True 成对：伏笔事件必须给，非伏笔事件提供会被立即拒绝",
+    "isforeshadowing": "标记本事件埋设伏笔，可位于树内任意位置；必须同时给 confidence；非伏笔事件保持 False",
     "from_entity": f"关系起点{ENTITY_REF_FIELD_HINT}",
     "to_entity": f"关系终点{ENTITY_REF_FIELD_HINT}",
     "speaker": f"说话人{ENTITY_REF_FIELD_HINT}",
-    "el": "事件的本章局部键，形如 e1；同 el 只建一次、内容不可改写；斜杠仅局部寻址，不表示包含",
+    "el": "本执行内你自定的事件引用 id（如 e1、e2）；整串就是一个 id，不写斜杠，不表示父子层级；"
+    "同 el 只创建一次，再次提交必须与创建时完全一致，任何字段或参与者差异都拒收",
     "entity.id": "实体的本章局部键，形如 a1；同 id 重写=更新该实体，已登记过的同名同类型再登记也是更新",
     "query": "检索原文的关键词，多词任一命中；% 匹配任意长度，_ 匹配单个字符",
-    "search_events.isforeshadowing": "只看伏笔根事件（True）或只看非伏笔根（False），不填返回全部；"
-    "伏笔根 = write_event(isforeshadowing=True) 种下的树根，伏笔动作的引用来源只在其中",
+    "search_events.isforeshadowing": "只看伏笔埋设事件（True）或只看非伏笔埋设事件（False），不填返回全部；"
+    "伏笔来源 = write_event(isforeshadowing=True) 标记的埋设事件，可位于树内任意位置，伏笔动作只引用这些事件",
     "search_events.compact": "紧凑索引模式：每条只回事件 id、章号、标题、类型、状态、保存态与伏笔标记，"
     "每页最多 100 条；用于通览全书事件，详情仍用 read_event",
     "search_graph.relation_limit": "关系分页条数（1..20，默认 20），与实体 limit 相互独立",
@@ -261,28 +282,23 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
     "pivot_moment": PIVOT_MOMENT_DESCRIPTION,
     "cliffhanger": CLIFFHANGER_DESCRIPTION,
     "verdict": _enum_parameter_note(DialogueVerdict),
-    "event.title": "本章事件标题，不是逐个动作标签",
-    "event.problem": "本事件围绕的具体问题",
-    "event.summary": "原文支持的事件概要",
-    "event.event_type": "简短事件类型，不是main/secondary",
-    "event.status": "ongoing 或 resolved，章节结束不代表事件解决",
-    "event.progress": "本章明确推进，可空；不得编造结局",
-    "event_id": "事件来源身份：本章事件填 event 回执的 ref.el，已保存事件填 search_events 的 event_id",
-    "source_event_id": "伏笔来源事件身份，只接受伏笔树根：write_event(isforeshadowing=True) 种下的那棵树的根"
-    "（read_event 回执 is_foreshadow_setup=True）；普通事件树根不算，须先读取该事件核对",
+    "write_event.items": "一次提交一棵事件树的成员数组；"
+    "每项写 el（本执行引用 id）、title、problem、summary、"
+    "event_type、status（ongoing 或 resolved，章节结束不代表事件解决）、evidence（本章段首可见号），"
+    "可选 characters、progress（本章明确推进，不得编造结局）、from_chapter_id、to_chapter_id、reason、"
+    "isforeshadowing、confidence；数组顺序即树内成员顺序，树 ID 由系统独立生成；本执行尚未保存的树可继续追加"
+    "新事件（已有成员原样重交，新 el 接在树末尾）",
+    "event_id": "事件来源身份：本章事件填 write_event 回执 results 的 el，已保存事件填 search_events 的 event_id",
+    "source_event_id": "伏笔来源事件身份，只接受 write_event(isforeshadowing=True) 标记的埋设事件"
+    "（read_event 回执 is_foreshadow_setup=True）；可位于树内任意位置，须先读取该事件核对",
     "action_type": "伏笔动作类型：写英文常量 'reinforce'（强化）或 'payoff'（疑似回收），不写中文词",
     "target_event_id": "强化或回收所指事件身份，可空；填写时须先读取该事件",
     "characters": '[{"name": 正文名字, "entity_type": 实体大类, "role": 参与角色, "narrative_role": 叙事功能, '
-    '"action": 做了什么, "emotion": -2..2 整数}, …]；'
-    "role/narrative_role/action/emotion 都可省略或写偏：role 缺省按实体登记类型取"
-    "（character→主体、location→地点、其余→客体），叙事功能近义词自动归一，"
-    "emotion 越界按边界收敛；非 character 条目只给 name、entity_type 与 role。"
-    f"role 取：{'、'.join(member.value for member in EventParticipantRole)}（{EVENT_ROLE_FIELD_HINT}）；"
-    f"narrative_role 取：{'、'.join(member.value for member in RoleFunction)}（{PERSON_ROLE_FIELD_HINT}）",
-    "participants.items": '[{"name": 正文名字, "entity_type": 实体大类, "role": 参与角色, '
-    '"narrative_role": 叙事功能, "action": 一句话动作, "emotion": -2..2 整数}, …]；'
-    "四个描述字段都可省略或写偏：role 缺省按实体登记类型取（character→主体、location→地点、"
-    "其余→客体），叙事功能近义词自动归一，emotion 越界按边界收敛。"
+    '"action": 做了什么, "emotion": -2..2 整数}, …]；随事件提交时一并写入，写入后不能补写或更新。'
+    "role 可省略或写偏，缺省按实体登记类型取（character→主体、location→地点、其余→客体）；"
+    "character 条目的 narrative_role/action/emotion 必填、不自动填默认值，"
+    "叙事功能近义词自动归一，emotion 越界按边界收敛；非 character 条目只给 name、entity_type 与 role，"
+    "多写的 narrative_role/action/emotion 不入库并在回执 warnings 列出。"
     f"role 取：{'、'.join(member.value for member in EventParticipantRole)}（{EVENT_ROLE_FIELD_HINT}）；"
     f"narrative_role 取：{'、'.join(member.value for member in RoleFunction)}（{PERSON_ROLE_FIELD_HINT}）",
 }
@@ -293,20 +309,28 @@ _CALL_PARAMETER_NOTES: dict[str, str] = {
 AGENT_CONTRACT_TEXT: str = (
     "执行一段 Python 程序，每次成功调用写入本次来源或候选记录，失败只作废那一条。\n"
     "运行规则：\n"
-    "- 对话序号：执行前预检可确定的 candidate_index 范围，越界时本程序不执行；动态返回值仍逐项校验。\n"
-    "- 语法：变量赋值与等长解包、字典下标赋值、列表/字典/元组（含 * 与 ** 解包）、列表/字典推导式、下标与切片、"
-    "算术 + - * / // %、比较 ==/!=/in/not in/</<=/>/>=/is/is not（可链式）、and/or/not、"
-    "条件表达式 a if cond else b、f-string、无默认值位置参数的 lambda 与 def（可 return）、for 与 if；"
+    "- 对话序号：每次实际调用时校验 candidate_index 范围，越界只拒绝该次调用，保留此前成功调用。\n"
+    "- 语法：变量赋值与等长解包、增量赋值（+= -= *= /= //= %=）、字典下标赋值、"
+    "列表/字典/元组/集合（含 * 与 ** 解包）、列表/字典/集合推导式、"
+    "下标与切片、"
+    "算术 + - * / // %（含文本与列表乘整数重复）、比较 ==/!=/in/not in/</<=/>/>=/is/is not（可链式）、"
+    "and/or/not、条件表达式 a if cond else b、f-string、无默认值位置参数的 lambda 与 def（可 return）、"
+    "for/while 与 if、try/except/else/finally、break/continue、import；"
     "基础函数 len/str/int/float/bool/min/max/abs/sum/sorted/enumerate/isinstance/any/all/round/repr/print"
-    "/list/dict/tuple/zip/reversed/format 与 "
-    "range(stop)/range(start, stop, step) 只接受位置参数，range 最多500项；"
-    "sorted 另接受 key=lambda 与 reverse=bool，min/max 另接受 key=lambda；"
+    "/list/dict/set/tuple/zip/reversed/format 与 "
+    "range(stop)/range(start, stop, step) 只接受位置参数（dict 另接受 k=v 关键字）；"
+    "sorted 另接受 key=lambda 或 def 函数与 reverse=bool，min/max 另接受 key=lambda 或 def 函数；"
     "内置容器与字符串方法可按属性调用（dict.get/items、list.append/extend、str.split/replace 等）；"
+    f"import 只开放 {'/'.join(sorted(PROGRAM_MODULES))}，模块属性只允许调用放行函数（如 json.dumps），"
+    "不开放属性读；"
+    "except 不写类型或只写 Exception，只捕获运行期错误（下标、键、类型、除零），语法与调用写法错误不捕获；"
     "业务工具只写具名参数，可用 ** 展开字典；"
-    "没有 import、try/except、其他属性访问、装饰器、默认参数或其他 Python API。"
+    "没有其他属性访问、装饰器、默认参数或其他 Python API。"
     "常量写 True/False/None（也接受 true/false/null）；\n"
-    "字典/列表一律写字面量（{…}/[…]），列表/字典推导式用于有界变换，循环一律用 for。\n"
-    "- 检索结果自动出现在 reads；print 输出在 printed，不产生工具调用。具名调用示例：\n"
+    "字典/列表/集合一律写字面量（{…}/[…]），推导式用于有界变换；遍历用 for，条件循环用 while。\n"
+    "- 检索结果自动进入本程序回执的 reads；print 输出进入 printed，不产生工具调用。"
+    "工具函数本身直接返回数据对象（返回结构见每个工具条目的“返回”一行），返回值里没有 reads/written 字段。"
+    "具名调用示例：\n"
     '  events_page = search_events(query="院门", chapter_id=24, limit=5, offset=0)\n'
     '  graph_page = search_graph(query="阿青", limit=5, offset=0, relation_limit=20, relation_offset=0)\n'
     '  for candidate in graph_page["entities"]:\n'
@@ -320,11 +344,14 @@ AGENT_CONTRACT_TEXT: str = (
     "- 执行前检查整段语法白名单，禁用语法使本程序不执行；"
     "业务失败只作废该条调用、后面的语句继续执行；动态运行错误停止本程序、已成功的调用保留。\n"
     f"- 上限：单个程序最多 {PROGRAM_MAX_CODE_CHARS} 字符、{PROGRAM_MAX_OPS} 条调用；"
+    f"range 与序列重复单项不超过 {PROGRAM_MAX_RANGE_ITEMS}，while 不超过 {PROGRAM_MAX_WHILE_ITERATIONS} 次；"
     f"单条 print 回显最多 {PROGRAM_PRINT_MAX_CHARS} 字符，超出只显示前段并标注原文长度。\n"
     "回执字段：\n"
     "- status：本次程序的整体结果。\n"
     "- applied：本程序成功的调用条数。\n"
     "- failed：失败清单，每条给 op（第几条调用）、line（源码行）、record、field、code、expected。\n"
+    "- result：顶层 return 的值（按 JSON 写），只接受可序列化的标量/列表/字典。\n"
+    "- caught：本程序被 except 捕获的运行期故障，每条给 type、message、line。\n"
     "- written：本程序成功的 record 键，直接照抄，不自行拼接。\n"
     "- written_refs：本程序每条成功写入的 record 与 ref，跨程序引用照抄这里。\n"
     "- reads：本程序最近的读结果，正文可截短；references 保留全部 source_ref 与坐标，"
@@ -334,7 +361,8 @@ AGENT_CONTRACT_TEXT: str = (
     "- error：程序在写完之前就失败时的错误详情（type 与 message）。\n"
     "- 单次调用：写类回 status=written 带 record 与 ref（ref 是该次的产出，如 push_case 的案例编号）；"
     "读类直接给数据；被拒一律 status=rejected 带 record/field/code/expected/message。\n"
-    "写类调用的成功正文不回显：记录键看 written，进度看 progress，原文句柄看 references。\n"
+    "写类调用的成功正文不回显：记录键看回执 written，进度看回执 progress，原文句柄看回执 references；"
+    "这些字段只在外层回执，工具函数的返回值里没有。\n"
     "工作方式：\n"
     "- 一次程序把本章该判的内容写完：同一段程序里连续调用多个构造器、写多条记录都可以。\n"
     "- 同名同类型的实体再登记就是更新它，同端点同类型的关系再写就是同一条边：不必先读全图防重。\n"

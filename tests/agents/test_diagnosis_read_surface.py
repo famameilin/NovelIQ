@@ -7,11 +7,14 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from src.agents.diagnosis.tools import build_diagnosis_tools
-from src.event_trees.organization import EventOrganizationDraft, OrganizationEvidence
+from src.event_trees.organization import EventOrganizationDraft
+from src.event_trees.organization_models import OrganizationEvidence
 from src.storage import new_id
 from src.storage.models import EventParticipant
 from tests.agents.test_diagnosis_organization import organization_case as organization_case
@@ -22,13 +25,26 @@ from tests.support.event_tree_fixtures import (
     add_diagnosis_context,
     ensure_character,
     first_paragraph,
-    identity_every_declaration,
-    publish_draft,
     report_case_anchor,
 )
 from tests.support.storage_fixtures import fixture_id, natural_record, storage_for
 
 LONG_SUMMARY = "顾霜寻路并点灯。" * 200
+
+
+@pytest.mark.parametrize("tool_name,arguments", [
+    ("search_events", {"kind": "arc"}),
+    ("read_event", {"node_id": "arc-id", "kind": "arc"}),
+])
+def test_read_schema_rejects_independent_arc_kind(tool_name, arguments):
+    tools = {
+        item.name: item
+        for item in build_diagnosis_tools(
+            storage_for(MagicMock()), fixture_id(__name__, "read-schema"), role="report", case_pool=MagicMock()
+        )
+    }
+    with pytest.raises(ValidationError, match="event.*outcome"):
+        tools[tool_name].invoke(arguments)
 
 
 @pytest.fixture
@@ -124,98 +140,33 @@ def test_declaration_index_keeps_paragraphs_and_detail_keeps_full_source(declara
         tools["search_events"].invoke({"limit": 21})
 
 
-def test_saved_nested_event_read_and_rejection_identify_actual_top_level(db_session, organization_case):
-    case, event_ids, draft = organization_case
-    root, child, parent = event_ids[0], event_ids[1], event_ids[2]
-    # 链为 root→parent→child：读取与拒绝都必须给出实际端点
-    draft.contain(
-        parent_event_id=parent,
-        child_event_id=child,
-        reason="原文中的父级问题",
-        evidence=[OrganizationEvidence(paragraph_id=0)],
-    )
-    publish_draft(db_session, case.run_id, draft)
-    fresh = EventOrganizationDraft(storage_for(db_session), case.run_id, case.session_id)
-    fresh.fixture_session = db_session
-    fresh.case_id = report_case_anchor(case.run_id)
-    fresh.producer_agent_id = case.agent_id
+def test_tree_search_finds_parent_tree_including_empty_one(declaration_case):
+    from src.event_trees.diagnosis_persistence import hydrate_draft_from_run
+
+    draft = declaration_case
+    hydrate_draft_from_run(draft.session, draft.run_id, draft)
+    identifiers = list(draft._all_events())
+    child = draft.queue_graph().event_tree[identifiers[0]]
+    parent = draft.queue(event_ids=[], tree_key="整体", title="整体事件：寻路与照明")
+    draft.reference(parent_tree_id=parent, child_tree_id=child, reason="整体包含寻路", evidence=[])
     tools = {
         tool.name: tool
         for tool in build_diagnosis_tools(
-            storage_for(db_session),
-            case.run_id,
-            role="report",
-            organization_draft=fresh,
-            agent_id=fixture_id(__name__, "read-hierarchy"),
+            storage_for(draft.fixture_session),
+            draft.run_id,
+            organization_draft=draft,
+            agent_id=fixture_id(__name__, "read-surface"),
         )
     }
-    detail = json.loads(tools["read_event"].invoke({"node_id": child, "kind": "event"}))
-    assert detail["parent_event_id"] == parent
-    assert detail["top_level_event_id"] == root and detail["is_top_level"] is False
-    page = json.loads(tools["search_events"].invoke({"kind": "event"}))
-    assert page["total"] == 3
-    roots = [item for item in page["events"] if item["is_top_level"]]
-    assert len(roots) == 1 and roots[0]["event_id"] == root
-    assert roots[0]["is_top_level"] is True
-    assert roots[0]["parent_event_id"] is None
-    outcome = fresh.register_outcome(
-        key="result",
-        title="身份结果",
-        description="身份得到确认",
-        evidence=[OrganizationEvidence(paragraph_id=0)],
-    )
-    rejected = json.loads(
-        tools["write_outcome"].invoke(
-            {
-                "items": [
-                    {
-                        "operation": "link",
-                        "event_id": child,
-                        "outcome_id": outcome,
-                        "reason": "子问题形成结果",
-                        "evidence": [{"paragraph_id": 0}],
-                    }
-                ]
-            }
-        )
-    )
-    assert rejected["status"] == "partial"
-    assert f"parent_event_id={parent}" in rejected["failed"][0]["message"]
-    assert f"top_level_event_id={root}" in rejected["failed"][0]["message"]
-    assert not fresh.event_outcome_links
-    tools["write_outcome"].invoke(
-        {
-            "items": [
-                {
-                    "operation": "link",
-                    "event_id": root,
-                    "outcome_id": outcome,
-                    "reason": "核对顶层问题的贡献",
-                    "evidence": [{"paragraph_id": 0}],
-                }
-            ]
-        }
-    )
-    assert set(fresh.event_outcome_links) == {(root, outcome)}
-
-
-def test_draft_parent_change_is_reflected_in_reads_without_rewriting_child(declaration_case):
-    draft = declaration_case
-    draft, _meta = identity_every_declaration(draft.fixture_session, draft.run_id)
-    child, parent = list(draft.events)
-    assert draft.read_events([child])[0]["is_top_level"] is True
-    before = draft.events[child].model_dump(mode="json")
-    draft.contain(
-        parent_event_id=parent,
-        child_event_id=child,
-        reason="父级问题明确包含子问题",
-        evidence=[OrganizationEvidence(paragraph_id=0)],
-    )
-    detail = draft.read_events([child])[0]
-    assert detail["parent_event_id"] == detail["top_level_event_id"] == parent
-    assert detail["is_top_level"] is False
-    assert draft.search_events(top_level_only=True)["items"][0]["event_id"] == parent
-    assert draft.events[child].model_dump(mode="json") == before
+    result = json.loads(tools["search_events"].invoke({"query": "整体事件"}))
+    row = next(item for item in result["trees"] if item["tree_id"] == parent)
+    assert row["event_count"] == 0 and row["child_tree_ids"] == [child]
+    assert row["parent_tree_ids"] == [] and row["is_top_level"]
+    child_row = json.loads(tools["search_events"].invoke({"tree_id": child}))["trees"][0]
+    assert child_row["parent_tree_ids"] == [parent] and not child_row["is_top_level"]
+    subtree = json.loads(tools["search_events"].invoke({"tree_id": parent}))
+    assert subtree["trees"][0]["tree_id"] == parent
+    assert [event["event_id"] for event in subtree["events"]] == [identifiers[0]]
 
 
 async def test_shared_text_reader_binds_exact_original_and_rejects_unmatched_occurrence(declaration_case):

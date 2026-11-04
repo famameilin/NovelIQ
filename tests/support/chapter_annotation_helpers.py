@@ -15,11 +15,12 @@ from typing import Any
 from sqlalchemy import select
 
 from src.agents.annotation.candidates import extract_dialogue_candidates
-from src.agents.annotation.output_models import BoundChapterAnnotation
+from src.agents.annotation.output_models import BoundChapterAnnotation, BoundCharacterObservation
 from src.event_trees.models import BoundEvent, EventParticipantInput
-from src.fact_graph.inputs import BoundRelationInput, ChapterMetricsInput, EntityInput
-from src.fact_graph.outputs import BoundCharacterObservation, BoundDialogue
+from src.fact_graph.inputs import BoundRelationInput, EntityInput
+from src.fact_graph.outputs import BoundDialogue
 from src.fact_graph.vocabulary import EntityType
+from src.metrics.annotation_inputs import ChapterMetricsInput
 from src.storage import new_id
 from src.storage.db import get_session_factory
 from src.storage.models import (
@@ -624,6 +625,32 @@ def commit_test_annotation(
             participant.entity = _to_key(participant.entity)
     trees.begin(invocation)
     trees.sync(invocation, chapter_id, annotation.events)
+    paragraph_text = {row.paragraph_id: row.text for row in paragraphs}
+    tree_ids = {event.node_id: new_id() for event in annotation.events}
+    trees.sync_contributions(
+        invocation,
+        {
+            "queues": {
+                tree_ids[event.node_id]: {
+                    "tree_id": tree_ids[event.node_id],
+                    "tree_key": None,
+                    "title": event.title,
+                    "description": event.description,
+                    "event_ids": [event.node_id],
+                    "reason": "完整单事件树",
+                    "evidence": [
+                        {
+                            "paragraph_id": event.evidence_paragraph_id,
+                            "char_start": 0,
+                            "char_end": len(paragraph_text[event.evidence_paragraph_id]),
+                        }
+                    ],
+                    "producer_agent_id": invocation,
+                }
+                for event in annotation.events
+            }
+        },
+    )
     cases.begin(invocation)
     ledger = AnnotationToolLedger(
         run_scope=run_id,

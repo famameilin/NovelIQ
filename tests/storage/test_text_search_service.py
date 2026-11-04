@@ -242,7 +242,7 @@ async def test_search_respects_paragraph_bounds(db_session) -> None:
 async def test_search_with_missing_paragraph_meta_skips_candidate(db_session) -> None:
     """候选段落元数据（章节/chunk）查不到时跳过该候选"""
     session = MagicMock()
-    session.reads.final_agents_annotation_text_search_search_1.return_value = []
+    session.reads.text.list_search_hit_positions.return_value = []
     service = TextSearchService(session, run_id=fixture_id(__name__, "run-1"), semantic_enabled=False)
     keyword_row = MagicMock(
         paragraph_id=7,

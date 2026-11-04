@@ -10,25 +10,16 @@ from dataclasses import dataclass
 
 from pydantic import Field, model_validator
 
-from .schema import (
-    CLIFFHANGER_DESCRIPTION,
-    EMOTION_SCORE_DESCRIPTION,
-    ENTITY_TAG_MAX_CHARS,
-    ENTITY_TAG_MAX_COUNT,
-    ENTITY_TAGS_RULE_TEXT,
-    PIVOT_MOMENT_DESCRIPTION,
-    StrictModel,
-    normalize_semantic_text,
-)
-from .vocabulary import (
+from src.fact_graph.schema import ENTITY_TAG_MAX_CHARS, ENTITY_TAG_MAX_COUNT, ENTITY_TAGS_RULE_TEXT, StrictModel
+from src.fact_graph.vocabulary import (
     DialogueParseStatus,
     DialogueVerdict,
     EntityType,
-    NarrativeFunction,
     RelationType,
     Tone,
     relation_catalog_text,
 )
+from src.text_processing.normalize import normalize_semantic_text
 
 
 class EntityInput(StrictModel):
@@ -102,38 +93,8 @@ class EntityDirectoryInput(StrictModel):
 
 # 段落级情绪监督：标签随指标整域提交；锚点用"段首可见号"（注入正文每段以 `N：` 开头），
 # 标签与 evidence 一律引用该号，落库时再映射回全局 paragraph_id（对持久化无影响）。
-class ParagraphLabelInput(StrictModel):
-    """一个段落的情绪标签
-
-    paragraph_id 取正文段首可见号（每段开头的 `N：` 里那个 N）。
-    """
-
-    paragraph_id: int = Field(ge=1, description="段首可见号（正文每段开头的 `N：`）")
-    emotion: int = Field(ge=-2, le=2, description=f"整段情绪分值。{EMOTION_SCORE_DESCRIPTION}")
 
 
-class ChapterMetricsInput(StrictModel):
-    """提交当前章 摘要和叙事指标"""
-
-    summary: str = Field(min_length=1)
-    emotional_valence: int = Field(ge=-2, le=2, description=EMOTION_SCORE_DESCRIPTION)
-    narrative_function: NarrativeFunction
-    pivot_moment: bool = Field(default=False, description=PIVOT_MOMENT_DESCRIPTION)
-    cliffhanger: bool = Field(default=False, description=CLIFFHANGER_DESCRIPTION)
-    labels: list[ParagraphLabelInput] = Field(
-        default_factory=list,
-        description="段落级情绪标签（每章自选 2-3 段；按 paragraph_id 去重，重复提交以最后一次为准）",
-    )
-
-    @model_validator(mode="after")
-    def normalize_summary(self) -> ChapterMetricsInput:
-        """规范化当前章 摘要；labels 按 paragraph_id 去重（后写覆盖）"""
-        self.summary = normalize_semantic_text(self.summary, label="summary")
-        deduped: dict[int, ParagraphLabelInput] = {}
-        for label in self.labels:
-            deduped[label.paragraph_id] = label
-        self.labels = list(deduped.values())
-        return self
 
 
 class DialogueInput(StrictModel):

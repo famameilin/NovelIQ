@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sqlalchemy import Select, func, or_, select
+from sqlalchemy.engine import Row
 
 from src.storage.models import (
     Agent,
@@ -142,6 +143,31 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
             )
             for record, _sequence, content in self.session.execute(statement).all()
         ]
+
+    def fetch_dialogue_observation_rows(self, run_id: str) -> list[Row]:
+        "按原有顺序读取对话归因、语气和正文切片长度"
+        content = func.substr(
+            Chapter.text,
+            DialogueRecord.start_char + 1,
+            DialogueRecord.end_char - DialogueRecord.start_char,
+        )
+        statement = (
+            select(
+                DialogueRecord.chapter_id.label("chapter_id"),
+                DialogueRecord.speaker_entity_id.label("speaker_entity_id"),
+                DialogueRecord.tone.label("tone"),
+                func.coalesce(func.char_length(content), 0).label("content_length"),
+            )
+            .join(
+                Chapter,
+                (Chapter.run_id == DialogueRecord.run_id) & (Chapter.chapter_id == DialogueRecord.chapter_id),
+            )
+            .where(DialogueRecord.run_id == run_id)
+            .order_by(
+                Chapter.sequence, DialogueRecord.chapter_id, DialogueRecord.start_char, DialogueRecord.dialogue_id
+            )
+        )
+        return list(self.session.execute(statement))
 
     def _annotation_event_statement(self, run_id: str) -> Select:
         "本运行的章级事件：记录自身带运行归属（agent_annotations.run_id）"
@@ -308,6 +334,31 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
             .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
             .where(ChapterAnnotation.run_id == run_id)
         )
+
+    def fetch_character_observation_rows(self, run_id: str) -> list[Row]:
+        "读取章级人物观测所需字段并保持图事实顺序"
+        statement = (
+            select(
+                ChapterAnnotation.chapter_id.label("chapter_id"),
+                GraphEntity.canonical_name.label("participant_entity_name"),
+                GraphEntity.entity_type.label("participant_entity_type"),
+                EventParticipant.narrative_role.label("participant_narrative_role"),
+                EventParticipant.action.label("participant_action"),
+                EventParticipant.emotion.label("participant_emotion"),
+            )
+            .select_from(GraphFact)
+            .join(EventParticipant, EventParticipant.participant_id == GraphFact.participant_id)
+            .join(CompleteEvent, CompleteEvent.event_id == EventParticipant.event_id)
+            .join(ChapterAnnotation, ChapterAnnotation.record_id == CompleteEvent.annotation_record_id)
+            .join(GraphEntity, GraphEntity.entity_id == EventParticipant.entity_id)
+            .outerjoin(
+                Chapter,
+                (Chapter.run_id == run_id) & (Chapter.chapter_id == GraphFact.effective_chapter_id),
+            )
+            .where(ChapterAnnotation.run_id == run_id)
+            .order_by(Chapter.sequence, GraphFact.operation_order, GraphFact.graph_fact_id)
+        )
+        return list(self.session.execute(statement))
 
     def _attach_participant_observations(self, run_id: str, rows: list[GraphFactRow]) -> list[GraphFactRow]:
         "人物动态观测：实体/角色/动作/情绪从事件的参与者行读取（不复制三态值）"

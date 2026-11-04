@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session as Storage
 
 from src.storage.ids import new_id
 from src.storage.records.events import EventSave as EventContribution
-from src.storage.repositories.queries import event_trees_trees as _queries
+from src.storage.repositories.queries import event_write_rows as _queries
 
 
 class EventWriter:
@@ -19,9 +19,9 @@ class EventWriter:
         from src.storage.records.evidence import evidence_for
         from src.storage.repositories import narrative_records as smap
 
-        _queries.event_trees_trees_save_work_1(session, self.run_id)
+        _queries.lock_run(session, self.run_id)
         contribution = frozen.snapshot()
-        record = _queries.event_trees_trees_save_work_2(session, annotation_id)
+        record = _queries.get_output(session, annotation_id)
         if record is None or record.agent_id != frozen.agent_id:
             raise ValueError("事件保存必须引用本执行的真实标注记录")
         source = smap.annotation_record_source(session, annotation_id)
@@ -90,16 +90,16 @@ class EventWriter:
             smap.write_evidence_rows(session, {"complete_event_id": event_id}, refs)
         session.flush()
         for identifier, action in contribution.get("actions", {}).items():
-            source_row = _queries.event_trees_trees_save_work_3(session, action)
+            source_row = _queries.get_action_source(session, action)
             if source_row is None or not source_row.is_foreshadowing_root:
-                raise ValueError(f"source_event_id={action['root_event_id']} 缺少有效伏笔事件")
+                raise ValueError(f"source_event_id={action['source_event_id']} 缺少有效伏笔事件")
             for field, endpoint_id in (
-                ("source_event_id", action["root_event_id"]),
+                ("source_event_id", action["source_event_id"]),
                 ("target_event_id", action.get("target_event_id")),
             ):
                 if endpoint_id is None:
                     continue
-                endpoint = _queries.event_trees_trees_save_work_4(session, endpoint_id)
+                endpoint = _queries.get_endpoint(session, endpoint_id)
                 endpoint_source = (
                     smap.annotation_record_source(session, endpoint.annotation_record_id)
                     if endpoint is not None
@@ -121,7 +121,7 @@ class EventWriter:
                     source_operation_local_key=str(action["source_operation_id"])[:128],
                     operation_order=int(action["operation_order"]),
                     action_type=action["action_type"],
-                    source_event_id=action["root_event_id"],
+                    source_event_id=action["source_event_id"],
                     target_event_id=action.get("target_event_id"),
                 )
             )
@@ -141,7 +141,7 @@ class EventWriter:
 
         from src.storage.models import CompleteEvent, EventForeshadowingAction, GraphFact
 
-        identifiers = list(_queries.event_trees_trees_discard_storage_1(session, execution_ids))
+        identifiers = list(_queries.list_execution_event_ids(session, execution_ids))
         from src.storage.repositories.event_contributions import discard_annotation_event_contributions
 
         discard_annotation_event_contributions(session, self.run_id, execution_ids, identifiers)

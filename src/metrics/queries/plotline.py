@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import base64
 import json
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Sequence
 from copy import deepcopy
 from typing import Any, cast
 
 from src.event_trees.action_order import load_foreshadowing_actions
-from src.event_trees.read.organization import EventTreeQuery
+from src.event_trees.read.organization import EventTreeQuery, organization_status
 from src.storage import Storage
 from src.utils.identity import stable_uuid, text_digest
 
@@ -32,22 +32,58 @@ SKIPPED_DELTA_FIELDS = frozenset({"entity_type", "support_count", "is_main_chara
 #: 允许以空 before 首次出现的字段（人物动态观测）
 FIRST_TIME_DELTA_FIELDS = frozenset({"action", "emotion", "role_function"})
 
+#: 同截点变化清单的按运行缓存；已完成运行的事实不再变化，上限两份截点
+_CHANGE_CACHE: OrderedDict[tuple[str, int], list[dict[str, Any]]] = OrderedDict()
+_CHANGE_CACHE_LIMIT = 2
+
+
+def _encode_cursor(context: list[Any], offset: int) -> str:
+    payload = json.dumps({"query": context, "offset": offset}, ensure_ascii=False).encode()
+    return base64.urlsafe_b64encode(payload).decode()
+
+
+def _decode_offset(cursor: str | None, context: list[Any]) -> int:
+    "游标携带完整查询条件，条件不同即拒绝"
+    if not cursor:
+        return 0
+    try:
+        decoded = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+        if decoded["query"] != context or not isinstance(decoded["offset"], int) or decoded["offset"] < 0:
+            raise ValueError
+        return decoded["offset"]
+    except (ValueError, KeyError, TypeError, UnicodeError) as exc:
+        raise ValueError("分页游标与当前时间轴条件不匹配") from exc
+
 
 class PlotlineQuery:
     """只消费已保存事实，调用方复用整个任务 completed 的访问规则"""
 
-    def __init__(self, session: Storage, run_id: str) -> None:
-        self.session, self.run_id = session, run_id
-        event_query = EventTreeQuery(session, run_id)
-        event_query.fetch()
-        self.events = event_query.events
-        self.organization_status = event_query.organization_status
-        rows = session.reads.metrics_queries_plotline_init_1(run_id)
+    def __init__(self, session: Storage, run_id: str, *, cache: bool = False) -> None:
+        "cache 仅对已完成运行开启：同截点的变化清单在进程内复用"
+        self.session, self.run_id, self.cache = session, run_id, cache
+        rows = session.reads.text.list_readable_run_chapters(run_id)
         self.chapters: list[dict[str, Any]] = [
             {"chapter_id": row.chapter_id, "order": index + 1, "title": row.display_title or row.title}
             for index, row in enumerate(rows)
         ]
         self.orders: dict[int, int] = {row["chapter_id"]: row["order"] for row in self.chapters}
+        self._event_state: tuple[dict[str, Any], str] | None = None
+
+    @property
+    def events(self) -> dict[str, Any]:
+        "事件按需加载：只有伏笔变化与状态折叠需要事件正文"
+        return self._event_tree()[0]
+
+    @property
+    def organization_status(self) -> str:
+        return self._event_tree()[1]
+
+    def _event_tree(self) -> tuple[dict[str, Any], str]:
+        if self._event_state is None:
+            query = EventTreeQuery(self.session, self.run_id, light=True)
+            query.fetch()
+            self._event_state = (query.events, query.organization_status)
+        return self._event_state
 
     def _cutoff(self, chapter_id: int | None) -> int:
         if chapter_id is None:
@@ -61,7 +97,7 @@ class PlotlineQuery:
         if not owner_ids:
             return {}
         evidence: dict[str, list[dict[str, Any]]] = {}
-        for row in self.session.reads.metrics_queries_plotline_evidence_by_owner_1(
+        for row in self.session.reads.text.list_owned_evidence(
             owner_column, owner_ids, self.run_id
         ):
             evidence.setdefault(str(row.owner_id), []).append(
@@ -75,24 +111,39 @@ class PlotlineQuery:
             )
         return evidence
 
-    def _fetch_facts(self, chapter_ids: list[int]) -> list[dict[str, Any]]:
-        """本运行在阅读截点内的贡献事实（实体/关系/人物观测/情节推进四种形状）"""
+    def _evidence_anchors(self, owner_column, owner_ids: Sequence[int | str]) -> dict[str, list[int]]:
+        "只取每个所有者最早证据所在段落，列表读取不再加载全部证据行"
+        if not owner_ids:
+            return {}
+        return {
+            str(row.owner_id): [int(row.paragraph_id)]
+            for row in self.session.reads.text.list_owned_evidence_anchors(owner_column, owner_ids, self.run_id)
+        }
+
+    def _fetch_facts(self, chapter_ids: list[int], *, with_evidence: bool = False) -> list[dict[str, Any]]:
+        """本运行在阅读截点内的贡献事实（实体/关系/人物观测/情节推进四种形状）
+
+        列表只取最早证据锚点；详情与导出按需加载全部证据行
+        """
         facts: list[dict[str, Any]] = []
-        for row in self.session.reads.final_metrics_queries_plotline_direct_facts(self.run_id, chapter_ids):
+        for row in self.session.reads.graph.list_direct_changes(self.run_id, chapter_ids):
             values = dict(row)
             values["shape"] = self._direct_fact_shape(values)
             facts.append(values)
-        for row in self.session.reads.final_metrics_queries_plotline_fetch_facts_1(chapter_ids, self.run_id):
+        for row in self.session.reads.graph.list_participant_changes(chapter_ids, self.run_id):
             values = dict(row)
             values["shape"] = "participant"
             values["subject_entity_id"] = values.get("subject_entity_id")
             facts.append(values)
         fact_ids = [str(fact["graph_fact_id"]) for fact in facts]
-        evidence = self._evidence_by_owner("graph_fact_id", fact_ids)
+        evidence = self._evidence_by_owner("graph_fact_id", fact_ids) if with_evidence else {}
+        anchors = {} if with_evidence else self._evidence_anchors("graph_fact_id", fact_ids)
         tags = self._fetch_fact_tags(fact_ids)
         for fact in facts:
-            fact["evidence"] = evidence.get(str(fact["graph_fact_id"]), [])
-            fact["tags"] = tags.get(str(fact["graph_fact_id"]), [])
+            key = str(fact["graph_fact_id"])
+            fact["evidence"] = evidence.get(key, [])
+            fact["anchors"] = anchors.get(key, [])
+            fact["tags"] = tags.get(key, [])
         facts.sort(
             key=lambda fact: (
                 self.orders[fact["chapter_id"]],
@@ -116,7 +167,7 @@ class PlotlineQuery:
         if not fact_ids:
             return {}
         tags: dict[str, list[str]] = {}
-        for row in self.session.reads.metrics_queries_plotline_fetch_fact_tags_1(fact_ids):
+        for row in self.session.reads.graph.list_ordered_fact_tags(fact_ids):
             tags.setdefault(str(row.graph_fact_id), []).append(str(row.tag))
         return tags
 
@@ -177,9 +228,28 @@ class PlotlineQuery:
             values.append(("tags", list(fact.get("tags") or [])))
         return values
 
-    def _changes(self, cutoff: int, *, display_order: bool = True) -> list[dict[str, Any]]:
+    def _changes(
+        self, cutoff: int, *, display_order: bool = True, with_evidence: bool = False
+    ) -> list[dict[str, Any]]:
+        "列表口径的变化按截点复用；带证据与详情口径每次重建"
+        key = (self.run_id, cutoff)
+        reusable = self.cache and not display_order and not with_evidence
+        if reusable and key in _CHANGE_CACHE:
+            _CHANGE_CACHE.move_to_end(key)
+            return _CHANGE_CACHE[key]
+        changes = self._build_changes(cutoff, display_order=display_order, with_evidence=with_evidence)
+        if reusable:
+            _CHANGE_CACHE[key] = changes
+            _CHANGE_CACHE.move_to_end(key)
+            while len(_CHANGE_CACHE) > _CHANGE_CACHE_LIMIT:
+                _CHANGE_CACHE.popitem(last=False)
+        return changes
+
+    def _build_changes(
+        self, cutoff: int, *, display_order: bool = True, with_evidence: bool = False
+    ) -> list[dict[str, Any]]:
         chapter_ids = [key for key, order in self.orders.items() if order <= cutoff]
-        facts = self._fetch_facts(chapter_ids)
+        facts = self._fetch_facts(chapter_ids, with_evidence=with_evidence)
         deltas = self._entity_deltas(facts)
         changes: list[dict[str, Any]] = []
         relation_states: dict[str, dict[str, Any]] = {}
@@ -254,6 +324,7 @@ class PlotlineQuery:
                     scope,
                     [str(fact["bound_event_id"])] if shape == "plotline" and fact.get("bound_event_id") else [],
                     [str(fact["graph_fact_id"])],
+                    anchors=fact.get("anchors") or None,
                 )
             )
         actions = load_foreshadowing_actions(self.session, self.run_id) if self.organization_status == "ready" else []
@@ -266,7 +337,7 @@ class PlotlineQuery:
         }
         previous: dict[str, str] = {}
         for action_row in actions:
-            root = self.events.get(action_row.root_event_id or "")
+            root = self.events.get(action_row.source_event_id)
             if root is None or (action_row.target_event_id and action_row.target_event_id not in visible_events):
                 raise ValueError(f"伏笔动作 {action_row.action_id} 的来源或目标不在阅读截点内")
             before = previous.get(root.event_id)
@@ -320,7 +391,15 @@ class PlotlineQuery:
         scope: str,
         events: list[str],
         facts: list[str],
+        *,
+        anchors: list[int] | None = None,
     ) -> dict[str, Any]:
+        if scope != "paragraph":
+            anchor_paragraph_ids: list[int] = []
+        elif anchors is not None:
+            anchor_paragraph_ids = sorted({int(item) for item in anchors})
+        else:
+            anchor_paragraph_ids = sorted({item["paragraph_id"] for item in evidence if "paragraph_id" in item})
         return {
             "plotline_change_id": stable_uuid("plotline", self.run_id, dimension, subject, source),
             "dimension": dimension,
@@ -335,9 +414,7 @@ class PlotlineQuery:
             "action": action,
             "evidence_scope": scope,
             "evidence": evidence,
-            "anchor_paragraph_ids": sorted({item["paragraph_id"] for item in evidence if "paragraph_id" in item})
-            if scope == "paragraph"
-            else [],
+            "anchor_paragraph_ids": anchor_paragraph_ids,
             "source_event_ids": events,
             "source_fact_ids": facts,
         }
@@ -354,27 +431,38 @@ class PlotlineQuery:
         cursor: str | None = None,
         limit: int = 100,
         source_fact_id: str | None = None,
+        meta_only: bool = False,
     ) -> dict[str, Any]:
+        "meta_only 只回运行外壳（章节、截点与组织状态），不折叠全书变化"
         cutoff = self._cutoff(through_chapter_id)
+        if meta_only:
+            return {
+                "run_id": self.run_id,
+                "organization_status": organization_status(self.session, self.run_id),
+                "chapters": self._chapter_titles(cutoff),
+                "through_chapter_id": self._chapter_id(cutoff),
+                "changes": [],
+                "states": [],
+                "state_counts": {},
+                "state_total": 0,
+                "total": 0,
+                "next_cursor": None,
+                "distribution": [],
+            }
         start = self._cutoff(window_start_chapter_id)
         end = self._cutoff(window_end_chapter_id) if window_end_chapter_id is not None else cutoff
         if start > end or not 1 <= limit <= 500 or (dimension is not None and dimension not in DIMENSIONS):
             raise ValueError("时间轴窗口、维度或分页大小无效")
         all_changes = self._changes(cutoff, display_order=False)
-        states: dict[tuple[str, str], dict[str, Any]] = {}
-        for change in all_changes:
-            key = (change["dimension"], change["subject_id"])
-            old = states.get(key, {}).get("state")
-            value = deepcopy(change["after"])
-            if change["dimension"] == "character":
-                value = {**(old or {}), **value}
-            states[key] = {
-                **{
-                    field: change[field]
-                    for field in ("subject_id", "subject_title", "dimension", "chapter_id", "chapter_order")
-                },
-                "state": value,
-            }
+        first_page = cursor is None
+        matched_states: list[dict[str, Any]] = []
+        if first_page:
+            matched_states = [
+                state
+                for state in self._fold_states(all_changes).values()
+                if (not subject_id or state["subject_id"] == subject_id)
+                and (not dimension or state["dimension"] == dimension)
+            ]
         selected = [
             item
             for item in all_changes
@@ -398,52 +486,170 @@ class PlotlineQuery:
             )
         )
         context = [self.run_id, cutoff, start, end, subject_id, dimension, q, source_fact_id]
-        offset = 0
-        if cursor:
-            try:
-                decoded = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
-                if decoded["query"] != context or not isinstance(decoded["offset"], int) or decoded["offset"] < 0:
-                    raise ValueError
-                offset = decoded["offset"]
-            except (ValueError, KeyError, TypeError, UnicodeError) as exc:
-                raise ValueError("分页游标与当前时间轴条件不匹配") from exc
+        offset = _decode_offset(cursor, context)
         next_offset = offset + limit
-        next_cursor = base64.urlsafe_b64encode(
-            json.dumps({"query": context, "offset": next_offset}, ensure_ascii=False).encode()
-        ).decode()
+        # 首屏带全书元数据；翻页只回变化，避免每页重发章节/状态/分布
         return {
             "run_id": self.run_id,
-            "organization_status": self.organization_status,
-            "chapters": [
-                {**chapter, "title": chapter["title"] if chapter["order"] <= cutoff else f"第 {chapter['order']} 章"}
-                for chapter in self.chapters
-            ],
-            "through_chapter_id": next((c["chapter_id"] for c in self.chapters if c["order"] == cutoff), None),
+            "organization_status": organization_status(self.session, self.run_id),
+            "chapters": self._chapter_titles(cutoff) if first_page else [],
+            "through_chapter_id": self._chapter_id(cutoff),
             "changes": selected[offset:next_offset],
-            "states": list(states.values()),
-            "subjects": [
-                {k: value[k] for k in ("dimension", "subject_id", "subject_title")} for value in states.values()
-            ],
+            "states": self._latest_states(matched_states) if first_page else [],
+            "state_counts": dict(Counter(state["dimension"] for state in matched_states)) if first_page else {},
+            "state_total": len(matched_states),
             "total": len(selected),
-            "next_cursor": next_cursor if next_offset < len(selected) else None,
+            "next_cursor": _encode_cursor(context, next_offset) if next_offset < len(selected) else None,
             "distribution": [
                 {"chapter_id": key[0], "chapter_order": key[1], "dimension": key[2], "count": count}
                 for key, count in sorted(counts.items())
-            ],
+            ]
+            if first_page
+            else [],
+        }
+
+    def _chapter_titles(self, cutoff: int) -> list[dict[str, Any]]:
+        return [
+            {**chapter, "title": chapter["title"] if chapter["order"] <= cutoff else f"第 {chapter['order']} 章"}
+            for chapter in self.chapters
+        ]
+
+    def _chapter_id(self, cutoff: int) -> int | None:
+        return next((chapter["chapter_id"] for chapter in self.chapters if chapter["order"] == cutoff), None)
+
+    def _fold_states(self, changes: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+        "按贡献顺序折叠每个主体的当前状态"
+        states: dict[tuple[str, str], dict[str, Any]] = {}
+        for change in changes:
+            key = (change["dimension"], change["subject_id"])
+            old = states.get(key, {}).get("state")
+            value = deepcopy(change["after"])
+            if change["dimension"] == "character":
+                value = {**(old or {}), **value}
+            states[key] = {
+                **{
+                    field: change[field]
+                    for field in ("subject_id", "subject_title", "dimension", "chapter_id", "chapter_order")
+                },
+                "state": value,
+            }
+        return states
+
+    def _latest_states(self, states: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+        "每个维度只留最近变化的一个主体，供截点状态行使用"
+        latest: dict[str, dict[str, Any]] = {}
+        for state in sorted(states, key=lambda item: (-item["chapter_order"], item["subject_id"])):
+            latest.setdefault(state["dimension"], state)
+        return [latest[dimension] for dimension in DIMENSIONS if dimension in latest]
+
+    def list_states(
+        self,
+        *,
+        through_chapter_id: int | None = None,
+        subject_id: str | None = None,
+        dimension: str | None = None,
+        q: str = "",
+        cursor: str | None = None,
+        limit: int = 100,
+        summary: bool = False,
+    ) -> dict[str, Any]:
+        "截点状态来源；summary 只回每维最近一个主体与各维主体数"
+        cutoff = self._cutoff(through_chapter_id)
+        if not 1 <= limit <= 500 or (dimension is not None and dimension not in DIMENSIONS):
+            raise ValueError("时间轴状态维度或分页大小无效")
+        states = [
+            state
+            for state in self._fold_states(self._changes(cutoff, display_order=False)).values()
+            if (not subject_id or state["subject_id"] == subject_id)
+            and (not dimension or state["dimension"] == dimension)
+            and (
+                not q
+                or q.casefold() in json.dumps([state["subject_title"]], ensure_ascii=False).casefold()
+            )
+        ]
+        if summary:
+            return {
+                "states": self._latest_states(states),
+                "state_counts": dict(Counter(state["dimension"] for state in states)),
+                "state_total": len(states),
+                "total": len(states),
+                "next_cursor": None,
+            }
+        states.sort(key=lambda state: (state["dimension"], -state["chapter_order"], state["subject_id"]))
+        context = ["states", self.run_id, cutoff, subject_id, dimension, q]
+        offset = _decode_offset(cursor, context)
+        next_offset = offset + limit
+        return {
+            "states": states[offset:next_offset],
+            "total": len(states),
+            "next_cursor": _encode_cursor(context, next_offset) if next_offset < len(states) else None,
+        }
+
+    def list_subjects(
+        self,
+        *,
+        through_chapter_id: int | None = None,
+        dimension: str | None = None,
+        q: str = "",
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        "变化主体选择器的分页来源，按名称匹配"
+        cutoff = self._cutoff(through_chapter_id)
+        if not 1 <= limit <= 500 or (dimension is not None and dimension not in DIMENSIONS):
+            raise ValueError("时间轴主体维度或分页大小无效")
+        subjects = [
+            {k: state[k] for k in ("dimension", "subject_id", "subject_title")}
+            for state in self._fold_states(self._changes(cutoff, display_order=False)).values()
+            if (not dimension or state["dimension"] == dimension)
+            and (not q or q.casefold() in state["subject_title"].casefold())
+        ]
+        subjects.sort(key=lambda row: (row["subject_title"], row["dimension"], row["subject_id"]))
+        context = ["subjects", self.run_id, cutoff, dimension, q]
+        offset = _decode_offset(cursor, context)
+        next_offset = offset + limit
+        return {
+            "subjects": subjects[offset:next_offset],
+            "total": len(subjects),
+            "next_cursor": _encode_cursor(context, next_offset) if next_offset < len(subjects) else None,
         }
 
     def detail(self, change_id: str, through_chapter_id: int) -> dict[str, Any]:
         cutoff = self._cutoff(through_chapter_id)
-        for item in self._changes(cutoff):
+        for item in self._changes(cutoff, display_order=False):
             if item["plotline_change_id"] == change_id:
-                return item
-        if any(item["plotline_change_id"] == change_id for item in self._changes(len(self.chapters))):
+                return self._with_evidence(item)
+        if any(
+            item["plotline_change_id"] == change_id
+            for item in self._changes(len(self.chapters), display_order=False)
+        ):
             raise LookupError("CHANGE_NOT_VISIBLE")
         raise LookupError("CHANGE_NOT_FOUND")
 
+    def _with_evidence(self, change: dict[str, Any]) -> dict[str, Any]:
+        "详情按需补齐全量证据与段落锚点"
+        change = deepcopy(change)
+        if change["evidence"] or not change["source_fact_ids"]:
+            return change
+        evidence = self._evidence_by_owner("graph_fact_id", change["source_fact_ids"])
+        merged = [row for fact_id in change["source_fact_ids"] for row in evidence.get(str(fact_id), [])]
+        change["evidence"] = merged
+        if change["evidence_scope"] == "paragraph":
+            change["anchor_paragraph_ids"] = sorted({int(row["paragraph_id"]) for row in merged})
+        return change
+
     def export(self) -> dict[str, Any]:
+        "导出保留全书变化与全部主体状态，不分页也不裁剪"
         last = self.chapters[-1]["chapter_id"] if self.chapters else None
         result = self.fetch(through_chapter_id=last)
-        result["changes"] = self._changes(len(self.chapters))
+        changes = self._changes(len(self.chapters), with_evidence=True)
+        states = self._fold_states(changes)
+        result["changes"] = changes
         result["next_cursor"] = None
+        result["states"] = list(states.values())
+        result["subjects"] = [
+            {k: value[k] for k in ("dimension", "subject_id", "subject_title")} for value in states.values()
+        ]
+        result.pop("state_counts")
+        result.pop("state_total")
         return result

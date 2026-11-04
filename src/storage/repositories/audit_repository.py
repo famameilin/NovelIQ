@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 
 from src.storage.models import Agent, AgentLoop, ToolCall
 from src.storage.models.base import naive_utcnow
@@ -173,6 +174,11 @@ class AuditRepository:
                     additions.append(f"invocation_error:{error}")
                 call.timing_notes_bytes = encode_document(list(dict.fromkeys([*notes, *additions])))
         self._session.flush()
+
+    def close_running_agents(self) -> int:
+        "启动时把上次进程遗留的 running Agent 身份收口为 error"
+        result = self._session.execute(update(Agent).where(Agent.status == "running").values(status="error"))
+        return int(cast(CursorResult[Any], result).rowcount or 0)
 
     @staticmethod
     def _write_usage(row: AgentLoop, usage: dict[str, Any]) -> None:

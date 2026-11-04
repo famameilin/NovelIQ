@@ -74,6 +74,61 @@ def _save_pool(client: TestClient) -> None:
     ).raise_for_status()
 
 
+def test_reasoning_effort_schema_and_defaults(isolated_settings: Path, api_client: TestClient) -> None:
+    fields = api_client.get("/api/settings/schema").json()["fields"]
+    view = api_client.get("/api/settings").json()
+    for task, label in (("annotation", "标注思考等级"), ("diagnosis", "诊断思考等级")):
+        spec = next(item for item in fields if item["path"] == ["models", task, "reasoning_effort"])
+        assert spec["field_type"] == "enum" and spec["label"] == label
+        assert spec["enum_values"] == ["low", "medium", "high", "xhigh", "max"]
+        assert spec["enum_labels"] == {"low": "低", "medium": "中", "high": "高", "xhigh": "极高", "max": "最高"}
+        assert view["values"]["models"][task]["reasoning_effort"] == "high"
+        assert view["defaults"]["models"][task]["reasoning_effort"] == "high"
+        assert "thinking" not in view["values"]["models"][task]
+        assert not any(item["path"] == ["models", task, "thinking"] for item in fields)
+
+
+@pytest.mark.parametrize("task", ["annotation", "diagnosis"])
+@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+def test_reasoning_effort_save_hot_apply_and_reset(
+    isolated_settings: Path, api_client: TestClient, task, effort
+) -> None:
+    from src.config import settings
+    from src.model_pool.configuration import load_task_config
+
+    _save_pool(api_client)
+    singleton = settings
+    response = api_client.put("/api/settings", json={"values": {"models": {task: {"reasoning_effort": effort}}}})
+    response.raise_for_status()
+    view = response.json()
+    assert settings is singleton
+    assert view["values"]["models"][task]["reasoning_effort"] == effort
+    assert getattr(settings.models, task).reasoning_effort == effort
+    assert load_task_config(task).reasoning_effort == effort
+    source_key = f"models/{task}/reasoning_effort"
+    assert view["sources"][source_key] == ("default" if effort == "high" else "file")
+    other = "diagnosis" if task == "annotation" else "annotation"
+    assert view["values"]["models"][other]["reasoning_effort"] == "high"
+    assert api_client.get("/api/settings").json()["values"]["models"][task]["reasoning_effort"] == effort
+    response = api_client.put("/api/settings", json={"values": {"models": {task: {"reasoning_effort": "high"}}}})
+    response.raise_for_status()
+    assert response.json()["sources"][source_key] == "default"
+    assert getattr(settings.models, task).reasoning_effort == "high"
+    assert json.loads(isolated_settings.read_text(encoding="utf-8")) == {}
+
+
+@pytest.mark.parametrize("task", ["annotation", "diagnosis"])
+@pytest.mark.parametrize("value", [True, False, None, "", "none", "minimal", "ultra", 1, [], {}])
+def test_invalid_reasoning_effort_does_not_write_or_apply(isolated_settings: Path, api_client, task, value) -> None:
+    from src.config import settings
+
+    response = api_client.put("/api/settings", json={"values": {"models": {task: {"reasoning_effort": value}}}})
+    assert response.status_code == 422
+    assert "reasoning_effort" in str(response.json())
+    assert not isolated_settings.exists()
+    assert getattr(settings.models, task).reasoning_effort == "high"
+
+
 def test_diagnosis_budget_setting_is_editable_and_used_by_scheduler(isolated_settings, api_client):
     from unittest.mock import MagicMock
 
@@ -209,6 +264,7 @@ def test_edit_model_keeps_key_and_updates_diagnosis_on_rename(isolated_settings:
     renamed = _entry("renamed", weight=0)
     renamed.pop("api_key")
     renamed["original_model_id"] = "diagnostic"
+    renamed["original_base_url"] = "https://diagnostic.example/v1"
     response = api_client.put(
         "/api/settings/env",
         json={
@@ -232,6 +288,22 @@ def test_delete_selected_model_requires_new_selection(isolated_settings: Path, a
     response = api_client.put("/api/settings/env", json={"model_pool": [_entry()], "diagnosis_model_id": "model-a"})
     assert response.status_code == 200
     assert len(response.json()["values"]["models"]["model_pool"]) == 1
+
+
+def test_same_model_on_two_endpoints_can_be_saved(isolated_settings: Path, api_client: TestClient) -> None:
+    _save_pool(api_client)
+    mirror = _entry("model-a", base_url="https://mirror.example/v1")
+    response = api_client.put(
+        "/api/settings/env",
+        json={
+            "model_pool": [_entry(), mirror, _entry("diagnostic", weight=0, max_in_flight=1)],
+            "diagnosis_model_id": "diagnostic",
+        },
+    )
+    assert response.status_code == 200
+    pool = response.json()["values"]["models"]["model_pool"]
+    assert sorted(item["model_id"] for item in pool) == ["diagnostic", "model-a", "model-a"]
+    assert len({item["base_url"] for item in pool}) == 3
 
 
 @pytest.mark.parametrize(
@@ -363,14 +435,14 @@ def test_parallel_parameter_updates_preserve_independent_fields(isolated_setting
     from src.api.models.settings import UpdateSettingsRequest
 
     updates = [
-        {"models": {"diagnosis": {"thinking": True}}},
+        {"models": {"diagnosis": {"reasoning_effort": "max"}}},
         {"models": {"annotation": {"timeout_s": 60}}},
         {"metrics": {"mtld_threshold": 0.81}},
     ]
     with ThreadPoolExecutor(max_workers=3) as pool:
         list(pool.map(lambda values: routes.update_settings(UpdateSettingsRequest(values=values)), updates))
     view = routes.get_settings().values
-    assert view["models"]["diagnosis"]["thinking"] is True
+    assert view["models"]["diagnosis"]["reasoning_effort"] == "max"
     assert view["models"]["annotation"]["timeout_s"] == 60
     assert view["metrics"]["mtld_threshold"] == 0.81
 

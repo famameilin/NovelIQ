@@ -51,9 +51,12 @@ def build_graph_network_tab(run_id: str, session: Storage, chapter_id: int | Non
 
     snapshot_reason: str | None = None
     snapshot: GraphSnapshotResponse | None = None
+    latest_snapshot: dict[str, Any] | None = None
     try:
         payload = _fetch_graph_snapshot(run_id, annotation_repo, chapter_id=chapter_id)
         snapshot = GraphSnapshotResponse.model_validate(payload)
+        if chapter_id is None:
+            latest_snapshot = payload
     except (ValueError, LookupError) as exc:
         snapshot_reason = str(exc)
 
@@ -67,7 +70,7 @@ def build_graph_network_tab(run_id: str, session: Storage, chapter_id: int | Non
             {"name": character.name, "appearance_count": character.appearance_count}
             for character in _fetch_characters(run_id, annotation_repo, limit=None)
         ],
-        "graph_metrics": compute_graph_metrics(run_id, session),
+        "graph_metrics": compute_graph_metrics(run_id, session, snapshot=latest_snapshot),
         "change_total": change_total,
         "unavailable_reason": snapshot_reason,
     }

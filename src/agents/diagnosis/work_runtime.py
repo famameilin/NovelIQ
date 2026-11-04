@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from src.agents.annotation.errors import AnnotationBudgetExhaustedError
+from src.agents.program_runtime.contracts import ProgramExecutionTimeout
 from src.agents.stream import ModelRequestError
 from src.event_bus import EventBus, Message
 from src.event_bus.notifications import StreamEvent
@@ -32,6 +33,7 @@ class SessionProgress:
     physical_sequence: int = 0
     audit_sequence: int = 0
     model_id: str = ""
+    entry_id: str = ""
     attempt_number: int = 1
 
 
@@ -140,6 +142,7 @@ class DiagnosisWorkScheduler:
         saved = False
         incomplete_error: AnnotationBudgetExhaustedError | None = None
         retry = False
+        success: bool | None = None
         timings: dict[str, float] = {}
 
         async def finish(status: str, error: str | None = None) -> None:
@@ -147,24 +150,39 @@ class DiagnosisWorkScheduler:
             audit_context = getattr(observer, "_context", None)
             if recorder is not None and isinstance(audit_context, dict):
                 recorder.finish_invocation(
-                    **audit_context, status=status, final_error=error, runtime_timings=timings,
+                    **audit_context,
+                    status=status,
+                    final_error=error,
+                    runtime_timings=timings,
                 )
                 await self.audit_barrier()
 
         try:
             await self.bus.request(
-                Message(topic="pool.enqueue", source=f"queue:{self.run_id}", target=self.pool.address,
-                        run_id=self.run_id, work_id=key,
-                        payload=SelectionRequest(self.run_id, key,
-                                                 fixed_model_id=self.model_id if role == "report" else None))
+                Message(
+                    topic="pool.enqueue",
+                    source=f"queue:{self.run_id}",
+                    target=self.pool.address,
+                    run_id=self.run_id,
+                    work_id=key,
+                    payload=SelectionRequest(
+                        self.run_id, key, fixed_model_id=self.model_id if role == "report" else None
+                    ),
+                )
             )
             selected = await future
             self._waiting.pop(key, None)
             timings["queue_wait_ms"] = round((time.perf_counter_ns() - queued_ns) / 1_000_000, 3)
             if role == "case" and self.domain.case_counts()[0] == 0:
                 return False
-            progress = SessionProgress(key=key, role=role, agent_id=new_id(), model_id=selected.model_id,
-                                       attempt_number=selected.attempt_number)
+            progress = SessionProgress(
+                key=key,
+                role=role,
+                agent_id=new_id(),
+                model_id=selected.model_id,
+                entry_id=selected.entry_id,
+                attempt_number=selected.attempt_number,
+            )
             session_model_id = selected.model_id
             session_reservation_id = selected.reservation_id
 
@@ -173,18 +191,28 @@ class DiagnosisWorkScheduler:
                 event.model_id, event.reservation_id = session_model_id, session_reservation_id
                 case_pool = getattr(self.domain, "case_pool", None)
                 if case_pool is not None and role == "case":
-                    event.details = {"case_ids": case_pool.claims_for(progress.agent_id),
-                        "unsubmitted_case_ids": case_pool.unsubmitted_for(progress.agent_id)}
+                    event.details = {
+                        "case_ids": case_pool.claims_for(progress.agent_id),
+                        "unsubmitted_case_ids": case_pool.unsubmitted_for(progress.agent_id),
+                    }
                 if self.bus.has_handler("analysis.activity", f"activity:{self.run_id}"):
-                    await self.bus.deliver(Message(topic="analysis.activity", source="diagnosis",
-                        target=f"activity:{self.run_id}", run_id=self.run_id, work_id=key,
-                        invocation_id=progress.agent_id, payload=event))
+                    await self.bus.deliver(
+                        Message(
+                            topic="analysis.activity",
+                            source="diagnosis",
+                            target=f"activity:{self.run_id}",
+                            run_id=self.run_id,
+                            work_id=key,
+                            invocation_id=progress.agent_id,
+                            payload=event,
+                        )
+                    )
 
             await activity(StreamEvent(action="activity", activity="starting"))
             observer = self.observer_factory(progress)
             context = self.domain.build_session_context(role, progress.agent_id, observer)
-            llm = self.llm_factory(selected.model_id)
-            context_window_tokens = model_context_window(selected.model_id)
+            llm = self.llm_factory(selected.entry_id)
+            context_window_tokens = model_context_window(selected.entry_id)
             work_stream = None
             if self.stream is not None:
                 from src.agents.stream import AgentStream
@@ -194,38 +222,24 @@ class DiagnosisWorkScheduler:
                     await activity(event)
 
                 work_stream = AgentStream(emit, sub_stage=role, stream_id=progress.agent_id)
-            # 会话图按标注三节点族构建（复用 annotation/agent_graph 的同一图结构）
-            from src.agents.annotation.agent_graph import build_agent_graph
-            from src.agents.annotation.agent_ir import AgentAnnotation
-            from src.agents.annotation.ledger import AnnotationToolLedger
+            from .session_loop import build_diagnosis_loop
 
-            from .program_runtime import bind_finish_ledger
-
-            ledger = AnnotationToolLedger(
-                run_scope=self.run_id, current_chapter_id=0, current_chapter_text="", allow_future_context=False
-            )
-            graph = build_agent_graph(
+            loop = build_diagnosis_loop(
                 llm,
-                context.program.build_tool(),
-                bind_finish_ledger(context.program.tools["finish"], ledger),
-                ledger=ledger,
-                agent=AgentAnnotation(role=role),
+                context.program,
                 max_iterations=context.max_rounds,
                 context_window_tokens=context_window_tokens,
                 stream=work_stream,
                 observer=observer,
                 retries=self.model_retries,
                 completion_check=context.completion_check,
-                thinking_message=lambda rounds: f"诊断推理中（第 {rounds} 轮）...",
             )
-            final_state = await graph.ainvoke(
+            final_state = await loop.run(
                 {
                     "messages": list(context.initial_messages),
-                    "phase": "chapter_open",
                     "iterations": progress.rounds,
                     "error": None,
                 },
-                config={"recursion_limit": 4 * context.max_rounds + 10},
             )
             progress.rounds = int(final_state.get("iterations") or progress.rounds)
             progress.physical_sequence = int(getattr(observer, "_turn_counter", progress.physical_sequence))
@@ -234,9 +248,15 @@ class DiagnosisWorkScheduler:
             if final_state.get("error"):
                 raise RuntimeError(str(final_state["error"]))
             if final_state.get("halted"):
-                incomplete_error = AnnotationBudgetExhaustedError("会话回合已耗尽，交回模型池重新选举")
-                if role != "case" or context.claimed_count() == 0:
-                    raise incomplete_error
+                if role == "report":
+                    # 回合用尽先按已提交内容核对完整性：已收口即保存，缺口交回模型池重试
+                    missing = list(context.completion_check())
+                    if missing:
+                        raise AnnotationBudgetExhaustedError("会话回合已耗尽且报告仍未收口：" + "；".join(missing))
+                else:
+                    incomplete_error = AnnotationBudgetExhaustedError("会话回合已耗尽，交回模型池重新选举")
+                    if context.claimed_count() == 0:
+                        raise incomplete_error
             if role == "case" and context.unsubmitted_count() and incomplete_error is None:
                 raise RuntimeError("完整性检查已结束但仍有未提交领取")
             await self.audit_barrier()
@@ -276,12 +296,16 @@ class DiagnosisWorkScheduler:
                     abort(progress.agent_id)
             successful = saved and incomplete_error is None
             await finish("success" if successful else "error", None if successful else str(exc) or type(exc).__name__)
-            if isinstance(exc, (ModelRequestError, AnnotationBudgetExhaustedError)):
+            if isinstance(exc, (ModelRequestError, AnnotationBudgetExhaustedError, ProgramExecutionTimeout)):
                 await activity(StreamEvent(action="activity", activity="retry", message="等待模型池重新选举"))
+                success = False
                 retry = True
                 return True
+            if not isinstance(exc, asyncio.CancelledError):
+                success = False
             raise
         else:
+            success = True
             await finish("success")
             return False
         finally:
@@ -297,8 +321,11 @@ class DiagnosisWorkScheduler:
                         run_id=self.run_id,
                         work_id=key,
                         invocation_id=progress.agent_id if progress is not None else "",
-                        payload={"reservation_id": selected.reservation_id,
-                                 "outcome": "retry" if retry else "released"},
+                        payload={
+                            "reservation_id": selected.reservation_id,
+                            "outcome": "retry" if retry else "released",
+                            "success": success,
+                        },
                     )
                 )
 

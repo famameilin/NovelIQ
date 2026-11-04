@@ -6,14 +6,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from src.api.services.results_contracts import (
     _convert_aggregate_result,
+    _convert_narrative_structure,
     build_aggregate_metrics_contract_from_models,
 )
-from src.metrics.queries.aggregate import MetricsQueryService
+from src.metrics.aggregate.types import AggregateResult
+from src.metrics.queries.aggregate import MetricsQueryService, query_aggregate_metrics, query_narrative_structure
 from src.storage import Storage
+from src.storage.records.annotation import ChapterAnnotationRow
 
 
 class MetricsService:
@@ -25,13 +29,18 @@ class MetricsService:
     def invalidate_cache(self, run_id: str) -> None:
         self.query.invalidate_cache(run_id)
 
+    def compute_aggregate_result(
+        self, run_id: str, session: Storage, *, annotation_rows: Sequence[ChapterAnnotationRow],
+    ) -> tuple[Any, Any, Any, Any]:
+        return _convert_aggregate_result(query_aggregate_metrics(run_id, session, annotation_rows=annotation_rows))
+
     def get_aggregate_result(self, run_id: str, session: Storage) -> tuple[Any, Any, Any, Any]:
         return _convert_aggregate_result(self.query.get_aggregate_result(run_id, session))
 
     def get_narrative_structure(self, run_id: str, session: Storage) -> Any:
         """获取叙事结构指标"""
-        narrative_structure, _, _, _ = self.get_aggregate_result(run_id, session)
-        return narrative_structure
+        result = AggregateResult(narrative_structure=query_narrative_structure(run_id, session))
+        return _convert_narrative_structure(result)
 
     def get_emotion_stats(self, run_id: str, session: Storage) -> Any:
         """获取情感统计指标"""

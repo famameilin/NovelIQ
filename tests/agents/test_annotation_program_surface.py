@@ -6,13 +6,13 @@ import json
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage
 
 from src.agents.annotation.ledger import AnnotationToolLedger
-from src.agents.annotation.program_contract import PROGRAM_TOOL_NAME
 from src.agents.annotation.prompts import build_agent_message
 from src.agents.annotation.text_search import TextSearchCandidate
 from src.agents.annotation.tool_batch import _build_tool_batch_node
+from src.agents.messages import AssistantMessage
+from src.agents.program_runtime.contracts import PROGRAM_TOOL_NAME
 from src.fact_graph.graph import FactGraph
 from src.fact_graph.inputs import ChapterParagraphInfo
 from tests.support.annotation_work_tools import build_annotation_tools
@@ -48,7 +48,7 @@ class _RecordingObserver:
 
 
 class _ProgramLLM(StreamedFakeModelMixin):
-    def __init__(self, reply: AIMessage) -> None:
+    def __init__(self, reply: AssistantMessage) -> None:
         self.reply = reply
         self.bound_names: list[str] = []
 
@@ -56,7 +56,7 @@ class _ProgramLLM(StreamedFakeModelMixin):
         self.bound_names = [str(tool.name) for tool in tools]
         return self
 
-    async def ainvoke(self, messages: list[Any]) -> AIMessage:
+    async def ainvoke(self, messages: list[Any]) -> AssistantMessage:
         return self.reply
 
 
@@ -89,6 +89,7 @@ def test_catalog_is_current_formal_tool_surface() -> None:
         "write_entity",
         "write_metrics",
         "write_event",
+        "retract_structure",
         "write_plotline",
         "write_foreshadowing_action",
         "write_relation",
@@ -109,8 +110,12 @@ def test_catalog_is_current_formal_tool_surface() -> None:
         "read_entity",
     }
     assert program_tool.name == PROGRAM_TOOL_NAME
-    for name in ("entity", "relation", "event", "participants", "dialogue", "label", "metric", "pending"):
+    assert "write_queue" not in program_tool.description
+    assert "write_event(items=" in program_tool.description
+    for name in ("entity", "relation", "dialogue", "label", "metric", "pending"):
         assert name + "(" in program_tool.description
+    assert "event(el" not in program_tool.description
+    assert "participants(" not in program_tool.description
     assert "search_pool(" not in program_tool.description
     assert "claim_case(" in program_tool.description
     assert "limit" in program_tool.description
@@ -118,22 +123,26 @@ def test_catalog_is_current_formal_tool_surface() -> None:
 
 async def test_case_program_preserves_claim_status_and_exposes_submission_candidates():
     runtime, _, _ = _surface(_ledger())
-    first = json.loads(await runtime.execute(
-        'a = push_case(case_type="event", description="检查第一件")\n'
-        'b = push_case(case_type="event", description="检查第二件")\n'
-        'claimed = claim_case(case_id=a["ref"]["case_id"])\n'
-        'submitted = submit_case(case_id=claimed["case_id"])',
-        "outer-case-context",
-    ))
+    first = json.loads(
+        await runtime.execute(
+            'a = push_case(case_type="event", description="检查第一件")\n'
+            'b = push_case(case_type="event", description="检查第二件")\n'
+            'claimed = claim_case(case_id=a["ref"]["case_id"])\n'
+            'submitted = submit_case(case_id=claimed["case_id"])',
+            "outer-case-context",
+        )
+    )
     assert not first.get("failed"), first
     assert runtime.env["claimed"]["status"] == "claimed"
     assert runtime.env["submitted"]["status"] == "submitted"
     offered = runtime.env["submitted"]["candidates"]
     assert offered and first["cases"][-1]["result"]["candidates"] == offered
-    second = json.loads(await runtime.execute(
-        'next_case = claim_case(case_id=submitted["candidates"][0]["case_id"])\n'
-        'submit_case(case_id=next_case["case_id"])'
-    ))
+    second = json.loads(
+        await runtime.execute(
+            'next_case = claim_case(case_id=submitted["candidates"][0]["case_id"])\n'
+            'submit_case(case_id=next_case["case_id"])'
+        )
+    )
     assert not second.get("failed"), second
     assert second["cases"][-1]["result"]["candidates"] == []
 
@@ -172,7 +181,7 @@ def test_link_schema_uses_actual_entity_or_event_ids() -> None:
         "same_entity",
         "different_entity",
         "relation_change",
-        "contains",
+        "parent_child",
     ]
     assert schema["properties"]["change_kind"]["default"] is None
 
@@ -199,7 +208,7 @@ async def test_direct_current_tools_use_same_dispatcher_and_unknown_call_is_isol
     result = await batch(
         {
             "messages": [
-                AIMessage(
+                AssistantMessage(
                     content="",
                     tool_calls=[
                         _call("unknown_tool", {}, "bad"),
@@ -238,7 +247,7 @@ async def test_native_batch_protocol_error_rejects_whole_batch() -> None:
     result = await _build_tool_batch_node(tools, ledger=ledger)(
         {
             "messages": [
-                AIMessage(
+                AssistantMessage(
                     content="",
                     tool_calls=[
                         _call("unknown_tool", {}, "bad"),

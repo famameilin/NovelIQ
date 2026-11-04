@@ -86,9 +86,9 @@ async def test_failed_or_cancelled_run_retains_registration_without_candidate_de
     assert row.producer_agent_id == author and row.status == "pending"
     assert not hasattr(pool, "deliveries")
     assert author not in domain.case_pool.saved
-    assert len(run_events(storage_for(draft.fixture_session), draft.run_id)) == 2
+    assert len(run_events(storage_for(draft.fixture_session), draft.run_id)) == 5
     assert _reports(draft.fixture_session, draft.run_id) == []
-    assert len(run_annotation_event_ids(storage_for(draft.fixture_session), draft.run_id)) == 2
+    assert len(run_annotation_event_ids(storage_for(draft.fixture_session), draft.run_id)) == 5
 
 
 @pytest.mark.parametrize("cancelled", [False, True])
@@ -156,23 +156,32 @@ def test_formal_output_adopts_real_child_delivery_without_fabricated_child_repor
         publish_draft,
     )
 
-    _novel_id, run_id = create_run_with_chunks(db_session, texts=["顾霜找回了身份。"])
+    _novel_id, run_id = create_run_with_chunks(
+        db_session, texts=["顾霜找回身份，寻到山门，点亮灯火，打开旧信，通知同伴。"]
+    )
     session_id, agent_id = add_diagnosis_context(db_session, run_id)
     record_id, _source_execution = add_annotation_source(db_session, run_id, 1, role="event")
     paragraph = first_paragraph(db_session, run_id)
-    add_declaration(
-        db_session,
-        record_id=record_id,
-        paragraph=paragraph,
-        phrase="找回了身份",
-        title="身份问题",
-        problem="能否确认身份",
-        summary="顾霜找回身份",
-        event_type="身份确认",
-    )
+    for phrase, title, problem, summary, event_type in (
+        ("找回身份", "身份问题", "能否确认身份", "顾霜找回身份", "身份确认"),
+        ("寻到山门", "山门问题", "能否找到山门", "顾霜寻到山门", "探寻"),
+        ("点亮灯火", "照明问题", "能否点亮灯火", "顾霜点亮灯火", "行动"),
+        ("打开旧信", "旧信问题", "能否读到旧信", "顾霜打开旧信", "探寻"),
+        ("通知同伴", "同伴问题", "能否通知同伴", "顾霜通知同伴", "行动"),
+    ):
+        add_declaration(
+            db_session,
+            record_id=record_id,
+            paragraph=paragraph,
+            phrase=phrase,
+            title=title,
+            problem=problem,
+            summary=summary,
+            event_type=event_type,
+        )
     db_session.commit()
     draft, _meta = identity_every_declaration(db_session, run_id, context=(session_id, agent_id))
-    publish_draft(db_session, run_id, draft)
+    publish_draft(db_session, run_id, draft, final=True, event_line_ids=list(draft.events))
     db_session.commit()
     report_id = _reports(db_session, run_id)[0].report_id
     domain = DiagnosisDomain(

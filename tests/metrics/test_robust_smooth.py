@@ -9,9 +9,33 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
+import src.metrics.robust_smooth as smooth_module
 from src.metrics.robust_smooth import robust_local_regression
+
+
+@pytest.mark.parametrize(
+    "positions",
+    [
+        [0.0, 0.001, 0.05, 0.3, 0.31, 0.32, 0.9, 1.0],
+        [0.0, 0.0, 0.0, 0.2, 0.2, 0.2, 0.4, 0.4],
+        [0.4, 0.1, 0.3, 0.0, 0.9, 0.2, 1.0, 0.8],
+    ],
+)
+def test_reused_windows_preserve_regression(positions, monkeypatch) -> None:
+    values = [math.sin(index) + (8 if index == 3 else 0) for index in range(len(positions))]
+    weights = [0.0 if index % 4 == 0 else 1.0 for index in range(len(positions))]
+    optimized = robust_local_regression(positions, values, weights=weights, bandwidth=0.05)
+    monkeypatch.setattr(smooth_module, "_prepare_regression_geometry", lambda *_args, **_kwargs: None)
+    original = robust_local_regression(positions, values, weights=weights, bandwidth=0.05)
+    assert optimized == original
+
+
+def test_window_reuse_stops_at_memory_limit() -> None:
+    positions = np.asarray([0.0] * 8)
+    assert smooth_module._prepare_regression_geometry(positions, 0.02, 7, max_entries=1) is None
 
 
 class TestRobustLocalRegression:

@@ -50,6 +50,7 @@ class TaskService:
             "title": novel.title,
             "author": novel.author,
             "file_size": novel.file_size,
+            "word_count": novel.word_count,
             "upload_time": novel.upload_time.isoformat() if novel.upload_time else None,
             "status": "uploaded",
         }

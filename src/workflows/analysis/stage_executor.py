@@ -57,7 +57,7 @@ class StageExecutor:
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         is_cancelled: CancellationCheck | None = None,
     ) -> None:
-        """执行标注阶段（LangGraph 标注 Agent）"""
+        """执行标注 Agent 阶段"""
         from src.workflows import run_annotate
 
         await run_annotate(
@@ -124,9 +124,7 @@ class StageExecutor:
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         is_cancelled: CancellationCheck | None = None,
     ) -> None:
-        """
-        执行诊断阶段（LangGraph 诊断 Agent）
-        """
+        """执行诊断 Agent 阶段"""
         from src.workflows import run_diagnose
 
         await run_diagnose(

@@ -1,7 +1,6 @@
 "存储合同中的封闭标量取值，不包含 ORM 映射"
 
 ANNOTATION_ROLES = ("annotation", "entity", "event", "metric")
-ARC_KINDS = ("main", "subplot")
 ARC_RELATION_PREFIXES = ("dep:", "sdp:")
 CASE_TYPES = ("character", "relation", "dialogue", "event")
 CAST_ROLES = ("focus", "main", "core")

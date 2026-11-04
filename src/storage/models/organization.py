@@ -1,8 +1,4 @@
-"""
-全书叙事组织 ORM 模型
-
-不复制 run/session/work；producer 是该判断的真实作者，不由端点作者替代。
-"""
+"""事件关系、全书结果与原文证据的 ORM 模型"""
 
 from __future__ import annotations
 
@@ -19,49 +15,55 @@ from .base import Base
 
 #: 因果角色封闭取值（仅真实存在才保存）
 CAUSE_ROLES = ("root", "main", "secondary")
-#: 叙事线类型封闭取值
-ARC_KINDS = ("main", "subplot")
 #: 伏笔动作类型封闭取值
 FORESHADOW_ACTION_TYPES = ("setup", "reinforce", "payoff")
 
 
 class NarrativeLink(Base):
-    "叙事链路表（四种互斥形状）"
+    "语义关系、事件树成员及整树父子引用"
 
     __tablename__ = "event_links"
     __table_args__ = (
         CheckConstraint(
-            "cause_role IS NULL OR cause_role IN ('root', 'main', 'secondary')",
-            name="ck_narrative_links_cause_role",
+            "(semantic_source_event_id IS NOT NULL AND semantic_target_event_id IS NOT NULL"
+            " AND relation_type IS NOT NULL AND source_operation_local_key IS NOT NULL"
+            " AND tree_id IS NULL AND member_event_id IS NULL AND position IS NULL"
+            " AND parent_tree_id IS NULL AND child_tree_id IS NULL)"
+            " OR (tree_id IS NOT NULL AND member_event_id IS NOT NULL"
+            " AND position IS NOT NULL AND position >= 0"
+            " AND parent_tree_id IS NULL AND child_tree_id IS NULL"
+            " AND semantic_source_event_id IS NULL AND semantic_target_event_id IS NULL"
+            " AND relation_type IS NULL AND source_operation_local_key IS NULL"
+            " AND is_active IS NULL AND expired_at IS NULL AND cause_role IS NULL)"
+            " OR (parent_tree_id IS NOT NULL AND child_tree_id IS NOT NULL AND parent_tree_id <> child_tree_id"
+            " AND tree_id IS NULL AND member_event_id IS NULL AND position IS NULL"
+            " AND semantic_source_event_id IS NULL AND semantic_target_event_id IS NULL"
+            " AND relation_type IS NULL AND source_operation_local_key IS NULL"
+            " AND is_active IS NULL AND expired_at IS NULL AND cause_role IS NULL)",
+            name="ck_narrative_links_shape",
         ),
         CheckConstraint(
-            # 语义/因果形状
-            "(semantic_source_event_id IS NOT NULL"
-            " AND semantic_target_event_id IS NOT NULL"
-            " AND relation_type IS NOT NULL AND source_operation_local_key IS NOT NULL"
-            " AND contained_child_id IS NULL AND contained_parent_id IS NULL"
-            " AND member_event_id IS NULL AND arc_group_id IS NULL AND arc_role IS NULL"
-            " AND outcome_group_id IS NULL)"
-            " OR (contained_child_id IS NOT NULL AND contained_parent_id IS NOT NULL"
-            " AND contained_child_id <> contained_parent_id"
-            " AND semantic_source_event_id IS NULL"
-            " AND semantic_target_event_id IS NULL"
-            " AND relation_type IS NULL AND source_operation_local_key IS NULL"
-            " AND member_event_id IS NULL AND arc_group_id IS NULL AND arc_role IS NULL"
-            " AND outcome_group_id IS NULL AND is_active IS NULL AND expired_at IS NULL AND cause_role IS NULL)"
-            " OR (member_event_id IS NOT NULL AND arc_group_id IS NOT NULL AND arc_role IS NOT NULL"
-            " AND semantic_source_event_id IS NULL"
-            " AND semantic_target_event_id IS NULL"
-            " AND relation_type IS NULL AND source_operation_local_key IS NULL"
-            " AND contained_child_id IS NULL AND contained_parent_id IS NULL AND outcome_group_id IS NULL"
-            " AND is_active IS NULL AND expired_at IS NULL AND cause_role IS NULL)"
-            " OR (member_event_id IS NOT NULL AND outcome_group_id IS NOT NULL"
-            " AND semantic_source_event_id IS NULL"
-            " AND semantic_target_event_id IS NULL"
-            " AND relation_type IS NULL AND source_operation_local_key IS NULL"
-            " AND contained_child_id IS NULL AND contained_parent_id IS NULL AND arc_group_id IS NULL"
-            " AND arc_role IS NULL AND is_active IS NULL AND expired_at IS NULL AND cause_role IS NULL)",
-            name="ck_narrative_links_shape",
+            "cause_role IS NULL OR cause_role IN ('root', 'main', 'secondary')", name="ck_narrative_links_cause_role"
+        ),
+        Index(
+            "uq_event_member",
+            "member_event_id",
+            unique=True,
+            postgresql_where=sql_text("member_event_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_tree_position",
+            "tree_id",
+            "position",
+            unique=True,
+            postgresql_where=sql_text("tree_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_tree_reference",
+            "parent_tree_id",
+            "child_tree_id",
+            unique=True,
+            postgresql_where=sql_text("parent_tree_id IS NOT NULL"),
         ),
         Index(
             "uq_narrative_links_operation",
@@ -77,125 +79,82 @@ class NarrativeLink(Base):
             unique=True,
             postgresql_where=sql_text("annotation_local_key IS NOT NULL"),
         ),
-        Index(
-            "uq_narrative_links_containment",
-            "contained_child_id",
-            unique=True,
-            postgresql_where=sql_text("contained_child_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_narrative_links_arc",
-            "member_event_id",
-            "arc_group_id",
-            unique=True,
-            postgresql_where=sql_text("arc_group_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_narrative_links_outcome",
-            "member_event_id",
-            "outcome_group_id",
-            unique=True,
-            postgresql_where=sql_text("outcome_group_id IS NOT NULL"),
-        ),
         Index("idx_narrative_links_producer", "producer_agent_id"),
         Index("idx_narrative_links_source_event", "semantic_source_event_id"),
         Index("idx_narrative_links_target_event", "semantic_target_event_id"),
-        {"comment": "叙事链路表：语义/因果、单父包含、事件—线、事件—结果四种互斥形状"},
     )
-
-    link_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), primary_key=True, comment="链路主键（uuid）", default=new_id, autoincrement=False
-    )
+    link_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=new_id, autoincrement=False)
     producer_agent_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("agent.id", ondelete="RESTRICT", name="narrative_links_producer_fkey"),
-        nullable=False,
-        comment="该判断的真实作者执行",
+        Uuid(as_uuid=False), ForeignKey("agent.id", ondelete="RESTRICT"), nullable=False
     )
-    reason: Mapped[str] = mapped_column(String, nullable=False, comment="关联理由")
+    reason: Mapped[str] = mapped_column(String, nullable=False)
     semantic_source_event_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_source_event_fkey"),
-        nullable=True,
-        comment="语义关系源端（完整事件，与事件端点恰一）",
+        Uuid(as_uuid=False), ForeignKey("event_records.event_id", ondelete="RESTRICT"), nullable=True
     )
     semantic_target_event_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("event_records.event_id", ondelete="RESTRICT"), nullable=True
+    )
+    relation_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_operation_local_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    annotation_local_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cause_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    position: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="树内连续成员顺序")
+    tree_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_target_event_fkey"),
+        ForeignKey("event_groups.group_id", ondelete="RESTRICT"),
         nullable=True,
-        comment="语义关系目标端（完整事件，与事件端点恰一）",
-    )
-    relation_type: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="语义关系类型码")
-    source_operation_local_key: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="产生该链路的真实本地操作地址"
-    )
-    annotation_local_key: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="章级本地地址（标注来源）"
-    )
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="真实创建时间")
-    is_active: Mapped[bool | None] = mapped_column(Boolean, nullable=True, comment="实际活动状态（承接旧边观察）")
-    expired_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True, comment="真实到期时间（不由 is_active 推算）"
-    )
-    cause_role: Mapped[str | None] = mapped_column(String(16), nullable=True, comment="因果角色（root/main/secondary）")
-    contained_child_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_child_fkey"),
-        nullable=True,
-        comment="包含关系子事件（唯一直接父）",
-    )
-    contained_parent_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_parent_fkey"),
-        nullable=True,
-        comment="包含关系父事件",
+        comment="事件树身份",
     )
     member_event_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("event_records.event_id", ondelete="RESTRICT", name="narrative_links_member_event_fkey"),
+        ForeignKey("event_records.event_id", ondelete="RESTRICT"),
         nullable=True,
-        comment="事件—线/事件—结果关联的事件",
+        comment="树成员事件身份",
     )
-    arc_group_id: Mapped[str | None] = mapped_column(
+    parent_tree_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("event_groups.group_id", ondelete="RESTRICT", name="narrative_links_arc_group_fkey"),
+        ForeignKey("event_groups.group_id", ondelete="RESTRICT"),
         nullable=True,
-        comment="关联叙事线节点",
+        comment="父事件树身份",
     )
-    outcome_group_id: Mapped[str | None] = mapped_column(
+    child_tree_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False),
-        ForeignKey("event_groups.group_id", ondelete="RESTRICT", name="narrative_links_outcome_group_fkey"),
+        ForeignKey("event_groups.group_id", ondelete="RESTRICT"),
         nullable=True,
-        comment="关联事件结果节点",
+        comment="子事件树身份",
     )
-    arc_role: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="该关联在叙事线中的实际角色")
-
-    def __repr__(self) -> str:
-        return f"<NarrativeLink(link_id={self.link_id})>"
 
 
 class NarrativeGroup(Base):
-    "全书组织节点表（叙事线 / 事件结果两种互斥形状）"
+    "事件树与全书结果节点表"
 
     __tablename__ = "event_groups"
     __table_args__ = (
-        CheckConstraint("arc_kind IS NULL OR arc_kind IN ('main', 'subplot')", name="ck_narrative_groups_arc_kind"),
+        CheckConstraint("kind IN ('tree', 'outcome')", name="ck_narrative_groups_kind"),
+        CheckConstraint("kind = 'tree' OR is_event_line = false", name="ck_narrative_groups_event_line"),
         CheckConstraint(
-            "(arc_kind IS NOT NULL AND arc_objective IS NOT NULL AND arc_role IS NOT NULL"
-            " AND arc_reason IS NOT NULL AND outcome_description IS NULL)"
-            " OR (arc_kind IS NULL AND arc_objective IS NULL AND arc_role IS NULL"
-            " AND arc_reason IS NULL AND outcome_description IS NOT NULL)",
-            name="ck_narrative_groups_shape",
+            "line_name IS NULL OR (is_event_line AND char_length(line_name) BETWEEN 2 AND 6 "
+            "AND right(line_name, 1) = '线')",
+            name="ck_narrative_groups_line_name",
         ),
-        CheckConstraint("parent_arc_id IS NULL OR parent_arc_id <> group_id", name="ck_narrative_groups_self_parent"),
         Index("idx_narrative_groups_producer", "producer_agent_id"),
-        {"comment": "组织节点表：叙事线与事件结果两类互斥形状（父线只能指向线，无环）"},
+        Index(
+            "uq_narrative_groups_tree_key",
+            "producer_agent_id",
+            "tree_key",
+            unique=True,
+            postgresql_where=sql_text("tree_key IS NOT NULL"),
+        ),
+        {"comment": "事件树与全书结果节点表：树身份独立于事件，空树合法"},
     )
 
     group_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
         primary_key=True,
-        comment="节点主键（uuid，原 arc/outcome uuid）",
+        comment="树或结果主键（uuid）",
         default=new_id,
         autoincrement=False,
     )
@@ -205,21 +164,19 @@ class NarrativeGroup(Base):
         nullable=False,
         comment="真实生产执行",
     )
-    title: Mapped[str] = mapped_column(String, nullable=False, comment="标题（不唯一，不以标题合并节点）")
-    arc_kind: Mapped[str | None] = mapped_column(String(16), nullable=True, comment="线类型（main/subplot）")
-    arc_objective: Mapped[str | None] = mapped_column(String, nullable=True, comment="叙事线目标")
-    arc_role: Mapped[str | None] = mapped_column(String, nullable=True, comment="叙事线作用")
-    arc_reason: Mapped[str | None] = mapped_column(String, nullable=True, comment="叙事线判断理由")
-    parent_arc_id: Mapped[str | None] = mapped_column(
-        Uuid(as_uuid=False),
-        ForeignKey("event_groups.group_id", ondelete="RESTRICT", name="narrative_groups_parent_fkey"),
-        nullable=True,
-        comment="父线（仅线→线，单父无环）",
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="outcome", comment="节点类型：tree/outcome"
     )
-    outcome_description: Mapped[str | None] = mapped_column(String, nullable=True, comment="结果描述（结果形状）")
+    title: Mapped[str] = mapped_column(String, nullable=False, comment="标题（不唯一，不以标题合并节点）")
+    description: Mapped[str] = mapped_column(String, nullable=False, comment="树的说明或结果描述")
+    is_event_line: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="是否选为事件线")
+    line_name: Mapped[str | None] = mapped_column(
+        String(6), nullable=True, comment="选为事件线时的书内线名，结尾为「线」"
+    )
+    tree_key: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="生产者内树幂等键")
 
     def __repr__(self) -> str:
-        return f"<NarrativeGroup(group_id={self.group_id}, title={self.title})>"
+        return f"<NarrativeGroup(group_id={self.group_id}, kind={self.kind}, title={self.title})>"
 
 
 class OrganizationCheck(Base):

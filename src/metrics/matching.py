@@ -38,8 +38,16 @@ def _count_phrase_hits(text: str, tokens: Sequence[str], term_set: set[str]) -> 
 
 
 def _count_fuzzy_hits(text: str, tokens: Sequence[str], term_set: set[str], max_edit_distance: int = 1) -> int:
-    """模糊匹配：phrase+编辑距离≤1（仅长度≥2，慢3-5x，限tension等关键路径）。"""
+    """模糊匹配：phrase+编辑距离≤1（仅长度≥2，慢3-5x，限tension等关键路径）。
+
+    候选词条按长度分桶，长度差超过 max_edit_distance 的词条不参与距离计算。
+    """
     base_count = _count_phrase_hits(text, tokens, term_set)
+
+    buckets: dict[int, list[str]] = {}
+    for term in term_set:
+        if len(term) >= 2:
+            buckets.setdefault(len(term), []).append(term)
 
     fuzzy_hits = 0
     matched_tokens = set()
@@ -48,15 +56,45 @@ def _count_fuzzy_hits(text: str, tokens: Sequence[str], term_set: set[str], max_
         if not token or len(token) < 2 or token in term_set or token in matched_tokens:
             continue
 
-        for term in term_set:
-            if len(term) < 2:
-                continue
-            if _edit_distance(token, term) <= max_edit_distance:
-                fuzzy_hits += 1
-                matched_tokens.add(token)
+        token_length = len(token)
+        hit = False
+        for length in range(token_length - max_edit_distance, token_length + max_edit_distance + 1):
+            for term in buckets.get(length, ()):
+                if max_edit_distance == 1:
+                    matched = _within_one_edit(token, term)
+                else:
+                    matched = _edit_distance(token, term) <= max_edit_distance
+                if matched:
+                    hit = True
+                    break
+            if hit:
                 break
+        if hit:
+            fuzzy_hits += 1
+            matched_tokens.add(token)
 
     return base_count + fuzzy_hits
+
+
+def _within_one_edit(left: str, right: str) -> bool:
+    """判定两词编辑距离是否不超过 1：同长只容一处替换，差一长只容一处增删"""
+    if left == right:
+        return True
+    if len(left) == len(right):
+        return sum(1 for first, second in zip(left, right, strict=True) if first != second) <= 1
+    if len(left) > len(right):
+        left, right = right, left
+    skipped = False
+    index = 0
+    for char in right:
+        if index < len(left) and left[index] == char:
+            index += 1
+            continue
+        if skipped:
+            return False
+        skipped = True
+    return True
+
 
 
 def _edit_distance(s1: str, s2: str) -> int:

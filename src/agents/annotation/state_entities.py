@@ -8,9 +8,9 @@ from typing import Any, Protocol
 
 from pydantic import ValidationError
 
+from src.agents.annotation.output_models import BoundCharacterObservation
 from src.fact_graph.graph import FactGraph
 from src.fact_graph.inputs import BoundRelationInput, EntityDirectoryInput, EntityInput, EntityNameRef
-from src.fact_graph.outputs import BoundCharacterObservation
 from src.fact_graph.vocabulary import RELATION_DEFINITIONS, DialogueVerdict, EntityType, RelationType
 
 from .entity_refs import ensure_entity_ref
@@ -26,6 +26,8 @@ class EntityRelationStateContext(Protocol):
     """只开放此工作状态需要的上下文和引用能力"""
 
     def _require_writable(self, record: str) -> None: ...
+
+    def require_domain(self, domain: str) -> None: ...
 
     current_chapter_id: int
     graph: FactGraph | None
@@ -55,11 +57,14 @@ class EntityRelationState:
         key = ctx.graph.entity_key(entity.name, entity.entity_type)
         record = f"entity/{entity.name}"
         ctx._require_writable(record)
+        ctx.require_domain("entity")
         normalized_el = unicodedata.normalize("NFC", el).strip()
         bound_key = self.entity_el_index.get(normalized_el)
         if bound_key is not None and bound_key != key:
+            occupant = self.written_entities.get(bound_key)
+            label = f"{occupant.name}/{occupant.entity_type}" if occupant is not None else bound_key
             raise AnnotationStageRejection(
-                f"el 键已被另一实体占用: {normalized_el}",
+                f"el 键已被另一实体占用: {normalized_el}（占用者：{label}）",
                 record=record,
                 field="el",
                 code="duplicate_el",
@@ -123,6 +128,7 @@ class EntityRelationState:
         to_ref = EntityNameRef.model_validate(to_ref)
         provisional = f"relation/{from_ref.name}-{to_ref.name}/{relation_type}"
         ctx._require_writable(provisional)
+        ctx.require_domain("relation")
         if ctx.graph is None:
             raise AnnotationInvariantError("write_relation 需要常驻事实图，graph 缺失")
         from_key = ensure_entity_ref(ctx.graph, from_ref.name, from_ref.entity_type, chapter_id=ctx.current_chapter_id)

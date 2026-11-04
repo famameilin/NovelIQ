@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import Table, delete, func, select, update
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
@@ -98,12 +99,15 @@ def fetch_topic_model_run(session: Session, run_id: str) -> TopicModelRunContrac
     )
 
 
+_TOPIC_INFERENCE_BATCH = 5_000
+
+
 def insert_paragraph_topic_inferences(
     session: Session,
     run_id: str,
     rows: Sequence[tuple[int, int, int, str, str | None, float | None]],
 ) -> int:
-    "全量 upsert 写入 run 的段落推断事实（paragraph_metrics.inference_* 列）"
+    "分批 upsert 段落推断事实，单条语句参数数不超过 PostgreSQL 上限"
     inference_rows = [
         {
             "run_id": run_id,
@@ -124,18 +128,20 @@ def insert_paragraph_topic_inferences(
     ]
     if not inference_rows:
         return 0
-    statement = pg_insert(ParagraphMetric).values(inference_rows)
-    session.execute(
-        statement.on_conflict_do_update(
-            index_elements=["run_id", "paragraph_id"],
-            set_={
-                "inference_token_count": statement.excluded.inference_token_count,
-                "inference_status": statement.excluded.inference_status,
-                "inference_error_text": statement.excluded.inference_error_text,
-                "inference_created_at": statement.excluded.inference_created_at,
-            },
+    for start in range(0, len(inference_rows), _TOPIC_INFERENCE_BATCH):
+        batch = inference_rows[start : start + _TOPIC_INFERENCE_BATCH]
+        statement = pg_insert(ParagraphMetric).values(batch)
+        session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["run_id", "paragraph_id"],
+                set_={
+                    "inference_token_count": statement.excluded.inference_token_count,
+                    "inference_status": statement.excluded.inference_status,
+                    "inference_error_text": statement.excluded.inference_error_text,
+                    "inference_created_at": statement.excluded.inference_created_at,
+                },
+            )
         )
-    )
     return len(inference_rows)
 
 
@@ -317,3 +323,38 @@ def fetch_paragraph_topic_rows(session: Session, run_id: str) -> Sequence[Row]:
         .order_by(global_start_char, ParagraphTopic.topic_id)
     )
     return session.execute(stmt).all()
+
+
+def fetch_paragraph_topic_distributions(session: Session, run_id: str) -> Sequence[Row]:
+    "每段一行读取完整主题分布，主题身份与权重按相同顺序配对"
+    position = global_start_char_projection()
+    statement = (
+        select(
+            Paragraph.paragraph_id,
+            Paragraph.chapter_id,
+            Chapter.sequence,
+            position.label("global_start_char"),
+            ParagraphMetric.inference_token_count,
+            func.array_agg(aggregate_order_by(ParagraphTopic.topic_id, ParagraphTopic.topic_id)).label("topic_ids"),
+            func.array_agg(aggregate_order_by(ParagraphTopic.topic_weight, ParagraphTopic.topic_id)).label(
+                "topic_weights"
+            ),
+        )
+        .select_from(Paragraph)
+        .join(Chapter, (Chapter.run_id == Paragraph.run_id) & (Chapter.chapter_id == Paragraph.chapter_id))
+        .join(
+            ParagraphMetric,
+            (ParagraphMetric.run_id == Paragraph.run_id) & (ParagraphMetric.paragraph_id == Paragraph.paragraph_id),
+        )
+        .join(
+            ParagraphTopic,
+            (ParagraphTopic.run_id == Paragraph.run_id) & (ParagraphTopic.paragraph_id == Paragraph.paragraph_id),
+        )
+        .where(Paragraph.run_id == run_id)
+        .group_by(
+            Paragraph.paragraph_id, Paragraph.chapter_id, Chapter.sequence, position,
+            ParagraphMetric.inference_token_count,
+        )
+        .order_by(position, Paragraph.paragraph_id)
+    )
+    return session.execute(statement).all()

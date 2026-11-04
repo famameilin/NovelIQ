@@ -25,7 +25,7 @@ class EventNodeRow:
     causal_event_refs: list[str]
     tree_id: str
     cause_role: str
-    parent_event_id: str | None
+    parent_event_ids: list[str]
     evidence_scope: str
     payload_path: str
     event_ordinal: int
@@ -48,11 +48,14 @@ class EventEdgeRow:
 
 @dataclass(frozen=True)
 class ForeshadowingEdgeRow:
-    """返回章节伏笔树视图（伏笔即事件树，一行一棵树）"""
+    """返回章节阅读边界内的伏笔轨迹"""
 
-    root_event_id: str
+    source_event_id: str
     run_id: str
-    tree_id: str
+    source_locator: dict[str, Any]
+    target_event_id: str | None
+    target_locator: dict[str, Any] | None
+    actions: list[dict[str, Any]]
     payoff_event_id: str | None
     first_chapter_id: int
     last_chapter_id: int
@@ -74,7 +77,7 @@ class EventTreeRow:
     """返回一棵事件树"""
 
     tree_id: str
-    root_event_id: str
+    entry_event_id: str
     main_chain: list[str]
     secondary_groups: list[EventSecondaryGroupRow]
     chapter_ids: list[int]

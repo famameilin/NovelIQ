@@ -14,7 +14,7 @@ def is_topic_model_complete(session: Storage, run_id: str) -> bool:
     model = session.paragraphs.fetch_topic_model_run(run_id)
     if model is None:
         return False
-    row = session.reads.topic_completion_is_topic_model_complete_1(model, run_id)
+    row = session.reads.topics.get_completion_counts(model, run_id)
     return (
         row["total"] > 0
         and row["settled"] == row["total"]

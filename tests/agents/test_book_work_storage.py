@@ -20,8 +20,8 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
 
     from src.agents.annotation.output_models import BoundChapterAnnotation
     from src.fact_graph.graph import FactGraph
-    from src.fact_graph.inputs import ChapterMetricsInput
     from src.fact_graph.outputs import BoundDialogue
+    from src.metrics.annotation_inputs import ChapterMetricsInput
     from src.storage.models import (
         ChapterAnnotation,
         GraphEntity,
@@ -36,7 +36,7 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
         relation_fact,
     )
 
-    text = 'Alice says: "Go."'
+    text = 'Alice says: "Go😀."'
     _, run_id = create_run_with_chunks(db_session, texts=["Alice knows Bob.", text], chapter_ids=[1, 2])
     persist_chapter_annotation(
         db_session,
@@ -69,9 +69,9 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
             BoundDialogue(
                 candidate_index=1,
                 candidate_key="actual-go",
-                content="Go.",
-                start=text.index("Go."),
-                end=text.index("Go.") + 3,
+                content="Go😀.",
+                start=text.index("Go😀."),
+                end=text.index("Go😀.") + len("Go😀."),
                 speaker="Alice",
             )
         ]
@@ -113,6 +113,14 @@ def test_retained_reference_restores_entity_after_source_chapter_discard(db_sess
         db_session.scalars(select(GraphFact).where(GraphFact.entity_id == alice, GraphFact.tags_submitted.is_(False)))
     )
     assert fetch_chapter_characters_full(storage_for(AnnotationRepository(db_session).session), run_id) == []
+    if reference_kind == "dialogue":
+        repository = AnnotationRepository(db_session)
+        original = repository.fetch_dialogue_records(run_id)
+        projection = repository.fetch_dialogue_observation_rows(run_id)
+        assert [(row.chapter_id, row.speaker_entity_id, row.tone, row.content_length) for row in projection] == [
+            (row.chapter_id, row.speaker_entity_id, row.tone, len(row.content)) for row in original
+        ]
+        assert [row.content_length for row in projection] == [len("Go😀.")]
 
 
 

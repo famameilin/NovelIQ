@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 
 from src.api.dependencies import get_db_session, require_readable_run_status, require_run_for_novel, resolve_run_id
-from src.event_trees.read.organization import EventTreeQuery, RunRequiresRebuildError
+from src.api.services.results_queries.event_trees import EventTreeReadService
+from src.event_trees.read.organization_models import RunRequiresRebuildError
 from src.fact_graph.read.source import read_evidence_source
 from src.storage import Storage
 
@@ -16,9 +17,9 @@ SessionDep = Annotated[Storage, Depends(get_db_session)]
 RunDep = Annotated[str, Depends(resolve_run_id)]
 
 
-def _query(session: Storage, novel_id: str, run_id: str) -> EventTreeQuery:
+def _query(session: Storage, novel_id: str, run_id: str) -> EventTreeReadService:
     require_readable_run_status(require_run_for_novel(session, novel_id, run_id))
-    return EventTreeQuery(session, run_id)
+    return EventTreeReadService(session, run_id)
 
 
 def _error(error: Exception) -> HTTPException:
@@ -30,21 +31,19 @@ def _error(error: Exception) -> HTTPException:
 
 
 @router.get("/{novel_id}/event-trees")
-async def get_event_trees(
+def get_event_trees(
     novel_id: str,
     session: SessionDep,
     run_id: RunDep,
-    cursor: str | None = None,
-    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict[str, Any]:
     try:
-        return _query(session, novel_id, run_id).fetch(cursor=cursor, limit=limit)
+        return _query(session, novel_id, run_id).fetch()
     except (ValueError, LookupError) as error:
         raise _error(error) from error
 
 
 @router.get("/{novel_id}/event-trees/nodes/{node_id}")
-async def get_event_tree_node(novel_id: str, node_id: str, session: SessionDep, run_id: RunDep) -> dict[str, Any]:
+def get_event_tree_node(novel_id: str, node_id: str, session: SessionDep, run_id: RunDep) -> dict[str, Any]:
     try:
         return _query(session, novel_id, run_id).detail(node_id)
     except (ValueError, LookupError) as error:
@@ -52,7 +51,7 @@ async def get_event_tree_node(novel_id: str, node_id: str, session: SessionDep, 
 
 
 @router.get("/{novel_id}/event-trees/nodes/{node_id}/source")
-async def get_event_tree_source(
+def get_event_tree_source(
     novel_id: str,
     node_id: str,
     session: SessionDep,
@@ -62,7 +61,7 @@ async def get_event_tree_source(
 ) -> dict[str, Any]:
     try:
         query = _query(session, novel_id, run_id)
-        evidence = query.detail(node_id)["evidence"]
+        evidence = query.evidence(node_id)
         source = read_evidence_source(session, run_id, evidence, chapter_id)
         # 全章正文供阅读，准确证据单独返回，不能把正文段落数组伪装成全部证据
         source["evidence"] = evidence

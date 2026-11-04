@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from src.api.models.responses import (
@@ -30,6 +31,7 @@ from src.metrics.queries.annotations import fetch_chapter_annotations_full
 from src.metrics.sampling import sample_paragraph_curve_points
 from src.storage import Storage
 from src.storage.contracts.stores import ParagraphStore
+from src.storage.records.annotation import ChapterAnnotationRow
 
 
 def _apply_emotion_smoothing(windows: list[EmotionTrendWindow]) -> list[EmotionTrendWindow]:
@@ -69,11 +71,14 @@ def _fetch_emotion_trend(
     range_start: float | None,
     range_end: float | None,
     window_paragraphs: int,
+    *,
+    paragraph_rows: Sequence[Any] | None = None,
+    metric_rows: Sequence[Any] | None = None,
 ) -> list[EmotionTrendWindow]:
     """由段落原始指标构造情绪趋势窗口并附带后端展示平滑值"""
     windows = aggregate_emotion_trend_windows(
-        paragraph_repo.fetch_paragraph_rows(run_id),
-        paragraph_repo.fetch_paragraph_metrics(run_id),
+        paragraph_rows if paragraph_rows is not None else paragraph_repo.fetch_paragraph_rows(run_id),
+        metric_rows if metric_rows is not None else paragraph_repo.fetch_paragraph_metrics(run_id),
         range_start=range_start,
         range_end=range_end,
         window_paragraphs=window_paragraphs,
@@ -147,6 +152,10 @@ def _fetch_chapter_metrics(
     paragraph_repo: ParagraphStore,
     annotation_repo: Storage,
     run: dict[str, Any],
+    *,
+    paragraph_rows: Sequence[Any] | None = None,
+    metric_rows: Sequence[Any] | None = None,
+    annotation_rows: Sequence[ChapterAnnotationRow] | None = None,
 ) -> ChapterMetricsResponse:
     """
     获取章节与全书汇总指标
@@ -155,12 +164,14 @@ def _fetch_chapter_metrics(
     - 章节标签来自 fetch_chapter_annotations_full（按 chapter_id 映射）
     """
     del run
+    if annotation_rows is None:
+        annotation_rows = fetch_chapter_annotations_full(annotation_repo, run_id, include_details=False)
     annotations_by_chapter_id = {
-        int(row.chapter_id): row for row in fetch_chapter_annotations_full(annotation_repo, run_id)
+        int(row.chapter_id): row for row in annotation_rows
     }
     payload = aggregate_chapter_metrics(
-        paragraph_repo.fetch_paragraph_rows(run_id),
-        paragraph_repo.fetch_paragraph_metrics(run_id),
+        paragraph_rows if paragraph_rows is not None else paragraph_repo.fetch_paragraph_rows(run_id),
+        metric_rows if metric_rows is not None else paragraph_repo.fetch_paragraph_metrics(run_id),
         annotations_by_chapter_id,
     )
     return ChapterMetricsResponse(

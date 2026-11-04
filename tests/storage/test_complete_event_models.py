@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from src.storage.ids import new_id
-from src.storage.models import Base, CompleteEvent, NarrativeLink, SourceEvidence
+from src.storage.models import Base, Case, CompleteEvent, NarrativeGroup, NarrativeLink, SourceEvidence
 from src.storage.repositories.case_writes import CaseWritesRepository
 from tests.support.chapter_annotation_helpers import create_run_with_chunks
 from tests.support.event_tree_fixtures import add_annotation_source, add_declaration, first_paragraph
@@ -59,6 +59,16 @@ def test_saved_event_body_and_range_are_immutable(db_session, event_case):
 def test_parent_range_does_not_need_to_cover_child(db_session, event_case):
     run, producer, record, child = event_case
     parent = new_id()
+    parent_tree = new_id()
+    db_session.add(
+        NarrativeGroup(
+            group_id=parent_tree,
+            producer_agent_id=producer,
+            kind="tree",
+            title="父事件树",
+            description="完整父事件树",
+        )
+    )
     db_session.add(
         CompleteEvent(
             event_id=parent,
@@ -75,27 +85,33 @@ def test_parent_range_does_not_need_to_cover_child(db_session, event_case):
         )
     )
     db_session.flush()
+    db_session.add(NarrativeLink(
+        link_id=new_id(), producer_agent_id=producer, tree_id=parent_tree,
+        member_event_id=parent, position=0, reason="完整父事件树",
+    ))
+    db_session.flush()
+    child_tree = db_session.scalar(select(NarrativeLink.tree_id).where(NarrativeLink.member_event_id == child))
     db_session.add(
         NarrativeLink(
             link_id=new_id(),
             producer_agent_id=producer,
-            contained_parent_id=parent,
-            contained_child_id=child,
+            parent_tree_id=parent_tree,
+            child_tree_id=child_tree,
             reason="独立范围的包含",
         )
     )
     db_session.flush()
     assert (
-        db_session.scalar(select(NarrativeLink.contained_parent_id).where(NarrativeLink.contained_child_id == child))
-        == parent
+        db_session.scalar(select(NarrativeLink.parent_tree_id).where(NarrativeLink.child_tree_id == child_tree))
+        == parent_tree
     )
     with pytest.raises(IntegrityError), db_session.begin_nested():
         db_session.add(
             NarrativeLink(
                 link_id=new_id(),
                 producer_agent_id=producer,
-                contained_parent_id=child,
-                contained_child_id=parent,
+                parent_tree_id=child_tree,
+                child_tree_id=parent_tree,
                 reason="非法闭环",
             )
         )
@@ -103,13 +119,53 @@ def test_parent_range_does_not_need_to_cover_child(db_session, event_case):
 
 
 def test_root_cases_are_stable_and_keep_promises_after_parenting(db_session, event_case):
-    run, producer, _, child = event_case
+    run, _producer, _, child = event_case
     repo = CaseWritesRepository(run)
-    rows = repo.register_event_roots(db_session)
-    assert len(rows) == 1 and child in rows[0]["description"]
-    assert rows == repo.register_event_roots(db_session)
-    assert rows[0]["case_id"] != child
+    child_tree = db_session.scalar(select(NarrativeLink.tree_id).where(NarrativeLink.member_event_id == child))
+    rows = repo.register_unparented_trees(db_session)
+    assert len(rows) == 1 and child_tree in rows[0]["description"]
+    assert rows == repo.register_unparented_trees(db_session)
+    assert rows[0]["case_id"] != child_tree
     assert "event_id" not in Base.metadata.tables["case"].c
+
+
+def test_unparented_tree_registers_at_most_twice(db_session, event_case):
+    run, producer, _, _child = event_case
+    repo = CaseWritesRepository(run)
+    first = repo.register_unparented_trees(db_session)
+    assert len(first) == 1
+    first_row = db_session.get(Case, first[0]["case_id"])
+    first_row.status = "resolved"
+    first_row.promised_agent_id = producer
+    db_session.flush()
+    second = repo.register_unparented_trees(db_session)
+    pending = [row for row in second if not row["submitted"]]
+    assert len(second) == 2 and len(pending) == 1
+    assert pending[0]["case_id"] != first[0]["case_id"]
+    second_row = db_session.get(Case, pending[0]["case_id"])
+    second_row.status = "resolved"
+    second_row.promised_agent_id = producer
+    db_session.flush()
+    third = repo.register_unparented_trees(db_session)
+    assert len(third) == 2
+    assert all(row["submitted"] for row in third)
+
+
+def test_unparented_empty_tree_enters_case_pool(db_session, event_case):
+    run, producer, _, _child = event_case
+    empty_tree = new_id()
+    db_session.add(
+        NarrativeGroup(
+            group_id=empty_tree,
+            producer_agent_id=producer,
+            kind="tree",
+            title="空容器",
+            description="尚无成员",
+        )
+    )
+    db_session.flush()
+    rows = CaseWritesRepository(run).register_unparented_trees(db_session)
+    assert any(empty_tree in row["description"] for row in rows)
 
 
 def test_evidence_has_single_event_owner(event_case):

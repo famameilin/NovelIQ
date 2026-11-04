@@ -133,12 +133,19 @@ class EventManager:
         if task_id not in self._projections:
             projection = AnalysisProjection()
             if self._outbox is not None:
-                while True:
-                    page = await asyncio.to_thread(self._outbox.replay, task_id, projection.cursor)
-                    if not page:
-                        break
+                tail_reader = getattr(self._outbox, "replay_tail", None)
+                if tail_reader is None:
+                    while True:
+                        page = await asyncio.to_thread(self._outbox.replay, task_id, projection.cursor)
+                        if not page:
+                            break
+                        for message in page:
+                            projection.apply(message["type"], message["data"], int(message["seq"]))
+                else:
+                    page, latest = await asyncio.to_thread(tail_reader, task_id)
                     for message in page:
                         projection.apply(message["type"], message["data"], int(message["seq"]))
+                    projection.cursor = max(projection.cursor, int(latest))
             self._projections[task_id] = projection
         return self._projections[task_id]
 
