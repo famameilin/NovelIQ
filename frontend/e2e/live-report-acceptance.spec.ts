@@ -36,8 +36,8 @@ test('live analysis tabs fit one screen and expose repaired data', async ({ page
       await tab.click();
     }
     if (item.route === 'linguistic') {
-      await expect(page.getByText('待审定').first()).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByText('待审词表命中')).toBeVisible();
+      await expect(page.getByText('词表命中次数')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText('固定表达密度（‰）')).toBeVisible();
     }
     if (item.route === 'topics') {
       await expect(page.getByText('主题列表 · 25 个')).toBeVisible({ timeout: 30_000 });

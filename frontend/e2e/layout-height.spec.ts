@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import type { PlotlineChange, PlotlineTimelineResponse } from '../src/api/narrativeTypes';
 
 import {
   createChapterMetrics,
@@ -7,7 +8,6 @@ import {
   createDiagnosis,
   createEmotionStats,
   createEmotionTrendWindows,
-  createEventTimeline,
   createForeshadowingTrees,
   createGraph,
   createGraphChangesPage,
@@ -43,6 +43,48 @@ interface HeightMeasurement {
   scrollHeight: number;
   overflow: number;
   internalScrollCount: number;
+}
+
+const timelineChapters = Array.from({ length: 24 }, (_, index) => ({
+  chapter_id: index + 1, order: index + 1, title: `第 ${index + 1} 章`,
+}));
+const timelineChanges: PlotlineChange[] = timelineChapters.map((chapter, index) => ({
+  plotline_change_id: `layout-change-${chapter.chapter_id}`,
+  dimension: (['plot', 'character', 'relationship', 'foreshadowing'] as const)[index % 4],
+  subject_id: `subject-${index % 4}`, subject_title: `叙事主体 ${index % 4}`,
+  title: `第 ${chapter.order} 章变化 ${'原文中的推进与判断。'.repeat(12)}`,
+  chapter_id: chapter.chapter_id, chapter_order: chapter.order,
+  before: '变化前的状态', after: '变化后的状态', deltas: [], action: null,
+  evidence_scope: 'paragraph', anchor_paragraph_ids: [chapter.chapter_id],
+  evidence: [{ chapter_id: chapter.chapter_id, paragraph_id: chapter.chapter_id }],
+  source_event_ids: [], source_fact_ids: [`layout-fact-${chapter.chapter_id}`],
+}));
+
+function timelineFixture(params: URLSearchParams): PlotlineTimelineResponse {
+  const cutoff = Number(params.get('through_chapter_id')) || 1;
+  const known = timelineChanges.filter(change => change.chapter_id <= cutoff);
+  const selected = known.filter(change =>
+    (!params.get('subject_id') || change.subject_id === params.get('subject_id')) &&
+    (!params.get('dimension') || change.dimension === params.get('dimension')) &&
+    (!params.get('q') || change.title.includes(params.get('q')!)) &&
+    (!params.get('source_fact_id') || change.source_fact_ids.includes(params.get('source_fact_id')!)) &&
+    change.chapter_id >= (Number(params.get('window_start_chapter_id')) || 1));
+  const offset = Number(params.get('cursor')) || 0, limit = Number(params.get('limit')) || 80;
+  return {
+    run_id: TASK_ID, chapters: timelineChapters, through_chapter_id: cutoff,
+    changes: selected.slice(offset, offset + limit),
+    states: [...new Map(known.map(change => [change.subject_id, {
+      subject_id: change.subject_id, subject_title: change.subject_title, dimension: change.dimension,
+      state: change.after, chapter_id: change.chapter_id, chapter_order: change.chapter_order,
+    }])).values()],
+    subjects: [...new Map(known.map(change => [change.subject_id, {
+      subject_id: change.subject_id, subject_title: change.subject_title, dimension: change.dimension,
+    }])).values()],
+    total: selected.length, next_cursor: offset + limit < selected.length ? String(offset + limit) : null,
+    distribution: selected.map(change => ({
+      chapter_id: change.chapter_id, chapter_order: change.chapter_order, dimension: change.dimension, count: 1,
+    })),
+  };
 }
 
 const PAGE_HEIGHT_CASES: readonly PageHeightCase[] = [
@@ -95,7 +137,7 @@ const PAGE_HEIGHT_CASES: readonly PageHeightCase[] = [
   {
     label: '叙事时间轴',
     pathSuffix: '/timeline',
-    views: [{ label: '事件轨道', role: 'region' }],
+    views: [{ label: '连续叙事时间轴', role: 'region' }],
   },
   {
     label: '诊断报告',
@@ -169,7 +211,7 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
   // 简要说明：为每条线索提供唯一树标识，并验证分页后的末页内容
   const foreshadowingThreads = Array.from({ length: 8 }, (_, index) => ({
     ...foreshadowingTemplate,
-    root_event_id: `root-layout-${index + 1}`,
+    source_event_id: `root-layout-${index + 1}`,
     tree_id: `tree-layout-${index + 1}`,
     first_chapter_id: index * 3 + 1,
     last_chapter_id: index * 3 + 8,
@@ -187,9 +229,6 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
     num_topics: topics.length,
     artifact_key: 'models/topic/layout-test',
   };
-  const timeline = createEventTimeline();
-  timeline.meta.novel_id = NOVEL_ID;
-  timeline.meta.novel_name = '布局校验小说';
 
   const posKeys = ['adj', 'adv', 'noun', 'prep', 'pron', 'verb', 'other', 'punct', 'particle', 'quantifier', 'num', 'conj'];
   const dependencyKeys = ['WP', 'ADV', 'ATT', 'CMP', 'COO', 'DBL', 'HED', 'POB', 'RAD', 'SBV', 'VOB', 'LAD', 'FOB', 'IOB'];
@@ -364,8 +403,8 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
         count: 100 - index * 3,
       })),
       total_char_count: 186000,
-      metric_hit_count: 0,
-      fixed_phrase_density: 0,
+      metric_hit_count: 47,
+      fixed_phrase_density: 0.2527,
       four_char_candidate_count: 12,
       total_hits: 59,
       unavailable_reason: null,
@@ -386,7 +425,6 @@ function createMockApiResponses(): Readonly<Record<string, unknown>> {
       ],
       unavailable_reason: null,
     },
-    [`/api/novels/${NOVEL_ID}/timeline`]: timeline,
     [`/api/novels/${NOVEL_ID}/diagnosis`]: diagnosis,
     [`/api/novels/${NOVEL_ID}/foreshadowing-trees`]: foreshadowingThreads,
   };
@@ -419,6 +457,24 @@ async function installAnalysisApiMocks(page: Page): Promise<Set<string>> {
       return;
     }
 
+    if (pathname === `/api/novels/${NOVEL_ID}/timeline`) {
+      await route.fulfill({ json: timelineFixture(requestUrl.searchParams) });
+      return;
+    }
+    if (pathname.startsWith(`/api/novels/${NOVEL_ID}/timeline/changes/`)) {
+      const identifier = decodeURIComponent(pathname.split('/').at(pathname.endsWith('/source') ? -2 : -1)!);
+      const change = timelineChanges.find(item => item.plotline_change_id === identifier);
+      if (!change || change.chapter_id > (Number(requestUrl.searchParams.get('through_chapter_id')) || 1)) {
+        await route.fulfill({ status: 404, json: { detail: 'CHANGE_NOT_VISIBLE' } });
+      } else if (pathname.endsWith('/source')) {
+        await route.fulfill({ json: {
+          chapter_id: change.chapter_id, title: `第 ${change.chapter_id} 章`,
+          paragraphs: [{ paragraph_id: change.chapter_id, paragraph_index: 0, text: '原文依据。'.repeat(400) }],
+          evidence_scope: 'paragraph', evidence: change.evidence,
+        } });
+      } else await route.fulfill({ json: change });
+      return;
+    }
     const response = responses[pathname];
     if (request.method() !== 'GET' || response === undefined) {
       unhandledRequests.add(`${request.method()} ${requestUrl.pathname}${requestUrl.search}`);
@@ -459,6 +515,10 @@ async function waitForStableLayout(
     const pageMain = document.querySelector('main');
     return pageMain != null && pageMain.querySelector('.animate-pulse') == null;
   });
+  if (new URL(page.url()).pathname.endsWith('/timeline')) {
+    await expect(page.getByText('正在读取变化…', { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel('截点已知状态')).toContainText('变化后的状态');
+  }
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
@@ -544,11 +604,15 @@ test.describe('全局页面高度门禁', () => {
   test('事件轨道在桌面视口中连续呈现全部事件', async ({ page }) => {
     const unhandledRequests = await installAnalysisApiMocks(page);
     await page.goto(`/novels/${NOVEL_ID}/timeline?task_id=${TASK_ID}`);
-    const track = page.getByRole('region', { name: '事件轨道' });
+    const track = page.getByLabel('章节变化轨道');
     await expect(track).toBeVisible();
-    const visibleCount = Number(await page.locator('[aria-label="事件轨道摘要"] dd').nth(1).textContent());
-    await expect(track.getByTestId('timeline-card')).toHaveCount(visibleCount);
-    await expect(page.getByRole('navigation', { name: '事件轨道分页' })).toHaveCount(0);
+    await expect(page.getByText('24 条已发生的变化 · 4 个主体')).toBeVisible();
+    expect(await track.getByTestId('timeline-change-node').count()).toBeGreaterThan(0);
+    await page.getByRole('combobox', { name: '阅读截点' }).selectOption('24');
+    await page.getByRole('combobox', { name: '显示窗口' }).selectOption('4');
+    await track.getByTestId('timeline-change-node').last().click();
+    await expect(page.getByRole('dialog', { name: '变化详情', exact: true })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '变化详情', exact: true })).toContainText('第 24 章');
     const bounds = await track.boundingBox();
     expect(bounds?.height).toBeGreaterThan(400);
     expect(bounds?.width).toBeGreaterThan(500);
@@ -572,6 +636,8 @@ test.describe('全局页面高度门禁', () => {
       if (message.type() === 'error') runtimeErrors.push(`CONSOLE ${message.text()}`);
     });
     page.on('requestfailed', (request) => {
+      // 查询取消是 StrictMode 卸载与页面切换的正常行为
+      if (request.failure()?.errorText === 'net::ERR_ABORTED') return;
       runtimeErrors.push(`REQUEST ${request.method()} ${request.url()} ${request.failure()?.errorText ?? '未知错误'}`);
     });
 
@@ -694,13 +760,13 @@ test.describe('重点页签 1280×720 单屏门禁', () => {
         if (pageCase.pathSuffix === '/characters' && view.label === '角色排行') {
           await showLastPage(page, '角色排行', true);
         }
-        if (pageCase.pathSuffix === '/timeline' && view.label === '事件轨道') {
-          const track = page.getByRole('region', { name: '事件轨道' });
-          const visibleCount = Number(await page.locator('[aria-label="事件轨道摘要"] dd').nth(1).textContent());
-          await expect(track.getByTestId('timeline-card')).toHaveCount(visibleCount);
-          await track.getByTestId('timeline-card').last().click();
-          await expect(page.getByRole('dialog', { name: '事件详情悬浮框' })).toBeVisible();
-          await expectSingleScreen(page, pageCase, '末尾事件详情');
+        if (pageCase.pathSuffix === '/timeline') {
+          const track = page.getByLabel('章节变化轨道');
+          await page.getByRole('combobox', { name: '阅读截点' }).selectOption('24');
+          await page.getByRole('combobox', { name: '显示窗口' }).selectOption('4');
+          await track.getByTestId('timeline-change-node').last().click();
+          await expect(page.getByRole('dialog', { name: '变化详情', exact: true })).toBeVisible();
+          await expectSingleScreen(page, pageCase, '末章变化详情');
         }
         if (pageCase.pathSuffix === '/topics' && view.label === '主题总览') {
           await showLastPage(page, '主题列表', true);
@@ -733,8 +799,18 @@ test.describe('重点页签 1280×720 单屏门禁', () => {
         }
         if (pageCase.pathSuffix === '/diagnosis' && view.label === '价值主题') {
           await showLastPage(page, '综合诊断');
-          await showLastPage(page, '价值逻辑理由', true);
-          await expect(page.getByText(/第 18 条价值判断说明/)).toBeVisible();
+          const controls = page.getByRole('navigation', { name: '价值主题分页' });
+          await expect(controls).toBeVisible();
+          const passages: string[] = [];
+          const previous = controls.getByRole('button', { name: '上一页' });
+          while (await previous.isEnabled()) await previous.click();
+          const next = controls.getByRole('button', { name: '下一页' });
+          while (true) {
+            passages.push(await page.getByTestId('value-logic-passage').innerText());
+            if (!(await next.isEnabled())) break;
+            await next.click();
+          }
+          expect(passages.join('')).toContain('第 18 条价值判断说明');
         }
         if (pageCase.pathSuffix === '/diagnosis' && view.label === '角色结构') {
           await showLastPage(page, '双主角', true);
@@ -789,15 +865,15 @@ test.describe('重点页签 1280×720 单屏门禁', () => {
       }
 
       if (pageCase.pathSuffix === '/timeline') {
-        await page.goto(`${path}&tree_id=tree%3A1`);
-        await waitForStableLayout(page, '事件详情深链', runtimeErrors);
-        const popup = page.getByRole('dialog', { name: '事件详情悬浮框' });
+        await page.goto(`${path}&source_fact_id=layout-fact-24`);
+        await waitForStableLayout(page, '变化详情深链', runtimeErrors);
+        const popup = page.getByRole('dialog', { name: '变化详情', exact: true });
         await expect(popup).toBeVisible();
-        const detailViews = [/^事件概况$/, /^参与实体/, /^因果联系/, /^关联伏笔/, /^分析数据$/];
-        for (const name of detailViews) {
-          await popup.getByRole('group', { name: '事件详情内容' }).getByRole('button', { name }).click();
-          await expectSingleScreen(page, pageCase, `事件详情 ${name.source}`);
-        }
+        await expect(popup).toContainText('第 24 章');
+        await expectSingleScreen(page, pageCase, '变化详情深链');
+        await popup.getByRole('button', { name: '阅读原文' }).click();
+        await expect(page.getByRole('dialog', { name: '章节原文', exact: true })).toBeVisible();
+
       }
 
       expect([...unhandledRequests], `${pageCase.label} 存在未模拟请求`).toEqual([]);

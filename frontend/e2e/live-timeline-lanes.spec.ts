@@ -50,7 +50,7 @@ test('tree-level timeline deep link opens the matching event on the timeline', a
   const timeline = await response.json() as EventTimelineResponse;
   const node = timeline.nodes[0];
   expect(node).toBeTruthy();
-  await page.goto(`/novels/${novelId}/timeline?task_id=${taskId}&tree_id=${encodeURIComponent(node.tree_id)}&event_id=${encodeURIComponent(node.root_event_id)}`);
+  await page.goto(`/novels/${novelId}/timeline?task_id=${taskId}&tree_id=${encodeURIComponent(node.tree_id)}&event_id=${encodeURIComponent(node.entry_event_id)}`);
   await expect(page.getByRole('dialog', { name: '事件详情悬浮框' })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe(`/novels/${novelId}/timeline`);
 });
