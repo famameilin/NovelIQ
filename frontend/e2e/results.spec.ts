@@ -2,6 +2,7 @@
  * 测试各分析结果页面的加载和展示：曲线、角色、图谱、主题、时间轴、诊断
  */
 import { test, expect } from '@playwright/test';
+import { createEmotionTrendWindows, createNarrativeStructure, createParagraphCurves } from '../src/mocks/data';
 
 const NOVEL_ID = 'abc12345';
 const TASK_ID = 'task5678';
@@ -76,39 +77,21 @@ test.describe('分析结果页面', () => {
   });
 
   test('曲线页应正常加载', async ({ page }) => {
-    await page.route(`**/api/novels/${NOVEL_ID}/paragraph-curves**`, async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify([
-          {
-            paragraph_id: 0,
-            chapter_id: 1,
-            paragraph_index: 0,
-            position: 0.0,
-            pos_density: 0.01,
-            neg_density: 0.02,
-            net_density: -0.01,
-            smoothed_net_density: -0.01,
-            surface_tension: 0.3,
-            smoothed_surface_tension: 0.3,
-          },
-          {
-            paragraph_id: 1,
-            chapter_id: 2,
-            paragraph_index: 0,
-            position: 1.0,
-            pos_density: 0.03,
-            neg_density: 0.01,
-            net_density: 0.02,
-            smoothed_net_density: 0.02,
-            surface_tension: 0.5,
-            smoothed_surface_tension: 0.5,
-          },
-        ]),
-      });
-    });
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.route(`**/api/novels/${NOVEL_ID}/emotion-trend**`, route =>
+      route.fulfill({ json: createEmotionTrendWindows(20, null) }));
+    await page.route(`**/api/novels/${NOVEL_ID}/tabs/rhythm**`, route => route.fulfill({ json: {
+      run_id: TASK_ID, curves: createParagraphCurves(80), narrative_structure: createNarrativeStructure(),
+    } }));
     await page.goto(`/novels/${NOVEL_ID}/curves?task_id=${TASK_ID}`);
+    await expect(page.getByText('情绪趋势曲线', { exact: true })).toBeVisible();
+    await expect(page.getByRole('tabpanel', { name: '情绪趋势' }).locator('canvas').first()).toBeVisible();
+    await page.getByRole('tab', { name: '节奏张力', exact: true }).click();
+    await expect(page.getByText('节奏张力曲线', { exact: true })).toBeVisible();
+    await expect(page.getByRole('tabpanel', { name: '节奏张力' }).locator('canvas').first()).toBeVisible();
+    await expect(page.getByText('加载失败', { exact: true })).toHaveCount(0);
+    expect(errors).toEqual([]);
   });
 
   test('角色页应正常加载', async ({ page }) => {
@@ -174,7 +157,7 @@ test.describe('分析结果页面', () => {
       });
     });
     await page.goto(`/novels/${NOVEL_ID}/timeline?task_id=${TASK_ID}`);
-    await expect(page.getByText('此截点内没有符合条件的变化')).toBeVisible();
+    await expect(page.getByText('没有符合条件的变化', { exact: true })).toBeVisible();
   });
 
   test('诊断页应正常加载', async ({ page }) => {

@@ -12,10 +12,14 @@ test('桌面任务仅展示状态，模型输出按真实 Agent 分流', async (
     if (!path.startsWith('/api/')) { await route.continue(); return; }
     if (path.endsWith(`/events/tasks/${taskId}`)) {
       const messages = [
-        { agent_type: 'case', invocation_id: 'case-agent', stream_id: 'case-stream', action: 'output', content: '已读取原文并核对案例' },
-        { agent_type: 'report', invocation_id: 'report-agent', stream_id: 'report-stream', action: 'output', content: '报告 Agent 正在整理结论' },
+        { type: 'snapshot', data: {
+          cursor: 1, run_id: 'run-runtime', task_id: taskId, status: 'running', stage: 'diagnose', error: null,
+          stages: { diagnose: { stage: 'diagnose', status: 'running' } }, models: [], seats: [], executions: {},
+        } },
+        { type: 'llm_output', data: { invocation_id: 'case-agent', stage: 'diagnose', sub_stage: 'case', content: '已读取原文并核对案例' } },
+        { type: 'llm_output', data: { invocation_id: 'report-agent', stage: 'diagnose', sub_stage: 'report', content: '报告 Agent 正在整理结论' } },
       ];
-      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: messages.map((message, index) => `id: ${index + 1}\nevent: llm_output\ndata: ${JSON.stringify(message)}\n\n`).join('') });
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: messages.map((message, index) => `id: ${index + 1}\nevent: ${message.type}\ndata: ${JSON.stringify(message.data)}\n\n`).join('') });
       return;
     }
     const task = { novel_id: novelId, task_id: taskId, status: 'running' };
@@ -27,14 +31,17 @@ test('桌面任务仅展示状态，模型输出按真实 Agent 分流', async (
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
   await page.goto(`/novels/${novelId}?task_id=${taskId}`);
-  await expect(page.getByRole('heading', { name: '分析进行中' }), errors.join(' | ')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole('region', { name: '分析工作台' }), errors.join(' | ')).toBeVisible({ timeout: 15000 });
   await expect(page.getByRole('button', { name: '停止分析' })).toBeVisible();
+  await page.getByRole('combobox', { name: '选择执行记录' }).selectOption('report-agent');
   await expect(page.getByText('报告 Agent 正在整理结论')).toBeVisible();
-  await page.getByRole('button', { name: /case · 流/ }).click();
+  await page.getByRole('combobox', { name: '选择执行记录' }).selectOption('case-agent');
   await expect(page.getByText('已读取原文并核对案例')).toBeVisible();
   await expect(page.getByRole('progressbar')).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath('runtime-status-desktop.png'), fullPage: false });
   await page.reload();
-  await expect(page.getByRole('heading', { name: '分析进行中' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '分析工作台' })).toBeVisible();
+  await page.getByRole('combobox', { name: '选择执行记录' }).selectOption('case-agent');
+  await expect(page.getByText('已读取原文并核对案例')).toBeVisible();
   expect(errors).toEqual([]);
 });

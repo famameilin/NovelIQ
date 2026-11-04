@@ -4,9 +4,9 @@ import {test,expect,type Page} from "@playwright/test";
 const novel="workbench-fixture",task="task-workbench";
 const stages=["preprocess","annotate","linguistic","aggregate","topic-model","diagnose"];
 const snapshot=(stage="annotate",capacities=[20,30])=>{
- const models=capacities.map((capacity,i)=>({model_id:i===0?"Qwen3 · 章节分析模型":"DeepSeek · 全书诊断与长模型名称展示",capacity}));
+ const models=capacities.map((capacity,i)=>({entry_id:`model-${i}`,model_id:i===0?"Qwen3":"DeepSeek",label:i===0?"Qwen3 · 章节分析模型":"DeepSeek · 全书诊断与长模型名称展示",capacity}));
  const seats=models.flatMap((model,m)=>Array.from({length:Math.min(6,model.capacity)},(_,slot)=>({
-  model_id:model.model_id,slot,reservation_id:`seat-${m}-${slot}`,run_id:m?"":"run",work_id:m?"":"chapter-12",foreign:!!m,
+  entry_id:model.entry_id,model_id:model.model_id,slot,reservation_id:`seat-${m}-${slot}`,run_id:m?"":"run",work_id:m?"":"chapter-12",foreign:!!m,
  })));
  return {cursor:100,run_id:"run",task_id:task,status:"running",stage,error:null,sync_pending:false,models,seats,
  stages:Object.fromEntries(stages.map(key=>[key,{stage:key,status:key===stage?"running":stages.indexOf(key)<stages.indexOf(stage)?"completed":"pending",
@@ -107,7 +107,7 @@ test("少量工位与满载工位均按实际容量绘制",async({page},info)=>{
  await page.setViewportSize({width:1440,height:1050});await fixture(page,"annotate",[3,5]);
  await expect(page.locator("[data-workstation]")).toHaveCount(8);
  const full=snapshot("annotate",[20,30]);
- full.seats=full.models.flatMap((model,m)=>Array.from({length:model.capacity},(_,slot)=>({model_id:model.model_id,slot,
+ full.seats=full.models.flatMap((model,m)=>Array.from({length:model.capacity},(_,slot)=>({entry_id:model.entry_id,model_id:model.model_id,slot,
  reservation_id:`full-${m}-${slot}`,run_id:"run",work_id:`work-${slot}`,foreign:false})));
  full.executions=Object.fromEntries(full.seats.map((seat,i)=>[`agent-${i}`,{invocation_id:`agent-${i}`,work_id:seat.work_id,
  reservation_id:seat.reservation_id,model_id:seat.model_id,stage:"annotate",sub_stage:"annotation",chapter_id:i+1,

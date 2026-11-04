@@ -25,6 +25,12 @@ const MOCK_NOVEL_RESPONSE = {
 
 test.describe('分析任务', () => {
   test.beforeEach(async ({ page }) => {
+    await page.route(`**/api/novels/${NOVEL_ID}/events/tasks/${TASK_ID}**`, route => route.fulfill({
+      contentType: 'text/event-stream', body: `id: 1\nevent: snapshot\ndata: ${JSON.stringify({
+        cursor: 1, run_id: 'analysis-fixture', task_id: TASK_ID, status: 'running', stage: 'annotate',
+        error: null, stages: {}, models: [], seats: [], executions: {},
+      })}\n\n`,
+    }));
     // Mock小说列表（getNovels 的列表请求）
     await page.route('**/api/novels/?**', async (route) => {
       if (route.request().method() === 'GET') {
@@ -94,7 +100,7 @@ test.describe('分析任务', () => {
 
   test('无任务时应显示空状态提示', async ({ page }) => {
     await page.goto(`/novels/${NOVEL_ID}`);
-    await expect(page.getByRole('heading', { name: '尚未分析' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '选择任务或开始分析' })).toBeVisible();
   });
 
   test('创建任务后应显示进度面板', async ({ page }) => {
@@ -120,7 +126,7 @@ test.describe('分析任务', () => {
     });
 
     await page.goto(`/novels/${NOVEL_ID}?task_id=${TASK_ID}`);
-    await expect(page.getByRole('heading', { name: '分析进行中' })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('region', { name: '分析工作台' })).toBeVisible({ timeout: 15000 });
   });
 
   test('已完成任务应显示仪表盘', async ({ page }) => {
