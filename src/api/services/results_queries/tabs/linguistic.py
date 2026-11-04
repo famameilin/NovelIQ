@@ -35,8 +35,6 @@ def build_linguistic_entities_tab(run_id: str, session: Storage) -> dict[str, An
         "surface_top": surface_top,
         "total_char_count": phrase_stats["total_char_count"],
         "metric_hit_count": phrase_stats["metric_hit_count"],
-        "audit_hit_count": phrase_stats["audit_hit_count"],
-        "metric_status": phrase_stats["metric_status"],
         "fixed_phrase_density": phrase_stats["fixed_phrase_density"],
         "four_char_candidate_count": phrase_stats["four_char_candidate_count"],
         "total_hits": phrase_stats["total_hits"],

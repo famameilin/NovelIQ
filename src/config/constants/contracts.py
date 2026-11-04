@@ -1,3 +1,0 @@
-"固定短语计量设置"
-
-FIXED_PHRASE_METRIC_ENABLED = False

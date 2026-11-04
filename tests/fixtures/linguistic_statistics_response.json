@@ -1,0 +1,142 @@
+{
+  "token_total": 11,
+  "sentence_total": 3,
+  "word_length_ratios": {
+    "1": 0.545455,
+    "2": 0.454545,
+    "3": 0.0,
+    "4": 0.0,
+    "5_plus": 0.0
+  },
+  "pos_ratios": {
+    "noun": 0.181818,
+    "verb": 0.818182
+  },
+  "sentence_pattern_ratios": {
+    "compound": 0.0,
+    "long": 0.0,
+    "medium": 0.0,
+    "parallel_candidate": 0.0,
+    "short": 0.666667
+  },
+  "avg_dependency_depth": 0.818182,
+  "max_dependency_depth": 1,
+  "dependency_relation_ratios": {
+    "HED": 0.181818,
+    "ATT": 0.818182
+  },
+  "dependency_root_count": 2,
+  "emotion_event_count": 3,
+  "emotion_pos_event_count": 2,
+  "emotion_neg_event_count": 1,
+  "emotion_negated_event_count": 1,
+  "lexicon_pos_count": 1.0,
+  "lexicon_neg_count": 2.0,
+  "mneg_pos_count": 1.0,
+  "mneg_neg_count": 2.0,
+  "boundary_pos_score_sum": 0.123457,
+  "boundary_neg_score_sum": 0.0,
+  "run_id": "RUN_ID",
+  "paragraph_count": 3,
+  "chapters": [
+    {
+      "token_total": 11,
+      "sentence_total": 2,
+      "word_length_ratios": {
+        "1": 0.545455,
+        "2": 0.454545,
+        "3": 0.0,
+        "4": 0.0,
+        "5_plus": 0.0
+      },
+      "pos_ratios": {
+        "noun": 0.181818,
+        "verb": 0.818182
+      },
+      "sentence_pattern_ratios": {
+        "compound": 0.0,
+        "long": 0.0,
+        "medium": 0.0,
+        "parallel_candidate": 0.0,
+        "short": 1.0
+      },
+      "avg_dependency_depth": 0.818182,
+      "max_dependency_depth": 1,
+      "dependency_relation_ratios": {
+        "HED": 0.181818,
+        "ATT": 0.818182
+      },
+      "dependency_root_count": 2,
+      "emotion_event_count": 3,
+      "emotion_pos_event_count": 2,
+      "emotion_neg_event_count": 1,
+      "emotion_negated_event_count": 1,
+      "lexicon_pos_count": 1.0,
+      "lexicon_neg_count": 2.0,
+      "mneg_pos_count": 1.0,
+      "mneg_neg_count": 2.0,
+      "boundary_pos_score_sum": 0.123457,
+      "boundary_neg_score_sum": 0.0,
+      "chapter_id": 1
+    },
+    {
+      "token_total": 0,
+      "sentence_total": 1,
+      "word_length_ratios": {},
+      "pos_ratios": {},
+      "sentence_pattern_ratios": {
+        "compound": 0.0,
+        "long": 0.0,
+        "medium": 0.0,
+        "parallel_candidate": 0.0,
+        "short": 0.0
+      },
+      "avg_dependency_depth": null,
+      "max_dependency_depth": 0,
+      "dependency_relation_ratios": {},
+      "dependency_root_count": 0,
+      "emotion_event_count": 0,
+      "emotion_pos_event_count": 0,
+      "emotion_neg_event_count": 0,
+      "emotion_negated_event_count": 0,
+      "lexicon_pos_count": 0.0,
+      "lexicon_neg_count": 0.0,
+      "mneg_pos_count": 0.0,
+      "mneg_neg_count": 0.0,
+      "boundary_pos_score_sum": null,
+      "boundary_neg_score_sum": null,
+      "chapter_id": 2
+    }
+  ],
+  "unavailable_reason": null,
+  "emotion_event_density": 2727.272727,
+  "emotion_event_holders": [
+    {
+      "holder": "阿青",
+      "event_count": 1,
+      "positive_count": 1,
+      "negative_count": 0
+    },
+    {
+      "holder": "阿白",
+      "event_count": 1,
+      "positive_count": 1,
+      "negative_count": 0
+    }
+  ],
+  "emotion_top_predicates": [
+    {
+      "predicate": "高兴",
+      "polarity": "positive",
+      "event_count": 2
+    },
+    {
+      "predicate": "伤心",
+      "polarity": "negative",
+      "event_count": 1
+    }
+  ],
+  "mneg_net_delta": 0.0,
+  "lexicon_net": -1.0,
+  "mneg_net": -1.0
+}

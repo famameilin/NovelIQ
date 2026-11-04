@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from dotenv import dotenv_values, load_dotenv
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
@@ -17,7 +17,7 @@ from src.storage import Storage
 from src.storage.constraints import install_domain_constraints
 from src.storage.database_url import resolve_database_url_from_env
 from src.storage.errors import StorageError
-from src.storage.models import Base
+from src.storage.models import Agent, Base, CompleteEvent, NarrativeGroup
 from src.storage.operations import OperationRunner
 from src.storage.records.annotation_save import AnnotationSave
 from src.storage.records.cases import CaseSave
@@ -411,6 +411,96 @@ def test_diagnosis_failure_after_report_write_rolls_back(stored_run, isolated_st
         )
 
 
+@pytest.mark.parametrize(
+    "line_count, selected_count, accepted",
+    [
+        (1, 1, False),
+        (5, 5, True),
+        (10, 10, True),
+        (11, 11, False),
+        (12, 10, True),
+        (10, 8, True),
+        (10, 7, True),
+    ],
+)
+def test_formal_report_enforces_diagnosis_selection_atomically(
+    prepared_annotation, isolated_storage, line_count, selected_count, accepted, monkeypatch
+):
+    storage, run_id, annotation = prepared_annotation
+    payload = annotation.events.snapshot()
+    original_node = next(iter(payload["nodes"].values()))
+    original_queue = next(iter(payload["queues"].values()))
+    payload["nodes"], payload["queues"] = {}, {}
+    for index in range(line_count):
+        identifier = storage.new_id()
+        payload["nodes"][identifier] = {
+            **original_node,
+            "content": {
+                **original_node["content"],
+                "node_id": identifier,
+                "title": f"行动 {index}",
+                "summary": f"完整行动 {index}",
+            },
+        }
+        payload["queues"][identifier] = {
+            **original_queue,
+            "content": {
+                **original_queue["content"],
+                "tree_id": identifier,
+                "event_ids": [identifier],
+            },
+        }
+    storage.annotations.save(replace(annotation, events=replace(annotation.events, snapshot_json=json.dumps(payload))))
+    author, report_id = storage.new_id(), storage.new_id()
+    storage.audit.start_invocation(run_id=run_id, agent_id=author, role="report")
+    organization = {name: [] for name in ("events", "queues", "queue_references", "relations", "outcomes")}
+    organization["source_agent_id"] = author
+    organization["event_line_ids"] = list(payload["nodes"])[:selected_count]
+    organization["event_line_names"] = {
+        identifier: f"事件{index}线"
+        for index, identifier in enumerate(organization["event_line_ids"], start=1)
+    }
+    request = DiagnosisReportSave(
+        run_id,
+        author,
+        {"report_id": report_id, "agent_id": author},
+        (),
+        json.dumps(organization),
+        (),
+        (),
+        (),
+    )
+    if accepted:
+        assert storage.diagnosis.save_report(request)["report_id"] == report_id
+    else:
+        with pytest.raises(ValueError, match="事件线"):
+            storage.diagnosis.save_report(request)
+    _, engine, _, schema = isolated_storage
+    with engine.connect() as connection:
+        assert connection.scalar(
+            text(f"SELECT count(*) FROM {schema}.diagnosis_reports WHERE report_id=:id"), {"id": report_id}
+        ) == int(accepted)
+        assert connection.scalar(
+            select(func.count())
+            .select_from(NarrativeGroup)
+            .join(Agent, Agent.id == NarrativeGroup.producer_agent_id)
+            .where(
+                Agent.run_id == run_id,
+                NarrativeGroup.kind == "tree",
+                NarrativeGroup.is_event_line.is_(True),
+            )
+        ) == (selected_count if accepted else 0)
+        assert (
+            connection.scalar(
+                select(func.count())
+                .select_from(CompleteEvent)
+                .join(Agent, Agent.id == CompleteEvent.producer_agent_id)
+                .where(Agent.run_id == run_id)
+            )
+            == line_count
+        )
+
+
 def test_domain_reads_restore_saved_graph_and_declarations(prepared_annotation):
     storage, run_id, request = prepared_annotation
     storage.annotations.save(request)
@@ -480,7 +570,8 @@ def test_result_and_diagnosis_queries_consume_storage_interfaces(prepared_annota
     queries = DiagnosisQueries(storage)
     assert queries.fetch_pivot_blocks(run_id) == []
     assert queries.fetch_foreshadowing_sources(run_id) == []
-    assert aggregate_linguistic_features(run_id, storage)
+    with pytest.raises(ValueError, match="正式语言统计不符合完整性契约"):
+        aggregate_linguistic_features(run_id, storage)
 
 
 def test_default_workflow_factories_return_storage_without_connecting():

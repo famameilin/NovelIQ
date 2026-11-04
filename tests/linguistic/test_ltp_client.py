@@ -50,6 +50,28 @@ class TestAnalyzeParagraph(unittest.TestCase):
         self.assertEqual(sum(result.pos_counts.values()), result.ltp_token_count)
         self.assertEqual(result.word_length_counts["1"], len(text))
 
+    def test_tokens_and_entities_keep_original_spans_across_whitespace(self) -> None:
+        text = "他叫 汤姆\t很高兴。"
+        output = LtpPipelineOutput(
+            cws=[["他", "叫", "汤姆", "很", "高兴"]], pos=[["r", "v", "nh", "d", "a"]],
+            ner=[[("Nh", "汤姆", 2, 2)]],
+            dep=[{"head": [2, 0, 2, 5, 2], "label": ["SBV", "HED", "VOB", "ADV", "VOB"]}], sdp=[],
+        )
+        result = analyze_paragraph(text, output)
+        for token in result.tokens:
+            self.assertEqual(text[token.local_start_char:token.local_end_char], token.text)
+        self.assertEqual(result.tokens[2].local_start_char, 3)
+        entity = result.entities[0]
+        self.assertEqual(text[entity.local_start_char:entity.local_end_char], "汤姆")
+        from src.linguistic.statistics import build_paragraph_statistics
+
+        self.assertEqual(build_paragraph_statistics(text, result)["ltp_token_count"], 5)
+
+    def test_tokens_missing_from_original_are_rejected(self) -> None:
+        output = _output_for(["甲丙"])
+        with self.assertRaisesRegex(ValueError, "原文"):
+            analyze_paragraph("甲乙", output)
+
     def test_sentence_patterns_short_medium_long(self) -> None:
         text = "嗯。这是中等长度的句子啊。" + "长" * 35 + "。"
         sentences = split_sentences(text)
@@ -207,7 +229,7 @@ class TestSdpArcParsing:
             dep=[{"head": [0, 1, 1], "label": ["HED", "SBV", "ADV"]}],
             sdp=[{"head": [1, 1], "dependent": [2, 3], "label": ["AGT", "mNEG"]}],
         )
-        result = analyze_paragraph("生气的贺伯安不", output)
+        result = analyze_paragraph("生气贺伯安不", output)
         assert [(a.head_index, a.dependent_index, a.label) for a in result.sdp_arcs] == [
             (1, 2, "AGT"),
             (1, 3, "mNEG"),

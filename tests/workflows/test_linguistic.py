@@ -1,16 +1,4 @@
-"""语言结构阶段集成测试（run_linguistic）
-
-LTP 推理用 FakeLtpSession 替换（真实 LTP 模型只做模块级验证），
-analyze_paragraph 纯函数路径保持真实；短语匹配与 Word2Vec 全真实。
-
-逐段事实落 paragraph_spans（词元/NER/短语三类互斥
-区间）与 paragraph_arcs（dep:*/sdp:*），句式五类计数落 paragraph_features；
-完成事实（linguistic_completed_at/phrase_completed_at）与共享句数落
-paragraph_metrics；run 级 LTP/短语/w2v 合同落 runs。派生量（词长分组、
-POS 分组、依存统计、词典对照、情绪事件）不落库，由读取投影从正式事实重算，
-因此本文件按同一投影断言。固定短语只有一个运行级来源（fixed_phrases 词表），
-不再扫描 draft 词表。
-"""
+"""正式语言阶段的生成、持久化和完成性集成测试"""
 
 from __future__ import annotations
 
@@ -27,13 +15,12 @@ from sqlalchemy import select, text
 
 from src.linguistic import ltp_client
 from src.linguistic.queries import fetch_entity_candidates
-from src.linguistic.storage_projection import project_linguistic_features
 from src.storage import new_id
+from tests.support.linguistic_fixtures import saved_linguistic_rows
 from tests.support.storage_fixtures import storage_for
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.config.constants.contracts import FIXED_PHRASE_METRIC_ENABLED
 from src.linguistic.ltp_client import LtpPipelineOutput
 from src.storage.repositories import ChapterRepository, ParagraphRepository, RunRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
@@ -175,7 +162,7 @@ class TestRunLinguistic:
         monkeypatch.setattr(_settings.linguistic.word2vec, "enabled", False)
 
     def _feature_rows(self) -> Sequence[Any]:
-        return project_linguistic_features(LinguisticRepository(self.db_session).fetch_linguistic_sources(self.run_id))
+        return saved_linguistic_rows(self.db_session, self.run_id)
 
     @pytest.mark.asyncio()
     async def test_runs_all_steps_and_writes_linguistic_relations(self) -> None:
@@ -202,13 +189,11 @@ class TestRunLinguistic:
             == "person"
         )
 
-        # 契约关闭正式短语计量：lexicon 命中与四字候选都不计入正式密度
+        # 词表命中与四字候选按匹配方式分行返回
         phrase_rows = repo.fetch_phrase_hits(self.run_id)
         assert phrase_rows
-        assert FIXED_PHRASE_METRIC_ENABLED is False
-        assert all(not row.is_metric_hit for row in phrase_rows)
         lexicon_rows = [row for row in phrase_rows if row.match_kind == "lexicon"]
-        assert lexicon_rows and all(not row.is_metric_hit for row in lexicon_rows)
+        assert lexicon_rows
         # 词面按原文切片投影，命中区间与原文自洽
         assert all(row.surface_text for row in lexicon_rows)
         assert all(row.local_end_char - row.local_start_char == len(row.surface_text) for row in lexicon_rows)
@@ -498,9 +483,7 @@ class TestMnegCorrection:
         assert float(metric_row.positive_weight_sum) == 0.0
         assert float(metric_row.negative_weight_sum) == 1.0
 
-        feature = project_linguistic_features(
-            LinguisticRepository(self.db_session).fetch_linguistic_sources(self.run_id)
-        )[0]
+        feature = saved_linguistic_rows(self.db_session, self.run_id)[0]
         assert float(feature.lexicon_pos_count) == 1.0
         assert float(feature.mneg_neg_count) == 1.0
         assert feature.emotion_event_count == 1
@@ -509,8 +492,7 @@ class TestMnegCorrection:
         assert event["predicate"] == "高兴"
         assert event["predicate_token_index"] == 3
         assert event["negated"] is True
-        assert event["holder"] is None
-        assert event["degree_words"] == []
+        assert event["holder_token_index"] is None
         # 语义依存弧留库（sdp:mNEG 一条），词典/边界观测不进语言事实行
         assert _arc_count(self.db_session, self.run_id, "sdp:") == 1
         sdp_code = self.db_session.execute(
@@ -589,7 +571,7 @@ class TestParagraphBoundary:
         yield
 
     def _feature_rows(self) -> Sequence[Any]:
-        return project_linguistic_features(LinguisticRepository(self.db_session).fetch_linguistic_sources(self.run_id))
+        return saved_linguistic_rows(self.db_session, self.run_id)
 
     def _insert_labels(self, labels: list[tuple[int, int]]) -> None:
         """直接落正式条目行：agent → agent_annotations → agent_assessments

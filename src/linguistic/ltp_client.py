@@ -273,8 +273,10 @@ def analyze_paragraph(text: str, output: LtpPipelineOutput) -> ParagraphLinguist
         sent_token_start = token_index
         for word_idx, word in enumerate(words):
             pos_tag = pos_tags[word_idx] if word_idx < len(pos_tags) else "o"
-            local_start = cursor
-            local_end = cursor + len(word)
+            local_start = text.find(word, cursor)
+            if local_start < 0 or text[cursor:local_start].strip():
+                raise ValueError("LTP 词元必须按顺序对应原文，仅允许跳过空白")
+            local_end = local_start + len(word)
             tokens.append(
                 LtpToken(
                     token_index=token_index,
@@ -328,9 +330,9 @@ def analyze_paragraph(text: str, output: LtpPipelineOutput) -> ParagraphLinguist
                     )
                 )
 
-        # NER 词元索引 → 字符区间（该句词元起点 = sent_start + 词元前缀字符和）
+        # NER 起点复用词元原文区间，保留词元之间的空白偏移
         for entity_type, surface, start_idx, _end_idx in output.ner[sent_idx]:
-            entity_start = sent_start + sum(len(w) for w in words[:start_idx])
+            entity_start = tokens[sent_token_start - 1 + start_idx].local_start_char
             entities.append(
                 LtpEntityCandidate(
                     surface_text=surface,

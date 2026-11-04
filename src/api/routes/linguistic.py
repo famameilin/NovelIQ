@@ -34,7 +34,7 @@ router = APIRouter(prefix="/novels/{novel_id}", tags=["linguistic"])
 
 
 @router.get("/linguistic/features", response_model=LinguisticFeaturesResponse)
-async def get_linguistic_features(
+def get_linguistic_features(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -51,7 +51,7 @@ async def get_linguistic_features(
 
 
 @router.get("/linguistic/entities", response_model=LinguisticEntitiesResponse)
-async def get_linguistic_entities(
+def get_linguistic_entities(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -63,7 +63,7 @@ async def get_linguistic_entities(
 
 
 @router.get("/linguistic/phrases", response_model=LinguisticPhrasesResponse)
-async def get_linguistic_phrases(
+def get_linguistic_phrases(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],
@@ -75,7 +75,7 @@ async def get_linguistic_phrases(
 
 
 @router.get("/linguistic/word2vec", response_model=Word2VecStatsResponse)
-async def get_linguistic_word2vec(
+def get_linguistic_word2vec(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Storage, Depends(get_db_session)],

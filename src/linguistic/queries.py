@@ -1,216 +1,76 @@
-"""语言结构基础数据聚合
-
-全部复合指标查询时计算，不落结果表；词性/词长/句式/依存比例的分母为
-LTP 有效词元数或句子数，缺失或无样本时返回空值与不可用原因。
-本模块返回纯 dict 载荷，响应装配留在 api 读侧。
-"""
+"""语言结构结果聚合与候选查询"""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
 
 from src.linguistic.ltp_client import POS_GROUP_MAP
+from src.linguistic.phrase_matcher import MATCH_KIND_FOUR_CHAR, MATCH_KIND_LEXICON
 from src.storage import Storage
 
 
-def feature_dict(row) -> dict[str, Any]:
-    """投影行 → 纯 dict（JSONB 投影列原样；列形状与旧宽表读取一致）"""
-    return {
-        "paragraph_id": row.paragraph_id,
-        "ltp_token_count": row.ltp_token_count,
-        "word_length_counts": row.word_length_counts or {},
-        "pos_counts": row.pos_counts or {},
-        "sentence_count": row.sentence_count,
-        "sentence_pattern_counts": row.sentence_pattern_counts or {},
-        "dependency_node_count": row.dependency_node_count,
-        "dependency_root_count": row.dependency_root_count,
-        "dependency_depth_sum": row.dependency_depth_sum,
-        "dependency_depth_max": row.dependency_depth_max,
-        "dependency_relation_counts": row.dependency_relation_counts or {},
-        "emotion_event_count": getattr(row, "emotion_event_count", None) or 0,
-        "emotion_pos_event_count": getattr(row, "emotion_pos_event_count", None) or 0,
-        "emotion_neg_event_count": getattr(row, "emotion_neg_event_count", None) or 0,
-        "emotion_events": getattr(row, "emotion_events", None) or [],
-        "lexicon_pos_count": float(getattr(row, "lexicon_pos_count", None) or 0.0),
-        "lexicon_neg_count": float(getattr(row, "lexicon_neg_count", None) or 0.0),
-        "mneg_pos_count": float(getattr(row, "mneg_pos_count", None) or 0.0),
-        "mneg_neg_count": float(getattr(row, "mneg_neg_count", None) or 0.0),
-        "boundary_pos_score_sum": getattr(row, "boundary_pos_score_sum", None),
-        "boundary_neg_score_sum": getattr(row, "boundary_neg_score_sum", None),
-        "chapter_id": None,
-    }
-
-
 def aggregate_linguistic_features(run_id: str, session: Storage) -> dict[str, Any]:
-    """
-    词性/词长/句式/依存比例聚合（书级 + 章节级）
-
-    - 词性比例、词长分布分母为 ltp_token_count（有效词元数）
-    - 句式比例分母为当前规则识别的句子总数
-    - 平均/最大句法深度、依存关系分布按有效句法节点守恒
-    - 空段落返回零值并保留有效词元数（分母不伪造）
-    """
-    ling_repo = session.linguistic
-    from src.linguistic.storage_projection import project_linguistic_features
-
-    rows = project_linguistic_features(ling_repo.fetch_linguistic_sources(run_id))
-    if not rows:
-        return {
-            "run_id": run_id,
-            "paragraph_count": 0,
-            "token_total": None,
-            "word_length_ratios": None,
-            "pos_ratios": None,
-            "sentence_pattern_ratios": None,
-            "avg_dependency_depth": None,
-            "max_dependency_depth": None,
-            "dependency_relation_ratios": None,
-            "dependency_root_count": None,
-            "emotion_event_count": None,
-            "emotion_pos_event_count": None,
-            "emotion_neg_event_count": None,
-            "emotion_negated_event_count": None,
-            "lexicon_pos_count": None,
-            "lexicon_neg_count": None,
-            "mneg_pos_count": None,
-            "mneg_neg_count": None,
-            "boundary_pos_score_sum": None,
-            "boundary_neg_score_sum": None,
-            "chapters": [],
-            "emotion_event_density": None,
-            "emotion_event_holders": [],
-            "emotion_top_predicates": [],
-            "mneg_net_delta": None,
-            "lexicon_net": None,
-            "mneg_net": None,
-            "unavailable_reason": "linguistic_unavailable: 无语言处理完成行（语言阶段未运行）",
-        }
-    # 章节归属（paragraphs.chapter_id）
-    paragraph_repo = session.paragraphs
-    chapter_of: dict[int, int] = {
-        int(row.paragraph_id): int(row.chapter_id) for row in paragraph_repo.fetch_paragraph_rows(run_id)
-    }
-
-    book = aggregate_feature_group([feature_dict(row) for row in rows])
-    merged: dict[int, list[dict[str, Any]]] = {}
-    for row in rows:
-        feature = feature_dict(row)
-        chapter_id = chapter_of.get(feature["paragraph_id"], 0)
-        feature["chapter_id"] = chapter_id
-        merged.setdefault(chapter_id, []).append(feature)
-    chapters = [
-        {"chapter_id": chapter_id, **aggregate_feature_group(group)} for chapter_id, group in sorted(merged.items())
-    ]
+    """汇总正式生成的逐段统计，返回全书和章节比例"""
+    payload = session.linguistic.fetch_statistics_aggregates(run_id)
+    completed = payload["completed"]
+    groups = payload["groups"]
+    if not all(
+        sum(group["word_length_counts"].values()) == group["ltp_token_count"]
+        and sum(group["pos_counts"].values()) == group["ltp_token_count"]
+        and sum(group["dependency_relation_counts"].values()) == group["dependency_node_count"]
+        for group in groups
+    ):
+        raise ValueError("正式语言统计不符合计数守恒契约")
+    book = next(group for group in groups if group["chapter_id"] is None)
+    token_total = book["ltp_token_count"]
+    lexicon_net = round(book["lexicon_pos_count"] - book["lexicon_neg_count"], 6)
+    mneg_net = round(book["mneg_pos_count"] - book["mneg_neg_count"], 6)
     return {
-        "run_id": run_id,
-        "paragraph_count": len(rows),
-        **book,
-        "chapters": chapters,
-        **aggregate_emotion_events(rows, book.get("token_total")),
+        "run_id": run_id, "paragraph_count": completed, **_format_group(book),
+        "chapters": [
+            {"chapter_id": group["chapter_id"], **_format_group(group)}
+            for group in sorted(
+                (group for group in groups if group["chapter_id"] is not None), key=lambda group: group["chapter_id"]
+            )
+        ],
+        "emotion_event_density": round(book["emotion_event_count"] * 10000 / token_total, 6) if token_total else None,
+        "emotion_event_holders": [dict(row) for row in payload["holders"]],
+        "emotion_top_predicates": [dict(row) for row in payload["predicates"]],
+        "lexicon_net": lexicon_net, "mneg_net": mneg_net, "mneg_net_delta": round(mneg_net - lexicon_net, 6),
         "unavailable_reason": None,
     }
 
 
-def aggregate_feature_group(features: list[dict[str, Any]]) -> dict[str, Any]:
-    """同一聚合组（书/章）内按可加充分统计量合并并计算比例"""
-    token_total = sum(f["ltp_token_count"] for f in features)
-    sentence_total = sum(f["sentence_count"] for f in features)
-    dep_node_total = sum(f["dependency_node_count"] for f in features)
-
-    def _merge_counts(key: str) -> dict[str, int]:
-        merged: dict[str, int] = {}
-        for feature in features:
-            for name, count in feature.get(key, {}).items():
-                merged[name] = merged.get(name, 0) + int(count)
-        return merged
-
-    total_word_lengths = _merge_counts("word_length_counts")
-    total_pos = _merge_counts("pos_counts")
-    total_patterns = _merge_counts("sentence_pattern_counts")
-    total_relations = _merge_counts("dependency_relation_counts")
-
-    return {
-        "token_total": token_total,
-        "sentence_total": sentence_total,
-        "word_length_ratios": (
-            {k: round(v / token_total, 6) for k, v in total_word_lengths.items()} if token_total else {}
-        ),
-        "pos_ratios": ({k: round(v / token_total, 6) for k, v in total_pos.items()} if token_total else {}),
-        "sentence_pattern_ratios": (
-            {k: round(v / sentence_total, 6) for k, v in total_patterns.items()} if sentence_total else {}
-        ),
-        "avg_dependency_depth": (
-            round(sum(f["dependency_depth_sum"] for f in features) / dep_node_total, 6) if dep_node_total else None
-        ),
-        "max_dependency_depth": max((f["dependency_depth_max"] for f in features), default=None),
-        "dependency_relation_ratios": (
-            {k: round(v / dep_node_total, 6) for k, v in total_relations.items()} if dep_node_total else {}
-        ),
-        "dependency_root_count": sum(f["dependency_root_count"] for f in features),
-        "emotion_event_count": sum(f["emotion_event_count"] for f in features),
-        "emotion_pos_event_count": sum(f["emotion_pos_event_count"] for f in features),
-        "emotion_neg_event_count": sum(f["emotion_neg_event_count"] for f in features),
-        "emotion_negated_event_count": sum(
-            1 for f in features for event in f["emotion_events"] if event.get("negated")
-        ),
-        "lexicon_pos_count": round(sum(f["lexicon_pos_count"] for f in features), 6),
-        "lexicon_neg_count": round(sum(f["lexicon_neg_count"] for f in features), 6),
-        "mneg_pos_count": round(sum(f["mneg_pos_count"] for f in features), 6),
-        "mneg_neg_count": round(sum(f["mneg_neg_count"] for f in features), 6),
-        "boundary_pos_score_sum": sum_optional(features, "boundary_pos_score_sum"),
-        "boundary_neg_score_sum": sum_optional(features, "boundary_neg_score_sum"),
+def _format_group(group: dict[str, Any]) -> dict[str, Any]:
+    """按汇总分母计算比例并保留可空监督分数"""
+    tokens = group["ltp_token_count"]
+    sentences = group["sentence_total"]
+    nodes = group["dependency_node_count"]
+    result: dict[str, Any] = {
+        "token_total": tokens, "sentence_total": sentences,
+        "word_length_ratios": _ratios(group["word_length_counts"], tokens),
+        "pos_ratios": _ratios(group["pos_counts"], tokens),
+        "sentence_pattern_ratios": _ratios(group["sentence_pattern_counts"], sentences),
+        "avg_dependency_depth": round(group["dependency_depth_sum"] / nodes, 6) if nodes else None,
+        "max_dependency_depth": group["dependency_depth_max"],
+        "dependency_relation_ratios": _ratios(group["dependency_relation_counts"], nodes),
+        "dependency_root_count": group["dependency_root_count"],
     }
+    for field in ("emotion_event_count", "emotion_pos_event_count", "emotion_neg_event_count",
+                  "emotion_negated_event_count"):
+        result[field] = group[field]
+    for field in ("lexicon_pos_count", "lexicon_neg_count", "mneg_pos_count", "mneg_neg_count",
+                  "boundary_pos_score_sum", "boundary_neg_score_sum"):
+        value = group[field]
+        result[field] = round(value, 6) if value is not None else None
+    return result
 
 
-def sum_optional(features: list[dict[str, Any]], key: str) -> float | None:
-    """可空数值列求和：全 NULL 返回 None（边界未拟合），否则求和（不伪造 0）"""
-    values = [feature[key] for feature in features if feature.get(key) is not None]
-    if not values:
-        return None
-    return round(sum(float(value) for value in values), 6)
-
-
-def aggregate_emotion_events(
-    rows: Sequence[Any],
-    token_total: int | None,
-) -> dict[str, Any]:
-    """书级情绪事件明细聚合（事件密度 / 持有者 × 事件 / 谓词 Top / net 对照）"""
-    events = [event for row in rows for event in (feature_dict(row)["emotion_events"])]
-
-    holders: dict[str, dict[str, int]] = {}
-    predicates: dict[tuple[str, str], int] = {}
-    for event in events:
-        holder = event.get("holder")
-        polarity = str(event.get("polarity"))
-        if holder:
-            bucket = holders.setdefault(str(holder), {"event_count": 0, "positive_count": 0, "negative_count": 0})
-            bucket["event_count"] += 1
-            bucket["positive_count" if polarity == "positive" else "negative_count"] += 1
-        key = (str(event.get("predicate")), polarity)
-        predicates[key] = predicates.get(key, 0) + 1
-
-    lexicon_net = round(
-        sum(float(row.lexicon_pos_count or 0.0) - float(row.lexicon_neg_count or 0.0) for row in rows), 6
-    )
-    mneg_net = round(sum(float(row.mneg_pos_count or 0.0) - float(row.mneg_neg_count or 0.0) for row in rows), 6)
-    density = round(len(events) * 10000 / token_total, 6) if token_total and token_total > 0 else None
-    return {
-        "emotion_event_density": density,
-        "emotion_event_holders": [
-            {"holder": name, **counts}
-            for name, counts in sorted(holders.items(), key=lambda item: -item[1]["event_count"])[:20]
-        ],
-        "emotion_top_predicates": [
-            {"predicate": predicate, "polarity": polarity, "event_count": count}
-            for (predicate, polarity), count in sorted(predicates.items(), key=lambda item: -item[1])[:20]
-        ],
-        "lexicon_net": lexicon_net,
-        "mneg_net": mneg_net,
-        "mneg_net_delta": round(mneg_net - lexicon_net, 6),
-    }
+def _ratios(counts: dict[str, int], denominator: int) -> dict[str, float]:
+    """同一汇总组的分类计数按既定分母归一"""
+    return {key: round(value / denominator, 6) for key, value in counts.items()} if denominator else {}
 
 
 def fetch_entity_candidates(run_id: str, session: Storage) -> dict[str, Any]:
@@ -267,23 +127,18 @@ def aggregate_phrase_stats(run_id: str, session: Storage) -> dict[str, Any]:
             "run_id": run_id,
             "total_char_count": total_char_count,
             "metric_hit_count": 0,
-            "audit_hit_count": 0,
-            "metric_status": "pending_review",
             "fixed_phrase_density": None,
             "four_char_candidate_count": 0,
             "total_hits": 0,
             "unavailable_reason": "linguistic_unavailable: 无语言处理完成行，短语匹配未运行",
         }
     rows = ling_repo.fetch_phrase_hits(run_id)
-    metric_hits = [row for row in rows if row.is_metric_hit]
-    audit_hits = [row for row in rows if row.match_kind == "lexicon" and not row.is_metric_hit]
-    four_char_candidates = [row for row in rows if row.match_kind == "four_char_candidate"]
+    metric_hits = [row for row in rows if row.match_kind == MATCH_KIND_LEXICON]
+    four_char_candidates = [row for row in rows if row.match_kind == MATCH_KIND_FOUR_CHAR]
     return {
         "run_id": run_id,
         "total_char_count": total_char_count,
         "metric_hit_count": len(metric_hits),
-        "audit_hit_count": len(audit_hits),
-        "metric_status": "pending_review" if audit_hits and not metric_hits else "ready",
         "fixed_phrase_density": (round(len(metric_hits) * 1000 / total_char_count, 6) if total_char_count else None),
         "four_char_candidate_count": len(four_char_candidates),
         "total_hits": len(rows),
@@ -302,7 +157,7 @@ def fetch_word2vec_stats(run_id: str, session: Storage) -> dict[str, Any]:
             "pos_coverage": [],
             "pos_centroids": [],
             "pos_similarity_matrix": None,
-            "unavailable_reason": "word2vec_unavailable: 该运行未启用 Word2Vec",
+            "unavailable_reason": "word2vec_unavailable: 该运行未启用词向量",
         }
     coverage = ling_repo.fetch_pos_embedding_coverage(run_id, POS_GROUP_MAP)
     pos_coverage = [

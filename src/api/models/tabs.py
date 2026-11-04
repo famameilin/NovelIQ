@@ -71,8 +71,6 @@ class LinguisticEntitiesTabResponse(LinguisticPhrasesResponse):
 
     count_by_type: dict[str, int] = Field(default_factory=dict)
     surface_top: list[EntitySurfaceCount] = Field(default_factory=list)
-    audit_hit_count: int = 0
-    metric_status: Literal["ready", "pending_review"] = "ready"
 
 
 class DashboardTabResponse(BaseModel):

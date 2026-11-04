@@ -1,4 +1,4 @@
-"""所属领域的产物完整性查询，供恢复编排调用"""
+"""正式语言产物的完整性校验"""
 
 from __future__ import annotations
 
@@ -6,10 +6,8 @@ from src.storage import Storage
 
 
 def is_linguistic_complete(session: Storage, run_id: str) -> bool:
-    """恢复任务只复用覆盖全部段落的语言完成事实，不能把首批数据当作阶段完成
-
-    完成事实是 paragraph_metrics.linguistic_completed_at 非空（不靠词元行数
-    推断）：零词元段落同样有完成行（零词元≠未处理）。
-    """
+    """仅复用覆盖全部段落且逐段统计齐全的正式语言产物"""
     row = session.reads.linguistic.get_completion_counts(run_id)
-    return row["total"] > 0 and row["completed"] == row["total"]
+    if row["completed"] > row["statistics_completed"]:
+        raise ValueError("正式语言统计不符合完整性契约")
+    return row["total"] > 0 and row["statistics_completed"] == row["total"]

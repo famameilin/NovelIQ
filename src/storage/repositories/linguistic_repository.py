@@ -1,31 +1,16 @@
-"""
-语言结构领域仓储
-
-语言面落点：
-- paragraph_spans：词元（token_index/raw_pos）、NER（raw_entity_type）、固定短语
-  （phrase_match_kind）三种互斥区间的唯一事实表；词面按原文切片，POS/NER 归一
-  由固定代码映射（POS_GROUP_MAP/ENTITY_TYPE_MAP）投影
-- paragraph_arcs：依存（dep:*，单头，ROOT 以 head_span_id 为空表达）与语义依存
-  （sdp:*，多头多标签）的有序弧；source_ordinal 保留各层段落内真实源顺序
-- paragraph_features：句式五类计数与 POS 分组向量（pos_vector:<group>）等封闭计算种类
-- paragraph_metrics：语言完成事实 linguistic_completed_at/phrase_completed_at、
-  共享句数 sentence_count 与边界监督观测（boundary_*_score_sum）
-- runs：run 级 LTP 合同、固定短语合同与 w2v_* 构建事实
-
-存储的 token_index 为 0 起词元序号（冻结模型合同）；读取投影转回 LTP 原生
-1 起坐标（ROOT=0）。派生量（词长分组、POS 分组计数、依存统计、词典与 mNEG
-对照计数、情绪事件）一律不落库，按正式词元/弧投影（fetch_linguistic_features）。
-"""
+"""语言结构、逐段统计及情绪观测的存取"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from math import isfinite
 from types import SimpleNamespace
 from typing import Any, cast
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import bindparam, delete, select, text, update
+from sqlalchemy import bindparam, delete, func, select, text, update
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapper, Session
@@ -38,6 +23,12 @@ from src.storage.models import (
     ParagraphFeature,
     ParagraphMetric,
     Run,
+)
+from src.storage.records.linguistic import (
+    LINGUISTIC_COUNT_FIELDS,
+    LINGUISTIC_GROUP_PREFIXES,
+    LINGUISTIC_SCALAR_FIELDS,
+    SENTENCE_CODE_TO_KEY,
 )
 from src.storage.repositories.base import BaseRepository
 
@@ -68,10 +59,6 @@ _POS_VECTOR_PREFIX = "pos_vector:"
 
 #: 语义向量 feature_code（嵌入模型，列宽按运行合同解析）
 FEATURE_SEMANTIC_VECTOR = "semantic_vector"
-
-#: 短语命中封闭匹配方式（来源由运行唯一 fixed_phrases 合同取得）
-PHRASE_MATCH_KIND_LEXICON = "lexicon"
-PHRASE_MATCH_KIND_FOUR_CHAR = "four_char_candidate"
 
 #: 未映射 POS 标签的归一组（与 ltp_client._OTHER_POS_GROUP 同值；此处仅为读取
 #: 侧默认，映射唯一事实源仍是 ltp_client.POS_GROUP_MAP 版本合同）
@@ -113,7 +100,14 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
             self.session.execute(
                 delete(ParagraphFeature).where(
                     ParagraphFeature.run_id == run_id,
-                    ParagraphFeature.feature_code.in_(_SENTENCE_FEATURE_CODES),
+                    (
+                        ParagraphFeature.feature_code.in_(
+                            (*LINGUISTIC_COUNT_FIELDS, *LINGUISTIC_SCALAR_FIELDS, *_SENTENCE_FEATURE_CODES)
+                        )
+                        | ParagraphFeature.feature_code.startswith("word_length:")
+                        | ParagraphFeature.feature_code.startswith("pos_count:")
+                        | ParagraphFeature.feature_code.startswith("dep_relation:")
+                    ),
                 )
             )
             self.session.execute(
@@ -129,6 +123,7 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
         for row in rows:
             paragraph_id = int(row["paragraph_id"])
             span_id_by_ltp_index: dict[int, str] = {}
+            token_rows: dict[int, dict[str, Any]] = {}
             for token in row.get("tokens") or []:
                 # LTP 原生坐标 1 起（ROOT=0）；存储按冻结模型合同转 0 起
                 ltp_index = int(token["token_index"])
@@ -145,6 +140,36 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
                         "raw_pos": str(token["pos_tag"]),
                     }
                 )
+                token_rows[ltp_index] = span_rows[-1]
+
+            for event in row["emotion_events"]:
+                predicate = token_rows[int(event["predicate_token_index"])]
+                if "emotion_polarity" in predicate:
+                    raise ValueError("同一词元只能保存一个情绪观测")
+                holder = event["holder_token_index"]
+                if holder is not None and int(holder) not in token_rows:
+                    raise ValueError("情绪持有者必须引用同段词元")
+                predicate.update(
+                    emotion_polarity=event["polarity"],
+                    emotion_negated=event["negated"],
+                    emotion_holder_token_index=None if holder is None else int(holder) - 1,
+                )
+
+            if int(row["ltp_token_count"]) != len(token_rows):
+                raise ValueError("语言词元数必须与词元记录守恒")
+            for field in ("word_length_counts", "pos_counts"):
+                if sum(row[field].values()) != len(token_rows):
+                    raise ValueError("词长和词性计数必须与有效词元数守恒")
+            if int(row["dependency_node_count"]) != len(row["dependency_arcs"]):
+                raise ValueError("依存节点数必须与依存弧数守恒")
+            if sum(row["dependency_relation_counts"].values()) != int(row["dependency_node_count"]):
+                raise ValueError("依存关系计数必须与依存节点数守恒")
+            for field in LINGUISTIC_COUNT_FIELDS:
+                if type(row[field]) is not int or row[field] < 0:
+                    raise ValueError("语言结构统计必须为非负整数")
+            for field in LINGUISTIC_SCALAR_FIELDS:
+                if not isfinite(row[field]) or row[field] < 0:
+                    raise ValueError("情绪对照计数必须为非负有限数")
 
             def _span_of(ltp_index: int, span_ids: dict[int, str] = span_id_by_ltp_index) -> str | None:
                 # ROOT=0 无词元；其余索引必须命中本段词元（不造假区间）
@@ -179,15 +204,19 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
                     }
                 )
 
-            patterns = row.get("sentence_pattern_counts") or {}
-            for feature_code in _SENTENCE_FEATURE_CODES:
-                key = _SENTENCE_CODE_TO_KEY[feature_code]
+            values = {field: ("count_value", row[field]) for field in LINGUISTIC_COUNT_FIELDS}
+            values.update({field: ("scalar_value", row[field]) for field in LINGUISTIC_SCALAR_FIELDS})
+            for field, prefix in LINGUISTIC_GROUP_PREFIXES.items():
+                values.update({prefix + key: ("count_value", count) for key, count in row[field].items()})
+            patterns = row["sentence_pattern_counts"]
+            values.update({code: ("count_value", patterns.get(key, 0)) for code, key in SENTENCE_CODE_TO_KEY.items()})
+            for feature_code, (value_column, value) in values.items():
                 feature_rows.append(
                     {
                         "run_id": run_id,
                         "paragraph_id": paragraph_id,
                         "feature_code": feature_code,
-                        "count_value": int(patterns.get(key) or 0),
+                        value_column: value,
                         "created_at": completed_at,
                     }
                 )
@@ -244,7 +273,7 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
     def fetch_linguistic_sources(
         self, run_id: str, *, after_id: int | None = None, limit: int | None = None
     ) -> dict[str, Any]:
-        "按 3NF 前读取形状返回段落语言结构投影行"
+        "读取语言完成段落及其词元、依存弧和句式观测"
         statement = (
             select(
                 ParagraphMetric.paragraph_id,
@@ -271,48 +300,88 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
                 "token_index_by_span": {},
                 "patterns_by_paragraph": {},
             }
+        paragraph_ids = [row.paragraph_id for row in metric_rows]
+
+        def scoped(statement, paragraph_column):
+            if after_id is None and limit is None:
+                return statement
+            return statement.where(paragraph_column.in_(paragraph_ids))
+
         paragraph_texts = {
             int(row.paragraph_id): row.text
             for row in self.session.execute(
-                select(Paragraph.paragraph_id, Paragraph.text).where(Paragraph.run_id == run_id)
+                scoped(
+                    select(Paragraph.paragraph_id, Paragraph.text).where(Paragraph.run_id == run_id),
+                    Paragraph.paragraph_id,
+                )
             ).all()
         }
-        tokens_by_paragraph: dict[int, list[Row]] = {}
+        tokens_by_paragraph: dict[int, Row] = {}
         for row in self.session.execute(
-            select(
+            scoped(
+                select(
+                    LinguisticSpan.paragraph_id,
+                    func.array_agg(aggregate_order_by(LinguisticSpan.token_index, LinguisticSpan.token_index)).label(
+                        "token_indices"
+                    ),
+                    func.array_agg(aggregate_order_by(LinguisticSpan.start_char, LinguisticSpan.token_index)).label(
+                        "start_chars"
+                    ),
+                    func.array_agg(aggregate_order_by(LinguisticSpan.end_char, LinguisticSpan.token_index)).label(
+                        "end_chars"
+                    ),
+                    func.array_agg(aggregate_order_by(LinguisticSpan.raw_pos, LinguisticSpan.token_index)).label(
+                        "pos_tags"
+                    ),
+                )
+                .where(LinguisticSpan.run_id == run_id, LinguisticSpan.token_index.is_not(None))
+                .group_by(LinguisticSpan.paragraph_id)
+                .order_by(LinguisticSpan.paragraph_id),
                 LinguisticSpan.paragraph_id,
-                LinguisticSpan.token_index,
-                LinguisticSpan.start_char,
-                LinguisticSpan.end_char,
-                LinguisticSpan.raw_pos,
             )
-            .where(LinguisticSpan.run_id == run_id, LinguisticSpan.token_index.is_not(None))
-            .order_by(LinguisticSpan.paragraph_id, LinguisticSpan.token_index)
         ).all():
-            tokens_by_paragraph.setdefault(int(row.paragraph_id), []).append(row)
+            tokens_by_paragraph[int(row.paragraph_id)] = row
         token_index_by_span: dict[str, int] = {}
-        arcs_by_paragraph: dict[int, list[Row]] = {}
+        arcs_by_paragraph: dict[int, Row] = {}
         for arc_row in self.session.execute(
-            select(
+            scoped(
+                select(
+                    LinguisticSpan.paragraph_id,
+                    func.array_agg(aggregate_order_by(LinguisticArc.relation_code, LinguisticArc.source_ordinal)).label(
+                        "relation_codes"
+                    ),
+                    func.array_agg(aggregate_order_by(LinguisticArc.head_span_id, LinguisticArc.source_ordinal)).label(
+                        "head_span_ids"
+                    ),
+                    func.array_agg(aggregate_order_by(LinguisticSpan.span_id, LinguisticArc.source_ordinal)).label(
+                        "span_ids"
+                    ),
+                    func.array_agg(aggregate_order_by(LinguisticSpan.token_index, LinguisticArc.source_ordinal)).label(
+                        "dependent_indices"
+                    ),
+                )
+                .select_from(LinguisticArc)
+                .join(LinguisticSpan, LinguisticSpan.span_id == LinguisticArc.dependent_span_id)
+                .where(LinguisticSpan.run_id == run_id)
+                .group_by(LinguisticSpan.paragraph_id)
+                .order_by(LinguisticSpan.paragraph_id),
                 LinguisticSpan.paragraph_id,
-                LinguisticArc.relation_code,
-                LinguisticArc.source_ordinal,
-                LinguisticArc.dependent_span_id,
-                LinguisticArc.head_span_id,
-                LinguisticSpan.span_id,
-                LinguisticSpan.token_index.label("dependent_index"),
             )
-            .select_from(LinguisticArc)
-            .join(LinguisticSpan, LinguisticSpan.span_id == LinguisticArc.dependent_span_id)
-            .where(LinguisticSpan.run_id == run_id)
-            .order_by(LinguisticSpan.paragraph_id, LinguisticArc.source_ordinal)
         ).all():
-            arcs_by_paragraph.setdefault(int(arc_row.paragraph_id), []).append(arc_row)
-            token_index_by_span[str(arc_row.span_id)] = int(arc_row.dependent_index)
+            arcs_by_paragraph[int(arc_row.paragraph_id)] = arc_row
+            token_index_by_span.update(
+                (str(span_id), int(index))
+                for span_id, index in zip(arc_row.span_ids, arc_row.dependent_indices, strict=True)
+            )
         patterns_by_paragraph: dict[int, dict[str, int]] = {}
         for pattern_row in self.session.execute(
-            select(ParagraphFeature.paragraph_id, ParagraphFeature.feature_code, ParagraphFeature.count_value).where(
-                ParagraphFeature.run_id == run_id, ParagraphFeature.feature_code.in_(_SENTENCE_FEATURE_CODES)
+            scoped(
+                select(
+                    ParagraphFeature.paragraph_id, ParagraphFeature.feature_code, ParagraphFeature.count_value
+                ).where(
+                    ParagraphFeature.run_id == run_id, ParagraphFeature.feature_code.in_(_SENTENCE_FEATURE_CODES)
+                ),
+                ParagraphFeature.paragraph_id,
             )
         ).all():
             patterns_by_paragraph.setdefault(int(pattern_row.paragraph_id), {})[str(pattern_row.feature_code)] = int(
@@ -485,8 +554,7 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
         return len(paragraph_ids)
 
     def fetch_phrase_hits(self, run_id: str) -> Sequence[SimpleNamespace]:
-        "短语命中投影：词面按原文切片，is_metric_hit 由运行固定短语合同投影"
-        from src.config.constants.contracts import FIXED_PHRASE_METRIC_ENABLED
+        "短语命中投影：词面按原文切片，匹配方式随行返回"
 
         rows = self.session.execute(
             text(
@@ -514,7 +582,6 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
                 local_start_char=int(row.local_start_char),
                 local_end_char=int(row.local_end_char),
                 match_kind=str(row.match_kind),
-                is_metric_hit=bool(FIXED_PHRASE_METRIC_ENABLED and str(row.match_kind) == PHRASE_MATCH_KIND_LEXICON),
             )
             for row in rows
         ]
@@ -591,24 +658,28 @@ class LinguisticRepository(BaseRepository[ParagraphMetric]):
         "按词性分组返回覆盖率分子分母（分母由正式词元 × 版本分组投影）"
         source_counts: dict[str, int] = {}
         for row in self.session.execute(
-            select(LinguisticSpan.raw_pos).where(
-                LinguisticSpan.run_id == run_id,
-                LinguisticSpan.token_index.is_not(None),
+            select(LinguisticSpan.raw_pos, func.count().label("source_total"))
+            .where(
+                LinguisticSpan.run_id == run_id, LinguisticSpan.token_index.is_not(None),
             )
+            .group_by(LinguisticSpan.raw_pos)
         ).all():
             group = pos_mappings.get(str(row.raw_pos), _DEFAULT_POS_GROUP)
-            source_counts[group] = source_counts.get(group, 0) + 1
+            source_counts[group] = source_counts.get(group, 0) + int(row.source_total)
 
         in_vocab_counts: dict[str, int] = {}
         for vocab_row in self.session.execute(
-            select(ParagraphFeature.feature_code, ParagraphFeature.in_vocabulary_token_count).where(
+            select(
+                ParagraphFeature.feature_code,
+                func.sum(ParagraphFeature.in_vocabulary_token_count).label("in_vocab_total"),
+            ).where(
                 ParagraphFeature.run_id == run_id,
                 ParagraphFeature.feature_code.like(f"{_POS_VECTOR_PREFIX}%"),
                 ParagraphFeature.in_vocabulary_token_count.is_not(None),
-            )
+            ).group_by(ParagraphFeature.feature_code)
         ).all():
             group = str(vocab_row.feature_code)[len(_POS_VECTOR_PREFIX) :]
-            in_vocab_counts[group] = in_vocab_counts.get(group, 0) + int(vocab_row.in_vocabulary_token_count or 0)
+            in_vocab_counts[group] = in_vocab_counts.get(group, 0) + int(vocab_row.in_vocab_total or 0)
 
         groups = sorted(set(source_counts) | set(in_vocab_counts))
         return [

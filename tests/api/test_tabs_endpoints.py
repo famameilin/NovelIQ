@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from src.storage.repositories import ParagraphRepository
 from src.storage.repositories.linguistic_repository import LinguisticRepository
+from tests.support.linguistic_fixtures import generated_linguistic_row
 from tests.support.paragraph_fixtures import (
     create_completed_run,
     create_run_with_status,
@@ -244,6 +245,8 @@ def test_tabs_require_completed_run(api_client: TestClient, db_session) -> None:
 
 def _make_feature_row(paragraph_id: int, *, tokens_count: int) -> dict:
     """构造 paragraph_linguistic_features 的合法插入行（paragraph_entities 外键依赖它）"""
+    paragraph_text = ("汤姆来访。", "乙。")[paragraph_id]
+    tokens_count = min(tokens_count, len(paragraph_text))
     tokens = [
         {
             "token_index": index + 1,
@@ -255,7 +258,7 @@ def _make_feature_row(paragraph_id: int, *, tokens_count: int) -> dict:
         }
         for index in range(tokens_count)
     ]
-    return {
+    return generated_linguistic_row(paragraph_text, {
         "run_id": None,
         "paragraph_id": paragraph_id,
         "ltp_token_count": tokens_count,
@@ -279,7 +282,7 @@ def _make_feature_row(paragraph_id: int, *, tokens_count: int) -> dict:
         "lexicon_neg_count": 0.0,
         "mneg_pos_count": 0.0,
         "mneg_neg_count": 0.0,
-    }
+    })
 
 
 def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[str, str]:
@@ -348,7 +351,6 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
                     "local_end_char": 4,
                     "match_kind": "lexicon",
                     "lexicon_key": "fixed_phrases.txt",
-                    "is_metric_hit": False,
                 },
                 {
                     "run_id": run_id,
@@ -359,7 +361,6 @@ def _create_linguistic_fixture_run(db_session, *, seed: bool = True) -> tuple[st
                     "local_end_char": 4,
                     "match_kind": "four_char_candidate",
                     "lexicon_key": None,
-                    "is_metric_hit": False,
                 },
             ],
         )

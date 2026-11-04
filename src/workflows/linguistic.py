@@ -1,27 +1,7 @@
-"""语言结构基础数据阶段
+"""正式语言阶段生成词元、依存弧、逐段统计和情绪观测
 
-执行顺序与落库契约（逐段事实落 paragraph_spans / paragraph_arcs /
-paragraph_features / paragraph_metrics）：
-1. LTP 词法/句法/实体/语义：analyze_paragraph_batch（cws/pos/ner/dep/sdp）→
-   paragraph_spans 词元行（token_index/raw_pos）+ paragraph_arcs
-   （dep:*/sdp:*，source_ordinal 保留源顺序）+ paragraph_features 的五类
-   句式计数行；完成事实与共享句数写 paragraph_metrics
-   （linguistic_completed_at/sentence_count）；NER 候选写 paragraph_spans
-   的 raw_entity_type 行（非图谱事实；词面与归一类型读取投影）
-2. 固定短语：唯一 fixed_phrases 词表匹配 → paragraph_spans 的
-   phrase_match_kind 行（lexicon/four_char_candidate）+ 完成事实
-   （phrase_completed_at）；词表来源与计量合同登记在 runs
-3. 情绪事件与 mNEG 修正（ltp.enabled 时生效）：
-   情绪词典只做谓词极性候选标记，持有者/对象/否定/程度取 sdp 的 AGT/DATV/
-   mNEG/mDEPD；mNEG 接管词典否定翻转后回写 paragraph_metrics 情绪计数并
-   整卷重算段落曲线（词典窗口规则基线与 mNEG 对照计数由读取投影按同一
-   正式词元/弧重算，不落第二份可违反守恒的副本）
-4. Word2Vec（可开关）：预训练词向量初始化 + 本书语料微调（warm-start）→
-   runs 的 w2v_* 实际构建列 + paragraph_features 的 pos_vector 行
-
-同 run 重跑先清后插（仓储层），不允许新旧结果混合；LTP 关闭时词法
-阶段跳过（各语言关系为空），Word2Vec 关闭时不写 w2v_* 列。
-"""
+逐段结果与完成事实同批保存，查询仅汇总已保存统计
+Word2Vec 按运行设置从本书词元训练"""
 
 from __future__ import annotations
 
@@ -77,27 +57,15 @@ async def run_linguistic(
 
     if ltp_settings.enabled:
         from src.lexicons import LexiconRegistry
-        from src.lexicons.tables import NEGATIVE_TERMS, POSITIVE_TERMS
         from src.linguistic import (
             analyze_paragraph_batch,
-            extract_emotion_events,
             match_fixed_phrases,
-            mneg_corrected_counts,
         )
+        from src.linguistic.statistics import build_paragraph_statistics
 
         registry = LexiconRegistry()
         terms = registry.get(LEXICON_FILES["fixed_phrases"])
 
-        # B 批：词典情绪计数对照基线（命中集与 preprocess 同源，
-        # 读 paragraph_metrics 现值作为窗口规则口径）
-        lexicon_counts = {
-            int(metric_row.paragraph_id): (
-                float(metric_row.positive_weight_sum or 0.0),
-                float(metric_row.negative_weight_sum or 0.0),
-            )
-            for metric_row in paragraph_repo.fetch_paragraph_metrics(run_id)
-        }
-        # mNEG 修正回写清单（paragraph_id → 修正后计数）
         mneg_corrections: list[dict[str, float | int]] = []
 
         last_id: int | None = None
@@ -120,27 +88,7 @@ async def run_linguistic(
             feature_rows: list[dict] = []
             entity_rows: list[dict] = []
             for row, result in zip(batch, results, strict=True):
-                data = result.to_dict()
-                # B 批：词典极性候选标记 × sdp 结构 → 情绪事件 + mNEG 修正计数
-                events = extract_emotion_events(result, POSITIVE_TERMS, NEGATIVE_TERMS)
-                mneg_pos, mneg_neg = mneg_corrected_counts(
-                    row.text,
-                    result.tokens,
-                    result.sdp_arcs,
-                    POSITIVE_TERMS,
-                    NEGATIVE_TERMS,
-                )
-                lexicon_pos, lexicon_neg = lexicon_counts.get(int(row.paragraph_id), (0.0, 0.0))
-                # 派生量（事件/计数）不落库，由读取投影按同一正式词元/弧重算；
-                # 这里只用于 mNEG 回写清单
-                data["emotion_events"] = [event.to_dict() for event in events]
-                data["emotion_event_count"] = len(events)
-                data["emotion_pos_event_count"] = sum(1 for event in events if event.polarity == "positive")
-                data["emotion_neg_event_count"] = sum(1 for event in events if event.polarity == "negative")
-                data["lexicon_pos_count"] = lexicon_pos
-                data["lexicon_neg_count"] = lexicon_neg
-                data["mneg_pos_count"] = mneg_pos
-                data["mneg_neg_count"] = mneg_neg
+                data = build_paragraph_statistics(row.text, result)
                 data.update(
                     {
                         "run_id": run_id,
@@ -151,8 +99,8 @@ async def run_linguistic(
                 mneg_corrections.append(
                     {
                         "paragraph_id": int(row.paragraph_id),
-                        "mneg_pos": mneg_pos,
-                        "mneg_neg": mneg_neg,
+                        "mneg_pos": data["mneg_pos_count"],
+                        "mneg_neg": data["mneg_neg_count"],
                     }
                 )
                 for entity in result.entities:
@@ -176,7 +124,7 @@ async def run_linguistic(
             logger.info(f"LTP 事实落库：段落={len(feature_rows)} 实体候选={len(entity_rows)}")
 
             # 固定短语匹配：唯一 fixed_phrases 词表的词表命中 + 四字候选
-            # （依赖 LTP 词元行；词表来源/计量合同登记在运行行）
+            # （依赖 LTP 词元行；词表来源登记在运行行）
             fixed_phrase_key = LEXICON_FILES["fixed_phrases"]
             phrase_rows: list[dict] = []
             for row in batch:

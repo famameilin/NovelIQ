@@ -1,8 +1,4 @@
-"""语言结构基础数据端点测试
-
-种子数据只写事实列（词元区间、命中区间、候选区间），
-词面/分组/类型/计量全部由读取投影补齐，因此种子坐标必须与原文自洽。
-"""
+"""已生成语言统计、实体候选和短语结果的端点测试"""
 
 from __future__ import annotations
 
@@ -10,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.storage.repositories.linguistic_repository import LinguisticRepository
+from tests.support.linguistic_fixtures import generated_linguistic_row
 from tests.support.paragraph_fixtures import create_completed_run, create_run_with_status, insert_spans, make_span
 from tests.support.storage_fixtures import task_for_run
 
@@ -75,7 +72,9 @@ def _seed_linguistic(db_session, run_id: str) -> None:
         {**_make_feature_row(0, text=_PARA_TEXTS[0], pos_tags=_PARA0_POS), "run_id": run_id},
         {**_make_feature_row(1, text=_PARA_TEXTS[1], pos_tags=_PARA1_POS), "run_id": run_id},
     ]
-    repo.insert_linguistic_features(run_id, rows)
+    repo.insert_linguistic_features(
+        run_id, [generated_linguistic_row(_PARA_TEXTS[row["paragraph_id"]], row) for row in rows]
+    )
     # 实体候选只存区间与原始类型；词面按原文切片、归一类型按版本映射投影
     repo.insert_entities(
         run_id,
@@ -101,7 +100,6 @@ def _seed_linguistic(db_session, run_id: str) -> None:
                 "match_kind": "lexicon",
                 "lexicon_key": "fixed_phrases.txt",
                 "phrase_type": None,
-                "is_metric_hit": False,
             },
             {
                 "run_id": run_id,
@@ -111,7 +109,6 @@ def _seed_linguistic(db_session, run_id: str) -> None:
                 "match_kind": "four_char_candidate",
                 "lexicon_key": None,
                 "phrase_type": None,
-                "is_metric_hit": False,
             },
         ],
     )
@@ -174,14 +171,41 @@ def test_features_endpoint_aggregates_with_conservation(api_client: TestClient, 
     assert len(body["chapters"]) >= 1
 
 
-def test_features_endpoint_unavailable_without_data(api_client: TestClient, db_session) -> None:
+def test_features_endpoint_fails_without_formal_statistics(api_client: TestClient, db_session) -> None:
     novel_id, run_id = _create_run_with_paragraphs(db_session)
 
-    response = api_client.get(
-        f"/api/novels/{novel_id}/linguistic/features", params={"task_id": task_for_run(run_id, db_session)}
+    with TestClient(api_client.app, raise_server_exceptions=False) as client:
+        response = client.get(
+            f"/api/novels/{novel_id}/linguistic/features", params={"task_id": task_for_run(run_id, db_session)}
+        )
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "Internal server error", "error_type": "InternalServerError", "status_code": 500,
+    }
+
+
+def test_features_fail_when_completed_statistics_are_missing(api_client, db_session, monkeypatch):
+    from sqlalchemy import delete
+
+    from src.storage.models import ParagraphFeature
+
+    novel_id, run_id = _create_run_with_paragraphs(db_session)
+    _seed_linguistic(db_session, run_id)
+    db_session.execute(delete(ParagraphFeature).where(
+        ParagraphFeature.run_id == run_id, ParagraphFeature.feature_code == "ltp_token_count",
+    ))
+    db_session.commit()
+    monkeypatch.setattr(
+        LinguisticRepository, "fetch_linguistic_sources", lambda *args, **kwargs: pytest.fail("读取时重算")
     )
-    assert response.status_code == 200
-    assert response.json()["unavailable_reason"] is not None
+    with TestClient(api_client.app, raise_server_exceptions=False) as client:
+        response = client.get(
+            f"/api/novels/{novel_id}/linguistic/features", params={"task_id": task_for_run(run_id, db_session)}
+        )
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "Internal server error", "error_type": "InternalServerError", "status_code": 500,
+    }
 
 
 def test_entities_endpoint_lists_candidates(api_client: TestClient, db_session) -> None:
@@ -200,8 +224,8 @@ def test_entities_endpoint_lists_candidates(api_client: TestClient, db_session) 
     assert entity["normalized_entity_type"] == "person"
 
 
-def test_phrases_endpoint_reports_audit_only_lexicon_hits(api_client: TestClient, db_session) -> None:
-    """单一固定短语词表 + 计量合同关闭：命中只做审计留痕，不计入正式密度"""
+def test_phrases_endpoint_counts_lexicon_hits_as_metric(api_client: TestClient, db_session) -> None:
+    """词表命中计入正式密度，四字候选只作候选记录"""
     novel_id, run_id = _create_run_with_paragraphs(db_session)
     _seed_linguistic(db_session, run_id)
 
@@ -210,8 +234,8 @@ def test_phrases_endpoint_reports_audit_only_lexicon_hits(api_client: TestClient
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["metric_hit_count"] == 0  # 计量合同关闭：lexicon 命中不计入正式密度
-    assert body["fixed_phrase_density"] == 0.0
+    assert body["metric_hit_count"] == 1
+    assert body["fixed_phrase_density"] > 0
     assert body["four_char_candidate_count"] == 1
     assert body["total_hits"] == 2
 

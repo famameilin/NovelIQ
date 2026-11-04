@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from src.diagnosis.queries import DiagnosisQueries
+from src.linguistic.completion import is_linguistic_complete
 from src.storage.models import Paragraph
 from src.storage.repositories import GraphRepository, ParagraphRepository, StatsRepository
 from src.topic.completion import is_topic_model_complete
@@ -88,6 +89,57 @@ def test_relation_history_reads_states_once_and_preserves_inactive_history(db_se
     assert repo.fetch_relation_changes(run_id, limit=1) == all_changes[:1]
     assert repo.fetch_relation_changes(run_id, limit=0) == []
 
+
+def _insert_completion(db_session, run_id: str, paragraph_id: int) -> None:
+    """写入单段语言处理完成标记（零词元同样算已完成）
+
+    完成行 FK 到 linguistic_runs 与运行合同，映射种子先落库再写完成行。
+    """
+    from src.storage.repositories.linguistic_repository import LinguisticRepository
+    from tests.support.linguistic_fixtures import generated_linguistic_row
+
+    repo = LinguisticRepository(db_session)
+    repo.insert_linguistic_features(
+        run_id,
+        [
+            generated_linguistic_row("", {"paragraph_id": paragraph_id, "sentence_count": 0})
+        ],
+        clear_first=False,
+    )
+    db_session.flush()
+
+
+def test_partial_linguistic_rows_are_not_a_completed_stage(db_session) -> None:
+    _, run_id = create_run_with_chunks(db_session, texts=["。", "！"], chapter_ids=[1, 2])
+    identifiers = list(
+        db_session.execute(
+            select(Paragraph.paragraph_id).where(Paragraph.run_id == run_id).order_by(Paragraph.paragraph_id),
+        ).scalars()
+    )
+    repo = StatsRepository(db_session)
+    assert not is_linguistic_complete(storage_for(repo.session), run_id)
+    _insert_completion(db_session, run_id, identifiers[0])
+    assert repo.has_linguistic_data(run_id)
+    assert not is_linguistic_complete(storage_for(repo.session), run_id)
+    _insert_completion(db_session, run_id, identifiers[1])
+    assert is_linguistic_complete(storage_for(repo.session), run_id)
+
+
+def test_completed_linguistic_rows_require_all_formal_statistics(db_session) -> None:
+    from sqlalchemy import delete
+
+    from src.storage.models import ParagraphFeature
+
+    _, run_id = create_run_with_chunks(db_session, texts=["。"], chapter_ids=[1])
+    paragraph_id = db_session.execute(
+        select(Paragraph.paragraph_id).where(Paragraph.run_id == run_id)
+    ).scalar_one()
+    _insert_completion(db_session, run_id, paragraph_id)
+    db_session.execute(delete(ParagraphFeature).where(
+        ParagraphFeature.run_id == run_id, ParagraphFeature.feature_code == "ltp_token_count",
+    ))
+    with pytest.raises(ValueError, match="正式语言统计不符合完整性契约"):
+        is_linguistic_complete(storage_for(db_session), run_id)
 
 
 def test_topic_contract_and_partial_inference_or_distribution_cannot_be_reused(db_session) -> None:
