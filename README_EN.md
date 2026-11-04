@@ -15,7 +15,7 @@ Once analysis completes, the frontend provides:
 - **Sentiment / pacing curves**: paragraph-level sentiment scoring and narrative pacing metrics, whole-book curves with switchable windows
 - **Character relationship graph**: annotation agents record characters, dialogue and relations chapter by chapter, merged across chapters into a network browsed as a force-directed graph
 - **Event timeline**: plot events presented along a timeline
-- **Event trees**: inspect complete events, containment, causes and outcomes within a chapter range, with source evidence
+- **Event trees**: inspect complete events, tree membership and parent/child trees within a chapter range, with source evidence
 - **Topic distribution**: LDA topic modeling that detects topic shifts across the plot
 - **Linguistic features**: LTP lexical and syntactic analysis, lexical richness (TTR/MTLD), dialogue ratio, and more
 - **Diagnostic report**: an LLM quality assessment grounded in whole-book evidence, exportable as a single-file HTML
@@ -30,7 +30,7 @@ Once analysis completes, the frontend provides:
 | --- | --- |
 | ![Event forest](assets/screenshots/event-growth-forest-1440x900.png) | ![Causal structure within a tree](assets/screenshots/event-growth-tree-1440x900.png) |
 
-Read the [0.3.0 upgrade guide](docs/upgrades/UPGRADE-0.3.0.md) before upgrading from 0.2.1. The entry point defaults to read-only preflight; conversion requires a backup, an isolated rehearsal and an explicit database name. This release includes a legacy-conversion exception. Results requiring reanalysis still come from original input through the formal pipeline. Historical migration scripts apply only to their matching release checkout.
+Read the [0.4.0 upgrade guide](docs/upgrades/UPGRADE-0.4.0.md) before upgrading from 0.3.0. The entry point defaults to read-only preflight; conversion requires a backup, an isolated rehearsal and an explicit database name. 0.4.0 no longer checks an existing database structure at startup, so a 0.3.0 database must go through that entry point. This release includes a legacy-conversion exception. Results requiring reanalysis still come from original input through the formal pipeline. Historical migration scripts apply only to their matching release checkout.
 
 Stack: Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17 (pgvector); React 19 / Vite / ECharts / Tailwind CSS. LLMs go through an OpenAI-compatible interface (self-hosted or third-party, both work); lexical analysis and word vectors are local offline models.
 
@@ -133,9 +133,9 @@ Cases enter one pool with explicit `caseid` values and are handled through `clai
 
 `event_records` stores complete-event titles, problems, summaries, types, states, chapter ranges and actual producers. Participants and source evidence are stored separately. Annotation and diagnosis share formal event identities. Chapter reads use actual chapter boundaries, while cross-chapter results retain their source evidence.
 
-Containment, semantic links, plotlines and outcome organization use the formal domain interfaces. The desktop event tree displays related events as cards and relationship curves with detail and source-text inspection. The timeline independently presents plot order.
+Tree membership, whole-tree parent/child references, semantic links and outcome organization use the formal domain interfaces. The desktop event tree displays related events as cards and relationship curves with detail and source-text inspection. The timeline independently presents plot order.
 
-Initialization first checks existing tables, fields, types, keys and constraints without modifying them; incompatible structures are rejected. Routine data corrections regenerate results from original input. See the [0.3.0 upgrade guide](docs/upgrades/UPGRADE-0.3.0.md) for this release's legacy conversion scope, archives and reanalysis requirements.
+Initialization creates tables and installs domain constraints for a new database; the service does not check an existing structure at startup. Structural differences in a 0.3.0 database are handled by the migration entry in the [0.4.0 upgrade guide](docs/upgrades/UPGRADE-0.4.0.md). Routine data corrections regenerate results from original input.
 
 ## Audit and Notifications
 
