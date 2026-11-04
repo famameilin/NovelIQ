@@ -36,6 +36,8 @@ test.describe('小说上传', () => {
             novel_id: 'new12345',
             filename: '测试上传.txt',
             status: 'uploaded',
+            title: '测试上传',
+            word_count: 1200,
             message: '文件上传成功',
           }),
         });

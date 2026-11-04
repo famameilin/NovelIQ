@@ -14,6 +14,7 @@ const MOCK_NOVELS = {
       author: '未知作者',
       upload_time: '2026-05-01T10:00:00',
       file_size: 102400,
+      word_count: 32800,
     },
     {
       novel_id: 'def67890',
@@ -24,6 +25,7 @@ const MOCK_NOVELS = {
       author: '未知作者',
       upload_time: '2026-05-02T12:00:00',
       file_size: 204800,
+      word_count: 96400,
     },
   ],
   total: 2,
