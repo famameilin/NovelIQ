@@ -49,6 +49,15 @@ class ProgramModel(StreamedFakeModelMixin):
         )
 
 
+SINGLE_CHAPTER_PROGRAM = (
+    "entity(id='a1', name='张三', entity_type='character', evid"
+    "ence=1)\ncreated = write_event(items=[dict(el='t1', evidence=1, title='张三出门"
+    "', problem='明确事件问题', summary='张三出门', event_type='行动', st"
+    "atus='ongoing')])\nmetric(summary='出门', emotional_valence=0"
+    ", narrative_function='铺垫')\nfinish()"
+)
+
+
 def _run_execution_ids(run_id: str):
     """本 run 真实尝试的执行选择器（执行行直接携带运行归属）"""
     return select(Agent.id).where(Agent.run_id == run_id)
@@ -123,6 +132,46 @@ async def test_annotation_skips_chapters_without_text(db_session) -> None:
     db_session.expire_all()
     assert is_annotate_complete(storage_for(db_session), run_id)
     assert [record.chapter_id for record in fetch_annotation_role_records(storage_for(db_session), run_id)] == [1]
+
+
+class _FakeEmbeddingClient:
+    instances: list[_FakeEmbeddingClient] = []
+
+    def __init__(self, **kwargs) -> None:
+        self.closed = False
+        self.instances.append(self)
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_annotation_closes_embedding_client_after_execution(db_session) -> None:
+    """语义检索启用时每次执行持有自己的嵌入客户端，执行结束即关闭"""
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["张三出门。"])
+    _FakeEmbeddingClient.instances = []
+    with (
+        patch("src.agents.model_client.build_chat_model", return_value=ProgramModel(SINGLE_CHAPTER_PROGRAM)),
+        patch("src.embedding.EmbeddingClient", _FakeEmbeddingClient),
+        patch("src.config.settings.settings.models.paragraph_embedding.semantic_enabled", True),
+    ):
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
+    assert len(_FakeEmbeddingClient.instances) == 1
+    assert _FakeEmbeddingClient.instances[0].closed
+
+
+@pytest.mark.asyncio
+async def test_annotation_skips_embedding_client_when_semantic_disabled(db_session) -> None:
+    """语义检索关闭时不创建嵌入客户端"""
+    novel_id, run_id = create_run_with_chunks(db_session, texts=["张三出门。"])
+    _FakeEmbeddingClient.instances = []
+    with (
+        patch("src.agents.model_client.build_chat_model", return_value=ProgramModel(SINGLE_CHAPTER_PROGRAM)),
+        patch("src.embedding.EmbeddingClient", _FakeEmbeddingClient),
+        patch("src.config.settings.settings.models.paragraph_embedding.semantic_enabled", False),
+    ):
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
+    assert _FakeEmbeddingClient.instances == []
 
 
 @pytest.mark.asyncio

@@ -184,17 +184,24 @@ class AnnotationAgent:
         invocation_id = new_id()
         payload = receipt.payload
         paragraph_info = build_chapter_paragraph_info(payload["paragraphs"])
-        embedding = EmbeddingClient(novel_id=self.novel_id)
-        query = DatabaseAnnotationQueryService(
-            self.session_factory,
-            run_id=self.run_id,
-            current_chapter_id=payload["chapter_id"],
-            current_first_paragraph_id=min(paragraph_info.paragraph_ids),
-            current_last_paragraph_id=max(paragraph_info.paragraph_ids),
-            embedding_client=embedding,
-        )
         if not str(payload["chapter_text"]).strip():
             raise AnnotationInputError("标注 work 的章正文不能为空")
+        embedding: EmbeddingClient | None = None
+        if settings.models.paragraph_embedding.semantic_enabled:
+            embedding = EmbeddingClient(novel_id=self.novel_id)
+        try:
+            query = DatabaseAnnotationQueryService(
+                self.session_factory,
+                run_id=self.run_id,
+                current_chapter_id=payload["chapter_id"],
+                current_first_paragraph_id=min(paragraph_info.paragraph_ids),
+                current_last_paragraph_id=max(paragraph_info.paragraph_ids),
+                embedding_client=embedding,
+            )
+        except BaseException:
+            if embedding is not None:
+                await embedding.aclose()
+            raise
         ledger = AnnotationToolLedger(
             run_scope=self.run_id,
             current_chapter_id=payload["chapter_id"],
@@ -463,6 +470,9 @@ class AnnotationAgent:
                 )
             )
             return {"outcome": "retry", "invocation_id": invocation_id, "error": str(exc)}
+        finally:
+            if embedding is not None:
+                await embedding.aclose()
 
     async def invoke_tool(self, execution: WorkExecution, tools: dict[str, Any], call: dict[str, Any]) -> str:
         """工具内存事务中无模型、原文 I/O、总线或数据库等待"""
