@@ -106,6 +106,26 @@ async def test_annotation_role_runs_real_program_and_saves_one_product(db_sessio
 
 
 @pytest.mark.asyncio
+async def test_annotation_skips_chapters_without_text(db_session) -> None:
+    """空正文章节不派发 work，也不阻塞标注完成"""
+    novel_id, run_id = create_run_with_chunks(
+        db_session, texts=["张三出门。", "   "], chapter_ids=[1, 2], title="空章跳过"
+    )
+    model = ProgramModel(
+        "entity(id='a1', name='张三', entity_type='character', evid"
+        "ence=1)\ncreated = write_event(items=[dict(el='t1', evidence=1, title='张三出门"
+        "', problem='明确事件问题', summary='张三出门', event_type='行动', st"
+        "atus='ongoing')])\nmetric(summary='出门', emotional_valence=0"
+        ", narrative_function='铺垫')\nfinish()"
+    )
+    with patch("src.agents.model_client.build_chat_model", return_value=model):
+        assert await run_annotate(run_id, storage_for(db_session), novel_id=novel_id) == (1, 0, 1)
+    db_session.expire_all()
+    assert is_annotate_complete(storage_for(db_session), run_id)
+    assert [record.chapter_id for record in fetch_annotation_role_records(storage_for(db_session), run_id)] == [1]
+
+
+@pytest.mark.asyncio
 async def test_reverse_resubmission_of_bidirectional_relation_keeps_save_confirmed(db_session) -> None:
     """同一双向关系被两个 work 换向提交不重插行、两章都能保存"""
     novel_id, run_id = create_run_with_chunks(

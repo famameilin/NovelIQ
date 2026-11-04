@@ -4,9 +4,12 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+from sqlalchemy import update
+
 from src.diagnosis.completion import has_diagnosis_data
 from src.metrics.queries.completion import is_aggregate_complete
 from src.storage import new_id
+from src.storage.models import Chapter
 from src.work.queries import is_annotate_complete
 from src.workflows.preprocess_readiness import is_preprocess_complete
 from tests.support.storage_fixtures import storage_for
@@ -273,6 +276,25 @@ class TestStageCompleteChecks:
         # 段落事实源：证据派生要求章节存在段落行
         _insert_paragraphs(db_session, run_id, chunks)
         for chapter_id in range(1, 4):
+            persist_chapter_annotation(db_session, run_id=run_id, chapter_id=chapter_id)
+        assert is_annotate_complete(storage_for(ann_repo.session), run_id)
+
+    def test_is_annotate_complete_ignores_chapters_without_text(self, db_session):
+        """空正文章节不进入标注完成判定的期望集合"""
+        run_repo = RunRepository(db_session)
+        novel_id = new_id()
+        insert_test_novel(novel_id, session=db_session)
+        run_id = run_repo.create_run(novel_id=novel_id)
+        chapter_repo = ChapterRepository(db_session)
+        ann_repo = AnnotationRepository(db_session)
+        chunks = _create_chunks(3)
+        chapter_repo.insert_chapter_texts(run_id, chunks)
+        _insert_paragraphs(db_session, run_id, chunks)
+        db_session.execute(
+            update(Chapter).where(Chapter.run_id == run_id, Chapter.chapter_id == 3).values(text="   ")
+        )
+        db_session.commit()
+        for chapter_id in (1, 2):
             persist_chapter_annotation(db_session, run_id=run_id, chapter_id=chapter_id)
         assert is_annotate_complete(storage_for(ann_repo.session), run_id)
 

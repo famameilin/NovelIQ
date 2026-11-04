@@ -45,7 +45,9 @@ class AnnotationRepository(BaseRepository[ChapterAnnotation]):
         return {int(row.chapter_id): int(row.sequence) for row in rows}
 
     def fetch_chapter_ids(self, run_id: str) -> set[int]:
-        return set(self.session.scalars(select(Chapter.chapter_id).where(Chapter.run_id == run_id).distinct()))
+        "有正文的章节身份：空章不进入标注完成判定"
+        rows = self.session.execute(select(Chapter.chapter_id, Chapter.text).where(Chapter.run_id == run_id))
+        return {int(row.chapter_id) for row in rows if str(row.text or "").strip()}
 
     def run_execution_ids(self, run_id: str) -> Select:
         "本运行的真实执行：整轮 session 行与直接携带 run 的调用行"
