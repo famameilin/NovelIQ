@@ -14,12 +14,11 @@ _TERMS = ["刀光剑影", "快意恩仇", "一帆风顺", "剑拔弩张", "碰�
 
 
 class TestMatchFixedPhrases(unittest.TestCase):
-    def _match(self, text: str, metric_enabled: bool = False):
+    def _match(self, text: str):
         return match_fixed_phrases(
             text,
             _TERMS,
             lexicon_key="fixed_phrases.txt",
-            metric_enabled=metric_enabled,
         )
 
     def test_longest_match_non_overlap(self) -> None:
@@ -41,14 +40,11 @@ class TestMatchFixedPhrases(unittest.TestCase):
         candidates = [h for h in self._match(text) if h.match_kind == "four_char_candidate"]
         # 已命中的四字词不产生候选
         self.assertNotIn("快意恩仇", [c.surface_text for c in candidates])
-        self.assertTrue(all(c.is_metric_hit is False for c in candidates))
 
-    def test_metric_hit_only_when_enabled(self) -> None:
-        text = "江湖快意恩仇。"
-        disabled = [h for h in self._match(text, metric_enabled=False) if h.match_kind == "lexicon"]
-        enabled = [h for h in self._match(text, metric_enabled=True) if h.match_kind == "lexicon"]
-        self.assertTrue(all(h.is_metric_hit is False for h in disabled))
-        self.assertTrue(all(h.is_metric_hit is True for h in enabled))
+    def test_lexicon_hits_carry_lexicon_match_kind(self) -> None:
+        hits = self._match("江湖快意恩仇。")
+        lexicon_hits = [h for h in hits if h.match_kind == "lexicon"]
+        self.assertEqual([h.surface_text for h in lexicon_hits], ["快意恩仇"])
 
     def test_empty_text_or_terms(self) -> None:
         self.assertEqual(self._match(""), [])

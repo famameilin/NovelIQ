@@ -22,14 +22,12 @@ LEXICON_FILES: dict[str, str] = {
     "fixed_phrases": "fixed_phrases.txt",
     # 身体反应转喻（皱眉/颤抖等体态情绪信号，独立计数不进正负极性）
     "body_reaction": "body_reaction.txt",
-    # 审定门（draft 词表）：命中行 is_metric_hit=false，不计入任何正式密度，
-    # 逐条人工审定后再提升进 body_reaction.txt / colloquial_negative.txt
+    # 待审定词表：只登记词条，当前不参与任何统计
     "body_reaction_draft": "body_reaction_draft.txt",
     "colloquial_expansion_draft": "colloquial_expansion_draft.txt",
 }
 
-# draft 审定队列 key 子集：无待审词条时文件为空是合法稳态（正式表空即降级）；
-# linguistic 阶段按此集合挂审定门，新增 draft 表需同时登记于此。
+# 待审定词表 key 子集：文件为空是合法稳态，加载校验豁免非空断言
 LEXICON_DRAFT_KEYS: tuple[str, ...] = ("body_reaction_draft", "colloquial_expansion_draft")
 
 

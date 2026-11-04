@@ -4,14 +4,16 @@
   贪心非重叠消解，全部命中行保留用于审计
 - 四字候选：连续 4 个汉字且未落在任何词表命中区间内的片段，仅候选
   不伪造词表来源
-- is_metric_hit：词表命中行是否计入正式固定短语密度由调用方决定；
-  四字候选行恒为 False（候选不伪造词表来源）
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+
+#: 匹配方式取值：词表命中 / 四字候选
+MATCH_KIND_LEXICON = "lexicon"
+MATCH_KIND_FOUR_CHAR = "four_char_candidate"
 
 #: 连续汉字片段（四字候选判定）
 _CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]{4,}")
@@ -28,7 +30,6 @@ class PhraseMatch:
     local_end_char: int
     match_kind: str
     lexicon_key: str | None
-    is_metric_hit: bool
 
 
 def _lexicon_hits(text: str, term_by_length: dict[int, list[str]]) -> list[tuple[str, int, int]]:
@@ -72,7 +73,6 @@ def match_fixed_phrases(
     lexicon_terms: list[str],
     *,
     lexicon_key: str,
-    metric_enabled: bool = False,
     phrase_type: str | None = None,
     four_char_candidate_enabled: bool = True,
 ) -> list[PhraseMatch]:
@@ -95,9 +95,8 @@ def match_fixed_phrases(
             phrase_type=phrase_type,
             local_start_char=start,
             local_end_char=end,
-            match_kind="lexicon",
+            match_kind=MATCH_KIND_LEXICON,
             lexicon_key=lexicon_key,
-            is_metric_hit=metric_enabled,
         )
         for surface, start, end in lexicon_hits
     ]
@@ -110,9 +109,8 @@ def match_fixed_phrases(
                     phrase_type=None,
                     local_start_char=start,
                     local_end_char=end,
-                    match_kind="four_char_candidate",
+                    match_kind=MATCH_KIND_FOUR_CHAR,
                     lexicon_key=None,
-                    is_metric_hit=False,
                 )
             )
 

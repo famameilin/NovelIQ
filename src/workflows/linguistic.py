@@ -184,7 +184,6 @@ async def run_linguistic(
                     row.text,
                     terms,
                     lexicon_key=fixed_phrase_key,
-                    metric_enabled=False,
                 )
                 for hit in hits:
                     phrase_rows.append(
@@ -197,7 +196,6 @@ async def run_linguistic(
                             "local_end_char": hit.local_end_char,
                             "match_kind": hit.match_kind,
                             "lexicon_key": hit.lexicon_key,
-                            "is_metric_hit": hit.is_metric_hit,
                         }
                     )
 
