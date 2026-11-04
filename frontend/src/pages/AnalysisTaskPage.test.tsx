@@ -9,12 +9,12 @@ import {useNovelStore} from '@/store/novelStore';
 import {useStreamStore} from '@/store/streamStore';
 
 const api=vi.hoisted(()=>({cancel:vi.fn(),resume:vi.fn(),status:vi.fn(),refetch:vi.fn(),
-  state:'running',synced:false,error:null as unknown}));
+  state:'running',error:null as unknown}));
 vi.mock('@/api/analysis',()=>({cancelAnalysisTask:api.cancel,resumeAnalysisTask:api.resume}));
 vi.mock('@/api/novels',()=>({getNovel:async()=>({title:'测试小说'})}));
 vi.mock('@/hooks/useAnalysisStatus',()=>({useAnalysisStatus:(novel:string,task:string)=>{
   api.status(novel,task);
-  return {status:api.state,projectionSynced:api.synced,query:{isError:!!api.error,error:api.error,refetch:api.refetch}};
+  return {status:api.state,query:{isError:!!api.error,error:api.error,refetch:api.refetch}};
 }}));
 vi.mock('sonner',()=>({toast:{info:vi.fn(),success:vi.fn(),error:vi.fn()}}));
 vi.mock('@/components/layout/PageContainer',()=>({PageContainer:({children}:{children:ReactNode})=><main>{children}</main>}));
@@ -34,7 +34,7 @@ function View({client}:{client:QueryClient}){
 }
 const client=()=>new QueryClient({defaultOptions:{queries:{retry:false}}});
 beforeEach(()=>{
-  vi.clearAllMocks();api.state='running';api.synced=false;api.error=null;
+  vi.clearAllMocks();api.state='running';api.error=null;
   api.cancel.mockResolvedValue({});api.resume.mockResolvedValue({task_id:'task'});
   useNovelStore.getState().clear();useStreamStore.getState().reset();
 });
@@ -65,12 +65,8 @@ it('停止和恢复使用正式任务入口，恢复后留在相同任务详情'
   expect(screen.getByLabelText('页面地址')).toHaveTextContent('/novels/novel/analysis/task');
 });
 
-it('完成后等待通知同步，随后自动进入同一任务结果',async()=>{
-  api.state='completed';const queryClient=client();const view=render(<View client={queryClient} />);
-  expect(screen.queryByRole('button',{name:'查看分析结果'})).toBeNull();
-  expect(screen.queryByRole('button',{name:/返回/})).toBeNull();
-  expect(screen.getByRole('region',{name:'任务工作台'})).toBeVisible();
-  api.synced=true;view.rerender(<View client={queryClient} />);
+it('状态接口返回已完成即进入同一任务结果',async()=>{
+  api.state='completed';const queryClient=client();render(<View client={queryClient} />);
   await waitFor(()=>expect(screen.getByLabelText('页面地址')).toHaveTextContent('/novels/novel?task_id=task'));
   expect(screen.getByText('小说详情与结果')).toBeVisible();
 });

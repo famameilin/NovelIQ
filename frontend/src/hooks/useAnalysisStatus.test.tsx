@@ -13,40 +13,42 @@ function wrapper({children}:PropsWithChildren) {
 }
 let client:QueryClient;
 beforeEach(()=>{client=new QueryClient({defaultOptions:{queries:{retry:false}}});api.get.mockReset();api.event=null;api.url=null;useStreamStore.getState().reset();});
-it("HTTP 状态核对不扩充进度，运行任务通过 SSE 读取快照",async()=>{
+it("运行中的任务按状态接口定状态并连接进度流",async()=>{
  api.get.mockResolvedValue({novel_id:"novel",task_id:"task",status:"running"});
  const view=renderHook(()=>useAnalysisStatus("novel","task"),{wrapper});
- await waitFor(()=>expect(useStreamStore.getState().status).toBe("running"));
- expect(api.url).toContain("/tasks/task");expect(useStreamStore.getState()).not.toHaveProperty("progress");view.unmount();
-});
-it("终态仍读取快照，最终通知同步后才开放结果",async()=>{
- api.get.mockResolvedValue({status:"running"});const completed=vi.fn();
- const view=renderHook(()=>useAnalysisStatus("novel","task",{onCompleted:completed}),{wrapper});
  await waitFor(()=>expect(view.result.current.status).toBe("running"));
- act(()=>api.event?.("snapshot",{...emptyAnalysisProjection(),task_id:"task",status:"running",sync_pending:true}));
- act(()=>api.event?.("task_complete",{status:"completed",task_id:"task"},1));
- expect(completed).toHaveBeenCalledOnce();expect(view.result.current.projectionSynced).toBe(false);expect(api.url).not.toBeNull();
- act(()=>api.event?.("notification_status",{task_id:"task",warning:null,sync_pending:false}));
- expect(view.result.current.projectionSynced).toBe(true);view.unmount();
+ expect(api.url).toContain("/events/tasks/task");view.unmount();
 });
-it("首次打开已失败任务和停止收尾均保持订阅",async()=>{
- api.get.mockResolvedValue({status:"failed"});
- const view=renderHook(()=>useAnalysisStatus("novel","task"),{wrapper});
- await waitFor(()=>expect(view.result.current.status).toBe("failed"));expect(api.url).toContain("/tasks/task");
- act(()=>api.event?.("snapshot",{...emptyAnalysisProjection(),task_id:"task",status:"cancelling"}));
- expect(api.url).not.toBeNull();view.unmount();
-});
-it("HTTP 先返回完成时继续等快照和通知尾部，不能提前切到结果",async()=>{
+it("已完成任务直接从状态接口读状态，不连接进度流",async()=>{
  api.get.mockResolvedValue({status:"completed"});
  const view=renderHook(()=>useAnalysisStatus("novel","task"),{wrapper});
  await waitFor(()=>expect(view.result.current.status).toBe("completed"));
- expect(view.result.current.projectionSynced).toBe(false);expect(api.url).not.toBeNull();
- act(()=>api.event?.("snapshot",{...emptyAnalysisProjection(),task_id:"task",status:"completed",sync_pending:true}));
- expect(view.result.current.projectionSynced).toBe(false);expect(api.url).not.toBeNull();
- act(()=>api.event?.("notification_status",{task_id:"task",warning:null,sync_pending:false}));
- expect(view.result.current.projectionSynced).toBe(true);expect(api.url).toBeNull();view.unmount();
+ expect(api.url).toBeNull();view.unmount();
 });
-it("新打开的无效任务读取失败后停止 SSE 重试",async()=>{
+it("失败与已取消任务同样不连接进度流",async()=>{
+ api.get.mockResolvedValue({status:"failed"});
+ const failed=renderHook(()=>useAnalysisStatus("novel","failed"),{wrapper});
+ await waitFor(()=>expect(failed.result.current.status).toBe("failed"));
+ expect(api.url).toBeNull();failed.unmount();
+ api.get.mockResolvedValue({status:"cancelled"});
+ const cancelled=renderHook(()=>useAnalysisStatus("novel","cancelled"),{wrapper});
+ await waitFor(()=>expect(cancelled.result.current.status).toBe("cancelled"));
+ expect(api.url).toBeNull();cancelled.unmount();
+});
+it("进度流收到终态事件时立即核对状态接口，状态以接口返回为准",async()=>{
+ api.get.mockResolvedValueOnce({status:"running"}).mockResolvedValue({status:"completed"});
+ const completed=vi.fn();
+ const view=renderHook(()=>useAnalysisStatus("novel","task",{onCompleted:completed}),{wrapper});
+ await waitFor(()=>expect(view.result.current.status).toBe("running"));
+ act(()=>api.event?.("snapshot",{...emptyAnalysisProjection(),task_id:"task",status:"running"}));
+ expect(api.get).toHaveBeenCalledTimes(1);
+ act(()=>api.event?.("task_complete",{task_id:"task",status:"completed"},1));
+ await waitFor(()=>expect(api.get).toHaveBeenCalledTimes(2));
+ await waitFor(()=>expect(view.result.current.status).toBe("completed"));
+ expect(completed).toHaveBeenCalledOnce();
+ expect(api.url).toBeNull();view.unmount();
+});
+it("新打开的无效任务读取失败后停止进度流重试",async()=>{
  api.get.mockRejectedValue(new Error('任务不存在'));
  const view=renderHook(()=>useAnalysisStatus('novel','missing'),{wrapper});
  await waitFor(()=>expect(view.result.current.query.isError).toBe(true));

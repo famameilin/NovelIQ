@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { getNarrativeSource } from "@/api/results";
+import type { NarrativeSource } from "@/api/narrativeTypes";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus, isRunRequiresRebuildError } from "@/api/errorGuards";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { control, narrativeLine, narrativeMuted, narrativePaper } from "./presentation";
@@ -30,7 +31,7 @@ export function FloatingDetail({ title, children, onClose, inline = false }: { t
 }
 
 type EvidenceLocation = { id: string; kind?: "event"; evidence_scope: "chapter" | "paragraph"; anchor_paragraph_ids: number[]; chapter_id?: number; evidence: Array<Record<string, unknown>> };
-export function NarrativeReader({ novelId, runId, page, location, throughChapterId, onClose }: { novelId: string; runId: string; page: "timeline" | "event-trees"; location: EvidenceLocation; throughChapterId?: number; onClose: () => void }) {
+export function NarrativeReader({ novelId, taskId, runId, page, location, throughChapterId, initialSource, initialError, onClose }: { novelId: string; taskId: string; runId: string; page: "timeline" | "event-trees"; location: EvidenceLocation; throughChapterId?: number; initialSource?: NarrativeSource; initialError?: { error: unknown; retry: () => void }; onClose: () => void }) {
   const [opener] = useState(() => document.activeElement as HTMLElement | null);
   const reader = useRef<HTMLDivElement>(null);
   const ids = [...new Set(location.evidence.map(item => Number(item.chapter_id)).filter(Number.isFinite))];
@@ -39,9 +40,16 @@ export function NarrativeReader({ novelId, runId, page, location, throughChapter
   const [offset, setOffset] = useState<number | null>(null);
   const [anchor, setAnchor] = useState(location.anchor_paragraph_ids[0]);
   const chapterAnchors = location.evidence.filter(item => Number(item.chapter_id) === chapter).map(item => Number(item.paragraph_id)).filter(id => Number.isFinite(id) && location.anchor_paragraph_ids.includes(id));
-  const source = useQuery({ queryKey: [page, "source", novelId, runId, location.kind, location.id, chapter, throughChapterId], queryFn: ({ signal }) => getNarrativeSource(novelId, runId, { page, id: location.id, kind: location.kind, chapterId: chapter, throughChapterId }, signal), retry: false, staleTime: 0 });
+  const initialChapterSource = initialSource?.chapter_id === chapter ? initialSource : undefined;
+  const source = useQuery({ queryKey: [page, "source", novelId, runId, location.kind, location.id, chapter, throughChapterId], queryFn: async ({ signal }) => {
+    // 在发起原文查询前检查挂载期间的取消状态
+    await Promise.resolve();
+    signal.throwIfAborted();
+    return getNarrativeSource(novelId, taskId, { page, id: location.id, kind: location.kind, chapterId: chapter, throughChapterId }, signal);
+  }, enabled: !initialChapterSource && !initialError, retry: false, staleTime: 0 });
+  const sourceData = initialChapterSource ?? source.data;
   // 段落较长时在阅读层分片，段落身份不变，选锚点直接落到相应纸页
-  const fragments = source.data?.paragraphs.flatMap(paragraph => {
+  const fragments = sourceData?.paragraphs.flatMap(paragraph => {
     const items = [];
     for (let start = 0; start < paragraph.text.length; start += 650) items.push({ ...paragraph, start, text: paragraph.text.slice(start, start + 650) });
     return items;
@@ -56,9 +64,9 @@ export function NarrativeReader({ novelId, runId, page, location, throughChapter
       onEscapeKeyDown={event => event.stopPropagation()}
       onCloseAutoFocus={event => { event.preventDefault(); if (opener?.isConnected) opener.focus(); }}>
     <section className={`flex h-full w-full max-w-4xl flex-col border shadow-xl ${narrativePaper} ${narrativeLine}`}>
-      <header className={`flex items-center justify-between gap-3 border-b p-5 ${narrativeLine}`}><div><span className={`flex items-center gap-2 text-xs ${narrativeMuted}`}><BookOpen size={15} />原文证据</span><Dialog.Title className="mt-2 font-serif text-xl">{source.data?.title ?? "正在读取…"}</Dialog.Title></div><Dialog.Close asChild><button aria-label="关闭原文" className={control}><X size={18} /></button></Dialog.Close></header>
-      <div className={`flex flex-wrap gap-3 px-6 pt-4 text-xs ${narrativeMuted}`}><span>{location.evidence_scope === "paragraph" ? "段落级依据" : "章节级依据，不标记具体段落"}</span>{ids.length > 1 && <select aria-label="证据章节" className={control} value={chapter} onChange={event => { const id = Number(event.target.value); setChapter(id); setAnchor(Number(location.evidence.find(item => Number(item.chapter_id) === id)?.paragraph_id)); setOffset(null); }}>{ids.map(id => <option key={id} value={id}>章节 {id}</option>)}</select>}{location.evidence_scope === "paragraph" && chapterAnchors.length > 1 && <select aria-label="证据锚点" className={control} value={anchor} onChange={event => { const id = Number(event.target.value); setAnchor(id); move(Math.max(0, fragments.findIndex(item => item.paragraph_id === id))); }}>{chapterAnchors.map(id => <option key={id} value={id}>段落 {id}</option>)}</select>}</div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-14 py-8">{source.isPending && <p>正在读取原文…</p>}{source.isError && <NarrativeError error={source.error} retry={() => void source.refetch()} />}{fragments[current] && <p className={`whitespace-pre-wrap p-4 font-serif text-lg leading-10 ${location.evidence_scope === "paragraph" && location.anchor_paragraph_ids.includes(fragments[current].paragraph_id) ? "border-l-2 border-primary bg-surface-hover" : ""}`}>{fragments[current].text}</p>}</div>
+      <header className={`flex items-center justify-between gap-3 border-b p-5 ${narrativeLine}`}><div><span className={`flex items-center gap-2 text-xs ${narrativeMuted}`}><BookOpen size={15} />原文证据</span><Dialog.Title className="mt-2 font-serif text-xl">{sourceData?.title ?? "正在读取…"}</Dialog.Title></div><Dialog.Close asChild><button aria-label="关闭原文" className={control}><X size={18} /></button></Dialog.Close></header>
+      {!initialError && <div className={`flex flex-wrap gap-3 px-6 pt-4 text-xs ${narrativeMuted}`}><span>{location.evidence_scope === "paragraph" ? "段落级依据" : "章节级依据，不标记具体段落"}</span>{ids.length > 1 && <select aria-label="证据章节" className={control} value={chapter} onChange={event => { const id = Number(event.target.value); setChapter(id); setAnchor(Number(location.evidence.find(item => Number(item.chapter_id) === id)?.paragraph_id)); setOffset(null); }}>{ids.map(id => <option key={id} value={id}>章节 {id}</option>)}</select>}{location.evidence_scope === "paragraph" && chapterAnchors.length > 1 && <select aria-label="证据锚点" className={control} value={anchor} onChange={event => { const id = Number(event.target.value); setAnchor(id); move(Math.max(0, fragments.findIndex(item => item.paragraph_id === id))); }}>{chapterAnchors.map(id => <option key={id} value={id}>段落 {id}</option>)}</select>}</div>}
+      <div className="min-h-0 flex-1 overflow-y-auto px-14 py-8">{initialError && <NarrativeError error={initialError.error} retry={initialError.retry} />}{!initialError && !initialChapterSource && source.isPending && <p>正在读取原文…</p>}{!initialError && !initialChapterSource && source.isError && <NarrativeError error={source.error} retry={() => void source.refetch()} />}{fragments[current] && <p className={`whitespace-pre-wrap p-4 font-serif text-lg leading-10 ${location.evidence_scope === "paragraph" && location.anchor_paragraph_ids.includes(fragments[current].paragraph_id) ? "border-l-2 border-primary bg-surface-hover" : ""}`}>{fragments[current].text}</p>}</div>
       <footer className={`flex items-center justify-between border-t p-5 ${narrativeLine}`}><button aria-label="上一页原文" className={control} disabled={current === 0} onClick={() => move(current - 1)}><ChevronLeft size={18} /></button><span className={`text-xs ${narrativeMuted}`}>{fragments.length ? current + 1 : 0} / {fragments.length}</span><button aria-label="下一页原文" className={control} disabled={current >= fragments.length - 1} onClick={() => move(current + 1)}><ChevronRight size={18} /></button></footer>
     </section>
     </Dialog.Content>

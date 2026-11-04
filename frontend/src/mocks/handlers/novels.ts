@@ -71,12 +71,16 @@ export const novelUploadHandler = http.post(`${BASE}/api/novels/upload`, async (
     return HttpResponse.json({ detail: "未提供文件" }, { status: 400 });
   }
 
-  const title = file.name.replace(/\.txt$/i, "");
+  const title = (formData.get("title") as string | null)?.trim() || file.name.replace(/\.txt$/i, "");
+  const author = (formData.get("author") as string | null)?.trim();
+  const wordCount = (await file.text()).replace(/\s/g, "").length;
   const novel = createNovel({
     title,
     filename: file.name,
     file_size: file.size,
+    word_count: wordCount,
     upload_time: new Date().toISOString(),
+    ...(author ? { author } : {}),
   });
 
   novelDb.set(novel.novel_id, novel);
@@ -84,7 +88,10 @@ export const novelUploadHandler = http.post(`${BASE}/api/novels/upload`, async (
 
   return HttpResponse.json({
     novel_id: novel.novel_id,
+    filename: novel.filename,
+    status: "uploaded",
     title: novel.title,
+    word_count: wordCount,
     message: "上传成功",
   });
 });

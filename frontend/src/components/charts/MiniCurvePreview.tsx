@@ -9,14 +9,12 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { Card } from "@/components/ui/card";
-import { getCSSColorVar, hslToHsla } from "@/lib/theme";
+import { getCSSColorVar } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import type { EmotionTrendWindow } from "@/api/types";
 import {
-  EMOTION_TREND_SERIES_CONFIG,
   formatEmotionTrendTooltipValue,
-  getEmotionTrendSeriesValue,
 } from "./emotionTrendSeries";
 
 echarts.use([
@@ -48,28 +46,26 @@ export function MiniCurvePreview({
   const navigate = useNavigate();
   const themeSignature = useChartThemeSignature();
 
-  const positiveColor = getCSSColorVar("--chart-positive");
-  const negativeColor = getCSSColorVar("--chart-negative");
-  const neutralColor = getCSSColorVar("--chart-1");
   const primaryColor = getCSSColorVar("--primary");
 
   const option = useMemo(() => {
     if (!data.length) return {};
 
-    const seriesData = EMOTION_TREND_SERIES_CONFIG.map((config) =>
-      data.map((window) => [window.position, getEmotionTrendSeriesValue(window, config)] as [number, number | null]),
+    const seriesData = data.map(
+      (window) => [window.position, window.smoothed_pooled_net_density] as const,
     );
-    const colorMap: Record<string, string> = {
-      "--chart-positive": positiveColor,
-      "--chart-negative": negativeColor,
-      "--chart-1": neutralColor,
-      "--primary": primaryColor,
-    };
-    const densityValues = seriesData.flatMap((series) =>
-      series.flatMap(([, value]) => (typeof value === "number" && Number.isFinite(value) ? [value] : [])),
-    );
-    const densityMin = densityValues.length > 0 ? Math.min(0, ...densityValues) : -0.001;
-    const densityMax = densityValues.length > 0 ? Math.max(0, ...densityValues) : 0.001;
+    let densityMin = Infinity;
+    let densityMax = -Infinity;
+    for (const [, value] of seriesData) {
+      if (value != null && Number.isFinite(value)) {
+        densityMin = Math.min(densityMin, value);
+        densityMax = Math.max(densityMax, value);
+      }
+    }
+    if (densityMin === Infinity) {
+      densityMin = -0.001;
+      densityMax = 0.001;
+    }
     const densitySpan = Math.max(densityMax - densityMin, 0.001);
     const densityPadding = densitySpan * 0.15;
 
@@ -105,36 +101,15 @@ export function MiniCurvePreview({
         min: densityMin - densityPadding,
         max: densityMax + densityPadding,
       },
-      series: EMOTION_TREND_SERIES_CONFIG.map((config, index) => {
-        const color = colorMap[config.colorVar];
-        const isMainSeries = config.role === "main";
-        const isSupportSeries = config.role === "support";
-        const lineOpacity = isMainSeries ? 1 : isSupportSeries ? 0.55 : 0.38;
-        return {
-          name: config.name,
-          type: "line" as const,
-          data: seriesData[index],
-          smooth: true,
-          showSymbol: false,
-          z: isMainSeries ? 4 : isSupportSeries ? 3 : 2,
-          lineStyle: {
-            width: isMainSeries ? 3 : isSupportSeries ? 2 : 1.5,
-            color: hslToHsla(color, lineOpacity),
-            type: isSupportSeries ? "dashed" : "solid",
-          },
-          areaStyle: isMainSeries
-            ? {
-                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                  { offset: 0, color: hslToHsla(color, 0.12) },
-                  { offset: 1, color: hslToHsla(color, 0.01) },
-                ]),
-              }
-            : undefined,
-          animationDuration: 800,
-        };
-      }),
+      series: [{
+        name: "平滑趋势",
+        type: "line" as const,
+        data: seriesData,
+        showSymbol: false,
+        lineStyle: { width: 2, color: primaryColor },
+      }],
     };
-  }, [data, negativeColor, neutralColor, positiveColor, primaryColor]);
+  }, [data, primaryColor]);
 
   return (
     <Card

@@ -77,13 +77,13 @@ export function TimelineEventInspector({
   const eventLabels = useMemo(() => {
     const labels = new Map<string, string>();
     nodes.forEach((item) => {
-      labels.set(item.root_event_id, item.title || item.summary);
+      labels.set(item.entry_event_id, item.title || item.summary);
       labels.set(item.tree_id, item.title || item.summary);
     });
     return labels;
   }, [nodes]);
   const treeEventIds = useMemo(() => {
-    const ids = new Set<string>([node.tree_id, node.root_event_id, ...node.main_chain]);
+    const ids = new Set<string>([node.tree_id, node.entry_event_id, ...node.main_chain]);
     node.secondary_groups.forEach((group) => {
       ids.add(group.target_event_id);
       group.branch.forEach((eventId) => ids.add(eventId));
@@ -94,7 +94,7 @@ export function TimelineEventInspector({
     .filter((edge) => treeEventIds.has(edge.target_event_id) || treeEventIds.has(edge.source_event_id))
     .map((edge) => [edge.edge_id, edge])).values()];
   const relatedForeshadowing = foreshadowingEdges.filter((edge) =>
-    treeEventIds.has(edge.root_event_id) ||
+    treeEventIds.has(edge.source_event_id) ||
     (edge.payoff_event_id != null && treeEventIds.has(edge.payoff_event_id)));
   const rawParticipants = node.participants.length > 0
     ? node.participants
@@ -138,7 +138,7 @@ export function TimelineEventInspector({
             <h2 className="mt-1 text-lg font-semibold leading-6 text-text">{node.title || node.summary}</h2>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => navigate(buildEventTreeUrl(novelId, taskId, { eventId: node.root_event_id }))}>
+            <Button variant="outline" size="sm" onClick={() => navigate(buildEventTreeUrl(novelId, taskId, { eventId: node.entry_event_id }))}>
               查看事件树
             </Button>
             <Button variant="outline" size="sm" onClick={handleSelectChapter}>

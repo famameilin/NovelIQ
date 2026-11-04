@@ -19,40 +19,67 @@ export interface PlotlineChange {
   source_event_ids: string[];
   source_fact_ids: string[];
 }
+export interface PlotlineState {
+  subject_id: string;
+  subject_title: string;
+  dimension: PlotlineDimension;
+  state: unknown;
+  chapter_id: number;
+  chapter_order: number;
+}
 export interface PlotlineTimelineResponse {
   run_id: string;
   organization_status?: "ready" | "pending_diagnosis";
   chapters: NarrativeChapter[];
   through_chapter_id: number | null;
   changes: PlotlineChange[];
-  states: Array<{ subject_id: string; subject_title: string; dimension: PlotlineDimension; state: unknown; chapter_id: number; chapter_order: number }>;
-  subjects: Array<{ subject_id: string; subject_title: string; dimension: PlotlineDimension }>;
+  states: PlotlineState[];
+  state_counts: Partial<Record<PlotlineDimension, number>>;
+  state_total: number;
   total: number;
   next_cursor: string | null;
   distribution: Array<{ chapter_id: number; chapter_order: number; dimension: PlotlineDimension; count: number }>;
 }
+export interface PlotlineStatesResponse {
+  states: PlotlineState[];
+  state_counts?: Partial<Record<PlotlineDimension, number>>;
+  state_total?: number;
+  total: number;
+  next_cursor: string | null;
+}
+export interface PlotlineSubjectsResponse {
+  subjects: Array<{ subject_id: string; subject_title: string; dimension: PlotlineDimension }>;
+  total: number;
+  next_cursor: string | null;
+}
 
-/* ===== 统一事件与包含树契约 =====
- * 列表仅 events（顶层大事件）分页，其余字段每页完整；
- * 子事件不经列表下发，通过事件详情卡的 direct_children 逐级访问 */
+/** 全书事件树结构与真实事件一次返回，事件线入口引用独立树身份 */
 export interface EventTreeChapter { chapter_id: number; title: string; chapter_order: number }
 export interface EventTreeCounts {
-  top_level_events: number;
-  child_events: number;
+  event_lines: number;
+  trees: number;
+  tree_references: number;
   all_events: number;
   outcomes: number;
-  event_outcome_links: number;
-  arcs: number;
-  event_arc_links: number;
   relations: number;
   foreshadowing_actions: number;
 }
-export interface EventTreeArc { arc_id: string; parent_arc_id: string | null; kind: string; title: string; objective: string }
+export interface EventQueueItem {
+  tree_id: string;
+  title: string;
+  description: string;
+  is_event_line: boolean;
+  line_name?: string | null;
+  event_ids: string[];
+}
+export interface QueueReferenceItem { parent_tree_id: string; child_tree_id: string; reason: string; evidence: Array<Record<string, unknown>> }
 export interface EventTreeEvent {
   from: number;
   to: number;
   event_id: string;
+  is_event_line: boolean;
   title: string;
+  problem: string;
   summary: string;
   event_type: string;
   status: string;
@@ -61,8 +88,6 @@ export interface EventTreeEvent {
   chapter_order: number;
 }
 export interface EventTreeOutcome { outcome_id: string; title: string; description: string; first_text_position: number }
-export interface EventArcLinkItem { event_id: string; arc_id: string; role: string; reason: string }
-export interface EventOutcomeLinkItem { event_id: string; outcome_id: string; reason: string }
 export interface EventRelationItem {
   relation_id?: string;
   source_kind: "event";
@@ -72,16 +97,17 @@ export interface EventRelationItem {
   relation_type: string;
   reason: string;
   evidence?: Array<Record<string, unknown>>;
-  locator?: { target_kind: "event"; target_id: string; top_level_event_id: string | null; ancestor_event_ids: string[]; evidence_position: number | null; title: string };
-  top_level_event_id?: string | null;
-  ancestor_event_ids?: string[];
+  locator?: { target_kind: "event"; target_id: string; tree_id: string; tree_position: number; event_line_ids: string[]; evidence_position: number | null; title: string };
+  tree_id?: string;
+  tree_position?: number;
+  event_line_ids?: string[];
   evidence_position?: number | null;
 }
 export interface ForeshadowingActionItem {
   action_id: string;
   action_type: "setup" | "reinforce" | "payoff";
   endpoint_kind: "event";
-  root_event_id: string;
+  source_event_id: string;
   target_event_id: string | null;
   chapter_id: number;
   chapter_order: number;
@@ -91,33 +117,36 @@ export interface EventTreeListResponse {
   organization_status?: "ready" | "pending_diagnosis";
   chapters: EventTreeChapter[];
   counts: EventTreeCounts;
-  arcs: EventTreeArc[];
+  event_line_ids: string[];
+  queues: EventQueueItem[];
   events: EventTreeEvent[];
+  queue_references: QueueReferenceItem[];
   outcomes: EventTreeOutcome[];
-  event_arc_links: EventArcLinkItem[];
-  event_outcome_links: EventOutcomeLinkItem[];
   relations: EventRelationItem[];
   foreshadowing_actions: ForeshadowingActionItem[];
-  next_cursor: string | null;
+  next_cursor: null;
 }
 export interface EventCardDetail {
   from: number;
   to: number;
   kind: "event";
   event_id: string;
+  is_event_line: boolean;
   run_id: string;
   title: string;
   summary: string;
   progress: string | null;
   event_type: string;
   status: string;
-  arcs: Array<{ arc_id: string; title: string; kind: string; role: string; reason: string }>;
   characters: Array<Record<string, unknown>>;
   direct_children: Array<{ event_id: string; title: string; event_type: string; status: string }>;
   evidence: Array<Record<string, unknown>>;
   source_chapters: number[];
   evidence_scope: "chapter" | "paragraph";
-  ancestry: string[];
+  tree_id: string;
+  tree_position: number;
+  event_line_ids: string[];
+  direct_parents: EventCardDetail["direct_children"];
   relations: EventRelationItem[];
 }
 export interface NarrativeSource {

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CapacityModel, CapacitySeat, ExecutionRecord } from "@/store/analysisProjection";
 import { executionActivity, executionRole } from "./workbenchLabels";
 
-interface Place { key: string; model: string; slot: number; x: number; y: number; row: number; }
+interface Place { key: string; entry: string; label: string; slot: number; x: number; y: number; row: number; }
 interface Island { key: string; x: number; y: number; places: Place[]; }
 interface Props {
   models: CapacityModel[]; seats: CapacitySeat[]; executions: Record<string, ExecutionRecord>;
@@ -32,16 +32,16 @@ export function AgentOffice({models,seats,executions,selected,onSelect}:Props) {
   const svg = useRef<SVGSVGElement>(null);
   const [size,setSize]=useState({width:650,height:390});
   const layout=useMemo(()=>{
-    const islands:Island[]=[],places:Place[]=[],regions:{model:string;x:number}[]=[];
+    const islands:Island[]=[],places:Place[]=[],regions:{entry:string;label:string;x:number}[]=[];
     let height=350,width=0;
     models.forEach(model=>{
-      const count=Math.max(model.capacity,...seats.filter(s=>s.model_id===model.model_id).map(s=>s.slot+1),0);
-      regions.push({model:model.model_id,x:width});
+      const count=Math.max(model.capacity,...seats.filter(s=>s.entry_id===model.entry_id).map(s=>s.slot+1),0);
+      regions.push({entry:model.entry_id,label:model.label,x:width});
       height=Math.max(height,Math.ceil(Math.ceil(count/6)/3)*270+120);
       for(let i=0;i<Math.ceil(count/6);i++) {
-        const island:Island={key:`${model.model_id}:${i}`,x:65+width+(i%3)*350,y:100+Math.floor(i/3)*270,places:[]};
+        const island:Island={key:`${model.entry_id}:${i}`,x:65+width+(i%3)*350,y:100+Math.floor(i/3)*270,places:[]};
         for(let k=0;k<Math.min(6,count-i*6);k++) {
-          const slot=i*6+k,p={key:`${model.model_id}:${slot}`,model:model.model_id,slot,x:island.x+49+(k%3)*96,y:island.y+(k<3?-25:140),row:k<3?0:1};
+          const slot=i*6+k,p={key:`${model.entry_id}:${slot}`,entry:model.entry_id,label:model.label,slot,x:island.x+49+(k%3)*96,y:island.y+(k<3?-25:140),row:k<3?0:1};
           places.push(p);island.places.push(p);
         }
         islands.push(island);
@@ -76,12 +76,12 @@ export function AgentOffice({models,seats,executions,selected,onSelect}:Props) {
     node.addEventListener("wheel",wheel,{passive:false});return()=>node.removeEventListener("wheel",wheel);
   },[location,size]);
   const drag=useRef<{x:number;y:number;cx:number;cy:number;moved:boolean}|null>(null);
-  const occupancy=new Map(seats.map(s=>[`${s.model_id}:${s.slot}`,s]));
+  const occupancy=new Map(seats.map(s=>[`${s.entry_id}:${s.slot}`,s]));
   const executionFor=(seat?:CapacitySeat)=>seat&&!seat.foreign?Object.values(executions).find(e=>e.reservation_id===seat.reservation_id):undefined;
   const chair=(p:Place)=>{
     const seat=occupancy.get(p.key),execution=executionFor(seat),[cx,cy]=point(p.x,p.y,29),[hx,hy]=point(p.x,p.y,57);
     const tint=seat?.foreign?"foreign":execution?.activity==="error"?"error":"person";
-    const label=`${p.model} 工位 ${p.slot+1} · ${seat?.foreign?'其他任务占用':execution?`${executionRole(execution.sub_stage)} · ${execution.chapter_id?`章节 ${execution.chapter_id} · `:''}${executionActivity(execution.activity)}`:seat?'已预留，等待 Agent 启动':'空闲'}`;
+    const label=`${p.label} 工位 ${p.slot+1} · ${seat?.foreign?'其他任务占用':execution?`${executionRole(execution.sub_stage)} · ${execution.chapter_id?`章节 ${execution.chapter_id} · `:''}${executionActivity(execution.activity)}`:seat?'已预留，等待 Agent 启动':'空闲'}`;
     return <g key={p.key} data-workstation={p.key} role="button" tabIndex={0} aria-label={label}
       onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();onSelect(execution?.invocation_id??null,seat);}}}>
       <title>{label}</title>
@@ -137,7 +137,7 @@ export function AgentOffice({models,seats,executions,selected,onSelect}:Props) {
           {island.places.filter(p=>p.row).map(chair)}
         </g>)}
       </g>
-      {models.map((model,i)=>{const p=point(layout.regions[i].x+70,40,65);return <text key={model.model_id} x={size.width/2+(p[0]-camera.x)*camera.scale} y={size.height/2+(p[1]-camera.y)*camera.scale} fill="hsl(var(--text))" fontSize={12} pointerEvents="none"><title>{model.model_id}</title>{model.model_id.length>32?`${model.model_id.slice(0,29)}…`:model.model_id} · {seats.filter(s=>s.model_id===model.model_id).length}/{model.capacity}</text>;})}
+      {models.map((model,i)=>{const p=point(layout.regions[i].x+70,40,65);return <text key={model.entry_id} x={size.width/2+(p[0]-camera.x)*camera.scale} y={size.height/2+(p[1]-camera.y)*camera.scale} fill="hsl(var(--text))" fontSize={12} pointerEvents="none"><title>{model.label}</title>{model.label.length>32?`${model.label.slice(0,29)}…`:model.label} · {seats.filter(s=>s.entry_id===model.entry_id).length}/{model.capacity}</text>;})}
     </svg>
     <div className="flex items-center justify-between px-3 pb-3 text-xs text-text-muted"><span>滚轮缩放 · 拖动平移 · 点击工位查看</span><button type="button" className="text-primary" onClick={()=>setCamera(fit())}>复位视角</button></div>
   </div>;

@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getCharacterFunctionTab, tabQueryKey } from "@/api/tabs";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
+import { useNovelTitle } from "@/hooks/useNovelTitle";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
@@ -72,6 +73,7 @@ export function CharactersPage() {
   // 小说作用域任务守卫——跨小说切换后旧小说的任务
   // 不得用于新小说的查询/SSE（模式同 GraphPage）
   const { storeTaskId } = useNovelScopedTask(novelId, urlTaskId);
+  const title = useNovelTitle("角色格局");
 
   // 功能与焦点接口已包含完整角色列表，避免重复查询同一份角色数据。
   const enabled = !!novelId && !!storeTaskId;
@@ -100,7 +102,7 @@ export function CharactersPage() {
   // ---------- 渲染 ----------
 
   return (
-    <AnalysisWorkspace title="角色格局">
+    <AnalysisWorkspace title={title}>
       {/* 未选择任务提示 */}
       {!storeTaskId && (
         <DashboardCardShell

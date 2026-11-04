@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/cn";
+import { formatWordCount } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /*  类型定义                                                           */
@@ -25,7 +26,7 @@ export interface NovelCardData {
   title: string;
   author?: string;
   filename: string;
-  fileSize?: number;
+  wordCount?: number | null;
   themeColor?: string;
   updatedAt: string;
 }
@@ -41,12 +42,6 @@ export interface NovelCardProps {
 /* ------------------------------------------------------------------ */
 /*  辅助函数                                                           */
 /* ------------------------------------------------------------------ */
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function formatDate(dateString: string): string {
   const date = new Date(dateString);
@@ -150,7 +145,7 @@ export function NovelCard({
               {novel.title}
             </p>
             <Badge variant="secondary" className="h-5 text-[10px] px-1.5 shrink-0">
-              {novel.fileSize ? formatFileSize(novel.fileSize) : ""}
+              {novel.wordCount != null ? formatWordCount(novel.wordCount) : ""}
             </Badge>
           </div>
 

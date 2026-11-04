@@ -1,13 +1,13 @@
 /**
  * GraphLegend 组件
  *
- * 按传入的 entityTypes/relationTypes 动态渲染节点类型与关系类型图例，
- * 颜色取 CSS 变量，与 ForceGraph 的配色主题同步
+ * 以紧凑横向条渲染节点类型与关系类型图例，颜色取 CSS 变量与 ForceGraph 配色同步
  */
 
 import { cn } from "@/lib/cn";
 import { getCSSColorVar } from "@/lib/theme";
 import { formatAnalysisLabel } from "@/lib/analysisLabels";
+import { formatEntityTypeLabel } from "@/lib/graphLabels";
 
 /* ------------------------------------------------------------------ */
 /*  类型定义                                                           */
@@ -32,15 +32,6 @@ const ENTITY_CSS_VAR_NAMES: Record<string, string> = {
   organization: "--chart-3",
   location: "--chart-4",
   item: "--chart-5",
-};
-
-/** 实体类型显示名称 */
-const ENTITY_LABELS: Record<string, string> = {
-  character: "角色",
-  group: "群体",
-  organization: "组织",
-  location: "地点",
-  item: "物品",
 };
 
 /** 关系类型 → CSS 变量名映射（与 ForceGraph.getRelationColorsFromCSS 一致） */
@@ -78,7 +69,6 @@ export function GraphLegend({
   relationTypes = [],
   className,
 }: GraphLegendProps) {
-  // 如果没有数据传入，不渲染任何内容
   if (entityTypes.length === 0 && relationTypes.length === 0) {
     return null;
   }
@@ -86,54 +76,39 @@ export function GraphLegend({
   return (
     <div
       className={cn(
-        "w-48 rounded-lg border border-border/60 bg-surface/95 p-3 backdrop-blur-sm shadow-sm",
-        className
+        "flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border/60 bg-surface/70 px-3 py-2",
+        className,
       )}
     >
-      <div className="space-y-4">
-        {/* 节点类型图例 */}
-        {entityTypes.length > 0 && (
-          <div>
-            <h4 className="mb-2 text-xs font-medium text-text-muted">节点类型</h4>
-            <div className="space-y-1.5">
-              {entityTypes.map((type) => (
-                <div key={type} className="flex items-center gap-2">
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: getEntityColor(type) }}
-                  />
-                  <span className="text-sm text-text-secondary">
-                    {ENTITY_LABELS[type] || formatAnalysisLabel(type, "entity")}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+      {entityTypes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-[11px] text-text-muted">节点</span>
+          {entityTypes.map((type) => (
+            <span key={type} className="flex items-center gap-1.5">
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: getEntityColor(type) }}
+              />
+              <span className="text-[11px] text-text-secondary">{formatEntityTypeLabel(type)}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
-        {/* 分隔线 */}
-        {entityTypes.length > 0 && relationTypes.length > 0 && (
-          <div className="h-px bg-border/60" />
-        )}
-
-        {/* 关系类型图例 */}
-        {relationTypes.length > 0 && (
-          <div>
-            <h4 className="mb-2 text-xs font-medium text-text-muted">关系类型</h4>
-            <div className="space-y-1.5">
-              {relationTypes.map((type) => (
-                <div key={type} className="flex items-center gap-2">
-                  <span
-                    className="h-0.5 w-5 rounded-full"
-                    style={{ backgroundColor: getRelationColor(type) }}
-                  />
-                  <span className="text-sm text-text-secondary">{formatAnalysisLabel(type, "relation")}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      {relationTypes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-[11px] text-text-muted">关系</span>
+          {relationTypes.map((type) => (
+            <span key={type} className="flex items-center gap-1.5">
+              <span
+                className="h-0.5 w-4 rounded-full"
+                style={{ backgroundColor: getRelationColor(type) }}
+              />
+              <span className="text-[11px] text-text-secondary">{formatAnalysisLabel(type, "relation")}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

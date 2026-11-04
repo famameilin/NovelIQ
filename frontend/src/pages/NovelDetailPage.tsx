@@ -10,6 +10,7 @@ import {
   batchDeleteTasks,
 } from "@/api/analysis";
 import { getDashboardTab, tabQueryKey } from "@/api/tabs";
+import type { DiagnosisResult } from "@/api/types";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
@@ -27,50 +28,72 @@ import { analysisTaskPath } from "@/lib/analysisTaskRoutes";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
-const STALE_TIME = 5 * 60 * 1000;
+function DashboardDiagnosisCards({ diagnosis, novelId }: { diagnosis: DiagnosisResult | null; novelId: string }) {
+  return (
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+      {diagnosis ? (
+        <DiagnosisSummaryCard diagnosis={diagnosis} novelId={novelId} className="h-full min-h-0" />
+      ) : (
+        <Card className="flex h-full items-center justify-center">
+          <p className="text-sm text-text-muted">暂无诊断数据</p>
+        </Card>
+      )}
+      <ScoreOverviewCard
+        foreshadowExpectation={diagnosis?.foreshadow_expectation}
+        powerStance={diagnosis?.power_stance_score}
+        civilianDignity={diagnosis?.common_people_dignity}
+        culturalDepth={diagnosis?.cultural_depth_score}
+        novelId={novelId}
+        className="h-full min-h-0"
+      />
+    </div>
+  );
+}
 
-function SkeletonGrid() {
+function SkeletonGrid({ diagnosis, novelId }: { diagnosis?: DiagnosisResult; novelId: string }) {
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card className="h-[300px]">
-          <CardContent className="p-5">
-            <div className="space-y-4">
-              <div className="h-5 w-24 animate-pulse rounded bg-surface-hover" />
-              <div className="space-y-3">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="flex gap-3">
-                    <div className="h-4 w-4 animate-pulse rounded bg-surface-hover" />
-                    <div className="h-4 flex-1 animate-pulse rounded bg-surface-hover" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="h-[300px]">
-          <CardContent className="p-5">
-            <div className="space-y-4">
-              <div className="h-5 w-24 animate-pulse rounded bg-surface-hover" />
-              <div className="flex items-center gap-3">
-                <div className="h-12 w-12 animate-pulse rounded-full bg-surface-hover" />
-                <div className="space-y-2">
-                  <div className="h-3 w-16 animate-pulse rounded bg-surface-hover" />
-                  <div className="h-4 w-12 animate-pulse rounded bg-surface-hover" />
+      {diagnosis ? <DashboardDiagnosisCards diagnosis={diagnosis} novelId={novelId} /> : (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <Card className="h-[300px]">
+            <CardContent className="p-5">
+              <div className="space-y-4">
+                <div className="h-5 w-24 animate-pulse rounded bg-surface-hover" />
+                <div className="space-y-3">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="flex gap-3">
+                      <div className="h-4 w-4 animate-pulse rounded bg-surface-hover" />
+                      <div className="h-4 flex-1 animate-pulse rounded bg-surface-hover" />
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div className="space-y-2">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="flex items-center justify-between">
+            </CardContent>
+          </Card>
+          <Card className="h-[300px]">
+            <CardContent className="p-5">
+              <div className="space-y-4">
+                <div className="h-5 w-24 animate-pulse rounded bg-surface-hover" />
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 animate-pulse rounded-full bg-surface-hover" />
+                  <div className="space-y-2">
                     <div className="h-3 w-16 animate-pulse rounded bg-surface-hover" />
-                    <div className="h-3 w-20 animate-pulse rounded bg-surface-hover" />
+                    <div className="h-4 w-12 animate-pulse rounded bg-surface-hover" />
                   </div>
-                ))}
+                </div>
+                <div className="space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="flex items-center justify-between">
+                      <div className="h-3 w-16 animate-pulse rounded bg-surface-hover" />
+                      <div className="h-3 w-20 animate-pulse rounded bg-surface-hover" />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
         {Array.from({ length: 5 }).map((_, i) => (
           <Card key={i} className="h-[140px]" />
@@ -173,7 +196,7 @@ export function NovelDetailPage() {
   const taskStatus = analysis.status;
   const isTaskActivelyProcessing =
     taskStatus === "pending" || taskStatus === "running" || taskStatus === "cancelling";
-  const canRequestResults = enabled && taskStatus === "completed" && analysis.projectionSynced;
+  const canRequestResults = enabled && taskStatus === "completed";
   const showTaskSummary = !!storeTaskId && !canRequestResults;
   const effectiveIsAnalyzing = isStartingTask || isTaskActivelyProcessing;
   const isTaskBusy = isStartingTask || isTaskActivelyProcessing;
@@ -249,9 +272,15 @@ export function NovelDetailPage() {
     queryKey: tabQueryKey("dashboard", novelId, storeTaskId),
     queryFn: () => getDashboardTab(novelId!, storeTaskId!),
     enabled: canRequestResults,
-    staleTime: STALE_TIME,
+    staleTime: 0,
+    gcTime: 0,
   });
   const dashboard = dashboardQuery.data;
+  // 订阅全局主题请求已读取的诊断报告，复用同一条网络请求
+  const { data: earlyDiagnosis } = useQuery<DiagnosisResult>({
+    queryKey: ["results", novelId, storeTaskId, "diagnosis"],
+    enabled: false,
+  });
 
   const isLoading =
     enabled &&
@@ -298,7 +327,9 @@ export function NovelDetailPage() {
       )}
 
       {/* 仅在未分析中时显示加载骨架屏 */}
-      {!showTaskSummary && isLoading && storeTaskId && <SkeletonGrid />}
+      {!showTaskSummary && isLoading && storeTaskId && novelId && (
+        <SkeletonGrid diagnosis={canRequestResults ? earlyDiagnosis : undefined} novelId={novelId} />
+      )}
 
       {/* 仅在未分析中时显示错误状态 */}
       {!showTaskSummary && analysisNotComplete && !isLoading && storeTaskId && (
@@ -329,24 +360,7 @@ export function NovelDetailPage() {
           <AnalysisWorkspace.Tab value="dashboard" label="仪表盘">
             <div className="h-full min-h-0 overflow-y-auto pr-1">
               <div className="grid min-h-full grid-rows-[auto_auto_auto] gap-3 pb-1">
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                {dashboard.diagnosis ? (
-                  <DiagnosisSummaryCard diagnosis={dashboard.diagnosis} novelId={novelId!} className="h-full min-h-0" />
-                ) : (
-                  <Card className="flex h-full items-center justify-center">
-                    <p className="text-sm text-text-muted">暂无诊断数据</p>
-                  </Card>
-                )}
-
-                <ScoreOverviewCard
-                  foreshadowExpectation={dashboard.diagnosis?.foreshadow_expectation}
-                  powerStance={dashboard.diagnosis?.power_stance_score}
-                  civilianDignity={dashboard.diagnosis?.common_people_dignity}
-                  culturalDepth={dashboard.diagnosis?.cultural_depth_score}
-                  novelId={novelId!}
-                  className="h-full min-h-0"
-                />
-              </div>
+              <DashboardDiagnosisCards diagnosis={dashboard.diagnosis} novelId={novelId!} />
 
               <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-5">
                 <DimensionMiniCard dimension="narrative" data={dashboard.narrative_structure ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/timeline`} className="min-h-0" />

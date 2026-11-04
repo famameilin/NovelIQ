@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -201,7 +201,7 @@ describe("GraphPage integration", () => {
     const user = userEvent.setup();
     renderGraphPage();
 
-    expect(await screen.findByText("当前人物关系")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("当前人物关系")).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "选择顾霜" }));
 
     const inspector = await screen.findByRole("complementary", { name: "顾霜实体详情" });

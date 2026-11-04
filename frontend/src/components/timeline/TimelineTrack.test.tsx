@@ -29,7 +29,7 @@ function createEventNode(overrides: Partial<TimelineEventNode> = {}): TimelineEv
   const treeId = overrides.tree_id ?? "evt-3";
   return {
     tree_id: treeId,
-    root_event_id: treeId,
+    entry_event_id: treeId,
     title: "白芷初遇",
     summary: "白芷初遇",
     anchor_chapter_id: 3,

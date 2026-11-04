@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -6,6 +6,8 @@ import { RefreshCw, BookOpen, Search, ArrowUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NovelCard, type NovelCardData } from "@/components/common/NovelCard";
 import { UploadDialog, type UploadFileInfo } from "@/components/home/UploadDialog";
+import { NovelInfoDialog } from "@/components/home/NovelInfoDialog";
+import type { NovelMetadata } from "@/components/home/uploadTypes";
 import { useHomeContext } from "@/components/layout/AppLayout";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,7 +23,7 @@ import type { Novel } from "@/api/types";
 import { useNovelStore } from "@/store/novelStore";
 import { appConfig } from "@/config";
 
-type SortKey = "title" | "updatedAt" | "fileSize";
+type SortKey = "title" | "updatedAt" | "wordCount";
 type SortOrder = "asc" | "desc";
 
 function generateThemeColor(seed: string | undefined): string {
@@ -41,7 +43,7 @@ function mapNovelToCardData(novel: Novel): NovelCardData {
     title: novel.title || novel.filename.replace(/\.txt$/, ""),
     author: novel.author || "未知作者",
     filename: novel.filename,
-    fileSize: novel.file_size,
+    wordCount: novel.word_count,
     updatedAt: novel.upload_time || new Date().toISOString(),
     themeColor: generateThemeColor(novel.novel_id),
   };
@@ -50,7 +52,7 @@ function mapNovelToCardData(novel: Novel): NovelCardData {
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "updatedAt", label: "最近上传" },
   { value: "title", label: "书名" },
-  { value: "fileSize", label: "文件大小" },
+  { value: "wordCount", label: "字数" },
 ];
 
 export function HomePage() {
@@ -68,6 +70,10 @@ export function HomePage() {
   const setTotalPages = homeContext?.setTotalPages;
 
   const [uploadFiles, setUploadFiles] = useState<UploadFileInfo[]>([]);
+  const [metadata, setMetadata] = useState<Record<string, NovelMetadata>>({});
+  const [infoDialogOpen, setInfoDialogOpen] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -97,41 +103,162 @@ export function HomePage() {
     if (setTotalPages) setTotalPages(totalPages);
   }, [total, isLoading, totalPages, setTotal, setIsLoading, setTotalPages]);
 
-  const uploadMutation = useMutation({
-    mutationFn: async ({ files, signal }: { files: UploadFileInfo[]; signal: AbortSignal }) => {
-      const results = [];
-      for (const fileInfo of files) {
-        if (fileInfo.status !== "pending") continue;
-        try {
-          const result = await uploadNovel(fileInfo.file, { signal });
-          results.push({ success: true, result });
-        } catch (error) {
-          // 取消上传时不记录为失败
-          if (signal.aborted) break;
-          results.push({
-            success: false,
-            error: error instanceof Error ? error.message : "上传失败",
-          });
+  const releasePreviews = (drafts: Record<string, NovelMetadata>) => {
+    Object.values(drafts).forEach((draft) => {
+      if (draft.coverPreviewUrl) URL.revokeObjectURL(draft.coverPreviewUrl);
+    });
+  };
+
+  const openInfoStep = () => {
+    const pending = uploadFiles.filter((fileInfo) => fileInfo.status === "pending");
+    if (pending.length === 0) return;
+    const drafts: Record<string, NovelMetadata> = {};
+    for (const fileInfo of pending) {
+      drafts[fileInfo.id] = {
+        title: fileInfo.file.name.replace(/\.txt$/i, ""),
+        author: "",
+        coverFile: null,
+        coverPreviewUrl: null,
+      };
+    }
+    setMetadata(drafts);
+    setInfoDialogOpen(true);
+  };
+
+  const backToFileStep = () => {
+    releasePreviews(metadata);
+    setMetadata({});
+    setInfoDialogOpen(false);
+  };
+
+  const closeUploadFlow = () => {
+    releasePreviews(metadata);
+    setMetadata({});
+    setInfoDialogOpen(false);
+    closeUploadDialog?.();
+    setUploadFiles([]);
+  };
+
+  const updateMetadata = (fileId: string, patch: Partial<NovelMetadata>) => {
+    setMetadata((prev) => {
+      const current = prev[fileId] ?? { title: "", author: "", coverFile: null, coverPreviewUrl: null };
+      return { ...prev, [fileId]: { ...current, ...patch } };
+    });
+  };
+
+  const selectCover = (fileId: string, cover: File) => {
+    const extension = `.${cover.name.split(".").pop()?.toLowerCase()}`;
+    if (!(appConfig.acceptedCoverTypes as readonly string[]).includes(extension)) {
+      toast.error("封面只支持 jpg、png、webp");
+      return;
+    }
+    if (cover.size > appConfig.maxCoverSizeBytes) {
+      toast.error("封面不能超过 2 MB");
+      return;
+    }
+    setMetadata((prev) => {
+      const current = prev[fileId];
+      if (current?.coverPreviewUrl) URL.revokeObjectURL(current.coverPreviewUrl);
+      return {
+        ...prev,
+        [fileId]: {
+          title: current?.title ?? "",
+          author: current?.author ?? "",
+          coverFile: cover,
+          coverPreviewUrl: URL.createObjectURL(cover),
+        },
+      };
+    });
+  };
+
+  const removeCover = (fileId: string) => {
+    setMetadata((prev) => {
+      const current = prev[fileId];
+      if (current?.coverPreviewUrl) URL.revokeObjectURL(current.coverPreviewUrl);
+      return {
+        ...prev,
+        [fileId]: {
+          title: current?.title ?? "",
+          author: current?.author ?? "",
+          coverFile: null,
+          coverPreviewUrl: null,
+        },
+      };
+    });
+  };
+
+  const handleUpload = async () => {
+    const targets = uploadFiles.filter((f) => f.status === "pending" || f.status === "error");
+    if (targets.length === 0) return;
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setIsUploading(true);
+    setUploadFiles((prev) =>
+      prev.map((f) =>
+        targets.some((t) => t.id === f.id)
+          ? { ...f, status: "uploading" as const, progress: 0, error: undefined }
+          : f
+      )
+    );
+
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (const fileInfo of targets) {
+      try {
+        const draft = metadata[fileInfo.id];
+        await uploadNovel(fileInfo.file, {
+          signal: controller.signal,
+          title: draft?.title.trim() || undefined,
+          author: draft?.author.trim() || undefined,
+          cover: draft?.coverFile ?? null,
+        });
+        successCount += 1;
+        setUploadFiles((prev) =>
+          prev.map((f) =>
+            f.id === fileInfo.id
+              ? { ...f, status: "success" as const, progress: 100, error: undefined }
+              : f
+          )
+        );
+      } catch (error) {
+        if (controller.signal.aborted) {
+          setUploadFiles((prev) =>
+            prev.map((f) =>
+              f.id === fileInfo.id ? { ...f, status: "pending" as const, progress: 0 } : f
+            )
+          );
+          break;
         }
+        failureCount += 1;
+        const message = error instanceof Error ? error.message : "上传失败";
+        setUploadFiles((prev) =>
+          prev.map((f) =>
+            f.id === fileInfo.id
+              ? { ...f, status: "error" as const, progress: 0, error: message }
+              : f
+          )
+        );
       }
-      return results;
-    },
-    onSuccess: (results) => {
-      const successCount = results.filter((r) => r.success).length;
-      if (successCount > 0) {
-        toast.success(`成功上传 ${successCount} 本小说`);
-        queryClient.invalidateQueries({ queryKey: ["novels"] });
-      }
-      const failCount = results.length - successCount;
-      if (failCount > 0) toast.error(`${failCount} 本小说上传失败`);
-      if (failCount === 0) {
-        setTimeout(() => {
-          closeUploadDialog?.();
-          setUploadFiles([]);
-        }, 1000);
-      }
-    },
-  });
+    }
+
+    abortRef.current = null;
+    setIsUploading(false);
+
+    if (successCount > 0) {
+      toast.success(`成功上传 ${successCount} 本小说`);
+      queryClient.invalidateQueries({ queryKey: ["novels"] });
+    }
+    if (failureCount > 0) toast.error(`${failureCount} 本小说上传失败`);
+    if (failureCount === 0) {
+      closeUploadFlow();
+    }
+  };
+
+  const handleCancelUpload = () => {
+    abortRef.current?.abort();
+  };
 
   const deleteMutation = useMutation({
     mutationFn: deleteNovel,
@@ -176,8 +303,8 @@ export function HomePage() {
         case "updatedAt":
           cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
           break;
-        case "fileSize":
-          cmp = (a.fileSize ?? 0) - (b.fileSize ?? 0);
+        case "wordCount":
+          cmp = (a.wordCount ?? 0) - (b.wordCount ?? 0);
           break;
       }
       return sortOrder === "asc" ? cmp : -cmp;
@@ -279,16 +406,32 @@ export function HomePage() {
       )}
 
       <UploadDialog
-        open={uploadDialogOpen}
+        open={uploadDialogOpen && !infoDialogOpen}
         onOpenChange={(open) => {
           if (open) openUploadDialog?.();
           else closeUploadDialog?.();
         }}
         files={uploadFiles}
         onFilesChange={setUploadFiles}
-        onUpload={async (signal) => {
-          await uploadMutation.mutateAsync({ files: uploadFiles, signal });
+        onContinue={openInfoStep}
+      />
+
+      <NovelInfoDialog
+        open={uploadDialogOpen && infoDialogOpen}
+        onOpenChange={(open) => {
+          if (open) return;
+          abortRef.current?.abort();
+          closeUploadFlow();
         }}
+        files={uploadFiles}
+        metadata={metadata}
+        isUploading={isUploading}
+        onMetadataChange={updateMetadata}
+        onCoverSelect={selectCover}
+        onCoverRemove={removeCover}
+        onBack={backToFileStep}
+        onUpload={handleUpload}
+        onCancelUpload={handleCancelUpload}
       />
     </div>
   );

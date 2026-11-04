@@ -47,7 +47,6 @@ async function checkTaskReady(novelId: string, taskId: string): Promise<Response
 
 function buildTopicModelMeta(numTopics: number) {
   return {
-    model_key: "gensim-lda",
     library_version: "4.4.0",
     num_topics: numTopics,
     artifact_key: "models/topic/mock-run",
@@ -216,8 +215,8 @@ export const linguisticEntitiesTabHandler = http.get(
         { surface_text: "落霞谷", entity_type: "location", count: 11 },
       ],
       total_char_count: 186000,
-      metric_hit_count: 0,
-      fixed_phrase_density: 0,
+      metric_hit_count: 47,
+      fixed_phrase_density: 0.2527,
       four_char_candidate_count: 12,
       total_hits: 59,
       unavailable_reason: null,

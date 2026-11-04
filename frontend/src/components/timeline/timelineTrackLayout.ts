@@ -115,7 +115,7 @@ function resolveNodeProgress(node: TimelineLayoutInputNode): number {
 }
 
 export function resolveNodeId(node: TimelineLayoutInputNode): string {
-  const maybeRootEventId = (node as TimelineEventNode).root_event_id;
+  const maybeRootEventId = (node as TimelineEventNode).entry_event_id;
   const maybeTreeId = (node as TimelineEventNode).tree_id;
   return maybeRootEventId ?? maybeTreeId ?? "";
 }
@@ -135,12 +135,12 @@ export function createTimelineLayoutNodes(
   const orderIndexMap = new Map(derivedOrder.map((id, i) => [id, i] as const));
 
   // 对 nodes 按 derivedOrder 排序，fallback 按 progress（保证未命中也能稳定排序）
-  // derived_event_order 仅含 event_id，需同时命中 root_event_id 与 tree_id
+  // derived_event_order 仅含 event_id，需同时命中 entry_event_id 与 tree_id
   const sortedNodes = [...nodes].sort((a, b) => {
     const aNode = a as TimelineEventNode;
     const bNode = b as TimelineEventNode;
-    const aOrder = orderIndexMap.get(aNode.root_event_id ?? "") ?? orderIndexMap.get(aNode.tree_id ?? "");
-    const bOrder = orderIndexMap.get(bNode.root_event_id ?? "") ?? orderIndexMap.get(bNode.tree_id ?? "");
+    const aOrder = orderIndexMap.get(aNode.entry_event_id ?? "") ?? orderIndexMap.get(aNode.tree_id ?? "");
+    const bOrder = orderIndexMap.get(bNode.entry_event_id ?? "") ?? orderIndexMap.get(bNode.tree_id ?? "");
     if (aOrder != null && bOrder != null) return aOrder - bOrder;
     if (aOrder != null) return -1;
     if (bOrder != null) return 1;
@@ -153,8 +153,8 @@ export function createTimelineLayoutNodes(
     const aEnd = aNode.char_end ?? Number.MAX_SAFE_INTEGER;
     const bEnd = bNode.char_end ?? Number.MAX_SAFE_INTEGER;
     if (aEnd !== bEnd) return aEnd - bEnd;
-    return String(aNode.root_event_id ?? aNode.tree_id ?? "").localeCompare(
-      String(bNode.root_event_id ?? bNode.tree_id ?? ""),
+    return String(aNode.entry_event_id ?? aNode.tree_id ?? "").localeCompare(
+      String(bNode.entry_event_id ?? bNode.tree_id ?? ""),
     );
   });
 

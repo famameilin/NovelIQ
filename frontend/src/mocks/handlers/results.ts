@@ -15,6 +15,7 @@ import {
 
 import { narrativeResponse } from "../narrativeData";
 import { narrativePreviewResponse, NARRATIVE_PREVIEW_NOVEL } from "../narrativePreview";
+import { eventTreeReferenceResponse, EVENT_TREE_REFERENCE_NOVEL } from "../eventTreeReference";
 
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
 // 只写 completed（与后端 READABLE_RUN_STATUSES 对齐）
@@ -143,7 +144,8 @@ export const narrativeHandlers = [
   const err = await checkTaskReady(params.novelId as string, taskId);
   if (err) return err;
   await delay(80);
-  const response = (params.novelId === NARRATIVE_PREVIEW_NOVEL ? narrativePreviewResponse : narrativeResponse)(url.pathname, url.searchParams, taskId);
+  const respond = params.novelId === EVENT_TREE_REFERENCE_NOVEL ? eventTreeReferenceResponse : params.novelId === NARRATIVE_PREVIEW_NOVEL ? narrativePreviewResponse : narrativeResponse;
+  const response = respond(url.pathname, url.searchParams, taskId);
   return new HttpResponse(JSON.stringify(response.data), { status: response.status, headers: { "Content-Type": "application/json" } });
 }));
 
@@ -178,7 +180,6 @@ export const topicSeriesHandler = http.get(
     return HttpResponse.json({
       run_id: taskId,
       model: {
-        model_key: "gensim-lda",
         library_version: "4.4.0",
         num_topics: MOCK_NUM_TOPICS,
         artifact_key: "models/topic/mock-run",
@@ -225,7 +226,6 @@ export const topicEmotionHandler = http.get(
     return HttpResponse.json({
       run_id: taskId,
       model: {
-        model_key: "gensim-lda",
         library_version: "4.4.0",
         num_topics: MOCK_NUM_TOPICS,
         artifact_key: "models/topic/mock-run",

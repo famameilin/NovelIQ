@@ -148,13 +148,13 @@ export function PlotlineField({ chapters, cutoffIndex, changes, distribution, se
 }
 
 /** 密集章节单独分页，图上的聚合数量来自完整分布，不能受已加载页数限制 */
-export function ChapterChanges({ novelId, runId, group, subject, q, onClose, onSelect }: {
-  novelId: string; runId: string; group: ChapterChangesSelection; subject: string; q: string;
+export function ChapterChanges({ novelId, taskId, runId, group, subject, q, onClose, onSelect }: {
+  novelId: string; taskId: string; runId: string; group: ChapterChangesSelection; subject: string; q: string;
   onClose: () => void; onSelect: (id: string) => void;
 }) {
   const query = useInfiniteQuery({
     queryKey: ["plotline-chapter", novelId, runId, group.chapterId, group.dimension, subject, q],
-    queryFn: ({ pageParam, signal }) => getTimeline(novelId, runId, { throughChapterId: group.chapterId, windowStartChapterId: group.chapterId, dimension: group.dimension, subjectId: subject || undefined, q, cursor: pageParam, signal }),
+    queryFn: ({ pageParam, signal }) => getTimeline(novelId, taskId, { throughChapterId: group.chapterId, windowStartChapterId: group.chapterId, dimension: group.dimension, subjectId: subject || undefined, q, cursor: pageParam, signal }),
     initialPageParam: undefined as string | undefined, getNextPageParam: page => page.next_cursor ?? undefined, retry: false,
   });
   return <FloatingDetail title="本章变化" onClose={onClose}><p className={`text-xs ${narrativeMuted}`}>第 {group.chapterOrder} 章 · {dimensionLabels[group.dimension]} · {query.data?.pages[0]?.total ?? 0} 条</p>{query.isPending && <p>正在读取变化…</p>}{query.isError && <NarrativeError error={query.error} retry={() => void query.refetch()} />}{query.data?.pages.flatMap(page => page.changes).map(change => <button key={change.plotline_change_id} className={`mt-4 block w-full border-t pt-4 text-left ${narrativeLine}`} onClick={() => onSelect(change.plotline_change_id)}><small className={narrativeMuted}>{change.subject_title}</small><span className="block">{change.title}</span></button>)}{query.hasNextPage && <button className={`${control} mt-4 w-full`} disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>继续加载本章变化</button>}</FloatingDetail>;

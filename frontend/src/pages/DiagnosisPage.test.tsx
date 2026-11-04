@@ -153,7 +153,7 @@ describe("DiagnosisPage", () => {
     getDiagnosisMock.mockResolvedValue(null);
     getForeshadowingTreesMock.mockResolvedValue([
       {
-        root_event_id: "root-1",
+        source_event_id: "root-1",
         tree_id: "tree-1",
         first_chapter_id: 3,
         last_chapter_id: 8,
@@ -252,7 +252,7 @@ describe("DiagnosisPage", () => {
     });
     getForeshadowingTreesMock.mockResolvedValue([
       {
-        root_event_id: "root-open",
+        source_event_id: "root-open",
         tree_id: "tree-open",
         first_chapter_id: 2,
         last_chapter_id: 4,
@@ -265,7 +265,7 @@ describe("DiagnosisPage", () => {
         latest_reason: "等待后续证据",
       },
       {
-        root_event_id: "root-reinforced",
+        source_event_id: "root-reinforced",
         tree_id: "tree-reinforced",
         first_chapter_id: 3,
         last_chapter_id: 8,
@@ -279,7 +279,7 @@ describe("DiagnosisPage", () => {
         latest_why_unresolved_now: "关键证人尚未现身",
       },
       {
-        root_event_id: "root-paid",
+        source_event_id: "root-paid",
         tree_id: "tree-paid",
         first_chapter_id: 6,
         last_chapter_id: 10,
@@ -322,7 +322,7 @@ describe("DiagnosisPage", () => {
     getDiagnosisMock.mockResolvedValue(null);
     const reason = "判断依据完整保留".repeat(50);
     getForeshadowingTreesMock.mockResolvedValue(Array.from({ length: 17 }, (_, index) => ({
-      root_event_id: `root-${index}`, tree_id: `tree-${index}`,
+      source_event_id: `root-${index}`, tree_id: `tree-${index}`,
       first_chapter_id: index + 1, last_chapter_id: index + 1, anchor_chapter_ids: [index + 1],
       description: `第${index + 1}条线索`, status: "open", active: true, strength: "medium",
       payoff_likelihood: "high", latest_reason: reason,

@@ -357,7 +357,7 @@ function FieldControl({ spec, value, onChange, defaultValue, inputId }: FieldCon
           <SelectContent>
             {spec.enum_values.map((item) => (
               <SelectItem key={item} value={item}>
-                {item}
+                {spec.enum_labels?.[item] ?? item}
               </SelectItem>
             ))}
           </SelectContent>

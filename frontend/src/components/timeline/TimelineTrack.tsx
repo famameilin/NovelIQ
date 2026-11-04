@@ -51,13 +51,13 @@ const PHASE_SURFACE_CLASS_MAP: Record<string, string> = {
 };
 
 function isTimelineEventNode(node: TimelineTrackNodeInput): node is TimelineEventNode {
-  return typeof (node as TimelineEventNode).tree_id === "string" && typeof (node as TimelineEventNode).root_event_id === "string";
+  return typeof (node as TimelineEventNode).tree_id === "string" && typeof (node as TimelineEventNode).entry_event_id === "string";
 }
 
 function resolveNodeKey(node: TimelineTrackNodeInput): string {
   // 类型守卫确保为 TimelineEventNode，避免 any 逃逸
   if (isTimelineEventNode(node)) {
-    return node.root_event_id ?? node.tree_id ?? "";
+    return node.entry_event_id ?? node.tree_id ?? "";
   }
   return (node as TimelineEventNode).tree_id ?? "";
 }
@@ -133,8 +133,8 @@ export function TimelineTrack({
     }
     const orderIndexMap = new Map(derivedOrder.map((id, i) => [id, i] as const));
     return [...nodes].sort((a, b) => {
-      const aIdx = orderIndexMap.get(a.root_event_id ?? "") ?? orderIndexMap.get(a.tree_id ?? "") ?? null;
-      const bIdx = orderIndexMap.get(b.root_event_id ?? "") ?? orderIndexMap.get(b.tree_id ?? "") ?? null;
+      const aIdx = orderIndexMap.get(a.entry_event_id ?? "") ?? orderIndexMap.get(a.tree_id ?? "") ?? null;
+      const bIdx = orderIndexMap.get(b.entry_event_id ?? "") ?? orderIndexMap.get(b.tree_id ?? "") ?? null;
       if (aIdx != null && bIdx != null) return aIdx - bIdx;
       if (aIdx != null) return -1;
       if (bIdx != null) return 1;
@@ -146,7 +146,7 @@ export function TimelineTrack({
       const aEnd = a.char_end ?? Number.MAX_SAFE_INTEGER;
       const bEnd = b.char_end ?? Number.MAX_SAFE_INTEGER;
       if (aEnd !== bEnd) return aEnd - bEnd;
-      return String(a.root_event_id ?? a.tree_id).localeCompare(String(b.root_event_id ?? b.tree_id));
+      return String(a.entry_event_id ?? a.tree_id).localeCompare(String(b.entry_event_id ?? b.tree_id));
     });
   }, [nodes, derivedOrder]);
 

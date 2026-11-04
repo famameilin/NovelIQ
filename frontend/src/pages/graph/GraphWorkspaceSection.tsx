@@ -4,7 +4,9 @@ import { motion } from "framer-motion";
 import { ArrowRight, History, Link2, Users } from "lucide-react";
 
 import type { GraphChange, GraphData, GraphNode } from "@/api/types";
+import type { GraphScope } from "@/components/charts/forceGraph/graphFocusModel";
 import type { ForceGraphHandle, GraphNodeObject } from "@/components/charts/forceGraphTypes";
+import type { GraphEntityTypeOption } from "@/components/charts/GraphToolbar";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { ForceGraph } from "@/components/charts/ForceGraph";
 import { GraphLegend } from "@/components/charts/GraphLegend";
@@ -14,10 +16,24 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 import { formatAnalysisLabel } from "@/lib/analysisLabels";
+import { formatRelationDirectionLabel } from "@/lib/graphLabels";
+
+export interface GraphSubgraphMeta {
+  chapterOrder: number;
+  /** 全书实体数，作为显示范围的对照 */
+  totalNodeCount: number;
+  visibleNodeCount: number;
+  visibleEdgeCount: number;
+  eligibleNodeCount: number;
+  hiddenNodeCount: number;
+  hiddenEdgeCount: number;
+  focusNode: GraphNode | null;
+}
 
 interface GraphWorkspaceSectionProps {
   view?: "full" | "graph" | "changes";
   graphData: GraphData;
+  subgraphMeta: GraphSubgraphMeta;
   forceGraphRef: RefObject<ForceGraphHandle | null>;
   onNodeClick: (node: GraphNodeObject) => void;
   searchQuery: string;
@@ -31,6 +47,15 @@ interface GraphWorkspaceSectionProps {
   onCenter: () => void;
   onRelationTypeChange: (types: Set<string>) => void;
   onSearchChange: (query: string) => void;
+  graphScope: GraphScope;
+  onGraphScopeChange: (scope: GraphScope) => void;
+  entityTypeOptions: GraphEntityTypeOption[];
+  selectedEntityTypes: Set<string>;
+  onEntityTypeChange: (types: Set<string>) => void;
+  searchMatches: GraphNode[];
+  onSelectSearchMatch: (node: GraphNode) => void;
+  labeledNodeIds: Set<string>;
+  onClearFocus: () => void;
   totalChangeCount: number;
   loadedChangeCount: number;
   hasMoreChanges: boolean;
@@ -57,21 +82,13 @@ const INITIAL_VISIBLE_CHANGE_COUNT = 8;
 const CHANGE_REVEAL_STEP = 20;
 
 /**
- * 将图谱关系方向转换为中文文案
- */
-function getDirectionalityLabel(directionality?: "directed" | "bidirectional" | null): string {
-  if (directionality === "bidirectional") return "双向关系";
-  if (directionality === "directed") return "单向关系";
-  return "方向未标注";
-}
-
-/**
  * 承载关系画布、变化记录和联动详情
  * 简要说明：根据主视图组合画布与变化区域，并分批展示已经加载的变化记录
  */
 export function GraphWorkspaceSection({
   view = "full",
   graphData,
+  subgraphMeta,
   forceGraphRef,
   onNodeClick,
   searchQuery,
@@ -85,6 +102,15 @@ export function GraphWorkspaceSection({
   onCenter,
   onRelationTypeChange,
   onSearchChange,
+  graphScope,
+  onGraphScopeChange,
+  entityTypeOptions,
+  selectedEntityTypes,
+  onEntityTypeChange,
+  searchMatches,
+  onSelectSearchMatch,
+  labeledNodeIds,
+  onClearFocus,
   totalChangeCount,
   loadedChangeCount,
   hasMoreChanges,
@@ -134,10 +160,25 @@ export function GraphWorkspaceSection({
     >
       {view !== "changes" && (
       <Card id="graph-workspace" variant="elevated" className="flex h-full min-h-0 flex-col rounded-lg">
-        <CardHeader className="shrink-0 gap-4">
-          <div className="space-y-1">
-            <CardTitle className="text-base">当前人物关系</CardTitle>
-            <CardDescription>截至第 {graphData.chapter_order} 章的有效实体与关系</CardDescription>
+        <CardHeader className="shrink-0 gap-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <CardTitle className="text-base">当前人物关系</CardTitle>
+              <CardDescription>
+                截至第 {subgraphMeta.chapterOrder} 章 · 当前显示 {subgraphMeta.visibleNodeCount} / {subgraphMeta.totalNodeCount} 个实体 · {subgraphMeta.visibleEdgeCount} 条关系
+              </CardDescription>
+            </div>
+            {subgraphMeta.focusNode ? (
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="text-xs text-text-muted">
+                  全部实体 <span className="text-text-muted/70">›</span>{" "}
+                  <span className="font-medium text-text">{subgraphMeta.focusNode.name}</span>
+                </span>
+                <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={onClearFocus}>
+                  返回全图
+                </Button>
+              </div>
+            ) : null}
           </div>
           <GraphToolbar
             onZoomIn={onZoomIn}
@@ -149,11 +190,19 @@ export function GraphWorkspaceSection({
             onRelationTypeChange={onRelationTypeChange}
             searchQuery={searchQuery}
             onSearchChange={onSearchChange}
+            graphScope={graphScope}
+            onGraphScopeChange={onGraphScopeChange}
+            scopeDisabled={subgraphMeta.focusNode !== null}
+            entityTypeOptions={entityTypeOptions}
+            selectedEntityTypes={selectedEntityTypes}
+            onEntityTypeChange={onEntityTypeChange}
+            searchMatches={searchMatches}
+            onSelectSearchMatch={onSelectSearchMatch}
             className="w-full"
           />
         </CardHeader>
 
-        <CardContent className="flex min-h-0 flex-1 flex-col">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-2">
           <div className="relative min-h-[320px] flex-1 overflow-hidden rounded-lg border border-border bg-surface">
             <ForceGraph
               ref={forceGraphRef}
@@ -162,13 +211,28 @@ export function GraphWorkspaceSection({
               searchQuery={searchQuery}
               relationFilter={selectedRelationTypes}
               appearanceCountMap={appearanceCountMap}
+              focusNodeId={subgraphMeta.focusNode?.entity_id ?? null}
+              labeledNodeIds={labeledNodeIds}
               className="absolute inset-0"
             />
-
-            <div className="absolute bottom-4 left-4 z-10 block">
-              <GraphLegend entityTypes={entityTypes} relationTypes={relationTypes} />
-            </div>
           </div>
+
+          {subgraphMeta.focusNode ? (
+            <p className="shrink-0 text-xs text-text-muted">
+              仅显示与「{subgraphMeta.focusNode.name}」直接相关的 {Math.max(subgraphMeta.visibleNodeCount - 1, 0)} 个实体
+              {subgraphMeta.hiddenNodeCount > 0 ? `，另有 ${subgraphMeta.hiddenNodeCount} 个未显示` : ""}。
+            </p>
+          ) : subgraphMeta.hiddenNodeCount > 0 ? (
+            <p className="shrink-0 text-xs text-text-muted">
+              本节显示关系最强的 {subgraphMeta.visibleNodeCount} 个实体，另有 {subgraphMeta.hiddenNodeCount} 个未在当前范围内。
+            </p>
+          ) : null}
+
+          <GraphLegend
+            entityTypes={entityTypes}
+            relationTypes={relationTypes}
+            className="shrink-0"
+          />
         </CardContent>
       </Card>
       )}
@@ -378,9 +442,9 @@ export function GraphWorkspaceSection({
                     <div className="rounded-xl border border-border bg-surface p-4">
                       <p className="text-xs uppercase tracking-wide text-text-muted">关系方向</p>
                       <p className="mt-2 text-sm font-medium text-text">
-                        {selectedChange.change_kind === "relation"
-                          ? getDirectionalityLabel(selectedChange.directionality)
-                          : "实体状态"}
+                          {selectedChange.change_kind === "relation"
+                            ? formatRelationDirectionLabel(selectedChange.directionality)
+                            : "实体状态"}
                       </p>
                     </div>
                   </div>

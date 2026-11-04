@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { AlertCircle } from "lucide-react";
 
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
@@ -5,13 +7,21 @@ import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 interface TabUnavailableStateProps {
   reason: string | null | undefined;
   title?: string;
+  /** 调用方补充的当前口径说明 */
+  detail?: ReactNode;
   className?: string;
 }
 
 /**
- * tab 数据不可用空态：保留不可用信号，不直接暴露后端内部原因
+ * tab 数据不可用空态
+ * 简要说明：保留不可用信号，不直接暴露后端内部原因，口径说明由调用方传入
  */
-export function TabUnavailableState({ reason, title = "数据暂不可用", className }: TabUnavailableStateProps) {
+export function TabUnavailableState({
+  reason,
+  title = "数据暂不可用",
+  detail,
+  className,
+}: TabUnavailableStateProps) {
   return (
     <DashboardCardShell
       title={title}
@@ -23,6 +33,7 @@ export function TabUnavailableState({ reason, title = "数据暂不可用", clas
       <AlertCircle className="h-12 w-12 text-text-muted" />
       <p className="text-sm text-text-muted">当前任务暂无可展示的结果数据。</p>
       {reason && <p className="max-w-md text-xs text-text-muted/80">分析数据源暂未满足当前视图的生成条件。</p>}
+      {detail ? <div className="max-w-md text-xs leading-5 text-text-muted/80">{detail}</div> : null}
     </DashboardCardShell>
   );
 }

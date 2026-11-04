@@ -51,26 +51,34 @@ export function useGraphChangePagination({ novelId, taskScopeId }: UseGraphChang
 
     const requestTaskId = taskScopeId;
     setIsChangesLoading(true);
-    void getGraphChanges(novelId, taskScopeId)
+    let active = true;
+    void Promise.resolve()
+      .then(() => {
+        if (!active) return null;
+        return getGraphChanges(novelId, taskScopeId);
+      })
       .then((page) => {
-        if (changesRequestSeqRef.current !== requestSeq || currentTaskScopeIdRef.current !== requestTaskId) {
+        if (!active || !page || changesRequestSeqRef.current !== requestSeq || currentTaskScopeIdRef.current !== requestTaskId) {
           return;
         }
         setLoadedChanges(page.changes);
         setChangesPageInfo(page.page_info);
       })
       .catch((error: unknown) => {
-        if (changesRequestSeqRef.current !== requestSeq || currentTaskScopeIdRef.current !== requestTaskId) {
+        if (!active || changesRequestSeqRef.current !== requestSeq || currentTaskScopeIdRef.current !== requestTaskId) {
           return;
         }
         const message = error instanceof Error ? error.message : "加载图谱变化失败";
         setChangesLoadError(message);
       })
       .finally(() => {
-        if (changesRequestSeqRef.current === requestSeq && currentTaskScopeIdRef.current === requestTaskId) {
+        if (active && changesRequestSeqRef.current === requestSeq && currentTaskScopeIdRef.current === requestTaskId) {
           setIsChangesLoading(false);
         }
       });
+    return () => {
+      active = false;
+    };
   }, [novelId, taskScopeId]);
 
   const sortedChanges = useMemo(() => {

@@ -12,6 +12,7 @@ import { getLinguisticFeatures, getLinguisticWord2vec } from "@/api/linguistic";
 import { getLinguisticEntitiesTab, tabQueryKey } from "@/api/tabs";
 import type { LinguisticEntitiesTabResponse, LinguisticFeaturesResponse, Word2VecStatsResponse } from "@/api/types";
 import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
+import { useNovelTitle } from "@/hooks/useNovelTitle";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { TabUnavailableState } from "@/components/common/TabUnavailableState";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
@@ -48,6 +49,7 @@ function renderTabGate<T>(
   title: string,
   unavailableReason: string | null | undefined,
   content: (data: T) => ReactNode,
+  unavailableDetail?: ReactNode,
 ): ReactNode {
   if (query.isLoading) {
     return (
@@ -75,7 +77,13 @@ function renderTabGate<T>(
   }
   if (!query.data) return null;
   if (unavailableReason) {
-    return <TabUnavailableState reason={unavailableReason} title={`${title}暂不可用`} />;
+    return (
+      <TabUnavailableState
+        reason={unavailableReason}
+        title={`${title}暂不可用`}
+        detail={unavailableDetail ?? <p>{unavailableReason}</p>}
+      />
+    );
   }
   return content(query.data);
 }
@@ -91,14 +99,14 @@ interface UseQueryResultLike<T> {
 
 /**
  * 将后端不可用原因转换为用户可读文案
- * 简要说明：隐藏内部字段名，保留实际原因中的中文说明
+ * 简要说明：去掉原因前缀与内部字段名，保留实际原因中的中文说明
  */
 function formatUnavailableReason(reason: string | null | undefined): string | null {
   if (!reason) return null;
   return reason
-    .replace(/^\s*linguistic_unavailable\s*:\s*/i, "")
+    .replace(/^\s*[a-z][a-z0-9_]*_unavailable\s*:\s*/i, "")
     .replace(/paragraph_linguistic_features/g, "段落语言特征数据")
-    .replace(/word2vec/g, "词向量数据");
+    .replace(/Word2Vec/g, "词向量");
 }
 
 function pageItems<T>(items: readonly T[], page: number, pageSize: number) {
@@ -205,16 +213,14 @@ function EntityPhraseView({ entitiesQuery }: { entitiesQuery: UseQueryResultLike
         <div className="flex h-full min-h-0 flex-col gap-3">
             <AnalysisMetricStrip
               items={[
-                { label: "固定表达密度（‰）", value: data.metric_status === "pending_review" ? "待审定" : data.fixed_phrase_density?.toFixed(4) ?? "—" },
-                { label: "正式命中次数", value: data.metric_status === "pending_review" ? "待审定" : data.metric_hit_count },
+                { label: "固定表达密度（‰）", value: data.fixed_phrase_density?.toFixed(4) ?? "—" },
+                { label: "词表命中次数", value: data.metric_hit_count },
                 { label: "四字候选数", value: data.four_char_candidate_count },
-                { label: "待审词表命中", value: data.audit_hit_count },
                 { label: "候选记录总数", value: data.total_hits },
               ]}
-              className="grid-cols-5 [&>div]:px-3 [&>div]:py-1.5 [&>div>dd]:text-base"
+              className="grid-cols-4 [&>div]:px-3 [&>div]:py-1.5 [&>div>dd]:text-base"
             />
             <p className="text-xs text-text-muted">
-              {data.metric_status === "pending_review" && "固定表达词表尚在审定，暂不计算正式密度。"}
               实体类型来自 LTP 候选识别，与知识图谱实体分类口径不同。
             </p>
             <AnalysisViewSwitcher value={view} onValueChange={setView} label="实体指标" options={[
@@ -341,6 +347,10 @@ function WordVectorSemanticView({ word2vecQuery }: { word2vecQuery: UseQueryResu
             </DashboardCardShell>}
           </>
         ),
+        <div className="space-y-1">
+          <p>{formatUnavailableReason(word2vecData?.unavailable_reason)}</p>
+          <p>词向量在语言特征阶段训练，可在「设置 → 语言特征」开启「启用 Word2Vec」后重新分析生成。</p>
+        </div>,
       )}
     </motion.div>
   );
@@ -384,8 +394,10 @@ export function LinguisticPage() {
     staleTime: STALE_TIME,
   });
 
+  const title = useNovelTitle("语言特征");
+
   return (
-    <AnalysisWorkspace title="语言特征">
+    <AnalysisWorkspace title={title}>
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="flex h-full min-h-0 flex-col">
         <AnalysisWorkspace.Tabs value={activeTab} onValueChange={setActiveTab}>
           <AnalysisWorkspace.Tab value="structure" label="表达结构">

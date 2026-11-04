@@ -99,8 +99,7 @@ vi.mock("@/hooks/useAnalysisStatus", () => ({
   useAnalysisStatus: (novelId: string | null, taskId: string | null) => {
     const query = useQuery({queryKey: ["task-status", novelId, taskId],
       queryFn: () => getTaskStatusMock(novelId, taskId), enabled: !!novelId && !!taskId});
-    return {isConnected: false, query, status: query.data?.status ?? null,
-      snapshotReady: true, projectionSynced: true};
+    return {isConnected: false, query, status: query.data?.status ?? null};
   },
 }));
 
@@ -499,6 +498,18 @@ describe("NovelDetailPage", () => {
     await waitFor(()=>expect(getDashboardTabMock).toHaveBeenCalledWith('novel-1','task-ready'));
     expect(screen.queryByRole('button',{name:'查看分析任务'})).toBeNull();
     expect(navigateMock).not.toHaveBeenCalledWith('/novels/novel-1/analysis/task-ready',expect.anything());
+  });
+  it("仪表盘聚合未返回时展示已经读取的诊断", async () => {
+    currentSearchParams = "task_id=task-ready";
+    getDashboardTabMock.mockImplementation(() => new Promise(() => {}));
+    const { queryClient } = renderNovelDetailPage();
+
+    await waitFor(() => expect(getDashboardTabMock).toHaveBeenCalled());
+    queryClient.setQueryData(["results", "novel-1", "task-ready", "diagnosis"], { power_stance_score: 4 });
+
+    expect(await screen.findByTestId("diagnosis-summary-card")).toBeInTheDocument();
+    expect(screen.getByTestId("score-overview-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("narrative-structure-bar")).not.toBeInTheDocument();
   });
   it('不带任务的小说地址保留选择入口，不被先前任务带走',async()=>{
     useNovelStore.setState({currentNovelId:'novel-1',currentTaskId:'task-old'});

@@ -35,10 +35,10 @@ export function AnalysisTaskPage() {
   });
   useEffect(() => {
     if (epoch < openedEpoch.current || !novelId || !taskId || analysis.query.isError) return;
-    if (analysis.status === "completed" && analysis.projectionSynced) {
+    if (analysis.status === "completed") {
       navigate(novelTaskPath(novelId, taskId), {replace: true});
     }
-  }, [epoch, novelId, taskId, analysis.status, analysis.projectionSynced, analysis.query.isError, navigate]);
+  }, [epoch, novelId, taskId, analysis.status, analysis.query.isError, navigate]);
   const novel = useQuery({
     queryKey: ["novel", novelId], queryFn: () => getNovel(novelId!),
     enabled: !!novelId, staleTime: 5 * 60 * 1000,

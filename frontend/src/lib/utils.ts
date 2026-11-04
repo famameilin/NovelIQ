@@ -19,8 +19,16 @@ export function formatFileSize(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
-type BadgeVariant = "default" | "secondary" | "success" | "destructive" | "outline";
+/**
+ * 把字数归一化为中文单位：一万以内保留完整数字，一万以上用万，一亿以上用亿
+ */
+export function formatWordCount(count: number): string {
+  if (count < 10_000) return `${count.toLocaleString("zh-CN")} 字`;
+  if (count < 100_000_000) return `${(count / 10_000).toFixed(1)} 万字`;
+  return `${(count / 100_000_000).toFixed(1)} 亿字`;
+}
 
+type BadgeVariant = "default" | "secondary" | "success" | "destructive" | "outline";
 export interface TaskStatusDisplay {
   label: string;
   variant: BadgeVariant;

@@ -1,8 +1,29 @@
-import { eventTreeResponse } from "./narrativeData";
+import { buildScaleBook, scaleEventTreeResponse } from "./eventTreeScale";
 import type { PlotlineChange, PlotlineDimension, PlotlineTimelineResponse } from "../api/narrativeTypes";
 
 export const NARRATIVE_PREVIEW_NOVEL = "narrative-design-demo";
 export const NARRATIVE_PREVIEW_TASK = "narrative-design-task";
+const previewTree = buildScaleBook({ chapters: 30, eventsPerChapter: 4, trees: 7, outcomes: 9 });
+const sharedBranches = [
+  { owner: 2, sources: [0, 1], title: "档案追查", problem: "核对档案，寻找身份线索", reasons: ["失踪调查促成档案追查", "身份调查引用同一批档案核查"] },
+  { owner: 4, sources: [0, 5], title: "证物比对", problem: "比对证物，确认线索联系", reasons: ["失踪调查推动证物比对", "远端搜寻引用同一批证物核验"] },
+  { owner: 6, sources: [4, 5], title: "证词核验", problem: "核验证词，确认事件真相", reasons: ["证物比对推动证词核验", "失踪者搜寻引用同一组证词核查"] },
+];
+const sharedReferences = sharedBranches.flatMap(branch => {
+  const owner = previewTree.event_line_ids[branch.owner];
+  const target = previewTree.queue_references.find(edge => edge.parent_tree_id === owner)!.child_tree_id;
+  const targetEventId = previewTree.queues.find(tree => tree.tree_id === target)!.event_ids[0];
+  const root = previewTree.events.find(event => event.event_id === targetEventId)!;
+  root.title = branch.title;
+  root.problem = branch.problem;
+  root.summary = `${branch.title}逐层核对线索，为多项调查提供共同依据。`;
+  return branch.sources.map((source, index) => ({
+    parent_tree_id: previewTree.event_line_ids[source], child_tree_id: target,
+    reason: branch.reasons[index], evidence: [{ chapter_id: root.chapter_id, paragraph_id: root.chapter_id }],
+  }));
+});
+previewTree.queue_references.push(...sharedReferences);
+previewTree.counts.tree_references = previewTree.queue_references.length;
 
 // 虚构样本，只在开发 mock 中提供，用于同内容视觉对照
 const events = [
@@ -50,7 +71,7 @@ const changes: PlotlineChange[] = referenceChanges.map(change => ({
 }));
 /** 与正式接口同形的只读响应；样本状态来自 mock 任务，不触及业务任务 */
 export function narrativePreviewResponse(path: string, params: URLSearchParams, runId = NARRATIVE_PREVIEW_TASK): { status: number; data: unknown } {
-  if (path.includes("/event-trees")) return eventTreeResponse(path, params, runId);
+  if (path.includes("/event-trees")) return scaleEventTreeResponse(previewTree, path, params, runId);
   const cutoff = Math.min(12, Math.max(1, Number(params.get("through_chapter_id")) || 1));
   const id = decodeURIComponent(path.split("/").at(path.endsWith("/source") ? -2 : -1)!);
   const change = changes.find(item => item.plotline_change_id === id);
@@ -62,8 +83,19 @@ export function narrativePreviewResponse(path: string, params: URLSearchParams, 
     return { status: 200, data: { chapter_id: chapterId, title: event.title, paragraphs: [{ paragraph_id: chapterId, paragraph_index: 0, text: event.quote }] } };
   }
   if (path.includes("/timeline/changes/")) return { status: 200, data: change };
+  const visible = changes.filter(item => item.chapter_order <= cutoff);
+  const states = [...new Map(visible.map(item => [item.subject_id, item])).values()].map(item => ({ subject_id: item.subject_id, subject_title: item.subject_title, dimension: item.dimension, state: item.after, chapter_id: item.chapter_id, chapter_order: item.chapter_order }));
+  if (path.endsWith("/timeline/states")) {
+    const matched = states.filter(state => (!params.get("dimension") || state.dimension === params.get("dimension")) && (!params.get("subject_id") || state.subject_id === params.get("subject_id")));
+    const offset = Number(params.get("cursor")) || 0, limit = Number(params.get("limit")) || 100;
+    if (params.get("summary") === "true") return { status: 200, data: { states: matched.slice(0, 4), state_counts: Object.fromEntries([...new Set(matched.map(state => state.dimension))].map(dimension => [dimension, matched.filter(state => state.dimension === dimension).length])), state_total: matched.length, total: matched.length, next_cursor: null } };
+    return { status: 200, data: { states: matched.slice(offset, offset + limit), total: matched.length, next_cursor: offset + limit < matched.length ? String(offset + limit) : null } };
+  }
+  if (path.endsWith("/timeline/subjects")) {
+    const matched = states.filter(state => !params.get("q") || state.subject_title.includes(params.get("q")!));
+    return { status: 200, data: { subjects: matched.map(state => ({ subject_id: state.subject_id, subject_title: state.subject_title, dimension: state.dimension })), total: matched.length, next_cursor: null } };
+  }
   if (path.endsWith("/timeline")) {
-    const visible = changes.filter(item => item.chapter_order <= cutoff);
     const stateMap = new Map(visible.map(item => [item.subject_id, item]));
     const filtered = visible.filter(item => (!params.get("dimension") || item.dimension === params.get("dimension")) && (!params.get("subject_id") || item.subject_id === params.get("subject_id")) && (!params.get("q") || `${item.title}${item.subject_title}`.includes(params.get("q")!)));
     const windowed = filtered.filter(item => item.chapter_order >= (Number(params.get("window_start_chapter_id")) || 1));
@@ -71,10 +103,11 @@ export function narrativePreviewResponse(path: string, params: URLSearchParams, 
     const distribution = [...new Map(filtered.map(item => [`${item.dimension}:${item.chapter_id}`, { chapter_id: item.chapter_id, chapter_order: item.chapter_order, dimension: item.dimension, count: filtered.filter(other => other.dimension === item.dimension && other.chapter_id === item.chapter_id).length }])).values()];
     const data: PlotlineTimelineResponse = {
       run_id: runId, chapters, through_chapter_id: cutoff, changes: windowed.slice(offset, offset + limit),
-      states: [...stateMap.values()].map(item => ({ subject_id: item.subject_id, subject_title: item.subject_title, dimension: item.dimension, state: item.after, chapter_id: item.chapter_id, chapter_order: item.chapter_order })),
-      subjects: [...stateMap.values()].map(item => ({ subject_id: item.subject_id, subject_title: item.subject_title, dimension: item.dimension })),
+      states: [...stateMap.values()].map(item => ({ subject_id: item.subject_id, subject_title: item.subject_title, dimension: item.dimension, state: item.after, chapter_id: item.chapter_id, chapter_order: item.chapter_order })).slice(0, 4),
+      state_counts: {}, state_total: stateMap.size,
       total: windowed.length, next_cursor: offset + limit < windowed.length ? String(offset + limit) : null, distribution,
     };
+    if (params.get("meta_only") === "true") return { status: 200, data: { ...data, changes: [], states: [], state_counts: {}, state_total: 0, total: 0, next_cursor: null, distribution: [] } };
     return { status: 200, data };
   }
   return { status: 404, data: { detail: "NOT_FOUND" } };

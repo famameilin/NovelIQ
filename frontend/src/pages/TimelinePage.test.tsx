@@ -47,6 +47,7 @@ it("仅章节入口同样定位，长段原文关闭重开保留分片位置", a
   await userEvent.click(within(reader).getByRole("button", { name: "关闭原文" }));
   await userEvent.click(screen.getByRole("button", { name: "阅读原文" }));
   await waitFor(() => expect(screen.getByRole("dialog", { name: "章节原文" })).toHaveTextContent("2 / 3"));
+  api.mock.calls.filter(([path]) => String(path).includes("/timeline")).forEach(([, config]) => expect(config?.params).toMatchObject({ task_id: "task-a" }));
 });
 
 it("未完成任务只显示项目统一等待状态", async () => {

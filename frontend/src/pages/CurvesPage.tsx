@@ -56,12 +56,12 @@ export function CurvesPage() {
 
   const emotionChartRef = useRef<ReactEChartsCore>(null);
   const rhythmChartRef = useRef<ReactEChartsCore>(null);
+  const [activeTab, setActiveTab] = useState("emotion");
 
   const [visibleSeries, setVisibleSeries] = useState<VisibleSeriesState>({
     emotion: new Set<EmotionTrendSeriesKey>([
       "pooled_pos_density",
       "pooled_neg_density",
-      "pooled_net_density",
       "smoothed_pooled_net_density",
     ]),
     rhythm: new Set<RhythmSeriesKey>(["surface_tension", "smoothed_surface_tension"]),
@@ -109,7 +109,7 @@ export function CurvesPage() {
   const rhythmQuery = useQuery({
     queryKey: tabQueryKey("rhythm", novelId, storeTaskId),
     queryFn: () => getRhythmTab(novelId!, storeTaskId!, { maxPoints: 800 }),
-    enabled,
+    enabled: enabled && activeTab === "rhythm",
     staleTime: STALE_TIME,
   });
 
@@ -269,7 +269,7 @@ export function CurvesPage() {
   return (
     <AnalysisWorkspace title={novelTitle}>
       <div className="flex h-full min-h-0 flex-col gap-2">
-      <AnalysisWorkspace.Tabs defaultValue="emotion">
+      <AnalysisWorkspace.Tabs value={activeTab} onValueChange={setActiveTab}>
         <AnalysisWorkspace.Tab value="emotion" label="情绪趋势">
           <DashboardCardShell
             title="情绪趋势曲线"

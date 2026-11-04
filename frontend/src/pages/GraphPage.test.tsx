@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,7 @@ const getGraphNetworkTabMock = vi.fn();
 const getGraphChangesMock = vi.fn();
 const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
+const forceGraphState = vi.hoisted(() => ({ data: null as GraphData | null }));
 
 let currentGraphSearchParams = "task_id=task-a";
 
@@ -76,19 +77,22 @@ vi.mock("@/components/charts/ForceGraph", () => ({
   }: {
     data: GraphData;
     onNodeClick: (node: GraphNodeObject) => void;
-  }) => (
-    <button
-      type="button"
-      onClick={() => {
-        const node = data.nodes[0];
-        if (node) {
-          onNodeClick({ ...node, id: String(node.entity_id) });
-        }
-      }}
-    >
-      选择第一个节点
-    </button>
-  ),
+  }) => {
+    forceGraphState.data = data;
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          const node = data.nodes[0];
+          if (node) {
+            onNodeClick({ ...node, id: String(node.entity_id) });
+          }
+        }}
+      >
+        选择第一个节点
+      </button>
+    );
+  },
 }));
 
 vi.mock("@/components/charts/GraphToolbar", () => ({
@@ -145,6 +149,15 @@ function createGraphData(): GraphData {
         state_chapter_id: 3,
         state: {},
       },
+      {
+        entity_id: "3",
+        name: "临安",
+        entity_type: "location",
+        first_seen_chapter: 1,
+        last_seen_chapter: 15,
+        state_chapter_id: 3,
+        state: {},
+      },
     ],
     edges: [
       {
@@ -155,6 +168,20 @@ function createGraphData(): GraphData {
         source_name: "顾霜",
         target_name: "司夜",
         relation_type: "盟友",
+        directionality: "directed",
+        relation_semantics: "ordinary",
+        attributes: {},
+        is_active: true,
+        changes: [],
+      },
+      {
+        relation_id: "relation-2",
+        state_chapter_id: 3,
+        source_entity_id: "1",
+        target_entity_id: "3",
+        source_name: "顾霜",
+        target_name: "临安",
+        relation_type: "位于",
         directionality: "directed",
         relation_semantics: "ordinary",
         attributes: {},
@@ -243,6 +270,20 @@ describe("GraphPage", () => {
     } satisfies Novel);
   });
 
+  it("关系快照结束后再加载变化列表", async () => {
+    const response = await getGraphNetworkTabMock();
+    getGraphNetworkTabMock.mockClear();
+    let resolveNetwork!: (value: typeof response) => void;
+    getGraphNetworkTabMock.mockImplementationOnce(() => new Promise((resolve) => { resolveNetwork = resolve; }));
+
+    renderPage();
+    await waitFor(() => expect(getGraphNetworkTabMock).toHaveBeenCalled());
+    expect(getGraphChangesMock).not.toHaveBeenCalled();
+
+    await act(async () => resolveNetwork(response));
+    await waitFor(() => expect(getGraphChangesMock).toHaveBeenCalledWith("novel-1", "task-a"));
+  });
+
   it("人物关系视图展示章节快照并支持同屏实体详情", async () => {
     const user = userEvent.setup();
     renderPage();
@@ -256,6 +297,35 @@ describe("GraphPage", () => {
     expect(inspector).toHaveTextContent("司夜");
     expect(inspector).not.toHaveTextContent("entity_id");
     expect(getGraphChangesMock).toHaveBeenCalledWith("novel-1", "task-a");
+  });
+
+  it("默认只绘制人物实体，地点等类型不进入画布", async () => {
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("当前人物关系")).toBeInTheDocument());
+
+    await waitFor(() => expect(forceGraphState.data).not.toBeNull());
+    const nodes = forceGraphState.data?.nodes ?? [];
+    expect(nodes.length).toBeGreaterThan(0);
+    expect(nodes.every((node) => node.entity_type === "character")).toBe(true);
+    expect(nodes.some((node) => node.name === "临安")).toBe(false);
+  });
+
+  it("点击节点进入聚焦视图并可以返回全图", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText("当前人物关系");
+    expect(screen.queryByRole("button", { name: "返回全图" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "选择第一个节点" }));
+    const backButton = await screen.findByRole("button", { name: "返回全图" });
+    expect(backButton).toBeInTheDocument();
+
+    await user.click(backButton);
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "返回全图" })).not.toBeInTheDocument();
+    });
   });
 
   it("切换关系演变后展示关系密度和变化列表，并转换单向关系文案", async () => {

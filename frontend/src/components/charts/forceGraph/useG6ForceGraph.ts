@@ -20,12 +20,16 @@ import {
 } from "./forceGraphLayout";
 import type { ForceGraphPalette } from "./forceGraphPalette";
 
+const DENSE_GRAPH_NODE_THRESHOLD = 60;
+
 interface UseG6ForceGraphOptions {
   containerRef: RefObject<HTMLDivElement | null>;
   model: ForceGraphModel;
   palette: ForceGraphPalette;
   searchQuery: string;
   appearanceCountMap?: Map<string, number>;
+  focusNodeId?: string | null;
+  labeledNodeIds?: Set<string>;
   onNodeClick: (node: GraphNodeObject) => void;
   onGraphReady: (graph: Graph | null) => void;
 }
@@ -37,6 +41,8 @@ export function useG6ForceGraph({
   palette,
   searchQuery,
   appearanceCountMap,
+  focusNodeId,
+  labeledNodeIds,
   onNodeClick,
   onGraphReady,
 }: UseG6ForceGraphOptions) {
@@ -117,6 +123,9 @@ export function useG6ForceGraph({
       const entityType = String(nodeCfg.entity_type || "character");
       const baseColor = palette.entityColors[entityType as keyof typeof palette.entityColors] || palette.auxColors.neutral;
       const searched = isSearchMatched(rawName);
+      const nodeId = String(nodeCfg.id || nodeCfg.entity_id || "");
+      const isFocusNode = focusNodeId != null && nodeId === String(focusNodeId);
+      const showLabel = !labeledNodeIds || labeledNodeIds.size === 0 || labeledNodeIds.has(nodeId);
 
       let fill = baseColor;
       if (appearanceCountMap && appearanceCountMap.size > 0) {
@@ -135,7 +144,8 @@ export function useG6ForceGraph({
         }
       }
 
-      const size = typeof nodeCfg.size === "number" ? Math.max(nodeCfg.size, 48) : 48;
+      const baseSize = typeof nodeCfg.size === "number" ? Math.max(nodeCfg.size, 48) : 48;
+      const size = isFocusNode ? Math.round(baseSize * 1.25) : baseSize;
       if (searched && fill !== palette.auxColors.positive) {
         fill = palette.auxColors.positive;
       }
@@ -145,10 +155,10 @@ export function useG6ForceGraph({
         size,
         style: {
           fill,
-          stroke: "transparent",
-          lineWidth: 1.5,
+          stroke: isFocusNode ? palette.auxColors.positive : "transparent",
+          lineWidth: isFocusNode ? 3 : 1.5,
         },
-        label: wrappedName,
+        label: showLabel ? wrappedName : "",
         labelCfg: {
           position: "center" as const,
           style: {
@@ -162,17 +172,20 @@ export function useG6ForceGraph({
       };
     });
 
+    const isDenseGraph = nodeCount > DENSE_GRAPH_NODE_THRESHOLD;
+    const isBusyGraph = nodeCount > 25;
+
     graph.edge((edgeCfg: Record<string, unknown>) => {
       const relationType = String(edgeCfg.relation_type || "");
       const color = palette.relationColors[relationType] || palette.auxColors.text;
-      const width = (LINK_WIDTH_MIN + LINK_WIDTH_MAX) / 2;
+      const width = isDenseGraph ? 0.8 : isBusyGraph ? 1.2 : (LINK_WIDTH_MIN + LINK_WIDTH_MAX) / 2;
 
       return {
         style: {
           stroke: color,
           lineWidth: width,
         },
-        opacity: 0.7,
+        opacity: isDenseGraph ? 0.3 : isBusyGraph ? 0.45 : 0.7,
       };
     });
 
@@ -204,6 +217,11 @@ export function useG6ForceGraph({
       graph.findAllByState("edge", "active").forEach((edge) => graph.setItemState(edge, "active", false));
     });
 
+    // 力导布局结束后统一适配视口，初始 fitView 只按播种坐标计算
+    graph.on("afterlayout", () => {
+      graph.fitView(FIT_VIEW_PADDING);
+    });
+
     graph.render();
 
     const observer = new ResizeObserver(() => {
@@ -221,7 +239,7 @@ export function useG6ForceGraph({
       graph.destroy();
       onGraphReady(null);
     };
-  }, [appearanceCountMap, containerRef, debouncedSearchQuery, model, onGraphReady, onNodeClick, palette]);
+  }, [appearanceCountMap, containerRef, debouncedSearchQuery, focusNodeId, labeledNodeIds, model, onGraphReady, onNodeClick, palette]);
 }
 
 function adjustColorDepth(cssColor: string, depth: number): string {

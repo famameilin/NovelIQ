@@ -26,7 +26,7 @@ function createEventNode(
 ): TimelineEventNode {
   return {
     tree_id: treeId,
-    root_event_id: `evt-${treeId}`,
+    entry_event_id: `evt-${treeId}`,
     title: summary,
     summary,
     anchor_chapter_id: chapterId,

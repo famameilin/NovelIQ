@@ -175,6 +175,7 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
           textStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
           icon: "roundRect",
           data: EMOTION_TREND_SERIES_CONFIG.map((s) => s.name),
+          selected: Object.fromEntries(EMOTION_TREND_SERIES_CONFIG.map((s) => [s.name, activeSeries.has(s.key)])),
         },
         tooltip: {
           trigger: "axis" as const,
@@ -320,7 +321,7 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
           notMerge
           lazyUpdate
           onEvents={{
-            legendClick: handleLegendClick,
+            legendselectchanged: handleLegendClick,
             datazoom: handleDataZoom,
             datazoomend: handleDataZoomEnd,
             click: handleChartClick,

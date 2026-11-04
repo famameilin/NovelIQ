@@ -13,7 +13,7 @@ import { createForceGraphPalette } from "./forceGraph/forceGraphPalette";
 import { useG6ForceGraph } from "./forceGraph/useG6ForceGraph";
 
 export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(function ForceGraph(
-  { data, onNodeClick, searchQuery, relationFilter, appearanceCountMap, className },
+  { data, onNodeClick, searchQuery, relationFilter, appearanceCountMap, focusNodeId, labeledNodeIds, className },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -36,6 +36,8 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(function
     palette,
     searchQuery,
     appearanceCountMap,
+    focusNodeId,
+    labeledNodeIds,
     onNodeClick,
     onGraphReady: (graph) => {
       graphRef.current = graph;

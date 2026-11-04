@@ -17,6 +17,12 @@ export const appConfig = {
   /** 上传：允许的文件扩展名 */
   acceptedFileTypes: [".txt"],
 
+  /** 上传：封面图片最大字节数 */
+  maxCoverSizeBytes: 2 * 1024 * 1024,
+
+  /** 上传：允许的封面扩展名 */
+  acceptedCoverTypes: [".jpg", ".jpeg", ".png", ".webp"],
+
   /** 数据预加载：hover 后缓存的 staleTime（ms） */
   prefetchStaleTime: 5 * 60 * 1000, // 5 分钟
 

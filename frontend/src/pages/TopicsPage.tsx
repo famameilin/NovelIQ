@@ -13,6 +13,7 @@ import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/a
 import { getTopicSeries, getTopicShifts, getTopicEmotion } from "@/api/results";
 import { getTopicsOverviewTab, tabQueryKey } from "@/api/tabs";
 import { useNovelScopedTask, shouldWriteBackTaskUrl } from "@/hooks/useNovelScopedTask";
+import { useNovelTitle } from "@/hooks/useNovelTitle";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { TabUnavailableState } from "@/components/common/TabUnavailableState";
 import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
@@ -32,7 +33,7 @@ import {
   TopicEmotionPanel,
 } from "@/components/topics";
 import { RefreshCw, AlertCircle } from "lucide-react";
-import type { ChapterTopicDistribution, Topic, TopicEmotionEntry } from "@/api/types";
+import type { ChapterTopicDistribution, Topic, TopicEmotionEntry, TopicShiftConfig } from "@/api/types";
 
 const STALE_TIME = 5 * 60 * 1000;
 const OVERVIEW_PAGE_SIZE = 8;
@@ -101,12 +102,19 @@ function TopicDetailPanel({
   );
 }
 
+/** 主题迁移空态展示的当前计算口径 */
+function TopicShiftCaliberNote({ config }: { config: TopicShiftConfig }) {
+  const caliber = `当前口径：每 ${config.window_size} 段为一个窗口（窗口至少 ${config.min_tokens_per_window} 个入模 token），相邻窗口主题分布的 JS 散度达到 ${config.score_threshold} 才记为迁移点，最多输出 ${config.max_candidates} 个。`;
+  return <p>{caliber}</p>;
+}
+
 /** 单数据视图的加载、错误和不可用状态门禁 */
 function renderTabGate<T>(
   query: UseQueryResult<T>,
   title: string,
   unavailableReason: string | null | undefined,
   content: (data: T) => ReactNode,
+  unavailableDetail?: ReactNode,
 ): ReactNode {
   if (query.isLoading) {
     return (
@@ -151,7 +159,13 @@ function renderTabGate<T>(
   }
   if (!query.data) return null;
   if (unavailableReason) {
-    return <TabUnavailableState reason={unavailableReason} title={`${title}暂不可用`} />;
+    return (
+      <TabUnavailableState
+        reason={unavailableReason}
+        title={`${title}暂不可用`}
+        detail={unavailableDetail}
+      />
+    );
   }
   return content(query.data);
 }
@@ -257,8 +271,10 @@ export function TopicsPage() {
       }, undefined);
   }, [overviewQuery.data, selectedTopic]);
 
+  const title = useNovelTitle("主题脉络");
+
   return (
-    <AnalysisWorkspace title="主题脉络">
+    <AnalysisWorkspace title={title}>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -338,9 +354,15 @@ export function TopicsPage() {
 
           <AnalysisWorkspace.Tab value="shifts" label="主题迁移">
             <div className="h-full min-h-0">
-              {renderTabGate(shiftsQuery, "主题迁移", shiftsQuery.data?.unavailable_reason ?? null, (shifts) => (
-                <TopicShiftsPanel candidates={shifts.candidates} config={shifts.config} showConfig className="h-full" />
-              ))}
+              {renderTabGate(
+                shiftsQuery,
+                "主题迁移",
+                shiftsQuery.data?.unavailable_reason ?? null,
+                (shifts) => (
+                  <TopicShiftsPanel candidates={shifts.candidates} config={shifts.config} showConfig className="h-full" />
+                ),
+                shiftsQuery.data ? <TopicShiftCaliberNote config={shiftsQuery.data.config} /> : null,
+              )}
             </div>
           </AnalysisWorkspace.Tab>
 

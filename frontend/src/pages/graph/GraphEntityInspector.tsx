@@ -1,31 +1,29 @@
-import { CircleUserRound, Link2, MapPin } from "lucide-react";
+import { useMemo, useState } from "react";
+
+import { ChevronDown, ChevronRight, CircleUserRound, Link2, MapPin, Search } from "lucide-react";
 
 import type { GraphNode } from "@/api/types";
+import type {
+  EntityRelationSummary,
+  GraphRelationGroup,
+  GraphRelationItem,
+} from "@/components/charts/forceGraph/graphFocusModel";
 import { AnalysisDetails } from "@/components/common/AnalysisDetails";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 import { formatAnalysisLabel } from "@/lib/analysisLabels";
-
-export interface GraphRelatedEntity {
-  node: GraphNode;
-  relationType: string;
-  directionality: "directed" | "bidirectional";
-  isActive: boolean;
-}
+import { formatEntityTypeLabel, formatRelationDirectionLabel } from "@/lib/graphLabels";
 
 interface GraphEntityInspectorProps {
   node: GraphNode | null;
-  relatedEntities: GraphRelatedEntity[];
+  relationSummary: EntityRelationSummary;
   onSelectEntity: (node: GraphNode) => void;
   className?: string;
 }
 
-const ENTITY_TYPE_LABELS: Record<string, string> = {
-  character: "人物",
-  location: "地点",
-  item: "物品",
-  organization: "组织",
-};
+const DEFAULT_OPEN_GROUP_COUNT = 3;
+const GROUP_ITEM_LIMIT = 10;
 
 const NARRATIVE_ROLE_DESCRIPTIONS: Record<string, string> = {
   主体: "发起动作",
@@ -37,32 +35,166 @@ const NARRATIVE_ROLE_DESCRIPTIONS: Record<string, string> = {
   见证者: "在场见证",
 };
 
-/**
- * 将图谱实体类型转换为中文展示名称
- * 简要说明：未知类型使用通用实体名称，避免直接暴露内部枚举
- */
-function getEntityTypeLabel(entityType: string): string {
-  return ENTITY_TYPE_LABELS[entityType] ?? "其他实体";
+function countLabel(group: GraphRelationGroup): string {
+  return `${group.items.length} 条`;
 }
 
 /**
- * 将关系方向转换为中文展示名称
- * 简要说明：统一图谱详情和关系变化中的方向语义
+ * 按关系类型分组展示实体关系
+ * 简要说明：默认展开条数最多的前几组，组内按支持次数排序并支持按名筛选
  */
-function getDirectionLabel(directionality: GraphRelatedEntity["directionality"]): string {
-  return directionality === "bidirectional" ? "双向关系" : "单向关系";
+function RelationGroups({
+  groups,
+  query,
+  onSelectEntity,
+}: {
+  groups: GraphRelationGroup[];
+  query: string;
+  onSelectEntity: (node: GraphNode) => void;
+}) {
+  const normalizedQuery = query.trim().toLowerCase();
+  const defaultOpen = useMemo(
+    () => new Set(groups.slice(0, DEFAULT_OPEN_GROUP_COUNT).map((group) => group.relationType)),
+    [groups],
+  );
+  const [openGroups, setOpenGroups] = useState<Set<string> | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  const effectiveOpen = openGroups ?? defaultOpen;
+  const isSearching = normalizedQuery.length > 0;
+
+  const toggleGroup = (relationType: string) => {
+    const next = new Set(effectiveOpen);
+    if (next.has(relationType)) {
+      next.delete(relationType);
+    } else {
+      next.add(relationType);
+    }
+    setOpenGroups(next);
+  };
+
+  const toggleExpand = (relationType: string) => {
+    const next = new Set(expandedGroups);
+    if (next.has(relationType)) {
+      next.delete(relationType);
+    } else {
+      next.add(relationType);
+    }
+    setExpandedGroups(next);
+  };
+
+  const visibleGroups = groups
+    .map((group) => ({
+      group,
+      items: normalizedQuery
+        ? group.items.filter((item) => item.node.name.toLowerCase().includes(normalizedQuery))
+        : group.items,
+    }))
+    .filter((entry) => entry.items.length > 0);
+
+  if (visibleGroups.length === 0) {
+    return (
+      <p className="mt-3 rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-sm text-text-muted">
+        {isSearching ? "没有匹配的相关实体" : "暂无主要关系"}
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      {visibleGroups.map(({ group, items }) => {
+        const isOpen = isSearching || effectiveOpen.has(group.relationType);
+        const isExpanded = isSearching || expandedGroups.has(group.relationType);
+        const visibleItems = isExpanded ? items : items.slice(0, GROUP_ITEM_LIMIT);
+
+        return (
+          <div key={group.relationType} className="overflow-hidden rounded-lg border border-border/60">
+            <button
+              type="button"
+              onClick={() => toggleGroup(group.relationType)}
+              aria-expanded={isOpen}
+              className="flex w-full items-center justify-between gap-3 bg-surface-hover/45 px-3 py-2 text-left transition-colors hover:bg-surface-hover"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                {isOpen ? (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />
+                )}
+                <span className="truncate text-sm font-medium text-text">
+                  {formatAnalysisLabel(group.relationType, "relation")}
+                </span>
+              </span>
+              <span className="shrink-0 text-xs text-text-muted">{countLabel(group)}</span>
+            </button>
+
+            {isOpen ? (
+              <div className="divide-y divide-border/50">
+                {visibleItems.map((item) => (
+                  <RelationItem
+                    key={`${item.node.entity_id}-${item.relationType}`}
+                    item={item}
+                    onSelectEntity={onSelectEntity}
+                  />
+                ))}
+                {!isExpanded && items.length > GROUP_ITEM_LIMIT ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(group.relationType)}
+                    className="w-full px-3 py-2 text-left text-xs text-primary transition-colors hover:bg-surface-hover"
+                  >
+                    展开全部 {items.length} 条
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RelationItem({
+  item,
+  onSelectEntity,
+}: {
+  item: GraphRelationItem;
+  onSelectEntity: (node: GraphNode) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelectEntity(item.node)}
+      className="flex w-full items-center justify-between gap-3 bg-background/40 px-3 py-2 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+    >
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium text-text">{item.node.name}</span>
+        <span className="mt-0.5 block text-xs text-text-muted">
+          {formatRelationDirectionLabel(item.directionality)}
+          {item.supportCount > 1 ? ` · 关联 ${item.supportCount} 次` : ""}
+          {item.node.last_seen_chapter != null ? ` · 最后出现第 ${item.node.last_seen_chapter} 章` : ""}
+        </span>
+      </span>
+      <Badge variant={item.isActive ? "secondary" : "outline"}>
+        {item.isActive ? "当前有效" : "已经结束"}
+      </Badge>
+    </button>
+  );
 }
 
 /**
  * 在关系画布旁展示用户可读的实体信息
- * 简要说明：隐藏内部编号，仅保留名称、出现范围、人物叙事作用、状态和主要关系
+ * 简要说明：隐藏内部编号，仅保留名称、出现范围、人物叙事作用、状态和分组关系
  */
 export function GraphEntityInspector({
   node,
-  relatedEntities,
+  relationSummary,
   onSelectEntity,
   className,
 }: GraphEntityInspectorProps) {
+  const [relationQuery, setRelationQuery] = useState("");
+
   if (!node) {
     return (
       <aside
@@ -93,7 +225,7 @@ export function GraphEntityInspector({
             <CircleUserRound className="h-5 w-5 text-primary" aria-hidden="true" />
             <h2 className="truncate text-lg font-semibold text-text">{node.name}</h2>
           </div>
-          <p className="mt-1 text-sm text-text-muted">{getEntityTypeLabel(node.entity_type)}</p>
+          <p className="mt-1 text-sm text-text-muted">{formatEntityTypeLabel(node.entity_type)}</p>
         </div>
         {stateStatus ? <Badge variant="secondary">{/^[\u4e00-\u9fff]/.test(stateStatus) ? stateStatus : "状态待确认"}</Badge> : null}
       </div>
@@ -128,32 +260,25 @@ export function GraphEntityInspector({
             <Link2 className="h-4 w-4 text-chart-2" aria-hidden="true" />
             主要关系
           </h3>
-          <span className="text-xs text-text-muted">{relatedEntities.length} 条</span>
+          <span className="text-xs text-text-muted" title={`原始关系 ${relationSummary.rawRelationCount} 条`}>
+            {relationSummary.entityCount} 位 · {relationSummary.relationCount} 条
+          </span>
         </div>
-        {relatedEntities.length > 0 ? (
-          <div className="mt-3 grid gap-2">
-            {relatedEntities.map((relatedEntity) => (
-              <button
-                key={`${relatedEntity.node.entity_id}-${relatedEntity.relationType}`}
-                type="button"
-                onClick={() => onSelectEntity(relatedEntity.node)}
-                className="flex w-full items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/50 px-3 py-2.5 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-text">{relatedEntity.node.name}</span>
-                  <span className="mt-0.5 block text-xs text-text-muted">
-                    {formatAnalysisLabel(relatedEntity.relationType, "relation")} · {getDirectionLabel(relatedEntity.directionality)}
-                  </span>
-                </span>
-                <Badge variant={relatedEntity.isActive ? "secondary" : "outline"}>
-                  {relatedEntity.isActive ? "当前有效" : "已经结束"}
-                </Badge>
-              </button>
-            ))}
+
+        {relationSummary.groups.length > 0 ? (
+          <div className="relative mt-3">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-text-muted" />
+            <Input
+              type="text"
+              value={relationQuery}
+              onChange={(event) => setRelationQuery(event.target.value)}
+              placeholder="在这些关系中筛选名称..."
+              className="h-8 pl-8 text-xs"
+            />
           </div>
-        ) : (
-          <p className="mt-3 rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-sm text-text-muted">暂无主要关系</p>
-        )}
+        ) : null}
+
+        <RelationGroups groups={relationSummary.groups} query={relationQuery} onSelectEntity={onSelectEntity} />
       </section>
 
       {(node.tags?.length || node.aliases?.length || node.state_chapter_id != null) ? (

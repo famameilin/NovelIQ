@@ -53,6 +53,19 @@ const fields = [
     nullable: false,
     editable: true,
   },
+  ...(["annotation", "diagnosis"] as const).map((task) => ({
+    path: ["models", task, "reasoning_effort"],
+    field_type: "enum",
+    label: `${task === "annotation" ? "标注" : "诊断"}思考等级`,
+    description: "",
+    min_value: null,
+    max_value: null,
+    step: null,
+    enum_values: ["low", "medium", "high", "xhigh", "max"],
+    enum_labels: { low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高" },
+    nullable: false,
+    editable: true,
+  })),
   {
     path: ["topic_model", "num_topics"],
     field_type: "integer",
@@ -102,10 +115,11 @@ const values: Record<string, unknown> = {
     diagnosis_model_id: "second-model",
     annotation: {
       timeout_s: 180,
+      reasoning_effort: "high",
       max_iterations: 15,
       allow_future_context: true,
     },
-    diagnosis: {},
+    diagnosis: { reasoning_effort: "high" },
     paragraph_embedding: {
       base_url: "http://localhost:8080/v1",
       model: "embedding-model",
@@ -125,10 +139,11 @@ const defaults: Record<string, unknown> = {
     diagnosis_model_id: null,
     annotation: {
       timeout_s: null,
+      reasoning_effort: "high",
       max_iterations: 10,
       allow_future_context: true,
     },
-    diagnosis: {},
+    diagnosis: { reasoning_effort: "high" },
     paragraph_embedding: { base_url: null, model: null, api_key: null },
   },
   topic_model: { num_topics: 25 },
@@ -139,6 +154,8 @@ const defaults: Record<string, unknown> = {
 };
 
 const sources: Record<string, "default" | "file"> = {
+  "models/annotation/reasoning_effort": "default",
+  "models/diagnosis/reasoning_effort": "default",
   "models/annotation/timeout_s": "file",
   "models/annotation/max_iterations": "file",
   "models/annotation/allow_future_context": "file",
@@ -157,7 +174,19 @@ export const settingsViewHandler = http.get(`${BASE}/api/settings`, async () => 
   return HttpResponse.json({ values, defaults, sources });
 });
 
-export const settingsUpdateHandler = http.put(`${BASE}/api/settings`, async () => {
+export const settingsUpdateHandler = http.put(`${BASE}/api/settings`, async ({ request }) => {
+  const patch = await request.json() as { values?: { models?: Record<string, { reasoning_effort?: string }> } };
+  const models = values.models as Record<string, Record<string, unknown>>;
+  for (const task of ["annotation", "diagnosis"]) {
+    const effort = patch.values?.models?.[task]?.reasoning_effort;
+    if (effort !== undefined) {
+      if (!["low", "medium", "high", "xhigh", "max"].includes(effort)) {
+        return HttpResponse.json({ detail: "思考等级无效" }, { status: 422 });
+      }
+      models[task].reasoning_effort = effort;
+      sources[`models/${task}/reasoning_effort`] = effort === "high" ? "default" : "file";
+    }
+  }
   await delay(400);
   return HttpResponse.json({ values, defaults, sources });
 });

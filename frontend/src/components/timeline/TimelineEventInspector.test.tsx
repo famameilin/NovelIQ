@@ -18,7 +18,7 @@ describe("TimelineEventInspector", () => {
     const onSelectTree = vi.fn();
     const node: TimelineEventNode = {
       tree_id: "tree:internal:1",
-      root_event_id: "event:internal:root",
+      entry_event_id: "event:internal:root",
       title: "旧案线索浮现",
       summary: "顾霜在铜铃异响中发现旧案线索",
       anchor_chapter_id: 8,
@@ -60,7 +60,7 @@ describe("TimelineEventInspector", () => {
             edge_id: "edge-1",
             edge_type: "causal",
             source_event_id: "event:external",
-            target_event_id: node.root_event_id,
+            target_event_id: node.entry_event_id,
             source_chapter_id: 6,
             target_chapter_id: 8,
             is_active: true,
@@ -69,9 +69,9 @@ describe("TimelineEventInspector", () => {
         ]}
         foreshadowingEdges={[
           {
-            root_event_id: "root-internal",
+            source_event_id: "root-internal",
             tree_id: "tree-internal",
-            payoff_event_id: node.root_event_id,
+            payoff_event_id: node.entry_event_id,
             first_chapter_id: 3,
             last_chapter_id: 8,
             description: "铜铃异响指向山门旧案",
@@ -92,7 +92,7 @@ describe("TimelineEventInspector", () => {
     await user.click(screen.getByRole("button", { name: "分析数据" }));
     expect(screen.getByText("字符范围")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(node.tree_id);
-    expect(document.body.textContent).not.toContain(node.root_event_id);
+    expect(document.body.textContent).not.toContain(node.entry_event_id);
     expect(document.body.textContent?.toLowerCase()).not.toContain("protagonist");
 
     await user.click(screen.getByRole("button", { name: "第 2 步" }));

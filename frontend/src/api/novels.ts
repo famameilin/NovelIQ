@@ -33,18 +33,28 @@ export async function getNovel(novelId: string): Promise<Novel | null> {
   }
 }
 
+export interface UploadNovelOptions {
+  signal?: AbortSignal;
+  title?: string;
+  author?: string;
+  cover?: File | null;
+}
+
 export async function uploadNovel(
   file: File,
-  options?: { signal?: AbortSignal }
+  options: UploadNovelOptions = {}
 ): Promise<NovelUploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
+  if (options.title) formData.append("title", options.title);
+  if (options.author) formData.append("author", options.author);
+  if (options.cover) formData.append("cover", options.cover);
   const { data } = await apiClient.post<NovelUploadResponse>(
     "/api/novels/upload",
     formData,
     {
       headers: { "Content-Type": "multipart/form-data" },
-      signal: options?.signal,
+      signal: options.signal,
     }
   );
   return data;

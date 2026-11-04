@@ -56,10 +56,10 @@ it("章节聚合浮层独立读取全部分页，并保留主体与搜索条件"
   });
   const onSelect = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(<QueryClientProvider client={client}><ChapterChanges novelId="novel-1" runId="run-a" group={{ chapterId: 2, chapterOrder: 2, dimension: "plot" }} subject="letter" q="线索" onClose={vi.fn()} onSelect={onSelect} /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><ChapterChanges novelId="novel-1" taskId="task-a" runId="run-a" group={{ chapterId: 2, chapterOrder: 2, dimension: "plot" }} subject="letter" q="线索" onClose={vi.fn()} onSelect={onSelect} /></QueryClientProvider>);
   await userEvent.click(await screen.findByRole("button", { name: "继续加载本章变化" }));
   await userEvent.click(await screen.findByRole("button", { name: /密集变化 83$/ }));
   expect(onSelect).toHaveBeenCalledWith("dense-82");
   expect(screen.queryByRole("button", { name: "继续加载本章变化" })).not.toBeInTheDocument();
-  expect(api.mock.calls[1][1]?.params).toMatchObject({ through_chapter_id: 2, window_start_chapter_id: 2, dimension: "plot", subject_id: "letter", q: "线索", cursor: "chapter-next" });
+  expect(api.mock.calls[1][1]?.params).toMatchObject({ task_id: "task-a", through_chapter_id: 2, window_start_chapter_id: 2, dimension: "plot", subject_id: "letter", q: "线索", cursor: "chapter-next" });
 });

@@ -1,13 +1,33 @@
-/** 事件树画布固定阅读尺度，只允许横向平移；视口状态只有 x，没有缩放和纵向位移 */
-export interface TreeViewportX { x: number }
+/** 事件线画布只维护平移与缩放，内容坐标使用布局尺度 */
+export interface ViewportPoint { x: number; y: number }
 
-/** 画布比视口窄时整体居中，否则平移范围钳制在完整内容边界内 */
-export function clampX(x: number, frameWidth: number, canvasWidth: number): number {
-  if (canvasWidth <= frameWidth) return (frameWidth - canvasWidth) / 2;
-  return Math.min(0, Math.max(frameWidth - canvasWidth, x));
+/** 内容小于视口时居中，否则把位移钳制在完整内容边界内 */
+export function clampAxis(value: number, frame: number, content: number): number {
+  if (content <= frame) return (frame - content) / 2;
+  return Math.min(0, Math.max(frame - content, value));
 }
 
-/** 定位操作只改变横向平移，让目标内容的横向中心落在视口中心 */
-export function locateX(frameWidth: number, canvasWidth: number, contentX: number): number {
-  return clampX(frameWidth / 2 - contentX, frameWidth, canvasWidth);
+export function clampViewport(
+  point: ViewportPoint, frame: { width: number; height: number }, content: { width: number; height: number },
+): ViewportPoint {
+  return { x: clampAxis(point.x, frame.width, content.width), y: clampAxis(point.y, frame.height, content.height) };
+}
+
+/** 定位让目标内容中心落在视口中心，并保留缩放后的边界 */
+export function locateViewport(
+  point: ViewportPoint, frame: { width: number; height: number }, content: { width: number; height: number }, zoom: number,
+): ViewportPoint {
+  return clampViewport(
+    { x: frame.width / 2 - point.x * zoom, y: frame.height / 2 - point.y * zoom },
+    frame,
+    { width: content.width * zoom, height: content.height * zoom },
+  );
+}
+
+/** 缩放围绕视口中心，保持当前阅读位置不跳 */
+export function zoomAround(
+  value: number, frameSize: number, contentSize: number, fromZoom: number, toZoom: number,
+): number {
+  const center = (frameSize / 2 - value) / fromZoom;
+  return clampAxis(frameSize / 2 - center * toZoom, frameSize, contentSize * toZoom);
 }

@@ -21,18 +21,32 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { GraphData, GraphNode } from "@/api/types";
 import type { ForceGraphHandle, GraphNodeObject } from "@/components/charts/forceGraphTypes";
+import {
+  buildEntityRelationSummary,
+  buildGraphSubgraph,
+  countEntitiesByType,
+  rankGraphNodes,
+  type EntityRelationSummary,
+  type GraphScope,
+} from "@/components/charts/forceGraph/graphFocusModel";
 import { GraphOverviewSection } from "@/pages/graph/GraphOverviewSection";
 import { GraphWorkspaceSection } from "@/pages/graph/GraphWorkspaceSection";
-import {
-  GraphEntityInspector,
-  type GraphRelatedEntity,
-} from "@/pages/graph/GraphEntityInspector";
+import { GraphEntityInspector } from "@/pages/graph/GraphEntityInspector";
 import { buildGraphUrl, buildTimelineUrl } from "@/pages/graph/graphPageNavigation";
 import { useGraphDeepLinkSelection } from "@/pages/graph/useGraphDeepLinkSelection";
 import { useGraphChangePagination } from "@/pages/graph/useGraphChangePagination";
 
 const STALE_TIME = 5 * 60 * 1000;
 const EMPTY_GRAPH_EDGES: GraphData["edges"] = [];
+const EMPTY_RELATION_SUMMARY: EntityRelationSummary = {
+  groups: [],
+  rawRelationCount: 0,
+  relationCount: 0,
+  entityCount: 0,
+};
+const LABEL_NODE_LIMIT = 60;
+const SEARCH_MATCH_LIMIT = 8;
+const DEFAULT_ENTITY_TYPES = ["character"];
 type GraphPrimaryView = "map" | "evolution";
 const pageSectionVariants = {
   hidden: { opacity: 0, y: 16 },
@@ -76,6 +90,11 @@ export function GraphPage() {
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRelationTypes, setSelectedRelationTypes] = useState<Set<string>>(new Set());
+  const [graphScope, setGraphScope] = useState<GraphScope>("core");
+  const [entityTypeFilter, setEntityTypeFilter] = useState<Set<string>>(
+    () => new Set(DEFAULT_ENTITY_TYPES),
+  );
+  const [focusEntityId, setFocusEntityId] = useState<string | null>(null);
   const previousTaskIdRef = useRef<string | null | undefined>(undefined);
   const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
   const taskScopeId = urlTaskId ?? storeTaskId;
@@ -143,60 +162,78 @@ export function GraphPage() {
   }, [graphNetworkQuery.data]);
 
   const relationTypes = useMemo(() => {
-    if (graphEdges.length === 0) return [];
+    if (!graphData) return [];
+    const nodeTypes = new Map(
+      (graphData.nodes ?? []).map((node) => [String(node.entity_id), node.entity_type]),
+    );
     const types = new Set<string>();
     graphEdges.forEach((edge) => {
-      if (edge.relation_type) {
+      if (!edge.relation_type) return;
+      const sourceType = nodeTypes.get(String(edge.source_entity_id));
+      const targetType = nodeTypes.get(String(edge.target_entity_id));
+      const sourceAllowed = entityTypeFilter.size === 0 || (sourceType != null && entityTypeFilter.has(sourceType));
+      const targetAllowed = entityTypeFilter.size === 0 || (targetType != null && entityTypeFilter.has(targetType));
+      if (sourceAllowed && targetAllowed) {
         types.add(edge.relation_type);
       }
     });
     return Array.from(types);
-  }, [graphEdges]);
+  }, [entityTypeFilter, graphData, graphEdges]);
 
-  const entityTypes = useMemo(() => {
-    if (!graphData?.nodes) return [];
+  const entityTypeOptions = useMemo(
+    () => countEntitiesByType(graphData?.nodes ?? []),
+    [graphData],
+  );
+
+  const allRelationTypes = useMemo(() => {
     const types = new Set<string>();
-    graphData.nodes.forEach((node) => {
-      types.add(node.entity_type);
+    graphEdges.forEach((edge) => {
+      if (edge.relation_type) types.add(edge.relation_type);
     });
     return Array.from(types);
-  }, [graphData]);
+  }, [graphEdges]);
 
-  const relatedEntities = useMemo((): GraphRelatedEntity[] => {
-    if (!selectedNode || !graphData) return [];
-
-    const related: GraphRelatedEntity[] = [];
-    const nodeMap = new Map<string, GraphNode>();
-    graphData.nodes.forEach((node) => {
-      nodeMap.set(node.entity_id, node);
+  const subgraph = useMemo(() => {
+    if (!graphData) return null;
+    return buildGraphSubgraph(graphData, {
+      scope: graphScope,
+      entityTypes: entityTypeFilter,
+      focusEntityId,
+      relationTypes: selectedRelationTypes,
+      appearanceCountMap,
     });
+  }, [appearanceCountMap, entityTypeFilter, focusEntityId, graphData, graphScope, selectedRelationTypes]);
 
-    graphEdges.forEach((edge) => {
-      if (edge.source_entity_id === selectedNode.entity_id) {
-        const targetNode = nodeMap.get(edge.target_entity_id);
-        if (targetNode) {
-          related.push({
-            node: targetNode,
-            relationType: edge.relation_type,
-            directionality: edge.directionality,
-            isActive: edge.is_active,
-          });
-        }
-      } else if (edge.target_entity_id === selectedNode.entity_id) {
-        const sourceNode = nodeMap.get(edge.source_entity_id);
-        if (sourceNode) {
-          related.push({
-            node: sourceNode,
-            relationType: edge.relation_type,
-            directionality: edge.directionality,
-            isActive: edge.is_active,
-          });
-        }
-      }
-    });
+  const labeledNodeIds = useMemo(() => {
+    if (!subgraph) return new Set<string>();
+    const nodeCount = subgraph.data.nodes.length;
+    if (nodeCount <= LABEL_NODE_LIMIT) return new Set<string>();
+    const ranked = rankGraphNodes(subgraph.data.nodes, subgraph.data.edges, appearanceCountMap);
+    return new Set(ranked.slice(0, LABEL_NODE_LIMIT).map((entry) => String(entry.node.entity_id)));
+  }, [appearanceCountMap, subgraph]);
 
-    return related.sort((left, right) => left.relationType.localeCompare(right.relationType));
-  }, [graphEdges, graphData, selectedNode]);
+  const visibleEntityTypes = useMemo(() => {
+    if (!subgraph) return [];
+    const types = new Set<string>();
+    subgraph.data.nodes.forEach((node) => types.add(node.entity_type));
+    return Array.from(types);
+  }, [subgraph]);
+
+  const searchMatches = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query || !graphData) return [];
+    return graphData.nodes
+      .filter((node) => node.name.toLowerCase().includes(query))
+      .slice(0, SEARCH_MATCH_LIMIT);
+  }, [graphData, searchQuery]);
+
+  const relationSummary = useMemo(
+    () =>
+      graphData && selectedNode
+        ? buildEntityRelationSummary(graphData, String(selectedNode.entity_id))
+        : EMPTY_RELATION_SUMMARY,
+    [graphData, selectedNode],
+  );
 
   const {
     changesLoadError,
@@ -209,7 +246,8 @@ export function GraphPage() {
     totalChangeCount,
   } = useGraphChangePagination({
     novelId,
-    taskScopeId,
+    // 先完成关系快照，再加载变化列表
+    taskScopeId: graphNetworkQuery.isPending ? null : taskScopeId,
   });
 
   const timelineUrl = novelId && taskScopeId ? buildTimelineUrl(novelId, taskScopeId) : null;
@@ -245,6 +283,9 @@ export function GraphPage() {
     setGraphView("map");
     setSearchQuery("");
     setSelectedRelationTypes(new Set());
+    setGraphScope("core");
+    setEntityTypeFilter(new Set(DEFAULT_ENTITY_TYPES));
+    setFocusEntityId(null);
   }, [taskScopeId]);
 
   const activeRelationCount = useMemo(
@@ -294,22 +335,75 @@ export function GraphPage() {
     setSearchQuery(query);
   }, []);
 
-  const handleNodeClick = useCallback((node: GraphNodeObject) => {
-    setSelectedNode(node);
+  const ensureEntityTypeVisible = useCallback((entityType: string) => {
+    setEntityTypeFilter((current) => {
+      if (current.size === 0 || current.has(entityType)) return current;
+      const next = new Set(current);
+      next.add(entityType);
+      return next;
+    });
+  }, []);
+
+  const focusOnEntity = useCallback(
+    (node: GraphNode) => {
+      ensureEntityTypeVisible(node.entity_type);
+      setSelectedNode(node);
+      setFocusEntityId(String(node.entity_id));
+    },
+    [ensureEntityTypeVisible],
+  );
+
+  const handleNodeClick = useCallback(
+    (node: GraphNodeObject) => {
+      focusOnEntity(node);
+    },
+    [focusOnEntity],
+  );
+
+  const handleSelectSearchMatch = useCallback(
+    (node: GraphNode) => {
+      focusOnEntity(node);
+      setSearchQuery("");
+    },
+    [focusOnEntity],
+  );
+
+  const handleClearFocus = useCallback(() => {
+    setFocusEntityId(null);
+  }, []);
+
+  const handleGraphScopeChange = useCallback((scope: GraphScope) => {
+    setGraphScope(scope);
+  }, []);
+
+  const handleEntityTypeChange = useCallback((types: Set<string>) => {
+    setEntityTypeFilter(types);
   }, []);
 
   const handleRetry = useCallback(() => {
     graphNetworkQuery.refetch();
   }, [graphNetworkQuery]);
 
+  const subgraphMeta = {
+    chapterOrder: graphData?.chapter_order ?? 0,
+    totalNodeCount: graphData?.nodes.length ?? 0,
+    visibleNodeCount: subgraph?.data.nodes.length ?? 0,
+    visibleEdgeCount: subgraph?.data.edges.length ?? 0,
+    eligibleNodeCount: subgraph?.eligibleNodeCount ?? 0,
+    hiddenNodeCount: subgraph?.hiddenNodeCount ?? 0,
+    hiddenEdgeCount: subgraph?.hiddenEdgeCount ?? 0,
+    focusNode: subgraph?.focusNode ?? null,
+  };
+
   const graphWorkspaceProps = {
-    graphData: graphData!,
+    graphData: subgraph?.data ?? graphData!,
+    subgraphMeta,
     forceGraphRef,
     onNodeClick: handleNodeClick,
     searchQuery,
     selectedRelationTypes,
     appearanceCountMap,
-    entityTypes,
+    entityTypes: visibleEntityTypes,
     relationTypes,
     onZoomIn: handleZoomIn,
     onZoomOut: handleZoomOut,
@@ -317,6 +411,15 @@ export function GraphPage() {
     onCenter: handleCenter,
     onRelationTypeChange: handleRelationTypeChange,
     onSearchChange: handleSearchChange,
+    graphScope,
+    onGraphScopeChange: handleGraphScopeChange,
+    entityTypeOptions,
+    selectedEntityTypes: entityTypeFilter,
+    onEntityTypeChange: handleEntityTypeChange,
+    searchMatches,
+    onSelectSearchMatch: handleSelectSearchMatch,
+    labeledNodeIds,
+    onClearFocus: handleClearFocus,
     totalChangeCount,
     loadedChangeCount,
     hasMoreChanges,
@@ -350,10 +453,10 @@ export function GraphPage() {
           <div className="flex h-full min-h-0 flex-col gap-3">
           <AnalysisMetricStrip
             items={[
-              { label: "有效实体", value: graphData!.nodes.length },
+              { label: "有效实体", value: graphData?.nodes.length ?? 0 },
               { label: "有效关系", value: activeRelationCount },
-              { label: "关系类型", value: relationTypes.length },
-              { label: "章节边界", value: `第 ${graphData!.chapter_order} 章` },
+              { label: "关系类型", value: allRelationTypes.length },
+              { label: "章节边界", value: `第 ${graphData?.chapter_order ?? 0} 章` },
             ]}
           />
           <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.55fr)_minmax(320px,0.65fr)] gap-4">
@@ -361,9 +464,10 @@ export function GraphPage() {
               <GraphWorkspaceSection key={`graph-map-${taskScopeId}`} {...graphWorkspaceProps} view="graph" />
             </div>
             <GraphEntityInspector
+              key={selectedNode?.entity_id ?? "empty"}
               node={selectedNode}
-              relatedEntities={relatedEntities}
-              onSelectEntity={setSelectedNode}
+              relationSummary={relationSummary}
+              onSelectEntity={focusOnEntity}
               className="h-full min-h-0"
             />
           </div>

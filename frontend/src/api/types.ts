@@ -7,11 +7,15 @@ export interface Novel {
   author?: string;
   upload_time: string | null;
   file_size: number;
+  word_count?: number | null;
 }
 
 export interface NovelUploadResponse {
   novel_id: string;
-  title: string;
+  filename: string;
+  status: string;
+  title?: string | null;
+  word_count?: number | null;
   message: string;
 }
 
@@ -265,7 +269,7 @@ export interface DiagnosisResult {
 
 // 伏笔即事件树：伏笔树 = isforeshadowing 根事件 + foreshadowing 挂树边
 export interface ForeshadowingTree {
-  root_event_id: string;
+  source_event_id: string;
   tree_id: string;
   first_chapter_id: number;
   last_chapter_id: number;
@@ -391,7 +395,7 @@ export interface TimelineEventSecondaryGroup {
 
 export interface TimelineEventNode {
   tree_id: string;
-  root_event_id: string;
+  entry_event_id: string;
   title?: string | null;
   summary: string;
   anchor_chapter_id: number;
@@ -429,7 +433,7 @@ export interface TimelineEventCausalEdge {
 }
 
 export interface TimelineEventForeshadowingEdge {
-  root_event_id: string;
+  source_event_id: string;
   tree_id: string;
   payoff_event_id?: string | null;
   first_chapter_id: number;
@@ -504,8 +508,6 @@ export interface StyleStatsMetrics {
 // 与后端 src/api/models/tabs.py 严格对齐）
 
 export interface TopicModelMetaInfo {
-  model_key: string;
-  library_version: string;
   num_topics: number;
   artifact_key: string;
 }
@@ -555,8 +557,6 @@ export interface LinguisticEntitiesTabResponse {
   surface_top: EntitySurfaceCount[];
   total_char_count: number;
   metric_hit_count: number;
-  audit_hit_count: number;
-  metric_status: "ready" | "pending_review";
   fixed_phrase_density: number | null;
   four_char_candidate_count: number;
   total_hits: number;
@@ -761,6 +761,7 @@ export interface SettingFieldSpec {
   max_value: number | null;
   step: number | null;
   enum_values: string[];
+  enum_labels?: Record<string, string>;
   nullable: boolean;
   editable: boolean;
 }
@@ -810,7 +811,9 @@ export interface ModelPoolEntryUpdate {
   temperature: number;
   top_p: number;
   max_tokens: number;
+  /** 编辑键：同一模型可挂多个端点，按（模型 ID，服务地址）定位已保存条目 */
   original_model_id?: string;
+  original_base_url?: string;
 }
 
 export interface TaskEnvPatch {

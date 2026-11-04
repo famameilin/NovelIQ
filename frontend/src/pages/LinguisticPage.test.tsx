@@ -47,7 +47,12 @@ vi.mock("@/components/common/DashboardCardShell", () => ({
 }));
 
 vi.mock("@/components/common/TabUnavailableState", () => ({
-  TabUnavailableState: passthroughComponent("tab-unavailable-state"),
+  TabUnavailableState: ({ reason, detail }: { reason?: string | null; detail?: ReactNode }) => (
+    <div data-testid="tab-unavailable-state" data-reason={reason ?? ""}>
+      <p>当前任务暂无可展示的结果数据。</p>
+      {detail}
+    </div>
+  ),
 }));
 
 vi.mock("@/components/layout/PageContainer", () => ({
@@ -123,10 +128,8 @@ describe("LinguisticPage", () => {
       count_by_type: { person: 186 },
       surface_top: [{ surface_text: "林渡", entity_type: "person", count: 92 }],
       total_char_count: 186000,
-      metric_hit_count: 0,
-      audit_hit_count: 6,
-      metric_status: "pending_review",
-      fixed_phrase_density: 0,
+      metric_hit_count: 47,
+      fixed_phrase_density: 0.2527,
       four_char_candidate_count: 12,
       total_hits: 59,
       unavailable_reason: null,
@@ -160,7 +163,7 @@ describe("LinguisticPage", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("tab", { name: "实体与短语" }));
     expect(await screen.findByText("候选记录总数")).toBeInTheDocument();
-    expect(screen.getAllByText("待审定").length).toBeGreaterThan(0);
+    expect(screen.getByText("词表命中次数")).toBeInTheDocument();
     expect(getLinguisticEntitiesTabMock).toHaveBeenCalledWith("novel-1", "task-1");
     expect(getLinguisticWord2vecMock).not.toHaveBeenCalled();
 
@@ -216,6 +219,25 @@ describe("LinguisticPage", () => {
     renderLinguisticPage();
 
     expect(await screen.findByTestId("tab-unavailable-state")).toBeInTheDocument();
+    expect(await screen.findByText("无 段落语言特征数据 行（语言阶段未运行）")).toBeInTheDocument();
+  });
+
+  it("词向量未启用时，词汇与语义空态显示具体原因与开启指引", async () => {
+    getLinguisticWord2vecMock.mockResolvedValue({
+      run_id: "task-1",
+      model: null,
+      pos_coverage: [],
+      pos_centroids: [],
+      pos_similarity_matrix: null,
+      unavailable_reason: "word2vec_unavailable: 该运行未启用词向量",
+    });
+
+    renderLinguisticPage();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "词汇与语义" }));
+
+    expect(await screen.findByText("该运行未启用词向量")).toBeInTheDocument();
+    expect(screen.getByText(/「设置 → 语言特征」开启「启用 Word2Vec」/)).toBeInTheDocument();
   });
 
   it("表达结构指标条展示段落级监督边界两列，未拟合时回退占位符", async () => {

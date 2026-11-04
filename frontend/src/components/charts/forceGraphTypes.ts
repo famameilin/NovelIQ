@@ -19,6 +19,10 @@ export interface ForceGraphProps {
   searchQuery: string;
   relationFilter: Set<string>;
   appearanceCountMap?: Map<string, number>;
+  /** 聚焦节点，渲染时放大并加描边 */
+  focusNodeId?: string | null;
+  /** 允许显示标签的节点；为空集合时全部显示 */
+  labeledNodeIds?: Set<string>;
   className?: string;
 }
 

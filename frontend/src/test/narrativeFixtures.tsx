@@ -9,7 +9,7 @@ import { EventTreesPage } from "@/pages/EventTreesPage";
 import { TimelinePage } from "@/pages/TimelinePage";
 import { useNovelStore } from "@/store/novelStore";
 
-export { chapters, changes, arc, eventA, eventB, childEvent, grandchildEvent, tree, timeline, treeDetail } from "@/mocks/narrativeData";
+export { chapters, changes, eventA, eventB, childEvent, grandchildEvent, tree, timeline, treeDetail } from "@/mocks/narrativeData";
 
 /** 使用正式 API 适配器，测试返回值与新契约保持一致 */
 export function installNarrativeApi() {
@@ -17,7 +17,10 @@ export function installNarrativeApi() {
   useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: "task-a", novelsCache: [] });
   return vi.spyOn(apiClient, "get").mockImplementation(async (url, config) => {
     const path = String(url);
-    const params = config?.params ?? {};
+    const params = (config?.params ?? {}) as Record<string, unknown>;
+    if ((path.includes("/event-trees") || path.includes("/timeline")) && params.task_id !== "task-a") {
+      throw { isAxiosError: true, response: { status: 404, data: { detail: "任务不存在" } } };
+    }
     const result = narrativeResponse(path, new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)])));
     const data = result.data;
     return { data, status: 200 } as AxiosResponse;

@@ -1,3 +1,4 @@
+import { indexEventQueues } from "./eventQueues";
 import { apiClient } from "./client";
 import type {
   DiagnosisResult,
@@ -8,7 +9,7 @@ import type {
   TopicSeriesResponse,
   TopicShiftResponse,
 } from "./types";
-import { type EventCardDetail, type EventTreeListResponse, type NarrativeSource, type PlotlineChange, type PlotlineDimension, type PlotlineTimelineResponse } from "./narrativeTypes";
+import { type EventCardDetail, type EventTreeListResponse, type NarrativeSource, type PlotlineChange, type PlotlineDimension, type PlotlineStatesResponse, type PlotlineSubjectsResponse, type PlotlineTimelineResponse } from "./narrativeTypes";
 
 // 情绪趋势窗口聚合：window_paragraphs 作用于 range 区间内（缺省=全书）；
 // 情绪趋势 tab 的数据源（单源端点直接作为 tab API）
@@ -78,7 +79,7 @@ export async function getGraphChanges(
 export async function getTimeline(
   novelId: string,
   taskId: string,
-  options: { throughChapterId?: number; windowStartChapterId?: number; windowEndChapterId?: number; subjectId?: string; dimension?: PlotlineDimension; q?: string; cursor?: string; limit?: number; sourceFactId?: string; signal?: AbortSignal } = {},
+  options: { throughChapterId?: number; windowStartChapterId?: number; windowEndChapterId?: number; subjectId?: string; dimension?: PlotlineDimension; q?: string; cursor?: string; limit?: number; sourceFactId?: string; metaOnly?: boolean; signal?: AbortSignal } = {},
 ): Promise<PlotlineTimelineResponse> {
   const { signal, ...query } = options;
   const { data } = await apiClient.get<PlotlineTimelineResponse>(
@@ -86,8 +87,42 @@ export async function getTimeline(
     {
       params: {
         task_id: taskId,
-        ...definedParams({ through_chapter_id: query.throughChapterId, window_start_chapter_id: query.windowStartChapterId, window_end_chapter_id: query.windowEndChapterId, subject_id: query.subjectId, dimension: query.dimension, q: query.q, cursor: query.cursor, limit: query.limit, source_fact_id: query.sourceFactId }),
+        ...definedParams({ through_chapter_id: query.throughChapterId, window_start_chapter_id: query.windowStartChapterId, window_end_chapter_id: query.windowEndChapterId, subject_id: query.subjectId, dimension: query.dimension, q: query.q, cursor: query.cursor, limit: query.limit, source_fact_id: query.sourceFactId, meta_only: query.metaOnly }),
       },
+      signal,
+    }
+  );
+  return data;
+}
+
+/** 截点状态来源：summary 只取每维最近一个主体，其余按偏移分页 */
+export async function getTimelineStates(
+  novelId: string,
+  taskId: string,
+  options: { throughChapterId?: number; subjectId?: string; dimension?: PlotlineDimension; q?: string; cursor?: string; limit?: number; summary?: boolean; signal?: AbortSignal } = {},
+): Promise<PlotlineStatesResponse> {
+  const { signal, ...query } = options;
+  const { data } = await apiClient.get<PlotlineStatesResponse>(
+    `/api/novels/${novelId}/timeline/states`,
+    {
+      params: { task_id: taskId, ...definedParams({ through_chapter_id: query.throughChapterId, subject_id: query.subjectId, dimension: query.dimension, q: query.q, cursor: query.cursor, limit: query.limit, summary: query.summary }) },
+      signal,
+    }
+  );
+  return data;
+}
+
+/** 变化主体选择器按名称搜索，不下载全书主体 */
+export async function getTimelineSubjects(
+  novelId: string,
+  taskId: string,
+  options: { throughChapterId?: number; dimension?: PlotlineDimension; q?: string; cursor?: string; limit?: number; signal?: AbortSignal } = {},
+): Promise<PlotlineSubjectsResponse> {
+  const { signal, ...query } = options;
+  const { data } = await apiClient.get<PlotlineSubjectsResponse>(
+    `/api/novels/${novelId}/timeline/subjects`,
+    {
+      params: { task_id: taskId, ...definedParams({ through_chapter_id: query.throughChapterId, dimension: query.dimension, q: query.q, cursor: query.cursor, limit: query.limit }) },
       signal,
     }
   );
@@ -98,31 +133,17 @@ function definedParams(values: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
 }
 
-/** 事件树列表仅顶层大事件分页，页面不再发送搜索、章节筛选或父级展开参数 */
-export async function getEventTrees(options: { novelId: string; taskId: string; cursor?: string; limit?: number; signal?: AbortSignal }): Promise<EventTreeListResponse> {
-  const { data } = await apiClient.get<EventTreeListResponse>(`/api/novels/${options.novelId}/event-trees`, { params: { task_id: options.taskId, ...definedParams({ cursor: options.cursor, limit: options.limit }) }, signal: options.signal });
+/** 一次读取全书真实事件、包含树和结果关联 */
+export async function getEventTrees(options: { novelId: string; taskId: string; signal?: AbortSignal }): Promise<EventTreeListResponse> {
+  const { data } = await apiClient.get<EventTreeListResponse>(`/api/novels/${options.novelId}/event-trees`, { params: { task_id: options.taskId }, signal: options.signal });
   return data;
 }
 
-/** 循环 cursor 完整消费全部页，按 counts 校验收齐；收不齐、游标重复或运行身份变化都视为读取失败 */
+/** 数量不一致时明确读取失败，避免把缺失节点的响应当作完整事件树 */
 export async function getEventTreeBook(novelId: string, taskId: string, signal?: AbortSignal): Promise<EventTreeListResponse> {
-  const first = await getEventTrees({ novelId, taskId, limit: 50, signal });
-  const events = new Map(first.events.map(event => [event.event_id, event]));
-  const seenCursors = new Set<string>();
-  let cursor = first.next_cursor;
-  while (cursor) {
-    if (seenCursors.has(cursor)) throw new Error("事件树分页游标重复，无法收齐全书事件");
-    seenCursors.add(cursor);
-    const page = await getEventTrees({ novelId, taskId, limit: 50, cursor, signal });
-    if (page.run_id !== first.run_id) throw new Error("事件树分页运行身份变化，无法合并全书事件");
-    page.events.forEach(event => events.set(event.event_id, event));
-    cursor = page.next_cursor;
-  }
-  const counts = first.counts;
-  if (events.size !== counts.top_level_events || counts.top_level_events + counts.child_events !== counts.all_events) {
-    throw new Error(`事件树分页未收齐：已读 ${events.size} 个顶层事件，契约声明顶层 ${counts.top_level_events} / 全部 ${counts.all_events}`);
-  }
-  return { ...first, events: [...events.values()], next_cursor: null };
+  const book = await getEventTrees({ novelId, taskId, signal });
+  indexEventQueues(book);
+  return book;
 }
 
 export async function getEventTreeNode(novelId: string, taskId: string, nodeId: string, signal?: AbortSignal): Promise<EventCardDetail> {

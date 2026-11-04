@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { GraphChange, GraphChangesPageInfo, GraphChangesPageResponse } from "@/api/types";
@@ -66,6 +67,18 @@ function renderPaginationHook(initialProps: HookProps = { novelId: "novel-1", ta
 describe("useGraphChangePagination", () => {
   beforeEach(() => {
     getGraphChangesMock.mockReset();
+  });
+
+  it("严格模式下首屏只请求一次变化列表", async () => {
+    getGraphChangesMock.mockResolvedValue(createPage([createChange("c1", 12)]));
+
+    const { result } = renderHook(
+      () => useGraphChangePagination({ novelId: "novel-1", taskScopeId: "task-a" }),
+      { wrapper: StrictMode },
+    );
+
+    await waitFor(() => expect(result.current.loadedChanges).toHaveLength(1));
+    expect(getGraphChangesMock).toHaveBeenCalledTimes(1);
   });
 
   it("首屏加载变化列表并按 effective_chapter_id 倒序展示", async () => {

@@ -100,7 +100,7 @@ export function TimelineNodeDetail({
     // 建立 event_id -> node 标题映射，用于展示 description
     const titleByEventId = new Map<string, string>();
     nodes.forEach((n) => {
-      titleByEventId.set(n.root_event_id, n.title ?? n.summary);
+      titleByEventId.set(n.entry_event_id, n.title ?? n.summary);
       n.main_chain.forEach((eid) => {
         if (!titleByEventId.has(eid)) titleByEventId.set(eid, eid);
       });
@@ -116,10 +116,10 @@ export function TimelineNodeDetail({
     }));
   }, [node, derivedOrder, nodes]);
 
-  // causal 前因后果：过滤 source/target 为本树事件（tree_id, root_event_id, main_chain, secondary branch）
+  // causal 前因后果：过滤 source/target 为本树事件（tree_id, entry_event_id, main_chain, secondary branch）
   const { causalInEdges, causalOutEdges } = useMemo(() => {
     if (!node) return { causalInEdges: [] as TimelineEventCausalEdge[], causalOutEdges: [] as TimelineEventCausalEdge[] };
-    const treeEventIds = new Set<string>([node.root_event_id, ...node.main_chain]);
+    const treeEventIds = new Set<string>([node.entry_event_id, ...node.main_chain]);
     node.secondary_groups.forEach((g) => {
       g.branch.forEach((eid) => treeEventIds.add(eid));
       treeEventIds.add(g.target_event_id);
@@ -133,10 +133,10 @@ export function TimelineNodeDetail({
 
   const relatedForeshadowing = useMemo(() => {
     if (!node) return [] as TimelineEventForeshadowingEdge[];
-    const treeEventIds = new Set<string>([node.root_event_id, ...node.main_chain]);
+    const treeEventIds = new Set<string>([node.entry_event_id, ...node.main_chain]);
     node.secondary_groups.forEach((g) => g.branch.forEach((eid) => treeEventIds.add(eid)));
     return foreshadowingEdges.filter(
-      (f) => treeEventIds.has(f.root_event_id) || (f.payoff_event_id && treeEventIds.has(f.payoff_event_id))
+      (f) => treeEventIds.has(f.source_event_id) || (f.payoff_event_id && treeEventIds.has(f.payoff_event_id))
     );
   }, [node, foreshadowingEdges]);
 
@@ -144,7 +144,7 @@ export function TimelineNodeDetail({
     if (!node) return;
     // 优先跳转到本树锚点：timeline?tree_id= & event_id=，保留 task_id
     const params = new URLSearchParams({ task_id: taskId, tree_id: node.tree_id });
-    if (node.root_event_id) params.set("event_id", node.root_event_id);
+    if (node.entry_event_id) params.set("event_id", node.entry_event_id);
     navigate(`/novels/${novelId}/timeline?${params.toString()}`);
   }, [navigate, node, novelId, taskId]);
 
@@ -466,7 +466,7 @@ export function TimelineNodeDetail({
               <div className="mb-2 text-xs font-medium text-text-muted">关联伏笔</div>
               <div className="space-y-2">
                 {relatedForeshadowing.map((f) => (
-                  <div key={f.root_event_id} className="rounded-lg bg-surface-hover p-3 text-xs">
+                  <div key={f.source_event_id} className="rounded-lg bg-surface-hover p-3 text-xs">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-[10px]">
                         {f.status}
@@ -479,7 +479,7 @@ export function TimelineNodeDetail({
                       </span>
                     </div>
                     <p className="mt-1.5 leading-5 text-text-muted">{f.description}</p>
-                    <p className="mt-1 font-mono text-[11px] text-text-muted">根 {f.root_event_id} → {f.payoff_event_id ?? "待回收"}</p>
+                    <p className="mt-1 font-mono text-[11px] text-text-muted">根 {f.source_event_id} → {f.payoff_event_id ?? "待回收"}</p>
                   </div>
                 ))}
               </div>

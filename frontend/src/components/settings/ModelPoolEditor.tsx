@@ -59,10 +59,15 @@ function initialDraft(entries: ModelPoolEntry[], diagnosisModelId: string | null
   return {
     entries: entries.map(({ model_id, base_url, weight, max_in_flight, temperature, top_p, max_tokens, context_window_tokens }) => ({
       model_id, base_url, weight, max_in_flight, temperature, top_p, max_tokens, context_window_tokens,
-      original_model_id: model_id,
+      original_model_id: model_id, original_base_url: base_url,
     })),
     diagnosisModelId,
   };
+}
+
+/** 池内唯一条目：同一模型可挂多个端点，同一（模型 ID，服务地址）只能出现一次 */
+function sameEntry(a: { model_id: string; base_url: string }, b: { model_id: string; base_url: string }) {
+  return a.model_id === b.model_id && a.base_url.replace(/\/+$/, "") === b.base_url.replace(/\/+$/, "");
 }
 
 export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoolEditorProps) {
@@ -120,10 +125,12 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
     if (!dialog) return;
     const form = dialog.form;
     const modelId = form.model_id.trim();
+    const baseUrl = form.base_url.trim().replace(/\/+$/, "");
     let error = "";
     if (!modelId) error = "模型 ID 不能为空";
-    else if (current.entries.some((entry, index) => index !== dialog.index && entry.model_id === modelId)) {
-      error = "模型 ID 已存在";
+    else if (current.entries.some((entry, index) => index !== dialog.index
+      && sameEntry(entry, { model_id: modelId, base_url: baseUrl }))) {
+      error = "同一模型与同一服务地址已存在";
     } else {
       try {
         const url = new URL(form.base_url.trim());
@@ -156,14 +163,16 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
       return;
     }
     const nextEntry: ModelPoolEntryUpdate = {
-      model_id: modelId, base_url: form.base_url.trim().replace(/\/+$/, ""), weight, max_in_flight: concurrency,
+      model_id: modelId, base_url: baseUrl, weight, max_in_flight: concurrency,
       temperature, top_p: topP, max_tokens: maxTokens, context_window_tokens: contextWindow,
       ...(entry?.original_model_id ? { original_model_id: entry.original_model_id } : {}),
+      ...(entry?.original_base_url ? { original_base_url: entry.original_base_url } : {}),
       ...(form.api_key ? { api_key: form.api_key } : {}),
     };
     const nextEntries = dialog.index === null ? [...current.entries, nextEntry]
       : current.entries.map((item, index) => index === dialog.index ? nextEntry : item);
-    setDraft({ entries: nextEntries, diagnosisModelId: entry?.model_id === current.diagnosisModelId
+    const keptName = nextEntries.some((item) => item.model_id === entry?.model_id);
+    setDraft({ entries: nextEntries, diagnosisModelId: entry?.model_id === current.diagnosisModelId && !keptName
       ? modelId : current.diagnosisModelId });
     setDialog(null);
   };
@@ -174,7 +183,8 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
   };
 
   const editedEntry = dialog?.index === null || !dialog ? null : current.entries[dialog.index];
-  const savedKey = entries.find((entry) => entry.model_id === editedEntry?.original_model_id)?.api_key;
+  const savedKey = entries.find((item) => item.model_id === editedEntry?.original_model_id
+    && item.base_url === editedEntry?.original_base_url)?.api_key;
 
   return <section aria-label="模型池" className="space-y-4 border-t border-border pt-6">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -200,12 +210,13 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
         <th className="w-[8%] py-2 font-normal">并发</th><th className="w-[12%] py-2 font-normal">上下文</th>
         <th className="w-[11%] py-2"><span className="sr-only">操作</span></th>
       </tr></thead>
-      <tbody>{current.entries.map((entry, index) => <tr key={entry.model_id} className="border-b border-border align-top">
+      <tbody>{current.entries.map((entry, index) => <tr key={`${entry.model_id}|${entry.base_url}`} className="border-b border-border align-top">
         <td className="break-all py-3 pr-3 text-text">{entry.model_id}
           {entry.model_id === current.diagnosisModelId && <Badge variant="secondary" className="mt-1 block w-fit">诊断</Badge>}
         </td>
         <td className="break-all py-3 pr-3 text-text-secondary">{entry.base_url}</td>
-        <td className="break-all py-3 pr-2 text-text-muted">{entry.api_key ? "待保存" : entries.find((item) => item.model_id === entry.original_model_id)?.api_key}</td>
+        <td className="break-all py-3 pr-2 text-text-muted">{entry.api_key ? "待保存" : entries.find((item) => item.model_id === entry.original_model_id
+          && item.base_url === entry.original_base_url)?.api_key}</td>
         <td className="py-3 tabular-nums">{entry.weight}<span className="block text-xs text-text-muted">
           {(entry.weight / weightScale / (totalWeight || 1) * 100).toFixed(1)}%
         </span></td>
@@ -227,7 +238,9 @@ export function ModelPoolEditor({ entries, diagnosisModelId, onSaved }: ModelPoo
       <Select value={current.diagnosisModelId ?? ""} disabled={save.isPending || current.entries.length === 0}
         onValueChange={(modelId) => setDraft({ ...current, diagnosisModelId: modelId })}>
         <SelectTrigger id="diagnosis-model" className="w-full"><SelectValue placeholder="未指定" /></SelectTrigger>
-        <SelectContent>{current.entries.map((entry) => <SelectItem key={entry.model_id} value={entry.model_id}>
+        <SelectContent>{current.entries
+          .filter((entry, index, list) => list.findIndex((item) => item.model_id === entry.model_id) === index)
+          .map((entry) => <SelectItem key={entry.model_id} value={entry.model_id}>
           {entry.model_id}
         </SelectItem>)}</SelectContent>
       </Select>

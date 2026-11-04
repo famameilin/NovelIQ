@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { isAnalysisNotCompleteError, getAnalysisNotCompleteRunStatus } from "@/api/errorGuards";
 import { getDiagnosis, getForeshadowingTrees } from "@/api/results";
 import { useNovelScopedTask } from "@/hooks/useNovelScopedTask";
+import { useNovelTitle } from "@/hooks/useNovelTitle";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { AnalysisMetricStrip } from "@/components/common/AnalysisMetricStrip";
 import { AnalysisViewSwitcher } from "@/components/common/AnalysisViewSwitcher";
@@ -141,7 +142,7 @@ function ForeshadowingTreesErrorCard(props: { onRetry: () => void }) {
  */
 function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTree[] }) {
   const [filter, setFilter] = useState<"all" | "open" | "reinforced" | "likely_paid_off">("all");
-  const [selectedRootId, setSelectedRootId] = useState<string | null>(props.foreshadowingTrees[0]?.root_event_id ?? null);
+  const [selectedRootId, setSelectedRootId] = useState<string | null>(props.foreshadowingTrees[0]?.source_event_id ?? null);
   const [page, setPage] = useState(1);
   const { ref, capacity } = useDiagnosisCapacity(64, 0, 6);
   const counts = useMemo(() => {
@@ -155,7 +156,7 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
   const pageCount = Math.ceil(visibleTrees.length / capacity);
   const currentPage = Math.min(page, Math.max(pageCount, 1));
   const pageTrees = visibleTrees.slice((currentPage - 1) * capacity, currentPage * capacity);
-  const selectedTree = visibleTrees.find(tree => tree.root_event_id === selectedRootId) ?? pageTrees[0] ?? null;
+  const selectedTree = visibleTrees.find(tree => tree.source_event_id === selectedRootId) ?? pageTrees[0] ?? null;
   const detailText = selectedTree ? [
     selectedTree.description,
     `最近判断依据：${selectedTree.latest_reason || "暂无补充判断"}`,
@@ -195,11 +196,11 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
           {pageTrees.map(tree => {
             const status = getThreadStatusMeta(tree.status);
             return (
-              <button key={tree.root_event_id} type="button" aria-pressed={selectedTree?.root_event_id === tree.root_event_id}
+              <button key={tree.source_event_id} type="button" aria-pressed={selectedTree?.source_event_id === tree.source_event_id}
                 aria-label={`${tree.description} · 回收可能性 ${getLevelLabel(tree.payoff_likelihood)}`}
-                onClick={() => setSelectedRootId(tree.root_event_id)}
+                onClick={() => setSelectedRootId(tree.source_event_id)}
                 className={cn("grid h-16 w-full grid-cols-[90px_minmax(0,1fr)_140px_88px_80px] items-center gap-3 border-b border-l-2 border-b-border/50 px-3 text-left text-xs first:rounded-t-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45",
-                  selectedTree?.root_event_id === tree.root_event_id ? "border-l-primary bg-primary/10" : "border-l-transparent hover:bg-surface-hover")}>
+                  selectedTree?.source_event_id === tree.source_event_id ? "border-l-primary bg-primary/10" : "border-l-transparent hover:bg-surface-hover")}>
                 <span><Badge variant={status.variant}>{status.label}</Badge></span>
                 <span data-diagnosis-preview className="line-clamp-2 text-sm leading-5 text-text">{tree.description}</span>
                 <span className="text-text-muted">第 {tree.first_chapter_id} 至 {tree.last_chapter_id} 章 · {tree.anchor_chapter_ids.length} 个锚点</span>
@@ -211,7 +212,7 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
         </div>
         <div className="h-8 shrink-0"><PagedControls page={currentPage} pageCount={pageCount} onPageChange={next => {
           setPage(next);
-          setSelectedRootId(visibleTrees[(next - 1) * capacity]?.root_event_id ?? null);
+          setSelectedRootId(visibleTrees[(next - 1) * capacity]?.source_event_id ?? null);
         }} label="伏笔线索" /></div>
       </section>
 
@@ -224,7 +225,7 @@ function ForeshadowingTreesSection(props: { foreshadowingTrees: ForeshadowingTre
             <div className="flex gap-2"><dt className="text-text-muted">回收可能性</dt><dd>{getLevelLabel(selectedTree.payoff_likelihood)}</dd></div>
           </dl>
         </div>
-        <DiagnosisPagedText key={selectedTree.root_event_id} text={detailText} label="伏笔判断" testId="foreshadowing-detail-passage" />
+        <DiagnosisPagedText key={selectedTree.source_event_id} text={detailText} label="伏笔判断" testId="foreshadowing-detail-passage" />
       </aside>}
     </div>
   );
@@ -345,10 +346,11 @@ export function DiagnosisPage() {
   const foreshadowMetric = diagnosis?.foreshadow_expectation ?? null;
   const foreshadowingTrees = foreshadowingTreesQuery.data ?? [];
   const primaryGenreLabel = diagnosis?.genre_labels?.[0] ?? null;
+  const title = useNovelTitle(primaryGenreLabel ? `${primaryGenreLabel}诊断报告` : "诊断报告");
   // ---------- 渲染 ----------
 
   return (
-    <AnalysisWorkspace title={primaryGenreLabel ? `${primaryGenreLabel}诊断报告` : "诊断报告"}>
+    <AnalysisWorkspace title={title}>
       {/* 加载骨架屏 */}
       {isLoading && <SkeletonGrid />}
 

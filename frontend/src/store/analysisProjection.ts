@@ -7,8 +7,8 @@ export interface StageRecord {
   stage: string; status: string; message?: string; steps?: Record<string, ProgressRecord>;
 }
 export interface ProgressRecord { current?: number | null; total?: number | null; unit?: string; status?: string; message?: string; }
-export interface CapacityModel { model_id: string; capacity: number; }
-export interface CapacitySeat { model_id: string; slot: number; reservation_id: string; run_id: string; work_id: string; foreign?: boolean; }
+export interface CapacityModel { entry_id: string; model_id: string; label: string; capacity: number; }
+export interface CapacitySeat { entry_id: string; model_id: string; slot: number; reservation_id: string; run_id: string; work_id: string; foreign?: boolean; }
 export interface ToolRecord { tool_call_id: string; content: string; message: string; status: string; }
 export interface ExecutionRecord {
   invocation_id: string; work_id?: string; model_id?: string; reservation_id?: string; stage?: string;

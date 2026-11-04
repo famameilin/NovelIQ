@@ -190,11 +190,11 @@ const MOCK_GRAPH_RELATION_CHANGES = [
 /* ------------------------------------------------------------------ */
 
 const NOVEL_TITLES = [
-  { title: "斗破苍穹", author: "天蚕土豆", filename: "斗破苍穹.txt", size: 4_567_890 },
-  { title: "凡人修仙传", author: "忘语", filename: "凡人修仙传.txt", size: 8_234_567 },
-  { title: "遮天", author: "辰东", filename: "遮天.txt", size: 6_123_456 },
-  { title: "完美世界", author: "辰东", filename: "完美世界.txt", size: 5_987_654 },
-  { title: "诡秘之主", author: "爱潜水的乌贼", filename: "诡秘之主.txt", size: 7_345_678 },
+  { title: "斗破苍穹", author: "天蚕土豆", filename: "斗破苍穹.txt", size: 4_567_890, words: 5_300_000 },
+  { title: "凡人修仙传", author: "忘语", filename: "凡人修仙传.txt", size: 8_234_567, words: 7_400_000 },
+  { title: "遮天", author: "辰东", filename: "遮天.txt", size: 6_123_456, words: 6_100_000 },
+  { title: "完美世界", author: "辰东", filename: "完美世界.txt", size: 5_987_654, words: 5_900_000 },
+  { title: "诡秘之主", author: "爱潜水的乌贼", filename: "诡秘之主.txt", size: 7_345_678, words: 4_800_000 },
 ];
 
 export function createNovel(overrides?: Partial<Novel>): Novel {
@@ -206,6 +206,7 @@ export function createNovel(overrides?: Partial<Novel>): Novel {
     author: sample.author,
     upload_time: dateAgo(Math.floor(Math.random() * 30)),
     file_size: sample.size,
+    word_count: sample.words,
     ...overrides,
   };
 }
@@ -248,10 +249,15 @@ novelList.forEach((novel) => {
 });
 
 // 固定的虚构设计样本，便于把正式页面与原示意稿放在同一内容下检查
-const narrativePreviewNovel = createNovel({ novel_id: "narrative-design-demo", title: "雾港来信 · 设计样本", filename: "雾港来信-虚构样本.txt", author: "虚构示例", file_size: 2400 });
+const narrativePreviewNovel = createNovel({ novel_id: "narrative-design-demo", title: "雾港来信 · 设计样本", filename: "雾港来信-虚构样本.txt", author: "虚构示例", file_size: 2400, word_count: 1800 });
 novelDb.set(narrativePreviewNovel.novel_id, narrativePreviewNovel);
 novelList.push(narrativePreviewNovel);
 taskDb.set(narrativePreviewNovel.novel_id, [createTask(narrativePreviewNovel.novel_id, "completed", { task_id: "narrative-design-task" })]);
+
+const eventTreeReferenceNovel = createNovel({ novel_id: "event-tree-reference", title: "重明传", filename: "重明传.txt", author: "虚构示例", file_size: 14900, word_count: 11000 });
+novelDb.set(eventTreeReferenceNovel.novel_id, eventTreeReferenceNovel);
+novelList.push(eventTreeReferenceNovel);
+taskDb.set(eventTreeReferenceNovel.novel_id, [createTask(eventTreeReferenceNovel.novel_id, "completed", { task_id: "reference-scene" })]);
 
 /* ------------------------------------------------------------------ */
 /*  角色                                                               */
@@ -501,7 +507,7 @@ export function createDiagnosis(): DiagnosisResult {
 export function createForeshadowingTrees(): ForeshadowingTree[] {
   return [
     {
-      root_event_id: "root-tree-1",
+      source_event_id: "root-tree-1",
       tree_id: "tree-1",
       first_chapter_id: 3,
       last_chapter_id: 12,
@@ -712,7 +718,7 @@ export function createEventTimeline(): EventTimelineResponse {
 
     nodes.push({
       tree_id: treeId,
-      root_event_id: rootEventId,
+      entry_event_id: rootEventId,
       title: titlePool,
       summary,
       anchor_chapter_id: anchorChapterId,
@@ -760,7 +766,7 @@ export function createEventTimeline(): EventTimelineResponse {
   nodes.sort((a, b) => a.anchor_chapter_order - b.anchor_chapter_order || a.char_start - b.char_start);
   const derived_event_order: string[] = [];
   nodes.forEach((n) => {
-    derived_event_order.push(n.root_event_id);
+    derived_event_order.push(n.entry_event_id);
     n.main_chain.forEach((eid) => {
       if (!derived_event_order.includes(eid)) derived_event_order.push(eid);
     });
@@ -781,8 +787,8 @@ export function createEventTimeline(): EventTimelineResponse {
     const srcNode = nodes[srcIdx];
     const tgtNode = nodes[tgtIdx];
     if (!srcNode || !tgtNode || srcNode.tree_id === tgtNode.tree_id) continue;
-    const srcEvent = srcNode.main_chain[srcNode.main_chain.length - 1] ?? srcNode.root_event_id;
-    const tgtEvent = tgtNode.root_event_id;
+    const srcEvent = srcNode.main_chain[srcNode.main_chain.length - 1] ?? srcNode.entry_event_id;
+    const tgtEvent = tgtNode.entry_event_id;
     const isActive = e !== 1; // 中间一条设为 inactive 演示虚线
     causal_edges.push({
       edge_id: `causal:${srcEvent}->${tgtEvent}:${e}`,
@@ -801,9 +807,9 @@ export function createEventTimeline(): EventTimelineResponse {
   }
 
   const foreshadowing_edges: TimelineEventForeshadowingEdge[] = nodes.slice(0, 2).map((n, idx) => ({
-    root_event_id: n.root_event_id,
+    source_event_id: n.entry_event_id,
     tree_id: n.tree_id,
-    payoff_event_id: nodes[(idx + 1) % nodes.length]?.root_event_id ?? null,
+    payoff_event_id: nodes[(idx + 1) % nodes.length]?.entry_event_id ?? null,
     first_chapter_id: n.start_chapter_id,
     last_chapter_id: n.end_chapter_id,
     description: `伏笔 ${idx + 1}：${n.title ?? n.summary.slice(0, 20)}`,

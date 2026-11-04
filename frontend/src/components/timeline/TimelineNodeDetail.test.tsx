@@ -42,7 +42,7 @@ vi.mock("framer-motion", () => ({
 function createEventNode(overrides?: Partial<TimelineEventNode>): TimelineEventNode {
   return {
     tree_id: "tree:1",
-    root_event_id: "event:1:root",
+    entry_event_id: "event:1:root",
     title: "少年初入修炼之路",
     summary: "树 1 包含主链 2 环与旁支 1 组，横跨第 1-5 章。",
     anchor_chapter_id: 1,

@@ -32,6 +32,13 @@ const schemaFixture: SettingsSchemaResponse = {
       path: ["models", "annotation", "timeout_s"], field_type: "number", label: "标注超时（秒）",
       description: "", min_value: 1, max_value: null, step: 1, enum_values: [], nullable: true, editable: true,
     },
+    ...(["annotation", "diagnosis"] as const).map((task) => ({
+      path: ["models", task, "reasoning_effort"], field_type: "enum" as const,
+      label: `${task === "annotation" ? "标注" : "诊断"}思考等级`, description: "",
+      min_value: null, max_value: null, step: null, nullable: false, editable: true,
+      enum_values: ["low", "medium", "high", "xhigh", "max"],
+      enum_labels: { low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高" },
+    })),
     {
       path: ["metrics", "mtld_threshold"], field_type: "number", label: "MTLD 阈值",
       description: "", min_value: 0, max_value: 1, step: null, enum_values: [], nullable: false, editable: true,
@@ -52,8 +59,8 @@ const viewFixture: SettingsViewResponse = {
           context_window_tokens: 64000, temperature: 0.3, top_p: 0.9, max_tokens: 4096 },
       ],
       diagnosis_model_id: "second-model",
-      annotation: { timeout_s: 100 },
-      diagnosis: {},
+      annotation: { timeout_s: 100, reasoning_effort: "high" },
+      diagnosis: { reasoning_effort: "high" },
       paragraph_embedding: { base_url: "http://localhost:8080/v1", model: "emb", api_key: "••••abcd" },
     },
     metrics: { mtld_threshold: 0.72 },
@@ -62,7 +69,7 @@ const viewFixture: SettingsViewResponse = {
   defaults: {
     models: {
       model_pool: [], diagnosis_model_id: null,
-      annotation: { timeout_s: null }, diagnosis: {},
+      annotation: { timeout_s: null, reasoning_effort: "high" }, diagnosis: { reasoning_effort: "high" },
       paragraph_embedding: { base_url: null, model: null, api_key: null },
     },
     metrics: { mtld_threshold: 0.72 },
@@ -104,6 +111,55 @@ beforeEach(() => {
 });
 
 describe("SettingsPage", () => {
+  it("两类任务显示五档中文思考等级并默认高", async () => {
+    renderPage();
+    for (const label of ["标注思考等级", "诊断思考等级"]) {
+      const select = await screen.findByRole("combobox", { name: label });
+      expect(select).toHaveTextContent("高");
+      fireEvent.keyDown(select, { key: "ArrowDown" });
+      expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["低", "中", "高", "极高", "最高"]);
+      await userEvent.keyboard("{Escape}");
+    }
+    expect(screen.queryByRole("switch", { name: /思考/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/标注思考模式|诊断思考模式/)).not.toBeInTheDocument();
+  });
+
+  it("分别保存思考等级原值并回显中文，支持放弃和恢复默认", async () => {
+    updateSettingsMock.mockImplementation(async (patch: { models: Record<string, { reasoning_effort: string }> }) => {
+      const view = structuredClone(viewFixture);
+      const models = view.values.models as Record<string, Record<string, unknown>>;
+      for (const [task, value] of Object.entries(patch.models)) Object.assign(models[task], value);
+      return view;
+    });
+    renderPage();
+    fireEvent.keyDown(await screen.findByRole("combobox", { name: "标注思考等级" }), { key: "ArrowDown" });
+    await userEvent.click(screen.getByRole("option", { name: "极高" }));
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "诊断思考等级" }), { key: "ArrowDown" });
+    await userEvent.click(screen.getByRole("option", { name: "最高" }));
+    await userEvent.click(screen.getByRole("button", { name: "放弃修改" }));
+    expect(screen.getByRole("combobox", { name: "标注思考等级" })).toHaveTextContent("高");
+    expect(screen.getByRole("combobox", { name: "诊断思考等级" })).toHaveTextContent("高");
+    for (const [label, option] of [["标注思考等级", "极高"], ["诊断思考等级", "最高"]]) {
+      fireEvent.keyDown(screen.getByRole("combobox", { name: label }), { key: "ArrowDown" });
+      await userEvent.click(screen.getByRole("option", { name: option }));
+    }
+    await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() => expect(updateSettingsMock).toHaveBeenLastCalledWith({ models: {
+      annotation: { reasoning_effort: "xhigh" }, diagnosis: { reasoning_effort: "max" },
+    } }));
+    await waitFor(() => expect(screen.queryByText("有未保存的修改，保存后立即生效。")).not.toBeInTheDocument());
+    expect(screen.getByRole("combobox", { name: "标注思考等级" })).toHaveTextContent("极高");
+    expect(screen.getByRole("combobox", { name: "诊断思考等级" })).toHaveTextContent("最高");
+    for (const label of ["标注思考等级", "诊断思考等级"]) {
+      await userEvent.click(screen.getByRole("button", { name: `恢复默认：${label}` }));
+      expect(screen.getByRole("combobox", { name: label })).toHaveTextContent("高");
+    }
+    await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() => expect(updateSettingsMock).toHaveBeenLastCalledWith({ models: {
+      annotation: { reasoning_effort: "high" }, diagnosis: { reasoning_effort: "high" },
+    } }));
+  });
+
   it("显示统一模型池及诊断选择，不显示文本连接和额外分类", async () => {
     renderPage();
     expect(await screen.findByRole("region", { name: "模型池" })).toBeInTheDocument();
@@ -150,8 +206,9 @@ describe("SettingsPage", () => {
     await userEvent.click(dialog.getByRole("button", { name: "添加" }));
     expect(dialog.getByRole("alert")).toHaveTextContent("模型 ID 不能为空");
     fireEvent.change(dialog.getByLabelText("ID"), { target: { value: "text-model" } });
+    fireEvent.change(dialog.getByLabelText("URL"), { target: { value: "https://first.example/v1" } });
     await userEvent.click(dialog.getByRole("button", { name: "添加" }));
-    expect(dialog.getByRole("alert")).toHaveTextContent("模型 ID 已存在");
+    expect(dialog.getByRole("alert")).toHaveTextContent("同一模型与同一服务地址已存在");
     fireEvent.change(dialog.getByLabelText("ID"), { target: { value: "new-model" } });
     fireEvent.change(dialog.getByLabelText("URL"), { target: { value: "https://new.example/v1" } });
     fireEvent.change(dialog.getByLabelText("Key"), { target: { value: "sk-new-key" } });
@@ -208,6 +265,7 @@ describe("SettingsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "保存模型池" }));
     await waitFor(() => expect(updateModelEnvMock).toHaveBeenCalledWith({
       model_pool: expect.arrayContaining([{ model_id: "renamed-model", original_model_id: "text-model",
+        original_base_url: "https://first.example/v1",
         base_url: "https://changed.example/v1", weight: 1, max_in_flight: 5, context_window_tokens: 128000,
         temperature: 0.7, top_p: 0.8, max_tokens: 131072 }]), diagnosis_model_id: "second-model",
     }));
