@@ -22,7 +22,6 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from src.config.project_version import project_version  # noqa: E402
 from src.storage.constraints import domain_constraint_statements  # noqa: E402
 from src.storage.database_url import resolve_database_url_from_env  # noqa: E402
 from src.storage.models import Base  # noqa: E402
@@ -361,12 +360,6 @@ def _source_contract() -> dict[str, Any]:
             )
         result[name] = {"columns": columns, "primary_key": list(primary_key), "foreign_keys": references}
     return result
-
-
-def _check_release() -> None:
-    "核对迁移入口对应的项目发布版本"
-    if project_version() != "0.4.0":
-        raise ValueError("此入口只用于项目 0.4.0 发布代码，请使用匹配发布的代码执行")
 
 
 def _catalog(connection: Connection, schema: str) -> dict[str, int]:
@@ -714,7 +707,6 @@ def _migrate(
             raise ValueError("缺少已安装的 vector 或 pg_trgm 扩展，请先准备数据库扩展")
         search_path = [schema, *sorted(set(extensions.values()) - {schema})]
         connection.execute(text("SET LOCAL search_path TO " + ",".join(_quote(name) for name in search_path)))
-        _check_release()
         if (
             apply
             and not connection.execute(

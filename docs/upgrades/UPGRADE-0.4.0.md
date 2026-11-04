@@ -32,7 +32,7 @@
 
 唯一入口为 `scripts/migrations/migrate_0_3_0_to_0_4_0.py`，公共接口固定为 `main() → migrate(database_env, schema, apply, expect_database)`，另有可选关键字参数 `archive_schema` 与 `drop_unmappable`。统一约定见 [迁移入口说明](../../scripts/migrations/README.md)。
 
-从 0.4.0 发布代码运行。数据库连接使用 `.env` 中现有的平铺配置：`DATABASE_URL/USERNAME/PASSWORD` 或 `TEST_DATABASE_URL/USERNAME/PASSWORD`；schema 默认读取对应的 `DATABASE_SCHEMA` 或 `TEST_DATABASE_SCHEMA`，未配置时使用 `public`。
+从包含本入口的项目代码运行；入口只负责 0.3.0 到 0.4.0 的结构转换，不按代码版本拒绝执行。数据库连接使用 `.env` 中现有的平铺配置：`DATABASE_URL/USERNAME/PASSWORD` 或 `TEST_DATABASE_URL/USERNAME/PASSWORD`；schema 默认读取对应的 `DATABASE_SCHEMA` 或 `TEST_DATABASE_SCHEMA`，未配置时使用 `public`。
 
 先在隔离的 0.3.0 备份恢复库预检：
 
