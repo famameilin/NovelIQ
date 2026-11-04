@@ -85,11 +85,11 @@ test('tree-level timeline link keeps its event detail on the timeline', async ({
   const forest = await response.json() as EventForestResponse;
   const tree = forest.event_trees[0];
   expect(tree).toBeTruthy();
-  await page.goto(`/novels/${novelId}/timeline?task_id=${taskId}&tree_id=${encodeURIComponent(tree.tree_id)}&event_id=${encodeURIComponent(tree.root_event_id)}`);
+  await page.goto(`/novels/${novelId}/timeline?task_id=${taskId}&tree_id=${encodeURIComponent(tree.tree_id)}&event_id=${encodeURIComponent(tree.entry_event_id)}`);
   await expect(page.getByRole('dialog', { name: '事件详情悬浮框' })).toBeVisible();
   const url = new URL(page.url());
   expect(url.pathname).toBe(`/novels/${novelId}/timeline`);
   expect(url.searchParams.get('task_id')).toBe(taskId);
   expect(url.searchParams.get('tree_id')).toBe(tree.tree_id);
-  expect(url.searchParams.get('event_id')).toBe(tree.root_event_id);
+  expect(url.searchParams.get('event_id')).toBe(tree.entry_event_id);
 });
