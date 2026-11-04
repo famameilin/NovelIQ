@@ -7,7 +7,7 @@ import httpx
 import pytest
 from openai import APIConnectionError, APITimeoutError, BadRequestError, InternalServerError
 
-from src.embedding import EmbeddingClient, EmbeddingServiceError
+from src.embedding import EmbeddingClient, EmbeddingServiceError, format_query_instruct
 
 
 def _build_httpx_response(status_code: int) -> httpx.Response:
@@ -104,3 +104,22 @@ async def test_exhausted_embedding_http_retries_are_dependency_failure() -> None
         await client.get_embedding("正文")
     assert create.await_count == 3
     await client._client.close()
+
+
+@pytest.mark.parametrize(
+    ("model", "expects_instruct"),
+    [
+        ("Qwen3-Embedding-4B", True),
+        ("qwen3-embedding:4b", True),
+        ("BAAI/bge-m3", False),
+        ("text-embedding-3-large", False),
+    ],
+)
+def test_format_query_applies_instruct_prefix_only_for_qwen_embedding(model: str, expects_instruct: bool) -> None:
+    """查询格式化按模型族选择：只有 Qwen3-Embedding 使用非对称检索 instruct 前缀"""
+    client = EmbeddingClient(base_url="http://embedding.test/v1", model=model, api_key="test", timeout_s=1)
+    formatted = client.format_query("林渡 顾霜")
+    if expects_instruct:
+        assert formatted == format_query_instruct("林渡 顾霜")
+    else:
+        assert formatted == "林渡 顾霜"

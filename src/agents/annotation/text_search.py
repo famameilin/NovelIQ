@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import TypedDict
 
-from src.embedding import EmbeddingClient, EmbeddingServiceError, format_query_instruct
+from src.embedding import EmbeddingClient, EmbeddingServiceError
 from src.storage import Storage
 from src.storage.query_terms import extract_query_terms
 
@@ -112,7 +112,9 @@ class TextSearchService:
             if self._embedding_client is None:
                 raise AnnotationDependencyError("原文语义检索已启用但 EmbeddingClient 未配置")
             try:
-                query_embedding = await self._embedding_client.get_embedding(format_query_instruct(normalized_query))
+                query_embedding = await self._embedding_client.get_embedding(
+                    self._embedding_client.format_query(normalized_query)
+                )
             except EmbeddingServiceError as exc:
                 # 依赖故障不能伪装成可由模型改参数修复的工具拒绝
                 raise AnnotationDependencyError(str(exc)) from exc

@@ -173,7 +173,10 @@ async def test_failed_program_does_not_promote_finish(previous_request: bool) ->
 )
 async def test_embedding_failure_aborts_program_after_auditing_both_call_levels(failure_type) -> None:
     """真实程序与工具边界：失败检索和 execute_code 都留审计，后续写入和 finish 不执行"""
-    client = SimpleNamespace(get_embedding=AsyncMock(side_effect=failure_type("嵌入服务不可用")))
+    client = SimpleNamespace(
+        get_embedding=AsyncMock(side_effect=failure_type("嵌入服务不可用")),
+        format_query=lambda text: text,
+    )
     search = TextSearchService(
         storage_for(MagicMock()), run_id=fixture_id(__name__, "run-agent-test"), embedding_client=client
     )

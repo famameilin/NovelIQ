@@ -1,4 +1,4 @@
-"""嵌入客户端：文本向量化（本地 llama-server，OpenAI 兼容接口）与查询侧的 instruct 前缀包装。"""
+"""嵌入客户端：文本向量化（本地 llama-server，OpenAI 兼容接口）与按模型族格式化的查询文本。"""
 
 from __future__ import annotations
 
@@ -24,9 +24,8 @@ EMBEDDING_CONNECTION_RETRY_DELAY_S = 0.5
 # 同时在飞的批次请求数：服务端按槽位并行处理，串行发批会把往返延迟累加成墙钟
 EMBEDDING_BATCH_CONCURRENCY = 4
 
-# 查询侧嵌入按 Qwen3-Embedding 官方非对称检索配方加 instruct 前缀：
-# 检索文档侧（embed_texts）必须直发原文不加前缀，只有查询侧走 format_query_instruct；
-# 指令按官方建议写英文；换成对称嵌入模型时须移除前缀，否则相似度失真。
+# 查询侧嵌入按嵌入模型族选择格式：Qwen3-Embedding 按官方非对称检索配方加 instruct 前缀，
+# BGE 及其他模型直发原文；检索文档侧（embed_texts）任何模型都直发原文。
 QUERY_INSTRUCT_TASK = "Given a query about a novel, retrieve original novel passages relevant to the query"
 
 
@@ -125,6 +124,13 @@ class EmbeddingClient:
         if not self._model:
             raise ValueError("embedding model is required")
         return self._model
+
+    def format_query(self, query: str) -> str:
+        """按嵌入模型族格式化查询文本：Qwen3-Embedding 加 instruct 前缀，其他模型用原文"""
+        model_name = self._require_model_name().strip().casefold()
+        if "qwen" in model_name and "embedding" in model_name:
+            return format_query_instruct(query)
+        return query
 
     async def _connection_retry(self, error: APIConnectionError, attempt: int) -> None:
         """记录一次连接级重试并按指数退避等待；APITimeoutError 是其子类同走该路径"""
