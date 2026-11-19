@@ -17,7 +17,7 @@ import {
   DataZoomComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import { getCSSColorVar } from "@/lib/theme";
+import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import type { ParagraphCurvePoint, NarrativeStructureMetrics } from "@/api/types";
@@ -84,6 +84,11 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
 
       const chart2Color = getCSSColorVar("--chart-2");
       const chart3Color = getCSSColorVar("--chart-3");
+      // ECharts 在 canvas 内无法解析 var()，颜色需先取出再拼成具体色值
+      const surfaceColor = getCSSColorVar("--surface");
+      const textColor = getCSSColorVar("--text");
+      const mutedColor = getCSSColorVar("--text-muted");
+      const primaryColor = getCSSColorVar("--primary");
 
       const colorMap: Record<string, string> = {
         "--chart-2": chart2Color,
@@ -140,14 +145,14 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           if (act1End != null && act1End > 0 && act1End < 1) {
             markLineData.push({
               xAxis: act1End,
-              label: { show: true, formatter: "第一幕", position: "start", color: "hsl(var(--text-muted))", fontSize: 10 },
+              label: { show: true, formatter: "第一幕", position: "start", color: mutedColor, fontSize: 10 },
               lineStyle: { type: "dashed", color: borderColor, opacity: 0.6 },
             });
           }
           if (act2End != null && act2End > 0 && act2End < 1) {
             markLineData.push({
               xAxis: act2End,
-              label: { show: true, formatter: "第二幕", position: "start", color: "hsl(var(--text-muted))", fontSize: 10 },
+              label: { show: true, formatter: "第二幕", position: "start", color: mutedColor, fontSize: 10 },
               lineStyle: { type: "dashed", color: borderColor, opacity: 0.6 },
             });
           }
@@ -178,9 +183,10 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
       const climaxMarkPoint = climaxPositions.length > 0 && tensionPeak != null ? {
         data: climaxPositions.map((ratio) => ({
           coord: [ratio, tensionPeak],
-          value: `高潮 ${(ratio * 100).toFixed(0)}%`,
+          // 高潮点密集时只显示百分比，完整信息留给悬浮提示，避免标签互相压叠
+          value: `${(ratio * 100).toFixed(0)}%`,
           itemStyle: { color: chart3Color },
-          symbolSize: 40,
+          symbolSize: 30,
           label: { show: true, formatter: "{c}", fontSize: 9, color: "#fff" },
         })),
       } : undefined;
@@ -189,7 +195,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
         grid: {
           top: 60,
           right: 30,
-          bottom: 60,
+          bottom: 84,
           left: 50,
           containLabel: false,
         },
@@ -197,16 +203,16 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           show: !!onSeriesToggle,
           top: 8,
           itemGap: 20,
-          textStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
+          textStyle: { color: mutedColor, fontSize: 12 },
           icon: "roundRect",
           data: SERIES_CONFIG.map((s) => s.name),
         },
         tooltip: {
           trigger: "axis" as const,
           axisPointer: { type: "cross" as const, crossStyle: { color: "#999" } },
-          backgroundColor: "hsl(var(--surface))",
-          borderColor: "hsl(var(--border))",
-          textStyle: { color: "hsl(var(--text))", fontSize: 12 },
+          backgroundColor: surfaceColor,
+          borderColor: borderColor,
+          textStyle: { color: textColor, fontSize: 12 },
           formatter: (
             params: Array<{
               seriesName: string;
@@ -247,13 +253,13 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
             xAxisIndex: 0,
             start: zoomRange ? zoomRange[0] * 100 : 0,
             end: zoomRange ? zoomRange[1] * 100 : 100,
-            height: 20,
-            bottom: 10,
+            height: 18,
+            bottom: 6,
             borderColor: borderColor,
-            backgroundColor: "hsl(var(--surface))",
-            fillerColor: "hsl(var(--primary) / 0.1)",
-            handleStyle: { color: "hsl(var(--primary))" },
-            textStyle: { color: "hsl(var(--text-muted))", fontSize: 10 },
+            backgroundColor: surfaceColor,
+            fillerColor: hslToHsla(primaryColor, 0.1),
+            handleStyle: { color: primaryColor },
+            textStyle: { color: mutedColor, fontSize: 10 },
           },
         ],
         xAxis: {
@@ -262,12 +268,12 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
           max: 1,
           name: "全书进度",
           nameLocation: "middle",
-          nameGap: 25,
-          nameTextStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
+          nameGap: 44,
+          nameTextStyle: { color: mutedColor, fontSize: 12 },
           axisLine: { lineStyle: { color: borderColor } },
           axisTick: { lineStyle: { color: borderColor } },
           axisLabel: {
-            color: "hsl(var(--text-muted))",
+            color: mutedColor,
             fontSize: 11,
             formatter: (value: number) => `${(value * 100).toFixed(0)}%`,
           },
@@ -275,11 +281,11 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
         yAxis: {
           type: "value" as const,
           name: "张力",
-          nameTextStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
+          nameTextStyle: { color: mutedColor, fontSize: 12 },
           axisLine: { show: false },
           axisTick: { show: false },
           splitLine: { lineStyle: { color: borderColor, opacity: 0.5 } },
-          axisLabel: { color: "hsl(var(--text-muted))", fontSize: 11 },
+          axisLabel: { color: mutedColor, fontSize: 11 },
         },
         series: series.map((s, idx) => ({
           ...s,

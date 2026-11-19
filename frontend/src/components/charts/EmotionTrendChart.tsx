@@ -90,6 +90,10 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
       const negativeColor = getCSSColorVar("--chart-negative");
       const neutralColor = getCSSColorVar("--chart-1");
       const primaryColor = getCSSColorVar("--primary");
+      // ECharts 在 canvas 内无法解析 var()，颜色需先取出再拼成具体色值
+      const surfaceColor = getCSSColorVar("--surface");
+      const textColor = getCSSColorVar("--text");
+      const mutedColor = getCSSColorVar("--text-muted");
 
       const colorMap: Record<string, string> = {
         "--chart-positive": positiveColor,
@@ -164,7 +168,7 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
         grid: {
           top: 60,
           right: 30,
-          bottom: 60,
+          bottom: 84,
           left: 50,
           containLabel: false,
         },
@@ -172,7 +176,7 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
           show: !!onSeriesToggle,
           top: 8,
           itemGap: 20,
-          textStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
+          textStyle: { color: mutedColor, fontSize: 12 },
           icon: "roundRect",
           data: EMOTION_TREND_SERIES_CONFIG.map((s) => s.name),
           selected: Object.fromEntries(EMOTION_TREND_SERIES_CONFIG.map((s) => [s.name, activeSeries.has(s.key)])),
@@ -180,9 +184,9 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
         tooltip: {
           trigger: "axis" as const,
           axisPointer: { type: "cross" as const, crossStyle: { color: "#999" } },
-          backgroundColor: "hsl(var(--surface))",
-          borderColor: "hsl(var(--border))",
-          textStyle: { color: "hsl(var(--text))", fontSize: 12 },
+          backgroundColor: surfaceColor,
+          borderColor: borderColor,
+          textStyle: { color: textColor, fontSize: 12 },
           formatter: (params: Array<{ seriesName: string; value: unknown; marker: string; dataIndex?: number }>) => {
             if (!Array.isArray(params) || params.length === 0) return "";
             const windowIndex = Number(params[0]?.dataIndex ?? -1);
@@ -215,13 +219,13 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
             xAxisIndex: 0,
             start: zoomRange ? zoomRange[0] * 100 : 0,
             end: zoomRange ? zoomRange[1] * 100 : 100,
-            height: 20,
-            bottom: 10,
+            height: 18,
+            bottom: 6,
             borderColor: borderColor,
-            backgroundColor: "hsl(var(--surface))",
-            fillerColor: "hsl(var(--primary) / 0.1)",
-            handleStyle: { color: "hsl(var(--primary))" },
-            textStyle: { color: "hsl(var(--text-muted))", fontSize: 10 },
+            backgroundColor: surfaceColor,
+            fillerColor: hslToHsla(primaryColor, 0.1),
+            handleStyle: { color: primaryColor },
+            textStyle: { color: mutedColor, fontSize: 10 },
           },
         ],
         xAxis: {
@@ -230,12 +234,12 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
           max: 1,
           name: "章节进度",
           nameLocation: "middle",
-          nameGap: 25,
-          nameTextStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
+          nameGap: 44,
+          nameTextStyle: { color: mutedColor, fontSize: 12 },
           axisLine: { lineStyle: { color: borderColor } },
           axisTick: { lineStyle: { color: borderColor } },
           axisLabel: {
-            color: "hsl(var(--text-muted))",
+            color: mutedColor,
             fontSize: 11,
             formatter: (value: number) => `${(value * 100).toFixed(0)}%`,
           },
@@ -245,12 +249,12 @@ export const EmotionTrendChart = forwardRef<ReactEChartsCore, EmotionTrendChartP
           name: "情绪密度",
           min: densityMin != null && densityPadding != null ? densityMin - densityPadding : undefined,
           max: densityMax != null && densityPadding != null ? densityMax + densityPadding : undefined,
-          nameTextStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
+          nameTextStyle: { color: mutedColor, fontSize: 12 },
           axisLine: { show: false },
           axisTick: { show: false },
           splitLine: { lineStyle: { color: borderColor, opacity: 0.5 } },
           axisLabel: {
-            color: "hsl(var(--text-muted))",
+            color: mutedColor,
             fontSize: 11,
             formatter: (value: number) => value.toFixed(4),
           },

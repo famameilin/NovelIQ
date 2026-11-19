@@ -36,6 +36,8 @@ vi.mock("echarts-for-react", async () => {
 
 vi.mock("@/lib/theme", () => ({
   getCSSColorVar: (name: string) => `hsl(${name})`,
+  hslToHsla: (color: string, alpha: number) =>
+    color.replace("hsl(", "hsla(").replace(/\)$/, `, ${alpha})`),
 }));
 
 /**
