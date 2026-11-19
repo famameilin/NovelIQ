@@ -1,4 +1,4 @@
-﻿# NovelIQ
+# NovelIQ
 
 > [中文文档](README.md)
 
@@ -12,13 +12,15 @@ A quantitative analysis platform for Chinese web novels: upload a full `.txt` bo
 
 Once analysis completes, the frontend provides:
 
-- **Sentiment / pacing curves**: paragraph-level sentiment scoring and narrative pacing metrics, whole-book curves with switchable windows
-- **Character relationship graph**: annotation agents record characters, dialogue and relations chapter by chapter, merged across chapters into a network browsed as a force-directed graph
-- **Event timeline**: plot events presented along a timeline
-- **Event trees**: inspect complete events, containment, causes and outcomes within a chapter range, with source evidence
+- **Dashboard**: score overview, dimension metrics, narrative structure, curve previews and diagnosis summary
+- **Sentiment / pacing curves**: sentiment trend aggregated by window and pacing tension smoothed per paragraph; whole-book curves with adjustable window granularity and zoom
+- **Character analysis**: appearance strength, narrative duties and focus rankings, with character arcs and emotion
+- **Character relationship graph**: annotation agents record characters and relations chapter by chapter, merged across chapters into a force-directed network searchable by character name
 - **Topic distribution**: LDA topic modeling that detects topic shifts across the plot
-- **Linguistic features**: LTP lexical and syntactic analysis, lexical richness (TTR/MTLD), dialogue ratio, and more
-- **Diagnostic report**: an LLM quality assessment grounded in whole-book evidence, exportable as a single-file HTML
+- **Linguistic features**: parts of speech, sentence patterns, word length and dependency statistics, plus entities, fixed expressions and word-vector aggregation
+- **Narrative timeline**: plot changes and character states presented along whole-book progress, with a switchable reading cutoff and display window
+- **Event trees and event lines**: the event-line view arranges key nodes by narrative line and opens the events each node covers; the directory lists every event per narrative line; details and source evidence are available
+- **Diagnostic report**: an LLM-generated comprehensive diagnosis based on whole-book evidence, plus independent foreshadowing tracking by clue state and chapter evidence
 
 | Sentiment / pacing curves | Character relationship graph |
 | --- | --- |
@@ -26,11 +28,9 @@ Once analysis completes, the frontend provides:
 | **Narrative timeline** | **Dashboard** |
 | ![Narrative timeline](assets/screenshots/timeline.png) | ![Dashboard](assets/screenshots/dashboard.png) |
 
-| Event forest | Causal structure within a tree |
+| Event lines | Event directory |
 | --- | --- |
-| ![Event forest](assets/screenshots/event-growth-forest-1440x900.png) | ![Causal structure within a tree](assets/screenshots/event-growth-tree-1440x900.png) |
-
-Read the [0.3.0 upgrade guide](docs/upgrades/UPGRADE-0.3.0.md) before upgrading from 0.2.1. The entry point defaults to read-only preflight; conversion requires a backup, an isolated rehearsal and an explicit database name. This release includes a legacy-conversion exception. Results requiring reanalysis still come from original input through the formal pipeline. Historical migration scripts apply only to their matching release checkout.
+| ![Event lines](assets/screenshots/event-lines.png) | ![Event directory](assets/screenshots/event-directory.png) |
 
 Stack: Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17 (pgvector); React 19 / Vite / ECharts / Tailwind CSS. LLMs go through an OpenAI-compatible interface (self-hosted or third-party, both work); lexical analysis and word vectors are local offline models.
 
@@ -41,7 +41,7 @@ Stack: Python 3.12 / FastAPI / SQLAlchemy / PostgreSQL 17 (pgvector); React 19 /
 LTP and Word2Vec load from local files and **never download over the network**; both can be toggled in settings:
 
 - **LTP** (`linguistic.ltp.enabled`, on by default): a complete offline model directory, path configured via the `LTP_MODEL_DIR` environment variable. If enabled but the model is missing, analysis errors out at the Linguistic Analysis stage; when disabled, lexical/syntactic/semantic annotation is skipped
-- **Word2Vec** (`linguistic.word2vec.enabled`, off by default): no model needed while off; once enabled it requires the converted `.kv` main file under `models/word2vec/shared/` (depends on LTP tokens), and a missing file errors at the same stage. For existing `.vec`/`.bin`/`.txt` pretrained vectors, run:
+- **Word2Vec** (`linguistic.word2vec.enabled`, off by default): no model needed while off; once enabled it requires the converted `.kv` main file under `models/word2vec/shared/`; it depends on LTP tokens, is skipped when LTP is off, and errors when LTP is on but the file is missing. For existing `.vec`/`.bin`/`.txt` pretrained vectors, run:
 
   ```powershell
   uv run python -m scripts.convert_word2vec_pretrained
@@ -50,6 +50,8 @@ LTP and Word2Vec load from local files and **never download over the network**; 
   Reads from `models/word2vec/pretrained/` by default and writes to `models/word2vec/shared/`.
 
 The `models/` directory is not tracked by Git; Docker Compose mounts the host directory into the container at `/app/models`.
+
+**Embedding service**: `EMBEDDING_MODEL_BASE_URL` / `EMBEDDING_MODEL_ID` / `EMBEDDING_MODEL_KEY` point to an OpenAI-compatible embedding endpoint (a local llama-server or a cloud API; the vector dimension follows the actual output of the service). On the query side the format follows the model name: Qwen3-Embedding gets the official instruct prefix, while BGE and other models send raw text; the document side always sends raw text. Changing the embedding model requires regenerating paragraph vectors.
 
 ### Docker deployment (recommended)
 
@@ -70,7 +72,7 @@ Requires a local PostgreSQL 17 with the pgvector extension.
 ```powershell
 ./scripts/dev.ps1 setup        # install dependencies (uv)
 Copy-Item .env.example .env    # fill in database and model API keys
-./scripts/dev.ps1 api --port 8000   # initializes empty storage; existing structures must match the current models
+./scripts/dev.ps1 api --port 8000   # creates tables and installs domain constraints; startup does not check an existing structure
 ```
 
 Frontend in another terminal:
@@ -85,12 +87,13 @@ npm run dev                    # http://localhost:5173, /api proxied to backend 
 
 | Layer | Directory | Responsibility |
 | --- | --- | --- |
-| API | `src/api/routes`, `src/api/services` | HTTP endpoints, result queries, view data and HTML export |
+| API | `src/api/routes`, `src/api/services` | HTTP endpoints, result queries, view data and full-result JSON export |
 | Workflows | `src/workflows` | Task lifecycle, six-stage orchestration, recovery and cancellation |
 | Agents and domains | `src/agents`, `src/diagnosis`, `src/fact_graph`, `src/event_trees`, `src/case_pool` | Annotation, diagnosis, fact graphs, complete events and cases |
-| Quantitative analysis | `src/metrics`, `src/linguistic`, `src/topic`, `src/lexicons`, `src/text_processing` | Metrics, linguistic structure, topics, lexicons and text processing |
+| Quantitative analysis | `src/metrics`, `src/linguistic`, `src/topic`, `src/lexicons`, `src/text_processing`, `src/embedding` | Metrics, linguistic structure, topics, lexicons, text processing and semantic retrieval |
 | Execution and notifications | `src/work`, `src/model_pool`, `src/audit`, `src/event_bus`, `src/sse` | Work scheduling, model capacity and health scores, audit, persisted notifications and replay |
-| Storage | `src/storage` | 30 business tables, UUIDv7 primary keys, named read/write interfaces, transactions and domain constraints |
+| Infrastructure | `src/config`, `src/utils` | Configuration and environment variables, cancellation and event-reference utilities |
+| Storage | `src/storage` | 30 business tables, UUIDv7 primary keys, domain query modules and read facades, transactions and domain constraints |
 
 Task requests enter workflow application services through the API. Stage orchestration calls agents and domains, and Storage persists their results. Activity notifications pass through EventBus; the SSE consumer persists them before delivery and supports cursor replay. The analysis workstation displays actual agent executions and model communication.
 
@@ -105,37 +108,37 @@ flowchart LR
 
 | Stage | Entry point | Processing and output |
 | --- | --- | --- |
-| Preprocess | `run_preprocess` | Encoding detection, chapter splitting, chapter and paragraph storage, and embeddings; later stages share the original paragraph boundaries |
-| Annotate | `run_annotate` | The chapter work pool schedules annotation or entity / event / metric roles to extract entities, relations, dialogue, complete events, foreshadowing and metrics; finish requests still require completeness checks and save confirmation |
-| Linguistic | `run_linguistic` | LTP tokens, dependency and semantic dependency arcs, phrase matches and emotion events; Word2Vec runs when enabled |
-| Aggregate | `run_aggregate` | Paragraph metrics, sentiment and pacing curves, global statistics and quality checks |
-| Topic model | `run_topic_model` | LDA training and model persistence; the run stores completion facts and `lda_paragraph_topics` stores paragraph topic distributions |
-| Diagnose | `run_diagnose` | Diagnosis roles gather evidence, handle cases and produce reports, with concurrency bounded by actual model-pool capacity |
+| Preprocess | `run_preprocess` | Encoding detection, chapter splitting, chapter and paragraph storage, paragraph metrics and smoothed curves; paragraph vectors are generated when semantic retrieval is enabled, and later stages share the original paragraph boundaries |
+| Annotate | `run_annotate` | The chapter work pool schedules annotation or entity / event / metric roles to extract entities, relations, dialogue, complete events, foreshadowing and metrics; chapters without text are not dispatched; writes take effect immediately and a finish request triggers a program completeness check before saving |
+| Linguistic | `run_linguistic` | LTP tokens, dependency and semantic dependency arcs, phrase matches and emotion events; Word2Vec trains when LTP is on; a per-book emotion boundary is fitted from self-selected paragraph labels and paragraph scores are written back |
+| Aggregate | `run_aggregate` | Aggregates whole-book and chapter statistics from paragraph sufficient statistics and runs quality checks; curves are read from stored results and not recomputed |
+| Topic model | `run_topic_model` | LDA training and model persistence; `lda_paragraph_topics` stores paragraph topic distributions |
+| Diagnose | `run_diagnose` | Diagnosis roles gather evidence, handle cases and produce reports, with dispatch bounded by model-pool health scores and actual capacity |
 
 **Recovery and cancellation**: the database stores task states and stage completion facts. Resuming preserves saved annotation-role results. Workflows handle cancellation, failures and retries, and the workstation shows failure summaries, retries and work that did not execute.
 
-**Concurrency and programs**: chapter size determines single-role or entity / event / metric work; actual concurrency follows model-pool capacity. Models batch reads and writes through `execute_code(code)` in a restricted interpreter with variables retained between programs. Programs reuse the original tool validation and reject imports, file access and network access. Model settings include context capacity, with conversation compaction when its conditions are met.
+**Concurrency and programs**: chapter size determines single-role or entity / event / metric work; actual concurrency follows model-pool capacity. Models batch reads and writes through `execute_code(code)` in a restricted interpreter with variables retained between programs. Only whitelisted modules (json, unicodedata, math, collections, datetime) are importable; other attribute access, file access and network access are blocked. Model settings include context capacity, with conversation compaction when its conditions are met.
 
 ## Quantitative Methods
 
-- **Curves and smoothing** — Sentiment/pacing curves are plotted on character coordinates; smoothing uses robust LOWESS: tricube-kernel weighted local linear regression, three bisquare robust iterations to suppress outlier segments, and bandwidth doubling adaptively when a window lacks enough points. Smoothing anchors to the character positions of paragraph scores (paragraph length as sample weight).
-- **Per-book emotion calibration** — Paragraph emotion intensity is scored directly by the sentiment lexicon (negation handled as a shared computation layer, effective within sentence boundaries); the annotation agent picks emotion-bearing paragraphs per chapter as supervision, paragraph vectors across the book fit a linear boundary, and scores are written back per paragraph. With insufficient supervision (fewer than 2 labels, or all identical scores) the field stays empty rather than fabricated; and because each book fits its own scale, curves are not comparable across books.
-- **Topics and shifts** — gensim LDA persists model artifacts and paragraph topic distributions with their full weights; topic shifts use Jensen-Shannon divergence between adjacent windows.
-- **Narrative phases and tension** — Global/local peak detection divides the book into setup / development / climax / resolution; tension proxies (fuzzy-match density of combat words, exclamation/question density, dialogue ratio, average sentence length) are computed per phase.
+- **Curves and smoothing** — Sentiment/pacing curves use whole-book progress as the axis; the backend applies robust LOWESS to window-aggregated series: tricube-kernel weighted local linear regression, three bisquare robust iterations to suppress outlier segments, and bandwidth doubling adaptively when a window lacks enough points. Positions are window character progress (0–1) and weights are window token counts.
+- **Per-book emotion calibration** — Paragraph emotion intensity is scored directly by the sentiment lexicon (negation scope determined by same-sentence token distance); the annotation agent picks emotion-bearing paragraphs per chapter as supervision; the linguistic stage fits a ridge-regression linear boundary on whole-book paragraph vectors and writes scores back per paragraph. With insufficient supervision (fewer than 2 labels, or all identical scores) the lexicon scale is kept and no boundary is fabricated; and because each book fits its own scale, curves are not comparable across books.
+- **Topics and shifts** — gensim LDA persists model artifacts and paragraph topic distributions with their full weights; topic shifts use Jensen-Shannon divergence between adjacent window distributions (base 2, range 0–1).
+- **Narrative phases, three acts and tension** — Global/local peak detection divides the book into setup / development / climax / resolution, identifies the main climax region and picks the first-act boundary under ratio and window constraints; tension combines five surface components — weighted combat-word hit rate, exclamation and question frequency, pause punctuation frequency and dialogue character ratio — each robustly standardized within the run by median/MAD (clipped to ±3), weighted-averaged and mapped to 0–1 by a sigmoid.
 
 ## Fact Graph and Cases
 
-Annotation agents register entities, relations, dialogue and facts in a shared graph scoped to the run. Entity references use source-text names and categories; reads support keyword search, field projection and pagination. Contributions retain their actual producing agent, with the existing save-confirmation and rollback chain handling failure and recovery.
+Annotation agents register entities, relations, dialogue and facts in a shared graph scoped to the run. Entity references use source-text names and categories; reads support keyword search, paragraph semantic recall and pagination. Contributions retain their actual producing agent, with the existing save-confirmation and rollback chain handling failure and recovery.
 
-Cases enter one pool with explicit `caseid` values and are handled through `claim_case`, `submit_case` and abandonment. A session can hold multiple cases. Claiming governs case handling and does not lock an event. Cases store registration and resolution state; business results retain their actual producer independently.
+Cases enter one pool: annotation and diagnosis register text cases through `push_case`, and event trees without a parent are registered automatically by tree identity when saved; `claim_case` or `claim_random_case` claims a case exclusively, and `submit_case` submits it. One execution can hold several unsubmitted cases; claiming only governs case handling and does not lock events. Cases store type, description, owner and submission state; business results retain their actual producer independently.
 
 ## Event Tree
 
 `event_records` stores complete-event titles, problems, summaries, types, states, chapter ranges and actual producers. Participants and source evidence are stored separately. Annotation and diagnosis share formal event identities. Chapter reads use actual chapter boundaries, while cross-chapter results retain their source evidence.
 
-Containment, semantic links, plotlines and outcome organization use the formal domain interfaces. The desktop event tree displays related events as cards and relationship curves with detail and source-text inspection. The timeline independently presents plot order.
+`event_groups` stores event trees and whole-book outcome nodes; tree identity is independent of events, and empty trees are valid. `event_links` stores semantic links, member order within a tree and whole-tree parent/child references. Event lines are selected from event trees during diagnosis and named by the diagnosis agent (names end with 线). The desktop event tree offers event-line and directory views: event lines arrange key nodes and their links by narrative line, and clicking a node lists the events it covers; the directory lists every event per narrative line; details open in the side panel and source evidence opens in a reader dialog; the timeline independently presents plot changes and character states.
 
-Initialization first checks existing tables, fields, types, keys and constraints without modifying them; incompatible structures are rejected. Routine data corrections regenerate results from original input. See the [0.3.0 upgrade guide](docs/upgrades/UPGRADE-0.3.0.md) for this release's legacy conversion scope, archives and reanalysis requirements.
+Initialization creates tables and installs domain constraints for a new database. Routine data corrections regenerate results from original input.
 
 ## Audit and Notifications
 
