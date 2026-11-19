@@ -179,6 +179,9 @@ scripts/db/*
 scripts/tools/*
 !scripts/tools/compare_module_results.py
 scripts/experiments/
+# 本地脚本对应的测试（本地保留）
+tests/scripts/test_setup_test_db.py
+tests/scripts/test_recompute_narrative_structure.py
 
 # ============================================================================
 # 独立工具与杂项
@@ -191,6 +194,8 @@ generalize-rag-to-narrative-evidence.md
 tools/report_exporter/
 tests/report/
 /understand-everything/
+# 宣传视频工程（本地保留）
+promo-video/
 
 # ============================================================================
 # 前端 (Vite + React)
