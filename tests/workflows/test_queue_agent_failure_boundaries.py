@@ -178,7 +178,11 @@ def _agent(bus: EventBus, sessions: Any, monkeypatch: Any) -> AnnotationAgent:
         "src.model_pool.configuration.load_task_config",
         lambda *args, **kwargs: SimpleNamespace(context_window_tokens=128000, entry_id="entry-test"),
     )
-    monkeypatch.setattr("src.embedding.EmbeddingClient", lambda **kwargs: object())
+    class _StubEmbeddingClient:
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr("src.embedding.EmbeddingClient", lambda **kwargs: _StubEmbeddingClient())
     monkeypatch.setattr(
         "src.agents.annotation.queries.DatabaseAnnotationQueryService", lambda *args, **kwargs: object()
     )

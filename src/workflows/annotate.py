@@ -27,20 +27,20 @@ def _load_work(
     session_factory: Callable[[], Storage], run_id: str
 ) -> tuple[list[WorkReceipt], set[int], dict[int, set[str]]]:
     session = session_factory()
-    chapters = session.reads.text.list_ordered_run_chapters(run_id)
+    all_chapters = session.reads.text.list_ordered_run_chapters(run_id)
+    chapters = [chapter for chapter in all_chapters if str(chapter.text or "").strip()]
+    annotatable = {int(chapter.chapter_id) for chapter in chapters}
     states = fetch_annotation_role_records(session, run_id)
-    complete = completed_chapters(states)
+    complete = completed_chapters(states) & annotatable
     saved: dict[int, set[str]] = {}
     for record in states:
-        if record.state == "saved":
+        if record.state == "saved" and int(record.chapter_id) in annotatable:
             saved.setdefault(int(record.chapter_id), set()).add(str(record.role))
-    orders = [{"chapter_id": chapter.chapter_id, "sequence": chapter.sequence} for chapter in chapters]
+    orders = [{"chapter_id": chapter.chapter_id, "sequence": chapter.sequence} for chapter in all_chapters]
     work: list[WorkReceipt] = []
     for chapter in chapters:
         if chapter.chapter_id in complete:
             continue
-        if not chapter.text:
-            raise ValueError(f"chapter_id={chapter.chapter_id} 缺少实际章输入")
         rows = session.reads.text.list_work_paragraphs(chapter, run_id)
         paragraphs = [
             SimpleNamespace(
@@ -120,7 +120,8 @@ async def run_annotate(
         len(work),
         len(retained),
     )
-    total = len(retained | {item.payload["chapter_id"] for item in work})
+    expected_ids = retained | {int(item.payload["chapter_id"]) for item in work}
+    total = len(expected_ids)
     if not total:
         return (0, 0, 0)
     work, rebuild = _plan_work(work, saved)
@@ -157,7 +158,7 @@ async def run_annotate(
             del receipt
             progress_session = factory()
             states = await asyncio.to_thread(fetch_annotation_role_records, progress_session, run_id)
-            completed = completed_chapters(states)
+            completed = completed_chapters(states) & expected_ids
             if emitter:
                 await emitter(StreamEvent(action="progress", stage="annotate", sub_stage="confirmed_chapters",
                     current=len(completed), total=total, unit="章", message="必需角色正式保存确认"))
@@ -168,7 +169,7 @@ async def run_annotate(
         await bus.request(Message(topic="audit.barrier", source=agent.address, target=audit.address, run_id=run_id))
         final_session = factory()
         states = await asyncio.to_thread(fetch_annotation_role_records, final_session, run_id)
-        actual = completed_chapters(states)
+        actual = completed_chapters(states) & expected_ids
         if len(actual) != total:
             raise RuntimeError(f"必需角色未全部成功保存: completed={len(actual)} total={total}")
         logger.info(
