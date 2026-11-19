@@ -134,6 +134,7 @@ async def test_search_merges_keyword_and_semantic_scores_per_paragraph(db_sessio
     _insert_paragraphs(db_session, run_id, ["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"])
     service = TextSearchService(storage_for(db_session), run_id=run_id, semantic_enabled=True)
     service._embedding_client = AsyncMock()
+    service._embedding_client.format_query = format_query_instruct
     semantic_rows = [
         SimilarParagraphRow(
             paragraph_id=0,
@@ -175,6 +176,7 @@ async def test_search_ranks_keyword_hits_before_semantic_only_rows(db_session) -
     _insert_paragraphs(db_session, run_id, ["林渡与顾霜并肩迎敌。\n顾霜独自离去。\n无关段落。"])
     service = TextSearchService(storage_for(db_session), run_id=run_id, semantic_enabled=True)
     service._embedding_client = AsyncMock()
+    service._embedding_client.format_query = format_query_instruct
     semantic_rows = [
         SimilarParagraphRow(
             paragraph_id=2,
@@ -209,6 +211,7 @@ async def test_search_wraps_query_with_instruct_prefix(db_session) -> None:
     _insert_paragraphs(db_session, run_id, ["林渡与顾霜并肩迎敌，携手入城。\n顾霜独自离去。"])
     service = TextSearchService(storage_for(db_session), run_id=run_id, semantic_enabled=True)
     service._embedding_client = AsyncMock()
+    service._embedding_client.format_query = format_query_instruct
     with patch(
         "src.storage.access.ParagraphAccess.search_similar_paragraphs",
         return_value=[],

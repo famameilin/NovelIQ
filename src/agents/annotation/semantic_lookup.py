@@ -6,7 +6,7 @@ import asyncio
 import threading
 from typing import Any
 
-from src.embedding import EmbeddingClient, EmbeddingServiceError, format_query_instruct
+from src.embedding import EmbeddingClient, EmbeddingServiceError
 from src.event_trees.semantic import event_paragraph_ids, paragraph_ranks, ranked_keys
 
 
@@ -50,7 +50,7 @@ class SemanticLookup:
     async def _fetch(self, query: str, limit: int) -> list[int]:
         client = EmbeddingClient()
         try:
-            vector = await client.get_embedding(format_query_instruct(query))
+            vector = await client.get_embedding(client.format_query(query))
         finally:
             await client.aclose()
         rows = self._session.paragraphs.search_similar_paragraphs(
